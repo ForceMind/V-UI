@@ -41,6 +41,9 @@ def get_web_path():
     web_path = os.path.join(base_path, "web")
     if not os.path.exists(web_path):
         os.makedirs(web_path, exist_ok=True)
+        # Create a default index.html if missing to avoid 404/500
+        with open(os.path.join(web_path, "index.html"), "w") as f:
+            f.write("<h1>V-UI Panel is running</h1><p>Please upload frontend files to the web directory.</p>")
     return web_path
 
 app.mount("/ui", StaticFiles(directory=get_web_path(), html=True), name="ui")
@@ -51,4 +54,5 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=2053, reload=True)
+    # Disable reload in production for stability
+    uvicorn.run("main:app", host="0.0.0.0", port=2053, reload=False)
