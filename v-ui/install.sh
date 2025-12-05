@@ -25,6 +25,8 @@ apt-get install -y python3 python3-pip python3-venv git curl socat
 
 # 3. Setup Directory
 INSTALL_DIR="/usr/local/v-ui"
+REPO_URL="https://github.com/your-username/v-ui.git" # ⚠️ 请替换为你实际的 GitHub 仓库地址
+
 echo -e "${GREEN}Setting up directory at ${INSTALL_DIR}...${NC}"
 
 if [ -d "$INSTALL_DIR" ]; then
@@ -32,14 +34,13 @@ if [ -d "$INSTALL_DIR" ]; then
     mv "$INSTALL_DIR" "${INSTALL_DIR}_backup_$(date +%s)"
 fi
 
-mkdir -p "$INSTALL_DIR"
-# Copy current files to install dir (Assuming script is run from the repo root or files are uploaded)
-# In a real scenario, we might git clone here.
-# cp -r ./* "$INSTALL_DIR"
-# For now, we assume the user uploads the 'v-ui' folder content to /usr/local/v-ui
-# Or we clone from a repo if provided.
+echo -e "${GREEN}Cloning repository from ${REPO_URL}...${NC}"
+git clone "$REPO_URL" "$INSTALL_DIR"
 
-echo "Please ensure the V-UI files are placed in ${INSTALL_DIR}"
+if [ ! -d "$INSTALL_DIR" ]; then
+    echo -e "${RED}Failed to clone repository!${NC}"
+    exit 1
+fi
 
 # 4. Setup Python Environment
 cd "$INSTALL_DIR"
