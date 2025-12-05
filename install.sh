@@ -57,6 +57,7 @@ fi
 
 # 5. Initialize Database
 echo -e "${GREEN}Initializing Database...${NC}"
+mkdir -p data
 python3 bin/init_db.py
 
 # 6. Setup Systemd Service
