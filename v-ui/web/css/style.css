@@ -1,0 +1,67 @@
+body {
+    margin: 0;
+    font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', Arial, sans-serif;
+    background-color: #f0f2f5;
+}
+
+.layout-container {
+    height: 100vh;
+}
+
+.aside-menu {
+    background-color: #304156;
+    color: white;
+    transition: width 0.3s;
+}
+
+.logo {
+    height: 60px;
+    line-height: 60px;
+    text-align: center;
+    color: white;
+    background-color: #2b3649;
+    font-weight: bold;
+}
+
+.el-menu-vertical {
+    border-right: none;
+}
+
+.header {
+    background-color: white;
+    border-bottom: 1px solid #dcdfe6;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+}
+
+.dashboard-view .el-card {
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.stat-text {
+    margin-top: 10px;
+    font-size: 14px;
+    color: #606266;
+}
+
+.view-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.disk-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px;
+    font-size: 12px;
+}
+
+.disk-item .el-progress {
+    width: 60%;
+}

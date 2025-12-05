@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V-UI Panel</title>
+    <!-- Element Plus CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/style.css">
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Element Plus -->
+    <script src="https://unpkg.com/element-plus"></script>
+    <!-- Icons -->
+    <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+    <!-- Axios -->
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <el-container class="layout-container" style="height: 100vh">
+            <!-- Sidebar -->
+            <el-aside width="220px" class="aside-menu">
+                <div class="logo">
+                    <h2>V-UI</h2>
+                </div>
+                <el-menu
+                    active-text-color="#409EFF"
+                    background-color="#304156"
+                    text-color="#bfcbd9"
+                    :default-active="currentView"
+                    @select="handleSelect"
+                    class="el-menu-vertical">
+                    
+                    <el-menu-item index="dashboard">
+                        <el-icon><Odometer /></el-icon>
+                        <span>系统状态 (Dashboard)</span>
+                    </el-menu-item>
+                    
+                    <el-menu-item index="inbounds">
+                        <el-icon><Connection /></el-icon>
+                        <span>入站列表 (Inbounds)</span>
+                    </el-menu-item>
+                    
+                    <el-menu-item index="settings">
+                        <el-icon><Setting /></el-icon>
+                        <span>面板设置 (Settings)</span>
+                    </el-menu-item>
+
+                    <el-menu-item index="security">
+                        <el-icon><Lock /></el-icon>
+                        <span>安全中心 (Security)</span>
+                    </el-menu-item>
+                </el-menu>
+            </el-aside>
+
+            <el-container>
+                <!-- Header -->
+                <el-header class="header">
+                    <div class="header-left">
+                        <el-tag type="success" v-if="systemStatus.os">Running on {{ systemStatus.os }}</el-tag>
+                    </div>
+                    <div class="header-right">
+                        <el-button type="danger" size="small" @click="restartXray" :loading="restarting">
+                            <el-icon><Refresh /></el-icon> 重启核心
+                        </el-button>
+                        <el-dropdown>
+                            <span class="el-dropdown-link">
+                                Admin <el-icon class="el-icon--right"><arrow-down /></el-icon>
+                            </span>
+                            <template #dropdown>
+                                <el-dropdown-menu>
+                                    <el-dropdown-item>Logout</el-dropdown-item>
+                                </el-dropdown-menu>
+                            </template>
+                        </el-dropdown>
+                    </div>
+                </el-header>
+
+                <!-- Main Content -->
+                <el-main>
+                    <!-- Dashboard View -->
+                    <div v-if="currentView === 'dashboard'" class="dashboard-view">
+                        <el-row :gutter="20">
+                            <el-col :span="6">
+                                <el-card shadow="hover">
+                                    <template #header>CPU</template>
+                                    <el-progress type="dashboard" :percentage="systemStatus.cpu?.percent || 0" :color="colors"></el-progress>
+                                    <div class="stat-text">{{ systemStatus.cpu?.cores }} Cores</div>
+                                </el-card>
+                            </el-col>
+                            <el-col :span="6">
+                                <el-card shadow="hover">
+                                    <template #header>Memory</template>
+                                    <el-progress type="dashboard" :percentage="systemStatus.memory?.percent || 0" :color="colors"></el-progress>
+                                    <div class="stat-text">{{ systemStatus.memory?.used }} / {{ systemStatus.memory?.total }}</div>
+                                </el-card>
+                            </el-col>
+                            <el-col :span="6">
+                                <el-card shadow="hover">
+                                    <template #header>Disk</template>
+                                    <div v-for="disk in systemStatus.disk" :key="disk.mountpoint" class="disk-item">
+                                        <span>{{ disk.mountpoint }}</span>
+                                        <el-progress :percentage="disk.percent"></el-progress>
+                                    </div>
+                                </el-card>
+                            </el-col>
+                            <el-col :span="6">
+                                <el-card shadow="hover">
+                                    <template #header>Network</template>
+                                    <div class="net-stat">
+                                        <p>Upload: {{ systemStatus.network?.sent }}</p>
+                                        <p>Download: {{ systemStatus.network?.recv }}</p>
+                                    </div>
+                                </el-card>
+                            </el-col>
+                        </el-row>
+                    </div>
+
+                    <!-- Inbounds View -->
+                    <div v-if="currentView === 'inbounds'">
+                        <div class="view-header">
+                            <h3>入站列表</h3>
+                            <el-button type="primary" @click="showAddInbound = true">添加节点 (Add Inbound)</el-button>
+                        </div>
+                        <el-table :data="inbounds" style="width: 100%" border>
+                            <el-table-column prop="id" label="ID" width="60"></el-table-column>
+                            <el-table-column prop="remark" label="备注 (Remark)"></el-table-column>
+                            <el-table-column prop="protocol" label="协议 (Protocol)" width="100">
+                                <template #default="scope">
+                                    <el-tag>{{ scope.row.protocol }}</el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="port" label="端口 (Port)" width="100"></el-table-column>
+                            <el-table-column label="流量 (Traffic)">
+                                <template #default="scope">
+                                    Up: {{ scope.row.up || 0 }} / Down: {{ scope.row.down || 0 }}
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="操作 (Actions)" width="200">
+                                <template #default="scope">
+                                    <el-button size="small" @click="editInbound(scope.row)">编辑</el-button>
+                                    <el-button size="small" type="danger" @click="deleteInbound(scope.row)">删除</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                    </div>
+
+                    <!-- Security View -->
+                    <div v-if="currentView === 'security'">
+                        <h3>安全中心</h3>
+                        <el-row :gutter="20">
+                            <el-col :span="12">
+                                <el-card header="防火墙状态">
+                                    <el-tag type="success">Active</el-tag>
+                                    <p>已拦截恶意扫描: 12 次</p>
+                                </el-card>
+                            </el-col>
+                            <el-col :span="12">
+                                <el-card header="快速封禁 IP">
+                                    <el-input v-model="banIpInput" placeholder="输入恶意 IP">
+                                        <template #append>
+                                            <el-button @click="banIp">封禁</el-button>
+                                        </template>
+                                    </el-input>
+                                </el-card>
+                            </el-col>
+                        </el-row>
+                    </div>
+
+                </el-main>
+            </el-container>
+        </el-container>
+
+        <!-- Add Inbound Dialog -->
+        <el-dialog v-model="showAddInbound" title="添加节点">
+            <el-form :model="newInbound" label-width="120px">
+                <el-form-item label="备注">
+                    <el-input v-model="newInbound.remark"></el-input>
+                </el-form-item>
+                <el-form-item label="协议">
+                    <el-select v-model="newInbound.protocol" placeholder="Select protocol">
+                        <el-option label="VMess" value="vmess"></el-option>
+                        <el-option label="VLESS" value="vless"></el-option>
+                        <el-option label="Trojan" value="trojan"></el-option>
+                        <el-option label="Shadowsocks" value="shadowsocks"></el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="端口">
+                    <el-input-number v-model="newInbound.port" :min="1" :max="65535"></el-input-number>
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <span class="dialog-footer">
+                    <el-button @click="showAddInbound = false">Cancel</el-button>
+                    <el-button type="primary" @click="addInbound">Confirm</el-button>
+                </span>
+            </template>
+        </el-dialog>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
