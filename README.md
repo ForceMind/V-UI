@@ -1,76 +1,94 @@
-# V-UI - Next Generation Xray Panel
+# V-UI - 下一代 Xray 面板 (Next Gen Xray Panel)
 
-## 📖 简介 (Introduction)
-**V-UI** 是一个轻量级、高性能、现代化的 Xray/Sing-box 管理面板。它基于 Python **FastAPI** 和 **Vue 3** 构建，旨在提供超越传统面板（如 x-ui, 3x-ui）的用户体验和运维能力。
+**V-UI** 是一个轻量级、高性能、现代化的 Xray/Sing-box 管理面板。
+它专为小白用户和高级玩家设计，提供可视化的界面来管理你的 VPN 节点、流量和服务器状态。
 
-不同于传统的 Go 语言面板，V-UI 采用 Python 作为后端，拥有更强大的生态扩展能力（如数据分析、机器学习识别恶意流量等），并专为高性能服务器和复杂网络环境设计。
+## ✨ 核心亮点
 
-## ✨ 核心特性 (Features)
+*   **简单易用**: 一键安装，开箱即用，全中文界面。
+*   **协议全**: 支持 VMess, VLESS, Trojan, Shadowsocks, Hysteria 2, Tuic v5, WireGuard。
+*   **防封锁**: 内置支持 Reality 和 Vision 等最新抗干扰技术。
+*   **安全**: 自动拦截恶意扫描，保护服务器安全。
+*   **多核心**: 同时支持 Xray-core 和 Sing-box。
 
-### 🚀 协议与连接 (Protocols)
-- **多核心支持**: 完美兼容 **Xray-core** 与 **Sing-box**。
-- **全协议覆盖**: VMess, VLESS, Trojan, Shadowsocks, Dokodemo-door, Socks, HTTP。
-- **前沿技术**: 支持 **XTLS-Reality**, **Vision** 流控, **Hysteria 2**, **Tuic v5**, **WireGuard**。
-- **多用户管理**: 支持流量统计、到期时间设置、账号限速、IP 限制。
+---
 
-### 🛡️ 安全与防护 (Security)
-- **主动防御**: 集成防火墙管理 (iptables/ufw)，支持面板一键封禁恶意 IP。
-- **防探测**: 智能识别恶意扫描行为，保护服务器不被探测。
-- **系统加固**: SSH 登录日志分析与防爆破 (Fail2Ban 集成)。
-- **WAF 防护**: 针对 Web 端口的基础应用层防火墙。
+## 📖 小白安装教程 (Installation)
 
-### 📊 运维与监控 (Operations)
-- **实时仪表盘**: CPU、内存、磁盘、网络流量实时监控。
-- **网页部署**: 内置静态网站托管功能，轻松部署伪装站点 (支持反向代理)。
-- **证书管理**: 集成 ACME 协议，支持 Let's Encrypt / ZeroSSL 证书一键申请与自动续期。
-- **类宝塔体验**: 提供文件管理、进程守护等基础运维功能。
+### 准备工作
+1.  一台境外 VPS 服务器 (推荐 Ubuntu 20.04+ 或 Debian 10+)。
+2.  SSH 连接工具 (如 Xshell, Putty, macOS Terminal)。
+3.  **注意**: 如果是阿里云/腾讯云/AWS 等，请务必在后台安全组放行 **2053** 端口，以及你打算使用的节点端口。
 
-## 🛠️ 快速开始 (Quick Start)
+### 方式一：二进制极速安装 (推荐)
 
-### 1. 服务器部署 (Ubuntu/Debian)
-
-我们提供了一键安装脚本，适用于 Ubuntu 20.04+ / Debian 10+。
+无需编译，无需安装 Python 环境，下载即用。
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/ForceMind/V-UI/refs/heads/master/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/ForceMind/V-UI/master/install-bin.sh)
 ```
 
-安装完成后，服务将自动启动并设置为开机自启。
+### 方式二：Docker 安装 (推荐)
 
-### 2. 本地开发 (Local Development)
+如果你喜欢干净的环境，推荐使用 Docker。
 
-如果你想在本地运行或进行二次开发：
+1.  **安装 Docker** (如果已有可跳过):
+    ```bash
+    curl -fsSL https://get.docker.com | bash
+    ```
 
-**环境要求**: Python 3.10+, Node.js (可选, 仅用于前端深度定制)
+2.  **部署 V-UI**:
+    ```bash
+    # 下载代码
+    git clone https://github.com/ForceMind/V-UI.git
+    cd V-UI
 
-```bash
-# 1. 克隆项目
-git clone https://github.com/your-repo/v-ui.git
-cd v-ui
+    # 启动面板
+    docker-compose up -d
+    ```
 
-# 2. 安装依赖
-pip install -r requirements.txt
+---
 
-# 3. 初始化数据库
-python bin/init_db.py
+## 💻 使用说明 (Usage)
 
-# 4. 启动服务
-python main.py
-```
+### 1. 登录面板
+*   **访问地址**: `http://你的服务器IP:2053/ui`
+*   **默认账号**: `admin`
+*   **默认密码**: `admin`
 
-## 📖 使用说明 (Usage)
+*(建议登录后立即修改密码)*
 
-- **管理面板**: `http://<服务器IP>:2053/ui`
-- **API 文档**: `http://<服务器IP>:2053/docs` (Swagger UI)
-- **默认端口**: `2053`
+### 2. 添加节点 (创建一个 VPN 连接)
+1.  点击左侧菜单 **"入站列表 (Inbounds)"**。
+2.  点击 **"添加节点"**。
+3.  **备注**: 随便填，例如 "我的手机"。
+4.  **协议**: 推荐选择 `vless` 或 `vmess`。
+5.  **端口**: 默认或自定义 (记得在云服务商防火墙放行该端口)。
+6.  点击 **"确定"**。
 
-### 默认账号
-*目前版本处于开发阶段，默认使用模拟验证。*
-- **Username**: `admin`
-- **Password**: `admin`
-*(请在生产环境中修改 `app/api/auth.py` 或等待数据库验证模块上线)*
+### 3. 连接使用
+目前版本请手动复制节点信息到你的客户端 (v2rayN, Shadowrocket 等) 配置使用。后续将支持二维码和订阅链接。
 
-## 📂 目录结构 (Directory Structure)
+---
+
+## ❓ 常见问题 (FAQ)
+
+**Q: 安装后无法访问面板?**
+A: 请检查服务器防火墙。
+1.  云服务商安全组是否放行 2053 端口？
+2.  服务器内部防火墙: `ufw allow 2053/tcp`。
+
+**Q: 如何更新面板?**
+A:
+*   **脚本安装**: 输入 `v-ui` 选择 "1. 安装/更新"。
+*   **Docker安装**: 在目录内执行 `docker-compose pull && docker-compose up -d`。
+
+**Q: 核心支持哪些?**
+A: 默认内置最新版 Xray-core。
+
+---
+
+## 📂 目录结构
 
 ```
 v-ui/
@@ -84,16 +102,10 @@ v-ui/
 ├── web/                # 前端静态资源 (HTML, JS, CSS)
 ├── main.py             # 程序入口 (FastAPI App)
 ├── requirements.txt    # Python 依赖列表
-└── install.sh          # 自动化部署脚本
+├── install.sh          # 自动化部署脚本
+├── Dockerfile          # Docker 构建文件
+└── docker-compose.yml  # Docker 编排文件
 ```
 
-## ❓ 常见问题 (FAQ)
-
-**Q: 如何更新 Xray 核心?**
-A: 将下载好的最新版 `xray` 二进制文件覆盖到 `bin/` 目录下，并在面板右上角点击"重启核心"即可。
-
-**Q: 为什么选择 Python 而不是 Go?**
-A: Python 拥有更丰富的运维和安全库 (如 psutil, scapy, fail2ban-client)，能让我们更轻松地实现复杂的服务器管理和安全防护功能。
-
-## 📄 许可证 (License)
+## 📄 许可证
 MIT License

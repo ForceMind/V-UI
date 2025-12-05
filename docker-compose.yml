@@ -1,0 +1,14 @@
+services:
+  v-ui:
+    build: .
+    image: v-ui:latest
+    container_name: v-ui
+    restart: always
+    # 使用 host 模式，这样面板创建的节点端口可以直接被外部访问，无需手动映射
+    network_mode: "host"
+    volumes:
+      - ./data:/app/data
+      - ./bin:/app/bin
+      - ./web:/app/web
+    environment:
+      - TZ=Asia/Shanghai

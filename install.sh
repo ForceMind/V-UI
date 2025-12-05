@@ -21,7 +21,7 @@ fi
 # 2. Install Dependencies
 echo -e "${GREEN}Installing System Dependencies...${NC}"
 apt-get update
-apt-get install -y python3 python3-pip python3-venv git curl socat
+apt-get install -y python3 python3-pip python3-venv git curl socat unzip
 
 # 3. Setup Directory
 INSTALL_DIR="/usr/local/v-ui"
@@ -59,6 +59,16 @@ fi
 echo -e "${GREEN}Initializing Database...${NC}"
 mkdir -p data
 python3 bin/init_db.py
+
+# 5.1 Download Xray Core
+echo -e "${GREEN}Downloading Xray Core...${NC}"
+mkdir -p bin
+curl -L -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
+unzip -o /tmp/xray.zip -d /tmp/xray
+mv /tmp/xray/xray bin/xray
+chmod +x bin/xray
+rm -rf /tmp/xray*
+echo -e "${GREEN}Xray Core installed to bin/xray${NC}"
 
 # 6. Setup Systemd Service
 echo -e "${GREEN}Creating Systemd Service...${NC}"

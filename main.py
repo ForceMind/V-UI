@@ -25,8 +25,25 @@ app.include_router(security.router, prefix="/api/security", tags=["Security"])
 
 from fastapi.staticfiles import StaticFiles
 import os
-os.makedirs("web", exist_ok=True)
-app.mount("/ui", StaticFiles(directory="web", html=True), name="ui")
+import sys
+
+def get_web_path():
+    """
+    Get the path to the web directory.
+    If frozen (PyInstaller), it's in the temp folder (sys._MEIPASS).
+    Otherwise, it's in the current directory.
+    """
+    if getattr(sys, 'frozen', False):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    
+    web_path = os.path.join(base_path, "web")
+    if not os.path.exists(web_path):
+        os.makedirs(web_path, exist_ok=True)
+    return web_path
+
+app.mount("/ui", StaticFiles(directory=get_web_path(), html=True), name="ui")
 
 @app.get("/")
 async def root():
