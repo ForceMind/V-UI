@@ -25,7 +25,7 @@ apt-get install -y python3 python3-pip python3-venv git curl socat
 
 # 3. Setup Directory
 INSTALL_DIR="/usr/local/v-ui"
-REPO_URL="https://github.com/your-username/v-ui.git" # ⚠️ 请替换为你实际的 GitHub 仓库地址
+REPO_URL="https://github.com/ForceMind/V-UI.git"
 
 echo -e "${GREEN}Setting up directory at ${INSTALL_DIR}...${NC}"
 

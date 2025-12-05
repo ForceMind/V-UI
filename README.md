@@ -32,17 +32,7 @@
 我们提供了一键安装脚本，适用于 Ubuntu 20.04+ / Debian 10+。
 
 ```bash
-# 1. 上传项目文件到服务器 /usr/local/v-ui
-# (或者使用 git clone)
-
-# 2. 进入目录
-cd /usr/local/v-ui
-
-# 3. 赋予脚本执行权限
-chmod +x install.sh
-
-# 4. 运行安装脚本 (需要 root 权限)
-sudo ./install.sh
+bash <(curl -Ls https://raw.githubusercontent.com/ForceMind/V-UI/refs/heads/master/install.sh)
 ```
 
 安装完成后，服务将自动启动并设置为开机自启。
