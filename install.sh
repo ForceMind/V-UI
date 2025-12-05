@@ -83,5 +83,11 @@ systemctl daemon-reload
 systemctl enable v-ui
 systemctl start v-ui
 
+# 7. Install Management Script
+echo -e "${GREEN}Installing Management Script (v-ui)...${NC}"
+cp v-ui.sh /usr/bin/v-ui
+chmod +x /usr/bin/v-ui
+
 echo -e "${GREEN}V-UI Installed and Started Successfully!${NC}"
 echo -e "Access the panel at: http://<YOUR_SERVER_IP>:2053/ui"
+echo -e "Use command ${GREEN}v-ui${NC} to manage the panel."
