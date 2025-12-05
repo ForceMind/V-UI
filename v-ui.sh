@@ -28,7 +28,7 @@ show_menu() {
     clear
     echo -e "
   ${green}V-UI 面板管理脚本${plain}
---- https://github.com/ForceMind/V-UI ---
+————————————————
 
   ${green}0.${plain} 退出脚本
 ————————————————
