@@ -1,6 +1,6 @@
 const { createApp, ref, onMounted, reactive } = Vue;
-const { ElMessage } = ElementPlus;
-const { Odometer, Connection, Setting, Lock, Refresh, ArrowDown } = ElementPlusIconsVue;
+const { ElMessage, ElMessageBox } = ElementPlus;
+const { Odometer, Connection, Setting, Lock, Refresh, ArrowDown, Document, UploadFilled } = ElementPlusIconsVue;
 
 const app = createApp({
     setup() {
@@ -10,7 +10,17 @@ const app = createApp({
         const showAddInbound = ref(false);
         const restarting = ref(false);
         const banIpInput = ref('');
+        const showQrDialog = ref(false);
+        const qrLink = ref('');
+        const siteFiles = ref([]);
         
+        // User State
+        const currentUser = ref({ username: 'admin' });
+        const userForm = reactive({
+            username: '',
+            password: ''
+        });
+
         const newInbound = reactive({
             remark: '',
             protocol: 'vless',
@@ -31,6 +41,11 @@ const app = createApp({
             currentView.value = key;
             if (key === 'inbounds') {
                 fetchInbounds();
+            } else if (key === 'settings') {
+                // Pre-fill username
+                userForm.username = currentUser.value.username;
+            } else if (key === 'site') {
+                fetchSiteFiles();
             }
         };
 
@@ -54,18 +69,58 @@ const app = createApp({
 
         const addInbound = async () => {
             try {
-                // Basic mock payload
+                // Backend handles UUID generation if not provided
                 const payload = {
-                    id: Date.now(), // Mock ID
-                    ...newInbound,
+                    remark: newInbound.remark,
+                    protocol: newInbound.protocol,
+                    port: newInbound.port,
+                    settings: JSON.stringify(newInbound.settings),
+                    stream_settings: JSON.stringify(newInbound.stream_settings),
                     enable: true
                 };
                 await axios.post('/api/xray/inbounds', payload);
                 ElMessage.success('Inbound added successfully');
                 showAddInbound.value = false;
                 fetchInbounds();
+                // Reset form
+                newInbound.remark = '';
+                newInbound.port = 443;
             } catch (error) {
-                ElMessage.error('Failed to add inbound');
+                console.error(error);
+                ElMessage.error('Failed to add inbound: ' + (error.response?.data?.detail || error.message));
+            }
+        };
+
+        const deleteInbound = async (row) => {
+            try {
+                await ElMessageBox.confirm('Are you sure to delete this inbound?', 'Warning', {
+                    confirmButtonText: 'OK',
+                    cancelButtonText: 'Cancel',
+                    type: 'warning',
+                });
+                
+                await axios.delete(`/api/xray/inbounds/${row.id}`);
+                ElMessage.success('Deleted successfully');
+                fetchInbounds();
+            } catch (error) {
+                if (error !== 'cancel') {
+                    ElMessage.error('Failed to delete inbound');
+                }
+            }
+        };
+
+        const updateProfile = async () => {
+            try {
+                const payload = {
+                    username: userForm.username,
+                    password: userForm.password || undefined // Only send if not empty
+                };
+                await axios.post('/api/auth/update_profile', payload);
+                ElMessage.success('Profile updated successfully. Please login again.');
+                currentUser.value.username = userForm.username;
+                userForm.password = ''; // Clear password field
+            } catch (error) {
+                ElMessage.error('Failed to update profile');
             }
         };
 
@@ -92,6 +147,60 @@ const app = createApp({
             }
         }
 
+        const showQrCode = (row) => {
+            // Construct a simple link for demonstration. 
+            // In a real app, you'd parse the settings to build a vmess:// or vless:// link
+            // For now, we'll just show a placeholder or a simple JSON representation
+            let link = '';
+            if (row.protocol === 'vless' || row.protocol === 'vmess') {
+                // Simplified link generation logic
+                // uuid@ip:port?security=none&type=tcp&headerType=none#remark
+                const uuid = JSON.parse(row.settings).clients?.[0]?.id || 'uuid-not-found';
+                const ip = location.hostname;
+                link = `${row.protocol}://${uuid}@${ip}:${row.port}?security=none&type=tcp#${encodeURIComponent(row.remark)}`;
+            } else {
+                link = `Protocol: ${row.protocol}, Port: ${row.port}`;
+            }
+            
+            qrLink.value = link;
+            showQrDialog.value = true;
+            
+            // Wait for DOM update then generate QR
+            setTimeout(() => {
+                const container = document.getElementById('qrcode');
+                container.innerHTML = '';
+                new QRCode(container, {
+                    text: link,
+                    width: 200,
+                    height: 200
+                });
+            }, 100);
+        };
+
+        const copyLink = () => {
+            navigator.clipboard.writeText(qrLink.value).then(() => {
+                ElMessage.success('Link copied to clipboard');
+            });
+        };
+
+        const fetchSiteFiles = async () => {
+            try {
+                const res = await axios.get('/api/files/list_files');
+                siteFiles.value = res.data;
+            } catch (error) {
+                ElMessage.error('Failed to list files');
+            }
+        };
+
+        const handleUploadSuccess = (response, file, fileList) => {
+            ElMessage.success('Site deployed successfully');
+            fetchSiteFiles();
+        };
+
+        const handleUploadError = (err, file, fileList) => {
+            ElMessage.error('Upload failed');
+        };
+
         // Poll system status
         onMounted(() => {
             fetchSystemStatus();
@@ -107,10 +216,22 @@ const app = createApp({
             colors,
             restarting,
             banIpInput,
+            currentUser,
+            userForm,
+            showQrDialog,
+            qrLink,
             handleSelect,
             addInbound,
+            deleteInbound,
+            updateProfile,
             restartXray,
-            banIp
+            banIp,
+            showQrCode,
+            copyLink,
+            siteFiles,
+            fetchSiteFiles,
+            handleUploadSuccess,
+            handleUploadError
         };
     }
 });
@@ -122,6 +243,8 @@ app.component('Setting', Setting);
 app.component('Lock', Lock);
 app.component('Refresh', Refresh);
 app.component('ArrowDown', ArrowDown);
+app.component('Document', Document);
+app.component('UploadFilled', UploadFilled);
 
 app.use(ElementPlus);
 app.mount('#app');

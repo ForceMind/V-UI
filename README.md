@@ -107,5 +107,24 @@ v-ui/
 └── docker-compose.yml  # Docker 编排文件
 ```
 
+## 🛠️ 源码构建 (Build from Source)
+
+如果你想自己编译二进制文件，可以使用我们提供的构建脚本。
+
+### Windows 用户
+确保已安装 Docker Desktop，然后在 PowerShell 中运行：
+```powershell
+.\build_release.ps1
+```
+
+### Linux / macOS 用户
+确保已安装 Docker，然后在终端运行：
+```bash
+chmod +x build_release.sh
+./build_release.sh
+```
+
+构建完成后，二进制文件将位于 `dist/v-ui`。
+
 ## 📄 许可证
 MIT License

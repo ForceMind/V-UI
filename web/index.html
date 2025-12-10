@@ -43,6 +43,11 @@
                         <span>入站列表 (Inbounds)</span>
                     </el-menu-item>
                     
+                    <el-menu-item index="site">
+                        <el-icon><Document /></el-icon>
+                        <span>站点部署 (Site)</span>
+                    </el-menu-item>
+
                     <el-menu-item index="settings">
                         <el-icon><Setting /></el-icon>
                         <span>面板设置 (Settings)</span>
@@ -67,10 +72,11 @@
                         </el-button>
                         <el-dropdown>
                             <span class="el-dropdown-link">
-                                Admin <el-icon class="el-icon--right"><arrow-down /></el-icon>
+                                {{ currentUser.username }} <el-icon class="el-icon--right"><arrow-down /></el-icon>
                             </span>
                             <template #dropdown>
                                 <el-dropdown-menu>
+                                    <el-dropdown-item @click="currentView = 'settings'">Settings</el-dropdown-item>
                                     <el-dropdown-item>Logout</el-dropdown-item>
                                 </el-dropdown-menu>
                             </template>
@@ -122,10 +128,10 @@
                     <div v-if="currentView === 'inbounds'">
                         <div class="view-header">
                             <h3>入站列表</h3>
-                            <el-button type="primary" @click="showAddInbound = true">添加节点 (Add Inbound)</el-button>
+                            <el-button type="primary" @click="openAddInbound">添加节点 (Add Inbound)</el-button>
                         </div>
                         <el-table :data="inbounds" style="width: 100%" border>
-                            <el-table-column prop="id" label="ID" width="60"></el-table-column>
+                            <el-table-column prop="id" label="ID" width="80"></el-table-column>
                             <el-table-column prop="remark" label="备注 (Remark)"></el-table-column>
                             <el-table-column prop="protocol" label="协议 (Protocol)" width="100">
                                 <template #default="scope">
@@ -138,13 +144,71 @@
                                     Up: {{ scope.row.up || 0 }} / Down: {{ scope.row.down || 0 }}
                                 </template>
                             </el-table-column>
-                            <el-table-column label="操作 (Actions)" width="200">
+                            <el-table-column label="操作 (Actions)" width="250">
                                 <template #default="scope">
-                                    <el-button size="small" @click="editInbound(scope.row)">编辑</el-button>
+                                    <el-button size="small" @click="showQrCode(scope.row)">二维码</el-button>
                                     <el-button size="small" type="danger" @click="deleteInbound(scope.row)">删除</el-button>
                                 </template>
                             </el-table-column>
                         </el-table>
+                    </div>
+
+                    <!-- Site View -->
+                    <div v-if="currentView === 'site'">
+                        <h3>站点部署 (Static Site)</h3>
+                        <el-card>
+                            <template #header>
+                                <span>Upload Website (Zip)</span>
+                            </template>
+                            <el-upload
+                                class="upload-demo"
+                                drag
+                                action="/api/files/upload_site"
+                                :on-success="handleUploadSuccess"
+                                :on-error="handleUploadError"
+                                accept=".zip"
+                            >
+                                <el-icon class="el-icon--upload"><upload-filled /></el-icon>
+                                <div class="el-upload__text">
+                                    Drop file here or <em>click to upload</em>
+                                </div>
+                                <template #tip>
+                                    <div class="el-upload__tip">
+                                        Only zip files are allowed. The content will be deployed to the root path /.
+                                    </div>
+                                </template>
+                            </el-upload>
+                            <div style="margin-top: 20px;">
+                                <h4>Current Files:</h4>
+                                <ul>
+                                    <li v-for="file in siteFiles" :key="file">{{ file }}</li>
+                                </ul>
+                                <el-button @click="fetchSiteFiles">Refresh List</el-button>
+                            </div>
+                        </el-card>
+                    </div>
+
+                    <!-- Settings View -->
+                    <div v-if="currentView === 'settings'">
+                        <h3>面板设置</h3>
+                        <el-card class="box-card" style="max-width: 500px">
+                            <template #header>
+                                <div class="card-header">
+                                    <span>修改账号密码</span>
+                                </div>
+                            </template>
+                            <el-form :model="userForm" label-width="100px">
+                                <el-form-item label="用户名">
+                                    <el-input v-model="userForm.username"></el-input>
+                                </el-form-item>
+                                <el-form-item label="新密码">
+                                    <el-input v-model="userForm.password" type="password" show-password placeholder="留空不修改"></el-input>
+                                </el-form-item>
+                                <el-form-item>
+                                    <el-button type="primary" @click="updateProfile">保存修改</el-button>
+                                </el-form-item>
+                            </el-form>
+                        </el-card>
                     </div>
 
                     <!-- Security View -->
@@ -190,6 +254,7 @@
                 <el-form-item label="端口">
                     <el-input-number v-model="newInbound.port" :min="1" :max="65535"></el-input-number>
                 </el-form-item>
+                <!-- Dynamic fields based on protocol could go here -->
             </el-form>
             <template #footer>
                 <span class="dialog-footer">
@@ -198,8 +263,18 @@
                 </span>
             </template>
         </el-dialog>
+
+        <!-- QR Code Dialog -->
+        <el-dialog v-model="showQrDialog" title="分享节点" width="300px">
+            <div style="text-align: center;">
+                <div id="qrcode"></div>
+                <p style="margin-top: 10px; word-break: break-all; font-size: 12px; color: #999;">{{ qrLink }}</p>
+                <el-button type="text" @click="copyLink">复制链接</el-button>
+            </div>
+        </el-dialog>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

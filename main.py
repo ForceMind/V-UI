@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import system, xray, auth, security
+from app.api import system, xray, auth, security, files
 
 app = FastAPI(
     title="V-UI",
@@ -22,6 +22,7 @@ app.include_router(system.router, prefix="/api/system", tags=["System"])
 app.include_router(xray.router, prefix="/api/xray", tags=["Xray"])
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(security.router, prefix="/api/security", tags=["Security"])
+app.include_router(files.router, prefix="/api/files", tags=["Files"])
 
 from fastapi.staticfiles import StaticFiles
 import os
@@ -46,7 +47,18 @@ def get_web_path():
             f.write("<h1>V-UI Panel is running</h1><p>Please upload frontend files to the web directory.</p>")
     return web_path
 
+# Mount Panel UI
 app.mount("/ui", StaticFiles(directory=get_web_path(), html=True), name="ui")
+
+# Mount Static Site (Camouflage)
+www_root = "wwwroot"
+if not os.path.exists(www_root):
+    os.makedirs(www_root)
+    with open(os.path.join(www_root, "index.html"), "w") as f:
+        f.write("<h1>Welcome</h1>")
+
+app.mount("/", StaticFiles(directory=www_root, html=True), name="site")
+
 
 @app.get("/")
 async def root():
@@ -55,4 +67,5 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
     # Disable reload in production for stability
-    uvicorn.run("main:app", host="0.0.0.0", port=2053, reload=False)
+    # Use app object directly for PyInstaller compatibility
+    uvicorn.run(app, host="0.0.0.0", port=2053)
