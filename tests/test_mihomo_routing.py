@@ -9,7 +9,26 @@ from app.services.mihomo_routing import (
     unique_proxy_names,
 )
 from app.services.mihomo_subscription import mihomo_config
-from tests.test_generators import inbound
+from types import SimpleNamespace
+
+
+def inbound(**kwargs):
+    data = {
+        "id": 1,
+        "core": "xray",
+        "remark": "demo",
+        "port": 443,
+        "protocol": "vless",
+        "settings": {
+            "clients": [{"id": "11111111-1111-1111-1111-111111111111"}],
+            "decryption": "none",
+        },
+        "stream_settings": {},
+        "enable": True,
+        "tag": "demo",
+    }
+    data.update(kwargs)
+    return SimpleNamespace(**data)
 
 
 def flatten_rules(plan):
