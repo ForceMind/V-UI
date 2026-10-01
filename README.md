@@ -1,130 +1,187 @@
-# V-UI - 下一代 Xray 面板 (Next Gen Xray Panel)
+# V-UI — 轻量双核心代理面板
 
-**V-UI** 是一个轻量级、高性能、现代化的 Xray/Sing-box 管理面板。
-它专为小白用户和高级玩家设计，提供可视化的界面来管理你的 VPN 节点、流量和服务器状态。
+**V-UI** 是一个面向个人 VPS 的轻量管理面板，统一管理 **Xray-core + sing-box**，并把服务器节点直接输出为可用的 **Mihomo / Clash Meta、sing-box JSON 和通用 Base64 订阅**。
 
-## ✨ 核心亮点
+当前版本的 Mihomo 分流引擎复用了同一作者项目 **ToClash** 的规则设计：策略组、服务预设、DNS policy、内网 DNS、自定义直连 / 强制代理和两种网络模式使用一致的语义。
 
-*   **简单易用**: 一键安装，开箱即用，全中文界面。
-*   **协议全**: 支持 VMess, VLESS, Trojan, Shadowsocks, Hysteria 2, Tuic v5, WireGuard。
-*   **防封锁**: 内置支持 Reality 和 Vision 等最新抗干扰技术。
-*   **安全**: 自动拦截恶意扫描，保护服务器安全。
-*   **多核心**: 同时支持 Xray-core 和 Sing-box。
+## 核心能力
 
----
+- **双核心**：Xray-core 与 sing-box 可独立生成配置、校验、启动、停止和重启。
+- **统一节点管理**：同一张 Inbound 列表管理两个核心，旧 Xray 数据自动兼容。
+- **协议**：
+  - Xray：VLESS、VMess、Trojan、Shadowsocks。
+  - sing-box：VLESS、VMess、Trojan、Shadowsocks、Hysteria2、TUIC。
+- **订阅输出**：
+  - 单节点分享 URI / 二维码。
+  - 通用 Base64。
+  - Mihomo / Clash Meta YAML。
+  - sing-box JSON。
+- **ToClash 分流**：
+  - PROXY / AUTO / FORCE_PROXY。
+  - 40 项服务预设。
+  - 常规“国内直连、其余代理”模式。
+  - “默认直连、仅指定服务代理”模式。
+  - 用户始终直连 / 始终代理。
+  - 本机、局域网、可选 CGNAT 优先保护。
+  - 企业 / 家庭内网 DNS。
+  - 必须代理规则后追加同条件 REJECT，避免不支持 UDP 时继续落入后续直连规则。
+  - 业务 DNS 与节点自身 DNS 分开规划，避免代理节点解析环路。
+- **轻量部署**：FastAPI + SQLite，不依赖 Redis、PostgreSQL 或消息队列。
+- **amd64 / arm64**：安装脚本与 Docker 均下载对应架构的 Xray 和 sing-box。
 
-## 📖 小白安装教程 (Installation)
+## 安装
 
-### 准备工作
-1.  一台境外 VPS 服务器 (推荐 Ubuntu 20.04+ 或 Debian 10+)。
-2.  SSH 连接工具 (如 Xshell, Putty, macOS Terminal)。
-3.  **注意**: 如果是阿里云/腾讯云/AWS 等，请务必在后台安全组放行 **2053** 端口，以及你打算使用的节点端口。
+### 二进制版本
 
-### 方式一：二进制极速安装 (推荐)
+发布 Release 后可使用：
 
-无需编译，无需安装 Python 环境，下载即用。
-
-```bash
+~~~bash
 bash <(curl -Ls https://raw.githubusercontent.com/ForceMind/V-UI/master/install-bin.sh)
-```
+~~~
 
-### 方式二：Docker 安装 (推荐)
+安装器会同时准备 V-UI、Xray-core 和 sing-box。
 
-如果你喜欢干净的环境，推荐使用 Docker。
+### 源码安装
 
-1.  **安装 Docker** (如果已有可跳过):
-    ```bash
-    curl -fsSL https://get.docker.com | bash
-    ```
+~~~bash
+git clone https://github.com/ForceMind/V-UI.git
+cd V-UI
+sudo bash install.sh
+~~~
 
-2.  **部署 V-UI**:
-    ```bash
-    # 下载代码
-    git clone https://github.com/ForceMind/V-UI.git
-    cd V-UI
+### Docker
 
-    # 启动面板
-    docker-compose up -d
-    ```
+~~~bash
+git clone https://github.com/ForceMind/V-UI.git
+cd V-UI
+docker compose up -d --build
+~~~
 
----
+Docker 使用 host 网络，使面板创建的代理端口无需逐个映射。
 
-## 💻 使用说明 (Usage)
+## 使用
 
-### 1. 登录面板
-*   **访问地址**: `http://你的服务器IP:2053/ui`
-*   **默认账号**: `admin`
-*   **默认密码**: `admin`
+面板默认监听：
 
-*(建议登录后立即修改密码)*
+~~~text
+http://服务器IP:2053/ui
+~~~
 
-### 2. 添加节点 (创建一个 VPN 连接)
-1.  点击左侧菜单 **"入站列表 (Inbounds)"**。
-2.  点击 **"添加节点"**。
-3.  **备注**: 随便填，例如 "我的手机"。
-4.  **协议**: 推荐选择 `vless` 或 `vmess`。
-5.  **端口**: 默认或自定义 (记得在云服务商防火墙放行该端口)。
-6.  点击 **"确定"**。
+基本流程：
 
-### 3. 连接使用
-目前版本请手动复制节点信息到你的客户端 (v2rayN, Shadowrocket 等) 配置使用。后续将支持二维码和订阅链接。
+1. 在“入站节点”选择 **Xray** 或 **sing-box** 并创建节点。
+2. 在“Mihomo 分流”选择网络模式、服务规则和自定义分流。
+3. 在“订阅输出”复制 Mihomo、sing-box 或 Base64 地址。
+4. Mihomo 订阅会实时读取已保存的分流设置，不需要重新生成节点。
 
----
+### Mihomo 两种模式
 
-## ❓ 常见问题 (FAQ)
+**常规模式**
 
-**Q: 安装后无法访问面板?**
-A: 请检查服务器防火墙。
-1.  云服务商安全组是否放行 2053 端口？
-2.  服务器内部防火墙: `ufw allow 2053/tcp`。
+~~~text
+本机 / 局域网 → DIRECT
+用户始终直连 → DIRECT
+用户始终代理 → FORCE_PROXY
+服务预设 → PROXY / FORCE_PROXY
+中国大陆 → DIRECT
+其他 → PROXY
+~~~
 
-**Q: 如何更新面板?**
-A:
-*   **脚本安装**: 输入 `v-ui` 选择 "1. 安装/更新"。
-*   **Docker安装**: 在目录内执行 `docker-compose pull && docker-compose up -d`。
+生成：
 
-**Q: 核心支持哪些?**
-A: 默认内置最新版 Xray-core。
+- PROXY：手动选择，包含 AUTO、DIRECT 和全部节点。
+- AUTO：url-test 自动选择节点。
+- FORCE_PROXY：不包含 DIRECT，用于不能降级直连的服务。
 
----
+**默认直连模式**
 
-## 📂 目录结构
+~~~text
+本机 / 局域网 → DIRECT
+用户指定 / 已开启服务 → FORCE_PROXY
+其他 → DIRECT
+~~~
 
-```
-v-ui/
-├── app/                # 后端核心代码
-│   ├── api/            # API 路由接口 (System, Xray, Auth, Security)
-│   ├── models/         # 数据库模型 (SQLAlchemy)
-│   ├── services/       # 业务逻辑服务 (核心控制, 监控等)
-│   └── ...
-├── bin/                # 二进制文件目录 (存放 xray, sing-box 核心文件)
-├── data/               # 数据目录 (数据库 v-ui.db, 配置文件 config.json)
-├── web/                # 前端静态资源 (HTML, JS, CSS)
-├── main.py             # 程序入口 (FastAPI App)
-├── requirements.txt    # Python 依赖列表
-├── install.sh          # 自动化部署脚本
-├── Dockerfile          # Docker 构建文件
-└── docker-compose.yml  # Docker 编排文件
-```
+适合当前网络本身已经可以直接访问国际互联网，只希望某些服务使用固定代理出口的场景。
 
-## 🛠️ 源码构建 (Build from Source)
+## API
 
-如果你想自己编译二进制文件，可以使用我们提供的构建脚本。
+主要接口：
 
-### Windows 用户
-确保已安装 Docker Desktop，然后在 PowerShell 中运行：
-```powershell
-.\build_release.ps1
-```
+~~~text
+GET/POST/PUT/DELETE  /api/inbounds
+GET                  /api/cores/status
+POST                 /api/cores/{core}/restart
 
-### Linux / macOS 用户
-确保已安装 Docker，然后在终端运行：
-```bash
-chmod +x build_release.sh
-./build_release.sh
-```
+GET                  /api/routing/mihomo
+PUT                  /api/routing/mihomo
+GET                  /api/routing/mihomo/catalog
+GET                  /api/routing/mihomo/preview
 
-构建完成后，二进制文件将位于 `dist/v-ui`。
+GET                  /api/subscription/raw
+GET                  /api/subscription/mihomo.yaml
+GET                  /api/subscription/sing-box.json
+GET                  /api/subscription/link/{id}
+~~~
 
-## 📄 许可证
+旧的 /api/xray/* 继续保留，便于现有脚本逐步迁移。
+
+## 数据
+
+~~~text
+data/
+├── v-ui.db                 # SQLite
+├── xray.json               # Xray 运行配置
+├── sing-box.json           # sing-box 运行配置
+└── mihomo-routing.json     # Mihomo / ToClash 分流设置
+~~~
+
+已有数据库缺少 core 字段时，启动会自动补字段，并将旧节点视为 xray。
+
+## 当前开发重点
+
+双核心和 Mihomo 分流已经进入同一架构。下一阶段重点是把协议参数编辑器补完整，包括：
+
+- VLESS Reality / Vision。
+- WS / gRPC / XHTTP。
+- TLS 证书与 SNI。
+- Hysteria2 带宽 / obfs。
+- TUIC congestion control / UDP relay。
+- 证书申请与续期。
+
+## 项目结构
+
+~~~text
+V-UI/
+├── app/
+│   ├── api/
+│   │   ├── inbounds.py
+│   │   ├── cores.py
+│   │   ├── routing.py
+│   │   ├── subscription.py
+│   │   ├── xray.py
+│   │   └── singbox.py
+│   ├── models/
+│   └── services/
+│       ├── core_manager.py
+│       ├── inbound_service.py
+│       ├── mihomo_routing.py
+│       ├── mihomo_subscription.py
+│       └── subscription_service.py
+├── bin/
+├── data/
+├── tests/
+├── web/
+├── main.py
+├── install.sh
+├── install-bin.sh
+├── Dockerfile
+└── docker-compose.yml
+~~~
+
+## 相关项目
+
+- **ToClash**：浏览器端代理链接 / Mihomo YAML 转换与分流配置工具。V-UI 的 Mihomo 规则模型与 ToClash 保持同一套设计思路。
+
+## License
+
 MIT License
