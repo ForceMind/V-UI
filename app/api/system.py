@@ -19,12 +19,12 @@ def get_size(bytes, suffix="B"):
         bytes /= factor
 
 @router.get("/status")
-async def get_system_status():
+def get_system_status():
     """
     Get real-time system status (CPU, RAM, Disk, Net)
     """
     # CPU
-    cpu_percent = psutil.cpu_percent(interval=1)
+    cpu_percent = psutil.cpu_percent(interval=None)
     cpu_count = psutil.cpu_count(logical=True)
     
     # Memory

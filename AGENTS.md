@@ -9,3 +9,5 @@ Read ROADMAP.md and the latest docs/ITERATIONS.md before editing. The user has n
 - Fixed-version real-core checks are mandatory for protocol claims; unit tests are not connectivity evidence.
 - ToClash remains an explicit alpha.5/alpha.6 goal. Do not add optional candidate-pool features to this run.
 - Report tested, untested and blocked items separately. A queued CI is not a passed CI.
+
+Current final stage is rc.2. Only the selected Ubuntu24.04 amd64/CPython3.12 deployment is accepted. Finish and verify the final head, then stop; never silently turn the optional queue into more scope. Build-time packages must retain exact pins/manifest/selected licenses; no font files or secrets in artifacts.

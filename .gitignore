@@ -6,3 +6,6 @@ bin/xray
 bin/sing-box
 wwwroot/
 .test-*/
+
+web/vendor/
+.bundle-work/

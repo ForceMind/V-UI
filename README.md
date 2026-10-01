@@ -1,57 +1,42 @@
-# V-UI — 个人双核心代理面板（开发中）
+# V-UI — 个人代理面板 / v0.3.0-rc.2
 
-**当前迭代：v0.3.0-alpha.2，管理员认证边界。不是正式 Release，也未完成公网部署验收。**
+在 V-UI 管理节点、设置 ToClash 分流，再让客户端直接订阅完整配置。FastAPI + SQLite，不需要常驻 Node、Redis 或外部转换服务。
 
-V-UI 的目标是以 FastAPI + SQLite 管理 Xray/sing-box，并直接导出带 ToClash 分流的 Mihomo 配置。已有双核心、协议表单和导出草稿，但“代码已有”不等于每种组合已验证。
+**这是经过逐阶段开发的候选版本，不是正式 Release，也没有部署到你的 VPS。** 主计划和证据见 [ROADMAP](ROADMAP.md)、[迭代记录](docs/ITERATIONS.md)及 PR #2～#9 的最终 Checks。旧的大 PR #1 保留为集成草稿，未合并 master。
 
-先读 [版本计划](ROADMAP.md)；本轮的启动、创建管理员、会话和回滚说明见 [AUTH_ALPHA2.md](docs/AUTH_ALPHA2.md)。开发前阅读 [AGENTS.md](AGENTS.md)。
+## 当前能力
 
-## 当前可验证的范围
+- 单管理员安全登录、密码重置、会话过期/撤销、同源请求校验和持久登录限流。
+- Xray / sing-box 独立配置校验、期望/生效状态区分、失败保护、核心停启和恢复。
+- 专用只读订阅：明确节点与输出格式、独立公开节点地址、到期/轮换/撤销；不能取得管理权限。
+- ToClash 0.3.8 固定基准：两种网络模式、40项服务预设、始终直连/代理、CGNAT、内网 DNS、独立节点 DNS、规则覆盖提示。
+- 分流草稿/已保存/预览区分，冲突与损坏拒绝。同一订阅 URL 在客户端刷新后返回最新保存设置。
+- 完整 Mihomo YAML 有节点、策略组、DNS 与 rules；不需要再次打开 ToClash 手工转换。URI/Base64 和 sing-box JSON 只提供经过验证的连接配置，不冒充完整 ToClash 分流。
 
-- 无默认密码或 mock token；本机交互式创建/重置管理员。
-- 管理 API、旧接口、文档及当前订阅接口统一鉴权。
-- 登录、改名/改密、退出、会话过期/撤销、CSRF、限流。
-- 保留原入站数据；同源网站托管暂时隔离，旧文件不删除。
+## 明确的验证范围
 
-本轮不增加协议、不改 ToClash 规则、不做证书申请和核心升级。旧主面板远程依赖及核心兼容性仍待发布前复核。
+公开导出和端到端链路首轮限定 **sing-box VLESS / 原生 TCP / TLS / 单用户 / 空 flow / 验证证书**。其他已有草稿协议表单不等于已验证；不支持的组合明确报错，不丢参数、不返回全直连兜底。
 
-## 独立测试目录启动
+固定核心：sing-box1.14.2、Xray26.3.27、Mihomo1.19.32。ToClash100个独立场景与40项目录对照；真实TLS连接、代理/直连DNS、错误证书/SNI/UUID拒绝和停止核心不降级直连见 [rc.1](docs/LOOPBACK_RC1.md)。UDP端到端和其他协议仍不在已验证矩阵内。
 
-使用 Python 3.12：
+## 部署方式
 
-```sh
-python -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-export VUI_DATA_DIR="$PWD/data"
-python -m app.admin create your_admin
-python main.py
-```
+首轮只验收 **Ubuntu24.04 amd64 + CPython3.12 + 非 root 专用账号 + 单进程 + 直接 HTTPS**。完整命令、信任边界、备份恢复与回滚见 [DEPLOYMENT_RC2.md](docs/DEPLOYMENT_RC2.md)。
 
-命令会询问密码，不接受密码参数。默认只监听 `127.0.0.1:2053`，通过本机或 SSH 隧道访问 `/login`；“面板设置”进入账户管理和退出页面。已有账号使用 `python -m app.admin set-password your_admin` 显式重置。
+仓库原前端模板作为开发输入，构建时确定性地替换为已校验本地资源并选用已验证节点默认值；模板变化会阻止构建，不能静默回退CDN。候选包包含固定wheel、核心与本地前端资源，安装时不联网解析latest；摘要、清单和许可随包保留。旧 install.sh/install-bin.sh 已停止执行，不能再用 root 一键脚本覆盖原服务。Docker/ARM64/PyInstaller/代理反代不是这一版验收路径。
 
-不要直接执行旧安装脚本覆盖现有服务。Docker、二进制打包、ARM64、HTTPS 反代和真实代理链路要按版本计划单独验收。
+工作路径：HTTPS登录 → 节点管理（默认sing-box/VLESS/TLS，建议10443）→ 分流与订阅 → 创建专用URL → 客户端导入并刷新。
 
-## ToClash 集成目标
+证书由操作者提供；无ACME自动签发。部署需要实际证书、域名和网络配置，本仓库和测试不会自动更改你的VPS。
 
-alpha.5 验证配置引擎，alpha.6 收口分流设置与订阅使用闭环：
-
-```text
-V-UI 节点 + 已保存分流设置 → 受保护的订阅 URL → Mihomo 客户端刷新
-```
-
-完整 Mihomo 配置应有 `proxies`、`proxy-groups`、`dns`、`rules`，不再需要手动把节点复制到 ToClash。URI/Base64 不承载这些分流设置；sing-box 完整分流转换不算首轮 Mihomo 集成已完成。
-
-alpha.3 前订阅接口暂时也受管理会话保护，不提供匿名导出，不把管理员凭据塞到 URL。
-
-## 测试
+## 开发与验证
 
 ```sh
 pip install -r requirements-test.txt
-python -m compileall -q app tests main.py
+python -m compileall -q app tests scripts main.py
 python -m unittest discover -s tests -v
-python -m playwright install chromium
-VUI_BROWSER_CHECK=1 python -m unittest discover -s tests -p test_startup.py -v
 ```
 
-测试使用临时数据和假凭据。浏览器烟测只覆盖本地登录/账户页和认证跳转，不等于全部旧面板或代理协议验收。真实结果以该版本 PR 的准确提交和 CI 日志为准。
+环境依赖的真实核心、独立ToClash参考、浏览器和最终包安装测试有独立CI任务；常规测试中的skip必须由相应任务覆盖，不能计作通过。新代码只在临时数据和假凭据上验证。
+
+[认证](docs/AUTH_ALPHA2.md) · [分流工作区](docs/WORKSPACE_ALPHA6.md) · [真实链路](docs/LOOPBACK_RC1.md) · [发布门槛](docs/DEPLOYMENT_RC2.md)
