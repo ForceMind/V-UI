@@ -31,6 +31,7 @@ jobs:
           node --check web/js/account.js
           node --check web/js/app.js
           node --check web/js/workspace.js
+          node --check web/js/certificates.js
       - name: Run tests
         run: python -m unittest discover -s tests -v
       - name: Fetch checksum-pinned real cores

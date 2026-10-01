@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.staticfiles import StaticFiles
-from app.api import auth, cores, files, inbounds, routing, security, singbox, subscription, subscriptions, system, xray
+from app.api import auth, certificates, cores, files, inbounds, routing, security, singbox, subscription, subscriptions, system, xray
 from app.models.database import DB_PATH, init_db
 from app.middleware.auth import AdminAuthMiddleware, configured_origin
 from app.services.core_manager import core_manager
@@ -15,8 +15,9 @@ from app.services.log_redaction import install_log_redaction
 from app.services.validated_export import ExportError
 from app.services.routing_store import RoutingStorageError
 
-app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.3.0-rc.2')
+app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.3.0-rc.3')
 app.add_middleware(AdminAuthMiddleware)
+app.include_router(certificates.router,prefix='/api/certificates',tags=['Certificates'])
 app.include_router(system.router,prefix='/api/system',tags=['System'])
 app.include_router(inbounds.router,prefix='/api/inbounds',tags=['Inbounds'])
 app.include_router(cores.router,prefix='/api/cores',tags=['Cores'])
@@ -50,10 +51,13 @@ async def startup_event():
     install_log_redaction()
     init_db()
     core_manager.recover_all()
+    if os.getenv('VUI_CERTIFICATES_ENABLED') == '1':
+        certificates.get_manager().start()
     if os.name=='posix' and DB_PATH.is_file(): DB_PATH.chmod(0o600)
 
 @app.on_event('shutdown')
 async def shutdown_event():
+    certificates.get_manager().stop()
     core_manager.stop_all()
 
 def get_web_path() -> str:
@@ -64,6 +68,10 @@ def get_web_path() -> str:
 @app.get('/account',include_in_schema=False)
 def account_page():
     return FileResponse(os.path.join(get_web_path(),'account.html'),headers={'Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
+
+@app.get('/certificates',include_in_schema=False)
+def certificates_page():
+    return FileResponse(os.path.join(get_web_path(),'certificates.html'),headers={'Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
 
 @app.get('/workspace',include_in_schema=False)
 def workspace_page():
