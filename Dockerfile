@@ -1,38 +1,47 @@
-FROM python:3.10-slim
+FROM python:3.12-slim
+
+ARG TARGETARCH=amd64
 
 WORKDIR /app
 
-# 安装系统依赖
 RUN apt-get update && apt-get install -y \
     curl \
     git \
     socat \
     tzdata \
+    unzip \
+    tar \
     && rm -rf /var/lib/apt/lists/*
 
-# 设置时区
 ENV TZ=Asia/Shanghai
 
-# 复制依赖并安装
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 下载 Xray Core
 RUN mkdir -p bin && \
-    curl -L -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip && \
-    unzip /tmp/xray.zip -d /tmp/xray && \
+    case "${TARGETARCH}" in \
+      amd64) XRAY_ASSET="Xray-linux-64.zip"; SB_ARCH="amd64" ;; \
+      arm64) XRAY_ASSET="Xray-linux-arm64-v8a.zip"; SB_ARCH="arm64" ;; \
+      *) echo "Unsupported TARGETARCH: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    curl -fL -o /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/latest/download/${XRAY_ASSET}" && \
+    mkdir -p /tmp/xray && \
+    unzip -oq /tmp/xray.zip -d /tmp/xray && \
     mv /tmp/xray/xray bin/xray && \
     chmod +x bin/xray && \
-    rm -rf /tmp/xray*
+    rm -rf /tmp/xray /tmp/xray.zip && \
+    SB_VERSION="$(curl -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep '"tag_name"' | head -n1 | cut -d '"' -f4 | sed 's/^v//')" && \
+    SB_DIR="sing-box-${SB_VERSION}-linux-${SB_ARCH}" && \
+    curl -fL -o /tmp/sing-box.tar.gz "https://github.com/SagerNet/sing-box/releases/download/v${SB_VERSION}/${SB_DIR}.tar.gz" && \
+    tar -xzf /tmp/sing-box.tar.gz -C /tmp && \
+    mv "/tmp/${SB_DIR}/sing-box" bin/sing-box && \
+    chmod +x bin/sing-box && \
+    rm -rf "/tmp/${SB_DIR}" /tmp/sing-box.tar.gz
 
-# 复制项目文件
 COPY . .
 
-# 赋予脚本执行权限
 RUN chmod +x entrypoint.sh
 
-# 暴露端口 (如果使用 host 模式，这个声明主要用于文档)
 EXPOSE 2053
 
-# 启动命令
 ENTRYPOINT ["./entrypoint.sh"]
