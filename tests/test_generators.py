@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from app.services.core_manager import SingBoxAdapter, XrayAdapter
 from app.services.mihomo_subscription import mihomo_config
-from app.services.subscription_service import share_link
+from app.services.client_export import share_link
 
 
 def inbound(**kwargs):
