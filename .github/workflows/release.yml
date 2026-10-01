@@ -1,0 +1,19 @@
+name: Selected release deployment gates
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  discovery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Read exact-version official frontend metadata without executing packages
+        run: python scripts/inspect_frontend.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vui-frontend-pin-discovery
+          path: /tmp/vui-frontend-pins.json
+          retention-days: 1
