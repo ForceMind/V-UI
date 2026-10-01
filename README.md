@@ -137,16 +137,26 @@ data/
 
 已有数据库缺少 core 字段时，启动会自动补字段，并将旧节点视为 xray。
 
-## 当前开发重点
+## 协议参数编辑器
 
-双核心和 Mihomo 分流已经进入同一架构。下一阶段重点是把协议参数编辑器补完整，包括：
+新增节点时已经可以直接配置：
 
 - VLESS Reality / Vision。
-- WS / gRPC / XHTTP。
-- TLS 证书与 SNI。
-- Hysteria2 带宽 / obfs。
-- TUIC congestion control / UDP relay。
-- 证书申请与续期。
+- Xray RAW / WebSocket / gRPC / XHTTP。
+- sing-box WebSocket / gRPC / HTTPUpgrade。
+- TLS 的 SNI、证书路径与私钥路径。
+- Hysteria2 上传/下载带宽、Salamander / Gecko obfs。
+- TUIC congestion control、UDP relay、0-RTT。
+- REALITY X25519 密钥自动生成，服务器私钥不会写入客户端订阅。
+
+需要注意：Mihomo 当前文档对 Xray-core v26.7.11+ REALITY 给出了兼容性警告。V-UI 会在订阅页显示对应提示；如果主要客户端是 Mihomo，优先使用 sing-box + VLESS REALITY。
+
+下一阶段主要剩余：
+
+- 节点编辑时的可视化参数回填。
+- ACME / acme.sh 证书申请、续期和证书状态管理。
+- 更完整的核心版本管理与升级/回滚。
+- 清理早期遗留的重复目录和历史代码。
 
 ## 项目结构
 
