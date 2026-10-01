@@ -1,41 +1,69 @@
 #!/bin/bash
+set -euo pipefail
 
-# V-UI Binary Installer
-# Usage: bash <(curl -Ls https://raw.githubusercontent.com/ForceMind/V-UI/master/install-bin.sh)
-
-set -e
 GREEN='\033[0;32m'
+RED='\033[0;31m'
 NC='\033[0m'
 
 INSTALL_DIR="/usr/local/v-ui"
 BIN_URL="https://github.com/ForceMind/V-UI/releases/latest/download/v-ui"
 
-echo -e "${GREEN}Installing V-UI (Binary Version)...${NC}"
+if [ "$EUID" -ne 0 ]; then
+  echo -e "${RED}Please run as root${NC}"
+  exit 1
+fi
 
-# 1. Prepare Directory
+apt-get update
+apt-get install -y curl unzip tar
+
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
+mkdir -p bin data
 
-# 2. Download Binary
-echo -e "${GREEN}Downloading V-UI Binary...${NC}"
-curl -L -o v-ui "$BIN_URL"
+echo -e "${GREEN}Downloading V-UI binary...${NC}"
+curl -fL -o v-ui "$BIN_URL"
 chmod +x v-ui
 
-# 3. Download Xray Core (Still needed as external dependency)
-echo -e "${GREEN}Downloading Xray Core...${NC}"
-mkdir -p bin
-curl -L -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
-unzip -o /tmp/xray.zip -d /tmp/xray
+ARCH_RAW="$(uname -m)"
+case "$ARCH_RAW" in
+    x86_64|amd64)
+        SB_ARCH="amd64"
+        XRAY_ASSET="Xray-linux-64.zip"
+        ;;
+    aarch64|arm64)
+        SB_ARCH="arm64"
+        XRAY_ASSET="Xray-linux-arm64-v8a.zip"
+        ;;
+    *)
+        echo -e "${RED}Unsupported architecture: ${ARCH_RAW}${NC}"
+        exit 1
+        ;;
+esac
+
+curl -fL -o /tmp/xray.zip     "https://github.com/XTLS/Xray-core/releases/latest/download/${XRAY_ASSET}"
+rm -rf /tmp/xray
+mkdir -p /tmp/xray
+unzip -oq /tmp/xray.zip -d /tmp/xray
 mv /tmp/xray/xray bin/xray
 chmod +x bin/xray
-rm -rf /tmp/xray*
+rm -rf /tmp/xray /tmp/xray.zip
 
-# 4. Create Systemd Service
-echo -e "${GREEN}Creating Service...${NC}"
+SB_VERSION="$(
+    curl -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/latest     | grep '"tag_name"'     | head -n1     | cut -d '"' -f4     | sed 's/^v//'
+)"
+SB_DIR="sing-box-${SB_VERSION}-linux-${SB_ARCH}"
+curl -fL -o /tmp/sing-box.tar.gz     "https://github.com/SagerNet/sing-box/releases/download/v${SB_VERSION}/${SB_DIR}.tar.gz"
+rm -rf "/tmp/${SB_DIR}"
+tar -xzf /tmp/sing-box.tar.gz -C /tmp
+mv "/tmp/${SB_DIR}/sing-box" bin/sing-box
+chmod +x bin/sing-box
+rm -rf "/tmp/${SB_DIR}" /tmp/sing-box.tar.gz
+
 cat > /etc/systemd/system/v-ui.service <<EOF
 [Unit]
 Description=V-UI Panel Service
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -51,12 +79,11 @@ EOF
 
 systemctl daemon-reload
 systemctl enable v-ui
-systemctl start v-ui
+systemctl restart v-ui
 
-# 5. Install Management Script
-echo -e "${GREEN}Installing Management Tool...${NC}"
-curl -Ls https://raw.githubusercontent.com/ForceMind/V-UI/master/v-ui.sh -o /usr/bin/v-ui
+curl -fsSL     https://raw.githubusercontent.com/ForceMind/V-UI/master/v-ui.sh     -o /usr/bin/v-ui
 chmod +x /usr/bin/v-ui
 
-echo -e "${GREEN}Installation Complete!${NC}"
+echo -e "${GREEN}Installation complete.${NC}"
 echo -e "Panel: http://<IP>:2053/ui"
+echo -e "Cores: Xray + sing-box"
