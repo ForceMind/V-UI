@@ -1,6 +1,8 @@
 name: ToClash reference and export verification
 on:
   pull_request:
+  push:
+    branches: [master]
 permissions:
   contents: read
 jobs:

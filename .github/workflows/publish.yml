@@ -1,0 +1,48 @@
+name: Publish verified V-UI release
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact current default-branch commit with all checks green
+        required: true
+        type: string
+      version:
+        description: Stable VERSION value, for example 0.3.0
+        required: true
+        type: string
+      confirm:
+        description: Enter RELEASE <version> <40-character commit>
+        required: true
+        type: string
+      publish:
+        description: Publish after verified uploads (false leaves a draft)
+        required: true
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: official-v-ui-release
+  cancel-in-progress: false
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Promote previously accepted artifact without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ inputs.commit }}
+          VERSION: ${{ inputs.version }}
+          CONFIRM: ${{ inputs.confirm }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          args=(--commit "$COMMIT" --version "$VERSION" --confirm "$CONFIRM")
+          if [[ "$PUBLISH" == 'true' ]]; then args+=(--publish); fi
+          python3 scripts/publish_release.py "${args[@]}"

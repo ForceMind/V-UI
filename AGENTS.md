@@ -1,13 +1,14 @@
-# V-UI development contract
+# V-UI 开发约束
 
-Read ROADMAP.md and the latest docs/ITERATIONS.md before editing. The user has now authorized sequential execution of all scheduled stages, alpha.3 through rc.2. This supersedes the prior instruction to stop after each turn, but not the small-version scope or safety gates.
+先读ROADMAP.md、docs/README.md和最近PR。用户已授权完善正式发布、所有文档、一键部署与图形化自动证书；仍不等于授权登录真实VPS、替实际域名同意CA条款或跳过验收公开Release。
 
-- Implement and test one stage before proceeding. Use a separate dependent branch/PR for each stage; keep dependencies explicit.
-- Do not merge master, the older dependent PRs, publish a Release, or deploy the user's VPS without explicit deployment approval.
-- Preserve existing data. Test only with temporary directories and synthetic credentials.
-- Do not log tokens, return server secrets in exports, or silently downgrade failed configurations to direct traffic.
-- Fixed-version real-core checks are mandatory for protocol claims; unit tests are not connectivity evidence.
-- ToClash remains an explicit alpha.5/alpha.6 goal. Do not add optional candidate-pool features to this run.
-- Report tested, untested and blocked items separately. A queued CI is not a passed CI.
-
-Current final stage is rc.2. Only the selected Ubuntu24.04 amd64/CPython3.12 deployment is accepted. Finish and verify the final head, then stop; never silently turn the optional queue into more scope. Build-time packages must retain exact pins/manifest/selected licenses; no font files or secrets in artifacts.
+- 保持每个阶段独立PR。当前收尾为rc.4/0.3.0发布准备，依赖已验收证书rc.3。
+- 所有最终功能在准确提交重新验证。queued/running/skip不算通过；单元、真实二进制、浏览器、systemd/安装与实际部署必须分开描述。
+- 保留用户数据，不删除/改名数据库掩盖升级问题，不回退到无鉴权旧版继续在线运行。
+- 不扩大协议、DNS-01/通配符、Docker/ARM64等矩阵；旧表单不是支持承诺。
+- 客户端配置不丢关键字段，不泄露私钥，不在失败/无节点时悄悄改成DIRECT。
+- 新证书与应用结果分开，失败保留旧材料；不以跳过TLS校验解决签发/测试错误。
+- root安装器只初始化系统，包内程序以非root用户运行；不得擅自停止原网站、修改SSH或防火墙。
+- 测试只能使用假凭据、临时目录、临时CA和明确为空的CI主机。真实systemd测试不能在生产实例运行。
+- 文件包不得含用户数据、token、私钥、测试CA或字体；第三方许可证和来源随包保留。
+- 正式发布走人工gated workflow，精确default HEAD、七组CI最新success、已验收同一套件、无覆盖tag/Release。未实际公开就写“发布准备完成/候选”，不写“已发布”。

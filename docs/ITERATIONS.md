@@ -20,3 +20,10 @@ alpha.5 fixes ToClash 0.3.8 / 95a5c71a516c10f97f47bfb771018ce890b2b570 and Mihom
 No master merges, tags, Releases, user databases or VPS deployments have been performed. CI acceptance must reference the final stage head, not earlier results.
 
 rc.2 uses Ubuntu24.04 amd64 / CPython3.12, one web worker, a dedicated unprivileged user and direct HTTPS. Candidate artifacts are uploaded only after the deployment job succeeds. It does not exercise Docker, ARM64, arbitrary historic migrations, actual user VPS networks or optional candidate-pool features. The second-version rollback test uses a synthetic candidate of this schema. No automatic Release or master merge.
+
+
+## Certificate and production-readiness extension
+
+rc.3: PR #10 / 2b24e7fe382d6529b6223d02f67fbdda72e5832a. Test72, reference9, loopback6, deployment5 and ACME2 succeeded. Real Certbot/Pebble issuance, renewal and failure checks plus the certificate browser workflow are distinct from actual user-domain issuance.
+
+rc.4: one-command systemd setup, managed-certificate selector, unified user/operations/API/security/release docs and gated manual promotion. Final status is recorded on the exact final PR/CI commit, not inferred from this ledger. No automatic master merge, public Release or user VPS deployment.
