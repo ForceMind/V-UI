@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 from app.services.core_manager import SingBoxAdapter, XrayAdapter
-from app.services.subscription_service import mihomo_config, share_link
+from app.services.mihomo_subscription import mihomo_config\nfrom app.services.subscription_service import share_link
 
 
 def inbound(**kwargs):
