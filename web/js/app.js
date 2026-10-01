@@ -1,32 +1,119 @@
-const { createApp, ref, onMounted, reactive } = Vue;
+const { createApp, ref, onMounted, reactive, computed } = Vue;
 const { ElMessage, ElMessageBox } = ElementPlus;
-const { Odometer, Connection, Setting, Lock, Refresh, ArrowDown, Document, UploadFilled } = ElementPlusIconsVue;
+const {
+    Odometer,
+    Connection,
+    Setting,
+    Lock,
+    Refresh,
+    ArrowDown,
+    Document,
+    UploadFilled,
+    Link
+} = ElementPlusIconsVue;
 
 const app = createApp({
     setup() {
         const currentView = ref('dashboard');
         const systemStatus = ref({});
+        const coreStatus = ref({});
         const inbounds = ref([]);
         const showAddInbound = ref(false);
-        const restarting = ref(false);
+        const restartingCore = ref('');
         const banIpInput = ref('');
         const showQrDialog = ref(false);
         const qrLink = ref('');
         const siteFiles = ref([]);
-        
-        // User State
         const currentUser = ref({ username: 'admin' });
+        const mihomoWarnings = ref([]);
+
+        const routingCatalog = ref({ categories: [], presets: [] });
+        const routingPreview = ref({ sections: [], dns: {}, warnings: [] });
+        const savingRouting = ref(false);
+        const routingForm = reactive({
+            mode: 'standard',
+            directDomains: '',
+            proxyDomains: '',
+            presets: {},
+            bypassCgnat: false,
+            intranet: []
+        });
+
         const userForm = reactive({
             username: '',
             password: ''
         });
 
         const newInbound = reactive({
+            core: 'xray',
             remark: '',
             protocol: 'vless',
             port: 443,
             settings: {},
-            stream_settings: {}
+            stream_settings: {},
+            profile: {
+                security: 'none',
+                transport: 'raw',
+                flow: '',
+                server_name: '',
+                certificate_path: '',
+                key_path: '',
+                path: '/',
+                host: '',
+                service_name: '',
+                xhttp_mode: 'auto',
+                reality_target: '',
+                reality_server_name: '',
+                reality_short_id: '',
+                client_fingerprint: 'chrome',
+                skip_cert_verify: false,
+                up_mbps: 100,
+                down_mbps: 100,
+                obfs_type: '',
+                obfs_password: '',
+                congestion_control: 'bbr',
+                udp_relay_mode: 'native',
+                zero_rtt_handshake: false
+            }
+        });
+
+        const protocolOptions = computed(() => {
+            if (newInbound.core === 'sing-box') {
+                return [
+                    ['VLESS', 'vless'],
+                    ['VMess', 'vmess'],
+                    ['Trojan', 'trojan'],
+                    ['Shadowsocks', 'shadowsocks'],
+                    ['Hysteria2', 'hysteria2'],
+                    ['TUIC', 'tuic']
+                ];
+            }
+            return [
+                ['VLESS', 'vless'],
+                ['VMess', 'vmess'],
+                ['Trojan', 'trojan'],
+                ['Shadowsocks', 'shadowsocks']
+            ];
+        });
+
+        const presetGroups = computed(() => {
+            return routingCatalog.value.categories.map(category => ({
+                ...category,
+                presets: routingCatalog.value.presets.filter(
+                    preset => preset.category === category.id
+                )
+            }));
+        });
+
+        const enabledPresetCount = computed(() => {
+            return Object.values(routingForm.presets)
+                .filter(Boolean)
+                .length;
+        });
+
+        const routingRuleCount = computed(() => {
+            return (routingPreview.value.sections || [])
+                .reduce((sum, section) => sum + (section.rules?.length || 0), 0);
         });
 
         const colors = [
@@ -37,15 +124,23 @@ const app = createApp({
             { color: '#6f7ad3', percentage: 20 }
         ];
 
+        const splitLines = (value) => {
+            return String(value || '')
+                .split(/\r?\n/)
+                .map(item => item.trim())
+                .filter(Boolean);
+        };
+
         const handleSelect = (key) => {
             currentView.value = key;
-            if (key === 'inbounds') {
-                fetchInbounds();
-            } else if (key === 'settings') {
-                // Pre-fill username
-                userForm.username = currentUser.value.username;
-            } else if (key === 'site') {
-                fetchSiteFiles();
+            if (key === 'inbounds') fetchInbounds();
+            if (key === 'routing') fetchRouting();
+            if (key === 'settings') userForm.username = currentUser.value.username;
+            if (key === 'site') fetchSiteFiles();
+            if (key === 'subscriptions') {
+                fetchCoreStatus();
+                fetchRoutingPreview();
+                fetchMihomoWarnings();
             }
         };
 
@@ -54,54 +149,247 @@ const app = createApp({
                 const res = await axios.get('/api/system/status');
                 systemStatus.value = res.data;
             } catch (error) {
-                console.error("Failed to fetch status", error);
+                console.error('Failed to fetch status', error);
+            }
+        };
+
+        const fetchCoreStatus = async () => {
+            try {
+                const res = await axios.get('/api/cores/status');
+                coreStatus.value = res.data;
+            } catch (error) {
+                console.error('Failed to fetch core status', error);
             }
         };
 
         const fetchInbounds = async () => {
             try {
-                const res = await axios.get('/api/xray/inbounds');
+                const res = await axios.get('/api/inbounds');
                 inbounds.value = res.data;
             } catch (error) {
                 ElMessage.error('Failed to load inbounds');
             }
         };
 
+        const fetchMihomoWarnings = async () => {
+            try {
+                const res = await axios.get('/api/subscription/mihomo-warnings');
+                mihomoWarnings.value = res.data;
+            } catch (error) {
+                console.error('Failed to load Mihomo compatibility warnings', error);
+            }
+        };
+
+        const fetchRoutingPreview = async () => {
+            try {
+                const res = await axios.get('/api/routing/mihomo/preview');
+                routingPreview.value = res.data;
+            } catch (error) {
+                console.error('Failed to preview routing', error);
+            }
+        };
+
+        const fetchRouting = async () => {
+            try {
+                const [catalogRes, settingsRes] = await Promise.all([
+                    axios.get('/api/routing/mihomo/catalog'),
+                    axios.get('/api/routing/mihomo')
+                ]);
+                routingCatalog.value = catalogRes.data;
+                const settings = settingsRes.data;
+                routingForm.mode = settings.mode || 'standard';
+                routingForm.directDomains = (settings.direct_domains || []).join('\n');
+                routingForm.proxyDomains = (settings.proxy_domains || []).join('\n');
+                routingForm.presets = { ...(settings.presets || {}) };
+                routingForm.bypassCgnat = Boolean(settings.bypass_cgnat);
+                routingForm.intranet = (settings.intranet || []).map(zone => ({
+                    suffix: zone.suffix,
+                    nameserversText: (zone.nameservers || []).join(', ')
+                }));
+                await fetchRoutingPreview();
+            } catch (error) {
+                ElMessage.error('Failed to load Mihomo routing settings');
+            }
+        };
+
+        const saveRouting = async () => {
+            savingRouting.value = true;
+            try {
+                const payload = {
+                    mode: routingForm.mode,
+                    direct_domains: splitLines(routingForm.directDomains),
+                    proxy_domains: splitLines(routingForm.proxyDomains),
+                    presets: { ...routingForm.presets },
+                    bypass_cgnat: routingForm.bypassCgnat,
+                    intranet: routingForm.intranet
+                        .filter(zone => zone.suffix?.trim())
+                        .map(zone => ({
+                            suffix: zone.suffix.trim(),
+                            nameservers: String(zone.nameserversText || '')
+                                .split(/[\s,]+/)
+                                .map(item => item.trim())
+                                .filter(Boolean)
+                        }))
+                };
+                const res = await axios.put('/api/routing/mihomo', payload);
+                const settings = res.data;
+                routingForm.directDomains = (settings.direct_domains || []).join('\n');
+                routingForm.proxyDomains = (settings.proxy_domains || []).join('\n');
+                routingForm.presets = { ...(settings.presets || {}) };
+                routingForm.intranet = (settings.intranet || []).map(zone => ({
+                    suffix: zone.suffix,
+                    nameserversText: (zone.nameservers || []).join(', ')
+                }));
+                await fetchRoutingPreview();
+                ElMessage.success('Mihomo 分流设置已保存，订阅立即生效');
+            } catch (error) {
+                ElMessage.error(
+                    error.response?.data?.detail ||
+                    'Failed to save Mihomo routing settings'
+                );
+            } finally {
+                savingRouting.value = false;
+            }
+        };
+
+        const resetRoutingDefaults = () => {
+            routingForm.mode = 'standard';
+            routingForm.directDomains = '';
+            routingForm.proxyDomains = '';
+            routingForm.bypassCgnat = false;
+            routingForm.intranet = [];
+            routingForm.presets = Object.fromEntries(
+                routingCatalog.value.presets.map(preset => [
+                    preset.id,
+                    Boolean(preset.default_enabled)
+                ])
+            );
+        };
+
+        const setCategoryEnabled = (categoryId, enabled) => {
+            routingCatalog.value.presets
+                .filter(preset => preset.category === categoryId)
+                .forEach(preset => {
+                    routingForm.presets[preset.id] = enabled;
+                });
+        };
+
+        const addIntranetZone = () => {
+            routingForm.intranet.push({
+                suffix: '',
+                nameserversText: ''
+            });
+        };
+
+        const removeIntranetZone = (index) => {
+            routingForm.intranet.splice(index, 1);
+        };
+
+        const openAddInbound = () => {
+            showAddInbound.value = true;
+        };
+
+        const resetInboundProfile = () => {
+            const p = newInbound.profile;
+            p.security = (
+                ['trojan', 'hysteria2', 'tuic'].includes(newInbound.protocol)
+                ? 'tls'
+                : 'none'
+            );
+            p.transport = (
+                newInbound.core === 'xray'
+                ? 'raw'
+                : (
+                    ['hysteria2', 'tuic'].includes(newInbound.protocol)
+                    ? 'quic'
+                    : 'direct'
+                )
+            );
+            p.flow = '';
+            p.server_name = '';
+            p.certificate_path = '';
+            p.key_path = '';
+            p.path = '/';
+            p.host = '';
+            p.service_name = '';
+            p.xhttp_mode = 'auto';
+            p.reality_target = '';
+            p.reality_server_name = '';
+            p.reality_short_id = '';
+            p.client_fingerprint = 'chrome';
+            p.skip_cert_verify = false;
+            p.up_mbps = 100;
+            p.down_mbps = 100;
+            p.obfs_type = '';
+            p.obfs_password = '';
+            p.congestion_control = 'bbr';
+            p.udp_relay_mode = 'native';
+            p.zero_rtt_handshake = false;
+        };
+
+        const onCoreChanged = () => {
+            newInbound.protocol = 'vless';
+            newInbound.settings = {};
+            newInbound.stream_settings = {};
+            resetInboundProfile();
+        };
+
+        const onProtocolChanged = () => {
+            newInbound.settings = {};
+            newInbound.stream_settings = {};
+            resetInboundProfile();
+        };
+
         const addInbound = async () => {
             try {
-                // Backend handles UUID generation if not provided
                 const payload = {
+                    core: newInbound.core,
                     remark: newInbound.remark,
                     protocol: newInbound.protocol,
                     port: newInbound.port,
-                    settings: JSON.stringify(newInbound.settings),
-                    stream_settings: JSON.stringify(newInbound.stream_settings),
+                    settings: newInbound.settings,
+                    stream_settings: newInbound.stream_settings,
+                    profile: { ...newInbound.profile },
                     enable: true
                 };
-                await axios.post('/api/xray/inbounds', payload);
-                ElMessage.success('Inbound added successfully');
+                const res = await axios.post('/api/inbounds', payload);
+                if (res.data.core && res.data.core.valid === false) {
+                    ElMessage.warning(
+                        'Node saved, but the core is not ready: ' +
+                        (res.data.core.validation_output || 'validation failed')
+                    );
+                } else {
+                    ElMessage.success('Inbound added successfully');
+                }
                 showAddInbound.value = false;
-                fetchInbounds();
-                // Reset form
+                await Promise.all([fetchInbounds(), fetchCoreStatus()]);
                 newInbound.remark = '';
                 newInbound.port = 443;
+                newInbound.settings = {};
+                newInbound.stream_settings = {};
+                resetInboundProfile();
             } catch (error) {
-                console.error(error);
-                ElMessage.error('Failed to add inbound: ' + (error.response?.data?.detail || error.message));
+                ElMessage.error(
+                    'Failed to add inbound: ' +
+                    (error.response?.data?.detail || error.message)
+                );
             }
         };
 
         const deleteInbound = async (row) => {
             try {
-                await ElMessageBox.confirm('Are you sure to delete this inbound?', 'Warning', {
-                    confirmButtonText: 'OK',
-                    cancelButtonText: 'Cancel',
-                    type: 'warning',
-                });
-                
-                await axios.delete(`/api/xray/inbounds/${row.id}`);
+                await ElMessageBox.confirm(
+                    `Delete ${row.remark || row.protocol}:${row.port}?`,
+                    'Warning',
+                    {
+                        confirmButtonText: 'OK',
+                        cancelButtonText: 'Cancel',
+                        type: 'warning'
+                    }
+                );
+                await axios.delete(`/api/inbounds/${row.id}`);
                 ElMessage.success('Deleted successfully');
-                fetchInbounds();
+                await Promise.all([fetchInbounds(), fetchCoreStatus()]);
             } catch (error) {
                 if (error !== 'cancel') {
                     ElMessage.error('Failed to delete inbound');
@@ -109,78 +397,103 @@ const app = createApp({
             }
         };
 
+        const restartCore = async (core) => {
+            restartingCore.value = core;
+            try {
+                const res = await axios.post(
+                    `/api/cores/${encodeURIComponent(core)}/restart`
+                );
+                if (res.data.valid === false) {
+                    ElMessage.error(
+                        res.data.validation_output ||
+                        `${core} config validation failed`
+                    );
+                } else {
+                    ElMessage.success(`${core} restarted`);
+                }
+                await fetchCoreStatus();
+            } catch (error) {
+                ElMessage.error(
+                    error.response?.data?.detail ||
+                    `Failed to restart ${core}`
+                );
+            } finally {
+                restartingCore.value = '';
+            }
+        };
+
         const updateProfile = async () => {
             try {
                 const payload = {
                     username: userForm.username,
-                    password: userForm.password || undefined // Only send if not empty
+                    password: userForm.password || undefined
                 };
                 await axios.post('/api/auth/update_profile', payload);
                 ElMessage.success('Profile updated successfully. Please login again.');
                 currentUser.value.username = userForm.username;
-                userForm.password = ''; // Clear password field
+                userForm.password = '';
             } catch (error) {
                 ElMessage.error('Failed to update profile');
             }
         };
 
-        const restartXray = async () => {
-            restarting.value = true;
-            try {
-                await axios.post('/api/xray/restart');
-                ElMessage.success('Restart command sent');
-            } catch (error) {
-                ElMessage.error('Failed to restart');
-            } finally {
-                setTimeout(() => { restarting.value = false; }, 2000);
-            }
-        };
-
         const banIp = async () => {
-            if(!banIpInput.value) return;
+            if (!banIpInput.value) return;
             try {
-                await axios.post(`/api/security/ban_ip?ip=${banIpInput.value}`);
+                await axios.post(
+                    `/api/security/ban_ip?ip=${encodeURIComponent(banIpInput.value)}`
+                );
                 ElMessage.success(`IP ${banIpInput.value} banned`);
                 banIpInput.value = '';
             } catch (error) {
                 ElMessage.error('Failed to ban IP');
             }
-        }
-
-        const showQrCode = (row) => {
-            // Construct a simple link for demonstration. 
-            // In a real app, you'd parse the settings to build a vmess:// or vless:// link
-            // For now, we'll just show a placeholder or a simple JSON representation
-            let link = '';
-            if (row.protocol === 'vless' || row.protocol === 'vmess') {
-                // Simplified link generation logic
-                // uuid@ip:port?security=none&type=tcp&headerType=none#remark
-                const uuid = JSON.parse(row.settings).clients?.[0]?.id || 'uuid-not-found';
-                const ip = location.hostname;
-                link = `${row.protocol}://${uuid}@${ip}:${row.port}?security=none&type=tcp#${encodeURIComponent(row.remark)}`;
-            } else {
-                link = `Protocol: ${row.protocol}, Port: ${row.port}`;
-            }
-            
-            qrLink.value = link;
-            showQrDialog.value = true;
-            
-            // Wait for DOM update then generate QR
-            setTimeout(() => {
-                const container = document.getElementById('qrcode');
-                container.innerHTML = '';
-                new QRCode(container, {
-                    text: link,
-                    width: 200,
-                    height: 200
-                });
-            }, 100);
         };
 
-        const copyLink = () => {
-            navigator.clipboard.writeText(qrLink.value).then(() => {
-                ElMessage.success('Link copied to clipboard');
-            });
+        const showQrCode = async (row) => {
+            try {
+                const res = await axios.get(
+                    `/api/subscription/link/${row.id}`,
+                    { responseType: 'text' }
+                );
+                const link = res.data;
+                if (!link) {
+                    ElMessage.warning('This node does not have enough share-link data yet');
+                    return;
+                }
+                qrLink.value = link;
+                showQrDialog.value = true;
+                setTimeout(() => {
+                    const container = document.getElementById('qrcode');
+                    container.innerHTML = '';
+                    new QRCode(container, {
+                        text: link,
+                        width: 200,
+                        height: 200
+                    });
+                }, 100);
+            } catch (error) {
+                ElMessage.error('Failed to generate share link');
+            }
+        };
+
+        const copyLink = async () => {
+            await navigator.clipboard.writeText(qrLink.value);
+            ElMessage.success('Link copied');
+        };
+
+        const subscriptionUrl = (format) => {
+            const paths = {
+                raw: '/api/subscription/raw',
+                mihomo: '/api/subscription/mihomo.yaml',
+                singbox: '/api/subscription/sing-box.json'
+            };
+            return `${location.origin}${paths[format]}`;
+        };
+
+        const copySubscription = async (format) => {
+            await navigator.clipboard.writeText(subscriptionUrl(format));
+            ElMessage.success('Subscription URL copied');
         };
 
         const fetchSiteFiles = async () => {
@@ -192,42 +505,71 @@ const app = createApp({
             }
         };
 
-        const handleUploadSuccess = (response, file, fileList) => {
+        const handleUploadSuccess = () => {
             ElMessage.success('Site deployed successfully');
             fetchSiteFiles();
         };
 
-        const handleUploadError = (err, file, fileList) => {
+        const handleUploadError = () => {
             ElMessage.error('Upload failed');
         };
 
-        // Poll system status
-        onMounted(() => {
-            fetchSystemStatus();
+        onMounted(async () => {
+            await Promise.all([
+                fetchSystemStatus(),
+                fetchCoreStatus(),
+                fetchInbounds(),
+                fetchRouting(),
+                fetchMihomoWarnings()
+            ]);
             setInterval(fetchSystemStatus, 3000);
+            setInterval(fetchCoreStatus, 10000);
         });
 
         return {
             currentView,
             systemStatus,
+            coreStatus,
             inbounds,
             showAddInbound,
             newInbound,
+            protocolOptions,
             colors,
-            restarting,
+            restartingCore,
             banIpInput,
             currentUser,
             userForm,
+            mihomoWarnings,
             showQrDialog,
             qrLink,
+            routingCatalog,
+            routingPreview,
+            routingForm,
+            presetGroups,
+            enabledPresetCount,
+            routingRuleCount,
+            savingRouting,
             handleSelect,
+            fetchInbounds,
+            fetchRouting,
+            saveRouting,
+            resetRoutingDefaults,
+            setCategoryEnabled,
+            addIntranetZone,
+            removeIntranetZone,
+            openAddInbound,
+            onCoreChanged,
+            onProtocolChanged,
+            resetInboundProfile,
             addInbound,
             deleteInbound,
             updateProfile,
-            restartXray,
+            restartCore,
             banIp,
             showQrCode,
             copyLink,
+            subscriptionUrl,
+            copySubscription,
             siteFiles,
             fetchSiteFiles,
             handleUploadSuccess,
@@ -236,7 +578,6 @@ const app = createApp({
     }
 });
 
-// Register Icons
 app.component('Odometer', Odometer);
 app.component('Connection', Connection);
 app.component('Setting', Setting);
@@ -245,6 +586,7 @@ app.component('Refresh', Refresh);
 app.component('ArrowDown', ArrowDown);
 app.component('Document', Document);
 app.component('UploadFilled', UploadFilled);
+app.component('Link', Link);
 
 app.use(ElementPlus);
 app.mount('#app');

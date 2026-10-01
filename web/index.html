@@ -1,280 +1,780 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>V-UI Panel</title>
-    <!-- Element Plus CSS -->
     <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
-    <!-- Custom CSS -->
     <link rel="stylesheet" href="css/style.css">
-    <!-- Vue 3 -->
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <!-- Element Plus -->
     <script src="https://unpkg.com/element-plus"></script>
-    <!-- Icons -->
     <script src="https://unpkg.com/@element-plus/icons-vue"></script>
-    <!-- Axios -->
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
 </head>
 <body>
-    <div id="app">
-        <el-container class="layout-container" style="height: 100vh">
-            <!-- Sidebar -->
-            <el-aside width="220px" class="aside-menu">
-                <div class="logo">
-                    <h2>V-UI</h2>
+<div id="app">
+    <el-container class="layout-container">
+        <el-aside width="220px" class="aside-menu">
+            <div class="logo"><h2>V-UI</h2></div>
+            <el-menu
+                active-text-color="#409EFF"
+                background-color="#304156"
+                text-color="#bfcbd9"
+                :default-active="currentView"
+                @select="handleSelect"
+                class="el-menu-vertical">
+                <el-menu-item index="dashboard">
+                    <el-icon><Odometer /></el-icon>
+                    <span>系统状态</span>
+                </el-menu-item>
+                <el-menu-item index="inbounds">
+                    <el-icon><Connection /></el-icon>
+                    <span>入站节点</span>
+                </el-menu-item>
+                <el-menu-item index="routing">
+                    <el-icon><Setting /></el-icon>
+                    <span>Mihomo 分流</span>
+                </el-menu-item>
+                <el-menu-item index="subscriptions">
+                    <el-icon><Link /></el-icon>
+                    <span>订阅输出</span>
+                </el-menu-item>
+                <el-menu-item index="site">
+                    <el-icon><Document /></el-icon>
+                    <span>站点部署</span>
+                </el-menu-item>
+                <el-menu-item index="settings">
+                    <el-icon><Setting /></el-icon>
+                    <span>面板设置</span>
+                </el-menu-item>
+                <el-menu-item index="security">
+                    <el-icon><Lock /></el-icon>
+                    <span>安全中心</span>
+                </el-menu-item>
+            </el-menu>
+        </el-aside>
+
+        <el-container>
+            <el-header class="header">
+                <div class="header-left">
+                    <el-tag type="success" v-if="systemStatus.os">
+                        Running on {{ systemStatus.os }}
+                    </el-tag>
+                    <el-tag
+                        style="margin-left: 8px"
+                        :type="coreStatus.xray?.running ? 'success' : 'info'">
+                        Xray {{ coreStatus.xray?.running ? 'Running' : 'Stopped' }}
+                    </el-tag>
+                    <el-tag
+                        style="margin-left: 8px"
+                        :type="coreStatus['sing-box']?.running ? 'success' : 'info'">
+                        sing-box {{ coreStatus['sing-box']?.running ? 'Running' : 'Stopped' }}
+                    </el-tag>
                 </div>
-                <el-menu
-                    active-text-color="#409EFF"
-                    background-color="#304156"
-                    text-color="#bfcbd9"
-                    :default-active="currentView"
-                    @select="handleSelect"
-                    class="el-menu-vertical">
-                    
-                    <el-menu-item index="dashboard">
-                        <el-icon><Odometer /></el-icon>
-                        <span>系统状态 (Dashboard)</span>
-                    </el-menu-item>
-                    
-                    <el-menu-item index="inbounds">
-                        <el-icon><Connection /></el-icon>
-                        <span>入站列表 (Inbounds)</span>
-                    </el-menu-item>
-                    
-                    <el-menu-item index="site">
-                        <el-icon><Document /></el-icon>
-                        <span>站点部署 (Site)</span>
-                    </el-menu-item>
+                <div class="header-right">
+                    <el-button
+                        size="small"
+                        @click="restartCore('xray')"
+                        :loading="restartingCore === 'xray'">
+                        <el-icon><Refresh /></el-icon> Xray
+                    </el-button>
+                    <el-button
+                        size="small"
+                        @click="restartCore('sing-box')"
+                        :loading="restartingCore === 'sing-box'">
+                        <el-icon><Refresh /></el-icon> sing-box
+                    </el-button>
+                    <el-dropdown style="margin-left: 16px">
+                        <span class="el-dropdown-link">
+                            {{ currentUser.username }}
+                            <el-icon class="el-icon--right"><arrow-down /></el-icon>
+                        </span>
+                    </el-dropdown>
+                </div>
+            </el-header>
 
-                    <el-menu-item index="settings">
-                        <el-icon><Setting /></el-icon>
-                        <span>面板设置 (Settings)</span>
-                    </el-menu-item>
+            <el-main>
+                <div v-if="currentView === 'dashboard'" class="dashboard-view">
+                    <el-row :gutter="20">
+                        <el-col :span="6">
+                            <el-card shadow="hover">
+                                <template #header>CPU</template>
+                                <el-progress
+                                    type="dashboard"
+                                    :percentage="systemStatus.cpu?.percent || 0"
+                                    :color="colors">
+                                </el-progress>
+                                <div class="stat-text">
+                                    {{ systemStatus.cpu?.cores }} Cores
+                                </div>
+                            </el-card>
+                        </el-col>
+                        <el-col :span="6">
+                            <el-card shadow="hover">
+                                <template #header>Memory</template>
+                                <el-progress
+                                    type="dashboard"
+                                    :percentage="systemStatus.memory?.percent || 0"
+                                    :color="colors">
+                                </el-progress>
+                                <div class="stat-text">
+                                    {{ systemStatus.memory?.used }} / {{ systemStatus.memory?.total }}
+                                </div>
+                            </el-card>
+                        </el-col>
+                        <el-col :span="6">
+                            <el-card shadow="hover">
+                                <template #header>Xray Core</template>
+                                <el-tag :type="coreStatus.xray?.binary_exists ? 'success' : 'danger'">
+                                    {{ coreStatus.xray?.binary_exists ? 'Installed' : 'Missing' }}
+                                </el-tag>
+                                <p>{{ coreStatus.xray?.running ? 'Running' : 'Stopped' }}</p>
+                            </el-card>
+                        </el-col>
+                        <el-col :span="6">
+                            <el-card shadow="hover">
+                                <template #header>sing-box Core</template>
+                                <el-tag :type="coreStatus['sing-box']?.binary_exists ? 'success' : 'danger'">
+                                    {{ coreStatus['sing-box']?.binary_exists ? 'Installed' : 'Missing' }}
+                                </el-tag>
+                                <p>{{ coreStatus['sing-box']?.running ? 'Running' : 'Stopped' }}</p>
+                            </el-card>
+                        </el-col>
+                    </el-row>
+                </div>
 
-                    <el-menu-item index="security">
-                        <el-icon><Lock /></el-icon>
-                        <span>安全中心 (Security)</span>
-                    </el-menu-item>
-                </el-menu>
-            </el-aside>
-
-            <el-container>
-                <!-- Header -->
-                <el-header class="header">
-                    <div class="header-left">
-                        <el-tag type="success" v-if="systemStatus.os">Running on {{ systemStatus.os }}</el-tag>
-                    </div>
-                    <div class="header-right">
-                        <el-button type="danger" size="small" @click="restartXray" :loading="restarting">
-                            <el-icon><Refresh /></el-icon> 重启核心
-                        </el-button>
-                        <el-dropdown>
-                            <span class="el-dropdown-link">
-                                {{ currentUser.username }} <el-icon class="el-icon--right"><arrow-down /></el-icon>
-                            </span>
-                            <template #dropdown>
-                                <el-dropdown-menu>
-                                    <el-dropdown-item @click="currentView = 'settings'">Settings</el-dropdown-item>
-                                    <el-dropdown-item>Logout</el-dropdown-item>
-                                </el-dropdown-menu>
-                            </template>
-                        </el-dropdown>
-                    </div>
-                </el-header>
-
-                <!-- Main Content -->
-                <el-main>
-                    <!-- Dashboard View -->
-                    <div v-if="currentView === 'dashboard'" class="dashboard-view">
-                        <el-row :gutter="20">
-                            <el-col :span="6">
-                                <el-card shadow="hover">
-                                    <template #header>CPU</template>
-                                    <el-progress type="dashboard" :percentage="systemStatus.cpu?.percent || 0" :color="colors"></el-progress>
-                                    <div class="stat-text">{{ systemStatus.cpu?.cores }} Cores</div>
-                                </el-card>
-                            </el-col>
-                            <el-col :span="6">
-                                <el-card shadow="hover">
-                                    <template #header>Memory</template>
-                                    <el-progress type="dashboard" :percentage="systemStatus.memory?.percent || 0" :color="colors"></el-progress>
-                                    <div class="stat-text">{{ systemStatus.memory?.used }} / {{ systemStatus.memory?.total }}</div>
-                                </el-card>
-                            </el-col>
-                            <el-col :span="6">
-                                <el-card shadow="hover">
-                                    <template #header>Disk</template>
-                                    <div v-for="disk in systemStatus.disk" :key="disk.mountpoint" class="disk-item">
-                                        <span>{{ disk.mountpoint }}</span>
-                                        <el-progress :percentage="disk.percent"></el-progress>
-                                    </div>
-                                </el-card>
-                            </el-col>
-                            <el-col :span="6">
-                                <el-card shadow="hover">
-                                    <template #header>Network</template>
-                                    <div class="net-stat">
-                                        <p>Upload: {{ systemStatus.network?.sent }}</p>
-                                        <p>Download: {{ systemStatus.network?.recv }}</p>
-                                    </div>
-                                </el-card>
-                            </el-col>
-                        </el-row>
-                    </div>
-
-                    <!-- Inbounds View -->
-                    <div v-if="currentView === 'inbounds'">
-                        <div class="view-header">
-                            <h3>入站列表</h3>
-                            <el-button type="primary" @click="openAddInbound">添加节点 (Add Inbound)</el-button>
+                <div v-if="currentView === 'inbounds'">
+                    <div class="view-header">
+                        <div>
+                            <h3>入站节点</h3>
+                            <div class="stat-text">
+                                Xray 与 sing-box 节点统一管理。
+                            </div>
                         </div>
-                        <el-table :data="inbounds" style="width: 100%" border>
-                            <el-table-column prop="id" label="ID" width="80"></el-table-column>
-                            <el-table-column prop="remark" label="备注 (Remark)"></el-table-column>
-                            <el-table-column prop="protocol" label="协议 (Protocol)" width="100">
+                        <el-button type="primary" @click="openAddInbound">
+                            添加节点
+                        </el-button>
+                    </div>
+                    <el-table :data="inbounds" style="width: 100%" border>
+                        <el-table-column prop="id" label="ID" width="70"></el-table-column>
+                        <el-table-column prop="remark" label="备注"></el-table-column>
+                        <el-table-column prop="core" label="核心" width="110">
+                            <template #default="scope">
+                                <el-tag :type="scope.row.core === 'xray' ? 'primary' : 'success'">
+                                    {{ scope.row.core }}
+                                </el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="protocol" label="协议" width="120"></el-table-column>
+                        <el-table-column prop="port" label="端口" width="100"></el-table-column>
+                        <el-table-column label="操作" width="220">
+                            <template #default="scope">
+                                <el-button size="small" @click="showQrCode(scope.row)">
+                                    分享
+                                </el-button>
+                                <el-button size="small" type="danger" @click="deleteInbound(scope.row)">
+                                    删除
+                                </el-button>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </div>
+
+                <div v-if="currentView === 'routing'" class="routing-view">
+                    <div class="view-header">
+                        <div>
+                            <h3>Mihomo 分流</h3>
+                            <div class="stat-text">
+                                基于 ToClash 的规则优先级、DNS policy 与服务预设。
+                            </div>
+                        </div>
+                        <div>
+                            <el-button @click="resetRoutingDefaults">恢复默认</el-button>
+                            <el-button
+                                type="primary"
+                                :loading="savingRouting"
+                                @click="saveRouting">
+                                保存并应用到订阅
+                            </el-button>
+                        </div>
+                    </div>
+
+                    <el-alert
+                        title="这里保存的是 Mihomo / Clash Meta 客户端分流，不会改变服务器上的 Xray / sing-box 入站。"
+                        type="info"
+                        :closable="false"
+                        style="margin-bottom: 18px">
+                    </el-alert>
+
+                    <el-card class="routing-section">
+                        <template #header>
+                            <div class="card-header-row">
+                                <strong>网络模式</strong>
+                                <el-tag>{{ routingForm.mode === 'standard' ? '常规分流' : '默认直连' }}</el-tag>
+                            </div>
+                        </template>
+
+                        <el-radio-group v-model="routingForm.mode">
+                            <el-radio-button label="standard">
+                                常规：国内直连，其余走 PROXY
+                            </el-radio-button>
+                            <el-radio-button label="direct">
+                                默认直连：只代理指定服务
+                            </el-radio-button>
+                        </el-radio-group>
+
+                        <div class="routing-help">
+                            <p v-if="routingForm.mode === 'standard'">
+                                使用 PROXY / AUTO / FORCE_PROXY 三组；中国大陆 GeoSite / GeoIP 直连，其他流量最终进入 PROXY。
+                            </p>
+                            <p v-else>
+                                只生成 FORCE_PROXY；未被选中的流量最终 DIRECT，适合服务器/本地网络本身可直接访问国际互联网的情况。
+                            </p>
+                        </div>
+
+                        <el-checkbox v-model="routingForm.bypassCgnat">
+                            将 100.64.0.0/10（CGNAT）视为本地直连
+                        </el-checkbox>
+                    </el-card>
+
+                    <el-card class="routing-section">
+                        <template #header>
+                            <strong>自定义网站分流</strong>
+                        </template>
+                        <div class="routing-two-column">
+                            <div>
+                                <div class="field-title">始终直连</div>
+                                <el-input
+                                    v-model="routingForm.directDomains"
+                                    type="textarea"
+                                    :rows="7"
+                                    placeholder="每行一个域名或 IP，例如&#10;example.com&#10;192.0.2.10">
+                                </el-input>
+                            </div>
+                            <div>
+                                <div class="field-title">始终代理</div>
+                                <el-input
+                                    v-model="routingForm.proxyDomains"
+                                    type="textarea"
+                                    :rows="7"
+                                    placeholder="每行一个域名或 IP，例如&#10;example.net&#10;2001:db8::1">
+                                </el-input>
+                            </div>
+                        </div>
+                    </el-card>
+
+                    <el-card class="routing-section">
+                        <template #header>
+                            <div class="card-header-row">
+                                <div>
+                                    <strong>服务规则预设</strong>
+                                    <span class="section-note">
+                                        已开启 {{ enabledPresetCount }} / {{ routingCatalog.presets.length }}
+                                    </span>
+                                </div>
+                            </div>
+                        </template>
+
+                        <div class="preset-groups">
+                            <div
+                                class="preset-group"
+                                v-for="group in presetGroups"
+                                :key="group.id">
+                                <div class="preset-group-header">
+                                    <strong>{{ group.name_zh }}</strong>
+                                    <div>
+                                        <el-button
+                                            text
+                                            size="small"
+                                            @click="setCategoryEnabled(group.id, true)">
+                                            全开
+                                        </el-button>
+                                        <el-button
+                                            text
+                                            size="small"
+                                            @click="setCategoryEnabled(group.id, false)">
+                                            全关
+                                        </el-button>
+                                    </div>
+                                </div>
+                                <div class="preset-items">
+                                    <div
+                                        class="preset-item"
+                                        v-for="preset in group.presets"
+                                        :key="preset.id">
+                                        <span>{{ preset.name_zh }}</span>
+                                        <el-switch v-model="routingForm.presets[preset.id]"></el-switch>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <el-alert
+                            title="默认保持 ToClash 的四项：OpenAI、Claude、GitHub、Google / YouTube。其他服务按需开启。"
+                            type="success"
+                            :closable="false"
+                            style="margin-top: 16px">
+                        </el-alert>
+                    </el-card>
+
+                    <el-card class="routing-section">
+                        <template #header>
+                            <div class="card-header-row">
+                                <div>
+                                    <strong>企业 / 家庭内网 DNS</strong>
+                                    <span class="section-note">可选</span>
+                                </div>
+                                <el-button size="small" @click="addIntranetZone">
+                                    添加区域
+                                </el-button>
+                            </div>
+                        </template>
+
+                        <el-empty
+                            v-if="routingForm.intranet.length === 0"
+                            description="没有配置内网 DNS">
+                        </el-empty>
+
+                        <el-table
+                            v-else
+                            :data="routingForm.intranet"
+                            border
+                            style="width: 100%">
+                            <el-table-column label="域名后缀" min-width="220">
                                 <template #default="scope">
-                                    <el-tag>{{ scope.row.protocol }}</el-tag>
+                                    <el-input
+                                        v-model="scope.row.suffix"
+                                        placeholder="corp.example">
+                                    </el-input>
                                 </template>
                             </el-table-column>
-                            <el-table-column prop="port" label="端口 (Port)" width="100"></el-table-column>
-                            <el-table-column label="流量 (Traffic)">
+                            <el-table-column label="DNS 服务器" min-width="320">
                                 <template #default="scope">
-                                    Up: {{ scope.row.up || 0 }} / Down: {{ scope.row.down || 0 }}
+                                    <el-input
+                                        v-model="scope.row.nameserversText"
+                                        placeholder="192.0.2.53 或多个地址用逗号分隔">
+                                    </el-input>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="操作 (Actions)" width="250">
+                            <el-table-column label="操作" width="90">
                                 <template #default="scope">
-                                    <el-button size="small" @click="showQrCode(scope.row)">二维码</el-button>
-                                    <el-button size="small" type="danger" @click="deleteInbound(scope.row)">删除</el-button>
+                                    <el-button
+                                        text
+                                        type="danger"
+                                        @click="removeIntranetZone(scope.$index)">
+                                        删除
+                                    </el-button>
                                 </template>
                             </el-table-column>
                         </el-table>
-                    </div>
+                    </el-card>
 
-                    <!-- Site View -->
-                    <div v-if="currentView === 'site'">
-                        <h3>站点部署 (Static Site)</h3>
-                        <el-card>
-                            <template #header>
-                                <span>Upload Website (Zip)</span>
-                            </template>
-                            <el-upload
-                                class="upload-demo"
-                                drag
-                                action="/api/files/upload_site"
-                                :on-success="handleUploadSuccess"
-                                :on-error="handleUploadError"
-                                accept=".zip"
-                            >
-                                <el-icon class="el-icon--upload"><upload-filled /></el-icon>
-                                <div class="el-upload__text">
-                                    Drop file here or <em>click to upload</em>
+                    <el-card class="routing-section">
+                        <template #header>
+                            <div class="card-header-row">
+                                <div>
+                                    <strong>当前规则预览</strong>
+                                    <span class="section-note">
+                                        {{ routingRuleCount }} 条规则
+                                    </span>
                                 </div>
-                                <template #tip>
-                                    <div class="el-upload__tip">
-                                        Only zip files are allowed. The content will be deployed to the root path /.
-                                    </div>
-                                </template>
-                            </el-upload>
-                            <div style="margin-top: 20px;">
-                                <h4>Current Files:</h4>
-                                <ul>
-                                    <li v-for="file in siteFiles" :key="file">{{ file }}</li>
-                                </ul>
-                                <el-button @click="fetchSiteFiles">Refresh List</el-button>
+                                <el-tag
+                                    v-if="routingPreview.warnings?.length"
+                                    type="warning">
+                                    {{ routingPreview.warnings.length }} 类覆盖提示
+                                </el-tag>
                             </div>
-                        </el-card>
-                    </div>
+                        </template>
 
-                    <!-- Settings View -->
-                    <div v-if="currentView === 'settings'">
-                        <h3>面板设置</h3>
-                        <el-card class="box-card" style="max-width: 500px">
-                            <template #header>
-                                <div class="card-header">
-                                    <span>修改账号密码</span>
-                                </div>
+                        <el-alert
+                            v-for="warning in routingPreview.warnings"
+                            :key="warning.code"
+                            :title="warning.code + ' × ' + warning.count"
+                            type="warning"
+                            :closable="false"
+                            style="margin-bottom: 8px">
+                        </el-alert>
+
+                        <div
+                            class="rule-section"
+                            v-for="section in routingPreview.sections"
+                            :key="section.id">
+                            <div class="rule-section-title">
+                                {{ section.comment }}
+                            </div>
+                            <pre>{{ section.rules.join('\n') }}</pre>
+                        </div>
+                    </el-card>
+                </div>
+
+                <div v-if="currentView === 'subscriptions'">
+                    <h3>订阅输出</h3>
+                    <el-alert
+                        title="Mihomo / Clash Meta YAML 会自动使用 Mihomo 分流页保存的 ToClash 规则；Base64 与 sing-box JSON 仅输出节点连接信息。"
+                        type="info"
+                        :closable="false"
+                        style="margin-bottom: 20px">
+                    </el-alert>
+                    <el-alert
+                        v-for="warning in mihomoWarnings"
+                        :key="warning.inbound_id + '-' + warning.code"
+                        :title="(warning.remark || ('Node #' + warning.inbound_id)) + '：' + warning.message"
+                        type="warning"
+                        :closable="false"
+                        style="margin-bottom: 10px">
+                    </el-alert>
+                    <el-card>
+                        <el-table :data="[
+                            { name: '通用 Base64', format: 'raw', url: subscriptionUrl('raw') },
+                            { name: 'Mihomo / Clash Meta', format: 'mihomo', url: subscriptionUrl('mihomo') },
+                            { name: 'sing-box JSON', format: 'singbox', url: subscriptionUrl('singbox') }
+                        ]">
+                            <el-table-column prop="name" label="格式" width="220"></el-table-column>
+                            <el-table-column prop="url" label="订阅地址"></el-table-column>
+                            <el-table-column label="操作" width="120">
+                                <template #default="scope">
+                                    <el-button size="small" @click="copySubscription(scope.row.format)">
+                                        复制
+                                    </el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                    </el-card>
+                </div>
+
+                <div v-if="currentView === 'site'">
+                    <h3>站点部署</h3>
+                    <el-card>
+                        <el-upload
+                            drag
+                            action="/api/files/upload_site"
+                            :on-success="handleUploadSuccess"
+                            :on-error="handleUploadError"
+                            accept=".zip">
+                            <el-icon class="el-icon--upload"><upload-filled /></el-icon>
+                            <div class="el-upload__text">
+                                Drop file here or <em>click to upload</em>
+                            </div>
+                        </el-upload>
+                        <div style="margin-top: 20px">
+                            <h4>Current Files</h4>
+                            <ul>
+                                <li v-for="file in siteFiles" :key="file">
+                                    {{ file }}
+                                </li>
+                            </ul>
+                        </div>
+                    </el-card>
+                </div>
+
+                <div v-if="currentView === 'settings'">
+                    <h3>面板设置</h3>
+                    <el-card style="max-width: 500px">
+                        <el-form :model="userForm" label-width="100px">
+                            <el-form-item label="用户名">
+                                <el-input v-model="userForm.username"></el-input>
+                            </el-form-item>
+                            <el-form-item label="新密码">
+                                <el-input
+                                    v-model="userForm.password"
+                                    type="password"
+                                    show-password
+                                    placeholder="留空不修改">
+                                </el-input>
+                            </el-form-item>
+                            <el-form-item>
+                                <el-button type="primary" @click="updateProfile">
+                                    保存修改
+                                </el-button>
+                            </el-form-item>
+                        </el-form>
+                    </el-card>
+                </div>
+
+                <div v-if="currentView === 'security'">
+                    <h3>安全中心</h3>
+                    <el-card style="max-width: 600px">
+                        <el-input v-model="banIpInput" placeholder="输入恶意 IP">
+                            <template #append>
+                                <el-button @click="banIp">封禁</el-button>
                             </template>
-                            <el-form :model="userForm" label-width="100px">
-                                <el-form-item label="用户名">
-                                    <el-input v-model="userForm.username"></el-input>
-                                </el-form-item>
-                                <el-form-item label="新密码">
-                                    <el-input v-model="userForm.password" type="password" show-password placeholder="留空不修改"></el-input>
-                                </el-form-item>
-                                <el-form-item>
-                                    <el-button type="primary" @click="updateProfile">保存修改</el-button>
-                                </el-form-item>
-                            </el-form>
-                        </el-card>
-                    </div>
-
-                    <!-- Security View -->
-                    <div v-if="currentView === 'security'">
-                        <h3>安全中心</h3>
-                        <el-row :gutter="20">
-                            <el-col :span="12">
-                                <el-card header="防火墙状态">
-                                    <el-tag type="success">Active</el-tag>
-                                    <p>已拦截恶意扫描: 12 次</p>
-                                </el-card>
-                            </el-col>
-                            <el-col :span="12">
-                                <el-card header="快速封禁 IP">
-                                    <el-input v-model="banIpInput" placeholder="输入恶意 IP">
-                                        <template #append>
-                                            <el-button @click="banIp">封禁</el-button>
-                                        </template>
-                                    </el-input>
-                                </el-card>
-                            </el-col>
-                        </el-row>
-                    </div>
-
-                </el-main>
-            </el-container>
+                        </el-input>
+                    </el-card>
+                </div>
+            </el-main>
         </el-container>
+    </el-container>
 
-        <!-- Add Inbound Dialog -->
-        <el-dialog v-model="showAddInbound" title="添加节点">
-            <el-form :model="newInbound" label-width="120px">
+    <el-dialog v-model="showAddInbound" title="添加节点" width="720px">
+        <el-form :model="newInbound" label-width="130px">
+            <el-form-item label="核心">
+                <el-radio-group v-model="newInbound.core" @change="onCoreChanged">
+                    <el-radio-button label="xray">Xray</el-radio-button>
+                    <el-radio-button label="sing-box">sing-box</el-radio-button>
+                </el-radio-group>
+            </el-form-item>
+
+            <div class="protocol-form-grid">
                 <el-form-item label="备注">
-                    <el-input v-model="newInbound.remark"></el-input>
-                </el-form-item>
-                <el-form-item label="协议">
-                    <el-select v-model="newInbound.protocol" placeholder="Select protocol">
-                        <el-option label="VMess" value="vmess"></el-option>
-                        <el-option label="VLESS" value="vless"></el-option>
-                        <el-option label="Trojan" value="trojan"></el-option>
-                        <el-option label="Shadowsocks" value="shadowsocks"></el-option>
-                    </el-select>
+                    <el-input v-model="newInbound.remark" placeholder="例如：US-01"></el-input>
                 </el-form-item>
                 <el-form-item label="端口">
-                    <el-input-number v-model="newInbound.port" :min="1" :max="65535"></el-input-number>
+                    <el-input-number
+                        v-model="newInbound.port"
+                        :min="1"
+                        :max="65535"
+                        style="width: 100%">
+                    </el-input-number>
                 </el-form-item>
-                <!-- Dynamic fields based on protocol could go here -->
-            </el-form>
-            <template #footer>
-                <span class="dialog-footer">
-                    <el-button @click="showAddInbound = false">Cancel</el-button>
-                    <el-button type="primary" @click="addInbound">Confirm</el-button>
-                </span>
-            </template>
-        </el-dialog>
-
-        <!-- QR Code Dialog -->
-        <el-dialog v-model="showQrDialog" title="分享节点" width="300px">
-            <div style="text-align: center;">
-                <div id="qrcode"></div>
-                <p style="margin-top: 10px; word-break: break-all; font-size: 12px; color: #999;">{{ qrLink }}</p>
-                <el-button type="text" @click="copyLink">复制链接</el-button>
             </div>
-        </el-dialog>
-    </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script src="js/app.js"></script>
+            <el-form-item label="协议">
+                <el-select
+                    v-model="newInbound.protocol"
+                    @change="onProtocolChanged"
+                    style="width: 100%">
+                    <el-option
+                        v-for="item in protocolOptions"
+                        :key="item[1]"
+                        :label="item[0]"
+                        :value="item[1]">
+                    </el-option>
+                </el-select>
+            </el-form-item>
+
+            <template v-if="!['shadowsocks','hysteria2','tuic'].includes(newInbound.protocol)">
+                <el-form-item label="传输方式">
+                    <el-select v-model="newInbound.profile.transport" style="width: 100%">
+                        <template v-if="newInbound.core === 'xray'">
+                            <el-option label="RAW / TCP" value="raw"></el-option>
+                            <el-option label="WebSocket" value="websocket"></el-option>
+                            <el-option label="gRPC" value="grpc"></el-option>
+                            <el-option
+                                v-if="newInbound.protocol === 'vless'"
+                                label="XHTTP"
+                                value="xhttp">
+                            </el-option>
+                        </template>
+                        <template v-else>
+                            <el-option label="Direct / TCP" value="direct"></el-option>
+                            <el-option label="WebSocket" value="ws"></el-option>
+                            <el-option label="gRPC" value="grpc"></el-option>
+                            <el-option label="HTTP Upgrade" value="httpupgrade"></el-option>
+                        </template>
+                    </el-select>
+                </el-form-item>
+
+                <el-form-item
+                    v-if="['websocket','ws','httpupgrade','xhttp'].includes(newInbound.profile.transport)"
+                    label="Path">
+                    <el-input v-model="newInbound.profile.path" placeholder="/"></el-input>
+                </el-form-item>
+
+                <el-form-item
+                    v-if="['websocket','ws','httpupgrade','xhttp'].includes(newInbound.profile.transport)"
+                    label="Host">
+                    <el-input
+                        v-model="newInbound.profile.host"
+                        placeholder="可选，例如 cdn.example.com">
+                    </el-input>
+                </el-form-item>
+
+                <el-form-item
+                    v-if="newInbound.profile.transport === 'grpc'"
+                    label="gRPC Service">
+                    <el-input
+                        v-model="newInbound.profile.service_name"
+                        placeholder="TunService">
+                    </el-input>
+                </el-form-item>
+
+                <el-form-item
+                    v-if="newInbound.profile.transport === 'xhttp'"
+                    label="XHTTP Mode">
+                    <el-select v-model="newInbound.profile.xhttp_mode" style="width: 100%">
+                        <el-option label="Auto" value="auto"></el-option>
+                        <el-option label="Stream One" value="stream-one"></el-option>
+                        <el-option label="Stream Up" value="stream-up"></el-option>
+                        <el-option label="Packet Up" value="packet-up"></el-option>
+                    </el-select>
+                </el-form-item>
+            </template>
+
+            <el-form-item
+                v-if="newInbound.protocol !== 'shadowsocks'"
+                label="传输安全">
+                <el-select
+                    v-model="newInbound.profile.security"
+                    :disabled="['trojan','hysteria2','tuic'].includes(newInbound.protocol)"
+                    style="width: 100%">
+                    <el-option
+                        v-if="!['trojan','hysteria2','tuic'].includes(newInbound.protocol)"
+                        label="None"
+                        value="none">
+                    </el-option>
+                    <el-option label="TLS" value="tls"></el-option>
+                    <el-option
+                        v-if="newInbound.protocol === 'vless'"
+                        label="REALITY"
+                        value="reality">
+                    </el-option>
+                </el-select>
+            </el-form-item>
+
+            <el-form-item
+                v-if="newInbound.protocol === 'vless'"
+                label="Flow">
+                <el-select v-model="newInbound.profile.flow" style="width: 100%">
+                    <el-option label="None" value=""></el-option>
+                    <el-option label="XTLS Vision" value="xtls-rprx-vision"></el-option>
+                </el-select>
+            </el-form-item>
+
+            <template v-if="newInbound.profile.security === 'tls'">
+                <el-form-item label="SNI">
+                    <el-input
+                        v-model="newInbound.profile.server_name"
+                        placeholder="example.com">
+                    </el-input>
+                </el-form-item>
+                <el-form-item label="证书路径">
+                    <el-input
+                        v-model="newInbound.profile.certificate_path"
+                        placeholder="/etc/letsencrypt/live/example.com/fullchain.pem">
+                    </el-input>
+                </el-form-item>
+                <el-form-item label="私钥路径">
+                    <el-input
+                        v-model="newInbound.profile.key_path"
+                        placeholder="/etc/letsencrypt/live/example.com/privkey.pem">
+                    </el-input>
+                </el-form-item>
+                <el-checkbox v-model="newInbound.profile.skip_cert_verify">
+                    客户端跳过证书校验（仅测试 / 自签证书）
+                </el-checkbox>
+            </template>
+
+            <template v-if="newInbound.profile.security === 'reality'">
+                <el-form-item label="目标站点">
+                    <el-input
+                        v-model="newInbound.profile.reality_target"
+                        placeholder="example.com:443">
+                    </el-input>
+                </el-form-item>
+                <el-form-item label="Server Name">
+                    <el-input
+                        v-model="newInbound.profile.reality_server_name"
+                        placeholder="留空则使用目标站点域名">
+                    </el-input>
+                </el-form-item>
+                <el-form-item label="Short ID">
+                    <el-input
+                        v-model="newInbound.profile.reality_short_id"
+                        placeholder="留空自动生成">
+                    </el-input>
+                </el-form-item>
+                <el-form-item label="浏览器指纹">
+                    <el-select
+                        v-model="newInbound.profile.client_fingerprint"
+                        style="width: 100%">
+                        <el-option label="Chrome" value="chrome"></el-option>
+                        <el-option label="Firefox" value="firefox"></el-option>
+                        <el-option label="Safari" value="safari"></el-option>
+                        <el-option label="Edge" value="edge"></el-option>
+                    </el-select>
+                </el-form-item>
+
+                <el-alert
+                    v-if="newInbound.core === 'xray'"
+                    title="Mihomo 官方当前明确警告：Xray-core v26.7.11+ REALITY 存在不兼容。V-UI 会生成配置，但如果主要给 Mihomo 使用，建议改选 sing-box + VLESS REALITY。"
+                    type="warning"
+                    :closable="false">
+                </el-alert>
+                <el-alert
+                    v-else
+                    title="V-UI 会自动生成 REALITY X25519 密钥对；私钥只写入服务器核心配置，订阅只导出客户端公钥。"
+                    type="success"
+                    :closable="false">
+                </el-alert>
+            </template>
+
+            <template v-if="newInbound.protocol === 'hysteria2'">
+                <div class="protocol-form-grid">
+                    <el-form-item label="上传带宽 Mbps">
+                        <el-input-number
+                            v-model="newInbound.profile.up_mbps"
+                            :min="1"
+                            style="width: 100%">
+                        </el-input-number>
+                    </el-form-item>
+                    <el-form-item label="下载带宽 Mbps">
+                        <el-input-number
+                            v-model="newInbound.profile.down_mbps"
+                            :min="1"
+                            style="width: 100%">
+                        </el-input-number>
+                    </el-form-item>
+                </div>
+                <el-form-item label="Obfs">
+                    <el-select v-model="newInbound.profile.obfs_type" style="width: 100%">
+                        <el-option label="关闭" value=""></el-option>
+                        <el-option label="Salamander" value="salamander"></el-option>
+                        <el-option label="Gecko" value="gecko"></el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item
+                    v-if="newInbound.profile.obfs_type"
+                    label="Obfs Password">
+                    <el-input
+                        v-model="newInbound.profile.obfs_password"
+                        type="password"
+                        show-password>
+                    </el-input>
+                </el-form-item>
+            </template>
+
+            <template v-if="newInbound.protocol === 'tuic'">
+                <el-form-item label="拥塞控制">
+                    <el-select
+                        v-model="newInbound.profile.congestion_control"
+                        style="width: 100%">
+                        <el-option label="BBR" value="bbr"></el-option>
+                        <el-option label="CUBIC" value="cubic"></el-option>
+                        <el-option label="New Reno" value="new_reno"></el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="UDP Relay">
+                    <el-select
+                        v-model="newInbound.profile.udp_relay_mode"
+                        style="width: 100%">
+                        <el-option label="Native" value="native"></el-option>
+                        <el-option label="QUIC" value="quic"></el-option>
+                    </el-select>
+                </el-form-item>
+                <el-checkbox v-model="newInbound.profile.zero_rtt_handshake">
+                    启用 0-RTT（连接更快，但存在重放风险）
+                </el-checkbox>
+            </template>
+        </el-form>
+
+        <template #footer>
+            <el-button @click="showAddInbound = false">取消</el-button>
+            <el-button type="primary" @click="addInbound">创建并应用</el-button>
+        </template>
+    </el-dialog>
+
+    <el-dialog v-model="showQrDialog" title="分享节点" width="320px">
+        <div style="text-align: center">
+            <div id="qrcode"></div>
+            <p style="margin-top: 10px; word-break: break-all; font-size: 12px; color: #999">
+                {{ qrLink }}
+            </p>
+            <el-button text @click="copyLink">复制链接</el-button>
+        </div>
+    </el-dialog>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>
