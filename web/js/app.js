@@ -25,6 +25,7 @@ const app = createApp({
         const qrLink = ref('');
         const siteFiles = ref([]);
         const currentUser = ref({ username: 'admin' });
+        const mihomoWarnings = ref([]);
 
         const routingCatalog = ref({ categories: [], presets: [] });
         const routingPreview = ref({ sections: [], dns: {}, warnings: [] });
@@ -49,7 +50,31 @@ const app = createApp({
             protocol: 'vless',
             port: 443,
             settings: {},
-            stream_settings: {}
+            stream_settings: {},
+            profile: {
+                security: 'none',
+                transport: 'raw',
+                flow: '',
+                server_name: '',
+                certificate_path: '',
+                key_path: '',
+                path: '/',
+                host: '',
+                service_name: '',
+                xhttp_mode: 'auto',
+                reality_target: '',
+                reality_server_name: '',
+                reality_short_id: '',
+                client_fingerprint: 'chrome',
+                skip_cert_verify: false,
+                up_mbps: 100,
+                down_mbps: 100,
+                obfs_type: '',
+                obfs_password: '',
+                congestion_control: 'bbr',
+                udp_relay_mode: 'native',
+                zero_rtt_handshake: false
+            }
         });
 
         const protocolOptions = computed(() => {
@@ -115,6 +140,7 @@ const app = createApp({
             if (key === 'subscriptions') {
                 fetchCoreStatus();
                 fetchRoutingPreview();
+                fetchMihomoWarnings();
             }
         };
 
@@ -142,6 +168,15 @@ const app = createApp({
                 inbounds.value = res.data;
             } catch (error) {
                 ElMessage.error('Failed to load inbounds');
+            }
+        };
+
+        const fetchMihomoWarnings = async () => {
+            try {
+                const res = await axios.get('/api/subscription/mihomo-warnings');
+                mihomoWarnings.value = res.data;
+            } catch (error) {
+                console.error('Failed to load Mihomo compatibility warnings', error);
             }
         };
 
@@ -254,10 +289,55 @@ const app = createApp({
             showAddInbound.value = true;
         };
 
+        const resetInboundProfile = () => {
+            const p = newInbound.profile;
+            p.security = (
+                ['trojan', 'hysteria2', 'tuic'].includes(newInbound.protocol)
+                ? 'tls'
+                : 'none'
+            );
+            p.transport = (
+                newInbound.core === 'xray'
+                ? 'raw'
+                : (
+                    ['hysteria2', 'tuic'].includes(newInbound.protocol)
+                    ? 'quic'
+                    : 'direct'
+                )
+            );
+            p.flow = '';
+            p.server_name = '';
+            p.certificate_path = '';
+            p.key_path = '';
+            p.path = '/';
+            p.host = '';
+            p.service_name = '';
+            p.xhttp_mode = 'auto';
+            p.reality_target = '';
+            p.reality_server_name = '';
+            p.reality_short_id = '';
+            p.client_fingerprint = 'chrome';
+            p.skip_cert_verify = false;
+            p.up_mbps = 100;
+            p.down_mbps = 100;
+            p.obfs_type = '';
+            p.obfs_password = '';
+            p.congestion_control = 'bbr';
+            p.udp_relay_mode = 'native';
+            p.zero_rtt_handshake = false;
+        };
+
         const onCoreChanged = () => {
             newInbound.protocol = 'vless';
             newInbound.settings = {};
             newInbound.stream_settings = {};
+            resetInboundProfile();
+        };
+
+        const onProtocolChanged = () => {
+            newInbound.settings = {};
+            newInbound.stream_settings = {};
+            resetInboundProfile();
         };
 
         const addInbound = async () => {
@@ -269,6 +349,7 @@ const app = createApp({
                     port: newInbound.port,
                     settings: newInbound.settings,
                     stream_settings: newInbound.stream_settings,
+                    profile: { ...newInbound.profile },
                     enable: true
                 };
                 const res = await axios.post('/api/inbounds', payload);
@@ -286,6 +367,7 @@ const app = createApp({
                 newInbound.port = 443;
                 newInbound.settings = {};
                 newInbound.stream_settings = {};
+                resetInboundProfile();
             } catch (error) {
                 ElMessage.error(
                     'Failed to add inbound: ' +
@@ -437,7 +519,8 @@ const app = createApp({
                 fetchSystemStatus(),
                 fetchCoreStatus(),
                 fetchInbounds(),
-                fetchRouting()
+                fetchRouting(),
+                fetchMihomoWarnings()
             ]);
             setInterval(fetchSystemStatus, 3000);
             setInterval(fetchCoreStatus, 10000);
@@ -456,6 +539,7 @@ const app = createApp({
             banIpInput,
             currentUser,
             userForm,
+            mihomoWarnings,
             showQrDialog,
             qrLink,
             routingCatalog,
@@ -475,6 +559,8 @@ const app = createApp({
             removeIntranetZone,
             openAddInbound,
             onCoreChanged,
+            onProtocolChanged,
+            resetInboundProfile,
             addInbound,
             deleteInbound,
             updateProfile,
