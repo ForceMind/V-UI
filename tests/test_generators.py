@@ -2,7 +2,8 @@ import unittest
 from types import SimpleNamespace
 
 from app.services.core_manager import SingBoxAdapter, XrayAdapter
-from app.services.mihomo_subscription import mihomo_config\nfrom app.services.subscription_service import share_link
+from app.services.mihomo_subscription import mihomo_config
+from app.services.subscription_service import share_link
 
 
 def inbound(**kwargs):
@@ -12,7 +13,12 @@ def inbound(**kwargs):
         "remark": "demo",
         "port": 443,
         "protocol": "vless",
-        "settings": {"clients": [{"id": "11111111-1111-1111-1111-111111111111"}], "decryption": "none"},
+        "settings": {
+            "clients": [
+                {"id": "11111111-1111-1111-1111-111111111111"}
+            ],
+            "decryption": "none",
+        },
         "stream_settings": {},
         "enable": True,
         "tag": "demo",
@@ -42,7 +48,10 @@ class ConfigGeneratorTests(unittest.TestCase):
         )
         config = SingBoxAdapter().build_config([item])
         self.assertEqual(config["inbounds"][0]["type"], "hysteria2")
-        self.assertEqual(config["inbounds"][0]["users"][0]["password"], "secret")
+        self.assertEqual(
+            config["inbounds"][0]["users"][0]["password"],
+            "secret",
+        )
 
     def test_vless_share_link(self):
         link = share_link(inbound(), "example.com")
@@ -53,6 +62,7 @@ class ConfigGeneratorTests(unittest.TestCase):
         output = mihomo_config([inbound()], "example.com")
         self.assertIn("vless", output)
         self.assertIn("example.com", output)
+        self.assertIn("FORCE_PROXY", output)
 
 
 if __name__ == "__main__":
