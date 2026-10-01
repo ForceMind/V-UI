@@ -9,3 +9,4 @@ requests
 aiofiles
 jinja2
 PyYAML
+python-multipart
