@@ -1,13 +1,1 @@
-fastapi
-uvicorn
-pydantic>=2
-sqlalchemy
-psutil
-python-jose[cryptography]
-passlib[bcrypt]
-requests
-aiofiles
-jinja2
-PyYAML
-python-multipart
-argon2-cffi==25.1.0
+-r requirements-runtime.txt
