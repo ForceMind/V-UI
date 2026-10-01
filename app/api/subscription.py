@@ -7,14 +7,15 @@ from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy.orm import Session
 
 from app.models.database import get_db
-from app.services.inbound_service import get_inbound, list_inbounds
-from app.services.mihomo_routing import load_routing
-from app.services.mihomo_subscription import mihomo_config
-from app.services.subscription_service import (
+from app.services.client_export import (
     base64_subscription,
+    export_warnings,
     share_link,
     singbox_client_config,
 )
+from app.services.inbound_service import get_inbound, list_inbounds
+from app.services.mihomo_routing import load_routing
+from app.services.mihomo_subscription import mihomo_config
 
 router = APIRouter()
 
@@ -40,12 +41,29 @@ async def mihomo_subscription(
     core: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
+    items = list_inbounds(db, core=core)
     content = mihomo_config(
-        list_inbounds(db, core=core),
+        items,
         _host(request, host),
         load_routing(),
     )
-    return Response(content=content, media_type="text/yaml; charset=utf-8")
+    warnings = export_warnings(items)
+    headers = {}
+    if warnings:
+        headers["X-VUI-Compatibility-Warnings"] = str(len(warnings))
+    return Response(
+        content=content,
+        media_type="text/yaml; charset=utf-8",
+        headers=headers,
+    )
+
+
+@router.get("/mihomo-warnings")
+async def mihomo_warnings(
+    core: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    return export_warnings(list_inbounds(db, core=core))
 
 
 @router.get("/sing-box.json")
