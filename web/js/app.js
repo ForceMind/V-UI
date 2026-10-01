@@ -1,32 +1,52 @@
-const { createApp, ref, onMounted, reactive } = Vue;
+const { createApp, ref, onMounted, reactive, computed } = Vue;
 const { ElMessage, ElMessageBox } = ElementPlus;
-const { Odometer, Connection, Setting, Lock, Refresh, ArrowDown, Document, UploadFilled } = ElementPlusIconsVue;
+const { Odometer, Connection, Setting, Lock, Refresh, ArrowDown, Document, UploadFilled, Link } = ElementPlusIconsVue;
 
 const app = createApp({
     setup() {
         const currentView = ref('dashboard');
         const systemStatus = ref({});
+        const coreStatus = ref({});
         const inbounds = ref([]);
         const showAddInbound = ref(false);
-        const restarting = ref(false);
+        const restartingCore = ref('');
         const banIpInput = ref('');
         const showQrDialog = ref(false);
         const qrLink = ref('');
         const siteFiles = ref([]);
-        
-        // User State
         const currentUser = ref({ username: 'admin' });
+
         const userForm = reactive({
             username: '',
             password: ''
         });
 
         const newInbound = reactive({
+            core: 'xray',
             remark: '',
             protocol: 'vless',
             port: 443,
             settings: {},
             stream_settings: {}
+        });
+
+        const protocolOptions = computed(() => {
+            if (newInbound.core === 'sing-box') {
+                return [
+                    ['VLESS', 'vless'],
+                    ['VMess', 'vmess'],
+                    ['Trojan', 'trojan'],
+                    ['Shadowsocks', 'shadowsocks'],
+                    ['Hysteria2', 'hysteria2'],
+                    ['TUIC', 'tuic']
+                ];
+            }
+            return [
+                ['VLESS', 'vless'],
+                ['VMess', 'vmess'],
+                ['Trojan', 'trojan'],
+                ['Shadowsocks', 'shadowsocks']
+            ];
         });
 
         const colors = [
@@ -39,14 +59,10 @@ const app = createApp({
 
         const handleSelect = (key) => {
             currentView.value = key;
-            if (key === 'inbounds') {
-                fetchInbounds();
-            } else if (key === 'settings') {
-                // Pre-fill username
-                userForm.username = currentUser.value.username;
-            } else if (key === 'site') {
-                fetchSiteFiles();
-            }
+            if (key === 'inbounds') fetchInbounds();
+            if (key === 'settings') userForm.username = currentUser.value.username;
+            if (key === 'site') fetchSiteFiles();
+            if (key === 'subscriptions') fetchCoreStatus();
         };
 
         const fetchSystemStatus = async () => {
@@ -54,54 +70,86 @@ const app = createApp({
                 const res = await axios.get('/api/system/status');
                 systemStatus.value = res.data;
             } catch (error) {
-                console.error("Failed to fetch status", error);
+                console.error('Failed to fetch status', error);
+            }
+        };
+
+        const fetchCoreStatus = async () => {
+            try {
+                const res = await axios.get('/api/cores/status');
+                coreStatus.value = res.data;
+            } catch (error) {
+                console.error('Failed to fetch core status', error);
             }
         };
 
         const fetchInbounds = async () => {
             try {
-                const res = await axios.get('/api/xray/inbounds');
+                const res = await axios.get('/api/inbounds');
                 inbounds.value = res.data;
             } catch (error) {
                 ElMessage.error('Failed to load inbounds');
             }
         };
 
+        const openAddInbound = () => {
+            showAddInbound.value = true;
+        };
+
+        const onCoreChanged = () => {
+            newInbound.protocol = 'vless';
+            newInbound.settings = {};
+            newInbound.stream_settings = {};
+        };
+
         const addInbound = async () => {
             try {
-                // Backend handles UUID generation if not provided
                 const payload = {
+                    core: newInbound.core,
                     remark: newInbound.remark,
                     protocol: newInbound.protocol,
                     port: newInbound.port,
-                    settings: JSON.stringify(newInbound.settings),
-                    stream_settings: JSON.stringify(newInbound.stream_settings),
+                    settings: newInbound.settings,
+                    stream_settings: newInbound.stream_settings,
                     enable: true
                 };
-                await axios.post('/api/xray/inbounds', payload);
-                ElMessage.success('Inbound added successfully');
+                const res = await axios.post('/api/inbounds', payload);
+                if (res.data.core && res.data.core.valid === false) {
+                    ElMessage.warning(
+                        'Node saved, but the core is not ready: ' +
+                        (res.data.core.validation_output || 'validation failed')
+                    );
+                } else {
+                    ElMessage.success('Inbound added successfully');
+                }
                 showAddInbound.value = false;
-                fetchInbounds();
-                // Reset form
+                await Promise.all([fetchInbounds(), fetchCoreStatus()]);
                 newInbound.remark = '';
                 newInbound.port = 443;
+                newInbound.settings = {};
+                newInbound.stream_settings = {};
             } catch (error) {
-                console.error(error);
-                ElMessage.error('Failed to add inbound: ' + (error.response?.data?.detail || error.message));
+                ElMessage.error(
+                    'Failed to add inbound: ' +
+                    (error.response?.data?.detail || error.message)
+                );
             }
         };
 
         const deleteInbound = async (row) => {
             try {
-                await ElMessageBox.confirm('Are you sure to delete this inbound?', 'Warning', {
-                    confirmButtonText: 'OK',
-                    cancelButtonText: 'Cancel',
-                    type: 'warning',
-                });
-                
-                await axios.delete(`/api/xray/inbounds/${row.id}`);
+                await ElMessageBox.confirm(
+                    `Delete ${row.remark || row.protocol}:${row.port}?`,
+                    'Warning',
+                    {
+                        confirmButtonText: 'OK',
+                        cancelButtonText: 'Cancel',
+                        type: 'warning'
+                    }
+                );
+                await axios.delete(`/api/inbounds/${row.id}`);
                 ElMessage.success('Deleted successfully');
-                fetchInbounds();
+                await Promise.all([fetchInbounds(), fetchCoreStatus()]);
             } catch (error) {
                 if (error !== 'cancel') {
                     ElMessage.error('Failed to delete inbound');
@@ -109,78 +157,103 @@ const app = createApp({
             }
         };
 
+        const restartCore = async (core) => {
+            restartingCore.value = core;
+            try {
+                const res = await axios.post(
+                    `/api/cores/${encodeURIComponent(core)}/restart`
+                );
+                if (res.data.valid === false) {
+                    ElMessage.error(
+                        res.data.validation_output ||
+                        `${core} config validation failed`
+                    );
+                } else {
+                    ElMessage.success(`${core} restarted`);
+                }
+                await fetchCoreStatus();
+            } catch (error) {
+                ElMessage.error(
+                    error.response?.data?.detail ||
+                    `Failed to restart ${core}`
+                );
+            } finally {
+                restartingCore.value = '';
+            }
+        };
+
         const updateProfile = async () => {
             try {
                 const payload = {
                     username: userForm.username,
-                    password: userForm.password || undefined // Only send if not empty
+                    password: userForm.password || undefined
                 };
                 await axios.post('/api/auth/update_profile', payload);
                 ElMessage.success('Profile updated successfully. Please login again.');
                 currentUser.value.username = userForm.username;
-                userForm.password = ''; // Clear password field
+                userForm.password = '';
             } catch (error) {
                 ElMessage.error('Failed to update profile');
             }
         };
 
-        const restartXray = async () => {
-            restarting.value = true;
-            try {
-                await axios.post('/api/xray/restart');
-                ElMessage.success('Restart command sent');
-            } catch (error) {
-                ElMessage.error('Failed to restart');
-            } finally {
-                setTimeout(() => { restarting.value = false; }, 2000);
-            }
-        };
-
         const banIp = async () => {
-            if(!banIpInput.value) return;
+            if (!banIpInput.value) return;
             try {
-                await axios.post(`/api/security/ban_ip?ip=${banIpInput.value}`);
+                await axios.post(
+                    `/api/security/ban_ip?ip=${encodeURIComponent(banIpInput.value)}`
+                );
                 ElMessage.success(`IP ${banIpInput.value} banned`);
                 banIpInput.value = '';
             } catch (error) {
                 ElMessage.error('Failed to ban IP');
             }
-        }
-
-        const showQrCode = (row) => {
-            // Construct a simple link for demonstration. 
-            // In a real app, you'd parse the settings to build a vmess:// or vless:// link
-            // For now, we'll just show a placeholder or a simple JSON representation
-            let link = '';
-            if (row.protocol === 'vless' || row.protocol === 'vmess') {
-                // Simplified link generation logic
-                // uuid@ip:port?security=none&type=tcp&headerType=none#remark
-                const uuid = JSON.parse(row.settings).clients?.[0]?.id || 'uuid-not-found';
-                const ip = location.hostname;
-                link = `${row.protocol}://${uuid}@${ip}:${row.port}?security=none&type=tcp#${encodeURIComponent(row.remark)}`;
-            } else {
-                link = `Protocol: ${row.protocol}, Port: ${row.port}`;
-            }
-            
-            qrLink.value = link;
-            showQrDialog.value = true;
-            
-            // Wait for DOM update then generate QR
-            setTimeout(() => {
-                const container = document.getElementById('qrcode');
-                container.innerHTML = '';
-                new QRCode(container, {
-                    text: link,
-                    width: 200,
-                    height: 200
-                });
-            }, 100);
         };
 
-        const copyLink = () => {
-            navigator.clipboard.writeText(qrLink.value).then(() => {
-                ElMessage.success('Link copied to clipboard');
-            });
+        const showQrCode = async (row) => {
+            try {
+                const res = await axios.get(
+                    `/api/subscription/link/${row.id}`,
+                    { responseType: 'text' }
+                );
+                const link = res.data;
+                if (!link) {
+                    ElMessage.warning('This node does not have enough share-link data yet');
+                    return;
+                }
+                qrLink.value = link;
+                showQrDialog.value = true;
+                setTimeout(() => {
+                    const container = document.getElementById('qrcode');
+                    container.innerHTML = '';
+                    new QRCode(container, {
+                        text: link,
+                        width: 200,
+                        height: 200
+                    });
+                }, 100);
+            } catch (error) {
+                ElMessage.error('Failed to generate share link');
+            }
+        };
+
+        const copyLink = async () => {
+            await navigator.clipboard.writeText(qrLink.value);
+            ElMessage.success('Link copied');
+        };
+
+        const subscriptionUrl = (format) => {
+            const paths = {
+                raw: '/api/subscription/raw',
+                mihomo: '/api/subscription/mihomo.yaml',
+                singbox: '/api/subscription/sing-box.json'
+            };
+            return `${location.origin}${paths[format]}`;
+        };
+
+        const copySubscription = async (format) => {
+            await navigator.clipboard.writeText(subscriptionUrl(format));
+            ElMessage.success('Subscription URL copied');
         };
 
         const fetchSiteFiles = async () => {
@@ -192,42 +265,53 @@ const app = createApp({
             }
         };
 
-        const handleUploadSuccess = (response, file, fileList) => {
+        const handleUploadSuccess = () => {
             ElMessage.success('Site deployed successfully');
             fetchSiteFiles();
         };
 
-        const handleUploadError = (err, file, fileList) => {
+        const handleUploadError = () => {
             ElMessage.error('Upload failed');
         };
 
-        // Poll system status
-        onMounted(() => {
-            fetchSystemStatus();
+        onMounted(async () => {
+            await Promise.all([
+                fetchSystemStatus(),
+                fetchCoreStatus(),
+                fetchInbounds()
+            ]);
             setInterval(fetchSystemStatus, 3000);
+            setInterval(fetchCoreStatus, 10000);
         });
 
         return {
             currentView,
             systemStatus,
+            coreStatus,
             inbounds,
             showAddInbound,
             newInbound,
+            protocolOptions,
             colors,
-            restarting,
+            restartingCore,
             banIpInput,
             currentUser,
             userForm,
             showQrDialog,
             qrLink,
             handleSelect,
+            fetchInbounds,
+            openAddInbound,
+            onCoreChanged,
             addInbound,
             deleteInbound,
             updateProfile,
-            restartXray,
+            restartCore,
             banIp,
             showQrCode,
             copyLink,
+            subscriptionUrl,
+            copySubscription,
             siteFiles,
             fetchSiteFiles,
             handleUploadSuccess,
@@ -236,7 +320,6 @@ const app = createApp({
     }
 });
 
-// Register Icons
 app.component('Odometer', Odometer);
 app.component('Connection', Connection);
 app.component('Setting', Setting);
@@ -245,6 +328,7 @@ app.component('Refresh', Refresh);
 app.component('ArrowDown', ArrowDown);
 app.component('Document', Document);
 app.component('UploadFilled', UploadFilled);
+app.component('Link', Link);
 
 app.use(ElementPlus);
 app.mount('#app');
