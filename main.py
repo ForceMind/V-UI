@@ -3,8 +3,13 @@ from __future__ import annotations
 import os
 import sys
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+# New credential/database files should not be group/world readable.
+os.umask(0o077)
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.staticfiles import StaticFiles
 
 from app.api import (
@@ -19,22 +24,19 @@ from app.api import (
     system,
     xray,
 )
-from app.models.database import init_db
+from app.models.database import DB_PATH, init_db
+from app.middleware.auth import AdminAuthMiddleware, configured_origin
 from app.services.core_manager import core_manager
 
 app = FastAPI(
     title="V-UI",
     description="Lightweight Xray + sing-box management panel",
-    version="0.3.0-alpha.1",
+    version="0.3.0-alpha.2",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# No permissive CORS. The default-deny boundary also covers legacy aliases,
+# subscription exports and OpenAPI; alpha.3 will add separate subscription tokens.
+app.add_middleware(AdminAuthMiddleware)
 
 app.include_router(system.router, prefix="/api/system", tags=["System"])
 app.include_router(inbounds.router, prefix="/api/inbounds", tags=["Inbounds"])
@@ -48,9 +50,20 @@ app.include_router(security.router, prefix="/api/security", tags=["Security"])
 app.include_router(files.router, prefix="/api/files", tags=["Files"])
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith("/api/auth/"):
+        # FastAPI's default detail can echo input. Never echo a password payload.
+        return JSONResponse({"detail": "Invalid authentication request"}, status_code=422)
+    return await request_validation_exception_handler(request, exc)
+
+
 @app.on_event("startup")
 async def startup_event():
+    configured_origin()  # Invalid deployment settings fail closed at startup.
     init_db()
+    if os.name == "posix" and DB_PATH.is_file():
+        DB_PATH.chmod(0o600)
 
 
 @app.on_event("shutdown")
@@ -75,18 +88,26 @@ def get_web_path() -> str:
     return web_path
 
 
+@app.get("/login", include_in_schema=False)
+@app.get("/account", include_in_schema=False)
+def account_page():
+    return FileResponse(os.path.join(get_web_path(), "account.html"), headers={
+        "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+    })
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse("/login", status_code=303)
+
+
 app.mount("/ui", StaticFiles(directory=get_web_path(), html=True), name="ui")
-
-www_root = "wwwroot"
-if not os.path.exists(www_root):
-    os.makedirs(www_root)
-    with open(os.path.join(www_root, "index.html"), "w", encoding="utf-8") as handle:
-        handle.write("<h1>Welcome</h1>")
-
-app.mount("/", StaticFiles(directory=www_root, html=True), name="site")
+# Deliberately do not serve uploaded wwwroot files on the administrator origin.
+# Existing files remain on disk. Upload/list routes are quarantined by middleware.
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=2053)
+    uvicorn.run(app, host=os.getenv("VUI_HOST", "127.0.0.1"),
+                port=int(os.getenv("VUI_PORT", "2053")), proxy_headers=False)

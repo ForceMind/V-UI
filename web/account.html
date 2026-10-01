@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>V-UI · 账户</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f6f7f9;color:#28313c;font-family:system-ui,-apple-system,"Microsoft YaHei",sans-serif;line-height:1.6}main{width:min(460px,calc(100% - 32px));margin:9vh auto;padding:30px;background:white;border:1px solid #e2e6ed;border-radius:12px}h1{margin:0 0 4px;font-size:26px}.muted{color:#637080;font-size:14px}label{display:block;margin:18px 0 6px}input{font:inherit;width:100%;padding:10px 12px;border:1px solid #bfc8d3;border-radius:6px}button,a{font:inherit}button{padding:10px 18px;border:1px solid #536c8d;border-radius:6px;background:#536c8d;color:white;cursor:pointer}button:disabled{opacity:.5;cursor:wait}a{color:#405e86}form button{margin-top:22px;width:100%}.actions{margin-top:20px;display:flex;justify-content:space-between;align-items:center}#message{color:#914123;white-space:pre-wrap;overflow-wrap:anywhere;min-height:24px}code{overflow-wrap:anywhere;font-size:13px}details{margin-top:24px}summary{cursor:pointer}.loading{margin:20px 0}[hidden]{display:none!important}
+</style>
+<script src="/ui/js/account.js" defer></script>
+</head>
+<body><main>
+<h1>V-UI</h1><p class="muted" id="subtitle">管理员账户</p>
+<p id="message" role="status" aria-live="polite">正在检查登录状态…</p>
+<form id="login-form" hidden>
+<label for="login-name">用户名</label><input id="login-name" name="username" autocomplete="username" maxlength="64" required>
+<label for="login-password">密码</label><input id="login-password" type="password" autocomplete="current-password" maxlength="128" required>
+<button type="submit">登录面板</button>
+<details><summary>首次使用或忘记密码</summary>
+<p class="muted">没有默认账号密码。请在服务器的项目目录及 Python 环境中执行，下列命令会交互式询问密码：</p>
+<code>python -m app.admin create your_admin</code>
+<p class="muted">已有账号重置密码：</p><code>python -m app.admin set-password your_admin</code>
+<p class="muted">使用与面板相同的 VUI_DATA_DIR；不要将密码写进命令参数。</p>
+</details>
+</form>
+<section id="account-panel" hidden>
+<p>已登录：<strong id="current-name"></strong></p>
+<form id="profile-form">
+<label for="profile-name">用户名</label><input id="profile-name" autocomplete="username" minlength="3" maxlength="64" required>
+<label for="current-password">当前密码（修改时验证）</label><input id="current-password" type="password" autocomplete="current-password" maxlength="128" required>
+<label for="new-password">新密码（留空则不修改密码）</label><input id="new-password" type="password" autocomplete="new-password" minlength="15" maxlength="128">
+<p class="muted">保存会退出所有已登录设备，需要重新登录。</p>
+<button type="submit">保存并退出全部会话</button>
+</form>
+<div class="actions"><a href="/ui/">返回管理面板</a><button id="logout" type="button">退出登录</button></div>
+</section>
+<p class="muted">会话最长一小时。当前 alpha 版本未完成公网发布验收。</p>
+</main></body></html>
