@@ -1,197 +1,57 @@
-# V-UI — 轻量双核心代理面板
+# V-UI — 个人双核心代理面板（开发中）
 
-**V-UI** 是一个面向个人 VPS 的轻量管理面板，统一管理 **Xray-core + sing-box**，并把服务器节点直接输出为可用的 **Mihomo / Clash Meta、sing-box JSON 和通用 Base64 订阅**。
+**当前迭代：v0.3.0-alpha.2，管理员认证边界。不是正式 Release，也未完成公网部署验收。**
 
-当前版本的 Mihomo 分流引擎复用了同一作者项目 **ToClash** 的规则设计：策略组、服务预设、DNS policy、内网 DNS、自定义直连 / 强制代理和两种网络模式使用一致的语义。
+V-UI 的目标是以 FastAPI + SQLite 管理 Xray/sing-box，并直接导出带 ToClash 分流的 Mihomo 配置。已有双核心、协议表单和导出草稿，但“代码已有”不等于每种组合已验证。
 
-## 核心能力
+先读 [版本计划](ROADMAP.md)；本轮的启动、创建管理员、会话和回滚说明见 [AUTH_ALPHA2.md](docs/AUTH_ALPHA2.md)。开发前阅读 [AGENTS.md](AGENTS.md)。
 
-- **双核心**：Xray-core 与 sing-box 可独立生成配置、校验、启动、停止和重启。
-- **统一节点管理**：同一张 Inbound 列表管理两个核心，旧 Xray 数据自动兼容。
-- **协议**：
-  - Xray：VLESS、VMess、Trojan、Shadowsocks。
-  - sing-box：VLESS、VMess、Trojan、Shadowsocks、Hysteria2、TUIC。
-- **订阅输出**：
-  - 单节点分享 URI / 二维码。
-  - 通用 Base64。
-  - Mihomo / Clash Meta YAML。
-  - sing-box JSON。
-- **ToClash 分流**：
-  - PROXY / AUTO / FORCE_PROXY。
-  - 40 项服务预设。
-  - 常规“国内直连、其余代理”模式。
-  - “默认直连、仅指定服务代理”模式。
-  - 用户始终直连 / 始终代理。
-  - 本机、局域网、可选 CGNAT 优先保护。
-  - 企业 / 家庭内网 DNS。
-  - 必须代理规则后追加同条件 REJECT，避免不支持 UDP 时继续落入后续直连规则。
-  - 业务 DNS 与节点自身 DNS 分开规划，避免代理节点解析环路。
-- **轻量部署**：FastAPI + SQLite，不依赖 Redis、PostgreSQL 或消息队列。
-- **amd64 / arm64**：安装脚本与 Docker 均下载对应架构的 Xray 和 sing-box。
+## 当前可验证的范围
 
-## 安装
+- 无默认密码或 mock token；本机交互式创建/重置管理员。
+- 管理 API、旧接口、文档及当前订阅接口统一鉴权。
+- 登录、改名/改密、退出、会话过期/撤销、CSRF、限流。
+- 保留原入站数据；同源网站托管暂时隔离，旧文件不删除。
 
-### 二进制版本
+本轮不增加协议、不改 ToClash 规则、不做证书申请和核心升级。旧主面板远程依赖及核心兼容性仍待发布前复核。
 
-发布 Release 后可使用：
+## 独立测试目录启动
 
-~~~bash
-bash <(curl -Ls https://raw.githubusercontent.com/ForceMind/V-UI/master/install-bin.sh)
-~~~
+使用 Python 3.12：
 
-安装器会同时准备 V-UI、Xray-core 和 sing-box。
+```sh
+python -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+export VUI_DATA_DIR="$PWD/data"
+python -m app.admin create your_admin
+python main.py
+```
 
-### 源码安装
+命令会询问密码，不接受密码参数。默认只监听 `127.0.0.1:2053`，通过本机或 SSH 隧道访问 `/login`；“面板设置”进入账户管理和退出页面。已有账号使用 `python -m app.admin set-password your_admin` 显式重置。
 
-~~~bash
-git clone https://github.com/ForceMind/V-UI.git
-cd V-UI
-sudo bash install.sh
-~~~
+不要直接执行旧安装脚本覆盖现有服务。Docker、二进制打包、ARM64、HTTPS 反代和真实代理链路要按版本计划单独验收。
 
-### Docker
+## ToClash 集成目标
 
-~~~bash
-git clone https://github.com/ForceMind/V-UI.git
-cd V-UI
-docker compose up -d --build
-~~~
+alpha.5 验证配置引擎，alpha.6 收口分流设置与订阅使用闭环：
 
-Docker 使用 host 网络，使面板创建的代理端口无需逐个映射。
+```text
+V-UI 节点 + 已保存分流设置 → 受保护的订阅 URL → Mihomo 客户端刷新
+```
 
-## 使用
+完整 Mihomo 配置应有 `proxies`、`proxy-groups`、`dns`、`rules`，不再需要手动把节点复制到 ToClash。URI/Base64 不承载这些分流设置；sing-box 完整分流转换不算首轮 Mihomo 集成已完成。
 
-面板默认监听：
+alpha.3 前订阅接口暂时也受管理会话保护，不提供匿名导出，不把管理员凭据塞到 URL。
 
-~~~text
-http://服务器IP:2053/ui
-~~~
+## 测试
 
-基本流程：
+```sh
+pip install -r requirements-test.txt
+python -m compileall -q app tests main.py
+python -m unittest discover -s tests -v
+python -m playwright install chromium
+VUI_BROWSER_CHECK=1 python -m unittest discover -s tests -p test_startup.py -v
+```
 
-1. 在“入站节点”选择 **Xray** 或 **sing-box** 并创建节点。
-2. 在“Mihomo 分流”选择网络模式、服务规则和自定义分流。
-3. 在“订阅输出”复制 Mihomo、sing-box 或 Base64 地址。
-4. Mihomo 订阅会实时读取已保存的分流设置，不需要重新生成节点。
-
-### Mihomo 两种模式
-
-**常规模式**
-
-~~~text
-本机 / 局域网 → DIRECT
-用户始终直连 → DIRECT
-用户始终代理 → FORCE_PROXY
-服务预设 → PROXY / FORCE_PROXY
-中国大陆 → DIRECT
-其他 → PROXY
-~~~
-
-生成：
-
-- PROXY：手动选择，包含 AUTO、DIRECT 和全部节点。
-- AUTO：url-test 自动选择节点。
-- FORCE_PROXY：不包含 DIRECT，用于不能降级直连的服务。
-
-**默认直连模式**
-
-~~~text
-本机 / 局域网 → DIRECT
-用户指定 / 已开启服务 → FORCE_PROXY
-其他 → DIRECT
-~~~
-
-适合当前网络本身已经可以直接访问国际互联网，只希望某些服务使用固定代理出口的场景。
-
-## API
-
-主要接口：
-
-~~~text
-GET/POST/PUT/DELETE  /api/inbounds
-GET                  /api/cores/status
-POST                 /api/cores/{core}/restart
-
-GET                  /api/routing/mihomo
-PUT                  /api/routing/mihomo
-GET                  /api/routing/mihomo/catalog
-GET                  /api/routing/mihomo/preview
-
-GET                  /api/subscription/raw
-GET                  /api/subscription/mihomo.yaml
-GET                  /api/subscription/sing-box.json
-GET                  /api/subscription/link/{id}
-~~~
-
-旧的 /api/xray/* 继续保留，便于现有脚本逐步迁移。
-
-## 数据
-
-~~~text
-data/
-├── v-ui.db                 # SQLite
-├── xray.json               # Xray 运行配置
-├── sing-box.json           # sing-box 运行配置
-└── mihomo-routing.json     # Mihomo / ToClash 分流设置
-~~~
-
-已有数据库缺少 core 字段时，启动会自动补字段，并将旧节点视为 xray。
-
-## 协议参数编辑器
-
-新增节点时已经可以直接配置：
-
-- VLESS Reality / Vision。
-- Xray RAW / WebSocket / gRPC / XHTTP。
-- sing-box WebSocket / gRPC / HTTPUpgrade。
-- TLS 的 SNI、证书路径与私钥路径。
-- Hysteria2 上传/下载带宽、Salamander / Gecko obfs。
-- TUIC congestion control、UDP relay、0-RTT。
-- REALITY X25519 密钥自动生成，服务器私钥不会写入客户端订阅。
-
-需要注意：Mihomo 当前文档对 Xray-core v26.7.11+ REALITY 给出了兼容性警告。V-UI 会在订阅页显示对应提示；如果主要客户端是 Mihomo，优先使用 sing-box + VLESS REALITY。
-
-下一阶段主要剩余：
-
-- 节点编辑时的可视化参数回填。
-- ACME / acme.sh 证书申请、续期和证书状态管理。
-- 更完整的核心版本管理与升级/回滚。
-- 清理早期遗留的重复目录和历史代码。
-
-## 项目结构
-
-~~~text
-V-UI/
-├── app/
-│   ├── api/
-│   │   ├── inbounds.py
-│   │   ├── cores.py
-│   │   ├── routing.py
-│   │   ├── subscription.py
-│   │   ├── xray.py
-│   │   └── singbox.py
-│   ├── models/
-│   └── services/
-│       ├── core_manager.py
-│       ├── inbound_service.py
-│       ├── mihomo_routing.py
-│       ├── mihomo_subscription.py
-│       └── subscription_service.py
-├── bin/
-├── data/
-├── tests/
-├── web/
-├── main.py
-├── install.sh
-├── install-bin.sh
-├── Dockerfile
-└── docker-compose.yml
-~~~
-
-## 相关项目
-
-- **ToClash**：浏览器端代理链接 / Mihomo YAML 转换与分流配置工具。V-UI 的 Mihomo 规则模型与 ToClash 保持同一套设计思路。
-
-## License
-
-MIT License
+测试使用临时数据和假凭据。浏览器烟测只覆盖本地登录/账户页和认证跳转，不等于全部旧面板或代理协议验收。真实结果以该版本 PR 的准确提交和 CI 日志为准。

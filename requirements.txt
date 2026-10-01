@@ -10,3 +10,4 @@ aiofiles
 jinja2
 PyYAML
 python-multipart
+argon2-cffi==25.1.0

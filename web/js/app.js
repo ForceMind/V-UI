@@ -1,3 +1,11 @@
+addEventListener('pageshow', (event) => { if (event.persisted) location.reload(); });
+// Session cookies are HttpOnly. Do not persist credentials in Web Storage.
+axios.defaults.headers.common['X-VUI-Request'] = '1';
+axios.interceptors.response.use(response => response, error => {
+    if (error.response?.status === 401) location.replace('/login');
+    return Promise.reject(error);
+});
+
 const { createApp, ref, onMounted, reactive, computed } = Vue;
 const { ElMessage, ElMessageBox } = ElementPlus;
 const {
@@ -24,7 +32,7 @@ const app = createApp({
         const showQrDialog = ref(false);
         const qrLink = ref('');
         const siteFiles = ref([]);
-        const currentUser = ref({ username: 'admin' });
+        const currentUser = ref({ username: '' });
         const mihomoWarnings = ref([]);
 
         const routingCatalog = ref({ categories: [], presets: [] });
@@ -132,6 +140,11 @@ const app = createApp({
         };
 
         const handleSelect = (key) => {
+            if (key === 'settings') { location.assign('/account'); return; }
+            if (key === 'site') {
+                ElMessage.warning('站点托管已暂时隔离，现有文件仍保留在服务器。');
+                return;
+            }
             currentView.value = key;
             if (key === 'inbounds') fetchInbounds();
             if (key === 'routing') fetchRouting();
@@ -422,20 +435,7 @@ const app = createApp({
             }
         };
 
-        const updateProfile = async () => {
-            try {
-                const payload = {
-                    username: userForm.username,
-                    password: userForm.password || undefined
-                };
-                await axios.post('/api/auth/update_profile', payload);
-                ElMessage.success('Profile updated successfully. Please login again.');
-                currentUser.value.username = userForm.username;
-                userForm.password = '';
-            } catch (error) {
-                ElMessage.error('Failed to update profile');
-            }
-        };
+        const updateProfile = () => { location.assign('/account'); };
 
         const banIp = async () => {
             if (!banIpInput.value) return;
@@ -515,6 +515,11 @@ const app = createApp({
         };
 
         onMounted(async () => {
+            try {
+                currentUser.value = (await axios.get('/api/auth/me')).data;
+            } catch (error) {
+                return; // No polling or privileged UI activity before login.
+            }
             await Promise.all([
                 fetchSystemStatus(),
                 fetchCoreStatus(),
