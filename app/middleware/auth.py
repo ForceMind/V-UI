@@ -25,8 +25,14 @@ def configured_origin() -> str:
         raise ValueError("VUI_PUBLIC_ORIGIN must be an origin, without path or credentials")
     if parsed.scheme == "http" and parsed.hostname not in LOCAL_HOSTS:
         raise ValueError("A non-loopback panel origin must use HTTPS")
-    _ = parsed.port  # Reject invalid/non-numeric ports at startup.
-    return value
+    port = parsed.port  # Reject invalid/non-numeric ports at startup.
+    # Browsers serialize origins with lowercase scheme/host and no default port.
+    # Canonicalization must also precede the HTTPS/Secure-cookie decision.
+    host = parsed.hostname
+    authority = f"[{host}]" if ":" in host else host.encode("idna").decode("ascii")
+    if port is not None and port != (443 if parsed.scheme == "https" else 80):
+        authority += f":{port}"
+    return f"{parsed.scheme}://{authority}"
 
 
 def cookie_name() -> str:
