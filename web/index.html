@@ -31,6 +31,10 @@
                     <el-icon><Connection /></el-icon>
                     <span>入站节点</span>
                 </el-menu-item>
+                <el-menu-item index="routing">
+                    <el-icon><Setting /></el-icon>
+                    <span>Mihomo 分流</span>
+                </el-menu-item>
                 <el-menu-item index="subscriptions">
                     <el-icon><Link /></el-icon>
                     <span>订阅输出</span>
@@ -176,10 +180,237 @@
                     </el-table>
                 </div>
 
+                <div v-if="currentView === 'routing'" class="routing-view">
+                    <div class="view-header">
+                        <div>
+                            <h3>Mihomo 分流</h3>
+                            <div class="stat-text">
+                                基于 ToClash 的规则优先级、DNS policy 与服务预设。
+                            </div>
+                        </div>
+                        <div>
+                            <el-button @click="resetRoutingDefaults">恢复默认</el-button>
+                            <el-button
+                                type="primary"
+                                :loading="savingRouting"
+                                @click="saveRouting">
+                                保存并应用到订阅
+                            </el-button>
+                        </div>
+                    </div>
+
+                    <el-alert
+                        title="这里保存的是 Mihomo / Clash Meta 客户端分流，不会改变服务器上的 Xray / sing-box 入站。"
+                        type="info"
+                        :closable="false"
+                        style="margin-bottom: 18px">
+                    </el-alert>
+
+                    <el-card class="routing-section">
+                        <template #header>
+                            <div class="card-header-row">
+                                <strong>网络模式</strong>
+                                <el-tag>{{ routingForm.mode === 'standard' ? '常规分流' : '默认直连' }}</el-tag>
+                            </div>
+                        </template>
+
+                        <el-radio-group v-model="routingForm.mode">
+                            <el-radio-button label="standard">
+                                常规：国内直连，其余走 PROXY
+                            </el-radio-button>
+                            <el-radio-button label="direct">
+                                默认直连：只代理指定服务
+                            </el-radio-button>
+                        </el-radio-group>
+
+                        <div class="routing-help">
+                            <p v-if="routingForm.mode === 'standard'">
+                                使用 PROXY / AUTO / FORCE_PROXY 三组；中国大陆 GeoSite / GeoIP 直连，其他流量最终进入 PROXY。
+                            </p>
+                            <p v-else>
+                                只生成 FORCE_PROXY；未被选中的流量最终 DIRECT，适合服务器/本地网络本身可直接访问国际互联网的情况。
+                            </p>
+                        </div>
+
+                        <el-checkbox v-model="routingForm.bypassCgnat">
+                            将 100.64.0.0/10（CGNAT）视为本地直连
+                        </el-checkbox>
+                    </el-card>
+
+                    <el-card class="routing-section">
+                        <template #header>
+                            <strong>自定义网站分流</strong>
+                        </template>
+                        <div class="routing-two-column">
+                            <div>
+                                <div class="field-title">始终直连</div>
+                                <el-input
+                                    v-model="routingForm.directDomains"
+                                    type="textarea"
+                                    :rows="7"
+                                    placeholder="每行一个域名或 IP，例如&#10;example.com&#10;192.0.2.10">
+                                </el-input>
+                            </div>
+                            <div>
+                                <div class="field-title">始终代理</div>
+                                <el-input
+                                    v-model="routingForm.proxyDomains"
+                                    type="textarea"
+                                    :rows="7"
+                                    placeholder="每行一个域名或 IP，例如&#10;example.net&#10;2001:db8::1">
+                                </el-input>
+                            </div>
+                        </div>
+                    </el-card>
+
+                    <el-card class="routing-section">
+                        <template #header>
+                            <div class="card-header-row">
+                                <div>
+                                    <strong>服务规则预设</strong>
+                                    <span class="section-note">
+                                        已开启 {{ enabledPresetCount }} / {{ routingCatalog.presets.length }}
+                                    </span>
+                                </div>
+                            </div>
+                        </template>
+
+                        <div class="preset-groups">
+                            <div
+                                class="preset-group"
+                                v-for="group in presetGroups"
+                                :key="group.id">
+                                <div class="preset-group-header">
+                                    <strong>{{ group.name_zh }}</strong>
+                                    <div>
+                                        <el-button
+                                            text
+                                            size="small"
+                                            @click="setCategoryEnabled(group.id, true)">
+                                            全开
+                                        </el-button>
+                                        <el-button
+                                            text
+                                            size="small"
+                                            @click="setCategoryEnabled(group.id, false)">
+                                            全关
+                                        </el-button>
+                                    </div>
+                                </div>
+                                <div class="preset-items">
+                                    <div
+                                        class="preset-item"
+                                        v-for="preset in group.presets"
+                                        :key="preset.id">
+                                        <span>{{ preset.name_zh }}</span>
+                                        <el-switch v-model="routingForm.presets[preset.id]"></el-switch>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <el-alert
+                            title="默认保持 ToClash 的四项：OpenAI、Claude、GitHub、Google / YouTube。其他服务按需开启。"
+                            type="success"
+                            :closable="false"
+                            style="margin-top: 16px">
+                        </el-alert>
+                    </el-card>
+
+                    <el-card class="routing-section">
+                        <template #header>
+                            <div class="card-header-row">
+                                <div>
+                                    <strong>企业 / 家庭内网 DNS</strong>
+                                    <span class="section-note">可选</span>
+                                </div>
+                                <el-button size="small" @click="addIntranetZone">
+                                    添加区域
+                                </el-button>
+                            </div>
+                        </template>
+
+                        <el-empty
+                            v-if="routingForm.intranet.length === 0"
+                            description="没有配置内网 DNS">
+                        </el-empty>
+
+                        <el-table
+                            v-else
+                            :data="routingForm.intranet"
+                            border
+                            style="width: 100%">
+                            <el-table-column label="域名后缀" min-width="220">
+                                <template #default="scope">
+                                    <el-input
+                                        v-model="scope.row.suffix"
+                                        placeholder="corp.example">
+                                    </el-input>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="DNS 服务器" min-width="320">
+                                <template #default="scope">
+                                    <el-input
+                                        v-model="scope.row.nameserversText"
+                                        placeholder="192.0.2.53 或多个地址用逗号分隔">
+                                    </el-input>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="90">
+                                <template #default="scope">
+                                    <el-button
+                                        text
+                                        type="danger"
+                                        @click="removeIntranetZone(scope.$index)">
+                                        删除
+                                    </el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                    </el-card>
+
+                    <el-card class="routing-section">
+                        <template #header>
+                            <div class="card-header-row">
+                                <div>
+                                    <strong>当前规则预览</strong>
+                                    <span class="section-note">
+                                        {{ routingRuleCount }} 条规则
+                                    </span>
+                                </div>
+                                <el-tag
+                                    v-if="routingPreview.warnings?.length"
+                                    type="warning">
+                                    {{ routingPreview.warnings.length }} 类覆盖提示
+                                </el-tag>
+                            </div>
+                        </template>
+
+                        <el-alert
+                            v-for="warning in routingPreview.warnings"
+                            :key="warning.code"
+                            :title="warning.code + ' × ' + warning.count"
+                            type="warning"
+                            :closable="false"
+                            style="margin-bottom: 8px">
+                        </el-alert>
+
+                        <div
+                            class="rule-section"
+                            v-for="section in routingPreview.sections"
+                            :key="section.id">
+                            <div class="rule-section-title">
+                                {{ section.comment }}
+                            </div>
+                            <pre>{{ section.rules.join('\n') }}</pre>
+                        </div>
+                    </el-card>
+                </div>
+
                 <div v-if="currentView === 'subscriptions'">
                     <h3>订阅输出</h3>
                     <el-alert
-                        title="同一套节点可输出通用链接、Mihomo / Clash Meta 和 sing-box JSON。"
+                        title="Mihomo / Clash Meta YAML 会自动使用 Mihomo 分流页保存的 ToClash 规则；Base64 与 sing-box JSON 仅输出节点连接信息。"
                         type="info"
                         :closable="false"
                         style="margin-bottom: 20px">
