@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session
 
 from app.models.database import get_db
 from app.services.inbound_service import get_inbound, list_inbounds
+from app.services.mihomo_routing import load_routing
+from app.services.mihomo_subscription import mihomo_config
 from app.services.subscription_service import (
     base64_subscription,
-    mihomo_config,
     share_link,
     singbox_client_config,
 )
@@ -39,7 +40,11 @@ async def mihomo_subscription(
     core: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    content = mihomo_config(list_inbounds(db, core=core), _host(request, host))
+    content = mihomo_config(
+        list_inbounds(db, core=core),
+        _host(request, host),
+        load_routing(),
+    )
     return Response(content=content, media_type="text/yaml; charset=utf-8")
 
 
