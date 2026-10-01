@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-pydantic
+pydantic>=2
 sqlalchemy
 psutil
 python-jose[cryptography]
@@ -8,3 +8,4 @@ passlib[bcrypt]
 requests
 aiofiles
 jinja2
+PyYAML
