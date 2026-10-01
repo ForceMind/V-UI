@@ -1,4 +1,4 @@
-#!/bin/sh
-set -eu
-printf "%s\n" "Legacy installer disabled. Use docs/DEPLOYMENT_RC2.md and scripts/deploy.py for the verified non-root path." >&2
-exit 1
+#!/usr/bin/env bash
+set -euo pipefail
+DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+exec bash "$DIR/install.sh" "$@"

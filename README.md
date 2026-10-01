@@ -1,42 +1,56 @@
-# V-UI — 个人代理面板 / v0.3.0-rc.2
+# V-UI
 
-在 V-UI 管理节点、设置 ToClash 分流，再让客户端直接订阅完整配置。FastAPI + SQLite，不需要常驻 Node、Redis 或外部转换服务。
+**个人自用的轻量代理面板：管理节点、图形化申请证书、设置 ToClash 分流，直接订阅完整 Mihomo 配置。**
 
-**这是经过逐阶段开发的候选版本，不是正式 Release，也没有部署到你的 VPS。** 主计划和证据见 [ROADMAP](ROADMAP.md)、[迭代记录](docs/ITERATIONS.md)及 PR #2～#9 的最终 Checks。旧的大 PR #1 保留为集成草稿，未合并 master。
+版本目标：**v0.3.0**。正式发布前须完成 [发布检查](docs/RELEASING.md) 中的验收和人工发布动作；版本号不代表 GitHub Release 已公开。各阶段保留独立 PR，不自动改动真实服务器。
 
-## 当前能力
+## 能做什么
 
-- 单管理员安全登录、密码重置、会话过期/撤销、同源请求校验和持久登录限流。
-- Xray / sing-box 独立配置校验、期望/生效状态区分、失败保护、核心停启和恢复。
-- 专用只读订阅：明确节点与输出格式、独立公开节点地址、到期/轮换/撤销；不能取得管理权限。
-- ToClash 0.3.8 固定基准：两种网络模式、40项服务预设、始终直连/代理、CGNAT、内网 DNS、独立节点 DNS、规则覆盖提示。
-- 分流草稿/已保存/预览区分，冲突与损坏拒绝。同一订阅 URL 在客户端刷新后返回最新保存设置。
-- 完整 Mihomo YAML 有节点、策略组、DNS 与 rules；不需要再次打开 ToClash 手工转换。URI/Base64 和 sing-box JSON 只提供经过验证的连接配置，不冒充完整 ToClash 分流。
+V-UI 使用 FastAPI + SQLite，不依赖 Redis、常驻 Node 或在线订阅转换服务。运行包包含固定版本的核心、Python wheels 和本地前端资源；不在安装时临时解析 `latest`。
 
-## 明确的验证范围
+| 功能 | 内容 |
+| --- | --- |
+| 管理面板 | 真实管理员账号、登录/退出/改密、会话失效与接口鉴权，无默认密码 |
+| 节点管理 | Xray/sing-box 核心独立控制，候选配置校验、失败保护、状态区分与重启恢复 |
+| 图形化证书 | HTTP-01 自动签发、测试/正式环境、到期状态、自动续期、面板热更新、TLS节点绑定 |
+| ToClash 分流 | 两种模式、40项服务预设、直连/代理、自定义内网DNS、CGNAT、规则预览 |
+| 客户端订阅 | 节点/格式作用域、一次显示的专用令牌、到期、轮换、撤销；完整Mihomo配置直接导出 |
+| 安装运维 | 一个入口完成受管服务设置，开机自启、权限隔离、停机备份、校验恢复、候选切换 |
 
-公开导出和端到端链路首轮限定 **sing-box VLESS / 原生 TCP / TLS / 单用户 / 空 flow / 验证证书**。其他已有草稿协议表单不等于已验证；不支持的组合明确报错，不丢参数、不返回全直连兜底。
+**当前已验证公开导出/端到端组合：sing-box + VLESS + 原生 TCP + TLS，单用户、空 flow、启用证书校验。**已有其他协议草稿表单不等于这些组合已验证；不支持的组合会拒绝导出，不静默丢参数或退成全直连。参见 [兼容矩阵](docs/COMPATIBILITY.md)。
 
-固定核心：sing-box1.14.2、Xray26.3.27、Mihomo1.19.32。ToClash100个独立场景与40项目录对照；真实TLS连接、代理/直连DNS、错误证书/SNI/UUID拒绝和停止核心不降级直连见 [rc.1](docs/LOOPBACK_RC1.md)。UDP端到端和其他协议仍不在已验证矩阵内。
+## 快速安装
 
-## 部署方式
+首轮支持 **Ubuntu 24.04 amd64、Python 3.12、systemd**。准备自己控制的域名、正确的 A/AAAA、可达的 TCP 80、面板端口（默认8443）和节点端口（建议10443）。安装器不替你更改安全组、SSH或防火墙，不会接管已有网站。
 
-首轮只验收 **Ubuntu24.04 amd64 + CPython3.12 + 非 root 专用账号 + 单进程 + 直接 HTTPS**。完整命令、信任边界、备份恢复与回滚见 [DEPLOYMENT_RC2.md](docs/DEPLOYMENT_RC2.md)。
-
-仓库原前端模板作为开发输入，构建时确定性地替换为已校验本地资源并选用已验证节点默认值；模板变化会阻止构建，不能静默回退CDN。候选包包含固定wheel、核心与本地前端资源，安装时不联网解析latest；摘要、清单和许可随包保留。旧 install.sh/install-bin.sh 已停止执行，不能再用 root 一键脚本覆盖原服务。Docker/ARM64/PyInstaller/代理反代不是这一版验收路径。
-
-工作路径：HTTPS登录 → 节点管理（默认sing-box/VLESS/TLS，建议10443）→ 分流与订阅 → 创建专用URL → 客户端导入并刷新。
-
-证书由操作者提供；无ACME自动签发。部署需要实际证书、域名和网络配置，本仓库和测试不会自动更改你的VPS。
-
-## 开发与验证
+将**同一验收提交**的安装套件解压后，在套件目录执行：
 
 ```sh
-pip install -r requirements-test.txt
-python -m compileall -q app tests scripts main.py
-python -m unittest discover -s tests -v
+sha256sum -c SHA256SUMS
+sudo bash install.sh --bundle ./vui-linux-amd64.zip \
+  --sha256 "$(awk '$2=="vui-linux-amd64.zip" {print $1}' SHA256SUMS)"
 ```
 
-环境依赖的真实核心、独立ToClash参考、浏览器和最终包安装测试有独立CI任务；常规测试中的skip必须由相应任务覆盖，不能计作通过。新代码只在临时数据和假凭据上验证。
+脚本会询问面板域名、邮箱及CA协议同意，并在不回显的终端中设置管理员密码。随后准备独立低权限账号、HTTP-01验证服务，申请面板证书并启动HTTPS。root只执行系统初始化，面板和Certbot不会以root运行。
 
-[认证](docs/AUTH_ALPHA2.md) · [分流工作区](docs/WORKSPACE_ALPHA6.md) · [真实链路](docs/LOOPBACK_RC1.md) · [发布门槛](docs/DEPLOYMENT_RC2.md)
+发布后可指定明确版本通过同一入口下载官方Release资产；**正式Release尚未生成时不要把下面命令当作当前可用下载地址**：
+
+```sh
+sudo bash install.sh --version v0.3.0
+```
+
+安装器本身也必须来自可信仓库/套件，不能只信任来源不明压缩包附带的摘要。详见 [安装指南](docs/INSTALLATION.md)。
+
+## 日常使用
+
+HTTPS登录 → 节点管理 → 新建已验证TLS节点，选择托管证书或填写已有证书路径 → 分流与订阅 → 保存规则 → 选择节点与格式并创建专用订阅 → 客户端导入并刷新。
+
+修改草稿不会影响客户端。保存成功后客户端刷新原URL即可取得新配置，无需重新创建令牌，也无需再次打开ToClash转换。URI/Base64只承载节点；sing-box连接JSON不包含完整ToClash分流，不能与Mihomo完整YAML混称。
+
+证书管理可从导航进入：申请、测试签发、查看到期与失败原因、暂停自动续期、绑定面板或TLS节点。测试证书不能用于上线；续期失败保留旧材料但不会延长旧证书有效期。服务停止期间续期检查暂停，恢复服务后继续。
+
+## 文档
+
+[完整文档入口](docs/README.md) · [安装](docs/INSTALLATION.md) · [证书](docs/CERTIFICATES.md) · [分流/订阅](docs/CONFIGURATION.md) · [维护/备份/恢复](docs/OPERATIONS.md) · [常见故障](docs/TROUBLESHOOTING.md) · [API](docs/API.md) · [兼容范围](docs/COMPATIBILITY.md) · [安全](SECURITY.md) · [开发](CONTRIBUTING.md) · [正式发布](docs/RELEASING.md) · [变更日志](CHANGELOG.md)
+
+V-UI自身沿用原README声明的MIT许可；打包的核心、Certbot、其他依赖和ToClash仍受各自许可约束，不因项目MIT许可而变更。来源和许可见 [third_party/NOTICE.md](third_party/NOTICE.md) 及构建包中的provenance/license文件。

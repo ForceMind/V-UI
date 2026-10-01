@@ -1,0 +1,17 @@
+name: Documents and release contracts
+on:
+  pull_request:
+  push:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - run: python3 scripts/check_docs.py
+      - run: python3 -m compileall -q scripts deploy
+      - run: python3 -m unittest discover -s tests -p test_release_promotion.py -v

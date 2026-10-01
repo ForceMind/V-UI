@@ -34,6 +34,7 @@ const app = createApp({
         const siteFiles = ref([]);
         const currentUser = ref({ username: '' });
         const mihomoWarnings = ref([]);
+        const managedCertificates = ref([]);
 
         const routingCatalog = ref({ categories: [], presets: [] });
         const routingPreview = ref({ sections: [], dns: {}, warnings: [] });
@@ -59,6 +60,7 @@ const app = createApp({
             port: 443,
             settings: {},
             stream_settings: {},
+            certificate_id: null,
             profile: {
                 security: 'none',
                 transport: 'raw',
@@ -140,6 +142,7 @@ const app = createApp({
         };
 
         const handleSelect = (key) => {
+            if (key === 'certificates') { location.assign('/certificates'); return; }
             if (['routing', 'subscriptions'].includes(key)) { location.assign('/workspace'); return; }
             if (key === 'settings') { location.assign('/account'); return; }
             if (key === 'site') {
@@ -299,11 +302,14 @@ const app = createApp({
             routingForm.intranet.splice(index, 1);
         };
 
-        const openAddInbound = () => {
+        const openAddInbound = async () => {
+            try { managedCertificates.value = (await axios.get('/api/certificates')).data.filter(c => c.environment === 'production' && c.revision && c.days_remaining >= 0); }
+            catch { managedCertificates.value = []; }
             showAddInbound.value = true;
         };
 
         const resetInboundProfile = () => {
+            newInbound.certificate_id = null;
             const p = newInbound.profile;
             p.security = (
                 ['trojan', 'hysteria2', 'tuic'].includes(newInbound.protocol)
@@ -364,6 +370,7 @@ const app = createApp({
                     settings: newInbound.settings,
                     stream_settings: newInbound.stream_settings,
                     profile: { ...newInbound.profile },
+                    certificate_id: newInbound.certificate_id || null,
                     enable: true
                 };
                 const res = await axios.post('/api/inbounds', payload);
@@ -546,6 +553,7 @@ const app = createApp({
             currentUser,
             userForm,
             mihomoWarnings,
+            managedCertificates,
             showQrDialog,
             qrLink,
             routingCatalog,
