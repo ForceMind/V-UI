@@ -15,6 +15,7 @@ from app.services.inbound_service import (
     to_dict,
     update_inbound,
 )
+from app.services.protocol_profiles import profile_catalog
 
 router = APIRouter()
 
@@ -26,6 +27,7 @@ class InboundPayload(BaseModel):
     protocol: str
     settings: dict[str, Any] | str | None = None
     stream_settings: dict[str, Any] | str | None = None
+    profile: dict[str, Any] | None = None
     enable: bool = True
     expiry_time: int = 0
     tag: str | None = None
@@ -35,6 +37,11 @@ class InboundPayload(BaseModel):
 def _apply_core(db: Session, core: str) -> dict:
     inbounds = list_inbounds(db, core=core)
     return core_manager.apply(core, inbounds, restart=True)
+
+
+@router.get("/profiles")
+async def get_protocol_profiles():
+    return profile_catalog()
 
 
 @router.get("")
