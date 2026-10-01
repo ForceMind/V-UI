@@ -4,8 +4,8 @@ The user authorized completion of the scheduled roadmap on 2026-10-01. Work proc
 
 | Stage | Scope | Status |
 | --- | --- | --- |
-| alpha.3 | Read-only scoped subscription grants | Implementation and regression added; awaiting this PR's CI |
-| alpha.4 | Safe core config apply/recovery | Not started |
+| alpha.3 | Read-only scoped subscription grants | Passed: 53 tests + Chromium auth, PR #4 / 1c4724e |
+| alpha.4 | Safe core config apply/recovery | Implementation under verification |
 | alpha.5 | Fixed ToClash parity and validated exports | Not started |
 | alpha.6 | Saved routing and subscription UI | Not started |
 | rc.1 | Real loopback proxy/DNS chain | Not started |
@@ -20,5 +20,19 @@ A grant selects existing enabled node IDs, not all present/future nodes. It cann
 Connection server is independent of the panel Host. It is stored in the grant, not taken from an untrusted request header. Actual protocol combinations remain subject to alpha.5 verification.
 
 Application access logging redacts the complete /sub/ URL, including query strings. The standard main.py entry disables access logs. A separate reverse proxy must also disable/redact logging for /sub/; application code cannot sanitize logs from external proxies or the user's client. All returned configs use no-store and no-referrer. Never paste real subscription URLs into issues or command history.
+
+## alpha.4 contract
+
+Managed runtime uses immutable SHA-256 configuration revisions and a commit-last state.json pointer in data/runtime/<core>. Core validation occurs before stopping the previous process. Failed candidates do not overwrite the committed revision. Failed starts restore the previous running revision; failed recovery is reported rather than claimed successful. Validate-only endpoints explicitly return applied=false.
+
+The SQLite inbound model is desired state. Core status includes desired_revision, applied_revision and dirty. A save followed by a failed core apply returns HTTP 409 with saved=true/applied=false. Retry the core restart/apply action, not duplicate node creation. Explicit migration of an existing node between cores is rejected; legacy per-core endpoints cannot edit/delete another core's node.
+
+Only one process can own each managed runtime. In-process application is serialized and reads the current database inside the apply lock. Linux pidfd-based watchdogs terminate core children when the panel process dies; committed state recovers on panel startup, while uncommitted staging revisions are ignored. Manual stop is persistent; normal panel shutdown preserves the intended enabled state. This requires Linux with pidfd support and one Uvicorn worker.
+
+Real validation pins sing-box 1.14.2 and Xray 26.3.27, with official archive SHA-256 checksums. Xray's renderer targets that tag's clients and network fields, not the moving documentation version. Current Xray/sing-box cross-client protocol compatibility is still limited by alpha.5. Real core -test/check is not a connectivity claim.
+
+Source for pinned Xray fields: https://github.com/XTLS/Xray-core/blob/v26.3.27/infra/conf/vless.go and transport_internet.go in the same directory/tag.
+
+Recovery files and revisions use owner-only permissions. Old data/xray.json and data/sing-box.json are not imported or overwritten automatically. No actual VPS configuration or user database is modified in tests.
 
 No master merges, tags, releases or VPS deployment have been performed. This ledger does not claim unrun CI results.

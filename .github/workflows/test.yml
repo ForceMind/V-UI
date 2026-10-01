@@ -32,6 +32,18 @@ jobs:
           node --check web/js/app.js
       - name: Run tests
         run: python -m unittest discover -s tests -v
+      - name: Fetch checksum-pinned real cores
+        run: python scripts/fetch_test_cores.py /tmp/vui-test-cores
+      - name: Validate with pinned real cores
+        env:
+          VUI_TEST_CORES: /tmp/vui-test-cores
+        run: python -m unittest discover -s tests -p test_real_cores.py -v
+      - name: Upload pinned test cores and provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: vui-test-cores
+          path: /tmp/vui-test-cores
+          retention-days: 1
       - name: Install test browser
         run: python -m playwright install --with-deps chromium
       - name: Browser authentication smoke

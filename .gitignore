@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+data/
+bin/xray
+bin/sing-box
+wwwroot/
+.test-*/
