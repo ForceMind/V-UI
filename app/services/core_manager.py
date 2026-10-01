@@ -18,6 +18,45 @@ class CoreError(RuntimeError):
     pass
 
 
+def _runtime_mapping(value: dict | None) -> dict:
+    """Strip V-UI-only metadata before passing config to a proxy core."""
+    return {
+        key: item
+        for key, item in dict(value or {}).items()
+        if not key.startswith("_")
+    }
+
+
+def _modern_xray_settings(protocol: str, value: dict | None) -> dict:
+    settings = _runtime_mapping(value)
+    # Older V-UI builds followed legacy V2Ray naming. Current Xray docs use
+    # users for VLESS, VMess and Trojan. Translate persisted rows at runtime.
+    if protocol in {"vless", "vmess", "trojan"}:
+        if "users" not in settings and "clients" in settings:
+            settings["users"] = settings.pop("clients")
+    return settings
+
+
+def _modern_xray_stream(value: dict | None) -> dict:
+    stream = _runtime_mapping(value)
+    # Xray renamed the transport selector to method. Keep old V-UI rows
+    # working while emitting the current schema.
+    if "method" not in stream and "network" in stream:
+        legacy = str(stream.pop("network") or "tcp").lower()
+        stream["method"] = {
+            "tcp": "raw",
+            "raw": "raw",
+            "ws": "websocket",
+            "websocket": "websocket",
+            "grpc": "grpc",
+            "xhttp": "xhttp",
+            "httpupgrade": "httpupgrade",
+            "kcp": "mkcp",
+            "mkcp": "mkcp",
+        }.get(legacy, legacy)
+    return stream
+
+
 class BaseCoreAdapter:
     name = ""
     binary_name = ""
@@ -129,10 +168,11 @@ class XrayAdapter(BaseCoreAdapter):
                 "listen": "0.0.0.0",
                 "port": item.port,
                 "protocol": item.protocol,
-                "settings": item.settings or {},
+                "settings": _modern_xray_settings(item.protocol, item.settings),
             }
-            if item.stream_settings:
-                inbound["streamSettings"] = item.stream_settings
+            stream = _modern_xray_stream(item.stream_settings)
+            if stream:
+                inbound["streamSettings"] = stream
             built.append(inbound)
 
         return {
@@ -174,8 +214,8 @@ class SingBoxAdapter(BaseCoreAdapter):
                 "listen": "::",
                 "listen_port": item.port,
             }
-            settings = dict(item.settings or {})
-            stream = dict(item.stream_settings or {})
+            settings = _runtime_mapping(item.settings)
+            stream = _runtime_mapping(item.stream_settings)
 
             if item.protocol in {"vless", "vmess", "trojan", "hysteria2", "tuic"}:
                 users = settings.pop("users", None)
