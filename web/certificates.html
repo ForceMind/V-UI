@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>V-UI · 证书管理</title><link rel="stylesheet" href="/ui/css/workspace.css"><script src="/ui/js/certificates.js" defer></script></head>
+<body><header><a class="brand" href="/ui/">V-UI</a><nav><a href="/workspace">分流与订阅</a><a href="/certificates" aria-current="page">证书管理</a><a href="/account">账户</a></nav></header>
+<main><div class="page-title"><div><h1>证书管理</h1><p>申请、续期和安全应用，不再手动搬运私钥。</p></div><span id="stage">HTTP-01</span></div>
+<p id="notice" role="status" aria-live="polite">正在读取…</p>
+<div id="cert-workspace" hidden>
+<section><h2>01 · 申请证书</h2>
+<p class="hint">将域名的 A / AAAA 记录指向此 VPS，并允许公网访问 80 端口。由一键安装器准备 HTTP-01 验证服务。不支持通配符；已有网站占用 80 时不能强行覆盖。</p>
+<form id="request-certificate"><div class="columns"><div><label for="domain">域名</label><input id="domain" required maxlength="253" placeholder="vpn.example.com（不含 https://、端口、路径）"></div><div><label for="email">联系邮箱</label><input id="email" required type="email" maxlength="254" placeholder="admin@example.com"></div></div>
+<label for="environment">签发环境</label><select id="environment"><option value="staging">测试签发（不受浏览器信任，不可绑定上线）</option><option value="production">正式签发（Let’s Encrypt）</option></select>
+<label class="check"><input type="checkbox" id="auto-renew" checked>到续期窗口后自动申请新证书</label>
+<label class="check"><input type="checkbox" id="terms" required>我控制该域名，并同意 <a href="https://letsencrypt.org/repository/" target="_blank" rel="noopener noreferrer">Let’s Encrypt 订阅协议</a> 与域名公开记录</label>
+<p class="hint">新私钥在本机生成；页面和订阅不会返回私钥。测试与正式证书分开保存。自动续期在面板服务运行时检查；停止服务会暂停续期。</p>
+<button type="submit" id="issue" class="primary">提交申请</button></form></section>
+<section><div class="section-head"><div><h2>02 · 证书与续期</h2><p>签发成功不等于所有绑定均已应用，请查看每个使用位置的状态。</p></div><button id="refresh" type="button">刷新状态</button></div>
+<div id="certificate-list"></div></section>
+<section><h2>03 · 使用说明</h2><p class="hint">新建节点时可选择托管证书。已有 sing-box / VLESS / TLS 节点可在证书卡片中绑定。续期不会主动启动你手动停止的核心；应用失败会保留旧运行配置并显示待处理。</p>
+<p class="hint">“应用到面板”只接受正式环境、且与当前面板域名一致的证书。热更新只影响新连接，不要求退出后台。HTTP-01 的 80 端口不提供面板登录或任意文件。</p></section>
+</div><footer>V-UI · Certbot 5.8.0 · 私钥仅在服务器受控目录中保存</footer></main></body></html>
