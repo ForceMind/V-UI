@@ -1,38 +1,20 @@
 # Ordered implementation ledger
 
-The user authorized completion of the scheduled roadmap on 2026-10-01. Work proceeds sequentially from verified alpha.2 commit 7118bd6ca67b8f996f2359db7921b95ca560cd89. Older PRs remain unmerged; each new PR explicitly depends on its predecessor. Candidate-pool features are not part of this authorization.
+User authorization: complete scheduled alpha.3 through rc.2 sequentially. Optional candidate features and real deployment are excluded. Every stage has an explicit dependent PR; older PRs remain unmerged.
 
-| Stage | Scope | Status |
+| Stage | Scope | Evidence/status |
 | --- | --- | --- |
-| alpha.3 | Read-only scoped subscription grants | Passed: 53 tests + Chromium auth, PR #4 / 1c4724e |
-| alpha.4 | Safe core config apply/recovery | Implementation under verification |
-| alpha.5 | Fixed ToClash parity and validated exports | Not started |
+| alpha.3 | Scoped read-only subscription grants | PR #4, 1c4724e; CI 61, 53 tests + Chromium passed |
+| alpha.4 | Safe config apply and recovery | PR #5, 1d4fc3e; CI 63, 66 tests with separate fixed-core checks + Chromium passed |
+| alpha.5 | ToClash parity and validated exports | PR #6 under final CI; local 77 tests and 100 independent reference cases passed |
 | alpha.6 | Saved routing and subscription UI | Not started |
 | rc.1 | Real loopback proxy/DNS chain | Not started |
 | rc.2 | Selected deployment release gates | Not started |
 
-## alpha.3 contract
+alpha.3 uses explicit node IDs/formats and an independent public server address. Tokens are SHA-256 stored, shown once, expiring, revocable and rotatable; they never grant management access. App logs redact subscription paths; external proxy logs require separate configuration.
 
-Authenticated administrators create a grant at POST /api/subscriptions with label, public node server, explicit inbound_ids, formats and expires_days. Create/rotate responses show the bearer URL once. Lists never return token hashes or cleartext tokens. GET/HEAD /sub/{token}/{format} is the only non-admin export path; formats are mihomo.yaml, raw and sing-box.json. Query overrides are rejected.
+alpha.4 uses immutable configuration revisions and commit-last state pointers. Desired and applied revisions are distinct, invalid candidates preserve the previous runtime, failed starts roll back, manual stop persists and process death cleans up children. Linux with pidfd support and one worker are required. Checksum-pinned sing-box 1.14.2 and Xray 26.3.27 are configuration-tested; Xray rendering targets that exact tag's clients/network schema. Initial bad sing-box expected digest was caught before execution and corrected from the precise immutable official asset.
 
-A grant selects existing enabled node IDs, not all present/future nodes. It cannot access /api/*, administrative cookies cannot be substituted for subscription tokens, and a deleted/disabled selected node blocks export instead of silently generating DIRECT. Expired/revoked grants return the same generic 404 as invalid tokens. Password reset or account disable invalidates associated grants. Rotation intentionally extends expiry to the supplied number of days.
+alpha.5 fixes ToClash 0.3.8 / 95a5c71a516c10f97f47bfb771018ce890b2b570 and Mihomo 1.19.32. Full configuration semantics, ordered DNS policies/rules, warnings and all 40 presets are compared independently. First public export profile is explicitly sing-box VLESS/TCP/TLS; unknown or unverified profiles fail rather than silently losing parameters or turning DIRECT. See EXPORT_ALPHA5.md. Node selection, creation, and profile drafts beyond this verified export profile do not imply end-to-end support.
 
-Connection server is independent of the panel Host. It is stored in the grant, not taken from an untrusted request header. Actual protocol combinations remain subject to alpha.5 verification.
-
-Application access logging redacts the complete /sub/ URL, including query strings. The standard main.py entry disables access logs. A separate reverse proxy must also disable/redact logging for /sub/; application code cannot sanitize logs from external proxies or the user's client. All returned configs use no-store and no-referrer. Never paste real subscription URLs into issues or command history.
-
-## alpha.4 contract
-
-Managed runtime uses immutable SHA-256 configuration revisions and a commit-last state.json pointer in data/runtime/<core>. Core validation occurs before stopping the previous process. Failed candidates do not overwrite the committed revision. Failed starts restore the previous running revision; failed recovery is reported rather than claimed successful. Validate-only endpoints explicitly return applied=false.
-
-The SQLite inbound model is desired state. Core status includes desired_revision, applied_revision and dirty. A save followed by a failed core apply returns HTTP 409 with saved=true/applied=false. Retry the core restart/apply action, not duplicate node creation. Explicit migration of an existing node between cores is rejected; legacy per-core endpoints cannot edit/delete another core's node.
-
-Only one process can own each managed runtime. In-process application is serialized and reads the current database inside the apply lock. Linux pidfd-based watchdogs terminate core children when the panel process dies; committed state recovers on panel startup, while uncommitted staging revisions are ignored. Manual stop is persistent; normal panel shutdown preserves the intended enabled state. This requires Linux with pidfd support and one Uvicorn worker.
-
-Real validation pins sing-box 1.14.2 and Xray 26.3.27, with official archive SHA-256 checksums. Xray's renderer targets that tag's clients and network fields, not the moving documentation version. Current Xray/sing-box cross-client protocol compatibility is still limited by alpha.5. Real core -test/check is not a connectivity claim.
-
-Source for pinned Xray fields: https://github.com/XTLS/Xray-core/blob/v26.3.27/infra/conf/vless.go and transport_internet.go in the same directory/tag.
-
-Recovery files and revisions use owner-only permissions. Old data/xray.json and data/sing-box.json are not imported or overwritten automatically. No actual VPS configuration or user database is modified in tests.
-
-No master merges, tags, releases or VPS deployment have been performed. This ledger does not claim unrun CI results.
+No master merges, tags, Releases, user databases or VPS deployments have been performed. CI acceptance must reference the final stage head, not earlier results.
