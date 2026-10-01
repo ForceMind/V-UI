@@ -1,0 +1,41 @@
+name: ToClash reference and export verification
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ForceMind/ToClash
+          ref: 95a5c71a516c10f97f47bfb771018ce890b2b570
+          path: .reference/toclash
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install independent reference dependencies
+        working-directory: .reference/toclash
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate fixed reference fixtures
+        run: |
+          mkdir -p /tmp/vui-reference
+          cp scripts/toclash_reference.ts .reference/toclash/vui-reference.ts
+          cd .reference/toclash
+          VUI_REFERENCE_OUT=/tmp/vui-reference ./node_modules/.bin/vite-node vui-reference.ts
+      - name: Fetch pinned client binary
+        run: python scripts/fetch_mihomo.py /tmp/vui-reference
+      - name: Preserve reference evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: vui-toclash-reference
+          path: /tmp/vui-reference
+          retention-days: 1
