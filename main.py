@@ -25,7 +25,7 @@ from app.services.core_manager import core_manager
 app = FastAPI(
     title="V-UI",
     description="Lightweight Xray + sing-box management panel",
-    version="0.3.0",
+    version="0.3.0-alpha.1",
 )
 
 app.add_middleware(
