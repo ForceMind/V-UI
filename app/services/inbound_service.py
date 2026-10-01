@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.database import Inbound
+from app.services.protocol_profiles import compile_profile
 
 SUPPORTED_CORES = {"xray", "sing-box"}
 XRAY_PROTOCOLS = {"vless", "vmess", "trojan", "shadowsocks"}
@@ -56,26 +57,28 @@ def validate_core_protocol(core: str, protocol: str) -> None:
 
 def ensure_credentials(core: str, protocol: str, settings: dict) -> dict:
     settings = dict(settings)
+
     if core == "xray":
         if protocol in {"vless", "vmess"}:
-            clients = list(settings.get("clients") or [])
-            if not clients:
-                clients = [{"id": str(uuid.uuid4())}]
-            elif not clients[0].get("id"):
-                clients[0]["id"] = str(uuid.uuid4())
-            if protocol == "vmess":
-                clients[0].setdefault("alterId", 0)
-            settings["clients"] = clients
+            users = list(settings.get("users") or settings.pop("clients", []) or [])
+            if not users:
+                users = [{"id": str(uuid.uuid4())}]
+            elif not users[0].get("id"):
+                users[0]["id"] = str(uuid.uuid4())
+            settings["users"] = users
             if protocol == "vless":
                 settings.setdefault("decryption", "none")
         elif protocol == "trojan":
-            clients = list(settings.get("clients") or [])
-            if not clients:
-                clients = [{"password": secrets.token_urlsafe(18)}]
-            settings["clients"] = clients
+            users = list(settings.get("users") or settings.pop("clients", []) or [])
+            if not users:
+                users = [{"password": secrets.token_urlsafe(18)}]
+            elif not users[0].get("password"):
+                users[0]["password"] = secrets.token_urlsafe(18)
+            settings["users"] = users
         elif protocol == "shadowsocks":
-            settings.setdefault("method", "aes-128-gcm")
-            settings.setdefault("password", secrets.token_urlsafe(18))
+            settings.setdefault("network", "tcp,udp")
+            settings.setdefault("method", "aes-256-gcm")
+            settings.setdefault("password", secrets.token_urlsafe(24))
     else:
         if protocol in {"vless", "vmess"}:
             users = list(settings.get("users") or [])
@@ -88,6 +91,8 @@ def ensure_credentials(core: str, protocol: str, settings: dict) -> dict:
             users = list(settings.get("users") or [])
             if not users:
                 users = [{"password": secrets.token_urlsafe(18)}]
+            elif not users[0].get("password"):
+                users[0]["password"] = secrets.token_urlsafe(18)
             settings["users"] = users
         elif protocol == "shadowsocks":
             settings.setdefault("method", "aes-128-gcm")
@@ -96,6 +101,8 @@ def ensure_credentials(core: str, protocol: str, settings: dict) -> dict:
             users = list(settings.get("users") or [])
             if not users:
                 users = [{"password": secrets.token_urlsafe(18)}]
+            elif not users[0].get("password"):
+                users[0]["password"] = secrets.token_urlsafe(18)
             settings["users"] = users
         elif protocol == "tuic":
             users = list(settings.get("users") or [])
@@ -104,6 +111,9 @@ def ensure_credentials(core: str, protocol: str, settings: dict) -> dict:
                     "uuid": str(uuid.uuid4()),
                     "password": secrets.token_urlsafe(18),
                 }]
+            else:
+                users[0].setdefault("uuid", str(uuid.uuid4()))
+                users[0].setdefault("password", secrets.token_urlsafe(18))
             settings["users"] = users
     return settings
 
@@ -141,14 +151,51 @@ def get_inbound(db: Session, inbound_id: int) -> Inbound:
     return item
 
 
-def create_inbound(db: Session, payload: dict) -> Inbound:
-    core = str(payload.get("core") or "xray").lower()
-    protocol = str(payload.get("protocol") or "").lower()
+def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[str, str, int, dict, dict]:
+    core = str(
+        payload.get("core")
+        or (existing.core if existing else "xray")
+        or "xray"
+    ).lower()
+    protocol = str(
+        payload.get("protocol")
+        or (existing.protocol if existing else "")
+    ).lower()
     validate_core_protocol(core, protocol)
 
-    port = int(payload.get("port") or 0)
+    port = int(payload.get("port") or (existing.port if existing else 0) or 0)
     if not 1 <= port <= 65535:
         raise HTTPException(status_code=422, detail="Port must be between 1 and 65535")
+
+    settings = ensure_credentials(
+        core,
+        protocol,
+        normalize_mapping(
+            payload.get(
+                "settings",
+                existing.settings if existing else None,
+            )
+        ),
+    )
+    stream_settings = normalize_mapping(
+        payload.get(
+            "stream_settings",
+            existing.stream_settings if existing else None,
+        )
+    )
+    profile = normalize_mapping(payload.get("profile"))
+    settings, stream_settings = compile_profile(
+        core,
+        protocol,
+        profile,
+        settings,
+        stream_settings,
+    )
+    return core, protocol, port, settings, stream_settings
+
+
+def create_inbound(db: Session, payload: dict) -> Inbound:
+    core, protocol, port, settings, stream_settings = _prepared_payload(payload)
 
     duplicate = (
         db.query(Inbound)
@@ -160,13 +207,6 @@ def create_inbound(db: Session, payload: dict) -> Inbound:
             status_code=409,
             detail=f"Port {port} is already used by inbound {duplicate.id}",
         )
-
-    settings = ensure_credentials(
-        core,
-        protocol,
-        normalize_mapping(payload.get("settings")),
-    )
-    stream_settings = normalize_mapping(payload.get("stream_settings"))
 
     item = Inbound(
         user_id=payload.get("user_id"),
@@ -188,13 +228,10 @@ def create_inbound(db: Session, payload: dict) -> Inbound:
 
 def update_inbound(db: Session, inbound_id: int, payload: dict) -> Inbound:
     item = get_inbound(db, inbound_id)
-    core = str(payload.get("core", item.core or "xray")).lower()
-    protocol = str(payload.get("protocol", item.protocol)).lower()
-    validate_core_protocol(core, protocol)
-
-    port = int(payload.get("port", item.port))
-    if not 1 <= port <= 65535:
-        raise HTTPException(status_code=422, detail="Port must be between 1 and 65535")
+    core, protocol, port, settings, stream_settings = _prepared_payload(
+        payload,
+        existing=item,
+    )
 
     duplicate = (
         db.query(Inbound)
@@ -217,14 +254,8 @@ def update_inbound(db: Session, inbound_id: int, payload: dict) -> Inbound:
     item.remark = payload.get("remark", item.remark) or ""
     item.enable = bool(payload.get("enable", item.enable))
     item.expiry_time = int(payload.get("expiry_time", item.expiry_time) or 0)
-    item.settings = ensure_credentials(
-        core,
-        protocol,
-        normalize_mapping(payload.get("settings", item.settings)),
-    )
-    item.stream_settings = normalize_mapping(
-        payload.get("stream_settings", item.stream_settings)
-    )
+    item.settings = settings
+    item.stream_settings = stream_settings
     item.tag = payload.get("tag", item.tag) or f"{core}-{protocol}-{port}"
 
     db.commit()
