@@ -76,7 +76,10 @@ class OneClickSystemTests(unittest.TestCase):
             finally: os.close(fd)
             clean=output.decode(errors='replace').replace(password,'[REDACTED]')
             self.assertTrue(sent_second,clean[-8000:])
-            self.assertEqual(os.waitstatus_to_exitcode(status),0,clean[-15000:])
+            if os.waitstatus_to_exitcode(status) != 0:
+                journal=subprocess.run(['sudo','journalctl','-u','v-ui.service','-u','v-ui-http01.service','-n','60','--no-pager'],capture_output=True,text=True)
+                clean += '\n' + journal.stdout.replace(password,'[REDACTED]')
+            self.assertEqual(os.waitstatus_to_exitcode(status),0,clean[-20000:])
             self.assertNotIn(password,output.decode(errors='replace'))
             uid=pwd.getpwnam('v-ui').pw_uid;self.assertGreater(uid,0)
             for name in ('v-ui.service','v-ui-http01.socket'):

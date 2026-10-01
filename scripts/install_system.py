@@ -206,6 +206,10 @@ def unit_files(config):
 def write_root_file(path, raw, mode=0o644):
     no_symlink_ancestors(path)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+    # The installer umask is 077. Only these public, root-controlled parents
+    # must be traversable by the service account; private data stays 0700.
+    if path.parent in (CONFIG_DIR, CONTROL):
+        path.parent.chmod(0o755)
     fd, name = tempfile.mkstemp(prefix='.vui-', dir=path.parent)
     try:
         with os.fdopen(fd, 'wb') as handle:

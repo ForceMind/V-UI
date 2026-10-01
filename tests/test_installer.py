@@ -4,6 +4,7 @@ from contextlib import ExitStack
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import socket
 import stat
@@ -83,6 +84,21 @@ class InstallerTests(unittest.TestCase):
             (units/'v-ui-http01.socket').write_text(installer.MARKER)
             installer.stop_existing_units(installer.UNITS)
             self.assertEqual(run.call_args.args[0],['systemctl','stop','v-ui-http01.socket'])
+
+    def test_public_control_directories_are_readable_under_private_umask(self):
+        config=self.root/'config';control=self.root/'control';private=self.root/'private'
+        private.mkdir(mode=0o700)
+        previous=os.umask(0o077)
+        try:
+            with patch.multiple(installer,CONFIG_DIR=config,CONTROL=control):
+                installer.write_root_file(config/'service.json',b'{}')
+                installer.write_root_file(control/'launcher.py',b'# launcher')
+                installer.write_root_file(private/'secret',b'private',mode=0o600)
+            for parent in (config,control):
+                self.assertEqual(stat.S_IMODE(parent.stat().st_mode),0o755)
+            self.assertEqual(stat.S_IMODE(private.stat().st_mode),0o700)
+            self.assertEqual(stat.S_IMODE((private/'secret').stat().st_mode),0o600)
+        finally:os.umask(previous)
 
     def test_no_password_argument_or_root_package_exec(self):
         source=Path(installer.__file__).read_text()
