@@ -1,6 +1,16 @@
 const { createApp, ref, onMounted, reactive, computed } = Vue;
 const { ElMessage, ElMessageBox } = ElementPlus;
-const { Odometer, Connection, Setting, Lock, Refresh, ArrowDown, Document, UploadFilled, Link } = ElementPlusIconsVue;
+const {
+    Odometer,
+    Connection,
+    Setting,
+    Lock,
+    Refresh,
+    ArrowDown,
+    Document,
+    UploadFilled,
+    Link
+} = ElementPlusIconsVue;
 
 const app = createApp({
     setup() {
@@ -15,6 +25,18 @@ const app = createApp({
         const qrLink = ref('');
         const siteFiles = ref([]);
         const currentUser = ref({ username: 'admin' });
+
+        const routingCatalog = ref({ categories: [], presets: [] });
+        const routingPreview = ref({ sections: [], dns: {}, warnings: [] });
+        const savingRouting = ref(false);
+        const routingForm = reactive({
+            mode: 'standard',
+            directDomains: '',
+            proxyDomains: '',
+            presets: {},
+            bypassCgnat: false,
+            intranet: []
+        });
 
         const userForm = reactive({
             username: '',
@@ -49,6 +71,26 @@ const app = createApp({
             ];
         });
 
+        const presetGroups = computed(() => {
+            return routingCatalog.value.categories.map(category => ({
+                ...category,
+                presets: routingCatalog.value.presets.filter(
+                    preset => preset.category === category.id
+                )
+            }));
+        });
+
+        const enabledPresetCount = computed(() => {
+            return Object.values(routingForm.presets)
+                .filter(Boolean)
+                .length;
+        });
+
+        const routingRuleCount = computed(() => {
+            return (routingPreview.value.sections || [])
+                .reduce((sum, section) => sum + (section.rules?.length || 0), 0);
+        });
+
         const colors = [
             { color: '#f56c6c', percentage: 100 },
             { color: '#e6a23c', percentage: 80 },
@@ -57,12 +99,23 @@ const app = createApp({
             { color: '#6f7ad3', percentage: 20 }
         ];
 
+        const splitLines = (value) => {
+            return String(value || '')
+                .split(/\r?\n/)
+                .map(item => item.trim())
+                .filter(Boolean);
+        };
+
         const handleSelect = (key) => {
             currentView.value = key;
             if (key === 'inbounds') fetchInbounds();
+            if (key === 'routing') fetchRouting();
             if (key === 'settings') userForm.username = currentUser.value.username;
             if (key === 'site') fetchSiteFiles();
-            if (key === 'subscriptions') fetchCoreStatus();
+            if (key === 'subscriptions') {
+                fetchCoreStatus();
+                fetchRoutingPreview();
+            }
         };
 
         const fetchSystemStatus = async () => {
@@ -90,6 +143,111 @@ const app = createApp({
             } catch (error) {
                 ElMessage.error('Failed to load inbounds');
             }
+        };
+
+        const fetchRoutingPreview = async () => {
+            try {
+                const res = await axios.get('/api/routing/mihomo/preview');
+                routingPreview.value = res.data;
+            } catch (error) {
+                console.error('Failed to preview routing', error);
+            }
+        };
+
+        const fetchRouting = async () => {
+            try {
+                const [catalogRes, settingsRes] = await Promise.all([
+                    axios.get('/api/routing/mihomo/catalog'),
+                    axios.get('/api/routing/mihomo')
+                ]);
+                routingCatalog.value = catalogRes.data;
+                const settings = settingsRes.data;
+                routingForm.mode = settings.mode || 'standard';
+                routingForm.directDomains = (settings.direct_domains || []).join('\n');
+                routingForm.proxyDomains = (settings.proxy_domains || []).join('\n');
+                routingForm.presets = { ...(settings.presets || {}) };
+                routingForm.bypassCgnat = Boolean(settings.bypass_cgnat);
+                routingForm.intranet = (settings.intranet || []).map(zone => ({
+                    suffix: zone.suffix,
+                    nameserversText: (zone.nameservers || []).join(', ')
+                }));
+                await fetchRoutingPreview();
+            } catch (error) {
+                ElMessage.error('Failed to load Mihomo routing settings');
+            }
+        };
+
+        const saveRouting = async () => {
+            savingRouting.value = true;
+            try {
+                const payload = {
+                    mode: routingForm.mode,
+                    direct_domains: splitLines(routingForm.directDomains),
+                    proxy_domains: splitLines(routingForm.proxyDomains),
+                    presets: { ...routingForm.presets },
+                    bypass_cgnat: routingForm.bypassCgnat,
+                    intranet: routingForm.intranet
+                        .filter(zone => zone.suffix?.trim())
+                        .map(zone => ({
+                            suffix: zone.suffix.trim(),
+                            nameservers: String(zone.nameserversText || '')
+                                .split(/[\s,]+/)
+                                .map(item => item.trim())
+                                .filter(Boolean)
+                        }))
+                };
+                const res = await axios.put('/api/routing/mihomo', payload);
+                const settings = res.data;
+                routingForm.directDomains = (settings.direct_domains || []).join('\n');
+                routingForm.proxyDomains = (settings.proxy_domains || []).join('\n');
+                routingForm.presets = { ...(settings.presets || {}) };
+                routingForm.intranet = (settings.intranet || []).map(zone => ({
+                    suffix: zone.suffix,
+                    nameserversText: (zone.nameservers || []).join(', ')
+                }));
+                await fetchRoutingPreview();
+                ElMessage.success('Mihomo 分流设置已保存，订阅立即生效');
+            } catch (error) {
+                ElMessage.error(
+                    error.response?.data?.detail ||
+                    'Failed to save Mihomo routing settings'
+                );
+            } finally {
+                savingRouting.value = false;
+            }
+        };
+
+        const resetRoutingDefaults = () => {
+            routingForm.mode = 'standard';
+            routingForm.directDomains = '';
+            routingForm.proxyDomains = '';
+            routingForm.bypassCgnat = false;
+            routingForm.intranet = [];
+            routingForm.presets = Object.fromEntries(
+                routingCatalog.value.presets.map(preset => [
+                    preset.id,
+                    Boolean(preset.default_enabled)
+                ])
+            );
+        };
+
+        const setCategoryEnabled = (categoryId, enabled) => {
+            routingCatalog.value.presets
+                .filter(preset => preset.category === categoryId)
+                .forEach(preset => {
+                    routingForm.presets[preset.id] = enabled;
+                });
+        };
+
+        const addIntranetZone = () => {
+            routingForm.intranet.push({
+                suffix: '',
+                nameserversText: ''
+            });
+        };
+
+        const removeIntranetZone = (index) => {
+            routingForm.intranet.splice(index, 1);
         };
 
         const openAddInbound = () => {
@@ -278,7 +436,8 @@ const app = createApp({
             await Promise.all([
                 fetchSystemStatus(),
                 fetchCoreStatus(),
-                fetchInbounds()
+                fetchInbounds(),
+                fetchRouting()
             ]);
             setInterval(fetchSystemStatus, 3000);
             setInterval(fetchCoreStatus, 10000);
@@ -299,8 +458,21 @@ const app = createApp({
             userForm,
             showQrDialog,
             qrLink,
+            routingCatalog,
+            routingPreview,
+            routingForm,
+            presetGroups,
+            enabledPresetCount,
+            routingRuleCount,
+            savingRouting,
             handleSelect,
             fetchInbounds,
+            fetchRouting,
+            saveRouting,
+            resetRoutingDefaults,
+            setCategoryEnabled,
+            addIntranetZone,
+            removeIntranetZone,
             openAddInbound,
             onCoreChanged,
             addInbound,
