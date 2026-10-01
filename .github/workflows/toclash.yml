@@ -31,9 +31,25 @@ jobs:
           cp scripts/toclash_reference.ts .reference/toclash/vui-reference.ts
           cd .reference/toclash
           VUI_REFERENCE_OUT=/tmp/vui-reference ./node_modules/.bin/vite-node vui-reference.ts
-      - name: Fetch pinned client binary
-        run: python scripts/fetch_mihomo.py /tmp/vui-reference
+      - name: Fetch checksum-pinned binaries
+        run: |
+          python scripts/fetch_mihomo.py /tmp/vui-reference
+          python scripts/fetch_test_cores.py /tmp/vui-test-cores
+      - name: Install V-UI test dependencies
+        run: pip install -r requirements-test.txt
+      - name: Compare independent ToClash output
+        env:
+          VUI_TOCLASH_FIXTURES: /tmp/vui-reference/fixtures.json
+        run: python -m unittest discover -s tests -p test_toclash_parity.py -v
+      - name: Check generated configs with real clients
+        env:
+          VUI_TEST_MIHOMO: /tmp/vui-reference/mihomo
+          VUI_TEST_CORES: /tmp/vui-test-cores
+        run: python -m unittest discover -s tests -p test_export_real.py -v
+      - name: Verify retained ToClash license
+        run: cmp third_party/ToClash-LICENSE .reference/toclash/LICENSE
       - name: Preserve reference evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: vui-toclash-reference
