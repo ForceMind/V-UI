@@ -10,11 +10,13 @@ import zipfile
 PINS = {
     'sing-box': {'version': '1.14.2',
         'url': 'https://github.com/SagerNet/sing-box/releases/download/v1.14.2/sing-box-1.14.2-linux-amd64.tar.gz',
-        'sha256': '738a57c9f31e8c417c6b7e0c7aacd0dbd1b6df4a6fbfa63e6d9b0776ee82beb8',
+        'sha256': 'a684484d7477d1437282ee411f4d131d0340aaad60a7868841ebd5d87dd8a0c6',
+        'source': 'https://api.github.com/repos/SagerNet/sing-box/releases/assets/585840814',
         'member': 'sing-box-1.14.2-linux-amd64/sing-box'},
     'xray': {'version': '26.3.27',
         'url': 'https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip',
         'sha256': '23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae',
+        'source': 'https://api.github.com/repos/XTLS/Xray-core/releases/assets/383041956',
         'member': 'xray'},
 }
 
