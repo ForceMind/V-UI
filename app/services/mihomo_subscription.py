@@ -12,7 +12,7 @@ from app.services.mihomo_routing import (
     normalize_routing,
     unique_proxy_names,
 )
-from app.services.subscription_service import _mihomo_proxy
+from app.services.client_export import mihomo_proxy
 
 try:
     import yaml
@@ -29,7 +29,7 @@ def mihomo_config(
     for item in inbounds:
         if not item.enable:
             continue
-        proxy = _mihomo_proxy(item, host)
+        proxy = mihomo_proxy(item, host)
         if proxy:
             proxies.append(proxy)
 
