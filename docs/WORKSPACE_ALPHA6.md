@@ -23,6 +23,6 @@ GET `/api/routing/mihomo` 保留原设置响应，新增 ETag；PUT 要求 If-Ma
 
 ## 验收边界
 
-本地完整回归包含 100 个独立 ToClash oracle 场景和固定真实客户端配置检查。新增 9 项设置/并发/损坏/持久化/订阅回归。Chromium 完整操作烟测由独立 CI 开关执行，尚未回读前不算通过。
+本地完整回归包含 100 个独立 ToClash oracle 场景和固定真实客户端配置检查。新增 9 项设置/并发/损坏/持久化/订阅回归。最终提交 ab641a2 的 CI 66 与 ToClash reference run 3 已通过；工作区 Chromium 烟测完整验证草稿、保存、刷新、订阅轮换/撤销、XSS 文本处理、不保存凭据以及手机布局。见 PR #7。
 
 本阶段不宣称节点已经连通，真实代理与 DNS 路径在 rc.1 验证。标准模式需要客户端 GeoSite/GeoIP 数据；UI 上已明确提示。没有自动部署、合并前置 PR 或发布 Release。

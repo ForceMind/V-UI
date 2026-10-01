@@ -1,0 +1,39 @@
+name: Real loopback proxy and DNS chain
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: pip install -r requirements-test.txt
+      - name: Fetch checksum-pinned real binaries
+        run: |
+          python scripts/fetch_test_cores.py /tmp/vui-rc1/cores
+          python scripts/fetch_mihomo.py /tmp/vui-rc1/client
+      - name: Exercise actual TLS proxy and local DNS paths
+        env:
+          VUI_TEST_CORES: /tmp/vui-rc1/cores
+          VUI_TEST_MIHOMO: /tmp/vui-rc1/client/mihomo
+        run: |
+          set -euo pipefail
+          export VUI_DATA_DIR="$(mktemp -d)"
+          python -m unittest discover -s tests -p test_loopback_chain.py -v 2>&1 | tee /tmp/vui-rc1/result.log
+      - name: Preserve pin and test evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vui-rc1-loopback-evidence
+          path: |
+            /tmp/vui-rc1/cores/provenance.json
+            /tmp/vui-rc1/client/mihomo-provenance.json
+            /tmp/vui-rc1/result.log
+          retention-days: 7

@@ -7,8 +7,8 @@ User authorization: complete scheduled alpha.3 through rc.2 sequentially. Option
 | alpha.3 | Scoped read-only subscription grants | PR #4, 1c4724e; CI 61, 53 tests + Chromium passed |
 | alpha.4 | Safe config apply and recovery | PR #5, 1d4fc3e; CI 63, 66 tests with separate fixed-core checks + Chromium passed |
 | alpha.5 | ToClash parity and validated exports | PR #6, 698d098; CI 65 + ToClash reference run 2 passed; 77 tests and 100 independent cases |
-| alpha.6 | Saved routing and subscription UI | Implemented on its dependent branch; local 86 tests passed, 1 browser test awaiting CI |
-| rc.1 | Real loopback proxy/DNS chain | Not started |
+| alpha.6 | Saved routing and subscription UI | PR #7, ab641a2; CI 66 + reference run 3 passed; 87 unique cases across tasks plus both Chromium workflows |
+| rc.1 | Real loopback proxy/DNS chain | Implemented; local real-core tests passed; final CI required |
 | rc.2 | Selected deployment release gates | Not started |
 
 alpha.3 uses explicit node IDs/formats and an independent public server address. Tokens are SHA-256 stored, shown once, expiring, revocable and rotatable; they never grant management access. App logs redact subscription paths; external proxy logs require separate configuration.
