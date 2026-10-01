@@ -1,29 +1,14 @@
-"""Backward-compatible Xray API.
-
-New code should use /api/inbounds and /api/cores. The old paths stay available
-so existing V-UI frontends and scripts do not break during the migration.
-"""
-
+"""Legacy Xray routes retain authentication and are scoped to Xray rows."""
 from __future__ import annotations
-
 from typing import Any
-
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from app.api.cores import apply_checked
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-
 from app.models.database import get_db
-from app.services.core_manager import core_manager
-from app.services.inbound_service import (
-    create_inbound,
-    delete_inbound,
-    list_inbounds,
-    to_dict,
-    update_inbound,
-)
+from app.services.inbound_service import create_inbound, delete_inbound, get_inbound, list_inbounds, to_dict, update_inbound
 
 router = APIRouter()
-
 
 class LegacyInboundPayload(BaseModel):
     id: int | None = None
@@ -38,45 +23,35 @@ class LegacyInboundPayload(BaseModel):
     tag: str | None = None
 
 
-def _apply(db: Session):
-    return core_manager.apply(
-        "xray",
-        list_inbounds(db, core="xray"),
-        restart=True,
-    )
-
+def _check_scope(db, inbound_id):
+    if get_inbound(db, inbound_id).core != "xray":
+        raise HTTPException(404, "Inbound not found for this core")
 
 @router.get("/inbounds")
-async def get_inbounds(db: Session = Depends(get_db)):
+def get_inbounds(db: Session = Depends(get_db)):
     return [to_dict(item) for item in list_inbounds(db, core="xray")]
 
-
 @router.post("/inbounds")
-async def add_inbound(payload: LegacyInboundPayload, db: Session = Depends(get_db)):
+def add_inbound(payload: LegacyInboundPayload, db: Session = Depends(get_db)):
     data = payload.model_dump(exclude={"id", "total_traffic"})
     data["core"] = "xray"
     item = create_inbound(db, data)
-    return {"message": "Inbound added", "inbound": to_dict(item), "core": _apply(db)}
-
+    return {"message": "Inbound added", "inbound": to_dict(item), "core": apply_checked("xray")}
 
 @router.put("/inbounds/{inbound_id}")
-async def edit_inbound(
-    inbound_id: int,
-    payload: LegacyInboundPayload,
-    db: Session = Depends(get_db),
-):
+def edit_inbound(inbound_id: int, payload: LegacyInboundPayload, db: Session = Depends(get_db)):
+    _check_scope(db, inbound_id)
     data = payload.model_dump(exclude={"id", "total_traffic"})
     data["core"] = "xray"
     item = update_inbound(db, inbound_id, data)
-    return {"message": "Inbound updated", "inbound": to_dict(item), "core": _apply(db)}
-
+    return {"message": "Inbound updated", "inbound": to_dict(item), "core": apply_checked("xray")}
 
 @router.delete("/inbounds/{inbound_id}")
-async def remove_inbound(inbound_id: int, db: Session = Depends(get_db)):
+def remove_inbound(inbound_id: int, db: Session = Depends(get_db)):
+    _check_scope(db, inbound_id)
     delete_inbound(db, inbound_id)
-    return {"message": "Inbound deleted", "core": _apply(db)}
-
+    return {"message": "Inbound deleted", "core": apply_checked("xray")}
 
 @router.post("/restart")
-async def restart_xray(db: Session = Depends(get_db)):
-    return _apply(db)
+def restart_xray():
+    return apply_checked("xray")

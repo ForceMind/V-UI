@@ -17,7 +17,7 @@ from app.middleware.auth import AdminAuthMiddleware, configured_origin
 from app.services.core_manager import core_manager
 from app.services.log_redaction import install_log_redaction
 
-app = FastAPI(title="V-UI", description="Lightweight Xray + sing-box management panel", version="0.3.0-alpha.3")
+app = FastAPI(title="V-UI", description="Lightweight Xray + sing-box management panel", version="0.3.0-alpha.4")
 app.add_middleware(AdminAuthMiddleware)
 
 app.include_router(system.router, prefix="/api/system", tags=["System"])
@@ -46,6 +46,7 @@ async def startup_event():
     configured_origin()
     install_log_redaction()
     init_db()
+    core_manager.recover_all()
     if os.name == "posix" and DB_PATH.is_file():
         DB_PATH.chmod(0o600)
 
