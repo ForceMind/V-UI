@@ -12,6 +12,7 @@ from app.api import (
     cores,
     files,
     inbounds,
+    routing,
     security,
     singbox,
     subscription,
@@ -24,7 +25,7 @@ from app.services.core_manager import core_manager
 app = FastAPI(
     title="V-UI",
     description="Lightweight Xray + sing-box management panel",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 app.add_middleware(
@@ -38,6 +39,7 @@ app.add_middleware(
 app.include_router(system.router, prefix="/api/system", tags=["System"])
 app.include_router(inbounds.router, prefix="/api/inbounds", tags=["Inbounds"])
 app.include_router(cores.router, prefix="/api/cores", tags=["Cores"])
+app.include_router(routing.router, prefix="/api/routing", tags=["Routing"])
 app.include_router(subscription.router, prefix="/api/subscription", tags=["Subscription"])
 app.include_router(xray.router, prefix="/api/xray", tags=["Xray"])
 app.include_router(singbox.router, prefix="/api/singbox", tags=["Sing-box"])
