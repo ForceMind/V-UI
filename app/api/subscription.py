@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.database import get_db
 from app.services.validated_export import base64_subscription, export_warnings, share_link, singbox_client_config
 from app.services.inbound_service import get_inbound, list_inbounds
-from app.services.mihomo_routing import load_routing
+from app.services.routing_store import load_routing
 from app.services.mihomo_subscription import mihomo_config
 
 router = APIRouter()

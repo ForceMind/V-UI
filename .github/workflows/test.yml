@@ -30,6 +30,7 @@ jobs:
         run: |
           node --check web/js/account.js
           node --check web/js/app.js
+          node --check web/js/workspace.js
       - name: Run tests
         run: python -m unittest discover -s tests -v
       - name: Fetch checksum-pinned real cores
@@ -50,6 +51,10 @@ jobs:
         env:
           VUI_BROWSER_CHECK: "1"
         run: python -m unittest discover -s tests -p test_startup.py -v
+      - name: Browser routing and subscription workflow
+        env:
+          VUI_WORKSPACE_BROWSER: "1"
+        run: python -m unittest discover -s tests -p test_workspace_browser.py -v
       - name: Upload reproducible source snapshot
         if: always()
         uses: actions/upload-artifact@v4
