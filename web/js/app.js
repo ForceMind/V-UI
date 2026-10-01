@@ -22,7 +22,7 @@ const {
 
 const app = createApp({
     setup() {
-        const currentView = ref('dashboard');
+        const currentView = ref(location.hash === '#inbounds' ? 'inbounds' : 'dashboard');
         const systemStatus = ref({});
         const coreStatus = ref({});
         const inbounds = ref([]);
@@ -140,6 +140,7 @@ const app = createApp({
         };
 
         const handleSelect = (key) => {
+            if (['routing', 'subscriptions'].includes(key)) { location.assign('/workspace'); return; }
             if (key === 'settings') { location.assign('/account'); return; }
             if (key === 'site') {
                 ElMessage.warning('站点托管已暂时隔离，现有文件仍保留在服务器。');
