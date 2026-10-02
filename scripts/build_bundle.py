@@ -21,6 +21,7 @@ sys.path.insert(0,str(ROOT))
 from app.release_tools import PLATFORM,create_archive,supported_environment
 from vendor_frontend import fetch as fetch_frontend
 from fetch_test_cores import fetch as fetch_cores
+from fetch_portable_runtimes import fetch as fetch_runtimes, PINS as RUNTIME_PINS
 from prepare_frontend import prepare as prepare_frontend
 
 
@@ -47,13 +48,22 @@ def core_sources(payload: Path):
     (output/'PROVENANCE.json').write_text(json.dumps(proof,indent=2))
 
 
-def wheel_lock(payload: Path):
+TARGETS = {
+    "x86_64-gnu": "manylinux2014_x86_64",
+    "aarch64-gnu": "manylinux2014_aarch64",
+    "x86_64-musl": "musllinux_1_2_x86_64",
+    "aarch64-musl": "musllinux_1_2_aarch64",
+}
+
+def wheel_lock(payload: Path, key: str):
     source=ROOT/'requirements-runtime.txt'
     requirements=[line.strip() for line in source.read_text().splitlines() if line.strip() and not line.startswith('#')]
     expected={re.sub('[-_.]+','-',name).lower():version for name,version in (line.split('==') for line in requirements)}
-    wheels=payload/'wheels';wheels.mkdir(mode=0o700)
+    wheels=payload/'wheels'/key;wheels.mkdir(parents=True,mode=0o700)
     subprocess.run([sys.executable,'-m','pip','--isolated','--disable-pip-version-check','download',
-        '--index-url','https://pypi.org/simple','--only-binary=:all:','--no-deps','-r',str(source),'--dest',str(wheels)],check=True,timeout=180)
+        '--index-url','https://pypi.org/simple','--only-binary=:all:','--no-deps',
+        '--platform',TARGETS[key],'--python-version','312','--implementation','cp','--abi','cp312',
+        '-r',str(source),'--dest',str(wheels)],check=True,timeout=240)
     found={}
     for wheel in sorted(wheels.glob('*.whl')):
         with zipfile.ZipFile(wheel) as archive:
@@ -63,9 +73,8 @@ def wheel_lock(payload: Path):
         name=re.sub('[-_.]+','-',metadata['Name']).lower();version=metadata['Version']
         if expected.get(name)!=version or name in found:raise ValueError('Wheel does not match the exact runtime lock')
         found[name]=f"{name}=={version} --hash=sha256:{hashlib.sha256(wheel.read_bytes()).hexdigest()}"
-    if set(found)!=set(expected):raise ValueError('Missing locked wheel')
-    (payload/'requirements.lock').write_text('\n'.join(found[name] for name in sorted(found))+'\n')
-
+    if set(found)!=set(expected):raise ValueError('Missing locked wheel for '+key)
+    (payload/('requirements.'+key+'.lock')).write_text('\n'.join(found[name] for name in sorted(found))+'\n')
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('destination',type=Path)
@@ -89,15 +98,20 @@ def main():
             target=payload/name;target.parent.mkdir(parents=True,exist_ok=True,mode=0o700);shutil.copyfile(source,target)
         prepare_frontend(payload)
         fetch_frontend(payload/'web/vendor')
-        fetch_cores(payload/'cores')
+        for arch in ('x86_64','aarch64'):
+            fetch_cores(payload/'cores'/arch,arch)
+        fetch_runtimes(payload/'runtimes')
         core_sources(payload)
-        wheel_lock(payload)
+        for key in TARGETS:
+            wheel_lock(payload,key)
         # Included bin hashes, npm archive integrities and lock files are themselves
         # protected by the final manifest and independent archive SHA-256.
         version=(ROOT/'VERSION').read_text().strip()
         if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',version):raise ValueError('Invalid release version')
         identity=version+'-'+args.source_commit[:12]
         metadata={'kind':'release','release_id':identity,'platform':PLATFORM,'source_commit':args.source_commit,'version':version,
+            'targets':sorted(TARGETS),'python_runtime_version':'3.12.14+20260901',
+            'portable_runtime_pins':RUNTIME_PINS,
             'protocol_profile':'sing-box VLESS/TCP/TLS single-user verified certificate',
             'runtime_pins':(ROOT/'requirements-runtime.txt').read_text()}
         checksum=create_archive(payload,args.destination,metadata)

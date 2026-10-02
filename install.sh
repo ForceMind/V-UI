@@ -3,12 +3,46 @@
 # Published assets: sudo bash install.sh --version v0.3.0 [installer arguments]
 set -euo pipefail
 umask 077
+
+find_python() {
+  local candidate
+  for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys;raise SystemExit(0 if sys.version_info >= (3,9) else 1)' 2>/dev/null; then
+      command -v "$candidate"; return 0
+    fi
+  done
+  return 1
+}
+bootstrap_tools() {
+  local pm=''
+  for pm in apt-get dnf yum zypper pacman apk xbps-install; do
+    command -v "$pm" >/dev/null 2>&1 && break
+    pm=''
+  done
+  [[ -n "$pm" ]] || { echo 'Python 3.9+ is required to start the installer and no known package manager was found.' >&2; exit 1; }
+  echo "No Python 3.9+ found. Detected package manager: $pm"
+  case "$pm" in
+    apt-get) apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y python3 ca-certificates curl ;;
+    dnf) dnf install -y python3 ca-certificates curl ;;
+    yum) yum install -y python3 ca-certificates curl ;;
+    zypper) zypper --non-interactive install python3 ca-certificates curl ;;
+    pacman) pacman -Sy --noconfirm --needed python ca-certificates curl ;;
+    apk) apk add --no-cache python3 ca-certificates curl ;;
+    xbps-install) xbps-install -Sy python3 ca-certificates curl ;;
+  esac
+}
+PYTHON="$(find_python || true)"
+if [[ -z "$PYTHON" ]]; then
+  [[ "${EUID:-$(id -u)}" -eq 0 ]] || { echo 'Run with sudo so prerequisites can be installed.' >&2; exit 1; }
+  bootstrap_tools
+  PYTHON="$(find_python)" || { echo 'Package manager did not provide Python 3.9+.' >&2; exit 1; }
+fi
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "${1:-}" != '--version' ]]; then
   if [[ -f "$SCRIPT_DIR/scripts/install_system.py" ]]; then
-    exec python3 "$SCRIPT_DIR/scripts/install_system.py" "$@"
+    exec "$PYTHON" "$SCRIPT_DIR/scripts/install_system.py" "$@"
   elif [[ -f "$SCRIPT_DIR/install_system.py" ]]; then
-    exec python3 "$SCRIPT_DIR/install_system.py" "$@"
+    exec "$PYTHON" "$SCRIPT_DIR/install_system.py" "$@"
   fi
   printf '%s\n' 'Local installer is missing. Use the complete verified kit or --version vX.Y.Z.' >&2
   exit 1
@@ -25,7 +59,7 @@ for FILE in SHA256SUMS install_system.py vui-linux-amd64.zip; do
     "$BASE/$FILE" -o "$WORK/$FILE"
 done
 # Only fixed names are accepted. Never execute paths named by a downloaded list.
-python3 - "$WORK" <<'PY'
+"$PYTHON" - "$WORK" <<'PY'
 import hashlib,pathlib,re,sys
 root=pathlib.Path(sys.argv[1]);entries={}
 for line in (root/'SHA256SUMS').read_text().splitlines():
@@ -38,4 +72,4 @@ for name in ('install_system.py','vui-linux-amd64.zip'):
 PY
 # This checksum is from the explicitly selected official release, not a signature.
 # Audit install.sh itself and the repository/release source before executing as root.
-python3 "$WORK/install_system.py" --bundle "$WORK/vui-linux-amd64.zip" --sha256 "$(cat "$WORK/bundle.sha")" "$@"
+"$PYTHON" "$WORK/install_system.py" --bundle "$WORK/vui-linux-amd64.zip" --sha256 "$(cat "$WORK/bundle.sha")" "$@"

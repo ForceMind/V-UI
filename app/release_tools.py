@@ -17,12 +17,63 @@ import sys
 import tempfile
 import time
 import uuid
-import venv
+import tarfile
 from urllib.error import HTTPError
 from urllib.request import ProxyHandler, build_opener
 import zipfile
 
-PLATFORM = 'linux-amd64-cpython312'
+PLATFORM = 'linux-multi-cpython312'
+ARCHES={'x86_64':'x86_64','amd64':'x86_64','aarch64':'aarch64','arm64':'aarch64'}
+
+def target_key() -> str:
+    if platform.system()!='Linux': raise ReleaseError('V-UI server packages support Linux only')
+    arch=ARCHES.get(platform.machine().lower())
+    if not arch: raise ReleaseError('Unsupported CPU architecture: '+platform.machine())
+    musl=bool(list(Path('/lib').glob('ld-musl-*.so.1')) or list(Path('/usr/lib').glob('ld-musl-*.so.1')))
+    if not musl:
+        name,_=platform.libc_ver(); musl=name.lower()=='musl'
+    return arch+('-musl' if musl else '-gnu')
+
+def target_arch() -> str:
+    return target_key().split('-',1)[0]
+
+def runtime_python(release: Path) -> Path:
+    value=release/'runtime'/'python'/'bin'/'python3'
+    if value.is_symlink():
+        resolved=value.resolve()
+        if release.resolve() not in resolved.parents: raise ReleaseError('Runtime Python symlink escapes release')
+    if not value.exists(): raise ReleaseError('Portable Python runtime is missing')
+    return value
+
+def runtime_tree_digest(root: Path) -> str:
+    digestor=hashlib.sha256()
+    for path in sorted(root.rglob('*')):
+        rel=path.relative_to(root).as_posix().encode()
+        digestor.update(rel+b'\0')
+        if path.is_symlink():
+            digestor.update(b'L'+os.readlink(path).encode()+b'\0')
+        elif path.is_file():
+            digestor.update(b'F'+str(path.stat().st_mode & 0o777).encode()+b'\0')
+            with path.open('rb') as handle:
+                for chunk in iter(lambda:handle.read(1024*1024),b''):digestor.update(chunk)
+        elif path.is_dir(): digestor.update(b'D\0')
+        else: raise ReleaseError('Unsupported runtime file type')
+    return digestor.hexdigest()
+
+def extract_runtime(archive_path: Path, destination: Path) -> None:
+    destination.mkdir(parents=True,mode=0o700)
+    with tarfile.open(archive_path,'r:gz') as archive:
+        members=archive.getmembers()
+        for member in members:
+            parts=PurePosixPath(member.name).parts
+            if not parts or parts[0]!='python' or any(part in ('','..') for part in parts) or member.name.startswith('/'):
+                raise ReleaseError('Unsafe portable Python archive path')
+            if not (member.isfile() or member.isdir() or member.issym() or member.islnk()):
+                raise ReleaseError('Portable Python archive contains unsupported entry')
+            if member.issym() or member.islnk():
+                target=PurePosixPath(member.linkname)
+                if target.is_absolute() or '..' in target.parts: raise ReleaseError('Unsafe portable Python link')
+        archive.extractall(destination)
 MAX_ARCHIVE = 350_000_000
 MAX_EXPANDED = 600_000_000
 MANIFEST = 'MANIFEST.json'
@@ -84,11 +135,11 @@ def stopped(root: Path):
         yield
 
 def supported_environment():
-    if platform.system() != 'Linux' or platform.machine() not in ('x86_64', 'amd64') or sys.version_info[:2] != (3, 12):
-        raise ReleaseError('Only Linux amd64 / CPython 3.12 is release-validated')
-    if os.geteuid() == 0: raise ReleaseError('Run as an unprivileged dedicated user, not root')
-    if not hasattr(os, 'pidfd_open'): raise ReleaseError('Linux pidfd support is required')
-    fd = os.pidfd_open(os.getpid()); os.close(fd)
+    key=target_key()
+    if os.geteuid()==0: raise ReleaseError('Run release operations as the unprivileged service user, not root')
+    if not hasattr(os,'pidfd_open'): raise ReleaseError('Linux pidfd support is required')
+    fd=os.pidfd_open(os.getpid());os.close(fd)
+    return key
 
 def files_in(root: Path) -> dict:
     result = {}
@@ -173,12 +224,13 @@ def verify_payload(payload: Path) -> dict:
 def child_env(payload: Path, data: Path) -> dict:
     env = {k:v for k,v in os.environ.items() if not k.startswith(('PIP_', 'PYTHON'))}
     env.update(PYTHONPATH=str(payload), PYTHONDONTWRITEBYTECODE='1', VUI_DATA_DIR=str(data),
-               VUI_BIN_DIR=str(payload/'cores'), VUI_PUBLIC_ORIGIN='', VUI_RELEASE_ROOT='')
+               VUI_BIN_DIR=str(payload/'cores'/target_arch()), VUI_PUBLIC_ORIGIN='', VUI_RELEASE_ROOT='')
     return env
 
 def health_check(release: Path):
     payload = release / 'payload'; verify_payload(payload)
-    python = release / 'venv' / 'bin' / 'python'
+    verify_runtime(release)
+    python = runtime_python(release)
     with tempfile.TemporaryDirectory(prefix='vui-candidate-') as directory:
         data = Path(directory)
         env = child_env(payload, data/'data'); env['VUI_BIN_DIR']=str(data/'no-cores')
@@ -211,11 +263,19 @@ def release_id(value: str) -> str:
         raise ReleaseError('Invalid release identifier')
     return value
 
+def verify_runtime(release: Path) -> dict:
+    ready=json.loads((release/'READY.json').read_text())
+    if ready.get('runtime_key')!=target_key(): raise ReleaseError('Prepared release runtime does not match this host')
+    if runtime_tree_digest(release/'runtime')!=ready.get('runtime_tree_sha256'):
+        raise ReleaseError('Portable runtime changed after preparation')
+    return ready
+
 def stage(archive: Path, expected_sha: str, root: Path) -> str:
-    supported_environment(); root=private_root(root)
+    key=supported_environment(); root=private_root(root)
     with lease(root/'.operation.lock'), tempfile.TemporaryDirectory(prefix='.stage-',dir=root) as temporary:
         payload=Path(temporary)/'payload'; meta=unpack_verified(archive,expected_sha,payload)
-        if meta.get('kind') != 'release' or meta.get('platform') != PLATFORM: raise ReleaseError('Not a supported release archive')
+        if meta.get('kind')!='release' or meta.get('platform')!=PLATFORM or key not in meta.get('targets',[]):
+            raise ReleaseError('Release archive does not support this Linux target: '+key)
         identity=release_id(meta.get('release_id'))
         releases=root/'releases'
         if releases.is_symlink(): raise ReleaseError('Release parent cannot be a symbolic link')
@@ -225,15 +285,25 @@ def stage(archive: Path, expected_sha: str, root: Path) -> str:
         final.mkdir(parents=True,mode=0o700)
         try:
             os.replace(payload,final/'payload')
-            venv.EnvBuilder(with_pip=True,symlinks=False).create(final/'venv')
-            python=final/'venv'/'bin'/'python'
+            runtime_archive=final/'payload'/'runtimes'/(key+'.tar.gz')
+            pin=(meta.get('portable_runtime_pins') or {}).get(key,{})
+            if not runtime_archive.is_file() or digest(runtime_archive.read_bytes())!=pin.get('sha256'):
+                raise ReleaseError('Portable Python runtime pin mismatch')
+            extract_runtime(runtime_archive,final/'runtime')
+            python=runtime_python(final)
             env=child_env(final/'payload',root/'data')
+            subprocess.run([str(python),'-m','ensurepip','--upgrade'],env=env,check=True,timeout=60,stdout=subprocess.DEVNULL)
+            lock=final/'payload'/('requirements.'+key+'.lock')
+            wheels=final/'payload'/'wheels'/key
             subprocess.run([str(python),'-m','pip','--isolated','--disable-pip-version-check','install',
-                '--no-index','--only-binary=:all:','--require-hashes','--find-links',str(final/'payload'/'wheels'),
-                '-r',str(final/'payload'/'requirements.lock')],env=env,check=True,timeout=120)
+                '--no-index','--only-binary=:all:','--require-hashes','--find-links',str(wheels),'-r',str(lock)],
+                env=env,check=True,timeout=180)
             subprocess.run([str(python),'-m','pip','--isolated','check'],env=env,check=True,timeout=20)
+            ready={'archive_sha256':expected_sha,'manifest_sha256':digest((final/'payload'/MANIFEST).read_bytes()),
+                   'runtime_key':key,'runtime_archive_sha256':pin['sha256'],
+                   'runtime_tree_sha256':runtime_tree_digest(final/'runtime')}
+            atomic_json(final/'READY.json',ready)
             health_check(final)
-            atomic_json(final/'READY.json',{'archive_sha256':expected_sha,'manifest_sha256':digest((final/'payload'/MANIFEST).read_bytes())})
             return identity
         except Exception:
             shutil.rmtree(final); raise
@@ -243,7 +313,7 @@ def active(root: Path) -> tuple[Path,dict]:
         current=json.loads((root/'CURRENT.json').read_text()); identity=release_id(current['release_id'])
         release=root/'releases'/identity
         if release.is_symlink(): raise ReleaseError('Release must not be a symbolic link')
-        meta=verify_payload(release/'payload'); ready=json.loads((release/'READY.json').read_text())
+        meta=verify_payload(release/'payload'); ready=verify_runtime(release)
         if digest((release/'payload'/MANIFEST).read_bytes()) != ready['manifest_sha256']:
             raise ReleaseError('Release manifest changed after health check')
         if meta['release_id'] != identity: raise ReleaseError('Release identity mismatch')
@@ -256,7 +326,7 @@ def activate(root: Path, identity: str):
         release=root/'releases'/identity
         if release.is_symlink() or (root/'releases').is_symlink(): raise ReleaseError('Symbolic release is not permitted')
         meta=verify_payload(release/'payload')
-        ready=json.loads((release/'READY.json').read_text())
+        ready=verify_runtime(release)
         if digest((release/'payload'/MANIFEST).read_bytes()) != ready['manifest_sha256'] or meta['release_id'] != identity:
             raise ReleaseError('Release not prepared')
         health_check(release)
