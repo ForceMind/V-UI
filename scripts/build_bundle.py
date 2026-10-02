@@ -79,7 +79,8 @@ def wheel_lock(payload: Path, key: str):
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('destination',type=Path)
     p.add_argument('--source-commit',required=True);p.add_argument('--target');args=p.parse_args()
-    supported_environment();os.umask(0o077)
+    os.umask(0o077)
+    if os.name!='posix':raise ValueError('Linux build environment required')
     if not re.fullmatch('[a-f0-9]{40}',args.source_commit):raise ValueError('Exact source commit required')
     actual=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     if actual!=args.source_commit:raise ValueError('Build source does not match the requested commit')
