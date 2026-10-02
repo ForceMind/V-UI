@@ -98,7 +98,7 @@ def extract_runtime(archive_path: Path, destination: Path) -> None:
                 elif member.islnk():
                     _normalized_archive_path(PurePosixPath(member.linkname))
             archive.extractall(destination,filter='data')
-    except (tarfile.TarError,OSError,ValueError,KeyError) as exc:
+    except (ReleaseError,tarfile.TarError,OSError,ValueError,KeyError) as exc:
         shutil.rmtree(destination,ignore_errors=True)
         if isinstance(exc,ReleaseError): raise
         raise ReleaseError('Portable Python extraction failed') from None

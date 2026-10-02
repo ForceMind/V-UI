@@ -60,6 +60,7 @@ jobs:
           mkdir -p /tmp/vui-portable
           docker run --rm             -e SOURCE="$SOURCE" -e ARCH="$ARCH"             -v "$PWD:/src" -v /tmp/vui-portable:/out             alpine:3.22 /bin/sh -euxc '
               apk add --no-cache python3 python3-dev py3-pip git cargo rust build-base libffi-dev openssl-dev ca-certificates
+              git config --global --add safe.directory /src
               cd /src
               python3 scripts/build_bundle.py "/out/vui-linux-${ARCH}-musl.zip" --source-commit "$SOURCE" --target "${ARCH}-musl"
               adduser -D smoke
@@ -92,5 +93,5 @@ jobs:
           probe debian:13-slim 'apt-get update >/dev/null && apt-get install -y python3 >/dev/null'
           probe fedora:43 'dnf install -y python3 >/dev/null'
           probe archlinux:latest 'pacman -Sy --noconfirm python >/dev/null'
-          probe opensuse/leap:15.6 'zypper --non-interactive install python3 >/dev/null'
+          probe opensuse/leap:15.6 'zypper --non-interactive install python311 >/dev/null && ln -sf /usr/bin/python3.11 /usr/local/bin/python3'
           probe alpine:3.22 'apk add --no-cache python3 >/dev/null'
