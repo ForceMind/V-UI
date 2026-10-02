@@ -32,3 +32,20 @@
 正式Release流程已经设计为手动动作：目标为当前默认分支HEAD，全套最新检查成功，晋升已测试同一个套件，默认草稿，不覆盖现有tag/Release。前置PR仍需审阅合并；没有自动访问用户VPS或真实数据库。
 
 当前公开导出和真实链路首轮仅限sing-box/VLESS/TCP/TLS单用户、空flow、证书验证。其他协议/UDP、DNS-01/通配符、完整sing-box规则迁移、任意YAML导入、Docker/ARM64和反代接管属于后续独立版本，不在本轮偷偷扩做。
+
+## v0.3.1 — Linux 可移植安装（PR #12）
+
+- 发行版/CPU/libc/init/package manager 自动检测；
+- x86_64/ARM64、glibc/musl 固定便携 Python 3.12 目标包；
+- systemd/OpenRC 服务后端；
+- 80/面板/默认节点端口检查；UFW/firewalld 仅在用户明确 `yes` 后开放；
+- 自定义 nftables/iptables 与云安全组等待人工确认；
+- 代表性 Debian/Fedora/Arch/openSUSE/Alpine 探测，ARM64/musl 原生构建启动验证。
+
+## v0.3.2 — 节点完整编辑和参数回填
+
+现有节点需要从 `settings` / `stream_settings` 反解为统一编辑表单，保留未修改凭据和证书绑定，保存继续使用候选校验/失败保护。浏览器回归覆盖创建→编辑→刷新→再次编辑→导出。
+
+## v0.4.x — 协议矩阵逐项完成
+
+顺序：Trojan/TLS → Shadowsocks → VMess/TLS → VLESS WS/gRPC → Hysteria2 → TUIC → REALITY/Vision → XHTTP/HTTPUpgrade → UDP专项。每一项都必须同时有服务端配置、编辑UI、URI/Mihomo/sing-box导出、真实核心/客户端检查、正向连接和错误凭据/TLS失败路径，不能因为表单存在就写成已支持。
