@@ -24,7 +24,7 @@ class ReleaseToolsTests(unittest.TestCase):
         self.root=Path(self.stack.enter_context(tempfile.TemporaryDirectory(prefix='vui-release-unit-')))
         self.source=self.root/'source';self.source.mkdir(mode=0o700)
         (self.source/'main.py').write_text('print("fixture")\n')
-        self.metadata={'kind':'release','platform':tools.PLATFORM,'release_id':'fixture-one'}
+        self.metadata={'kind':'release','platform':tools.PLATFORM,'release_id':'fixture-one','targets':[tools.target_key()]}
 
     def archive(self, source=None, identity='one'):
         target=self.root/(identity+'.zip')
@@ -36,7 +36,10 @@ class ReleaseToolsTests(unittest.TestCase):
         archive,checksum=self.archive(identity=identity)
         release=self.root/'releases'/identity;release.mkdir(parents=True,mode=0o700)
         tools.unpack_verified(archive,checksum,release/'payload')
-        tools.atomic_json(release/'READY.json',{'manifest_sha256':tools.digest((release/'payload'/MANIFEST).read_bytes())})
+        runtime=release/'runtime'/'python'/'bin';runtime.mkdir(parents=True)
+        python=runtime/'python3';python.write_text('#! /bin/sh\n');python.chmod(0o700)
+        tools.atomic_json(release/'READY.json',{'manifest_sha256':tools.digest((release/'payload'/MANIFEST).read_bytes()),
+            'runtime_key':tools.target_key(),'runtime_tree_sha256':tools.runtime_tree_digest(release/'runtime')})
         return release
 
     def fixture_database(self):
@@ -199,11 +202,11 @@ class ReleaseToolsTests(unittest.TestCase):
         self.assertIn("security: 'tls'",(target/'web/js/app.js').read_text())
         with self.assertRaises(ValueError):prepare(target)
 
-    def test_selected_environment_rejects_root_and_wrong_python(self):
-        with patch.object(tools.platform,'system',return_value='Linux'),patch.object(tools.platform,'machine',return_value='x86_64'),patch.object(tools.sys,'version_info',(3,12)),patch.object(tools.os,'geteuid',return_value=0):
+    def test_selected_environment_rejects_root_and_unknown_arch(self):
+        with patch.object(tools.platform,'system',return_value='Linux'),patch.object(tools.platform,'machine',return_value='x86_64'),patch.object(tools.os,'geteuid',return_value=0):
             with self.assertRaises(tools.ReleaseError):tools.supported_environment()
-        with patch.object(tools.sys,'version_info',(3,13)):
-            with self.assertRaises(tools.ReleaseError):tools.supported_environment()
+        with patch.object(tools.platform,'machine',return_value='mips64'):
+            with self.assertRaises(tools.ReleaseError):tools.target_key()
 
 MANIFEST=tools.MANIFEST
 if __name__=='__main__':unittest.main()

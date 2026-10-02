@@ -39,7 +39,7 @@ class ReleaseDeploymentTests(unittest.TestCase):
             identity=tools.stage(bundle,checksum,root)
             with self.assertRaises(tools.ReleaseError):tools.stage(bundle,checksum,root)
             tools.activate(root,identity)
-            release,current=tools.active(root);payload=release/'payload';python=release/'venv/bin/python'
+            release,current=tools.active(root);payload=release/'payload';python=release/'runtime/python/bin/python3'
             manifest=tools.verify_payload(payload)
             self.assertEqual(manifest['platform'],tools.PLATFORM)
             self.assertEqual(manifest['source_commit'],os.environ['VUI_RELEASE_COMMIT'])

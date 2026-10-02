@@ -23,9 +23,10 @@ import sys
 import tempfile
 import time
 import zipfile
-import platform_support
-import firewall_support
-import service_support
+try:
+    from . import platform_support, firewall_support, service_support
+except ImportError:
+    import platform_support, firewall_support, service_support
 
 ROOT = Path('/var/lib/v-ui')
 CONFIG_DIR = Path('/etc/v-ui')
@@ -34,7 +35,19 @@ CONTROL = Path('/usr/local/lib/v-ui')
 MARKER = '# Managed by V-UI guarded installer v1\n'
 UNIT_DIR = Path('/etc/systemd/system')
 UNITS = ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')
-MAX_ARCHIVE = 350_000_000
+MAX_ARCHIVE = 700_000_000
+# Compatibility names for older tooling/tests; new installs select a backend dynamically.
+MARKER=service_support.MARKER
+UNIT_DIR=service_support.SYSTEMD_DIR
+UNITS=('v-ui.service','v-ui-http01.service','v-ui-http01.socket')
+
+def unit_files(config):
+    cfg={**config,'service_manager':'systemd','bootstrap_python':config.get('bootstrap_python',str(Path(sys.executable).resolve()))}
+    return {path.name:value for path,(value,mode) in service_support.service_files(cfg).items()}
+
+def stop_existing_units(names):
+    present=[name for name in names if (UNIT_DIR/name).is_file()]
+    if present:service_support.stop('systemd',present)
 
 
 class InstallError(RuntimeError):
@@ -109,6 +122,8 @@ def validate_options(args):
     args.email = local + '@' + fqdn(host)
     if not 1024 <= args.port <= 65535:
         raise InstallError('Use an unprivileged HTTPS port in 1024–65535')
+    if not 1024 <= args.node_port <= 65535:
+        raise InstallError('Use an unprivileged default node port in 1024–65535')
     ipaddress.ip_address(args.bind)
     if bool(args.cert) != bool(args.key):
         raise InstallError('Provide both --cert and --key, or neither for automatic issuance')
@@ -140,7 +155,7 @@ def no_symlink_ancestors(path):
         raise InstallError('Refusing symbolic path: ' + str(path))
 
 
-def check_reserved(existing, manager):
+def check_reserved(existing, manager='systemd'):
     for path in (ROOT, CONFIG_DIR, CONTROL):
         no_symlink_ancestors(path)
     if not existing:
@@ -427,7 +442,7 @@ def main():
     p.add_argument('--accept-terms', action='store_true'); p.add_argument('--upgrade', action='store_true')
     p.add_argument('--cert'); p.add_argument('--key')
     p.add_argument('--health-ca', help='Optional private-CA trust file for provided-certificate HTTPS health verification')
-    p.add_argument('--dry-run', action='store_true')
+    p.add_argument('--dry-run',action='store_true')
     args = p.parse_args()
     if not args.domain or not args.email:
         with open('/dev/tty', 'r+') as terminal:
