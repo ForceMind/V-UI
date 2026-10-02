@@ -35,7 +35,7 @@ CONTROL = Path('/usr/local/lib/v-ui')
 MARKER = '# Managed by V-UI guarded installer v1\n'
 UNIT_DIR = Path('/etc/systemd/system')
 UNITS = ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')
-MAX_ARCHIVE = 700_000_000
+MAX_ARCHIVE = 850_000_000
 # Compatibility names for older tooling/tests; new installs select a backend dynamically.
 MARKER=service_support.MARKER
 UNIT_DIR=service_support.SYSTEMD_DIR
@@ -75,7 +75,7 @@ def verify_archive(path, sha):
     entries = archive.infolist()
     names = [item.filename for item in entries]
     if (len(names) > 10000 or len(set(names)) != len(names) or not all(safe_path(n) for n in names)
-            or sum(e.file_size for e in entries) > 600_000_000):
+            or sum(e.file_size for e in entries) > 1_100_000_000):
         raise InstallError('Unsafe bundle paths or size')
     for entry in entries:
         if entry.is_dir() or stat.S_IFMT(entry.external_attr >> 16) not in (0, stat.S_IFREG) or entry.flag_bits & 1:
@@ -389,13 +389,16 @@ def install(args):
                 as_service([sys.executable,'-B',str(controller),'--root',str(ROOT),'backup',str(target)])
                 print('Private pre-update backup:', target)
             as_service([sys.executable,'-B',str(controller),'--root',str(ROOT),'activate',meta['release_id']])
+            release=ROOT/'releases'/meta['release_id']
+            runtime_python=release/'runtime/python/bin/python3'
+            config['bootstrap_python']=str(runtime_python)
             write_root_file(CONTROL/'launcher.py', archive.read('deploy/system_launcher.py'))
             for path,(value,mode) in service_support.service_files(config).items():
                 write_root_file(path,value.encode(),mode)
             write_root_file(CONFIG, json.dumps({**config, 'ready': False}, indent=2).encode())
             service_support.reload(manager)
             service_support.enable_start(manager,[http_name])
-            release=ROOT/'releases'/meta['release_id'];python=release/'runtime/python/bin/python3';payload=release/'payload'
+            release=ROOT/'releases'/meta['release_id'];python=runtime_python;payload=release/'payload'
             if args.cert:
                 copy_private(args.cert, ROOT/'data/certs/provided-fullchain.pem', uid, gid)
                 copy_private(args.key, ROOT/'data/certs/provided-privkey.pem', uid, gid)
