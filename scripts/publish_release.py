@@ -15,7 +15,7 @@ import zipfile
 
 REPO = 'ForceMind/V-UI'
 REQUIRED = {'test.yml','toclash.yml','loopback.yml','release.yml','acme.yml','oneclick.yml','docs.yml'}
-ASSETS = {'install.sh','install_system.py','vui-linux-amd64.zip','vui-source.zip',
+ASSETS = {'install.sh','install_system.py','platform_support.py','firewall_support.py','service_support.py','vui-linux.zip','vui-source.zip',
           'SHA256SUMS','RELEASE.json','RELEASE_NOTES.md'}
 
 
@@ -58,7 +58,7 @@ def validate_kit(raw, commit, version):
         names=archive.namelist()
         if set(names)!=ASSETS or len(names)!=len(ASSETS):
             raise ReleaseGateError('Unexpected release artifact entries')
-        if sum(x.file_size for x in archive.infolist())>500_000_000:
+        if sum(x.file_size for x in archive.infolist())>900_000_000:
             raise ReleaseGateError('Release artifact exceeds size limit')
         files={name:archive.read(name) for name in names}
     hashes={}
@@ -72,7 +72,7 @@ def validate_kit(raw, commit, version):
     record=json.loads(files['RELEASE.json'])
     if record.get('source_commit')!=commit or record.get('version')!=version:
         raise ReleaseGateError('Artifact metadata does not match requested release')
-    with zipfile.ZipFile(io.BytesIO(files['vui-linux-amd64.zip'])) as archive:
+    with zipfile.ZipFile(io.BytesIO(files['vui-linux.zip'])) as archive:
         manifest=json.loads(archive.read('MANIFEST.json'))
         if manifest['source_commit']!=commit or manifest['version']!=version:
             raise ReleaseGateError('Bundle belongs to a different source or version')
@@ -119,8 +119,8 @@ def main():
         if urllib.parse.urlsplit(location).scheme!='https':raise ReleaseGateError('Insecure artifact redirect')
     else:raise ReleaseGateError('Expected signed artifact redirect')
     # The signed download request intentionally carries no GitHub authorization header.
-    with urllib.request.urlopen(location,timeout=120) as response:raw=response.read(400_000_001)
-    if len(raw)>400_000_000 or artifact.get('digest')!='sha256:'+hashlib.sha256(raw).hexdigest():
+    with urllib.request.urlopen(location,timeout=120) as response:raw=response.read(900_000_001)
+    if len(raw)>900_000_000 or artifact.get('digest')!='sha256:'+hashlib.sha256(raw).hexdigest():
         raise ReleaseGateError('Artifact transport digest mismatch')
     files=validate_kit(raw,args.commit,args.version)
     evidence='\n'.join('- '+path+': '+str(run['html_url']) for path,run in checks.items())

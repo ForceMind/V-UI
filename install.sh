@@ -54,7 +54,7 @@ command -v curl >/dev/null || { echo 'Install curl first' >&2; exit 1; }
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "$WORK"' EXIT
 BASE="https://github.com/ForceMind/V-UI/releases/download/$VERSION"
-for FILE in SHA256SUMS install_system.py vui-linux-amd64.zip; do
+for FILE in SHA256SUMS install_system.py platform_support.py firewall_support.py service_support.py vui-linux.zip; do
   curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --location --retry 2 --connect-timeout 15 --max-time 300 \
     "$BASE/$FILE" -o "$WORK/$FILE"
 done
@@ -66,10 +66,10 @@ for line in (root/'SHA256SUMS').read_text().splitlines():
     match=re.fullmatch(r'([a-f0-9]{64})  ([A-Za-z0-9._-]+)',line)
     if not match or match[2] in entries:raise SystemExit('Invalid checksum list')
     entries[match[2]]=match[1]
-for name in ('install_system.py','vui-linux-amd64.zip'):
+for name in ('install_system.py','platform_support.py','firewall_support.py','service_support.py','vui-linux.zip'):
     if hashlib.sha256((root/name).read_bytes()).hexdigest()!=entries.get(name):raise SystemExit('Release asset checksum mismatch')
-(root/'bundle.sha').write_text(entries['vui-linux-amd64.zip'])
+(root/'bundle.sha').write_text(entries['vui-linux.zip'])
 PY
 # This checksum is from the explicitly selected official release, not a signature.
 # Audit install.sh itself and the repository/release source before executing as root.
-"$PYTHON" "$WORK/install_system.py" --bundle "$WORK/vui-linux-amd64.zip" --sha256 "$(cat "$WORK/bundle.sha")" "$@"
+PYTHONPATH="$WORK" "$PYTHON" "$WORK/install_system.py" --bundle "$WORK/vui-linux.zip" --sha256 "$(cat "$WORK/bundle.sha")" "$@"
