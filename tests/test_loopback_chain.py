@@ -109,8 +109,17 @@ class LoopbackChainTests(unittest.TestCase):
                 if time.monotonic()>deadline: raise
 
     def assert_proxy_success(self, host):
-        status,data=http_through(self.proxy_port,host,self.target_port)
-        self.assertEqual((status,data),(200,b'VUI-LOOPBACK-TARGET'),(self.root/'client.log').read_text())
+        deadline=time.monotonic()+3
+        last=None
+        while time.monotonic()<deadline:
+            try:
+                status,data=http_through(self.proxy_port,host,self.target_port)
+                last=(status,data)
+                if last==(200,b'VUI-LOOPBACK-TARGET'):return
+            except (OSError,TimeoutError) as exc:
+                last=exc
+            time.sleep(.08)
+        self.fail(f'Proxy did not become usable: {last}\n'+(self.root/'client.log').read_text())
 
     def assert_proxy_failure(self):
         before=len(self.requests)

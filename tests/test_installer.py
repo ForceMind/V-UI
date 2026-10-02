@@ -21,7 +21,9 @@ class InstallerTests(unittest.TestCase):
         self.root=Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
     def args(self, **changes):
         data=dict(domain='panel.example.test',email='a@example.test',admin='admin',port=8443,
-                  bind='0.0.0.0',cert=None,key=None,accept_terms=True)
+                  bind='0.0.0.0',cert=None,key=None,accept_terms=True,node_port=10443,
+                  open_firewall='no',assume_external_ports_open=True,dry_run=False,
+                  upgrade=False,health_ca=None)
         data.update(changes);return argparse.Namespace(**data)
     def test_domains_flags_terms_and_ports_are_strict(self):
         for value in ('127.0.0.1','*.example.com','https://example.com','a.example:8443','--hook evil', 'a/example.com'):
@@ -48,11 +50,12 @@ class InstallerTests(unittest.TestCase):
     def test_foreign_paths_and_units_are_not_adopted(self):
         root=self.root/'instance';control=self.root/'control';configdir=self.root/'cfg';unitdir=self.root/'units'
         unitdir.mkdir();root.mkdir()
-        with patch.multiple(installer,ROOT=root,CONTROL=control,CONFIG_DIR=configdir,CONFIG=configdir/'service.json',UNIT_DIR=unitdir):
-            with self.assertRaises(installer.InstallError):installer.check_reserved(False)
+        with patch.multiple(installer,ROOT=root,CONTROL=control,CONFIG_DIR=configdir,CONFIG=configdir/'service.json'), \
+             patch.object(installer.service_support,'SYSTEMD_DIR',unitdir):
+            with self.assertRaises(installer.InstallError):installer.check_reserved(False,'systemd')
             root.rmdir();(unitdir/'v-ui.service').write_text('not ours')
             with patch.object(installer.pwd,'getpwnam',side_effect=KeyError):
-                with self.assertRaises(installer.InstallError):installer.check_reserved(False)
+                with self.assertRaises(installer.InstallError):installer.check_reserved(False,'systemd')
             self.assertEqual((unitdir/'v-ui.service').read_text(),'not ours')
     def test_bundle_digest_and_archive_paths_are_checked_before_execution(self):
         path=self.root/'bundle.zip'
@@ -63,7 +66,8 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse((self.root.parent/'outside').exists())
     def test_hash_correct_bundle_must_have_complete_manifest_and_controller(self):
         files={'scripts/deploy.py':b'# controller','app/release_tools.py':b'# api','deploy/system_launcher.py':b'# launcher'}
-        manifest={'schema':1,'kind':'release','release_id':'0.3.0-fixture','platform':'linux-amd64-cpython312','files':{
+        manifest={'schema':1,'kind':'release','release_id':'0.3.1-fixture','platform':'linux-multi-cpython312',
+                  'targets':[installer.platform_support.target_key()],'files':{
             name:{'size':len(data),'sha256':hashlib.sha256(data).hexdigest(),'mode':0o600} for name,data in files.items()}}
         path=self.root/'bundle.zip'
         with zipfile.ZipFile(path,'w') as z:
