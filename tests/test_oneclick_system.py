@@ -41,7 +41,7 @@ class OneClickSystemTests(unittest.TestCase):
             cmd = ['sudo','bash',str(source/'install.sh'),'--bundle',str(bundle),'--sha256',sha,
                    '--domain',domain,'--email','admin@example.test','--admin','installer-admin',
                    '--cert',str(cert),'--key',str(key),'--health-ca',str(ca),
-                   '--bind','127.0.0.1','--port',str(port)]
+                   '--bind','127.0.0.1','--port',str(port),'--open-firewall','no','--assume-external-ports-open']
             def cleanup():
                 subprocess.run(['sudo','systemctl','disable','--now','v-ui.service','v-ui-http01.socket'],capture_output=True)
                 subprocess.run(['sudo','systemctl','stop','v-ui-http01.service'],capture_output=True)
@@ -115,8 +115,8 @@ class OneClickSystemTests(unittest.TestCase):
             self.assertIn(b'certificate-list',api('/certificates')[1])
             # Socket activation really supplies :80 to an unprivileged responder.
             token='T'*43
-            command=['sudo','-u','v-ui','/usr/bin/python3.12','-c',
-                'from pathlib import Path;p=Path("/var/lib/v-ui/data/certificates/http-webroot/.well-known/acme-challenge");p.mkdir(parents=True,exist_ok=True);(p/("T"*43)).write_text("token.key_authorization")']
+            command=['sudo','-u','v-ui','/bin/sh','-c',
+                'mkdir -p /var/lib/v-ui/data/certificates/http-webroot/.well-known/acme-challenge && printf %s token.key_authorization > /var/lib/v-ui/data/certificates/http-webroot/.well-known/acme-challenge/' + token]
             subprocess.run(command,check=True)
             for path,expected in ((f'/.well-known/acme-challenge/{token}',200),('/api/auth/me',404),('/login',404)):
                 connection=http.client.HTTPConnection('127.0.0.1',80,timeout=10)

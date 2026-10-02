@@ -24,7 +24,7 @@ class ReleasePromotionTests(unittest.TestCase):
         bundle=io.BytesIO()
         with zipfile.ZipFile(bundle,'w') as z:z.writestr('MANIFEST.json',json.dumps({'source_commit':commit,'version':version}))
         files={name:b'fixture' for name in ASSETS-{'SHA256SUMS'}}
-        files['vui-linux-amd64.zip']=bundle.getvalue()
+        files['vui-linux.zip']=bundle.getvalue()
         files['RELEASE.json']=json.dumps({'source_commit':commit,'version':version}).encode()
         checks=''.join(hashlib.sha256(data).hexdigest()+'  '+name+'\n' for name,data in sorted(files.items()))
         files['SHA256SUMS']=checks.encode()

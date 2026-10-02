@@ -38,7 +38,7 @@ class InstallerTests(unittest.TestCase):
             with self.assertRaises(installer.InstallError):installer.check_port(sock.getsockname()[1],'127.0.0.1')
             self.assertGreater(sock.fileno(),0)
     def test_systemd_units_run_no_root_and_no_shell(self):
-        units=installer.unit_files({'ipv6':True})
+        units=installer.unit_files({'ipv6':True,'bootstrap_python':'/opt/vui/python'})
         for name in ('v-ui.service','v-ui-http01.service'):
             self.assertIn('User=v-ui',units[name]);self.assertIn('NoNewPrivileges=true',units[name])
             self.assertNotIn('User=root',units[name]);self.assertNotIn('/bin/sh',units[name])
@@ -103,7 +103,7 @@ class InstallerTests(unittest.TestCase):
     def test_no_password_argument_or_root_package_exec(self):
         source=Path(installer.__file__).read_text()
         self.assertNotIn("add_argument('--password'",source)
-        self.assertIn("'/usr/sbin/runuser', '-u', 'v-ui'",source)
+        self.assertIn('os.setuid(account.pw_uid)',source)
         self.assertIn("with open('/dev/tty'",source)
         self.assertNotIn('shell=True',source)
 
