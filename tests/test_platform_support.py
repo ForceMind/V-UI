@@ -21,6 +21,12 @@ class PlatformSupportTests(unittest.TestCase):
     def test_target_key_combines_arch_and_libc(self):
         with patch.object(p.platform,"system",return_value="Linux"),patch.object(p,"architecture",return_value="aarch64"),patch.object(p,"libc_family",return_value="musl"):
             self.assertEqual(p.target_key(),"aarch64-musl")
+    def test_glibc_version_is_exposed_for_runtime_gate(self):
+        with patch.object(p.platform,'libc_ver',return_value=('glibc','2.39')):
+            self.assertEqual(p.glibc_version(),(2,39))
+        with patch.object(p.platform,'libc_ver',return_value=('glibc','2.31')):
+            self.assertEqual(p.glibc_version(),(2,31))
+
     def test_service_manager_detects_systemd_then_openrc(self):
         with patch.object(p.Path,"is_dir",return_value=True),patch.object(p.shutil,"which",side_effect=lambda n:"/bin/"+n if n=="systemctl" else None):
             self.assertEqual(p.init_system(),"systemd")

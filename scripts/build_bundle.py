@@ -49,10 +49,10 @@ def core_sources(payload: Path):
 
 
 TARGETS = {
-    "x86_64-gnu": "manylinux2014_x86_64",
-    "aarch64-gnu": "manylinux2014_aarch64",
-    "x86_64-musl": "musllinux_1_2_x86_64",
-    "aarch64-musl": "musllinux_1_2_aarch64",
+    "x86_64-gnu": ["manylinux_2_34_x86_64","manylinux_2_28_x86_64","manylinux2014_x86_64"],
+    "aarch64-gnu": ["manylinux_2_34_aarch64","manylinux_2_28_aarch64","manylinux2014_aarch64"],
+    "x86_64-musl": ["musllinux_1_2_x86_64"],
+    "aarch64-musl": ["musllinux_1_2_aarch64"],
 }
 
 def wheel_lock(payload: Path, key: str):
@@ -60,9 +60,10 @@ def wheel_lock(payload: Path, key: str):
     requirements=[line.strip() for line in source.read_text().splitlines() if line.strip() and not line.startswith('#')]
     expected={re.sub('[-_.]+','-',name).lower():version for name,version in (line.split('==') for line in requirements)}
     wheels=payload/'wheels'/key;wheels.mkdir(parents=True,mode=0o700)
+    platforms=sum((['--platform', value] for value in TARGETS[key]),[])
     subprocess.run([sys.executable,'-m','pip','--isolated','--disable-pip-version-check','download',
         '--index-url','https://pypi.org/simple','--only-binary=:all:','--no-deps',
-        '--platform',TARGETS[key],'--python-version','312','--implementation','cp','--abi','cp312',
+        *platforms,'--python-version','312','--implementation','cp','--abi','cp312',
         '-r',str(source),'--dest',str(wheels)],check=True,timeout=240)
     found={}
     for wheel in sorted(wheels.glob('*.whl')):
