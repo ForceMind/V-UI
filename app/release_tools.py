@@ -74,8 +74,8 @@ def extract_runtime(archive_path: Path, destination: Path) -> None:
                 target=PurePosixPath(member.linkname)
                 if target.is_absolute() or '..' in target.parts: raise ReleaseError('Unsafe portable Python link')
         archive.extractall(destination)
-MAX_ARCHIVE = 350_000_000
-MAX_EXPANDED = 600_000_000
+MAX_ARCHIVE = 850_000_000
+MAX_EXPANDED = 1_100_000_000
 MANIFEST = 'MANIFEST.json'
 
 class ReleaseError(RuntimeError):
