@@ -188,6 +188,31 @@ class ReleaseToolsTests(unittest.TestCase):
         proof=extract_selected(data,pin,target)
         self.assertEqual(proof['library.js'],hashlib.sha256(b'abc').hexdigest())
 
+    def test_portable_runtime_allows_internal_relative_symlink_but_blocks_escape(self):
+        good=self.root/'good-runtime.tar.gz'
+        with tarfile.open(good,'w:gz') as archive:
+            directory=tarfile.TarInfo('python/bin');directory.type=tarfile.DIRTYPE;directory.mode=0o755
+            archive.addfile(directory)
+            target=tarfile.TarInfo('python/bin/python3.12');target.size=3;target.mode=0o755
+            archive.addfile(target,io.BytesIO(b'bin'))
+            link=tarfile.TarInfo('python/bin/python3');link.type=tarfile.SYMTYPE;link.linkname='python3.12'
+            archive.addfile(link)
+            relative=tarfile.TarInfo('python/bin/python');relative.type=tarfile.SYMTYPE;relative.linkname='../bin/python3.12'
+            archive.addfile(relative)
+        destination=self.root/'runtime-good'
+        tools.extract_runtime(good,destination)
+        self.assertTrue((destination/'python/bin/python3').is_symlink())
+        self.assertEqual((destination/'python/bin/python3').resolve(),(destination/'python/bin/python3.12').resolve())
+
+        bad=self.root/'bad-runtime.tar.gz'
+        with tarfile.open(bad,'w:gz') as archive:
+            directory=tarfile.TarInfo('python/bin');directory.type=tarfile.DIRTYPE;archive.addfile(directory)
+            link=tarfile.TarInfo('python/bin/python3');link.type=tarfile.SYMTYPE;link.linkname='../../outside'
+            archive.addfile(link)
+        with self.assertRaises(tools.ReleaseError):
+            tools.extract_runtime(bad,self.root/'runtime-bad')
+        self.assertFalse((self.root/'runtime-bad').exists())
+
     def test_release_frontend_is_local_and_template_changes_fail_closed(self):
         from scripts.prepare_frontend import prepare
         source=Path(__file__).resolve().parents[1]
