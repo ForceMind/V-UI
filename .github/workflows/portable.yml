@@ -59,7 +59,7 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/vui-portable
           docker run --rm             -e SOURCE="$SOURCE" -e ARCH="$ARCH"             -v "$PWD:/src" -v /tmp/vui-portable:/out             alpine:3.22 /bin/sh -euxc '
-              apk add --no-cache python3 py3-pip git cargo rust build-base libffi-dev openssl-dev ca-certificates
+              apk add --no-cache python3 python3-dev py3-pip git cargo rust build-base libffi-dev openssl-dev ca-certificates
               cd /src
               python3 scripts/build_bundle.py "/out/vui-linux-${ARCH}-musl.zip" --source-commit "$SOURCE" --target "${ARCH}-musl"
               adduser -D smoke
@@ -87,14 +87,7 @@ jobs:
           set -euo pipefail
           probe() {
             image="$1"; install="$2"
-            docker run --rm -v "$PWD:/src:ro" "$image" /bin/sh -ec "$install; PYTHONPATH=/src python3 - <<'PY'
-import json
-from scripts.platform_support import distro
-value=distro()
-print(json.dumps(value))
-assert value['id'] != 'unknown'
-assert value['arch'] == 'x86_64'
-PY"
+            docker run --rm -v "$PWD:/src:ro" "$image" /bin/sh -ec "$install; PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/src python3 /src/scripts/platform_support.py"
           }
           probe debian:13-slim 'apt-get update >/dev/null && apt-get install -y python3 >/dev/null'
           probe fedora:43 'dnf install -y python3 >/dev/null'

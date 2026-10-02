@@ -95,3 +95,8 @@ def distro() -> dict:
         "init":init_system(),
         "package_manager":package_manager(),
     }
+
+
+if __name__ == "__main__":
+    import json
+    print(json.dumps(distro(), ensure_ascii=False))
