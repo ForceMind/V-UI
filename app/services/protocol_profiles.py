@@ -507,14 +507,16 @@ def compile_profile(
                 settings["down_mbps"] = int(down)
             obfs_type = str(profile.get("obfs_type") or "").strip()
             if obfs_type:
-                settings["obfs"] = {
-                    "type": obfs_type,
-                    "password": _required(
-                        profile,
-                        "obfs_password",
-                        "Hysteria2 obfs password",
-                    ),
-                }
+                previous = settings.get("obfs") or {}
+                password = str(profile.get("obfs_password") or "").strip()
+                if not password and previous.get("type") == obfs_type:
+                    password = str(previous.get("password") or "")
+                if not password:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Hysteria2 obfs password is required when enabling obfs",
+                    )
+                settings["obfs"] = {"type": obfs_type, "password": password}
             else:
                 settings.pop("obfs", None)
         elif protocol == "tuic":
@@ -650,5 +652,6 @@ def decompile_profile(core: str, protocol: str, settings: dict | None,
     if protocol == "hysteria2":
         obfs = settings.get("obfs") or {}
         profile["obfs_type"] = str(obfs.get("type") or "")
-        profile["obfs_password"] = str(obfs.get("password") or "")
+        profile["obfs_password"] = ""
+        profile["obfs_password_set"] = bool(obfs.get("password"))
     return profile
