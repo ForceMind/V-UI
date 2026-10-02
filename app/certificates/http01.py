@@ -33,6 +33,11 @@ class ChallengeServer(ThreadingHTTPServer):
         finally: self.slots.release()
 
 
+
+class ChallengeServerV6(ChallengeServer):
+    address_family = socket.AF_INET6
+
+
 def handler_for(webroot: Path):
     class ChallengeHandler(BaseHTTPRequestHandler):
         def setup(self):
@@ -66,24 +71,45 @@ def handler_for(webroot: Path):
     return ChallengeHandler
 
 
+def _thread(server, servers):
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    servers.append(server)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--webroot', type=Path, required=True)
     args = p.parse_args()
-    # Production port 80 is opened by systemd, not a root Python service.
-    count = int(os.getenv('LISTEN_FDS', '0'))
-    if int(os.getenv('LISTEN_PID', '0')) != os.getpid() or not 1 <= count <= 2:
-        raise SystemExit('Start through the managed HTTP-01 socket unit')
     servers = []
-    for fd in range(3, 3 + count):
-        sock = socket.socket(fileno=fd)
-        server = ChallengeServer(('127.0.0.1', 0), handler_for(args.webroot), bind_and_activate=False)
-        server.socket.close(); server.socket = sock
-        server.server_address = sock.getsockname()
-        server.server_name = 'vui-http01'; server.server_port = server.server_address[1]
-        server.daemon_threads = True
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        servers.append(server)
+    direct = os.getenv('VUI_HTTP01_DIRECT') == '1'
+    if direct:
+        if os.geteuid() == 0:
+            raise SystemExit('Direct HTTP-01 must stay unprivileged')
+        # OpenRC supplies ambient CAP_NET_BIND_SERVICE to this one responder.
+        _thread(ChallengeServer(('0.0.0.0', 80), handler_for(args.webroot)), servers)
+        if os.getenv('VUI_HTTP01_IPV6') == '1':
+            try:
+                server6 = ChallengeServerV6(('::', 80), handler_for(args.webroot))
+                server6.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+                _thread(server6, servers)
+            except OSError:
+                for server in servers: server.shutdown(); server.server_close()
+                raise SystemExit('IPv6 HTTP-01 binding failed while IPv6 is enabled')
+    else:
+        # systemd owns privileged sockets and passes them to the unprivileged process.
+        count = int(os.getenv('LISTEN_FDS', '0'))
+        if int(os.getenv('LISTEN_PID', '0')) != os.getpid() or not 1 <= count <= 2:
+            raise SystemExit('Start through the managed HTTP-01 socket unit')
+        for fd in range(3, 3 + count):
+            sock = socket.socket(fileno=fd)
+            family = sock.family
+            cls = ChallengeServerV6 if family == socket.AF_INET6 else ChallengeServer
+            server = cls(('::1' if family == socket.AF_INET6 else '127.0.0.1', 0),
+                         handler_for(args.webroot), bind_and_activate=False)
+            server.socket.close(); server.socket = sock
+            server.server_address = sock.getsockname()
+            server.server_name = 'vui-http01'; server.server_port = server.server_address[1]
+            _thread(server, servers)
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
