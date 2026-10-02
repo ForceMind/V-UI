@@ -63,6 +63,7 @@ const app = createApp({
             settings: {},
             stream_settings: {},
             certificate_id: null,
+            enable: true,
             profile: {
                 security: 'none',
                 transport: 'raw',
@@ -320,6 +321,7 @@ const app = createApp({
             newInbound.protocol = 'vless';
             newInbound.remark = '';
             newInbound.port = 443;
+            newInbound.enable = true;
             newInbound.settings = {};
             newInbound.stream_settings = {};
             resetInboundProfile();
@@ -339,6 +341,7 @@ const app = createApp({
                 newInbound.protocol = value.protocol;
                 newInbound.remark = value.remark || '';
                 newInbound.port = value.port;
+                newInbound.enable = Boolean(value.enable);
                 newInbound.settings = {};
                 newInbound.stream_settings = {};
                 resetInboundProfile();
@@ -412,7 +415,8 @@ const app = createApp({
                         remark: newInbound.remark,
                         port: newInbound.port,
                         profile,
-                        certificate_id: newInbound.certificate_id || null
+                        certificate_id: newInbound.certificate_id || null,
+                        enable: newInbound.enable
                     });
                     ElMessage.success('Inbound updated successfully');
                 } else {
@@ -423,7 +427,7 @@ const app = createApp({
                         port: newInbound.port,
                         profile,
                         certificate_id: newInbound.certificate_id || null,
-                        enable: true
+                        enable: newInbound.enable
                     });
                     ElMessage.success('Inbound added successfully');
                 }
