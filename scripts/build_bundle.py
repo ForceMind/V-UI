@@ -22,6 +22,7 @@ from app.release_tools import PLATFORM,create_archive,supported_environment
 from vendor_frontend import fetch as fetch_frontend
 from fetch_test_cores import fetch as fetch_cores
 from fetch_portable_runtimes import fetch as fetch_runtimes, PINS as RUNTIME_PINS
+from platform_support import target_key as detected_target
 from prepare_frontend import prepare as prepare_frontend
 
 
@@ -48,23 +49,21 @@ def core_sources(payload: Path):
     (output/'PROVENANCE.json').write_text(json.dumps(proof,indent=2))
 
 
-TARGETS = {
-    "x86_64-gnu": ["manylinux_2_34_x86_64","manylinux_2_28_x86_64","manylinux2014_x86_64"],
-    "aarch64-gnu": ["manylinux_2_34_aarch64","manylinux_2_28_aarch64","manylinux2014_aarch64"],
-    "x86_64-musl": ["musllinux_1_2_x86_64"],
-    "aarch64-musl": ["musllinux_1_2_aarch64"],
-}
+TARGETS = set(RUNTIME_PINS)
 
 def wheel_lock(payload: Path, key: str):
     source=ROOT/'requirements-runtime.txt'
     requirements=[line.strip() for line in source.read_text().splitlines() if line.strip() and not line.startswith('#')]
     expected={re.sub('[-_.]+','-',name).lower():version for name,version in (line.split('==') for line in requirements)}
     wheels=payload/'wheels'/key;wheels.mkdir(parents=True,mode=0o700)
-    platforms=sum((['--platform', value] for value in TARGETS[key]),[])
-    subprocess.run([sys.executable,'-m','pip','--isolated','--disable-pip-version-check','download',
-        '--index-url','https://pypi.org/simple','--only-binary=:all:','--no-deps',
-        *platforms,'--python-version','312','--implementation','cp','--abi','cp312',
-        '-r',str(source),'--dest',str(wheels)],check=True,timeout=240)
+    if key.endswith('-musl'):
+        command=[sys.executable,'-m','pip','--isolated','--disable-pip-version-check','wheel',
+            '--no-deps','-r',str(source),'--wheel-dir',str(wheels)]
+    else:
+        command=[sys.executable,'-m','pip','--isolated','--disable-pip-version-check','download',
+            '--index-url','https://pypi.org/simple','--only-binary=:all:','--no-deps',
+            '-r',str(source),'--dest',str(wheels)]
+    subprocess.run(command,check=True,timeout=600)
     found={}
     for wheel in sorted(wheels.glob('*.whl')):
         with zipfile.ZipFile(wheel) as archive:
@@ -79,12 +78,15 @@ def wheel_lock(payload: Path, key: str):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('destination',type=Path)
-    p.add_argument('--source-commit',required=True);args=p.parse_args()
+    p.add_argument('--source-commit',required=True);p.add_argument('--target');args=p.parse_args()
     supported_environment();os.umask(0o077)
     if not re.fullmatch('[a-f0-9]{40}',args.source_commit):raise ValueError('Exact source commit required')
     actual=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     if actual!=args.source_commit:raise ValueError('Build source does not match the requested commit')
     subprocess.run(['git','diff','--quiet','HEAD','--'],cwd=ROOT,check=True)
+    key=args.target or detected_target()
+    if key not in TARGETS:raise ValueError('Unsupported build target: '+key)
+    if key != detected_target():raise ValueError('Build target must match the native build environment')
     with tempfile.TemporaryDirectory(prefix='vui-build-') as directory:
         payload=Path(directory)/'payload';payload.mkdir(mode=0o700)
         # Only git-tracked application files; never copy local data, keys or tests.
@@ -99,20 +101,19 @@ def main():
             target=payload/name;target.parent.mkdir(parents=True,exist_ok=True,mode=0o700);shutil.copyfile(source,target)
         prepare_frontend(payload)
         fetch_frontend(payload/'web/vendor')
-        for arch in ('x86_64','aarch64'):
-            fetch_cores(payload/'cores'/arch,arch)
-        fetch_runtimes(payload/'runtimes')
+        arch=key.split('-',1)[0]
+        fetch_cores(payload/'cores'/arch,arch)
+        fetch_runtimes(payload/'runtimes',[key])
         core_sources(payload)
-        for key in TARGETS:
-            wheel_lock(payload,key)
+        wheel_lock(payload,key)
         # Included bin hashes, npm archive integrities and lock files are themselves
         # protected by the final manifest and independent archive SHA-256.
         version=(ROOT/'VERSION').read_text().strip()
         if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',version):raise ValueError('Invalid release version')
         identity=version+'-'+args.source_commit[:12]
         metadata={'kind':'release','release_id':identity,'platform':PLATFORM,'source_commit':args.source_commit,'version':version,
-            'targets':sorted(TARGETS),'python_runtime_version':'3.12.14+20260901',
-            'portable_runtime_pins':RUNTIME_PINS,
+            'targets':[key],'python_runtime_version':'3.12.14+20260901',
+            'portable_runtime_pins':{key:RUNTIME_PINS[key]},
             'protocol_profile':'sing-box VLESS/TCP/TLS single-user verified certificate',
             'runtime_pins':(ROOT/'requirements-runtime.txt').read_text()}
         checksum=create_archive(payload,args.destination,metadata)

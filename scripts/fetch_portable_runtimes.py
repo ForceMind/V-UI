@@ -23,10 +23,13 @@ PINS = {
     },
 }
 
-def fetch(destination: Path) -> None:
+def fetch(destination: Path, keys=None) -> None:
     destination=Path(destination)
     destination.mkdir(parents=True,exist_ok=True)
-    for key,pin in PINS.items():
+    selected=list(PINS) if keys is None else list(keys)
+    for key in selected:
+        if key not in PINS:raise ValueError('Unknown portable runtime target: '+key)
+        pin=PINS[key]
         path=destination/(key+".tar.gz")
         with urllib.request.urlopen(pin["url"],timeout=120) as response:
             raw=response.read(160_000_001)
