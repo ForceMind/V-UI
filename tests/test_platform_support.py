@@ -27,11 +27,6 @@ class PlatformSupportTests(unittest.TestCase):
         with patch.object(p.platform,'libc_ver',return_value=('glibc','2.31')):
             self.assertEqual(p.glibc_version(),(2,31))
 
-    def test_musl_version_detection(self):
-        result=type('R',(),{'stdout':'musl libc (x86_64)\nVersion 1.2.5\n','stderr':''})()
-        with patch.object(p.shutil,'which',return_value='/usr/bin/ldd'),patch.object(p.subprocess,'run',return_value=result):
-            self.assertEqual(p.musl_version(),(1,2))
-
     def test_service_manager_detects_systemd_then_openrc(self):
         with patch.object(p.Path,"is_dir",return_value=True),patch.object(p.shutil,"which",side_effect=lambda n:"/bin/"+n if n=="systemctl" else None):
             self.assertEqual(p.init_system(),"systemd")

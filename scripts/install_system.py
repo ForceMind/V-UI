@@ -134,10 +134,6 @@ def validate_options(args):
 def check_platform():
     try: info=platform_support.distro()
     except RuntimeError as exc: raise InstallError(str(exc)) from None
-    if not info['runtime_compatible']:
-        version=info.get('glibc_version') or info.get('musl_version') or 'unknown'
-        raise InstallError('Detected '+info['name']+' with '+info['libc']+' '+version+
-            '; this secure runtime requires glibc >= 2.34 or musl >= 1.2')
     if info['init'] not in ('systemd','openrc'):
         raise InstallError('Detected '+info['name']+', but no supported service manager is running (systemd or OpenRC required)')
     if info['init']=='openrc':

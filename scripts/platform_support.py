@@ -43,14 +43,6 @@ def re_match_version(value: str) -> bool:
     import re
     return bool(re.fullmatch(r'[0-9]+\.[0-9]+(?:\.[0-9]+)?',value or ''))
 
-def musl_version() -> tuple[int,int] | None:
-    ldd=shutil.which('ldd')
-    if not ldd:return None
-    result=subprocess.run([ldd,'--version'],capture_output=True,text=True)
-    import re
-    match=re.search(r'Version\s+([0-9]+)\.([0-9]+)',result.stdout+result.stderr,re.I)
-    return (int(match.group(1)),int(match.group(2))) if match else None
-
 def libc_family() -> str:
     if list(Path("/lib").glob("ld-musl-*.so.1")) or list(Path("/usr/lib").glob("ld-musl-*.so.1")):
         return "musl"
@@ -90,8 +82,6 @@ def distro() -> dict:
     value=read_os_release()
     libc=libc_family()
     glibc=glibc_version() if libc=='gnu' else None
-    musl=musl_version() if libc=='musl' else None
-    compatible=(glibc is not None and glibc >= (2,34)) if libc=='gnu' else (musl is not None and musl >= (1,2))
     return {
         "id":value.get("ID","unknown"),
         "name":value.get("PRETTY_NAME") or value.get("NAME") or "Unknown Linux",
@@ -100,8 +90,7 @@ def distro() -> dict:
         "arch":architecture(),
         "libc":libc,
         "glibc_version":'.'.join(map(str,glibc)) if glibc else None,
-        "musl_version":'.'.join(map(str,musl)) if musl else None,
-        "runtime_compatible":compatible,
+        "runtime_compatible": libc=='musl' or (glibc is not None and glibc >= (2,34)),
         "target":target_key(),
         "init":init_system(),
         "package_manager":package_manager(),
