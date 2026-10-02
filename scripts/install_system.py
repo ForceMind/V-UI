@@ -47,7 +47,7 @@ def unit_files(config):
 
 def stop_existing_units(names):
     present=[name for name in names if (UNIT_DIR/name).is_file()]
-    if present:service_support.stop('systemd',present)
+    if present:command(['systemctl','stop',*present],stderr=subprocess.DEVNULL)
 
 
 class InstallError(RuntimeError):
