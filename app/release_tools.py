@@ -60,20 +60,48 @@ def runtime_tree_digest(root: Path) -> str:
         else: raise ReleaseError('Unsupported runtime file type')
     return digestor.hexdigest()
 
+def _normalized_archive_path(value: PurePosixPath) -> tuple[str, ...]:
+    if value.is_absolute():
+        raise ReleaseError('Unsafe portable Python link')
+    stack=[]
+    for part in value.parts:
+        if part in ('','.'): continue
+        if part=='..':
+            if not stack: raise ReleaseError('Unsafe portable Python link')
+            stack.pop()
+        else:
+            if '\\' in part or any(ord(ch)<32 or ord(ch)==127 for ch in part):
+                raise ReleaseError('Unsafe portable Python link')
+            stack.append(part)
+    if not stack or stack[0]!='python':
+        raise ReleaseError('Portable Python link escapes runtime root')
+    return tuple(stack)
+
+
 def extract_runtime(archive_path: Path, destination: Path) -> None:
     destination.mkdir(parents=True,mode=0o700)
-    with tarfile.open(archive_path,'r:gz') as archive:
-        members=archive.getmembers()
-        for member in members:
-            parts=PurePosixPath(member.name).parts
-            if not parts or parts[0]!='python' or any(part in ('','..') for part in parts) or member.name.startswith('/'):
-                raise ReleaseError('Unsafe portable Python archive path')
-            if not (member.isfile() or member.isdir() or member.issym() or member.islnk()):
-                raise ReleaseError('Portable Python archive contains unsupported entry')
-            if member.issym() or member.islnk():
-                target=PurePosixPath(member.linkname)
-                if target.is_absolute() or '..' in target.parts: raise ReleaseError('Unsafe portable Python link')
-        archive.extractall(destination)
+    try:
+        with tarfile.open(archive_path,'r:gz') as archive:
+            members=archive.getmembers()
+            if len(members)>50000 or sum(max(0,m.size) for m in members)>650_000_000:
+                raise ReleaseError('Portable Python archive exceeds limits')
+            for member in members:
+                name=PurePosixPath(member.name)
+                parts=name.parts
+                if (not parts or parts[0]!='python' or member.name.startswith('/')
+                        or any(part in ('','..') for part in parts)):
+                    raise ReleaseError('Unsafe portable Python archive path')
+                if not (member.isfile() or member.isdir() or member.issym() or member.islnk()):
+                    raise ReleaseError('Portable Python archive contains unsupported entry')
+                if member.issym():
+                    _normalized_archive_path(name.parent / PurePosixPath(member.linkname))
+                elif member.islnk():
+                    _normalized_archive_path(PurePosixPath(member.linkname))
+            archive.extractall(destination,filter='data')
+    except (tarfile.TarError,OSError,ValueError,KeyError) as exc:
+        shutil.rmtree(destination,ignore_errors=True)
+        if isinstance(exc,ReleaseError): raise
+        raise ReleaseError('Portable Python extraction failed') from None
 MAX_ARCHIVE = 850_000_000
 MAX_EXPANDED = 1_100_000_000
 MANIFEST = 'MANIFEST.json'
