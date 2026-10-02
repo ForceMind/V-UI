@@ -36,7 +36,7 @@ def main():
     elif args.command=='restore': restore(root,args.archive,args.sha256);print('Data restored; all old sessions and subscription grants revoked')
     elif args.command=='recover-restore': recover_restore(root);print('Interrupted restore recovery checked')
     else:
-        release,_=active(root);payload=release/'payload';python=release/'venv'/'bin'/'python'
+        release,_=active(root);payload=release/'payload';python=release/'runtime'/'python'/'bin'/'python3'
         env=child_env(payload,root/'data')
         if args.command=='admin':
             with stopped(root):

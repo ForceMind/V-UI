@@ -43,9 +43,8 @@ class ReleaseDeploymentTests(unittest.TestCase):
             manifest=tools.verify_payload(payload)
             self.assertEqual(manifest['platform'],tools.PLATFORM)
             self.assertEqual(manifest['source_commit'],os.environ['VUI_RELEASE_COMMIT'])
-            lock=payload/('requirements.'+tools.target_key()+'.lock')
-            self.assertTrue(lock.is_file())
-            self.assertTrue(all('--hash=sha256:' in line for line in lock.read_text().splitlines()))
+            self.assertTrue((payload/'requirements.lock').is_file())
+            self.assertTrue(all('--hash=sha256:' in line for line in (payload/'requirements.lock').read_text().splitlines()))
             self.assertFalse(any(name.endswith(('.ttf','.otf','.woff','.woff2')) for name in manifest['files']))
             data=root/'data';password='Synthetic-release-test-password!'
             provision=subprocess.run([str(python),'-B','-c',
