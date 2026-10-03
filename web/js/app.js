@@ -388,6 +388,7 @@ const app = createApp({
             p.down_mbps = 100;
             p.obfs_type = '';
             p.obfs_password = '';
+            p.obfs_password_set = false;
             p.congestion_control = 'bbr';
             p.udp_relay_mode = 'native';
             p.zero_rtt_handshake = false;
