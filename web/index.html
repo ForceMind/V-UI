@@ -555,6 +555,17 @@
                 style="margin-bottom: 16px">
             </el-alert>
 
+            <el-alert
+                v-if="editingInboundId && (inboundCredentials.has_uuid || inboundCredentials.has_password)"
+                :title="'已有凭据保留在服务器：' +
+                    (inboundCredentials.has_uuid ? 'UUID ' : '') +
+                    (inboundCredentials.has_password ? '密码' : '') +
+                    '。编辑接口只返回是否存在，不回传秘密值。'"
+                type="success"
+                :closable="false"
+                style="margin-bottom: 16px">
+            </el-alert>
+
             <el-form-item label="节点状态">
                 <el-switch
                     v-model="newInbound.enable"
