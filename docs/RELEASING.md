@@ -6,8 +6,8 @@
 
 1. 按依赖顺序审阅并合并前置PR；目标必须是当前默认分支的**准确40位HEAD提交**，不能给一个旧测试结果配新源码。
 2. VERSION与main.py版本一致，CHANGELOG、兼容矩阵、证书和安装文档已更新。
-3. 默认分支push会触发全部门槛。相同提交必须完成test、toclash、loopback、release、acme、oneclick和docs七组工作流，**每组最新一次**都为completed/success。失败、取消、缺失或排队一律阻断。
-4. One-command安装任务生成该提交唯一未过期的`vui-release-kit-<sha>`附件。不要手工把未测试构建替换进去。
+3. 默认分支push会触发全部门槛。相同提交必须完成test、toclash、loopback、release、acme、oneclick、portable和docs八组工作流，**每组最新一次**都为completed/success。失败、取消、缺失或排队一律阻断。
+4. One-command 任务生成 x86_64/glibc 发布套件；portable matrix 生成 ARM64/glibc 与两套 musl artifact。发布脚本只聚合同一 exact-head 提交且已通过验收的这些附件，不在发布时重建。
 5. 检查原有tag/Release不存在；正式版本不覆盖、不悄悄替换已发布资产。
 
 ## 人工触发
@@ -20,7 +20,10 @@ GitHub权限只在该人工工作流的发布job授予contents:write/actions:rea
 
 ## 发布资产
 
-- vui-linux-amd64.zip：经过同提交安装验收的固定离线包。
+- vui-linux-x86_64-gnu.zip：经过同提交 one-click/systemd 验收的固定离线包。
+- vui-linux-aarch64-gnu.zip：经过同提交 ARM64 原生 portable 验收的固定离线包。
+- vui-linux-x86_64-musl.zip：经过同提交 Alpine/musl 原生 portable 验收的固定离线包。
+- vui-linux-aarch64-musl.zip：经过同提交 ARM64 Alpine/musl 原生 portable 验收的固定离线包。
 - install.sh、install_system.py：同提交安装入口和root初始化控制器。
 - vui-source.zip：准确提交的源码。
 - SHA256SUMS：全部固定资产的整文件摘要。
@@ -31,7 +34,7 @@ GitHub权限只在该人工工作流的发布job授予contents:write/actions:rea
 
 ## 公开后检查
 
-核对Release公开状态、tag目标、下载文件摘要和文档链接。可在独立临时Ubuntu机器复核在线`install.sh --version v0.3.0`的路径；线上URL只有该版本确实发布后才存在。
+核对Release公开状态、tag目标、下载文件摘要和文档链接。可在独立临时 Linux 机器复核在线 `install.sh --version v0.3.1` 的自动目标选择路径；线上URL只有该版本确实发布后才存在。
 
 外部CA域名验证、云安全组和真实用户网络需要用户自己的配置，不属于维护者自动取得的授权。不要把发布流程顺手变成登录真实VPS部署。
 
