@@ -39,15 +39,18 @@ def load_selected():
         path = payload / name
         if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != manifest['files'][name]['sha256']:
             raise RuntimeError('Launch code failed integrity check')
-    return cfg, release, payload
+    ready=json.loads((release/'READY.json').read_text())
+    runtime=release/'runtime'/'python'/'bin'/'python3'
+    if not runtime.exists(): raise RuntimeError('Portable runtime is missing')
+    return cfg, release, payload, runtime, ready['runtime_key'].split('-',1)[0]
 
 
 def main():
     mode = sys.argv[1] if len(sys.argv) == 2 else ''
-    if mode not in ('panel', 'http01'):
+    if mode not in ('panel', 'http01', 'http01-direct'):
         raise RuntimeError('Choose panel or http01')
-    cfg, release, payload = load_selected()
-    if mode == 'http01':
+    cfg, release, payload, runtime, arch = load_selected()
+    if mode in ('http01', 'http01-direct'):
         command = ['-m', 'app.certificates.http01', '--webroot',
                    str(ROOT / 'data/certificates/http-webroot')]
     else:
@@ -60,10 +63,12 @@ def main():
            if name in {'LANG', 'LC_ALL', 'LISTEN_FDS', 'LISTEN_PID', 'LISTEN_FDNAMES',
                        'NOTIFY_SOCKET', 'INVOCATION_ID', 'JOURNAL_STREAM'}}
     env.update(PATH='/usr/bin:/bin', HOME=str(ROOT), PYTHONDONTWRITEBYTECODE='1',
-               VUI_DATA_DIR=str(ROOT / 'data'), VUI_BIN_DIR=str(payload / 'cores'))
-    python = release / 'venv/bin/python'
+               VUI_DATA_DIR=str(ROOT / 'data'), VUI_BIN_DIR=str(payload / 'cores' / arch))
+    if mode == 'http01-direct':
+        env['VUI_HTTP01_DIRECT']='1'
+        env['VUI_HTTP01_IPV6']='1' if cfg.get('ipv6') else '0'
     os.chdir(payload)
-    os.execve(python, [str(python), '-B', *command], env)
+    os.execve(runtime, [str(runtime), '-B', *command], env)
 
 
 if __name__ == '__main__':

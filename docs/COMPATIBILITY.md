@@ -1,20 +1,59 @@
-# 已验证范围
+# 兼容与验证范围
 
-| 层级 | 已验证 |
+## Linux 安装层
+
+0.3.1 的安装选择依据是实际环境能力，不是发行版名称。
+
+| 层级 | 目标 / 验收 |
 | --- | --- |
-| 一键部署 | Ubuntu24.04 amd64、系统Python3.12、systemd、非root应用用户、直接HTTPS/8443 |
-| 底层核心配置 | 固定sing-box1.14.2、Xray26.3.27的配置检查与状态管理 |
-| 公开导出与真实链路 | sing-box VLESS/TCP/TLS、单用户、空flow、证书验证；明确SNI，可选已验证ALPN/Chrome指纹 |
-| 客户端 | 固定Mihomo1.19.32的配置加载和对应真实链路 |
-| 分流 | ToClash0.3.8固定提交的100个语义场景与40项服务目录；实际默认直连模式DNS/路径测试 |
-| ACME | 固定Certbot5.8.0，HTTP-01单域名；测试/正式隔离，实际Pebble2.10.1协议与GUI测试 |
+| CPU | x86_64、ARM64 |
+| libc | glibc、musl；目标包在对应原生环境启动 |
+| init | systemd、OpenRC |
+| Python | 固定便携 CPython 3.12 |
+| 核心 | sing-box 1.14.2、Xray 26.3.27，按 CPU/libc 选择固定官方构建 |
+| 防火墙 | UFW/firewalld 可在用户明确确认后修改；自定义 nftables/iptables 只提示 |
+| 代表性发行版探测 | Debian、Fedora、Arch、openSUSE、Alpine |
 
-常规模式的地理规则语义通过对照，但这不证明所有用户网络可下载远程地理库，或其具体网站分类永远准确。实际公网速度、运营商限制、站点地区限制和所有移动端客户端版本不属于上述通过证据。
+“探测成功”不单独等于完整支持。正式支持声明要求普通测试、真实 one-click、portable matrix 和发布门槛同时通过。
 
-## 尚未验收，不能声称已支持
+未经适配的 NixOS、runit/s6、其他 CPU、声明式或只读系统不会被假装支持；安装器应给出检测结果并停止。
 
-其他协议或组合（HY2、TUIC、REALITY、VMess、Trojan、Shadowsocks、Vision、非TCP传输）的端到端公开导出、UDP实际转发、sing-box完整ToClash分流迁移、任意现有YAML导入、DNS-01/通配符、DNS服务商API、Docker/ARM64/其他发行版、反向代理自动接管、自动核心版本升级。
+## 已验证代理基线
 
-历史表单和核心能力不等于V-UI已验证矩阵。后续扩展需新增固定二进制与失败路径测试，不靠隐藏字段或删掉不认识的参数“兼容”。
+当前公开导出与真实端到端连接基线仍为：
 
-一键安装器遇到未支持平台应明确退出。安装脚本不能验证真实公网域名控制权，最终以CA验证结果为准；测试中的本机Pebble成功不表示已经为用户真实域名申请成功。
+- sing-box；
+- VLESS；
+- 原生 TCP；
+- TLS；
+- 单用户；
+- 空 flow；
+- 正常证书校验；
+- 明确 SNI；
+- 已验证的可选 ALPN / client fingerprint。
+
+Mihomo 固定客户端与 ToClash 规则语义继续独立验收。
+
+## 尚未完成的协议矩阵
+
+下列协议/组合即使已有表单或生成代码，也不能写成“已完整支持”：
+
+- Trojan；
+- Shadowsocks；
+- VMess；
+- Hysteria2；
+- TUIC；
+- REALITY / Vision；
+- WebSocket / gRPC / XHTTP / HTTPUpgrade 全组合；
+- UDP 实际转发；
+- sing-box 完整 ToClash 规则迁移。
+
+后续版本对每项都要求：服务端配置、编辑回填、URI/Mihomo/sing-box 导出、真实核心 config check、真实客户端 check、正向连接以及错误凭据/TLS/参数失败路径。
+
+## 证书
+
+已实现 Certbot HTTP-01 单域名申请、测试/正式隔离、自动续期和消费者绑定。DNS-01、通配符和 DNS provider API 尚未纳入。
+
+## 边界
+
+“支持所有 Linux 发行版”的实现目标是**取消发行版品牌白名单**，依据 CPU/libc/init 等真实能力选择安全路径；不是承诺 Linux 历史上每个内核、CPU、libc 和 init 都可由同一 root 脚本自动修改。

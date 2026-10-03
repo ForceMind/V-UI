@@ -8,7 +8,7 @@ permissions:
 jobs:
   system-install:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -24,18 +24,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/vui-oneclick
-          python scripts/build_bundle.py /tmp/vui-oneclick/vui-linux-amd64.zip --source-commit "$SOURCE" | tee /tmp/vui-oneclick/build.log
+          python scripts/build_bundle.py /tmp/vui-oneclick/vui-linux.zip --source-commit "$SOURCE" | tee /tmp/vui-oneclick/build.log
       - name: Test guarded installer on ephemeral systemd runner
         env:
           VUI_SYSTEM_INSTALL_TEST: '1'
-          VUI_RELEASE_BUNDLE: /tmp/vui-oneclick/vui-linux-amd64.zip
+          VUI_RELEASE_BUNDLE: /tmp/vui-oneclick/vui-linux.zip
         run: |
           set -euo pipefail
           python -B -m unittest discover -s tests -p test_oneclick_system.py -v 2>&1 | tee /tmp/vui-oneclick/acceptance.log
       - name: Assemble release kit only after acceptance
         env:
           SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: python scripts/build_release_kit.py /tmp/vui-oneclick/vui-linux-amd64.zip /tmp/vui-oneclick/kit "$SOURCE"
+        run: python scripts/build_release_kit.py /tmp/vui-oneclick/vui-linux.zip /tmp/vui-oneclick/kit "$SOURCE"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: vui-release-kit-${{ github.event.pull_request.head.sha || github.sha }}

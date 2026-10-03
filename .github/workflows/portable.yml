@@ -1,0 +1,98 @@
+name: Portable Linux runtime matrix
+on:
+  pull_request:
+  push:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  native-arm64-glibc:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Build exact aarch64 glibc target
+        env:
+          SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/vui-portable
+          python scripts/build_bundle.py /tmp/vui-portable/vui-linux-aarch64-gnu.zip --source-commit "$SOURCE" --target aarch64-gnu
+          SHA="$(cut -d' ' -f1 /tmp/vui-portable/vui-linux-aarch64-gnu.zip.sha256)"
+          ROOT="$(mktemp -d)"
+          python scripts/portable_stage_smoke.py --bundle /tmp/vui-portable/vui-linux-aarch64-gnu.zip --sha256 "$SHA" --root "$ROOT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vui-linux-aarch64-gnu-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            /tmp/vui-portable/vui-linux-aarch64-gnu.zip
+            /tmp/vui-portable/vui-linux-aarch64-gnu.zip.sha256
+          retention-days: 7
+
+  musl:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Build and stage native Alpine/musl target
+        env:
+          SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/vui-portable
+          docker run --rm             -e SOURCE="$SOURCE" -e ARCH="$ARCH"             -v "$PWD:/src" -v /tmp/vui-portable:/out             alpine:3.22 /bin/sh -euxc '
+              apk add --no-cache python3 python3-dev py3-pip git cargo rust build-base libffi-dev openssl-dev ca-certificates
+              git config --global --add safe.directory /src
+              cd /src
+              python3 scripts/build_bundle.py "/out/vui-linux-${ARCH}-musl.zip" --source-commit "$SOURCE" --target "${ARCH}-musl"
+              adduser -D smoke
+              mkdir -p /tmp/vui-stage && chown smoke:smoke /tmp/vui-stage && chmod 700 /tmp/vui-stage
+              SHA="$(cut -d" " -f1 "/out/vui-linux-${ARCH}-musl.zip.sha256")"
+              chown smoke:smoke "/out/vui-linux-${ARCH}-musl.zip" "/out/vui-linux-${ARCH}-musl.zip.sha256"
+              su smoke -s /bin/sh -c "cd /src && PYTHONPATH=/src python3 scripts/portable_stage_smoke.py --bundle /out/vui-linux-${ARCH}-musl.zip --sha256 $SHA --root /tmp/vui-stage"
+            '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vui-linux-${{ matrix.arch }}-musl-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            /tmp/vui-portable/vui-linux-${{ matrix.arch }}-musl.zip
+            /tmp/vui-portable/vui-linux-${{ matrix.arch }}-musl.zip.sha256
+          retention-days: 7
+
+  distro-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Probe representative distro families without a whitelist
+        run: |
+          set -euo pipefail
+          probe() {
+            image="$1"; install="$2"
+            docker run --rm -v "$PWD:/src:ro" "$image" /bin/sh -ec "$install; PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/src python3 /src/scripts/platform_support.py"
+          }
+          probe debian:13-slim 'apt-get update >/dev/null && apt-get install -y python3 >/dev/null'
+          probe fedora:43 'dnf install -y python3 >/dev/null'
+          probe archlinux:latest 'pacman -Sy --noconfirm python >/dev/null'
+          probe opensuse/leap:15.6 'zypper --non-interactive install python311 >/dev/null && ln -sf /usr/bin/python3.11 /usr/local/bin/python3'
+          probe alpine:3.22 'apk add --no-cache python3 >/dev/null'
