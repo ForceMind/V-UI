@@ -135,7 +135,15 @@ class ReleaseDeploymentTests(unittest.TestCase):
                     dialog.get_by_placeholder('example.com',exact=True).fill('vpn.example.test')
                     dialog.get_by_placeholder('/etc/letsencrypt/live/example.com/fullchain.pem').fill(str(cert))
                     dialog.get_by_placeholder('/etc/letsencrypt/live/example.com/privkey.pem').fill(str(key))
-                    dialog.get_by_role('button',name='创建并应用',exact=True).click()
+                    with page.expect_response(
+                        lambda response: response.url.endswith('/api/inbounds')
+                        and response.request.method == 'POST',
+                        timeout=20000,
+                    ) as pending:
+                        dialog.get_by_role('button',name='创建并应用',exact=True).click()
+                    created=pending.value
+                    if created.status != 200:
+                        self.fail('Inbound create failed '+str(created.status)+': '+created.text())
                     expect(dialog).not_to_be_visible(timeout=20000)
                     expect(page.locator('.el-table')).to_contain_text('release-browser-node')
                     page.get_by_text('Mihomo 分流',exact=True).first.click();page.wait_for_url('**/workspace')
