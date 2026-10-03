@@ -66,6 +66,7 @@ jobs:
               adduser -D smoke
               mkdir -p /tmp/vui-stage && chown smoke:smoke /tmp/vui-stage && chmod 700 /tmp/vui-stage
               SHA="$(cut -d" " -f1 "/out/vui-linux-${ARCH}-musl.zip.sha256")"
+              chown smoke:smoke "/out/vui-linux-${ARCH}-musl.zip" "/out/vui-linux-${ARCH}-musl.zip.sha256"
               su smoke -s /bin/sh -c "cd /src && PYTHONPATH=/src python3 scripts/portable_stage_smoke.py --bundle /out/vui-linux-${ARCH}-musl.zip --sha256 $SHA --root /tmp/vui-stage"
             '
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
