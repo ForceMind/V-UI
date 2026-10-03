@@ -69,6 +69,36 @@ class InboundEditorTests(unittest.TestCase):
         self.assertEqual(stream2["_vui"]["client_fingerprint"],"firefox")
         self.assertEqual(settings2["users"][0]["uuid"],settings["users"][0]["uuid"])
 
+    def test_editor_dict_never_contains_persisted_protocol_secrets(self):
+        uuid="11111111-1111-1111-1111-111111111111"
+        password="server-password-never-return"
+        item=self.add(
+            "sing-box","tuic",
+            {"users":[{"uuid":uuid,"password":password}],"congestion_control":"bbr"},
+            {"tls":{"enabled":True,"server_name":"tuic.example.test",
+                    "certificate_path":"/cert.pem","key_path":"/key.pem"},
+             "_vui":{"security":"tls","server_name":"tuic.example.test",
+                     "udp_relay_mode":"native"}},
+        )
+        state=editor_dict(item)
+        serialized=str(state)
+        self.assertNotIn(uuid,serialized)
+        self.assertNotIn(password,serialized)
+        self.assertTrue(state["credentials"]["has_uuid"])
+        self.assertTrue(state["credentials"]["has_password"])
+
+        settings={"users":[{"uuid":uuid}]}
+        settings,stream=compile_profile("sing-box","vless",{
+            "security":"reality","transport":"direct",
+            "reality_target":"target.example.test:443",
+            "reality_short_id":"0102030405060708",
+        },settings,{})
+        private=stream["tls"]["reality"]["private_key"]
+        reality=self.add("sing-box","vless",settings,stream,port=11443)
+        reality_state=editor_dict(reality)
+        self.assertNotIn(private,str(reality_state))
+        self.assertNotIn(uuid,str(reality_state))
+
     def test_xray_transport_edit_removes_stale_blocks(self):
         settings={"users":[{"id":"11111111-1111-1111-1111-111111111111"}],"decryption":"none"}
         stream={"method":"websocket","wsSettings":{"path":"/old","host":"old.example.test"},
