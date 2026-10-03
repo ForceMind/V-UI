@@ -103,7 +103,7 @@ def main():
         prepare_frontend(payload)
         fetch_frontend(payload/'web/vendor')
         arch=key.split('-',1)[0]
-        fetch_cores(payload/'cores'/arch,arch)
+        fetch_cores(payload/'cores'/arch,key)
         fetch_runtimes(payload/'runtimes',[key])
         core_sources(payload)
         wheel_lock(payload,key)
