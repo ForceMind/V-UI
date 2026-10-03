@@ -2,7 +2,7 @@
 
 **个人自用的轻量代理面板：管理节点、图形化申请证书、设置 ToClash 分流，直接订阅完整 Mihomo 配置。**
 
-版本目标：**v0.3.0**。正式发布前须完成 [发布检查](docs/RELEASING.md) 中的验收和人工发布动作；版本号不代表 GitHub Release 已公开。各阶段保留独立 PR，不自动改动真实服务器。
+版本目标：**v0.3.1**。正式发布前须完成 [发布检查](docs/RELEASING.md) 中的全部 exact-head 验收和人工发布动作；版本号不代表 GitHub Release 已公开。
 
 ## 能做什么
 
@@ -21,7 +21,7 @@ V-UI 使用 FastAPI + SQLite，不依赖 Redis、常驻 Node 或在线订阅转�
 
 ## 快速安装
 
-首轮支持 **Ubuntu 24.04 amd64、Python 3.12、systemd**。准备自己控制的域名、正确的 A/AAAA、可达的 TCP 80、面板端口（默认8443）和节点端口（建议10443）。安装器不替你更改安全组、SSH或防火墙，不会接管已有网站。
+安装器不再按 Ubuntu 白名单判断环境，而是检测 CPU、glibc/musl、systemd/OpenRC、包管理器、防火墙和端口。目标运行包覆盖 x86_64/ARM64 × glibc/musl；运行服务使用固定便携 Python 3.12。
 
 将**同一验收提交**的安装套件解压后，在套件目录执行：
 
@@ -31,12 +31,12 @@ sudo bash install.sh --bundle ./vui-linux-amd64.zip \
   --sha256 "$(awk '$2=="vui-linux-amd64.zip" {print $1}' SHA256SUMS)"
 ```
 
-脚本会询问面板域名、邮箱及CA协议同意，并在不回显的终端中设置管理员密码。随后准备独立低权限账号、HTTP-01验证服务，申请面板证书并启动HTTPS。root只执行系统初始化，面板和Certbot不会以root运行。
+脚本会先检查 80、面板端口和默认节点端口。本机 UFW/firewalld 缺规则时只有在你明确输入 `yes` 后才会开放；自定义 nftables/iptables 与云安全组只提示并等待人工确认。随后才创建低权限账号、HTTP-01 验证服务和 HTTPS 面板。
 
 发布后可指定明确版本通过同一入口下载官方Release资产；**正式Release尚未生成时不要把下面命令当作当前可用下载地址**：
 
 ```sh
-sudo bash install.sh --version v0.3.0
+sudo bash install.sh --version v0.3.1
 ```
 
 安装器本身也必须来自可信仓库/套件，不能只信任来源不明压缩包附带的摘要。详见 [安装指南](docs/INSTALLATION.md)。
