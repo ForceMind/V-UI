@@ -1,5 +1,16 @@
 # 变更日志
 
+## 0.3.1 — Linux 可移植安装与发布链
+
+- 安装器从 Ubuntu 24.04/amd64 白名单改为检测发行版、CPU、libc、init、包管理器和防火墙能力。
+- 支持 x86_64 / ARM64 与 glibc / musl 四种目标运行包，运行服务使用固定便携 CPython 3.12 和 hash-locked wheels。
+- sing-box 按 glibc/musl 选择官方对应构建；Xray 按 CPU 架构选择固定官方构建。
+- systemd 与 OpenRC 分别使用受管服务后端；主面板保持非 root。
+- 安装前检查 TCP 80、面板端口和默认节点端口。UFW/firewalld 只有用户明确确认后才修改；自定义 nftables/iptables 和云安全组仅提示人工处理。
+- 在线 `install.sh --version` 自动检测目标并下载对应 Release 包。
+- 正式发布门槛增加 portable Linux matrix；四个目标包必须来自同一 exact-head 提交的已验收 artifact，发布阶段不重新编译。
+
+
 ## 0.3.0 — 正式发布准备
 
 本条记录代码目标版本，公开发布日期由正式Release动作确定，不把候选CI完成时间写成已公开发布。
