@@ -7,6 +7,7 @@
 | 新服务器安装/首次证书/创建管理员 | [INSTALLATION.md](INSTALLATION.md) |
 | 申请/测试/自动续期/面板或节点绑定 | [CERTIFICATES.md](CERTIFICATES.md) |
 | 节点、规则、DNS、专用订阅 | [CONFIGURATION.md](CONFIGURATION.md) |
+| 服务规则包、敏感服务强制代理、上游规则与防漏直连 | [SERVICE_RULE_PACKS.md](SERVICE_RULE_PACKS.md) |
 | 更新、停机备份、恢复、回滚、卸载 | [OPERATIONS.md](OPERATIONS.md) |
 | 访问失败/签发失败/核心未生效 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
 | 管理API、令牌和错误状态 | [API.md](API.md) |
