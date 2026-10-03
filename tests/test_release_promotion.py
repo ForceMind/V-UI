@@ -101,10 +101,12 @@ class ReleasePromotionTests(unittest.TestCase):
         for target in TARGETS[1:]:
             with self.subTest(target=target):
                 raw=self.portable(target)
-                self.assertEqual(
-                    validate_target_artifact(raw,SHA,'0.3.1',target),
-                    bundle(target),
-                )
+                returned=validate_target_artifact(raw,SHA,'0.3.1',target)
+                with zipfile.ZipFile(io.BytesIO(returned)) as archive:
+                    manifest=json.loads(archive.read('MANIFEST.json'))
+                self.assertEqual(manifest['targets'],[target])
+                self.assertEqual(manifest['source_commit'],SHA)
+                self.assertEqual(manifest['version'],'0.3.1')
                 with self.assertRaises(ReleaseGateError):
                     validate_target_artifact(self.portable(target,corrupt=True),SHA,'0.3.1',target)
                 with self.assertRaises(ReleaseGateError):
