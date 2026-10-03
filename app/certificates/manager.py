@@ -228,6 +228,20 @@ class CertificateManager:
                               verify_chain=record.environment == 'production')
             return paths, record.domain, selected
 
+    def binding(self, target):
+        with database.SessionLocal() as db:
+            row=db.get(CertificateBinding,target)
+            return row.certificate_id if row else None
+
+    def unbind(self, target):
+        with self._binding_lock, database.SessionLocal() as db:
+            db.execute(text('BEGIN IMMEDIATE'))
+            row=db.get(CertificateBinding,target)
+            if row:
+                db.delete(row)
+            db.commit()
+        return {'target':target,'configured':False}
+
     def bind(self, certificate_id, target):
         self.material(certificate_id)
         if target != 'panel' and not re.fullmatch(r'inbound:[1-9][0-9]*', target): raise CertificateError('INVALID_TARGET')
