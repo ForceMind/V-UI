@@ -27,7 +27,30 @@ class RealExportTests(unittest.TestCase):
                 json_path=root/'client.json';json_path.write_text(json.dumps(singbox_client_config([item],'127.0.0.1')))
                 result=subprocess.run([str(Path(os.environ['VUI_TEST_CORES'])/'sing-box'),'check','-c',str(json_path)],capture_output=True,timeout=15)
                 self.assertEqual(result.returncode,0,result.stderr.decode(errors='replace'))
-            print('Generated VLESS/TCP/TLS configuration accepted by Mihomo and sing-box')
+            trojan=SimpleNamespace(
+                id=2,core='sing-box',protocol='trojan',port=11443,remark='trojan-test',
+                enable=True,expiry_time=0,
+                settings={'users':[{'password':'trojan-password-123'}]},
+                stream_settings={'tls':{'enabled':True,'server_name':'trojan.example.test'}}
+            )
+            yaml_path=root/'trojan-client.yaml'
+            yaml_path.write_text(mihomo_config([trojan],'127.0.0.1',{'mode':'direct'}))
+            result=subprocess.run(
+                [os.environ['VUI_TEST_MIHOMO'],'-t','-d',str(root),'-f',str(yaml_path)],
+                capture_output=True,timeout=15,
+            )
+            self.assertEqual(
+                result.returncode,0,
+                result.stdout.decode(errors='replace')+result.stderr.decode(errors='replace'),
+            )
+            json_path=root/'trojan-client.json'
+            json_path.write_text(json.dumps(singbox_client_config([trojan],'127.0.0.1')))
+            result=subprocess.run(
+                [str(Path(os.environ['VUI_TEST_CORES'])/'sing-box'),'check','-c',str(json_path)],
+                capture_output=True,timeout=15,
+            )
+            self.assertEqual(result.returncode,0,result.stderr.decode(errors='replace'))
+            print('Generated VLESS/TCP/TLS and Trojan/TCP/TLS configurations accepted by Mihomo and sing-box')
             item=SimpleNamespace(
                 id=2,core='sing-box',protocol='trojan',port=10444,
                 remark='trojan-node',enable=True,
