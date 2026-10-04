@@ -35,8 +35,8 @@ def node_host(value: str) -> str:
 def _common(item, server: str) -> tuple[str, str]:
     if not item.enable or getattr(item, "expiry_time", 0):
         raise ExportError("Disabled or expiring nodes are not eligible for this export profile")
-    if item.core != "sing-box" or item.protocol not in {"vless", "trojan", "shadowsocks"}:
-        raise ExportError("Validated export currently requires verified sing-box VLESS/TCP/TLS, Trojan/TCP/TLS or Shadowsocks")
+    if item.core != "sing-box" or item.protocol not in {"vless", "trojan", "shadowsocks", "vmess"}:
+        raise ExportError("Validated export currently requires verified sing-box VLESS/TCP/TLS, Trojan/TCP/TLS, Shadowsocks or VMess/TCP/TLS")
     server=node_host(server)
     if type(item.port) is not int or not 1 <= item.port <= 65535:
         raise ExportError("Invalid node port")
@@ -102,6 +102,25 @@ def _vless_node(item, server: str, name: str, sni: str, meta: dict,
     return result
 
 
+def _vmess_node(item, server: str, name: str, sni: str, meta: dict,
+                alpn: list[str] | None) -> dict:
+    user=mapping(_one_user(item), {"uuid","name"}, "VMess user")
+    uid=user.get("uuid")
+    if not isinstance(uid,str) or not re.fullmatch(
+        r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}",uid
+    ):
+        raise ExportError("Invalid VMess UUID")
+    result={"name":name,"type":"vmess","server":server,"port":item.port,
+            "uuid":uid,"alterId":0,"cipher":"auto","udp":True,
+            "tls":True,"servername":sni,"network":"tcp",
+            "skip-cert-verify":False}
+    if meta.get("client_fingerprint"):
+        result["client-fingerprint"]=meta["client_fingerprint"]
+    if alpn:
+        result["alpn"]=alpn
+    return result
+
+
 def _trojan_node(item, server: str, name: str, sni: str, meta: dict,
                  alpn: list[str] | None) -> dict:
     user=mapping(_one_user(item), {"password","name"}, "Trojan user")
@@ -145,6 +164,8 @@ def validated_node(item, server: str) -> dict:
     sni,meta,alpn=_tcp_tls(item)
     if item.protocol=="vless":
         return _vless_node(item,server,name,sni,meta,alpn)
+    if item.protocol=="vmess":
+        return _vmess_node(item,server,name,sni,meta,alpn)
     if item.protocol=="trojan":
         return _trojan_node(item,server,name,sni,meta,alpn)
     raise ExportError("Unreachable export profile")
@@ -177,6 +198,22 @@ def share_link(item, server: str) -> str:
             f"{node['cipher']}:{node['password']}".encode()
         ).decode().rstrip("=")
         return f"ss://{userinfo}@{host}:{node['port']}#{quote(node['name'],safe='')}"
+
+    if node["type"]=="vmess":
+        payload={
+            "v":"2","ps":node["name"],"add":node["server"],
+            "port":str(node["port"]),"id":node["uuid"],"aid":"0",
+            "scy":"auto","net":"tcp","type":"none","host":"","path":"",
+            "tls":"tls","sni":node["servername"],
+        }
+        if node.get("client-fingerprint"):
+            payload["fp"]=node["client-fingerprint"]
+        if node.get("alpn"):
+            payload["alpn"]=",".join(node["alpn"])
+        encoded=base64.b64encode(
+            __import__("json").dumps(payload,separators=(",",":"),ensure_ascii=False).encode()
+        ).decode()
+        return "vmess://"+encoded
 
     params={"sni":node["sni"]}
     if node.get("client-fingerprint"):
@@ -218,6 +255,10 @@ def singbox_client_config(items, server: str) -> dict:
             outbound={"type":"trojan","tag":node["name"],"server":node["server"],
                       "server_port":node["port"],"password":node["password"],
                       "tls":_client_tls(node)}
+        elif node["type"]=="vmess":
+            outbound={"type":"vmess","tag":node["name"],"server":node["server"],
+                      "server_port":node["port"],"uuid":node["uuid"],
+                      "security":"auto","alter_id":0,"tls":_client_tls(node)}
         else:
             outbound={"type":"shadowsocks","tag":node["name"],"server":node["server"],
                       "server_port":node["port"],"method":node["cipher"],
@@ -240,6 +281,6 @@ def export_warnings(items) -> list[dict]:
             warnings.append({
                 "inbound_id":item.id,
                 "code":"UNVERIFIED_EXPORT_PROFILE",
-                "message":"This node is outside the verified sing-box VLESS/TCP/TLS, Trojan/TCP/TLS and Shadowsocks export profiles.",
+                "message":"This node is outside the verified sing-box VLESS/TCP/TLS, Trojan/TCP/TLS, Shadowsocks and VMess/TCP/TLS export profiles.",
             })
     return warnings
