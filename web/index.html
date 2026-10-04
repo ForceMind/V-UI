@@ -663,7 +663,7 @@
             </el-form-item>
 
             <template v-if="newInbound.profile.security === 'tls'">
-                <el-form-item label="托管证书" v-if="newInbound.core === 'sing-box' && newInbound.protocol === 'vless'">
+                <el-form-item label="托管证书" v-if="newInbound.core === 'sing-box' && ['vless','trojan'].includes(newInbound.protocol)">
                     <el-select v-model="newInbound.certificate_id" clearable placeholder="选证书自动填入；或手动填写路径" style="width:100%">
                         <el-option v-for="cert in managedCertificates" :key="cert.id" :label="cert.domain" :value="cert.id"></el-option>
                     </el-select>
