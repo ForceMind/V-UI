@@ -4,6 +4,22 @@
 set -euo pipefail
 umask 077
 
+detect_target() {
+  local arch libc
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) arch=x86_64 ;;
+    aarch64|arm64) arch=aarch64 ;;
+    *) echo "Unsupported CPU architecture: $arch" >&2; return 1 ;;
+  esac
+  if ls /lib/ld-musl-*.so.1 /usr/lib/ld-musl-*.so.1 >/dev/null 2>&1 || (command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl); then
+    libc=musl
+  else
+    libc=gnu
+  fi
+  printf '%s-%s\n' "$arch" "$libc"
+}
+
 find_python() {
   local candidate
   for candidate in python3 python; do
@@ -33,15 +49,8 @@ bootstrap_tools() {
   esac
 }
 bootstrap_portable_python() {
-  local arch libc key url sha root archive
-  arch="$(uname -m)"
-  case "$arch" in x86_64|amd64) arch=x86_64 ;; aarch64|arm64) arch=aarch64 ;; *) return 1 ;; esac
-  if ls /lib/ld-musl-*.so.1 /usr/lib/ld-musl-*.so.1 >/dev/null 2>&1 || (command -v ldd >/dev/null && ldd --version 2>&1 | grep -qi musl); then
-    libc=musl
-  else
-    libc=gnu
-  fi
-  key="$arch-$libc"
+  local key url sha root archive
+  key="$(detect_target)" || return 1
   case "$key" in
     x86_64-gnu)
       url='https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz'
@@ -100,22 +109,28 @@ WORK="$(mktemp -d)"
 cleanup_all() { rm -rf -- "$WORK"; cleanup_bootstrap; }
 trap cleanup_all EXIT
 BASE="https://github.com/ForceMind/V-UI/releases/download/$VERSION"
-for FILE in SHA256SUMS install_system.py platform_support.py firewall_support.py service_support.py vui-linux.zip; do
+TARGET="$(detect_target)"
+BUNDLE="vui-linux-$TARGET.zip"
+echo "Detected release target: $TARGET"
+for FILE in SHA256SUMS install_system.py platform_support.py firewall_support.py service_support.py "$BUNDLE"; do
   curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --location --retry 2 --connect-timeout 15 --max-time 300 \
     "$BASE/$FILE" -o "$WORK/$FILE"
 done
 # Only fixed names are accepted. Never execute paths named by a downloaded list.
-"$PYTHON" - "$WORK" <<'PY'
+"$PYTHON" - "$WORK" "$BUNDLE" <<'PY'
 import hashlib,pathlib,re,sys
-root=pathlib.Path(sys.argv[1]);entries={}
+root=pathlib.Path(sys.argv[1]);bundle=sys.argv[2];entries={}
+if not re.fullmatch(r'vui-linux-(?:x86_64|aarch64)-(?:gnu|musl)\.zip',bundle):
+    raise SystemExit('Invalid target bundle name')
 for line in (root/'SHA256SUMS').read_text().splitlines():
     match=re.fullmatch(r'([a-f0-9]{64})  ([A-Za-z0-9._-]+)',line)
     if not match or match[2] in entries:raise SystemExit('Invalid checksum list')
     entries[match[2]]=match[1]
-for name in ('install_system.py','platform_support.py','firewall_support.py','service_support.py','vui-linux.zip'):
-    if hashlib.sha256((root/name).read_bytes()).hexdigest()!=entries.get(name):raise SystemExit('Release asset checksum mismatch')
-(root/'bundle.sha').write_text(entries['vui-linux.zip'])
+for name in ('install_system.py','platform_support.py','firewall_support.py','service_support.py',bundle):
+    if hashlib.sha256((root/name).read_bytes()).hexdigest()!=entries.get(name):
+        raise SystemExit('Release asset checksum mismatch: '+name)
+(root/'bundle.sha').write_text(entries[bundle])
 PY
 # This checksum is from the explicitly selected official release, not a signature.
 # Audit install.sh itself and the repository/release source before executing as root.
-PYTHONPATH="$WORK" "$PYTHON" "$WORK/install_system.py" --bundle "$WORK/vui-linux.zip" --sha256 "$(cat "$WORK/bundle.sha")" "$@"
+PYTHONPATH="$WORK" "$PYTHON" "$WORK/install_system.py" --bundle "$WORK/$BUNDLE" --sha256 "$(cat "$WORK/bundle.sha")" "$@"

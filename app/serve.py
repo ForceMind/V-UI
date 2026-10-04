@@ -7,7 +7,7 @@ from pathlib import Path
 import ssl
 import sys
 from urllib.parse import urlsplit
-from app.release_tools import ReleaseError, active, lease, private_root, supported_environment
+from app.release_tools import ReleaseError, active, lease, private_root, supported_environment, target_arch
 
 
 def private_file(value: str) -> Path:
@@ -32,7 +32,7 @@ def run() -> None:
     if not 1024 <= args.port <= 65535: raise ReleaseError('Use an unprivileged port in 1024–65535')
     ipaddress.ip_address(args.bind)
     os.environ['VUI_PUBLIC_ORIGIN']=args.origin
-    os.environ.update(VUI_DATA_DIR=str(root/'data'),VUI_BIN_DIR=str(Path(__file__).resolve().parents[1]/'cores'))
+    os.environ.update(VUI_DATA_DIR=str(root/'data'))
     from app.middleware.auth import configured_origin
     origin=configured_origin()
     if not origin.startswith('https://') or (urlsplit(origin).port or 443) != args.port:
@@ -44,7 +44,7 @@ def run() -> None:
         data=root/'data'
         if not data.is_dir() or data.is_symlink() or data.stat().st_uid != os.geteuid() or data.stat().st_mode & 0o077:
             raise ReleaseError('Data directory must be owned by service user with mode 0700')
-        os.environ.update(VUI_DATA_DIR=str(data),VUI_BIN_DIR=str(payload/'cores'),VUI_RELEASE_ROOT=str(root))
+        os.environ.update(VUI_DATA_DIR=str(data),VUI_BIN_DIR=str(payload/'cores'/target_arch()),VUI_RELEASE_ROOT=str(root))
         # Only initialize the data store after taking the instance lease and
         # verifying the selected release. Bootstrap paths are not API inputs.
         from app.certificates.manager import get_manager

@@ -50,8 +50,8 @@ class InboundUpdatePayload(BaseModel):
 def _managed_certificate(profile: dict | None, certificate_id: str, core: str, protocol: str):
     from app.certificates.manager import get_manager
     from app.api.certificates import perform
-    if core != "sing-box" or protocol not in {"vless", "trojan"}:
-        raise HTTPException(409, "Managed certificates currently target validated sing-box VLESS/TLS or Trojan/TLS")
+    if core != "sing-box" or protocol != "vless":
+        raise HTTPException(409, "Managed certificates currently target sing-box VLESS/TLS")
     paths, domain, _ = perform(lambda: get_manager().material(certificate_id))
     return {
         **(profile or {}),
