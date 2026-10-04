@@ -1,5 +1,20 @@
 # 变更日志
 
+## 0.4.2 — VMess/TCP/TLS（候选）
+
+- 新增 sing-box VMess/TCP/TLS strict public export：Mihomo YAML、VMess URI/Base64、sing-box JSON。
+- 仅接受单 UUID 用户、TCP、TLS、证书校验与明确 SNI；未知字段、非 TCP、关闭 TLS 明确拒绝。
+- 新增真实 sing-box VMess 服务端 + Mihomo/sing-box 客户端 loopback，覆盖正确 UUID、错误 UUID、错误 CA/SNI 与 DIRECT 失败回退检查。
+- 本条为候选实现记录；只有 exact-head 全组 CI 成功后才更新兼容矩阵为“已验证”。
+
+## 0.4.1 — Shadowsocks
+
+- sing-box Shadowsocks 首轮公开支持 aes-128-gcm、aes-256-gcm、chacha20-ietf-poly1305。
+- Mihomo YAML、SIP002 ss://、sing-box JSON 均由固定客户端配置检查。
+- 真实 Mihomo 与 sing-box 客户端完成 TCP/UDP loopback；错误密码和 method 均拒绝且不回退 DIRECT。
+- exact-head 八组 CI 已完成 success 后进入下一协议版本。
+
+
 ## 0.4.0 — Trojan/TCP/TLS
 
 - 新增 sing-box Trojan/TCP/TLS strict public export：Mihomo YAML、Trojan URI/Base64、sing-box JSON。
