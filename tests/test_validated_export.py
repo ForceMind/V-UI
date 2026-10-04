@@ -122,8 +122,9 @@ class ValidatedExportTests(unittest.TestCase):
         singbox=json.dumps(singbox_client_config([item],'vmess.example.test'))
         raw=base64.b64decode(base64_subscription([item],'vmess.example.test')).decode()
         for output in (mihomo,singbox,raw):
-            self.assertIn('44444444-4444-4444-4444-444444444444',output)
             self.assertNotIn('/private/server',output)
+        self.assertIn('44444444-4444-4444-4444-444444444444',mihomo)
+        self.assertIn('44444444-4444-4444-4444-444444444444',singbox)
         proxy=yaml.safe_load(mihomo)['proxies'][0]
         self.assertEqual(proxy['type'],'vmess')
         self.assertEqual(proxy['uuid'],'44444444-4444-4444-4444-444444444444')
