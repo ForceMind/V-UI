@@ -1,5 +1,14 @@
 # 变更日志
 
+## 0.4.0 — Trojan/TCP/TLS
+
+- 新增 sing-box Trojan/TCP/TLS strict public export：Mihomo YAML、Trojan URI/Base64、sing-box JSON。
+- 单密码用户、TLS/SNI/证书校验、可选 ALPN/Chrome fingerprint 经过固定客户端验证。
+- 真实 sing-box 服务端 + Mihomo 客户端 loopback 验证正确密码连通、错误密码拒绝、错误 CA/SNI 拒绝且不回退 DIRECT。
+- 托管证书、自动续期和证书页面绑定扩展到 Trojan/TLS 节点。
+- 未验证的 Xray Trojan、WS/gRPC Trojan 等继续明确拒绝，不随本版本放开。
+
+
 ## 0.3.1 — Linux 可移植安装与发布链
 
 - 安装器从 Ubuntu 24.04/amd64 白名单改为检测发行版、CPU、libc、init、包管理器和防火墙能力。
