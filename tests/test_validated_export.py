@@ -49,6 +49,22 @@ def trojan_node(**changes):
     return SimpleNamespace(**value)
 
 
+def vmess_node(**changes):
+    value=dict(
+        id=4,core='sing-box',protocol='vmess',port=13443,
+        remark='vmess / 中文',enable=True,expiry_time=0,
+        settings={'users':[{'uuid':'44444444-4444-4444-4444-444444444444'}]},
+        stream_settings={'tls':{
+            'enabled':True,
+            'server_name':'vmess.example.test',
+            'certificate_path':'/private/server/vmess-cert.pem',
+            'key_path':'/private/server/vmess-key.pem',
+        }},
+    )
+    value.update(changes)
+    return SimpleNamespace(**value)
+
+
 def ss_node(method="aes-128-gcm", **changes):
     value=dict(
         id=3,core='sing-box',protocol='shadowsocks',port=12443,
@@ -99,6 +115,33 @@ class ValidatedExportTests(unittest.TestCase):
         self.assertEqual(client['type'],'trojan')
         self.assertEqual(client['password'],'Tr0jan-pass:/?#[]@!$&()*+,;=')
         self.assertEqual(client['tls']['server_name'],'trojan.example.test')
+
+    def test_vmess_three_outputs_preserve_uuid_tls_and_hide_server_paths(self):
+        item=vmess_node()
+        mihomo=mihomo_config([item],'vmess.example.test',{'mode':'direct'})
+        singbox=json.dumps(singbox_client_config([item],'vmess.example.test'))
+        raw=base64.b64decode(base64_subscription([item],'vmess.example.test')).decode()
+        for output in (mihomo,singbox,raw):
+            self.assertIn('44444444-4444-4444-4444-444444444444',output)
+            self.assertNotIn('/private/server',output)
+        proxy=yaml.safe_load(mihomo)['proxies'][0]
+        self.assertEqual(proxy['type'],'vmess')
+        self.assertEqual(proxy['uuid'],'44444444-4444-4444-4444-444444444444')
+        self.assertEqual(proxy['alterId'],0)
+        self.assertEqual(proxy['cipher'],'auto')
+        self.assertTrue(proxy['tls'])
+        self.assertFalse(proxy['skip-cert-verify'])
+        self.assertEqual(proxy['servername'],'vmess.example.test')
+        client=singbox_client_config([item],'vmess.example.test')['outbounds'][0]
+        self.assertEqual(client['type'],'vmess')
+        self.assertEqual(client['uuid'],'44444444-4444-4444-4444-444444444444')
+        self.assertEqual(client['alter_id'],0)
+        self.assertEqual(client['tls']['server_name'],'vmess.example.test')
+        self.assertTrue(raw.startswith('vmess://'))
+        payload=json.loads(base64.b64decode(raw[len('vmess://'):]).decode())
+        self.assertEqual(payload['id'],'44444444-4444-4444-4444-444444444444')
+        self.assertEqual(payload['tls'],'tls')
+        self.assertEqual(payload['sni'],'vmess.example.test')
 
     def test_shadowsocks_three_outputs_for_validated_aead_methods(self):
         for method in ("aes-128-gcm","aes-256-gcm","chacha20-ietf-poly1305"):
@@ -170,10 +213,20 @@ class ValidatedExportTests(unittest.TestCase):
             {'core':'xray'},
             {'protocol':'tuic'},
             {'protocol':'hysteria2'},
-            {'protocol':'vmess'},
         ):
             with self.subTest(change=change),self.assertRaises(ExportError):
                 validated_nodes([vless_node(**change)],'vpn.example.test')
+
+    def test_vmess_rejects_multiuser_unknown_fields_non_tcp_and_insecure_tls(self):
+        candidates=[]
+        x=vmess_node();x.settings['unknown']='secret';candidates.append(x)
+        x=vmess_node();x.settings['users']*=2;candidates.append(x)
+        x=vmess_node();x.settings['users'][0]['unknown']='secret';candidates.append(x)
+        x=vmess_node();x.stream_settings['transport']={'type':'ws','path':'/x'};candidates.append(x)
+        x=vmess_node();x.stream_settings['tls']['enabled']=False;candidates.append(x)
+        for item in candidates:
+            with self.subTest(item=item.__dict__),self.assertRaises(ExportError):
+                validated_nodes([item],'vmess.example.test')
 
     def test_vless_unknown_fields_multiuser_flow_and_non_tcp_are_rejected(self):
         candidates=[]
