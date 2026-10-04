@@ -80,6 +80,8 @@ const app = createApp({
                 reality_short_id: '',
                 client_fingerprint: 'chrome',
                 skip_cert_verify: false,
+                shadowsocks_method: 'aes-128-gcm',
+                shadowsocks_password_set: false,
                 up_mbps: 100,
                 down_mbps: 100,
                 obfs_type: '',
@@ -384,6 +386,8 @@ const app = createApp({
             p.reality_short_id = '';
             p.client_fingerprint = 'chrome';
             p.skip_cert_verify = false;
+            p.shadowsocks_method = 'aes-128-gcm';
+            p.shadowsocks_password_set = false;
             p.up_mbps = 100;
             p.down_mbps = 100;
             p.obfs_type = '';
