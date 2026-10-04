@@ -2,7 +2,7 @@
 
 ## Linux 安装层
 
-0.3.1 的安装选择依据是实际环境能力，不是发行版名称。
+0.4.0 延续 0.3.1 的安装选择依据是实际环境能力，不是发行版名称。
 
 | 层级 | 目标 / 验收 |
 | --- | --- |
@@ -20,17 +20,12 @@
 
 ## 已验证代理基线
 
-当前公开导出与真实端到端连接基线仍为：
+当前公开导出与真实端到端连接已验证两条配置：
 
-- sing-box；
-- VLESS；
-- 原生 TCP；
-- TLS；
-- 单用户；
-- 空 flow；
-- 正常证书校验；
-- 明确 SNI；
-- 已验证的可选 ALPN / client fingerprint。
+1. **sing-box + VLESS + TCP + TLS**：单用户、空 flow、正常证书校验、明确 SNI；可选 ALPN / Chrome client fingerprint 已验证。
+2. **sing-box + Trojan + TCP + TLS**：单密码用户、正常证书校验、明确 SNI；可选 ALPN / Chrome client fingerprint 已验证。
+
+两者均通过 Mihomo 和 sing-box 客户端配置检查。真实 loopback 验证正确凭据连通、错误凭据拒绝、错误 CA/SNI 拒绝，并确认失败不会回退 DIRECT。
 
 Mihomo 固定客户端与 ToClash 规则语义继续独立验收。
 
@@ -38,7 +33,7 @@ Mihomo 固定客户端与 ToClash 规则语义继续独立验收。
 
 下列协议/组合即使已有表单或生成代码，也不能写成“已完整支持”：
 
-- Trojan；
+- Trojan 的 Xray 实现及 WebSocket/gRPC 等非 TCP 组合；
 - Shadowsocks；
 - VMess；
 - Hysteria2；
