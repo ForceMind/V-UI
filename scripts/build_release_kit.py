@@ -12,8 +12,11 @@ def build(bundle, destination, commit):
     root=Path(__file__).resolve().parents[1]
     bundle,destination=Path(bundle),Path(destination)
     destination.mkdir(parents=True,exist_ok=True)
-    target=destination/'vui-linux.zip';shutil.copyfile(bundle,target)
-    with zipfile.ZipFile(target) as archive:manifest=json.loads(archive.read('MANIFEST.json'))
+    with zipfile.ZipFile(bundle) as archive:manifest=json.loads(archive.read('MANIFEST.json'))
+    targets=manifest.get('targets') or []
+    if len(targets)!=1 or targets[0] not in {'x86_64-gnu','aarch64-gnu','x86_64-musl','aarch64-musl'}:
+        raise ValueError('Release bundle must contain exactly one supported target')
+    target=destination/('vui-linux-'+targets[0]+'.zip');shutil.copyfile(bundle,target)
     if manifest['source_commit'] != commit:raise ValueError('Bundle was built from another commit')
     for source,name in (
         (root/'install.sh','install.sh'),
@@ -26,7 +29,8 @@ def build(bundle, destination, commit):
     subprocess.run(['git','archive','--format=zip','--output='+str(destination/'vui-source.zip'),commit],cwd=root,check=True)
     shutil.copyfile(root/'docs/RELEASE_NOTES.md',destination/'RELEASE_NOTES.md')
     (destination/'RELEASE.json').write_text(json.dumps({'schema':1,'version':manifest['version'],
-        'source_commit':commit,'release_id':manifest['release_id'],'platform':manifest['platform']},indent=2))
+        'source_commit':commit,'release_id':manifest['release_id'],'platform':manifest['platform'],
+        'targets':targets},indent=2))
     entries=[]
     for path in sorted(destination.iterdir()):
         if path.is_file() and path.name!='SHA256SUMS':
