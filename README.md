@@ -27,8 +27,9 @@ V-UI 使用 FastAPI + SQLite，不依赖 Redis、常驻 Node 或在线订阅转�
 
 ```sh
 sha256sum -c SHA256SUMS
-sudo bash install.sh --bundle ./vui-linux-amd64.zip \
-  --sha256 "$(awk '$2=="vui-linux-amd64.zip" {print $1}' SHA256SUMS)"
+# 示例：x86_64 + glibc；其他机器使用对应 target 包
+sudo bash install.sh --bundle ./vui-linux-x86_64-gnu.zip \
+  --sha256 "$(awk '$2=="vui-linux-x86_64-gnu.zip" {print $1}' SHA256SUMS)"
 ```
 
 脚本会先检查 80、面板端口和默认节点端口。本机 UFW/firewalld 缺规则时只有在你明确输入 `yes` 后才会开放；自定义 nftables/iptables 与云安全组只提示并等待人工确认。随后才创建低权限账号、HTTP-01 验证服务和 HTTPS 面板。
