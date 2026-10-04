@@ -88,8 +88,18 @@ jobs:
       - name: Probe representative distro families without a whitelist
         run: |
           set -euo pipefail
+          pull_retry() {
+            image="$1"
+            for attempt in 1 2 3; do
+              docker pull "$image" && return 0
+              echo "docker pull failed for $image (attempt $attempt/3)" >&2
+              sleep $((attempt * 3))
+            done
+            return 1
+          }
           probe() {
             image="$1"; install="$2"
+            pull_retry "$image"
             docker run --rm -v "$PWD:/src:ro" "$image" /bin/sh -ec "$install; PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/src python3 /src/scripts/platform_support.py"
           }
           probe debian:13-slim 'apt-get update >/dev/null && apt-get install -y python3 >/dev/null'

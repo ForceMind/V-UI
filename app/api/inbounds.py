@@ -117,22 +117,52 @@ def edit_inbound(
     data["core"] = item.core or "xray"
     data["protocol"] = item.protocol
 
-    if certificate_changed and certificate_id:
-        data["profile"] = _managed_certificate(
-            data.get("profile"), certificate_id, data["core"], data["protocol"]
-        )
+    previous_certificate = None
+    certificate_manager = None
+    if certificate_changed:
+        from app.certificates.manager import get_manager
+        from app.api.certificates import perform
+        certificate_manager = get_manager()
+        target = "inbound:" + str(inbound_id)
+        previous_certificate = certificate_manager.binding(target)
+        if certificate_id:
+            data["profile"] = _managed_certificate(
+                data.get("profile"), certificate_id, data["core"], data["protocol"]
+            )
+        elif previous_certificate:
+            profile = data.get("profile")
+            if not isinstance(profile, dict):
+                raise HTTPException(
+                    409,
+                    "Provide explicit manual certificate and key paths before removing managed renewal",
+                )
+            old_paths, _, _ = perform(
+                lambda: certificate_manager.material(previous_certificate)
+            )
+            certificate_path = str(profile.get("certificate_path") or "").strip()
+            key_path = str(profile.get("key_path") or "").strip()
+            if (
+                not certificate_path
+                or not key_path
+                or certificate_path == str(old_paths[0])
+                or key_path == str(old_paths[1])
+            ):
+                raise HTTPException(
+                    409,
+                    "Replace the managed certificate/key paths before unbinding; "
+                    "otherwise the node would lose automatic renewal while still using old material",
+                )
 
     updated = update_inbound(db, inbound_id, data)
     result = apply_checked(updated.core)
 
     if certificate_changed:
-        from app.certificates.manager import get_manager
         from app.api.certificates import perform
         target = "inbound:" + str(inbound_id)
         if certificate_id:
-            perform(lambda: get_manager().bind(certificate_id, target))
-        else:
-            perform(lambda: get_manager().unbind(target))
+            perform(lambda: certificate_manager.bind(certificate_id, target))
+        elif previous_certificate:
+            perform(lambda: certificate_manager.unbind(target))
 
     return {
         "message": "Inbound updated",

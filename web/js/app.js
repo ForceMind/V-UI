@@ -407,6 +407,12 @@ const app = createApp({
             resetInboundProfile();
         };
 
+        const clearManagedCertificate = () => {
+            if (!editingInboundId.value) return;
+            newInbound.profile.certificate_path = '';
+            newInbound.profile.key_path = '';
+        };
+
         const saveInbound = async () => {
             try {
                 const profile = { ...newInbound.profile };
@@ -629,6 +635,7 @@ const app = createApp({
             openEditInbound,
             onCoreChanged,
             onProtocolChanged,
+            clearManagedCertificate,
             resetInboundProfile,
             saveInbound,
             deleteInbound,
