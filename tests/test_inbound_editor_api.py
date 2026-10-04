@@ -1,6 +1,7 @@
 """Authenticated editor API: no protocol secrets are returned, but edits preserve them."""
 from copy import deepcopy
 import json
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -95,6 +96,70 @@ class InboundEditorApiTests(unittest.TestCase):
         self.assertEqual(response.status_code,200,response.text)
         with database.SessionLocal() as db:
             self.assertEqual(db.get(database.Inbound,identity).settings["obfs"]["password"],secret)
+
+    def test_managed_certificate_unbind_requires_replacement_manual_material(self):
+        uuid="11111111-1111-1111-1111-111111111111"
+        old_cert=Path("/managed/revision/fullchain.pem")
+        old_key=Path("/managed/revision/privkey.pem")
+        with database.SessionLocal() as db:
+            row=database.Inbound(
+                core="sing-box",protocol="vless",remark="managed-cert-node",
+                port=10445,enable=True,
+                settings={"users":[{"uuid":uuid}]},
+                stream_settings={
+                    "tls":{
+                        "enabled":True,
+                        "server_name":"vpn.example.test",
+                        "certificate_path":str(old_cert),
+                        "key_path":str(old_key),
+                    },
+                    "_vui":{"security":"tls","server_name":"vpn.example.test"},
+                },
+                tag="managed-cert-node",
+            )
+            db.add(row);db.commit();db.refresh(row);identity=row.id
+
+        class FakeManager:
+            def __init__(self):
+                self.unbound=[]
+            def binding(self,target):
+                return "a"*32
+            def material(self,certificate_id):
+                return (old_cert,old_key),"vpn.example.test","b"*64
+            def unbind(self,target):
+                self.unbound.append(target)
+                return {"target":target,"configured":False}
+
+        manager=FakeManager()
+        editor=self.client.get(f"/api/inbounds/{identity}/editor").json()
+        profile=editor["profile"]
+
+        with patch("app.certificates.manager.get_manager",return_value=manager), \
+             patch.object(inbound_api,"apply_checked",return_value={"applied":True,"valid":True}):
+            response=self.client.put(
+                f"/api/inbounds/{identity}",
+                headers=auth_tests.HEADERS,
+                json={"profile":profile,"certificate_id":None},
+            )
+        self.assertEqual(response.status_code,409,response.text)
+        self.assertEqual(manager.unbound,[])
+
+        profile={**profile,
+                 "certificate_path":"/manual/fullchain.pem",
+                 "key_path":"/manual/privkey.pem"}
+        with patch("app.certificates.manager.get_manager",return_value=manager), \
+             patch.object(inbound_api,"apply_checked",return_value={"applied":True,"valid":True}):
+            response=self.client.put(
+                f"/api/inbounds/{identity}",
+                headers=auth_tests.HEADERS,
+                json={"profile":profile,"certificate_id":None},
+            )
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(manager.unbound,[f"inbound:{identity}"])
+        with database.SessionLocal() as db:
+            stream=db.get(database.Inbound,identity).stream_settings
+            self.assertEqual(stream["tls"]["certificate_path"],"/manual/fullchain.pem")
+            self.assertEqual(stream["tls"]["key_path"],"/manual/privkey.pem")
 
     def test_update_contract_rejects_core_protocol_and_raw_settings_overrides(self):
         identity,_,_=self.add_reality()
