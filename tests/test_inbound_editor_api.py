@@ -10,10 +10,11 @@ import app.api.inbounds as inbound_api
 import test_auth as auth_tests
 
 
-class InboundEditorApiTests(auth_tests.AuthenticationTests):
+class InboundEditorApiTests(unittest.TestCase):
     def setUp(self):
-        super().setUp()
-        self.login()
+        auth_tests.AuthenticationTests.setUp(self)
+        response=auth_tests.AuthenticationTests.login(self)
+        self.assertEqual(response.status_code,200,response.text)
 
     def add_reality(self):
         uuid="11111111-1111-1111-1111-111111111111"
