@@ -104,15 +104,14 @@ class ValidatedExportTests(unittest.TestCase):
         for method in ("aes-128-gcm","aes-256-gcm","chacha20-ietf-poly1305"):
             with self.subTest(method=method):
                 item=ss_node(method)
-                outputs=(
-                    mihomo_config([item],'ss.example.test',{'mode':'direct'}),
-                    json.dumps(singbox_client_config([item],'ss.example.test')),
-                    base64.b64decode(base64_subscription([item],'ss.example.test')).decode(),
-                )
-                for output in outputs:
-                    self.assertIn('shadowsocks-password-123',output if method not in output else output)
+                mihomo=mihomo_config([item],'ss.example.test',{'mode':'direct'})
+                singbox=json.dumps(singbox_client_config([item],'ss.example.test'))
+                uri=base64.b64decode(base64_subscription([item],'ss.example.test')).decode()
+                for output in (mihomo,singbox,uri):
                     self.assertNotIn('/private/server',output)
-                proxy=yaml.safe_load(outputs[0])['proxies'][0]
+                self.assertIn('shadowsocks-password-123',mihomo)
+                self.assertIn('shadowsocks-password-123',singbox)
+                proxy=yaml.safe_load(mihomo)['proxies'][0]
                 self.assertEqual(proxy['type'],'ss')
                 self.assertEqual(proxy['cipher'],method)
                 self.assertEqual(proxy['password'],'shadowsocks-password-123')
@@ -121,8 +120,11 @@ class ValidatedExportTests(unittest.TestCase):
                 self.assertEqual(client['type'],'shadowsocks')
                 self.assertEqual(client['method'],method)
                 self.assertEqual(client['password'],'shadowsocks-password-123')
-                uri=base64.b64decode(base64_subscription([item],'ss.example.test')).decode()
                 self.assertTrue(uri.startswith('ss://'))
+                parsed=urlsplit(uri)
+                encoded=parsed.username
+                decoded=base64.urlsafe_b64decode(encoded + '='*(-len(encoded)%4)).decode()
+                self.assertEqual(decoded,method+':shadowsocks-password-123')
                 self.assertIn('#ss%20%2F%20%E4%B8%AD%E6%96%87',uri)
 
     def test_shadowsocks_rejects_unknown_method_fields_stream_and_password(self):
