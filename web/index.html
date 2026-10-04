@@ -632,6 +632,23 @@
                 </el-form-item>
             </template>
 
+            <template v-if="newInbound.protocol === 'shadowsocks'">
+                <el-form-item label="加密方法">
+                    <el-select v-model="newInbound.profile.shadowsocks_method" style="width: 100%">
+                        <el-option label="AES-128-GCM" value="aes-128-gcm"></el-option>
+                        <el-option label="AES-256-GCM" value="aes-256-gcm"></el-option>
+                        <el-option label="ChaCha20-IETF-Poly1305" value="chacha20-ietf-poly1305"></el-option>
+                    </el-select>
+                </el-form-item>
+                <el-alert
+                    v-if="editingInboundId && inboundCredentials.has_password"
+                    title="Shadowsocks 密码保留在服务器；编辑页面不回显。"
+                    type="success"
+                    :closable="false"
+                    style="margin-bottom: 16px">
+                </el-alert>
+            </template>
+
             <el-form-item
                 v-if="newInbound.protocol !== 'shadowsocks'"
                 label="传输安全">
