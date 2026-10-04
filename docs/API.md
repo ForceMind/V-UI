@@ -13,13 +13,15 @@ HTTP接口以`/api`开头。`/docs`和`/openapi.json`也要求管理员登录，
 | 方法/路径 | 行为 |
 | --- | --- |
 | GET/POST `/api/inbounds` | 列出/创建；可传certificate_id选择正式托管证书 |
-| PUT/DELETE `/api/inbounds/{id}` | 编辑/删除，仍须处理配置应用失败 |
+| GET `/api/inbounds/{id}/editor` | 返回可视化编辑 profile、绑定状态和“是否已有凭据”；不返回 UUID/密码/Reality 私钥/Obfs 密码本体 |
+| PUT `/api/inbounds/{id}` | 只在原 core/protocol 内更新备注、端口、启停、profile、证书绑定；不做隐式协议迁移 |
+| DELETE `/api/inbounds/{id}` | 删除节点并清理其托管证书绑定 |
 | GET `/api/inbounds/profiles` | 草稿表单能力目录，不是端到端验收证明 |
 | GET `/api/cores/status` | 查询运行状态和期望/生效差异 |
 | POST `/api/cores/{core}/apply` | 生成并检查候选，具体生效语义依schema |
 | POST `/api/cores/{core}/restart`、`/stop` | 明确启动应用/停止 |
 
-旧Xray/sing-box接口仍经过同一个鉴权边界。管理员节点详情可能含服务端私密配置，不能当作对外分享内容；客户端只能使用专用订阅/公有导出。
+旧 Xray/sing-box 接口仍经过同一个鉴权边界。`/api/inbounds` 原始管理列表可能含服务端配置，不能作为编辑回填或分享接口；视觉编辑只使用 `/editor` 的脱敏模型。保存配置后核心应用失败会返回“已保存但未应用”的冲突状态，不能把数据库写入当作连通成功。
 
 ## 分流
 

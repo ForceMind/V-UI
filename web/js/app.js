@@ -27,6 +27,8 @@ const app = createApp({
         const coreStatus = ref({});
         const inbounds = ref([]);
         const showAddInbound = ref(false);
+        const editingInboundId = ref(null);
+        const inboundCredentials = ref({});
         const restartingCore = ref('');
         const banIpInput = ref('');
         const showQrDialog = ref(false);
@@ -61,6 +63,7 @@ const app = createApp({
             settings: {},
             stream_settings: {},
             certificate_id: null,
+            enable: true,
             profile: {
                 security: 'none',
                 transport: 'raw',
@@ -302,10 +305,53 @@ const app = createApp({
             routingForm.intranet.splice(index, 1);
         };
 
+        const loadManagedCertificates = async () => {
+            try {
+                managedCertificates.value = (await axios.get('/api/certificates')).data
+                    .filter(c => c.environment === 'production' && c.revision && c.days_remaining >= 0);
+            } catch {
+                managedCertificates.value = [];
+            }
+        };
+
         const openAddInbound = async () => {
-            try { managedCertificates.value = (await axios.get('/api/certificates')).data.filter(c => c.environment === 'production' && c.revision && c.days_remaining >= 0); }
-            catch { managedCertificates.value = []; }
+            editingInboundId.value = null;
+            inboundCredentials.value = {};
+            newInbound.core = 'xray';
+            newInbound.protocol = 'vless';
+            newInbound.remark = '';
+            newInbound.port = 443;
+            newInbound.enable = true;
+            newInbound.settings = {};
+            newInbound.stream_settings = {};
+            resetInboundProfile();
+            await loadManagedCertificates();
             showAddInbound.value = true;
+        };
+
+        const openEditInbound = async (row) => {
+            try {
+                const [state] = await Promise.all([
+                    axios.get(`/api/inbounds/${row.id}/editor`),
+                    loadManagedCertificates()
+                ]);
+                const value = state.data;
+                editingInboundId.value = row.id;
+                newInbound.core = value.core;
+                newInbound.protocol = value.protocol;
+                newInbound.remark = value.remark || '';
+                newInbound.port = value.port;
+                newInbound.enable = Boolean(value.enable);
+                newInbound.settings = {};
+                newInbound.stream_settings = {};
+                resetInboundProfile();
+                Object.assign(newInbound.profile, value.profile || {});
+                newInbound.certificate_id = value.certificate_id || null;
+                inboundCredentials.value = value.credentials || {};
+                showAddInbound.value = true;
+            } catch (error) {
+                ElMessage.error(error.response?.data?.detail || 'Failed to load inbound editor');
+            }
         };
 
         const resetInboundProfile = () => {
@@ -342,6 +388,7 @@ const app = createApp({
             p.down_mbps = 100;
             p.obfs_type = '';
             p.obfs_password = '';
+            p.obfs_password_set = false;
             p.congestion_control = 'bbr';
             p.udp_relay_mode = 'native';
             p.zero_rtt_handshake = false;
@@ -360,39 +407,44 @@ const app = createApp({
             resetInboundProfile();
         };
 
-        const addInbound = async () => {
+        const saveInbound = async () => {
             try {
-                const payload = {
-                    core: newInbound.core,
-                    remark: newInbound.remark,
-                    protocol: newInbound.protocol,
-                    port: newInbound.port,
-                    settings: newInbound.settings,
-                    stream_settings: newInbound.stream_settings,
-                    profile: { ...newInbound.profile },
-                    certificate_id: newInbound.certificate_id || null,
-                    enable: true
-                };
-                const res = await axios.post('/api/inbounds', payload);
-                if (res.data.core && res.data.core.valid === false) {
-                    ElMessage.warning(
-                        'Node saved, but the core is not ready: ' +
-                        (res.data.core.validation_output || 'validation failed')
-                    );
+                const profile = { ...newInbound.profile };
+                let res;
+                if (editingInboundId.value) {
+                    res = await axios.put(`/api/inbounds/${editingInboundId.value}`, {
+                        remark: newInbound.remark,
+                        port: newInbound.port,
+                        profile,
+                        certificate_id: newInbound.certificate_id || null,
+                        enable: newInbound.enable
+                    });
+                    ElMessage.success('Inbound updated successfully');
                 } else {
+                    res = await axios.post('/api/inbounds', {
+                        core: newInbound.core,
+                        remark: newInbound.remark,
+                        protocol: newInbound.protocol,
+                        port: newInbound.port,
+                        profile,
+                        certificate_id: newInbound.certificate_id || null,
+                        enable: newInbound.enable
+                    });
                     ElMessage.success('Inbound added successfully');
                 }
                 showAddInbound.value = false;
+                editingInboundId.value = null;
                 await Promise.all([fetchInbounds(), fetchCoreStatus()]);
-                newInbound.remark = '';
-                newInbound.port = 443;
-                newInbound.settings = {};
-                newInbound.stream_settings = {};
-                resetInboundProfile();
             } catch (error) {
+                const detail = error.response?.data?.detail;
+                if (error.response?.status === 409 && detail?.saved) {
+                    ElMessage.warning('设置已保存为期望状态，但核心未应用：' + (detail.message || 'validation failed'));
+                    await Promise.all([fetchInbounds(), fetchCoreStatus()]);
+                    return;
+                }
                 ElMessage.error(
-                    'Failed to add inbound: ' +
-                    (error.response?.data?.detail || error.message)
+                    (editingInboundId.value ? 'Failed to update inbound: ' : 'Failed to add inbound: ') +
+                    (typeof detail === 'string' ? detail : detail?.message || error.message)
                 );
             }
         };
@@ -545,6 +597,8 @@ const app = createApp({
             coreStatus,
             inbounds,
             showAddInbound,
+            editingInboundId,
+            inboundCredentials,
             newInbound,
             protocolOptions,
             colors,
@@ -572,10 +626,11 @@ const app = createApp({
             addIntranetZone,
             removeIntranetZone,
             openAddInbound,
+            openEditInbound,
             onCoreChanged,
             onProtocolChanged,
             resetInboundProfile,
-            addInbound,
+            saveInbound,
             deleteInbound,
             updateProfile,
             restartCore,

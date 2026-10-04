@@ -135,6 +135,11 @@ def _common_client_metadata(profile: dict) -> dict:
 
 def _apply_xray_transport(stream: dict, profile: dict) -> None:
     transport = str(profile.get("transport") or "raw").lower()
+    # Editing must not leave stale transport blocks behind.
+    for key in ("rawSettings", "wsSettings", "grpcSettings", "xhttpSettings",
+                "httpupgradeSettings", "tcpSettings"):
+        stream.pop(key, None)
+    stream.pop("network", None)
     if transport not in {"raw", "websocket", "grpc", "xhttp"}:
         raise HTTPException(
             status_code=422,
@@ -214,11 +219,15 @@ def _apply_xray_security(
 
     if security == "none":
         stream["security"] = "none"
+        stream.pop("tlsSettings", None)
+        stream.pop("realitySettings", None)
+        stream.pop("_vui", None)
         return
 
     if security == "tls":
         certificate_path, key_path = _certificate_paths(profile)
         stream["security"] = "tls"
+        stream.pop("realitySettings", None)
         stream["tlsSettings"] = {
             "serverName": str(profile.get("server_name") or ""),
             "certificates": [{
@@ -266,12 +275,37 @@ def _apply_xray_security(
                 detail="Reality short ID must be hexadecimal",
             ) from exc
 
-        private_key = str(profile.get("reality_private_key") or "").strip()
-        public_key = str(profile.get("reality_public_key") or "").strip()
-        if not private_key or not public_key:
+        existing_reality = stream.get("realitySettings") or {}
+        existing_meta = stream.get("_vui") or {}
+        private_key = str(
+            profile.get("reality_private_key")
+            or existing_reality.get("privateKey")
+            or ""
+        ).strip()
+        public_key = str(
+            profile.get("reality_public_key")
+            or existing_meta.get("reality_public_key")
+            or ""
+        ).strip()
+        if private_key and not public_key:
+            try:
+                padded = private_key + "=" * (-len(private_key) % 4)
+                raw = base64.urlsafe_b64decode(padded.encode())
+                public_key = _b64url(
+                    X25519PrivateKey.from_private_bytes(raw).public_key().public_bytes(
+                        encoding=serialization.Encoding.Raw,
+                        format=serialization.PublicFormat.Raw,
+                    )
+                )
+            except Exception as exc:
+                raise HTTPException(status_code=422, detail="Existing Reality private key is invalid") from exc
+        elif public_key and not private_key:
+            raise HTTPException(status_code=422, detail="Reality private key is missing; regenerate the key pair explicitly")
+        elif not private_key:
             private_key, public_key = generate_reality_keypair()
 
         stream["security"] = "reality"
+        stream.pop("tlsSettings", None)
         stream["realitySettings"] = {
             "show": False,
             "target": target,
@@ -314,6 +348,7 @@ def _apply_singbox_tls(
                 detail=f"{protocol} requires TLS in the visual profile",
             )
         stream.pop("tls", None)
+        stream.pop("_vui", None)
         return
 
     if security == "tls":
@@ -362,9 +397,33 @@ def _apply_singbox_tls(
                 detail="Reality short ID must be hexadecimal",
             ) from exc
 
-        private_key = str(profile.get("reality_private_key") or "").strip()
-        public_key = str(profile.get("reality_public_key") or "").strip()
-        if not private_key or not public_key:
+        existing_reality = (stream.get("tls") or {}).get("reality") or {}
+        existing_meta = stream.get("_vui") or {}
+        private_key = str(
+            profile.get("reality_private_key")
+            or existing_reality.get("private_key")
+            or ""
+        ).strip()
+        public_key = str(
+            profile.get("reality_public_key")
+            or existing_meta.get("reality_public_key")
+            or ""
+        ).strip()
+        if private_key and not public_key:
+            try:
+                padded = private_key + "=" * (-len(private_key) % 4)
+                raw = base64.urlsafe_b64decode(padded.encode())
+                public_key = _b64url(
+                    X25519PrivateKey.from_private_bytes(raw).public_key().public_bytes(
+                        encoding=serialization.Encoding.Raw,
+                        format=serialization.PublicFormat.Raw,
+                    )
+                )
+            except Exception as exc:
+                raise HTTPException(status_code=422, detail="Existing Reality private key is invalid") from exc
+        elif public_key and not private_key:
+            raise HTTPException(status_code=422, detail="Reality private key is missing; regenerate the key pair explicitly")
+        elif not private_key:
             private_key, public_key = generate_reality_keypair()
 
         stream["tls"] = {
@@ -448,14 +507,18 @@ def compile_profile(
                 settings["down_mbps"] = int(down)
             obfs_type = str(profile.get("obfs_type") or "").strip()
             if obfs_type:
-                settings["obfs"] = {
-                    "type": obfs_type,
-                    "password": _required(
-                        profile,
-                        "obfs_password",
-                        "Hysteria2 obfs password",
-                    ),
-                }
+                previous = settings.get("obfs") or {}
+                password = str(profile.get("obfs_password") or "").strip()
+                if not password and previous.get("type") == obfs_type:
+                    password = str(previous.get("password") or "")
+                if not password:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Hysteria2 obfs password is required when enabling obfs",
+                    )
+                settings["obfs"] = {"type": obfs_type, "password": password}
+            else:
+                settings.pop("obfs", None)
         elif protocol == "tuic":
             congestion = str(
                 profile.get("congestion_control") or "bbr"
@@ -478,3 +541,117 @@ def compile_profile(
         return settings, stream
 
     raise HTTPException(status_code=422, detail=f"Unsupported core: {core}")
+
+
+def _first_user(settings: dict) -> dict:
+    users = settings.get("users") or settings.get("clients") or []
+    return dict(users[0]) if users else {}
+
+
+def decompile_profile(core: str, protocol: str, settings: dict | None,
+                      stream_settings: dict | None) -> dict[str, Any]:
+    """Convert persisted core fields back to the visual editor shape.
+
+    Private Reality keys are intentionally not returned. compile_profile()
+    preserves them from the persisted stream when the editor saves.
+    """
+    settings = dict(settings or {})
+    stream = dict(stream_settings or {})
+    meta = dict(stream.get("_vui") or {})
+    profile: dict[str, Any] = {
+        "security": "none",
+        "transport": "raw" if core == "xray" else "direct",
+        "flow": "",
+        "server_name": str(meta.get("server_name") or ""),
+        "certificate_path": "",
+        "key_path": "",
+        "path": "/",
+        "host": "",
+        "service_name": "",
+        "xhttp_mode": "auto",
+        "reality_target": "",
+        "reality_server_name": "",
+        "reality_short_id": str(meta.get("reality_short_id") or ""),
+        "client_fingerprint": str(meta.get("client_fingerprint") or "chrome"),
+        "skip_cert_verify": bool(meta.get("skip_cert_verify", False)),
+        "up_mbps": settings.get("up_mbps", 100),
+        "down_mbps": settings.get("down_mbps", 100),
+        "obfs_type": "",
+        "obfs_password": "",
+        "congestion_control": str(settings.get("congestion_control") or "bbr"),
+        "udp_relay_mode": str(meta.get("udp_relay_mode") or "native"),
+        "zero_rtt_handshake": bool(settings.get("zero_rtt_handshake", False)),
+    }
+    user = _first_user(settings)
+    profile["flow"] = str(user.get("flow") or "")
+
+    if core == "xray":
+        method = str(stream.get("method") or stream.get("network") or "raw").lower()
+        method = {"tcp": "raw", "ws": "websocket"}.get(method, method)
+        profile["transport"] = method
+        if method == "websocket":
+            value = stream.get("wsSettings") or {}
+            profile["path"] = str(value.get("path") or "/")
+            profile["host"] = str(value.get("host") or "")
+        elif method == "grpc":
+            value = stream.get("grpcSettings") or {}
+            profile["service_name"] = str(value.get("serviceName") or "")
+        elif method == "xhttp":
+            value = stream.get("xhttpSettings") or {}
+            profile["path"] = str(value.get("path") or "/")
+            profile["host"] = str(value.get("host") or "")
+            profile["xhttp_mode"] = str(value.get("mode") or "auto")
+
+        security = str(meta.get("security") or stream.get("security") or "none").lower()
+        profile["security"] = security
+        if security == "tls":
+            tls = stream.get("tlsSettings") or {}
+            certs = tls.get("certificates") or []
+            cert = certs[0] if certs else {}
+            profile["server_name"] = str(meta.get("server_name") or tls.get("serverName") or "")
+            profile["certificate_path"] = str(cert.get("certificateFile") or "")
+            profile["key_path"] = str(cert.get("keyFile") or "")
+        elif security == "reality":
+            reality = stream.get("realitySettings") or {}
+            profile["reality_target"] = str(reality.get("target") or "")
+            names = reality.get("serverNames") or []
+            shorts = reality.get("shortIds") or []
+            profile["reality_server_name"] = str(meta.get("server_name") or (names[0] if names else ""))
+            profile["reality_short_id"] = str(meta.get("reality_short_id") or (shorts[0] if shorts else ""))
+        return profile
+
+    transport = stream.get("transport") or {}
+    profile["transport"] = str(transport.get("type") or ("quic" if protocol in {"hysteria2", "tuic"} else "direct"))
+    if profile["transport"] in {"ws", "httpupgrade"}:
+        profile["path"] = str(transport.get("path") or "/")
+        profile["host"] = str((transport.get("headers") or {}).get("Host") or transport.get("host") or "")
+    elif profile["transport"] == "grpc":
+        profile["service_name"] = str(transport.get("service_name") or "")
+
+    tls = stream.get("tls") or {}
+    reality = tls.get("reality") or {}
+    if reality.get("enabled"):
+        profile["security"] = "reality"
+        handshake = reality.get("handshake") or {}
+        server = str(handshake.get("server") or "")
+        port = handshake.get("server_port")
+        profile["reality_target"] = server + ((":" + str(port)) if server and port else "")
+        profile["reality_server_name"] = str(meta.get("server_name") or tls.get("server_name") or server)
+        short = reality.get("short_id") or []
+        if isinstance(short, list):
+            short = short[0] if short else ""
+        profile["reality_short_id"] = str(meta.get("reality_short_id") or short or "")
+    elif tls.get("enabled"):
+        profile["security"] = "tls"
+        profile["server_name"] = str(meta.get("server_name") or tls.get("server_name") or "")
+        profile["certificate_path"] = str(tls.get("certificate_path") or "")
+        profile["key_path"] = str(tls.get("key_path") or "")
+    else:
+        profile["security"] = "none"
+
+    if protocol == "hysteria2":
+        obfs = settings.get("obfs") or {}
+        profile["obfs_type"] = str(obfs.get("type") or "")
+        profile["obfs_password"] = ""
+        profile["obfs_password_set"] = bool(obfs.get("password"))
+    return profile
