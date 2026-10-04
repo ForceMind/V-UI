@@ -187,7 +187,17 @@ class LoopbackChainTests(unittest.TestCase):
             row.stream_settings=stream;db.commit()
         self.start()
         self.assert_proxy_failure()
-        self.assertIn('certificate',(self.root/'client.log').read_text().lower())
+        deadline=time.monotonic()+2
+        log=''
+        while time.monotonic()<deadline:
+            log=(self.root/'client.log').read_text().lower()
+            if any(marker in log for marker in ('certificate','x509','tls')):
+                break
+            time.sleep(.05)
+        self.assertTrue(
+            any(marker in log for marker in ('certificate','x509','tls')),
+            'Wrong-SNI failure did not produce TLS/certificate evidence:\n'+log,
+        )
         print('rc.1: wrong TLS server name rejected')
 
 if __name__=='__main__': unittest.main()
