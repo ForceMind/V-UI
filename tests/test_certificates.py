@@ -195,31 +195,22 @@ class CertificateTests(unittest.TestCase):
                     db.add(database.Inbound(
                         id=node_id,core='sing-box',protocol=protocol,
                         port=10443+index,enable=True,settings=settings,
-                        stream_settings={'tls':{
-                            'enabled':True,
-                            'server_name':f'{protocol}.example.test',
-                        }},
+                        stream_settings={'tls':{'enabled':True,'server_name':f'{protocol}.example.test'}},
                     ))
                     db.commit()
-
                 with patch.object(core_manager.get('sing-box'),'status',return_value={'running':False}), \
                      patch.object(core_manager,'apply_database',return_value={'applied':False}) as apply:
                     with self.assertRaisesRegex(CertificateError,'CORE_STOPPED_PENDING_APPLY'):
                         self.manager.bind(identity,'inbound:'+str(node_id))
                     self.assertFalse(apply.call_args.kwargs['activate'])
-
                 with patch.object(core_manager.get('sing-box'),'status',return_value={'running':True}), \
                      patch.object(core_manager,'apply_database',return_value={'applied':True}) as apply:
                     self.manager.bind(identity,'inbound:'+str(node_id))
                     first=self.manager.material(identity)[0]
-                    self.due(identity)
-                    self.manager.process_once()
+                    self.due(identity);self.manager.process_once()
                     with database.SessionLocal() as db:
                         row=db.get(database.Inbound,node_id)
-                        self.assertNotEqual(
-                            row.stream_settings['tls']['certificate_path'],
-                            str(first[0]),
-                        )
+                        self.assertNotEqual(row.stream_settings['tls']['certificate_path'],str(first[0]))
                         self.assertEqual(
                             db.get(CertificateBinding,'inbound:'+str(node_id)).applied_revision,
                             self.manager.material(identity)[2],
