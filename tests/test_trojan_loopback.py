@@ -94,7 +94,7 @@ class TrojanLoopbackTests(unittest.TestCase):
             read_snapshot()["revision"],
         )
 
-    def exported_config(self):
+    def issue_grant(self):
         grant=self.client.post(
             "/api/subscriptions",
             headers=grant_tests.HEADERS,
@@ -106,46 +106,80 @@ class TrojanLoopbackTests(unittest.TestCase):
             },
         )
         self.assertEqual(grant.status_code,201,grant.text)
+        return grant.json()
+
+    def public_get(self,path):
         with self.client.__class__(
             self.client.app,
             base_url=grant_tests.ORIGIN,
             client=("127.0.0.1",54012),
         ) as public:
-            response=public.get(grant.json()["paths"]["mihomo.yaml"])
+            return public.get(path)
+
+    def exported_mihomo(self,grant,port):
+        response=self.public_get(grant["paths"]["mihomo.yaml"])
         self.assertEqual(response.status_code,200,response.text)
         self.assertNotIn(str(self.key),response.text)
         self.assertNotIn("certificate_path",response.text)
         config=yaml.safe_load(response.text)
         self.assertEqual(config["proxies"][0]["type"],"trojan")
         self.assertFalse(config["proxies"][0]["skip-cert-verify"])
-        config["mixed-port"]=self.proxy_port
+        config["mixed-port"]=port
         config["bind-address"]="127.0.0.1"
-        path=self.root/"client.yaml"
+        path=self.root/("mihomo-client-"+str(port)+".yaml")
         path.write_text(yaml.safe_dump(config,sort_keys=False))
         return path
 
-    def start(self, *, trust=True):
+    def exported_singbox(self,grant,port):
+        response=self.public_get(grant["paths"]["sing-box.json"])
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertNotIn(str(self.key),response.text)
+        self.assertNotIn("certificate_path",response.text)
+        config=response.json()
+        self.assertEqual(config["outbounds"][0]["type"],"trojan")
+        self.assertFalse(config["outbounds"][0]["tls"].get("insecure",False))
+        config["inbounds"][0]["listen_port"]=port
+        path=self.root/("singbox-client-"+str(port)+".json")
+        path.write_text(json.dumps(config))
+        return path
+
+    def start_mihomo(self, grant=None, *, trust=True):
         self.server.start(self.server_port)
-        path=self.exported_config()
+        grant=grant or self.issue_grant()
+        port=unused_port()
+        path=self.exported_mihomo(grant,port)
         env=self.env.copy()
         if not trust:
             other,_,_=certificate_files(self.root,"untrusted")
             env["SSL_CERT_FILE"]=str(other)
-        self.client_core=CoreProcess(
+        process=CoreProcess(
             self.stack,
-            [os.environ["VUI_TEST_MIHOMO"],"-d",str(self.root/"client-data"),
+            [os.environ["VUI_TEST_MIHOMO"],"-d",str(self.root/("mihomo-data-"+str(port))),
              "-f",str(path)],
-            self.root/"client.log",
+            self.root/("mihomo-"+str(port)+".log"),
             env,
         )
-        self.client_core.start(self.proxy_port)
+        process.start(port)
+        return process,port
 
-    def assert_success(self):
+    def start_singbox_client(self,grant):
+        port=unused_port()
+        path=self.exported_singbox(grant,port)
+        process=CoreProcess(
+            self.stack,
+            [str(Path(os.environ["VUI_TEST_CORES"])/"sing-box"),"run","-c",str(path)],
+            self.root/("singbox-client-"+str(port)+".log"),
+            self.env,
+        )
+        process.start(port)
+        return process,port
+
+    def assert_success(self,port,host="forced.example.test"):
         deadline=time.monotonic()+4
         last=None
         while time.monotonic()<deadline:
             try:
-                last=http_through(self.proxy_port,"forced.example.test",self.target_port)
+                last=http_through(port,host,self.target_port)
                 if last==(200,b"VUI-LOOPBACK-TARGET"):
                     return
             except (OSError,TimeoutError) as exc:
@@ -154,11 +188,11 @@ class TrojanLoopbackTests(unittest.TestCase):
         self.fail(f"Trojan path did not become usable: {last}\n"+
                   (self.root/"client.log").read_text())
 
-    def assert_failure_without_direct_fallback(self):
+    def assert_failure_without_direct_fallback(self,port):
         before=len(self.requests)
         try:
             status,_=http_through(
-                self.proxy_port,"forced.example.test",self.target_port
+                port,"forced.example.test",self.target_port
             )
             self.assertGreaterEqual(status,400)
         except (OSError,TimeoutError):
@@ -168,24 +202,46 @@ class TrojanLoopbackTests(unittest.TestCase):
             "Failed Trojan proxy must not reach target through DIRECT",
         )
 
-    def test_real_trojan_tls_proxy(self):
-        self.start()
-        self.assert_success()
-        print("Trojan/TLS: real sing-box server and Mihomo proxy path passed")
+    def wait_tls_evidence(self,path):
+        deadline=time.monotonic()+2
+        log=""
+        while time.monotonic()<deadline:
+            log=path.read_text().lower()
+            if any(marker in log for marker in ("certificate","x509","tls")):
+                return log
+            time.sleep(.05)
+        return log
+
+    def test_real_trojan_tls_proxy_in_mihomo_and_public_singbox_subscription(self):
+        grant=self.issue_grant()
+
+        mihomo,port=self.start_mihomo(grant)
+        self.assert_success(port)
+        mihomo.stop()
+
+        singbox,port=self.start_singbox_client(grant)
+        self.assert_success(port,host="127.0.0.1")
+        singbox.stop()
+
+        self.assertGreaterEqual(len(self.requests),2)
+        print("Trojan/TLS: real Mihomo and public sing-box subscription paths passed")
 
     def test_wrong_password_is_rejected_without_direct_fallback(self):
         with database.SessionLocal() as db:
             row=db.get(database.Inbound,1)
             row.settings={"users":[{"password":"wrong-trojan-password"}]}
             db.commit()
-        self.start()
-        self.assert_failure_without_direct_fallback()
+        process,port=self.start_mihomo()
+        self.assert_failure_without_direct_fallback(port)
+        process.stop()
         print("Trojan/TLS: wrong password rejected without DIRECT fallback")
 
     def test_untrusted_certificate_is_rejected(self):
-        self.start(trust=False)
-        self.assert_failure_without_direct_fallback()
-        self.assertIn("certificate",(self.root/"client.log").read_text().lower())
+        process,port=self.start_mihomo(trust=False)
+        self.assert_failure_without_direct_fallback(port)
+        log=self.wait_tls_evidence(self.root/("mihomo-"+str(port)+".log"))
+        process.stop()
+        self.assertTrue(any(x in log for x in ("certificate","x509","tls")),log)
         print("Trojan/TLS: untrusted certificate rejected")
 
     def test_wrong_server_name_is_rejected(self):
@@ -196,9 +252,11 @@ class TrojanLoopbackTests(unittest.TestCase):
             stream["_vui"]["server_name"]="wrong.example.test"
             row.stream_settings=stream
             db.commit()
-        self.start()
-        self.assert_failure_without_direct_fallback()
-        self.assertIn("certificate",(self.root/"client.log").read_text().lower())
+        process,port=self.start_mihomo()
+        self.assert_failure_without_direct_fallback(port)
+        log=self.wait_tls_evidence(self.root/("mihomo-"+str(port)+".log"))
+        process.stop()
+        self.assertTrue(any(x in log for x in ("certificate","x509","tls")),log)
         print("Trojan/TLS: wrong SNI rejected")
 
 
