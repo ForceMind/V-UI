@@ -491,6 +491,12 @@ def compile_profile(
         _apply_singbox_tls(protocol, stream, profile)
 
         users = list(settings.get("users") or [])
+        if protocol == "shadowsocks":
+            method=str(profile.get("shadowsocks_method") or settings.get("method") or "aes-128-gcm").strip()
+            if method not in {"aes-128-gcm","aes-256-gcm","chacha20-ietf-poly1305"}:
+                raise HTTPException(status_code=422,detail="Unsupported Shadowsocks method")
+            settings["method"]=method
+
         if protocol == "vless" and users:
             flow = str(profile.get("flow") or "").strip()
             if flow:
@@ -584,6 +590,8 @@ def decompile_profile(core: str, protocol: str, settings: dict | None,
     }
     user = _first_user(settings)
     profile["flow"] = str(user.get("flow") or "")
+    profile["shadowsocks_method"] = str(settings.get("method") or "aes-128-gcm")
+    profile["shadowsocks_password_set"] = bool(settings.get("password"))
 
     if core == "xray":
         method = str(stream.get("method") or stream.get("network") or "raw").lower()
