@@ -29,6 +29,15 @@ def trojan_node(**changes):
     value.update(changes)
     return SimpleNamespace(**value)
 
+
+def trojan_node(**changes):
+    value=dict(id=2,core='sing-box',protocol='trojan',port=11443,remark='trojan demo / 中文',enable=True,
+        settings={'users':[{'password':'trojan-password-123'}]},
+        stream_settings={'tls':{'enabled':True,'server_name':'trojan.example.test',
+            'certificate_path':'/private/server/trojan-cert.pem','key_path':'/private/server/trojan-key.pem'}})
+    value.update(changes)
+    return SimpleNamespace(**value)
+
 class ValidatedExportTests(unittest.TestCase):
     def test_three_outputs_preserve_connection_fields_without_server_paths(self):
         item=node()
@@ -52,7 +61,44 @@ class ValidatedExportTests(unittest.TestCase):
         config=yaml.safe_load(outputs[0])
         proxy=config['proxies'][0]
         self.assertEqual(proxy['type'],'trojan')
-        self.assertEqual(proxy['password'],'Tr0jan-pass:/?#[]@!    def test_ipv6_uri_and_name_encoding(self):
+        self.assertEqual(proxy['password'],'Tr0jan-pass:/?#[]@!    def test_trojan_three_outputs_preserve_password_and_hide_server_paths(self):
+        item=trojan_node()
+        outputs=(
+            mihomo_config([item],'trojan.example.test',{'mode':'direct'}),
+            json.dumps(singbox_client_config([item],'trojan.example.test')),
+            base64.b64decode(base64_subscription([item],'trojan.example.test')).decode(),
+        )
+        for output in outputs:
+            self.assertIn('trojan-password-123',output)
+            self.assertNotIn('/private/server',output)
+        config=yaml.safe_load(outputs[0])
+        proxy=config['proxies'][0]
+        self.assertEqual(proxy['type'],'trojan')
+        self.assertEqual(proxy['password'],'trojan-password-123')
+        self.assertTrue(proxy['tls'])
+        self.assertFalse(proxy['skip-cert-verify'])
+        self.assertEqual(proxy['sni'],'trojan.example.test')
+        client=singbox_client_config([item],'trojan.example.test')['outbounds'][0]
+        self.assertEqual(client['type'],'trojan')
+        self.assertEqual(client['password'],'trojan-password-123')
+        self.assertEqual(client['tls']['server_name'],'trojan.example.test')
+        uri=base64.b64decode(base64_subscription([item],'trojan.example.test')).decode()
+        self.assertTrue(uri.startswith('trojan://trojan-password-123@'))
+        self.assertIn('sni=trojan.example.test',uri)
+
+    def test_trojan_rejects_multiuser_unknown_fields_non_tcp_and_insecure_tls(self):
+        candidates=[]
+        x=trojan_node();x.settings['users']*=2;candidates.append(x)
+        x=trojan_node();x.settings['users'][0]['unknown']='secret';candidates.append(x)
+        x=trojan_node();x.settings['users'][0]['password']='';candidates.append(x)
+        x=trojan_node();x.stream_settings['transport']={'type':'ws','path':'/trojan'};candidates.append(x)
+        x=trojan_node();x.stream_settings['tls']['enabled']=False;candidates.append(x)
+        x=trojan_node();x.stream_settings['_vui']={'security':'tls','skip_cert_verify':True};candidates.append(x)
+        for item in candidates:
+            with self.subTest(item=item.__dict__),self.assertRaises(ExportError):
+                validated_nodes([item],'trojan.example.test')
+
+    def test_ipv6_uri_and_name_encoding(self):
 ()*+,;=')
         self.assertEqual(proxy['sni'],'vpn.example.test')
         self.assertTrue(proxy['tls'])
