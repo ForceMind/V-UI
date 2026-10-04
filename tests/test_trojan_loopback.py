@@ -185,8 +185,11 @@ class TrojanLoopbackTests(unittest.TestCase):
             except (OSError,TimeoutError) as exc:
                 last=exc
             time.sleep(.08)
-        self.fail(f"Trojan path did not become usable: {last}\n"+
-                  (self.root/"client.log").read_text())
+        logs="\n".join(
+            path.read_text(errors="replace")
+            for path in sorted(self.root.glob("*client*.log"))
+        )
+        self.fail(f"Trojan path did not become usable: {last}\n"+logs)
 
     def assert_failure_without_direct_fallback(self,port):
         before=len(self.requests)
