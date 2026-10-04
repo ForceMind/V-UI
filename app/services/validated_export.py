@@ -6,6 +6,7 @@ Draft exporters remain internal and are never used as a fallback.
 from __future__ import annotations
 
 import base64
+import json
 import re
 from urllib.parse import quote, urlencode
 
@@ -211,7 +212,7 @@ def share_link(item, server: str) -> str:
         if node.get("alpn"):
             payload["alpn"]=",".join(node["alpn"])
         encoded=base64.b64encode(
-            __import__("json").dumps(payload,separators=(",",":"),ensure_ascii=False).encode()
+            json.dumps(payload,separators=(",",":"),ensure_ascii=False).encode()
         ).decode()
         return "vmess://"+encoded
 
