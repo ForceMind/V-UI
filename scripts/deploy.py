@@ -22,7 +22,7 @@ def main():
     undo=commands.add_parser('restore');undo.add_argument('archive',type=Path);undo.add_argument('--sha256',required=True)
     admin=commands.add_parser('admin');admin.add_argument('action',choices=['create','set-password']);admin.add_argument('username')
     launch=commands.add_parser('run')
-    launch.add_argument('--origin',required=True);launch.add_argument('--cert',required=True);launch.add_argument('--key',required=True)
+    launch.add_argument('--origin',required=True);launch.add_argument('--cert');launch.add_argument('--key')
     launch.add_argument('--bind',default='127.0.0.1');launch.add_argument('--port',type=int,default=8443)
     args=p.parse_args();supported_environment();os.umask(0o077);root=private_root(args.root)
     if args.command=='stage': print(stage(args.archive,args.sha256,root))
@@ -44,8 +44,10 @@ def main():
                 raise SystemExit(result.returncode)
         else:
             command=[str(python),'-B','-m','app.serve','--root',str(root),'--origin',args.origin,
-                     '--cert',str(Path(args.cert).absolute()),'--key',str(Path(args.key).absolute()),
                      '--bind',args.bind,'--port',str(args.port)]
+            if args.cert or args.key:
+                if not (args.cert and args.key):raise ReleaseError('Provide both certificate and private key')
+                command += ['--cert',str(Path(args.cert).absolute()),'--key',str(Path(args.key).absolute())]
             os.chdir(payload);os.execve(python,command,env)
 
 

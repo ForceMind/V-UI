@@ -24,6 +24,7 @@ class InboundPayload(BaseModel):
     expiry_time: int = 0
     tag: str | None = None
     user_id: int | None = None
+    certificate_id: str | None = None
 
 
 @router.get("/profiles")
@@ -40,8 +41,19 @@ def get_all_inbounds(core: str | None = None, db: Session = Depends(get_db)):
 @router.post("")
 @router.post("/")
 def add_inbound(payload: InboundPayload, db: Session = Depends(get_db)):
-    item = create_inbound(db, payload.model_dump())
+    data=payload.model_dump()
+    if payload.certificate_id:
+        from app.certificates.manager import get_manager
+        from app.api.certificates import perform
+        if payload.core != 'sing-box' or payload.protocol != 'vless':
+            raise HTTPException(409, 'Managed certificates currently target sing-box VLESS/TLS')
+        paths,domain,_=perform(lambda:get_manager().material(payload.certificate_id))
+        data['profile']={**(payload.profile or {}),'security':'tls','server_name':domain,
+            'certificate_path':str(paths[0]),'key_path':str(paths[1])}
+    item = create_inbound(db, data)
     core_status = apply_checked(item.core)
+    if payload.certificate_id:
+        perform(lambda:get_manager().bind(payload.certificate_id,'inbound:'+str(item.id)))
     return {"message": "Inbound added", "inbound": to_dict(item), "core": core_status}
 
 
