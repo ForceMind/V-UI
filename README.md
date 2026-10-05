@@ -17,7 +17,7 @@ V-UI 使用 FastAPI + SQLite，不依赖 Redis、常驻 Node 或在线订阅转�
 | 客户端订阅 | 节点/格式作用域、一次显示的专用令牌、到期、轮换、撤销；完整Mihomo配置直接导出 |
 | 安装运维 | 一个入口完成受管服务设置，开机自启、权限隔离、停机备份、校验恢复、候选切换 |
 
-**当前已验证基线包含 sing-box + VLESS/TCP/TLS、Trojan/TCP/TLS 与 Shadowsocks AEAD；v0.4.2 正在验收 sing-box + VMess/TCP/TLS。** TLS 组合要求单用户与证书校验，VLESS 还要求空 flow。已有其他协议草稿表单不等于这些组合已验证；不支持的组合会拒绝导出，不静默丢参数或退成全直连。参见 [兼容矩阵](docs/COMPATIBILITY.md)。
+**当前已验证基线包含 sing-box + VLESS/TCP/TLS、Trojan/TCP/TLS 与 Shadowsocks AEAD；v0.4.2 正在验收 sing-box + VMess/TCP/TLS。** TLS 组合要求单用户与证书校验，VLESS 还要求空 flow。已有其他协议草稿表单不等于这些组合已验证；不支持的组合会拒绝导出，不静默丢参数或退成全直连。Shadowsocks 三种 AEAD 导出、配置检查及逐 cipher 双客户端 TCP/UDP 验收范围在矩阵中单独列明。参见 [兼容矩阵](docs/COMPATIBILITY.md)。
 
 ## 快速安装
 

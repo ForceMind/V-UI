@@ -654,6 +654,7 @@
                 label="传输安全">
                 <el-select
                     v-model="newInbound.profile.security"
+                    @change="onSecurityChanged"
                     :disabled="['trojan','hysteria2','tuic'].includes(newInbound.protocol)"
                     style="width: 100%">
                     <el-option

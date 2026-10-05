@@ -37,6 +37,13 @@ class ChallengeServer(ThreadingHTTPServer):
 class ChallengeServerV6(ChallengeServer):
     address_family = socket.AF_INET6
 
+    def server_bind(self):
+        # Direct/OpenRC mode binds IPv4 separately. Set this before bind(),
+        # otherwise the default dual-stack socket collides with that listener.
+        # Socket activation skips server_bind and keeps systemd's socket intact.
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        super().server_bind()
+
 
 def handler_for(webroot: Path):
     class ChallengeHandler(BaseHTTPRequestHandler):
@@ -90,7 +97,6 @@ def main():
         if os.getenv('VUI_HTTP01_IPV6') == '1':
             try:
                 server6 = ChallengeServerV6(('::', 80), handler_for(args.webroot))
-                server6.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
                 _thread(server6, servers)
             except OSError:
                 for server in servers: server.shutdown(); server.server_close()

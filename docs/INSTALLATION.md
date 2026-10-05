@@ -33,11 +33,11 @@
 | 8443 | HTTPS 管理面板 |
 | 10443 | 默认节点端口，可用 `--node-port` 修改 |
 
-端口已有监听时安装停止，不结束原进程。
+新安装在创建账号、写服务文件或修改防火墙前检查端口。TCP 80 与默认节点端口分别检查 IPv4 和可用的 IPv6；面板按 `--bind` 地址检查。systemd 与 OpenRC 使用相同的双栈预检。端口已有监听时安装停止，不结束原进程。预检不是端口预留，检查后新出现的监听仍可能导致服务启动失败。
 
-UFW / firewalld 缺规则时，交互模式会询问是否现在开放；只有输入 `yes` 才修改。firewalld 同时写运行时和永久规则。自定义 nftables / iptables 不自动覆盖；安装器列出端口并等待人工确认。云安全组无法由本机可靠修改，也会提示并等待确认。
+UFW / firewalld 缺规则时，交互模式会询问是否现在开放；只有输入 `yes` 才修改。firewalld 通过 `--get-active-zones` 查询实际接口绑定，仅在一个明确的接口 zone、没有 source 绑定时自动处理，并同时写该 zone 的运行时和永久规则；不会把默认 zone 当作实际入口。多个 zone、source 绑定、空结果或查询失败时不猜测、不自动开放任何 zone，需人工核对实际入口并配置。确认期间 zone 发生变化也会停止修改。自定义 nftables / iptables 不自动覆盖；安装器列出端口并等待人工确认。云安全组无法由本机可靠修改，也会提示并等待确认。
 
-自动化场景只有在操作者确实已经处理外部防火墙时才应使用 `--assume-external-ports-open`。这不是“检测到已开放”的意思。
+自动化场景只有在操作者确实已经处理外部防火墙时才应使用 `--assume-external-ports-open`。这不是“检测到已开放”的意思。此标志也确认自定义/无法确定的本机防火墙已由操作者人工核对；`--open-firewall yes` 本身不会授权安装器猜测 firewalld zone。
 
 80 被 Nginx / Apache / Caddy / 其他站点占用时，本版不会自动接管已有网站。
 
@@ -76,7 +76,7 @@ sudo bash install.sh --bundle ./vui-linux-x86_64-gnu.zip --sha256 "$SHA" \
 - `v-ui`：通过 `supervise-daemon` 运行面板。
 - `v-ui-http01`：仍以 `v-ui` 用户运行，仅获得绑定低端口所需 capability。
 
-主面板不会因为 OpenRC 支持而变成 root 进程。
+OpenRC 的 HTTP-01 分别绑定 IPv4 和 IPv6-only socket，IPv6-only 选项在绑定前设置；systemd 保持 socket activation。主面板不会因为 OpenRC 支持而变成 root 进程。
 
 ## 5. 数据与运行时
 
@@ -98,10 +98,10 @@ root 只负责系统初始化和受管服务文件；应用、核心与 Certbot 
 
 ## 7. 官方 Release 一键安装
 
-正式 Release 公布后：
+当前文档对应 **v0.4.1 候选**，版本号不代表该版本已经公开发布。下面仅展示正式 Release 公布且资产核对完成后的命令，不能视为当前可用下载地址；安装入口须来自同一可信仓库或已验收套件：
 
 ```sh
-sudo bash install.sh --version v0.3.1
+sudo bash install.sh --version v0.4.1
 ```
 
 脚本先检测 `x86_64/aarch64 + gnu/musl`，再从该明确版本下载对应目标包、安装控制器和 `SHA256SUMS`，逐个验证摘要后执行。不会下载 `latest`，也不会在发布时重新构建包。

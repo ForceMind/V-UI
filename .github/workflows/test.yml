@@ -57,6 +57,14 @@ jobs:
         env:
           VUI_WORKSPACE_BROWSER: "1"
         run: python -m unittest discover -s tests -p test_workspace_browser.py -v
+      - name: Prepare checksum-pinned editor frontend
+        run: python scripts/vendor_frontend.py /tmp/vui-editor-web
+      - name: Browser managed-certificate editor transitions and restore
+        env:
+          VUI_NODE_BROWSER: "1"
+          VUI_TEST_CORES: /tmp/vui-test-cores
+          VUI_FRONTEND_ASSETS: /tmp/vui-editor-web
+        run: python -m unittest discover -s tests -p test_inbound_editor_browser.py -v
       - name: Upload reproducible source snapshot
         if: always()
         uses: actions/upload-artifact@v4
