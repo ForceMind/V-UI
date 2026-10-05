@@ -49,6 +49,17 @@ def trojan_node(**changes):
     return SimpleNamespace(**value)
 
 
+def ss_node(method="aes-128-gcm", **changes):
+    value=dict(
+        id=3,core='sing-box',protocol='shadowsocks',port=12443,
+        remark='ss / 中文',enable=True,expiry_time=0,
+        settings={'method':method,'password':'shadowsocks-password-123'},
+        stream_settings={},
+    )
+    value.update(changes)
+    return SimpleNamespace(**value)
+
+
 class ValidatedExportTests(unittest.TestCase):
     def test_vless_three_outputs_preserve_connection_fields_without_server_paths(self):
         item=vless_node()
@@ -89,6 +100,44 @@ class ValidatedExportTests(unittest.TestCase):
         self.assertEqual(client['password'],'Tr0jan-pass:/?#[]@!$&()*+,;=')
         self.assertEqual(client['tls']['server_name'],'trojan.example.test')
 
+    def test_shadowsocks_three_outputs_for_validated_aead_methods(self):
+        for method in ("aes-128-gcm","aes-256-gcm","chacha20-ietf-poly1305"):
+            with self.subTest(method=method):
+                item=ss_node(method)
+                mihomo=mihomo_config([item],'ss.example.test',{'mode':'direct'})
+                singbox=json.dumps(singbox_client_config([item],'ss.example.test'))
+                uri=base64.b64decode(base64_subscription([item],'ss.example.test')).decode()
+                for output in (mihomo,singbox,uri):
+                    self.assertNotIn('/private/server',output)
+                self.assertIn('shadowsocks-password-123',mihomo)
+                self.assertIn('shadowsocks-password-123',singbox)
+                proxy=yaml.safe_load(mihomo)['proxies'][0]
+                self.assertEqual(proxy['type'],'ss')
+                self.assertEqual(proxy['cipher'],method)
+                self.assertEqual(proxy['password'],'shadowsocks-password-123')
+                self.assertTrue(proxy['udp'])
+                client=singbox_client_config([item],'ss.example.test')['outbounds'][0]
+                self.assertEqual(client['type'],'shadowsocks')
+                self.assertEqual(client['method'],method)
+                self.assertEqual(client['password'],'shadowsocks-password-123')
+                self.assertTrue(uri.startswith('ss://'))
+                parsed=urlsplit(uri)
+                encoded=parsed.username
+                decoded=base64.urlsafe_b64decode(encoded + '='*(-len(encoded)%4)).decode()
+                self.assertEqual(decoded,method+':shadowsocks-password-123')
+                self.assertIn('#ss%20%2F%20%E4%B8%AD%E6%96%87',uri)
+
+    def test_shadowsocks_rejects_unknown_method_fields_stream_and_password(self):
+        candidates=[]
+        candidates.append(ss_node("rc4-md5"))
+        x=ss_node();x.settings['unknown']='x';candidates.append(x)
+        x=ss_node();x.settings['password']='';candidates.append(x)
+        x=ss_node();x.stream_settings={'transport':{'type':'ws'}};candidates.append(x)
+        x=ss_node();x.stream_settings={'_vui':{'security':'none'}};candidates.append(x)
+        for item in candidates:
+            with self.subTest(item=item.__dict__),self.assertRaises(ExportError):
+                validated_nodes([item],'ss.example.test')
+
     def test_vless_ipv6_uri_and_name_encoding(self):
         uri=share_link(vless_node(),'2001:db8::1')
         parsed=urlsplit(uri)
@@ -122,7 +171,6 @@ class ValidatedExportTests(unittest.TestCase):
             {'protocol':'tuic'},
             {'protocol':'hysteria2'},
             {'protocol':'vmess'},
-            {'protocol':'shadowsocks'},
         ):
             with self.subTest(change=change),self.assertRaises(ExportError):
                 validated_nodes([vless_node(**change)],'vpn.example.test')

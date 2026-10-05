@@ -99,6 +99,28 @@ class InboundEditorTests(unittest.TestCase):
         self.assertNotIn(private,str(reality_state))
         self.assertNotIn(uuid,str(reality_state))
 
+    def test_shadowsocks_method_roundtrip_preserves_hidden_password(self):
+        password="hidden-shadowsocks-password"
+        item=self.add(
+            "sing-box","shadowsocks",
+            {"method":"aes-128-gcm","password":password},
+            {},
+            port=12443,
+        )
+        state=editor_dict(item)
+        self.assertEqual(state["profile"]["shadowsocks_method"],"aes-128-gcm")
+        self.assertTrue(state["profile"]["shadowsocks_password_set"])
+        self.assertTrue(state["credentials"]["has_password"])
+        self.assertNotIn(password,str(state))
+
+        profile={**state["profile"],"shadowsocks_method":"chacha20-ietf-poly1305"}
+        updated=update_inbound(
+            self.db,item.id,
+            {"core":"sing-box","protocol":"shadowsocks","profile":profile},
+        )
+        self.assertEqual(updated.settings["method"],"chacha20-ietf-poly1305")
+        self.assertEqual(updated.settings["password"],password)
+
     def test_xray_transport_edit_removes_stale_blocks(self):
         settings={"users":[{"id":"11111111-1111-1111-1111-111111111111"}],"decryption":"none"}
         stream={"method":"websocket","wsSettings":{"path":"/old","host":"old.example.test"},

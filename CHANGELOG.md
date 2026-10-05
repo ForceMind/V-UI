@@ -1,5 +1,11 @@
 # 变更日志
 
+## 0.4.1 — Shadowsocks AEAD 候选
+
+- 正常 merge-forward 继承 PR15/PR13/PR12 已验收修复，当前文档和安装示例对齐候选版本。
+- 保留三种 AEAD cipher 的 strict 导出和固定真实客户端配置检查，以及 method 编辑时的密码保护。
+- 补齐三种既有 cipher 的双客户端真实 TCP/UDP 正向及错误密码/错误 method 拒绝用例，要求目标不收到失败请求且不 DIRECT 回退。
+
 ## 0.4.0 — Trojan/TCP/TLS 候选
 
 - 补齐合入后的协议默认安全模式回归：Trojan 省略/空/null security 仍按 TLS 保护续期；只有替换两条手工材料路径才可解除绑定。VLESS none/REALITY 与空 profile 语义保留。

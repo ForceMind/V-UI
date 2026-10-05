@@ -140,6 +140,118 @@ def start_http_target(stack: ExitStack):
     return server.server_address[1], requests
 
 
+def start_udp_echo(stack: ExitStack):
+    packets = []
+    lock = threading.Lock()
+
+    class Handler(socketserver.BaseRequestHandler):
+        def handle(self):
+            packet, transport = self.request
+            with lock:
+                packets.append(packet)
+            transport.sendto(b"VUI-UDP-ECHO:" + packet, self.client_address)
+
+    server = socketserver.ThreadingUDPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    thread = threading.Thread(
+        target=server.serve_forever,
+        kwargs={"poll_interval": 0.02},
+        daemon=True,
+    )
+    thread.start()
+
+    def close():
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    stack.callback(close)
+    return server.server_address[1], packets
+
+
+def _recv_exact(stream: socket.socket, size: int) -> bytes:
+    value=b""
+    while len(value)<size:
+        chunk=stream.recv(size-len(value))
+        if not chunk:
+            raise OSError("SOCKS5 control channel closed")
+        value+=chunk
+    return value
+
+
+def _socks_address_from_stream(stream: socket.socket, atyp: int) -> tuple[str,int]:
+    if atyp == 1:
+        host=socket.inet_ntop(socket.AF_INET,_recv_exact(stream,4))
+    elif atyp == 4:
+        host=socket.inet_ntop(socket.AF_INET6,_recv_exact(stream,16))
+    elif atyp == 3:
+        length=_recv_exact(stream,1)[0]
+        host=_recv_exact(stream,length).decode("ascii")
+    else:
+        raise OSError("Unsupported SOCKS5 address type")
+    port=struct.unpack("!H",_recv_exact(stream,2))[0]
+    return host,port
+
+
+def _socks_udp_target(host: str, port: int) -> bytes:
+    try:
+        raw=socket.inet_pton(socket.AF_INET,host)
+        address=b"\x01"+raw
+    except OSError:
+        try:
+            raw=socket.inet_pton(socket.AF_INET6,host)
+            address=b"\x04"+raw
+        except OSError:
+            encoded=host.encode("idna")
+            if not 1 <= len(encoded) <= 255:
+                raise OSError("Invalid SOCKS5 UDP target")
+            address=b"\x03"+bytes([len(encoded)])+encoded
+    return address+struct.pack("!H",port)
+
+
+def _strip_socks_udp(packet: bytes) -> bytes:
+    if len(packet)<4 or packet[:2]!=b"\x00\x00" or packet[2]!=0:
+        raise OSError("Invalid SOCKS5 UDP response")
+    pos=3
+    atyp=packet[pos];pos+=1
+    if atyp==1:
+        pos+=4
+    elif atyp==4:
+        pos+=16
+    elif atyp==3:
+        if pos>=len(packet): raise OSError("Invalid SOCKS5 UDP domain")
+        size=packet[pos];pos+=1+size
+    else:
+        raise OSError("Invalid SOCKS5 UDP address type")
+    pos+=2
+    if pos>len(packet): raise OSError("Truncated SOCKS5 UDP response")
+    return packet[pos:]
+
+
+def socks5_udp_through(proxy_port: int, host: str, target_port: int, payload: bytes) -> bytes:
+    with socket.create_connection(("127.0.0.1",proxy_port),timeout=3) as control:
+        control.settimeout(3)
+        control.sendall(b"\x05\x01\x00")
+        if _recv_exact(control,2)!=b"\x05\x00":
+            raise OSError("SOCKS5 no-auth negotiation failed")
+        control.sendall(b"\x05\x03\x00\x01\x00\x00\x00\x00\x00\x00")
+        reply=_recv_exact(control,4)
+        if reply[:3]!=b"\x05\x00\x00":
+            raise OSError("SOCKS5 UDP associate failed")
+        relay_host,relay_port=_socks_address_from_stream(control,reply[3])
+        if relay_host=="0.0.0.0":
+            relay_host="127.0.0.1"
+        elif relay_host=="::":
+            relay_host="::1"
+        family=socket.AF_INET6 if ":" in relay_host else socket.AF_INET
+        with socket.socket(family,socket.SOCK_DGRAM) as udp:
+            udp.settimeout(3)
+            request=b"\x00\x00\x00"+_socks_udp_target(host,target_port)+payload
+            udp.sendto(request,(relay_host,relay_port))
+            response,_=udp.recvfrom(65535)
+        return _strip_socks_udp(response)
+
+
 def unused_port() -> int:
     with socket.socket() as sock: sock.bind(('127.0.0.1',0)); return sock.getsockname()[1]
 

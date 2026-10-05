@@ -2,7 +2,7 @@
 
 ## Linux 安装层
 
-0.4.0 延续 0.3.1 的安装选择依据是实际环境能力，不是发行版名称。
+0.4.1 候选延续 0.3.1 的安装选择依据是实际环境能力，不是发行版名称。
 
 | 层级 | 目标 / 验收 |
 | --- | --- |
@@ -29,18 +29,24 @@
 
 Mihomo 固定客户端与 ToClash 规则语义继续独立验收。
 
+## Shadowsocks 候选验证范围
+
+PR #16 的既有实现支持 sing-box Shadowsocks 的三种 AEAD cipher：`aes-128-gcm`、`aes-256-gcm`、`chacha20-ietf-poly1305`。三种都有 SIP002/Mihomo/sing-box 严格导出与固定真实客户端配置检查，method 编辑保留服务端密码。
+
+真实 TCP/UDP 链路用例逐一覆盖上述三种 cipher，分别使用 Mihomo 和公开订阅生成的 sing-box 客户端。每种 cipher 的错误密码与错误 method 也由两种客户端验证拒绝，目标不收到数据且不 DIRECT 回退。配置检查和真实转发仍是分别执行的门槛，不互相替代。最终候选验收以 [PR #16](https://github.com/ForceMind/V-UI/pull/16) 的准确提交和八组工作流为准。
+
 ## 尚未完成的协议矩阵
 
 下列协议/组合即使已有表单或生成代码，也不能写成“已完整支持”：
 
 - Trojan 的 Xray 实现及 WebSocket/gRPC 等非 TCP 组合；
-- Shadowsocks；
+- Xray Shadowsocks、2022 cipher、插件/obfs，以及未列明的 cipher；
 - VMess；
 - Hysteria2；
 - TUIC；
 - REALITY / Vision；
 - WebSocket / gRPC / XHTTP / HTTPUpgrade 全组合；
-- UDP 实际转发；
+- 除上述 Shadowsocks AEAD 之外的 UDP 专项；
 - sing-box 完整 ToClash 规则迁移。
 
 后续版本对每项都要求：服务端配置、编辑回填、URI/Mihomo/sing-box 导出、真实核心 config check、真实客户端 check、正向连接以及错误凭据/TLS/参数失败路径。

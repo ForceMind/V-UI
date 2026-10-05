@@ -1,18 +1,18 @@
-# V-UI 0.4.0
+# V-UI 0.4.1
 
 当前为候选发布说明；不表示 GitHub Release 已公开，也不表示已部署。
 
-本版在 0.3.1 Linux 可移植安装和 0.3.2 节点可逆编辑基础上，新增首个第二协议公开验证矩阵：**sing-box Trojan/TCP/TLS**。
+本版继承 VLESS/TCP/TLS、Trojan/TCP/TLS 与已验收的 Linux 安装和托管证书编辑修复，维护既有 sing-box Shadowsocks AEAD 候选，不增加其他协议。
 
-## 新增
+## Shadowsocks 的准确验证范围
 
-- Trojan URI/Base64、完整 Mihomo YAML、sing-box 客户端连接 JSON。
-- 单密码用户 + TLS/SNI + 正常证书验证 strict export。
-- 托管证书选择、证书页面绑定和自动续期支持 Trojan/TLS。
-- 固定真实 sing-box 服务端 + Mihomo 客户端验证：正确密码连通；错误密码、错误 CA、错误 SNI 均拒绝且不得回退 DIRECT。
+- strict public export 支持 `aes-128-gcm`、`aes-256-gcm`、`chacha20-ietf-poly1305`；SIP002 URI、Mihomo YAML 和 sing-box JSON 保留 method/密码，拒绝未知字段、未知 method、空密码及 transport/TLS 残留。
+- 三种 method 均有固定 Mihomo / sing-box 的真实配置检查；编辑 method 时保留服务端密码，不回传浏览器。
+- 真实链路用例逐一覆盖上述三种 method：sing-box 服务端 + Mihomo 和公开订阅 sing-box 客户端的 TCP/UDP 转发；错误密码与错误 method 均拒绝，目标收不到数据且不 DIRECT 回退。
+- 每种 method 的错误密码和错误 method 均由两个真实客户端分别验证 TCP/UDP 拒绝；最终证据必须来自本候选准确提交的八组验收。
 
-## 仍然明确拒绝
+## 边界
 
-Xray Trojan、Trojan WebSocket/gRPC、Shadowsocks、VMess、Hysteria2、TUIC、REALITY/Vision 等尚未完成各自真实矩阵的组合不会因为表单或草稿生成器存在就被宣称支持。
+Xray Shadowsocks、2022 cipher、插件/obfs、VMess、Hysteria2、TUIC、REALITY/Vision 和未列明传输组合仍未纳入本候选的已验证链路范围。Shadowsocks UDP 证据不扩展到其他协议。
 
-Linux 安装仍按 x86_64/ARM64 × glibc/musl、systemd/OpenRC 的 0.3.1 验收范围执行。正式 Release 只有 exact-head 全套工作流成功后才可由人工发布流程晋升。
+保留 40 项 ToClash 服务目录、x86_64/ARM64 × glibc/musl、systemd/OpenRC 范围。正式 Release 必须等待依赖按序处理、默认分支 exact-head 八组验收及人工发布，不将候选版本号当作可用下载承诺。

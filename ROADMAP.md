@@ -36,7 +36,7 @@ PR #13。
 顺序：
 
 1. Trojan + TLS — **v0.4.0 / PR #15**：sing-box TCP/TLS strict export、真实 Mihomo/sing-box 链路与证书续期；
-2. Shadowsocks — 下一版本；
+2. Shadowsocks — **v0.4.1 / PR #16 候选**：三种 AEAD 导出/真实配置检查，逐 cipher 双客户端 TCP/UDP 链路与负向拒绝；
 3. VMess + TLS；
 4. VLESS WebSocket / gRPC；
 5. Hysteria2；

@@ -47,6 +47,15 @@ def trojan(optional=False):
     return item
 
 
+def shadowsocks(method='aes-128-gcm'):
+    return SimpleNamespace(
+        id=3,core='sing-box',protocol='shadowsocks',port=12443,remark='ss-test',
+        enable=True,expiry_time=0,
+        settings={'method':method,'password':'shadowsocks-password-123'},
+        stream_settings={},
+    )
+
+
 @unittest.skipUnless(
     os.getenv('VUI_TEST_MIHOMO') and os.getenv('VUI_TEST_CORES'),
     'pinned binaries not provided',
@@ -93,7 +102,10 @@ class RealExportTests(unittest.TestCase):
                             root,
                             protocol+('-optional' if optional else '-plain'),
                         )
-            print('Generated VLESS/TCP/TLS and Trojan/TCP/TLS configs accepted by Mihomo and sing-box')
+            for method in ('aes-128-gcm','aes-256-gcm','chacha20-ietf-poly1305'):
+                with self.subTest(protocol='shadowsocks',method=method):
+                    self.check_item(shadowsocks(method),root,'ss-'+method)
+            print('Generated VLESS/TLS, Trojan/TLS and Shadowsocks configs accepted by Mihomo and sing-box')
 
 
 if __name__=='__main__':
