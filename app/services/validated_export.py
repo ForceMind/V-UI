@@ -12,6 +12,7 @@ from urllib.parse import quote, urlencode
 
 from app.services.subscription_tokens import normalize_server
 from app.services.mihomo_routing import unique_proxy_names
+from app.services.websocket_profile import websocket_host, websocket_path
 
 
 class ExportError(ValueError):
@@ -37,7 +38,7 @@ def _common(item, server: str) -> tuple[str, str]:
     if not item.enable or getattr(item, "expiry_time", 0):
         raise ExportError("Disabled or expiring nodes are not eligible for this export profile")
     if item.core != "sing-box" or item.protocol not in {"vless", "trojan", "shadowsocks", "vmess"}:
-        raise ExportError("Validated export currently requires verified sing-box VLESS/TCP/TLS, Trojan/TCP/TLS, Shadowsocks or VMess/TCP/TLS")
+        raise ExportError("Validated export requires verified sing-box VLESS/TCP/TLS or VLESS/WS/TLS, Trojan/TCP/TLS, Shadowsocks or VMess/TCP/TLS")
     server=node_host(server)
     if type(item.port) is not int or not 1 <= item.port <= 65535:
         raise ExportError("Invalid node port")
@@ -48,9 +49,9 @@ def _common(item, server: str) -> tuple[str, str]:
     return server,name
 
 
-def _tcp_tls(item) -> tuple[str, dict, list[str] | None]:
+def _verified_tls(item, *, websocket: bool = False) -> tuple[str, dict, list[str] | None]:
     stream=mapping(item.stream_settings or {}, {"tls","transport","_vui"}, "stream")
-    if stream.get("transport") not in (None,{}):
+    if not websocket and stream.get("transport") not in (None,{}):
         raise ExportError("Non-TCP transports need a separately validated export profile")
     tls=mapping(stream.get("tls"), {"enabled","server_name","certificate_path","key_path","alpn"}, "TLS")
     if tls.get("enabled") is not True:
@@ -72,7 +73,25 @@ def _tcp_tls(item) -> tuple[str, dict, list[str] | None]:
         or any(not isinstance(x,str) or not re.fullmatch(r"[A-Za-z0-9./_-]{1,64}",x) for x in alpn)
     ):
         raise ExportError("Invalid TLS ALPN")
+    if websocket and alpn not in (None, ["http/1.1"]):
+        raise ExportError("The validated WebSocket profile only accepts HTTP/1.1 ALPN")
     return sni,meta,list(alpn) if alpn else None
+
+
+def _websocket_transport(item) -> dict:
+    transport = mapping(item.stream_settings["transport"], {"type", "path", "headers"}, "WebSocket transport")
+    if transport.get("type") != "ws":
+        raise ExportError("Only the separately verified VLESS WebSocket transport is accepted")
+    headers = mapping(transport.get("headers", {}), {"Host"}, "WebSocket headers")
+    try:
+        path = websocket_path(transport.get("path"))
+        host = websocket_host(headers["Host"]) if "Host" in headers else None
+    except ValueError as exc:
+        raise ExportError(str(exc)) from exc
+    result = {"path": path}
+    if host is not None:
+        result["headers"] = {"Host": host}
+    return result
 
 
 def _one_user(item) -> dict:
@@ -91,8 +110,8 @@ def _vless_node(item, server: str, name: str, sni: str, meta: dict,
         r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}",uid
     ):
         raise ExportError("Invalid VLESS UUID")
-    if user.get("flow"):
-        raise ExportError("This flow is not part of the validated TCP/TLS profile")
+    if user.get("flow", "") != "":
+        raise ExportError("This flow is not part of the validated VLESS TLS profiles")
     result={"name":name,"type":"vless","server":server,"port":item.port,"uuid":uid,
             "udp":True,"tls":True,"servername":sni,"network":"tcp",
             "packet-encoding":"xudp","skip-cert-verify":False}
@@ -162,9 +181,19 @@ def validated_node(item, server: str) -> dict:
     server,name=_common(item,server)
     if item.protocol=="shadowsocks":
         return _shadowsocks_node(item,server,name)
-    sni,meta,alpn=_tcp_tls(item)
+    stream = item.stream_settings or {}
+    transport = stream.get("transport") if isinstance(stream, dict) else None
+    websocket = item.protocol == "vless" and isinstance(transport, dict) and transport.get("type") == "ws"
+    sni,meta,alpn=_verified_tls(item, websocket=websocket)
     if item.protocol=="vless":
-        return _vless_node(item,server,name,sni,meta,alpn)
+        node = _vless_node(item,server,name,sni,meta,alpn)
+        if websocket:
+            node["network"] = "ws"
+            node["ws-opts"] = _websocket_transport(item)
+            # This version verifies HTTP/TCP forwarding, not WebSocket UDP.
+            node["udp"] = False
+            node.pop("packet-encoding", None)
+        return node
     if item.protocol=="vmess":
         return _vmess_node(item,server,name,sni,meta,alpn)
     if item.protocol=="trojan":
@@ -183,8 +212,14 @@ def share_link(item, server: str) -> str:
     node=validated_node(item,server)
     host=f"[{node['server']}]" if ":" in node["server"] else node["server"]
     if node["type"]=="vless":
-        params={"security":"tls","type":"tcp","sni":node["servername"],
-                "encryption":"none","packetEncoding":"xudp"}
+        params={"security":"tls","type":node["network"],"sni":node["servername"],
+                "encryption":"none"}
+        if node["network"] == "ws":
+            params["path"] = node["ws-opts"]["path"]
+            if node["ws-opts"].get("headers"):
+                params["host"] = node["ws-opts"]["headers"]["Host"]
+        else:
+            params["packetEncoding"] = "xudp"
         if node.get("client-fingerprint"):
             params["fp"]=node["client-fingerprint"]
         if node.get("alpn"):
@@ -252,6 +287,10 @@ def singbox_client_config(items, server: str) -> dict:
             outbound={"type":"vless","tag":node["name"],"server":node["server"],
                       "server_port":node["port"],"uuid":node["uuid"],
                       "packet_encoding":"xudp","tls":_client_tls(node)}
+            if node["network"] == "ws":
+                outbound.pop("packet_encoding")
+                outbound["network"] = "tcp"
+                outbound["transport"] = {"type": "ws", **node["ws-opts"]}
         elif node["type"]=="trojan":
             outbound={"type":"trojan","tag":node["name"],"server":node["server"],
                       "server_port":node["port"],"password":node["password"],
@@ -282,6 +321,6 @@ def export_warnings(items) -> list[dict]:
             warnings.append({
                 "inbound_id":item.id,
                 "code":"UNVERIFIED_EXPORT_PROFILE",
-                "message":"This node is outside the verified sing-box VLESS/TCP/TLS, Trojan/TCP/TLS, Shadowsocks and VMess/TCP/TLS export profiles.",
+                "message":"This node is outside the verified sing-box VLESS/TCP/TLS, VLESS/WS/TLS, Trojan/TCP/TLS, Shadowsocks and VMess/TCP/TLS export profiles.",
             })
     return warnings

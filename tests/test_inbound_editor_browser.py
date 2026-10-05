@@ -12,6 +12,9 @@ import sys
 import tempfile
 import time
 import unittest
+from urllib.parse import parse_qs, urlsplit
+
+import yaml
 
 from app import release_tools
 from loopback_helpers import unused_port
@@ -232,12 +235,100 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 dialog.get_by_role('button', name='取消', exact=True).click()
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     self.assertEqual(db.execute('SELECT settings FROM inbounds WHERE id=?', (vmess_id,)).fetchone()[0], created_credentials[vmess_id])
-                # The separate certificate-management card must offer the same
-                # existing VMess/TLS target and complete its normal bind action.
+                # VLESS WS uses the same visual editor and managed certificate.
+                # Its optional Host is client metadata, never a server Host gate.
+                def ws_draft():
+                    page.get_by_role('button', name='添加节点', exact=True).click()
+                    dialog = page.get_by_role('dialog')
+                    dialog.get_by_text('sing-box', exact=True).click()
+                    security(dialog, 'TLS')
+                    dialog.locator('.el-form-item').filter(has_text='传输方式').locator('.el-select').click()
+                    page.get_by_role('option', name='WebSocket', exact=True).click()
+                    dialog.get_by_placeholder('例如：US-01').fill('managed-vless-ws')
+                    dialog.get_by_role('spinbutton').fill(str(unused_port()))
+                    dialog.get_by_placeholder('/', exact=True).fill('/vless-ws')
+                    dialog.get_by_placeholder('可选，例如 cdn.example.com').fill('cdn.example.test')
+                    expect(dialog).to_contain_text('Host 仅为客户端路由参数')
+                    expect(dialog).to_contain_text('sing-box 不校验请求 Host')
+                    select_certificate(dialog)
+                    return dialog
+                dialog = ws_draft()
+                dialog.get_by_role('button', name='取消', exact=True).click()
+                self.assertEqual(len(context.request.get(base + '/api/inbounds').json()), len(identities))
+                dialog = ws_draft()
+                ws_id = save(dialog); identities.append(ws_id)
+                with sqlite3.connect(root / 'data/v-ui.db') as db:
+                    created_credentials[ws_id] = db.execute('SELECT settings FROM inbounds WHERE id=?', (ws_id,)).fetchone()[0]
+                    initial_ws_stream = json.loads(db.execute('SELECT stream_settings FROM inbounds WHERE id=?', (ws_id,)).fetchone()[0])
+                ws_uuid = json.loads(created_credentials[ws_id])['users'][0]['uuid']
+                self.assertEqual(initial_ws_stream['transport'], {'type': 'ws', 'path': '/vless-ws', 'headers': {'Host': 'cdn.example.test'}})
+                state = editor(ws_id)
+                self.assertEqual(state['protocol'], 'vless')
+                self.assertTrue(state['credentials']['has_uuid'])
+                self.assertEqual(state['certificate_id'], certificate_id)
+                self.assertEqual(state['profile']['transport'], 'ws')
+                self.assertEqual(state['profile']['path'], '/vless-ws')
+                self.assertEqual(state['profile']['host'], 'cdn.example.test')
+                self.assertEqual(state['profile']['server_name'], 'vpn.example.test')
+                self.assertFalse(state['profile']['skip_cert_verify'])
+                self.assertNotIn(ws_uuid, json.dumps(state))
+
+                def check_ws_prefill(dialog, path, host):
+                    expect(dialog.locator('.el-form-item').filter(has_text='传输方式')).to_contain_text('WebSocket')
+                    expect(dialog.get_by_placeholder('/', exact=True)).to_have_value(path)
+                    expect(dialog.get_by_placeholder('可选，例如 cdn.example.com')).to_have_value(host)
+                    expect(dialog.get_by_placeholder('example.com', exact=True)).to_have_value('vpn.example.test')
+                    expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).to_contain_text('vpn.example.test')
+                    expect(dialog).to_contain_text('已有凭据保留在服务器')
+                    expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select__wrapper')).to_have_class(re.compile(r'is-disabled'))
+                    self.assertNotIn(ws_uuid, dialog.inner_text())
+                    self.assertNotIn(ws_uuid, str(dialog.locator('input').evaluate_all('(inputs) => inputs.map(input => input.value)')))
+
+                dialog = open_edit('managed-vless-ws')
+                check_ws_prefill(dialog, '/vless-ws', 'cdn.example.test')
+                # Rejected WS parameters must not alter the saved profile or binding.
+                for path, host in (('/vless-ws?ed=1', 'cdn.example.test'),
+                                   ('/vless-ws', 'cdn.example.test:443')):
+                    dialog.get_by_placeholder('/', exact=True).fill(path)
+                    dialog.get_by_placeholder('可选，例如 cdn.example.com').fill(host)
+                    with page.expect_response(lambda reply: reply.url.endswith(f'/api/inbounds/{ws_id}') and reply.request.method == 'PUT') as rejected:
+                        dialog.get_by_role('button', name='保存并应用', exact=True).click()
+                    self.assertEqual(rejected.value.status, 422, rejected.value.text())
+                    expect(dialog).to_be_visible()
+                    self.assertEqual(editor(ws_id), state)
+                dialog.get_by_placeholder('/', exact=True).fill('/cancelled-ws')
+                dialog.get_by_placeholder('可选，例如 cdn.example.com').fill('cancelled.example.test')
+                dialog.get_by_role('button', name='取消', exact=True).click()
+                self.assertEqual(editor(ws_id), state)
+                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                dialog = open_edit('managed-vless-ws')
+                check_ws_prefill(dialog, '/vless-ws', 'cdn.example.test')
+                dialog.get_by_placeholder('例如：US-01').fill('managed-vless-ws-edited')
+                dialog.get_by_placeholder('/', exact=True).fill('/vless-ws-edited')
+                dialog.get_by_placeholder('可选，例如 cdn.example.com').fill('cdn2.example.test')
+                save(dialog, ws_id)
+                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                dialog = open_edit('managed-vless-ws-edited')
+                check_ws_prefill(dialog, '/vless-ws-edited', 'cdn2.example.test')
+                dialog.get_by_role('button', name='取消', exact=True).click()
+                self.assertEqual(editor(ws_id)['certificate_id'], certificate_id)
+                self.assertNotIn(ws_uuid, json.dumps(editor(ws_id)))
+                with sqlite3.connect(root / 'data/v-ui.db') as db:
+                    settings, ws_stream_before = db.execute('SELECT settings,stream_settings FROM inbounds WHERE id=?', (ws_id,)).fetchone()
+                self.assertEqual(settings, created_credentials[ws_id])
+                self.assertEqual(json.loads(ws_stream_before)['transport'], {'type': 'ws', 'path': '/vless-ws-edited', 'headers': {'Host': 'cdn2.example.test'}})
+                runtime = root / 'data/runtime/sing-box'
+                revision = json.loads((runtime / 'state.json').read_text())['revision']
+                applied = json.loads((runtime / (revision + '.json')).read_text())
+                ws_server = next(item for item in applied['inbounds'] if item.get('users', [{}])[0].get('uuid') == ws_uuid)
+                self.assertEqual(ws_server['transport'], {'type': 'ws', 'path': '/vless-ws-edited'})
+                # The separate certificate-management card must offer both TLS
+                # targets and complete its existing normal VMess bind action.
                 page.goto(base + '/certificates')
                 card = page.locator(f'[data-certificate="{certificate_id}"]')
                 choices = card.get_by_label('选择绑定节点')
                 expect(choices.locator(f'option[value="{vmess_id}"]')).to_have_text('managed-vmess-edited')
+                expect(choices.locator(f'option[value="{ws_id}"]')).to_have_text('managed-vless-ws-edited')
                 choices.select_option(str(vmess_id))
                 with page.expect_response(lambda reply: reply.url.endswith(f'/api/certificates/{certificate_id}/bind-inbound') and reply.request.method == 'POST') as bound:
                     card.get_by_role('button', name='绑定节点', exact=True).click()
@@ -256,6 +347,14 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 self.assertNotIn(str(root), exported.text())
                 self.assertIn('managed-vmess-edited', exported.text())
                 self.assertIn(vmess_uuid, exported.text())
+                ws_proxy = next(item for item in yaml.safe_load(exported.text())['proxies'] if item['name'] == 'managed-vless-ws-edited')
+                self.assertEqual(ws_proxy['type'], 'vless')
+                self.assertEqual(ws_proxy['uuid'], ws_uuid)
+                self.assertEqual(ws_proxy['network'], 'ws')
+                self.assertEqual(ws_proxy['ws-opts'], {'path': '/vless-ws-edited', 'headers': {'Host': 'cdn2.example.test'}})
+                self.assertTrue(ws_proxy['tls'])
+                self.assertEqual(ws_proxy['servername'], 'vpn.example.test')
+                self.assertFalse(ws_proxy['skip-cert-verify'])
                 singbox = context.request.get(base + response.json()['paths']['sing-box.json'])
                 self.assertEqual(singbox.status, 200, singbox.text())
                 vmess_client = next(item for item in singbox.json()['outbounds'] if item.get('type') == 'vmess')
@@ -263,6 +362,12 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 self.assertEqual(vmess_client['tls']['server_name'], 'vpn.example.test')
                 self.assertFalse(vmess_client['tls'].get('insecure', False))
                 self.assertNotIn(str(root), singbox.text())
+                ws_client = next(item for item in singbox.json()['outbounds'] if item.get('tag') == 'managed-vless-ws-edited')
+                self.assertEqual(ws_client['uuid'], ws_uuid)
+                self.assertEqual(ws_client['transport'], {'type': 'ws', 'path': '/vless-ws-edited', 'headers': {'Host': 'cdn2.example.test'}})
+                self.assertTrue(ws_client['tls']['enabled'])
+                self.assertEqual(ws_client['tls']['server_name'], 'vpn.example.test')
+                self.assertFalse(ws_client['tls'].get('insecure', False))
                 raw = context.request.get(base + response.json()['paths']['raw'])
                 self.assertEqual(raw.status, 200, raw.text())
                 links = base64.b64decode(raw.text()).decode().splitlines()
@@ -272,6 +377,18 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 self.assertEqual(vmess_payload['tls'], 'tls')
                 self.assertEqual(vmess_payload['sni'], 'vpn.example.test')
                 self.assertNotIn(str(root), json.dumps(vmess_payload))
+                ws_link = urlsplit(next(item for item in links if item.startswith('vless://' + ws_uuid + '@')))
+                ws_query = parse_qs(ws_link.query, strict_parsing=True)
+                self.assertEqual(ws_query['security'], ['tls'])
+                self.assertEqual(ws_query['type'], ['ws'])
+                self.assertEqual(ws_query['sni'], ['vpn.example.test'])
+                self.assertEqual(ws_query['path'], ['/vless-ws-edited'])
+                self.assertEqual(ws_query['host'], ['cdn2.example.test'])
+                self.assertNotIn('ed', ws_query)
+                self.assertNotIn('allowInsecure', ws_query)
+                for text in (exported.text(), singbox.text(), '\n'.join(links)):
+                    for server_only in (str(root), 'certificate_path', 'key_path', 'PRIVATE KEY', '_vui'):
+                        self.assertNotIn(server_only, text)
 
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     secrets_before = db.execute('SELECT id,settings FROM inbounds ORDER BY id').fetchall()
@@ -284,6 +401,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     db.execute("UPDATE inbounds SET remark='after-backup'")
                     db.execute('DELETE FROM certificate_bindings')
+                    db.execute("UPDATE inbounds SET settings='{}',stream_settings='{}' WHERE id=?", (ws_id,))
                 release_tools.restore(root, archive, digest)
                 base = start(); page = new_page(); login()
                 for identity in identities:
@@ -293,13 +411,22 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     self.assertTrue(state['remark'].endswith('-edited'))
                     dialog = open_edit(state['remark'])
                     expect(dialog).to_contain_text('vpn.example.test')
+                    if identity == ws_id:
+                        self.assertEqual(state['profile']['transport'], 'ws')
+                        self.assertEqual(state['profile']['path'], '/vless-ws-edited')
+                        self.assertEqual(state['profile']['host'], 'cdn2.example.test')
+                        self.assertEqual(state['profile']['server_name'], 'vpn.example.test')
+                        self.assertNotIn(ws_uuid, json.dumps(state))
+                        check_ws_prefill(dialog, '/vless-ws-edited', 'cdn2.example.test')
                     dialog.get_by_role('button', name='取消', exact=True).click()
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     self.assertEqual(db.execute('SELECT id,settings FROM inbounds ORDER BY id').fetchall(), secrets_before)
+                    self.assertEqual(db.execute('SELECT stream_settings FROM inbounds WHERE id=?', (ws_id,)).fetchone()[0], ws_stream_before)
                 self.assertEqual(external, [])
                 self.assertEqual(errors, [])
                 self.assertEqual(context.request.get(base + response.json()['paths']['mihomo.yaml']).status, 404)
                 print('VMess managed TLS: inbound and certificate-page selectors / card binding / create / cancel / edit / refresh / re-edit / hidden UUID retained / three exports / stopped restore OK')
+                print('VLESS WS managed TLS: create / cancel / invalid path and Host rejected / path and client Host edit / refresh / prefill / hidden UUID retained / binding retained / three verified-TLS exports without server paths / stopped restore OK')
                 print('Node editor browser: managed TLS create / cancel / protected TLS unbind / none and REALITY edits / refresh / re-edit / TLS export / stopped restore / credentials retained OK')
                 stop()
                 browser.close()

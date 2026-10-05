@@ -34,7 +34,7 @@ GitHub权限只在该人工工作流的发布job授予contents:write/actions:rea
 
 ## 公开后检查
 
-核对Release公开状态、tag目标、下载文件摘要和文档链接。可在独立临时 Linux 机器复核在线 `install.sh --version v0.4.2` 的自动目标选择路径；线上URL只有该版本确实发布后才存在。
+核对Release公开状态、tag目标、下载文件摘要和文档链接。可在独立临时 Linux 机器复核在线 `install.sh --version v0.4.3` 的自动目标选择路径；线上URL只有该版本确实发布后才存在。
 
 外部CA域名验证、云安全组和真实用户网络需要用户自己的配置，不属于维护者自动取得的授权。不要把发布流程顺手变成登录真实VPS部署。
 

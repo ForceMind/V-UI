@@ -1,5 +1,19 @@
 # 变更日志
 
+## 0.4.3 — VLESS/WebSocket/TLS（候选，最终验收待完成）
+
+- 从已收口的 v0.4.2 主线开始独立 WS 版本；不改变 FastAPI/SQLite、40 项 ToClash、四目标 Linux、托管证书编辑和发布边界。
+- 新增 sing-box 1.14.2 / VLESS / WebSocket / TLS 的严格参数和 URI/Base64、Mihomo、sing-box 导出；单 UUID、空 flow、明确 SNI、正常证书校验，ALPN 省略或仅 `http/1.1`，可选 Chrome fingerprint。
+- path 与可选 DNS-style Host 使用共享严格校验，拒绝 query、fragment、百分号转义、dot segments、early data 和未知字段。Host 保存在客户端元数据，实际服务端配置去除；不是 Host 白名单，也不代替 TLS SNI/证书验证。
+- 验收门槛包括两种固定客户端的正向 HTTP/TCP、错误 UUID/CA/SNI/path 拒绝、不同合法 Host 接受，以及浏览器创建/取消/编辑/刷新/恢复和证书生命周期；不新增 UDP 声明，不放开其他 WS/gRPC/core 组合。
+- 最终准确提交八组 CI 尚待完成。未创建本候选的 Draft Release、tag、公开 Release 或部署；不能把下述 v0.4.2 主线结果当作本候选通过。
+
+## 2026-10-05 — v0.4.2 主线收口
+
+- PR #1–#13、#15–#17 共 16 个 PR 正常合并至 `master` `0225ce4b1301e70068421e54c409b303d45cf812`，tree `1a642d38bbd55d8cd12ebfabdbd421624a7a08f3`；PR #14 排除。
+- 最终主线八组最新工作流及 11 个 job 成功，四目标 Linux 附件摘要/清单/源码与版本核验完成。没有 Draft Release、新版本 tag、公开 Release 或部署。
+- 这是候选阶段之后的状态更新；以下历史条目保留当时的候选描述与验收边界。来源见[主线收口记录](docs/MAINLINE_CLOSURE_20261005.md)。
+
 ## 0.4.2 — VMess/TCP/TLS（候选）
 
 - 新增 sing-box VMess/TCP/TLS strict public export：Mihomo YAML、VMess URI/Base64、sing-box JSON。

@@ -229,12 +229,12 @@ class ValidatedExportTests(unittest.TestCase):
             with self.subTest(item=item.__dict__),self.assertRaises(ExportError):
                 validated_nodes([item],'vmess.example.test')
 
-    def test_vless_unknown_fields_multiuser_flow_and_non_tcp_are_rejected(self):
+    def test_vless_unknown_fields_multiuser_flow_and_unverified_transport_are_rejected(self):
         candidates=[]
         x=vless_node();x.settings['unknown']='secret';candidates.append(x)
         x=vless_node();x.settings['users']*=2;candidates.append(x)
         x=vless_node();x.settings['users'][0]['flow']='xtls-rprx-vision';candidates.append(x)
-        x=vless_node();x.stream_settings['transport']={'type':'ws','path':'/x'};candidates.append(x)
+        x=vless_node();x.stream_settings['transport']={'type':'grpc','service_name':'x'};candidates.append(x)
         x=vless_node();x.stream_settings['tls']['reality']={'private_key':'never-export'};candidates.append(x)
         for item in candidates:
             with self.subTest(item=item.__dict__),self.assertRaises(ExportError):

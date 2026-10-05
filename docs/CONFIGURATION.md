@@ -63,8 +63,34 @@ sing-box 的 VLESS/TLS、Trojan/TLS、VMess/TLS 的证书来源都可以选择�
 
 服务端证书路径和私钥不会进入客户端导出。多用户、禁用证书校验、未知字段以及 WS/gRPC 等未单独验收传输会明确拒绝，不通过丢参数来生成“看似可用”的配置。
 
-## 0.4.2 VMess/TCP/TLS 候选
+## 0.4.2 VMess/TCP/TLS 基线
 
-仅 sing-box / VMess / 原生 TCP / TLS / 单 UUID 用户进入本候选的验证路径。选择 TLS 后可从托管正式证书列表选择，也可以在证书管理页面的卡片选择已有 VMess/TLS 节点绑定；编辑会回填绑定而不回传 UUID；取消不保存，修改名称/端口不重新生成 UUID。手工解绑仍使用 TLS 时必须换成两条新的手工材料路径，不能关闭续期却继续引用原托管文件。
+仅 sing-box / VMess / 原生 TCP / TLS / 单 UUID 用户已进入 v0.4.2 主线验收范围。选择 TLS 后可从托管正式证书列表选择，也可以在证书管理页面的卡片选择已有 VMess/TLS 节点绑定；编辑会回填绑定而不回传 UUID；取消不保存，修改名称/端口不重新生成 UUID。手工解绑仍使用 TLS 时必须换成两条新的手工材料路径，不能关闭续期却继续引用原托管文件。
 
 导出使用 Mihomo YAML、VMess URI/Base64 或 sing-box JSON；不关闭证书校验，不忽略未知字段，不扩大为 Xray、WebSocket/gRPC 或 UDP 支持。准确验收范围见[兼容矩阵](COMPATIBILITY.md)。
+
+## 0.4.3 VLESS/WebSocket/TLS 候选
+
+本候选仅针对 sing-box 1.14.2 / VLESS / WS / TLS，最终准确提交全组 CI 尚待完成。客户端固定为 Mihomo 1.19.32 与 sing-box 1.14.2，只新增 HTTP/TCP 验证，不宣称 WS UDP 可用。
+
+创建或编辑 sing-box/VLESS 节点时选择 WebSocket，保持单 UUID、空 flow、TLS、明确的 SNI 与证书校验。可以选择正式托管证书或填写自己的两条服务端材料路径；Host 与证书字段相互独立。
+
+- Path 必填，例如 `/vui-ws` 或 `/`；总长 1–256 个 ASCII 字符，以 `/` 开头，只允许字母、数字、`.`、`_`、`~`、`/`、`-`。禁止 `.` / `..` 路径段、query（如 `?ed=2048`）、fragment、百分号转义、空白或 early data。
+- Host 可留空；填写时用 ASCII DNS-style 名称，例如 `edge.example.com`，总长不超过 253，每段不超过 63 个字符；每段以字母或数字开头结尾，中间可含 `-`。不要填写 `https://`、端口、路径、尾随点、IP 的方括号形式或空白。
+- 可视化编辑器没有 ALPN 输入框。ALPN 限制针对原始 API / 持久化 TLS 配置中的 `tls.alpn`：字段必须省略或恰为 `["http/1.1"]`，不接受空列表、`h2` 或其他列表；WS 可视化编辑会保留已有的受支持值。可选客户端 Chrome fingerprint，其他未验收指纹不随本候选放开。
+
+### Host 与 SNI 的区别
+
+节点连接地址决定客户端拨号到哪里；TLS SNI 指定要校验证书的服务器名称；WebSocket Host 只是 HTTP 请求中的客户端路由信息。Host 可以不同于 SNI，不会改变证书验证目标。不要用改 Host 或关闭证书校验处理 CA/SNI 错误。
+
+V-UI 将可选 Host 保存于 `transport.headers.Host` 并保留到客户端导出，生成实际 sing-box 服务端配置时删除这个客户端字段。sing-box 1.14.2 不据此校验请求 Host；Mihomo 和 sing-box 客户端改用另一个格式合法的 Host，直连该服务端仍会被接受。这不是鉴权绕过，因为 Host 从未作为鉴权条件；凭据和 TLS 验证仍须通过。若外部反向代理需要按 Host 路由，必须自行配置，该代理/CDN 部署不在本候选范围内。
+
+非法 Host 在可视化编译/导出阶段拒绝；格式合法但不同的 Host 接受是另一种行为。服务端仍检查配置的 WS path，错误 path 应无法转发。
+
+### 保存、导出与证书
+
+URI/Base64 的 `type=ws`、path、可选 Host、TLS/SNI、ALPN 和 fingerprint，与 Mihomo `ws-opts`、sing-box `transport` 对应保留；URI 序列化为 query 参数时的必要编码不表示允许在表单 path 中手填百分号转义。Mihomo WS 节点不启用 UDP，sing-box 出站限定 TCP。私钥及服务端材料路径不进入客户端输出。
+
+未知 transport/header 字段、early-data 参数（即使显式为 0）、非空 flow、多用户、不受支持 profile、禁用 TLS 或证书校验都拒绝公开导出，不静默丢字段或改成 DIRECT。原有草稿表单不表示 Xray WS/gRPC 等已通过验收。
+
+编辑回填 path/Host 与证书绑定，UUID 继续留在服务端，取消不保存。已有原始配置若含可视化表单无法表示的 TLS、header 或 early-data 参数，WS 编辑明确拒绝保存，不靠丢弃这些字段来完成修改。托管证书的换绑、TLS 手工解绑路径检查、续期失败保留旧材料与材料/应用状态分离均不改变。手动停止核心时续期不自动启动，保持 `CORE_STOPPED_PENDING_APPLY`，明确启动后再应用。

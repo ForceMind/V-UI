@@ -2,13 +2,13 @@
 
 先读ROADMAP.md、docs/README.md和最近PR。用户已授权完善正式发布、所有文档、一键部署与图形化自动证书；仍不等于授权登录真实VPS、替实际域名同意CA条款或跳过验收公开Release。
 
-- 保持每个阶段独立PR。当前收尾为rc.4/0.3.0发布准备，依赖已验收证书rc.3。
+- 保持每个阶段独立PR。v0.4.2 主线已按正常 merge commit 收口；当前阶段为 v0.4.3 sing-box/VLESS/WebSocket/TLS 候选，最终准确提交验收仍待完成，不能复用旧主线结果替代。历史证据见 docs/MAINLINE_CLOSURE_20261005.md。
 - 所有最终功能在准确提交重新验证。queued/running/skip不算通过；单元、真实二进制、浏览器、systemd/安装与实际部署必须分开描述。
 - 保留用户数据，不删除/改名数据库掩盖升级问题，不回退到无鉴权旧版继续在线运行。
-- 不扩大协议、DNS-01/通配符、Docker/ARM64等矩阵；旧表单不是支持承诺。
+- 不超出当前阶段扩大协议、DNS-01/通配符、容器部署或既有四目标 Linux 矩阵；旧表单不是支持承诺。v0.4.3 不包含 Xray WS、gRPC、Hysteria2、TUIC 或 REALITY/Vision。
 - 客户端配置不丢关键字段，不泄露私钥，不在失败/无节点时悄悄改成DIRECT。
 - 新证书与应用结果分开，失败保留旧材料；不以跳过TLS校验解决签发/测试错误。
 - root安装器只初始化系统，包内程序以非root用户运行；不得擅自停止原网站、修改SSH或防火墙。
 - 测试只能使用假凭据、临时目录、临时CA和明确为空的CI主机。真实systemd测试不能在生产实例运行。
 - 文件包不得含用户数据、token、私钥、测试CA或字体；第三方许可证和来源随包保留。
-- 正式发布走人工gated workflow，精确default HEAD、七组CI最新success、已验收同一套件、无覆盖tag/Release。未实际公开就写“发布准备完成/候选”，不写“已发布”。
+- 正式发布走人工gated workflow，精确default HEAD、八组CI最新success、已验收同一套件、无覆盖tag/Release。未实际公开就写“发布准备完成/候选”，不写“已发布”。

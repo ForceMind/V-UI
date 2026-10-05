@@ -611,6 +611,14 @@
                     </el-input>
                 </el-form-item>
 
+                <el-alert
+                    v-if="newInbound.core === 'sing-box' && newInbound.protocol === 'vless' && newInbound.profile.transport === 'ws'"
+                    type="warning" :closable="false" show-icon
+                    title="VLESS WebSocket 验证范围"
+                    description="公开导出要求 TLS、正确 SNI、证书校验和空 flow。Path 须以 / 开头，最长 256 个 ASCII 字符，仅字母、数字、/、.、_、~、-，无点路径段、查询、转义或 early data。Host 仅为客户端路由参数，可留空或填写无端口的 ASCII 主机名；sing-box 不校验请求 Host，不能当作访问控制，也不替代 SNI/证书校验。仅验证 HTTP/TCP 转发。"
+                    style="margin-bottom: 18px">
+                </el-alert>
+
                 <el-form-item
                     v-if="newInbound.profile.transport === 'grpc'"
                     label="gRPC Service">
