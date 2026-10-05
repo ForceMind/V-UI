@@ -1,49 +1,34 @@
-from __future__ import annotations
-
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-
-from app.models.database import get_db
+from fastapi import APIRouter, HTTPException
 from app.services.core_manager import CoreError, core_manager
-from app.services.inbound_service import list_inbounds
 
 router = APIRouter()
 
-
 @router.get("/status")
-async def get_core_status():
+def status():
     return core_manager.status()
 
 
-@router.post("/{core}/apply")
-async def apply_core(core: str, db: Session = Depends(get_db)):
+def apply_checked(core: str, activate=True):
     try:
-        return core_manager.apply(
-            core,
-            list_inbounds(db, core=core),
-            restart=False,
-        )
+        return core_manager.apply_database(core, activate=activate)
     except CoreError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(409, {"saved": True, "applied": False, "message": str(exc)}) from exc
+
+
+@router.post("/{core}/apply")
+def validate(core: str):
+    return apply_checked(core, activate=False)
 
 
 @router.post("/{core}/restart")
-async def restart_core(core: str, db: Session = Depends(get_db)):
-    try:
-        return core_manager.apply(
-            core,
-            list_inbounds(db, core=core),
-            restart=True,
-        )
-    except CoreError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+def restart(core: str):
+    return apply_checked(core)
 
 
 @router.post("/{core}/stop")
-async def stop_core(core: str):
+def stop(core: str):
     try:
-        adapter = core_manager.get(core)
-        adapter.stop()
-        return adapter.status()
+        core_manager.get(core).stop()
+        return core_manager.get(core).status()
     except CoreError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(409, str(exc)) from exc
