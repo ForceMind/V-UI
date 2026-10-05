@@ -1,12 +1,23 @@
 # 变更日志
 
-## 0.4.3 — VLESS/WebSocket/TLS（候选，最终验收待完成）
+## 0.4.4 — VLESS/gRPC/TLS（候选，最终验收待完成）
 
-- 从已收口的 v0.4.2 主线开始独立 WS 版本；不改变 FastAPI/SQLite、40 项 ToClash、四目标 Linux、托管证书编辑和发布边界。
-- 新增 sing-box 1.14.2 / VLESS / WebSocket / TLS 的严格参数和 URI/Base64、Mihomo、sing-box 导出；单 UUID、空 flow、明确 SNI、正常证书校验，ALPN 省略或仅 `http/1.1`，可选 Chrome fingerprint。
-- path 与可选 DNS-style Host 使用共享严格校验，拒绝 query、fragment、百分号转义、dot segments、early data 和未知字段。Host 保存在客户端元数据，实际服务端配置去除；不是 Host 白名单，也不代替 TLS SNI/证书验证。
-- 验收门槛包括两种固定客户端的正向 HTTP/TCP、错误 UUID/CA/SNI/path 拒绝、不同合法 Host 接受，以及浏览器创建/取消/编辑/刷新/恢复和证书生命周期；不新增 UDP 声明，不放开其他 WS/gRPC/core 组合。
-- 最终准确提交八组 CI 尚待完成。未创建本候选的 Draft Release、tag、公开 Release 或部署；不能把下述 v0.4.2 主线结果当作本候选通过。
+- 从已验收的 v0.4.3 WS 主线开始独立 gRPC 版本；FastAPI/SQLite、40 项 ToClash、四目标 Linux、固定依赖/核心和发布边界不变。
+- 固定官方 sing-box 1.14.2 未含 `with_grpc`，实际使用 gRPC Lite；Mihomo 1.19.32 不变。前置提交 `a0205fe545fabd958fe7aa80835a3ec6abeada92` 的真实链路通过 45 项测试，首次 `008608a` 两个 x509 文本断言失败仍保留在[阶段记录](docs/VLESS_GRPC_044.md)。
+- 候选新增仅 sing-box/VLESS/gRPC/TLS 的严格 URI/Base64、Mihomo 和 sing-box 导出；单 UUID、空 flow、明确 SNI、正常证书校验，ALPN 省略或仅 h2，Chrome fingerprint 独立可选。
+- service_name 使用 `[A-Za-z0-9._-]{1,128}` 字面字符串，保留大小写及 `.`/`..`；拒绝路径/query/百分号转义/空白/Unicode/类型强转和未知 transport/TLS/authority/header/timer/multi-mode 字段，不靠编辑静默清除导入选项。
+- 前置双客户端真实 HTTP/h2、四种独立 Chrome/ALPN 组合、边界 service、错误 UUID/CA/SNI/service/case 均有证据；失败目标无请求、无 DIRECT。测试专用 HTTP/2 诊断证明 sing-box 真实 x509 拒绝，但 Lite 调用者可能超时，不承诺及时错误传播。
+- 共用编译器/编辑器/托管证书，保留隐藏 UUID、受支持 ALPN、证书绑定和停止核心 `CORE_STOPPED_PENDING_APPLY`；集成门槛覆盖三格式、浏览器创建/取消/编辑/刷新/再打开/恢复和续期。
+- 仅新增 HTTP/TCP：Mihomo `udp: false`、sing-box 出站 `network: tcp`。不新增 authority/Host 白名单、核心重编译、反代、Xray gRPC、HY2/TUIC 或依赖更新。
+- 最终独立审查、准确候选八组 CI、授权正常合并及准确主线八组 CI 仍待完成；前置通过不能代替集成验收。本阶段未晋升当前附件、创建 tag/Release 或部署。
+
+## 2026-10-05 — v0.4.3 WebSocket 主线收口
+
+- [PR #18](https://github.com/ForceMind/V-UI/pull/18) 正常合并至 `master` `1b3ec40cd3bb640246d12afa104db0aec08ce336`；准确候选 `f9dfa611edcf5946bb4c8ae3cee59118d36930e9` 与合并 tree 均为 `7f7e2df30774f614ecfe6989f22fbf8447d842e5`，来源分支保留。
+- 最终主线八组工作流、11 个 job 和每一步均成功，独立审查已完成；无 queued/running/skipped 计作成功。普通测试 263 项通过（50 项环境 skip 另计），真实 loopback 37 项、激活 Chromium 与证书/安装/四目标门槛独立通过。
+- 已验收 sing-box VLESS/WS/TLS、单 UUID、空 flow、明确 SNI/验证证书、严格 path 和可选 DNS-style Host，三格式无损导出。Host 是客户端元数据，服务端不做 Host 白名单；不同合法 Host 接受与非法 Host 输入拒绝分别记录。
+- ALPN 省略或仅 http/1.1、Chrome 独立可选，仅 HTTP/TCP；错误 UUID/CA/SNI/path 双客户端拒绝且无 DIRECT，保留真实 x509 证据；浏览器/证书/UUID/停机恢复完成。
+- 本地 netlink/socket 环境阻断不写成运行通过，真实证据来自准确候选及最终 master CI。本阶段未创建 tag、Draft Release、公开 Release 或部署，也未晋升 WS 候选附件；历史 v0.4.2 套件未被替换。详见[WS 收口记录](docs/VLESS_WS_CLOSURE_043.md)。
 
 ## 2026-10-05 — v0.4.2 主线收口
 

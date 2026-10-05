@@ -15,6 +15,10 @@
 | VLESS/WS 导出拒绝 | 核对严格 path、可选 Host、单 UUID、空 flow、TLS/SNI、ALPN；不允许 early data、额外 header 或未知字段 |
 | VLESS/WS 错误 path 无法连接 | 客户端 path 必须匹配服务端；不能通过 query/百分号转义或关闭 TLS 校验修复 |
 | 更换合法 WS Host 仍可连接 | sing-box 不强制校验请求 Host，它只是客户端路由信息；这不表示 TLS SNI/CA 验证失效，勿把 Host 当作白名单 |
+| VLESS/gRPC 导出或编辑拒绝 | 检查单 UUID、空 flow、TLS/SNI、字面 `[A-Za-z0-9._-]{1,128}` service name、ALPN 省略或仅 h2；已有未知字段不得靠编辑静默丢弃 |
+| VLESS/gRPC service name 不匹配 | 客户端必须逐字匹配，区分大小写；不要加 `/`、`/Tun`、query 或百分号转义。`.` / `..` 是合法字面 service，不能按路径段归一化 |
+| VLESS/gRPC 错误 CA/SNI 只显示超时 | 固定 sing-box gRPC Lite 可能未及时返回 x509 原因；核对 CA、明确 SNI、实际日志。超时本身不是正确 TLS 拒绝证据，不关闭验证；[测试诊断记录](VLESS_GRPC_044.md)使用局部 HTTP/2 日志取得证据 |
+| gRPC authority/Host、headers、timer 或多模式不可保存 | 本候选未验收这些参数，固定核心不实施 authority/Host 白名单；不替换核心、增加反代或悄悄忽略字段以伪造支持 |
 | 409分流保存 | 另一页面已更新修订；重新载入，手动合并草稿，不覆盖他人新版本 |
 | 428分流保存 | 缺少If-Match；先读取snapshot/ETag，使用当前UI |
 | 503规则 | 已保存文件不可读/损坏；从可信备份恢复，系统不会悄悄回到默认规则 |

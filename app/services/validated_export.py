@@ -13,6 +13,7 @@ from urllib.parse import quote, urlencode
 from app.services.subscription_tokens import normalize_server
 from app.services.mihomo_routing import unique_proxy_names
 from app.services.websocket_profile import websocket_host, websocket_path
+from app.services.grpc_profile import grpc_service_name
 
 
 class ExportError(ValueError):
@@ -38,7 +39,7 @@ def _common(item, server: str) -> tuple[str, str]:
     if not item.enable or getattr(item, "expiry_time", 0):
         raise ExportError("Disabled or expiring nodes are not eligible for this export profile")
     if item.core != "sing-box" or item.protocol not in {"vless", "trojan", "shadowsocks", "vmess"}:
-        raise ExportError("Validated export requires verified sing-box VLESS/TCP/TLS or VLESS/WS/TLS, Trojan/TCP/TLS, Shadowsocks or VMess/TCP/TLS")
+        raise ExportError("Validated export requires verified sing-box VLESS/TCP/TLS, VLESS/WS/TLS or VLESS/gRPC/TLS, Trojan/TCP/TLS, Shadowsocks or VMess/TCP/TLS")
     server=node_host(server)
     if type(item.port) is not int or not 1 <= item.port <= 65535:
         raise ExportError("Invalid node port")
@@ -49,9 +50,9 @@ def _common(item, server: str) -> tuple[str, str]:
     return server,name
 
 
-def _verified_tls(item, *, websocket: bool = False) -> tuple[str, dict, list[str] | None]:
+def _verified_tls(item, *, websocket: bool = False, grpc: bool = False) -> tuple[str, dict, list[str] | None]:
     stream=mapping(item.stream_settings or {}, {"tls","transport","_vui"}, "stream")
-    if not websocket and stream.get("transport") not in (None,{}):
+    if not (websocket or grpc) and stream.get("transport") not in (None,{}):
         raise ExportError("Non-TCP transports need a separately validated export profile")
     tls=mapping(stream.get("tls"), {"enabled","server_name","certificate_path","key_path","alpn"}, "TLS")
     if tls.get("enabled") is not True:
@@ -62,6 +63,8 @@ def _verified_tls(item, *, websocket: bool = False) -> tuple[str, dict, list[str
                  "client metadata")
     if meta.get("security","tls")!="tls" or meta.get("skip_cert_verify",False) is not False:
         raise ExportError("TLS verification cannot be disabled in this profile")
+    if grpc and "server_name" in meta and not isinstance(meta["server_name"], str):
+        raise ExportError("gRPC client TLS name must be a string")
     if meta.get("server_name") and node_host(meta["server_name"])!=sni:
         raise ExportError("Conflicting client/server TLS names")
     fingerprint=meta.get("client_fingerprint","")
@@ -75,6 +78,8 @@ def _verified_tls(item, *, websocket: bool = False) -> tuple[str, dict, list[str
         raise ExportError("Invalid TLS ALPN")
     if websocket and alpn not in (None, ["http/1.1"]):
         raise ExportError("The validated WebSocket profile only accepts HTTP/1.1 ALPN")
+    if grpc and "alpn" in tls and alpn != ["h2"]:
+        raise ExportError("The validated gRPC profile only accepts h2 ALPN")
     return sni,meta,list(alpn) if alpn else None
 
 
@@ -100,6 +105,15 @@ def _one_user(item) -> dict:
     if not isinstance(users,list) or len(users)!=1:
         raise ExportError(f"Select a node with exactly one explicit {item.protocol.upper()} user")
     return users[0]
+
+
+def _grpc_transport(item) -> dict:
+    transport = mapping(item.stream_settings["transport"], {"type", "service_name"}, "gRPC transport")
+    try:
+        service = grpc_service_name(transport.get("service_name"))
+    except ValueError as exc:
+        raise ExportError(str(exc)) from exc
+    return {"grpc-service-name": service}
 
 
 def _vless_node(item, server: str, name: str, sni: str, meta: dict,
@@ -184,13 +198,20 @@ def validated_node(item, server: str) -> dict:
     stream = item.stream_settings or {}
     transport = stream.get("transport") if isinstance(stream, dict) else None
     websocket = item.protocol == "vless" and isinstance(transport, dict) and transport.get("type") == "ws"
-    sni,meta,alpn=_verified_tls(item, websocket=websocket)
+    grpc = item.protocol == "vless" and isinstance(transport, dict) and transport.get("type") == "grpc"
+    sni,meta,alpn=_verified_tls(item, websocket=websocket, grpc=grpc)
     if item.protocol=="vless":
         node = _vless_node(item,server,name,sni,meta,alpn)
         if websocket:
             node["network"] = "ws"
             node["ws-opts"] = _websocket_transport(item)
             # This version verifies HTTP/TCP forwarding, not WebSocket UDP.
+            node["udp"] = False
+            node.pop("packet-encoding", None)
+        elif grpc:
+            node["network"] = "grpc"
+            node["grpc-opts"] = _grpc_transport(item)
+            # gRPC Lite acceptance is HTTP/TCP, not a UDP support claim.
             node["udp"] = False
             node.pop("packet-encoding", None)
         return node
@@ -218,6 +239,8 @@ def share_link(item, server: str) -> str:
             params["path"] = node["ws-opts"]["path"]
             if node["ws-opts"].get("headers"):
                 params["host"] = node["ws-opts"]["headers"]["Host"]
+        elif node["network"] == "grpc":
+            params["serviceName"] = node["grpc-opts"]["grpc-service-name"]
         else:
             params["packetEncoding"] = "xudp"
         if node.get("client-fingerprint"):
@@ -291,6 +314,10 @@ def singbox_client_config(items, server: str) -> dict:
                 outbound.pop("packet_encoding")
                 outbound["network"] = "tcp"
                 outbound["transport"] = {"type": "ws", **node["ws-opts"]}
+            elif node["network"] == "grpc":
+                outbound.pop("packet_encoding")
+                outbound["network"] = "tcp"
+                outbound["transport"] = {"type": "grpc", "service_name": node["grpc-opts"]["grpc-service-name"]}
         elif node["type"]=="trojan":
             outbound={"type":"trojan","tag":node["name"],"server":node["server"],
                       "server_port":node["port"],"password":node["password"],
@@ -321,6 +348,6 @@ def export_warnings(items) -> list[dict]:
             warnings.append({
                 "inbound_id":item.id,
                 "code":"UNVERIFIED_EXPORT_PROFILE",
-                "message":"This node is outside the verified sing-box VLESS/TCP/TLS, VLESS/WS/TLS, Trojan/TCP/TLS, Shadowsocks and VMess/TCP/TLS export profiles.",
+                "message":"This node is outside the verified sing-box VLESS/TCP/TLS, VLESS/WS/TLS, VLESS/gRPC/TLS, Trojan/TCP/TLS, Shadowsocks and VMess/TCP/TLS export profiles.",
             })
     return warnings

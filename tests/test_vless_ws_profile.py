@@ -113,7 +113,7 @@ class VlessWebSocketProfileTests(unittest.TestCase):
             {"type": "ws", "path": "/", "headers": {"host": "cdn.example.test"}},
             {"type": "ws", "path": "/", "headers": {"Host": ""}},
             {"type": "ws", "path": "/", "headers": None},
-            {"type": "grpc", "service_name": "not-supported"},
+            {"type": "grpc", "service_name": "not/supported"},
         ]
         candidates = []
         for transport in transports:
