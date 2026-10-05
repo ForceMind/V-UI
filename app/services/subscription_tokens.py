@@ -92,6 +92,8 @@ def create_grant(owner_id: int, label: str, server: str, inbound_ids: list[int],
         rows = db.query(database.Inbound).filter(database.Inbound.id.in_(ids)).all()
         if len(rows) != len(ids) or any(not row.enable for row in rows):
             raise HTTPException(422, "Selected nodes are missing or disabled")
+        from app.services.validated_export import validated_nodes
+        validated_nodes(rows, server)
         token = "vui_s_" + secrets.token_urlsafe(32)
         grant = SubscriptionGrant(owner_id=owner_id, token_hash=digest(token),
             credential_stamp=digest(user.password_hash), label=label, server=server,
@@ -106,7 +108,9 @@ def create_grant(owner_id: int, label: str, server: str, inbound_ids: list[int],
 
 def list_grants(owner_id: int) -> list[dict]:
     with database.SessionLocal() as db:
-        return [public_record(g) for g in db.query(SubscriptionGrant).filter_by(
+        user = _owner(db, owner_id)
+        return [{**public_record(g), "invalidated": not hmac.compare_digest(
+            g.credential_stamp, digest(user.password_hash))} for g in db.query(SubscriptionGrant).filter_by(
             owner_id=owner_id).order_by(SubscriptionGrant.id.desc()).all()]
 
 

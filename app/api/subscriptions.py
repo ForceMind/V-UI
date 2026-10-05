@@ -9,7 +9,7 @@ from app.models import database
 from app.services.subscription_tokens import authorized_nodes, change_grant, create_grant, list_grants
 from app.services.validated_export import base64_subscription, singbox_client_config
 from app.services.mihomo_subscription import mihomo_config
-from app.services.mihomo_routing import load_routing
+from app.services.routing_store import load_routing
 
 router = APIRouter()
 public_router = APIRouter()

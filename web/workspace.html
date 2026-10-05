@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>V-UI · 分流与订阅</title><link rel="stylesheet" href="/ui/css/workspace.css">
+<script src="/ui/js/workspace.js" defer></script></head>
+<body><header><a class="brand" href="/ui/">V-UI</a><nav><a href="/ui/#inbounds">节点管理</a><a href="/workspace" aria-current="page">分流与订阅</a><a href="/account">账户 / 退出</a></nav></header>
+<main><div class="page-title"><div><h1>分流与订阅</h1><p>节点、策略组、DNS 和规则，合在一个配置里。</p></div><span id="stage">alpha.6</span></div>
+<p id="notice" role="status" aria-live="polite">正在读取已保存的设置…</p>
+<div id="workspace" hidden>
+<section><div class="section-head"><div><h2>01 · 分流设置</h2><p id="save-state">尚未加载</p></div><div class="actions"><button id="reload" type="button">重新载入</button><button id="preview" type="button">预览草稿</button><button id="save" type="button" class="primary">保存设置</button></div></div>
+<form id="routing-form"><label for="mode">网络模式</label><select id="mode"><option value="standard">常规分流：国内直连，其余走 PROXY</option><option value="direct">默认直连：仅指定服务走代理</option></select>
+<p class="hint">常规模式需要客户端具备 GeoSite / GeoIP 数据。默认直连模式不依赖这些数据。</p>
+<div class="columns"><div><label for="direct">始终直连</label><textarea id="direct" rows="5" placeholder="每行一个域名、网址或 IP；无需要可留空"></textarea></div><div><label for="proxy">始终代理</label><textarea id="proxy" rows="5" placeholder="每行一个域名、网址或 IP；无需要可留空"></textarea></div></div>
+<details open><summary>服务预设 <span id="preset-count"></span></summary><p class="hint">保留 ToClash 的 40 项目录；共享登录域名可能影响多个服务，关闭开关不等于强制直连。</p><div id="presets" class="preset-grid"></div></details>
+<label class="check"><input id="cgnat" type="checkbox">将 100.64.0.0/10（CGNAT）加入本地直连</label>
+<details><summary>企业 / 家庭内网 DNS（可选）</summary><p class="hint">每个区域可指定不同 DNS；需要系统 DNS 时明确填写 system。必须实际可达，示例并非你的网络配置。</p><div id="zones"></div><button id="add-zone" type="button">添加内网区域</button></details>
+</form>
+<div class="preview-head"><strong id="preview-label">尚未生成预览</strong><span id="rule-count"></span></div><div id="warnings"></div><pre id="rule-preview" tabindex="0">修改表单只改变草稿；保存后，客户端刷新订阅才会应用新配置。</pre>
+</section>
+<section id="subscriptions"><div class="section-head"><div><h2>02 · 客户端订阅</h2><p>令牌只读、独立于管理员登录；只包含明确选择的节点。</p></div><button id="refresh-grants" type="button">刷新列表</button></div>
+<p class="hint">本阶段已验证导出：sing-box · VLESS · TCP · TLS · 单用户。其他组合仍在后续协议验证队列，不会静默生成不完整配置。</p>
+<form id="grant-form"><div class="columns"><div><label for="label">订阅名称</label><input id="label" required maxlength="128" placeholder="例如：我的手机"></div><div><label for="server">节点公开连接地址</label><input id="server" required maxlength="253" placeholder="vpn.example.com 或 IP，不含端口和 https://"></div></div>
+<p class="hint">这是客户端连接代理节点的地址，不一定等于面板地址；全部选中节点使用此地址。</p>
+<fieldset><legend>选择节点</legend><div id="nodes"></div></fieldset><fieldset><legend>输出格式</legend><label class="check"><input type="checkbox" name="format" value="mihomo.yaml" checked>Mihomo 完整配置</label><label class="check"><input type="checkbox" name="format" value="raw">Base64 节点链接</label><label class="check"><input type="checkbox" name="format" value="sing-box.json">sing-box 连接配置（不含 ToClash 分流）</label></fieldset>
+<div class="actions"><label for="days">有效天数</label><input id="days" type="number" min="1" max="3650" value="90" required><button id="create-grant" class="primary" type="submit">创建专用订阅</button></div></form>
+<div id="issued" hidden><div class="section-head"><strong>新地址只在本次显示</strong><button id="forget" type="button">隐藏地址</button></div><p class="hint">复制到客户端后妥善保管；不写入浏览器存储。遗失时可以轮换，旧地址立即失效。</p><textarea id="issued-urls" readonly rows="4" aria-label="新订阅地址"></textarea><div class="actions"><button id="copy" type="button">复制地址</button><button id="download" type="button">下载 Mihomo YAML</button></div></div>
+<div class="table-wrap"><table><thead><tr><th>名称 / 节点地址</th><th>范围</th><th>状态</th><th>有效期</th><th>操作</th></tr></thead><tbody id="grants"></tbody></table></div>
+<p class="hint">列表不会再显示原始令牌。轮换使用上方有效天数；修改管理员密码也会让旧订阅失效，重新登录后可按需轮换。</p>
+</section>
+</div><footer>V-UI · ToClash 0.3.8 固定基准 · 此页不连接第三方转换服务</footer></main></body></html>

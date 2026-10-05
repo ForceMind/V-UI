@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>V-UI · 账户</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#f6f7f9;color:#28313c;font-family:system-ui,-apple-system,"Microsoft YaHei",sans-serif;line-height:1.6}main{width:min(460px,calc(100% - 32px));margin:9vh auto;padding:30px;background:white;border:1px solid #e2e6ed;border-radius:12px}h1{margin:0 0 4px;font-size:26px}.muted{color:#637080;font-size:14px}label{display:block;margin:18px 0 6px}input{font:inherit;width:100%;padding:10px 12px;border:1px solid #bfc8d3;border-radius:6px}button,a{font:inherit}button{padding:10px 18px;border:1px solid #536c8d;border-radius:6px;background:#536c8d;color:white;cursor:pointer}button:disabled{opacity:.5;cursor:wait}a{color:#405e86}form button{margin-top:22px;width:100%}.actions{margin-top:20px;display:flex;justify-content:space-between;align-items:center}#message{color:#914123;white-space:pre-wrap;overflow-wrap:anywhere;min-height:24px}code{overflow-wrap:anywhere;font-size:13px}details{margin-top:24px}summary{cursor:pointer}.loading{margin:20px 0}[hidden]{display:none!important}
+*{box-sizing:border-box}body{margin:0;background:#f6f7f9;color:#28313c;font-family:system-ui,-apple-system,"Microsoft YaHei",sans-serif;line-height:1.6}main{width:min(460px,calc(100% - 32px));margin:9vh auto;padding:30px;background:white;border:1px solid #e2e6ed;border-radius:12px}h1{margin:0 0 4px;font-size:26px}.muted{color:#637080;font-size:14px}label{display:block;margin:18px 0 6px}input{font:inherit;width:100%;padding:10px 12px;border:1px solid #bfcbd3;border-radius:6px}button,a{font:inherit}button{padding:10px 18px;border:1px solid #536c8d;border-radius:6px;background:#536c8d;color:white;cursor:pointer}button:disabled{opacity:.5;cursor:wait}a{color:#405e86}form button{margin-top:22px;width:100%}.actions{margin-top:20px;display:flex;justify-content:space-between;align-items:center}#message{color:#914123;white-space:pre-wrap;overflow-wrap:anywhere;min-height:24px}code{overflow-wrap:anywhere;font-size:13px}details{margin-top:24px}summary{cursor:pointer}.loading{margin:20px 0}[hidden]{display:none!important}
 </style>
 <script src="/ui/js/account.js" defer></script>
 </head>
@@ -32,7 +32,7 @@
 <p class="muted">保存会退出所有已登录设备，需要重新登录。</p>
 <button type="submit">保存并退出全部会话</button>
 </form>
-<div class="actions"><a href="/ui/">返回管理面板</a><button id="logout" type="button">退出登录</button></div>
+<div class="actions"><a href="/ui/">管理面板</a><a href="/workspace">分流与订阅</a><button id="logout" type="button">退出登录</button></div>
 </section>
 <p class="muted">会话最长一小时。当前 alpha 版本未完成公网发布验收。</p>
 </main></body></html>

@@ -13,8 +13,9 @@ from app.middleware.auth import AdminAuthMiddleware, configured_origin
 from app.services.core_manager import core_manager
 from app.services.log_redaction import install_log_redaction
 from app.services.validated_export import ExportError
+from app.services.routing_store import RoutingStorageError
 
-app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.3.0-alpha.5')
+app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.3.0-alpha.6')
 app.add_middleware(AdminAuthMiddleware)
 app.include_router(system.router,prefix='/api/system',tags=['System'])
 app.include_router(inbounds.router,prefix='/api/inbounds',tags=['Inbounds'])
@@ -28,6 +29,10 @@ app.include_router(singbox.router,prefix='/api/singbox',tags=['Sing-box'])
 app.include_router(auth.router,prefix='/api/auth',tags=['Auth'])
 app.include_router(security.router,prefix='/api/security',tags=['Security'])
 app.include_router(files.router,prefix='/api/files',tags=['Files'])
+
+@app.exception_handler(RoutingStorageError)
+async def invalid_routing_storage(request: Request,exc: RoutingStorageError):
+    return JSONResponse({'detail':'Saved routing is unavailable; no fallback was generated'},status_code=503)
 
 @app.exception_handler(ExportError)
 async def invalid_export(request: Request,exc: ExportError):
@@ -59,6 +64,10 @@ def get_web_path() -> str:
 @app.get('/account',include_in_schema=False)
 def account_page():
     return FileResponse(os.path.join(get_web_path(),'account.html'),headers={'Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
+
+@app.get('/workspace',include_in_schema=False)
+def workspace_page():
+    return FileResponse(os.path.join(get_web_path(),'workspace.html'),headers={'Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
 
 @app.get('/',include_in_schema=False)
 def root():

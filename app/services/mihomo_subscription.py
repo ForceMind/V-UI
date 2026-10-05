@@ -1,6 +1,7 @@
 from __future__ import annotations
 import yaml
-from app.services.mihomo_routing import build_policy_groups, load_routing
+from app.services.mihomo_routing import build_policy_groups
+from app.services.routing_store import load_routing
 from app.services.routing_validation import build_rule_plan, normalize_routing
 from app.services.validated_export import validated_nodes
 
