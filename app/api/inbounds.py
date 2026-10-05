@@ -115,9 +115,10 @@ def edit_inbound(
     item = get_inbound(db, inbound_id)
     data = payload.model_dump(exclude_unset=True)
     profile = data.get("profile")
-    # Match compile_profile: an empty profile is a no-op; a nonempty VLESS
-    # profile defaults a missing/empty security value to none.
-    leaving_tls = bool(profile) and str(profile.get("security") or "none").lower() in {"none", "reality"}
+    # Match compile_profile: {} is a no-op; implicit security is protocol-aware.
+    # In particular, Trojan remains TLS when security is missing/empty/null.
+    default_security = "tls" if item.core == "sing-box" and item.protocol in {"hysteria2", "tuic", "trojan"} else "none"
+    leaving_tls = bool(profile) and str(profile.get("security") or default_security).lower() in {"none", "reality"}
     certificate_changed = "certificate_id" in data or leaving_tls
     certificate_id = data.pop("certificate_id", None)
     data["core"] = item.core or "xray"
