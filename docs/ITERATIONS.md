@@ -27,3 +27,15 @@ rc.2 uses Ubuntu24.04 amd64 / CPython3.12, one web worker, a dedicated unprivile
 rc.3: PR #10 / 2b24e7fe382d6529b6223d02f67fbdda72e5832a. Test72, reference9, loopback6, deployment5 and ACME2 succeeded. Real Certbot/Pebble issuance, renewal and failure checks plus the certificate browser workflow are distinct from actual user-domain issuance.
 
 rc.4: one-command systemd setup, managed-certificate selector, unified user/operations/API/security/release docs and gated manual promotion. Final status is recorded on the exact final PR/CI commit, not inferred from this ledger. No automatic master merge, public Release or user VPS deployment.
+
+
+## v0.3.1 Linux installation review repair (PR #12)
+
+This bounded repair starts from `06c0b8653f7b8d27a43d0ac0bb0bf61561fb7e95` on the existing PR #12 branch. It does not merge dependent PRs or change release/protocol scope.
+
+- OpenRC HTTP-01 selects IPv6-only before binding, while systemd keeps inherited socket activation.
+- New installations test IPv4 and available IPv6 for HTTP-01 and the default sing-box node before firewall/account/service writes. Existing conflicting listeners remain live.
+- Firewalld uses a single active interface-bound zone, never its default as a proxy for ingress. Multiple zones, source bindings, malformed/failed queries require manual handling. A changed zone after confirmation is refused before writes.
+- Real temporary-socket regressions reproduce the pre-fix collision and IPv6-only conflict cases. Mocked command tests cover non-default zone selection, runtime/permanent writes, manual fallback, explicit `yes`, and no-write dry runs. They do not operate the host firewall or service accounts.
+
+Run the focused regression group with `python -m unittest discover -s tests -p test_linux_installation_regressions.py -v` and `python -m unittest discover -s tests -p test_firewall_support.py -v`, alongside existing HTTP-01 and installer tests. The final exact-head acceptance record is PR #12's eight separate workflows: Test V-UI, ToClash, loopback, ACME, one-command installation, portable matrix, selected release deployment, and documentation. Local tests do not replace those gates; no public Release or user VPS deployment is implied.
