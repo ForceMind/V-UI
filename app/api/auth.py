@@ -1,38 +1,61 @@
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
-from typing import Optional
+from __future__ import annotations
+
+from fastapi import APIRouter, Request, Response
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
+
+from app.middleware.auth import configured_origin, cookie_name
+from app.services import auth_service
 
 router = APIRouter()
 
-# Simple in-memory user store (Replace with DB in production)
-# Default: admin / admin
-current_user = {
-    "username": "admin",
-    "password": "admin"
-}
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    model_config = ConfigDict(extra="forbid")
+    username: str = Field(min_length=1, max_length=64)
+    password: SecretStr = Field(min_length=1, max_length=128)
+
 
 class UpdateProfileRequest(BaseModel):
-    username: str
-    password: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
+    username: str = Field(min_length=3, max_length=64)
+    current_password: SecretStr = Field(min_length=1, max_length=128)
+    password: SecretStr | None = Field(default=None, min_length=15, max_length=128)
+
+
+def clear_cookie(response: Response) -> None:
+    response.delete_cookie(cookie_name(), path="/", httponly=True,
+                           secure=configured_origin().startswith("https://"), samesite="strict")
+
 
 @router.post("/login")
-async def login(creds: LoginRequest):
-    if creds.username == current_user["username"] and creds.password == current_user["password"]:
-        return {"token": "mock-jwt-token-xyz", "expires_in": 3600}
-    raise HTTPException(status_code=401, detail="Invalid credentials")
+def login(creds: LoginRequest, request: Request, response: Response):
+    user, token = auth_service.login(
+        creds.username, creds.password.get_secret_value(),
+        request.client.host if request.client else "unknown",
+        request.cookies.get(cookie_name(), ""))
+    response.set_cookie(cookie_name(), token, max_age=auth_service.SESSION_SECONDS,
+                        path="/", httponly=True,
+                        secure=configured_origin().startswith("https://"), samesite="strict")
+    return {"user": user, "expires_in": auth_service.SESSION_SECONDS}
+
 
 @router.get("/me")
-async def get_current_user():
-    return {"username": current_user["username"], "role": "superuser"}
+def me(request: Request):
+    return request.state.admin
+
+
+@router.post("/logout")
+def logout(request: Request, response: Response):
+    auth_service.logout(request.cookies.get(cookie_name(), ""))
+    clear_cookie(response)
+    return {"message": "Signed out"}
+
 
 @router.post("/update")
-async def update_profile(profile: UpdateProfileRequest):
-    global current_user
-    current_user["username"] = profile.username
-    if profile.password:
-        current_user["password"] = profile.password
-    return {"message": "Profile updated successfully"}
+@router.post("/update_profile")
+def update_profile(profile: UpdateProfileRequest, request: Request, response: Response):
+    auth_service.change_profile(request.state.admin["id"], profile.username,
+                                profile.current_password.get_secret_value(),
+                                profile.password.get_secret_value() if profile.password else None)
+    clear_cookie(response)
+    return {"message": "Profile changed; all sessions revoked. Sign in again."}
