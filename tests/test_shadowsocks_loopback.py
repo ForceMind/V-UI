@@ -198,27 +198,45 @@ class ShadowsocksLoopbackTests(unittest.TestCase):
 
         self.assertGreaterEqual(len(self.http_requests),2)
         self.assertGreaterEqual(len(self.udp_packets),2)
-        print("Shadowsocks: real TCP+UDP passed in Mihomo and public sing-box subscription")
+        print(f"Shadowsocks {self.method}: real TCP+UDP passed in Mihomo and public sing-box subscription")
 
     def test_wrong_password_is_rejected_for_tcp_and_udp_without_direct_fallback(self):
         with database.SessionLocal() as db:
             row=db.get(database.Inbound,1)
             row.settings={"method":self.method,"password":"wrong-password"}
             db.commit()
-        process,port=self.start_mihomo()
-        self.assert_failure_without_target(port)
-        process.stop()
-        print("Shadowsocks: wrong password rejected for TCP+UDP without DIRECT fallback")
+        grant=self.issue_grant()
+        for start in (self.start_mihomo, self.start_singbox_client):
+            with self.subTest(client=start.__name__, method=self.method):
+                process,port=start(grant)
+                self.assert_failure_without_target(port)
+                process.stop()
+        print(f"Shadowsocks {self.method}: wrong password rejected by both clients for TCP+UDP without DIRECT fallback")
 
     def test_wrong_method_is_rejected_for_tcp_and_udp_without_direct_fallback(self):
         with database.SessionLocal() as db:
             row=db.get(database.Inbound,1)
-            row.settings={"method":"aes-256-gcm","password":self.password}
+            wrong_method = "aes-128-gcm" if self.method == "aes-256-gcm" else "aes-256-gcm"
+            self.assertNotEqual(wrong_method, self.method)
+            row.settings={"method":wrong_method,"password":self.password}
             db.commit()
-        process,port=self.start_mihomo()
-        self.assert_failure_without_target(port)
-        process.stop()
-        print("Shadowsocks: mismatched AEAD method rejected for TCP+UDP without DIRECT fallback")
+        grant=self.issue_grant()
+        for start in (self.start_mihomo, self.start_singbox_client):
+            with self.subTest(client=start.__name__, method=self.method):
+                process,port=start(grant)
+                self.assert_failure_without_target(port)
+                process.stop()
+        print(f"Shadowsocks {self.method}: mismatched AEAD method rejected by both clients for TCP+UDP without DIRECT fallback")
+
+
+# Each subclass gets the same isolated server, target counters and both clients.
+# unittest discovery must execute all three methods and their negative cases.
+class ShadowsocksAES256LoopbackTests(ShadowsocksLoopbackTests):
+    method = "aes-256-gcm"
+
+
+class ShadowsocksChaCha20LoopbackTests(ShadowsocksLoopbackTests):
+    method = "chacha20-ietf-poly1305"
 
 
 if __name__=="__main__":
