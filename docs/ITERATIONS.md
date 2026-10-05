@@ -49,3 +49,5 @@ This bounded repair begins at `7afc1e1f2993159aa249fa864001dce08415da62` and nor
 - Staying on TLS retains the manual replacement-path guard. Empty profiles remain no-ops; validation failures preserve binding; saved desired transitions unbind even when core application fails.
 - New API and actual app.js regression tests reproduce the reviewed defects before the fix. The separate real Chromium/Uvicorn/pinned-core gate uses synthetic local CA material for create, cancel, edit, reload/re-edit, TLS export and stopped restore. Existing secret redaction/preservation, core/protocol immutability and stopped-core renewal checks remain required.
 - Acceptance requires all eight distinct workflows on the final exact head. Local passes and environment skips do not replace binary, loopback, ACME, one-command system installation, portable, deployment or documentation acceptance. REALITY/none edit coverage is not new export/connectivity support.
+
+Browser acceptance fixture restart closes its old page before opening a new random localhost origin, so retired-page polling cannot be mistaken for a third-party request. The no-external-request assertion remains strict.

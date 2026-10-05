@@ -89,12 +89,16 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 if os.getenv('VUI_TEST_CHROMIUM'): options['executable_path'] = os.environ['VUI_TEST_CHROMIUM']
                 browser = p.chromium.launch(**options)
                 context = browser.new_context(viewport={'width': 1280, 'height': 900})
-                page = context.new_page(); errors = []; external = []
-                page.on('pageerror', lambda error: errors.append(str(error)))
+                errors = []; external = []
                 def local(route):
                     if not route.request.url.startswith(base + '/'): external.append(route.request.url); route.abort()
                     else: route.continue_()
-                page.route('**/*', local)
+                def new_page():
+                    page = context.new_page()
+                    page.on('pageerror', lambda error: errors.append(str(error)))
+                    page.route('**/*', local)
+                    return page
+                page = new_page()
                 def login():
                     page.goto(base + '/login')
                     page.locator('#login-name').fill('editor-admin'); page.locator('#login-password').fill(password)
@@ -195,13 +199,16 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     secrets_before = db.execute('SELECT id,settings FROM inbounds ORDER BY id').fetchall()
                     self.assertEqual(dict(secrets_before), created_credentials)
+                # Stop this page's polling before the fixture restarts on a new
+                # random origin; keep the strict network guard on the new page.
+                page.close()
                 stop()
                 archive = root / 'editor-backup.zip'; digest = release_tools.backup(root, archive)
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     db.execute("UPDATE inbounds SET remark='after-backup'")
                     db.execute('DELETE FROM certificate_bindings')
                 release_tools.restore(root, archive, digest)
-                base = start(); login()
+                base = start(); page = new_page(); login()
                 for identity in identities:
                     state = editor(identity)
                     self.assertEqual(state['certificate_id'], certificate_id)
