@@ -50,8 +50,8 @@ class InboundUpdatePayload(BaseModel):
 def _managed_certificate(profile: dict | None, certificate_id: str, core: str, protocol: str):
     from app.certificates.manager import get_manager
     from app.api.certificates import perform
-    if core != "sing-box" or protocol != "vless":
-        raise HTTPException(409, "Managed certificates currently target sing-box VLESS/TLS")
+    if core != "sing-box" or protocol not in {"vless", "trojan"}:
+        raise HTTPException(409, "Managed certificates currently target validated sing-box VLESS/TLS or Trojan/TLS")
     if profile and "security" in profile and str(profile["security"]).lower() != "tls":
         raise HTTPException(409, "Managed certificates require TLS; clear certificate_id when leaving TLS")
     paths, domain, _ = perform(lambda: get_manager().material(certificate_id))
@@ -115,9 +115,10 @@ def edit_inbound(
     item = get_inbound(db, inbound_id)
     data = payload.model_dump(exclude_unset=True)
     profile = data.get("profile")
-    # Match compile_profile: an empty profile is a no-op; a nonempty VLESS
-    # profile defaults a missing/empty security value to none.
-    leaving_tls = bool(profile) and str(profile.get("security") or "none").lower() in {"none", "reality"}
+    # Match compile_profile: {} is a no-op; implicit security is protocol-aware.
+    # In particular, Trojan remains TLS when security is missing/empty/null.
+    default_security = "tls" if item.core == "sing-box" and item.protocol in {"hysteria2", "tuic", "trojan"} else "none"
+    leaving_tls = bool(profile) and str(profile.get("security") or default_security).lower() in {"none", "reality"}
     certificate_changed = "certificate_id" in data or leaving_tls
     certificate_id = data.pop("certificate_id", None)
     data["core"] = item.core or "xray"

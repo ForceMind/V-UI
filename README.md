@@ -2,7 +2,7 @@
 
 **个人自用的轻量代理面板：管理节点、图形化申请证书、设置 ToClash 分流，直接订阅完整 Mihomo 配置。**
 
-版本目标：**v0.3.1**。正式发布前须完成 [发布检查](docs/RELEASING.md) 中的全部 exact-head 验收和人工发布动作；版本号不代表 GitHub Release 已公开。
+版本目标：**v0.4.0**。正式发布前须完成 [发布检查](docs/RELEASING.md) 中的全部 exact-head 验收和人工发布动作；版本号不代表 GitHub Release 已公开。
 
 ## 能做什么
 
@@ -17,7 +17,7 @@ V-UI 使用 FastAPI + SQLite，不依赖 Redis、常驻 Node 或在线订阅转�
 | 客户端订阅 | 节点/格式作用域、一次显示的专用令牌、到期、轮换、撤销；完整Mihomo配置直接导出 |
 | 安装运维 | 一个入口完成受管服务设置，开机自启、权限隔离、停机备份、校验恢复、候选切换 |
 
-**当前已验证公开导出/端到端组合：sing-box + VLESS + 原生 TCP + TLS，单用户、空 flow、启用证书校验。**已有其他协议草稿表单不等于这些组合已验证；不支持的组合会拒绝导出，不静默丢参数或退成全直连。参见 [兼容矩阵](docs/COMPATIBILITY.md)。
+**当前已验证公开导出/端到端组合：sing-box + VLESS/TCP/TLS，以及 sing-box + Trojan/TCP/TLS；均要求单用户、启用证书校验，VLESS 还要求空 flow。**已有其他协议草稿表单不等于这些组合已验证；不支持的组合会拒绝导出，不静默丢参数或退成全直连。参见 [兼容矩阵](docs/COMPATIBILITY.md)。
 
 ## 快速安装
 
@@ -27,8 +27,9 @@ V-UI 使用 FastAPI + SQLite，不依赖 Redis、常驻 Node 或在线订阅转�
 
 ```sh
 sha256sum -c SHA256SUMS
-sudo bash install.sh --bundle ./vui-linux-amd64.zip \
-  --sha256 "$(awk '$2=="vui-linux-amd64.zip" {print $1}' SHA256SUMS)"
+# 示例：x86_64 + glibc；其他机器使用对应 target 包
+sudo bash install.sh --bundle ./vui-linux-x86_64-gnu.zip \
+  --sha256 "$(awk '$2=="vui-linux-x86_64-gnu.zip" {print $1}' SHA256SUMS)"
 ```
 
 脚本会先检查 80、面板端口和默认节点端口。本机 UFW/firewalld 缺规则时只有在你明确输入 `yes` 后才会开放；自定义 nftables/iptables 与云安全组只提示并等待人工确认。随后才创建低权限账号、HTTP-01 验证服务和 HTTPS 面板。
@@ -36,7 +37,7 @@ sudo bash install.sh --bundle ./vui-linux-amd64.zip \
 发布后可指定明确版本通过同一入口下载官方Release资产；**正式Release尚未生成时不要把下面命令当作当前可用下载地址**：
 
 ```sh
-sudo bash install.sh --version v0.3.1
+sudo bash install.sh --version v0.4.0
 ```
 
 安装器本身也必须来自可信仓库/套件，不能只信任来源不明压缩包附带的摘要。详见 [安装指南](docs/INSTALLATION.md)。

@@ -1,40 +1,18 @@
-# V-UI 0.3.1
+# V-UI 0.4.0
 
-本版重点是把一键部署从 Ubuntu/amd64 单一环境扩展成**发行版无白名单的 Linux 能力检测 + 四目标固定运行包**，并把端口/防火墙处理改为显式、安全、可确认的流程。
+当前为候选发布说明；不表示 GitHub Release 已公开，也不表示已部署。
 
-## Linux 安装
+本版在 0.3.1 Linux 可移植安装和 0.3.2 节点可逆编辑基础上，新增首个第二协议公开验证矩阵：**sing-box Trojan/TCP/TLS**。
 
-安装入口会先检测：
+## 新增
 
-- 发行版与 `/etc/os-release`；
-- x86_64 / ARM64；
-- glibc / musl；
-- systemd / OpenRC；
-- apt、dnf/yum、zypper、pacman、apk、xbps、emerge 等包管理器；
-- TCP 80、面板端口和默认节点端口占用；
-- UFW、firewalld、自定义 nftables/iptables。
+- Trojan URI/Base64、完整 Mihomo YAML、sing-box 客户端连接 JSON。
+- 单密码用户 + TLS/SNI + 正常证书验证 strict export。
+- 托管证书选择、证书页面绑定和自动续期支持 Trojan/TLS。
+- 固定真实 sing-box 服务端 + Mihomo 客户端验证：正确密码连通；错误密码、错误 CA、错误 SNI 均拒绝且不得回退 DIRECT。
 
-运行版本使用包内固定 CPython 3.12，不要求系统自带 Python 3.12。系统 Python 只用于启动安装器；过旧时可使用固定摘要的便携引导 Python。
+## 仍然明确拒绝
 
-正式 Release 包按目标拆分：
+Xray Trojan、Trojan WebSocket/gRPC、Shadowsocks、VMess、Hysteria2、TUIC、REALITY/Vision 等尚未完成各自真实矩阵的组合不会因为表单或草稿生成器存在就被宣称支持。
 
-- `vui-linux-x86_64-gnu.zip`
-- `vui-linux-aarch64-gnu.zip`
-- `vui-linux-x86_64-musl.zip`
-- `vui-linux-aarch64-musl.zip`
-
-`install.sh --version v0.3.1` 会先检测当前机器，再只下载对应包。
-
-## 端口和防火墙
-
-默认预检 TCP 80、8443 和 10443（节点端口可修改）。端口被其他服务占用时停止，不自动结束原进程。
-
-UFW / firewalld 缺规则时会询问是否开放，只有输入 `yes` 才修改。自定义 nftables / iptables 不自动覆盖；云安全组也不会假装可以从本机修改，安装器会列出所需端口并等待人工确认。
-
-## 验收
-
-0.3.1 的正式发布要求同一 commit 同时通过常规测试、ToClash、真实代理/DNS、ACME、one-click systemd 安装、release deployment、文档以及 portable Linux matrix。ARM64 和 musl 都使用原生环境构建/启动，不用交叉平台结果冒充真实支持。
-
-## 仍未扩大协议支持范围
-
-公开导出和真实端到端代理链路仍以已经验收的 sing-box + VLESS + TCP + TLS 为基线。Trojan、Shadowsocks、VMess、HY2、TUIC、REALITY/Vision 等会在后续版本逐项完成创建、编辑、导出、核心检查、客户端检查和真实连接失败路径后再标记支持。
+Linux 安装仍按 x86_64/ARM64 × glibc/musl、systemd/OpenRC 的 0.3.1 验收范围执行。正式 Release 只有 exact-head 全套工作流成功后才可由人工发布流程晋升。

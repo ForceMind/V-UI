@@ -180,27 +180,42 @@ class CertificateTests(unittest.TestCase):
         with self.assertRaisesRegex(CertificateError,'KEY_MISMATCH'):
             validate_material(paths[0].read_bytes(),other,'panel.example.test',verify_chain=False)
 
-    def test_node_renewal_binds_new_material_without_starting_stopped_core(self):
+    def test_vless_and_trojan_node_renewal_bind_new_material_without_starting_stopped_core(self):
         from app.services.core_manager import core_manager
-        identity=self.issue()
-        with database.SessionLocal() as db:
-            db.add(database.Inbound(id=100,core='sing-box',protocol='vless',port=10443,enable=True,
-                settings={'users':[{'uuid':'11111111-1111-1111-1111-111111111111'}]},
-                stream_settings={'tls':{'enabled':True,'server_name':'panel.example.test'}}));db.commit()
-        with patch.object(core_manager.get('sing-box'),'status',return_value={'running':False}), \
-             patch.object(core_manager,'apply_database',return_value={'applied':False}) as apply:
-            with self.assertRaisesRegex(CertificateError,'CORE_STOPPED_PENDING_APPLY'):
-                self.manager.bind(identity,'inbound:100')
-            self.assertFalse(apply.call_args.kwargs['activate'])
-        with patch.object(core_manager.get('sing-box'),'status',return_value={'running':True}), \
-             patch.object(core_manager,'apply_database',return_value={'applied':True}) as apply:
-            self.manager.bind(identity,'inbound:100')
-            first=self.manager.material(identity)[0]
-            self.due(identity);self.manager.process_once()
-            with database.SessionLocal() as db:
-                self.assertNotEqual(db.get(database.Inbound,100).stream_settings['tls']['certificate_path'],str(first[0]))
-                self.assertEqual(db.get(CertificateBinding,'inbound:100').applied_revision,self.manager.material(identity)[2])
-            self.assertTrue(apply.call_args.kwargs['activate'])
+        for index,protocol in enumerate(("vless","trojan"),start=1):
+            with self.subTest(protocol=protocol):
+                identity=self.issue(domain=f"{protocol}.example.test")
+                node_id=100+index
+                settings=(
+                    {'users':[{'uuid':'11111111-1111-1111-1111-111111111111'}]}
+                    if protocol=='vless'
+                    else {'users':[{'password':'trojan-password'}]}
+                )
+                with database.SessionLocal() as db:
+                    db.add(database.Inbound(
+                        id=node_id,core='sing-box',protocol=protocol,
+                        port=10443+index,enable=True,settings=settings,
+                        stream_settings={'tls':{'enabled':True,'server_name':f'{protocol}.example.test'}},
+                    ))
+                    db.commit()
+                with patch.object(core_manager.get('sing-box'),'status',return_value={'running':False}), \
+                     patch.object(core_manager,'apply_database',return_value={'applied':False}) as apply:
+                    with self.assertRaisesRegex(CertificateError,'CORE_STOPPED_PENDING_APPLY'):
+                        self.manager.bind(identity,'inbound:'+str(node_id))
+                    self.assertFalse(apply.call_args.kwargs['activate'])
+                with patch.object(core_manager.get('sing-box'),'status',return_value={'running':True}), \
+                     patch.object(core_manager,'apply_database',return_value={'applied':True}) as apply:
+                    self.manager.bind(identity,'inbound:'+str(node_id))
+                    first=self.manager.material(identity)[0]
+                    self.due(identity);self.manager.process_once()
+                    with database.SessionLocal() as db:
+                        row=db.get(database.Inbound,node_id)
+                        self.assertNotEqual(row.stream_settings['tls']['certificate_path'],str(first[0]))
+                        self.assertEqual(
+                            db.get(CertificateBinding,'inbound:'+str(node_id)).applied_revision,
+                            self.manager.material(identity)[2],
+                        )
+                    self.assertTrue(apply.call_args.kwargs['activate'])
 
     def test_offline_bootstrap_is_idempotent_and_reuses_valid_certificate(self):
         from app.certificates.cli import bootstrap_panel
