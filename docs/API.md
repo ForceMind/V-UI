@@ -71,7 +71,7 @@ path 的 1–256 ASCII 字符/路径段限制与 Host 的 DNS-style/253 字符/6
 
 持久化的 `transport.headers.Host` 只用于客户端导出和回填，实际 sing-box 服务端配置去除该字段，不实施请求 Host 白名单。不同合法 Host 的请求接受与错误 SNI/CA 的 TLS 拒绝必须分别理解；Host 不改变证书绑定域名。新 WS 范围只声明 HTTP/TCP，编辑回填不返回 UUID 或私钥；公共订阅只提供连接所需 UUID，不包含私钥或服务器材料路径。
 
-### v0.4.4 VLESS/gRPC profile 候选
+### v0.4.4 VLESS/gRPC profile 已验证基线
 
 限定 `core: sing-box`、`protocol: vless`；可视化 profile 使用 `transport: grpc`、字符串 `service_name`、`security: tls` 和明确 `server_name`（SNI），单 UUID、空 flow、正常证书校验。`service_name` 必须匹配 `[A-Za-z0-9._-]{1,128}`，保留字面值/大小写，不 trim 或类型强转；非法值在编译阶段返回 422。`.` / `..` 合法，但 `/`、query、百分号转义、Unicode、空白和非字符串不合法。
 
@@ -81,4 +81,16 @@ ALPN 不属于可视化输入：原始 API / 持久化 `tls.alpn` 必须省略�
 
 已有 gRPC 节点缺失或畸形 UUID 时，编辑返回 422，不能通过自动生成新 UUID 掩盖导入问题。省略 flow、fingerprint 或 skip-cert-verify 对应编辑字段会保留原值，不将畸形或不支持配置自动变成可公开配置；畸形 SNI 类型也拒绝。
 
-固定二进制前置链路通过不代表本集成候选已经验收。现有 gRPC Lite 错误 CA/SNI 可能表现为调用者超时，不能承诺及时返回 TLS 原因；证据与最终待完成门槛见[阶段契约](VLESS_GRPC_044.md)。
+本范围已经完成[gRPC 准确主线验收](VLESS_GRPC_CLOSURE_044.md)，后续变更仍须重验。现有 gRPC Lite 错误 CA/SNI 可能表现为调用者超时，不能承诺及时返回 TLS 原因；首次失败、前置与当时候选文本见[历史契约](VLESS_GRPC_044.md)。
+
+### v0.4.5 Hysteria2 profile 候选
+
+限定 `core: sing-box`、`protocol: hysteria2`；可视化 profile 使用 `security: tls`、`transport: quic`、明确 `server_name`（SNI），以及正式 `certificate_id` 或手工 `certificate_path` / `key_path`。原生 QUIC 是该协议自己的传输，不另生成 WS/gRPC transport。证书校验不能关闭。
+
+`profile.hysteria2_password` 为可选密码：省略或空字符串，新建时自动生成、已有节点保留；非空字符串明确替换。密码保留字面字符，不 trim，长度 1–256，不能全为空白、含 Unicode 控制字符（Cc）或不能编码为 UTF-8 的 surrogate。错误类型或值返回 422，不回显秘密。`GET /api/inbounds/{id}/editor` 返回空 `hysteria2_password` 和 `hysteria2_password_set` 标志，不返回原密码。已有 users/password 缺失或畸形不能靠编辑自动生成替代；缺失或禁用的 TLS 不能靠无关的部分更新悄悄修复。
+
+新 HY2 不默认注入 `up_mbps`、`down_mbps` 或 Chrome fingerprint。已有可表达的带宽/obfs 草稿允许保留其原值，但仍不符合严格公开契约；无法表示的导入字段拒绝编辑，不静默清除。公开导出只接受单密码和原生 QUIC 默认值，拒绝 obfs、hopping、带宽/拥塞、ALPN（包括显式 null）/uTLS 覆盖、多用户、未知字段及 TLS/SNI 冲突。
+
+公开 URI 为标准 `hysteria2://`，密码百分号编码、查询为 `sni` 和 `insecure=0`；Mihomo 节点包含密码、`sni`、`skip-cert-verify: false` 和 `udp: false`；sing-box 出站包含密码、验证 TLS/SNI 和 `network: tcp`。订阅可以含连接凭据，不能含私钥或服务端材料路径；失败不退 DIRECT。仅验 HTTP/TCP 负载，QUIC UDP 端口本身不证明应用 UDP。
+
+HY2 正式托管证书绑定/续期沿用原材料与应用状态分离，停止核心保留 `CORE_STOPPED_PENDING_APPLY`。当前实现须完成独立审查及最终准确候选/主线八组验收；固定二进制前置真实链路 58 项通过不是集成 API/浏览器/证书通过声明，见[HY2 契约](HYSTERIA2_045.md)。

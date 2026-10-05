@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.models.database import Inbound
 from app.services.protocol_profiles import compile_profile, decompile_profile
 from app.services.grpc_profile import is_grpc_transport
+from app.services.hysteria2_profile import password_value
 
 SUPPORTED_CORES = {"xray", "sing-box"}
 XRAY_PROTOCOLS = {"vless", "vmess", "trojan", "shadowsocks"}
@@ -142,7 +143,12 @@ def to_dict(item: Inbound) -> dict:
 
 def editor_dict(item: Inbound) -> dict:
     settings=item.settings or {}
-    users=settings.get("users") or settings.get("clients") or []
+    if item.core == "sing-box" and item.protocol == "hysteria2":
+        users = settings.get("users") if isinstance(settings, dict) else None
+        if not isinstance(users, list) or len(users) != 1 or not isinstance(users[0], dict):
+            raise HTTPException(status_code=422, detail="Existing Hysteria2 credentials cannot be represented by this editor")
+    else:
+        users=settings.get("users") or settings.get("clients") or []
     first=users[0] if users else {}
     result={
         "id":item.id,
@@ -153,7 +159,7 @@ def editor_dict(item: Inbound) -> dict:
         "enable":bool(item.enable),
         "expiry_time":item.expiry_time or 0,
         "tag":item.tag,
-        "profile":decompile_profile(item.core or "xray",item.protocol,settings,item.stream_settings or {}),
+        "profile":decompile_profile(item.core or "xray",item.protocol,settings,item.stream_settings if item.core == "sing-box" and item.protocol == "hysteria2" else (item.stream_settings or {})),
         "credentials":{
             "user_count":len(users),
             "has_uuid":bool(first.get("uuid") or first.get("id")),
@@ -201,6 +207,16 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
         )
     )
     profile = normalize_mapping(payload.get("profile"))
+    if existing is None and core == "sing-box" and protocol == "hysteria2":
+        users = settings.get("users", [])
+        if (not isinstance(users, list) or len(users) > 1
+                or any(not isinstance(user, dict) for user in users)):
+            raise HTTPException(status_code=422, detail="New Hysteria2 nodes require one password user")
+        if users and "password" in users[0] and users[0]["password"] != "":
+            try:
+                password_value(users[0]["password"])
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
     old_stream = existing.stream_settings if existing else {}
     old_transport = old_stream.get("transport") if isinstance(old_stream, dict) else None
     transport = stream_settings.get("transport")
@@ -209,7 +225,20 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
         or is_grpc_transport(transport)
         or str(profile.get("transport") or "").lower() == "grpc"
     )
-    if grpc_edit:
+    if existing is not None and core == "sing-box" and protocol == "hysteria2":
+        users = settings.get("users")
+        try:
+            if not isinstance(users, list) or len(users) != 1 or not isinstance(users[0], dict):
+                raise ValueError("Existing Hysteria2 editing requires one explicit password user")
+            password_value(users[0].get("password"))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc) + "; no credential was generated") from exc
+        if profile and "security" not in profile:
+            previous_tls = stream_settings.get("tls")
+            if not isinstance(previous_tls, dict) or previous_tls.get("enabled") is not True:
+                raise HTTPException(status_code=422, detail="Explicit TLS selection is required to change an existing Hysteria2 security state")
+        settings = deepcopy(settings)
+    elif grpc_edit:
         # Creating a node may generate credentials; an ordinary edit must not
         # repair an imported missing/invalid secret and silently enable export.
         users = settings.get("users")

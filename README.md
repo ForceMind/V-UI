@@ -2,7 +2,7 @@
 
 **个人自用的轻量代理面板：管理节点、图形化申请证书、设置 ToClash 分流，直接订阅完整 Mihomo 配置。**
 
-版本目标：**v0.4.4**（VLESS/gRPC/TLS 候选；独立审查和最终 exact-head CI 待完成）。正式发布前须完成 [发布检查](docs/RELEASING.md) 中的全部 exact-head 验收和人工发布动作；版本号不代表 GitHub Release 已公开。
+版本目标：**v0.4.5**（Hysteria2/TLS 候选；独立审查和最终 exact-head / exact-master CI 待完成）。正式发布前须完成 [发布检查](docs/RELEASING.md) 中的全部 exact-head 验收和人工发布动作；版本号不代表 GitHub Release 已公开。
 
 ## 能做什么
 
@@ -21,9 +21,13 @@ V-UI 使用 FastAPI + SQLite，不依赖 Redis、常驻 Node 或在线订阅转�
 
 **v0.4.3 VLESS/WebSocket/TLS 已验收为继承基线。** [PR #18](https://github.com/ForceMind/V-UI/pull/18) 正常合并至 `1b3ec40cd3bb640246d12afa104db0aec08ce336`，准确主线八组工作流、11 个 job 和每一步均成功。可选 WebSocket Host 是客户端路由信息，不是服务端访问白名单，也不代替 TLS SNI/证书验证；详见[WS 收口记录](docs/VLESS_WS_CLOSURE_043.md)。合并与 CI 不表示发布或附件晋升。
 
-**v0.4.4 仅新增 sing-box 1.14.2 / VLESS / gRPC / TLS 候选**，客户端保持 Mihomo 1.19.32 与 sing-box 1.14.2。现有官方 sing-box 构建未含 `with_grpc`，实际使用 gRPC Lite；不替换或重编译核心。`service_name` 是 1–128 字符的 ASCII 字母、数字、点、下划线或连字符字面值，区分大小写；单 UUID、空 flow、明确 SNI、正常证书校验，HTTP/2、ALPN 省略或仅 `h2`，Chrome fingerprint 独立可选。只新增 HTTP/TCP，不声明 gRPC UDP。
+**v0.4.4 VLESS/gRPC/TLS 已验收为继承基线。** [PR #19](https://github.com/ForceMind/V-UI/pull/19) 正常合并至 `84729dfc53165003e7d459a5d56621ce89ba497c`，候选 `240edf23af8a12b2cbd71114fe65c693290e39f2` 与合并 tree 均为 `200f8b61ac6decc4fb11384c5d8d162f1f1bdcdc`；准确候选及主线八组成功，最终主线 11 个 job 和每一步全部成功。固定 sing-box 1.14.2 实际使用 gRPC Lite，仍只有 HTTP/TCP；错误 CA/SNI 可能让调用者超时，真实 x509 诊断不表示及时错误传播。详见[gRPC 收口](docs/VLESS_GRPC_CLOSURE_044.md)，[首次失败与候选历史](docs/VLESS_GRPC_044.md)完整保留。
 
-固定二进制[前置链路](docs/VLESS_GRPC_044.md)在 `a0205fe545fabd958fe7aa80835a3ec6abeada92` 通过 45 项测试，但不能代替集成导出、浏览器、证书及最终候选/主线八组验收。gRPC Lite 错误 CA/SNI 可能向调用者表现为超时，不能承诺及时返回 TLS 错误；测试子进程的 HTTP/2 诊断确认了真实 x509 拒绝和目标无请求。未知字段和不支持组合明确拒绝，不静默丢参数或退成全直连。参见[参数说明](docs/CONFIGURATION.md#044-vlessgrpctls-候选)和[兼容矩阵](docs/COMPATIBILITY.md)。
+**v0.4.5 仅新增 sing-box / Hysteria2 / TLS 候选**，固定官方 sing-box 1.14.2 服务端/客户端及 Mihomo 1.19.32 不变。单密码、明确验证 SNI、原生 QUIC 默认值；标准 `hysteria2://` URI、完整 Mihomo YAML 和 sing-box JSON 保留密码与 TLS，不公开 obfs、跳端口、带宽、ALPN/uTLS 覆盖或 TUIC。新表单可选密码留空时新建生成、编辑保留，不回传已有秘密；不再默认注入 HY2 带宽或 Chrome 元数据。
+
+固定前置 `e18003670c6469489c7a63413be0a3f9bd77cf0b` 的[真实链路 CI](https://github.com/ForceMind/V-UI/actions/runs/37293701022)通过 58 项测试，双客户端实际 HTTP 转发和错误密码/CA/SNI 有真实认证/x509 原因、零目标请求、无 DIRECT。该提交 ACME 仍因测试 DNS TCP/UDP 端口碰撞失败，**不是前置八组全绿**；独立审查和最终集成候选/主线八组验收仍待完成。详见[HY2 契约与失败历史](docs/HYSTERIA2_045.md)、[参数](docs/CONFIGURATION.md#045-hysteria2tls-候选)和[兼容矩阵](docs/COMPATIBILITY.md)。
+
+HY2 需要节点端口 UDP 通行，但本候选只验证 HTTP/TCP 应用负载；Mihomo `udp: false`、sing-box `network: tcp`，不承诺应用 UDP 转发。未知字段和不支持组合明确拒绝，不静默丢参数或退成全直连。
 
 ## 快速安装
 
@@ -38,12 +42,12 @@ sudo bash install.sh --bundle ./vui-linux-x86_64-gnu.zip \
   --sha256 "$(awk '$2=="vui-linux-x86_64-gnu.zip" {print $1}' SHA256SUMS)"
 ```
 
-脚本会先检查 80、面板端口和默认节点端口。本机 UFW/firewalld 缺规则时只有在你明确输入 `yes` 后才会开放；自定义 nftables/iptables 与云安全组只提示并等待人工确认。随后才创建低权限账号、HTTP-01 验证服务和 HTTPS 面板。
+脚本会先检查 TCP 80、面板端口和默认节点 TCP 端口。HY2 的 UDP 端口须显式重复声明，例如 `--node-udp-port 10443 --node-udp-port 20443`；每个端口须为 1024–65535，TCP 放行不能替代 UDP。新安装做 IPv4/可用 IPv6 UDP 占用探测，升级明确提示人工核对所有权。声明不持久保存，后续运行须重传，也不会创建节点。本机 UFW/firewalld 缺规则时会按端口/协议分别列出，只有明确 `yes` 才会开放，且不自动启用防火墙；自定义 nftables/iptables 与云安全组只提示并等待人工确认。随后才创建低权限账号、HTTP-01 验证服务和 HTTPS 面板。
 
 发布后可指定明确版本通过同一入口下载官方Release资产；**正式Release尚未生成时不要把下面命令当作当前可用下载地址**：
 
 ```sh
-sudo bash install.sh --version v0.4.4
+sudo bash install.sh --version v0.4.5
 ```
 
 安装器本身也必须来自可信仓库/套件，不能只信任来源不明压缩包附带的摘要。详见 [安装指南](docs/INSTALLATION.md)。

@@ -1,10 +1,10 @@
 # 兼容与验证范围
 
-v0.4.2 的[主线验收](MAINLINE_CLOSURE_20261005.md)和 v0.4.3 的[WS 主线验收](VLESS_WS_CLOSURE_043.md)已经完成。当前 v0.4.4 VLESS/gRPC/TLS 为候选，最终独立审查与准确候选/主线八组 CI 尚待完成；以下区分继承基线、已通过的固定二进制前置链路和新集成候选。
+v0.4.2 的[主线验收](MAINLINE_CLOSURE_20261005.md)、v0.4.3 的[WS 主线验收](VLESS_WS_CLOSURE_043.md)和 v0.4.4 的[gRPC 主线验收](VLESS_GRPC_CLOSURE_044.md)已经完成。当前 v0.4.5 Hysteria2/TLS 为候选，最终独立审查与准确候选/主线八组 CI 尚待完成；以下区分继承基线、固定二进制前置链路和新集成候选。
 
 ## Linux 安装层
 
-0.4.4 候选延续 0.3.1 的安装能力模型；选择依据是实际环境能力，不是发行版名称。
+0.4.5 候选延续 0.3.1 的安装能力模型；选择依据是实际环境能力，不是发行版名称。
 
 | 层级 | 目标 / 验收 |
 | --- | --- |
@@ -16,7 +16,7 @@ v0.4.2 的[主线验收](MAINLINE_CLOSURE_20261005.md)和 v0.4.3 的[WS 主线�
 | 防火墙 | UFW/firewalld 可在用户明确确认后修改；自定义 nftables/iptables 只提示 |
 | 代表性发行版探测 | Debian、Fedora、Arch、openSUSE、Alpine |
 
-“探测成功”不单独等于完整支持。正式支持声明要求普通测试、真实 one-click、portable matrix 和发布门槛同时通过。v0.4.2 的四目标附件已核验；任何 v0.4.4 包须通过本候选自己的验收，不能使用旧套件或前置链路结果替代。
+“探测成功”不单独等于完整支持。正式支持声明要求普通测试、真实 one-click、portable matrix 和发布门槛同时通过。v0.4.2 的四目标附件已核验；任何 v0.4.5 包须通过本候选自己的验收，不能使用旧套件或前置链路结果替代。
 
 未经适配的 NixOS、runit/s6、其他 CPU、声明式或只读系统不会被假装支持；安装器应给出检测结果并停止。
 
@@ -60,9 +60,9 @@ Host 是客户端路由元数据，保存在节点的 `transport.headers.Host` �
 
 详细参数和操作见[配置说明](CONFIGURATION.md#043-vlesswebsockettls-基线)。
 
-## v0.4.4 VLESS/gRPC/TLS 候选
+## v0.4.4 VLESS/gRPC/TLS 已验证基线
 
-**最终集成候选未完成验收。** 固定二进制前置提交 `a0205fe545fabd958fe7aa80835a3ec6abeada92` 的[真实链路工作流](https://github.com/ForceMind/V-UI/actions/runs/37288165901)通过 45 项测试；这是后续实现的前提，不能代替最终导出、浏览器、证书、安装或准确候选/主线八组 CI。
+[PR #19](https://github.com/ForceMind/V-UI/pull/19) 已正常合并至 `84729dfc53165003e7d459a5d56621ce89ba497c`，候选 `240edf23af8a12b2cbd71114fe65c693290e39f2` 与合并 tree 为 `200f8b61ac6decc4fb11384c5d8d162f1f1bdcdc`；独立审查、准确候选/主线各八组成功，最终主线 11 个 job 和全部步骤通过。最终真实链路 53 项与早期裸前置 45 项分开记录；详见[gRPC 收口](VLESS_GRPC_CLOSURE_044.md)。
 
 | 项目 | 限定范围 |
 | --- | --- |
@@ -76,22 +76,42 @@ Host 是客户端路由元数据，保存在节点的 `transport.headers.Host` �
 
 前置链路的两种真实客户端均通过四种 Chrome/h2 组合和字面 `.`、`..`、128 字符 service name，实际 TLS 协商 h2。错误 UUID/CA/SNI/service name 和仅大小写差异均不送达可达 IP 目标、不退 DIRECT。首次前置 CI 的两个 sing-box CA/SNI 日志断言失败保留在[阶段记录](VLESS_GRPC_044.md)；后续只对负向测试 sing-box 子进程启用 `GODEBUG=http2debug=1`，取得真实 x509 unknown-CA/wrong-name 证据，未改变二进制或 TLS 校验。
 
-**gRPC Lite 的错误 CA/SNI 可能向调用者表现为超时，不能承诺及时返回 TLS 错误原因。** 诊断日志证明拒绝来源，超时本身不证明正确 TLS 拒绝。实际固定服务端没有 authority/Host allowlist，本候选不建立此访问控制，不新增反向代理。
+**gRPC Lite 的错误 CA/SNI 可能向调用者表现为超时，不能承诺及时返回 TLS 错误原因。** 诊断日志证明拒绝来源，超时本身不证明正确 TLS 拒绝。实际固定服务端没有 authority/Host allowlist，此 gRPC 基线不建立此访问控制，不新增反向代理。
 
 拒绝空、非字符串、空白、前导 `/`、内嵌 path/query、百分号转义、Unicode service name，以及 authority、headers、health timer、multi-mode 等未验收字段。已有导入配置包含可视化表单不能表示的选项时，编辑应拒绝而不静默丢失；畸形 service/flow 等不能因无关编辑变成可公开配置。共用编辑器保留隐藏 UUID、受支持 ALPN、托管证书与停止待应用状态。
 
-集成验收还须覆盖公开订阅生成的配置、创建/取消/编辑/刷新/再打开/停机恢复和托管证书续期。详细参数见[配置说明](CONFIGURATION.md#044-vlessgrpctls-候选)。
+集成验收已经覆盖公开订阅生成的配置、创建/取消/编辑/刷新/再打开/损坏后停机恢复和托管证书续期。详细参数见[配置说明](CONFIGURATION.md#044-vlessgrpctls-基线)，后续修改仍须在自己的准确提交重验。
+
+## v0.4.5 Hysteria2/TLS 候选
+
+**最终集成候选尚未验收。** [Draft PR #20](https://github.com/ForceMind/V-UI/pull/20) 的固定前置 `e18003670c6469489c7a63413be0a3f9bd77cf0b` [真实链路](https://github.com/ForceMind/V-UI/actions/runs/37293701022) 58 项通过，同提交 ACME 因继承 DNS TCP/UDP 测试端口碰撞失败。七组工作流成功、一组失败，不是八组全绿；集成独立审查、准确候选/主线各八组仍待完成。
+
+| 项目 | 限定范围 |
+| --- | --- |
+| 服务端 / 客户端 | 官方 sing-box 1.14.2 / Mihomo 1.19.32 与 sing-box 1.14.2，pin/摘要/构建不变 |
+| 协议与安全 | sing-box、Hysteria2、单密码、TLS、明确验证 SNI、原生 QUIC 默认值 |
+| 密码 | 1–256 字面字符，非全空白，无 Unicode 控制字符（Cc）或无效 UTF-8 surrogate；URI 百分号编码 |
+| 三格式 | 标准 `hysteria2://`、Mihomo YAML、sing-box JSON，保留密码/SNI/验证语义，无服务器私钥或材料路径 |
+| 应用负载 | 仅 HTTP/TCP；Mihomo `udp: false`，sing-box `network: tcp`；不声明应用 UDP |
+| 网络条件 | 节点 UDP 端口须在主机/云网络通行，TCP 规则不替代 UDP；不因为 UDP socket 启动而推导应用 UDP 支持 |
+| 严格公开排除 | obfs、hopping、多用户、带宽/拥塞、ALPN/uTLS 覆盖、零 RTT 扩展、TUIC、未知字段 |
+| 编辑与证书 | 空密码新建生成/编辑保留、响应无秘密、新默认不写带宽/Chrome；高级草稿保留或拒绝不可表达项，续期/失败保护/停止待应用 |
+| 安装 UDP 预检 | 可重复显式 `--node-udp-port`，1024–65535，与 TCP 分开；新安装双栈 bind，升级人工所有权核查，不自动启用防火墙、不持久保存声明、不创建节点 |
+
+前置双客户端正常 HTTP 实际送达、错误密码/CA/SNI 有真实 `authentication failed` / x509 原因，目标 IP 先证明可达，每次负向零目标请求且无 DIRECT。首次缺少 Mihomo CA 与继承 gRPC SNI 原因日志的失败完整保留；有界失败请求观察修复没有削弱断言或修改核心。
+
+公开订阅、真实 config check/链路、Chromium 完整编辑与损坏恢复、托管证书新 QUIC 会话和安装/四目标套件是集成门槛；前置成功不替代它们。详细[配置](CONFIGURATION.md#045-hysteria2tls-候选)与[证据](HYSTERIA2_045.md)。
 
 ## 尚未完成的协议矩阵
 
 下列协议/组合即使已有表单或生成代码，也不能写成“已完整支持”：
 
-- Xray VLESS WebSocket/gRPC，以及本页候选范围之外的 VLESS gRPC；
+- Xray VLESS WebSocket/gRPC，以及本页已验收范围之外的 VLESS gRPC；
 - Trojan 的 Xray 实现及 WebSocket/gRPC 等非 TCP 组合；
 - Xray Shadowsocks、2022 cipher、插件/obfs，以及未列明的 cipher；
 - Xray VMess 及 VMess 非 TCP/TLS 组合；
-- Hysteria2、TUIC、REALITY / Vision；
-- 除上述 WS 基线和 gRPC 候选外的 WebSocket/gRPC，以及 XHTTP / HTTPUpgrade 全组合；
+- Hysteria2 的最终集成验收及本页候选范围外组合、TUIC、REALITY / Vision；
+- 除上述 WS 和 gRPC 基线外的 WebSocket/gRPC，以及 XHTTP / HTTPUpgrade 全组合；
 - 除上述 Shadowsocks AEAD 之外的 UDP 专项；
 - sing-box 完整 ToClash 规则迁移。
 
@@ -99,7 +119,7 @@ Host 是客户端路由元数据，保存在节点的 `transport.headers.Host` �
 
 ## 证书
 
-已实现 Certbot HTTP-01 单域名申请、测试/正式隔离、自动续期和消费者绑定。WS 基线与 gRPC 候选沿用现有托管证书生命周期和停止待应用语义；gRPC 集成仍须完成本候选验收。不把 WS Host 或 gRPC service_name 当作证书域名。DNS-01、通配符和 DNS provider API 尚未纳入。
+已实现 Certbot HTTP-01 单域名申请、测试/正式隔离、自动续期和消费者绑定。WS 与 gRPC 基线沿用并已验证托管证书生命周期和停止待应用语义；HY2 候选复用同一流程，仍须完成自己的最终集成验收。不把 WS Host 或 gRPC service_name 当作证书域名。DNS-01、通配符和 DNS provider API 尚未纳入。
 
 ## 边界
 

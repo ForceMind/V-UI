@@ -1,4 +1,5 @@
 """Real Pebble with real HTTP-01 fetches. No always-valid challenge shortcut."""
+import errno
 import json
 import os
 from pathlib import Path
@@ -12,7 +13,70 @@ import time
 from urllib.request import build_opener, ProxyHandler, HTTPSHandler
 from app.certificates.http01 import handler_for
 from http.server import ThreadingHTTPServer
-from loopback_helpers import certificate_files, DnsAnswers, start_udp_dns, unused_port
+from loopback_helpers import certificate_files, DnsAnswers, unused_port
+
+
+def start_dual_dns(stack, answers):
+    """Own TCP and UDP on one ephemeral port before starting either service.
+
+    An available UDP port need not be available for TCP (and vice versa).
+    Keep the first socket bound while claiming the other transport, and only
+    retry genuine address collisions. Permission or other failures stay fatal.
+    """
+    class TcpDns(socketserver.BaseRequestHandler):
+        def handle(self):
+            self.request.settimeout(3)
+            def read(size):
+                value = b''
+                while len(value) < size:
+                    chunk = self.request.recv(size - len(value))
+                    if not chunk:
+                        raise EOFError()
+                    value += chunk
+                return value
+            try:
+                size = struct.unpack('!H', read(2))[0]
+                answer = answers.answer(read(size))
+                self.request.sendall(struct.pack('!H', len(answer)) + answer)
+            except (OSError, EOFError, ValueError, IndexError, UnicodeError):
+                pass
+
+    class UdpDns(socketserver.BaseRequestHandler):
+        def handle(self):
+            packet, transport = self.request
+            try:
+                transport.sendto(answers.answer(packet), self.client_address)
+            except (ValueError, IndexError, UnicodeError):
+                pass
+
+    for attempt in range(10):
+        tcp = None
+        try:
+            tcp = socketserver.ThreadingTCPServer(('127.0.0.1', 0), TcpDns)
+            udp = socketserver.ThreadingUDPServer(tcp.server_address, UdpDns)
+        except OSError as exc:
+            if tcp is not None:
+                tcp.server_close()
+            if exc.errno != errno.EADDRINUSE or attempt == 9:
+                raise
+        else:
+            break
+
+    def start(server):
+        server.daemon_threads = True
+        thread = threading.Thread(target=server.serve_forever,
+                                  kwargs={'poll_interval': .02}, daemon=True)
+        thread.start()
+        def close():
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+        stack.callback(close)
+
+    # The sockets stay bound continuously from reservation until cleanup.
+    start(tcp)
+    start(udp)
+    return tcp.server_address[1]
 
 
 class PebbleFixture:
@@ -25,27 +89,7 @@ class PebbleFixture:
         def close_http():self.http.shutdown();self.http.server_close();self.thread.join(timeout=3)
         stack.callback(close_http)
         dns=DnsAnswers('PEBBLE_DNS',{domain:'127.0.0.1'})
-        dns_port=start_udp_dns(stack,dns)
-        class TcpDns(socketserver.BaseRequestHandler):
-            def handle(self):
-                self.request.settimeout(3)
-                def read(size):
-                    value=b''
-                    while len(value)<size:
-                        chunk=self.request.recv(size-len(value))
-                        if not chunk:raise EOFError()
-                        value+=chunk
-                    return value
-                try:
-                    size=struct.unpack('!H',read(2))[0]
-                    answer=dns.answer(read(size))
-                    self.request.sendall(struct.pack('!H',len(answer))+answer)
-                except (OSError,EOFError,ValueError,IndexError):pass
-        tcp_dns=socketserver.ThreadingTCPServer(('127.0.0.1',dns_port),TcpDns)
-        tcp_dns.daemon_threads=True
-        tcp_thread=threading.Thread(target=tcp_dns.serve_forever,daemon=True);tcp_thread.start()
-        def close_tcp():tcp_dns.shutdown();tcp_dns.server_close();tcp_thread.join(timeout=3)
-        stack.callback(close_tcp)
+        dns_port=start_dual_dns(stack,dns)
         port,management=unused_port(),unused_port()
         config={'pebble':{'listenAddress':f'127.0.0.1:{port}',
             'managementListenAddress':f'127.0.0.1:{management}',

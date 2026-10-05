@@ -384,12 +384,14 @@ const app = createApp({
             p.reality_target = '';
             p.reality_server_name = '';
             p.reality_short_id = '';
-            p.client_fingerprint = 'chrome';
+            p.client_fingerprint = newInbound.protocol === 'hysteria2' ? '' : 'chrome';
             p.skip_cert_verify = false;
             p.shadowsocks_method = 'aes-128-gcm';
             p.shadowsocks_password_set = false;
-            p.up_mbps = 100;
-            p.down_mbps = 100;
+            p.up_mbps = newInbound.protocol === 'hysteria2' ? null : 100;
+            p.down_mbps = newInbound.protocol === 'hysteria2' ? null : 100;
+            p.hysteria2_password = '';
+            p.hysteria2_password_set = false;
             p.obfs_type = '';
             p.obfs_password = '';
             p.obfs_password_set = false;

@@ -233,8 +233,11 @@ class VLESSGRPCPreflightLoopbackTests(unittest.TestCase):
             time.sleep(.08)
         self.fail(f"VLESS/gRPC/TLS did not reach the HTTP target: {last}\n{self.logs()}")
 
-    def assert_failure_without_direct(self, port):
-        self.requests.clear()
+    def assert_failure_without_direct(self, port, *, clear=True):
+        if clear:
+            self.requests.clear()
+        else:
+            self.assertEqual(self.requests, [], "A previous rejected request arrived late at the target")
         started = time.monotonic()
         try:
             status, _ = http_through(port, "127.0.0.1", self.target_port)
@@ -260,7 +263,9 @@ class VLESSGRPCPreflightLoopbackTests(unittest.TestCase):
             # A bound mixed listener can race its first actual HTTP request.
             # Repeat only rejected requests, preserving zero target delivery,
             # until the real x509 cause is observable; timeout alone never passes.
-            self.assert_failure_without_direct(port)
+            self.assert_failure_without_direct(port, clear=False)
+        log = process.log_path.read_text(errors="replace").lower()
+        self.assertEqual(self.requests, [], "Rejected requests reached the target during reason collection")
         self.assertIn("x509", log, self.logs())
         self.assertIn("unknown authority" if failure == "ca" else "wrong.example.test", log)
         print(f"gRPC preflight {failure}: " + next(line for line in log.splitlines() if "x509" in line))

@@ -45,9 +45,11 @@ sudo bash install.sh --bundle ./vui-linux-x86_64-gnu.zip --sha256 '<可信 SHA25
 
 不要把 CPU/libc/service-manager 迁移当成普通 `--upgrade`。
 
+HY2 的 UDP 声明不持久保存在安装配置中；如需升级时检查并确认相应规则，须再次显式追加例如 `--node-udp-port 10443 --node-udp-port 20443`。既有安装会跳过 UDP bind 探测并提示人工核对所有权，避免运行节点造成假冲突；升级不证明端口空闲，也不自动推断/创建节点。TCP/UDP 同号规则仍分别核对，详见[安装指南](INSTALLATION.md)。
+
 ## 防火墙变化
 
-安装器只在明确确认后修改 UFW/firewalld。以后修改端口时，还要同步检查：
+安装器只在列出精确端口/协议并获明确确认后修改 UFW/firewalld，不自动启用防火墙。HY2 的 QUIC 需要节点 UDP 通行，现有 TCP 规则不能代替；这不意味着应用 UDP 转发已验收。以后修改端口时，还要同步检查：
 
 - 本机监听；
 - UFW/firewalld 或自定义 nftables/iptables；

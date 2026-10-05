@@ -11,6 +11,7 @@ from fastapi import HTTPException
 
 from app.services.websocket_profile import websocket_host, websocket_path
 from app.services.grpc_profile import grpc_service_name, is_grpc_transport
+from app.services import hysteria2_profile
 
 
 def profile_catalog() -> dict[str, Any]:
@@ -563,6 +564,12 @@ def compile_profile(
         return settings, stream
 
     if core == "sing-box":
+        hy2_alpn = None
+        if protocol == "hysteria2":
+            try:
+                hy2_alpn = hysteria2_profile.prepare_profile(profile, settings, stream)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
         previous_transport = stream.get("transport", {})
         previous_grpc = protocol == "vless" and is_grpc_transport(previous_transport)
         vless_grpc = protocol == "vless" and str(profile.get("transport") or "").lower() == "grpc"
@@ -615,6 +622,10 @@ def compile_profile(
         if protocol not in {"hysteria2", "tuic"}:
             _apply_singbox_transport(stream, profile)
         _apply_singbox_tls(protocol, stream, profile)
+        if protocol == "hysteria2":
+            stream["_vui"]["client_fingerprint"] = profile["client_fingerprint"]
+            if hy2_alpn is not None:
+                stream["tls"]["alpn"] = hy2_alpn
         if vless_ws and preserved_ws_alpn:
             stream["tls"]["alpn"] = list(preserved_ws_alpn)
         if vless_grpc and str(profile.get("security") or "none").lower() == "tls":
@@ -639,26 +650,30 @@ def compile_profile(
                 users[0].pop("flow", None)
             settings["users"] = users
         elif protocol == "hysteria2":
-            up = profile.get("up_mbps")
-            down = profile.get("down_mbps")
-            if up not in (None, ""):
-                settings["up_mbps"] = int(up)
-            if down not in (None, ""):
-                settings["down_mbps"] = int(down)
-            obfs_type = str(profile.get("obfs_type") or "").strip()
-            if obfs_type:
-                previous = settings.get("obfs") or {}
-                password = str(profile.get("obfs_password") or "").strip()
-                if not password and previous.get("type") == obfs_type:
-                    password = str(previous.get("password") or "")
-                if not password:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="Hysteria2 obfs password is required when enabling obfs",
-                    )
-                settings["obfs"] = {"type": obfs_type, "password": password}
-            else:
-                settings.pop("obfs", None)
+            if profile.get("hysteria2_password", "") != "":
+                if len(users) != 1 or not isinstance(users[0], dict):
+                    raise HTTPException(status_code=422, detail="Hysteria2 requires one explicit password user")
+                users[0]["password"] = profile["hysteria2_password"]
+                settings["users"] = users
+            for field in ("up_mbps", "down_mbps"):
+                if field in profile:
+                    if profile[field] in (None, ""):
+                        settings.pop(field, None)
+                    else:
+                        settings[field] = profile[field]
+            # Omission is not a request to disable an existing obfuscator.
+            if "obfs_type" in profile:
+                obfs_type = profile["obfs_type"]
+                if obfs_type:
+                    previous = settings.get("obfs") or {}
+                    password = profile.get("obfs_password", "")
+                    if not password and previous.get("type") == obfs_type:
+                        password = previous.get("password", "")
+                    if not password:
+                        raise HTTPException(status_code=422, detail="Hysteria2 obfs password is required when enabling obfs")
+                    settings["obfs"] = {"type": obfs_type, "password": password}
+                else:
+                    settings.pop("obfs", None)
         elif protocol == "tuic":
             congestion = str(
                 profile.get("congestion_control") or "bbr"
@@ -695,6 +710,11 @@ def decompile_profile(core: str, protocol: str, settings: dict | None,
     Private Reality keys are intentionally not returned. compile_profile()
     preserves them from the persisted stream when the editor saves.
     """
+    if core == "sing-box" and protocol == "hysteria2":
+        try:
+            return hysteria2_profile.editor_profile(settings, stream_settings)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     settings = dict(settings or {})
     stream = dict(stream_settings or {})
     grpc = core == "sing-box" and protocol == "vless" and is_grpc_transport(stream.get("transport"))

@@ -156,8 +156,11 @@ class Hysteria2PreflightLoopbackTests(unittest.TestCase):
             time.sleep(.08)
         self.fail(f"Hysteria2/TLS did not reach the HTTP target: {last}\n{self.logs()}")
 
-    def assert_failure_without_direct(self, port):
-        self.requests.clear()
+    def assert_failure_without_direct(self, port, *, clear=True):
+        if clear:
+            self.requests.clear()
+        else:
+            self.assertEqual(self.requests, [], "A previous rejected request arrived late at the target")
         started = time.monotonic()
         try:
             status, _ = http_through(port, "127.0.0.1", self.target_port)
@@ -181,7 +184,9 @@ class Hysteria2PreflightLoopbackTests(unittest.TestCase):
             # A fresh mixed listener may accept a socket before processing its
             # first proxy request. Repeat only failed requests while collecting
             # the mandatory reason; every attempt must leave the target empty.
-            self.assert_failure_without_direct(port)
+            self.assert_failure_without_direct(port, clear=False)
+        log = process.log_path.read_text(errors="replace").lower()
+        self.assertEqual(self.requests, [], "Rejected requests reached the target during reason collection")
         self.assertIn(evidence, log, self.logs())
         if failure in {"ca", "sni"}:
             self.assertIn("unknown authority" if failure == "ca" else "wrong.example.test", log)

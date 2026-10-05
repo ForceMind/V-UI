@@ -14,6 +14,7 @@ from app.services.subscription_tokens import normalize_server
 from app.services.mihomo_routing import unique_proxy_names
 from app.services.websocket_profile import websocket_host, websocket_path
 from app.services.grpc_profile import grpc_service_name
+from app.services.hysteria2_profile import password_value
 
 
 class ExportError(ValueError):
@@ -38,8 +39,8 @@ def node_host(value: str) -> str:
 def _common(item, server: str) -> tuple[str, str]:
     if not item.enable or getattr(item, "expiry_time", 0):
         raise ExportError("Disabled or expiring nodes are not eligible for this export profile")
-    if item.core != "sing-box" or item.protocol not in {"vless", "trojan", "shadowsocks", "vmess"}:
-        raise ExportError("Validated export requires verified sing-box VLESS/TCP/TLS, VLESS/WS/TLS or VLESS/gRPC/TLS, Trojan/TCP/TLS, Shadowsocks or VMess/TCP/TLS")
+    if item.core != "sing-box" or item.protocol not in {"vless", "trojan", "shadowsocks", "vmess", "hysteria2"}:
+        raise ExportError("Validated export requires verified sing-box VLESS/TCP/TLS, VLESS/WS/TLS or VLESS/gRPC/TLS, Trojan/TCP/TLS, Shadowsocks, VMess/TCP/TLS or Hysteria2/TLS")
     server=node_host(server)
     if type(item.port) is not int or not 1 <= item.port <= 65535:
         raise ExportError("Invalid node port")
@@ -50,8 +51,8 @@ def _common(item, server: str) -> tuple[str, str]:
     return server,name
 
 
-def _verified_tls(item, *, websocket: bool = False, grpc: bool = False) -> tuple[str, dict, list[str] | None]:
-    stream=mapping(item.stream_settings or {}, {"tls","transport","_vui"}, "stream")
+def _verified_tls(item, *, websocket: bool = False, grpc: bool = False, hysteria2: bool = False) -> tuple[str, dict, list[str] | None]:
+    stream=mapping(item.stream_settings or {}, {"tls","_vui"} if hysteria2 else {"tls","transport","_vui"}, "stream")
     if not (websocket or grpc) and stream.get("transport") not in (None,{}):
         raise ExportError("Non-TCP transports need a separately validated export profile")
     tls=mapping(stream.get("tls"), {"enabled","server_name","certificate_path","key_path","alpn"}, "TLS")
@@ -63,10 +64,15 @@ def _verified_tls(item, *, websocket: bool = False, grpc: bool = False) -> tuple
                  "client metadata")
     if meta.get("security","tls")!="tls" or meta.get("skip_cert_verify",False) is not False:
         raise ExportError("TLS verification cannot be disabled in this profile")
-    if grpc and "server_name" in meta and not isinstance(meta["server_name"], str):
+    if (grpc or hysteria2) and "server_name" in meta and not isinstance(meta["server_name"], str):
         raise ExportError("gRPC client TLS name must be a string")
     if meta.get("server_name") and node_host(meta["server_name"])!=sni:
         raise ExportError("Conflicting client/server TLS names")
+    if hysteria2:
+        if "alpn" in tls or meta.get("client_fingerprint", "") != "":
+            raise ExportError("The verified Hysteria2 profile uses native QUIC defaults without ALPN or uTLS overrides")
+        if not isinstance(tls.get("server_name"), str) or tls["server_name"] != sni:
+            raise ExportError("Hysteria2 requires a literal valid TLS server name")
     fingerprint=meta.get("client_fingerprint","")
     if fingerprint not in ("","chrome"):
         raise ExportError("Client fingerprint is not validated")
@@ -172,6 +178,16 @@ def _trojan_node(item, server: str, name: str, sni: str, meta: dict,
     return result
 
 
+def _hysteria2_node(item, server: str, name: str, sni: str) -> dict:
+    user = mapping(_one_user(item), {"password", "name"}, "Hysteria2 user")
+    try:
+        password = password_value(user.get("password"))
+    except ValueError as exc:
+        raise ExportError(str(exc)) from exc
+    return {"name": name, "type": "hysteria2", "server": server, "port": item.port,
+            "password": password, "udp": False, "sni": sni, "skip-cert-verify": False}
+
+
 SS_METHODS={"aes-128-gcm","aes-256-gcm","chacha20-ietf-poly1305"}
 
 
@@ -199,7 +215,7 @@ def validated_node(item, server: str) -> dict:
     transport = stream.get("transport") if isinstance(stream, dict) else None
     websocket = item.protocol == "vless" and isinstance(transport, dict) and transport.get("type") == "ws"
     grpc = item.protocol == "vless" and isinstance(transport, dict) and transport.get("type") == "grpc"
-    sni,meta,alpn=_verified_tls(item, websocket=websocket, grpc=grpc)
+    sni,meta,alpn=_verified_tls(item, websocket=websocket, grpc=grpc, hysteria2=item.protocol=="hysteria2")
     if item.protocol=="vless":
         node = _vless_node(item,server,name,sni,meta,alpn)
         if websocket:
@@ -219,6 +235,8 @@ def validated_node(item, server: str) -> dict:
         return _vmess_node(item,server,name,sni,meta,alpn)
     if item.protocol=="trojan":
         return _trojan_node(item,server,name,sni,meta,alpn)
+    if item.protocol=="hysteria2":
+        return _hysteria2_node(item,server,name,sni)
     raise ExportError("Unreachable export profile")
 
 
@@ -274,6 +292,10 @@ def share_link(item, server: str) -> str:
         ).decode()
         return "vmess://"+encoded
 
+    if node["type"] == "hysteria2":
+        return (f"hysteria2://{quote(node['password'],safe='')}@{host}:{node['port']}/?"
+                f"{urlencode({'sni': node['sni'], 'insecure': '0'})}#{quote(node['name'],safe='')}")
+
     params={"sni":node["sni"]}
     if node.get("client-fingerprint"):
         params["fp"]=node["client-fingerprint"]
@@ -322,6 +344,10 @@ def singbox_client_config(items, server: str) -> dict:
             outbound={"type":"trojan","tag":node["name"],"server":node["server"],
                       "server_port":node["port"],"password":node["password"],
                       "tls":_client_tls(node)}
+        elif node["type"]=="hysteria2":
+            outbound={"type":"hysteria2","tag":node["name"],"server":node["server"],
+                      "server_port":node["port"],"password":node["password"],
+                      "network":"tcp","tls":_client_tls(node)}
         elif node["type"]=="vmess":
             outbound={"type":"vmess","tag":node["name"],"server":node["server"],
                       "server_port":node["port"],"uuid":node["uuid"],
@@ -348,6 +374,6 @@ def export_warnings(items) -> list[dict]:
             warnings.append({
                 "inbound_id":item.id,
                 "code":"UNVERIFIED_EXPORT_PROFILE",
-                "message":"This node is outside the verified sing-box VLESS/TCP/TLS, VLESS/WS/TLS, VLESS/gRPC/TLS, Trojan/TCP/TLS, Shadowsocks and VMess/TCP/TLS export profiles.",
+                "message":"This node is outside the verified sing-box VLESS/TCP/TLS, VLESS/WS/TLS, VLESS/gRPC/TLS, Trojan/TCP/TLS, Shadowsocks, VMess/TCP/TLS and bounded Hysteria2/TLS export profiles.",
             })
     return warnings

@@ -1,6 +1,12 @@
 # v0.4.4 VLESS/gRPC/TLS 验收契约
 
-## 状态与前置验证
+## 2026-10-05 状态补记
+
+v0.4.4 已完成独立审查、准确候选八组 CI、[PR #19](https://github.com/ForceMind/V-UI/pull/19) 正常合并与准确主线八组 CI，现为已验证继承基线。最终 master 为 `84729dfc53165003e7d459a5d56621ce89ba497c`，候选为 `240edf23af8a12b2cbd71114fe65c693290e39f2`，相同 tree 为 `200f8b61ac6decc4fb11384c5d8d162f1f1bdcdc`；最终 11 个 job 和每一步全部成功。完整证据、限制和发布边界见[gRPC 主线收口](VLESS_GRPC_CLOSURE_044.md)。
+
+**以下正文是原阶段历史，完整保留当时“候选/待完成”的描述、前置通过和首次失败，不代表当前 v0.4.4 状态。** 当前独立开发阶段见[v0.4.5 Hysteria2/TLS 契约](HYSTERIA2_045.md)；尚未因为本页收口而发布、部署或晋升附件。
+
+## 历史：状态与前置验证
 
 v0.4.3 已由 [PR #18](https://github.com/ForceMind/V-UI/pull/18) 正常合并至 `1b3ec40cd3bb640246d12afa104db0aec08ce336`，该准确主线的八组工作流、11 个 job 和每一步均成功，详见[WS 收口](VLESS_WS_CLOSURE_043.md)。它不构成 gRPC 支持证据。
 

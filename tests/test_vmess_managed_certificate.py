@@ -40,7 +40,7 @@ class VMessManagedCertificateTests(unittest.TestCase):
 
     def test_incompatible_targets_and_security_reject_before_material_lookup(self):
         for core, protocol, security in (('xray', 'vmess', 'tls'),
-                ('sing-box', 'shadowsocks', 'tls'), ('sing-box', 'hysteria2', 'tls'),
+                ('sing-box', 'shadowsocks', 'tls'), ('sing-box', 'tuic', 'tls'),
                 ('sing-box', 'vmess', 'none'), ('sing-box', 'vmess', 'reality')):
             with self.subTest(core=core, protocol=protocol, security=security):
                 with self.assertRaises(HTTPException) as rejected:
