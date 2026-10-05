@@ -266,9 +266,9 @@ def firewall_preflight(args, ports):
         if any(firewall_support.port_open(info,p) is not True for p in missing):
             raise InstallError('Firewall change could not be verified')
     if unknown:
-        print('Custom firewall detected; automatic modification is intentionally disabled.')
+        print('Firewall rules or ingress zone could not be verified; automatic modification is disabled.')
         print('Open TCP ports manually:',', '.join(map(str,unknown)))
-        if not args.assume_external_ports_open and not tty_confirm('Have you opened the listed ports in the custom firewall?'):
+        if not args.assume_external_ports_open and not tty_confirm('Have you manually verified and opened the listed ports in the actual ingress firewall zones?'):
             raise InstallError('Waiting for manual firewall configuration')
     if not args.assume_external_ports_open:
         print('V-UI cannot modify cloud security groups or provider firewalls.')
@@ -333,9 +333,12 @@ def install(args):
             raise InstallError('An installation already exists. Use --upgrade with a verified package')
     else:
         check_port(80)
-        if ipv6 and manager=='systemd': check_port(80,'::')
+        if ipv6: check_port(80,'::')
         check_port(args.port,args.bind)
         if args.node_port not in (80,args.port):check_port(args.node_port,'0.0.0.0')
+        # The default sing-box inbound listens on ::. Its IPv6-only conflicts
+        # are invisible to an IPv4 probe, on both systemd and OpenRC hosts.
+        if ipv6: check_port(args.node_port,'::')
     if args.cert:
         if Path(args.cert).is_symlink() or Path(args.key).is_symlink():
             raise InstallError('Certificate inputs must be regular files')
