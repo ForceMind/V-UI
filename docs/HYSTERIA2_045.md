@@ -24,3 +24,9 @@
 `test_hysteria2_preflight_loopback.py` 使用临时 CA、隔离监听器和假密码。先证明 HTTP 目标 IP 可直接到达，再逐客户端验证正常转发和错误密码/CA/SNI；负向每次只改变一项，必须零目标请求、无 DIRECT，并记录真实认证或 x509 拒绝原因。超时不能单独充当 TLS 拒绝证据。
 
 前置通过后才实现完整公开配置、编辑器与托管证书测试。随后仍须独立审查、准确候选八组 CI、授权正常合并和准确主线八组 CI；不能复用旧主线结果。当前附件未晋升或发布。
+
+## 首次前置失败记录
+
+首个前置提交 `6daff89e562c93c77b797aa27131b1a438e654a9` 的[真实链路运行](https://github.com/ForceMind/V-UI/actions/runs/37292930480)证明两种客户端均可通过 QUIC 转发 HTTP，但 Mihomo 的一例错误 CA 没有取得 x509 日志，继承的 gRPC 前置一例 Mihomo 错误 SNI 也没有原因日志，故整组失败。不能将其记作通过。
+
+后续测试仅在限定观察期内重复失败请求，每次仍必须零目标送达，最后仍必须出现真实 x509 原因。密码证据收紧为 `authentication failed`，避免将本地 mixed listener 的 `Auth success` 当作 HY2 拒绝证明。未换二进制、跳过 TLS、改协议或加 DIRECT；结果待新准确提交 CI。

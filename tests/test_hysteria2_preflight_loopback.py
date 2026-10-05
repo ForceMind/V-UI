@@ -170,15 +170,18 @@ class Hysteria2PreflightLoopbackTests(unittest.TestCase):
         self.assertEqual(self.requests, [], "Rejected HY2 request reached directly reachable target\n" + self.logs())
         return f"{outcome} after {elapsed:.2f}s"
 
-    def failure_evidence(self, process, failure):
-        deadline = time.monotonic() + 3
-        evidence = "x509" if failure in {"ca", "sni"} else "auth"
+    def failure_evidence(self, process, failure, port):
+        deadline = time.monotonic() + 12
+        evidence = "x509" if failure in {"ca", "sni"} else "authentication failed"
         log = ""
         while time.monotonic() < deadline:
             log = process.log_path.read_text(errors="replace").lower()
             if evidence in log:
                 break
-            time.sleep(.05)
+            # A fresh mixed listener may accept a socket before processing its
+            # first proxy request. Repeat only failed requests while collecting
+            # the mandatory reason; every attempt must leave the target empty.
+            self.assert_failure_without_direct(port)
         self.assertIn(evidence, log, self.logs())
         if failure in {"ca", "sni"}:
             self.assertIn("unknown authority" if failure == "ca" else "wrong.example.test", log)
@@ -213,7 +216,7 @@ class Hysteria2PreflightLoopbackTests(unittest.TestCase):
                                 self.assert_success(port)
                             else:
                                 outcome = self.assert_failure_without_direct(port)
-                                self.failure_evidence(process, mutation)
+                                self.failure_evidence(process, mutation, port)
                                 print(f"Hysteria2 preflight {client} {mutation}: {outcome}; target requests=0")
                             self.assertIsNone(process.process.poll(), process.log_path.read_text())
                             self.assertIsNone(server.process.poll(), server.log_path.read_text())

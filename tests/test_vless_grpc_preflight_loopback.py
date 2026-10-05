@@ -250,14 +250,17 @@ class VLESSGRPCPreflightLoopbackTests(unittest.TestCase):
         # CA/SNI cases independently require the real process's x509 evidence.
         return f"{outcome} after {elapsed:.2f}s"
 
-    def tls_error_evidence(self, process, failure):
-        deadline = time.monotonic() + 2
+    def tls_error_evidence(self, process, failure, port):
+        deadline = time.monotonic() + 12
         log = ""
         while time.monotonic() < deadline:
             log = process.log_path.read_text(errors="replace").lower()
             if "x509" in log:
                 break
-            time.sleep(.05)
+            # A bound mixed listener can race its first actual HTTP request.
+            # Repeat only rejected requests, preserving zero target delivery,
+            # until the real x509 cause is observable; timeout alone never passes.
+            self.assert_failure_without_direct(port)
         self.assertIn("x509", log, self.logs())
         self.assertIn("unknown authority" if failure == "ca" else "wrong.example.test", log)
         print(f"gRPC preflight {failure}: " + next(line for line in log.splitlines() if "x509" in line))
@@ -292,7 +295,7 @@ class VLESSGRPCPreflightLoopbackTests(unittest.TestCase):
                                 print(f"gRPC preflight {client} {mutation}: caller observed "
                                       f"{outcome}; target requests=0")
                                 if mutation in {"ca", "sni"}:
-                                    self.tls_error_evidence(process, mutation)
+                                    self.tls_error_evidence(process, mutation, port)
                             self.assertIsNone(process.process.poll(), process.log_path.read_text())
                             self.assertIsNone(server.process.poll(), server.log_path.read_text())
                         finally:
