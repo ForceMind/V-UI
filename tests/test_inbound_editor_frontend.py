@@ -53,5 +53,48 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_managed_certificate_selector_matches_validated_tls_protocols(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs = require('node:fs'), assert = require('node:assert/strict');
+const html = fs.readFileSync('web/index.html', 'utf8');
+const selector = html.match(/<template v-if="([^"]+)">\s*<el-form-item label="托管证书" v-if="([^"]+)"/);
+assert.ok(selector, 'managed selector must remain inside the TLS template');
+const visible = new Function('newInbound', `return (${selector[1]}) && (${selector[2]});`);
+for (const protocol of ['vless', 'trojan', 'vmess']) {
+  assert.equal(visible({core: 'sing-box', protocol, profile: {security: 'tls'}}), true, protocol);
+  for (const security of ['none', 'reality'])
+    assert.equal(visible({core: 'sing-box', protocol, profile: {security}}), false, `${protocol}/${security}`);
+  assert.equal(visible({core: 'xray', protocol, profile: {security: 'tls'}}), false, `xray/${protocol}`);
+}
+for (const protocol of ['shadowsocks', 'hysteria2', 'tuic'])
+  assert.equal(visible({core: 'sing-box', protocol, profile: {security: 'tls'}}), false, protocol);
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+    def test_certificate_page_binding_filter_includes_only_validated_tls_nodes(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const source = fs.readFileSync('web/js/certificates.js', 'utf8');
+const match = source.match(/nodes\.filter\((.*?)\)\.forEach/);
+assert.ok(match, 'actual certificate-page binding filter must exist');
+const accepted = vm.runInNewContext('(' + match[1] + ')');
+for (const protocol of ['vless', 'trojan', 'vmess']) {
+  const node = {core: 'sing-box', protocol, stream_settings: {tls: {enabled: true}}};
+  assert.equal(accepted(node), true, protocol);
+  assert.equal(Boolean(accepted({...node, core: 'xray'})), false, `xray/${protocol}`);
+  for (const stream_settings of [{}, {tls: {enabled: false}}, {tls: {enabled: true, reality: {}}}])
+    assert.equal(Boolean(accepted({...node, stream_settings})), false, protocol);
+}
+for (const protocol of ['shadowsocks', 'hysteria2', 'tuic'])
+  assert.equal(Boolean(accepted({core: 'sing-box', protocol, stream_settings: {tls: {enabled: true}}})), false, protocol);
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 if __name__ == '__main__':
     unittest.main()

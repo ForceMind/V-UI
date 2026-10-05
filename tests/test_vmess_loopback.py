@@ -162,14 +162,21 @@ class VMessLoopbackTests(unittest.TestCase):
         process.start(port)
         return process,port
 
-    def start_singbox_client(self,grant):
+    def start_singbox_client(self,grant=None,*,trust=True):
+        if self.server.process is None:
+            self.server.start(self.server_port)
+        grant=grant or self.issue_grant()
         port=unused_port()
         path=self.exported_singbox(grant,port)
+        env=self.env.copy()
+        if not trust:
+            other,_,_=certificate_files(self.root,"untrusted-singbox")
+            env["SSL_CERT_FILE"]=str(other)
         process=CoreProcess(
             self.stack,
             [str(Path(os.environ["VUI_TEST_CORES"])/"sing-box"),"run","-c",str(path)],
             self.root/("singbox-client-"+str(port)+".log"),
-            self.env,
+            env,
         )
         process.start(port)
         return process,port
@@ -191,11 +198,11 @@ class VMessLoopbackTests(unittest.TestCase):
         )
         self.fail(f"VMess path did not become usable: {last}\n"+logs)
 
-    def assert_failure_without_direct_fallback(self,port):
+    def assert_failure_without_direct_fallback(self,port,host="forced.example.test"):
         before=len(self.requests)
         try:
             status,_=http_through(
-                port,"forced.example.test",self.target_port
+                port,host,self.target_port
             )
             self.assertGreaterEqual(status,400)
         except (OSError,TimeoutError):
@@ -210,7 +217,7 @@ class VMessLoopbackTests(unittest.TestCase):
         log=""
         while time.monotonic()<deadline:
             log=path.read_text().lower()
-            if any(marker in log for marker in ("certificate","x509","tls")):
+            if "x509" in log:
                 return log
             time.sleep(.05)
         return log
@@ -244,8 +251,9 @@ class VMessLoopbackTests(unittest.TestCase):
         self.assert_failure_without_direct_fallback(port)
         log=self.wait_tls_evidence(self.root/("mihomo-"+str(port)+".log"))
         process.stop()
-        self.assertTrue(any(x in log for x in ("certificate","x509","tls")),log)
-        print("VMess/TLS: untrusted certificate rejected")
+        self.assertIn("x509",log)
+        self.assertIn("unknown authority",log)
+        print("VMess/TLS Mihomo untrusted CA: "+next(line for line in log.splitlines() if "x509" in line))
 
     def test_wrong_server_name_is_rejected(self):
         with database.SessionLocal() as db:
@@ -259,8 +267,45 @@ class VMessLoopbackTests(unittest.TestCase):
         self.assert_failure_without_direct_fallback(port)
         log=self.wait_tls_evidence(self.root/("mihomo-"+str(port)+".log"))
         process.stop()
-        self.assertTrue(any(x in log for x in ("certificate","x509","tls")),log)
-        print("VMess/TLS: wrong SNI rejected")
+        self.assertIn("x509",log)
+        self.assertIn("wrong.example.test",log)
+        print("VMess/TLS Mihomo wrong SNI: "+next(line for line in log.splitlines() if "x509" in line))
+
+
+    def test_wrong_uuid_is_rejected_by_singbox_without_direct_fallback(self):
+        with database.SessionLocal() as db:
+            row=db.get(database.Inbound,1)
+            row.settings={"users":[{"uuid":"55555555-5555-5555-5555-555555555555"}]}
+            db.commit()
+        process,port=self.start_singbox_client()
+        self.assert_failure_without_direct_fallback(port,host="127.0.0.1")
+        process.stop()
+        print("VMess/TLS sing-box: wrong UUID rejected with reachable IP target untouched and no DIRECT fallback")
+
+    def test_untrusted_certificate_is_rejected_by_singbox(self):
+        process,port=self.start_singbox_client(trust=False)
+        self.assert_failure_without_direct_fallback(port,host="127.0.0.1")
+        log=self.wait_tls_evidence(process.log_path)
+        process.stop()
+        self.assertIn("x509",log)
+        self.assertIn("unknown authority",log)
+        print("VMess/TLS sing-box untrusted CA: "+next(line for line in log.splitlines() if "x509" in line))
+
+    def test_wrong_server_name_is_rejected_by_singbox(self):
+        with database.SessionLocal() as db:
+            row=db.get(database.Inbound,1)
+            stream=deepcopy(row.stream_settings)
+            stream["tls"]["server_name"]="wrong.example.test"
+            stream["_vui"]["server_name"]="wrong.example.test"
+            row.stream_settings=stream
+            db.commit()
+        process,port=self.start_singbox_client()
+        self.assert_failure_without_direct_fallback(port,host="127.0.0.1")
+        log=self.wait_tls_evidence(process.log_path)
+        process.stop()
+        self.assertIn("x509",log)
+        self.assertIn("wrong.example.test",log)
+        print("VMess/TLS sing-box wrong SNI: "+next(line for line in log.splitlines() if "x509" in line))
 
 
 if __name__=="__main__":

@@ -1,5 +1,6 @@
 """Real browser/core editor transitions with an isolated synthetic certificate CA."""
 from contextlib import ExitStack
+import base64
 import json
 import os
 from pathlib import Path
@@ -185,9 +186,66 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     dialog = open_edit(name + '-edited'); security(dialog, 'TLS'); select_certificate(dialog)
                     save(dialog, identity)
                     self.assertEqual(editor(identity)['certificate_id'], certificate_id)
+                # VMess already has validated API/export/renewal support. Its actual
+                # create/edit form must expose the same managed TLS selector.
+                def vmess_draft():
+                    page.get_by_role('button', name='添加节点', exact=True).click()
+                    dialog = page.get_by_role('dialog')
+                    dialog.get_by_text('sing-box', exact=True).click()
+                    dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select').click()
+                    page.get_by_role('option', name='VMess', exact=True).click()
+                    security(dialog, 'TLS')
+                    managed = dialog.locator('.el-form-item').filter(has_text='托管证书')
+                    expect(managed).to_be_visible()
+                    dialog.get_by_placeholder('例如：US-01').fill('managed-vmess')
+                    dialog.get_by_role('spinbutton').fill(str(unused_port()))
+                    select_certificate(dialog)
+                    return dialog
+                dialog = vmess_draft()
+                dialog.get_by_role('button', name='取消', exact=True).click()
+                self.assertEqual(len(context.request.get(base + '/api/inbounds').json()), len(identities))
+                dialog = vmess_draft()
+                vmess_id = save(dialog); identities.append(vmess_id)
+                with sqlite3.connect(root / 'data/v-ui.db') as db:
+                    created_credentials[vmess_id] = db.execute('SELECT settings FROM inbounds WHERE id=?', (vmess_id,)).fetchone()[0]
+                vmess_uuid = json.loads(created_credentials[vmess_id])['users'][0]['uuid']
+                state = editor(vmess_id)
+                self.assertEqual(state['protocol'], 'vmess')
+                self.assertEqual(state['certificate_id'], certificate_id)
+                self.assertEqual(state['profile']['security'], 'tls')
+                self.assertNotIn(vmess_uuid, json.dumps(state))
+                dialog = open_edit('managed-vmess')
+                expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).to_contain_text('vpn.example.test')
+                expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select__wrapper')).to_have_class(re.compile(r'is-disabled'))
+                self.assertNotIn(vmess_uuid, dialog.inner_text())
+                dialog.get_by_placeholder('例如：US-01').fill('cancelled-vmess')
+                dialog.get_by_role('button', name='取消', exact=True).click()
+                self.assertEqual(editor(vmess_id)['remark'], 'managed-vmess')
+                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                dialog = open_edit('managed-vmess')
+                expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).to_contain_text('vpn.example.test')
+                dialog.get_by_placeholder('例如：US-01').fill('managed-vmess-edited')
+                save(dialog, vmess_id)
+                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                dialog = open_edit('managed-vmess-edited')
+                expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).to_contain_text('vpn.example.test')
+                dialog.get_by_role('button', name='取消', exact=True).click()
+                with sqlite3.connect(root / 'data/v-ui.db') as db:
+                    self.assertEqual(db.execute('SELECT settings FROM inbounds WHERE id=?', (vmess_id,)).fetchone()[0], created_credentials[vmess_id])
+                # The separate certificate-management card must offer the same
+                # existing VMess/TLS target and complete its normal bind action.
+                page.goto(base + '/certificates')
+                card = page.locator(f'[data-certificate="{certificate_id}"]')
+                choices = card.get_by_label('选择绑定节点')
+                expect(choices.locator(f'option[value="{vmess_id}"]')).to_have_text('managed-vmess-edited')
+                choices.select_option(str(vmess_id))
+                with page.expect_response(lambda reply: reply.url.endswith(f'/api/certificates/{certificate_id}/bind-inbound') and reply.request.method == 'POST') as bound:
+                    card.get_by_role('button', name='绑定节点', exact=True).click()
+                self.assertEqual(bound.value.status, 200, bound.value.text())
+                self.assertEqual(editor(vmess_id)['certificate_id'], certificate_id)
                 headers = {'Origin': base, 'X-VUI-Request': '1'}
                 response = context.request.post(base + '/api/subscriptions', headers=headers,
-                    data={'label': 'editor-export', 'server': 'vpn.example.test', 'inbound_ids': identities, 'formats': ['mihomo.yaml']})
+                    data={'label': 'editor-export', 'server': 'vpn.example.test', 'inbound_ids': identities, 'formats': ['mihomo.yaml', 'raw', 'sing-box.json']})
                 self.assertEqual(response.status, 201, response.text())
                 url = base + response.json()['paths']['mihomo.yaml']
                 exported = context.request.get(url)
@@ -196,6 +254,25 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 self.assertIn('managed-reality-edited', exported.text())
                 self.assertNotIn('PRIVATE KEY', exported.text())
                 self.assertNotIn(str(root), exported.text())
+                self.assertIn('managed-vmess-edited', exported.text())
+                self.assertIn(vmess_uuid, exported.text())
+                singbox = context.request.get(base + response.json()['paths']['sing-box.json'])
+                self.assertEqual(singbox.status, 200, singbox.text())
+                vmess_client = next(item for item in singbox.json()['outbounds'] if item.get('type') == 'vmess')
+                self.assertEqual(vmess_client['uuid'], vmess_uuid)
+                self.assertEqual(vmess_client['tls']['server_name'], 'vpn.example.test')
+                self.assertFalse(vmess_client['tls'].get('insecure', False))
+                self.assertNotIn(str(root), singbox.text())
+                raw = context.request.get(base + response.json()['paths']['raw'])
+                self.assertEqual(raw.status, 200, raw.text())
+                links = base64.b64decode(raw.text()).decode().splitlines()
+                vmess_link = next(item for item in links if item.startswith('vmess://'))
+                vmess_payload = json.loads(base64.b64decode(vmess_link[len('vmess://'):]).decode())
+                self.assertEqual(vmess_payload['id'], vmess_uuid)
+                self.assertEqual(vmess_payload['tls'], 'tls')
+                self.assertEqual(vmess_payload['sni'], 'vpn.example.test')
+                self.assertNotIn(str(root), json.dumps(vmess_payload))
+
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     secrets_before = db.execute('SELECT id,settings FROM inbounds ORDER BY id').fetchall()
                     self.assertEqual(dict(secrets_before), created_credentials)
@@ -222,6 +299,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 self.assertEqual(external, [])
                 self.assertEqual(errors, [])
                 self.assertEqual(context.request.get(base + response.json()['paths']['mihomo.yaml']).status, 404)
+                print('VMess managed TLS: inbound and certificate-page selectors / card binding / create / cancel / edit / refresh / re-edit / hidden UUID retained / three exports / stopped restore OK')
                 print('Node editor browser: managed TLS create / cancel / protected TLS unbind / none and REALITY edits / refresh / re-edit / TLS export / stopped restore / credentials retained OK')
                 stop()
                 browser.close()

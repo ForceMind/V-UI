@@ -2,7 +2,7 @@
 
 ## Linux 安装层
 
-0.4.1 候选延续 0.3.1 的安装选择依据是实际环境能力，不是发行版名称。
+0.4.2 候选延续 0.3.1 的安装选择依据是实际环境能力，不是发行版名称。
 
 | 层级 | 目标 / 验收 |
 | --- | --- |
@@ -35,13 +35,19 @@ PR #16 的既有实现支持 sing-box Shadowsocks 的三种 AEAD cipher：`aes-1
 
 真实 TCP/UDP 链路用例逐一覆盖上述三种 cipher，分别使用 Mihomo 和公开订阅生成的 sing-box 客户端。每种 cipher 的错误密码与错误 method 也由两种客户端验证拒绝，目标不收到数据且不 DIRECT 回退。配置检查和真实转发仍是分别执行的门槛，不互相替代。最终候选验收以 [PR #16](https://github.com/ForceMind/V-UI/pull/16) 的准确提交和八组工作流为准。
 
+## VMess/TCP/TLS 候选验证范围
+
+sing-box / VMess / 原生 TCP / TLS / 单 UUID 用户 / 明确 SNI / 正常证书校验。Mihomo YAML、VMess URI/Base64 和 sing-box JSON 有严格导出和固定真实配置检查；真实 sing-box 服务端的正向链路分别由 Mihomo 与公开订阅 sing-box 客户端验收。错误 UUID、错误 CA、错误 SNI 拒绝与无 DIRECT 回退用例分别执行两个客户端；新增 sing-box 负向使用可达 IP 目标，不能因目标 DNS 不可解析而伪造拒绝，CA/SNI 失败须包含真实 x509 错误。
+
+入站编辑的托管正式证书选择与现有 VMess 绑定/续期能力一致；真实浏览器另验创建、取消、编辑、刷新、再编辑、UUID 保留及三格式导出。最终结果以 [PR #17](https://github.com/ForceMind/V-UI/pull/17) 的准确提交和八组工作流为准，不凭表单推断其他 VMess 组合或已公开发布。
+
 ## 尚未完成的协议矩阵
 
 下列协议/组合即使已有表单或生成代码，也不能写成“已完整支持”：
 
 - Trojan 的 Xray 实现及 WebSocket/gRPC 等非 TCP 组合；
 - Xray Shadowsocks、2022 cipher、插件/obfs，以及未列明的 cipher；
-- VMess；
+- Xray VMess 及 VMess 非 TCP/TLS 组合；
 - Hysteria2；
 - TUIC；
 - REALITY / Vision；

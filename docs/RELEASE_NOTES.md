@@ -1,18 +1,23 @@
-# V-UI 0.4.1
+# V-UI 0.4.2
 
 当前为候选发布说明；不表示 GitHub Release 已公开，也不表示已部署。
 
-本版继承 VLESS/TCP/TLS、Trojan/TCP/TLS 与已验收的 Linux 安装和托管证书编辑修复，维护既有 sing-box Shadowsocks AEAD 候选，不增加其他协议。
+本版维护既有 sing-box VMess/TCP/TLS 候选，继承 VLESS/TCP/TLS、Trojan/TCP/TLS、三种 Shadowsocks AEAD 的验收与 Linux 安装、节点编辑修复；不新增协议或传输组合。
 
-## Shadowsocks 的准确验证范围
+## VMess/TCP/TLS
 
-- strict public export 支持 `aes-128-gcm`、`aes-256-gcm`、`chacha20-ietf-poly1305`；SIP002 URI、Mihomo YAML 和 sing-box JSON 保留 method/密码，拒绝未知字段、未知 method、空密码及 transport/TLS 残留。
-- 三种 method 均有固定 Mihomo / sing-box 的真实配置检查；编辑 method 时保留服务端密码，不回传浏览器。
-- 真实链路用例逐一覆盖上述三种 method：sing-box 服务端 + Mihomo 和公开订阅 sing-box 客户端的 TCP/UDP 转发；错误密码与错误 method 均拒绝，目标收不到数据且不 DIRECT 回退。
-- 每种 method 的错误密码和错误 method 均由两个真实客户端分别验证 TCP/UDP 拒绝；最终证据必须来自本候选准确提交的八组验收。
+- strict public export 仅接受单 UUID 用户、原生 TCP、TLS、明确 SNI 与正常证书校验；Mihomo YAML、VMess URI/Base64 和 sing-box JSON 保留 UUID/TLS 参数，服务端材料路径不进入导出。
+- 入站表单为 sing-box/VMess/TLS 显示已验证的正式托管证书选择，与现有 API、绑定及续期能力一致；其他 core/protocol 和非 TLS 安全模式不因此放开选择。
+- 前端条件/API 正反回归及真实 Vue/Chromium 用例覆盖创建、取消、编辑、刷新、再编辑、UUID 不回显且不改变、三格式导出及停机恢复。
+- 固定真实 sing-box 服务端 + Mihomo 与公开订阅 sing-box 客户端正向链路；错误 UUID、错误 CA、错误 SNI 拒绝与无 DIRECT 回退用例分别使用 Mihomo 和 sing-box，CA/SNI 失败要求真实 x509 错误证据。不同证据层级单独记录，不把配置检查当作真实链路。
+- 托管证书续期保持核心手动停止状态，不擅自启动；沿用新的材料和应用结果分离语义。
+
+## 已继承的 Shadowsocks 验证
+
+`aes-128-gcm`、`aes-256-gcm`、`chacha20-ietf-poly1305` 均有严格导出、固定真实配置检查，以及两个客户端逐 cipher 的 TCP/UDP 正向与错误密码/method 拒绝测试；失败目标无数据且不 DIRECT 回退。
 
 ## 边界
 
-Xray Shadowsocks、2022 cipher、插件/obfs、VMess、Hysteria2、TUIC、REALITY/Vision 和未列明传输组合仍未纳入本候选的已验证链路范围。Shadowsocks UDP 证据不扩展到其他协议。
+Xray VMess、VMess WebSocket/gRPC、REALITY/Vision、Hysteria2、TUIC、未列明 cipher/传输和其他协议 UDP 专项仍未纳入本候选验证范围。40 项 ToClash 服务目录、四目标 Linux、systemd/OpenRC 范围不变。
 
-保留 40 项 ToClash 服务目录、x86_64/ARM64 × glibc/musl、systemd/OpenRC 范围。正式 Release 必须等待依赖按序处理、默认分支 exact-head 八组验收及人工发布，不将候选版本号当作可用下载承诺。
+最终验收必须以当前准确提交八组工作流为准；正式发布还需要处理前置依赖、默认分支 exact-head 重验与人工发布。未发布前不承诺在线版本安装命令可用。
