@@ -293,3 +293,26 @@ class CoreProcess:
             self.process.terminate()
             try: self.process.wait(timeout=5)
             except subprocess.TimeoutExpired: self.process.kill(); self.process.wait(timeout=3)
+
+
+def require_tls_rejection(testcase, log_path, rejected_request, requests,
+                          expected_reason, *, expected_count=0, timeout=12):
+    """Observe an actual x509 reason while retaining every target-delivery count.
+
+    A bound proxy listener need not have processed its first request. Retry only
+    requests whose rejection is asserted by the caller; transport/startup errors
+    or caller timeouts alone cannot satisfy this test. Never reset counters.
+    """
+    before = expected_count
+    deadline = time.monotonic() + timeout
+    while True:
+        testcase.assertEqual(len(requests), before, "A rejected TLS request reached the target")
+        log = log_path.read_text(errors="replace").lower()
+        if any("x509" in line and expected_reason in line for line in log.splitlines()):
+            testcase.assertEqual(len(requests), before, "A rejected TLS request arrived late")
+            return log
+        if time.monotonic() >= deadline:
+            testcase.fail("No actual x509 rejection reason was observed: " + expected_reason + "\n" + log)
+        rejected_request()
+        testcase.assertEqual(len(requests), before, "A rejected TLS retry reached the target")
+        time.sleep(.05)

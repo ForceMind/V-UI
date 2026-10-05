@@ -23,6 +23,7 @@ from loopback_helpers import (
     unused_port,
     http_through,
     CoreProcess,
+    require_tls_rejection,
 )
 
 
@@ -205,15 +206,11 @@ class TrojanLoopbackTests(unittest.TestCase):
             "Failed Trojan proxy must not reach target through DIRECT",
         )
 
-    def wait_tls_evidence(self,path):
-        deadline=time.monotonic()+2
-        log=""
-        while time.monotonic()<deadline:
-            log=path.read_text().lower()
-            if any(marker in log for marker in ("certificate","x509","tls")):
-                return log
-            time.sleep(.05)
-        return log
+    def wait_tls_evidence(self,path,port,reason):
+        return require_tls_rejection(
+            self, path, lambda: self.assert_failure_without_direct_fallback(port),
+            self.requests, reason,
+        )
 
     def test_real_trojan_tls_proxy_in_mihomo_and_public_singbox_subscription(self):
         grant=self.issue_grant()
@@ -242,9 +239,9 @@ class TrojanLoopbackTests(unittest.TestCase):
     def test_untrusted_certificate_is_rejected(self):
         process,port=self.start_mihomo(trust=False)
         self.assert_failure_without_direct_fallback(port)
-        log=self.wait_tls_evidence(self.root/("mihomo-"+str(port)+".log"))
+        log=self.wait_tls_evidence(self.root/("mihomo-"+str(port)+".log"),port,"unknown authority")
         process.stop()
-        self.assertTrue(any(x in log for x in ("certificate","x509","tls")),log)
+        self.assertIn("x509",log)
         print("Trojan/TLS: untrusted certificate rejected")
 
     def test_wrong_server_name_is_rejected(self):
@@ -257,9 +254,9 @@ class TrojanLoopbackTests(unittest.TestCase):
             db.commit()
         process,port=self.start_mihomo()
         self.assert_failure_without_direct_fallback(port)
-        log=self.wait_tls_evidence(self.root/("mihomo-"+str(port)+".log"))
+        log=self.wait_tls_evidence(self.root/("mihomo-"+str(port)+".log"),port,"wrong.example.test")
         process.stop()
-        self.assertTrue(any(x in log for x in ("certificate","x509","tls")),log)
+        self.assertIn("x509",log)
         print("Trojan/TLS: wrong SNI rejected")
 
 
