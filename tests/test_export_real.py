@@ -1,5 +1,6 @@
 """Load generated client configurations with checksum-pinned real cores."""
 import json
+from itertools import product
 import os
 from pathlib import Path
 import subprocess
@@ -9,6 +10,8 @@ from types import SimpleNamespace
 
 from app.services.validated_export import singbox_client_config
 from app.services.mihomo_subscription import mihomo_config
+from app.services.core_manager import SingBoxAdapter
+from loopback_helpers import certificate_files
 
 
 def vless(optional=False):
@@ -26,6 +29,19 @@ def vless(optional=False):
             'client_fingerprint':'chrome',
             'skip_cert_verify':False,
         }
+    return item
+
+
+def vless_websocket(*, fingerprint=False, alpn=False, with_host=True):
+    item=vless(fingerprint)
+    item.stream_settings['tls'].pop('alpn',None)
+    item.remark='vless-ws-test'
+    item.stream_settings['transport']={'type':'ws','path':'/vless/ws-0_4.3'}
+    if with_host:
+        item.stream_settings['transport']['headers']={'Host':'ws.example.test'}
+    if alpn:
+        # WS uses the HTTP/1.1 upgrade path; h2-only is not a verified profile.
+        item.stream_settings['tls']['alpn']=['http/1.1']
     return item
 
 
@@ -106,6 +122,51 @@ class RealExportTests(unittest.TestCase):
                 with self.subTest(protocol='shadowsocks',method=method):
                     self.check_item(shadowsocks(method),root,'ss-'+method)
             print('Generated VLESS/TLS, Trojan/TLS and Shadowsocks configs accepted by Mihomo and sing-box')
+
+    def test_vless_ws_tls_configs_load_in_both_real_clients(self):
+        with tempfile.TemporaryDirectory(prefix='vui-ws-real-export-') as tmp:
+            root=Path(tmp)
+            passed=0
+            for fingerprint,alpn,with_host in product((False,True),repeat=3):
+                with self.subTest(fingerprint=fingerprint,alpn=alpn,with_host=with_host):
+                    self.check_item(
+                        vless_websocket(fingerprint=fingerprint,alpn=alpn,with_host=with_host),root,
+                        f'vless-ws-fp-{fingerprint}-alpn-{alpn}-host-{with_host}',
+                    )
+                    passed+=1
+            if passed==8:
+                print('VLESS/WS/TLS independent Chrome/http1.1 settings, with/without Host, accepted by Mihomo and sing-box')
+
+    def test_vless_ws_tls_server_configs_load_in_real_singbox(self):
+        with tempfile.TemporaryDirectory(prefix='vui-ws-real-server-') as tmp:
+            root=Path(tmp)
+            _,cert,key=certificate_files(root)
+            passed=0
+            for fingerprint,alpn,with_host in product((False,True),repeat=3):
+                with self.subTest(fingerprint=fingerprint,alpn=alpn,with_host=with_host):
+                    item=vless_websocket(fingerprint=fingerprint,alpn=alpn,with_host=with_host)
+                    item.tag='vless-ws-server'
+                    item.stream_settings['tls'].update(
+                        certificate_path=str(cert),key_path=str(key),
+                    )
+                    config=SingBoxAdapter().build_config([item])
+                    inbound=config['inbounds'][0]
+                    self.assertEqual(inbound['transport'],{
+                        'type':'ws','path':'/vless/ws-0_4.3',
+                    })
+                    path=root/f'server-fp-{fingerprint}-alpn-{alpn}-host-{with_host}.json'
+                    path.write_text(json.dumps(config))
+                    result=subprocess.run(
+                        [str(Path(os.environ['VUI_TEST_CORES'])/'sing-box'),
+                         'check','-c',str(path)],
+                        capture_output=True,timeout=15,
+                    )
+                    self.assertEqual(result.returncode,0,
+                        result.stdout.decode(errors='replace')+
+                        result.stderr.decode(errors='replace'))
+                    passed+=1
+            if passed==8:
+                print('VLESS/WS/TLS server configs accepted by sing-box; Host remains client-only metadata')
 
 
 if __name__=='__main__':

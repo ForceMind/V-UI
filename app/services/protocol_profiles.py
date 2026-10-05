@@ -8,6 +8,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from fastapi import HTTPException
 
+from app.services.websocket_profile import websocket_host, websocket_path
+
 
 def profile_catalog() -> dict[str, Any]:
     return {
@@ -486,9 +488,46 @@ def compile_profile(
         return settings, stream
 
     if core == "sing-box":
+        vless_ws = protocol == "vless" and str(profile.get("transport") or "").lower() == "ws"
+        preserved_ws_alpn = None
+        if vless_ws:
+            try:
+                profile["path"] = websocket_path(profile.get("path", "/"))
+                host = profile.get("host", "")
+                if host != "":
+                    profile["host"] = websocket_host(host)
+                if not isinstance(profile.get("flow", ""), str):
+                    raise ValueError("VLESS flow must be a string; the verified WebSocket profile uses an empty flow")
+                if {"headers", "max_early_data", "early_data_header_name"} & profile.keys():
+                    raise ValueError("The visual VLESS WebSocket profile does not accept arbitrary headers or early data")
+                previous = stream.get("transport") or {}
+                if isinstance(previous, dict) and previous.get("type") == "ws":
+                    headers = previous.get("headers", {})
+                    if (set(previous) - {"type", "path", "headers"}
+                            or not isinstance(headers, dict) or set(headers) - {"Host"}):
+                        raise ValueError("Existing WebSocket options cannot be represented by this editor; no fields were dropped")
+                if str(profile.get("security") or "none").lower() == "tls":
+                    previous_tls = stream.get("tls") or {}
+                    if not isinstance(previous_tls, dict):
+                        raise ValueError("Existing WebSocket TLS options cannot be represented by this editor")
+                    previous_reality = previous_tls.get("reality")
+                    leaving_reality = isinstance(previous_reality, dict) and previous_reality.get("enabled") is True
+                    if previous_tls.get("enabled") and not leaving_reality:
+                        metadata = stream.get("_vui") or {}
+                        if (set(previous_tls) - {"enabled", "server_name", "certificate_path", "key_path", "alpn"}
+                                or not isinstance(metadata, dict)
+                                or set(metadata) - {"security", "server_name", "client_fingerprint", "skip_cert_verify"}):
+                            raise ValueError("Existing WebSocket TLS options cannot be represented by this editor; no fields were dropped")
+                    preserved_ws_alpn = previous_tls.get("alpn")
+                    if preserved_ws_alpn not in (None, ["http/1.1"]):
+                        raise ValueError("The validated WebSocket profile only accepts HTTP/1.1 ALPN")
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
         if protocol not in {"hysteria2", "tuic"}:
             _apply_singbox_transport(stream, profile)
         _apply_singbox_tls(protocol, stream, profile)
+        if vless_ws and preserved_ws_alpn:
+            stream["tls"]["alpn"] = list(preserved_ws_alpn)
 
         users = list(settings.get("users") or [])
         if protocol == "shadowsocks":
@@ -632,7 +671,22 @@ def decompile_profile(core: str, protocol: str, settings: dict | None,
     profile["transport"] = str(transport.get("type") or ("quic" if protocol in {"hysteria2", "tuic"} else "direct"))
     if profile["transport"] in {"ws", "httpupgrade"}:
         profile["path"] = str(transport.get("path") or "/")
-        profile["host"] = str((transport.get("headers") or {}).get("Host") or transport.get("host") or "")
+        if protocol == "vless" and profile["transport"] == "ws":
+            # An imported invalid path must require a deliberate correction,
+            # not become an exportable root path on an unrelated visual edit.
+            profile["path"] = transport.get("path", "")
+            profile["flow"] = user.get("flow", "")
+        headers = transport.get("headers") or {}
+        if not isinstance(headers, dict):
+            headers = {}  # compile_profile refuses unrepresentable WS imports.
+        profile["host"] = str(headers.get("Host") or transport.get("host") or "")
+        if protocol == "vless" and profile["transport"] == "ws":
+            profile["host"] = headers.get("Host", "")
+            if "Host" in headers and headers["Host"] == "":
+                # Explicit empty imported headers are rejected by strict export.
+                # Null keeps that invalid draft invalid on an unrelated save;
+                # typing/clearing the input explicitly yields the optional "".
+                profile["host"] = None
     elif profile["transport"] == "grpc":
         profile["service_name"] = str(transport.get("service_name") or "")
 

@@ -180,11 +180,15 @@ class CertificateTests(unittest.TestCase):
         with self.assertRaisesRegex(CertificateError,'KEY_MISMATCH'):
             validate_material(paths[0].read_bytes(),other,'panel.example.test',verify_chain=False)
 
-    def test_vless_trojan_and_vmess_node_renewal_bind_new_material_without_starting_stopped_core(self):
+    def test_tls_node_renewal_preserves_ws_and_does_not_start_stopped_core(self):
         from app.services.core_manager import core_manager
-        for index,protocol in enumerate(("vless","trojan","vmess"),start=1):
-            with self.subTest(protocol=protocol):
-                identity=self.issue(domain=f"{protocol}.example.test")
+        for index,(protocol,transport) in enumerate((("vless",None),("trojan",None),("vmess",None),
+                ("vless",{"type":"ws","path":"/managed-ws","headers":{"Host":"cdn.example.test"}})),start=1):
+            with self.subTest(protocol=protocol,transport=transport):
+                domain=f"{protocol}-{index}.example.test"
+                identity=self.issue(domain=domain)
+                stream={'tls':{'enabled':True,'server_name':domain}}
+                if transport: stream['transport']=transport
                 node_id=100+index
                 settings=(
                     {'users':[{'uuid':'11111111-1111-1111-1111-111111111111'}]}
@@ -195,7 +199,7 @@ class CertificateTests(unittest.TestCase):
                     db.add(database.Inbound(
                         id=node_id,core='sing-box',protocol=protocol,
                         port=10443+index,enable=True,settings=settings,
-                        stream_settings={'tls':{'enabled':True,'server_name':f'{protocol}.example.test'}},
+                        stream_settings=stream,
                     ))
                     db.commit()
                 with patch.object(core_manager.get('sing-box'),'status',return_value={'running':False}), \
@@ -211,6 +215,8 @@ class CertificateTests(unittest.TestCase):
                     with database.SessionLocal() as db:
                         row=db.get(database.Inbound,node_id)
                         self.assertNotEqual(row.stream_settings['tls']['certificate_path'],str(first[0]))
+                        self.assertEqual(row.settings,settings)
+                        self.assertEqual(row.stream_settings.get('transport'),transport)
                         self.assertEqual(
                             db.get(CertificateBinding,'inbound:'+str(node_id)).applied_revision,
                             self.manager.material(identity)[2],

@@ -2,7 +2,7 @@
 
 | 现象 | 检查与处理 |
 | --- | --- |
-| 安装提示平台不支持 | 仅Ubuntu24.04 amd64和booted systemd已验收；不要改检测条件强行安装 |
+| 安装提示平台不支持 | 检查 CPU/libc/init 能力是否属于四目标 Linux 与 systemd/OpenRC 范围；不要改检测条件强行安装，见[兼容矩阵](COMPATIBILITY.md) |
 | Port80 already in use | 查看原网站/容器占用；安装器不会自动停止它。当前不自动接管已有反代 |
 | 包摘要不一致 | 停止，不执行。重新从同一可信提交取得套件和摘要；不能改预期值让测试通过 |
 | reserved paths / foreign service | 已有目录、账号或unit不属于该安装器；备份并人工核对，不自动覆盖 |
@@ -12,6 +12,9 @@
 | 403 | Origin、Host或X-VUI-Request不满足保护条件；使用固定公开来源，不任意改代理转发头 |
 | 404订阅 | 令牌无效、到期、撤销、格式不在授权范围，或管理员密码已变更 |
 | 409导出 | 节点组合不在验证矩阵、被禁用/删除或配置未准备好；不是无条件忽略的告警 |
+| VLESS/WS 导出拒绝 | 核对严格 path、可选 Host、单 UUID、空 flow、TLS/SNI、ALPN；不允许 early data、额外 header 或未知字段 |
+| VLESS/WS 错误 path 无法连接 | 客户端 path 必须匹配服务端；不能通过 query/百分号转义或关闭 TLS 校验修复 |
+| 更换合法 WS Host 仍可连接 | sing-box 不强制校验请求 Host，它只是客户端路由信息；这不表示 TLS SNI/CA 验证失效，勿把 Host 当作白名单 |
 | 409分流保存 | 另一页面已更新修订；重新载入，手动合并草稿，不覆盖他人新版本 |
 | 428分流保存 | 缺少If-Match；先读取snapshot/ETag，使用当前UI |
 | 503规则 | 已保存文件不可读/损坏；从可信备份恢复，系统不会悄悄回到默认规则 |

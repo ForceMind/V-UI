@@ -108,6 +108,20 @@ class SingBoxAdapter(BaseCoreAdapter):
             for key in ("tls", "transport", "multiplex"):
                 if key in stream:
                     inbound[key] = stream[key]
+            transport = inbound.get("transport")
+            if item.protocol == "vless" and isinstance(transport, dict) and transport.get("type") == "ws":
+                # The existing stored Host field is client routing metadata.
+                # sing-box does not validate it as a server Host allowlist;
+                # do not send it back as a server response header either.
+                transport = dict(inbound["transport"])
+                if isinstance(transport.get("headers"), dict):
+                    headers = dict(transport["headers"])
+                    headers.pop("Host", None)
+                    if headers:
+                        transport["headers"] = headers
+                    else:
+                        transport.pop("headers", None)
+                inbound["transport"] = transport
             built.append(inbound)
         return {"log": {"level": "warn", "timestamp": True}, "inbounds": built,
             "outbounds": [{"type": "direct", "tag": "direct"}], "route": {"final": "direct"}}

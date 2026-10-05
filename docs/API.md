@@ -62,3 +62,11 @@ POST `/api/subscriptions`：label、server（节点公开地址）、inbound_ids
 保留 TLS 并解绑必须提供新的手工证书与私钥路径；任意一项仍指向原托管材料会被拒绝。空 `profile: {}` 沿用原配置，不构成离开 TLS，也不能绕过路径检查。无效的替换 profile 不会清除原绑定；有效配置已经保存而核心应用失败时，解绑跟随已保存的期望配置生效，响应继续区分 `saved` 与 `applied`。
 
 这只修正编辑与绑定状态；`none` / `REALITY` 并未因此扩大本阶段的公开导出和连接验收范围。续期仍保留手动停止核心的 `CORE_STOPPED_PENDING_APPLY` 状态。
+
+### v0.4.3 VLESS/WS profile
+
+候选范围为 `core: sing-box`、`protocol: vless`，可视化 profile 使用 `transport: ws`、`path`、可选 `host`、`security: tls` 与明确 SNI。单 UUID、空 flow、正常 TLS 校验，可选 Chrome fingerprint。ALPN 不是可视化 profile 的输入字段：原始 API / 持久化 TLS 配置中的 `tls.alpn` 必须省略或恰为 `["http/1.1"]`，可视化 WS 编辑保留已有受支持值。已有配置含表单无法表示的 TLS、header 或 early-data 参数时拒绝编辑保存，不静默丢弃。最终 exact-head 验收尚待完成。
+
+path 的 1–256 ASCII 字符/路径段限制与 Host 的 DNS-style/253 字符/63 字符 label 限制见[配置指南](CONFIGURATION.md#043-vlesswebsockettls-候选)。无效 path/Host 在 profile 编译时返回 422；不得通过原始配置绕过严格公开导出。订阅遇到未知 transport/header 字段、early data 或不支持组合时明确拒绝。
+
+持久化的 `transport.headers.Host` 只用于客户端导出和回填，实际 sing-box 服务端配置去除该字段，不实施请求 Host 白名单。不同合法 Host 的请求接受与错误 SNI/CA 的 TLS 拒绝必须分别理解；Host 不改变证书绑定域名。新 WS 范围只声明 HTTP/TCP，编辑回填不返回 UUID 或私钥；公共订阅只提供连接所需 UUID，不包含私钥或服务器材料路径。
