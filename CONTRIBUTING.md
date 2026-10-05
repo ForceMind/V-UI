@@ -23,7 +23,7 @@ python -m unittest discover -s tests -v
 | --- | --- |
 | Test V-UI | API、鉴权、数据库、状态、纯函数、原浏览器操作流程和托管证书节点编辑/恢复 |
 | ToClash reference and export verification | 固定独立参考、100场景、40项目录、客户端配置 |
-| Real loopback proxy and DNS chain | 实际 VLESS/TCP/TLS、Trojan、Shadowsocks、VMess，以及候选 VLESS/WS/TLS 的双客户端链路与失败路径；DNS、拒绝/停启 |
+| Real loopback proxy and DNS chain | 实际 VLESS/TCP/TLS、Trojan、Shadowsocks、VMess，已验证 VLESS/WS/TLS，以及候选 VLESS/gRPC/TLS 的双客户端链路与失败路径；DNS、拒绝/停启 |
 | Selected release deployment gates | 实际离线包、HTTPS、完整Vue面板、备份恢复/回滚 |
 | ACME certificate acceptance | Certbot/Pebble真实HTTP-01、续期/失败、Chromium证书页 |
 | One-command installation acceptance | 仅临时CI主机上的实际sudo/systemd/socket安装、升级、重启 |
@@ -48,9 +48,9 @@ python -m unittest discover -s tests -v
 
 浏览器使用隔离临时目录、真实 Uvicorn/核心进程和仅测试构造器注入的临时 CA，不会访问公网 CA、修改主机信任或防火墙。它覆盖托管 TLS 创建、取消、TLS 手工解绑拒绝、none/REALITY 切换、刷新/再编辑、恢复 TLS 后的受支持导出及停机备份恢复；发布包 HTTPS/升级/回滚仍由独立 deployment gate 验证。
 
-## v0.4.3 WebSocket 验收
+## v0.4.3 WebSocket 基线回归
 
-当前是 sing-box 1.14.2 / VLESS / WS / TLS 候选，最终 exact-head 八组 CI 尚待完成。已收口的 v0.4.2 历史证据见[主线记录](docs/MAINLINE_CLOSURE_20261005.md)，不能借用为新版本通过。
+sing-box 1.14.2 / VLESS / WS / TLS 已由 PR #18 完成准确主线八组验收，见[WS 收口](docs/VLESS_WS_CLOSURE_043.md)。更早 v0.4.2 证据见[主线记录](docs/MAINLINE_CLOSURE_20261005.md)；基线通过不能代替后续提交自己的重验。
 
 - `python -m unittest discover -s tests -p 'test_vless_ws_profile.py' -v`：共享 path/Host 校验、编辑往返、未知字段和 early data 拒绝、三格式无损导出、服务端去除客户端 Host、材料不泄露。
 - `test_export_real.py`：固定 Mihomo 1.19.32 / sing-box 1.14.2 配置检查；配置能载入不等于链路能转发。
@@ -60,3 +60,18 @@ python -m unittest discover -s tests -v
 - `python scripts/check_docs.py`：当前版本、链接与安装示例；历史文档保留当时的版本和失败记录，不批量改写历史。
 
 范围限 HTTP/TCP，不宣称新增 UDP；TLS 必须验证明确 SNI，Host 不代替 SNI。后续改动必须在最终提交重新执行对应门槛，并分别报告未运行、失败和通过。
+
+## v0.4.4 gRPC 候选验收
+
+固定官方 sing-box 1.14.2 无 `with_grpc`，实际 gRPC Lite；Mihomo 固定 1.19.32。不得为获得标准 gRPC 重编译核心、换 pin、新增反代、依赖或后端。前置 `a0205fe545fabd958fe7aa80835a3ec6abeada92` 的真实链路 45 项测试通过，集成候选的最终独立审查/准确候选和主线八组 CI 尚待完成。详细链接、首次失败和已知限制见[阶段契约](docs/VLESS_GRPC_044.md)。
+
+- `python -m unittest discover -s tests -p 'test_vless_grpc_profile.py' -v`：严格 `[A-Za-z0-9._-]{1,128}` 字面 service name，不 trim/强转；flow、ALPN（含显式 null 拒绝）、未知字段、三格式映射、编辑往返、秘密和已导入字段保护。
+- `test_vless_grpc_credentials.py`：已有 gRPC 节点缺失/畸形 UUID 的编辑返回 422，不生成替代；省略 flow/fingerprint/skip 字段保留原值，不使畸形导入变得可公开。
+- `python -m unittest discover -s tests -p 'test_vless_grpc_managed_certificate.py' -v`：托管证书绑定、严格编辑和原子失败；`test_certificates.py` 覆盖实际应用/续期及停止待应用状态。
+- `test_export_real.py`：真实 Mihomo/sing-box 检查公开导出，四种独立 Chrome/h2 组合；不能把 config check 写成真实连通。
+- `test_vless_grpc_preflight_loopback.py`：保留裸核心互通前提及负向诊断；`test_vless_grpc_loopback.py`：编译后通过公开订阅生成配置的集成链路。二者设置 `VUI_TEST_CORES` 和 `VUI_TEST_MIHOMO` 才运行，不把默认环境 skip 当作通过。
+- 实际 h2、四种指纹/ALPN组合、字面 `.`/`..`/128 字符 service、两种客户端错误 UUID/CA/SNI/service/case 均覆盖；先证明目标 IP 可达，失败目标不得收到请求且不得 DIRECT。
+- 仅负向测试 sing-box 子进程加 `GODEBUG=http2debug=1` 获取真实 x509 CA/SNI 证据。实际 Lite 调用者仍可能超时，不能声称及时错误传播；保留第一次缺少 x509 日志的失败，不改 TLS 校验/系统信任或固定二进制。
+- 激活 `test_inbound_editor_browser.py`，验创建/取消/编辑/刷新/再打开、UUID 保留、证书回填、三格式与停机备份恢复；续期不得启动手动停止的核心，保持 `CORE_STOPPED_PENDING_APPLY`。
+
+仅 sing-box/VLESS/gRPC/TLS、单 UUID、空 flow、明确验证 SNI、ALPN 省略或 `["h2"]`、Chrome 独立可选、HTTP/TCP。Mihomo `udp: false`、sing-box `network: tcp`；不扩大到 UDP、h2c、Xray gRPC、authority/Host enforcement、额外 headers/timers/multi-mode、HY2/TUIC 或发布/部署。失败、环境阻断、未运行、前置通过和最终集成通过要分别报告。

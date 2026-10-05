@@ -45,6 +45,16 @@ def vless_websocket(*, fingerprint=False, alpn=False, with_host=True):
     return item
 
 
+def vless_grpc(*, fingerprint=False, alpn=False, service_name='vless.grpc_0-4.4'):
+    item=vless(fingerprint)
+    item.stream_settings['tls'].pop('alpn',None)
+    item.remark='vless-grpc-test'
+    item.stream_settings['transport']={'type':'grpc','service_name':service_name}
+    if alpn:
+        item.stream_settings['tls']['alpn']=['h2']
+    return item
+
+
 def trojan(optional=False):
     item=SimpleNamespace(
         id=2,core='sing-box',protocol='trojan',port=11443,remark='trojan-test',
@@ -167,6 +177,52 @@ class RealExportTests(unittest.TestCase):
                     passed+=1
             if passed==8:
                 print('VLESS/WS/TLS server configs accepted by sing-box; Host remains client-only metadata')
+
+    def test_vless_grpc_tls_configs_load_in_both_real_clients(self):
+        with tempfile.TemporaryDirectory(prefix='vui-grpc-real-export-') as tmp:
+            root=Path(tmp)
+            passed=0
+            services=('vless.grpc_0-4.4','.', '..', 'A'+('a_.-'*32)[:127])
+            for fingerprint,alpn,service_name in product((False,True),(False,True),services):
+                with self.subTest(fingerprint=fingerprint,alpn=alpn,service_name=service_name):
+                    self.check_item(
+                        vless_grpc(fingerprint=fingerprint,alpn=alpn,service_name=service_name),root,
+                        f'vless-grpc-fp-{fingerprint}-alpn-{alpn}-service-{services.index(service_name)}',
+                    )
+                    passed+=1
+            if passed==16:
+                print('VLESS/gRPC/TLS exports accepted by both real clients: independent Chrome/h2 and literal service names')
+
+    def test_vless_grpc_tls_server_configs_load_in_real_singbox(self):
+        with tempfile.TemporaryDirectory(prefix='vui-grpc-real-server-') as tmp:
+            root=Path(tmp)
+            _,cert,key=certificate_files(root)
+            passed=0
+            services=('vless.grpc_0-4.4','.', '..', 'A'+('a_.-'*32)[:127])
+            for fingerprint,alpn,service_name in product((False,True),(False,True),services):
+                with self.subTest(fingerprint=fingerprint,alpn=alpn,service_name=service_name):
+                    item=vless_grpc(fingerprint=fingerprint,alpn=alpn,service_name=service_name)
+                    item.tag='vless-grpc-server'
+                    item.stream_settings['tls'].update(
+                        certificate_path=str(cert),key_path=str(key),
+                    )
+                    config=SingBoxAdapter().build_config([item])
+                    self.assertEqual(config['inbounds'][0]['transport'],{
+                        'type':'grpc','service_name':service_name,
+                    })
+                    path=root/f'server-{passed}.json'
+                    path.write_text(json.dumps(config))
+                    result=subprocess.run(
+                        [str(Path(os.environ['VUI_TEST_CORES'])/'sing-box'),
+                         'check','-c',str(path)],
+                        capture_output=True,timeout=15,
+                    )
+                    self.assertEqual(result.returncode,0,
+                        result.stdout.decode(errors='replace')+
+                        result.stderr.decode(errors='replace'))
+                    passed+=1
+            if passed==16:
+                print('VLESS/gRPC/TLS server configs accepted by real sing-box with all Chrome/h2 and literal-service variants')
 
 
 if __name__=='__main__':

@@ -65,8 +65,20 @@ POST `/api/subscriptions`：label、server（节点公开地址）、inbound_ids
 
 ### v0.4.3 VLESS/WS profile
 
-候选范围为 `core: sing-box`、`protocol: vless`，可视化 profile 使用 `transport: ws`、`path`、可选 `host`、`security: tls` 与明确 SNI。单 UUID、空 flow、正常 TLS 校验，可选 Chrome fingerprint。ALPN 不是可视化 profile 的输入字段：原始 API / 持久化 TLS 配置中的 `tls.alpn` 必须省略或恰为 `["http/1.1"]`，可视化 WS 编辑保留已有受支持值。已有配置含表单无法表示的 TLS、header 或 early-data 参数时拒绝编辑保存，不静默丢弃。最终 exact-head 验收尚待完成。
+已验收 WS 基线范围为 `core: sing-box`、`protocol: vless`，可视化 profile 使用 `transport: ws`、`path`、可选 `host`、`security: tls` 与明确 SNI。单 UUID、空 flow、正常 TLS 校验，可选 Chrome fingerprint。ALPN 不是可视化 profile 的输入字段：原始 API / 持久化 TLS 配置中的 `tls.alpn` 必须省略或恰为 `["http/1.1"]`，可视化 WS 编辑保留已有受支持值。已有配置含表单无法表示的 TLS、header 或 early-data 参数时拒绝编辑保存，不静默丢弃。准确主线验收见[WS 收口记录](VLESS_WS_CLOSURE_043.md)。
 
-path 的 1–256 ASCII 字符/路径段限制与 Host 的 DNS-style/253 字符/63 字符 label 限制见[配置指南](CONFIGURATION.md#043-vlesswebsockettls-候选)。无效 path/Host 在 profile 编译时返回 422；不得通过原始配置绕过严格公开导出。订阅遇到未知 transport/header 字段、early data 或不支持组合时明确拒绝。
+path 的 1–256 ASCII 字符/路径段限制与 Host 的 DNS-style/253 字符/63 字符 label 限制见[配置指南](CONFIGURATION.md#043-vlesswebsockettls-基线)。无效 path/Host 在 profile 编译时返回 422；不得通过原始配置绕过严格公开导出。订阅遇到未知 transport/header 字段、early data 或不支持组合时明确拒绝。
 
 持久化的 `transport.headers.Host` 只用于客户端导出和回填，实际 sing-box 服务端配置去除该字段，不实施请求 Host 白名单。不同合法 Host 的请求接受与错误 SNI/CA 的 TLS 拒绝必须分别理解；Host 不改变证书绑定域名。新 WS 范围只声明 HTTP/TCP，编辑回填不返回 UUID 或私钥；公共订阅只提供连接所需 UUID，不包含私钥或服务器材料路径。
+
+### v0.4.4 VLESS/gRPC profile 候选
+
+限定 `core: sing-box`、`protocol: vless`；可视化 profile 使用 `transport: grpc`、字符串 `service_name`、`security: tls` 和明确 `server_name`（SNI），单 UUID、空 flow、正常证书校验。`service_name` 必须匹配 `[A-Za-z0-9._-]{1,128}`，保留字面值/大小写，不 trim 或类型强转；非法值在编译阶段返回 422。`.` / `..` 合法，但 `/`、query、百分号转义、Unicode、空白和非字符串不合法。
+
+ALPN 不属于可视化输入：原始 API / 持久化 `tls.alpn` 必须省略或恰为 `["h2"]`，显式 `null` 也拒绝，编辑保留已有受支持值。Chrome fingerprint 独立可选。原始导入配置含不能表示的 TLS/transport/authority/headers/timer/multi-mode 选项时拒绝编辑，不静默删除；原始 API 也不能绕过严格公开导出。
+
+持久化与 sing-box 导出对应 `transport: {"type": "grpc", "service_name": "vless.grpc_0-4.4"}`；URI 对应 `type=grpc` / `serviceName`，Mihomo 对应 `grpc-opts.grpc-service-name`。仅 HTTP/TCP，Mihomo `udp: false`、sing-box `network: tcp`。无 authority/Host 白名单，不把 service name 当证书域名；证书绑定仍依据 SNI。`/editor` 隐藏并保留 UUID，订阅可包含连接凭据，不含私钥或服务端材料路径。
+
+已有 gRPC 节点缺失或畸形 UUID 时，编辑返回 422，不能通过自动生成新 UUID 掩盖导入问题。省略 flow、fingerprint 或 skip-cert-verify 对应编辑字段会保留原值，不将畸形或不支持配置自动变成可公开配置；畸形 SNI 类型也拒绝。
+
+固定二进制前置链路通过不代表本集成候选已经验收。现有 gRPC Lite 错误 CA/SNI 可能表现为调用者超时，不能承诺及时返回 TLS 原因；证据与最终待完成门槛见[阶段契约](VLESS_GRPC_044.md)。

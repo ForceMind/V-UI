@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
+import re
 import secrets
 import uuid
 from typing import Any
@@ -10,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models.database import Inbound
 from app.services.protocol_profiles import compile_profile, decompile_profile
+from app.services.grpc_profile import is_grpc_transport
 
 SUPPORTED_CORES = {"xray", "sing-box"}
 XRAY_PROTOCOLS = {"vless", "vmess", "trojan", "shadowsocks"}
@@ -56,7 +59,7 @@ def validate_core_protocol(core: str, protocol: str) -> None:
 
 
 def ensure_credentials(core: str, protocol: str, settings: dict) -> dict:
-    settings = dict(settings)
+    settings = deepcopy(settings)
 
     if core == "xray":
         if protocol in {"vless", "vmess"}:
@@ -190,16 +193,7 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
     if not 1 <= port <= 65535:
         raise HTTPException(status_code=422, detail="Port must be between 1 and 65535")
 
-    settings = ensure_credentials(
-        core,
-        protocol,
-        normalize_mapping(
-            payload.get(
-                "settings",
-                existing.settings if existing else None,
-            )
-        ),
-    )
+    settings = normalize_mapping(payload.get("settings", existing.settings if existing else None))
     stream_settings = normalize_mapping(
         payload.get(
             "stream_settings",
@@ -207,6 +201,24 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
         )
     )
     profile = normalize_mapping(payload.get("profile"))
+    old_stream = existing.stream_settings if existing else {}
+    old_transport = old_stream.get("transport") if isinstance(old_stream, dict) else None
+    transport = stream_settings.get("transport")
+    grpc_edit = existing is not None and core == "sing-box" and protocol == "vless" and (
+        is_grpc_transport(old_transport)
+        or is_grpc_transport(transport)
+        or str(profile.get("transport") or "").lower() == "grpc"
+    )
+    if grpc_edit:
+        # Creating a node may generate credentials; an ordinary edit must not
+        # repair an imported missing/invalid secret and silently enable export.
+        users = settings.get("users")
+        uid = users[0].get("uuid") if isinstance(users, list) and len(users) == 1 and isinstance(users[0], dict) else None
+        if not isinstance(uid, str) or not re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", uid):
+            raise HTTPException(status_code=422, detail="Existing VLESS gRPC editing requires one explicit valid UUID; no credential was generated")
+        settings = deepcopy(settings)
+    else:
+        settings = ensure_credentials(core, protocol, settings)
     settings, stream_settings = compile_profile(
         core,
         protocol,

@@ -180,15 +180,17 @@ class CertificateTests(unittest.TestCase):
         with self.assertRaisesRegex(CertificateError,'KEY_MISMATCH'):
             validate_material(paths[0].read_bytes(),other,'panel.example.test',verify_chain=False)
 
-    def test_tls_node_renewal_preserves_ws_and_does_not_start_stopped_core(self):
+    def test_tls_node_renewal_preserves_transports_and_does_not_start_stopped_core(self):
         from app.services.core_manager import core_manager
         for index,(protocol,transport) in enumerate((("vless",None),("trojan",None),("vmess",None),
-                ("vless",{"type":"ws","path":"/managed-ws","headers":{"Host":"cdn.example.test"}})),start=1):
+                ("vless",{"type":"ws","path":"/managed-ws","headers":{"Host":"cdn.example.test"}}),
+                ("vless",{"type":"grpc","service_name":"Managed.Service_1"})),start=1):
             with self.subTest(protocol=protocol,transport=transport):
                 domain=f"{protocol}-{index}.example.test"
                 identity=self.issue(domain=domain)
                 stream={'tls':{'enabled':True,'server_name':domain}}
                 if transport: stream['transport']=transport
+                if transport and transport['type']=='grpc': stream['tls']['alpn']=['h2']
                 node_id=100+index
                 settings=(
                     {'users':[{'uuid':'11111111-1111-1111-1111-111111111111'}]}
@@ -222,6 +224,41 @@ class CertificateTests(unittest.TestCase):
                             self.manager.material(identity)[2],
                         )
                     self.assertTrue(apply.call_args.kwargs['activate'])
+                if transport and transport['type']=='grpc':
+                    # Failed issuance preserves both the active revision and
+                    # the complete bound node, including service/ALPN/UUID.
+                    with database.SessionLocal() as db:
+                        saved_stream=json.loads(json.dumps(db.get(database.Inbound,node_id).stream_settings))
+                        applied_revision=db.get(CertificateBinding,'inbound:'+str(node_id)).applied_revision
+                    self.assertEqual(saved_stream['tls']['alpn'],['h2'])
+                    self.due(identity);self.provider.failure=True
+                    try:
+                        job=self.manager.renew(identity);self.manager.process_once()
+                        self.assertEqual(self.manager.job(job['id'])['state'],'failed')
+                        self.assertEqual(self.manager.material(identity)[2],applied_revision)
+                        with database.SessionLocal() as db:
+                            row=db.get(database.Inbound,node_id)
+                            self.assertEqual(row.settings,settings)
+                            self.assertEqual(row.stream_settings,saved_stream)
+                            self.assertEqual(db.get(CertificateBinding,'inbound:'+str(node_id)).applied_revision,applied_revision)
+                    finally:
+                        self.provider.failure=False
+                    # Renewal may save a fresh desired certificate while a
+                    # stopped core remains stopped and its applied revision old.
+                    self.due(identity)
+                    with patch.object(core_manager.get('sing-box'),'status',return_value={'running':False}), \
+                         patch.object(core_manager,'apply_database',return_value={'applied':False}) as apply:
+                        self.manager.process_once()
+                        self.assertFalse(apply.call_args.kwargs['activate'])
+                    with database.SessionLocal() as db:
+                        row=db.get(database.Inbound,node_id)
+                        binding=db.get(CertificateBinding,'inbound:'+str(node_id))
+                        self.assertEqual(binding.error,'CORE_STOPPED_PENDING_APPLY')
+                        self.assertEqual(binding.applied_revision,applied_revision)
+                        self.assertNotEqual(self.manager.material(identity)[2],applied_revision)
+                        self.assertEqual(row.settings,settings)
+                        self.assertEqual(row.stream_settings['transport'],transport)
+                        self.assertEqual(row.stream_settings['tls']['alpn'],['h2'])
 
     def test_offline_bootstrap_is_idempotent_and_reuses_valid_certificate(self):
         from app.certificates.cli import bootstrap_panel

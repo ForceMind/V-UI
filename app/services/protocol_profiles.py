@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from copy import deepcopy
 import secrets
 from typing import Any
 
@@ -9,6 +10,7 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from fastapi import HTTPException
 
 from app.services.websocket_profile import websocket_host, websocket_path
+from app.services.grpc_profile import grpc_service_name, is_grpc_transport
 
 
 def profile_catalog() -> dict[str, Any]:
@@ -459,6 +461,79 @@ def _apply_singbox_tls(
     )
 
 
+def _grpc_editor_guard(profile: dict, stream: dict, *, entering: bool) -> list[str] | None:
+    """Keep bounded gRPC edits literal and refuse unrepresented imported options."""
+    previous = stream.get("transport", {})
+    existing = is_grpc_transport(previous)
+    desired_security = str(profile.get("security") or "none").lower()
+    try:
+        if existing and previous["type"] != "grpc":
+            raise ValueError("Existing gRPC transport type is malformed; no fields were dropped")
+        if entering:
+            profile["service_name"] = grpc_service_name(profile.get("service_name"))
+            if {"authority", "headers", "user_agent", "idle_timeout", "ping_timeout",
+                    "permit_without_stream", "multi_mode", "max_early_data",
+                    "early_data_header_name"} & profile.keys():
+                raise ValueError("The visual VLESS gRPC profile does not accept authority, headers or additional transport options")
+        if entering and ("Host" in profile or (profile.get("host", "") != "" and
+                (existing or not isinstance(previous, dict) or previous.get("type") != "ws"))):
+            raise ValueError("The verified VLESS gRPC profile does not accept a custom Host")
+        if existing and set(previous) - {"type", "service_name"}:
+            raise ValueError("Existing gRPC transport options cannot be represented by this editor; no fields were dropped")
+        # Do not normalize an imported invalid flow into an exportable empty flow.
+        if not isinstance(profile.get("flow", ""), str):
+            raise ValueError("VLESS flow must be a string")
+        if entering and profile.get("flow", "") != "":
+            raise ValueError("The verified VLESS gRPC profile requires an empty flow")
+        for field in ("server_name", "client_fingerprint", "certificate_path", "key_path"):
+            if field in profile and (not isinstance(profile[field], str) or profile[field] != profile[field].strip()):
+                raise ValueError(f"gRPC {field} must be a literal string without surrounding whitespace")
+        if "skip_cert_verify" in profile and type(profile["skip_cert_verify"]) is not bool:
+            raise ValueError("gRPC skip_cert_verify must be a boolean")
+        previous_tls = stream.get("tls", {})
+        metadata = stream.get("_vui", {})
+        if existing or (entering and desired_security == "tls"):
+            if not isinstance(previous_tls, dict) or not isinstance(metadata, dict):
+                raise ValueError("Existing gRPC TLS/client metadata cannot be represented by this editor")
+            reality = previous_tls.get("reality")
+            is_reality = isinstance(reality, dict) and reality.get("enabled") is True
+            tls_fields = {"enabled", "server_name", "certificate_path", "key_path", "alpn"}
+            meta_fields = {"security", "server_name", "client_fingerprint", "skip_cert_verify"}
+            if is_reality:
+                tls_fields.add("reality")
+                meta_fields |= {"reality_public_key", "reality_short_id", "mihomo_compatibility"}
+                handshake = reality.get("handshake", {})
+                shorts = reality.get("short_id", [])
+                if (set(reality) - {"enabled", "handshake", "private_key", "short_id"}
+                        or not isinstance(handshake, dict) or set(handshake) - {"server", "server_port"}
+                        or not isinstance(shorts, list) or len(shorts) > 1):
+                    raise ValueError("Existing gRPC REALITY options cannot be represented by this editor; no fields were dropped")
+            if set(previous_tls) - tls_fields or set(metadata) - meta_fields:
+                raise ValueError("Existing gRPC TLS/client metadata options cannot be represented by this editor; no fields were dropped")
+            if existing and previous_tls.get("enabled") is True and not is_reality:
+                if metadata.get("security", "tls") != "tls":
+                    raise ValueError("Existing gRPC client/server TLS security conflicts")
+                if metadata.get("server_name") and metadata["server_name"] != previous_tls.get("server_name"):
+                    raise ValueError("Existing gRPC client/server TLS names conflict")
+            if "enabled" in previous_tls and type(previous_tls["enabled"]) is not bool:
+                raise ValueError("Existing gRPC TLS enabled must be a boolean")
+            for mapping, fields in ((previous_tls, ("server_name", "certificate_path", "key_path")),
+                                    (metadata, ("security", "server_name", "client_fingerprint"))):
+                for field in fields:
+                    if field in mapping and (not isinstance(mapping[field], str) or mapping[field] != mapping[field].strip()):
+                        raise ValueError(f"Existing gRPC {field} must be a literal string without surrounding whitespace")
+            if "skip_cert_verify" in metadata and type(metadata["skip_cert_verify"]) is not bool:
+                raise ValueError("Existing gRPC skip_cert_verify must be a boolean")
+        alpn = previous_tls.get("alpn") if isinstance(previous_tls, dict) else None
+        if entering and desired_security == "tls" and "alpn" in previous_tls and alpn != ["h2"]:
+            raise ValueError("The validated gRPC profile only accepts HTTP/2 h2 ALPN")
+        if existing and "alpn" in previous_tls and previous_tls["alpn"] != ["h2"]:
+            raise ValueError("Existing gRPC ALPN cannot be represented by this editor")
+        return deepcopy(alpn)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 def compile_profile(
     core: str,
     protocol: str,
@@ -470,8 +545,8 @@ def compile_profile(
         return settings, stream_settings
 
     profile = dict(profile)
-    settings = dict(settings)
-    stream = dict(stream_settings)
+    settings = deepcopy(settings)
+    stream = deepcopy(stream_settings)
 
     if core == "xray":
         _apply_xray_transport(stream, profile)
@@ -488,6 +563,20 @@ def compile_profile(
         return settings, stream
 
     if core == "sing-box":
+        previous_transport = stream.get("transport", {})
+        previous_grpc = protocol == "vless" and is_grpc_transport(previous_transport)
+        vless_grpc = protocol == "vless" and str(profile.get("transport") or "").lower() == "grpc"
+        if previous_grpc:
+            # An omitted edit field is not an explicit repair of an imported
+            # value. Preserve literals until the caller supplies a replacement.
+            prior_users = settings.get("users")
+            prior_user = prior_users[0] if isinstance(prior_users, list) and prior_users and isinstance(prior_users[0], dict) else {}
+            profile.setdefault("flow", deepcopy(prior_user.get("flow", "")))
+            prior_meta = stream.get("_vui", {})
+            if isinstance(prior_meta, dict):
+                profile.setdefault("skip_cert_verify", deepcopy(prior_meta.get("skip_cert_verify", False)))
+                profile.setdefault("client_fingerprint", deepcopy(prior_meta.get("client_fingerprint", "")))
+        preserved_grpc_alpn = _grpc_editor_guard(profile, stream, entering=vless_grpc) if vless_grpc or previous_grpc else None
         vless_ws = protocol == "vless" and str(profile.get("transport") or "").lower() == "ws"
         preserved_ws_alpn = None
         if vless_ws:
@@ -528,6 +617,12 @@ def compile_profile(
         _apply_singbox_tls(protocol, stream, profile)
         if vless_ws and preserved_ws_alpn:
             stream["tls"]["alpn"] = list(preserved_ws_alpn)
+        if vless_grpc and str(profile.get("security") or "none").lower() == "tls":
+            if preserved_grpc_alpn is not None:
+                stream["tls"]["alpn"] = preserved_grpc_alpn
+            # Empty optional fingerprint stays empty instead of acquiring the
+            # generic form's Chrome default during an unrelated imported edit.
+            stream["_vui"]["client_fingerprint"] = profile.get("client_fingerprint", "chrome")
 
         users = list(settings.get("users") or [])
         if protocol == "shadowsocks":
@@ -537,7 +632,7 @@ def compile_profile(
             settings["method"]=method
 
         if protocol == "vless" and users:
-            flow = str(profile.get("flow") or "").strip()
+            flow = profile.get("flow", "") if vless_grpc or previous_grpc else str(profile.get("flow") or "").strip()
             if flow:
                 users[0]["flow"] = flow
             else:
@@ -602,6 +697,11 @@ def decompile_profile(core: str, protocol: str, settings: dict | None,
     """
     settings = dict(settings or {})
     stream = dict(stream_settings or {})
+    grpc = core == "sing-box" and protocol == "vless" and is_grpc_transport(stream.get("transport"))
+    if grpc and (not isinstance(stream.get("_vui", {}), dict) or not isinstance(stream.get("tls", {}), dict)):
+        raise HTTPException(status_code=422, detail="Existing gRPC TLS/client metadata cannot be represented by this editor")
+    if grpc and "reality" in stream.get("tls", {}) and not isinstance(stream["tls"]["reality"], dict):
+        raise HTTPException(status_code=422, detail="Existing gRPC REALITY options cannot be represented by this editor")
     meta = dict(stream.get("_vui") or {})
     profile: dict[str, Any] = {
         "security": "none",
@@ -687,8 +787,12 @@ def decompile_profile(core: str, protocol: str, settings: dict | None,
                 # Null keeps that invalid draft invalid on an unrelated save;
                 # typing/clearing the input explicitly yields the optional "".
                 profile["host"] = None
-    elif profile["transport"] == "grpc":
-        profile["service_name"] = str(transport.get("service_name") or "")
+    elif grpc or profile["transport"] == "grpc":
+        profile["service_name"] = transport.get("service_name", "") if grpc else str(transport.get("service_name") or "")
+        if grpc:
+            profile["flow"] = user.get("flow", "")
+            profile["client_fingerprint"] = meta.get("client_fingerprint", "")
+            profile["skip_cert_verify"] = meta.get("skip_cert_verify", False)
 
     tls = stream.get("tls") or {}
     reality = tls.get("reality") or {}
@@ -710,6 +814,11 @@ def decompile_profile(core: str, protocol: str, settings: dict | None,
         profile["key_path"] = str(tls.get("key_path") or "")
     else:
         profile["security"] = "none"
+
+    if grpc and profile["security"] == "tls":
+        profile["server_name"] = meta.get("server_name", tls.get("server_name", ""))
+        profile["certificate_path"] = tls.get("certificate_path", "")
+        profile["key_path"] = tls.get("key_path", "")
 
     if protocol == "hysteria2":
         obfs = settings.get("obfs") or {}

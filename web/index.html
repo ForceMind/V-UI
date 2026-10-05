@@ -619,6 +619,14 @@
                     style="margin-bottom: 18px">
                 </el-alert>
 
+                <el-alert
+                    v-if="newInbound.core === 'sing-box' && newInbound.protocol === 'vless' && newInbound.profile.transport === 'grpc'"
+                    type="warning" :closable="false" show-icon
+                    title="VLESS gRPC Lite 验证范围"
+                    description="固定 sing-box 1.14.2 gRPC Lite / Mihomo 1.19.32。公开导出要求 TLS、正确 SNI、证书校验、HTTP/2 和空 flow；ALPN 省略或仅 h2。Service 为 1–128 个 ASCII 字母、数字、.、_、-，区分大小写，不裁剪空白或转义。不支持自定义 authority / Host 或其他 gRPC 参数；仅验证 HTTP/TCP 转发，不新增 UDP。"
+                    style="margin-bottom: 18px">
+                </el-alert>
+
                 <el-form-item
                     v-if="newInbound.profile.transport === 'grpc'"
                     label="gRPC Service">
