@@ -72,11 +72,15 @@ def main():
     p.add_argument('--source-commit',required=True);args=p.parse_args()
     supported_environment();os.umask(0o077)
     if not re.fullmatch('[a-f0-9]{40}',args.source_commit):raise ValueError('Exact source commit required')
+    actual=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
+    if actual!=args.source_commit:raise ValueError('Build source does not match the requested commit')
+    subprocess.run(['git','diff','--quiet','HEAD','--'],cwd=ROOT,check=True)
     with tempfile.TemporaryDirectory(prefix='vui-build-') as directory:
         payload=Path(directory)/'payload';payload.mkdir(mode=0o700)
         # Only git-tracked application files; never copy local data, keys or tests.
         tracked=subprocess.check_output(['git','ls-files','-z'],cwd=ROOT).decode().split('\x00')
-        allowed_files={'main.py','README.md','ROADMAP.md','AGENTS.md','requirements-runtime.txt','scripts/deploy.py'}
+        allowed_files={'main.py','README.md','ROADMAP.md','AGENTS.md','VERSION','CHANGELOG.md','SECURITY.md',
+            'CONTRIBUTING.md','LICENSE','install.sh','requirements-runtime.txt','scripts/deploy.py','scripts/install_system.py'}
         for name in filter(None,tracked):
             if not (name in allowed_files or name.startswith(('app/','web/','docs/','third_party/','deploy/'))):continue
             if '__pycache__' in name or name.endswith(('.pyc','.ttf','.otf','.woff','.woff2')):continue
@@ -90,8 +94,10 @@ def main():
         wheel_lock(payload)
         # Included bin hashes, npm archive integrities and lock files are themselves
         # protected by the final manifest and independent archive SHA-256.
-        identity='0.3.0-rc.2-'+args.source_commit[:12]
-        metadata={'kind':'release','release_id':identity,'platform':PLATFORM,'source_commit':args.source_commit,
+        version=(ROOT/'VERSION').read_text().strip()
+        if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',version):raise ValueError('Invalid release version')
+        identity=version+'-'+args.source_commit[:12]
+        metadata={'kind':'release','release_id':identity,'platform':PLATFORM,'source_commit':args.source_commit,'version':version,
             'protocol_profile':'sing-box VLESS/TCP/TLS single-user verified certificate',
             'runtime_pins':(ROOT/'requirements-runtime.txt').read_text()}
         checksum=create_archive(payload,args.destination,metadata)

@@ -59,6 +59,8 @@ def add_inbound(payload: InboundPayload, db: Session = Depends(get_db)):
 
 @router.put("/{inbound_id}")
 def edit_inbound(inbound_id: int, payload: InboundPayload, db: Session = Depends(get_db)):
+    if payload.certificate_id:
+        raise HTTPException(409, "Use the certificate binding API to change an existing node certificate")
     previous = next((item for item in list_inbounds(db) if item.id == inbound_id), None)
     if previous and payload.core != previous.core:
         raise HTTPException(409, "Cross-core migration requires a separate inbound")

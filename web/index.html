@@ -35,6 +35,7 @@
                     <el-icon><Setting /></el-icon>
                     <span>Mihomo 分流</span>
                 </el-menu-item>
+                <el-menu-item index="certificates"><el-icon><Lock /></el-icon><span>证书管理</span></el-menu-item>
                 <el-menu-item index="subscriptions">
                     <el-icon><Link /></el-icon>
                     <span>订阅输出</span>
@@ -631,6 +632,12 @@
             </el-form-item>
 
             <template v-if="newInbound.profile.security === 'tls'">
+                <el-form-item label="托管证书" v-if="newInbound.core === 'sing-box' && newInbound.protocol === 'vless'">
+                    <el-select v-model="newInbound.certificate_id" clearable placeholder="选证书自动填入；或手动填写路径" style="width:100%">
+                        <el-option v-for="cert in managedCertificates" :key="cert.id" :label="cert.domain" :value="cert.id"></el-option>
+                    </el-select>
+                </el-form-item>
+                <p v-if="newInbound.certificate_id">使用托管证书的域名与路径；后续续期自动更新该节点。</p>
                 <el-form-item label="SNI">
                     <el-input
                         v-model="newInbound.profile.server_name"
