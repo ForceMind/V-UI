@@ -117,6 +117,22 @@ class RealExportTests(unittest.TestCase):
             result.stderr.decode(errors='replace'),
         )
 
+    def test_hysteria2_server_and_exports_load_in_real_pinned_binaries(self):
+        from test_hysteria2_profile import hy2_node
+        with tempfile.TemporaryDirectory(prefix='vui-hy2-real-export-') as tmp:
+            root = Path(tmp)
+            item = hy2_node()
+            self.check_item(item, root, 'hy2-native-defaults')
+            _, cert, key = certificate_files(root)
+            item.stream_settings['tls'].update(certificate_path=str(cert), key_path=str(key))
+            config = SingBoxAdapter().build_config([item])
+            self.assertNotIn('transport', config['inbounds'][0])
+            path = root/'server.json'; path.write_text(json.dumps(config))
+            result = subprocess.run([str(Path(os.environ['VUI_TEST_CORES'])/'sing-box'),
+                                     'check', '-c', str(path)], capture_output=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stdout.decode(errors='replace') + result.stderr.decode(errors='replace'))
+            print('Hysteria2 server and both exported clients accepted by unchanged pinned binaries')
+
     def test_vless_and_trojan_tls_configs_load_in_real_clients(self):
         with tempfile.TemporaryDirectory(prefix='vui-real-export-') as tmp:
             root=Path(tmp)

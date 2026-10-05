@@ -213,7 +213,7 @@ class ValidatedExportTests(unittest.TestCase):
         for change in (
             {'core':'xray'},
             {'protocol':'tuic'},
-            {'protocol':'hysteria2'},
+            {'protocol':'tuic'},
         ):
             with self.subTest(change=change),self.assertRaises(ExportError):
                 validated_nodes([vless_node(**change)],'vpn.example.test')

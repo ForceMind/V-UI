@@ -9,7 +9,7 @@
 - libc：glibc 或 musl；
 - init：systemd 或 OpenRC；
 - 包管理器：apt、dnf/yum、zypper、pacman、apk、xbps、emerge；
-- TCP 80、面板端口、默认节点端口；
+- TCP 80、面板端口、默认节点 TCP 端口；显式声明时另检查节点 UDP/QUIC 端口；
 - UFW、firewalld、自定义 nftables / iptables。
 
 运行服务使用目标包自带的固定 CPython 3.12 和 hash-locked wheels，不要求系统自带 Python 3.12。系统 Python 只负责启动安装器；低于 3.9 时入口会先尝试包管理器，仍不足时使用固定 SHA-256 的便携 Python 引导。
@@ -35,11 +35,30 @@
 
 新安装在创建账号、写服务文件或修改防火墙前检查端口。TCP 80 与默认节点端口分别检查 IPv4 和可用的 IPv6；面板按 `--bind` 地址检查。systemd 与 OpenRC 使用相同的双栈预检。端口已有监听时安装停止，不结束原进程。预检不是端口预留，检查后新出现的监听仍可能导致服务启动失败。
 
-UFW / firewalld 缺规则时，交互模式会询问是否现在开放；只有输入 `yes` 才修改。firewalld 通过 `--get-active-zones` 查询实际接口绑定，仅在一个明确的接口 zone、没有 source 绑定时自动处理，并同时写该 zone 的运行时和永久规则；不会把默认 zone 当作实际入口。多个 zone、source 绑定、空结果或查询失败时不猜测、不自动开放任何 zone，需人工核对实际入口并配置。确认期间 zone 发生变化也会停止修改。自定义 nftables / iptables 不自动覆盖；安装器列出端口并等待人工确认。云安全组无法由本机可靠修改，也会提示并等待确认。
+UFW / firewalld 缺规则时按精确端口/协议列出（例如 `10443/tcp` 与 `10443/udp`），交互模式会询问是否现在开放；只有输入 `yes` 或操作者明确设置 `--open-firewall yes` 才修改。安装器不会自动启用尚未启用的主机防火墙。firewalld 通过 `--get-active-zones` 查询实际接口绑定，仅在一个明确的接口 zone、没有 source 绑定时自动处理，并同时写该 zone 的运行时和永久规则；不会把默认 zone 当作实际入口。多个 zone、source 绑定、空结果或查询失败时不猜测、不自动开放任何 zone，需人工核对实际入口并配置。确认期间 zone 发生变化也会停止修改。自定义 nftables / iptables 不自动覆盖；安装器列出端口并等待人工确认。云安全组无法由本机可靠修改，也会提示并等待确认。
 
 自动化场景只有在操作者确实已经处理外部防火墙时才应使用 `--assume-external-ports-open`。这不是“检测到已开放”的意思。此标志也确认自定义/无法确定的本机防火墙已由操作者人工核对；`--open-firewall yes` 本身不会授权安装器猜测 firewalld zone。
 
 80 被 Nginx / Apache / Caddy / 其他站点占用时，本版不会自动接管已有网站。
+
+### Hysteria2 的显式 UDP/QUIC 声明
+
+v0.4.5 候选的安装器可接受可重复参数：
+
+```sh
+sudo bash install.sh --bundle ./vui-linux-x86_64-gnu.zip --sha256 '<可信 SHA256>' \
+  --node-port 10443 --node-udp-port 10443 --node-udp-port 20443
+```
+
+- 每个 `--node-udp-port` 必须为 1024–65535；不传时 UDP 声明为空，不会根据默认 TCP 节点端口自动增加 UDP 规则。
+- TCP 和 UDP 可以使用同一数字，但各有独立占用探测、规则和确认。面板/HTTP-01 保持 TCP，不能用它们的规则推导 HY2 已可达。
+- 新安装在创建账号、写服务或改防火墙前，对声明 UDP 端口做 IPv4 及可用 IPv6 bind 探测；被占用则停止，不结束原进程。探测不是端口预留或外部连通证明。
+- 既有安装/升级跳过 UDP bind 探测，避免与自己的运行节点冲突；会明确提示人工核对端口所有权。不能把升级路径写成“UDP 端口检查为空闲”。
+- 主机规则、云安全组和自定义防火墙的确认均包括精确 `/tcp`、`/udp`。`--open-firewall yes` 不允许猜测 firewalld zone，也不授权自动启用防火墙；`--assume-external-ports-open` 只是操作者已处理外部/未知规则的声明。
+- UDP 声明不写入持久安装配置；以后升级或重新运行如需检查这些端口，必须再次传入每个参数。安装器不会自动推断已有 HY2 节点。
+- 该标志不会创建 HY2 节点、分配密码或启用应用 UDP。节点仍由面板另建；QUIC 使用 UDP 承载，但候选只验证 HTTP/TCP 应用负载，Mihomo `udp: false`、sing-box `network: tcp`。
+
+UDP 安装行为和 HY2 集成仍需最终准确候选/主线门槛；固定二进制前置通过不表示真实安装或部署完成，见[HY2 契约](HYSTERIA2_045.md)。
 
 ## 3. 本地验收包
 
@@ -98,10 +117,10 @@ root 只负责系统初始化和受管服务文件；应用、核心与 Certbot 
 
 ## 7. 官方 Release 一键安装
 
-当前文档对应 **v0.4.4 VLESS/gRPC/TLS 候选**，版本号不代表该版本已经公开发布。下面仅展示正式 Release 公布且资产核对完成后的命令，不能视为当前可用下载地址；安装入口须来自同一可信仓库或已验收套件：
+当前文档对应 **v0.4.5 Hysteria2/TLS 候选**，版本号不代表该版本已经公开发布。下面仅展示正式 Release 公布且资产核对完成后的命令，不能视为当前可用下载地址；安装入口须来自同一可信仓库或已验收套件：
 
 ```sh
-sudo bash install.sh --version v0.4.4
+sudo bash install.sh --version v0.4.5
 ```
 
 脚本先检测 `x86_64/aarch64 + gnu/musl`，再从该明确版本下载对应目标包、安装控制器和 `SHA256SUMS`，逐个验证摘要后执行。不会下载 `latest`，也不会在发布时重新构建包。

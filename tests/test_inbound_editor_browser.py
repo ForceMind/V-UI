@@ -6,13 +6,14 @@ import os
 from pathlib import Path
 import re
 import shutil
+import socket
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import yaml
 
@@ -408,6 +409,99 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 grpc_server = next(item for item in applied['inbounds'] if item.get('users', [{}])[0].get('uuid') == grpc_uuid)
                 self.assertEqual(grpc_server['transport'], {'type': 'grpc', 'service_name': 'VUI.Edited-2'})
                 self.assertEqual(grpc_server['tls']['alpn'], ['h2'])
+                # Hysteria2 has a UDP listener with native QUIC defaults. Auth
+                # passwords may be supplied, but are never returned for editing.
+                hy2_password = 'Synthetic-browser-HY2:p@ss/word?+#%'
+                def hy2_draft():
+                    page.get_by_role('button', name='添加节点', exact=True).click()
+                    dialog = page.get_by_role('dialog')
+                    dialog.get_by_text('sing-box', exact=True).click()
+                    dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select').click()
+                    page.get_by_role('option', name='Hysteria2', exact=True).click()
+                    dialog.get_by_placeholder('例如：US-01').fill('managed-hysteria2')
+                    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+                        udp.bind(('127.0.0.1', 0))
+                        hy2_port = udp.getsockname()[1]
+                    dialog.locator('.el-form-item').filter(has_text=re.compile(r'^端口')).get_by_role('spinbutton').fill(str(hy2_port))
+                    expect(dialog).to_contain_text('QUIC')
+                    expect(dialog).to_contain_text('UDP ' + str(hy2_port))
+                    expect(dialog).to_contain_text('HTTP/TCP')
+                    expect(dialog).to_contain_text('未验收草稿')
+                    expect(dialog.locator('.el-form-item').filter(has_text='传输方式')).to_have_count(0)
+                    for label in ('上传带宽 Mbps', '下载带宽 Mbps'):
+                        expect(dialog.locator('.el-form-item').filter(has_text=label).get_by_role('spinbutton')).to_have_value('')
+                    auth = dialog.locator('.el-form-item').filter(has_text='Hysteria2 Password').locator('input')
+                    expect(auth).to_have_attribute('type', 'password')
+                    auth.fill(hy2_password)
+                    select_certificate(dialog)
+                    return dialog
+                dialog = hy2_draft()
+                dialog.get_by_role('button', name='取消', exact=True).click()
+                self.assertEqual(len(context.request.get(base + '/api/inbounds').json()), len(identities))
+                dialog = hy2_draft()
+                hy2_id = save(dialog); identities.append(hy2_id)
+                with sqlite3.connect(root / 'data/v-ui.db') as db:
+                    created_credentials[hy2_id] = db.execute('SELECT settings FROM inbounds WHERE id=?', (hy2_id,)).fetchone()[0]
+                self.assertEqual(json.loads(created_credentials[hy2_id]), {'users': [{'password': hy2_password}]})
+
+                def check_hy2_state():
+                    state = editor(hy2_id)
+                    self.assertEqual(state['protocol'], 'hysteria2')
+                    self.assertEqual(state['certificate_id'], certificate_id)
+                    self.assertEqual(state['profile']['security'], 'tls')
+                    self.assertEqual(state['profile']['transport'], 'quic')
+                    self.assertEqual(state['profile']['server_name'], 'vpn.example.test')
+                    self.assertEqual(state['profile']['client_fingerprint'], '')
+                    self.assertIsNone(state['profile']['up_mbps'])
+                    self.assertIsNone(state['profile']['down_mbps'])
+                    self.assertFalse(state['profile']['skip_cert_verify'])
+                    self.assertTrue(state['profile']['hysteria2_password_set'])
+                    self.assertFalse(state['profile'].get('hysteria2_password'))
+                    self.assertNotIn(hy2_password, json.dumps(state))
+                    return state
+
+                def check_hy2_prefill(dialog):
+                    expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).to_contain_text('vpn.example.test')
+                    expect(dialog.get_by_placeholder('example.com', exact=True)).to_have_value('vpn.example.test')
+                    expect(dialog).to_contain_text('已有凭据保留在服务器')
+                    expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select__wrapper')).to_have_class(re.compile(r'is-disabled'))
+                    auth = dialog.locator('.el-form-item').filter(has_text='Hysteria2 Password').locator('input')
+                    expect(auth).to_have_attribute('type', 'password')
+                    expect(auth).to_have_value('')
+                    self.assertNotIn(hy2_password, dialog.inner_text())
+                    self.assertNotIn(hy2_password, str(dialog.locator('input').evaluate_all('(inputs) => inputs.map(input => input.value)')))
+                    return auth
+
+                hy2_state = check_hy2_state()
+                dialog = open_edit('managed-hysteria2')
+                check_hy2_prefill(dialog).fill('Cancelled-HY2-password')
+                dialog.get_by_placeholder('例如：US-01').fill('cancelled-hysteria2')
+                dialog.get_by_role('button', name='取消', exact=True).click()
+                self.assertEqual(check_hy2_state(), hy2_state)
+                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                dialog = open_edit('managed-hysteria2')
+                check_hy2_prefill(dialog)
+                dialog.get_by_placeholder('例如：US-01').fill('managed-hysteria2-edited')
+                save(dialog, hy2_id)
+                check_hy2_state()
+                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                dialog = open_edit('managed-hysteria2-edited')
+                check_hy2_prefill(dialog)
+                dialog.get_by_role('button', name='取消', exact=True).click()
+                with sqlite3.connect(root / 'data/v-ui.db') as db:
+                    settings, hy2_stream_before = db.execute('SELECT settings,stream_settings FROM inbounds WHERE id=?', (hy2_id,)).fetchone()
+                self.assertEqual(settings, created_credentials[hy2_id])
+                self.assertNotIn('transport', json.loads(hy2_stream_before))
+                revision = json.loads((runtime / 'state.json').read_text())['revision']
+                applied = json.loads((runtime / (revision + '.json')).read_text())
+                hy2_server = next(item for item in applied['inbounds'] if item['type'] == 'hysteria2')
+                self.assertEqual(hy2_server['users'], [{'password': hy2_password}])
+                self.assertEqual(hy2_server['tls']['server_name'], 'vpn.example.test')
+                self.assertTrue(hy2_server['tls']['enabled'])
+                for field in ('transport', 'up_mbps', 'down_mbps', 'obfs'):
+                    self.assertNotIn(field, hy2_server)
+                self.assertNotIn('alpn', hy2_server['tls'])
+                self.assertNotIn('utls', hy2_server['tls'])
                 # The separate certificate-management card must offer both TLS
                 # targets and complete its existing normal VMess bind action.
                 page.goto(base + '/certificates')
@@ -416,6 +510,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 expect(choices.locator(f'option[value="{vmess_id}"]')).to_have_text('managed-vmess-edited')
                 expect(choices.locator(f'option[value="{ws_id}"]')).to_have_text('managed-vless-ws-edited')
                 expect(choices.locator(f'option[value="{grpc_id}"]')).to_have_text('managed-vless-grpc-edited')
+                expect(choices.locator(f'option[value="{hy2_id}"]')).to_have_text('managed-hysteria2-edited')
                 choices.select_option(str(vmess_id))
                 with page.expect_response(lambda reply: reply.url.endswith(f'/api/certificates/{certificate_id}/bind-inbound') and reply.request.method == 'POST') as bound:
                     card.get_by_role('button', name='绑定节点', exact=True).click()
@@ -452,6 +547,14 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 self.assertTrue(grpc_proxy['tls'])
                 self.assertEqual(grpc_proxy['servername'], 'vpn.example.test')
                 self.assertFalse(grpc_proxy['skip-cert-verify'])
+                hy2_proxy = next(item for item in yaml.safe_load(exported.text())['proxies'] if item['name'] == 'managed-hysteria2-edited')
+                self.assertEqual(hy2_proxy['type'], 'hysteria2')
+                self.assertEqual(hy2_proxy['password'], hy2_password)
+                self.assertEqual(hy2_proxy['sni'], 'vpn.example.test')
+                self.assertFalse(hy2_proxy['skip-cert-verify'])
+                self.assertFalse(hy2_proxy['udp'])
+                for field in ('up', 'down', 'obfs', 'obfs-password', 'alpn', 'client-fingerprint'):
+                    self.assertNotIn(field, hy2_proxy)
                 singbox = context.request.get(base + response.json()['paths']['sing-box.json'])
                 self.assertEqual(singbox.status, 200, singbox.text())
                 vmess_client = next(item for item in singbox.json()['outbounds'] if item.get('type') == 'vmess')
@@ -473,6 +576,17 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 self.assertEqual(grpc_client['tls']['server_name'], 'vpn.example.test')
                 self.assertEqual(grpc_client['tls']['alpn'], ['h2'])
                 self.assertFalse(grpc_client['tls'].get('insecure', False))
+                hy2_client = next(item for item in singbox.json()['outbounds'] if item.get('tag') == 'managed-hysteria2-edited')
+                self.assertEqual(hy2_client['type'], 'hysteria2')
+                self.assertEqual(hy2_client['password'], hy2_password)
+                self.assertEqual(hy2_client['network'], 'tcp')
+                self.assertTrue(hy2_client['tls']['enabled'])
+                self.assertEqual(hy2_client['tls']['server_name'], 'vpn.example.test')
+                self.assertFalse(hy2_client['tls'].get('insecure', False))
+                for field in ('transport', 'up_mbps', 'down_mbps', 'obfs'):
+                    self.assertNotIn(field, hy2_client)
+                self.assertNotIn('alpn', hy2_client['tls'])
+                self.assertNotIn('utls', hy2_client['tls'])
                 raw = context.request.get(base + response.json()['paths']['raw'])
                 self.assertEqual(raw.status, 200, raw.text())
                 links = base64.b64decode(raw.text()).decode().splitlines()
@@ -500,6 +614,11 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 self.assertEqual(grpc_query['alpn'], ['h2'])
                 for field in ('path', 'host', 'authority', 'allowInsecure', 'packetEncoding'):
                     self.assertNotIn(field, grpc_query)
+                hy2_link = urlsplit(next(item for item in links if item.startswith('hysteria2://')))
+                self.assertEqual(unquote(hy2_link.username), hy2_password)
+                self.assertIsNone(hy2_link.password)
+                hy2_query = parse_qs(hy2_link.query, strict_parsing=True)
+                self.assertEqual(hy2_query, {'sni': ['vpn.example.test'], 'insecure': ['0']})
                 for text in (exported.text(), singbox.text(), '\n'.join(links)):
                     for server_only in (str(root), 'certificate_path', 'key_path', 'PRIVATE KEY', '_vui'):
                         self.assertNotIn(server_only, text)
@@ -515,7 +634,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     db.execute("UPDATE inbounds SET remark='after-backup'")
                     db.execute('DELETE FROM certificate_bindings')
-                    for identity in (ws_id, grpc_id):
+                    for identity in (ws_id, grpc_id, hy2_id):
                         db.execute("UPDATE inbounds SET settings='{}',stream_settings='{}' WHERE id=?", (identity,))
                 release_tools.restore(root, archive, digest)
                 base = start(); page = new_page(); login()
@@ -539,17 +658,22 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                         self.assertEqual(state['profile']['server_name'], 'vpn.example.test')
                         self.assertNotIn(grpc_uuid, json.dumps(state))
                         check_grpc_prefill(dialog, 'VUI.Edited-2')
+                    if identity == hy2_id:
+                        check_hy2_state()
+                        check_hy2_prefill(dialog)
                     dialog.get_by_role('button', name='取消', exact=True).click()
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     self.assertEqual(db.execute('SELECT id,settings FROM inbounds ORDER BY id').fetchall(), secrets_before)
                     self.assertEqual(db.execute('SELECT stream_settings FROM inbounds WHERE id=?', (ws_id,)).fetchone()[0], ws_stream_before)
                     self.assertEqual(db.execute('SELECT stream_settings FROM inbounds WHERE id=?', (grpc_id,)).fetchone()[0], grpc_stream_before)
+                    self.assertEqual(db.execute('SELECT stream_settings FROM inbounds WHERE id=?', (hy2_id,)).fetchone()[0], hy2_stream_before)
                 self.assertEqual(external, [])
                 self.assertEqual(errors, [])
                 self.assertEqual(context.request.get(base + response.json()['paths']['mihomo.yaml']).status, 404)
                 print('VMess managed TLS: inbound and certificate-page selectors / card binding / create / cancel / edit / refresh / re-edit / hidden UUID retained / three exports / stopped restore OK')
                 print('VLESS WS managed TLS: create / cancel / invalid path and Host rejected / path and client Host edit / refresh / prefill / hidden UUID retained / binding retained / three verified-TLS exports without server paths / stopped restore OK')
                 print('VLESS gRPC Lite managed TLS: create / cancel / literal invalid service rejected / service edit / refresh / prefill / hidden UUID and h2 ALPN retained / binding / three exports / stopped restore OK')
+                print('Hysteria2 managed TLS: native QUIC UDP listener / create / cancel / edit / refresh / reopen / hidden password retained / binding selectors / three verified-TLS exports / damaged stopped backup restoration OK')
                 print('Node editor browser: managed TLS create / cancel / protected TLS unbind / none and REALITY edits / refresh / re-edit / TLS export / stopped restore / credentials retained OK')
                 stop()
                 browser.close()

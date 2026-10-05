@@ -18,7 +18,14 @@
 | VLESS/gRPC 导出或编辑拒绝 | 检查单 UUID、空 flow、TLS/SNI、字面 `[A-Za-z0-9._-]{1,128}` service name、ALPN 省略或仅 h2；已有未知字段不得靠编辑静默丢弃 |
 | VLESS/gRPC service name 不匹配 | 客户端必须逐字匹配，区分大小写；不要加 `/`、`/Tun`、query 或百分号转义。`.` / `..` 是合法字面 service，不能按路径段归一化 |
 | VLESS/gRPC 错误 CA/SNI 只显示超时 | 固定 sing-box gRPC Lite 可能未及时返回 x509 原因；核对 CA、明确 SNI、实际日志。超时本身不是正确 TLS 拒绝证据，不关闭验证；[测试诊断记录](VLESS_GRPC_044.md)使用局部 HTTP/2 日志取得证据 |
-| gRPC authority/Host、headers、timer 或多模式不可保存 | 本候选未验收这些参数，固定核心不实施 authority/Host 白名单；不替换核心、增加反代或悄悄忽略字段以伪造支持 |
+| gRPC authority/Host、headers、timer 或多模式不可保存 | gRPC 基线未验收这些参数，固定核心不实施 authority/Host 白名单；不替换核心、增加反代或悄悄忽略字段以伪造支持 |
+| Hysteria2 没有连通但 TCP 已开放 | QUIC 使用节点 UDP；核对主机/云安全组的准确 UDP 端口，TCP 同号放行不能替代。新安装可显式 `--node-udp-port`，升级须重传并人工核对所有权 |
+| Hysteria2 导出拒绝 | 仅单密码、明确验证 SNI、原生 QUIC 默认值；obfs、hopping、带宽、ALPN/uTLS 覆盖、多用户或未知字段不在严格公开范围，不靠丢字段或关闭 TLS 修复 |
+| Hysteria2 编辑返回 422 | 检查已有 users/password 和 TLS 是否有效、字段是否能由表单表达；密码须 1–256 字面字符，无全空白、Unicode 控制字符或无效 UTF-8，不能借空值生成掩盖坏导入 |
+| Hysteria2 空密码或高级草稿 | 密码输入空字符串：新建生成、编辑保留，响应不回传秘密。新默认无带宽/Chrome；已有高级草稿可以保留，不表示能够公开导出 |
+| Hysteria2 超时或错误密码/CA/SNI | 核对真实认证/x509 错误；Mihomo 错误密码可在 3 秒请求期限后超时同时记录 authentication failed，不保证立即结构化报错。不能把超时或零目标请求单独当作拒绝原因，保持验证开启。前置失败及有界观察修复见[阶段证据](HYSTERIA2_045.md) |
+| Hysteria2 应用 UDP 不通 | 当前只验 HTTP/TCP 负载，Mihomo udp:false、sing-box network:tcp；QUIC 自身 UDP socket 不等于应用 UDP 支持 |
+| UDP 安装预检报端口占用 | 新安装分别探测 IPv4/可用 IPv6 UDP，与 TCP 独立；核对端口属主，不停止无关进程。既有安装跳过 bind 预检，必须人工核对 |
 | 409分流保存 | 另一页面已更新修订；重新载入，手动合并草稿，不覆盖他人新版本 |
 | 428分流保存 | 缺少If-Match；先读取snapshot/ETag，使用当前UI |
 | 503规则 | 已保存文件不可读/损坏；从可信备份恢复，系统不会悄悄回到默认规则 |

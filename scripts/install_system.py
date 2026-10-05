@@ -124,6 +124,12 @@ def validate_options(args):
         raise InstallError('Use an unprivileged HTTPS port in 1024–65535')
     if not 1024 <= args.node_port <= 65535:
         raise InstallError('Use an unprivileged default node port in 1024–65535')
+    # Older callers construct Namespace objects without this optional field.
+    udp_ports = getattr(args, 'node_udp_port', [])
+    if (not isinstance(udp_ports, list)
+            or any(type(port) is not int or not 1024 <= port <= 65535 for port in udp_ports)):
+        raise InstallError('Use explicit unprivileged node UDP ports in 1024–65535')
+    args.node_udp_port = sorted(set(udp_ports))
     ipaddress.ip_address(args.bind)
     if bool(args.cert) != bool(args.key):
         raise InstallError('Provide both --cert and --key, or neither for automatic issuance')
@@ -176,15 +182,18 @@ def check_reserved(existing, manager='systemd'):
                 raise InstallError('An unrelated system service already uses '+name)
 
 
-def check_port(port, bind='0.0.0.0'):
+def check_port(port, bind='0.0.0.0', protocol='tcp'):
+    if protocol not in ('tcp', 'udp'):
+        raise InstallError('Port protocol must be tcp or udp')
     family = socket.AF_INET6 if ':' in bind else socket.AF_INET
-    with socket.socket(family, socket.SOCK_STREAM) as sock:
+    kind = socket.SOCK_DGRAM if protocol == 'udp' else socket.SOCK_STREAM
+    with socket.socket(family, kind) as sock:
         if family == socket.AF_INET6:
             sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
         try:
             sock.bind((bind, port))
         except OSError:
-            raise InstallError(f'Port {port} is already in use; no existing service was stopped') from None
+            raise InstallError(f'Port {port} is already in use ({protocol}); no existing service was stopped') from None
 
 
 def probe_ipv6():
@@ -247,34 +256,50 @@ def tty_confirm(message):
         raise InstallError('Interactive confirmation is required; rerun from a terminal or use the explicit non-interactive flags') from None
 
 
-def firewall_preflight(args, ports):
+def firewall_preflight(args, ports, udp_ports=None):
+    ports=sorted(set(ports))
+    udp_ports=sorted(set(udp_ports or []))
     info=firewall_support.detect()
     statuses={port:firewall_support.port_open(info,port) for port in ports}
+    udp_statuses={port:firewall_support.port_open(info,port,protocol='udp') for port in udp_ports}
     missing=[port for port,value in statuses.items() if value is False]
     unknown=[port for port,value in statuses.items() if value is None]
+    missing_udp=[port for port,value in udp_statuses.items() if value is False]
+    unknown_udp=[port for port,value in udp_statuses.items() if value is None]
+    def labels(tcp, udp):
+        return ', '.join([str(port)+'/tcp' for port in tcp]+[str(port)+'/udp' for port in udp])
+    result={'backend':info['backend'],'missing':missing,'unknown':unknown,
+            'tcp_ports':ports,'udp_ports':udp_ports,'missing_udp':missing_udp,'unknown_udp':unknown_udp}
     print('Local firewall:',info['detail'])
+    print('Required inbound firewall ports:',labels(ports,udp_ports))
+    if udp_ports:
+        print('Explicit node UDP ports are for QUIC transport; this does not create a node or enable application UDP forwarding.')
     if args.dry_run:
-        return {'backend':info['backend'],'missing':missing,'unknown':unknown}
-    if missing:
+        return result
+    if missing or missing_udp:
+        print('Local firewall changes requested:',labels(missing,missing_udp))
         choice=args.open_firewall
         if choice=='ask':
-            choice='yes' if tty_confirm('Local firewall blocks '+', '.join(str(p)+'/tcp' for p in missing)+'. Open these ports now?') else 'no'
+            choice='yes' if tty_confirm('Local firewall needs '+labels(missing,missing_udp)+'. Open these ports now?') else 'no'
         if choice!='yes':
-            raise InstallError('Required local firewall ports remain closed: '+', '.join(map(str,missing)))
-        try:firewall_support.open_ports(info,missing)
+            raise InstallError('Required local firewall ports remain closed: '+labels(missing,missing_udp))
+        try:
+            if missing:firewall_support.open_ports(info,missing)
+            if missing_udp:firewall_support.open_ports(info,missing_udp,protocol='udp')
         except RuntimeError as exc:raise InstallError(str(exc)) from None
-        if any(firewall_support.port_open(info,p) is not True for p in missing):
+        if (any(firewall_support.port_open(info,p) is not True for p in missing)
+                or any(firewall_support.port_open(info,p,protocol='udp') is not True for p in missing_udp)):
             raise InstallError('Firewall change could not be verified')
-    if unknown:
+    if unknown or unknown_udp:
         print('Firewall rules or ingress zone could not be verified; automatic modification is disabled.')
-        print('Open TCP ports manually:',', '.join(map(str,unknown)))
-        if not args.assume_external_ports_open and not tty_confirm('Have you manually verified and opened the listed ports in the actual ingress firewall zones?'):
+        print('Open ports manually:',labels(unknown,unknown_udp))
+        if not args.assume_external_ports_open and not tty_confirm('Have you manually verified and opened '+labels(unknown,unknown_udp)+' in the actual ingress firewall zones?'):
             raise InstallError('Waiting for manual firewall configuration')
     if not args.assume_external_ports_open:
         print('V-UI cannot modify cloud security groups or provider firewalls.')
-        if not tty_confirm('Have you opened TCP '+', '.join(map(str,ports))+' in the cloud/upstream firewall?'):
+        if not tty_confirm('Have you opened '+labels(ports,udp_ports)+' in the cloud/upstream firewall?'):
             raise InstallError('Waiting for cloud/upstream port configuration')
-    return {'backend':info['backend'],'missing':missing,'unknown':unknown}
+    return result
 
 
 def copy_private(source, target, uid, gid):
@@ -331,6 +356,8 @@ def install(args):
         config['ipv6']=saved.get('ipv6',ipv6)
         if not args.upgrade and saved.get('ready'):
             raise InstallError('An installation already exists. Use --upgrade with a verified package')
+        if args.node_udp_port:
+            print('Existing installation: node UDP bind probes are skipped to avoid conflicting with running nodes; verify node port ownership manually.')
     else:
         check_port(80)
         if ipv6: check_port(80,'::')
@@ -339,12 +366,17 @@ def install(args):
         # The default sing-box inbound listens on ::. Its IPv6-only conflicts
         # are invisible to an IPv4 probe, on both systemd and OpenRC hosts.
         if ipv6: check_port(args.node_port,'::')
+        # UDP and TCP can share a number, but each needs its own bind probe.
+        # Do not infer QUIC ports from the default TCP node port.
+        for port in args.node_udp_port:
+            check_port(port,'0.0.0.0',protocol='udp')
+            if ipv6:check_port(port,'::',protocol='udp')
     if args.cert:
         if Path(args.cert).is_symlink() or Path(args.key).is_symlink():
             raise InstallError('Certificate inputs must be regular files')
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(args.cert, args.key)
-    firewall=firewall_preflight(args,sorted(set([80,args.port,args.node_port])))
+    firewall=firewall_preflight(args,sorted(set([80,args.port,args.node_port])),args.node_udp_port)
     if args.dry_run:
         print(json.dumps({'checks':'passed','no_changes':True,'domain':args.domain,
               'release_id':meta['release_id'],'distro':info,'service_manager':manager,
@@ -443,6 +475,8 @@ def main():
     p.add_argument('--domain'); p.add_argument('--email'); p.add_argument('--admin', default='admin')
     p.add_argument('--port',type=int,default=8443);p.add_argument('--bind',default='0.0.0.0')
     p.add_argument('--node-port',type=int,default=10443,help='Default node TCP port to preflight/open')
+    p.add_argument('--node-udp-port',type=int,action='append',default=[],metavar='PORT',
+                   help='Explicit node UDP/QUIC port to preflight/open; repeat for each port; does not create a node')
     p.add_argument('--open-firewall',choices=['ask','yes','no'],default='ask')
     p.add_argument('--assume-external-ports-open',action='store_true',help='Skip cloud/upstream firewall confirmation')
     p.add_argument('--accept-terms', action='store_true'); p.add_argument('--upgrade', action='store_true')

@@ -20,7 +20,9 @@
 
 v0.4.3 的 VLESS/WS/TLS 已完成[准确主线验收](VLESS_WS_CLOSURE_043.md)，沿用上述正式托管证书、绑定和续期流程。WebSocket Host 是客户端路由信息，不是证书域名；绑定和证书验证仍使用 TLS SNI，不能用不同 Host 绕过域名检查。
 
-v0.4.4 的 VLESS/gRPC/TLS 候选复用同一流程，最终独立审查与准确候选/主线验收仍待完成。`service_name` 与 SNI/证书域名无关，不能拿它代替域名验证。续期须保留 UUID、字面 service name、受支持 ALPN/指纹与绑定关系；失败保留旧材料，停止核心保持 `CORE_STOPPED_PENDING_APPLY`。固定 gRPC Lite 客户端的错误 CA/SNI 可能表现为超时，不能因请求没送达就声称已获得明确 TLS 错误；详见[阶段证据和限制](VLESS_GRPC_044.md)。
+v0.4.4 的 VLESS/gRPC/TLS 已完成[gRPC 准确主线验收](VLESS_GRPC_CLOSURE_044.md)，复用同一流程。`service_name` 与 SNI/证书域名无关，不能拿它代替域名验证。续期须保留 UUID、字面 service name、受支持 ALPN/指纹与绑定关系；失败保留旧材料，停止核心保持 `CORE_STOPPED_PENDING_APPLY`。固定 gRPC Lite 客户端的错误 CA/SNI 可能表现为超时，不能因请求没送达就声称已获得明确 TLS 错误；详见[阶段证据和限制](VLESS_GRPC_044.md)。
+
+v0.4.5 的 Hysteria2/TLS 候选新增同一正式托管证书选择、绑定与续期路径。单密码、明确验证 SNI、原生 QUIC；续期保持密码/节点配置，失败保留旧活动材料和已应用 revision，停止核心继续 `CORE_STOPPED_PENDING_APPLY`。新门槛包括双客户端用全新 QUIC 会话验证续期后链路，及真实 Chromium 创建/取消/编辑/刷新/再打开/导出/损坏后停机恢复；最终集成尚未验收，不能把裸核心前置成功写成托管证书通过，详见[HY2 契约](HYSTERIA2_045.md)。QUIC 节点需要 UDP 通行，但不改变 ACME HTTP-01 仍使用 TCP 80 的条件，也不证明应用 UDP 支持。
 
 手动停止的核心不会因续期被自动启动。新证书路径可保存并验证，页面显示待应用；主动启动核心后再“重试应用”。手工改过节点证书路径时，自动续期不会覆盖该改动，需重新明确绑定。
 

@@ -23,7 +23,7 @@ python -m unittest discover -s tests -v
 | --- | --- |
 | Test V-UI | API、鉴权、数据库、状态、纯函数、原浏览器操作流程和托管证书节点编辑/恢复 |
 | ToClash reference and export verification | 固定独立参考、100场景、40项目录、客户端配置 |
-| Real loopback proxy and DNS chain | 实际 VLESS/TCP/TLS、Trojan、Shadowsocks、VMess，已验证 VLESS/WS/TLS，以及候选 VLESS/gRPC/TLS 的双客户端链路与失败路径；DNS、拒绝/停启 |
+| Real loopback proxy and DNS chain | 实际 VLESS/TCP/TLS、Trojan、Shadowsocks、VMess，已验证 VLESS/WS/TLS、VLESS/gRPC/TLS，以及候选 Hysteria2/TLS 的双客户端链路与失败路径；DNS、拒绝/停启 |
 | Selected release deployment gates | 实际离线包、HTTPS、完整Vue面板、备份恢复/回滚 |
 | ACME certificate acceptance | Certbot/Pebble真实HTTP-01、续期/失败、Chromium证书页 |
 | One-command installation acceptance | 仅临时CI主机上的实际sudo/systemd/socket安装、升级、重启 |
@@ -61,9 +61,9 @@ sing-box 1.14.2 / VLESS / WS / TLS 已由 PR #18 完成准确主线八组验收�
 
 范围限 HTTP/TCP，不宣称新增 UDP；TLS 必须验证明确 SNI，Host 不代替 SNI。后续改动必须在最终提交重新执行对应门槛，并分别报告未运行、失败和通过。
 
-## v0.4.4 gRPC 候选验收
+## v0.4.4 gRPC 基线回归
 
-固定官方 sing-box 1.14.2 无 `with_grpc`，实际 gRPC Lite；Mihomo 固定 1.19.32。不得为获得标准 gRPC 重编译核心、换 pin、新增反代、依赖或后端。前置 `a0205fe545fabd958fe7aa80835a3ec6abeada92` 的真实链路 45 项测试通过，集成候选的最终独立审查/准确候选和主线八组 CI 尚待完成。详细链接、首次失败和已知限制见[阶段契约](docs/VLESS_GRPC_044.md)。
+固定官方 sing-box 1.14.2 无 `with_grpc`，实际 gRPC Lite；Mihomo 固定 1.19.32。不得为获得标准 gRPC 重编译核心、换 pin、新增反代、依赖或后端。[PR #19 的准确主线](docs/VLESS_GRPC_CLOSURE_044.md) `84729dfc53165003e7d459a5d56621ce89ba497c` 已完成独立审查与准确候选/主线八组 CI，最终 11 个 job 和每一步全部成功。前置 45 项与最终主线真实链路 53 项分开记录；首次失败和已知限制仍见[原阶段契约](docs/VLESS_GRPC_044.md)。
 
 - `python -m unittest discover -s tests -p 'test_vless_grpc_profile.py' -v`：严格 `[A-Za-z0-9._-]{1,128}` 字面 service name，不 trim/强转；flow、ALPN（含显式 null 拒绝）、未知字段、三格式映射、编辑往返、秘密和已导入字段保护。
 - `test_vless_grpc_credentials.py`：已有 gRPC 节点缺失/畸形 UUID 的编辑返回 422，不生成替代；省略 flow/fingerprint/skip 字段保留原值，不使畸形导入变得可公开。
@@ -75,3 +75,19 @@ sing-box 1.14.2 / VLESS / WS / TLS 已由 PR #18 完成准确主线八组验收�
 - 激活 `test_inbound_editor_browser.py`，验创建/取消/编辑/刷新/再打开、UUID 保留、证书回填、三格式与停机备份恢复；续期不得启动手动停止的核心，保持 `CORE_STOPPED_PENDING_APPLY`。
 
 仅 sing-box/VLESS/gRPC/TLS、单 UUID、空 flow、明确验证 SNI、ALPN 省略或 `["h2"]`、Chrome 独立可选、HTTP/TCP。Mihomo `udp: false`、sing-box `network: tcp`；不扩大到 UDP、h2c、Xray gRPC、authority/Host enforcement、额外 headers/timers/multi-mode、HY2/TUIC 或发布/部署。失败、环境阻断、未运行、前置通过和最终集成通过要分别报告。
+
+## v0.4.5 Hysteria2 候选验收
+
+当前 [Draft PR #20](https://github.com/ForceMind/V-UI/pull/20) 只增加固定 sing-box 1.14.2 / Mihomo 1.19.32、单密码、明确验证 SNI 和原生 QUIC 默认值。前置 `e18003670c6469489c7a63413be0a3f9bd77cf0b` 的[真实链路](https://github.com/ForceMind/V-UI/actions/runs/37293701022) 58 项通过；同提交 [ACME](https://github.com/ForceMind/V-UI/actions/runs/37293701064) 因继承夹具的 DNS TCP/UDP 端口碰撞失败，夹具预留修复已通过 4 项本地回归，准确候选 ACME 重跑仍待完成，不是八组全绿。最终独立审查、集成 exact-head 和 exact-master 八组均仍待完成。
+
+- `python -m unittest discover -s tests -p 'test_hysteria2_profile.py' -v`：严格密码/SNI/默认值、标准 URI 编码、完整 Mihomo/sing-box 输出、拒绝调优/未知字段，编辑隐藏秘密、空值保留与遗留高级草稿保护。
+- `test_hysteria2_preflight_loopback.py`：裸配置固定核心；`test_hysteria2_loopback.py`：应用编译、匿名无 cookie 公开订阅生成配置的双客户端链路。使用 `VUI_TEST_CORES` / `VUI_TEST_MIHOMO` 激活真实门槛，不能将默认 skip 写成运行通过。
+- 双客户端每次只改变密码、CA 或 SNI 一项，先证明目标 IP 可达；错误密码需要真实 `authentication failed`，CA/SNI 需要实际 x509。有限观察窗口内可重复失败请求，但每次都必须零目标送达、无 DIRECT；本地 mixed listener 的 `Auth success`、超时或零送达本身不是上游拒绝原因。
+- `test_export_real.py`：真实客户端 config check；与实际 HTTP/TCP 转发分开报告。Mihomo `udp: false`、sing-box `network: tcp`；QUIC 的 UDP socket 不代表应用 UDP 已验收。
+- `test_hysteria2_managed_certificate.py`：API/编辑/绑定、续期后新的真实 QUIC 会话、失败保留旧材料和已应用 revision、停止核心 `CORE_STOPPED_PENDING_APPLY`。原证书门槛继续回归。
+- 激活 `test_inbound_editor_browser.py`，覆盖创建/取消/编辑/刷新/再打开、密码隐藏/稳定、证书回填、三格式解析及故意损坏后的停机备份恢复。
+- `test_hysteria2_installation.py` / `test_firewall_support.py`：可重复显式 UDP 端口、1024–65535、独立于 TCP、IPv4/可用 IPv6 冲突、精确确认和升级人工所有权提示；不修改实际主机防火墙，不自动启用它。
+- `test_acme_fixture.py`：测试 DNS TCP/UDP 同端口配对的防碰撞回归；不得通过跳过 ACME 或降低真实证书断言掩盖夹具错误。
+- `python scripts/check_docs.py` 与最终 diff 检查必须通过；实际浏览器、真实配置、链路、ACME、安装和四目标包在准确候选各自验收。前置成功不自动解锁合并或公开 Release。
+
+完整边界与首次失败见[HY2 阶段契约](docs/HYSTERIA2_045.md)。不放开 obfs/hopping、带宽/ALPN/uTLS 覆盖、多用户、TUIC、应用 UDP、其他核心或生产部署；原固定 pins、四 Linux 目标和 40 项 ToClash 不变。

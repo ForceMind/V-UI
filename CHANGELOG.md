@@ -1,5 +1,23 @@
 # 变更日志
 
+## 0.4.5 — Hysteria2/TLS（候选，最终验收待完成）
+
+- 从已验收 v0.4.4 gRPC 主线开始独立 [Draft PR #20](https://github.com/ForceMind/V-UI/pull/20)，固定 sing-box 1.14.2 / Mihomo 1.19.32、四目标 Linux、40 项 ToClash 和发布边界不变。
+- 仅单密码、明确验证 SNI、原生 QUIC 默认值；标准 `hysteria2://` 编码密码、`sni` / `insecure=0`，Mihomo YAML、sing-box JSON 无损映射。仅 HTTP/TCP 负载，Mihomo `udp: false`、sing-box `network: tcp`；QUIC UDP 不等于应用 UDP。
+- 新增可选 Hysteria2 Password，空输入在创建时生成、编辑时保留；编辑响应不回传秘密，新 HY2 不默认写入带宽/Chrome。既有高级/obfs 草稿保留或在无法表达时拒绝，严格公开导出不放开 obfs、hopping、带宽、ALPN/uTLS 覆盖、TUIC 或未知字段。
+- 共用托管证书、续期失败保留旧材料和停止核心 `CORE_STOPPED_PENDING_APPLY`；新增真实浏览器创建/取消/编辑/刷新/再打开/导出与故意损坏后的停机恢复门槛。
+- 安装器新增可重复 `--node-udp-port`（1024–65535），与 TCP 独立；新安装双栈 bind 预检、升级人工核对所有权、精确端口/协议确认、不自动启用防火墙。声明不持久保存、不创建节点，后续运行须再次传入。
+- 准确前置 `e18003670c6469489c7a63413be0a3f9bd77cf0b` 的[真实链路](https://github.com/ForceMind/V-UI/actions/runs/37293701022)通过 58 项测试，双客户端实际 HTTP 与错误密码/CA/SNI 有真实认证/x509、零目标送达和无 DIRECT。首次 `6daff89e` 缺日志失败保留；第二前置 ACME 因 DNS TCP/UDP 测试端口碰撞失败，夹具预留修复已通过 4 项本地回归，准确候选 ACME 重跑仍待完成，不能写成八组全绿。
+- 当前独立审查、最终集成 exact-head 八组、授权正常 merge 与 exact-master 八组仍待完成；未创建 tag/Release、部署或晋升当前附件。完整证据见[HY2 契约](docs/HYSTERIA2_045.md)。
+
+## 2026-10-05 — v0.4.4 gRPC 主线收口
+
+- [PR #19](https://github.com/ForceMind/V-UI/pull/19) 正常合并至 `84729dfc53165003e7d459a5d56621ce89ba497c`；候选 `240edf23af8a12b2cbd71114fe65c693290e39f2` 与合并 tree 同为 `200f8b61ac6decc4fb11384c5d8d162f1f1bdcdc`，来源分支保留。
+- 独立审查、八组 exact-candidate 与八组 exact-master 成功；最终主线 11 个 job、每一步成功。普通 discovery 298 项 OK（含 68 项明确环境 skip），激活真实链路 53 项通过，真实 Chromium、托管证书、安装/四目标门槛分别完成。skip 不作通过。
+- gRPC Lite 限制不变，真实 x509 证据不等于及时向调用者返回 TLS 错误；第一次失败和前置通过保留。此阶段无 tag、Draft Release、公开 Release、部署或附件晋升。详见[gRPC 收口](docs/VLESS_GRPC_CLOSURE_044.md)。
+
+以下 v0.4.4 候选条目保留编写当时的状态；“待完成”不覆盖以上已完成主线收口。
+
 ## 0.4.4 — VLESS/gRPC/TLS（候选，最终验收待完成）
 
 - 从已验收的 v0.4.3 WS 主线开始独立 gRPC 版本；FastAPI/SQLite、40 项 ToClash、四目标 Linux、固定依赖/核心和发布边界不变。
