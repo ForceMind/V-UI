@@ -52,6 +52,8 @@ def _managed_certificate(profile: dict | None, certificate_id: str, core: str, p
     from app.api.certificates import perform
     if core != "sing-box" or protocol not in {"vless", "trojan"}:
         raise HTTPException(409, "Managed certificates currently target validated sing-box VLESS/TLS or Trojan/TLS")
+    if profile and "security" in profile and str(profile["security"]).lower() != "tls":
+        raise HTTPException(409, "Managed certificates require TLS; clear certificate_id when leaving TLS")
     paths, domain, _ = perform(lambda: get_manager().material(certificate_id))
     return {
         **(profile or {}),
@@ -112,8 +114,12 @@ def edit_inbound(
 ):
     item = get_inbound(db, inbound_id)
     data = payload.model_dump(exclude_unset=True)
-    certificate_changed = "certificate_id" in data
-    certificate_id = data.pop("certificate_id", None) if certificate_changed else None
+    profile = data.get("profile")
+    # Match compile_profile: an empty profile is a no-op; a nonempty VLESS
+    # profile defaults a missing/empty security value to none.
+    leaving_tls = bool(profile) and str(profile.get("security") or "none").lower() in {"none", "reality"}
+    certificate_changed = "certificate_id" in data or leaving_tls
+    certificate_id = data.pop("certificate_id", None)
     data["core"] = item.core or "xray"
     data["protocol"] = item.protocol
 
@@ -129,7 +135,7 @@ def edit_inbound(
             data["profile"] = _managed_certificate(
                 data.get("profile"), certificate_id, data["core"], data["protocol"]
             )
-        elif previous_certificate:
+        elif previous_certificate and not leaving_tls:
             profile = data.get("profile")
             if not isinstance(profile, dict):
                 raise HTTPException(
@@ -154,6 +160,11 @@ def edit_inbound(
                 )
 
     updated = update_inbound(db, inbound_id, data)
+    # The desired profile is now saved. Remove renewal before applying so a
+    # failed core apply cannot leave this saved non-TLS/manual node bound.
+    if certificate_changed and not certificate_id and previous_certificate:
+        from app.api.certificates import perform
+        perform(lambda: certificate_manager.unbind("inbound:" + str(inbound_id)))
     result = apply_checked(updated.core)
 
     if certificate_changed:
@@ -161,8 +172,6 @@ def edit_inbound(
         target = "inbound:" + str(inbound_id)
         if certificate_id:
             perform(lambda: certificate_manager.bind(certificate_id, target))
-        elif previous_certificate:
-            perform(lambda: certificate_manager.unbind(target))
 
     return {
         "message": "Inbound updated",
