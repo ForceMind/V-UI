@@ -1,15 +1,24 @@
 # 变更日志
 
-## 0.4.0 — Trojan/TCP/TLS
+## 0.4.0 — Trojan/TCP/TLS 候选
 
+- 正常合入已验收的 PR #13 节点编辑与 PR #12 Linux 安装修复；当前安装、发布和文档索引示例统一跟随 VERSION，并增加防漂移回归。
 - 新增 sing-box Trojan/TCP/TLS strict public export：Mihomo YAML、Trojan URI/Base64、sing-box JSON。
 - 单密码用户、TLS/SNI/证书校验、可选 ALPN/Chrome fingerprint 经过固定客户端验证。
 - 真实 sing-box 服务端 + Mihomo 客户端 loopback 验证正确密码连通、错误密码拒绝、错误 CA/SNI 拒绝且不回退 DIRECT。
 - 托管证书、自动续期和证书页面绑定扩展到 Trojan/TLS 节点。
 - 未验证的 Xray Trojan、WS/gRPC Trojan 等继续明确拒绝，不随本版本放开。
 
+## 0.3.2 — 节点编辑修复候选
+
+- 合入已验收的 PR #12 Linux 安装修复，保留依赖 PR 链与发布边界。
+- 修复托管 TLS 节点切换 `none` / `REALITY` 后被隐藏证书选择改回 TLS，以及非 TLS 解绑错误要求证书路径的问题。
+- 保留 TLS 手工解绑保护、秘密保留和核心/协议锁定；空 profile 不会意外解除续期。
+- 增加实际 Vue/Chromium、固定核心与临时 CA 的创建、编辑、取消、刷新、再编辑、TLS 导出和停机恢复回归；该编辑测试不扩大协议支持范围。
 
 ## 0.3.1 — Linux 可移植安装与发布链
+
+- Linux 安装回归修复：OpenRC HTTP-01 在 bind 前设置 IPv6-only；新安装双栈预检 HTTP-01/默认节点端口；firewalld 仅处理明确的活动接口 zone，歧义时保留现有规则并等待人工核对。
 
 - 安装器从 Ubuntu 24.04/amd64 白名单改为检测发行版、CPU、libc、init、包管理器和防火墙能力。
 - 支持 x86_64 / ARM64 与 glibc / musl 四种目标运行包，运行服务使用固定便携 CPython 3.12 和 hash-locked wheels。

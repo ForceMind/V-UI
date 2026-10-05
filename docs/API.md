@@ -54,3 +54,11 @@ POST `/api/subscriptions`：label、server（节点公开地址）、inbound_ids
 证书API不接受shell命令、用户hooks、任意CA URL、DNS provider token。申请错误与应用错误分开，不能看到job成功就忽略绑定失败。自动续期暂停不取消已经排队的明确请求。
 
 通用401/403/429与维护方式见[排错](TROUBLESHOOTING.md)。
+
+### 节点安全模式与托管证书
+
+更新节点时，明确非 TLS 的 `profile.security`（`none` / `reality`）会解除已有托管续期绑定；可同时传 `certificate_id: null`。未传 `certificate_id` 的非 TLS 更新也不会遗留绑定。传非空 `certificate_id` 与明确非 TLS 模式相冲突时返回 409，不会悄悄改回 TLS。
+
+保留 TLS 并解绑必须提供新的手工证书与私钥路径；任意一项仍指向原托管材料会被拒绝。空 `profile: {}` 沿用原配置，不构成离开 TLS，也不能绕过路径检查。无效的替换 profile 不会清除原绑定；有效配置已经保存而核心应用失败时，解绑跟随已保存的期望配置生效，响应继续区分 `saved` 与 `applied`。
+
+这只修正编辑与绑定状态；`none` / `REALITY` 并未因此扩大本阶段的公开导出和连接验收范围。续期仍保留手动停止核心的 `CORE_STOPPED_PENDING_APPLY` 状态。

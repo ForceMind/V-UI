@@ -7,6 +7,41 @@ import subprocess
 def run(args):
     return subprocess.run(args,capture_output=True,text=True)
 
+def active_firewalld_zone(output: str) -> str | None:
+    """Only one interface-bound zone with no source-specific routing is safe.
+
+    The default zone is not evidence of where inbound traffic arrives. Multiple
+    active zones, source bindings and unknown output need operator knowledge;
+    never guess which interface/source carries the user's public traffic.
+    """
+    zones = {}
+    current = None
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        if not line[0].isspace():
+            name = line.strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", name) or name in zones:
+                return None
+            current = name
+            zones[current] = set()
+        else:
+            match = re.fullmatch(r"\s+(interfaces|sources):\s*(.*)", line)
+            if current is None or match is None:
+                return None
+            kind, values = match.groups()
+            if kind in zones[current]:
+                return None
+            if kind == "sources" and values.strip():
+                return None
+            if kind == "interfaces" and values.strip():
+                zones[current].add(kind)
+    if len(zones) != 1:
+        return None
+    zone, bindings = next(iter(zones.items()))
+    return zone if "interfaces" in bindings else None
+
+
 def detect() -> dict:
     ufw=shutil.which("ufw")
     if ufw:
@@ -17,8 +52,13 @@ def detect() -> dict:
     if firewall:
         state=run([firewall,"--state"])
         if state.returncode==0 and state.stdout.strip()=="running":
-            zone=run([firewall,"--get-default-zone"]).stdout.strip() or "default"
-            return {"backend":"firewalld","managed":True,"detail":"firewalld active","zone":zone}
+            active=run([firewall,"--get-active-zones"])
+            zone=active_firewalld_zone(active.stdout) if active.returncode==0 else None
+            if zone is None:
+                return {"backend":"firewalld","managed":False,
+                        "detail":"firewalld ingress zone is ambiguous or unavailable; manual configuration required"}
+            return {"backend":"firewalld","managed":True,
+                    "detail":"firewalld active interface zone: "+zone,"zone":zone}
     nft=shutil.which("nft")
     if nft:
         rules=run([nft,"list","ruleset"])
@@ -37,8 +77,12 @@ def port_open(info: dict, port: int) -> bool | None:
         value=run(["ufw","status"])
         return any(re.search(r"(^|\s)"+re.escape(str(port))+r"/tcp\s+ALLOW\b",line,re.I) for line in value.stdout.splitlines())
     if backend=="firewalld":
+        if not info.get("managed") or not info.get("zone"):
+            return None
         value=run(["firewall-cmd","--zone",info["zone"],"--query-port",str(port)+"/tcp"])
-        return value.returncode==0
+        if value.returncode==0 and value.stdout.strip()=="yes": return True
+        if value.returncode==1 and value.stdout.strip()=="no": return False
+        return None
     if backend=="none": return True
     return None
 
@@ -50,6 +94,14 @@ def open_ports(info: dict, ports: list[int]) -> None:
             if result.returncode: raise RuntimeError("UFW refused port "+str(port))
         return
     if info["backend"]=="firewalld":
+        if not info.get("managed") or not info.get("zone"):
+            raise RuntimeError("Firewalld ingress zone requires manual configuration")
+        # Confirmation may take time. Refuse to apply the approved ports to a
+        # different (or now ambiguous) zone if bindings changed in the meantime.
+        current=detect()
+        if (current.get("backend")!="firewalld" or not current.get("managed")
+                or current.get("zone")!=info["zone"]):
+            raise RuntimeError("Firewalld ingress zone changed; rerun preflight or configure it manually")
         zone=info["zone"]
         for port in ports:
             for permanent in (False,True):
