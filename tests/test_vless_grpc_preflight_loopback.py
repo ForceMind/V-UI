@@ -178,6 +178,16 @@ class VLESSGRPCPreflightLoopbackTests(unittest.TestCase):
         env = self.env.copy()
         if options.get("failure") == "ca":
             env["SSL_CERT_FILE"] = str(self.wrong_ca)
+        if client == "singbox" and options.get("failure") in {"ca", "sni"}:
+            # v1.14.2 gRPC Lite stores RoundTrip errors in GunConn.setup, but
+            # an initial pipe Write can block before Read reports that error.
+            # Its pinned x/net v0.57.0 http2 transport_common.go logs the actual
+            # TLS dial error with http2debug=1. Enable only diagnostic logging
+            # for these subprocesses; keep the unchanged binary, protocol,
+            # certificate verification, and required x509/reason assertions.
+            debug = [flag for flag in env.get("GODEBUG", "").split(",")
+                     if flag and not flag.startswith("http2debug=")]
+            env["GODEBUG"] = ",".join([*debug, "http2debug=1"])
         if client == "mihomo":
             path = self.unique_path(client, "yaml")
             path.write_text(yaml.safe_dump(config, sort_keys=False))
@@ -225,14 +235,20 @@ class VLESSGRPCPreflightLoopbackTests(unittest.TestCase):
 
     def assert_failure_without_direct(self, port):
         self.requests.clear()
+        started = time.monotonic()
         try:
             status, _ = http_through(port, "127.0.0.1", self.target_port)
+            outcome = f"HTTP {status}"
             self.assertGreaterEqual(status, 400, self.logs())
-        except (OSError, http.client.HTTPException):
-            pass
+        except (OSError, http.client.HTTPException) as exc:
+            outcome = f"{type(exc).__name__}: {exc}"
+        elapsed = time.monotonic() - started
         time.sleep(.1)
         self.assertEqual(self.requests, [],
                          "Rejected gRPC request reached the directly reachable target\n" + self.logs())
+        # A caller timeout is only its observed outcome, not TLS-error proof.
+        # CA/SNI cases independently require the real process's x509 evidence.
+        return f"{outcome} after {elapsed:.2f}s"
 
     def tls_error_evidence(self, process, failure):
         deadline = time.monotonic() + 2
@@ -272,7 +288,9 @@ class VLESSGRPCPreflightLoopbackTests(unittest.TestCase):
                             if mutation is None:
                                 self.assert_success(port)
                             else:
-                                self.assert_failure_without_direct(port)
+                                outcome = self.assert_failure_without_direct(port)
+                                print(f"gRPC preflight {client} {mutation}: caller observed "
+                                      f"{outcome}; target requests=0")
                                 if mutation in {"ca", "sni"}:
                                     self.tls_error_evidence(process, mutation)
                             self.assertIsNone(process.process.poll(), process.log_path.read_text())

@@ -44,6 +44,14 @@ v0.4.3 已由 [PR #18](https://github.com/ForceMind/V-UI/pull/18) 正常合并�
 
 固定服务端与两种客户端的配置检查通过，包含默认/Chrome/h2 独立组合与语法合法的错误 UUID、CA、SNI、service name。首次真实运行在服务端监听前失败：`start service: create netlink socket: operation not permitted`。这是当前本地沙箱阻断，不是已证明的协议不兼容，也不是运行通过；首次失败日志保留，真实转发和拒绝路径交由同一固定二进制的 CI 执行。
 
+## 首次真实 CI 记录（保留失败）
+
+前置提交 `008608afacf119780eacce97df0207d5e0fa9c9f` 的[首次真实链路运行](https://github.com/ForceMind/V-UI/actions/runs/37287322011)总计 45 个测试，两个断言失败，其余七组工作流成功。两种固定客户端已实际通过四种 Chrome/h2 正向组合、`.` / `..` / 128 字符字面 service name，协商 h2；错误 UUID、service name 和仅大小写差异均无目标送达。
+
+失败项是 sing-box gRPC Lite 的错误 CA/SNI 测试：客户端请求未送达目标，但日志未在观察窗口出现要求的 `x509` 字样。Mihomo 两项有明确 x509 错误。不能把超时或没有目标请求单独等同于 TLS 拒绝证据；因此本次前置门槛未通过，公开导出保持关闭。
+
+固定 [Lite client](https://github.com/SagerNet/sing-box/blob/v1.14.2/transport/v2raygrpclite/client.go) 与 [connection](https://github.com/SagerNet/sing-box/blob/v1.14.2/transport/v2raygrpclite/conn.go) 源码显示异步 RoundTrip 将错误保存在延迟连接，而写入使用独立 pipe；错误可未及时到达普通客户端日志。下一次验证只为测试子进程开启 HTTP/2 诊断日志，保留真正的 x509、正向控制与无目标送达断言；不改核心、TLS 行为、pin 或支持结论。
+
 ## 发布与下一阶段
 
 本阶段仅独立 Draft PR 与计划内正常提交/推送。合并须等独立审查和八组 exact-head 验收后由父任务授权，再核验八组 exact-main。没有 tag、Release、部署、真实 CA 账户、生产凭据、主机防火墙或 HY2/TUIC 扩展。
