@@ -30,7 +30,7 @@ from app.services.mihomo_routing import default_routing
 from app.services.routing_store import read_snapshot, save_routing
 import test_subscription_tokens as grant_tests
 from loopback_helpers import (
-    certificate_files, CoreProcess, http_through, start_http_target, unused_port,
+    certificate_files, CoreProcess, http_through, start_http_target, unused_port, require_tls_rejection,
 )
 
 
@@ -332,8 +332,11 @@ class VLESSGRPCLoopbackTests(unittest.TestCase):
             time.sleep(.08)
         self.fail(f"Public VLESS/gRPC/TLS export did not reach target: {last}\n{self.logs()}")
 
-    def assert_failure_without_direct(self, port):
-        self.requests.clear()
+    def assert_failure_without_direct(self, port, *, clear=True):
+        if clear:
+            self.requests.clear()
+        else:
+            self.assertEqual(self.requests, [], "A previous rejected request reached the target late")
         started = time.monotonic()
         try:
             status, _ = http_through(port, "127.0.0.1", self.target_port)
@@ -349,16 +352,12 @@ class VLESSGRPCLoopbackTests(unittest.TestCase):
         # require the true certificate failure from the real client's log.
         return f"{outcome} after {elapsed:.2f}s"
 
-    def tls_error_evidence(self, process, failure):
-        deadline = time.monotonic() + 2
-        log = ""
-        while time.monotonic() < deadline:
-            log = process.log_path.read_text(errors="replace").lower()
-            if "x509" in log:
-                break
-            time.sleep(.05)
-        self.assertIn("x509", log, self.logs())
-        self.assertIn("unknown authority" if failure == "ca" else "wrong.example.test", log)
+    def tls_error_evidence(self, process, failure, port):
+        log = require_tls_rejection(
+            self, process.log_path,
+            lambda: self.assert_failure_without_direct(port, clear=False),
+            self.requests, "unknown authority" if failure == "ca" else "wrong.example.test",
+        )
         print(f"gRPC public exports {failure}: " + next(line for line in log.splitlines() if "x509" in line))
 
     def verify_both_clients(self, *, fingerprint=False, alpn=False, failure=None,
@@ -388,7 +387,7 @@ class VLESSGRPCLoopbackTests(unittest.TestCase):
                                 print(f"gRPC public exports {client} {mutation}: caller observed "
                                       f"{outcome}; target requests=0")
                                 if mutation in {"ca", "sni"}:
-                                    self.tls_error_evidence(process, mutation)
+                                    self.tls_error_evidence(process, mutation, port)
                             self.assertIsNone(process.process.poll(), process.log_path.read_text())
                             self.assertIsNone(server.process.poll(), server.log_path.read_text())
                         finally:
