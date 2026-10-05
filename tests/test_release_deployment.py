@@ -39,12 +39,13 @@ class ReleaseDeploymentTests(unittest.TestCase):
             identity=tools.stage(bundle,checksum,root)
             with self.assertRaises(tools.ReleaseError):tools.stage(bundle,checksum,root)
             tools.activate(root,identity)
-            release,current=tools.active(root);payload=release/'payload';python=release/'venv/bin/python'
+            release,current=tools.active(root);payload=release/'payload';python=release/'runtime/python/bin/python3'
             manifest=tools.verify_payload(payload)
             self.assertEqual(manifest['platform'],tools.PLATFORM)
             self.assertEqual(manifest['source_commit'],os.environ['VUI_RELEASE_COMMIT'])
-            self.assertTrue((payload/'requirements.lock').is_file())
-            self.assertTrue(all('--hash=sha256:' in line for line in (payload/'requirements.lock').read_text().splitlines()))
+            lock=payload/('requirements.'+tools.target_key()+'.lock')
+            self.assertTrue(lock.is_file())
+            self.assertTrue(all('--hash=sha256:' in line for line in lock.read_text().splitlines()))
             self.assertFalse(any(name.endswith(('.ttf','.otf','.woff','.woff2')) for name in manifest['files']))
             data=root/'data';password='Synthetic-release-test-password!'
             provision=subprocess.run([str(python),'-B','-c',
@@ -125,12 +126,24 @@ class ReleaseDeploymentTests(unittest.TestCase):
                     page.get_by_text('入站节点',exact=True).first.click()
                     page.get_by_role('button',name='添加节点',exact=True).click()
                     dialog=page.get_by_role('dialog')
+                    dialog.get_by_text('sing-box',exact=True).click()
+                    security_item=dialog.locator('.el-form-item').filter(has_text='传输安全')
+                    security_item.locator('.el-select').click()
+                    page.get_by_role('option',name='TLS',exact=True).click()
                     dialog.get_by_placeholder('例如：US-01').fill('release-browser-node')
                     dialog.get_by_role('spinbutton').fill(str(node_port))
                     dialog.get_by_placeholder('example.com',exact=True).fill('vpn.example.test')
                     dialog.get_by_placeholder('/etc/letsencrypt/live/example.com/fullchain.pem').fill(str(cert))
                     dialog.get_by_placeholder('/etc/letsencrypt/live/example.com/privkey.pem').fill(str(key))
-                    dialog.get_by_role('button',name='创建并应用',exact=True).click()
+                    with page.expect_response(
+                        lambda response: response.url.endswith('/api/inbounds')
+                        and response.request.method == 'POST',
+                        timeout=20000,
+                    ) as pending:
+                        dialog.get_by_role('button',name='创建并应用',exact=True).click()
+                    created=pending.value
+                    if created.status != 200:
+                        self.fail('Inbound create failed '+str(created.status)+': '+created.text())
                     expect(dialog).not_to_be_visible(timeout=20000)
                     expect(page.locator('.el-table')).to_contain_text('release-browser-node')
                     page.get_by_text('Mihomo 分流',exact=True).first.click();page.wait_for_url('**/workspace')

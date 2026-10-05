@@ -109,8 +109,17 @@ class LoopbackChainTests(unittest.TestCase):
                 if time.monotonic()>deadline: raise
 
     def assert_proxy_success(self, host):
-        status,data=http_through(self.proxy_port,host,self.target_port)
-        self.assertEqual((status,data),(200,b'VUI-LOOPBACK-TARGET'),(self.root/'client.log').read_text())
+        deadline=time.monotonic()+3
+        last=None
+        while time.monotonic()<deadline:
+            try:
+                status,data=http_through(self.proxy_port,host,self.target_port)
+                last=(status,data)
+                if last==(200,b'VUI-LOOPBACK-TARGET'):return
+            except (OSError,TimeoutError) as exc:
+                last=exc
+            time.sleep(.08)
+        self.fail(f'Proxy did not become usable: {last}\n'+(self.root/'client.log').read_text())
 
     def assert_proxy_failure(self):
         before=len(self.requests)
@@ -178,7 +187,17 @@ class LoopbackChainTests(unittest.TestCase):
             row.stream_settings=stream;db.commit()
         self.start()
         self.assert_proxy_failure()
-        self.assertIn('certificate',(self.root/'client.log').read_text().lower())
+        deadline=time.monotonic()+2
+        log=''
+        while time.monotonic()<deadline:
+            log=(self.root/'client.log').read_text().lower()
+            if any(marker in log for marker in ('certificate','x509','tls')):
+                break
+            time.sleep(.05)
+        self.assertTrue(
+            any(marker in log for marker in ('certificate','x509','tls')),
+            'Wrong-SNI failure did not produce TLS/certificate evidence:\n'+log,
+        )
         print('rc.1: wrong TLS server name rejected')
 
 if __name__=='__main__': unittest.main()

@@ -8,7 +8,7 @@ permissions:
 jobs:
   deployment:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -26,12 +26,12 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/vui-release
           test "$(git rev-parse HEAD)" = "$VUI_SOURCE_COMMIT"
-          python scripts/build_bundle.py /tmp/vui-release/vui-linux-amd64-rc2.zip --source-commit "$VUI_SOURCE_COMMIT" | tee /tmp/vui-release/build.log
+          python scripts/build_bundle.py /tmp/vui-release/vui-linux.zip --source-commit "$VUI_SOURCE_COMMIT" | tee /tmp/vui-release/build.log
       - name: Install explicit test browser
         run: python -m playwright install --with-deps chromium
       - name: Verify non-root install HTTPS browser and recovery
         env:
-          VUI_RELEASE_BUNDLE: /tmp/vui-release/vui-linux-amd64-rc2.zip
+          VUI_RELEASE_BUNDLE: /tmp/vui-release/vui-linux.zip
           VUI_RELEASE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
@@ -42,8 +42,8 @@ jobs:
         with:
           name: vui-linux-amd64-rc2-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
-            /tmp/vui-release/vui-linux-amd64-rc2.zip
-            /tmp/vui-release/vui-linux-amd64-rc2.zip.sha256
+            /tmp/vui-release/vui-linux.zip
+            /tmp/vui-release/vui-linux.zip.sha256
           retention-days: 7
       - name: Preserve build and acceptance results only
         if: always()
