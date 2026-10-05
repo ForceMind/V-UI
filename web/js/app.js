@@ -413,16 +413,25 @@ const app = createApp({
             newInbound.profile.key_path = '';
         };
 
+        const onSecurityChanged = () => {
+            if (newInbound.profile.security !== 'tls' && newInbound.certificate_id) {
+                newInbound.certificate_id = null;
+                newInbound.profile.certificate_path = '';
+                newInbound.profile.key_path = '';
+            }
+        };
+
         const saveInbound = async () => {
             try {
                 const profile = { ...newInbound.profile };
+                const certificateId = profile.security === 'tls' ? newInbound.certificate_id || null : null;
                 let res;
                 if (editingInboundId.value) {
                     res = await axios.put(`/api/inbounds/${editingInboundId.value}`, {
                         remark: newInbound.remark,
                         port: newInbound.port,
                         profile,
-                        certificate_id: newInbound.certificate_id || null,
+                        certificate_id: certificateId,
                         enable: newInbound.enable
                     });
                     ElMessage.success('Inbound updated successfully');
@@ -433,7 +442,7 @@ const app = createApp({
                         protocol: newInbound.protocol,
                         port: newInbound.port,
                         profile,
-                        certificate_id: newInbound.certificate_id || null,
+                        certificate_id: certificateId,
                         enable: newInbound.enable
                     });
                     ElMessage.success('Inbound added successfully');
@@ -636,6 +645,7 @@ const app = createApp({
             onCoreChanged,
             onProtocolChanged,
             clearManagedCertificate,
+            onSecurityChanged,
             resetInboundProfile,
             saveInbound,
             deleteInbound,

@@ -21,7 +21,7 @@ python -m unittest discover -s tests -v
 
 | CI | 验证 |
 | --- | --- |
-| Test V-UI | API、鉴权、数据库、状态、纯函数和原浏览器操作流程 |
+| Test V-UI | API、鉴权、数据库、状态、纯函数、原浏览器操作流程和托管证书节点编辑/恢复 |
 | ToClash reference and export verification | 固定独立参考、100场景、40项目录、客户端配置 |
 | Real loopback proxy and DNS chain | 实际VLESS/TLS、DNS路径、拒绝/停启 |
 | Selected release deployment gates | 实际离线包、HTTPS、完整Vue面板、备份恢复/回滚 |
@@ -40,3 +40,9 @@ python -m unittest discover -s tests -v
 核心/协议修改必须固定真实二进制并测试失败路径；仅检查生成JSON不等于连通。新增配置字段需同步前端、API、导出过滤、文档和测试；未知字段不得静默丢失。格式转换必须把凭据、SNI、TLS和传输参数当作完整性边界。
 
 代码中不得提交用户token、数据库、私钥、运行时输出或未加密备份。每个PR报告准确提交、实际通过/失败/未测项目、兼容边界与回滚说明；未合并、未发布、未部署三者分别说明。
+
+## 托管证书编辑回归
+
+`python -m unittest discover -s tests -p 'test_inbound*.py' -v` 覆盖编辑模型、API 和实际 app.js payload；浏览器门槛默认明确 skip。专门运行时先用 `scripts/fetch_test_cores.py` 与 `scripts/vendor_frontend.py` 获取校验固定的核心/前端资产，再设置 `VUI_NODE_BROWSER=1`、`VUI_TEST_CORES` 和 `VUI_FRONTEND_ASSETS` 运行 `test_inbound_editor_browser.py`。可用 `VUI_TEST_CHROMIUM` 显式指定本机 Chromium。
+
+浏览器使用隔离临时目录、真实 Uvicorn/核心进程和仅测试构造器注入的临时 CA，不会访问公网 CA、修改主机信任或防火墙。它覆盖托管 TLS 创建、取消、TLS 手工解绑拒绝、none/REALITY 切换、刷新/再编辑、恢复 TLS 后的受支持导出及停机备份恢复；发布包 HTTPS/升级/回滚仍由独立 deployment gate 验证。

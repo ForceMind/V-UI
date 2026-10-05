@@ -39,3 +39,13 @@ This bounded repair starts from `06c0b8653f7b8d27a43d0ac0bb0bf61561fb7e95` on th
 - Real temporary-socket regressions reproduce the pre-fix collision and IPv6-only conflict cases. Mocked command tests cover non-default zone selection, runtime/permanent writes, manual fallback, explicit `yes`, and no-write dry runs. They do not operate the host firewall or service accounts.
 
 Run the focused regression group with `python -m unittest discover -s tests -p test_linux_installation_regressions.py -v` and `python -m unittest discover -s tests -p test_firewall_support.py -v`, alongside existing HTTP-01 and installer tests. The final exact-head acceptance record is PR #12's eight separate workflows: Test V-UI, ToClash, loopback, ACME, one-command installation, portable matrix, selected release deployment, and documentation. Local tests do not replace those gates; no public Release or user VPS deployment is implied.
+
+
+## v0.3.2 node editor review repair (PR #13)
+
+This bounded repair begins at `7afc1e1f2993159aa249fa864001dce08415da62` and normally merge-forwards the reviewed PR #12 head `719b2b138d681e1b08370c4c769d7d73d47be43f`; no history rewrite, main merge or release is implied.
+
+- Changing managed TLS to none/REALITY clears the hidden certificate selection and binding, without requiring unused file paths. Conflicting explicit managed IDs are rejected rather than changing security silently.
+- Staying on TLS retains the manual replacement-path guard. Empty profiles remain no-ops; validation failures preserve binding; saved desired transitions unbind even when core application fails.
+- New API and actual app.js regression tests reproduce the reviewed defects before the fix. The separate real Chromium/Uvicorn/pinned-core gate uses synthetic local CA material for create, cancel, edit, reload/re-edit, TLS export and stopped restore. Existing secret redaction/preservation, core/protocol immutability and stopped-core renewal checks remain required.
+- Acceptance requires all eight distinct workflows on the final exact head. Local passes and environment skips do not replace binary, loopback, ACME, one-command system installation, portable, deployment or documentation acceptance. REALITY/none edit coverage is not new export/connectivity support.
