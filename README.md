@@ -2,7 +2,7 @@
 
 **个人自用的轻量代理面板：管理节点、图形化申请证书、设置 ToClash 分流，直接订阅完整 Mihomo 配置。**
 
-版本目标：**v0.4.1**。正式发布前须完成 [发布检查](docs/RELEASING.md) 中的全部 exact-head 验收和人工发布动作；版本号不代表 GitHub Release 已公开。
+版本目标：**v0.4.2**。正式发布前须完成 [发布检查](docs/RELEASING.md) 中的全部 exact-head 验收和人工发布动作；版本号不代表 GitHub Release 已公开。
 
 ## 能做什么
 
@@ -17,7 +17,7 @@ V-UI 使用 FastAPI + SQLite，不依赖 Redis、常驻 Node 或在线订阅转�
 | 客户端订阅 | 节点/格式作用域、一次显示的专用令牌、到期、轮换、撤销；完整Mihomo配置直接导出 |
 | 安装运维 | 一个入口完成受管服务设置，开机自启、权限隔离、停机备份、校验恢复、候选切换 |
 
-**当前已验证公开导出/端到端组合：sing-box + VLESS/TCP/TLS，以及 sing-box + Trojan/TCP/TLS；均要求单用户、启用证书校验，VLESS 还要求空 flow。**已有其他协议草稿表单不等于这些组合已验证；不支持的组合会拒绝导出，不静默丢参数或退成全直连。Shadowsocks 候选的三种 AEAD 导出、配置检查及逐 cipher 双客户端 TCP/UDP 验收范围也在矩阵中单独列明。参见 [兼容矩阵](docs/COMPATIBILITY.md)。
+**当前已验证基线包含 sing-box + VLESS/TCP/TLS、Trojan/TCP/TLS 与 Shadowsocks AEAD；v0.4.2 正在验收 sing-box + VMess/TCP/TLS。** TLS 组合要求单用户与证书校验，VLESS 还要求空 flow。已有其他协议草稿表单不等于这些组合已验证；不支持的组合会拒绝导出，不静默丢参数或退成全直连。Shadowsocks 三种 AEAD 导出、配置检查及逐 cipher 双客户端 TCP/UDP 验收范围在矩阵中单独列明。参见 [兼容矩阵](docs/COMPATIBILITY.md)。
 
 ## 快速安装
 
@@ -37,7 +37,7 @@ sudo bash install.sh --bundle ./vui-linux-x86_64-gnu.zip \
 发布后可指定明确版本通过同一入口下载官方Release资产；**正式Release尚未生成时不要把下面命令当作当前可用下载地址**：
 
 ```sh
-sudo bash install.sh --version v0.4.1
+sudo bash install.sh --version v0.4.2
 ```
 
 安装器本身也必须来自可信仓库/套件，不能只信任来源不明压缩包附带的摘要。详见 [安装指南](docs/INSTALLATION.md)。

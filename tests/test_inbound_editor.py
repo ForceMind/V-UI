@@ -99,6 +99,30 @@ class InboundEditorTests(unittest.TestCase):
         self.assertNotIn(private,str(reality_state))
         self.assertNotIn(uuid,str(reality_state))
 
+    def test_vmess_tls_roundtrip_preserves_hidden_uuid(self):
+        uuid="44444444-4444-4444-4444-444444444444"
+        item=self.add(
+            "sing-box","vmess",{"users":[{"uuid":uuid}]},
+            {"tls":{"enabled":True,"server_name":"vmess.example.test",
+                    "certificate_path":"/cert.pem","key_path":"/key.pem"},
+             "_vui":{"security":"tls","server_name":"vmess.example.test",
+                     "client_fingerprint":"chrome","skip_cert_verify":False}},
+            port=13443,
+        )
+        state=editor_dict(item)
+        self.assertNotIn(uuid,str(state))
+        self.assertTrue(state["credentials"]["has_uuid"])
+        self.assertEqual(state["profile"]["security"],"tls")
+        self.assertEqual(state["profile"]["server_name"],"vmess.example.test")
+        profile={**state["profile"],"server_name":"vmess2.example.test",
+                 "certificate_path":"/cert2.pem","key_path":"/key2.pem"}
+        updated=update_inbound(
+            self.db,item.id,
+            {"core":"sing-box","protocol":"vmess","profile":profile},
+        )
+        self.assertEqual(updated.settings["users"][0]["uuid"],uuid)
+        self.assertEqual(updated.stream_settings["tls"]["server_name"],"vmess2.example.test")
+
     def test_shadowsocks_method_roundtrip_preserves_hidden_password(self):
         password="hidden-shadowsocks-password"
         item=self.add(

@@ -180,15 +180,15 @@ class CertificateTests(unittest.TestCase):
         with self.assertRaisesRegex(CertificateError,'KEY_MISMATCH'):
             validate_material(paths[0].read_bytes(),other,'panel.example.test',verify_chain=False)
 
-    def test_vless_and_trojan_node_renewal_bind_new_material_without_starting_stopped_core(self):
+    def test_vless_trojan_and_vmess_node_renewal_bind_new_material_without_starting_stopped_core(self):
         from app.services.core_manager import core_manager
-        for index,protocol in enumerate(("vless","trojan"),start=1):
+        for index,protocol in enumerate(("vless","trojan","vmess"),start=1):
             with self.subTest(protocol=protocol):
                 identity=self.issue(domain=f"{protocol}.example.test")
                 node_id=100+index
                 settings=(
                     {'users':[{'uuid':'11111111-1111-1111-1111-111111111111'}]}
-                    if protocol=='vless'
+                    if protocol in {'vless','vmess'}
                     else {'users':[{'password':'trojan-password'}]}
                 )
                 with database.SessionLocal() as db:

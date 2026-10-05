@@ -271,7 +271,7 @@ class CertificateManager:
                 else:
                     row = db.get(database.Inbound, int(target.split(':')[1]))
                     if not row: raise CertificateError('INBOUND_NOT_FOUND')
-                    if row.core != 'sing-box' or row.protocol not in {'vless','trojan'}: raise CertificateError('UNSUPPORTED_CERTIFICATE_TARGET')
+                    if row.core != 'sing-box' or row.protocol not in {'vless','trojan','vmess'}: raise CertificateError('UNSUPPORTED_CERTIFICATE_TARGET')
                     stream = deepcopy(row.stream_settings or {})
                     tls = stream.get('tls') or {}
                     if tls.get('reality') or not tls.get('enabled'):
