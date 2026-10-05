@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.database import Inbound
-from app.services.protocol_profiles import compile_profile
+from app.services.protocol_profiles import compile_profile, decompile_profile
 
 SUPPORTED_CORES = {"xray", "sing-box"}
 XRAY_PROTOCOLS = {"vless", "vmess", "trojan", "shadowsocks"}
@@ -135,6 +135,29 @@ def to_dict(item: Inbound) -> dict:
         "stream_settings": item.stream_settings or {},
         "tag": item.tag,
     }
+
+
+def editor_dict(item: Inbound) -> dict:
+    settings=item.settings or {}
+    users=settings.get("users") or settings.get("clients") or []
+    first=users[0] if users else {}
+    result={
+        "id":item.id,
+        "core":item.core or "xray",
+        "protocol":item.protocol,
+        "remark":item.remark or "",
+        "port":item.port,
+        "enable":bool(item.enable),
+        "expiry_time":item.expiry_time or 0,
+        "tag":item.tag,
+        "profile":decompile_profile(item.core or "xray",item.protocol,settings,item.stream_settings or {}),
+        "credentials":{
+            "user_count":len(users),
+            "has_uuid":bool(first.get("uuid") or first.get("id")),
+            "has_password":bool(first.get("password") or settings.get("password")),
+        },
+    }
+    return result
 
 
 def list_inbounds(db: Session, core: str | None = None) -> list[Inbound]:

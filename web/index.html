@@ -168,8 +168,11 @@
                         </el-table-column>
                         <el-table-column prop="protocol" label="协议" width="120"></el-table-column>
                         <el-table-column prop="port" label="端口" width="100"></el-table-column>
-                        <el-table-column label="操作" width="220">
+                        <el-table-column label="操作" width="300">
                             <template #default="scope">
+                                <el-button size="small" type="primary" plain @click="openEditInbound(scope.row)">
+                                    编辑
+                                </el-button>
                                 <el-button size="small" @click="showQrCode(scope.row)">
                                     分享
                                 </el-button>
@@ -506,10 +509,10 @@
         </el-container>
     </el-container>
 
-    <el-dialog v-model="showAddInbound" title="添加节点" width="720px">
+    <el-dialog v-model="showAddInbound" :title="editingInboundId ? '编辑节点' : '添加节点'" width="720px">
         <el-form :model="newInbound" label-width="130px">
             <el-form-item label="核心">
-                <el-radio-group v-model="newInbound.core" @change="onCoreChanged">
+                <el-radio-group v-model="newInbound.core" @change="onCoreChanged" :disabled="Boolean(editingInboundId)">
                     <el-radio-button label="xray">Xray</el-radio-button>
                     <el-radio-button label="sing-box">sing-box</el-radio-button>
                 </el-radio-group>
@@ -533,6 +536,7 @@
                 <el-select
                     v-model="newInbound.protocol"
                     @change="onProtocolChanged"
+                    :disabled="Boolean(editingInboundId)"
                     style="width: 100%">
                     <el-option
                         v-for="item in protocolOptions"
@@ -541,6 +545,33 @@
                         :value="item[1]">
                     </el-option>
                 </el-select>
+            </el-form-item>
+
+            <el-alert
+                v-if="editingInboundId"
+                title="编辑会保留现有 UUID / 密码等凭据；核心和协议不在编辑中迁移，需要切换时请新建节点。"
+                type="info"
+                :closable="false"
+                style="margin-bottom: 16px">
+            </el-alert>
+
+            <el-alert
+                v-if="editingInboundId && (inboundCredentials.has_uuid || inboundCredentials.has_password)"
+                :title="'已有凭据保留在服务器：' +
+                    (inboundCredentials.has_uuid ? 'UUID ' : '') +
+                    (inboundCredentials.has_password ? '密码' : '') +
+                    '。编辑接口只返回是否存在，不回传秘密值。'"
+                type="success"
+                :closable="false"
+                style="margin-bottom: 16px">
+            </el-alert>
+
+            <el-form-item label="节点状态">
+                <el-switch
+                    v-model="newInbound.enable"
+                    active-text="启用"
+                    inactive-text="停用">
+                </el-switch>
             </el-form-item>
 
             <template v-if="!['shadowsocks','hysteria2','tuic'].includes(newInbound.protocol)">
@@ -606,6 +637,7 @@
                 label="传输安全">
                 <el-select
                     v-model="newInbound.profile.security"
+                    @change="onSecurityChanged"
                     :disabled="['trojan','hysteria2','tuic'].includes(newInbound.protocol)"
                     style="width: 100%">
                     <el-option
@@ -633,7 +665,7 @@
 
             <template v-if="newInbound.profile.security === 'tls'">
                 <el-form-item label="托管证书" v-if="newInbound.core === 'sing-box' && newInbound.protocol === 'vless'">
-                    <el-select v-model="newInbound.certificate_id" clearable placeholder="选证书自动填入；或手动填写路径" style="width:100%">
+                    <el-select v-model="newInbound.certificate_id" clearable @clear="clearManagedCertificate" placeholder="选证书自动填入；或手动填写路径" style="width:100%">
                         <el-option v-for="cert in managedCertificates" :key="cert.id" :label="cert.domain" :value="cert.id"></el-option>
                     </el-select>
                 </el-form-item>
@@ -735,7 +767,8 @@
                     <el-input
                         v-model="newInbound.profile.obfs_password"
                         type="password"
-                        show-password>
+                        show-password
+                        :placeholder="newInbound.profile.obfs_password_set ? '留空保持当前 Obfs 密码' : '请输入 Obfs 密码'">
                     </el-input>
                 </el-form-item>
             </template>
@@ -766,7 +799,7 @@
 
         <template #footer>
             <el-button @click="showAddInbound = false">取消</el-button>
-            <el-button type="primary" @click="addInbound">创建并应用</el-button>
+            <el-button type="primary" @click="saveInbound">{{ editingInboundId ? '保存并应用' : '创建并应用' }}</el-button>
         </template>
     </el-dialog>
 
