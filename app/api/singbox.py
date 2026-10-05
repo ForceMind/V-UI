@@ -1,7 +1,7 @@
-"""Backward-compatible Xray API.
+"""Sing-box compatibility API.
 
-New code should use /api/inbounds and /api/cores. The old paths stay available
-so existing V-UI frontends and scripts do not break during the migration.
+The unified /api/inbounds endpoint is preferred, but these endpoints make the
+second core easy to script and mirror the existing Xray API.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from app.services.inbound_service import (
 router = APIRouter()
 
 
-class LegacyInboundPayload(BaseModel):
+class SingBoxInboundPayload(BaseModel):
     id: int | None = None
     remark: str = ""
     port: int = Field(ge=1, le=65535)
@@ -34,27 +34,26 @@ class LegacyInboundPayload(BaseModel):
     stream_settings: dict[str, Any] | str | None = None
     enable: bool = True
     expiry_time: int = 0
-    total_traffic: int = 0
     tag: str | None = None
 
 
 def _apply(db: Session):
     return core_manager.apply(
-        "xray",
-        list_inbounds(db, core="xray"),
+        "sing-box",
+        list_inbounds(db, core="sing-box"),
         restart=True,
     )
 
 
 @router.get("/inbounds")
 async def get_inbounds(db: Session = Depends(get_db)):
-    return [to_dict(item) for item in list_inbounds(db, core="xray")]
+    return [to_dict(item) for item in list_inbounds(db, core="sing-box")]
 
 
 @router.post("/inbounds")
-async def add_inbound(payload: LegacyInboundPayload, db: Session = Depends(get_db)):
-    data = payload.model_dump(exclude={"id", "total_traffic"})
-    data["core"] = "xray"
+async def add_inbound(payload: SingBoxInboundPayload, db: Session = Depends(get_db)):
+    data = payload.model_dump(exclude={"id"})
+    data["core"] = "sing-box"
     item = create_inbound(db, data)
     return {"message": "Inbound added", "inbound": to_dict(item), "core": _apply(db)}
 
@@ -62,11 +61,11 @@ async def add_inbound(payload: LegacyInboundPayload, db: Session = Depends(get_d
 @router.put("/inbounds/{inbound_id}")
 async def edit_inbound(
     inbound_id: int,
-    payload: LegacyInboundPayload,
+    payload: SingBoxInboundPayload,
     db: Session = Depends(get_db),
 ):
-    data = payload.model_dump(exclude={"id", "total_traffic"})
-    data["core"] = "xray"
+    data = payload.model_dump(exclude={"id"})
+    data["core"] = "sing-box"
     item = update_inbound(db, inbound_id, data)
     return {"message": "Inbound updated", "inbound": to_dict(item), "core": _apply(db)}
 
@@ -78,5 +77,5 @@ async def remove_inbound(inbound_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/restart")
-async def restart_xray(db: Session = Depends(get_db)):
+async def restart_singbox(db: Session = Depends(get_db)):
     return _apply(db)
