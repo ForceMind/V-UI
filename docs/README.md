@@ -1,6 +1,6 @@
 # V-UI 文档
 
-当前使用文档按 **v0.4.7** REALITY/Vision 集成候选组织，最终独立审查和准确候选/主线八组仍待完成。[TUIC v0.4.6](TUIC_CLOSURE_046.md)及此前协议/安全修复是已验收继承基线；[REALITY/Vision 契约](REALITY_VISION_047.md)记录已通过裸前置与首次失败，不能代替最终集成验收。源码、候选/主线、附件晋升、发布和部署分别记录。
+当前产品文档按 **v0.4.7** 组织，[REALITY/Vision](REALITY_VISION_CLOSURE_047.md)及 [TUIC v0.4.6](TUIC_CLOSURE_046.md)与此前协议/安全修复均有准确主线验收。REALITY 首次主线 VMess CA 原因日志缺失和 unchanged-code attempt 2 成功分别保留，重跑不证明轮询不稳定性已永久修复。下一阶段 [v0.4.8 XHTTP 刻画前置](XHTTP_CHARACTERIZATION_048.md)不提高产品版本、不开放公共导出，准确提交的真实 CI 验收仍待完成。源码、配置检查、候选/主线、附件晋升、发布和部署分别记录。
 
 | 阅读目标 | 文档 |
 | --- | --- |
@@ -11,7 +11,9 @@
 | 访问失败/签发失败/核心未生效 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
 | 管理API、令牌和错误状态 | [API.md](API.md) |
 | 已验证与未验证的协议/部署范围 | [COMPATIBILITY.md](COMPATIBILITY.md) |
-| REALITY/Vision 当前候选、参考流量与认证边界 | [REALITY_VISION_047.md](REALITY_VISION_047.md) |
+| XHTTP 当前刻画、sing-box 不支持与 HTTPUpgrade URI 缺口 | [XHTTP_CHARACTERIZATION_048.md](XHTTP_CHARACTERIZATION_048.md) |
+| REALITY/Vision 已验收、主线重跑与失败历史 | [REALITY_VISION_CLOSURE_047.md](REALITY_VISION_CLOSURE_047.md) |
+| REALITY/Vision 参考流量、认证边界与阶段历史 | [REALITY_VISION_047.md](REALITY_VISION_047.md) |
 | TUIC v5/TLS 已验收与失败历史 | [TUIC_CLOSURE_046.md](TUIC_CLOSURE_046.md) |
 | Hysteria2/TLS 已验收基线与失败历史 | [HYSTERIA2_CLOSURE_045.md](HYSTERIA2_CLOSURE_045.md) |
 | 普通响应允许列表与 PR #23 安全收口 | [INBOUND_RESPONSE_CLOSURE_20261006.md](INBOUND_RESPONSE_CLOSURE_20261006.md) |

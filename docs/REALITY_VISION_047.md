@@ -1,6 +1,12 @@
-# v0.4.7 REALITY / Vision 集成契约
+# v0.4.7 REALITY / Vision 阶段契约与历史
 
-## 当前状态
+## 已验收收口
+
+REALITY/Vision v0.4.7 已由 [PR #24](https://github.com/ForceMind/V-UI/pull/24) 正常合并至签名 master `6b049262457b259c602c5e74be296ef52780c462`，最终候选 `70cc2f4f7dc4349c7ecffbc33fc088f51b8651fa` 与主线 tree 均为 `316f0159e3ae3d7362022d9c9ac61bc0afa867c1`。独立审查完成，准确候选八组/11 jobs/全部步骤 attempt 1 成功；准确主线八组/11 个最新 jobs/全部步骤成功，其中链路首次继承 VMess/Mihomo CA 用例缺少必需 x509 日志，unchanged-code attempt 2 取得真实原因后通过，其余七组 attempt 1。该重跑不表示旧被动日志轮询不稳定性已永久修复。真实链路 89 项、独立 HY2 8/TUIC 8 和 Chromium 完整流程已分别验收，详见[收口记录](REALITY_VISION_CLOSURE_047.md)。
+
+以下保留本阶段裸前置、集成和审查时的原始门槛与失败事实；其中“当前进行中”“待完成”指当时状态，不覆盖上述最终收口。后续修改仍须在自己的准确提交重验。
+
+## 原集成阶段状态
 
 当前获准按路线推进独立 REALITY/Vision 阶段，起点为 [TUIC v0.4.6 已验收 master](TUIC_CLOSURE_046.md) `df8a980beb682a981d72e42760705f1831cacf9b`，tree `f68098e398cb7ac29e2e1e809b8f741bb3c30533`。本阶段先做官方固定核心的裸前置；**真实 CI 前置通过前，公开 REALITY/Vision 支持保持阻断**。源码支持、配置可载入、测试代码存在和既有 TUIC 主线通过都不等于 REALITY 链路已验收。
 
