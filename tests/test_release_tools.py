@@ -1,14 +1,16 @@
 """Offline archive, data recovery and atomic version-selection failure tests."""
-from contextlib import ExitStack
+from contextlib import ExitStack, redirect_stdout
 import base64
 import hashlib
 import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sqlite3
 import stat
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -225,7 +227,49 @@ class ReleaseToolsTests(unittest.TestCase):
         self.assertNotIn('https://cdnjs.cloudflare.com',page)
         self.assertIn('vendor/vue.js',page)
         self.assertIn("security: 'tls'",(target/'web/js/app.js').read_text())
+        xray=re.search(r'<el-alert\s+v-if="newInbound.core === \'xray\'"[^>]*>',page)
+        self.assertIsNotNone(xray)
+        self.assertIn('title="Xray REALITY 尚未验收，不能公开导出；已验收的 sing-box VLESS/direct TCP/REALITY/Vision 仅限 docs/COMPATIBILITY.md 中列明的范围。"',xray[0])
+        self.assertIn('type="warning"',xray[0])
+        sing_box=re.search(r'<el-alert\s+v-else-if="newInbound.core === \'sing-box\' && newInbound.profile.transport === \'direct\'"[^>]*>',page)
+        self.assertIsNotNone(sing_box)
+        self.assertIn('type="success"',sing_box[0])
+        self.assertIn('title="REALITY UUID、私钥和 Short ID 保留在服务器，编辑页面不回显；空输入保持已有值。新建自动生成 X25519 密钥对，客户端导出仅包含所需 UUID、公钥和 Short ID。"',sing_box[0])
+        self.assertNotIn('当前已验证导出仅覆盖 sing-box VLESS/TCP/TLS',page)
+        self.assertNotIn('REALITY 在本版未验收',page)
         with self.assertRaises(ValueError):prepare(target)
+
+    def test_generated_bundle_manifest_describes_bounded_cumulative_exports(self):
+        source=Path(__file__).resolve().parents[1]
+        # Run the real builder/prepare/archive path with temporary source and
+        # mocked downloads. This fixture is never installed or executed.
+        with patch.object(sys,'path',[str(source/'scripts'),*sys.path]),patch.object(sys,'dont_write_bytecode',True):
+            from scripts import build_bundle
+        tracked=('main.py','VERSION','requirements-runtime.txt','web/index.html',
+                 'web/js/app.js','docs/COMPATIBILITY.md')
+        for name in tracked:
+            destination=self.source/name;destination.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copyfile(source/name,destination)
+        commit='a'*40;target=tools.target_key();bundle=self.root/'generated.zip'
+        with ExitStack() as stack:
+            previous_umask=os.umask(0o077);stack.callback(os.umask,previous_umask)
+            stack.enter_context(patch.object(build_bundle,'ROOT',self.source))
+            stack.enter_context(patch.object(sys,'argv',['build_bundle.py',str(bundle),'--source-commit',commit,'--target',target]))
+            stack.enter_context(patch.object(build_bundle.subprocess,'check_output',side_effect=[commit+'\n',('\0'.join(tracked)+'\0').encode()]))
+            stack.enter_context(patch.object(build_bundle.subprocess,'run'))
+            for name in ('fetch_frontend','fetch_cores','fetch_runtimes','core_sources','wheel_lock'):
+                stack.enter_context(patch.object(build_bundle,name))
+            stack.enter_context(redirect_stdout(io.StringIO()))
+            build_bundle.main()
+        checksum=bundle.with_suffix('.zip.sha256').read_text().split()[0]
+        manifest=tools.unpack_verified(bundle,checksum,self.root/'generated-payload')
+        self.assertEqual(manifest['protocol_profile'],
+            'bounded cumulative sing-box exports (including VLESS REALITY/Vision); see docs/COMPATIBILITY.md for exact combinations and application UDP limits')
+        self.assertEqual(manifest['source_commit'],commit)
+        self.assertEqual(manifest['version'],(source/'VERSION').read_text().strip())
+        self.assertEqual(manifest['targets'],[target])
+        self.assertIn('docs/COMPATIBILITY.md',manifest['files'])
+        self.assertEqual(tools.verify_payload(self.root/'generated-payload'),manifest)
 
     def test_selected_environment_rejects_root_and_unknown_arch(self):
         with patch.object(tools.platform,'system',return_value='Linux'),patch.object(tools.platform,'machine',return_value='x86_64'),patch.object(tools.os,'geteuid',return_value=0):

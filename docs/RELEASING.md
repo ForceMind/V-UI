@@ -15,6 +15,16 @@
 - 最终准备检查须下载同一准确 master 的已验收附件，逐项核对 Actions archive digest、包内源码/版本/target MANIFEST、第三方许可证/来源、安装器与 helper/source/说明资产、RELEASE.json 和最终完整 SHA256SUMS；不得发布时重建替代。四目标 package 验收、附件晋升与公开发布分别记录。
 - 到上述核验完成前，只能报告“范围冻结、发布准备中”，不能报告完整套件已核验或已发布。完成准备仍不授权创建 Draft Release、tag、上传/晋升或公开发布；保留下面的人工明确确认与真实发布后核验边界。
 
+## 0.4.7 打包范围说明更正（2026-10-06）
+
+[PR #26](https://github.com/ForceMind/V-UI/pull/26) 的候选 `0171f1f010f63bf73fde54c330309274e3d40f2b` 与正常合并 master `a21e31e1df4fd36a6994da780c29d051374279a9` 已分别完成八组/11 jobs/全部步骤验收。候选各组 attempt 1；主线除链路外七组 attempt 1，链路首次继承 GeoSite 下载连接重置后 unchanged-code [attempt 2](https://github.com/ForceMind/V-UI/actions/runs/37494753598/attempts/2) 成功。首次失败记录保留，不把重跑当作外部下载问题永久修复。
+
+该 master 的 13 项最终资产已做独立字节/来源核验：四个目标 ZIP 合计 376,881,626 字节，Actions archive 摘要、包内源码/版本/target MANIFEST、许可证/来源、源码包、安装器/helper、RELEASE.json 和 SHA256SUMS 一致。此结论仍作为旧套件完整性证据保留；未执行包内软件，也未上传、晋升或发布。
+
+核验同时发现打包 UI 在 `core === 'xray'` 警告中使用了全局“REALITY 未验收”的过时说法，MANIFEST 也仍只描述 VLESS/TCP/TLS。旧套件因此被后续修正候选取代，原因是发布展示质量，不是摘要不符或源码替换。修正仅明确 Xray REALITY 未验收/公开拒绝、保留 sing-box REALITY/Vision 有界验收及成功分支，并把累计导出范围指向 [COMPATIBILITY.md](COMPATIBILITY.md)。协议/编辑/导出行为、版本、核心 pin、应用 UDP 范围及 XHTTP/HTTPUpgrade 阻断均不改变。
+
+本次修正仍须独立审查、准确候选八组、正常合并后的准确主线八组，以及该新主线自己的四目标最终套件核验。新增单元回归读取真实 `prepare()` 结果与合成构建 ZIP 的实际 MANIFEST；deployment 门槛也检查实际安装包清单。合成夹具不等于四目标真实包验收，旧通过不能冒充新通过；结果记录在对应 PR/发布准备证据中，不预填未来 SHA 或递归回写成功声明。上述新验收完成前仍为发布准备中，任何 tag、Draft Release、上传、晋升、公开发布或部署均须另行明确授权。
+
 ## 前置条件
 
 1. 按依赖顺序审阅并合并前置PR；目标必须是当前默认分支的**准确40位HEAD提交**，不能给一个旧测试结果配新源码。
