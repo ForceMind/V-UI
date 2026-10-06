@@ -329,6 +329,59 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js','utf8'),sandbox);
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_tuic_defaults_prefill_cancel_and_blank_password_payload(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const vm = require('node:vm'), fs = require('node:fs'), assert = require('node:assert/strict');
+let setup;
+const writes=[], clone=value=>JSON.parse(JSON.stringify(value));
+const stored={id:45,core:'sing-box',protocol:'tuic',port:10445,remark:'tuic',enable:true,
+ certificate_id:'a'.repeat(32),credentials:{has_password:true},profile:{security:'tls',transport:'quic',
+ server_name:'vpn.example.test',certificate_path:'/cert',key_path:'/key',client_fingerprint:'',
+ skip_cert_verify:false,up_mbps:null,down_mbps:null,obfs_type:'',obfs_password:'',
+ tuic_password:'',tuic_password_set:true,tuic_uuid:'',tuic_uuid_set:true,congestion_control:'cubic',udp_relay_mode:'native',zero_rtt_handshake:false}};
+const app={component(){},use(){},mount(){}};
+const sandbox={addEventListener(){},location:{hash:''},
+ Vue:{createApp(o){setup=o.setup;return app;},ref:v=>({value:v}),reactive:v=>v,
+ computed:fn=>({get value(){return fn();}}),onMounted(){}},
+ ElementPlus:{ElMessage:{success(){},error(m){throw Error(m);}},ElMessageBox:{}},ElementPlusIconsVue:{},
+ axios:{defaults:{headers:{common:{}}},interceptors:{response:{use(){}}},
+ async get(url){return {data:url.endsWith('/editor')?clone(stored):[]};},
+ async post(url,body){writes.push({url,body:clone(body)});return {data:{}};},
+ async put(url,body){writes.push({url,body:clone(body)});return {data:{}};}}};
+vm.runInNewContext(fs.readFileSync('web/js/app.js','utf8'),sandbox);
+(async()=>{
+ const state=setup();await state.openAddInbound();
+ state.newInbound.core='sing-box';state.onCoreChanged();state.newInbound.protocol='tuic';state.onProtocolChanged();
+ const p=state.newInbound.profile;
+ assert.equal(p.security,'tls');assert.equal(p.transport,'quic');assert.equal(p.client_fingerprint,'');
+ assert.equal(p.up_mbps,null);assert.equal(p.down_mbps,null);assert.equal(p.obfs_type,'');
+ assert.equal(p.tuic_password,'');assert.equal(p.tuic_password_set,false);
+ assert.equal(p.tuic_uuid,'');assert.equal(p.tuic_uuid_set,false);
+ assert.equal(p.congestion_control,'cubic');assert.equal(p.udp_relay_mode,'native');assert.equal(p.zero_rtt_handshake,false);
+ p.server_name='vpn.example.test';state.newInbound.certificate_id=stored.certificate_id;
+ await state.saveInbound();assert.equal(writes[0].body.profile.tuic_password,'');
+ await state.openEditInbound({id:45});assert.equal(p.tuic_password,'');assert.equal(p.tuic_password_set,true);
+ p.tuic_uuid='discarded-uuid';p.tuic_password='discarded';p.up_mbps=100;state.showAddInbound.value=false;
+ await state.openEditInbound({id:45});assert.equal(writes.length,1);assert.equal(p.tuic_password,'');
+ assert.equal(p.up_mbps,null);assert.equal(p.client_fingerprint,'');assert.equal(p.tuic_uuid,'');assert.equal(p.tuic_uuid_set,true);
+ await state.saveInbound();assert.equal(writes[1].url,'/api/inbounds/45');
+ assert.equal(writes[1].body.profile.tuic_password,'');assert.equal(writes[1].body.certificate_id,stored.certificate_id);
+ assert.equal('settings' in writes[1].body,false);assert.equal('stream_settings' in writes[1].body,false);
+ await state.openEditInbound({id:45});p.tuic_password='explicit-replacement';await state.saveInbound();
+ assert.equal(writes[2].body.profile.tuic_password,'explicit-replacement');
+ const html=fs.readFileSync('web/index.html','utf8');
+ assert.ok(html.includes('v-model="newInbound.profile.tuic_password"'));
+ assert.ok(html.includes('留空保持当前 TUIC 密码'));assert.ok(html.includes('Mihomo 的 TUIC UDP 能力不能靠 udp:false 关闭'));
+ assert.ok(html.includes('v-model="newInbound.profile.tuic_uuid"'));
+ await state.openEditInbound({id:45});p.tuic_uuid='explicit-uuid';await state.saveInbound();
+ assert.equal(writes[3].body.profile.tuic_uuid,'explicit-uuid');assert.equal(writes[3].body.profile.tuic_password,'');
+})().catch(e=>{console.error(e);process.exitCode=1;});
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
     def test_managed_certificate_selector_matches_validated_tls_protocols(self):
         root = Path(__file__).resolve().parents[1]
         script = r'''
@@ -337,13 +390,13 @@ const html = fs.readFileSync('web/index.html', 'utf8');
 const selector = html.match(/<template v-if="([^"]+)">\s*<el-form-item label="托管证书" v-if="([^"]+)"/);
 assert.ok(selector, 'managed selector must remain inside the TLS template');
 const visible = new Function('newInbound', `return (${selector[1]}) && (${selector[2]});`);
-for (const protocol of ['vless', 'trojan', 'vmess', 'hysteria2']) {
+for (const protocol of ['vless', 'trojan', 'vmess', 'hysteria2', 'tuic']) {
   assert.equal(visible({core: 'sing-box', protocol, profile: {security: 'tls'}}), true, protocol);
   for (const security of ['none', 'reality'])
     assert.equal(visible({core: 'sing-box', protocol, profile: {security}}), false, `${protocol}/${security}`);
   assert.equal(visible({core: 'xray', protocol, profile: {security: 'tls'}}), false, `xray/${protocol}`);
 }
-for (const protocol of ['shadowsocks', 'tuic'])
+for (const protocol of ['shadowsocks'])
   assert.equal(visible({core: 'sing-box', protocol, profile: {security: 'tls'}}), false, protocol);
 '''
         result = subprocess.run(['node', '-e', script], cwd=root, text=True, capture_output=True, timeout=15)

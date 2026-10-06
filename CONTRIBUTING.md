@@ -23,7 +23,7 @@ python -m unittest discover -s tests -v
 | --- | --- |
 | Test V-UI | API、鉴权、数据库、状态、纯函数、原浏览器操作流程和托管证书节点编辑/恢复 |
 | ToClash reference and export verification | 固定独立参考、100场景、40项目录、客户端配置 |
-| Real loopback proxy and DNS chain | 实际 VLESS/TCP/TLS、Trojan、Shadowsocks、VMess，已验证 VLESS/WS/TLS、VLESS/gRPC/TLS，以及候选 Hysteria2/TLS 的双客户端链路与失败路径；DNS、拒绝/停启 |
+| Real loopback proxy and DNS chain | 实际 VLESS/TCP/TLS、Trojan、Shadowsocks、VMess，已验证 VLESS/WS/TLS、VLESS/gRPC/TLS，已验证 Hysteria2/TLS 及候选 TUIC v5/TLS 的双客户端链路与失败路径；DNS、拒绝/停启 |
 | Selected release deployment gates | 实际离线包、HTTPS、完整Vue面板、备份恢复/回滚 |
 | ACME certificate acceptance | Certbot/Pebble真实HTTP-01、续期/失败、Chromium证书页 |
 | One-command installation acceptance | 仅临时CI主机上的实际sudo/systemd/socket安装、升级、重启 |
@@ -76,9 +76,9 @@ sing-box 1.14.2 / VLESS / WS / TLS 已由 PR #18 完成准确主线八组验收�
 
 仅 sing-box/VLESS/gRPC/TLS、单 UUID、空 flow、明确验证 SNI、ALPN 省略或 `["h2"]`、Chrome 独立可选、HTTP/TCP。Mihomo `udp: false`、sing-box `network: tcp`；不扩大到 UDP、h2c、Xray gRPC、authority/Host enforcement、额外 headers/timers/multi-mode、HY2/TUIC 或发布/部署。失败、环境阻断、未运行、前置通过和最终集成通过要分别报告。
 
-## v0.4.5 Hysteria2 候选验收
+## v0.4.5 Hysteria2 基线回归
 
-当前 [Draft PR #20](https://github.com/ForceMind/V-UI/pull/20) 只增加固定 sing-box 1.14.2 / Mihomo 1.19.32、单密码、明确验证 SNI 和原生 QUIC 默认值。前置 `e18003670c6469489c7a63413be0a3f9bd77cf0b` 的[真实链路](https://github.com/ForceMind/V-UI/actions/runs/37293701022) 58 项通过；同提交 [ACME](https://github.com/ForceMind/V-UI/actions/runs/37293701064) 因继承夹具的 DNS TCP/UDP 端口碰撞失败，夹具预留修复已通过 4 项本地回归，准确候选 ACME 重跑仍待完成，不是八组全绿。最终独立审查、集成 exact-head 和 exact-master 八组均仍待完成。
+[PR #20/#21](docs/HYSTERIA2_CLOSURE_045.md)已完成 HY2 最终主线八组/11 jobs/全部步骤 attempt 1 验收。原前置缺日志、ACME DNS 端口碰撞、首次 master 继承 Trojan/gRPC TLS 证据失败与 portable 首次 API rate limit 仍保留于[原契约](docs/HYSTERIA2_045.md)；以下是后续修改必须保持的基线回归。
 
 - `python -m unittest discover -s tests -p 'test_hysteria2_profile.py' -v`：严格密码/SNI/默认值、标准 URI 编码、完整 Mihomo/sing-box 输出、拒绝调优/未知字段，编辑隐藏秘密、空值保留与遗留高级草稿保护。
 - `test_hysteria2_preflight_loopback.py`：裸配置固定核心；`test_hysteria2_loopback.py`：应用编译、匿名无 cookie 公开订阅生成配置的双客户端链路。使用 `VUI_TEST_CORES` / `VUI_TEST_MIHOMO` 激活真实门槛，不能将默认 skip 写成运行通过。
@@ -90,4 +90,19 @@ sing-box 1.14.2 / VLESS / WS / TLS 已由 PR #18 完成准确主线八组验收�
 - `test_acme_fixture.py`：测试 DNS TCP/UDP 同端口配对的防碰撞回归；不得通过跳过 ACME 或降低真实证书断言掩盖夹具错误。
 - `python scripts/check_docs.py` 与最终 diff 检查必须通过；实际浏览器、真实配置、链路、ACME、安装和四目标包在准确候选各自验收。前置成功不自动解锁合并或公开 Release。
 
-完整边界与首次失败见[HY2 阶段契约](docs/HYSTERIA2_045.md)。不放开 obfs/hopping、带宽/ALPN/uTLS 覆盖、多用户、TUIC、应用 UDP、其他核心或生产部署；原固定 pins、四 Linux 目标和 40 项 ToClash 不变。
+完整边界与首次失败见[HY2 阶段契约](docs/HYSTERIA2_045.md)。HY2 基线不放开 obfs/hopping、带宽/ALPN/uTLS 覆盖、多用户、应用 UDP、其他核心或生产部署；TUIC 按下节独立契约验收；原固定 pins、四 Linux 目标和 40 项 ToClash 不变。
+
+
+## v0.4.6 TUIC v5 候选验收
+
+当前 [Draft PR #22](https://github.com/ForceMind/V-UI/pull/22)先通过固定官方二进制裸前置（准确 `21cb0bc7`，八组/11 jobs/全部步骤 attempt 1，链路 69 项），再正常 merge-forward 继承 [PR #23 安全修复](docs/INBOUND_RESPONSE_CLOSURE_20261006.md)。当前集成重建，不复用丢失的本地证据；最终独立审查、八组 exact-head、授权正常 merge 和八组 exact-master 仍待完成。
+
+- `python -m unittest discover -s tests -p 'test_tuic_profile.py' -v`：服务端 ALPN 恰为 h3（不可省略）、单 UUID/密码对、独立空输入保留、普通响应 allowlist、未知/高级导入草稿保护与三格式映射
+- `test_export_real.py`：固定客户端 config check；`test_tuic_loopback.py`：真实 Mihomo URI provider/converter 导入和转发。TUIC URI 为非官方客户端约定，不称官方通用标准
+- `test_tuic_preflight_loopback.py` / `test_tuic_loopback.py`：分别裸前置与应用编译/匿名公开订阅双客户端链路。使用 `VUI_TEST_CORES` / `VUI_TEST_MIHOMO` 激活；分别只改变 UUID、密码、CA 或 SNI，要求真实 unknown user/token mismatch/x509 原因、固定目标零送达和无 DIRECT，超时不够
+- `test_tuic_rejection_evidence.py` 验证凭据原因及新会话日志边界；`test_tls_rejection_evidence.py` 要求 x509 与具体 CA/SNI 原因来自同一日志行。共用有界失败观察不重置目标基线，不掩盖晚到请求
+- `test_tuic_managed_certificate.py`：绑定/改绑/编辑/续期新 QUIC 会话、失败保留材料和已应用 revision、停止核心 `CORE_STOPPED_PENDING_APPLY`
+- 激活 `test_inbound_editor_browser.py`：创建/取消/回填/编辑/刷新/再打开/三格式导出、UUID 与密码分别稳定、损坏后停机恢复；普通响应无秘密及证书卡 allowlist 继续覆盖
+- `test_hysteria2_installation.py` / `test_firewall_support.py`、ACME、40 项 ToClash、四目标 Linux 与完整八组不减；`python scripts/check_docs.py` 校验所有当前版本入口，不改写历史版本
+
+仅 HTTP/TCP；sing-box `network: tcp`，Mihomo TUIC adapter 硬编码 UDP 能力，省略无效 `udp: false`，不称关闭 UDP。QUIC 需要节点 UDP 可达，应用 UDP 未验收。固定 pin/构建不变，无真实 CA/防火墙变更、tag/Release、附件晋升或部署；完整边界见[TUIC 契约](docs/TUIC_046.md)。

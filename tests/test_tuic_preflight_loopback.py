@@ -19,9 +19,9 @@ import unittest
 
 import yaml
 
-from loopback_helpers import certificate_files, CoreProcess, http_through, start_http_target, unused_port, require_tls_rejection
+from loopback_helpers import certificate_files, CoreProcess, http_through, start_http_target, unused_port, require_tls_rejection, require_rejection_evidence
 
-PASSWORD = "tuic-test:p@ss/word?#%"
+PASSWORD = "tuic-test:p@ss/word?#%雪 with space"
 SNI = "vpn.example.test"
 TARGET_BODY = b"VUI-LOOPBACK-TARGET"
 CLIENTS = ("mihomo", "singbox")
@@ -33,6 +33,7 @@ FAILURES = ("uuid", "password", "ca", "sni")
 @unittest.skipUnless(os.getenv("VUI_TEST_CORES") and os.getenv("VUI_TEST_MIHOMO"),
                      "pinned real sing-box and Mihomo binaries required")
 class TUICPreflightLoopbackTests(unittest.TestCase):
+    clients = CLIENTS
     @classmethod
     def setUpClass(cls):
         cls.singbox = str(Path(os.environ["VUI_TEST_CORES"]) / "sing-box")
@@ -116,10 +117,16 @@ class TUICPreflightLoopbackTests(unittest.TestCase):
         env = self.env.copy()
         if options.get("failure") == "ca":
             env["SSL_CERT_FILE"] = str(self.wrong_ca)
-        if client == "mihomo":
+        if client.startswith("mihomo"):
             path = self.unique_path(client, "yaml")
-            path.write_text(yaml.safe_dump(config, sort_keys=False))
             home = str(self.unique_path("mihomo-home", "data"))
+            Path(home).mkdir()
+            for name, provider in config.get("proxy-providers", {}).items():
+                # Honor the real client's existing safe-path boundary.
+                destination = Path(home) / (name + ".txt")
+                destination.write_bytes(Path(provider["path"]).read_bytes())
+                provider["path"] = str(destination)
+            path.write_text(yaml.safe_dump(config, sort_keys=False))
             command = [self.mihomo, "-d", home, "-f", str(path)]
             self.check_command([self.mihomo, "-t", "-d", home, "-f", str(path)], env)
         else:
@@ -189,18 +196,10 @@ class TUICPreflightLoopbackTests(unittest.TestCase):
             evidence = next(line for line in log.splitlines() if "x509" in line and reason in line)
         else:
             reason = "authentication: unknown user " + WRONG_UUID if failure == "uuid" else "authentication: token mismatch"
-            deadline = time.monotonic() + 12
-            while True:
-                self.assertEqual(self.requests, [], "Rejected request arrived at target")
-                # The shared server's earlier sessions must not satisfy this client.
-                log = server.log_path.read_text(errors="replace")[offset:].lower()
-                evidence = next((line for line in log.splitlines() if reason in line), None)
-                if evidence:
-                    break
-                if time.monotonic() >= deadline:
-                    self.fail("No actual TUIC credential rejection: " + reason + "\n" + self.logs())
-                self.assert_failure_without_direct(port, clear=False)
-            self.assertEqual(self.requests, [], "Rejected request arrived during observation")
+            log = require_rejection_evidence(self, server.log_path,
+                lambda: self.assert_failure_without_direct(port, clear=False), self.requests,
+                (reason,), log_offset=offset)
+            evidence = next(line for line in log.splitlines() if reason in line)
         print(f"TUIC v5 preflight {failure}: " + evidence)
 
     def verify_both_clients(self, *, failure=None):
@@ -220,7 +219,7 @@ class TUICPreflightLoopbackTests(unittest.TestCase):
                 server_port = udp.getsockname()[1]
             server = CoreProcess(processes, self.prepare_server(server_port), self.unique_path("server", "log"), self.env)
             self.start_udp_server(server, server_port)
-            for client in CLIENTS:
+            for client in self.clients:
                 with self.subTest(client=client, failure=failure):
                     for mutation in ((None, failure) if failure else (None,)):
                         port = unused_port()
@@ -245,7 +244,7 @@ class TUICPreflightLoopbackTests(unittest.TestCase):
         # Parsing has no local listener dependency, so environment restrictions
         # cannot hide whether the pinned binaries implement this profile.
         self.prepare_server(19443)
-        for client in CLIENTS:
+        for client in self.clients:
             for failure in (None, *FAILURES):
                 with self.subTest(client=client, failure=failure):
                     self.prepare_client(client, 19444, 19443, failure=failure)

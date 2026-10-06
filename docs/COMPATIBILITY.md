@@ -1,10 +1,10 @@
 # 兼容与验证范围
 
-v0.4.2 的[主线验收](MAINLINE_CLOSURE_20261005.md)、v0.4.3 的[WS 主线验收](VLESS_WS_CLOSURE_043.md)和 v0.4.4 的[gRPC 主线验收](VLESS_GRPC_CLOSURE_044.md)已经完成。当前 v0.4.5 Hysteria2/TLS 为候选，最终独立审查与准确候选/主线八组 CI 尚待完成；以下区分继承基线、固定二进制前置链路和新集成候选。
+[v0.4.2](MAINLINE_CLOSURE_20261005.md)、[WS v0.4.3](VLESS_WS_CLOSURE_043.md)、[gRPC v0.4.4](VLESS_GRPC_CLOSURE_044.md)、[HY2 v0.4.5](HYSTERIA2_CLOSURE_045.md)和 [PR #23 普通响应安全修复](INBOUND_RESPONSE_CLOSURE_20261006.md)已完成各自准确主线验收。当前 v0.4.6 TUIC v5/TLS 是集成候选；最终独立审查与准确候选/主线八组 CI 仍待完成，裸前置成功不能代替。
 
 ## Linux 安装层
 
-0.4.5 候选延续 0.3.1 的安装能力模型；选择依据是实际环境能力，不是发行版名称。
+0.4.6 候选延续 0.3.1 的安装能力模型；选择依据是实际环境能力，不是发行版名称。
 
 | 层级 | 目标 / 验收 |
 | --- | --- |
@@ -16,7 +16,7 @@ v0.4.2 的[主线验收](MAINLINE_CLOSURE_20261005.md)、v0.4.3 的[WS 主线验
 | 防火墙 | UFW/firewalld 可在用户明确确认后修改；自定义 nftables/iptables 只提示 |
 | 代表性发行版探测 | Debian、Fedora、Arch、openSUSE、Alpine |
 
-“探测成功”不单独等于完整支持。正式支持声明要求普通测试、真实 one-click、portable matrix 和发布门槛同时通过。v0.4.2 的四目标附件已核验；任何 v0.4.5 包须通过本候选自己的验收，不能使用旧套件或前置链路结果替代。
+“探测成功”不单独等于完整支持。正式支持声明要求普通测试、真实 one-click、portable matrix 和发布门槛同时通过。v0.4.2 的四目标附件已核验；任何 v0.4.6 包须通过本候选自己的验收，不能使用旧套件或前置链路结果替代。
 
 未经适配的 NixOS、runit/s6、其他 CPU、声明式或只读系统不会被假装支持；安装器应给出检测结果并停止。
 
@@ -82,9 +82,9 @@ Host 是客户端路由元数据，保存在节点的 `transport.headers.Host` �
 
 集成验收已经覆盖公开订阅生成的配置、创建/取消/编辑/刷新/再打开/损坏后停机恢复和托管证书续期。详细参数见[配置说明](CONFIGURATION.md#044-vlessgrpctls-基线)，后续修改仍须在自己的准确提交重验。
 
-## v0.4.5 Hysteria2/TLS 候选
+## v0.4.5 Hysteria2/TLS 已验证基线
 
-**最终集成候选尚未验收。** [Draft PR #20](https://github.com/ForceMind/V-UI/pull/20) 的固定前置 `e18003670c6469489c7a63413be0a3f9bd77cf0b` [真实链路](https://github.com/ForceMind/V-UI/actions/runs/37293701022) 58 项通过，同提交 ACME 因继承 DNS TCP/UDP 测试端口碰撞失败。七组工作流成功、一组失败，不是八组全绿；集成独立审查、准确候选/主线各八组仍待完成。
+[PR #20/#21](HYSTERIA2_CLOSURE_045.md)最终 master `838c66d9974dd9f3a944641a2e9e03cc200e0bbe` 八组/11 jobs/全部步骤 attempt 1 成功，真实链路 63 项与独立托管 HY2 8 项通过。更早前置缺日志、ACME 端口碰撞、首次 master 继承 TLS 证据失败和 portable 限流仍保留于[历史契约](HYSTERIA2_045.md)。后续改动必须重新验收。
 
 | 项目 | 限定范围 |
 | --- | --- |
@@ -100,7 +100,24 @@ Host 是客户端路由元数据，保存在节点的 `transport.headers.Host` �
 
 前置双客户端正常 HTTP 实际送达、错误密码/CA/SNI 有真实 `authentication failed` / x509 原因，目标 IP 先证明可达，每次负向零目标请求且无 DIRECT。首次缺少 Mihomo CA 与继承 gRPC SNI 原因日志的失败完整保留；有界失败请求观察修复没有削弱断言或修改核心。
 
-公开订阅、真实 config check/链路、Chromium 完整编辑与损坏恢复、托管证书新 QUIC 会话和安装/四目标套件是集成门槛；前置成功不替代它们。详细[配置](CONFIGURATION.md#045-hysteria2tls-候选)与[证据](HYSTERIA2_045.md)。
+公开订阅、真实 config check/链路、Chromium 完整编辑与损坏恢复、托管证书新 QUIC 会话和安装/四目标套件已在上述主线分别验收。详细[配置](CONFIGURATION.md#045-hysteria2tls-基线)与[收口证据](HYSTERIA2_CLOSURE_045.md)。
+
+## v0.4.6 TUIC v5/TLS 候选
+
+[Draft PR #22](https://github.com/ForceMind/V-UI/pull/22)的裸前置 `21cb0bc7` 八组/11 jobs/全部步骤 attempt 1 成功，[真实链路 69 项](https://github.com/ForceMind/V-UI/actions/runs/37356266391)包含双客户端 HTTP 正向及分别错误 UUID/密码/CA/SNI 的真实原因、零送达与无 DIRECT。正常 merge-forward 继承安全 master `8e0d0746`；**最终集成独立审查、八组 exact-head、授权正常合并和八组 exact-master 仍待完成**。
+
+| 项目 | 限定范围 |
+| --- | --- |
+| 固定实现 | 未改变的官方 sing-box 1.14.2 服务端/客户端、Mihomo 1.19.32；TUIC v5，排除 v4/token |
+| 安全 | 单 UUID/密码对、明确验证 SNI、服务端 TLS ALPN 恰为 `["h3"]`，不可省略；原生 QUIC、默认 cubic/heartbeat、零 RTT 关闭 |
+| 三格式 | 固定 Mihomo 客户端支持的非官方 TUIC URI 约定、Mihomo YAML、sing-box JSON；不是官方通用 URI 标准，无服务端材料 |
+| 应用负载 | 仅 HTTP/TCP；sing-box `network: tcp`。Mihomo TUIC adapter 硬编码 UDP 能力，省略无效 `udp: false`，不得宣称关闭 UDP；应用 UDP 未验收 |
+| 网络条件 | 节点 UDP/QUIC 端口须在主机/云网络通行；TCP 规则不替代 UDP |
+| 编辑与导入 | UUID/密码各自空新建生成、空编辑保留；高级参数保留或拒绝，草稿不因无关编辑而公开可用 |
+| 响应安全 | 普通响应 PR #23 allowlist；特权 `/editor` 手工证书路径字符串与明确授权客户端导出凭据分开 |
+| 待验收门槛 | 实际 URI provider 导入、公开订阅链路、证书绑定/续期/失败/停止待应用、Chromium 创建/取消/编辑/刷新/导出/损坏后停机恢复 |
+
+不复用工作区回退前丢失的本地结果，EPERM 不算运行通过；参数与详细门槛见[配置](CONFIGURATION.md#046-tuic-v5tls-候选)和[TUIC 契约](TUIC_046.md)。40 项 ToClash、四目标 Linux 和协议区分 UDP 安装器不变。
 
 ## 尚未完成的协议矩阵
 
@@ -110,7 +127,7 @@ Host 是客户端路由元数据，保存在节点的 `transport.headers.Host` �
 - Trojan 的 Xray 实现及 WebSocket/gRPC 等非 TCP 组合；
 - Xray Shadowsocks、2022 cipher、插件/obfs，以及未列明的 cipher；
 - Xray VMess 及 VMess 非 TCP/TLS 组合；
-- Hysteria2 的最终集成验收及本页候选范围外组合、TUIC、REALITY / Vision；
+- 本页 HY2 基线范围外组合、TUIC 最终集成及候选范围外组合、REALITY / Vision；
 - 除上述 WS 和 gRPC 基线外的 WebSocket/gRPC，以及 XHTTP / HTTPUpgrade 全组合；
 - 除上述 Shadowsocks AEAD 之外的 UDP 专项；
 - sing-box 完整 ToClash 规则迁移。
@@ -119,7 +136,7 @@ Host 是客户端路由元数据，保存在节点的 `transport.headers.Host` �
 
 ## 证书
 
-已实现 Certbot HTTP-01 单域名申请、测试/正式隔离、自动续期和消费者绑定。WS 与 gRPC 基线沿用并已验证托管证书生命周期和停止待应用语义；HY2 候选复用同一流程，仍须完成自己的最终集成验收。不把 WS Host 或 gRPC service_name 当作证书域名。DNS-01、通配符和 DNS provider API 尚未纳入。
+已实现 Certbot HTTP-01 单域名申请、测试/正式隔离、自动续期和消费者绑定。WS 与 gRPC 基线沿用并已验证托管证书生命周期和停止待应用语义；HY2 已完成自己的主线验收；TUIC 候选复用同一流程，仍须完成自己的最终集成验收。不把 WS Host 或 gRPC service_name 当作证书域名。DNS-01、通配符和 DNS provider API 尚未纳入。
 
 ## 边界
 

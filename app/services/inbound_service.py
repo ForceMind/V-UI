@@ -14,6 +14,7 @@ from app.models.database import Inbound
 from app.services.protocol_profiles import compile_profile, decompile_profile
 from app.services.grpc_profile import is_grpc_transport
 from app.services.hysteria2_profile import password_value
+from app.services import tuic_profile
 
 SUPPORTED_CORES = {"xray", "sing-box"}
 XRAY_PROTOCOLS = {"vless", "vmess", "trojan", "shadowsocks"}
@@ -116,8 +117,8 @@ def ensure_credentials(core: str, protocol: str, settings: dict) -> dict:
                     "password": secrets.token_urlsafe(18),
                 }]
             else:
-                users[0].setdefault("uuid", str(uuid.uuid4()))
-                users[0].setdefault("password", secrets.token_urlsafe(18))
+                if not users[0].get("uuid"): users[0]["uuid"] = str(uuid.uuid4())
+                if not users[0].get("password"): users[0]["password"] = secrets.token_urlsafe(18)
             settings["users"] = users
     return settings
 
@@ -154,7 +155,7 @@ def to_dict(item: Inbound) -> dict:
             "has_obfs_password": isinstance(obfs, dict) and bool(obfs.get("password")),
         },
         "managed_certificate_eligible": (
-            item.core == "sing-box" and item.protocol in {"vless", "trojan", "vmess", "hysteria2"}
+            item.core == "sing-box" and item.protocol in {"vless", "trojan", "vmess", "hysteria2", "tuic"}
             and isinstance(tls, dict) and tls.get("enabled") is True and "reality" not in tls
         ),
         "tag": item.tag,
@@ -163,10 +164,10 @@ def to_dict(item: Inbound) -> dict:
 
 def editor_dict(item: Inbound) -> dict:
     settings=item.settings or {}
-    if item.core == "sing-box" and item.protocol == "hysteria2":
+    if item.core == "sing-box" and item.protocol in {"hysteria2", "tuic"}:
         users = settings.get("users") if isinstance(settings, dict) else None
         if not isinstance(users, list) or len(users) != 1 or not isinstance(users[0], dict):
-            raise HTTPException(status_code=422, detail="Existing Hysteria2 credentials cannot be represented by this editor")
+            raise HTTPException(status_code=422, detail=f"Existing {item.protocol} credentials cannot be represented by this editor")
     else:
         users=settings.get("users") or settings.get("clients") or []
     first=users[0] if users else {}
@@ -179,7 +180,7 @@ def editor_dict(item: Inbound) -> dict:
         "enable":bool(item.enable),
         "expiry_time":item.expiry_time or 0,
         "tag":item.tag,
-        "profile":decompile_profile(item.core or "xray",item.protocol,settings,item.stream_settings if item.core == "sing-box" and item.protocol == "hysteria2" else (item.stream_settings or {})),
+        "profile":decompile_profile(item.core or "xray",item.protocol,settings,item.stream_settings if item.core == "sing-box" and item.protocol in {"hysteria2", "tuic"} else (item.stream_settings or {})),
         "credentials":{
             "user_count":len(users),
             "has_uuid":bool(first.get("uuid") or first.get("id")),
@@ -227,6 +228,19 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
         )
     )
     profile = normalize_mapping(payload.get("profile"))
+    if core == "sing-box" and protocol == "tuic":
+        try:
+            if existing is not None:
+                tuic_profile.credential_user(settings)
+            else:
+                users = settings.get("users", [])
+                if not isinstance(users, list) or len(users) > 1 or any(not isinstance(user, dict) for user in users):
+                    raise ValueError("New TUIC nodes require one UUID/password pair")
+                if users:
+                    for field, validator in (("uuid", tuic_profile.uuid_value), ("password", tuic_profile.password_value)):
+                        if field in users[0] and users[0][field] != "": validator(users[0][field])
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     if existing is None and core == "sing-box" and protocol == "hysteria2":
         users = settings.get("users", [])
         if (not isinstance(users, list) or len(users) > 1
@@ -257,6 +271,12 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
             previous_tls = stream_settings.get("tls")
             if not isinstance(previous_tls, dict) or previous_tls.get("enabled") is not True:
                 raise HTTPException(status_code=422, detail="Explicit TLS selection is required to change an existing Hysteria2 security state")
+        settings = deepcopy(settings)
+    elif existing is not None and core == "sing-box" and protocol == "tuic":
+        if profile and "security" not in profile:
+            previous_tls = stream_settings.get("tls")
+            if not isinstance(previous_tls, dict) or previous_tls.get("enabled") is not True:
+                raise HTTPException(status_code=422, detail="Explicit TLS selection is required to change an existing TUIC security state")
         settings = deepcopy(settings)
     elif grpc_edit:
         # Creating a node may generate credentials; an ordinary edit must not

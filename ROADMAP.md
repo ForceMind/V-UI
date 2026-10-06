@@ -8,7 +8,9 @@ v0.4.3 由 [PR #18](https://github.com/ForceMind/V-UI/pull/18) 正常合并至 `
 
 v0.4.4 由 [PR #19](https://github.com/ForceMind/V-UI/pull/19) 正常合并至 `84729dfc53165003e7d459a5d56621ce89ba497c`，候选 `240edf23af8a12b2cbd71114fe65c693290e39f2` 与合并 tree 均为 `200f8b61ac6decc4fb11384c5d8d162f1f1bdcdc`；独立审查、八组 exact-head 与八组 exact-master 已完成，最终主线 11 个 job/全部步骤成功。它是 gRPC Lite 已验证基线，详见[gRPC 收口](docs/VLESS_GRPC_CLOSURE_044.md)。
 
-当前独立版本为 **v0.4.5 Hysteria2/TLS 候选**，[Draft PR #20](https://github.com/ForceMind/V-UI/pull/20)。固定前置 `e18003670c6469489c7a63413be0a3f9bd77cf0b` 的真实链路 58 项通过，但同提交 ACME 因 DNS TCP/UDP 测试端口碰撞失败，不是八组全绿；详见[HY2 契约](docs/HYSTERIA2_045.md)。集成独立审查、exact-head 八组、授权正常 merge 和 exact-master 八组尚待完成。旧主线或前置链路通过不自动认可后续源码或附件；发布、附件晋升与部署仍由独立流程负责。
+v0.4.5 由 [PR #20/#21](docs/HYSTERIA2_CLOSURE_045.md) 正常合并收口到 `838c66d9974dd9f3a944641a2e9e03cc200e0bbe`，tree `e12287d8ebbea233142d58191ee5141a0a49a17a`；最终八组/11 jobs/全部步骤 attempt 1 成功。[PR #23 普通响应安全修复](docs/INBOUND_RESPONSE_CLOSURE_20261006.md)随后正常合并至 `8e0d07463e59b52856f55fa33346a760a38b4705`，准确候选/主线验收完成。历史失败分别保留。
+
+当前独立版本为 **v0.4.6 TUIC v5/TLS 候选**，[Draft PR #22](https://github.com/ForceMind/V-UI/pull/22)。裸前置 `21cb0bc7` 八组/11 jobs/全部步骤 attempt 1 成功，真实链路 69 项；正常 merge-forward `7c380d7c` 继承上述安全修复。当前重新构建和测试集成，不复用工作区回退前丢失的本地证据。独立审查、exact-head 八组、授权正常 merge 和 exact-master 八组仍待完成，详见[TUIC 契约](docs/TUIC_046.md)。源码、附件晋升、发布和部署分别记录。
 
 ## v0.3.0 基线
 
@@ -50,8 +52,8 @@ PR #13。
 3. VMess + TLS — **v0.4.2 / PR #17（主线验收已完成）**：strict export、真实 Mihomo/sing-box 链路、错误 UUID/CA/SNI；
 4. VLESS WebSocket — **v0.4.3 / PR #18（主线验收已完成）**；
 5. VLESS gRPC — **v0.4.4 / PR #19（主线验收已完成）**；
-6. Hysteria2 — **v0.4.5 / Draft PR #20（当前候选，最终审查/CI 待完成）**；
-7. TUIC；
+6. Hysteria2 — **v0.4.5 / PR #20/#21（主线验收已完成）**；
+7. TUIC — **v0.4.6 / Draft PR #22（当前候选，最终审查/CI 待完成）**；
 8. REALITY / Vision；
 9. XHTTP / HTTPUpgrade；
 10. UDP / DNS 专项。
@@ -79,7 +81,7 @@ PR #13。
 - 共用编译器、编辑器与托管证书；未知导入字段不因编辑而消失，UUID 隐藏且不变，创建/取消/编辑/刷新/再打开/恢复和 `CORE_STOPPED_PENDING_APPLY` 继续验收。
 - 不新增依赖、后端、迁移、反向代理或 authority/Host 白名单；Xray gRPC、h2c、HY2/TUIC 等仍排除。前置通过与候选审查、准确候选八组 CI、正常合并、准确主线八组 CI 已分别记录于[主线收口](docs/VLESS_GRPC_CLOSURE_044.md)。首次失败和当时候选历史完整保留于[阶段契约](docs/VLESS_GRPC_044.md)，后续修改仍须重验。
 
-### v0.4.5 的边界与门槛
+### v0.4.5 已验收 HY2 基线的保留边界
 
 - sing-box 1.14.2 / Mihomo 1.19.32 固定官方二进制，单密码、明确验证 SNI、原生 QUIC 默认值；不含 obfs、hopping、带宽/拥塞、ALPN/uTLS 覆盖、多用户或 TUIC。
 - 标准 `hysteria2://` URI 编码密码并写明 `sni` / `insecure=0`，完整 Mihomo YAML 与 sing-box JSON 保留密码/TLS；服务端材料不导出，未知字段拒绝，不退 DIRECT。
@@ -87,7 +89,16 @@ PR #13。
 - 新建不注入带宽/Chrome；密码输入留空新建生成、编辑保留，已有秘密不回传。高级/obfs 草稿保留或不可表达时拒绝，不能借编辑静默变成公开可用配置。
 - 复用托管证书；绑定/续期/失败保留材料与 `CORE_STOPPED_PENDING_APPLY`，真实浏览器创建/取消/编辑/刷新/再打开/导出/损坏后停机恢复分别验收。
 - 安装器可重复 `--node-udp-port`（1024–65535），TCP/UDP 独立，新安装 IPv4/可用 IPv6 探测，升级提示人工核对所有权；精确端口/协议确认，不自动启用防火墙，声明不持久保存且不创建节点。
-- 首次前置失败、第二次真实链路 58 项通过及 ACME DNS 端口碰撞失败均保留；最终独立审查和准确候选/主线各八组仍待完成，不能复用 gRPC 的通过或裸 HY2 前置代替集成验收。
+- 首次前置失败、第二次真实链路 58 项通过及 ACME DNS 端口碰撞失败均保留；PR #20 首次 master 的继承 TLS 日志失败及 PR #21 portable 首次限流也保留。最终独立审查和准确候选/主线验收已完成，详见[HY2 收口](docs/HYSTERIA2_CLOSURE_045.md)；后续修改仍须重验。
+
+### v0.4.6 TUIC 的边界与待完成门槛
+
+- 固定官方 sing-box 1.14.2 / Mihomo 1.19.32、单 UUID/密码对、明确验证 SNI、服务端 ALPN 恰为 h3（不允许省略）、原生 QUIC/默认拥塞、零 RTT 关闭
+- 固定客户端非官方 TUIC URI 约定、Mihomo YAML、sing-box JSON 无损保留凭据/TLS；不称官方通用 URI 标准，不含服务端材料，不退 DIRECT
+- 仅 HTTP/TCP，sing-box `network: tcp`；Mihomo TUIC adapter 硬编码 UDP 能力，省略无效 `udp: false`，不得称已禁用 UDP。QUIC 要求节点 UDP 通行，应用 UDP 未验收
+- 独立 UUID/密码输入留空新建生成、编辑保留；继承 PR #23 普通响应允许列表，特权 `/editor` 手工证书路径例外与明确授权客户端导出分开。高级草稿保留或拒绝，不能被编辑静默转换成可公开配置
+- 三格式与实际 URI provider 导入、公开订阅双客户端链路/分别错误 UUID/密码/CA/SNI、证书绑定/续期/失败/停止待应用、Chromium 创建/取消/编辑/刷新/导出/损坏后停机恢复都须在最终提交验收
+- 四目标 Linux、40 项 ToClash 和协议区分 UDP 安装器保持；当前独立审查、八组 exact-head、授权正常合并及八组 exact-master 仍待完成。无 tag/Release/部署/附件晋升/真实 CA/实际防火墙变更
 
 ## 后续
 

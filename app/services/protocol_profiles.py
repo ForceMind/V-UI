@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from app.services.websocket_profile import websocket_host, websocket_path
 from app.services.grpc_profile import grpc_service_name, is_grpc_transport
-from app.services import hysteria2_profile
+from app.services import hysteria2_profile, tuic_profile
 
 
 def profile_catalog() -> dict[str, Any]:
@@ -564,6 +564,12 @@ def compile_profile(
         return settings, stream
 
     if core == "sing-box":
+        tuic_alpn = None
+        if protocol == "tuic":
+            try:
+                tuic_alpn = tuic_profile.prepare_profile(profile, settings, stream)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
         hy2_alpn = None
         if protocol == "hysteria2":
             try:
@@ -626,6 +632,9 @@ def compile_profile(
             stream["_vui"]["client_fingerprint"] = profile["client_fingerprint"]
             if hy2_alpn is not None:
                 stream["tls"]["alpn"] = hy2_alpn
+        if protocol == "tuic":
+            stream["_vui"]["client_fingerprint"] = profile["client_fingerprint"]
+            stream["tls"]["alpn"] = tuic_alpn
         if vless_ws and preserved_ws_alpn:
             stream["tls"]["alpn"] = list(preserved_ws_alpn)
         if vless_grpc and str(profile.get("security") or "none").lower() == "tls":
@@ -675,23 +684,15 @@ def compile_profile(
                 else:
                     settings.pop("obfs", None)
         elif protocol == "tuic":
-            congestion = str(
-                profile.get("congestion_control") or "bbr"
-            ).strip()
-            if congestion not in {"cubic", "new_reno", "bbr"}:
-                raise HTTPException(
-                    status_code=422,
-                    detail="Invalid TUIC congestion control",
-                )
-            settings["congestion_control"] = congestion
-            settings["zero_rtt_handshake"] = bool(
-                profile.get("zero_rtt_handshake", False)
-            )
-            metadata = dict(stream.get("_vui") or {})
-            metadata["udp_relay_mode"] = str(
-                profile.get("udp_relay_mode") or "native"
-            )
-            stream["_vui"] = metadata
+            for field in ("uuid", "password"):
+                value = profile.get("tuic_" + field, "")
+                if value != "": users[0][field] = value
+            settings["users"] = users
+            # Advanced draft values remain explicit; strict export is narrower.
+            for field, default in (("congestion_control", "cubic"), ("zero_rtt_handshake", False)):
+                if field in settings or profile[field] != default: settings[field] = profile[field]
+            if "udp_relay_mode" in stream_settings.get("_vui", {}) or profile["udp_relay_mode"] != "native":
+                stream["_vui"]["udp_relay_mode"] = profile["udp_relay_mode"]
 
         return settings, stream
 
@@ -710,9 +711,10 @@ def decompile_profile(core: str, protocol: str, settings: dict | None,
     Private Reality keys are intentionally not returned. compile_profile()
     preserves them from the persisted stream when the editor saves.
     """
-    if core == "sing-box" and protocol == "hysteria2":
+    if core == "sing-box" and protocol in {"hysteria2", "tuic"}:
         try:
-            return hysteria2_profile.editor_profile(settings, stream_settings)
+            module = tuic_profile if protocol == "tuic" else hysteria2_profile
+            return module.editor_profile(settings, stream_settings)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     settings = dict(settings or {})

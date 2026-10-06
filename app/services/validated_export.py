@@ -15,6 +15,7 @@ from app.services.mihomo_routing import unique_proxy_names
 from app.services.websocket_profile import websocket_host, websocket_path
 from app.services.grpc_profile import grpc_service_name
 from app.services.hysteria2_profile import password_value
+from app.services import tuic_profile
 
 
 class ExportError(ValueError):
@@ -39,8 +40,8 @@ def node_host(value: str) -> str:
 def _common(item, server: str) -> tuple[str, str]:
     if not item.enable or getattr(item, "expiry_time", 0):
         raise ExportError("Disabled or expiring nodes are not eligible for this export profile")
-    if item.core != "sing-box" or item.protocol not in {"vless", "trojan", "shadowsocks", "vmess", "hysteria2"}:
-        raise ExportError("Validated export requires verified sing-box VLESS/TCP/TLS, VLESS/WS/TLS or VLESS/gRPC/TLS, Trojan/TCP/TLS, Shadowsocks, VMess/TCP/TLS or Hysteria2/TLS")
+    if item.core != "sing-box" or item.protocol not in {"vless", "trojan", "shadowsocks", "vmess", "hysteria2", "tuic"}:
+        raise ExportError("Validated export requires verified sing-box VLESS/TCP/TLS, VLESS/WS/TLS or VLESS/gRPC/TLS, Trojan/TCP/TLS, Shadowsocks, VMess/TCP/TLS or Hysteria2/TLS or TUIC v5/TLS")
     server=node_host(server)
     if type(item.port) is not int or not 1 <= item.port <= 65535:
         raise ExportError("Invalid node port")
@@ -51,8 +52,8 @@ def _common(item, server: str) -> tuple[str, str]:
     return server,name
 
 
-def _verified_tls(item, *, websocket: bool = False, grpc: bool = False, hysteria2: bool = False) -> tuple[str, dict, list[str] | None]:
-    stream=mapping(item.stream_settings or {}, {"tls","_vui"} if hysteria2 else {"tls","transport","_vui"}, "stream")
+def _verified_tls(item, *, websocket: bool = False, grpc: bool = False, hysteria2: bool = False, tuic: bool = False) -> tuple[str, dict, list[str] | None]:
+    stream=mapping(item.stream_settings or {}, {"tls","_vui"} if hysteria2 or tuic else {"tls","transport","_vui"}, "stream")
     if not (websocket or grpc) and stream.get("transport") not in (None,{}):
         raise ExportError("Non-TCP transports need a separately validated export profile")
     tls=mapping(stream.get("tls"), {"enabled","server_name","certificate_path","key_path","alpn"}, "TLS")
@@ -60,12 +61,12 @@ def _verified_tls(item, *, websocket: bool = False, grpc: bool = False, hysteria
         raise ExportError("Verified TLS is required for this export profile")
     sni=node_host(tls.get("server_name") or "")
     meta=mapping(stream.get("_vui",{}),
-                 {"security","server_name","client_fingerprint","skip_cert_verify"},
+                 {"security","server_name","client_fingerprint","skip_cert_verify"} | ({"udp_relay_mode"} if tuic else set()),
                  "client metadata")
     if meta.get("security","tls")!="tls" or meta.get("skip_cert_verify",False) is not False:
         raise ExportError("TLS verification cannot be disabled in this profile")
-    if (grpc or hysteria2) and "server_name" in meta and not isinstance(meta["server_name"], str):
-        raise ExportError("gRPC client TLS name must be a string")
+    if (grpc or hysteria2 or tuic) and "server_name" in meta and not isinstance(meta["server_name"], str):
+        raise ExportError(f"{item.protocol} client TLS name must be a string")
     if meta.get("server_name") and node_host(meta["server_name"])!=sni:
         raise ExportError("Conflicting client/server TLS names")
     if hysteria2:
@@ -73,6 +74,13 @@ def _verified_tls(item, *, websocket: bool = False, grpc: bool = False, hysteria
             raise ExportError("The verified Hysteria2 profile uses native QUIC defaults without ALPN or uTLS overrides")
         if not isinstance(tls.get("server_name"), str) or tls["server_name"] != sni:
             raise ExportError("Hysteria2 requires a literal valid TLS server name")
+    if tuic:
+        if meta.get("client_fingerprint", "") != "":
+            raise ExportError("TUIC uses QUIC TLS without a client fingerprint override")
+        if not isinstance(tls.get("server_name"), str) or tls["server_name"] != sni:
+            raise ExportError("TUIC requires a literal valid TLS server name")
+        if tls.get("alpn") != ["h3"]:
+            raise ExportError("The characterized TUIC profile requires explicit h3 ALPN")
     fingerprint=meta.get("client_fingerprint","")
     if fingerprint not in ("","chrome"):
         raise ExportError("Client fingerprint is not validated")
@@ -188,6 +196,25 @@ def _hysteria2_node(item, server: str, name: str, sni: str) -> dict:
             "password": password, "udp": False, "sni": sni, "skip-cert-verify": False}
 
 
+def _tuic_node(item, server: str, name: str, sni: str, meta: dict) -> dict:
+    settings = mapping(item.settings, {"users", "congestion_control", "zero_rtt_handshake"}, "TUIC settings")
+    if settings.get("congestion_control", "cubic") != "cubic":
+        raise ExportError("TUIC public export only accepts default cubic congestion control")
+    if settings.get("zero_rtt_handshake", False) is not False:
+        raise ExportError("TUIC public export requires zero-RTT disabled")
+    if meta.get("udp_relay_mode", "native") != "native":
+        raise ExportError("TUIC public export does not admit an alternate UDP relay mode")
+    try:
+        user = tuic_profile.credential_user(settings)
+    except ValueError as exc:
+        raise ExportError(str(exc)) from exc
+    # The pinned Mihomo TUIC adapter hardcodes UDP capability. Do not include
+    # ineffective udp:false and falsely claim TCP-only enforcement.
+    return {"name": name, "type": "tuic", "server": server, "port": item.port,
+            "uuid": user["uuid"], "password": user["password"], "sni": sni,
+            "skip-cert-verify": False, "alpn": ["h3"], "reduce-rtt": False}
+
+
 SS_METHODS={"aes-128-gcm","aes-256-gcm","chacha20-ietf-poly1305"}
 
 
@@ -215,7 +242,7 @@ def validated_node(item, server: str) -> dict:
     transport = stream.get("transport") if isinstance(stream, dict) else None
     websocket = item.protocol == "vless" and isinstance(transport, dict) and transport.get("type") == "ws"
     grpc = item.protocol == "vless" and isinstance(transport, dict) and transport.get("type") == "grpc"
-    sni,meta,alpn=_verified_tls(item, websocket=websocket, grpc=grpc, hysteria2=item.protocol=="hysteria2")
+    sni,meta,alpn=_verified_tls(item, websocket=websocket, grpc=grpc, hysteria2=item.protocol=="hysteria2", tuic=item.protocol=="tuic")
     if item.protocol=="vless":
         node = _vless_node(item,server,name,sni,meta,alpn)
         if websocket:
@@ -237,6 +264,8 @@ def validated_node(item, server: str) -> dict:
         return _trojan_node(item,server,name,sni,meta,alpn)
     if item.protocol=="hysteria2":
         return _hysteria2_node(item,server,name,sni)
+    if item.protocol=="tuic":
+        return _tuic_node(item,server,name,sni,meta)
     raise ExportError("Unreachable export profile")
 
 
@@ -292,6 +321,11 @@ def share_link(item, server: str) -> str:
         ).decode()
         return "vmess://"+encoded
 
+    if node["type"] == "tuic":
+        # Fixed Mihomo converter convention, not an official universal standard.
+        # Verification and zero-RTT use secure defaults; no invented URI toggles.
+        return (f"tuic://{quote(node['uuid'],safe='')}:{quote(node['password'],safe='')}@{host}:{node['port']}?"
+                + urlencode({"sni": node["sni"], "alpn": "h3"}) + "#" + quote(node["name"], safe=""))
     if node["type"] == "hysteria2":
         return (f"hysteria2://{quote(node['password'],safe='')}@{host}:{node['port']}/?"
                 f"{urlencode({'sni': node['sni'], 'insecure': '0'})}#{quote(node['name'],safe='')}")
@@ -348,6 +382,10 @@ def singbox_client_config(items, server: str) -> dict:
             outbound={"type":"hysteria2","tag":node["name"],"server":node["server"],
                       "server_port":node["port"],"password":node["password"],
                       "network":"tcp","tls":_client_tls(node)}
+        elif node["type"]=="tuic":
+            outbound={"type":"tuic","tag":node["name"],"server":node["server"],
+                      "server_port":node["port"],"uuid":node["uuid"],"password":node["password"],
+                      "network":"tcp","zero_rtt_handshake":False,"tls":_client_tls(node)}
         elif node["type"]=="vmess":
             outbound={"type":"vmess","tag":node["name"],"server":node["server"],
                       "server_port":node["port"],"uuid":node["uuid"],
