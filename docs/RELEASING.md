@@ -2,7 +2,9 @@
 
 正式Release是一次明确的公开写操作，不等同于PR、版本字符串或Actions候选附件。此流程只晋升经过验收的完整套件，不在发布时重新构建“另一份看似相同的包”。
 
-当前 v0.4.7 是 [REALITY/Vision 集成候选](REALITY_VISION_047.md)，裸前置八组通过不代替最终独立审查和准确候选/主线验收。[TUIC 主线收口](TUIC_CLOSURE_046.md)是继承基线。首次 REALITY 前置 HEADERS 断言失败及更早各阶段失败保留。未晋升附件或执行 tag/Release/生产部署；源码、原始 CI artifact、已核验附件与公开发布分别记录。
+当前 v0.4.7 [REALITY/Vision 已完成主线收口](REALITY_VISION_CLOSURE_047.md)：独立审查、准确候选八组和正常合并后的准确主线八组已验收。首次 REALITY 前置 HEADERS 断言失败、最终 master 继承 VMess/Mihomo CA 被动轮询缺少 x509 原因的首次失败及 unchanged-code attempt 2 通过均保留；重跑不表示旧轮询问题永久修复。当前 [XHTTP 阶段](XHTTP_CHARACTERIZATION_048.md)仅做固定核心能力刻画的测试/文档，产品 VERSION 仍为 0.4.7，公开 XHTTP/HTTPUpgrade 支持保持阻断，需完成自己的准确提交验收。先收口当前刻画，再单独报告发布及附件准备状态；UDP/DNS 实现留待后续独立阶段。
+
+当前未晋升附件、创建 Draft Release 或执行 tag/公开 Release/生产部署；源码、原始 CI artifact、已核验附件与公开发布分别记录。完成代码、PR、CI 或发布准备不等于获准创建发布草稿或公开发布；任何发布操作仍受下述人工门槛与明确授权边界约束。
 
 ## 前置条件
 

@@ -2,9 +2,9 @@
 
 ## 节点
 
-从HTTPS面板登录，在“入站节点”创建节点。发布包默认新建 sing-box/VLESS/TLS、端口10443；Trojan/TCP/TLS 也已进入公开验证矩阵；先使用[兼容矩阵](COMPATIBILITY.md)列明的已验证组合，flow保持空、证书校验保持开启。
+从HTTPS面板登录，在“入站节点”创建节点。发布包默认新建 sing-box/VLESS/TLS、端口10443；Trojan/TCP/TLS 也已进入公开验证矩阵；先使用[兼容矩阵](COMPATIBILITY.md)列明的已验证组合；普通 TLS 组合 flow 保持空、证书校验保持开启，限定 REALITY 使用精确 Vision flow。
 
-sing-box 的 VLESS/TLS、Trojan/TLS、VMess/TLS，以及当前候选 Hysteria2/TLS 的证书来源都可以选择已申请成功的正式托管证书，自动填入服务端材料并建立续期绑定；也可以手动填写证书/私钥路径与SNI。测试证书不进入可上线选择。后台仍以`material`校验结果为准，不能通过前端选择绕过域名、期限和环境检查。
+sing-box 的 VLESS/TLS、Trojan/TLS、VMess/TLS，以及已验收 Hysteria2/TLS、TUIC/TLS 的证书来源都可以选择已申请成功的正式托管证书，自动填入服务端材料并建立续期绑定；也可以手动填写证书/私钥路径与SNI。测试证书不进入可上线选择。后台仍以`material`校验结果为准，不能通过前端选择绕过域名、期限和环境检查。
 
 创建后可以直接从节点列表点“编辑”。编辑表单由当前持久化核心配置反解，不重新生成节点：
 
@@ -167,10 +167,12 @@ URI/Base64 的 `type=ws`、path、可选 Host、TLS/SNI、ALPN 和 fingerprint�
 
 仅验收 HTTP/TCP；sing-box 出站 `network: tcp`。固定 Mihomo TUIC adapter 硬编码 UDP 能力，导出省略无效的 `udp: false`，不能声称关闭 UDP。应用 UDP 未验收；QUIC 传输本身仍需要主机/云网络放行节点 UDP 端口。沿用显式可重复的 `--node-udp-port` 安装预检，不改变 TCP/UDP 分离和确认规则。
 
-证书按 SNI 绑定，续期保留 UUID/密码/配置，失败保留旧活动材料及已应用 revision。停止核心保持 `CORE_STOPPED_PENDING_APPLY`；创建/取消/编辑/刷新/再打开/导出、续期新 QUIC 会话和故意损坏后停机恢复均须由当前最终集成提交验证，不能用裸前置替代。
+证书按 SNI 绑定，续期保留 UUID/密码/配置，失败保留旧活动材料及已应用 revision。停止核心保持 `CORE_STOPPED_PENDING_APPLY`；创建/取消/编辑/刷新/再打开/导出、续期新 QUIC 会话和故意损坏后停机恢复均已由 TUIC 准确主线验证，后续修改仍须重验，不能用裸前置替代。
 
 
-## 0.4.7 REALITY / Vision 集成候选
+## 0.4.7 REALITY / Vision 已验收基线
+
+[PR #24 的准确主线](REALITY_VISION_CLOSURE_047.md)已完成独立审查及准确候选/主线八组，三格式、秘密安全编辑、证书边界、真实 Chromium 和停机恢复分别验收。
 
 选择 sing-box / VLESS / REALITY，固定 Direct / TCP、XTLS Vision 与 Chrome。填写独立握手参考端地址及端口、明确的 DNS-style SNI，不从参考地址猜测 SNI。参考服务必须兼容固定核心的 TLS 1.3/X25519 握手；它不是应用转发目标。不要对本测试说明使用真实第三方域名、账户或 CA。
 
@@ -181,4 +183,12 @@ URI/Base64 的 `type=ws`、path、可选 Host、TLS/SNI、ALPN 和 fingerprint�
 - 不绑定托管证书，不填普通 certificate/key 路径。明确从 TLS 切换后清除绑定；取消不修改数据库，非法请求不改变节点/绑定
 - 三格式保留 UUID、flow、SNI、Chrome、公钥和 short ID，不含服务端私钥或参考地址。Mihomo YAML 用 udp:false、sing-box 用 network:tcp；实际 Mihomo URI importer 自带 udp=true，不能声称 URI 强制禁用 UDP。此阶段仅 HTTP/TCP
 
-认证失败时可能观察到参考 TLS 回落或伪装请求，这是 REALITY 设计中的独立流量；应用目标必须零送达且不能 DIRECT。成功 REALITY 验证认证证书，不能套用普通 CA 失败语义。固定核心的真实裸前置通过与最终集成状态分开，见[契约/证据](REALITY_VISION_047.md)。
+认证失败时可能观察到参考 TLS 回落或伪装请求，这是 REALITY 设计中的独立流量；应用目标必须零送达且不能 DIRECT。成功 REALITY 验证认证证书，不能套用普通 CA 失败语义。固定核心的裸前置、最终集成与主线重跑分别记录，见[阶段契约](REALITY_VISION_047.md)和[准确主线证据](REALITY_VISION_CLOSURE_047.md)。
+
+## XHTTP / HTTPUpgrade 的当前边界
+
+产品版本仍为 0.4.7，XHTTP 当前只有固定核心能力刻画，没有公开订阅/编辑支持的新增承诺。已有传输表单或配置生成代码不代表通过验收；XHTTP 公开 URI/Mihomo/sing-box 导出保持阻断，不能将不支持字段删除、改为 TCP/WS/HTTPUpgrade 或回退 DIRECT。
+
+刻画夹具仅使用 Xray 26.3.27 服务端与 Mihomo 1.19.32 原生 YAML/真实 URI provider、假 UUID、空 flow、普通验证 TLS、显式 `stream-one`/h2/Chrome/SNI/Host/path、HTTP/TCP。sing-box 1.14.2 无 XHTTP transport；不要配置成 sing-box JSON 后将 parser 拒绝当作环境故障。Mihomo URI importer 硬编码 `udp=true`，也不能声称 URI 禁用应用 UDP。
+
+HTTPUpgrade 的原生 Mihomo 表达必须是 `network:ws` 与 `ws-opts.v2ray-http-upgrade:true`；固定 URI `type=httpupgrade` 缺少此转换，可能被当作普通 TCP/TLS。它与普通 WebSocket、XHTTP 均是不同协议，不能用改名或 provider override 声称原 URI 无损。此处是限制说明，不是上线配置教程；完整来源和待验收项目见[XHTTP 刻画边界](XHTTP_CHARACTERIZATION_048.md)。

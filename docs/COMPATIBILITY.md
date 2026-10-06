@@ -1,10 +1,10 @@
 # 兼容与验证范围
 
-[v0.4.2](MAINLINE_CLOSURE_20261005.md)、[WS](VLESS_WS_CLOSURE_043.md)、[gRPC](VLESS_GRPC_CLOSURE_044.md)、[HY2](HYSTERIA2_CLOSURE_045.md)、[PR #23 安全修复](INBOUND_RESPONSE_CLOSURE_20261006.md)和 [TUIC v0.4.6](TUIC_CLOSURE_046.md)均已完成各自准确主线验收。当前 v0.4.7 REALITY/Vision 为集成候选，裸前置八组通过，最终集成审查及准确候选/主线八组仍待完成。
+[v0.4.2](MAINLINE_CLOSURE_20261005.md)、[WS](VLESS_WS_CLOSURE_043.md)、[gRPC](VLESS_GRPC_CLOSURE_044.md)、[HY2](HYSTERIA2_CLOSURE_045.md)、[PR #23 安全修复](INBOUND_RESPONSE_CLOSURE_20261006.md)、[TUIC v0.4.6](TUIC_CLOSURE_046.md)和 [REALITY/Vision v0.4.7](REALITY_VISION_CLOSURE_047.md)均已完成各自准确主线验收。当前产品版本仍为 0.4.7；下一阶段 XHTTP 仅能力刻画，公开导出保持阻断、准确提交的真实 CI 验收待完成。
 
 ## Linux 安装层
 
-0.4.7 候选延续 0.3.1 的安装能力模型；选择依据是实际环境能力，不是发行版名称。
+0.4.7 延续 0.3.1 的安装能力模型；选择依据是实际环境能力，不是发行版名称。
 
 | 层级 | 目标 / 验收 |
 | --- | --- |
@@ -16,7 +16,7 @@
 | 防火墙 | UFW/firewalld 可在用户明确确认后修改；自定义 nftables/iptables 只提示 |
 | 代表性发行版探测 | Debian、Fedora、Arch、openSUSE、Alpine |
 
-“探测成功”不单独等于完整支持。正式支持声明要求普通测试、真实 one-click、portable matrix 和发布门槛同时通过。v0.4.2 的四目标附件已核验；任何 v0.4.7 包须通过本候选自己的验收，不能使用旧套件或前置链路结果替代。
+“探测成功”不单独等于完整支持。正式支持声明要求普通测试、真实 one-click、portable matrix 和发布门槛同时通过。v0.4.2 的四目标附件已核验；v0.4.7 准确主线亦已通过自己的四目标门槛；任何后续包须通过自身准确提交验收，不能使用旧套件或前置链路结果替代。验收不表示附件晋升或正式发布。
 
 未经适配的 NixOS、runit/s6、其他 CPU、声明式或只读系统不会被假装支持；安装器应给出检测结果并停止。
 
@@ -127,12 +127,12 @@ TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合
 - Trojan 的 Xray 实现及 WebSocket/gRPC 等非 TCP 组合；
 - Xray Shadowsocks、2022 cipher、插件/obfs，以及未列明的 cipher；
 - Xray VMess 及 VMess 非 TCP/TLS 组合；
-- 本页 HY2 基线范围外组合、TUIC 已验收范围外组合、当前 REALITY/Vision 候选及其范围外组合；
+- 本页 HY2 基线范围外组合、TUIC 已验收范围外组合、REALITY/Vision 已验收范围外组合；
 - 除上述 WS 和 gRPC 基线外的 WebSocket/gRPC，以及 XHTTP / HTTPUpgrade 全组合；
 - 除上述 Shadowsocks AEAD 之外的 UDP 专项；
 - sing-box 完整 ToClash 规则迁移。
 
-后续版本对每项都要求：服务端配置、编辑回填、URI/Mihomo/sing-box 导出、真实核心 config check、真实客户端 check、正向连接以及错误凭据/TLS/参数失败路径。
+后续公开支持版本对每项都要求：服务端配置、编辑回填、URI/Mihomo/sing-box 导出、真实核心 config check、真实客户端 check、正向连接以及错误凭据/TLS/参数失败路径。能力刻画不会降低此门槛；核心无法表达时保留不支持结论。
 
 ## 证书
 
@@ -143,8 +143,16 @@ TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合
 “支持所有 Linux 发行版”的实现目标是**取消发行版品牌白名单**，依据 CPU/libc/init 等真实能力选择安全路径；不是承诺 Linux 历史上每个内核、CPU、libc 和 init 都可由同一 root 脚本自动修改。
 
 
-## v0.4.7 REALITY/Vision 当前集成候选
+## v0.4.7 REALITY/Vision 已验收基线
 
 固定官方 sing-box 1.14.2 与 Mihomo 1.19.32 的 VLESS/direct TCP/精确 Vision、单 UUID、单规范 16 位 short ID、匹配 X25519 pair、显式 SNI、Chrome。无 ALPN 覆盖、托管证书、mux、其他核心/传输或应用 UDP 扩围。私钥与参考地址服务器专用；三格式仅输出客户端所需凭据/公钥。
 
-裸前置 a44b5ce 八组/11 jobs/全部步骤通过；完整公共导出/编辑/浏览器集成需自己的最终准确提交验收。Mihomo YAML、sing-box JSON、实际 URI importer 的参考握手与应用目标独立；失败需实际认证/UUID/flow原因及应用零送达，伪装 HEADERS 只记录实际数。URI importer 的 udp=true 不代表应用 UDP 已验收，也不能宣称 URI 禁用 UDP。完整契约及首次失败见[阶段记录](REALITY_VISION_047.md)。
+最终候选 `70cc2f4` 与正常合并 master `6b049262` 的独立审查/八组验收已完成，完整公共导出/编辑/浏览器/损坏停机恢复有准确主线证据。链路首次继承 VMess/Mihomo CA 用例的被动轮询没有捕获必需 x509 原因，unchanged-code attempt 2 成功不构成永久修复；详见[收口](REALITY_VISION_CLOSURE_047.md)。Mihomo YAML、sing-box JSON、实际 URI importer 的参考握手与应用目标独立；失败需实际认证/UUID/flow原因及应用零送达，伪装 HEADERS 只记录实际数。URI importer 的 udp=true 不代表应用 UDP 已验收，也不能宣称 URI 禁用 UDP。完整契约及首次失败见[阶段记录](REALITY_VISION_047.md)。
+
+## v0.4.8 XHTTP 仅刻画，公开支持阻断
+
+固定 Xray 26.3.27 可表达 XHTTP 服务端，Mihomo 1.19.32 可表达原生 YAML 与实际 URI provider；本阶段只刻画 VLESS/空 flow/单假 UUID/TLS/h2/Chrome/`stream-one`/显式 SNI、Host、path 的 HTTP/TCP。sing-box 1.14.2 的 transport decoder 不支持 XHTTP，真实 parser 以 `unknown transport type: xhttp` 拒绝，不能声称三格式或双客户端支持。
+
+本地实际 parser 已检查四种已知 mode 的 Xray/Mihomo 原生配置与非法 mode；`mihomo -t` 对非法 provider payload 也返回成功，不能用它证明 URI 已导入。当前本地原生 YAML/实际 URI provider 正向与六类负向通过，具有预期 HTTP 正文、独立服务端 TLS 1.3/h2 探测、真实拒绝原因、零应用送达与无 DIRECT。完整前置的 HTTPUpgrade 两个子测试却在 sing-box 启动时 netlink EPERM，整组保留失败、准确提交仍须真实 CI。历史环境限制和当前实际结果分别保留；普通响应、编辑、证书/恢复、八组门槛、四目标 Linux 与 40 项 ToClash 全部保留。
+
+HTTPUpgrade 是独立传输：sing-box 原生 `type:httpupgrade` 与 Mihomo 原生 `network:ws` + `ws-opts.v2ray-http-upgrade:true` 可表达。固定 Mihomo 的 URI `type=httpupgrade` 导入却保留未知 `network:httpupgrade`、没有 upgrade flag，VLESS adapter 默认落入普通 TCP/TLS；`type=ws` 同样无法编码该 flag。原生 parser 成功不修复 URI 语义，不能把 HTTPUpgrade 当作 XHTTP 或完整格式契约的替代。详见[刻画契约与固定源码](XHTTP_CHARACTERIZATION_048.md)。

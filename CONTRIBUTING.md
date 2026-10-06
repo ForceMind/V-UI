@@ -23,7 +23,7 @@ python -m unittest discover -s tests -v
 | --- | --- |
 | Test V-UI | API、鉴权、数据库、状态、纯函数、原浏览器操作流程和托管证书节点编辑/恢复 |
 | ToClash reference and export verification | 固定独立参考、100场景、40项目录、客户端配置 |
-| Real loopback proxy and DNS chain | 实际 VLESS/TCP/TLS、Trojan、Shadowsocks、VMess，已验证 VLESS/WS/TLS、VLESS/gRPC/TLS，已验证 Hysteria2/TLS 及已验收 TUIC v5/TLS，当前候选 REALITY/Vision 的双客户端链路与失败路径；DNS、拒绝/停启 |
+| Real loopback proxy and DNS chain | 实际 VLESS/TCP/TLS、Trojan、Shadowsocks、VMess，已验证 VLESS/WS/TLS、VLESS/gRPC/TLS，已验证 Hysteria2/TLS 及已验收 TUIC v5/TLS，已验收 REALITY/Vision 的双客户端链路与失败路径；XHTTP 刻画须独立标记且不得新增公共支持；DNS、拒绝/停启 |
 | Selected release deployment gates | 实际离线包、HTTPS、完整Vue面板、备份恢复/回滚 |
 | ACME certificate acceptance | Certbot/Pebble真实HTTP-01、续期/失败、Chromium证书页 |
 | One-command installation acceptance | 仅临时CI主机上的实际sudo/systemd/socket安装、升级、重启 |
@@ -108,7 +108,9 @@ TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合
 仅 HTTP/TCP；sing-box `network: tcp`，Mihomo TUIC adapter 硬编码 UDP 能力，省略无效 `udp: false`，不称关闭 UDP。QUIC 需要节点 UDP 可达，应用 UDP 未验收。固定 pin/构建不变，无真实 CA/防火墙变更、tag/Release、附件晋升或部署；完整边界见[TUIC 契约](docs/TUIC_046.md)。
 
 
-## v0.4.7 REALITY / Vision 候选回归
+## v0.4.7 REALITY / Vision 已验收回归
+
+最终候选 `70cc2f4` 与正常签名 master `6b049262` 已完成独立审查及准确八组验收，详见[收口](docs/REALITY_VISION_CLOSURE_047.md)。首次 master 链路继承 VMess/Mihomo CA 测试的被动 2 秒轮询未捕获必需 x509 原因，整组失败保留；unchanged-code attempt 2 成功不证明此不稳定性已永久修复。
 
 - test_reality_profile.py / test_reality_export.py：严格存储/输入校验、密钥配对、隐藏/空保留、独立替换、未知导入保护、三格式和无服务端材料
 - test_reality_certificate_boundary.py：真实隔离 API/SQLite 的回归先行，拒绝绑定不持久化、合法 legacy 保存后解绑、非法更新不变；不更改有效 TLS 的 desired/applied 失败语义
@@ -117,4 +119,21 @@ TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合
 - test_reality_rejection_evidence.py：超时/EOF/旧日志不够，应用请求不能用参考计数掩盖；startup/missing-evidence 失败路径也脱敏并抑制原异常上下文
 - test_export_real.py 的服务器与双客户端真实配置检查，与 test_inbound_editor_browser.py 的创建/取消/编辑/刷新/再打开/独立替换/导出/故意损坏后停机恢复分别验收
 
-最终八组与独立源码审查不能由裸前置替代。四 Linux 目标、40 项 ToClash、所有已验收协议/证书/安装门槛不减少，完整历史见[REALITY/Vision 契约](docs/REALITY_VISION_047.md)。
+最终八组与独立源码审查已经完成，后续修改仍不能用旧结果或裸前置替代。四 Linux 目标、40 项 ToClash、所有已验收协议/证书/安装门槛不减少，完整历史见[REALITY/Vision 契约](docs/REALITY_VISION_047.md)。
+
+## v0.4.8 XHTTP 刻画前置
+
+从 REALITY 准确 master `6b049262` 独立分支开始；仅刻画测试/文档，`VERSION` 保持 `0.4.7`，不增加公开支持、生产参数、UI 或客户端导出。完整固定来源、映射、负向证据与 HTTPUpgrade URI 缺口见[刻画契约](docs/XHTTP_CHARACTERIZATION_048.md)。
+
+- `python -m unittest discover -s tests -p 'test_xhttp_contract.py' -v`：默认单元边界、夹具字段、原因检查与公开导出拒绝回归
+- `test_xhttp_preflight_loopback.py`：通过现有 `VUI_TEST_CORES` / `VUI_TEST_MIHOMO` 激活固定 parser/真实前置，由既有 loopback glob 纳入；`xhttp_helpers.py` 仅用于测试夹具，不进入生产路径
+- 官方 Xray 26.3.27 → Mihomo 1.19.32 原生 YAML 与真实 URI provider；显式 `stream-one`/TLS/h2/Chrome、单假 UUID/空 flow、SNI/Host/path，仅 HTTP/TCP
+- sing-box 1.14.2 `transport.type:xhttp` 必须取得实际 `unknown transport type: xhttp` parser 拒绝；公开三格式拒绝回归不能省略
+- 原生 mode parser 检查与真实转发分别运行；Mihomo `-t` 对非法 URI provider payload 也成功，不能代替 provider 启动、真实导入/h2/HTTP 转发
+- 每条 YAML/provider 路径分别只改变 UUID/CA/SNI/path/Host/mode；先证明固定应用目标可达，每个新客户端会话独立日志边界，整个窗口零应用请求、无 DIRECT，并取得明确 UUID/x509/服务端 path、Host、mode 拒绝原因；上游 XHTTP 404/400 为固定源码行为，外层代理 `>=400` 不等于捕获上游状态
+- wrong path 使用不相关前缀，wrong Host 使用不相关合法名称并保持 SNI，wrong mode 固定服务端 `stream-one`、客户端 `packet-up`；不把任意 path/Host/mode 差异当作拒绝
+- 临时 CA 仅通过子进程 `SSL_CERT_FILE` 与空临时目录 `SSL_CERT_DIR`；不改主机信任、pin/构建、反代、生产诊断或凭据
+- 默认 skip、历史本地 socket/netlink/Chromium EPERM、当前本地实际运行、配置检查和准确 CI 结果分别报告；不以 timeout/EOF/旧日志代替原因，也不将重跑当作已修复继承轮询不稳定性
+- 保留完整八组、四目标 Linux、40 项 ToClash、PR #23 普通响应 allowlist、协议/编辑/证书/备份语义；无 tag/Release、附件晋升、真实部署、CA/账户或实际防火墙变更
+
+当前本地执行：默认 487 项中实际 367 项通过、120 项明确环境 skip；XHTTP contract 7 项与选取 parser 3 项通过；最终工作树选取 10 方法（3 parser + 1 XHTTP 正向 + 6 负向）重验全部通过、无 skip，仅明确排除已有 netlink 阻断的 HTTPUpgrade-gap 方法。完整前置 11 方法中 10 方法通过，HTTPUpgrade 方法两项子测试在 sing-box 启动时报 netlink EPERM，整组 `FAILED (failures=2)`。XHTTP 两条路径正向/六类负向的通过与此阻断分别记录，独立服务端 TLS 1.3/h2 探测不称客户端抓包；准确提交 CI 仍待，详见[执行结果](docs/XHTTP_CHARACTERIZATION_048.md#当前本地执行结果2026-10-06)。

@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-10-06 — REALITY v0.4.7 主线收口与 XHTTP 刻画启动
+
+REALITY/Vision v0.4.7 已由 [PR #24](https://github.com/ForceMind/V-UI/pull/24) 正常合并至签名 master `6b049262457b259c602c5e74be296ef52780c462`，最终候选 `70cc2f4f7dc4349c7ecffbc33fc088f51b8651fa` 与主线 tree 均为 `316f0159e3ae3d7362022d9c9ac61bc0afa867c1`。独立审查完成，准确候选八组/11 jobs/全部步骤 attempt 1 成功；准确主线八组/11 个最新 jobs/全部步骤成功，其中链路首次继承 VMess/Mihomo CA 用例缺少必需 x509 日志，unchanged-code attempt 2 取得真实原因后通过，其余七组 attempt 1。该重跑不表示旧被动日志轮询不稳定性已永久修复。真实链路 89 项、独立 HY2 8/TUIC 8 和 Chromium 完整流程已分别验收，详见[收口记录](docs/REALITY_VISION_CLOSURE_047.md)。
+
+当前获准推进 **v0.4.8 XHTTP 刻画前置**，产品 `VERSION` 仍为 `0.4.7`。范围仅固定 Xray 26.3.27 服务端 → Mihomo 1.19.32 原生 YAML/实际 URI provider，显式 `stream-one`/TLS/h2/Chrome、空 flow、单假 UUID、明确 SNI/Host/path、HTTP/TCP。sing-box 1.14.2 不支持 XHTTP；三格式/双客户端公共契约不存在，公开导出保持阻断。HTTPUpgrade 单独记录固定 Mihomo URI 导入缺口，不能替代 XHTTP；当前准确提交的真实 CI 验收仍待完成，见[刻画边界](docs/XHTTP_CHARACTERIZATION_048.md)。
+
+以下 REALITY 候选条目保留当时状态，不覆盖上述收口。
+
 ## 0.4.7 — REALITY / Vision（集成候选）
 
 - 独立 Draft PR #24；固定 sing-box 1.14.2 / Mihomo 1.19.32、VLESS/direct TCP/精确 Vision、单 UUID/short ID、显式 SNI、Chrome，公私钥配对验证与隐藏编辑
