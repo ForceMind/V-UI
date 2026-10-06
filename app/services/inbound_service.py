@@ -123,6 +123,18 @@ def ensure_credentials(core: str, protocol: str, settings: dict) -> dict:
 
 
 def to_dict(item: Inbound) -> dict:
+    """Allowlisted administration summary, never a raw core/export document.
+
+    Imported settings may contain unknown credential types or private TLS
+    material. Internal apply and intentional exports read the model directly.
+    """
+    settings = item.settings if isinstance(item.settings, dict) else {}
+    stream = item.stream_settings if isinstance(item.stream_settings, dict) else {}
+    users = settings.get("users") or settings.get("clients") or []
+    users = users if isinstance(users, list) else []
+    user_maps = [user for user in users if isinstance(user, dict)]
+    obfs = settings.get("obfs")
+    tls = stream.get("tls")
     return {
         "id": item.id,
         "user_id": item.user_id,
@@ -135,8 +147,16 @@ def to_dict(item: Inbound) -> dict:
         "expiry_time": item.expiry_time or 0,
         "port": item.port,
         "protocol": item.protocol,
-        "settings": item.settings or {},
-        "stream_settings": item.stream_settings or {},
+        "credentials": {
+            "user_count": len(users),
+            "has_uuid": any(bool(user.get("uuid") or user.get("id")) for user in user_maps),
+            "has_password": bool(settings.get("password")) or any(bool(user.get("password")) for user in user_maps),
+            "has_obfs_password": isinstance(obfs, dict) and bool(obfs.get("password")),
+        },
+        "managed_certificate_eligible": (
+            item.core == "sing-box" and item.protocol in {"vless", "trojan", "vmess", "hysteria2"}
+            and isinstance(tls, dict) and tls.get("enabled") is True and "reality" not in tls
+        ),
         "tag": item.tag,
     }
 
