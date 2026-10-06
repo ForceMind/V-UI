@@ -21,7 +21,9 @@ HTTP接口以`/api`开头。`/docs`和`/openapi.json`也要求管理员登录，
 | POST `/api/cores/{core}/apply` | 生成并检查候选，具体生效语义依schema |
 | POST `/api/cores/{core}/restart`、`/stop` | 明确启动应用/停止 |
 
-旧 Xray/sing-box 接口仍经过同一个鉴权边界。`/api/inbounds` 原始管理列表可能含服务端配置，不能作为编辑回填或分享接口；视觉编辑只使用 `/editor` 的脱敏模型。保存配置后核心应用失败会返回“已保存但未应用”的冲突状态，不能把数据库写入当作连通成功。
+旧 Xray/sing-box 接口仍经过同一个鉴权边界。普通 GET 列表、POST 创建和 PUT 更新响应现在采用允许列表摘要：节点 id/core/protocol/remark/port/enable、流量/到期/tag/user_id 等元数据，`credentials`（user_count/has_uuid/has_password/has_obfs_password）和 `managed_certificate_eligible` 布尔值。**响应不再包含 `settings` / `stream_settings`，也不返回 UUID、认证/obfs 密码、REALITY 私钥、未知配置秘密或服务器证书/密钥路径。** 这同时适用于 `/api/inbounds`、`/api/xray/inbounds` 和 `/api/singbox/inbounds` 的正常列表/创建/更新响应，是对依赖旧原始响应的管理客户端的有意破坏性收窄；原始创建请求和旧接口更新请求能力不变。
+
+视觉编辑继续使用鉴权后的 `/api/inbounds/{id}/editor` 专用模型。它不回传 UUID/密码/REALITY 私钥/obfs 密码本体；为保留既有手工证书编辑能力，可回传特权管理员需要的证书/密钥路径字符串，但从不返回密钥文件内容。证书卡只使用 `managed_certificate_eligible`，不再读取原始 TLS 配置。该标志是保守的界面筛选提示，不替代绑定接口授权；含 `reality` 键的导入配置（即使为空对象）不进入证书选项，原绑定校验本身不因此变更。内部数据库、核心应用、受授权的客户端导出与停机备份独立于普通响应，不做脱敏写回；客户端导出仍包含必要客户端凭据，但永不包含服务器私钥或材料路径。保存配置后核心应用失败会返回“已保存但未应用”的冲突状态，不能把数据库写入当作连通成功。
 
 ## 分流
 

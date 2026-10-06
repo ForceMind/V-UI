@@ -358,15 +358,11 @@ const source = fs.readFileSync('web/js/certificates.js', 'utf8');
 const match = source.match(/nodes\.filter\((.*?)\)\.forEach/);
 assert.ok(match, 'actual certificate-page binding filter must exist');
 const accepted = vm.runInNewContext('(' + match[1] + ')');
-for (const protocol of ['vless', 'trojan', 'vmess', 'hysteria2']) {
-  const node = {core: 'sing-box', protocol, stream_settings: {tls: {enabled: true}}};
-  assert.equal(accepted(node), true, protocol);
-  assert.equal(Boolean(accepted({...node, core: 'xray'})), false, `xray/${protocol}`);
-  for (const stream_settings of [{}, {tls: {enabled: false}}, {tls: {enabled: true, reality: {}}}])
-    assert.equal(Boolean(accepted({...node, stream_settings})), false, protocol);
-}
-for (const protocol of ['shadowsocks', 'tuic'])
-  assert.equal(Boolean(accepted({core: 'sing-box', protocol, stream_settings: {tls: {enabled: true}}})), false, protocol);
+assert.equal(accepted({managed_certificate_eligible: true}), true);
+for (const managed_certificate_eligible of [false, undefined, null, 1, 'true'])
+  assert.equal(accepted({managed_certificate_eligible}), false);
+// Ordinary summaries deliberately contain no raw TLS documents.
+assert.equal(accepted({core:'sing-box',protocol:'vless',stream_settings:{tls:{enabled:true}}}), false);
 '''
         result = subprocess.run(['node', '-e', script], cwd=root, text=True, capture_output=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
