@@ -124,7 +124,11 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                         dialog.get_by_role('button', name='保存并应用' if identity else '创建并应用', exact=True).click()
                     self.assertEqual(pending.value.status, 200, pending.value.text())
                     expect(dialog).not_to_be_visible(timeout=20000)
-                    return pending.value.json()['inbound']['id']
+                    saved = pending.value.json()['inbound']
+                    self.assertNotIn('settings', saved)
+                    self.assertNotIn('stream_settings', saved)
+                    self.assertIs(type(saved['managed_certificate_eligible']), bool)
+                    return saved['id']
                 def editor(identity):
                     response = context.request.get(base + f'/api/inbounds/{identity}/editor')
                     self.assertEqual(response.status, 200, response.text())
@@ -626,6 +630,18 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     secrets_before = db.execute('SELECT id,settings FROM inbounds ORDER BY id').fetchall()
                     self.assertEqual(dict(secrets_before), created_credentials)
+                # Explicit exports above carry client credentials; normal page
+                # traffic must not carry raw server documents or their secrets.
+                for endpoint in ('/api/inbounds', '/api/singbox/inbounds', '/api/xray/inbounds'):
+                    ordinary = context.request.get(base + endpoint)
+                    self.assertEqual(ordinary.status, 200, ordinary.text())
+                    for node in ordinary.json():
+                        self.assertNotIn('settings', node)
+                        self.assertNotIn('stream_settings', node)
+                        self.assertIs(type(node['managed_certificate_eligible']), bool)
+                    self.assertNotIn(str(root), ordinary.text())
+                    for secret in (vmess_uuid, ws_uuid, grpc_uuid, hy2_password):
+                        self.assertNotIn(secret, ordinary.text())
                 # Stop this page's polling before the fixture restarts on a new
                 # random origin; keep the strict network guard on the new page.
                 page.close()

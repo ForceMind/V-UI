@@ -55,7 +55,7 @@
             actions.append(button('应用到面板',async()=>{if(!confirm('确认将该证书用于当前面板域名？新连接将使用新证书。'))return;await api('/'+cert.id+'/bind-panel','POST');notice('面板证书已更新。');},!deployable||!capabilities.panel_hot_reload));
             const select=element('select',null,{'aria-label':'选择绑定节点','data-bind-select':cert.id});
             select.append(element('option','选择 TLS 节点',{value:''}));
-            nodes.filter(n=>n.core==='sing-box'&&['vless','trojan','vmess','hysteria2'].includes(n.protocol)&&n.stream_settings?.tls?.enabled&&!n.stream_settings?.tls?.reality).forEach(n=>select.append(element('option',n.remark||'节点 '+n.id,{value:String(n.id)})));
+            nodes.filter(n=>n.managed_certificate_eligible===true).forEach(n=>select.append(element('option',n.remark||'节点 '+n.id,{value:String(n.id)})));
             actions.append(select);
             actions.append(button('绑定节点',async()=>{if(!select.value)throw new Error('请先选择 TLS 节点');await api('/'+cert.id+'/bind-inbound','POST',{inbound_id:Number(select.value)});notice('证书已绑定节点。未运行的核心不会被自动启动。');},!deployable));
             actions.append(button('重试应用',async()=>{const results=await api('/'+cert.id+'/apply','POST');if(results.some(r=>!r.applied))throw new Error('仍有绑定未应用，请查看卡片状态');notice('已检查所有绑定。');},!deployable||!cert.bindings.length));
