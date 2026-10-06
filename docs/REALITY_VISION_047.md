@@ -111,3 +111,9 @@
 
 
 现代 PUT 另有已复现的显式转换边界：已有 REALITY 节点仅提交 certificate_id（包括空 profile 或未指定 security）时，旧代码会合成 TLS 并改变节点/绑定。v0.4.7 要求明确 profile.security=tls 才能转换并绑定；未明确请求在读取证书材料前拒绝，节点/绑定保持不变。显式 REALITY→TLS 正向回归保留 UUID。此事实与上述旧绑定后续 reapply 未覆盖 REALITY 的复现是两个不同路径，均只使用隔离假数据。
+
+### 集成源码审查阻断与修复
+
+集成 `243434aff287afb6ceecfd1eb9f3de41b12e39c3` / tree `3fa79b4775f20bb3165dd69b55594ba6c578f1e5` 的八组 CI、11 jobs、全部步骤 attempt 1 成功，但独立源码审查仍发现阻断：已导入非直连 REALITY 草稿可在切换普通 TLS 时绕过 direct-only 旧状态检查，丢弃未知参数并变为可导出。该提交不因 CI 全绿而获准合并。
+
+修复在任何旧 REALITY 草稿编辑前检查原始持久化状态，早于 generic ensure_credentials：未知嵌套字段、缺 UUID/key/short ID 均拒绝，不能生成替代凭据。已知 WS/gRPC/HTTPUpgrade 草稿继续与公开支持分离；省略的 path/Host/service/SNI/指纹和秘密保持，不借部分编辑重置。回归包含原 WS/max_time_difference 复现、三类草稿缺秘密、各嵌套未知字段、真实字段省略以及既有 gRPC 迁移。修正后的准确候选须重新独立复核和通过完整八组。

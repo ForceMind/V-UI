@@ -192,6 +192,55 @@ def validate_stored(settings, stream):
             'public_key': public, 'short_id': short}
 
 
+def validate_existing_for_edit(settings, stream):
+    """Guard every old REALITY draft before generic migration can erase fields.
+
+    This does not qualify non-direct transports for export. It admits only the
+    known visual draft representation, keeping its empty flow/fingerprint while
+    reusing strict shape and secret validation on a temporary copy.
+    """
+    if is_direct_candidate(stream):
+        return validate_stored(settings, stream)
+    user = credential_user(settings)
+    if not isinstance(user.get('flow', ''), str) or user.get('flow', '') not in ('', FLOW):
+        raise ValueError('Existing REALITY draft flow cannot be represented by this editor')
+    stream = _mapping(stream, {'tls', '_vui', 'transport'}, 'draft stream fields')
+    transport = stream.get('transport')
+    if not isinstance(transport, dict):
+        raise ValueError('Existing REALITY draft transport cannot be represented by this editor')
+    if transport.get('type') == 'grpc':
+        from app.services.grpc_profile import grpc_service_name
+        _mapping(transport, {'type', 'service_name'}, 'draft gRPC fields')
+        grpc_service_name(transport.get('service_name'))
+    elif transport.get('type') == 'ws':
+        from app.services.websocket_profile import websocket_host, websocket_path
+        _mapping(transport, {'type', 'path', 'headers'}, 'draft WebSocket fields')
+        websocket_path(transport.get('path'))
+        headers = _mapping(transport.get('headers', {}), {'Host'}, 'draft WebSocket headers')
+        if 'Host' in headers: websocket_host(headers['Host'])
+    elif transport.get('type') == 'httpupgrade':
+        from app.services.websocket_profile import websocket_host, websocket_path
+        _mapping(transport, {'type', 'path', 'host'}, 'draft HTTPUpgrade fields')
+        websocket_path(transport.get('path'))
+        if transport.get('host', '') != '': websocket_host(transport['host'])
+        elif 'host' in transport and not isinstance(transport['host'], str):
+            raise ValueError('Existing REALITY draft Host must be a literal string')
+    else:
+        raise ValueError('Unsupported REALITY draft transport')
+    meta = _mapping(stream.get('_vui'), META_FIELDS, 'draft client metadata')
+    fingerprint = meta.get('client_fingerprint')
+    if fingerprint not in ('chrome', 'firefox', 'safari', 'edge'):
+        raise ValueError('Existing REALITY draft fingerprint cannot be represented by this editor')
+    checked_settings, checked_stream = deepcopy(settings), deepcopy(stream)
+    checked_settings['users'][0]['flow'] = FLOW
+    checked_stream.pop('transport')
+    checked_stream['_vui']['client_fingerprint'] = 'chrome'
+    value = validate_stored(checked_settings, checked_stream)
+    value['flow'] = user.get('flow', '')
+    value['client_fingerprint'] = fingerprint
+    return value
+
+
 def _transition_source(settings, stream):
     """Explicit TLS/none migration may remove represented fields, not imports."""
     user = credential_user(settings)

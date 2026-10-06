@@ -235,6 +235,14 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
     )
     profile = normalize_mapping(payload.get("profile"))
     old_stream = existing.stream_settings if existing else {}
+    if (existing is not None and existing.core == "sing-box" and existing.protocol == "vless"
+            and reality_profile.has_reality(old_stream)):
+        try:
+            # Inspect original persisted credentials, before a generic helper
+            # can regenerate a missing UUID in an unqualified transport draft.
+            reality_profile.validate_existing_for_edit(existing.settings, old_stream)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     strict_reality = core == "sing-box" and protocol == "vless" and (
         reality_profile.is_direct_candidate(old_stream)
         or reality_profile.is_direct_candidate(stream_settings)

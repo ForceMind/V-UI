@@ -569,6 +569,36 @@ def compile_profile(
         desired_reality = protocol == "vless" and (reality_profile.wants_direct(profile)
             or (previous_reality and "security" not in profile))
         try:
+            if protocol == "vless" and reality_profile.has_reality(stream):
+                old_reality = reality_profile.validate_existing_for_edit(settings, stream)
+                if not previous_reality:
+                    profile.setdefault('security', 'reality')
+                    profile.setdefault('transport', stream['transport']['type'])
+                    if (not isinstance(profile['security'], str)
+                            or profile['security'].lower() not in ('reality', 'tls', 'none')):
+                        raise ValueError('Choose explicit REALITY, TLS or none for this draft')
+                    desired_reality = reality_profile.wants_direct(profile)
+                if not previous_reality and profile['security'].lower() == 'reality':
+                    # Known unqualified visual drafts remain editable without
+                    # silently rotating omitted credentials or visible values.
+                    host = old_reality['handshake_server']
+                    target = ('['+host+']' if ':' in host else host)+':'+str(old_reality['handshake_port'])
+                    profile.setdefault('reality_target', target)
+                    profile.setdefault('reality_server_name', old_reality['server_name'])
+                    profile.setdefault('client_fingerprint', old_reality['client_fingerprint'])
+                    profile.setdefault('flow', old_reality['flow'])
+                    if profile.get('reality_short_id', '') == '':
+                        profile['reality_short_id'] = old_reality['short_id']
+                    old_transport = stream['transport']
+                    if (isinstance(profile['transport'], str)
+                            and profile['transport'].lower() == old_transport['type']):
+                        if old_transport['type'] == 'grpc':
+                            profile.setdefault('service_name', old_transport['service_name'])
+                        else:
+                            profile.setdefault('path', old_transport['path'])
+                            host = (old_transport.get('headers', {}).get('Host', '')
+                                    if old_transport['type'] == 'ws' else old_transport.get('host', ''))
+                            profile.setdefault('host', host)
             if previous_reality:
                 reality_profile.validate_stored(settings, stream)
             if desired_reality:
