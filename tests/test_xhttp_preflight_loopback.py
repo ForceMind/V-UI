@@ -20,8 +20,9 @@ import yaml
 from loopback_helpers import (certificate_files, CoreProcess, http_through,
     require_rejection_evidence, start_http_target, unused_port)
 from xhttp_helpers import (FAILURES, SNI, TARGET_BODY,
-    mihomo_config, mihomo_proxy, rejection_reason, share_uri,
-    singbox_gap_server, singbox_xhttp_client, xray_server)
+    classify_protocol_bytes, mihomo_config, mihomo_proxy, rejection_reason,
+    require_httpupgrade_bad_request, share_uri, singbox_gap_server,
+    singbox_xhttp_client, start_protocol_recorder, xray_server)
 
 
 @unittest.skipUnless(os.getenv('VUI_TEST_CORES') and os.getenv('VUI_TEST_MIHOMO'),
@@ -188,6 +189,59 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
                                 self.assertEqual(len(self.requests), baseline, 'Late rejected application delivery')
                             self.assertIsNone(server.process.poll(), self.logs())
 
+    def observe_httpupgrade_protocols(self):
+        captured = None
+        for client, expected in (('mihomo', 'httpupgrade'), ('mihomo-uri', 'vless')):
+            baseline = len(self.requests)
+            with ExitStack() as observation_stack:
+                recorder_port, observations = start_protocol_recorder(observation_stack, self.cert, self.key)
+                port = unused_port()
+                command, env = self.prepare_client(client, port, recorder_port, httpupgrade=True)
+                process = CoreProcess(observation_stack, command, self.unique_path('wire-'+client, 'log'), env)
+                process.start(port)
+                # This no-forward recorder is not a proxy success/rejection
+                # oracle. Only actual complete protocol bytes count below.
+                self.assert_failure(port, baseline)
+                deadline = time.monotonic()+3
+                records = observations.snapshot()
+                while not records and time.monotonic() < deadline:
+                    time.sleep(.02); records = observations.snapshot()
+                self.assertTrue(records, 'No actual protocol bytes observed')
+                for record in records:
+                    self.assertTrue('error' not in record, 'Protocol recorder reported incomplete or failed TLS observation')
+                    self.assertEqual(record['sni'], SNI)
+                    self.assertEqual(record['alpn'], 'http/1.1')
+                    self.assertIn(record['tls'], ('TLSv1.2', 'TLSv1.3'))
+                    self.assertEqual(classify_protocol_bytes(record['payload'], self.target_port), expected)
+                if expected == 'vless': captured = records[0]['payload']
+                process.stop(); time.sleep(.1)
+                self.assertEqual(len(self.requests), baseline, 'Recorder traffic reached application target')
+                self.assertTrue(observations.snapshot() == records, 'Recorder changed after observation boundary')
+                print(f'HTTPUpgrade separate wire recorder {client}: verified TLS/SNI/http1.1; '
+                      f'actual {expected} bytes; application delta=0; no forwarding')
+        self.assertIsNotNone(captured)
+        return captured
+
+    def replay_actual_bad_request(self, server_port, captured, baseline):
+        # Replay the exact bytes recorded from the real untouched URI importer.
+        # This is a separate observation, not a TLS relay or captured direct-run
+        # response. The actual fixed server, not the recorder, supplies HTTP400.
+        self.assertEqual(classify_protocol_bytes(captured, self.target_port), 'vless')
+        context = ssl.create_default_context(cafile=str(self.ca))
+        context.set_alpn_protocols(['http/1.1'])
+        with socket.create_connection(('127.0.0.1', server_port), timeout=3) as raw:
+            with context.wrap_socket(raw, server_hostname=SNI) as tls:
+                self.assertEqual(tls.selected_alpn_protocol(), 'http/1.1')
+                tls.sendall(captured)
+                response = http.client.HTTPResponse(tls)
+                response.begin()
+                self.assertEqual(response.version, 11)
+                body = response.read(4097)
+                require_httpupgrade_bad_request(response.status, response.reason, body)
+        self.assertEqual(len(self.requests), baseline, 'Wrong-protocol replay reached application target')
+        print('HTTPUpgrade separate unchanged-byte replay: real fixed sing-box HTTP/1.1 400 Bad Request; '
+              'verified TLS/SNI/http1.1; application delta=0')
+
     def test_00_bounded_parser_checks_and_singbox_gap(self):
         self.prepare_server(19443)
         for client in self.clients:
@@ -215,6 +269,10 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
             self.prepare_client('mihomo', 19444, 19443, httpupgrade=True, network=network)
         print('Mihomo accepts arbitrary network names; parser success does not establish HTTPUpgrade')
 
+    def test_03_httpupgrade_verified_wire_recorder(self):
+        self.start_target()
+        self.observe_httpupgrade_protocols()
+
     def test_verified_http_forwarding(self): self.verify_clients()
     def test_wrong_uuid_rejected(self): self.verify_clients('uuid')
     def test_wrong_ca_rejected(self): self.verify_clients('ca')
@@ -225,6 +283,7 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
 
     def test_httpupgrade_actual_uri_wrong_transport_control(self):
         self.start_target()
+        captured = self.observe_httpupgrade_protocols()
         # The URI remains type=httpupgrade throughout. Changing only the fixture
         # server demonstrates the wrong TCP semantics; it is not a substitute export.
         for upgrade in (True, False):
@@ -243,14 +302,10 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
                             process.start(port)
                             if upgrade and client == 'mihomo-uri':
                                 baseline = len(self.requests)
-                                offset = len(process.log_path.read_text(errors='replace'))
                                 self.assert_failure(port, baseline)
-                                log = require_rejection_evidence(self, process.log_path,
-                                    lambda: self.assert_failure(port, baseline), self.requests,
-                                    ('unexpected response version',), expected_count=baseline, log_offset=offset,
-                                    label='HTTPUpgrade URI wrong-transport handshake rejection')
-                                print('HTTPUpgrade URI gap: '+next(line for line in log.splitlines()
-                                    if 'unexpected response version' in line)+'; application delta=0; no DIRECT')
+                                self.replay_actual_bad_request(server_port, captured, baseline)
+                                print('HTTPUpgrade direct untouched URI: application delta=0; no DIRECT; '
+                                      'wrong VLESS bytes and actual parser HTTP400 proven by separate observations')
                                 process.stop(); time.sleep(.15)
                                 self.assertEqual(len(self.requests), baseline)
                             else:

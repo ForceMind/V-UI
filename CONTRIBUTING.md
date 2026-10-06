@@ -136,4 +136,6 @@ TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合
 - 默认 skip、历史本地 socket/netlink/Chromium EPERM、当前本地实际运行、配置检查和准确 CI 结果分别报告；不以 timeout/EOF/旧日志代替原因，也不将重跑当作已修复继承轮询不稳定性
 - 保留完整八组、四目标 Linux、40 项 ToClash、PR #23 普通响应 allowlist、协议/编辑/证书/备份语义；无 tag/Release、附件晋升、真实部署、CA/账户或实际防火墙变更
 
-当前本地执行：默认 487 项中实际 367 项通过、120 项明确环境 skip；XHTTP contract 7 项与选取 parser 3 项通过；最终工作树选取 10 方法（3 parser + 1 XHTTP 正向 + 6 负向）重验全部通过、无 skip，仅明确排除已有 netlink 阻断的 HTTPUpgrade-gap 方法。完整前置 11 方法中 10 方法通过，HTTPUpgrade 方法两项子测试在 sing-box 启动时报 netlink EPERM，整组 `FAILED (failures=2)`。XHTTP 两条路径正向/六类负向的通过与此阻断分别记录，独立服务端 TLS 1.3/h2 探测不称客户端抓包；准确提交 CI 仍待，详见[执行结果](docs/XHTTP_CHARACTERIZATION_048.md#当前本地执行结果2026-10-06)。
+首次前置本地执行：默认 487 项中实际 367 项通过、120 项明确环境 skip；XHTTP contract 7 项与选取 parser 3 项通过；最终工作树选取 10 方法（3 parser + 1 XHTTP 正向 + 6 负向）重验全部通过、无 skip，仅明确排除已有 netlink 阻断的 HTTPUpgrade-gap 方法。完整前置 11 方法中 10 方法通过，HTTPUpgrade 方法两项子测试在 sing-box 启动时报 netlink EPERM，整组 `FAILED (failures=2)`。XHTTP 两条路径正向/六类负向的通过与此阻断分别记录，独立服务端 TLS 1.3/h2 探测不称客户端抓包；准确提交 CI 仍待，详见[执行结果](docs/XHTTP_CHARACTERIZATION_048.md#首次前置本地执行结果2026-10-06)。
+
+HTTPUpgrade 原样 URI 的晚期 VLESS read 错误不会可靠出现在固定 Mihomo 日志；首次候选 77c264ab 链路 100 项中该原因断言失败已保留。修正仅使用独立验证 TLS 的协议 recorder 和同 bytes 对真实固定 sing-box 的 replay：实际 GET Upgrade 与 raw VLESS header/假 UUID/TCP/目标必须明确区分，真实 HTTP400/正文、直接 URI 零送达、canonical 成功和普通 TCP 错误传输对照分别必需。recorder 不转发、不计作应用送达；EOF/超时/截断/错误 UUID/command/目标/TLS 或一般错误都不得通过。默认单元中的 mock recorder 不输出真实 TLS/核心通过消息。完整原因、首次失败与修正门槛见[刻画记录](docs/XHTTP_CHARACTERIZATION_048.md#首次准确候选-ci-失败与观察修正)。
