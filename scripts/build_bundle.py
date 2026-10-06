@@ -115,7 +115,7 @@ def main():
         metadata={'kind':'release','release_id':identity,'platform':PLATFORM,'source_commit':args.source_commit,'version':version,
             'targets':[key],'python_runtime_version':'3.12.14+20260901',
             'portable_runtime_pins':{key:RUNTIME_PINS[key]},
-            'protocol_profile':'sing-box VLESS/TCP/TLS single-user verified certificate',
+            'protocol_profile':'bounded cumulative sing-box exports (including VLESS REALITY/Vision); see docs/COMPATIBILITY.md for exact combinations and application UDP limits',
             'runtime_pins':(ROOT/'requirements-runtime.txt').read_text()}
         checksum=create_archive(payload,args.destination,metadata)
         args.destination.with_suffix(args.destination.suffix+'.sha256').write_text(checksum+'  '+args.destination.name+'\n')

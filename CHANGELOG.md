@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-10-06 — 0.4.7 打包范围说明修正（发布准备）
+
+- 修正打包 UI 的 Xray REALITY 警告：Xray 组合仍未验收、不能公开导出；sing-box REALITY/Vision 的既有有界验收按兼容矩阵说明，保留原条件与成功提示
+- MANIFEST 的 `protocol_profile` 改为累计 sing-box 导出范围说明并指向 `docs/COMPATIBILITY.md`；新增真实 `prepare()`、合成构建产物 MANIFEST 与实际 deployment 包清单回归
+- 旧 `a21e31e1df4fd36a6994da780c29d051374279a9` 的八组 CI 和 13 项资产/四目标 ZIP 字节核验保留；套件因展示范围说明过时而被后续修正候选取代，不是摘要或来源篡改。新候选/主线各八组及新最终套件核验仍须独立完成，详见[发布准备更正](docs/RELEASING.md#047-打包范围说明更正2026-10-06)
+- VERSION/main.py 仍为 0.4.7；不改变协议、导出、编辑行为、核心 pin 或应用 UDP 范围，XHTTP/HTTPUpgrade 公开阻断保留；未执行发布、上传、tag、附件晋升或部署
+
 ## 2026-10-06 — XHTTP 刻画收口与 0.4.7 范围冻结
 
 [PR #25 XHTTP 刻画](docs/XHTTP_CHARACTERIZATION_CLOSURE_048.md)已正常合并至签名 master `66dbe70cfa86fe140fa1b69d3896244ab17a0e3c`；最终候选 `f7996c579418d1ffe5df06fc12677cf22a42e034` 与主线 tree 均为 `80ad474cfdd159dcc603a14b4a1c9d24427494e7`，独立审查、候选/主线各八组、11 jobs、全部步骤 attempt 1 成功。仅测试/文档刻画，产品 `VERSION` 保持 `0.4.7`；sing-box 1.14.2 不支持 XHTTP，固定 Mihomo HTTPUpgrade URI 有传输缺口，公开 XHTTP/HTTPUpgrade 导出仍阻断。最终链路 101 项、独立 HY2 8/TUIC 8、真实核心与 Chromium 分别验收；首次 CI 和本地失败完整保留。

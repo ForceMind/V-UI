@@ -26,7 +26,7 @@ def prepare(payload: Path):
     text=replace_once(text,'Mihomo 分流页保存的 ToClash 规则','分流与订阅工作区保存的 ToClash 规则')
     text=replace_once(text,
         'Mihomo 官方当前明确警告：Xray-core v26.7.11+ REALITY 存在不兼容。V-UI 会生成配置，但如果主要给 Mihomo 使用，建议改选 sing-box + VLESS REALITY。',
-        '当前已验证导出仅覆盖 sing-box VLESS/TCP/TLS。REALITY 在本版未验收，不会作为可用订阅导出。')
+        'Xray REALITY 尚未验收，不能公开导出；已验收的 sing-box VLESS/direct TCP/REALITY/Vision 仅限 docs/COMPATIBILITY.md 中列明的范围。')
     path.write_text(text)
     path=payload/'web/js/app.js';text=path.read_text()
     text=replace_once(text,"core: 'xray',","core: 'sing-box',")
