@@ -237,15 +237,21 @@ class RealityPreflightLoopbackTests(unittest.TestCase):
                             self.assertIn(expected_sni, after['client_hellos'][len(before['client_hellos']):])
                             if mutation in ('public_key', 'short_id', 'sni'):
                                 deadline = time.monotonic()+4
-                                while len(after['camouflage']) <= len(before['camouflage']) and time.monotonic() < deadline:
+                                while len(after['handshakes']) <= len(before['handshakes']) and time.monotonic() < deadline:
                                     time.sleep(.05); after = traffic.snapshot()
-                                self.assertGreater(len(after['camouflage']), len(before['camouflage']), self.logs())
+                                # The clients start their camouflage GET in a
+                                # goroutine, then the failed dial's caller can
+                                # close the connection first. TLS fallback is
+                                # observable; completed HTTP HEADERS are not
+                                # guaranteed and must only be counted, not forced.
+                                self.assertGreater(len(after['handshakes']), len(before['handshakes']), self.logs())
                                 self.assertTrue(all(x == ('TLSv1.3', 'h2') for x in after['handshakes']))
                             if mutation: self.assertEqual(self.requests, [], 'Late application delivery')
                             self.assertIsNone(process.process.poll(), self.logs())
                             self.assertIsNone(server.process.poll(), self.logs())
                             print(f'REALITY {client} {mutation or "HTTP success"}: application requests={len(self.requests)}; '
                                   f'reference ClientHellos={len(after["client_hellos"])-len(before["client_hellos"])}; '
+                                  f'reference completed TLS={len(after["handshakes"])-len(before["handshakes"])}; '
                                   f'camouflage HEADERS={len(after["camouflage"])-len(before["camouflage"])}; no DIRECT')
                         finally: process.stop()
                     self.requests.clear()

@@ -45,6 +45,8 @@
 
 服务端在认证前连接参考端，以及客户端认证失败后的伪装 GET，是固定源码允许的行为。**失败用例要求 HTTP 应用目标零送达，不要求参考端零连接或零 GET。** 不能将参考流量算成成功应用转发，也不能把合法伪装流量误报为 DIRECT。
 
+伪装 GET 在客户端 goroutine 中启动，失败拨号的调用方可以先关闭同一连接，因而不能要求每次出现完整 HTTP HEADERS。参考端分别记录 ClientHello、完成的 TLS 1.3/h2 握手与实际 HTTP HEADERS；key/short ID/SNI 失败必须观察到参考 TLS 回落，HEADERS 仅按实际数记录。真实认证错误、应用零送达和无 DIRECT 的断言不变。
+
 假参考证书同时覆盖允许 SNI 与测试用不允许 SNI，两种客户端使用同一边界；这样错误 SNI 验的是 REALITY 服务端 allowlist，不是证书名称不匹配。临时 CA 只通过假测试子进程的 `SSL_CERT_FILE` 与指向空临时目录的 `SSL_CERT_DIR` 注入；不修改主机信任、不关闭验证，不使用真实凭据/真实 CA。空目录必须存在，不能用未指定系统信任目录替代。
 
 每种客户端分别先证明正确 HTTP 代理及目标 IP 可达，再只改变一项进行负向验证：
@@ -72,6 +74,10 @@
 7. 保留既有协议、HY2/TUIC 独立托管证书门槛、PR #23 普通响应保护、ACME、协议区分 UDP 安装预检、四目标 Linux 与 40 项 ToClash
 
 ## 准确提交与八组 CI 门槛
+
+### 首次前置失败保留
+
+首个裸前置 [`67769509401804fbbdd617acd01d047424035f0b`](https://github.com/ForceMind/V-UI/commit/67769509401804fbbdd617acd01d047424035f0b) 的 [真实链路 attempt 1](https://github.com/ForceMind/V-UI/actions/runs/37470333699) 在 9 个 key/short ID/SNI 子场景中，因测试错误地强求伪装 HTTP HEADERS 大于零而失败。两种客户端及实际 URI importer 的正向 HTTP、错误 UUID/flow、真实 REALITY verification/authentication 原因和应用零送达已分别观察到；这些局部结果不能改写整组失败。修正只将非保证的 GET 要求改为实际参考 TLS 回落证据，并继续独立计数 ClientHello/完整握手/HEADERS，不换核心、跳过验证或放松应用送达与认证原因门槛。
 
 当前均为 pending，后续只能追加已核验准确提交的结果及链接。不能复用旧 TUIC 的绿色运行，也不能从本地配置检查推断 CI 或 runtime 成功。
 
