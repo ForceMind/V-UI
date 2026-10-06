@@ -2,7 +2,7 @@
 
 **个人自用的轻量代理面板：管理节点、图形化申请证书、设置 ToClash 分流，直接订阅完整 Mihomo 配置。**
 
-当前产品版本：**v0.4.7**（REALITY/Vision 准确主线已验收；下一阶段 XHTTP 仅刻画前置，不改变公开支持）。正式发布须完成[发布检查](docs/RELEASING.md)，版本号不代表 Release 已公开。
+当前产品版本：**v0.4.7**（REALITY/Vision 与 PR #25 XHTTP 刻画已准确主线验收；XHTTP/HTTPUpgrade 公开导出仍阻断，产品范围冻结并进入发布准备）。正式发布须完成[发布检查](docs/RELEASING.md)，版本号不代表 Release 已公开。
 
 ## 能做什么
 
@@ -31,7 +31,9 @@ TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合
 
 REALITY/Vision v0.4.7 已由 [PR #24](https://github.com/ForceMind/V-UI/pull/24) 正常合并至签名 master `6b049262457b259c602c5e74be296ef52780c462`，最终候选 `70cc2f4f7dc4349c7ecffbc33fc088f51b8651fa` 与主线 tree 均为 `316f0159e3ae3d7362022d9c9ac61bc0afa867c1`。独立审查完成，准确候选八组/11 jobs/全部步骤 attempt 1 成功；准确主线八组/11 个最新 jobs/全部步骤成功，其中链路首次继承 VMess/Mihomo CA 用例缺少必需 x509 日志，unchanged-code attempt 2 取得真实原因后通过，其余七组 attempt 1。该重跑不表示旧被动日志轮询不稳定性已永久修复。真实链路 89 项、独立 HY2 8/TUIC 8 和 Chromium 完整流程已分别验收，详见[收口记录](docs/REALITY_VISION_CLOSURE_047.md)。
 
-当前获准推进 **v0.4.8 XHTTP 刻画前置**，产品 `VERSION` 仍为 `0.4.7`。范围仅固定 Xray 26.3.27 服务端 → Mihomo 1.19.32 原生 YAML/实际 URI provider，显式 `stream-one`/TLS/h2/Chrome、空 flow、单假 UUID、明确 SNI/Host/path、HTTP/TCP。sing-box 1.14.2 不支持 XHTTP；三格式/双客户端公共契约不存在，公开导出保持阻断。HTTPUpgrade 单独记录固定 Mihomo URI 导入缺口，不能替代 XHTTP；当前准确提交的真实 CI 验收仍待完成，见[刻画边界](docs/XHTTP_CHARACTERIZATION_048.md)。
+[PR #25 XHTTP 刻画](docs/XHTTP_CHARACTERIZATION_CLOSURE_048.md)已正常合并至签名 master `66dbe70cfa86fe140fa1b69d3896244ab17a0e3c`；最终候选 `f7996c579418d1ffe5df06fc12677cf22a42e034` 与主线 tree 均为 `80ad474cfdd159dcc603a14b4a1c9d24427494e7`，独立审查、候选/主线各八组、11 jobs、全部步骤 attempt 1 成功。仅测试/文档刻画，产品 `VERSION` 保持 `0.4.7`；sing-box 1.14.2 不支持 XHTTP，固定 Mihomo HTTPUpgrade URI 有传输缺口，公开 XHTTP/HTTPUpgrade 导出仍阻断。最终链路 101 项、独立 HY2 8/TUIC 8、真实核心与 Chromium 分别验收；首次 CI 和本地失败完整保留。
+
+产品 0.4.7 范围已冻结，当前进入[发布准备](docs/RELEASING.md)。本次最终文档提交的准确 CI 与同提交四目标附件核验以对应 PR/发布准备证据为准，本文不预先声明通过。截至 2026-10-06 本次检查，未新建 tag/Draft Release/公开 Release、晋升附件或生产部署；先完成 0.4.7 交付决定，再进入独立 UDP/DNS 实现阶段。
 
 TUIC 只验 HTTP/TCP；sing-box 出站为 `network: tcp`。Mihomo TUIC adapter 硬编码 UDP 能力，省略无效 `udp: false`，不能宣称已关闭 UDP。QUIC 传输要求节点 UDP 通行，但应用 UDP 未验收。未知字段或不支持组合拒绝，失败不退 DIRECT。
 

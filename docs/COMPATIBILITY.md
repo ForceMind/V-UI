@@ -1,6 +1,6 @@
 # 兼容与验证范围
 
-[v0.4.2](MAINLINE_CLOSURE_20261005.md)、[WS](VLESS_WS_CLOSURE_043.md)、[gRPC](VLESS_GRPC_CLOSURE_044.md)、[HY2](HYSTERIA2_CLOSURE_045.md)、[PR #23 安全修复](INBOUND_RESPONSE_CLOSURE_20261006.md)、[TUIC v0.4.6](TUIC_CLOSURE_046.md)和 [REALITY/Vision v0.4.7](REALITY_VISION_CLOSURE_047.md)均已完成各自准确主线验收。当前产品版本仍为 0.4.7；下一阶段 XHTTP 仅能力刻画，公开导出保持阻断、准确提交的真实 CI 验收待完成。
+[v0.4.2](MAINLINE_CLOSURE_20261005.md)、[WS](VLESS_WS_CLOSURE_043.md)、[gRPC](VLESS_GRPC_CLOSURE_044.md)、[HY2](HYSTERIA2_CLOSURE_045.md)、[PR #23 安全修复](INBOUND_RESPONSE_CLOSURE_20261006.md)、[TUIC v0.4.6](TUIC_CLOSURE_046.md)和 [REALITY/Vision v0.4.7](REALITY_VISION_CLOSURE_047.md)均已完成各自准确主线验收。当前产品版本仍为 0.4.7；[PR #25 XHTTP 刻画](XHTTP_CHARACTERIZATION_CLOSURE_048.md)已完成独立审查、准确候选/主线各八组/11 jobs/全部步骤 attempt 1 验收，XHTTP/HTTPUpgrade 公开导出仍阻断。产品范围冻结；[发布准备](RELEASING.md)与正式发布另行验收。
 
 ## Linux 安装层
 
@@ -153,6 +153,6 @@ TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合
 
 固定 Xray 26.3.27 可表达 XHTTP 服务端，Mihomo 1.19.32 可表达原生 YAML 与实际 URI provider；本阶段只刻画 VLESS/空 flow/单假 UUID/TLS/h2/Chrome/`stream-one`/显式 SNI、Host、path 的 HTTP/TCP。sing-box 1.14.2 的 transport decoder 不支持 XHTTP，真实 parser 以 `unknown transport type: xhttp` 拒绝，不能声称三格式或双客户端支持。
 
-本地实际 parser 已检查四种已知 mode 的 Xray/Mihomo 原生配置与非法 mode；`mihomo -t` 对非法 provider payload 也返回成功，不能用它证明 URI 已导入。当前本地原生 YAML/实际 URI provider 正向与六类负向通过，具有预期 HTTP 正文、独立服务端 TLS 1.3/h2 探测、真实拒绝原因、零应用送达与无 DIRECT。完整前置的 HTTPUpgrade 两个子测试却在 sing-box 启动时 netlink EPERM，整组保留失败、准确提交仍须真实 CI。历史环境限制和当前实际结果分别保留；普通响应、编辑、证书/恢复、八组门槛、四目标 Linux 与 40 项 ToClash 全部保留。
+本地实际 parser 已检查四种已知 mode 的 Xray/Mihomo 原生配置与非法 mode；`mihomo -t` 对非法 provider payload 也返回成功，不能用它证明 URI 已导入。准确候选 `f7996c5` 与 master `66dbe70c` 的原生 YAML/实际 URI provider 正向与六类负向通过，具有预期 HTTP 正文、独立服务端 TLS 1.3/h2 探测、真实拒绝原因、零应用送达与无 DIRECT。完整链路均为 101 项，独立 HY2 8/TUIC 8 另计。本地完整 11/12 方法组仍各有两个 HTTPUpgrade sing-box 启动 netlink EPERM 子测试失败；首次 CI 的晚期协议日志缺失失败也保留，不能被最终 CI 成功改写。历史环境限制和当前实际结果分别保留；普通响应、编辑、证书/恢复、八组门槛、四目标 Linux 与 40 项 ToClash 全部保留。
 
-HTTPUpgrade 是独立传输：sing-box 原生 `type:httpupgrade` 与 Mihomo 原生 `network:ws` + `ws-opts.v2ray-http-upgrade:true` 可表达。固定 Mihomo 的 URI `type=httpupgrade` 导入却保留未知 `network:httpupgrade`、没有 upgrade flag，VLESS adapter 默认落入普通 TCP/TLS；`type=ws` 同样无法编码该 flag。原生 parser 成功不修复 URI 语义，不能把 HTTPUpgrade 当作 XHTTP 或完整格式契约的替代。详见[刻画契约与固定源码](XHTTP_CHARACTERIZATION_048.md)。
+HTTPUpgrade 是独立传输：sing-box 原生 `type:httpupgrade` 与 Mihomo 原生 `network:ws` + `ws-opts.v2ray-http-upgrade:true` 可表达。固定 Mihomo 的 URI `type=httpupgrade` 导入却保留未知 `network:httpupgrade`、没有 upgrade flag，VLESS adapter 默认落入普通 TCP/TLS；`type=ws` 同样无法编码该 flag。最终 CI 分别验证 canonical YAML 真实转发、原样 URI 对实际 HTTPUpgrade 服务端失败/零应用送达、独立验证 TLS recorder 的 GET Upgrade 与 raw VLESS，以及同 bytes 对实际服务端 replay 的 HTTP400/正文。普通 TCP 对照只证明 URI 错落传输；replay HTTP400 不称直接 URI 会话抓包。原生 parser 成功不修复 URI 语义，不能把 HTTPUpgrade 当作 XHTTP 或完整格式契约的替代。详见[刻画契约与固定源码](XHTTP_CHARACTERIZATION_048.md)和[准确 CI 收口](XHTTP_CHARACTERIZATION_CLOSURE_048.md)。

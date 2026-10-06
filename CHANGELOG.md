@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-10-06 — XHTTP 刻画收口与 0.4.7 范围冻结
+
+[PR #25 XHTTP 刻画](docs/XHTTP_CHARACTERIZATION_CLOSURE_048.md)已正常合并至签名 master `66dbe70cfa86fe140fa1b69d3896244ab17a0e3c`；最终候选 `f7996c579418d1ffe5df06fc12677cf22a42e034` 与主线 tree 均为 `80ad474cfdd159dcc603a14b4a1c9d24427494e7`，独立审查、候选/主线各八组、11 jobs、全部步骤 attempt 1 成功。仅测试/文档刻画，产品 `VERSION` 保持 `0.4.7`；sing-box 1.14.2 不支持 XHTTP，固定 Mihomo HTTPUpgrade URI 有传输缺口，公开 XHTTP/HTTPUpgrade 导出仍阻断。最终链路 101 项、独立 HY2 8/TUIC 8、真实核心与 Chromium 分别验收；首次 CI 和本地失败完整保留。
+
+产品 0.4.7 范围已冻结，当前进入[发布准备](docs/RELEASING.md)。本次最终文档提交的准确 CI 与同提交四目标附件核验以对应 PR/发布准备证据为准，本文不预先声明通过。截至 2026-10-06 本次检查，未新建 tag/Draft Release/公开 Release、晋升附件或生产部署；先完成 0.4.7 交付决定，再进入独立 UDP/DNS 实现阶段。
+
+以下旧条目保留当时的候选、待验收与失败状态；最终 PR #25 结论以上述收口记录为准。
+
 ## 2026-10-06 — REALITY v0.4.7 主线收口与 XHTTP 刻画启动
 
 REALITY/Vision v0.4.7 已由 [PR #24](https://github.com/ForceMind/V-UI/pull/24) 正常合并至签名 master `6b049262457b259c602c5e74be296ef52780c462`，最终候选 `70cc2f4f7dc4349c7ecffbc33fc088f51b8651fa` 与主线 tree 均为 `316f0159e3ae3d7362022d9c9ac61bc0afa867c1`。独立审查完成，准确候选八组/11 jobs/全部步骤 attempt 1 成功；准确主线八组/11 个最新 jobs/全部步骤成功，其中链路首次继承 VMess/Mihomo CA 用例缺少必需 x509 日志，unchanged-code attempt 2 取得真实原因后通过，其余七组 attempt 1。该重跑不表示旧被动日志轮询不稳定性已永久修复。真实链路 89 项、独立 HY2 8/TUIC 8 和 Chromium 完整流程已分别验收，详见[收口记录](docs/REALITY_VISION_CLOSURE_047.md)。
