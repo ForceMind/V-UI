@@ -1,6 +1,6 @@
 # V-UI 文档
 
-当前产品文档按 **v0.4.7** 组织，[REALITY/Vision](REALITY_VISION_CLOSURE_047.md)及 [TUIC v0.4.6](TUIC_CLOSURE_046.md)与此前协议/安全修复均有准确主线验收。REALITY 首次主线 VMess CA 原因日志缺失和 unchanged-code attempt 2 成功分别保留，重跑不证明轮询不稳定性已永久修复。下一阶段 [v0.4.8 XHTTP 刻画前置](XHTTP_CHARACTERIZATION_048.md)不提高产品版本、不开放公共导出，准确提交的真实 CI 验收仍待完成。源码、配置检查、候选/主线、附件晋升、发布和部署分别记录。
+当前产品文档按 **v0.4.7** 组织，[REALITY/Vision](REALITY_VISION_CLOSURE_047.md)及 [TUIC v0.4.6](TUIC_CLOSURE_046.md)与此前协议/安全修复均有准确主线验收。REALITY 首次主线 VMess CA 原因日志缺失和 unchanged-code attempt 2 成功分别保留，重跑不证明轮询不稳定性已永久修复。[PR #25 XHTTP 刻画](XHTTP_CHARACTERIZATION_CLOSURE_048.md)已在准确候选/主线各八组、11 jobs、全部步骤 attempt 1 通过；不提高产品版本、不开放 XHTTP/HTTPUpgrade 公共导出。产品 0.4.7 范围冻结并进入[发布准备](RELEASING.md)，最终文档提交与同提交附件的验收以对应 PR/发布准备证据为准，本文不预先声明通过。截至 2026-10-06 本次检查，未新建 tag/Draft Release/公开 Release 或晋升附件。源码、配置检查、候选/主线、附件晋升、发布和部署分别记录。
 
 | 阅读目标 | 文档 |
 | --- | --- |
@@ -11,7 +11,8 @@
 | 访问失败/签发失败/核心未生效 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
 | 管理API、令牌和错误状态 | [API.md](API.md) |
 | 已验证与未验证的协议/部署范围 | [COMPATIBILITY.md](COMPATIBILITY.md) |
-| XHTTP 当前刻画、sing-box 不支持与 HTTPUpgrade URI 缺口 | [XHTTP_CHARACTERIZATION_048.md](XHTTP_CHARACTERIZATION_048.md) |
+| PR #25 准确候选/主线验收与首次失败 | [XHTTP_CHARACTERIZATION_CLOSURE_048.md](XHTTP_CHARACTERIZATION_CLOSURE_048.md) |
+| XHTTP 刻画、sing-box 不支持与 HTTPUpgrade URI 缺口 | [XHTTP_CHARACTERIZATION_048.md](XHTTP_CHARACTERIZATION_048.md) |
 | REALITY/Vision 已验收、主线重跑与失败历史 | [REALITY_VISION_CLOSURE_047.md](REALITY_VISION_CLOSURE_047.md) |
 | REALITY/Vision 参考流量、认证边界与阶段历史 | [REALITY_VISION_047.md](REALITY_VISION_047.md) |
 | TUIC v5/TLS 已验收与失败历史 | [TUIC_CLOSURE_046.md](TUIC_CLOSURE_046.md) |

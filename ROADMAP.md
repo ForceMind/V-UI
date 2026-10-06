@@ -14,7 +14,9 @@ TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合
 
 REALITY/Vision v0.4.7 已由 [PR #24](https://github.com/ForceMind/V-UI/pull/24) 正常合并至签名 master `6b049262457b259c602c5e74be296ef52780c462`，最终候选 `70cc2f4f7dc4349c7ecffbc33fc088f51b8651fa` 与主线 tree 均为 `316f0159e3ae3d7362022d9c9ac61bc0afa867c1`。独立审查完成，准确候选八组/11 jobs/全部步骤 attempt 1 成功；准确主线八组/11 个最新 jobs/全部步骤成功，其中链路首次继承 VMess/Mihomo CA 用例缺少必需 x509 日志，unchanged-code attempt 2 取得真实原因后通过，其余七组 attempt 1。该重跑不表示旧被动日志轮询不稳定性已永久修复。真实链路 89 项、独立 HY2 8/TUIC 8 和 Chromium 完整流程已分别验收，详见[收口记录](docs/REALITY_VISION_CLOSURE_047.md)。
 
-当前获准推进 **v0.4.8 XHTTP 刻画前置**，产品 `VERSION` 仍为 `0.4.7`。范围仅固定 Xray 26.3.27 服务端 → Mihomo 1.19.32 原生 YAML/实际 URI provider，显式 `stream-one`/TLS/h2/Chrome、空 flow、单假 UUID、明确 SNI/Host/path、HTTP/TCP。sing-box 1.14.2 不支持 XHTTP；三格式/双客户端公共契约不存在，公开导出保持阻断。HTTPUpgrade 单独记录固定 Mihomo URI 导入缺口，不能替代 XHTTP；当前准确提交的真实 CI 验收仍待完成，见[刻画边界](docs/XHTTP_CHARACTERIZATION_048.md)。
+[PR #25 XHTTP 刻画](docs/XHTTP_CHARACTERIZATION_CLOSURE_048.md)已正常合并至签名 master `66dbe70cfa86fe140fa1b69d3896244ab17a0e3c`；最终候选 `f7996c579418d1ffe5df06fc12677cf22a42e034` 与主线 tree 均为 `80ad474cfdd159dcc603a14b4a1c9d24427494e7`，独立审查、候选/主线各八组、11 jobs、全部步骤 attempt 1 成功。仅测试/文档刻画，产品 `VERSION` 保持 `0.4.7`；sing-box 1.14.2 不支持 XHTTP，固定 Mihomo HTTPUpgrade URI 有传输缺口，公开 XHTTP/HTTPUpgrade 导出仍阻断。最终链路 101 项、独立 HY2 8/TUIC 8、真实核心与 Chromium 分别验收；首次 CI 和本地失败完整保留。
+
+产品 0.4.7 范围已冻结，当前进入[发布准备](docs/RELEASING.md)。本次最终文档提交的准确 CI 与同提交四目标附件核验以对应 PR/发布准备证据为准，本文不预先声明通过。截至 2026-10-06 本次检查，未新建 tag/Draft Release/公开 Release、晋升附件或生产部署；先完成 0.4.7 交付决定，再进入独立 UDP/DNS 实现阶段。
 
 ## v0.3.0 基线
 
@@ -59,8 +61,9 @@ PR #13。
 6. Hysteria2 — **v0.4.5 / PR #20/#21（主线验收已完成）**；
 7. TUIC — **v0.4.6 / PR #22（主线验收已完成）**；
 8. REALITY / Vision — **v0.4.7 / PR #24（主线验收已完成）**；
-9. XHTTP — **v0.4.8 刻画前置（当前；VERSION 仍为 0.4.7，公开导出阻断）**；HTTPUpgrade 的独立能力与 URI 缺口另行记录；
-10. UDP / DNS 专项。
+9. XHTTP — **v0.4.8 刻画前置 / PR #25（主线验收已完成；VERSION 仍为 0.4.7，公开导出阻断）**；HTTPUpgrade 的独立能力与 URI 缺口另行记录；
+10. 冻结累计产品 0.4.7，完成准确最终文档/CI/四目标附件的发布准备和交付决定；发布动作仍须明确授权；
+11. UDP / DNS 专项，留待上述决定完成后的独立阶段；现有只读审计不构成实现。
 
 每个公开协议支持版本都必须同时完成服务端、编辑 UI、URI/Mihomo/sing-box 导出、真实核心检查、真实客户端检查、正向连接和错误凭据/TLS/参数失败路径。固定核心无法表达完整契约时只做明确标记的刻画，不静默删掉客户端/格式门槛或换协议。
 
@@ -112,12 +115,12 @@ PR #13。
 - REALITY 参考握手/伪装流量与应用目标分别计数。五类负向要求真实 UUID/flow/REALITY 错误、应用零送达与无 DIRECT；异步伪装 GET 不能强求每次发生
 - 最终集成独立审查、准确候选八组、正常合并和准确主线八组已完成，见[主线收口](docs/REALITY_VISION_CLOSURE_047.md)。首次伪装 HEADERS 断言失败、集成审查阻断与首次主线 VMess 被动日志轮询失败保留；unchanged-code 重跑通过不表示轮询问题永久修复
 
-### v0.4.8 XHTTP 当前刻画边界
+### v0.4.8 XHTTP 已验收刻画边界
 
-- 从上述准确 REALITY master 独立分支推进，仅测试/文档；产品版本不提升，公开 XHTTP/HTTPUpgrade 导出仍拒绝
+- 从上述准确 REALITY master 独立分支完成 PR #25，仅测试/文档；候选/主线各八组验收见[收口记录](docs/XHTTP_CHARACTERIZATION_CLOSURE_048.md)，产品版本不提升，公开 XHTTP/HTTPUpgrade 导出仍拒绝
 - Xray 26.3.27 → Mihomo 1.19.32 YAML 与实际 URI provider，固定单假 UUID、空 flow、TLS/h2/Chrome、`stream-one`、显式 SNI/Host/path，仅 HTTP/TCP
 - sing-box 1.14.2 parser 明确拒绝 `unknown transport type: xhttp`，不改 pin/构建，也不替换为 HTTPUpgrade/WS/HTTP/h2
-- 正向与 UUID/CA/SNI/path/Host/mode 负向运行时均待真实 CI；配置检查不能证明 provider payload 或转发，负向必须保留真实原因、零目标送达和无 DIRECT
+- 两条路径的正向与 UUID/CA/SNI/path/Host/mode 负向均有准确候选/主线真实 CI；配置检查不替代 provider payload 或转发证据，真实拒绝原因、零应用送达和无 DIRECT 均保留
 - Xray path 为规范化后的前缀匹配、Host 忽略大小写并去请求端口、mode 为有方向的兼容关系；不能泛称任意不同值均拒绝
 - HTTPUpgrade 的 sing-box JSON/Mihomo 原生 `ws`+upgrade 可表达；固定 Mihomo URI `type=httpupgrade` 缺少 normalization/upgrade flag 而落入普通 TCP，独立缺口不绕过，详见[刻画契约](docs/XHTTP_CHARACTERIZATION_048.md)
 

@@ -6,7 +6,7 @@
 
 固定官方核心下没有 XHTTP 的三格式/双客户端公共契约：Xray 26.3.27 有 XHTTP 服务端；Mihomo 1.19.32 有原生 YAML 与实际 URI importer；sing-box 1.14.2 的 inbound/outbound transport decoder 不支持 XHTTP。不得改 pin、重编译核心、新增 Xray 客户端导出，或改称 HTTPUpgrade、WS、HTTP、h2 来绕过缺口。
 
-2026-10-06 已有实际本地 parser 证据和固定源码核对；其后本地运行在未升级权限、未改环境或安全设置的情况下取得独立的 Xray 服务端 TLS 1.3/h2 探测、Mihomo 原生 YAML 与真实 URI provider 的预期 loopback HTTP 正文和无 DIRECT；六类负向均有真实拒绝原因、零应用送达与无 DIRECT。首次完整本地前置因独立 HTTPUpgrade 诊断的两项 netlink EPERM 子测试失败而失败；其后首个准确候选 CI 已完成七组、链路组仅因要求一个固定客户端不输出的错误日志而失败，详见下方保留记录。修正后的准确提交验收仍待完成。此前 socket/netlink/Chromium EPERM 保留为历史环境限制，既不算通过，也不能泛化为当前所有本地运行阻断。当前本地结果、测试代码、配置可载入及历史主线绿色均不能替代本阶段的准确提交验收。
+2026-10-06 已有实际本地 parser 证据和固定源码核对；其后本地运行在未升级权限、未改环境或安全设置的情况下取得独立的 Xray 服务端 TLS 1.3/h2 探测、Mihomo 原生 YAML 与真实 URI provider 的预期 loopback HTTP 正文和无 DIRECT；六类负向均有真实拒绝原因、零应用送达与无 DIRECT。首次完整本地前置因独立 HTTPUpgrade 诊断的两项 netlink EPERM 子测试失败而失败；其后首个准确候选 CI 已完成七组、链路组仅因要求一个固定客户端不输出的错误日志而失败，详见下方保留记录。修正后的最终候选 `f7996c579418d1ffe5df06fc12677cf22a42e034` 与正常签名 master `66dbe70cfa86fe140fa1b69d3896244ab17a0e3c` 已完成独立审查及各八组/11 jobs/全部步骤 attempt 1 验收，详见[准确收口](XHTTP_CHARACTERIZATION_CLOSURE_048.md)。此前 socket/netlink/Chromium EPERM 保留为历史环境限制，既不算通过，也不能泛化为当前所有本地运行阻断。当前本地结果、测试代码、配置可载入及历史主线绿色均不能替代本阶段的准确提交验收。
 
 ## 固定官方来源
 
@@ -89,7 +89,7 @@ HTTPUpgrade 是不同的真实传输。固定 sing-box 1.14.2 服务端/JSON 客
 - 固定 Mihomo URI `type=httpupgrade` converter 保留 `network:httpupgrade`、生成 `ws-opts` 却不添加 upgrade flag；provider/adapter parser 不做必要的 `ws`+upgrade 规范化，VLESS adapter 的未知 network 默认走普通 TCP/TLS
 - 实际 parser 检查中，原生 `network:httpupgrade` 和 `network:not-a-transport` 都返回成功；这不证明 HTTPUpgrade 能力。URI `type=ws` 同样无法编码必需的 upgrade flag，不能偷偷加 provider override 后声称原 URI 无损
 
-单独的运行诊断保留三条直接链路：canonical YAML → 固定 sing-box HTTPUpgrade 应成功；原样 URI → 同一 HTTPUpgrade 服务端应失败且零应用送达；原样 URI → 独立普通 TCP 服务端应成功。**最后一项只用于证明 URI 错落 TCP，绝不计作 HTTPUpgrade 通过。** 首次 CI 已观察到这些直接链路行为，但真实原因日志断言失败，整组没有通过。
+单独的运行诊断保留三条直接链路：canonical YAML → 固定 sing-box HTTPUpgrade 应成功；原样 URI → 同一 HTTPUpgrade 服务端应失败且零应用送达；原样 URI → 独立普通 TCP 服务端应成功。**最后一项只用于证明 URI 错落 TCP，绝不计作 HTTPUpgrade 通过。** 首次 CI 已观察到这些直接链路行为，但真实原因日志断言失败，整组没有通过；最终候选/主线以以下独立协议观察完成验收，首次失败仍保留。
 
 固定 Mihomo 的 VLESS `recvResponse()` 可产生 `unexpected response version`，但这个发生在初始 dial/write 成功之后的 relay read。正常 tunnel 不保证输出该后期错误；继续延长日志轮询不能建立所需证据。源码见 [VLESS 读响应](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/transport/vless/conn.go)、[tunnel 错误记录边界](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/tunnel/tunnel.go)与[handleSocket](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/tunnel/connection.go)。controller delay 路径也可能将该失败改成一般错误，不能作为替代证明。
 
@@ -100,13 +100,13 @@ HTTPUpgrade 是不同的真实传输。固定 sing-box 1.14.2 服务端/JSON 客
 3. 将 recorder 从真实 URI 客户端取得的同一段完整 bytes **不改任何字节**，经另一条正常验证证书/SNI/ALPN 的 TLS 会话送到实际固定 sing-box HTTPUpgrade 服务端。必须读取实际 `HTTP/1.1 400 Bad Request` 及精确正文 `400 Bad Request`，并保持应用计数不变；一般错误、超时、EOF 不够
 4. 直接的真实 URI → 实际 HTTPUpgrade 服务端仍必须失败、应用增量为零且无 DIRECT。上述 replay 的 HTTP400 单独标记，不能说成直接 URI 会话的抓包；canonical 实际成功与普通 TCP 错误传输对照也仍为必需
 
-已检查 sing-box 自身 `version` 输出的 Go 构建为 `go1.26.8`，不是从另一客户端推断。该标准库 [request parser](https://github.com/golang/go/blob/go1.26.8/src/net/http/request.go)拒绝前导 NUL 的非法 method，[server](https://github.com/golang/go/blob/go1.26.8/src/net/http/server.go)返回 HTTP400 而不输出详细原因；这解释源码行为，修正后的实际 replay 响应仍须真实 CI 验证。临时观察只记录协议类型/结果，不公开原始 UUID/header bytes 或 TLS 密钥。
+已检查 sing-box 自身 `version` 输出的 Go 构建为 `go1.26.8`，不是从另一客户端推断。该标准库 [request parser](https://github.com/golang/go/blob/go1.26.8/src/net/http/request.go)拒绝前导 NUL 的非法 method，[server](https://github.com/golang/go/blob/go1.26.8/src/net/http/server.go)返回 HTTP400 而不输出详细原因；这解释源码行为，修正后的实际 replay 响应已由最终候选/主线真实 CI 验证，证据与直接 URI 失败分开记录。临时观察只记录协议类型/结果，不公开原始 UUID/header bytes 或 TLS 密钥。
 
 ## 首次前置本地执行结果（2026-10-06）
 
 - 默认全量测试：487 项，48.304 秒，`OK (skipped=120)`；实际执行 367 项，120 项环境 skip 不计作 runtime 通过
 - 独立 XHTTP contract 单元：7 项通过；选取的固定 parser 方法：3 项通过，1.584 秒
-- 最终工作树选取的 10 个方法（3 parser + 1 XHTTP 正向 + 6 负向）重验全部通过，25.939 秒、无 skip。明确仅排除已在完整执行中 netlink 阻断的 HTTPUpgrade-gap 方法；这个选择性通过不改写完整 11 方法组的两项失败，也不替代待完成的准确 CI
+- 最终工作树选取的 10 个方法（3 parser + 1 XHTTP 正向 + 6 负向）重验全部通过，25.939 秒、无 skip。明确仅排除已在完整执行中 netlink 阻断的 HTTPUpgrade-gap 方法；这个选择性通过不改写完整 11 方法组的两项失败，也不替代随后完成的准确 CI
 - 独立正向探测：1 项通过，0.585 秒，覆盖原生 YAML 和实际 URI provider 的预期 HTTP 正文/应用送达/无 DIRECT
 - 完整 focused preflight：11 个测试方法，24.529 秒，其中 10 个方法通过；HTTPUpgrade URI-gap 方法的两个服务端子测试失败，最终 `FAILED (failures=2)`，没有 skip。不能将该整组写成通过
 - 通过的 XHTTP 运行方法含上述两条路径的正向与六类独立负向：错误 UUID、CA、SNI、path、Host、mode；每次均记录真实 VLESS/x509/XHTTP 原因、`application delta=0` 和无 DIRECT
@@ -127,7 +127,7 @@ HTTPUpgrade 是不同的真实传输。固定 sing-box 1.14.2 服务端/JSON 客
 - 默认全量 496 项，41.919 秒，`OK (skipped=121)`：375 项实际执行；15 项 focused 单元回归通过。模拟 recorder 的单元不输出真实 TLS/核心成功消息
 - 完整修正前置 12 个方法，38.761 秒：11 个方法通过；HTTPUpgrade 核心/replay 方法仍因两个 sing-box 服务启动 netlink EPERM 子测试失败，整组 `FAILED (failures=2)`、无 skip。独立 recorder、三个 parser 方法、全部 XHTTP 正向/六类负向通过，不等于该整组通过
 
-真实 fixed-server HTTP400 replay 及完整修正候选八组须准确提交 CI，不进行盲目 unchanged-code 重跑；原首个候选失败和两轮本地环境失败都保留。
+上述本地结果之后，真实 fixed-server HTTP400 replay、完整修正候选与正常合并 master 各八组均已在准确提交 CI 通过，未以盲目 unchanged-code 重跑代替源码诊断与独立审查。最终链路各 101 项、独立 HY2 8/TUIC 8，Test 默认各 496 项（375 执行、121 明确环境 skip），真实核心与 Chromium 单独激活验收，见[收口记录](XHTTP_CHARACTERIZATION_CLOSURE_048.md)。原首个候选失败和两轮本地环境失败都保留。
 
 ## 测试入口与不变门槛
 

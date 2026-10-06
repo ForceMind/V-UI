@@ -1,6 +1,6 @@
 # V-UI 0.4.7
 
-REALITY/Vision 已由 [PR #24](https://github.com/ForceMind/V-UI/pull/24) 完成独立审查、准确候选八组、正常合并和准确主线八组，见[收口记录](REALITY_VISION_CLOSURE_047.md)。本文件仍为发布准备说明；没有创建正式 Release、附件晋升或生产部署。当前 XHTTP 刻画不改变产品版本 0.4.7 或公共支持。
+REALITY/Vision 已由 [PR #24](https://github.com/ForceMind/V-UI/pull/24) 完成独立审查、准确候选八组、正常合并和准确主线八组，见[收口记录](REALITY_VISION_CLOSURE_047.md)。本文件为发布准备说明；截至 2026-10-06 本次检查，没有创建正式 Release、附件晋升或生产部署。[PR #25 XHTTP 刻画](XHTTP_CHARACTERIZATION_CLOSURE_048.md)也已完成准确候选/主线验收，不改变产品版本 0.4.7 或公共支持。产品范围冻结；本次最终文档提交的 CI 与同提交四目标附件核验以对应 PR/发布准备证据为准，本文不预先声明通过，也不能以旧提交的结果替代。
 
 ## 继承基线
 
@@ -20,6 +20,6 @@ REALITY/Vision 已由 [PR #24](https://github.com/ForceMind/V-UI/pull/24) 完成
 
 最终候选 `70cc2f4` 与正常签名 master `6b049262` tree 相同；候选八组全部 attempt 1，主线八组最终成功。主线链路首次继承 VMess/Mihomo CA 用例缺少必需 x509 原因，unchanged-code attempt 2 取得真实 unknown-authority 原因后通过，其余七组 attempt 1；该重跑不证明被动日志轮询不稳定性已永久修复。真实链路 89 项及独立 HY2 8/TUIC 8，公开订阅、严格编辑、Chrome/秘密回填、取消/刷新/再编辑/导出及损坏后停机恢复均有准确主线证据。原有 ACME/安装/40 项 ToClash/四目标 Linux 与完整八组不减，见[主线收口](REALITY_VISION_CLOSURE_047.md)；完整来源与前置/审查失败历史见[阶段契约](REALITY_VISION_047.md)。
 
-下一阶段仅 [XHTTP 刻画前置](XHTTP_CHARACTERIZATION_048.md)。sing-box 1.14.2 不支持 XHTTP，HTTPUpgrade 另有固定 Mihomo URI 转换缺口，公开导出保持阻断，准确提交的真实 CI 验收仍待完成。
+[PR #25 XHTTP 刻画](XHTTP_CHARACTERIZATION_CLOSURE_048.md)最终候选 `f7996c5` 与签名 master `66dbe70c` 同 tree，分别八组/11 jobs/全部步骤 attempt 1 成功。链路各 101 项、独立 HY2 8/TUIC 8；默认 496 项中 375 执行、121 明确 skip，真实核心与继承 REALITY 完整 Chromium 流程分别验收。XHTTP 的 Mihomo YAML/实际 URI 路径正向及六类负向通过；HTTPUpgrade 原生成功、原样 URI 失败、独立协议 recorder、同 bytes 验证 TLS replay 的实际 HTTP400 与普通 TCP 对照分别记录。sing-box 1.14.2 不支持 XHTTP，HTTPUpgrade 仍有固定 Mihomo URI 转换缺口，公开导出保持阻断。首次 `77c264a` CI 缺少晚期日志原因的失败及源码诊断/审查修正保留于[刻画记录](XHTTP_CHARACTERIZATION_048.md)。
 
-历史本地 netlink/socket/Chromium EPERM 按原结果保留，不写成运行通过；当前 XHTTP 本地运行与 HTTPUpgrade netlink 阻断另见刻画记录，不泛化为所有本地测试不可运行。源码、配置检查、真实链路、浏览器、包验证、发布与部署分别记录。无 tag/Release、附件晋升、真实 CA/账户或实际防火墙变更。
+历史本地 netlink/socket/Chromium EPERM 按原结果保留，不写成运行通过；当前 XHTTP 本地运行与 HTTPUpgrade netlink 阻断另见刻画记录，不泛化为所有本地测试不可运行。源码、配置检查、真实链路、浏览器、包验证、发布与部署分别记录。本轮未新建 tag/Draft Release/公开 Release、晋升附件、操作真实 CA/账户或修改实际防火墙；已有历史 `v1.0.0` tag 不变。先完成本版发布准备与交付决定，再推进独立 UDP/DNS 实现；[人工发布边界](RELEASING.md)不变。
