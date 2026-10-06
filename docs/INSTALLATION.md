@@ -43,7 +43,7 @@ UFW / firewalld 缺规则时按精确端口/协议列出（例如 `10443/tcp` �
 
 ### Hysteria2 的显式 UDP/QUIC 声明
 
-v0.4.5 已验收且 v0.4.6 TUIC 候选沿用的安装器可接受可重复参数：
+已验收 v0.4.5/HY2 与 v0.4.6/TUIC 沿用的安装器可接受可重复参数：
 
 ```sh
 sudo bash install.sh --bundle ./vui-linux-x86_64-gnu.zip --sha256 '<可信 SHA256>' \
@@ -117,10 +117,10 @@ root 只负责系统初始化和受管服务文件；应用、核心与 Certbot 
 
 ## 7. 官方 Release 一键安装
 
-当前文档对应 **v0.4.6 TUIC v5/TLS 候选**，版本号不代表该版本已经公开发布。下面仅展示正式 Release 公布且资产核对完成后的命令，不能视为当前可用下载地址；安装入口须来自同一可信仓库或已验收套件：
+当前文档对应 **v0.4.7 REALITY/Vision 集成候选**，版本号不代表该版本已经公开发布。下面仅展示正式 Release 公布且资产核对完成后的命令，不能视为当前可用下载地址；安装入口须来自同一可信仓库或已验收套件：
 
 ```sh
-sudo bash install.sh --version v0.4.6
+sudo bash install.sh --version v0.4.7
 ```
 
 脚本先检测 `x86_64/aarch64 + gnu/musl`，再从该明确版本下载对应目标包、安装控制器和 `SHA256SUMS`，逐个验证摘要后执行。不会下载 `latest`，也不会在发布时重新构建包。

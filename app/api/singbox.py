@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from app.api.cores import apply_checked
+from app.services.reality_profile import has_reality
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from app.models.database import get_db
@@ -43,6 +44,12 @@ def edit_inbound(inbound_id: int, payload: SingBoxInboundPayload, db: Session = 
     data = payload.model_dump(exclude={"id"})
     data["core"] = "sing-box"
     item = update_inbound(db, inbound_id, data)
+    if has_reality(item.stream_settings):
+        # Match the modern desired-state API: validate/save first, remove stale
+        # renewal next, then apply. Failed validation never changes the binding.
+        from app.certificates.manager import get_manager
+        from app.api.certificates import perform
+        perform(lambda: get_manager().unbind("inbound:" + str(inbound_id)))
     return {"message": "Inbound updated", "inbound": to_dict(item), "core": apply_checked("sing-box")}
 
 @router.delete("/inbounds/{inbound_id}")

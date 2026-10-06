@@ -52,6 +52,7 @@ class SecurityBindingTests(unittest.TestCase):
 
     def profile(self, security):
         return {'security': security, 'transport': 'direct',
+                'flow': 'xtls-rprx-vision' if security == 'reality' else '', 'client_fingerprint': 'chrome',
                 'reality_target': 'target.example.test:443',
                 'reality_server_name': 'target.example.test',
                 'reality_short_id': '0102030405060708'}

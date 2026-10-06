@@ -1,6 +1,6 @@
 # V-UI 文档
 
-当前使用文档按 **v0.4.6** TUIC v5/TLS 候选组织，最终独立审查、准确候选八组、授权正常合并和准确主线八组 CI 仍待完成。[v0.4.2 主线](MAINLINE_CLOSURE_20261005.md)、[WS](VLESS_WS_CLOSURE_043.md)、[gRPC](VLESS_GRPC_CLOSURE_044.md)、[HY2](HYSTERIA2_CLOSURE_045.md)及 [PR #23 普通响应安全修复](INBOUND_RESPONSE_CLOSURE_20261006.md)是继承基线。当前 [TUIC 契约](TUIC_046.md)将裸前置 69 项真实链路和新集成门槛分开；不复用丢失的旧本地证据。历史失败、版本号、候选/主线验收、附件晋升、发布与部署分别记录，不互相推断。
+当前使用文档按 **v0.4.7** REALITY/Vision 集成候选组织，最终独立审查和准确候选/主线八组仍待完成。[TUIC v0.4.6](TUIC_CLOSURE_046.md)及此前协议/安全修复是已验收继承基线；[REALITY/Vision 契约](REALITY_VISION_047.md)记录已通过裸前置与首次失败，不能代替最终集成验收。源码、候选/主线、附件晋升、发布和部署分别记录。
 
 | 阅读目标 | 文档 |
 | --- | --- |
@@ -11,7 +11,8 @@
 | 访问失败/签发失败/核心未生效 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
 | 管理API、令牌和错误状态 | [API.md](API.md) |
 | 已验证与未验证的协议/部署范围 | [COMPATIBILITY.md](COMPATIBILITY.md) |
-| TUIC v5/TLS 当前候选、URI 约定、QUIC/UDP 边界与证据 | [TUIC_046.md](TUIC_046.md) |
+| REALITY/Vision 当前候选、参考流量与认证边界 | [REALITY_VISION_047.md](REALITY_VISION_047.md) |
+| TUIC v5/TLS 已验收与失败历史 | [TUIC_CLOSURE_046.md](TUIC_CLOSURE_046.md) |
 | Hysteria2/TLS 已验收基线与失败历史 | [HYSTERIA2_CLOSURE_045.md](HYSTERIA2_CLOSURE_045.md) |
 | 普通响应允许列表与 PR #23 安全收口 | [INBOUND_RESPONSE_CLOSURE_20261006.md](INBOUND_RESPONSE_CLOSURE_20261006.md) |
 | gRPC Lite 已验收基线与错误传播限制 | [VLESS_GRPC_CLOSURE_044.md](VLESS_GRPC_CLOSURE_044.md) |

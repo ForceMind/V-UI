@@ -21,9 +21,9 @@ HTTP接口以`/api`开头。`/docs`和`/openapi.json`也要求管理员登录，
 | POST `/api/cores/{core}/apply` | 生成并检查候选，具体生效语义依schema |
 | POST `/api/cores/{core}/restart`、`/stop` | 明确启动应用/停止 |
 
-旧 Xray/sing-box 接口仍经过同一个鉴权边界。普通 GET 列表、POST 创建和 PUT 更新响应现在采用允许列表摘要：节点 id/core/protocol/remark/port/enable、流量/到期/tag/user_id 等元数据，`credentials`（user_count/has_uuid/has_password/has_obfs_password）和 `managed_certificate_eligible` 布尔值。**响应不再包含 `settings` / `stream_settings`，也不返回 UUID、认证/obfs 密码、REALITY 私钥、未知配置秘密或服务器证书/密钥路径。** 这同时适用于 `/api/inbounds`、`/api/xray/inbounds` 和 `/api/singbox/inbounds` 的正常列表/创建/更新响应，是对依赖旧原始响应的管理客户端的有意破坏性收窄；原始创建请求和旧接口更新请求能力不变。
+旧 Xray/sing-box 接口仍经过同一个鉴权边界。普通 GET 列表、POST 创建和 PUT 更新响应现在采用允许列表摘要：节点 id/core/protocol/remark/port/enable、流量/到期/tag/user_id 等元数据，`credentials`（user_count/has_uuid/has_password/has_obfs_password）和 `managed_certificate_eligible` 布尔值。**响应不再包含 `settings` / `stream_settings`，也不返回 UUID、认证/obfs 密码、REALITY 私钥、未知配置秘密或服务器证书/密钥路径。** 这同时适用于 `/api/inbounds`、`/api/xray/inbounds` 和 `/api/singbox/inbounds` 的正常列表/创建/更新响应，是对依赖旧原始响应的管理客户端的有意破坏性收窄；原始创建/旧接口更新的请求结构未因该响应修复改变；v0.4.7 REALITY 原始输入另受下述严格校验。
 
-视觉编辑继续使用鉴权后的 `/api/inbounds/{id}/editor` 专用模型。它不回传 UUID/密码/REALITY 私钥/obfs 密码本体；为保留既有手工证书编辑能力，可回传特权管理员需要的证书/密钥路径字符串，但从不返回密钥文件内容。证书卡只使用 `managed_certificate_eligible`，不再读取原始 TLS 配置。该标志是保守的界面筛选提示，不替代绑定接口授权；含 `reality` 键的导入配置（即使为空对象）不进入证书选项，原绑定校验本身不因此变更。内部数据库、核心应用、受授权的客户端导出与停机备份独立于普通响应，不做脱敏写回；客户端导出仍包含必要客户端凭据，但永不包含服务器私钥或材料路径。保存配置后核心应用失败会返回“已保存但未应用”的冲突状态，不能把数据库写入当作连通成功。
+视觉编辑继续使用鉴权后的 `/api/inbounds/{id}/editor` 专用模型。它不回传 UUID/密码/REALITY 私钥/obfs 密码本体；为保留既有手工证书编辑能力，可回传特权管理员需要的证书/密钥路径字符串，但从不返回密钥文件内容。证书卡只使用 `managed_certificate_eligible`，不再读取原始 TLS 配置。该标志是保守的界面筛选提示，不替代绑定接口授权；含 `reality` 键的导入配置（即使为空对象）不进入证书选项，v0.4.7 绑定接口在写入 binding 前亦拒绝 REALITY。内部数据库、核心应用、受授权的客户端导出与停机备份独立于普通响应，不做脱敏写回；客户端导出仍包含必要客户端凭据，但永不包含服务器私钥或材料路径。保存配置后核心应用失败会返回“已保存但未应用”的冲突状态，不能把数据库写入当作连通成功。
 
 ## 分流
 
@@ -63,7 +63,7 @@ POST `/api/subscriptions`：label、server（节点公开地址）、inbound_ids
 
 保留 TLS 并解绑必须提供新的手工证书与私钥路径；任意一项仍指向原托管材料会被拒绝。空 `profile: {}` 沿用原配置，不构成离开 TLS，也不能绕过路径检查。无效的替换 profile 不会清除原绑定；有效配置已经保存而核心应用失败时，解绑跟随已保存的期望配置生效，响应继续区分 `saved` 与 `applied`。
 
-这只修正编辑与绑定状态；`none` / `REALITY` 并未因此扩大本阶段的公开导出和连接验收范围。续期仍保留手动停止核心的 `CORE_STOPPED_PENDING_APPLY` 状态。
+这只修正编辑与绑定状态；`none` 不属于公开导出范围，REALITY 仅按下述独立 v0.4.7 限定候选推进。续期仍保留手动停止核心的 `CORE_STOPPED_PENDING_APPLY` 状态。
 
 ### v0.4.3 VLESS/WS profile
 
@@ -98,7 +98,7 @@ ALPN 不属于可视化输入：原始 API / 持久化 `tls.alpn` 必须省略�
 HY2 正式托管证书绑定/续期沿用原材料与应用状态分离，停止核心保留 `CORE_STOPPED_PENDING_APPLY`。该范围已完成[HY2 主线验收](HYSTERIA2_CLOSURE_045.md)，后续变更仍须重验；裸前置 58 项、历史失败和最终集成验收分别记录于[原契约](HYSTERIA2_045.md)。
 
 
-### v0.4.6 TUIC v5 profile 候选
+### v0.4.6 TUIC v5 profile
 
 限定 `core: sing-box`、`protocol: tuic`，profile 使用 `security: tls`、`transport: quic`、明确 `server_name` 及正式 `certificate_id` 或手工材料路径。新建生成服务端 `tls.alpn: ["h3"]`；严格公开导出要求该字段恰为 h3，不接受省略/null/空列表/其他 ALPN。默认拥塞 cubic、原生 relay、零 RTT 关闭、无指纹覆盖。
 
@@ -108,4 +108,16 @@ HY2 正式托管证书绑定/续期沿用原材料与应用状态分离，停止
 
 TUIC URI 是固定 Mihomo converter 的非官方客户端约定，不是官方通用标准；Mihomo YAML 包含 `sni`、`alpn: [h3]`、`skip-cert-verify: false`、`reduce-rtt: false`。其 TUIC adapter 硬编码 UDP 能力，省略无效 `udp: false`，不得声称禁用 UDP。sing-box 出站 `network: tcp`，应用 UDP 未验收，QUIC 仍要求节点 UDP 可达。
 
-证书绑定/续期/失败保护/停止待应用沿用现有语义。当前集成独立审查及准确候选/主线八组仍待完成，完整约束与新测试门槛见[TUIC 契约](TUIC_046.md)。
+证书绑定/续期/失败保护/停止待应用沿用现有语义，TUIC 准确候选/主线验收已完成，见[TUIC 收口](TUIC_CLOSURE_046.md)。
+
+
+### v0.4.7 REALITY/Vision profile 候选
+
+限定 sing-box/VLESS。profile 使用 security=reality、transport=direct、flow=xtls-rprx-vision、client_fingerprint=chrome、skip_cert_verify=false，以及显式 reality_target/reality_server_name。reality_uuid 与 reality_short_id 为空时仅新建生成，编辑时保留；非空独立替换。short ID 必须为 16 位小写 hex。编辑响应这两项均为空，并有 reality_uuid_set/reality_short_id_set/reality_private_key_set 布尔状态；从不返回私钥。
+
+已有 REALITY 节点必须先通过完整存储形状、UUID、配对密钥与 short ID 校验，不能靠编辑重生成缺失凭据。未知字段、ALPN、额外传输、mux、普通证书材料及非 Chrome/精确 Vision 拒绝。严格导出与编辑共享存储校验；不能借修改备注或切换安全模式静默删除未知项再公开。
+
+绑定接口在写入 REALITY desired binding 前拒绝；有效 legacy raw TLS→REALITY 更新在节点保存后解绑，core apply 失败仍保留已保存/未应用语义。非法更新保持原节点/绑定。此前隔离 SQLite/API 复现仅观察到残留绑定及 TLS_NODE_REQUIRED 错误，后续 reapply 未修改 REALITY 或调用核心；不声称发生真实事故。
+
+
+现代 PUT 另有已复现的显式转换边界：已有 REALITY 节点仅提交 certificate_id（包括空 profile 或未指定 security）时，旧代码会合成 TLS 并改变节点/绑定。v0.4.7 要求明确 profile.security=tls 才能转换并绑定；未明确请求在读取证书材料前拒绝，节点/绑定保持不变。显式 REALITY→TLS 正向回归保留 UUID。此事实与上述旧绑定后续 reapply 未覆盖 REALITY 的复现是两个不同路径，均只使用隔离假数据。

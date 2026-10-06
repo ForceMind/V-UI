@@ -7,6 +7,54 @@ import unittest
 
 @unittest.skipUnless(shutil.which('node'), 'Node required for frontend contract check')
 class InboundEditorFrontendTests(unittest.TestCase):
+    def test_reality_dedicated_payload_hidden_credentials_and_explicit_security_transition(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
+let setup; const writes=[]; const clone=v=>JSON.parse(JSON.stringify(v));
+const stored={id:47,core:'sing-box',protocol:'vless',remark:'reality',port:10447,enable:true,certificate_id:null,
+ credentials:{has_uuid:true},profile:{security:'reality',transport:'direct',flow:'xtls-rprx-vision',
+ reality_target:'127.0.0.1:19445',reality_server_name:'reference.example.test',client_fingerprint:'chrome',
+ skip_cert_verify:false,reality_uuid:'',reality_short_id:'',reality_uuid_set:true,reality_short_id_set:true,reality_private_key_set:true}};
+const app={component(){},use(){},mount(){}};
+const sandbox={addEventListener(){},location:{hash:''},
+ Vue:{createApp(o){setup=o.setup;return app},ref:v=>({value:v}),reactive:v=>v,computed:f=>({get value(){return f()}}),onMounted(){}},
+ ElementPlus:{ElMessage:{success(){},error(m){throw Error(m)}},ElMessageBox:{}},ElementPlusIconsVue:{},
+ axios:{defaults:{headers:{common:{}}},interceptors:{response:{use(){}}},
+ async get(url){return {data:url==='/api/inbounds/47/editor'?clone(stored):[]}},
+ async post(url,body){writes.push({url,body:clone(body)});return {data:{}}},
+ async put(url,body){writes.push({url,body:clone(body)});return {data:{}}}}};
+vm.runInNewContext(fs.readFileSync('web/js/app.js','utf8'),sandbox);
+(async()=>{
+ const state=setup();await state.openAddInbound();state.newInbound.core='sing-box';state.onCoreChanged();
+ const p=state.newInbound.profile;state.newInbound.certificate_id='old-managed';
+ p.security='reality';state.onSecurityChanged();
+ assert.equal(p.flow,'xtls-rprx-vision');assert.equal(p.transport,'direct');assert.equal(p.client_fingerprint,'chrome');
+ assert.equal(state.newInbound.certificate_id,null);assert.equal(p.reality_uuid,'');assert.equal(p.reality_short_id,'');
+ p.reality_target='127.0.0.1:19445';p.reality_server_name='reference.example.test';await state.saveInbound();
+ assert.deepEqual(Object.keys(writes[0].body.profile).sort(),['security','transport','flow','reality_target','reality_server_name','reality_uuid','reality_short_id','client_fingerprint','skip_cert_verify'].sort());
+ assert.equal(writes[0].body.profile.reality_uuid,'');assert.equal(writes[0].body.profile.reality_short_id,'');
+ await state.openEditInbound({id:47});assert.equal(p.reality_uuid,'');assert.equal(p.reality_short_id,'');
+ assert.equal(p.reality_private_key_set,true);assert.equal(p.reality_short_id_set,true);
+ p.reality_short_id='cancelled';state.showAddInbound.value=false;await state.openEditInbound({id:47});
+ assert.equal(p.reality_short_id,'');assert.equal(writes.length,1);
+ await state.saveInbound();assert.equal(writes[1].body.profile.reality_uuid,'');assert.equal(writes[1].body.profile.reality_short_id,'');
+ await state.openEditInbound({id:47});p.reality_uuid='22222222-2222-4222-8222-222222222222';await state.saveInbound();
+ assert.equal(writes[2].body.profile.reality_short_id,'');
+ await state.openEditInbound({id:47});p.reality_short_id='fedcba9876543210';await state.saveInbound();
+ assert.equal(writes[3].body.profile.reality_uuid,'');
+ await state.openEditInbound({id:47});p.security='tls';state.onSecurityChanged();assert.equal(p.flow,'');
+ await state.saveInbound();assert.equal('reality_uuid' in writes[4].body.profile,false);
+ for(const w of writes){assert.equal('reality_private_key' in w.body.profile,false);assert.equal('settings' in w.body,false)}
+ const html=fs.readFileSync('web/index.html','utf8');
+ assert.match(html,/v-model="newInbound.profile.reality_uuid" type="password"/);
+ assert.ok(html.includes('留空保持当前 Short ID'));assert.ok(html.includes('不绑定托管证书'));
+ assert.ok(html.includes('握手参考端'));assert.ok(html.includes('必填，例如 reference.example.test'));
+})().catch(e=>{console.error(e);process.exitCode=1});
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_vless_websocket_create_edit_prefill_preserves_public_profile(self):
         root = Path(__file__).resolve().parents[1]
         script = r'''

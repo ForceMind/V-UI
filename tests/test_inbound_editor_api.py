@@ -21,7 +21,7 @@ class InboundEditorApiTests(unittest.TestCase):
         uuid="11111111-1111-1111-1111-111111111111"
         settings={"users":[{"uuid":uuid}]}
         settings,stream=compile_profile("sing-box","vless",{
-            "security":"reality",
+            "security":"reality", "flow":"xtls-rprx-vision",
             "transport":"direct",
             "reality_target":"target.example.test:443",
             "reality_server_name":"target.example.test",
@@ -46,12 +46,14 @@ class InboundEditorApiTests(unittest.TestCase):
         self.assertTrue(value["credentials"]["has_uuid"])
         self.assertFalse(value["credentials"]["has_password"])
         self.assertEqual(value["profile"]["security"],"reality")
-        self.assertEqual(value["profile"]["reality_short_id"],"0102030405060708")
+        self.assertEqual(value["profile"]["reality_short_id"], "")
+        self.assertTrue(value["profile"]["reality_short_id_set"])
+        self.assertNotIn("0102030405060708", raw)
 
     def test_edit_preserves_uuid_and_reality_private_key(self):
         identity,uuid,private=self.add_reality()
         current=self.client.get(f"/api/inbounds/{identity}/editor").json()
-        profile={**current["profile"],"client_fingerprint":"firefox",
+        profile={**current["profile"],"client_fingerprint":"chrome",
                  "reality_server_name":"other.example.test"}
         with patch.object(inbound_api,"apply_checked",return_value={"applied":True,"valid":True}):
             response=self.client.put(f"/api/inbounds/{identity}",headers=auth_tests.HEADERS,json={
@@ -62,7 +64,7 @@ class InboundEditorApiTests(unittest.TestCase):
             row=db.get(database.Inbound,identity)
             self.assertEqual(row.settings["users"][0]["uuid"],uuid)
             self.assertEqual(row.stream_settings["tls"]["reality"]["private_key"],private)
-            self.assertEqual(row.stream_settings["_vui"]["client_fingerprint"],"firefox")
+            self.assertEqual(row.stream_settings["_vui"]["client_fingerprint"],"chrome")
             self.assertEqual(row.remark,"edited-secret-node")
             self.assertEqual(row.port,11443)
 

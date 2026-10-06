@@ -18,7 +18,7 @@
 <div class="preview-head"><strong id="preview-label">尚未生成预览</strong><span id="rule-count"></span></div><div id="warnings"></div><pre id="rule-preview" tabindex="0">修改表单只改变草稿；保存后，客户端刷新订阅才会应用新配置。</pre>
 </section>
 <section id="subscriptions"><div class="section-head"><div><h2>02 · 客户端订阅</h2><p>令牌只读、独立于管理员登录；只包含明确选择的节点。</p></div><button id="refresh-grants" type="button">刷新列表</button></div>
-<p class="hint">已验证导出：sing-box · VLESS/TCP/TLS（单用户、空 flow）与 Trojan/TCP/TLS（单密码用户）。其他组合不会静默生成不完整配置。</p>
+<p class="hint">严格导出范围见兼容文档。REALITY/Vision 候选限定 sing-box/VLESS/直连 TCP、单 UUID、显式 SNI、Chrome 与配对公钥；未知组合拒绝，不生成不完整配置。</p>
 <form id="grant-form"><div class="columns"><div><label for="label">订阅名称</label><input id="label" required maxlength="128" placeholder="例如：我的手机"></div><div><label for="server">节点公开连接地址</label><input id="server" required maxlength="253" placeholder="vpn.example.com 或 IP，不含端口和 https://"></div></div>
 <p class="hint">这是客户端连接代理节点的地址，不一定等于面板地址；全部选中节点使用此地址。</p>
 <fieldset><legend>选择节点</legend><div id="nodes"></div></fieldset><fieldset><legend>输出格式</legend><label class="check"><input type="checkbox" name="format" value="mihomo.yaml" checked>Mihomo 完整配置</label><label class="check"><input type="checkbox" name="format" value="raw">Base64 节点链接</label><label class="check"><input type="checkbox" name="format" value="sing-box.json">sing-box 连接配置（不含 ToClash 分流）</label></fieldset>

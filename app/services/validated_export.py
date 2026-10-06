@@ -15,7 +15,7 @@ from app.services.mihomo_routing import unique_proxy_names
 from app.services.websocket_profile import websocket_host, websocket_path
 from app.services.grpc_profile import grpc_service_name
 from app.services.hysteria2_profile import password_value
-from app.services import tuic_profile
+from app.services import tuic_profile, reality_profile
 
 
 class ExportError(ValueError):
@@ -41,7 +41,7 @@ def _common(item, server: str) -> tuple[str, str]:
     if not item.enable or getattr(item, "expiry_time", 0):
         raise ExportError("Disabled or expiring nodes are not eligible for this export profile")
     if item.core != "sing-box" or item.protocol not in {"vless", "trojan", "shadowsocks", "vmess", "hysteria2", "tuic"}:
-        raise ExportError("Validated export requires verified sing-box VLESS/TCP/TLS, VLESS/WS/TLS or VLESS/gRPC/TLS, Trojan/TCP/TLS, Shadowsocks, VMess/TCP/TLS or Hysteria2/TLS or TUIC v5/TLS")
+        raise ExportError("Validated export requires the bounded sing-box VLESS TCP/TLS, WS/TLS, gRPC/TLS, REALITY/Vision, Trojan/TLS, Shadowsocks, VMess/TLS, Hysteria2/TLS or TUIC v5/TLS profiles")
     server=node_host(server)
     if type(item.port) is not int or not 1 <= item.port <= 65535:
         raise ExportError("Invalid node port")
@@ -239,6 +239,16 @@ def validated_node(item, server: str) -> dict:
     if item.protocol=="shadowsocks":
         return _shadowsocks_node(item,server,name)
     stream = item.stream_settings or {}
+    if item.protocol == 'vless' and reality_profile.has_reality(stream):
+        try:
+            value = reality_profile.validate_stored(item.settings, stream)
+        except ValueError as exc:
+            raise ExportError(str(exc)) from exc
+        return {'name': name, 'type': 'vless', 'server': server, 'port': item.port,
+                'uuid': value['uuid'], 'flow': value['flow'], 'network': 'tcp', 'udp': False,
+                'tls': True, 'servername': value['server_name'], 'client-fingerprint': 'chrome',
+                'skip-cert-verify': False,
+                'reality-opts': {'public-key': value['public_key'], 'short-id': value['short_id']}}
     transport = stream.get("transport") if isinstance(stream, dict) else None
     websocket = item.protocol == "vless" and isinstance(transport, dict) and transport.get("type") == "ws"
     grpc = item.protocol == "vless" and isinstance(transport, dict) and transport.get("type") == "grpc"
@@ -282,7 +292,10 @@ def share_link(item, server: str) -> str:
     if node["type"]=="vless":
         params={"security":"tls","type":node["network"],"sni":node["servername"],
                 "encryption":"none"}
-        if node["network"] == "ws":
+        if 'reality-opts' in node:
+            params.update(security='reality', flow=node['flow'],
+                          pbk=node['reality-opts']['public-key'], sid=node['reality-opts']['short-id'])
+        elif node["network"] == "ws":
             params["path"] = node["ws-opts"]["path"]
             if node["ws-opts"].get("headers"):
                 params["host"] = node["ws-opts"]["headers"]["Host"]
@@ -355,6 +368,9 @@ def _client_tls(node: dict) -> dict:
         tls["utls"]={"enabled":True,"fingerprint":node["client-fingerprint"]}
     if node.get("alpn"):
         tls["alpn"]=list(node["alpn"])
+    if 'reality-opts' in node:
+        tls['reality'] = {'enabled': True, 'public_key': node['reality-opts']['public-key'],
+                          'short_id': node['reality-opts']['short-id']}
     return tls
 
 
@@ -366,7 +382,11 @@ def singbox_client_config(items, server: str) -> dict:
             outbound={"type":"vless","tag":node["name"],"server":node["server"],
                       "server_port":node["port"],"uuid":node["uuid"],
                       "packet_encoding":"xudp","tls":_client_tls(node)}
-            if node["network"] == "ws":
+            if 'reality-opts' in node:
+                outbound.pop('packet_encoding')
+                outbound['network'] = 'tcp'
+                outbound['flow'] = node['flow']
+            elif node["network"] == "ws":
                 outbound.pop("packet_encoding")
                 outbound["network"] = "tcp"
                 outbound["transport"] = {"type": "ws", **node["ws-opts"]}
@@ -412,6 +432,6 @@ def export_warnings(items) -> list[dict]:
             warnings.append({
                 "inbound_id":item.id,
                 "code":"UNVERIFIED_EXPORT_PROFILE",
-                "message":"This node is outside the verified sing-box VLESS/TCP/TLS, VLESS/WS/TLS, VLESS/gRPC/TLS, Trojan/TCP/TLS, Shadowsocks, VMess/TCP/TLS and bounded Hysteria2/TLS export profiles.",
+                "message":"This node is outside the bounded sing-box VLESS TCP/TLS, WS/TLS, gRPC/TLS, REALITY/Vision, Trojan/TLS, Shadowsocks, VMess/TLS, Hysteria2/TLS and TUIC v5/TLS export profiles.",
             })
     return warnings

@@ -16,7 +16,7 @@
 
 任务返回202仅表示已排队。页面显示待处理、正在申请、有效、测试证书、申请失败、续期失败及过期；有效期、续期窗口、重试时间和任务结果均来自持久数据库，不用前端计时伪造进度。
 
-正式证书可以绑定到当前同域名的管理面板，或绑定到已有 sing-box/VLESS/TLS、Trojan/TLS、VMess/TLS、Hysteria2/TLS 节点；TUIC/TLS 为当前待验收候选。面板的SSL上下文会热更新，不需要重启来载入新证书；节点使用现有安全配置应用流程。签发成功与应用成功是两个状态：应用失败必须查看绑定错误并重试，不能只看到“有效”就认为所有位置已换证。
+正式证书可以绑定到当前同域名的管理面板，或绑定到已有 sing-box/VLESS/TLS、Trojan/TLS、VMess/TLS、Hysteria2/TLS 节点及 TUIC/TLS 节点。面板的SSL上下文会热更新，不需要重启来载入新证书；节点使用现有安全配置应用流程。签发成功与应用成功是两个状态：应用失败必须查看绑定错误并重试，不能只看到“有效”就认为所有位置已换证。
 
 v0.4.3 的 VLESS/WS/TLS 已完成[准确主线验收](VLESS_WS_CLOSURE_043.md)，沿用上述正式托管证书、绑定和续期流程。WebSocket Host 是客户端路由信息，不是证书域名；绑定和证书验证仍使用 TLS SNI，不能用不同 Host 绕过域名检查。
 
@@ -24,7 +24,7 @@ v0.4.4 的 VLESS/gRPC/TLS 已完成[gRPC 准确主线验收](VLESS_GRPC_CLOSURE_
 
 v0.4.5 的 Hysteria2/TLS 已完成[HY2 主线验收](HYSTERIA2_CLOSURE_045.md)，复用正式托管证书选择、绑定与续期路径。单密码、明确验证 SNI、原生 QUIC；续期保留密码/节点配置，失败保留旧活动材料和已应用 revision，停止核心保持 `CORE_STOPPED_PENDING_APPLY`。新 QUIC 会话及 Chromium 完整流程已有对应主线证据，早期失败仍完整保留。
 
-v0.4.6 TUIC v5/TLS 候选继承同一流程和 [PR #23 普通响应允许列表](INBOUND_RESPONSE_CLOSURE_20261006.md)。单 UUID/密码对、明确验证 SNI、服务端 h3 不可省略、零 RTT 关闭；续期不得改变凭据/传输，停止核心不能被自动启动。双客户端续期新 QUIC 会话、绑定/失败材料保护和 Chromium 创建/取消/编辑/刷新/导出/损坏后停机恢复必须完成当前独立集成验收，裸前置通过不作替代，见[TUIC 契约](TUIC_046.md)。
+已验收 v0.4.6 TUIC v5/TLS 继承同一流程和 [PR #23 普通响应允许列表](INBOUND_RESPONSE_CLOSURE_20261006.md)。单 UUID/密码对、明确验证 SNI、服务端 h3 不可省略、零 RTT 关闭；续期不得改变凭据/传输，停止核心不能被自动启动。双客户端续期新 QUIC 会话、绑定/失败材料保护和 Chromium 创建/取消/编辑/刷新/导出/损坏后停机恢复已完成准确主线验收，见[TUIC 收口](TUIC_CLOSURE_046.md)。
 
 HY2/TUIC 的 QUIC 节点需要 UDP 通行；ACME HTTP-01 仍使用 TCP 80，两者不能互相替代，也不证明应用 UDP 已验收。普通节点响应不含材料路径；特权 `/editor` 仅保留手工路径字符串能力，客户端导出永无服务端材料。
 
@@ -81,3 +81,13 @@ python -m app.certificates.cli bootstrap --root /var/lib/v-ui \
 测试的临时CA仅传给测试子进程/构造器，不修改系统信任，不关闭TLS校验，不提供可由管理API指定任意CA URL的参数。测试通过证明实现路径，不等于已经替你的公网域名完成验证。
 
 依据：[Let’s Encrypt 验证方式](https://letsencrypt.org/docs/challenge-types/)；[Certbot 5.8.0 参数](https://eff-certbot.readthedocs.io/en/stable/man/certbot.html)。
+
+
+## REALITY 不使用托管证书
+
+v0.4.7 的 REALITY/Vision 候选使用配对 X25519 材料与独立参考 TLS 握手，不能当作普通 TLS 节点绑定 certificate_id。绑定接口在写入前拒绝任何 REALITY 标记；无效绑定不创建/替换 desired binding。有效 legacy raw 安全切换保存后清除旧绑定；非法切换不改变节点或绑定。普通有效 TLS 的续期失败保护、desired/applied revision 与 CORE_STOPPED_PENDING_APPLY 保持。
+
+隔离旧代码复现：拒绝 bind 后留下未应用 binding/error；legacy 切换后留下旧 binding，后续 reapply 返回 TLS_NODE_REQUIRED 且 REALITY 节点未变、核心未应用。这是已复现的状态问题，没有证据声称 REALITY 被覆盖或真实用户受影响。
+
+
+现代 PUT 另有已复现的显式转换边界：已有 REALITY 节点仅提交 certificate_id（包括空 profile 或未指定 security）时，旧代码会合成 TLS 并改变节点/绑定。v0.4.7 要求明确 profile.security=tls 才能转换并绑定；未明确请求在读取证书材料前拒绝，节点/绑定保持不变。显式 REALITY→TLS 正向回归保留 UUID。此事实与上述旧绑定后续 reapply 未覆盖 REALITY 的复现是两个不同路径，均只使用隔离假数据。
