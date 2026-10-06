@@ -49,6 +49,7 @@ def safe_log(value, keys=()):
                      'pinned real sing-box and Mihomo binaries required')
 class RealityPreflightLoopbackTests(unittest.TestCase):
     clients = ('mihomo', 'singbox', 'mihomo-uri')
+    evidence_label = 'REALITY preflight'
 
     @classmethod
     def setUpClass(cls):
@@ -200,7 +201,7 @@ class RealityPreflightLoopbackTests(unittest.TestCase):
         except AssertionError as exc:
             raise AssertionError(self.sanitize(str(exc))) from None
         evidence = next(line for line in log.splitlines() if all(reason in line for reason in reasons))
-        print(f'REALITY {client} {failure}: '+self.sanitize(evidence))
+        print(f'{self.evidence_label} {client} {failure}: '+self.sanitize(evidence))
 
     def verify_clients(self, *, failure=None):
         self.target_port, self.requests = start_http_target(self.stack)
@@ -249,7 +250,7 @@ class RealityPreflightLoopbackTests(unittest.TestCase):
                             if mutation: self.assertEqual(self.requests, [], 'Late application delivery')
                             self.assertIsNone(process.process.poll(), self.logs())
                             self.assertIsNone(server.process.poll(), self.logs())
-                            print(f'REALITY {client} {mutation or "HTTP success"}: application requests={len(self.requests)}; '
+                            print(f'{self.evidence_label} {client} {mutation or "HTTP success"}: application requests={len(self.requests)}; '
                                   f'reference ClientHellos={len(after["client_hellos"])-len(before["client_hellos"])}; '
                                   f'reference completed TLS={len(after["handshakes"])-len(before["handshakes"])}; '
                                   f'camouflage HEADERS={len(after["camouflage"])-len(before["camouflage"])}; no DIRECT')
@@ -261,7 +262,7 @@ class RealityPreflightLoopbackTests(unittest.TestCase):
         for client in self.clients:
             for failure in (None, *FAILURES):
                 with self.subTest(client=client, failure=failure): self.prepare_client(client, 19444, 19443, failure=failure)
-        print('REALITY bare server, both clients and actual URI provider accept bounded configuration')
+        print(self.evidence_label+': server, both clients and actual URI provider accept bounded configuration')
 
     def test_verified_http_forwarding(self): self.verify_clients()
     def test_wrong_uuid_rejected(self): self.verify_clients(failure='uuid')

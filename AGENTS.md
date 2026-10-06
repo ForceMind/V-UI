@@ -4,7 +4,7 @@
 
 - 保持每个阶段独立 PR；PR #14 仍排除。v0.4.2、WS v0.4.3、gRPC v0.4.4 和 HY2 v0.4.5 已正常合并收口。HY2 最终 master 838c66d9974dd9f3a944641a2e9e03cc200e0bbe/tree e12287d8ebbea233142d58191ee5141a0a49a17a；PR #23 安全修复最终 master 8e0d07463e59b52856f55fa33346a760a38b4705/tree fda9f9d8a26dd21bdf0e441ab5d9bbc7ec0dbdd8，两者最终八组/11 jobs/全部步骤 attempt 1 成功。详见 docs/HYSTERIA2_CLOSURE_045.md、docs/INBOUND_RESPONSE_CLOSURE_20261006.md；历史失败保留。
 - TUIC v0.4.6 / PR #22 已正常合并至签名 master df8a980beb682a981d72e42760705f1831cacf9b/tree f68098e398cb7ac29e2e1e809b8f741bb3c30533。候选 14f570e8406098aa7570f2daaf24bdbe550a1858 八组/11 jobs/全部步骤 attempt 1 成功；最终 master 八组/11 个最新 jobs/全部步骤成功，其中 deployment 首次上游 GitHub 403 后以不改代码/pin/凭据的 attempt 2 通过，其余七组 attempt 1。链路 75 项、独立 HY2 8 项/TUIC 8 项和 Chromium 完整流程已验收；历史失败及本地 EPERM 保留，见 docs/TUIC_CLOSURE_046.md。
-- 当前用户批准阶段为独立 v0.4.7 REALITY / Vision，基于上述 TUIC master 先做裸前置。固定二进制真实 CI 前置通过前，公开 REALITY/Vision 导出仍阻断；不以源码刻画、config check、默认 skip 或旧主线通过代替。严格导出/编辑/浏览器/恢复集成、独立审查、准确候选八组、协调授权正常 merge 与准确主线八组按序完成，见 docs/REALITY_VISION_047.md。
+- 当前用户批准阶段为独立 v0.4.7 REALITY / Vision，基于上述 TUIC master，裸前置 a44b5ce20edcaee1ee3b26c34b7c21badfe5bf7b 已通过八组/11 jobs/全部步骤 attempt 1，链路 82 项及独立 HY2 8/TUIC 8；当前推进严格集成。首次 6776950 伪装 HEADERS 断言失败保留；不以源码刻画、config check、默认 skip 或旧主线通过代替。严格导出/编辑/浏览器/恢复集成、独立审查、准确候选八组、协调授权正常 merge 与准确主线八组按序完成，见 docs/REALITY_VISION_047.md。
 - 所有最终功能在准确提交重新验证。queued/running/skip不算通过；单元、真实二进制、浏览器、systemd/安装与实际部署必须分开描述。
 - 保留用户数据，不删除/改名数据库掩盖升级问题，不回退到无鉴权旧版继续在线运行。
 - 当前 TUIC 只使用未改变的官方 sing-box 1.14.2 与 Mihomo 1.19.32、单 UUID/密码对、明确验证 SNI、原生 QUIC/默认拥塞、零 RTT 关闭；服务端 TLS ALPN 必须恰为 h3，不能省略。TUIC 本身不扩大多用户、v4/token 或调优/指纹；REALITY/Vision 仅按独立 v0.4.7 契约推进，不扩大 DNS-01/通配符或容器部署，不改变四目标 Linux、40 项 ToClash；不换 pin、重编译核心或加反代。

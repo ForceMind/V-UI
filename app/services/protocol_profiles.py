@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from app.services.websocket_profile import websocket_host, websocket_path
 from app.services.grpc_profile import grpc_service_name, is_grpc_transport
-from app.services import hysteria2_profile, tuic_profile
+from app.services import hysteria2_profile, tuic_profile, reality_profile
 
 
 def profile_catalog() -> dict[str, Any]:
@@ -541,6 +541,7 @@ def compile_profile(
     profile: dict[str, Any] | None,
     settings: dict,
     stream_settings: dict,
+    *, creating: bool | None = None,
 ) -> tuple[dict, dict]:
     if not profile:
         return settings, stream_settings
@@ -564,6 +565,27 @@ def compile_profile(
         return settings, stream
 
     if core == "sing-box":
+        previous_reality = protocol == "vless" and reality_profile.is_direct_candidate(stream)
+        desired_reality = protocol == "vless" and (reality_profile.wants_direct(profile)
+            or (previous_reality and "security" not in profile))
+        try:
+            if previous_reality:
+                reality_profile.validate_stored(settings, stream)
+            if desired_reality:
+                return reality_profile.compile_profile(profile, settings, stream,
+                    creating=(not stream if creating is None else creating))
+            if previous_reality:
+                # Leaving a valid strict profile is explicit. Never use the
+                # generic compiler to erase imported unsupported state.
+                if profile.get("security") not in ("none", "tls"):
+                    raise ValueError("Choose explicit TLS or none when leaving REALITY")
+                if profile.get("flow", "") != "":
+                    raise ValueError("Leaving REALITY requires an empty VLESS flow")
+                for field in ("reality_uuid", "reality_short_id"):
+                    if profile.get(field, "") != "":
+                        raise ValueError("REALITY credential replacement requires REALITY security")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         tuic_alpn = None
         if protocol == "tuic":
             try:
@@ -711,6 +733,11 @@ def decompile_profile(core: str, protocol: str, settings: dict | None,
     Private Reality keys are intentionally not returned. compile_profile()
     preserves them from the persisted stream when the editor saves.
     """
+    if core == "sing-box" and protocol == "vless" and reality_profile.is_direct_candidate(stream_settings):
+        try:
+            return reality_profile.editor_profile(settings, stream_settings)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     if core == "sing-box" and protocol in {"hysteria2", "tuic"}:
         try:
             module = tuic_profile if protocol == "tuic" else hysteria2_profile

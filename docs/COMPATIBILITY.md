@@ -1,10 +1,10 @@
 # 兼容与验证范围
 
-[v0.4.2](MAINLINE_CLOSURE_20261005.md)、[WS v0.4.3](VLESS_WS_CLOSURE_043.md)、[gRPC v0.4.4](VLESS_GRPC_CLOSURE_044.md)、[HY2 v0.4.5](HYSTERIA2_CLOSURE_045.md)和 [PR #23 普通响应安全修复](INBOUND_RESPONSE_CLOSURE_20261006.md)已完成各自准确主线验收。当前 v0.4.6 TUIC v5/TLS 是集成候选；最终独立审查与准确候选/主线八组 CI 仍待完成，裸前置成功不能代替。
+[v0.4.2](MAINLINE_CLOSURE_20261005.md)、[WS](VLESS_WS_CLOSURE_043.md)、[gRPC](VLESS_GRPC_CLOSURE_044.md)、[HY2](HYSTERIA2_CLOSURE_045.md)、[PR #23 安全修复](INBOUND_RESPONSE_CLOSURE_20261006.md)和 [TUIC v0.4.6](TUIC_CLOSURE_046.md)均已完成各自准确主线验收。当前 v0.4.7 REALITY/Vision 为集成候选，裸前置八组通过，最终集成审查及准确候选/主线八组仍待完成。
 
 ## Linux 安装层
 
-0.4.6 候选延续 0.3.1 的安装能力模型；选择依据是实际环境能力，不是发行版名称。
+0.4.7 候选延续 0.3.1 的安装能力模型；选择依据是实际环境能力，不是发行版名称。
 
 | 层级 | 目标 / 验收 |
 | --- | --- |
@@ -16,7 +16,7 @@
 | 防火墙 | UFW/firewalld 可在用户明确确认后修改；自定义 nftables/iptables 只提示 |
 | 代表性发行版探测 | Debian、Fedora、Arch、openSUSE、Alpine |
 
-“探测成功”不单独等于完整支持。正式支持声明要求普通测试、真实 one-click、portable matrix 和发布门槛同时通过。v0.4.2 的四目标附件已核验；任何 v0.4.6 包须通过本候选自己的验收，不能使用旧套件或前置链路结果替代。
+“探测成功”不单独等于完整支持。正式支持声明要求普通测试、真实 one-click、portable matrix 和发布门槛同时通过。v0.4.2 的四目标附件已核验；任何 v0.4.7 包须通过本候选自己的验收，不能使用旧套件或前置链路结果替代。
 
 未经适配的 NixOS、runit/s6、其他 CPU、声明式或只读系统不会被假装支持；安装器应给出检测结果并停止。
 
@@ -102,9 +102,9 @@ Host 是客户端路由元数据，保存在节点的 `transport.headers.Host` �
 
 公开订阅、真实 config check/链路、Chromium 完整编辑与损坏恢复、托管证书新 QUIC 会话和安装/四目标套件已在上述主线分别验收。详细[配置](CONFIGURATION.md#045-hysteria2tls-基线)与[收口证据](HYSTERIA2_CLOSURE_045.md)。
 
-## v0.4.6 TUIC v5/TLS 候选
+## v0.4.6 TUIC v5/TLS 已验收基线
 
-[Draft PR #22](https://github.com/ForceMind/V-UI/pull/22)的裸前置 `21cb0bc7` 八组/11 jobs/全部步骤 attempt 1 成功，[真实链路 69 项](https://github.com/ForceMind/V-UI/actions/runs/37356266391)包含双客户端 HTTP 正向及分别错误 UUID/密码/CA/SNI 的真实原因、零送达与无 DIRECT。正常 merge-forward 继承安全 master `8e0d0746`；**最终集成独立审查、八组 exact-head、授权正常合并和八组 exact-master 仍待完成**。
+TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合并至 `df8a980beb682a981d72e42760705f1831cacf9b`，候选/主线 tree `f68098e398cb7ac29e2e1e809b8f741bb3c30533` 相同。准确候选八组/11 jobs/全部步骤 attempt 1 成功；准确主线八组/11 jobs/全部步骤成功，其中 deployment 首次上游 403 后 unchanged-code attempt 2 通过，其余七组 attempt 1。真实链路 75 项、独立 HY2 8/TUIC 8 与 Chromium 完整流程分别通过，详见[收口记录](TUIC_CLOSURE_046.md)。
 
 | 项目 | 限定范围 |
 | --- | --- |
@@ -115,9 +115,9 @@ Host 是客户端路由元数据，保存在节点的 `transport.headers.Host` �
 | 网络条件 | 节点 UDP/QUIC 端口须在主机/云网络通行；TCP 规则不替代 UDP |
 | 编辑与导入 | UUID/密码各自空新建生成、空编辑保留；高级参数保留或拒绝，草稿不因无关编辑而公开可用 |
 | 响应安全 | 普通响应 PR #23 allowlist；特权 `/editor` 手工证书路径字符串与明确授权客户端导出凭据分开 |
-| 待验收门槛 | 实际 URI provider 导入、公开订阅链路、证书绑定/续期/失败/停止待应用、Chromium 创建/取消/编辑/刷新/导出/损坏后停机恢复 |
+| 已验收门槛 | 实际 URI provider 导入、公开订阅链路、证书绑定/续期/失败/停止待应用、Chromium 创建/取消/编辑/刷新/导出/损坏后停机恢复 |
 
-不复用工作区回退前丢失的本地结果，EPERM 不算运行通过；参数与详细门槛见[配置](CONFIGURATION.md#046-tuic-v5tls-候选)和[TUIC 契约](TUIC_046.md)。40 项 ToClash、四目标 Linux 和协议区分 UDP 安装器不变。
+不复用工作区回退前丢失的本地结果，EPERM 不算本地运行通过；最终证据见[TUIC 收口](TUIC_CLOSURE_046.md)，参数见[配置](CONFIGURATION.md#046-tuic-v5tls)。40 项 ToClash、四目标 Linux 和协议区分 UDP 安装器不变。
 
 ## 尚未完成的协议矩阵
 
@@ -127,7 +127,7 @@ Host 是客户端路由元数据，保存在节点的 `transport.headers.Host` �
 - Trojan 的 Xray 实现及 WebSocket/gRPC 等非 TCP 组合；
 - Xray Shadowsocks、2022 cipher、插件/obfs，以及未列明的 cipher；
 - Xray VMess 及 VMess 非 TCP/TLS 组合；
-- 本页 HY2 基线范围外组合、TUIC 最终集成及候选范围外组合、REALITY / Vision；
+- 本页 HY2 基线范围外组合、TUIC 已验收范围外组合、当前 REALITY/Vision 候选及其范围外组合；
 - 除上述 WS 和 gRPC 基线外的 WebSocket/gRPC，以及 XHTTP / HTTPUpgrade 全组合；
 - 除上述 Shadowsocks AEAD 之外的 UDP 专项；
 - sing-box 完整 ToClash 规则迁移。
@@ -136,8 +136,15 @@ Host 是客户端路由元数据，保存在节点的 `transport.headers.Host` �
 
 ## 证书
 
-已实现 Certbot HTTP-01 单域名申请、测试/正式隔离、自动续期和消费者绑定。WS 与 gRPC 基线沿用并已验证托管证书生命周期和停止待应用语义；HY2 已完成自己的主线验收；TUIC 候选复用同一流程，仍须完成自己的最终集成验收。不把 WS Host 或 gRPC service_name 当作证书域名。DNS-01、通配符和 DNS provider API 尚未纳入。
+已实现 Certbot HTTP-01 单域名申请、测试/正式隔离、自动续期和消费者绑定。WS 与 gRPC 基线沿用并已验证托管证书生命周期和停止待应用语义；HY2 已完成自己的主线验收；TUIC 已完成同一流程的准确主线验收；REALITY 不适用托管证书。不把 WS Host 或 gRPC service_name 当作证书域名。DNS-01、通配符和 DNS provider API 尚未纳入。
 
 ## 边界
 
 “支持所有 Linux 发行版”的实现目标是**取消发行版品牌白名单**，依据 CPU/libc/init 等真实能力选择安全路径；不是承诺 Linux 历史上每个内核、CPU、libc 和 init 都可由同一 root 脚本自动修改。
+
+
+## v0.4.7 REALITY/Vision 当前集成候选
+
+固定官方 sing-box 1.14.2 与 Mihomo 1.19.32 的 VLESS/direct TCP/精确 Vision、单 UUID、单规范 16 位 short ID、匹配 X25519 pair、显式 SNI、Chrome。无 ALPN 覆盖、托管证书、mux、其他核心/传输或应用 UDP 扩围。私钥与参考地址服务器专用；三格式仅输出客户端所需凭据/公钥。
+
+裸前置 a44b5ce 八组/11 jobs/全部步骤通过；完整公共导出/编辑/浏览器集成需自己的最终准确提交验收。Mihomo YAML、sing-box JSON、实际 URI importer 的参考握手与应用目标独立；失败需实际认证/UUID/flow原因及应用零送达，伪装 HEADERS 只记录实际数。URI importer 的 udp=true 不代表应用 UDP 已验收，也不能宣称 URI 禁用 UDP。完整契约及首次失败见[阶段记录](REALITY_VISION_047.md)。

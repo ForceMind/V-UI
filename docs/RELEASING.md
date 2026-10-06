@@ -2,7 +2,7 @@
 
 正式Release是一次明确的公开写操作，不等同于PR、版本字符串或Actions候选附件。此流程只晋升经过验收的完整套件，不在发布时重新构建“另一份看似相同的包”。
 
-当前 v0.4.6 是 TUIC v5/TLS 集成候选，最终独立审查、准确候选八组、授权正常合并和准确主线八组 CI 仍待完成。[HY2 主线收口](HYSTERIA2_CLOSURE_045.md)与 [PR #23 普通响应安全修复](INBOUND_RESPONSE_CLOSURE_20261006.md)是继承基线，不代替 TUIC 验收。TUIC 裸前置八组/11 jobs/全部步骤 attempt 1 成功、真实链路 69 项只证明该准确前置；当前重建不复用丢失的本地证据，见[TUIC 契约](TUIC_046.md)。本阶段未晋升附件或执行 tag/Release/部署；源码、原始 CI artifact、已核验附件、发布准备与正式发布分别标注，历史套件保持原样。
+当前 v0.4.7 是 [REALITY/Vision 集成候选](REALITY_VISION_047.md)，裸前置八组通过不代替最终独立审查和准确候选/主线验收。[TUIC 主线收口](TUIC_CLOSURE_046.md)是继承基线。首次 REALITY 前置 HEADERS 断言失败及更早各阶段失败保留。未晋升附件或执行 tag/Release/生产部署；源码、原始 CI artifact、已核验附件与公开发布分别记录。
 
 ## 前置条件
 
@@ -36,7 +36,7 @@ GitHub权限只在该人工工作流的发布job授予contents:write/actions:rea
 
 ## 公开后检查
 
-核对Release公开状态、tag目标、下载文件摘要和文档链接。可在独立临时 Linux 机器复核在线 `install.sh --version v0.4.6` 的自动目标选择路径；线上URL只有该版本确实发布后才存在。
+核对Release公开状态、tag目标、下载文件摘要和文档链接。可在独立临时 Linux 机器复核在线 `install.sh --version v0.4.7` 的自动目标选择路径；线上URL只有该版本确实发布后才存在。
 
 外部CA域名验证、云安全组和真实用户网络需要用户自己的配置，不属于维护者自动取得的授权。不要把发布流程顺手变成登录真实VPS部署。
 

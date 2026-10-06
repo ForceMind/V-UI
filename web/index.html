@@ -576,7 +576,7 @@
 
             <template v-if="!['shadowsocks','hysteria2','tuic'].includes(newInbound.protocol)">
                 <el-form-item label="传输方式">
-                    <el-select v-model="newInbound.profile.transport" style="width: 100%">
+                    <el-select v-model="newInbound.profile.transport" :disabled="newInbound.core === 'sing-box' && newInbound.profile.security === 'reality' && newInbound.profile.transport === 'direct'" style="width: 100%">
                         <template v-if="newInbound.core === 'xray'">
                             <el-option label="RAW / TCP" value="raw"></el-option>
                             <el-option label="WebSocket" value="websocket"></el-option>
@@ -690,7 +690,7 @@
             <el-form-item
                 v-if="newInbound.protocol === 'vless'"
                 label="Flow">
-                <el-select v-model="newInbound.profile.flow" style="width: 100%">
+                <el-select v-model="newInbound.profile.flow" :disabled="newInbound.core === 'sing-box' && newInbound.profile.security === 'reality' && newInbound.profile.transport === 'direct'" style="width: 100%">
                     <el-option label="None" value=""></el-option>
                     <el-option label="XTLS Vision" value="xtls-rprx-vision"></el-option>
                 </el-select>
@@ -727,7 +727,14 @@
             </template>
 
             <template v-if="newInbound.profile.security === 'reality'">
-                <el-form-item label="目标站点">
+                <el-alert v-if="newInbound.core === 'sing-box' && newInbound.profile.transport === 'direct'"
+                    title="REALITY / Vision：仅 sing-box VLESS 直连 TCP、单 UUID、Chrome。握手参考端与应用目标不同；失败时可能产生参考 TLS / 伪装流量，不能把它当作应用送达。仅验收 HTTP/TCP，不绑定托管证书，不支持 ALPN 覆盖或应用 UDP。"
+                    type="info" :closable="false" style="margin-bottom: 16px"></el-alert>
+                <el-form-item v-if="newInbound.core === 'sing-box' && newInbound.profile.transport === 'direct'" label="REALITY UUID">
+                    <el-input v-model="newInbound.profile.reality_uuid" type="password" show-password
+                        :placeholder="newInbound.profile.reality_uuid_set ? '留空保持当前 REALITY UUID' : '留空自动生成 REALITY UUID'"></el-input>
+                </el-form-item>
+                <el-form-item label="握手参考端">
                     <el-input
                         v-model="newInbound.profile.reality_target"
                         placeholder="example.com:443">
@@ -736,23 +743,26 @@
                 <el-form-item label="Server Name">
                     <el-input
                         v-model="newInbound.profile.reality_server_name"
-                        placeholder="留空则使用目标站点域名">
+                        :placeholder="newInbound.core === 'sing-box' && newInbound.profile.transport === 'direct' ? '必填，例如 reference.example.test' : '留空则使用目标站点域名'">
                     </el-input>
                 </el-form-item>
                 <el-form-item label="Short ID">
                     <el-input
                         v-model="newInbound.profile.reality_short_id"
-                        placeholder="留空自动生成">
+                        :type="newInbound.core === 'sing-box' && newInbound.profile.transport === 'direct' ? 'password' : 'text'"
+                        :show-password="newInbound.core === 'sing-box' && newInbound.profile.transport === 'direct'"
+                        :placeholder="newInbound.core === 'sing-box' && newInbound.profile.transport === 'direct' && newInbound.profile.reality_short_id_set ? '留空保持当前 Short ID' : '留空自动生成'">
                     </el-input>
                 </el-form-item>
                 <el-form-item label="浏览器指纹">
                     <el-select
                         v-model="newInbound.profile.client_fingerprint"
+                        :disabled="newInbound.core === 'sing-box' && newInbound.profile.transport === 'direct'"
                         style="width: 100%">
                         <el-option label="Chrome" value="chrome"></el-option>
-                        <el-option label="Firefox" value="firefox"></el-option>
-                        <el-option label="Safari" value="safari"></el-option>
-                        <el-option label="Edge" value="edge"></el-option>
+                        <el-option v-if="newInbound.core !== 'sing-box' || newInbound.profile.transport !== 'direct'" label="Firefox" value="firefox"></el-option>
+                        <el-option v-if="newInbound.core !== 'sing-box' || newInbound.profile.transport !== 'direct'" label="Safari" value="safari"></el-option>
+                        <el-option v-if="newInbound.core !== 'sing-box' || newInbound.profile.transport !== 'direct'" label="Edge" value="edge"></el-option>
                     </el-select>
                 </el-form-item>
 
@@ -763,11 +773,14 @@
                     :closable="false">
                 </el-alert>
                 <el-alert
-                    v-else
-                    title="V-UI 会自动生成 REALITY X25519 密钥对；私钥只写入服务器核心配置，订阅只导出客户端公钥。"
+                    v-else-if="newInbound.core === 'sing-box' && newInbound.profile.transport === 'direct'"
+                    title="REALITY UUID、私钥和 Short ID 保留在服务器，编辑页面不回显；空输入保持已有值。新建自动生成 X25519 密钥对，客户端导出仅包含所需 UUID、公钥和 Short ID。"
                     type="success"
                     :closable="false">
                 </el-alert>
+                <el-alert v-if="newInbound.core === 'sing-box' && newInbound.profile.transport !== 'direct'"
+                    title="此 REALITY 传输组合仍为未验收草稿，不能公开导出；已有参数应保留或明确拒绝，不能靠普通编辑清除。"
+                    type="warning" :closable="false" style="margin-bottom: 16px"></el-alert>
             </template>
 
             <template v-if="newInbound.protocol === 'hysteria2'">

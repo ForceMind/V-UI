@@ -23,7 +23,7 @@ python -m unittest discover -s tests -v
 | --- | --- |
 | Test V-UI | API、鉴权、数据库、状态、纯函数、原浏览器操作流程和托管证书节点编辑/恢复 |
 | ToClash reference and export verification | 固定独立参考、100场景、40项目录、客户端配置 |
-| Real loopback proxy and DNS chain | 实际 VLESS/TCP/TLS、Trojan、Shadowsocks、VMess，已验证 VLESS/WS/TLS、VLESS/gRPC/TLS，已验证 Hysteria2/TLS 及候选 TUIC v5/TLS 的双客户端链路与失败路径；DNS、拒绝/停启 |
+| Real loopback proxy and DNS chain | 实际 VLESS/TCP/TLS、Trojan、Shadowsocks、VMess，已验证 VLESS/WS/TLS、VLESS/gRPC/TLS，已验证 Hysteria2/TLS 及已验收 TUIC v5/TLS，当前候选 REALITY/Vision 的双客户端链路与失败路径；DNS、拒绝/停启 |
 | Selected release deployment gates | 实际离线包、HTTPS、完整Vue面板、备份恢复/回滚 |
 | ACME certificate acceptance | Certbot/Pebble真实HTTP-01、续期/失败、Chromium证书页 |
 | One-command installation acceptance | 仅临时CI主机上的实际sudo/systemd/socket安装、升级、重启 |
@@ -93,9 +93,9 @@ sing-box 1.14.2 / VLESS / WS / TLS 已由 PR #18 完成准确主线八组验收�
 完整边界与首次失败见[HY2 阶段契约](docs/HYSTERIA2_045.md)。HY2 基线不放开 obfs/hopping、带宽/ALPN/uTLS 覆盖、多用户、应用 UDP、其他核心或生产部署；TUIC 按下节独立契约验收；原固定 pins、四 Linux 目标和 40 项 ToClash 不变。
 
 
-## v0.4.6 TUIC v5 候选验收
+## v0.4.6 TUIC v5 已验收回归
 
-当前 [Draft PR #22](https://github.com/ForceMind/V-UI/pull/22)先通过固定官方二进制裸前置（准确 `21cb0bc7`，八组/11 jobs/全部步骤 attempt 1，链路 69 项），再正常 merge-forward 继承 [PR #23 安全修复](docs/INBOUND_RESPONSE_CLOSURE_20261006.md)。当前集成重建，不复用丢失的本地证据；最终独立审查、八组 exact-head、授权正常 merge 和八组 exact-master 仍待完成。
+TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合并至 `df8a980beb682a981d72e42760705f1831cacf9b`，候选/主线 tree `f68098e398cb7ac29e2e1e809b8f741bb3c30533` 相同。准确候选八组/11 jobs/全部步骤 attempt 1 成功；准确主线八组/11 jobs/全部步骤成功，其中 deployment 首次上游 403 后 unchanged-code attempt 2 通过，其余七组 attempt 1。真实链路 75 项、独立 HY2 8/TUIC 8 与 Chromium 完整流程分别通过，详见[收口记录](docs/TUIC_CLOSURE_046.md)。
 
 - `python -m unittest discover -s tests -p 'test_tuic_profile.py' -v`：服务端 ALPN 恰为 h3（不可省略）、单 UUID/密码对、独立空输入保留、普通响应 allowlist、未知/高级导入草稿保护与三格式映射
 - `test_export_real.py`：固定客户端 config check；`test_tuic_loopback.py`：真实 Mihomo URI provider/converter 导入和转发。TUIC URI 为非官方客户端约定，不称官方通用标准
@@ -106,3 +106,15 @@ sing-box 1.14.2 / VLESS / WS / TLS 已由 PR #18 完成准确主线八组验收�
 - `test_hysteria2_installation.py` / `test_firewall_support.py`、ACME、40 项 ToClash、四目标 Linux 与完整八组不减；`python scripts/check_docs.py` 校验所有当前版本入口，不改写历史版本
 
 仅 HTTP/TCP；sing-box `network: tcp`，Mihomo TUIC adapter 硬编码 UDP 能力，省略无效 `udp: false`，不称关闭 UDP。QUIC 需要节点 UDP 可达，应用 UDP 未验收。固定 pin/构建不变，无真实 CA/防火墙变更、tag/Release、附件晋升或部署；完整边界见[TUIC 契约](docs/TUIC_046.md)。
+
+
+## v0.4.7 REALITY / Vision 候选回归
+
+- test_reality_profile.py / test_reality_export.py：严格存储/输入校验、密钥配对、隐藏/空保留、独立替换、未知导入保护、三格式和无服务端材料
+- test_reality_certificate_boundary.py：真实隔离 API/SQLite 的回归先行，拒绝绑定不持久化、合法 legacy 保存后解绑、非法更新不变；不更改有效 TLS 的 desired/applied 失败语义
+- test_reality_preflight_loopback.py：已通过固定核心裸前置；test_reality_loopback.py：编译器与匿名公开订阅集成。三种实际路径为 Mihomo YAML/sing-box JSON/Mihomo URI importer，五类负向保留实际原因、应用零送达、无 DIRECT
+- reality_helpers.py 使用临时 CA、TLS 1.3/X25519/h2 本地参考；ClientHello、完整 TLS 与伪装 HEADERS 独立计数。异步 GET 不保证完成，不能强求 HEADERS>0。CA 只注入子进程，不改系统信任
+- test_reality_rejection_evidence.py：超时/EOF/旧日志不够，应用请求不能用参考计数掩盖；startup/missing-evidence 失败路径也脱敏并抑制原异常上下文
+- test_export_real.py 的服务器与双客户端真实配置检查，与 test_inbound_editor_browser.py 的创建/取消/编辑/刷新/再打开/独立替换/导出/故意损坏后停机恢复分别验收
+
+最终八组与独立源码审查不能由裸前置替代。四 Linux 目标、40 项 ToClash、所有已验收协议/证书/安装门槛不减少，完整历史见[REALITY/Vision 契约](docs/REALITY_VISION_047.md)。

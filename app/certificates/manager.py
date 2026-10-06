@@ -17,6 +17,7 @@ from app.certificates.models import Certificate, CertificateJob, CertificateBind
 from app.certificates.material import (CertificateError, domain_name, email_address,
     make_csr, private_write, validate_material)
 from app.certificates.provider import CertbotProvider
+from app.services.reality_profile import has_reality
 from app.release_tools import lease, ReleaseError, sync_directory
 
 ACTIVE_JOBS = ('queued', 'running')
@@ -248,6 +249,12 @@ class CertificateManager:
         with self._binding_lock:
             with database.SessionLocal() as db:
                 db.execute(text('BEGIN IMMEDIATE'))
+                if target != 'panel':
+                    row = db.get(database.Inbound, int(target.split(':')[1]))
+                    # REALITY exclusion is a precondition, not a failed apply:
+                    # preserve any previous desired/applied certificate state.
+                    if row is not None and has_reality(row.stream_settings):
+                        raise CertificateError('TLS_NODE_REQUIRED')
                 binding = db.get(CertificateBinding, target)
                 if binding is None:
                     binding = CertificateBinding(target=target); db.add(binding)
@@ -274,7 +281,7 @@ class CertificateManager:
                     if row.core != 'sing-box' or row.protocol not in {'vless','trojan','vmess','hysteria2','tuic'}: raise CertificateError('UNSUPPORTED_CERTIFICATE_TARGET')
                     stream = deepcopy(row.stream_settings or {})
                     tls = stream.get('tls') or {}
-                    if tls.get('reality') or not tls.get('enabled'):
+                    if has_reality(stream) or not tls.get('enabled'):
                         raise CertificateError('TLS_NODE_REQUIRED')
                     if not explicit and binding.applied_revision:
                         oldroot = self.root / 'revisions' / binding.applied_certificate_id / binding.applied_revision

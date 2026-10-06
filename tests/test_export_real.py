@@ -87,6 +87,20 @@ def shadowsocks(method='aes-128-gcm'):
     'pinned binaries not provided',
 )
 class RealExportTests(unittest.TestCase):
+    def test_reality_server_and_exports_load_in_real_pinned_binaries(self):
+        from test_reality_export import reality_node
+        with tempfile.TemporaryDirectory(prefix='vui-reality-real-export-') as tmp:
+            root = Path(tmp); item = reality_node()
+            self.check_item(item, root, 'reality-vision')
+            config = SingBoxAdapter().build_config([item])
+            self.assertNotIn('transport', config['inbounds'][0])
+            self.assertNotIn('_vui', config['inbounds'][0])
+            path = root/'server.json'; path.write_text(json.dumps(config))
+            result = subprocess.run([str(Path(os.environ['VUI_TEST_CORES'])/'sing-box'), 'check', '-c', str(path)],
+                                    capture_output=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stdout.decode(errors='replace')+result.stderr.decode(errors='replace'))
+            print('REALITY/Vision server and strict exports accepted by unchanged pinned binaries')
+
     def check_item(self,item,root,label):
         yaml_path=root/(label+'.yaml')
         yaml_path.write_text(

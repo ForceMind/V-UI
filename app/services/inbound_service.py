@@ -14,7 +14,7 @@ from app.models.database import Inbound
 from app.services.protocol_profiles import compile_profile, decompile_profile
 from app.services.grpc_profile import is_grpc_transport
 from app.services.hysteria2_profile import password_value
-from app.services import tuic_profile
+from app.services import tuic_profile, reality_profile
 
 SUPPORTED_CORES = {"xray", "sing-box"}
 XRAY_PROTOCOLS = {"vless", "vmess", "trojan", "shadowsocks"}
@@ -156,13 +156,19 @@ def to_dict(item: Inbound) -> dict:
         },
         "managed_certificate_eligible": (
             item.core == "sing-box" and item.protocol in {"vless", "trojan", "vmess", "hysteria2", "tuic"}
-            and isinstance(tls, dict) and tls.get("enabled") is True and "reality" not in tls
+            and isinstance(tls, dict) and tls.get("enabled") is True and not reality_profile.has_reality(stream)
         ),
         "tag": item.tag,
     }
 
 
 def editor_dict(item: Inbound) -> dict:
+    strict_reality = item.core == "sing-box" and item.protocol == "vless" and reality_profile.is_direct_candidate(item.stream_settings)
+    if strict_reality:
+        try:
+            reality_profile.validate_stored(item.settings, item.stream_settings)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     settings=item.settings or {}
     if item.core == "sing-box" and item.protocol in {"hysteria2", "tuic"}:
         users = settings.get("users") if isinstance(settings, dict) else None
@@ -228,6 +234,22 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
         )
     )
     profile = normalize_mapping(payload.get("profile"))
+    old_stream = existing.stream_settings if existing else {}
+    strict_reality = core == "sing-box" and protocol == "vless" and (
+        reality_profile.is_direct_candidate(old_stream)
+        or reality_profile.is_direct_candidate(stream_settings)
+        or (not profile and "stream_settings" in payload and reality_profile.has_reality(stream_settings))
+        or reality_profile.wants_direct(profile))
+    if strict_reality:
+        try:
+            if existing is not None and reality_profile.is_direct_candidate(old_stream):
+                reality_profile.validate_stored(existing.settings, old_stream)
+            if not profile and reality_profile.has_reality(stream_settings):
+                reality_profile.validate_stored(settings, stream_settings)
+            elif existing is not None:
+                reality_profile.credential_user(settings)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     if core == "sing-box" and protocol == "tuic":
         try:
             if existing is not None:
@@ -251,7 +273,6 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
                 password_value(users[0]["password"])
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
-    old_stream = existing.stream_settings if existing else {}
     old_transport = old_stream.get("transport") if isinstance(old_stream, dict) else None
     transport = stream_settings.get("transport")
     grpc_edit = existing is not None and core == "sing-box" and protocol == "vless" and (
@@ -259,7 +280,11 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
         or is_grpc_transport(transport)
         or str(profile.get("transport") or "").lower() == "grpc"
     )
-    if existing is not None and core == "sing-box" and protocol == "hysteria2":
+    if strict_reality:
+        # The REALITY compiler alone generates new credentials. Existing
+        # malformed imports must not be healed by the generic ensure helper.
+        settings = deepcopy(settings)
+    elif existing is not None and core == "sing-box" and protocol == "hysteria2":
         users = settings.get("users")
         try:
             if not isinstance(users, list) or len(users) != 1 or not isinstance(users[0], dict):
@@ -294,6 +319,7 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
         profile,
         settings,
         stream_settings,
+        creating=existing is None,
     )
     return core, protocol, port, settings, stream_settings
 

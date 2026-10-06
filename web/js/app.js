@@ -384,6 +384,10 @@ const app = createApp({
             p.reality_target = '';
             p.reality_server_name = '';
             p.reality_short_id = '';
+            p.reality_uuid = '';
+            p.reality_uuid_set = false;
+            p.reality_short_id_set = false;
+            p.reality_private_key_set = false;
             p.client_fingerprint = ['hysteria2', 'tuic'].includes(newInbound.protocol) ? '' : 'chrome';
             p.skip_cert_verify = false;
             p.shadowsocks_method = 'aes-128-gcm';
@@ -427,11 +431,33 @@ const app = createApp({
                 newInbound.profile.certificate_path = '';
                 newInbound.profile.key_path = '';
             }
+            if (newInbound.core === 'sing-box' && newInbound.protocol === 'vless') {
+                if (newInbound.profile.security === 'reality') {
+                    newInbound.profile.transport = 'direct';
+                    newInbound.profile.flow = 'xtls-rprx-vision';
+                    newInbound.profile.client_fingerprint = 'chrome';
+                    newInbound.profile.skip_cert_verify = false;
+                } else if (newInbound.profile.flow === 'xtls-rprx-vision') {
+                    newInbound.profile.flow = '';
+                }
+            }
         };
 
         const saveInbound = async () => {
             try {
-                const profile = { ...newInbound.profile };
+                let profile = { ...newInbound.profile };
+                if (newInbound.core === 'sing-box' && newInbound.protocol === 'vless' && profile.security === 'reality' && profile.transport === 'direct') {
+                    // Send only this dedicated profile's visible fields. The
+                    // server validates persisted state before any edit so an
+                    // unsupported import cannot be silently repaired here.
+                    const fields = ['security', 'transport', 'flow', 'reality_target', 'reality_server_name',
+                        'reality_uuid', 'reality_short_id', 'client_fingerprint', 'skip_cert_verify'];
+                    profile = Object.fromEntries(fields.map(key => [key, profile[key]]));
+                } else {
+                    for (const key of ['reality_uuid', 'reality_uuid_set', 'reality_short_id_set', 'reality_private_key_set']) {
+                        delete profile[key];
+                    }
+                }
                 const certificateId = profile.security === 'tls' ? newInbound.certificate_id || null : null;
                 let res;
                 if (editingInboundId.value) {

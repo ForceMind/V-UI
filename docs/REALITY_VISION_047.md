@@ -1,10 +1,10 @@
-# v0.4.7 REALITY / Vision 裸前置契约
+# v0.4.7 REALITY / Vision 集成契约
 
 ## 当前状态
 
 当前获准按路线推进独立 REALITY/Vision 阶段，起点为 [TUIC v0.4.6 已验收 master](TUIC_CLOSURE_046.md) `df8a980beb682a981d72e42760705f1831cacf9b`，tree `f68098e398cb7ac29e2e1e809b8f741bb3c30533`。本阶段先做官方固定核心的裸前置；**真实 CI 前置通过前，公开 REALITY/Vision 支持保持阻断**。源码支持、配置可载入、测试代码存在和既有 TUIC 主线通过都不等于 REALITY 链路已验收。
 
-当前未记录 REALITY/Vision 准确提交的真实 CI 成功。开发环境 socket/netlink EPERM 只能记录为环境阻断，不作为本地 runtime 或浏览器成功。本页中的后续集成门槛均为待完成项，不代表已对用户提供支持；裸前置不单独变更当前产品版本、发布或部署状态。
+准确裸前置 `a44b5ce20edcaee1ee3b26c34b7c21badfe5bf7b` 已核对八组/11 jobs/全部步骤 attempt 1 成功，tree `13dd71f1c27f33695b7e5b5dcd77171e783df581`。真实链路 82 项与独立 HY2 8/TUIC 8 通过，当前进入公共导出/编辑集成候选，最终准确候选/主线验收仍待完成。开发环境 socket/netlink EPERM 只能记录为环境阻断，不作为本地 runtime 或浏览器成功。本页集成门槛须在最终代码提交重验；当前版本号 0.4.7 不代表正式发布或生产部署。
 
 ## 固定源码与实际实现
 
@@ -25,7 +25,7 @@
 
 ## 有界公开契约
 
-下列是前置成功后才可实现并验收的严格公开范围：
+下列是已通过裸前置、当前实施并等待最终集成验收的严格公开范围：
 
 - sing-box 服务端、VLESS 直连 TCP、精确 `xtls-rprx-vision`、单个规范 UUID，不增加其他 flow、WebSocket/gRPC/XHTTP/HTTPUpgrade、multiplex 或 Xray REALITY 支持
 - 单个规范 16 位十六进制 short ID（8 字节，规范小写），显式字面 SNI；不依赖空值、推断、通配符或不同名称的替换
@@ -63,7 +63,7 @@
 
 默认使用 debug 级日志。若为假测试诊断开启 sing-box 服务端 trace，须限定到该假凭据子进程，并在日志输出、失败报告和 artifact 前脱敏派生密钥、私钥等材料。不能将包含 `AuthKey` 字节的 trace 作为可公开原始日志；也不改变生产默认诊断或官方核心。
 
-## 后续应用集成门槛（前置通过后）
+## 当前应用集成门槛
 
 1. 共享 schema/编译器严格校验上述边界；原始导入的未知/高级字段保留或拒绝，不能借编辑清除后解锁公开导出
 2. UUID/private key/short ID 的编辑输入隐藏，空输入保留；校验已有公私钥配对和状态，不靠新生成凭据掩盖畸形导入。新建生成、明确替换与普通编辑分别测试
@@ -79,12 +79,12 @@
 
 首个裸前置 [`67769509401804fbbdd617acd01d047424035f0b`](https://github.com/ForceMind/V-UI/commit/67769509401804fbbdd617acd01d047424035f0b) 的 [真实链路 attempt 1](https://github.com/ForceMind/V-UI/actions/runs/37470333699) 在 9 个 key/short ID/SNI 子场景中，因测试错误地强求伪装 HTTP HEADERS 大于零而失败。两种客户端及实际 URI importer 的正向 HTTP、错误 UUID/flow、真实 REALITY verification/authentication 原因和应用零送达已分别观察到；这些局部结果不能改写整组失败。修正只将非保证的 GET 要求改为实际参考 TLS 回落证据，并继续独立计数 ClientHello/完整握手/HEADERS，不换核心、跳过验证或放松应用送达与认证原因门槛。
 
-当前均为 pending，后续只能追加已核验准确提交的结果及链接。不能复用旧 TUIC 的绿色运行，也不能从本地配置检查推断 CI 或 runtime 成功。
+裸前置已通过；集成与最终候选/主线仍为 pending，只能追加已核验准确提交的结果及链接。不能复用旧 TUIC 的绿色运行，也不能从本地配置检查推断 CI 或 runtime 成功。
 
 | 阶段 | 必需结果 | 当前状态 |
 | --- | --- | --- |
-| 固定核心裸前置 | 双客户端正确链路和全部独立负向原因；完整八组 CI | 待完成，公开支持仍阻断 |
-| 应用集成与独立源码审查 | 严格导出/编辑/allowlist/恢复及固定核心真实证据 | 待前置成功后推进 |
+| 固定核心裸前置 | 双客户端正确链路和全部独立负向原因；完整八组 CI | a44b5ce 已完成；最终集成仍待验收 |
+| 应用集成与独立源码审查 | 严格导出/编辑/allowlist/恢复及固定核心真实证据 | 当前进行中 |
 | 最终 exact-head | 八组工作流、11 个最新 job、全部步骤成功 | 待完成 |
 | 正常合并 | 父任务协调授权正常 merge，保留已有历史 | 待完成 |
 | 最终 exact-master | 新主线八组工作流、11 个最新 job、全部步骤成功 | 待完成 |
@@ -92,3 +92,22 @@
 八组分别为 Documents and release contracts、Test V-UI、Real loopback proxy and DNS chain、ToClash reference and export verification、ACME certificate acceptance、One-command installation acceptance、Portable Linux runtime matrix、Selected release deployment gates。queued、running、skip 或旧 SHA 成功均不算通过；如有重跑，保留首次失败、原因与 attempt，不改写为首次成功。
 
 本阶段无 tag、Draft Release、公开 Release、附件晋升、真实生产部署、真实 CA/账户、生产凭据或实际主机防火墙变更。临时 CI deployment gate 与生产部署分开记录。
+
+
+### 已验收裸前置的准确工作流
+
+以下均对应 `a44b5ce`，11 个最新 job 与全部步骤 attempt 1 成功；不替代后续代码：
+
+- [文档](https://github.com/ForceMind/V-UI/actions/runs/37471617674)、[Test/Chromium](https://github.com/ForceMind/V-UI/actions/runs/37471617623)、[链路](https://github.com/ForceMind/V-UI/actions/runs/37471617751)、[ToClash](https://github.com/ForceMind/V-UI/actions/runs/37471617595)
+- [ACME](https://github.com/ForceMind/V-UI/actions/runs/37471617726)、[安装](https://github.com/ForceMind/V-UI/actions/runs/37471617724)、[四目标](https://github.com/ForceMind/V-UI/actions/runs/37471617643)、[临时部署门槛](https://github.com/ForceMind/V-UI/actions/runs/37471617671)
+
+链路 job 112296276163 中，各次正常客户端 HTTP 的应用计数 1、参考 ClientHello 1、完整参考 TLS 0。key/short ID/SNI 负向的 Mihomo YAML 和 URI importer 各观察 10 次参考 ClientHello/完整 TLS，sing-box 各 1 次；均应用零送达、真实 REALITY 错误。HEADERS 实际均为 0，按事实记录，不解释为没有参考回落。UUID/flow 负向为真实 unknown UUID/flow mismatch、应用零送达。
+
+### 证书排除修正的复现边界
+
+在新严格集成前使用真实隔离 API/SQLite 与合成签发器复现：REALITY bind 返回 409 TLS_NODE_REQUIRED，却留下未应用 binding/error 行；合法 legacy raw TLS→REALITY 保存后仍有旧 applied binding。之后 apply_existing 返回 TLS_NODE_REQUIRED，REALITY 数据未变且核心应用未被调用。没有观察到 REALITY 被覆盖，也不声称真实事故。
+
+回归先行修正仅处理上述 REALITY 边界：非法绑定在持久化前拒绝，合法 legacy 切换保存后解绑，非法切换保持节点/绑定；普通有效 TLS 的 desired/applied、失败保护和停止待应用保持。
+
+
+现代 PUT 另有已复现的显式转换边界：已有 REALITY 节点仅提交 certificate_id（包括空 profile 或未指定 security）时，旧代码会合成 TLS 并改变节点/绑定。v0.4.7 要求明确 profile.security=tls 才能转换并绑定；未明确请求在读取证书材料前拒绝，节点/绑定保持不变。显式 REALITY→TLS 正向回归保留 UUID。此事实与上述旧绑定后续 reapply 未覆盖 REALITY 的复现是两个不同路径，均只使用隔离假数据。

@@ -12,10 +12,12 @@ from app.services.inbound_service import (
     editor_dict,
     get_inbound,
     list_inbounds,
+    normalize_mapping,
     to_dict,
     update_inbound,
 )
 from app.services.protocol_profiles import profile_catalog
+from app.services.reality_profile import has_reality
 
 router = APIRouter()
 
@@ -94,6 +96,8 @@ def get_inbound_editor(inbound_id: int, db: Session = Depends(get_db)):
 def add_inbound(payload: InboundPayload, db: Session = Depends(get_db)):
     data = payload.model_dump()
     if payload.certificate_id:
+        if has_reality(normalize_mapping(payload.stream_settings)):
+            raise HTTPException(409, "REALITY cannot bind a managed certificate")
         data["profile"] = _managed_certificate(
             payload.profile, payload.certificate_id, payload.core, payload.protocol
         )
@@ -115,6 +119,9 @@ def edit_inbound(
     item = get_inbound(db, inbound_id)
     data = payload.model_dump(exclude_unset=True)
     profile = data.get("profile")
+    if (data.get("certificate_id") and has_reality(item.stream_settings)
+            and (not isinstance(profile, dict) or profile.get("security") != "tls")):
+        raise HTTPException(409, "Choose an explicit TLS transition before binding a managed certificate to REALITY")
     # Match compile_profile: {} is a no-op; implicit security is protocol-aware.
     # In particular, Trojan remains TLS when security is missing/empty/null.
     default_security = "tls" if item.core == "sing-box" and item.protocol in {"hysteria2", "tuic", "trojan"} else "none"

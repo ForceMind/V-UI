@@ -35,3 +35,10 @@
 | 网站托管/防火墙接口不可用 | 本版故意隔离网站，主机防火墙由管理员外部管理，不假报操作成功 |
 
 报告问题时提供：精确提交或release_id、系统版本、相关状态码、已脱敏的错误代码、是否使用受管入口。不要提供完整订阅URL、私钥、管理员密码或整个数据目录。
+
+
+## REALITY/Vision 候选连接失败
+
+先检查固定版本、exact xtls-rprx-vision、Chrome、显式 SNI、配对公钥和单个 16 位小写 short ID；不以跳过校验、更换核心或绑定托管证书解决。参考握手端须独立可达且满足 TLS 1.3/X25519。服务端私钥不能粘贴进公开日志。默认不启用 trace：上游 REALITY trace 可能含派生 AuthKey。
+
+REALITY verification/authentication failed、unknown UUID 与 flow mismatch 是不同阶段；超时/EOF 本身不证明正确拒绝。参考 TLS 或伪装流量不表示应用请求送达，也不表示 DIRECT 回退；应用目标应独立核对。成功 REALITY 使用其认证证书机制，不能把普通 CA/SNI 失败排查直接等同应用。

@@ -1,5 +1,17 @@
 # 变更日志
 
+## 0.4.7 — REALITY / Vision（集成候选）
+
+- 独立 Draft PR #24；固定 sing-box 1.14.2 / Mihomo 1.19.32、VLESS/direct TCP/精确 Vision、单 UUID/short ID、显式 SNI、Chrome，公私钥配对验证与隐藏编辑
+- 裸前置 a44b5ce 八组/11 jobs/全部步骤 attempt 1，通过 82 项真实链路与独立 HY2 8/TUIC 8；首次 6776950 强求伪装 HEADERS 的 9 个失败保留，见[阶段契约](docs/REALITY_VISION_047.md)
+- 严格三格式、秘密安全编辑、REALITY 证书排除、公开链路与 Chromium/损坏恢复为本次最终门槛；独立审查、准确候选/主线八组仍待完成。无 tag/Release/部署/附件晋升
+
+## 2026-10-06 — TUIC v0.4.6 主线收口
+
+TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合并至 `df8a980beb682a981d72e42760705f1831cacf9b`，候选/主线 tree `f68098e398cb7ac29e2e1e809b8f741bb3c30533` 相同。准确候选八组/11 jobs/全部步骤 attempt 1 成功；准确主线八组/11 jobs/全部步骤成功，其中 deployment 首次上游 403 后 unchanged-code attempt 2 通过，其余七组 attempt 1。真实链路 75 项、独立 HY2 8/TUIC 8 与 Chromium 完整流程分别通过，详见[收口记录](docs/TUIC_CLOSURE_046.md)。
+
+以下 TUIC 候选条目保留当时状态，不覆盖上述收口。
+
 ## 0.4.6 — TUIC v5/TLS（候选，最终集成验收待完成）
 
 - 独立 [Draft PR #22](https://github.com/ForceMind/V-UI/pull/22)，固定官方 sing-box 1.14.2 / Mihomo 1.19.32，单 UUID/密码对、明确验证 SNI、服务端 ALPN 恰为 h3、原生 QUIC/默认拥塞、零 RTT 关闭

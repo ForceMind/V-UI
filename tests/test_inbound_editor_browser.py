@@ -169,8 +169,8 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     dialog.get_by_role('button', name='取消', exact=True).click(); dialog = open_edit(name)
                     security(dialog, label)
                     if value == 'reality':
-                        dialog.get_by_placeholder('example.com:443').fill('target.example.test:443')
-                        dialog.get_by_placeholder('留空则使用目标站点域名').fill('target.example.test')
+                        dialog.get_by_placeholder('example.com:443').fill('127.0.0.1:19445')
+                        dialog.get_by_placeholder('必填，例如 reference.example.test').fill('reference.example.test')
                     save(dialog, identity)
                     state = editor(identity)
                     self.assertEqual(state['profile']['security'], value)
@@ -188,9 +188,13 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     self.assertIsNone(editor(identity)['certificate_id'])
                     with sqlite3.connect(root / 'data/v-ui.db') as db:
                         settings, stream = db.execute('SELECT settings,stream_settings FROM inbounds WHERE id=?', (identity,)).fetchone()
-                    self.assertEqual(settings, created_credentials[identity])
+                    if value == 'reality':
+                        self.assertEqual(json.loads(settings)['users'][0]['uuid'], json.loads(created_credentials[identity])['users'][0]['uuid'])
+                        self.assertEqual(json.loads(settings)['users'][0]['flow'], 'xtls-rprx-vision')
+                    else:
+                        self.assertEqual(settings, created_credentials[identity])
                     if private: self.assertEqual(json.loads(stream)['tls']['reality']['private_key'], private)
-                    # Return to the already-supported TLS export profile; no REALITY support expansion.
+                    # Explicitly returning to ordinary TLS clears Vision flow.
                     dialog = open_edit(name + '-edited'); security(dialog, 'TLS'); select_certificate(dialog)
                     save(dialog, identity)
                     self.assertEqual(editor(identity)['certificate_id'], certificate_id)
@@ -611,6 +615,102 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 self.assertEqual(tuic_server['tls']['alpn'], ['h3'])
                 self.assertFalse(tuic_server.get('zero_rtt_handshake', False))
                 self.assertNotIn('utls', tuic_server['tls'])
+                # Qualified REALITY has a handshake reference address, no local
+                # certificate binding, and hidden independently editable UUID/ID.
+                def reality_draft():
+                    page.get_by_role('button', name='添加节点', exact=True).click()
+                    dialog = page.get_by_role('dialog'); dialog.get_by_text('sing-box', exact=True).click()
+                    security(dialog, 'REALITY')
+                    dialog.get_by_placeholder('例如：US-01').fill('qualified-reality')
+                    dialog.get_by_role('spinbutton').fill(str(unused_port()))
+                    dialog.get_by_placeholder('example.com:443').fill('127.0.0.1:19445')
+                    dialog.get_by_placeholder('必填，例如 reference.example.test').fill('reference.example.test')
+                    expect(dialog).to_contain_text('握手参考端与应用目标不同')
+                    expect(dialog).to_contain_text('不绑定托管证书')
+                    expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).not_to_be_visible()
+                    expect(dialog.locator('.el-form-item').filter(has_text='Flow')).to_contain_text('XTLS Vision')
+                    for label in ('REALITY UUID', 'Short ID'):
+                        field = dialog.locator('.el-form-item').filter(has_text=re.compile('^'+label)).locator('input')
+                        expect(field).to_have_attribute('type', 'password'); expect(field).to_have_value('')
+                    return dialog
+                dialog = reality_draft(); dialog.get_by_role('button', name='取消', exact=True).click()
+                self.assertEqual(len(context.request.get(base + '/api/inbounds').json()), len(identities))
+                dialog = reality_draft(); reality_id = save(dialog); identities.append(reality_id)
+
+                def reality_material():
+                    with sqlite3.connect(root / 'data/v-ui.db') as db:
+                        settings, stream = db.execute('SELECT settings,stream_settings FROM inbounds WHERE id=?', (reality_id,)).fetchone()
+                    return json.loads(settings), json.loads(stream)
+                reality_settings, reality_stream = reality_material()
+                reality_uuid = reality_settings['users'][0]['uuid']
+                reality_private = reality_stream['tls']['reality']['private_key']
+                reality_public = reality_stream['_vui']['reality_public_key']
+                reality_short = reality_stream['tls']['reality']['short_id'][0]
+                self.assertEqual(reality_settings['users'][0]['flow'], 'xtls-rprx-vision')
+                self.assertEqual(len(reality_short), 16)
+
+                def check_reality_prefill(dialog):
+                    state = editor(reality_id)
+                    self.assertIsNone(state['certificate_id'])
+                    self.assertEqual(state['profile']['security'], 'reality')
+                    self.assertEqual(state['profile']['flow'], 'xtls-rprx-vision')
+                    self.assertEqual(state['profile']['client_fingerprint'], 'chrome')
+                    self.assertEqual(state['profile']['reality_uuid'], '')
+                    self.assertEqual(state['profile']['reality_short_id'], '')
+                    self.assertTrue(state['profile']['reality_uuid_set'])
+                    self.assertTrue(state['profile']['reality_short_id_set'])
+                    self.assertTrue(state['profile']['reality_private_key_set'])
+                    expect(dialog.get_by_placeholder('example.com:443')).to_have_value('127.0.0.1:19445')
+                    expect(dialog.get_by_placeholder('必填，例如 reference.example.test')).to_have_value('reference.example.test')
+                    for label in ('REALITY UUID', 'Short ID'):
+                        field = dialog.locator('.el-form-item').filter(has_text=re.compile('^'+label)).locator('input')
+                        expect(field).to_have_attribute('type', 'password'); expect(field).to_have_value('')
+                    for secret in (reality_uuid, reality_private, reality_short):
+                        self.assertNotIn(secret, json.dumps(state))
+                        self.assertNotIn(secret, dialog.inner_text())
+                        self.assertNotIn(secret, str(dialog.locator('input').evaluate_all('(inputs) => inputs.map(input => input.value)')))
+                    return state
+
+                dialog = open_edit('qualified-reality'); check_reality_prefill(dialog)
+                dialog.get_by_placeholder('例如：US-01').fill('cancelled-reality')
+                dialog.locator('.el-form-item').filter(has_text=re.compile('^Short ID')).locator('input').fill('aaaaaaaaaaaaaaaa')
+                dialog.get_by_role('button', name='取消', exact=True).click()
+                self.assertEqual(reality_material(), (reality_settings, reality_stream))
+                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                dialog = open_edit('qualified-reality'); check_reality_prefill(dialog)
+                dialog.get_by_placeholder('例如：US-01').fill('qualified-reality-edited')
+                save(dialog, reality_id)
+                self.assertEqual(reality_material(), (reality_settings, reality_stream))
+                # A malformed replacement is rejected with desired material intact.
+                dialog = open_edit('qualified-reality-edited'); check_reality_prefill(dialog)
+                short_input = dialog.locator('.el-form-item').filter(has_text=re.compile('^Short ID')).locator('input')
+                short_input.fill('ABC')
+                with page.expect_response(lambda reply: reply.url.endswith(f'/api/inbounds/{reality_id}') and reply.request.method == 'PUT') as rejected:
+                    dialog.get_by_role('button', name='保存并应用', exact=True).click()
+                self.assertEqual(rejected.value.status, 422, rejected.value.text())
+                self.assertEqual(reality_material(), (reality_settings, reality_stream))
+                short_input.fill(''); dialog.get_by_role('button', name='取消', exact=True).click()
+                dialog = open_edit('qualified-reality-edited'); check_reality_prefill(dialog)
+                dialog.locator('.el-form-item').filter(has_text='REALITY UUID').locator('input').fill('22222222-2222-4222-8222-222222222222')
+                save(dialog, reality_id)
+                new_settings, new_stream = reality_material()
+                self.assertEqual(new_stream, reality_stream)
+                reality_uuid = new_settings['users'][0]['uuid']
+                self.assertEqual(reality_uuid, '22222222-2222-4222-8222-222222222222')
+                dialog = open_edit('qualified-reality-edited'); check_reality_prefill(dialog)
+                dialog.locator('.el-form-item').filter(has_text=re.compile('^Short ID')).locator('input').fill('fedcba9876543210')
+                save(dialog, reality_id)
+                reality_settings, reality_stream = reality_material()
+                self.assertEqual(reality_settings, new_settings)
+                reality_short = reality_stream['tls']['reality']['short_id'][0]
+                self.assertEqual(reality_short, 'fedcba9876543210')
+                self.assertEqual(reality_stream['tls']['reality']['private_key'], reality_private)
+                self.assertEqual(reality_stream['_vui']['reality_public_key'], reality_public)
+                with sqlite3.connect(root / 'data/v-ui.db') as db:
+                    created_credentials[reality_id], reality_stream_before = db.execute('SELECT settings,stream_settings FROM inbounds WHERE id=?', (reality_id,)).fetchone()
+                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                dialog = open_edit('qualified-reality-edited'); check_reality_prefill(dialog)
+                dialog.get_by_role('button', name='取消', exact=True).click()
                 # The separate certificate-management card must offer both TLS
                 # targets and complete its existing normal VMess bind action.
                 page.goto(base + '/certificates')
@@ -621,6 +721,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 expect(choices.locator(f'option[value="{grpc_id}"]')).to_have_text('managed-vless-grpc-edited')
                 expect(choices.locator(f'option[value="{hy2_id}"]')).to_have_text('managed-hysteria2-edited')
                 expect(choices.locator(f'option[value="{tuic_id}"]')).to_have_text('managed-tuic-edited')
+                expect(choices.locator(f'option[value="{reality_id}"]')).to_have_count(0)
                 choices.select_option(str(vmess_id))
                 with page.expect_response(lambda reply: reply.url.endswith(f'/api/certificates/{certificate_id}/bind-inbound') and reply.request.method == 'POST') as bound:
                     card.get_by_role('button', name='绑定节点', exact=True).click()
@@ -745,8 +846,24 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 self.assertEqual(unquote(tuic_link.username), tuic_uuid)
                 self.assertEqual(unquote(tuic_link.password), tuic_password)
                 self.assertEqual(parse_qs(tuic_link.query, strict_parsing=True), {'sni': ['vpn.example.test'], 'alpn': ['h3']})
+                reality_proxy = next(item for item in yaml.safe_load(exported.text())['proxies'] if item['name'] == 'qualified-reality-edited')
+                self.assertEqual(reality_proxy['uuid'], reality_uuid)
+                self.assertEqual(reality_proxy['flow'], 'xtls-rprx-vision')
+                self.assertEqual(reality_proxy['client-fingerprint'], 'chrome')
+                self.assertEqual(reality_proxy['reality-opts'], {'public-key': reality_public, 'short-id': reality_short})
+                self.assertFalse(reality_proxy['udp']); self.assertNotIn('alpn', reality_proxy)
+                reality_client = next(item for item in singbox.json()['outbounds'] if item.get('tag') == 'qualified-reality-edited')
+                self.assertEqual(reality_client['uuid'], reality_uuid)
+                self.assertEqual(reality_client['flow'], 'xtls-rprx-vision')
+                self.assertEqual(reality_client['network'], 'tcp')
+                self.assertEqual(reality_client['tls']['reality'], {'enabled': True, 'public_key': reality_public, 'short_id': reality_short})
+                self.assertEqual(reality_client['tls']['utls'], {'enabled': True, 'fingerprint': 'chrome'})
+                reality_link = urlsplit(next(item for item in links if item.startswith('vless://' + reality_uuid + '@')))
+                self.assertEqual(parse_qs(reality_link.query, strict_parsing=True), {'security': ['reality'], 'type': ['tcp'],
+                    'encryption': ['none'], 'flow': ['xtls-rprx-vision'], 'sni': ['reference.example.test'],
+                    'fp': ['chrome'], 'pbk': [reality_public], 'sid': [reality_short]})
                 for text in (exported.text(), singbox.text(), '\n'.join(links)):
-                    for server_only in (str(root), 'certificate_path', 'key_path', 'PRIVATE KEY', '_vui'):
+                    for server_only in (str(root), 'certificate_path', 'key_path', 'PRIVATE KEY', '_vui', reality_private, '127.0.0.1:19445'):
                         self.assertNotIn(server_only, text)
 
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
@@ -762,7 +879,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                         self.assertNotIn('stream_settings', node)
                         self.assertIs(type(node['managed_certificate_eligible']), bool)
                     self.assertNotIn(str(root), ordinary.text())
-                    for secret in (vmess_uuid, ws_uuid, grpc_uuid, hy2_password, tuic_uuid, tuic_password):
+                    for secret in (vmess_uuid, ws_uuid, grpc_uuid, hy2_password, tuic_uuid, tuic_password, reality_uuid, reality_private, reality_short):
                         self.assertNotIn(secret, ordinary.text())
                 # Stop this page's polling before the fixture restarts on a new
                 # random origin; keep the strict network guard on the new page.
@@ -772,17 +889,17 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     db.execute("UPDATE inbounds SET remark='after-backup'")
                     db.execute('DELETE FROM certificate_bindings')
-                    for identity in (ws_id, grpc_id, hy2_id, tuic_id):
+                    for identity in (ws_id, grpc_id, hy2_id, tuic_id, reality_id):
                         db.execute("UPDATE inbounds SET settings='{}',stream_settings='{}' WHERE id=?", (identity,))
                 release_tools.restore(root, archive, digest)
                 base = start(); page = new_page(); login()
                 for identity in identities:
                     state = editor(identity)
-                    self.assertEqual(state['certificate_id'], certificate_id)
-                    self.assertEqual(state['profile']['security'], 'tls')
+                    self.assertEqual(state['certificate_id'], None if identity == reality_id else certificate_id)
+                    self.assertEqual(state['profile']['security'], 'reality' if identity == reality_id else 'tls')
                     self.assertTrue(state['remark'].endswith('-edited'))
                     dialog = open_edit(state['remark'])
-                    expect(dialog).to_contain_text('vpn.example.test')
+                    if identity != reality_id: expect(dialog).to_contain_text('vpn.example.test')
                     if identity == ws_id:
                         self.assertEqual(state['profile']['transport'], 'ws')
                         self.assertEqual(state['profile']['path'], '/vless-ws-edited')
@@ -802,6 +919,8 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     if identity == tuic_id:
                         check_tuic_state()
                         check_tuic_prefill(dialog)
+                    if identity == reality_id:
+                        check_reality_prefill(dialog)
                     dialog.get_by_role('button', name='取消', exact=True).click()
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     self.assertEqual(db.execute('SELECT id,settings FROM inbounds ORDER BY id').fetchall(), secrets_before)
@@ -809,6 +928,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     self.assertEqual(db.execute('SELECT stream_settings FROM inbounds WHERE id=?', (grpc_id,)).fetchone()[0], grpc_stream_before)
                     self.assertEqual(db.execute('SELECT stream_settings FROM inbounds WHERE id=?', (hy2_id,)).fetchone()[0], hy2_stream_before)
                     self.assertEqual(db.execute('SELECT stream_settings FROM inbounds WHERE id=?', (tuic_id,)).fetchone()[0], tuic_stream_before)
+                    self.assertEqual(db.execute('SELECT stream_settings FROM inbounds WHERE id=?', (reality_id,)).fetchone()[0], reality_stream_before)
                 self.assertEqual(external, [])
                 self.assertEqual(errors, [])
                 self.assertEqual(context.request.get(base + response.json()['paths']['mihomo.yaml']).status, 404)
@@ -817,6 +937,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 print('VLESS gRPC Lite managed TLS: create / cancel / literal invalid service rejected / service edit / refresh / prefill / hidden UUID and h2 ALPN retained / binding / three exports / stopped restore OK')
                 print('Hysteria2 managed TLS: native QUIC UDP listener / create / cancel / edit / refresh / reopen / hidden password retained / binding selectors / three verified-TLS exports / damaged stopped backup restoration OK')
                 print('TUIC v5 managed TLS: create / cancel / hidden UUID and password / blank-preserving edit / refresh / reopen / h3 native QUIC / managed selectors / three exports / damaged stopped restore / safe ordinary responses OK')
+                print('REALITY/Vision: create / cancel / explicit SNI and Chrome / hidden stable keypair / independent UUID and short-ID replacement / invalid replacement rejection / no managed binding / three exports / damaged stopped restore / safe ordinary responses OK')
                 print('Node editor browser: managed TLS create / cancel / protected TLS unbind / none and REALITY edits / refresh / re-edit / TLS export / stopped restore / credentials retained OK')
                 stop()
                 browser.close()

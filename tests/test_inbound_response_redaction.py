@@ -76,12 +76,24 @@ class InboundResponseRedactionTests(unittest.TestCase):
                 stream = {'tls': {'enabled': True, 'key_path': '/synthetic/private.pem',
                                   'reality': {'private_key': PRIVATE}},
                           'realitySettings': {'privateKey': PRIVATE}, 'future': {'credential': UNKNOWN}}
-                identity, path, _ = self.create(core, protocol, settings, stream=stream)
+                malformed_reality = core == 'sing-box' and protocol == 'vless'
+                identity, path, _ = self.create(core, protocol, settings, stream={} if malformed_reality else stream)
+                if malformed_reality:
+                    # Model an old imported row: strict REALITY creation/editing
+                    # now rejects it, but ordinary list responses must stay safe.
+                    with database.SessionLocal() as db:
+                        db.get(database.Inbound, identity).stream_settings = deepcopy(stream)
+                        db.commit()
                 original = self.snapshot(identity)
                 self.assert_safe(self.client.get(path))
                 self.assert_safe(self.client.get(path + '?core=' + core))
-                self.assert_safe(self.client.put(path + '/' + str(identity), headers=auth_tests.HEADERS,
-                                                json={'remark': 'updated-synthetic'}))
+                updated = self.client.put(path + '/' + str(identity), headers=auth_tests.HEADERS,
+                                          json={'remark': 'updated-synthetic'})
+                if malformed_reality:
+                    self.assertEqual(updated.status_code, 422, updated.text)
+                    for secret in SECRET_VALUES: self.assertNotIn(secret, updated.text)
+                else:
+                    self.assert_safe(updated)
                 self.assertEqual(self.snapshot(identity), original)
                 with database.SessionLocal() as db:
                     row = db.get(database.Inbound, identity)
@@ -145,14 +157,19 @@ class InboundResponseRedactionTests(unittest.TestCase):
                 ('sing-box', 'shadowsocks', {'tls': {'enabled': True}}, False),
                 ('xray', 'vless', {'tls': {'enabled': True}}, False)):
             with self.subTest(core=core, protocol=protocol, stream=stream):
-                identity, _, _ = self.create(core, protocol, {}, stream=stream)
+                malformed_reality = core == 'sing-box' and protocol == 'vless' and 'reality' in stream.get('tls', {})
+                identity, _, _ = self.create(core, protocol, {}, stream={} if malformed_reality else stream)
+                if malformed_reality:
+                    with database.SessionLocal() as db:
+                        db.get(database.Inbound, identity).stream_settings = deepcopy(stream)
+                        db.commit()
                 row = next(x for x in self.client.get('/api/inbounds').json() if x['id'] == identity)
                 self.assertIs(row['managed_certificate_eligible'], expected)
 
     def test_privileged_editor_retains_manual_path_contract_but_not_secret_contents(self):
         from app.services.protocol_profiles import compile_profile
         settings, stream = compile_profile('sing-box', 'vless', {
-            'security': 'reality', 'transport': 'direct', 'reality_target': 'target.example.test:443',
+            'security': 'reality', 'transport': 'direct', 'flow': 'xtls-rprx-vision', 'client_fingerprint': 'chrome', 'reality_target': 'target.example.test:443',
             'reality_server_name': 'vpn.example.test'}, {'users': [{'uuid': UUID}]}, {})
         identity, _, _ = self.create('sing-box', 'vless', settings, stream=stream)
         private_key = self.snapshot(identity)[1]['tls']['reality']['private_key']

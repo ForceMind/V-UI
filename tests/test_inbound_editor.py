@@ -52,7 +52,7 @@ class InboundEditorTests(unittest.TestCase):
     def test_reality_private_key_is_never_decompiled_and_survives_edit(self):
         settings={"users":[{"uuid":"11111111-1111-1111-1111-111111111111"}]}
         settings,stream=compile_profile("sing-box","vless",{
-            "security":"reality","transport":"direct",
+            "security":"reality","transport":"direct","flow":"xtls-rprx-vision",
             "reality_target":"target.example.test:443",
             "reality_server_name":"target.example.test",
             "reality_short_id":"0102030405060708",
@@ -62,11 +62,12 @@ class InboundEditorTests(unittest.TestCase):
         profile=decompile_profile("sing-box","vless",settings,stream)
         self.assertNotIn("reality_private_key",profile)
         self.assertNotIn(private,str(profile))
-        profile["client_fingerprint"]="firefox"
+        profile["reality_server_name"]="edited.example.test"
         settings2,stream2=compile_profile("sing-box","vless",profile,settings,stream)
         self.assertEqual(stream2["tls"]["reality"]["private_key"],private)
         self.assertEqual(stream2["_vui"]["reality_public_key"],public)
-        self.assertEqual(stream2["_vui"]["client_fingerprint"],"firefox")
+        self.assertEqual(stream2["_vui"]["client_fingerprint"],"chrome")
+        self.assertEqual(stream2["tls"]["server_name"],"edited.example.test")
         self.assertEqual(settings2["users"][0]["uuid"],settings["users"][0]["uuid"])
 
     def test_editor_dict_never_contains_persisted_protocol_secrets(self):
@@ -89,8 +90,9 @@ class InboundEditorTests(unittest.TestCase):
 
         settings={"users":[{"uuid":uuid}]}
         settings,stream=compile_profile("sing-box","vless",{
-            "security":"reality","transport":"direct",
+            "security":"reality","transport":"direct","flow":"xtls-rprx-vision",
             "reality_target":"target.example.test:443",
+            "reality_server_name":"target.example.test", "client_fingerprint":"chrome",
             "reality_short_id":"0102030405060708",
         },settings,{})
         private=stream["tls"]["reality"]["private_key"]

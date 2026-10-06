@@ -10,7 +10,7 @@ sing-box 的 VLESS/TLS、Trojan/TLS、VMess/TLS，以及当前候选 Hysteria2/T
 
 - core / protocol 在普通编辑中锁定；要迁移协议或核心请新建节点；
 - UUID、Trojan/TUIC/HY2 密码等只保留在服务端，页面只显示“已有凭据”；
-- REALITY 私钥不返回浏览器，修改 SNI、short ID、指纹或传输时继续保留原私钥；
+- 限定 REALITY/Vision 的 UUID、私钥、short ID 均不回显；空输入保留，Chrome/direct/Vision 固定，未知导入项不会被静默清除；
 - Hysteria2 Password 空输入在新建时生成、编辑时保留原密码；非空输入明确替换，已有秘密不回传；
 - Hysteria2 Obfs 密码留空表示在类型不变时保留原值；这是高级草稿保留语义，obfs 仍不属于严格公开契约；
 - 切换 WS/gRPC/XHTTP/RAW 时会清理旧传输块，避免残留配置冲突；
@@ -148,9 +148,9 @@ URI/Base64 的 `type=ws`、path、可选 Host、TLS/SNI、ALPN 和 fingerprint�
 托管证书绑定/换绑、TLS 手工解绑、续期失败保留旧材料与材料/应用状态分离沿用现有流程。续期不改变密码或传输，手动停止核心保持 `CORE_STOPPED_PENDING_APPLY`，只有主动启动后应用。新浏览器验收覆盖创建/取消/编辑/刷新/再打开/秘密稳定、三格式解析和故意损坏后的停机备份/恢复；这些流程已由上述 HY2 主线验收，后续修改仍须重验。
 
 
-## 0.4.6 TUIC v5/TLS 候选
+## 0.4.6 TUIC v5/TLS
 
-当前仅为固定官方 sing-box 1.14.2 / Mihomo 1.19.32 的限定 TUIC v5 集成候选，最终独立审查及准确候选/主线八组待完成，见[TUIC 契约](TUIC_046.md)。
+固定官方 sing-box 1.14.2 / Mihomo 1.19.32 的限定 TUIC v5 已完成准确候选/主线验收，见[TUIC 收口](TUIC_CLOSURE_046.md)；原候选记录继续作为历史。
 
 ### 创建或编辑
 
@@ -168,3 +168,17 @@ URI/Base64 的 `type=ws`、path、可选 Host、TLS/SNI、ALPN 和 fingerprint�
 仅验收 HTTP/TCP；sing-box 出站 `network: tcp`。固定 Mihomo TUIC adapter 硬编码 UDP 能力，导出省略无效的 `udp: false`，不能声称关闭 UDP。应用 UDP 未验收；QUIC 传输本身仍需要主机/云网络放行节点 UDP 端口。沿用显式可重复的 `--node-udp-port` 安装预检，不改变 TCP/UDP 分离和确认规则。
 
 证书按 SNI 绑定，续期保留 UUID/密码/配置，失败保留旧活动材料及已应用 revision。停止核心保持 `CORE_STOPPED_PENDING_APPLY`；创建/取消/编辑/刷新/再打开/导出、续期新 QUIC 会话和故意损坏后停机恢复均须由当前最终集成提交验证，不能用裸前置替代。
+
+
+## 0.4.7 REALITY / Vision 集成候选
+
+选择 sing-box / VLESS / REALITY，固定 Direct / TCP、XTLS Vision 与 Chrome。填写独立握手参考端地址及端口、明确的 DNS-style SNI，不从参考地址猜测 SNI。参考服务必须兼容固定核心的 TLS 1.3/X25519 握手；它不是应用转发目标。不要对本测试说明使用真实第三方域名、账户或 CA。
+
+- REALITY UUID 留空新建生成，编辑留空保持；非空只替换 UUID
+- Short ID 为规范小写 16 位十六进制；留空新建生成、编辑保持，非空只替换 short ID
+- X25519 私钥仅服务器保存，编辑不回显、不提供私钥输入；已有 pair 必须匹配并保持。不要在 Issue 粘贴核心配置或备份
+- 显式 SNI 为字面 DNS 名称，无 scheme/port/通配符/首尾空白；Chrome 与精确 Vision flow 固定，不接受 ALPN 覆盖或其他传输/多用户/multiplex
+- 不绑定托管证书，不填普通 certificate/key 路径。明确从 TLS 切换后清除绑定；取消不修改数据库，非法请求不改变节点/绑定
+- 三格式保留 UUID、flow、SNI、Chrome、公钥和 short ID，不含服务端私钥或参考地址。Mihomo YAML 用 udp:false、sing-box 用 network:tcp；实际 Mihomo URI importer 自带 udp=true，不能声称 URI 强制禁用 UDP。此阶段仅 HTTP/TCP
+
+认证失败时可能观察到参考 TLS 回落或伪装请求，这是 REALITY 设计中的独立流量；应用目标必须零送达且不能 DIRECT。成功 REALITY 验证认证证书，不能套用普通 CA 失败语义。固定核心的真实裸前置通过与最终集成状态分开，见[契约/证据](REALITY_VISION_047.md)。

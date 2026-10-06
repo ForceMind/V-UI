@@ -2,7 +2,7 @@
 
 **个人自用的轻量代理面板：管理节点、图形化申请证书、设置 ToClash 分流，直接订阅完整 Mihomo 配置。**
 
-版本目标：**v0.4.6**（TUIC v5/TLS 候选；独立审查和最终 exact-head / exact-master CI 待完成）。正式发布前须完成 [发布检查](docs/RELEASING.md) 中的全部 exact-head 验收和人工发布动作；版本号不代表 GitHub Release 已公开。
+版本目标：**v0.4.7**（REALITY/Vision 集成候选；独立审查和最终 exact-head / exact-master CI 待完成）。正式发布须完成[发布检查](docs/RELEASING.md)，版本号不代表 Release 已公开。
 
 ## 能做什么
 
@@ -27,9 +27,9 @@ V-UI 使用 FastAPI + SQLite，不依赖 Redis、常驻 Node 或在线订阅转�
 
 **普通节点响应已继承 [PR #23 安全修复](docs/INBOUND_RESPONSE_CLOSURE_20261006.md)。** 准确 master `8e0d07463e59b52856f55fa33346a760a38b4705` 独立审查和候选/主线八组完成。普通列表/创建/更新仅返回允许列表摘要，不返回 UUID/密码、原始配置或服务器材料路径；特权 `/editor` 保留手工证书路径字符串，明确授权导出保留客户端凭据且无服务端材料。没有证据声称真实泄露事件。
 
-**v0.4.6 仅新增 sing-box / TUIC v5 / TLS 候选**，固定官方 sing-box 1.14.2 服务端/客户端和 Mihomo 1.19.32 不变。单 UUID/密码对、明确验证 SNI、服务端 ALPN 恰为 h3、原生 QUIC/默认拥塞和零 RTT 关闭。三格式为固定客户端支持的 TUIC URI 约定、完整 Mihomo YAML、sing-box JSON；URI 是上游临时/非官方约定，不能称官方通用标准。UUID/密码输入分别留空新建生成、编辑保留；未知或高级导入字段保留或明确拒绝，不能静默清除后导出。
+TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合并至 `df8a980beb682a981d72e42760705f1831cacf9b`，候选/主线 tree `f68098e398cb7ac29e2e1e809b8f741bb3c30533` 相同。准确候选八组/11 jobs/全部步骤 attempt 1 成功；准确主线八组/11 jobs/全部步骤成功，其中 deployment 首次上游 403 后 unchanged-code attempt 2 通过，其余七组 attempt 1。真实链路 75 项、独立 HY2 8/TUIC 8 与 Chromium 完整流程分别通过，详见[收口记录](docs/TUIC_CLOSURE_046.md)。
 
-裸前置 `21cb0bc721dd4f5e4d172d7602c8135f2f04db91` 八组/11 jobs/全部步骤 attempt 1 成功，[真实链路 69 项](https://github.com/ForceMind/V-UI/actions/runs/37356266391)含双客户端正确 HTTP、分别错误 UUID/密码/CA/SNI，真实原因、零目标送达和无 DIRECT。**最终集成独立审查、准确候选八组、授权正常合并和准确主线八组仍待完成。** 当前重建不复用丢失的旧本地通过证据，详见[TUIC 契约](docs/TUIC_046.md)、[参数](docs/CONFIGURATION.md#046-tuic-v5tls-候选)和[兼容矩阵](docs/COMPATIBILITY.md)。
+当前独立版本为 **v0.4.7 REALITY/Vision 集成候选**，[Draft PR #24](https://github.com/ForceMind/V-UI/pull/24)。固定二进制裸前置 `a44b5ce20edcaee1ee3b26c34b7c21badfe5bf7b` 八组/11 jobs/全部步骤 attempt 1 成功，[真实链路 82 项](https://github.com/ForceMind/V-UI/actions/runs/37471617751)及独立 HY2 8/TUIC 8 通过；首次前置错误地要求必有伪装 HEADERS 的失败保留。当前严格导出、秘密安全编辑和浏览器/恢复集成仍需独立源码审查、最终 exact-head 八组、授权正常 merge 与 exact-master 八组，见[阶段契约](docs/REALITY_VISION_047.md)。
 
 TUIC 只验 HTTP/TCP；sing-box 出站为 `network: tcp`。Mihomo TUIC adapter 硬编码 UDP 能力，省略无效 `udp: false`，不能宣称已关闭 UDP。QUIC 传输要求节点 UDP 通行，但应用 UDP 未验收。未知字段或不支持组合拒绝，失败不退 DIRECT。
 
@@ -51,7 +51,7 @@ sudo bash install.sh --bundle ./vui-linux-x86_64-gnu.zip \
 发布后可指定明确版本通过同一入口下载官方Release资产；**正式Release尚未生成时不要把下面命令当作当前可用下载地址**：
 
 ```sh
-sudo bash install.sh --version v0.4.6
+sudo bash install.sh --version v0.4.7
 ```
 
 安装器本身也必须来自可信仓库/套件，不能只信任来源不明压缩包附带的摘要。详见 [安装指南](docs/INSTALLATION.md)。
