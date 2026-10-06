@@ -1,6 +1,12 @@
 # v0.4.5 Hysteria2/TLS 验收契约
 
-## 当前状态
+## 当前状态更新（2026-10-06）
+
+[PR #20/#21 最终主线收口](HYSTERIA2_CLOSURE_045.md)已完成，准确 master 为 `838c66d9974dd9f3a944641a2e9e03cc200e0bbe`，tree `e12287d8ebbea233142d58191ee5141a0a49a17a`。最终八组/11 个 job/全部步骤 attempt 1 成功，成为当前 TUIC 阶段的继承基线；[PR #23 响应安全修复](INBOUND_RESPONSE_CLOSURE_20261006.md)也已独立收口。
+
+**下文原候选、待完成和失败记录完整保留，是当时状态，不覆盖上述收口。** 首次前置日志不足、第二前置 ACME 端口碰撞、PR #20 首次 master 的继承 Trojan/gRPC 证据失败及 PR #21 portable 首次 API 限流均不能因后来成功而抹去。当前独立候选见[TUIC v0.4.6](TUIC_046.md)，并未发布、部署或晋升附件。
+
+## 历史：当时当前状态
 
 当前为独立 [Draft PR #20](https://github.com/ForceMind/V-UI/pull/20) 的 Hysteria2/TLS 集成候选。继承基线为 [PR #19](https://github.com/ForceMind/V-UI/pull/19) 正常合并后的 `84729dfc53165003e7d459a5d56621ce89ba497c`；该 gRPC 准确主线八组工作流、11 个 job 和全部步骤已通过，详见[gRPC 收口](VLESS_GRPC_CLOSURE_044.md)。这些结果不构成 HY2 证据。
 

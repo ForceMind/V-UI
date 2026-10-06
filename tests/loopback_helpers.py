@@ -303,16 +303,28 @@ def require_tls_rejection(testcase, log_path, rejected_request, requests,
     requests whose rejection is asserted by the caller; transport/startup errors
     or caller timeouts alone cannot satisfy this test. Never reset counters.
     """
+    return require_rejection_evidence(testcase, log_path, rejected_request, requests,
+        ("x509", expected_reason), expected_count=expected_count, timeout=timeout,
+        label="x509 rejection")
+
+
+def require_rejection_evidence(testcase, log_path, rejected_request, requests,
+                               reasons, *, expected_count=0, timeout=12,
+                               log_offset=0, label="credential rejection"):
+    """Require reasons on one fresh line without resetting target delivery.
+
+    The bound is a retry-start window, not a deadline for an active request.
+    """
     before = expected_count
     deadline = time.monotonic() + timeout
     while True:
         testcase.assertEqual(len(requests), before, "A rejected TLS request reached the target")
-        log = log_path.read_text(errors="replace").lower()
-        if any("x509" in line and expected_reason in line for line in log.splitlines()):
+        log = log_path.read_text(errors="replace")[log_offset:].lower()
+        if any(all(reason in line for reason in reasons) for line in log.splitlines()):
             testcase.assertEqual(len(requests), before, "A rejected TLS request arrived late")
             return log
         if time.monotonic() >= deadline:
-            testcase.fail("No actual x509 rejection reason was observed: " + expected_reason + "\n" + log)
+            testcase.fail("No actual " + label + " reason was observed: " + repr(reasons) + "\n" + log)
         rejected_request()
         testcase.assertEqual(len(requests), before, "A rejected TLS retry reached the target")
         time.sleep(.05)

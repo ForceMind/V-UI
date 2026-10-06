@@ -506,6 +506,111 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     self.assertNotIn(field, hy2_server)
                 self.assertNotIn('alpn', hy2_server['tls'])
                 self.assertNotIn('utls', hy2_server['tls'])
+                # TUIC has a UDP listener with native QUIC defaults. Auth
+                # passwords may be supplied, but are never returned for editing.
+                tuic_uuid = '11111111-1111-4111-8111-111111111111'
+                tuic_password = 'Synthetic-browser-TUIC:p@ss/word?+#%'
+                def tuic_draft():
+                    page.get_by_role('button', name='添加节点', exact=True).click()
+                    dialog = page.get_by_role('dialog')
+                    dialog.get_by_text('sing-box', exact=True).click()
+                    dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select').click()
+                    page.get_by_role('option', name='TUIC', exact=True).click()
+                    dialog.get_by_placeholder('例如：US-01').fill('managed-tuic')
+                    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+                        udp.bind(('127.0.0.1', 0))
+                        tuic_port = udp.getsockname()[1]
+                    dialog.locator('.el-form-item').filter(has_text=re.compile(r'^端口')).get_by_role('spinbutton').fill(str(tuic_port))
+                    expect(dialog).to_contain_text('QUIC')
+                    expect(dialog).to_contain_text('UDP ' + str(tuic_port))
+                    expect(dialog).to_contain_text('HTTP/TCP')
+                    expect(dialog).to_contain_text('未验收草稿')
+                    expect(dialog.locator('.el-form-item').filter(has_text='传输方式')).to_have_count(0)
+                    expect(dialog.locator('.el-form-item').filter(has_text='拥塞控制')).to_contain_text('CUBIC')
+                    expect(dialog.locator('.el-form-item').filter(has_text='UDP Relay')).to_contain_text('Native')
+                    expect(dialog.get_by_role('checkbox', name=re.compile('启用 0-RTT'))).not_to_be_checked()
+                    uid = dialog.locator('.el-form-item').filter(has_text='TUIC UUID').locator('input')
+                    expect(uid).to_have_attribute('type', 'password'); uid.fill(tuic_uuid)
+                    auth = dialog.locator('.el-form-item').filter(has_text='TUIC Password').locator('input')
+                    expect(auth).to_have_attribute('type', 'password')
+                    auth.fill(tuic_password)
+                    select_certificate(dialog)
+                    return dialog
+                dialog = tuic_draft()
+                dialog.get_by_role('button', name='取消', exact=True).click()
+                self.assertEqual(len(context.request.get(base + '/api/inbounds').json()), len(identities))
+                dialog = tuic_draft()
+                tuic_id = save(dialog); identities.append(tuic_id)
+                with sqlite3.connect(root / 'data/v-ui.db') as db:
+                    created_credentials[tuic_id] = db.execute('SELECT settings FROM inbounds WHERE id=?', (tuic_id,)).fetchone()[0]
+                self.assertEqual(json.loads(created_credentials[tuic_id]), {'users': [{'uuid': tuic_uuid, 'password': tuic_password}]})
+
+                def check_tuic_state():
+                    state = editor(tuic_id)
+                    self.assertEqual(state['protocol'], 'tuic')
+                    self.assertEqual(state['certificate_id'], certificate_id)
+                    self.assertEqual(state['profile']['security'], 'tls')
+                    self.assertEqual(state['profile']['transport'], 'quic')
+                    self.assertEqual(state['profile']['server_name'], 'vpn.example.test')
+                    self.assertEqual(state['profile']['client_fingerprint'], '')
+                    self.assertEqual(state['profile']['congestion_control'], 'cubic')
+                    self.assertEqual(state['profile']['udp_relay_mode'], 'native')
+                    self.assertFalse(state['profile']['zero_rtt_handshake'])
+                    self.assertTrue(state['profile']['tuic_uuid_set'])
+                    self.assertFalse(state['profile'].get('tuic_uuid'))
+                    self.assertNotIn(tuic_uuid, json.dumps(state))
+                    self.assertFalse(state['profile']['skip_cert_verify'])
+                    self.assertTrue(state['profile']['tuic_password_set'])
+                    self.assertFalse(state['profile'].get('tuic_password'))
+                    self.assertNotIn(tuic_password, json.dumps(state))
+                    return state
+
+                def check_tuic_prefill(dialog):
+                    expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).to_contain_text('vpn.example.test')
+                    expect(dialog.get_by_placeholder('example.com', exact=True)).to_have_value('vpn.example.test')
+                    expect(dialog).to_contain_text('已有凭据保留在服务器')
+                    expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select__wrapper')).to_have_class(re.compile(r'is-disabled'))
+                    auth = dialog.locator('.el-form-item').filter(has_text='TUIC Password').locator('input')
+                    expect(auth).to_have_attribute('type', 'password')
+                    expect(auth).to_have_value('')
+                    self.assertNotIn(tuic_password, dialog.inner_text())
+                    self.assertNotIn(tuic_password, str(dialog.locator('input').evaluate_all('(inputs) => inputs.map(input => input.value)')))
+                    uid = dialog.locator('.el-form-item').filter(has_text='TUIC UUID').locator('input')
+                    expect(uid).to_have_attribute('type', 'password'); expect(uid).to_have_value('')
+                    self.assertNotIn(tuic_uuid, str(dialog.locator('input').evaluate_all('(inputs) => inputs.map(input => input.value)')))
+                    return auth
+
+                tuic_state = check_tuic_state()
+                dialog = open_edit('managed-tuic')
+                check_tuic_prefill(dialog).fill('Cancelled-TUIC-password')
+                dialog.get_by_placeholder('例如：US-01').fill('cancelled-tuic')
+                dialog.get_by_role('button', name='取消', exact=True).click()
+                self.assertEqual(check_tuic_state(), tuic_state)
+                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                dialog = open_edit('managed-tuic')
+                check_tuic_prefill(dialog)
+                dialog.get_by_placeholder('例如：US-01').fill('managed-tuic-edited')
+                save(dialog, tuic_id)
+                check_tuic_state()
+                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                dialog = open_edit('managed-tuic-edited')
+                check_tuic_prefill(dialog)
+                dialog.get_by_role('button', name='取消', exact=True).click()
+                with sqlite3.connect(root / 'data/v-ui.db') as db:
+                    settings, tuic_stream_before = db.execute('SELECT settings,stream_settings FROM inbounds WHERE id=?', (tuic_id,)).fetchone()
+                self.assertEqual(settings, created_credentials[tuic_id])
+                self.assertNotIn('transport', json.loads(tuic_stream_before))
+                revision = json.loads((runtime / 'state.json').read_text())['revision']
+                applied = json.loads((runtime / (revision + '.json')).read_text())
+                tuic_server = next(item for item in applied['inbounds'] if item['type'] == 'tuic')
+                self.assertEqual(tuic_server['users'], [{'uuid': tuic_uuid, 'password': tuic_password}])
+                self.assertEqual(tuic_server['tls']['server_name'], 'vpn.example.test')
+                self.assertTrue(tuic_server['tls']['enabled'])
+                for field in ('transport', 'up_mbps', 'down_mbps', 'obfs'):
+                    self.assertNotIn(field, tuic_server)
+                self.assertEqual(tuic_server['tls']['alpn'], ['h3'])
+                self.assertFalse(tuic_server.get('zero_rtt_handshake', False))
+                self.assertNotIn('utls', tuic_server['tls'])
                 # The separate certificate-management card must offer both TLS
                 # targets and complete its existing normal VMess bind action.
                 page.goto(base + '/certificates')
@@ -515,6 +620,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 expect(choices.locator(f'option[value="{ws_id}"]')).to_have_text('managed-vless-ws-edited')
                 expect(choices.locator(f'option[value="{grpc_id}"]')).to_have_text('managed-vless-grpc-edited')
                 expect(choices.locator(f'option[value="{hy2_id}"]')).to_have_text('managed-hysteria2-edited')
+                expect(choices.locator(f'option[value="{tuic_id}"]')).to_have_text('managed-tuic-edited')
                 choices.select_option(str(vmess_id))
                 with page.expect_response(lambda reply: reply.url.endswith(f'/api/certificates/{certificate_id}/bind-inbound') and reply.request.method == 'POST') as bound:
                     card.get_by_role('button', name='绑定节点', exact=True).click()
@@ -559,6 +665,11 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 self.assertFalse(hy2_proxy['udp'])
                 for field in ('up', 'down', 'obfs', 'obfs-password', 'alpn', 'client-fingerprint'):
                     self.assertNotIn(field, hy2_proxy)
+                tuic_proxy = next(item for item in yaml.safe_load(exported.text())['proxies'] if item['name'] == 'managed-tuic-edited')
+                self.assertEqual(tuic_proxy, {'name': 'managed-tuic-edited', 'type': 'tuic',
+                    'server': 'vpn.example.test', 'port': tuic_server['listen_port'], 'uuid': tuic_uuid,
+                    'password': tuic_password, 'sni': 'vpn.example.test', 'skip-cert-verify': False,
+                    'alpn': ['h3'], 'reduce-rtt': False})
                 singbox = context.request.get(base + response.json()['paths']['sing-box.json'])
                 self.assertEqual(singbox.status, 200, singbox.text())
                 vmess_client = next(item for item in singbox.json()['outbounds'] if item.get('type') == 'vmess')
@@ -591,6 +702,13 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     self.assertNotIn(field, hy2_client)
                 self.assertNotIn('alpn', hy2_client['tls'])
                 self.assertNotIn('utls', hy2_client['tls'])
+                tuic_client = next(item for item in singbox.json()['outbounds'] if item.get('tag') == 'managed-tuic-edited')
+                self.assertEqual(tuic_client['type'], 'tuic')
+                self.assertEqual(tuic_client['uuid'], tuic_uuid)
+                self.assertEqual(tuic_client['password'], tuic_password)
+                self.assertEqual(tuic_client['network'], 'tcp')
+                self.assertFalse(tuic_client['zero_rtt_handshake'])
+                self.assertEqual(tuic_client['tls'], {'enabled': True, 'server_name': 'vpn.example.test', 'alpn': ['h3']})
                 raw = context.request.get(base + response.json()['paths']['raw'])
                 self.assertEqual(raw.status, 200, raw.text())
                 links = base64.b64decode(raw.text()).decode().splitlines()
@@ -623,6 +741,10 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 self.assertIsNone(hy2_link.password)
                 hy2_query = parse_qs(hy2_link.query, strict_parsing=True)
                 self.assertEqual(hy2_query, {'sni': ['vpn.example.test'], 'insecure': ['0']})
+                tuic_link = urlsplit(next(item for item in links if item.startswith('tuic://')))
+                self.assertEqual(unquote(tuic_link.username), tuic_uuid)
+                self.assertEqual(unquote(tuic_link.password), tuic_password)
+                self.assertEqual(parse_qs(tuic_link.query, strict_parsing=True), {'sni': ['vpn.example.test'], 'alpn': ['h3']})
                 for text in (exported.text(), singbox.text(), '\n'.join(links)):
                     for server_only in (str(root), 'certificate_path', 'key_path', 'PRIVATE KEY', '_vui'):
                         self.assertNotIn(server_only, text)
@@ -640,7 +762,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                         self.assertNotIn('stream_settings', node)
                         self.assertIs(type(node['managed_certificate_eligible']), bool)
                     self.assertNotIn(str(root), ordinary.text())
-                    for secret in (vmess_uuid, ws_uuid, grpc_uuid, hy2_password):
+                    for secret in (vmess_uuid, ws_uuid, grpc_uuid, hy2_password, tuic_uuid, tuic_password):
                         self.assertNotIn(secret, ordinary.text())
                 # Stop this page's polling before the fixture restarts on a new
                 # random origin; keep the strict network guard on the new page.
@@ -650,7 +772,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     db.execute("UPDATE inbounds SET remark='after-backup'")
                     db.execute('DELETE FROM certificate_bindings')
-                    for identity in (ws_id, grpc_id, hy2_id):
+                    for identity in (ws_id, grpc_id, hy2_id, tuic_id):
                         db.execute("UPDATE inbounds SET settings='{}',stream_settings='{}' WHERE id=?", (identity,))
                 release_tools.restore(root, archive, digest)
                 base = start(); page = new_page(); login()
@@ -677,12 +799,16 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     if identity == hy2_id:
                         check_hy2_state()
                         check_hy2_prefill(dialog)
+                    if identity == tuic_id:
+                        check_tuic_state()
+                        check_tuic_prefill(dialog)
                     dialog.get_by_role('button', name='取消', exact=True).click()
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     self.assertEqual(db.execute('SELECT id,settings FROM inbounds ORDER BY id').fetchall(), secrets_before)
                     self.assertEqual(db.execute('SELECT stream_settings FROM inbounds WHERE id=?', (ws_id,)).fetchone()[0], ws_stream_before)
                     self.assertEqual(db.execute('SELECT stream_settings FROM inbounds WHERE id=?', (grpc_id,)).fetchone()[0], grpc_stream_before)
                     self.assertEqual(db.execute('SELECT stream_settings FROM inbounds WHERE id=?', (hy2_id,)).fetchone()[0], hy2_stream_before)
+                    self.assertEqual(db.execute('SELECT stream_settings FROM inbounds WHERE id=?', (tuic_id,)).fetchone()[0], tuic_stream_before)
                 self.assertEqual(external, [])
                 self.assertEqual(errors, [])
                 self.assertEqual(context.request.get(base + response.json()['paths']['mihomo.yaml']).status, 404)
@@ -690,6 +816,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 print('VLESS WS managed TLS: create / cancel / invalid path and Host rejected / path and client Host edit / refresh / prefill / hidden UUID retained / binding retained / three verified-TLS exports without server paths / stopped restore OK')
                 print('VLESS gRPC Lite managed TLS: create / cancel / literal invalid service rejected / service edit / refresh / prefill / hidden UUID and h2 ALPN retained / binding / three exports / stopped restore OK')
                 print('Hysteria2 managed TLS: native QUIC UDP listener / create / cancel / edit / refresh / reopen / hidden password retained / binding selectors / three verified-TLS exports / damaged stopped backup restoration OK')
+                print('TUIC v5 managed TLS: create / cancel / hidden UUID and password / blank-preserving edit / refresh / reopen / h3 native QUIC / managed selectors / three exports / damaged stopped restore / safe ordinary responses OK')
                 print('Node editor browser: managed TLS create / cancel / protected TLS unbind / none and REALITY edits / refresh / re-edit / TLS export / stopped restore / credentials retained OK')
                 stop()
                 browser.close()

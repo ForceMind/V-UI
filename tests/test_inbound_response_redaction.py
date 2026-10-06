@@ -141,7 +141,7 @@ class InboundResponseRedactionTests(unittest.TestCase):
                 ('sing-box', 'hysteria2', {'tls': {'enabled': True}}, True),
                 ('sing-box', 'vless', {'tls': {'enabled': True, 'reality': {}}}, False),
                 ('sing-box', 'vless', {'tls': {'enabled': 'true'}}, False),
-                ('sing-box', 'vless', {}, False), ('sing-box', 'tuic', {'tls': {'enabled': True}}, False),
+                ('sing-box', 'vless', {}, False), ('sing-box', 'tuic', {'tls': {'enabled': True}}, True),
                 ('sing-box', 'shadowsocks', {'tls': {'enabled': True}}, False),
                 ('xray', 'vless', {'tls': {'enabled': True}}, False)):
             with self.subTest(core=core, protocol=protocol, stream=stream):

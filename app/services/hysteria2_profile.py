@@ -14,6 +14,7 @@ PROFILE_FIELDS = {
     "obfs_type", "obfs_password", "obfs_password_set", "congestion_control", "udp_relay_mode",
     "zero_rtt_handshake", "shadowsocks_method", "shadowsocks_password_set",
     "hysteria2_password", "hysteria2_password_set",
+    "tuic_uuid", "tuic_uuid_set", "tuic_password", "tuic_password_set",
 }
 
 
@@ -70,7 +71,8 @@ def prepare_profile(profile, settings, stream):
     foreign_defaults = {"flow": "", "path": "/", "host": "", "service_name": "",
         "xhttp_mode": "auto", "reality_target": "", "reality_server_name": "",
         "reality_short_id": "", "congestion_control": "bbr", "udp_relay_mode": "native",
-        "zero_rtt_handshake": False, "shadowsocks_method": "aes-128-gcm", "shadowsocks_password_set": False}
+        "zero_rtt_handshake": False, "tuic_uuid": "", "tuic_uuid_set": False,
+        "tuic_password": "", "tuic_password_set": False, "shadowsocks_method": "aes-128-gcm", "shadowsocks_password_set": False}
     for name, default in foreign_defaults.items():
         if name in profile and (type(profile[name]) is not type(default) or profile[name] != default):
             raise ValueError("Hysteria2 does not accept the foreign option " + name)

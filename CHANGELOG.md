@@ -1,5 +1,29 @@
 # 变更日志
 
+## 0.4.6 — TUIC v5/TLS（候选，最终集成验收待完成）
+
+- 独立 [Draft PR #22](https://github.com/ForceMind/V-UI/pull/22)，固定官方 sing-box 1.14.2 / Mihomo 1.19.32，单 UUID/密码对、明确验证 SNI、服务端 ALPN 恰为 h3、原生 QUIC/默认拥塞、零 RTT 关闭
+- 三格式为固定客户端非官方 TUIC URI 约定、Mihomo YAML、sing-box JSON；不是官方通用 URI 标准，保留客户端凭据/验证语义，不导出服务端材料。仅 HTTP/TCP；sing-box `network: tcp`，Mihomo TUIC 硬编码 UDP 能力，省略无效 `udp: false`，应用 UDP 未验收
+- UUID/密码分别空输入新建生成、编辑保留，普通响应继承 PR #23 allowlist，特权 `/editor` 仅保留手工证书路径字符串；高级导入草稿保留或拒绝，不静默降格后公开导出
+- 裸前置 `21cb0bc721dd4f5e4d172d7602c8135f2f04db91` 八组/11 jobs/全部步骤 attempt 1 成功，[链路 69 项](https://github.com/ForceMind/V-UI/actions/runs/37356266391)含双客户端分别错误 UUID/密码/CA/SNI 的真实原因、零目标送达、无 DIRECT
+- 正常 merge-forward `7c380d7c9d7948f4e1992cbb5404b805904a6b57` 继承安全 master `8e0d0746`；当前重建不复用工作区回退前丢失的本地证据，runtime/browser EPERM 不算通过
+- 公开订阅、实际 URI provider 导入、托管证书完整生命周期、Chromium 创建/取消/编辑/刷新/再打开/导出/损坏后停机恢复为本次集成门槛。独立审查、八组 exact-head、授权正常 merge、八组 exact-master 仍待完成；无 tag/Release、附件晋升或部署，详见[TUIC 契约](docs/TUIC_046.md)
+
+## 2026-10-06 — 普通节点响应安全修复主线收口
+
+- [PR #23](https://github.com/ForceMind/V-UI/pull/23) 正常合并至签名 master `8e0d07463e59b52856f55fa33346a760a38b4705`，tree `fda9f9d8a26dd21bdf0e441ab5d9bbc7ec0dbdd8`，来源候选 `ae415ea5ce4879a2e8a9cf52e8a933136087e1cd`
+- 独立源码审查、八组准确候选和八组准确主线成功；最终 11 jobs/全部步骤 attempt 1 成功。普通 discovery 371 项（含 80 项明确 skip）、激活真实链路 63 项、托管 HY2 8 项及 Chromium 响应/证书卡/编辑/导出/恢复分别验证，见[安全收口](docs/INBOUND_RESPONSE_CLOSURE_20261006.md)
+- 普通响应不回传秘密/原始配置/服务端材料路径；特权编辑路径字符串、必要客户端导出凭据保留。只使用合成凭据，不宣称真实泄露事件；无生产轮换、发布或部署
+
+## 2026-10-06 — v0.4.5 HY2 主线收口
+
+- [PR #20/#21](docs/HYSTERIA2_CLOSURE_045.md) 正常合并最终 master `838c66d9974dd9f3a944641a2e9e03cc200e0bbe`，tree `e12287d8ebbea233142d58191ee5141a0a49a17a`；最终八组/11 jobs/全部步骤 attempt 1 成功，真实链路 63 项与托管 HY2 8 项分别通过
+- PR #20 来源候选 `c9d45aac7b8e6951e231d3ca41a9eb8507638510` 已完成独立审查/候选验收；首次合并 `dbf1cfbe` 的继承 Trojan/gRPC TLS 原因日志失败保留。PR #21 来源 `5ee7e35` 仅修复有界真实原因收集，保持零目标请求、无 DIRECT 和 x509 断言
+- 首次裸前置 `6daff89e` 日志不足、第二前置 `e1800367` 链路 58 项通过但 ACME DNS TCP/UDP 端口碰撞，以及 PR #21 portable 初次 API rate limit 失败/attempt 2 成功均保留，不改写为首次成功。无 tag/Release、附件晋升或部署
+
+以下原安全候选及 HY2 候选条目完整保留当时状态；“待完成”不覆盖以上已完成收口，也不证明当前 TUIC 通过。
+
+
 ## 2026-10-06 — 普通节点响应凭据收敛（安全修复候选）
 
 - 修复共用 serializer 在已鉴权普通列表/创建/更新时回传原始 settings/stream_settings 的问题，覆盖统一接口与 Xray/sing-box 旧别名；改为元数据、凭据存在状态和托管证书适用性允许列表

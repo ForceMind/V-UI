@@ -1,4 +1,4 @@
-"""Managed Hysteria2 TLS preserves secrets and separates issuance from application."""
+"""Managed TUIC TLS preserves secrets and separates issuance from application."""
 from contextlib import ExitStack
 from copy import deepcopy
 import json
@@ -21,15 +21,16 @@ from app.services.core_runtime import CoreRuntime
 from app.services.inbound_service import create_inbound
 import test_auth as auth_tests
 import test_certificates as certificate_tests
-import test_hysteria2_preflight_loopback as hy2_preflight
+import test_tuic_preflight_loopback as tuic_preflight
 from test_inbound_security_binding import BindingManager
 from loopback_helpers import CoreProcess, start_http_target, unused_port
 
 
-PASSWORD = 'Synthetic-HY2:p@ss/word?+#%'
+PASSWORD = 'Synthetic-TUIC:p@ss/word?+#%'
+UUID = '11111111-1111-4111-8111-111111111111'
 
 
-class Hysteria2ManagedEditorTests(unittest.TestCase):
+class TUICManagedEditorTests(unittest.TestCase):
     def setUp(self):
         auth_tests.AuthenticationTests.setUp(self)
         self.assertEqual(auth_tests.AuthenticationTests.login(self).status_code, 200)
@@ -39,8 +40,8 @@ class Hysteria2ManagedEditorTests(unittest.TestCase):
 
     def create(self):
         result = self.client.post('/api/inbounds', headers=auth_tests.HEADERS, json={
-            'core': 'sing-box', 'protocol': 'hysteria2', 'remark': 'managed-hysteria2', 'port': 10451,
-            'profile': {'security': 'tls', 'transport': 'quic', 'hysteria2_password': PASSWORD,
+            'core': 'sing-box', 'protocol': 'tuic', 'remark': 'managed-tuic', 'port': 10451,
+            'profile': {'security': 'tls', 'transport': 'quic', 'tuic_uuid': UUID, 'tuic_password': PASSWORD,
                         'client_fingerprint': '', 'up_mbps': None, 'down_mbps': None},
             'certificate_id': 'a' * 32})
         self.assertEqual(result.status_code, 200, result.text)
@@ -54,7 +55,7 @@ class Hysteria2ManagedEditorTests(unittest.TestCase):
     def test_create_edit_refresh_keep_binding_and_never_return_auth_password(self):
         identity = self.create()
         original = self.snapshot(identity)
-        self.assertEqual(original[0]['users'], [{'password': PASSWORD}])
+        self.assertEqual(original[0]['users'], [{'uuid': UUID, 'password': PASSWORD}])
         self.assertNotIn('transport', original[1])
         for field in ('up_mbps', 'down_mbps', 'obfs'):
             self.assertNotIn(field, original[0])
@@ -66,12 +67,15 @@ class Hysteria2ManagedEditorTests(unittest.TestCase):
             self.assertEqual(state['profile']['transport'], 'quic')
             self.assertEqual(state['profile']['security'], 'tls')
             self.assertEqual(state['profile']['server_name'], 'vpn.example.test')
-            self.assertTrue(state['profile']['hysteria2_password_set'])
-            self.assertFalse(state['profile'].get('hysteria2_password'))
+            self.assertTrue(state['profile']['tuic_password_set'])
+            self.assertTrue(state['profile']['tuic_uuid_set'])
+            self.assertFalse(state['profile'].get('tuic_uuid'))
+            self.assertNotIn(UUID, json.dumps(state))
+            self.assertFalse(state['profile'].get('tuic_password'))
             self.assertNotIn(PASSWORD, json.dumps(state))
             result = self.client.put(f'/api/inbounds/{identity}', headers=auth_tests.HEADERS, json={
-                'remark': f'managed-hysteria2-edited-{index}',
-                'profile': {**state['profile'], 'hysteria2_password': ''},
+                'remark': f'managed-tuic-edited-{index}',
+                'profile': {**state['profile'], 'tuic_password': ''},
                 'certificate_id': state['certificate_id']})
             self.assertEqual(result.status_code, 200, result.text)
             self.assertEqual(self.snapshot(identity), original)
@@ -79,16 +83,16 @@ class Hysteria2ManagedEditorTests(unittest.TestCase):
     def test_explicit_password_replacement_preserves_tls_and_binding(self):
         identity = self.create()
         _, stream = self.snapshot(identity)
-        replacement = 'Synthetic-new-HY2:p@ss/word?#%'
+        replacement = 'Synthetic-new-TUIC:p@ss/word?#%'
         state = self.client.get(f'/api/inbounds/{identity}/editor').json()
         result = self.client.put(f'/api/inbounds/{identity}', headers=auth_tests.HEADERS, json={
-            'profile': {**state['profile'], 'hysteria2_password': replacement},
+            'profile': {**state['profile'], 'tuic_password': replacement},
             'certificate_id': 'a' * 32})
         self.assertEqual(result.status_code, 200, result.text)
-        self.assertEqual(self.snapshot(identity), ({'users': [{'password': replacement}]}, stream))
+        self.assertEqual(self.snapshot(identity), ({'users': [{'uuid': UUID, 'password': replacement}]}, stream))
         refreshed = self.client.get(f'/api/inbounds/{identity}/editor').json()
         self.assertEqual(refreshed['certificate_id'], 'a' * 32)
-        self.assertTrue(refreshed['profile']['hysteria2_password_set'])
+        self.assertTrue(refreshed['profile']['tuic_password_set'])
         for secret in (PASSWORD, replacement):
             self.assertNotIn(secret, json.dumps(refreshed))
 
@@ -113,9 +117,9 @@ class Hysteria2ManagedEditorTests(unittest.TestCase):
 
     def test_other_targets_remain_rejected_before_material_lookup(self):
         for core, protocol, security in (
-                ('xray', 'hysteria2', 'tls'), ('sing-box', 'unsupported', 'tls'),
-                ('sing-box', 'shadowsocks', 'tls'), ('sing-box', 'hysteria2', 'none'),
-                ('sing-box', 'hysteria2', 'reality')):
+                ('xray', 'tuic', 'tls'), ('sing-box', 'unsupported', 'tls'),
+                ('sing-box', 'shadowsocks', 'tls'), ('sing-box', 'tuic', 'none'),
+                ('sing-box', 'tuic', 'reality')):
             with self.subTest(core=core, protocol=protocol, security=security):
                 with self.assertRaises(HTTPException) as rejected:
                     inbound_api._managed_certificate({'security': security}, 'a' * 32, core, protocol)
@@ -123,7 +127,7 @@ class Hysteria2ManagedEditorTests(unittest.TestCase):
         self.assertEqual(self.manager.material_calls, 0)
 
 
-class Hysteria2ManagedLifecycleTests(unittest.TestCase):
+class TUICManagedLifecycleTests(unittest.TestCase):
     # Reuse the isolated real certificate/SQLite fixture without inheriting its
     # unrelated tests. SigningProvider is a temporary CA, never a public account.
     setUp = certificate_tests.CertificateTests.setUp
@@ -131,13 +135,13 @@ class Hysteria2ManagedLifecycleTests(unittest.TestCase):
     issue = certificate_tests.CertificateTests.issue
     due = certificate_tests.CertificateTests.due
 
-    def node(self, *, protocol='hysteria2', core='sing-box', tls=None):
+    def node(self, *, protocol='tuic', core='sing-box', tls=None):
         stream = {'tls': tls if tls is not None else {'enabled': True, 'server_name': 'vpn.example.test'},
                   '_vui': {'security': 'tls', 'server_name': 'vpn.example.test',
                            'client_fingerprint': '', 'skip_cert_verify': False}}
         with database.SessionLocal() as db:
             row = database.Inbound(core=core, protocol=protocol, port=10451, enable=True,
-                settings={'users': [{'password': PASSWORD}]}, stream_settings=stream)
+                settings={'users': [{'uuid': UUID, 'password': PASSWORD}]}, stream_settings=stream)
             db.add(row); db.commit(); db.refresh(row)
             return row.id
 
@@ -167,7 +171,7 @@ class Hysteria2ManagedLifecycleTests(unittest.TestCase):
         self.assertNotEqual(revision, first_revision)
         self.assertEqual(tuple(path.read_bytes() for path in first_paths), old_bytes)
         settings, stream = self.snapshot(identity)
-        self.assertEqual(settings, {'users': [{'password': PASSWORD}]})
+        self.assertEqual(settings, {'users': [{'uuid': UUID, 'password': PASSWORD}]})
         self.assertNotIn('transport', stream)
         self.assertEqual(stream['tls']['certificate_path'], str(paths[0]))
         self.assertEqual(stream['tls']['key_path'], str(paths[1]))
@@ -242,7 +246,7 @@ class Hysteria2ManagedLifecycleTests(unittest.TestCase):
         self.assertEqual(self.manager.job(job['id'])['state'], 'succeeded')
         self.assertNotEqual(self.manager.material(certificate_id)[2], previous)
         self.assertEqual(tuple(path.read_bytes() for path in paths), material)
-        self.assertEqual(self.snapshot(identity)[0], {'users': [{'password': PASSWORD}]})
+        self.assertEqual(self.snapshot(identity)[0], {'users': [{'uuid': UUID, 'password': PASSWORD}]})
         with database.SessionLocal() as db:
             binding = db.get(CertificateBinding, target)
             self.assertEqual(binding.applied_revision, previous)
@@ -251,10 +255,10 @@ class Hysteria2ManagedLifecycleTests(unittest.TestCase):
     def test_manager_retains_target_and_tls_guards(self):
         certificate_id = self.issue(domain='vpn.example.test')
         for core, protocol, tls, error in (
-                ('xray', 'hysteria2', None, 'UNSUPPORTED_CERTIFICATE_TARGET'),
+                ('xray', 'tuic', None, 'UNSUPPORTED_CERTIFICATE_TARGET'),
                 ('sing-box', 'unsupported', None, 'UNSUPPORTED_CERTIFICATE_TARGET'),
-                ('sing-box', 'hysteria2', {'enabled': False}, 'TLS_NODE_REQUIRED'),
-                ('sing-box', 'hysteria2', {'enabled': True, 'reality': {'enabled': True}}, 'TLS_NODE_REQUIRED')):
+                ('sing-box', 'tuic', {'enabled': False}, 'TLS_NODE_REQUIRED'),
+                ('sing-box', 'tuic', {'enabled': True, 'reality': {'enabled': True}}, 'TLS_NODE_REQUIRED')):
             with self.subTest(core=core, protocol=protocol, tls=tls):
                 identity = self.node(core=core, protocol=protocol, tls=tls)
                 before = self.snapshot(identity)
@@ -267,7 +271,7 @@ class Hysteria2ManagedLifecycleTests(unittest.TestCase):
 
 @unittest.skipUnless(os.getenv('VUI_TEST_CORES') and os.getenv('VUI_TEST_MIHOMO'),
                      'pinned real sing-box and Mihomo binaries required')
-class Hysteria2ManagedRealCoreTests(unittest.TestCase):
+class TUICManagedRealCoreTests(unittest.TestCase):
     """Real managed QUIC reloads use the same operator runtime as the panel.
 
     Client construction and HTTP assertions reuse the pinned bare preflight;
@@ -276,16 +280,16 @@ class Hysteria2ManagedRealCoreTests(unittest.TestCase):
     login = certificate_tests.CertificateTests.login
     issue = certificate_tests.CertificateTests.issue
     due = certificate_tests.CertificateTests.due
-    unique_path = hy2_preflight.Hysteria2PreflightLoopbackTests.unique_path
-    client_config = hy2_preflight.Hysteria2PreflightLoopbackTests.client_config
-    check_command = hy2_preflight.Hysteria2PreflightLoopbackTests.check_command
-    prepare_client = hy2_preflight.Hysteria2PreflightLoopbackTests.prepare_client
-    logs = hy2_preflight.Hysteria2PreflightLoopbackTests.logs
-    assert_success = hy2_preflight.Hysteria2PreflightLoopbackTests.assert_success
+    unique_path = tuic_preflight.TUICPreflightLoopbackTests.unique_path
+    client_config = tuic_preflight.TUICPreflightLoopbackTests.client_config
+    check_command = tuic_preflight.TUICPreflightLoopbackTests.check_command
+    prepare_client = tuic_preflight.TUICPreflightLoopbackTests.prepare_client
+    logs = tuic_preflight.TUICPreflightLoopbackTests.logs
+    assert_success = tuic_preflight.TUICPreflightLoopbackTests.assert_success
 
     @classmethod
     def setUpClass(cls):
-        hy2_preflight.Hysteria2PreflightLoopbackTests.setUpClass.__func__(cls)
+        tuic_preflight.TUICPreflightLoopbackTests.setUpClass.__func__(cls)
 
     def setUp(self):
         certificate_tests.CertificateTests.setUp(self)
@@ -307,7 +311,7 @@ class Hysteria2ManagedRealCoreTests(unittest.TestCase):
     def forward_both(self, server_port, phase):
         # Each phase launches fresh clients and new QUIC sessions, so an old
         # connection cannot conceal failed server restarts or TLS reloads.
-        for client in hy2_preflight.CLIENTS:
+        for client in tuic_preflight.CLIENTS:
             with self.subTest(client=client, phase=phase), ExitStack() as processes:
                 port = unused_port()
                 command, env = self.prepare_client(client, port, server_port)
@@ -316,21 +320,21 @@ class Hysteria2ManagedRealCoreTests(unittest.TestCase):
                 self.assert_success(port)
                 self.assertIsNone(process.process.poll(), self.logs())
                 self.assertTrue(self.runtime.status()['running'])
-                print(f'Hysteria2 managed TLS {phase}: {client} HTTP/TCP over QUIC; fresh verified session')
+                print(f'TUIC managed TLS {phase}: {client} HTTP/TCP over QUIC; fresh verified session')
 
     def test_managed_bind_renew_failed_issue_stopped_apply_and_restart_forward_both_clients(self):
-        certificate_id = self.issue(domain=hy2_preflight.SNI)
+        certificate_id = self.issue(domain=tuic_preflight.SNI)
         paths, _, first_revision = self.manager.material(certificate_id)
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
             udp.bind(('127.0.0.1', 0))
             server_port = udp.getsockname()[1]
         with database.SessionLocal() as db:
             row = create_inbound(db, {
-                'core': 'sing-box', 'protocol': 'hysteria2', 'remark': 'managed-real-hysteria2',
+                'core': 'sing-box', 'protocol': 'tuic', 'remark': 'managed-real-tuic',
                 'port': server_port, 'profile': {
-                    'security': 'tls', 'transport': 'quic', 'server_name': hy2_preflight.SNI,
+                    'security': 'tls', 'transport': 'quic', 'server_name': tuic_preflight.SNI,
                     'certificate_path': str(paths[0]), 'key_path': str(paths[1]),
-                    'hysteria2_password': hy2_preflight.PASSWORD,
+                    'tuic_uuid': tuic_preflight.UUID, 'tuic_password': tuic_preflight.PASSWORD,
                     'client_fingerprint': '', 'up_mbps': None, 'down_mbps': None,
                     'skip_cert_verify': False}})
             identity = row.id
@@ -341,8 +345,8 @@ class Hysteria2ManagedRealCoreTests(unittest.TestCase):
         self.manager.bind(certificate_id, target)
         config = json.loads(self.runtime.config_path().read_text())
         server = config['inbounds'][0]
-        self.assertEqual(server['type'], 'hysteria2')
-        self.assertEqual(server['users'], [{'password': hy2_preflight.PASSWORD}])
+        self.assertEqual(server['type'], 'tuic')
+        self.assertEqual(server['users'], [{'uuid': tuic_preflight.UUID, 'password': tuic_preflight.PASSWORD}])
         for field in ('transport', 'up_mbps', 'down_mbps', 'obfs'):
             self.assertNotIn(field, server)
         self.target_port, self.requests = start_http_target(self.stack)

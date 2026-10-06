@@ -85,7 +85,7 @@ ALPN 不属于可视化输入：原始 API / 持久化 `tls.alpn` 必须省略�
 
 本范围已经完成[gRPC 准确主线验收](VLESS_GRPC_CLOSURE_044.md)，后续变更仍须重验。现有 gRPC Lite 错误 CA/SNI 可能表现为调用者超时，不能承诺及时返回 TLS 原因；首次失败、前置与当时候选文本见[历史契约](VLESS_GRPC_044.md)。
 
-### v0.4.5 Hysteria2 profile 候选
+### v0.4.5 Hysteria2 profile 已验证基线
 
 限定 `core: sing-box`、`protocol: hysteria2`；可视化 profile 使用 `security: tls`、`transport: quic`、明确 `server_name`（SNI），以及正式 `certificate_id` 或手工 `certificate_path` / `key_path`。原生 QUIC 是该协议自己的传输，不另生成 WS/gRPC transport。证书校验不能关闭。
 
@@ -95,4 +95,17 @@ ALPN 不属于可视化输入：原始 API / 持久化 `tls.alpn` 必须省略�
 
 公开 URI 为标准 `hysteria2://`，密码百分号编码、查询为 `sni` 和 `insecure=0`；Mihomo 节点包含密码、`sni`、`skip-cert-verify: false` 和 `udp: false`；sing-box 出站包含密码、验证 TLS/SNI 和 `network: tcp`。订阅可以含连接凭据，不能含私钥或服务端材料路径；失败不退 DIRECT。仅验 HTTP/TCP 负载，QUIC UDP 端口本身不证明应用 UDP。
 
-HY2 正式托管证书绑定/续期沿用原材料与应用状态分离，停止核心保留 `CORE_STOPPED_PENDING_APPLY`。当前实现须完成独立审查及最终准确候选/主线八组验收；固定二进制前置真实链路 58 项通过不是集成 API/浏览器/证书通过声明，见[HY2 契约](HYSTERIA2_045.md)。
+HY2 正式托管证书绑定/续期沿用原材料与应用状态分离，停止核心保留 `CORE_STOPPED_PENDING_APPLY`。该范围已完成[HY2 主线验收](HYSTERIA2_CLOSURE_045.md)，后续变更仍须重验；裸前置 58 项、历史失败和最终集成验收分别记录于[原契约](HYSTERIA2_045.md)。
+
+
+### v0.4.6 TUIC v5 profile 候选
+
+限定 `core: sing-box`、`protocol: tuic`，profile 使用 `security: tls`、`transport: quic`、明确 `server_name` 及正式 `certificate_id` 或手工材料路径。新建生成服务端 `tls.alpn: ["h3"]`；严格公开导出要求该字段恰为 h3，不接受省略/null/空列表/其他 ALPN。默认拥塞 cubic、原生 relay、零 RTT 关闭、无指纹覆盖。
+
+`profile.tuic_uuid` 与 `profile.tuic_password` 分别省略/空字符串时，新建生成、编辑保留；非空只替换对应项。UUID 是规范的连字符字符串；密码 1–256 字面字符，不 trim，不允许全空白、Unicode Cc 或无效 UTF-8 surrogate。非法类型/值、已有缺失/畸形凭据返回 422，不回显秘密、不悄悄重新生成。已有导入缺失 TLS 时，有意修复须明确 `security: "tls"`；已有 TLS 对象缺少 ALPN 仍拒绝，不通过部分编辑补齐。
+
+`/editor` 返回空 `tuic_uuid` / `tuic_password` 与 `tuic_uuid_set` / `tuic_password_set`；普通列表/创建/更新继续使用 PR #23 摘要允许列表。特权编辑保留手工证书路径字符串，明确授权导出包含客户端 UUID/密码且无服务端材料。高级导入字段保留或拒绝；草稿保存不改变严格公开导出范围。
+
+TUIC URI 是固定 Mihomo converter 的非官方客户端约定，不是官方通用标准；Mihomo YAML 包含 `sni`、`alpn: [h3]`、`skip-cert-verify: false`、`reduce-rtt: false`。其 TUIC adapter 硬编码 UDP 能力，省略无效 `udp: false`，不得声称禁用 UDP。sing-box 出站 `network: tcp`，应用 UDP 未验收，QUIC 仍要求节点 UDP 可达。
+
+证书绑定/续期/失败保护/停止待应用沿用现有语义。当前集成独立审查及准确候选/主线八组仍待完成，完整约束与新测试门槛见[TUIC 契约](TUIC_046.md)。

@@ -697,7 +697,7 @@
             </el-form-item>
 
             <template v-if="newInbound.profile.security === 'tls'">
-                <el-form-item label="托管证书" v-if="newInbound.core === 'sing-box' && ['vless','trojan','vmess','hysteria2'].includes(newInbound.protocol)">
+                <el-form-item label="托管证书" v-if="newInbound.core === 'sing-box' && ['vless','trojan','vmess','hysteria2','tuic'].includes(newInbound.protocol)">
                     <el-select v-model="newInbound.certificate_id" clearable @clear="clearManagedCertificate" placeholder="选证书自动填入；或手动填写路径" style="width:100%">
                         <el-option v-for="cert in managedCertificates" :key="cert.id" :label="cert.domain" :value="cert.id"></el-option>
                     </el-select>
@@ -816,6 +816,18 @@
             </template>
 
             <template v-if="newInbound.protocol === 'tuic'">
+                <el-alert :title="'TUIC v5 使用 QUIC：服务器与云防火墙需允许 UDP ' + newInbound.port + '。当前仅验收 HTTP/TCP；Mihomo 的 TUIC UDP 能力不能靠 udp:false 关闭，不承诺应用 UDP 转发。'"
+                    type="info" :closable="false"></el-alert>
+                <el-form-item label="TUIC UUID">
+                    <el-input v-model="newInbound.profile.tuic_uuid" type="password" show-password
+                        :placeholder="newInbound.profile.tuic_uuid_set ? '留空保持当前 TUIC UUID' : '留空自动生成 TUIC UUID'"></el-input>
+                </el-form-item>
+                <el-form-item label="TUIC Password">
+                    <el-input v-model="newInbound.profile.tuic_password" type="password" show-password
+                        :placeholder="newInbound.profile.tuic_password_set ? '留空保持当前 TUIC 密码' : '留空自动生成 TUIC 密码'"></el-input>
+                </el-form-item>
+                <el-alert title="公开配置仅接受默认 CUBIC、h3、Native 与关闭 0-RTT；已有高级参数保留为未验收草稿，不能公开导出。"
+                    type="warning" :closable="false"></el-alert>
                 <el-form-item label="拥塞控制">
                     <el-select
                         v-model="newInbound.profile.congestion_control"

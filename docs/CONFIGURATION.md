@@ -122,9 +122,9 @@ URI/Base64 的 `type=ws`、path、可选 Host、TLS/SNI、ALPN 和 fingerprint�
 
 错误 CA/SNI 会阻止实际转发，但当前固定 Lite 客户端可能让请求等待至超时，没有及时把 x509 原因返回调用者。不能把“超时”单独当成 TLS 拒绝证明，也不能承诺立即显示详细 TLS 错误。前置测试仅为负向 sing-box 子进程开启 `GODEBUG=http2debug=1`，取得真实 unknown-CA/wrong-name x509 证据，同时检查目标无请求和无 DIRECT；未改变二进制、信任库、验证策略或生产日志默认值。排错应核对 CA、SNI、service_name 和实际日志，不通过跳过 TLS 验证或更换核心掩盖问题。
 
-## 0.4.5 Hysteria2/TLS 候选
+## 0.4.5 Hysteria2/TLS 基线
 
-本候选限定 sing-box 1.14.2 服务端/客户端与 Mihomo 1.19.32，单密码、明确验证 SNI、原生 QUIC 默认值。固定二进制前置真实链路已通过，但集成独立审查、最终准确候选/主线八组 CI 尚待完成；同一前置 ACME 仍有已记录的测试夹具端口碰撞失败，详见[阶段契约](HYSTERIA2_045.md)。
+本基线限定 sing-box 1.14.2 服务端/客户端与 Mihomo 1.19.32，单密码、明确验证 SNI、原生 QUIC 默认值。[PR #20/#21 主线验收](HYSTERIA2_CLOSURE_045.md)已完成；前置缺日志、ACME 端口碰撞及首次 master TLS 证据失败仍保留于[历史契约](HYSTERIA2_045.md)。后续变更须重验。
 
 ### 创建或编辑
 
@@ -145,4 +145,26 @@ URI/Base64 的 `type=ws`、path、可选 Host、TLS/SNI、ALPN 和 fingerprint�
 
 标准 `hysteria2://<encoded-password>@<server>:<port>/?sni=<name>&insecure=0#<name>` 对密码和显示名执行必要百分号编码，解析后须还原原密码；Mihomo YAML 与 sing-box JSON 同样保留密码、SNI 与验证状态。URI 只承载标准连接参数，不额外承诺导入客户端的应用 UDP 行为。服务端私钥和材料路径不导出，失败不退 DIRECT。
 
-托管证书绑定/换绑、TLS 手工解绑、续期失败保留旧材料与材料/应用状态分离沿用现有流程。续期不改变密码或传输，手动停止核心保持 `CORE_STOPPED_PENDING_APPLY`，只有主动启动后应用。新浏览器验收覆盖创建/取消/编辑/刷新/再打开/秘密稳定、三格式解析和故意损坏后的停机备份/恢复；这是候选门槛，尚未声称最终集成已通过。
+托管证书绑定/换绑、TLS 手工解绑、续期失败保留旧材料与材料/应用状态分离沿用现有流程。续期不改变密码或传输，手动停止核心保持 `CORE_STOPPED_PENDING_APPLY`，只有主动启动后应用。新浏览器验收覆盖创建/取消/编辑/刷新/再打开/秘密稳定、三格式解析和故意损坏后的停机备份/恢复；这些流程已由上述 HY2 主线验收，后续修改仍须重验。
+
+
+## 0.4.6 TUIC v5/TLS 候选
+
+当前仅为固定官方 sing-box 1.14.2 / Mihomo 1.19.32 的限定 TUIC v5 集成候选，最终独立审查及准确候选/主线八组待完成，见[TUIC 契约](TUIC_046.md)。
+
+### 创建或编辑
+
+选择 sing-box / TUIC，保持 TLS、原生 QUIC、明确 SNI 和正常证书校验，选择正式托管证书或手工证书/私钥路径。服务端 ALPN 必须明确且恰为 `["h3"]`；新建自动写入，不能省略、null 或套用 gRPC 的 h2。拥塞保持默认 cubic、relay 保持 native、零 RTT 关闭，不添加 Chrome/带宽/heartbeat 调优。
+
+- `TUIC UUID`、`TUIC Password` 独立处理：留空新建生成、编辑保留；非空只替换对应凭据，取消不保存
+- UUID 为规范的连字符字符串，密码为 1–256 字面字符，不 trim，不允许全空白、Unicode Cc 或无效 UTF-8 surrogate；畸形已有凭据拒绝，不能靠无关编辑重新生成
+- 普通列表/创建/更新不返回凭据或原始配置，编辑只显示存在标志；特权编辑可回填手工证书路径字符串，密钥内容不返回
+- 导入的高级拥塞/relay/零 RTT/ALPN 参数可保留或在不可表达时拒绝；保存草稿不代表可公开导出。不静默移除未知字段、补齐缺失 h3 或把关闭验证的导入变成合格节点；已有导入缺失 TLS 时，有意修复须明确选择 TLS，而非无关的部分编辑
+
+### 导出与 UDP 边界
+
+三格式为完整 Mihomo YAML、sing-box JSON 和固定 Mihomo 导入器支持的 TUIC URI 约定：`tuic://<encoded-uuid>:<encoded-password>@<server>:<port>?sni=<name>&alpn=h3#<name>`。上游称此约定临时/非官方，不能称官方通用 URI 标准。凭据百分号编码且导入后还原，保留 SNI/h3/验证语义；正常验证与零 RTT 关闭使用固定导入器安全默认值，不附加虚构开关。服务端材料永不导出，失败不退 DIRECT。
+
+仅验收 HTTP/TCP；sing-box 出站 `network: tcp`。固定 Mihomo TUIC adapter 硬编码 UDP 能力，导出省略无效的 `udp: false`，不能声称关闭 UDP。应用 UDP 未验收；QUIC 传输本身仍需要主机/云网络放行节点 UDP 端口。沿用显式可重复的 `--node-udp-port` 安装预检，不改变 TCP/UDP 分离和确认规则。
+
+证书按 SNI 绑定，续期保留 UUID/密码/配置，失败保留旧活动材料及已应用 revision。停止核心保持 `CORE_STOPPED_PENDING_APPLY`；创建/取消/编辑/刷新/再打开/导出、续期新 QUIC 会话和故意损坏后停机恢复均须由当前最终集成提交验证，不能用裸前置替代。
