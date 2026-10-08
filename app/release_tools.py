@@ -54,7 +54,14 @@ def runtime_tree_digest(root: Path) -> str:
         elif path.is_file():
             digestor.update(b'F'+str(path.stat().st_mode & 0o777).encode()+b'\0')
             with path.open('rb') as handle:
-                for chunk in iter(lambda:handle.read(1024*1024),b''):digestor.update(chunk)
+                # This tree belongs to the prepared release, never user data.
+                # Hash every byte without retaining the entire installed Python
+                # tree in cache after each integrity scan.
+                wrapped = _PrivateArchiveFile(handle)
+                if wrapped.advice is not None and wrapped.dontneed is not None:
+                    os.fsync(handle.fileno())
+                for chunk in iter(lambda:wrapped.read(STREAM_CHUNK),b''):
+                    digestor.update(chunk)
         elif path.is_dir(): digestor.update(b'D\0')
         else: raise ReleaseError('Unsupported runtime file type')
     return digestor.hexdigest()
@@ -129,8 +136,8 @@ def stream_digest(handle, output=None, limit=None):
 def file_digest(path: Path, *, cold=False) -> str:
     with path.open('rb') as handle:
         if cold:
-            # Only immutable install artifacts opt in, never Python runtime,
-            # application code or user data. Preserve every digest check.
+            # Only caller-selected immutable installation files opt in; never
+            # application data. Preserve every digest check.
             wrapped = _PrivateArchiveFile(handle)
             if wrapped.advice is not None and wrapped.dontneed is not None:
                 os.fsync(handle.fileno())
@@ -185,6 +192,8 @@ class _PrivateArchiveFile:
         return count
 
     def read(self, size=-1):
+        if size == 0:
+            return self.handle.read(0)  # A zero-byte request is not EOF.
         offset = self.handle.tell()
         data = self.handle.read(size)
         # Revisit the consumed prefix in batches: a previous hint can race
@@ -433,7 +442,7 @@ def stage(archive: Path, expected_sha: str, root: Path) -> str:
             os.replace(payload,final/'payload')
             runtime_archive=final/'payload'/'runtimes'/(key+'.tar.gz')
             pin=(meta.get('portable_runtime_pins') or {}).get(key,{})
-            if not runtime_archive.is_file() or file_digest(runtime_archive)!=pin.get('sha256'):
+            if not runtime_archive.is_file() or file_digest(runtime_archive, cold=True)!=pin.get('sha256'):
                 raise ReleaseError('Portable Python runtime pin mismatch')
             extract_runtime(runtime_archive,final/'runtime')
             python=runtime_python(final)

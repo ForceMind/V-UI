@@ -111,6 +111,8 @@ class _PrivateArchiveFile:
         return count
 
     def read(self, size=-1):
+        if size == 0:
+            return self.handle.read(0)  # A zero-byte request is not EOF.
         offset = self.handle.tell()
         data = self.handle.read(size)
         # Revisit the consumed prefix in batches: a previous hint can race

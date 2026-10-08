@@ -141,3 +141,92 @@ class PrivateArchiveCacheTests(unittest.TestCase):
                     self.assertTrue(all(handle.closed for handle in handles))
                     self.assertFalse((root / 'partial').exists())
                     self.assertEqual(release_tools.file_digest(bundle), sha)
+
+    def test_zero_length_read_does_not_report_eof_or_discard(self):
+        for module in (release_tools, install_system):
+            with self.subTest(module=module.__name__), tempfile.TemporaryFile() as raw:
+                raw.write(b'fixture'); raw.seek(0)
+                with patch.object(os, 'posix_fadvise') as advice:
+                    wrapped = module._PrivateArchiveFile(raw)
+                    self.assertEqual(wrapped.read(0), b'')
+                    advice.assert_not_called()
+                    self.assertEqual(wrapped.read(), b'fixture')
+                    self.assertEqual(wrapped.read(), b'')
+                    advice.assert_called_once_with(raw.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+
+    def _runtime_fixture(self, root):
+        (root / 'python' / 'lib').mkdir(parents=True)
+        (root / 'python' / 'lib' / 'module.py').write_bytes(b'fixture' * 1000)
+        (root / 'python' / 'empty').write_bytes(b'')
+        (root / 'python' / 'alias').symlink_to('lib/module.py')
+
+    def _legacy_runtime_digest(self, root):
+        checksum = hashlib.sha256()
+        for path in sorted(root.rglob('*')):
+            checksum.update(path.relative_to(root).as_posix().encode() + b'\0')
+            if path.is_symlink():
+                checksum.update(b'L' + os.readlink(path).encode() + b'\0')
+            elif path.is_file():
+                checksum.update(b'F' + str(path.stat().st_mode & 0o777).encode() + b'\0')
+                checksum.update(path.read_bytes())
+            elif path.is_dir(): checksum.update(b'D\0')
+            else: raise AssertionError('unexpected fixture type')
+        return checksum.hexdigest()
+
+    def test_runtime_cold_scan_preserves_legacy_digest_and_link_semantics(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); self._runtime_fixture(root)
+            expected = self._legacy_runtime_digest(root)
+            with patch.object(os, 'fsync') as sync, patch.object(os, 'posix_fadvise') as advice:
+                self.assertEqual(release_tools.runtime_tree_digest(root), expected)
+                self.assertEqual(sync.call_count, 2)
+                self.assertEqual(advice.call_count, 2)
+                self.assertTrue(all(c.args[1:] == (0, 0, os.POSIX_FADV_DONTNEED)
+                                    for c in advice.call_args_list))
+
+    def test_runtime_cold_scan_still_detects_content_mode_and_link_changes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); self._runtime_fixture(root)
+            original = release_tools.runtime_tree_digest(root)
+            path = root / 'python' / 'lib' / 'module.py'
+            path.write_bytes(b'changed')
+            changed = release_tools.runtime_tree_digest(root)
+            self.assertNotEqual(changed, original)
+            path.chmod(0o700)
+            changed_mode = release_tools.runtime_tree_digest(root)
+            self.assertNotEqual(changed_mode, changed)
+            link = root / 'python' / 'alias'; link.unlink(); link.symlink_to('empty')
+            self.assertNotEqual(release_tools.runtime_tree_digest(root), changed_mode)
+
+    def test_runtime_cold_scan_hint_failure_keeps_integrity_but_sync_failure_fails(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); self._runtime_fixture(root)
+            expected = self._legacy_runtime_digest(root)
+            for hint in (None, lambda *a: (_ for _ in ()).throw(OSError('unsupported'))):
+                with self.subTest(hint=hint), patch.object(os, 'posix_fadvise', hint):
+                    self.assertEqual(release_tools.runtime_tree_digest(root), expected)
+            with patch.object(os, 'fsync', side_effect=OSError('runtime writeback failed')), \
+                 patch.object(os, 'posix_fadvise') as advice:
+                with self.assertRaisesRegex(OSError, 'runtime writeback failed'):
+                    release_tools.runtime_tree_digest(root)
+                advice.assert_not_called()
+
+    def test_runtime_scan_bounds_reads_and_closes_file_after_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); (root / 'large').write_bytes(b'x' * (10 * 1024 * 1024))
+            sizes = []; original = release_tools._PrivateArchiveFile.read
+            def read(handle, size=-1):
+                sizes.append(size); return original(handle, size)
+            with patch.object(release_tools._PrivateArchiveFile, 'read', read):
+                self.assertEqual(release_tools.runtime_tree_digest(root), self._legacy_runtime_digest(root))
+            self.assertTrue(sizes)
+            self.assertTrue(all(size == release_tools.STREAM_CHUNK for size in sizes))
+            opened = []; original_open = Path.open
+            def capture(path, *args, **kwargs):
+                handle = original_open(path, *args, **kwargs); opened.append(handle); return handle
+            with patch.object(Path, 'open', capture), \
+                 patch.object(os, 'fsync', side_effect=OSError('injected error')):
+                with self.assertRaisesRegex(OSError, 'injected error'):
+                    release_tools.runtime_tree_digest(root)
+            self.assertTrue(opened)
+            self.assertTrue(all(handle.closed for handle in opened))
