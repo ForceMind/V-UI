@@ -1,0 +1,56 @@
+name: Opt-in sustained low-resource acceptance
+on:
+  pull_request:
+    types: [labeled]
+permissions:
+  contents: read
+jobs:
+  sustained:
+    if: github.event.label.name == 'run-low-resource-sustained'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: pip install -r requirements-test.txt
+      - name: Build exact-head offline candidate outside resource limit
+        env:
+          VUI_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/vui-sustained
+          test "$(git rev-parse HEAD)" = "$VUI_SOURCE_COMMIT"
+          python scripts/build_bundle.py /tmp/vui-sustained/vui-linux.zip --source-commit "$VUI_SOURCE_COMMIT" | tee /tmp/vui-sustained/build.log
+      - name: Preflight real persistent CONNECT lanes before long idle
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/vui-sustained/preflight-core
+          unzip -p /tmp/vui-sustained/vui-linux.zip cores/x86_64/sing-box > /tmp/vui-sustained/preflight-core/sing-box
+          chmod 700 /tmp/vui-sustained/preflight-core/sing-box
+          export VUI_SUSTAINED_BINARY=/tmp/vui-sustained/preflight-core/sing-box
+          python -B -m unittest discover -s tests -p test_low_resource_sustained.py -v 2>&1 | tee /tmp/vui-sustained/preflight.log
+      - name: Run complete ninety-minute sustained profile
+        env:
+          VUI_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          python -B scripts/low_resource_acceptance.py \
+            --bundle /tmp/vui-sustained/vui-linux.zip \
+            --source-commit "$VUI_SOURCE_COMMIT" \
+            --memory-mib 512 --duration-profile sustained \
+            --output /tmp/vui-sustained/low-resource-sustained.json
+      - name: Preserve all sustained evidence including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vui-sustained-evidence-${{ github.event.pull_request.head.sha }}
+          path: |
+            /tmp/vui-sustained/*.json
+            /tmp/vui-sustained/*.log
+          retention-days: 7

@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from http.cookiejar import CookieJar
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -116,6 +117,19 @@ def write_json(path: Path, value: dict):
     temporary.replace(path)
 
 
+def process_snapshot(directory: Path):
+    rows = []
+    for pid in (directory / "cgroup.procs").read_text().split():
+        try:
+            status = Path(f"/proc/{int(pid)}/status").read_text().splitlines()
+            fields = dict(line.split(":", 1) for line in status if ":" in line)
+            rows.append({"pid": int(pid), "ppid": int(fields["PPid"]),
+                         "name": fields["Name"].strip(), "threads": int(fields["Threads"])})
+        except FileNotFoundError:
+            continue  # The process exited between the two kernel reads.
+    return rows
+
+
 def filesystem_type(path: Path) -> str:
     # Capture actual mount type, not an assumption that /tmp is disk-backed.
     matches = []
@@ -129,17 +143,35 @@ def filesystem_type(path: Path) -> str:
     return max(matches)[1]
 
 
+def duration_profile(args):
+    profile = getattr(args, "duration_profile", "smoke")
+    if profile not in {"smoke", "sustained"}:
+        raise RuntimeError("Unknown duration profile")
+    if profile == "sustained" and args.memory_mib != 512:
+        raise RuntimeError("Sustained profile currently requires the original 512 MiB limit")
+    return profile
+
+
+def runtime_seconds(args):
+    return 6600 if duration_profile(args) == "sustained" else 600
+
+
 def worker(args) -> int:
     require_hosted_runner()
     directory = cgroup_directory(args.unit)
     limits = verify_limits(directory, args.memory_mib)
+    profile = duration_profile(args)
     report = {"schema": 1, "scope": "actual offline stage/activate, HTTPS panel with idle certificate manager and bounded single sing-box proxy smoke; not full VPS qualification",
               "source_commit": args.source_commit, "unit": args.unit, "limits": limits,
-              "requested_memory_mib": args.memory_mib, "base_page_size_bytes": os.sysconf("SC_PAGE_SIZE"),
+              "duration_profile": profile, "requested_memory_mib": args.memory_mib, "base_page_size_bytes": os.sysconf("SC_PAGE_SIZE"),
               "accounting": "worker, offline pip, panel, local clients, and descendants in one cgroup; build/download, host OS and pre-existing cache ownership excluded",
               "memory_peak_scope": "lifetime cgroup maximum, not reset per stage",
               "memory_stat_scope": "stage-end/current snapshots, not composition at lifetime peak; separate kernel reads may differ",
               "stages": [], "complete": False, "outcome": "running"}
+    if profile == "sustained":
+        report["scope"] = "30-minute panel and single-core idles plus three 10-minute fixed-rate VLESS/TCP/TLS connection steps; not full VPS or 24-hour qualification"
+        report["sustained_load"] = []
+        report["accounting"] += "; sustained client/target/generator outside service cgroup, separately measured; short controls remain inside"
     output = args.output
 
     def checkpoint():
@@ -165,6 +197,7 @@ def worker(args) -> int:
             row["wall_seconds"] = time.monotonic() - started
             after = metrics(directory)
             row["cpu_usage_usec"] = after["cpu.stat"]["usage_usec"] - before["cpu.stat"]["usage_usec"]
+            row["cpu_mean_percent_one_core"] = row["cpu_usage_usec"] / max(row["wall_seconds"], 1e-9) / 10000
             row["memory_current_bytes"] = after["memory.current"]
             row["memory_peak_bytes"] = after["memory.peak"]
             row["memory_stat"] = after["memory.stat"]
@@ -291,15 +324,61 @@ def worker(args) -> int:
                     list(pool.map(one, range(100)))
                 report["concurrent_workload"] = {"requests": 100, "concurrency": 10, "path": "/api/auth/me", "status_200": 100}
             stage("100_authenticated_reads_concurrency_10", concurrent_reads)
-            def idle():
-                time.sleep(60)
+            def alive():
                 if running[0].poll() is not None:
-                    raise RuntimeError("Panel exited during idle")
-            stage("panel_only_idle_60_seconds", idle)
+                    raise RuntimeError("Panel exited unexpectedly")
+            def monitor_wait(seconds, health):
+                started = time.monotonic()
+                deadline = started + seconds
+                samples = []
+                while time.monotonic() < deadline:
+                    alive()
+                    health()
+                    sample = metrics(directory)
+                    sample["processes"] = process_snapshot(directory)
+                    assert_no_oom(sample)
+                    samples.append({"elapsed_seconds": time.monotonic() - started, **sample})
+                    report["stages"][-1]["samples"] = samples
+                    checkpoint()
+                    time.sleep(min(30, max(0, deadline - time.monotonic())))
+                health()
+            def idle():
+                if profile == "sustained":
+                    monitor_wait(1800, alive)
+                else:
+                    time.sleep(60)
+                    alive()
+            if profile == "smoke":
+                stage("panel_only_idle_60_seconds", idle)
+            else:
+                stage("panel_only_idle_1800_seconds", idle)
+                stage("refresh_session_after_panel_idle", login)
             from scripts.low_resource_proxy import run_proxy_smoke
+            def sustained_load(binary, fixture, ca, port, health):
+                from scripts.low_resource_sustained import CONCURRENCIES, request_load
+                last_sample = [0.0]
+                def observe():
+                    alive()
+                    health()
+                    if time.monotonic() - last_sample[0] >= 30:
+                        sample = metrics(directory)
+                        sample["processes"] = process_snapshot(directory)
+                        assert_no_oom(sample)
+                        report["stages"][-1].setdefault("samples", []).append(sample)
+                        checkpoint()
+                        last_sample[0] = time.monotonic()
+                for concurrency in CONCURRENCIES:
+                    stage(f"refresh_session_before_{concurrency}_connection_load", login)
+                    result = stage(f"proxy_sustained_{concurrency}_connections_600_seconds",
+                        lambda: request_load(args.work_dir, args.unit, args.source_commit,
+                            concurrency, binary, fixture, ca, port, observe))
+                    report["sustained_load"].append(result)
+                    stage(f"panel_recovery_after_{concurrency}_connections", lambda: api("/api/auth/me"))
             run_proxy_smoke(payload / "cores" / tools.target_arch() / "sing-box", root / "proxy-fixture",
                             output.with_suffix(""), stage, report,
-                            lambda: api("/api/auth/me"))
+                            lambda: api("/api/auth/me"),
+                            sustained=sustained_load if profile == "sustained" else None,
+                            idle_monitor=monitor_wait if profile == "sustained" else None)
             old_cookies = list(jar)
             stage("logout", lambda: api("/api/auth/logout", {}))
             for cookie in old_cookies:
@@ -349,18 +428,37 @@ def systemd_command(args, unit: str, work: Path, worker_output: Path) -> list[st
     return ["sudo", "-n", "systemd-run", "--wait", "--pipe", "--unit", unit,
             "--uid", str(os.getuid()), "--gid", str(os.getgid()),
             "--property", f"MemoryMax={args.memory_mib}M", "--property", "MemorySwapMax=0",
-            "--property", "CPUQuota=100%", "--property", "RuntimeMaxSec=600",
+            "--property", "CPUQuota=100%", "--property", f"RuntimeMaxSec={runtime_seconds(args)}",
             "--property", "KillMode=control-group", "--property", "OOMPolicy=stop",
             "--setenv=GITHUB_ACTIONS=true", "--setenv=RUNNER_ENVIRONMENT=github-hosted",
             "--setenv=TMPDIR=" + str(work),
             sys.executable, "-B", str(Path(__file__).resolve()), "--worker", "--unit", unit,
             "--bundle", str(args.bundle.resolve()), "--source-commit", args.source_commit,
-            "--output", str(worker_output), "--work-dir", str(work), "--memory-mib", str(args.memory_mib)]
+            "--output", str(worker_output), "--work-dir", str(work), "--memory-mib", str(args.memory_mib),
+            "--duration-profile", duration_profile(args)]
+
+
+def validate_sustained_stages(report, unit, commit):
+    from scripts.low_resource_sustained import validate_result
+    stages = {row["name"]: row for row in report.get("stages", [])}
+    for name, seconds in (("panel_only_idle_1800_seconds", 1800),
+                          ("panel_single_proxy_idle_1800_seconds", 1800),
+                          *((f"proxy_sustained_{n}_connections_600_seconds", 600) for n in (1, 10, 50))):
+        row = stages.get(name, {})
+        elapsed = row.get("wall_seconds")
+        if (row.get("outcome") != "passed" or type(elapsed) not in (int, float)
+                or not math.isfinite(elapsed) or elapsed < seconds):
+            raise RuntimeError("Sustained stage missing or shorter than contracted duration")
+    if [row.get("concurrency") for row in report.get("sustained_load", [])] != [1, 10, 50]:
+        raise RuntimeError("Sustained connection ladder incomplete")
+    for row in report["sustained_load"]:
+        validate_result(row, unit, commit, row["concurrency"])
 
 
 def coordinator(args) -> int:
     require_hosted_runner()
     budget = memory_bytes(args.memory_mib)
+    profile = duration_profile(args)
     if not re.fullmatch(r"[0-9a-f]{40}", args.source_commit):
         raise RuntimeError("An exact source commit is required")
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -371,22 +469,31 @@ def coordinator(args) -> int:
     unit = "vui-low-resource-" + uuid.uuid4().hex + ".service"
     summary = {"schema": 1, "unit": unit, "source_commit": args.source_commit, "outcome": "failed",
                "scope": f"{args.memory_mib} MiB cgroup / one CPU quota regression, not a full 512 MiB host",
-               "requested_memory_mib": args.memory_mib, "worker_report": worker_output.name}
+               "duration_profile": profile, "requested_memory_mib": args.memory_mib, "worker_report": worker_output.name}
     with tempfile.TemporaryDirectory(prefix="low-resource-work-", dir=output.parent) as directory:
         command = systemd_command(args, unit, Path(directory), worker_output)
         try:
-            with output.with_suffix(".log").open("w") as log:
-                result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=660)
+            broker = nullcontext()
+            if profile == "sustained":
+                sys.path.insert(0, str(SOURCE))
+                from scripts.low_resource_sustained import LoadBroker
+                broker = LoadBroker(Path(directory), output, unit, args.source_commit)
+            with broker, output.with_suffix(".log").open("w") as log:
+                result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT,
+                                        timeout=runtime_seconds(args) + 60)
             summary["systemd_run_returncode"] = result.returncode
             if not worker_output.exists():
                 raise RuntimeError("Worker accounting report missing (possible OOM or timeout)")
             report = json.loads(worker_output.read_text())
             if (result.returncode != 0 or report.get("outcome") != "passed" or report.get("complete") is not True
                     or report.get("unit") != unit or report.get("source_commit") != args.source_commit
+                    or report.get("duration_profile") != profile
                     or report.get("requested_memory_mib") != args.memory_mib
                     or report.get("limits", {}).get("memory.max") != budget
                     or report.get("base_page_size_bytes") != os.sysconf("SC_PAGE_SIZE")):
                 raise RuntimeError("Worker failed or its final accounting is incomplete")
+            if profile == "sustained":
+                validate_sustained_stages(report, unit, args.source_commit)
             assert_no_oom(report["metrics"])
             summary["peak_budget_assessment"] = peak_assessment(report["metrics"]["memory.peak"],
                 budget, report["base_page_size_bytes"])
@@ -426,6 +533,7 @@ def main():
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--memory-mib", type=int, choices=MEMORY_PROFILES, default=512)
+    parser.add_argument("--duration-profile", choices=("smoke", "sustained"), default="smoke")
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--unit")
     parser.add_argument("--work-dir", type=Path)

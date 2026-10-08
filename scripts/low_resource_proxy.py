@@ -98,17 +98,20 @@ def require_rejection(request, deliveries, log_path, reasons, *, offset=0, timeo
         time.sleep(.05)
 
 
-def run_proxy_smoke(binary: Path, root: Path, log_prefix: Path, stage, report, panel_check):
+def run_proxy_smoke(binary: Path, root: Path, log_prefix: Path, stage, report, panel_check,
+                    *, sustained=None, idle_monitor=None):
     root.mkdir(mode=0o700)
     report["proxy_workload"] = {
         "protocol": "VLESS/TCP/TLS", "core": "verified installed bundled sing-box",
         "client": "same bundled sing-box; synthetic explicit proxy-only config, not subscription export",
-        "idle_seconds": IDLE_SECONDS,
+        "idle_seconds": 1800 if sustained else IDLE_SECONDS,
         "accounting": "panel plus one server during idle; active phases also include test client and local HTTP target in same cgroup",
         "scope": "short loopback regression only; not 30-minute idle, 10-minute load, 24-hour stability or VPS qualification",
         "positive": [], "negative": {}, "cleanup_complete": False,
     }
     evidence = report["proxy_workload"]
+    if sustained:
+        evidence["scope"] = "30-minute single-server idle and original short positive/negative controls; separate sustained_load records external ten-minute connection ladder"
     processes = []
     with ExitStack() as stack:
         ca, cert, key = certificate_files(root, "proxy")
@@ -134,9 +137,18 @@ def run_proxy_smoke(binary: Path, root: Path, log_prefix: Path, stage, report, p
 
         def idle():
             healthy()
-            time.sleep(IDLE_SECONDS)
+            if sustained:
+                idle_monitor(1800, lambda: server_alive())
+            else:
+                time.sleep(IDLE_SECONDS)
             healthy()
-        stage("panel_single_proxy_idle_60_seconds", idle)
+        def server_alive():
+            if server.process.poll() is not None:
+                raise RuntimeError("Proxy server exited unexpectedly")
+        stage("panel_single_proxy_idle_1800_seconds" if sustained else "panel_single_proxy_idle_60_seconds", idle)
+        if sustained:
+            sustained(binary, root, ca, port, server_alive)
+            healthy()
         target_port, deliveries = start_http_target(stack)
         client_port = unused_port()
         with ExitStack() as clients:

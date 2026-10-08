@@ -147,9 +147,11 @@ class LowResourceAcceptanceTests(unittest.TestCase):
                     raise subprocess.TimeoutExpired(command, 660)
                 if mode != "missing":
                     report = {"unit": unit, "source_commit": COMMIT, "outcome": "passed", "complete": True,
+                              "duration_profile": getattr(self.args, "duration_profile", "smoke"),
                               "metrics": gate.metrics(self.cg), "requested_memory_mib": self.args.memory_mib,
                               "limits": {"memory.max": gate.memory_bytes(self.args.memory_mib)},
                               "base_page_size_bytes": os.sysconf("SC_PAGE_SIZE")}
+                    if mode == "wrong_duration_profile": report["duration_profile"] = "sustained"
                     if mode == "partial": report["complete"] = False
                     if mode == "wrong_source": report["source_commit"] = "c" * 40
                     if mode == "wrong_profile": report["requested_memory_mib"] = 384 if self.args.memory_mib == 512 else 512
@@ -177,7 +179,7 @@ class LowResourceAcceptanceTests(unittest.TestCase):
         self.assertFalse(list(self.root.glob("low-resource-work-*")))
 
     def test_coordinator_failures_never_silently_skip(self):
-        for mode in ("missing", "partial", "wrong_source", "wrong_profile", "wrong_limit", "wrong_page", "oom", "over_peak", "failed", "nonzero", "timeout"):
+        for mode in ("missing", "partial", "wrong_duration_profile", "wrong_source", "wrong_profile", "wrong_limit", "wrong_page", "oom", "over_peak", "failed", "nonzero", "timeout"):
             with self.subTest(mode=mode):
                 self.args.output = self.root / (mode + ".json")
                 status, summary, calls = self.run_coordinator(mode)
