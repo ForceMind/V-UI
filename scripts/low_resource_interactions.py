@@ -8,12 +8,14 @@ from __future__ import annotations
 import argparse
 import base64
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 import hashlib
 import json
 import math
 import os
 from pathlib import Path
 import resource
+import shutil
 import re
 import ssl
 import subprocess
@@ -157,6 +159,13 @@ def validate_result(value, unit, commit):
     expected_unit=unit.removesuffix('.service')+'-browser.service'
     if value.get('client_cgroup') != '0::/system.slice/'+expected_unit:
         raise RuntimeError('Browser did not run in its separate scoped unit')
+    driver=value.get('native_focus_driver',{})
+    if (driver.get('playwright_version')!='1.57.0' or driver.get('changes')!=1
+            or driver.get('enabled') is not False or driver.get('installed_driver_modified') is not False
+            or not re.fullmatch('[0-9a-f]{64}',driver.get('source_sha256',''))
+            or not re.fullmatch('[0-9a-f]{64}',driver.get('copy_sha256',''))
+            or driver['source_sha256']==driver['copy_sha256']):
+        raise RuntimeError('Native visibility driver provenance missing')
     from scripts.low_resource_acceptance import assert_no_oom
     external=value.get('external_metrics', {})
     if (type(external.get('memory.peak')) is not int or external['memory.peak'] <= 0
@@ -252,6 +261,59 @@ def request_interactions(work, output, unit, commit, origin, ca, cert, cookie, o
     return value
 
 
+NATIVE_BACKGROUND_ARGS = (
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+)
+
+
+_FOCUS_ENABLE = 'this._client.send("Emulation.setFocusEmulationEnabled", { enabled: true })'
+_FOCUS_DISABLE = _FOCUS_ENABLE.replace('enabled: true', 'enabled: false')
+
+
+@contextmanager
+def native_playwright_driver(work, report):
+    """Do not enable focus capture in Playwright's original CDP session.
+
+    A second CDP session cannot release the first session's browser-side capture
+    handle. Use an isolated copy of the pinned automation driver, with exactly
+    one boolean changed; never modify the installed package or Chromium binary.
+    """
+    from importlib.metadata import version
+    from playwright._impl._driver import compute_driver_executable
+    from playwright._impl import _transport
+    from unittest.mock import patch
+    if version('playwright') != '1.57.0':raise RuntimeError('Native visibility driver requires exact Playwright 1.57.0')
+    node, cli = compute_driver_executable()
+    source=Path(cli).parent
+    copied=work/'native-playwright-package'
+    if copied.exists():raise RuntimeError('Refusing to overwrite a driver fixture')
+    shutil.copytree(source,copied,symlinks=True)  # Includes upstream license files.
+    try:
+        path=copied/'lib/server/chromium/crPage.js'
+        original=path.read_bytes();text=original.decode('utf-8')
+        if text.count(_FOCUS_ENABLE)!=1:raise RuntimeError('Pinned focus initialization is not uniquely identified')
+        changed=text.replace(_FOCUS_ENABLE,_FOCUS_DISABLE).encode('utf-8')
+        path.write_bytes(changed)
+        report['native_focus_driver']=dict(playwright_version='1.57.0',changes=1,
+            source_sha256=hashlib.sha256(original).hexdigest(),copy_sha256=hashlib.sha256(changed).hexdigest(),
+            enabled=False,installed_driver_modified=False)
+        with patch.object(_transport,'compute_driver_executable',return_value=(node,str(copied/Path(cli).name))):
+            yield
+    finally:
+        shutil.rmtree(copied)
+
+
+def wait_native_visibility(pages, expected, *, timeout=5):
+    deadline=time.monotonic()+timeout
+    while True:
+        states={name:page.evaluate('document.visibilityState') for name,page in pages.items()}
+        if states==expected:return states
+        if time.monotonic()>=deadline:raise RuntimeError('Native tab visibility transition failed: '+repr(states))
+        next(iter(pages.values())).wait_for_timeout(100)
+
+
 def track_page(page, label, current, inflight, errors):
     page.on('pageerror', lambda error: errors.append(type(error).__name__))
     def requested(request):
@@ -290,6 +352,7 @@ def run(value, output, work):
     report = dict(schema=1, outcome='running', unit=value['unit'], source_commit=value['source_commit'],
         node_count=100, client_cgroup=membership(), phases=[], cleanup_complete=False,
         scope='100 synthetic database nodes; actual headed browser visibility and fixed exports; not proxy throughput or certificate renewal',
+        visibility_mode='native headed tabs; Playwright focus emulation disabled and background scheduling overrides removed',
         accounting='browser/export generator outside service cgroup; same hosted machine still shared')
     origin = value['origin']
     ca_context = ssl.create_default_context(cafile=value['ca'])
@@ -326,16 +389,17 @@ def run(value, output, work):
         start=time.monotonic();row['visibility']={};row['visibility_samples']=0
         while time.monotonic()-start < SECONDS:
             states={name:page.evaluate('document.visibilityState') for name,page in pages.items()}
-            if states != expected: raise RuntimeError('Browser did not maintain real requested visibility')
             row['visibility']=states;row['visibility_samples']+=1
+            if states != expected: raise RuntimeError('Browser did not maintain real requested visibility')
             next(iter(pages.values())).wait_for_timeout(min(1000,max(1,(SECONDS-(time.monotonic()-start))*1000)))
         if external or errors: raise RuntimeError('Unexpected external request or browser exception')
     try:
         leaf=x509.load_pem_x509_certificate(Path(value['cert']).read_bytes())
         spki=leaf.public_key().public_bytes(serialization.Encoding.DER,serialization.PublicFormat.SubjectPublicKeyInfo)
         pin=base64.b64encode(hashlib.sha256(spki).digest()).decode()
-        with sync_playwright() as p:
-            browser=p.chromium.launch(headless=False,args=['--ignore-certificate-errors-spki-list='+pin])
+        with native_playwright_driver(work,report), sync_playwright() as p:
+            browser=p.chromium.launch(headless=False,args=['--ignore-certificate-errors-spki-list='+pin],
+                                      ignore_default_args=list(NATIVE_BACKGROUND_ARGS))
             try:
                 context=browser.new_context(viewport={'width':1280,'height':900})
                 context.route('**/*',only_local)
@@ -343,13 +407,14 @@ def run(value, output, work):
                                          secure=True,httpOnly=True,sameSite='Strict')])
                 first=context.new_page();track_page(first,'tab1',current,inflight,errors);first.goto(origin+'/ui/')
                 expect(first.locator('.logo')).to_contain_text('V-UI')
-                first.bring_to_front();first.wait_for_timeout(1000)
+                first.bring_to_front();wait_native_visibility({'tab1':first},{'tab1':'visible'})
                 phase('visible_tab',lambda row:observe_pages(row,{'tab1':first},{'tab1':'visible'}))
-                blank=context.new_page();blank.goto('about:blank');blank.bring_to_front();first.wait_for_timeout(500)
+                blank=context.new_page();blank.goto('about:blank')
+                blank.bring_to_front();wait_native_visibility({'tab1':first},{'tab1':'hidden'})
                 phase('hidden_tab',lambda row:observe_pages(row,{'tab1':first},{'tab1':'hidden'}))
                 second=context.new_page();track_page(second,'tab2',current,inflight,errors);second.goto(origin+'/ui/')
                 expect(second.locator('.logo')).to_contain_text('V-UI')
-                second.bring_to_front();second.wait_for_timeout(1000)
+                second.bring_to_front();wait_native_visibility({'tab1':first,'tab2':second},{'tab1':'hidden','tab2':'visible'})
                 phase('two_tabs',lambda row:observe_pages(row,{'tab1':first,'tab2':second},{'tab1':'hidden','tab2':'visible'}))
                 # Do not mix active browser polling into the standalone export windows.
                 first.close();second.close();blank.close()

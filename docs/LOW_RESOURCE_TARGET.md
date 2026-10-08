@@ -193,3 +193,11 @@ ZIP 的中心目录、最多 10,000 个文件条目及至多 4 MB MANIFEST 仍�
 浏览器及导出客户端在独立临时systemd cgroup中，位于服务组之外；整个外部组的CPU、memory.peak和OOM计数包括Xvfb及脱离父进程组的Chromium子进程，getrusage另列且不相加。external_metrics采样截止helper退出前，未计入随后Xvfb包装器最后收尾。清理针对整个外部cgroup并验证无存活成员，同宿主争用依旧存在。服务每10秒及观察到driver阶段变化时保存cgroup计数与进程快照；阶段标签采集最多约1秒对齐延迟，不能把这些近似窗口称作逐阶段精确CPU峰值。所有失败保留日志/JSON，只有清理成功且完整来源/时长/数据/隔离证据通过才接受。
 
 本地暂无Xvfb，不能以本地无浏览器/结构测试替代准确CI的真实隐藏状态。真实假CA证书签发/续期与流量叠加、大日志及更大规则/节点数据集仍待单独补齐；静态假证书不算实际证书任务，真实Certbot及HTTP-01 responder必须计入服务工作，Pebble/浏览器/发生器单独记账。不购买或访问生产机器，不合并、发布或部署。
+
+#### 首次真实UI诊断失败与原生可见性修正
+
+`4bb27fc53cb747323ff7a79efbc29a17ce42e7e2` 的[首次UI运行](https://github.com/ForceMind/V-UI/actions/runs/37843285811)未通过；[失败附件](https://github.com/ForceMind/V-UI/actions/runs/37843285811/artifacts/11579325032) ZIP SHA-256 `9ab8740d2bf7aa5f74ccf1fcd97d423ec530a69ae8a074111b8c58d48fcc2c5d`已核验。真实可见标签60.001秒取得system20次/core6次、26个200、完整请求最大重叠2；隐藏阶段未观察到实际hidden，严格中止，后续双标签/导出/注销不记通过。服务peak478,121,984字节、外部浏览器组peak435,318,784字节，二者OOM均0，外部整组清理已确认；资源通过本身不能覆盖场景失败。
+
+已核对固定[Playwright 1.57主帧初始化源码](https://github.com/microsoft/playwright/blob/v1.57.0/packages/playwright-core/src/server/chromium/crPage.ts)及[启动参数](https://github.com/microsoft/playwright/blob/v1.57.0/packages/playwright-core/src/server/chromium/chromiumSwitches.ts)：框架默认主动模拟页面始终focused/active，并禁用后台节流/后台渲染调度。因此只调用bring_to_front仍不能把测试解释成原生标签可见性。本次修正仅撤销这些测试框架覆盖：在私有临时目录完整复制固定1.57的automation driver/package并保留许可证，只将crPage.js唯一的原session初始化enabled:true改为false，记录前后SHA和精确替换数，通过当前helper进程的driver入口选择副本，退出后还原入口并删除副本；不改已安装包、Chromium二进制、生产源码或核心pin。启动时移除三项后台调度禁用参数，不设置/伪造visibilityState，不冻结页面，不注入visibility事件。不能仅从新的CDP session发false就假定释放了原session的浏览器capture：固定Chromium的[浏览器端实现](https://github.com/chromium/chromium/blob/143.0.7499.4/content/browser/devtools/protocol/emulation_handler.cc)仍保留原session自己的capture handle，因此从原session初始化就不启用它。依然等待并逐秒核验实际浏览器状态，拿不到hidden就失败，不以模拟值或skip换绿。实际效果待修正head重新执行。
+
+同一4bb候选的portable x86_64-musl源码来源API明确返回HTTP403 rate limit exceeded，该job失败且附件步骤跳过；其余三个portable jobs成功。保留这次上游失败，不改核心pin/凭据，不把未完成的准确四目标套件写成通过。此处修正和文档同批提交，不为单段文档另触发完整验收。

@@ -41,7 +41,9 @@ class InteractionContracts(unittest.TestCase):
             else:row.update(both_tabs_redirected=True,polling_stopped=True)
             phases.append(row)
         return dict(outcome='passed',source_commit=COMMIT,unit=UNIT,node_count=100,phases=phases,
-            cleanup_complete=True,broker_cleanup_complete=True,client_cgroup='0::/system.slice/'+UNIT.removesuffix('.service')+'-browser.service',
+            cleanup_complete=True,broker_cleanup_complete=True,
+            native_focus_driver=dict(playwright_version='1.57.0',changes=1,enabled=False,installed_driver_modified=False,source_sha256='a'*64,copy_sha256='b'*64),
+            client_cgroup='0::/system.slice/'+UNIT.removesuffix('.service')+'-browser.service',
             external_metrics={'memory.peak':100000,'cpu.stat':{'usage_usec':100},'memory.events':{'oom':0,'oom_kill':0}},
             external_requests=0,browser_exceptions=0,
             client_usage=dict(self_user_seconds=1,self_system_seconds=1,children_user_seconds=1,
@@ -67,7 +69,7 @@ class InteractionContracts(unittest.TestCase):
     def test_missing_mixed_or_incomplete_evidence_rejected(self):
         for field,value in [('source_commit','wrong'),('outcome','running'),('node_count',0),
                             ('broker_cleanup_complete',False),('cleanup_complete',False),
-                            ('client_usage',{}),('external_metrics',{}),('external_requests',1),('browser_exceptions',1),
+                            ('client_usage',{}),('native_focus_driver',{}),('external_metrics',{}),('external_requests',1),('browser_exceptions',1),
                             ('client_cgroup','0::/system.slice/'+UNIT),('phases',[])]:
             row=self.result();row[field]=value
             with self.subTest(field=field),self.assertRaises(RuntimeError):
@@ -88,7 +90,9 @@ class InteractionContracts(unittest.TestCase):
         self.assertIn('headless=False',source)
         self.assertIn("page.evaluate('document.visibilityState')",source)
         self.assertNotIn('Object.defineProperty',source)
-        self.assertNotIn('Emulation.set',source)
+        self.assertEqual(source.count('Emulation.setFocusEmulationEnabled'),1)
+        self.assertNotIn('setPageVisibility',source)
+        self.assertNotIn('setWebLifecycleState',source)
         self.assertNotIn('context.request.post',source)
         self.assertIn("fetch('/api/auth/logout'",source)
         self.assertNotIn('ignore_https_errors',source)
@@ -156,6 +160,42 @@ class InteractionContracts(unittest.TestCase):
         self.assertEqual(row['requests'],{'tab1:/api/system/status':2})
         self.assertEqual(row['request_failures'],1)
         self.assertFalse(inflight)
+
+    def test_native_focus_uses_isolated_exact_driver_copy_and_restores_transport(self):
+        from playwright._impl import _transport, _driver
+        package=self.root/'package';path=package/'lib/server/chromium/crPage.js';path.parent.mkdir(parents=True)
+        text='before; '+interaction._FOCUS_ENABLE+'; after;'
+        path.write_text(text);(package/'cli.js').write_text('fixture');(package/'LICENSE').write_text('fixture license')
+        real=_transport.compute_driver_executable
+        report={}
+        with patch.object(_driver,'compute_driver_executable',return_value=('/node',str(package/'cli.js'))):
+            with interaction.native_playwright_driver(self.root,report):
+                node,cli=_transport.compute_driver_executable()
+                self.assertEqual(node,'/node')
+                copied=Path(cli).parent
+                self.assertEqual((copied/'lib/server/chromium/crPage.js').read_text(),text.replace(interaction._FOCUS_ENABLE,interaction._FOCUS_DISABLE))
+                self.assertTrue((copied/'LICENSE').exists())
+                self.assertEqual(path.read_text(),text)
+            self.assertFalse(copied.exists())
+            self.assertIs(_transport.compute_driver_executable,real)
+            self.assertFalse(report['native_focus_driver']['enabled'])
+            self.assertFalse(report['native_focus_driver']['installed_driver_modified'])
+            path.write_text('no exact marker')
+            with self.assertRaisesRegex(RuntimeError,'uniquely identified'):
+                with interaction.native_playwright_driver(self.root,{}):pass
+            self.assertFalse((self.root/'native-playwright-package').exists())
+
+    def test_native_visibility_is_read_not_forced(self):
+        self.assertEqual(set(interaction.NATIVE_BACKGROUND_ARGS),{
+            '--disable-background-timer-throttling','--disable-backgrounding-occluded-windows','--disable-renderer-backgrounding'})
+        class Page:
+            def evaluate(self,expression):self.expression=expression;return 'visible'
+            def wait_for_timeout(self,ms):pass
+        page=Page()
+        self.assertEqual(interaction.wait_native_visibility({'tab1':page},{'tab1':'visible'},timeout=0),{'tab1':'visible'})
+        with self.assertRaisesRegex(RuntimeError,'Native tab visibility'):
+            interaction.wait_native_visibility({'tab1':page},{'tab1':'hidden'},timeout=0)
+        self.assertEqual(page.expression,'document.visibilityState')
 
     def test_workflow_opt_in_and_old_smoke_unchanged(self):
         root=Path(__file__).resolve().parents[1]
