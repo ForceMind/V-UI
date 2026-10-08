@@ -6,7 +6,6 @@ from contextlib import contextmanager
 import fcntl
 import hashlib
 import http.client
-import io
 import ipaddress
 import json
 import os
@@ -36,6 +35,7 @@ MARKER = '# Managed by V-UI guarded installer v1\n'
 UNIT_DIR = Path('/etc/systemd/system')
 UNITS = ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')
 MAX_ARCHIVE = 850_000_000
+STREAM_CHUNK = 1024 * 1024
 # Compatibility names for older tooling/tests; new installs select a backend dynamically.
 MARKER=service_support.MARKER
 UNIT_DIR=service_support.SYSTEMD_DIR
@@ -64,41 +64,67 @@ def safe_path(name):
             and all(part not in ('', '.', '..') for part in name.split('/')))
 
 
-def verify_archive(path, sha):
+def verify_archive(path, sha, *, temp_dir=None):
     if not re.fullmatch(r'[a-f0-9]{64}', sha or ''):
         raise InstallError('A trusted 64-character SHA-256 is required')
-    with Path(path).open('rb') as handle:
-        raw = handle.read(MAX_ARCHIVE + 1)
-    if len(raw) > MAX_ARCHIVE or hashlib.sha256(raw).hexdigest() != sha:
-        raise InstallError('Bundle checksum mismatch; nothing was installed')
-    archive = zipfile.ZipFile(io.BytesIO(raw))
-    entries = archive.infolist()
-    names = [item.filename for item in entries]
-    if (len(names) > 10000 or len(set(names)) != len(names) or not all(safe_path(n) for n in names)
-            or sum(e.file_size for e in entries) > 1_100_000_000):
-        raise InstallError('Unsafe bundle paths or size')
-    for entry in entries:
-        if entry.is_dir() or stat.S_IFMT(entry.external_attr >> 16) not in (0, stat.S_IFREG) or entry.flag_bits & 1:
-            raise InstallError('Bundle contains a link, directory or encrypted entry')
-    if 'MANIFEST.json' not in names or archive.getinfo('MANIFEST.json').file_size > 4_000_000:
-        raise InstallError('Missing or oversized manifest')
-    meta = json.loads(archive.read('MANIFEST.json'))
-    if (not isinstance(meta, dict) or meta.get('schema') != 1 or meta.get('kind') != 'release'
-            or meta.get('platform') != 'linux-multi-cpython312'
-            or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,100}', meta.get('release_id', ''))):
-        raise InstallError('Not a supported V-UI bundle')
-    if not isinstance(meta.get('files'), dict) or set(names) != set(meta['files']) | {'MANIFEST.json'}:
-        raise InstallError('Manifest file set mismatch')
-    for name, info in meta['files'].items():
-        content = archive.read(name)
-        if info['mode'] not in (0o600, 0o700) or len(content) != info['size'] or hashlib.sha256(content).hexdigest() != info['sha256']:
-            raise InstallError('Payload checksum or mode mismatch')
-    if platform_support.target_key() not in meta.get('targets', []):
-        raise InstallError('Bundle does not contain this Linux architecture/libc target: '+platform_support.target_key())
-    for name in ('scripts/deploy.py', 'app/release_tools.py', 'deploy/system_launcher.py'):
-        if name not in meta['files']:
-            raise InstallError('Bundle predates the managed one-command installer')
-    return raw, archive, meta
+    # A private file-backed snapshot preserves digest-before-use even if the
+    # caller replaces or modifies the original bundle while installation runs.
+    # Select a disk-backed directory on low-memory hosts: /var/tmp can also
+    # be tmpfs. The unlinked 0600 file lives until install/dry-run exits.
+    snapshot = tempfile.TemporaryFile(prefix='vui-verified-', dir=temp_dir or '/var/tmp')
+    archive = None
+    try:
+        checksum = hashlib.sha256(); size = 0
+        with Path(path).open('rb') as handle:
+            while True:
+                chunk = handle.read(min(STREAM_CHUNK, MAX_ARCHIVE + 1 - size))
+                if not chunk: break
+                size += len(chunk)
+                if size > MAX_ARCHIVE:
+                    raise InstallError('Bundle checksum mismatch; nothing was installed')
+                checksum.update(chunk); snapshot.write(chunk)
+        if checksum.hexdigest() != sha:
+            raise InstallError('Bundle checksum mismatch; nothing was installed')
+        snapshot.seek(0)
+        archive = zipfile.ZipFile(snapshot)
+        entries = archive.infolist()
+        names = [item.filename for item in entries]
+        if (len(names) > 10000 or len(set(names)) != len(names) or not all(safe_path(n) for n in names)
+                or sum(e.file_size for e in entries) > 1_100_000_000):
+            raise InstallError('Unsafe bundle paths or size')
+        for entry in entries:
+            if entry.is_dir() or stat.S_IFMT(entry.external_attr >> 16) not in (0, stat.S_IFREG) or entry.flag_bits & 1:
+                raise InstallError('Bundle contains a link, directory or encrypted entry')
+        if 'MANIFEST.json' not in names or archive.getinfo('MANIFEST.json').file_size > 4_000_000:
+            raise InstallError('Missing or oversized manifest')
+        meta = json.loads(archive.read('MANIFEST.json'))
+        if (not isinstance(meta, dict) or meta.get('schema') != 1 or meta.get('kind') != 'release'
+                or meta.get('platform') != 'linux-multi-cpython312'
+                or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,100}', meta.get('release_id', ''))):
+            raise InstallError('Not a supported V-UI bundle')
+        if not isinstance(meta.get('files'), dict) or set(names) != set(meta['files']) | {'MANIFEST.json'}:
+            raise InstallError('Manifest file set mismatch')
+        for name, info in meta['files'].items():
+            if (type(info['size']) is not int or info['size'] != archive.getinfo(name).file_size
+                    or info['mode'] not in (0o600, 0o700)):
+                raise InstallError('Payload size or mode mismatch')
+            checksum = hashlib.sha256(); size = 0
+            with archive.open(name) as content:
+                for chunk in iter(lambda: content.read(STREAM_CHUNK), b''):
+                    size += len(chunk); checksum.update(chunk)
+            if info['mode'] not in (0o600, 0o700) or size != info['size'] or checksum.hexdigest() != info['sha256']:
+                raise InstallError('Payload checksum or mode mismatch')
+        if platform_support.target_key() not in meta.get('targets', []):
+            raise InstallError('Bundle does not contain this Linux architecture/libc target: '+platform_support.target_key())
+        for name in ('scripts/deploy.py', 'app/release_tools.py', 'deploy/system_launcher.py'):
+            if name not in meta['files']:
+                raise InstallError('Bundle predates the managed one-command installer')
+        snapshot.seek(0)
+        return snapshot, archive, meta
+    except Exception:
+        if archive is not None: archive.close()
+        snapshot.close()
+        raise
 
 
 def fqdn(value):
@@ -216,7 +242,11 @@ def write_root_file(path, raw, mode=0o644):
     fd, name = tempfile.mkstemp(prefix='.vui-', dir=path.parent)
     try:
         with os.fdopen(fd, 'wb') as handle:
-            handle.write(raw); handle.flush(); os.fsync(handle.fileno())
+            if hasattr(raw, 'read'):
+                shutil.copyfileobj(raw, handle, STREAM_CHUNK)
+            else:
+                handle.write(raw)
+            handle.flush(); os.fsync(handle.fileno())
         os.chmod(name, mode); os.replace(name, path)
     finally:
         if os.path.exists(name): os.unlink(name)
@@ -336,7 +366,12 @@ def https_health(config, cafile=None):
 
 def install(args):
     validate_options(args)
-    raw, archive, meta = verify_archive(args.bundle, args.sha256)
+    snapshot, archive, meta = verify_archive(args.bundle, args.sha256, temp_dir=getattr(args, 'archive_temp_dir', None))
+    with snapshot, archive:
+        return install_verified(args, snapshot, archive, meta)
+
+
+def install_verified(args, snapshot, archive, meta):
     existing=CONFIG.exists()
     info=check_platform()
     manager=info['init']
@@ -403,10 +438,17 @@ def install(args):
     # A tiny verified controller is extracted as data; it is never executed as root.
     with tempfile.TemporaryDirectory(prefix='.installer-', dir=ROOT) as directory:
         work = Path(directory); os.chown(work, uid, gid)
-        bundle = work / 'bundle.zip'; bundle.write_bytes(raw); os.chmod(bundle, 0o600); os.chown(bundle, uid, gid)
+        bundle = work / 'bundle.zip'
+        snapshot.seek(0)
+        with bundle.open('xb') as output:
+            shutil.copyfileobj(snapshot, output, STREAM_CHUNK)
+        os.chmod(bundle, 0o600); os.chown(bundle, uid, gid)
         for name in ('scripts/deploy.py', 'app/release_tools.py'):
             path = work/name; path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            os.chown(path.parent, uid, gid); path.write_bytes(archive.read(name)); os.chmod(path, 0o600); os.chown(path, uid, gid)
+            os.chown(path.parent, uid, gid)
+            with archive.open(name) as source, path.open('xb') as output:
+                shutil.copyfileobj(source, output, STREAM_CHUNK)
+            os.chmod(path, 0o600); os.chown(path, uid, gid)
         controller = work/'scripts/deploy.py'
         prepared = ROOT/'releases'/meta['release_id']/'READY.json'
         if not prepared.exists():
@@ -427,7 +469,8 @@ def install(args):
             release=ROOT/'releases'/meta['release_id']
             runtime_python=release/'runtime/python/bin/python3'
             config['bootstrap_python']=str(runtime_python)
-            write_root_file(CONTROL/'launcher.py', archive.read('deploy/system_launcher.py'))
+            with archive.open('deploy/system_launcher.py') as source:
+                write_root_file(CONTROL/'launcher.py', source)
             for path,(value,mode) in service_support.service_files(config).items():
                 write_root_file(path,value.encode(),mode)
             write_root_file(CONFIG, json.dumps({**config, 'ready': False}, indent=2).encode())
@@ -472,6 +515,7 @@ def install(args):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--bundle', required=True, type=Path); p.add_argument('--sha256', required=True)
+    p.add_argument('--archive-temp-dir', type=Path, help='Existing disk-backed directory for the private verification snapshot (default: /var/tmp; avoid tmpfs on low-memory hosts)')
     p.add_argument('--domain'); p.add_argument('--email'); p.add_argument('--admin', default='admin')
     p.add_argument('--port',type=int,default=8443);p.add_argument('--bind',default='0.0.0.0')
     p.add_argument('--node-port',type=int,default=10443,help='Default node TCP port to preflight/open')

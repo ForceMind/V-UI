@@ -1,6 +1,6 @@
 """Explicit QUIC UDP preflight only; never modify the test host's firewall."""
 import argparse
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 import io
 import json
 from pathlib import Path
@@ -99,7 +99,7 @@ class Hysteria2InstallationTests(unittest.TestCase):
             if conflict == (port, bind, protocol):
                 raise installer.InstallError(f'Port {port} is already in use ({protocol})')
         with patch.object(installer, 'CONFIG', self.root / 'service.json'), \
-             patch.object(installer, 'verify_archive', return_value=(b'', None, {'release_id': 'fixture'})), \
+             patch.object(installer, 'verify_archive', return_value=(io.BytesIO(), nullcontext(), {'release_id': 'fixture'})), \
              patch.object(installer, 'check_platform', return_value={'init': manager, 'name': 'fixture', 'target': target}), \
              patch.object(installer, 'check_reserved'), \
              patch.object(installer, 'probe_ipv6', return_value=ipv6), \

@@ -3,7 +3,6 @@ from __future__ import annotations
 from contextlib import contextmanager
 import fcntl
 import hashlib
-import io
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -103,6 +102,7 @@ def extract_runtime(archive_path: Path, destination: Path) -> None:
         if isinstance(exc,ReleaseError): raise
         raise ReleaseError('Portable Python extraction failed') from None
 MAX_ARCHIVE = 850_000_000
+STREAM_CHUNK = 1024 * 1024
 MAX_EXPANDED = 1_100_000_000
 MANIFEST = 'MANIFEST.json'
 
@@ -111,6 +111,36 @@ class ReleaseError(RuntimeError):
 
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+def stream_digest(handle, output=None, limit=None):
+    """Hash/copy with bounded reads; optional limit also bounds snapshot disk use."""
+    checksum = hashlib.sha256(); size = 0
+    while True:
+        chunk = handle.read(STREAM_CHUNK if limit is None else min(STREAM_CHUNK, limit + 1 - size))
+        if not chunk: break
+        size += len(chunk)
+        if limit is not None and size > limit:
+            raise ReleaseError('Archive exceeds size limit')
+        checksum.update(chunk)
+        if output is not None: output.write(chunk)
+    return checksum.hexdigest(), size
+
+
+def file_digest(path: Path) -> str:
+    with path.open('rb') as handle:
+        return stream_digest(handle)[0]
+
+
+@contextmanager
+def verified_snapshot(path: Path, expected_sha: str, *, directory=None):
+    # Hash exactly the bytes subsequently opened by ZipFile, without retaining
+    # the archive in RAM or reopening a mutable caller-owned path after hashing.
+    with tempfile.TemporaryFile(prefix='vui-verified-', dir=directory or '/var/tmp') as snapshot:
+        with path.open('rb') as source:
+            actual, _ = stream_digest(source, snapshot, MAX_ARCHIVE)
+        if actual != expected_sha: raise ReleaseError('Archive checksum mismatch')
+        snapshot.seek(0)
+        yield snapshot
 
 def safe_name(value: str) -> bool:
     return (isinstance(value, str) and bool(value) and len(value) < 512
@@ -178,7 +208,7 @@ def files_in(root: Path) -> dict:
         name = path.relative_to(root).as_posix()
         if name == MANIFEST: continue
         if not safe_name(name): raise ReleaseError('Unsafe payload path')
-        result[name] = {'sha256':digest(path.read_bytes()), 'size':path.stat().st_size,
+        result[name] = {'sha256':file_digest(path), 'size':path.stat().st_size,
                        'mode':0o700 if name.startswith('cores/') and path.name in ('xray','sing-box') else 0o600}
     return result
 
@@ -192,18 +222,19 @@ def create_archive(payload: Path, destination: Path, metadata: dict) -> str:
         for name, info in manifest['files'].items():
             entry = zipfile.ZipInfo(name); entry.compress_type = zipfile.ZIP_DEFLATED
             entry.external_attr = (stat.S_IFREG | info['mode']) << 16
-            archive.writestr(entry, (payload / name).read_bytes())
+            entry.file_size = info['size']
+            with (payload / name).open('rb') as source, archive.open(entry, 'w') as target:
+                shutil.copyfileobj(source, target, STREAM_CHUNK)
     with destination.open('rb') as handle: os.fsync(handle.fileno())
     sync_directory(destination.parent)
-    return digest(destination.read_bytes())
+    return file_digest(destination)
 
 def unpack_verified(archive_path: Path, expected_sha: str, destination: Path) -> dict:
     if not re.fullmatch(r'[a-f0-9]{64}', expected_sha): raise ReleaseError('Expected archive SHA-256 is required')
-    with archive_path.open('rb') as handle: raw = handle.read(MAX_ARCHIVE + 1)
-    if len(raw) > MAX_ARCHIVE or digest(raw) != expected_sha: raise ReleaseError('Archive checksum mismatch')
     if destination.exists(): raise ReleaseError('Extraction requires a new directory')
     try:
-        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        with verified_snapshot(archive_path, expected_sha,
+                directory=destination.parent if destination.parent.is_dir() else None) as snapshot, zipfile.ZipFile(snapshot) as archive:
             entries = archive.infolist()
             names = [entry.filename for entry in entries]
             if len(names) > 10000 or len(set(names)) != len(names) or not all(safe_name(n) for n in names):
@@ -222,10 +253,13 @@ def unpack_verified(archive_path: Path, expected_sha: str, destination: Path) ->
             for name, info in manifest['files'].items():
                 if info['mode'] not in (0o600, 0o700) or not re.fullmatch(r'[a-f0-9]{64}', info['sha256']):
                     raise ReleaseError('Invalid manifest entry')
-                data = archive.read(name)
-                if len(data) != info['size'] or digest(data) != info['sha256']: raise ReleaseError('Payload checksum mismatch')
+                if type(info['size']) is not int or info['size'] != archive.getinfo(name).file_size:
+                    raise ReleaseError('Payload size mismatch')
                 target = destination / name; target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                target.write_bytes(data); target.chmod(info['mode'])
+                with archive.open(name) as source, target.open('xb') as output:
+                    checksum, size = stream_digest(source, output, info['size'])
+                if size != info['size'] or checksum != info['sha256']: raise ReleaseError('Payload checksum mismatch')
+                target.chmod(info['mode'])
             (destination / MANIFEST).write_text(json.dumps(manifest,sort_keys=True,indent=2))
             (destination / MANIFEST).chmod(0o600)
             return manifest
@@ -315,7 +349,7 @@ def stage(archive: Path, expected_sha: str, root: Path) -> str:
             os.replace(payload,final/'payload')
             runtime_archive=final/'payload'/'runtimes'/(key+'.tar.gz')
             pin=(meta.get('portable_runtime_pins') or {}).get(key,{})
-            if not runtime_archive.is_file() or digest(runtime_archive.read_bytes())!=pin.get('sha256'):
+            if not runtime_archive.is_file() or file_digest(runtime_archive)!=pin.get('sha256'):
                 raise ReleaseError('Portable Python runtime pin mismatch')
             extract_runtime(runtime_archive,final/'runtime')
             python=runtime_python(final)

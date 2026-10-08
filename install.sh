@@ -127,7 +127,10 @@ for line in (root/'SHA256SUMS').read_text().splitlines():
     if not match or match[2] in entries:raise SystemExit('Invalid checksum list')
     entries[match[2]]=match[1]
 for name in ('install_system.py','platform_support.py','firewall_support.py','service_support.py',bundle):
-    if hashlib.sha256((root/name).read_bytes()).hexdigest()!=entries.get(name):
+    checksum=hashlib.sha256()
+    with (root/name).open('rb') as source:
+        for chunk in iter(lambda:source.read(1024*1024),b''):checksum.update(chunk)
+    if checksum.hexdigest()!=entries.get(name):
         raise SystemExit('Release asset checksum mismatch: '+name)
 (root/'bundle.sha').write_text(entries[bundle])
 PY
