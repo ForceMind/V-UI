@@ -126,19 +126,88 @@ def stream_digest(handle, output=None, limit=None):
     return checksum.hexdigest(), size
 
 
-def file_digest(path: Path) -> str:
+def file_digest(path: Path, *, cold=False) -> str:
     with path.open('rb') as handle:
+        if cold:
+            # Only immutable install artifacts opt in, never Python runtime,
+            # application code or user data. Preserve every digest check.
+            wrapped = _PrivateArchiveFile(handle)
+            if wrapped.advice is not None and wrapped.dontneed is not None:
+                os.fsync(handle.fileno())
+            return stream_digest(wrapped)[0]
         return stream_digest(handle)[0]
+
+
+class _PrivateArchiveFile:
+    """Bound cache for installer-owned immutable files, never user data.
+
+    Cache advice is optional. Writeback errors still fail the operation; an
+    unsupported advisory syscall only loses the optimization. Keep this helper
+    identical in the standalone installer and release controller.
+    """
+    def __init__(self, handle):
+        self.handle = handle
+        self.pending = 0
+        self.read_pending = 0
+        self.advice = getattr(os, 'posix_fadvise', None)
+        self.dontneed = getattr(os, 'POSIX_FADV_DONTNEED', None)
+        self.page_size = os.sysconf('SC_PAGESIZE')
+
+    def __getattr__(self, name):
+        return getattr(self.handle, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return self.handle.__exit__(*args)
+
+    def _discard(self, offset, size):
+        if self.advice is not None and self.dontneed is not None:
+            try:
+                self.advice(self.handle.fileno(), offset, size, self.dontneed)
+            except OSError:
+                # Some filesystems/kernels do not implement advisory eviction.
+                pass
+
+    def finish_writes(self):
+        self.handle.flush()
+        if self.pending and self.advice is not None and self.dontneed is not None:
+            os.fsync(self.handle.fileno())  # Dirty pages cannot be discarded.
+            self._discard(0, 0)
+        self.pending = 0
+
+    def write(self, data):
+        count = self.handle.write(data)
+        self.pending += count
+        if self.pending >= 8 * 1024 * 1024:
+            self.finish_writes()
+        return count
+
+    def read(self, size=-1):
+        offset = self.handle.tell()
+        data = self.handle.read(size)
+        # Revisit the consumed prefix in batches: a previous hint can race
+        # kernel readahead/LRU insertion. Partial trailing pages are retained.
+        self.read_pending += len(data)
+        end = ((offset + len(data)) // self.page_size) * self.page_size
+        if not data:
+            self._discard(0, 0)
+        elif self.read_pending >= 8 * 1024 * 1024 and end:
+            self._discard(0, end)
+            self.read_pending = 0
+        return data
 
 
 @contextmanager
 def verified_snapshot(path: Path, expected_sha: str, *, directory=None):
     # Hash exactly the bytes subsequently opened by ZipFile, without retaining
     # the archive in RAM or reopening a mutable caller-owned path after hashing.
-    with tempfile.TemporaryFile(prefix='vui-verified-', dir=directory or '/var/tmp') as snapshot:
+    with _PrivateArchiveFile(tempfile.TemporaryFile(prefix='vui-verified-', dir=directory or '/var/tmp')) as snapshot:
         with path.open('rb') as source:
             actual, _ = stream_digest(source, snapshot, MAX_ARCHIVE)
         if actual != expected_sha: raise ReleaseError('Archive checksum mismatch')
+        snapshot.finish_writes()
         snapshot.seek(0)
         yield snapshot
 
@@ -199,7 +268,18 @@ def supported_environment():
     fd=os.pidfd_open(os.getpid());os.close(fd)
     return key
 
-def files_in(root: Path) -> dict:
+def _packaging_artifact(name: str) -> bool:
+    return ((name.startswith('wheels/') and name.endswith('.whl'))
+            or (name.startswith('runtimes/') and name.endswith('.tar.gz')))
+
+
+def _cold_digest_artifact(name: str) -> bool:
+    parts = PurePosixPath(name).parts
+    return (_packaging_artifact(name) or (len(parts) == 3 and parts[0] == 'cores'
+            and parts[1] in ('x86_64', 'aarch64') and parts[2] in ('sing-box', 'xray')))
+
+
+def files_in(root: Path, *, cold_install_artifacts=False) -> dict:
     result = {}
     for path in sorted(root.rglob('*')):
         if path.is_symlink(): raise ReleaseError('Symbolic links are not permitted in payloads or backups')
@@ -208,7 +288,8 @@ def files_in(root: Path) -> dict:
         name = path.relative_to(root).as_posix()
         if name == MANIFEST: continue
         if not safe_name(name): raise ReleaseError('Unsafe payload path')
-        result[name] = {'sha256':file_digest(path), 'size':path.stat().st_size,
+        cold = cold_install_artifacts and _cold_digest_artifact(name)
+        result[name] = {'sha256':file_digest(path, cold=cold), 'size':path.stat().st_size,
                        'mode':0o700 if name.startswith('cores/') and path.name in ('xray','sing-box') else 0o600}
     return result
 
@@ -257,7 +338,10 @@ def unpack_verified(archive_path: Path, expected_sha: str, destination: Path) ->
                     raise ReleaseError('Payload size mismatch')
                 target = destination / name; target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                 with archive.open(name) as source, target.open('xb') as output:
-                    checksum, size = stream_digest(source, output, info['size'])
+                    writer = (_PrivateArchiveFile(output) if manifest.get('kind') == 'release'
+                              and _packaging_artifact(name) else output)
+                    checksum, size = stream_digest(source, writer, info['size'])
+                    if isinstance(writer, _PrivateArchiveFile): writer.finish_writes()
                 if size != info['size'] or checksum != info['sha256']: raise ReleaseError('Payload checksum mismatch')
                 target.chmod(info['mode'])
             (destination / MANIFEST).write_text(json.dumps(manifest,sort_keys=True,indent=2))
@@ -271,7 +355,7 @@ def unpack_verified(archive_path: Path, expected_sha: str, destination: Path) ->
 def verify_payload(payload: Path) -> dict:
     try:
         manifest = json.loads((payload / MANIFEST).read_text())
-        if manifest.get('schema') != 1 or files_in(payload) != manifest['files']:
+        if manifest.get('schema') != 1 or files_in(payload, cold_install_artifacts=manifest.get('kind') == 'release') != manifest['files']:
             raise ReleaseError('Installed payload differs from its manifest')
         for name, info in manifest['files'].items():
             path = payload / name

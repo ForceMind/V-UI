@@ -64,6 +64,67 @@ def safe_path(name):
             and all(part not in ('', '.', '..') for part in name.split('/')))
 
 
+class _PrivateArchiveFile:
+    """Bound cache for installer-owned immutable files, never user data.
+
+    Cache advice is optional. Writeback errors still fail the operation; an
+    unsupported advisory syscall only loses the optimization. Keep this helper
+    identical in the standalone installer and release controller.
+    """
+    def __init__(self, handle):
+        self.handle = handle
+        self.pending = 0
+        self.read_pending = 0
+        self.advice = getattr(os, 'posix_fadvise', None)
+        self.dontneed = getattr(os, 'POSIX_FADV_DONTNEED', None)
+        self.page_size = os.sysconf('SC_PAGESIZE')
+
+    def __getattr__(self, name):
+        return getattr(self.handle, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return self.handle.__exit__(*args)
+
+    def _discard(self, offset, size):
+        if self.advice is not None and self.dontneed is not None:
+            try:
+                self.advice(self.handle.fileno(), offset, size, self.dontneed)
+            except OSError:
+                # Some filesystems/kernels do not implement advisory eviction.
+                pass
+
+    def finish_writes(self):
+        self.handle.flush()
+        if self.pending and self.advice is not None and self.dontneed is not None:
+            os.fsync(self.handle.fileno())  # Dirty pages cannot be discarded.
+            self._discard(0, 0)
+        self.pending = 0
+
+    def write(self, data):
+        count = self.handle.write(data)
+        self.pending += count
+        if self.pending >= 8 * 1024 * 1024:
+            self.finish_writes()
+        return count
+
+    def read(self, size=-1):
+        offset = self.handle.tell()
+        data = self.handle.read(size)
+        # Revisit the consumed prefix in batches: a previous hint can race
+        # kernel readahead/LRU insertion. Partial trailing pages are retained.
+        self.read_pending += len(data)
+        end = ((offset + len(data)) // self.page_size) * self.page_size
+        if not data:
+            self._discard(0, 0)
+        elif self.read_pending >= 8 * 1024 * 1024 and end:
+            self._discard(0, end)
+            self.read_pending = 0
+        return data
+
+
 def verify_archive(path, sha, *, temp_dir=None):
     if not re.fullmatch(r'[a-f0-9]{64}', sha or ''):
         raise InstallError('A trusted 64-character SHA-256 is required')
@@ -71,7 +132,7 @@ def verify_archive(path, sha, *, temp_dir=None):
     # caller replaces or modifies the original bundle while installation runs.
     # Select a disk-backed directory on low-memory hosts: /var/tmp can also
     # be tmpfs. The unlinked 0600 file lives until install/dry-run exits.
-    snapshot = tempfile.TemporaryFile(prefix='vui-verified-', dir=temp_dir or '/var/tmp')
+    snapshot = _PrivateArchiveFile(tempfile.TemporaryFile(prefix='vui-verified-', dir=temp_dir or '/var/tmp'))
     archive = None
     try:
         checksum = hashlib.sha256(); size = 0
@@ -85,6 +146,7 @@ def verify_archive(path, sha, *, temp_dir=None):
                 checksum.update(chunk); snapshot.write(chunk)
         if checksum.hexdigest() != sha:
             raise InstallError('Bundle checksum mismatch; nothing was installed')
+        snapshot.finish_writes()
         snapshot.seek(0)
         archive = zipfile.ZipFile(snapshot)
         entries = archive.infolist()
@@ -440,8 +502,9 @@ def install_verified(args, snapshot, archive, meta):
         work = Path(directory); os.chown(work, uid, gid)
         bundle = work / 'bundle.zip'
         snapshot.seek(0)
-        with bundle.open('xb') as output:
+        with _PrivateArchiveFile(bundle.open('xb')) as output:
             shutil.copyfileobj(snapshot, output, STREAM_CHUNK)
+            output.finish_writes()
         os.chmod(bundle, 0o600); os.chown(bundle, uid, gid)
         for name in ('scripts/deploy.py', 'app/release_tools.py'):
             path = work/name; path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)

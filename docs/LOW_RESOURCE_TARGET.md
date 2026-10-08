@@ -119,3 +119,18 @@ ZIP 的中心目录、最多 10,000 个文件条目及至多 4 MB MANIFEST 仍�
 短测发送10次串行和100次并发度10的HTTP请求，核对正文与应用送达计数；错误UUID必须有新的真实协议原因，错误CA必须有真实x509原因，并同时保证应用零送达及没有DIRECT。目标、服务器、客户端均在嵌套清理范围内，退出/失败清理后才进入备份路径。活动阶段额外计入测试客户端与目标进程，单服务器空载时没有测试客户端；不把这几秒负载当作10分钟吞吐、所有协议、双核心或24小时稳定性验收。
 
 本地官方pin及配置parser检查成功，实际启动遇到sandbox netlink EPERM，原失败保留，没有提权或改安全设置；真实链路和资源结果由空CI runner的准确候选验证，单元mock通过不替代它。
+
+### 固定容差仍失败后的实际缓存优化
+
+`f10509aaa0a98e55e24e9ef2164be788426ba222` 的[资源运行](https://github.com/ForceMind/V-UI/actions/runs/37720250164)中，512MiB含真实TLS代理的全部工作成功；384MiB的功能阶段和代理正负向亦成功、OOM为0，但peak=402,685,952，比384MiB名义上限多32,768字节（8个4KiB基础页），超出固定一页政策而失败，320MiB仍未执行。[原附件](https://github.com/ForceMind/V-UI/actions/runs/37720250164/artifacts/11525616359) SHA-256 `5e73c06ca946ceaee95bf3e47797936fdb63dc5accf8b785043bac25c99beecf`已核验。没有扩大容差、提高quota、修改swap或重跑赌绿。
+
+新的产品候选改为降低实际一次性文件缓存占用：
+
+- 私有ZIP快照与交接副本每8MiB刷写/fsync，然后对已消费范围使用逐文件POSIX_FADV_DONTNEED提示；完整读取仍按原有1MiB块进行。
+- release包中wheels与压缩Python运行时的解包写入也分批写回；完整性校验对这些文件及精确的 `cores/<x86_64|aarch64>/{sing-box,xray}`路径使用冷读取提示，避免只为SHA校验而留下完整巨大文件的缓存。
+- 所有文件、字节、摘要、权限、ownership、路径/大小拒绝、原子切换及回滚保持。提示不修改核心或其进程映射；Python已安装运行时文件、应用代码、数据库、配置及用户数据不在该提示允许列表中。不调用全局drop_caches、不改sysctl/cgroup门槛。
+- root独立安装器与非root release controller各自内置相同的小helper，以AST一致性测试保护；root不导入包内app代码，没有新增发布helper资产。
+
+[POSIX_FADV_DONTNEED说明](https://man7.org/linux/man-pages/man2/posix_fadvise.2.html)指出脏页和非整页范围可能保留；因此先写回再提示，读取时批量重访已消费前缀。提示是best-effort，内核/文件系统可以保留页面；提示不支持时保留正确性而失去优化，真实写回错误仍失败。额外顺序写回和后续冷读取可能增加I/O，不能只用内存下降宣称CPU/功耗提升。
+
+本地合成单inode观察：128/256MiB文件，普通写读的采样驻留峰值128/256MiB，候选24/28MiB，读后驻留0；不是cgroup总内存。对已核验e4f安装包做仅文件清单/缓存/parser验证：40个不可变安装文件共179,116,176字节，逐文件即时驻留页数之和从179,200,000降到11,100,160字节，所有摘要与MANIFEST一致，官方sing-box与Xray配置parser仍成功。e4f旧包不作为新源码安装验收；新代码仍须准确新包三档CI。前述固定一页政策保持不变。
