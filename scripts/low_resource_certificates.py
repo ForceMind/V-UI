@@ -129,6 +129,33 @@ class CertificateBroker:
             write(evidence,result);write(response,result)
 
 
+def retain_fixture_account(root):
+    """Force new fake-CA authorization without weakening real challenge checks.
+
+    Pebble 2.10.1 can reuse authorization even at AUTHZREUSE=0 (inclusive
+    random comparison). Keep the old disposable account intact and let the
+    unchanged provider register a new account for the scheduled renewal.
+    """
+    source=root/'managed/accounts/production';retained=root/'retained-first-account'
+    if not source.is_dir() or source.is_symlink() or retained.exists():raise RuntimeError('Unexpected fake account state')
+    def fingerprint(directory):
+        result={}
+        for path in sorted(directory.rglob('*')):
+            if path.is_symlink():raise RuntimeError('Unexpected fake account symlink')
+            if path.is_file():
+                digest=hashlib.sha256()
+                with path.open('rb') as handle:
+                    for block in iter(lambda:handle.read(65536),b''):digest.update(block)
+                result[path.relative_to(directory).as_posix()]=digest.hexdigest()
+        if (len(list(directory.rglob('private_key.json')))!=1 or len(list(directory.rglob('regr.json')))!=1):
+            raise RuntimeError('Missing unique first fake ACME account')
+        return result
+    before=fingerprint(source);source.rename(retained)
+    if fingerprint(retained)!=before or source.exists():raise RuntimeError('Fake account retention failed')
+    return dict(policy='fresh fake ACME account for deterministic renewal revalidation; original retained',
+                retained_file_count=len(before),retained_files_unchanged=True)
+
+
 def new_successful_job(rows, previous, certificate_id):
     added=[row for row in rows if row['id'] not in previous]
     if (len(added)!=1 or len(rows)!=len(previous)+1 or len({row['id'] for row in rows})!=len(rows)
@@ -166,11 +193,12 @@ def observe_certbot(root, expected_cgroup, directory, proc=Path('/proc')):
 def observed_handler(base,root,report,active,lock,identity=member):
     class Observed(base):
         def do_GET(self):
+            self.request_phase=active['phase']
             self.result_status=None
             super().do_GET()
             if self.result_status==200:
                 with lock:
-                    report['challenges'].append(dict(phase=active['phase'],status=200,monotonic=time.monotonic(),
+                    report['challenges'].append(dict(phase=self.request_phase,status=200,monotonic=time.monotonic(),
                         token_sha256=hashlib.sha256(self.path.rsplit('/',1)[-1].encode()).hexdigest()))
         def send_response(self,code,*args):
             self.result_status=code
@@ -179,7 +207,7 @@ def observed_handler(base,root,report,active,lock,identity=member):
                     children=observe_certbot(root,identity(),active['directory'])
                     if len(children)!=1:raise RuntimeError('Expected one waiting Certbot')
                     with lock:
-                        child=children[0];child.update(phase=active['phase'],observed_monotonic=time.monotonic())
+                        child=children[0];child.update(phase=self.request_phase,observed_monotonic=time.monotonic())
                         if not any(c['pid']==child['pid'] and c['phase']==child['phase'] for c in report['certbot_processes']):
                             report['certbot_processes'].append(child)
                 except Exception as exc:
@@ -267,10 +295,17 @@ def service(request, output):
         execute('issue',create)
         first=manager.material(identity[0]);old=[p.read_bytes() for p in first[0]]
         serial=x509.load_pem_x509_certificate(old[0]).serial_number
+        report['renewal_account_fixture']=retain_fixture_account(root)
+        checkpoint()
         with database.SessionLocal() as db:
             if db.query(CertificateJob).filter(CertificateJob.state.in_(('queued','running'))).count():raise RuntimeError('Concurrent certificate job')
             row=db.get(Certificate,identity[0]);row.renew_at=0;row.last_attempt=0;row.retry_at=0;db.commit()
         execute('scheduled_renewal')
+        new_keys=list((root/'managed/accounts/production').rglob('private_key.json'))
+        old_keys=list((root/'retained-first-account').rglob('private_key.json'))
+        if len(new_keys)!=1 or len(old_keys)!=1 or new_keys[0].read_bytes()==old_keys[0].read_bytes():
+            raise RuntimeError('Renewal did not register a distinct fake ACME account')
+        report['renewal_account_fixture']['fresh_account_key_distinct']=True
         second=manager.material(identity[0])
         second_serial=x509.load_pem_x509_certificate(second[0][0].read_bytes()).serial_number
         if first[2]==second[2] or serial==second_serial or [p.read_bytes() for p in first[0]]!=old:raise RuntimeError('Renewal did not preserve old valid material')
@@ -452,6 +487,11 @@ def validate_result(external, service, unit, commit):
             or external.get('no_direct') is not True):raise RuntimeError('Incomplete overlap traffic evidence')
     def integer(value):return type(value) is int and value>=0
     validate_metrics_record(external.get('external_metrics'))
+    account=service.get('renewal_account_fixture',{})
+    if (account.get('policy')!='fresh fake ACME account for deterministic renewal revalidation; original retained'
+            or account.get('retained_files_unchanged') is not True or account.get('fresh_account_key_distinct') is not True
+            or type(account.get('retained_file_count')) is not int or account['retained_file_count']<=0):
+        raise RuntimeError('Missing deterministic fake-account fixture evidence')
     if (service.get('imported_installed_app') is not True or service.get('isolated_database') is not True
             or service.get('certbot_version')!='5.8.0' or service.get('automatic_due_scheduling') is not True
             or service.get('no_duplicate_due_job') is not True or service.get('observation_errors')!=[]

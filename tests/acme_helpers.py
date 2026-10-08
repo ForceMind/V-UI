@@ -80,7 +80,9 @@ def start_dual_dns(stack, answers):
 
 
 class PebbleFixture:
-    def __init__(self, stack, root: Path, webroot: Path, domain='panel.example.test', *, http_port=None):
+    def __init__(self, stack, root: Path, webroot: Path, domain='panel.example.test', *, http_port=None, authz_reuse_percent=0):
+        if type(authz_reuse_percent) is not int or not 0 <= authz_reuse_percent <= 100:
+            raise ValueError("Invalid fake CA authorization reuse percentage")
         self.root, self.webroot, self.domain = root, webroot, domain
         self.ca, cert, key = certificate_files(root, 'pebble-server')
         self.http = None
@@ -104,7 +106,7 @@ class PebbleFixture:
             'keyAlgorithm':'ecdsa','profiles':{'default':{'description':'VUI certificate tests','validityPeriod':7776000}}}}
         path=root/'pebble.json';path.write_text(json.dumps(config))
         self.log_path=root/'pebble.log';log=stack.enter_context(self.log_path.open('w'))
-        env={**os.environ,'PEBBLE_VA_NOSLEEP':'1','PEBBLE_WFE_NONCEREJECT':'0','PEBBLE_AUTHZREUSE':'0'}
+        env={**os.environ,'PEBBLE_VA_NOSLEEP':'1','PEBBLE_WFE_NONCEREJECT':'0','PEBBLE_AUTHZREUSE':str(authz_reuse_percent)}
         env.pop('PEBBLE_VA_ALWAYS_VALID',None)
         binary=os.environ['VUI_TEST_PEBBLE']
         self.process=subprocess.Popen([binary,'-config',str(path),'-dnsserver',f'127.0.0.1:{dns_port}'],

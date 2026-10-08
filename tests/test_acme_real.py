@@ -52,6 +52,44 @@ class RealACMETests(unittest.TestCase):
         self.assertIn('valid',self.pebble.log_path.read_text().lower())
         print('Real ACME: Certbot CSR, actual HTTP-01 fetch, trusted chain and repeat issuance passed')
 
+    def test_real_due_renewal_with_fresh_fake_account_always_revalidates(self):
+        # Force 100% authorization reuse at the fake CA. A new account must
+        # still perform real HTTP-01 for the same name, deterministically.
+        import acme_helpers
+        from scripts.low_resource_certificates import retain_fixture_account
+        from app.certificates.models import CertificateJob
+        root=self.root/'fresh-account';root.mkdir()
+        events=[];phase=['issue'];original=acme_helpers.handler_for
+        def tracked(webroot):
+            base=original(webroot)
+            class Handler(base):
+                def send_response(self,code,*args):
+                    if self.command=='GET' and code==200:events.append(phase[0])
+                    return super().send_response(code,*args)
+            return Handler
+        with patch.object(acme_helpers,'handler_for',tracked):
+            self.pebble=PebbleFixture(self.stack,root,root/'managed/http-webroot',authz_reuse_percent=100)
+        self.manager=CertificateManager(root/'managed',
+            CertbotProvider(root/'managed',test_directory=self.pebble.directory,test_ca=self.pebble.ca),
+            trusted_roots=self.pebble.root_pem)
+        job=self.manager.create(self.pebble.domain,'admin@example.test','production',True,True)
+        self.execute(job);identity=job['certificate_id'];first=self.manager.material(identity)
+        self.assertIn('issue',events)
+        retained=retain_fixture_account(root);self.assertTrue(retained['retained_files_unchanged'])
+        phase[0]='renewal'
+        with database.SessionLocal() as db:
+            row=db.get(Certificate,identity);row.renew_at=0;row.last_attempt=0;row.retry_at=0;db.commit()
+        self.assertTrue(self.manager.process_once())
+        with database.SessionLocal() as db:
+            jobs=db.query(CertificateJob).order_by(CertificateJob.sequence).all()
+            self.assertEqual(len(jobs),2);self.assertTrue(all(row.state=='succeeded' for row in jobs))
+        second=self.manager.material(identity)
+        self.assertIn('renewal',events);self.assertNotEqual(first[2],second[2])
+        self.assertTrue(first[0][0].exists());self.assertFalse(self.manager.process_once())
+        self.assertTrue((root/'retained-first-account').is_dir())
+        self.assertTrue((root/'managed/accounts/production').is_dir())
+        print('Real ACME: fresh fake account requires HTTP-01 even at 100% authorization reuse; due renewal passed')
+
     def test_http01_failure_does_not_create_active_certificate(self):
         job=self.manager.create('unresolvable.example.test','admin@example.test','production',True,True)
         self.manager.process_once()

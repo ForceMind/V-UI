@@ -36,7 +36,9 @@ def evidence():
         imported_installed_app=True,isolated_database=True,certbot_version='5.8.0',automatic_due_scheduling=True,
         old_material_unchanged=True,validated_san_key_chain=True,no_duplicate_due_job=True,observation_errors=[],
         first_revision='a'*64,renewed_revision='b'*64,first_serial='100',renewed_serial='200',load_started_monotonic=100,
-        jobs=[],challenges=[],certbot_processes=[])
+        jobs=[],challenges=[],certbot_processes=[],
+        renewal_account_fixture=dict(policy='fresh fake ACME account for deterministic renewal revalidation; original retained',
+            retained_file_count=3,retained_files_unchanged=True,fresh_account_key_distinct=True))
     for index,name in enumerate(('issue','scheduled_renewal')):
         start=110+index*10
         service['jobs'].append(dict(name=name,id=str(index),certificate_id='fixture',sequence=index+1,state='succeeded',error=None,
@@ -185,6 +187,17 @@ class CertificateResourceTests(unittest.TestCase):
                 environment=acme_helpers.subprocess.Popen.call_args.kwargs['env']
                 self.assertNotIn('PEBBLE_VA_ALWAYS_VALID',environment)
                 self.assertEqual(environment['PEBBLE_AUTHZREUSE'],'0')
+
+    def test_old_fake_account_is_retained_and_never_reused_or_deleted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);source=root/'managed/accounts/production';source.mkdir(parents=True)
+            (source/'private_key.json').write_text('synthetic-key');(source/'regr.json').write_text('synthetic-registration')
+            result=cert.retain_fixture_account(root)
+            self.assertTrue(result['retained_files_unchanged']);self.assertFalse(source.exists())
+            self.assertEqual((root/'retained-first-account/private_key.json').read_text(),'synthetic-key')
+            source.mkdir();(source/'private_key.json').write_text('second-synthetic-key')
+            with self.assertRaises(RuntimeError):cert.retain_fixture_account(root)
+            self.assertEqual((source/'private_key.json').read_text(),'second-synthetic-key')
 
     def test_scoped_external_unit(self):
         self.assertEqual(cert.external_group(UNIT.removesuffix('.service')+'-certificates.service').name,

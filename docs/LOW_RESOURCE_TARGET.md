@@ -240,3 +240,17 @@ ZIP 的中心目录、最多 10,000 个文件条目及至多 4 MB MANIFEST 仍�
 这批测试的是实际签发/自动续期资源与固定流量叠加，代理TLS仍使用测试静态材料，不称在线节点证书热切换或失败续期保旧已在本profile验证。大日志、更大数据量、24小时、双核心、真实整机及四平台资源资格仍分别待验；无合并、发布、部署或付费资源。
 
 本批最终本地完整套件588项：465通过、123环境skip；新证书资源10项通过（含反例、实际HTTP-01 handler响应不变、外部CA不另起responder），文档、Python编译、workflow解析和diff检查通过。独立复审所报证据规格/完整记账、PID及时间绑定、非零退出、失败partial、namespace模块来源及service样本缺口均已修复并复审无阻断。真实Certbot/Pebble重叠以新准确head CI为准。
+
+#### 4823c6b 首次证书叠加失败与确定性假账户修正
+
+准确 `4823c6bb10c65ca944d2165ea46a3b67dcb2e88f` 的[首次证书运行](https://github.com/ForceMind/V-UI/actions/runs/37853923682)失败，不能登记整批通过。[失败ZIP](https://github.com/ForceMind/V-UI/actions/runs/37853923682/artifacts/11583468279) SHA-256 `c6ba8323f5c503c41816593fe13cbc7352808d347840b063cf348e57f767e951`已核；同head普通八组另行通过，不覆盖本失败。
+
+原始证据中两条DB job均succeeded、serial/revision不同、旧材料保留；10条连接600.003秒完成6000响应与一次新单连接恢复，零错误。服务peak477,880,320字节、max及三种OOM均0。但只有首次签发的三次HTTP-01 GET200和一个Certbot进程观察，续期没有新challenge/第二PID；严格验证据此报错，后续本profile的负向/备份等阶段未执行。不是因为OOM而失败，也不能只凭两个组件写了passed覆盖缺失证据。
+
+核对固定[官方Pebble v2.10.1源码](https://github.com/letsencrypt/pebble/blob/v2.10.1/wfe/wfe.go)发现：新授权条件使用rand.Intn(100) > authzReusePercent，因此PEBBLE_AUTHZREUSE=0仍可能复用旧授权；负值不被配置解析接受。原始现象与此分支一致，但旧附件没有Pebble内部日志，不能声称捕获了那次随机数或内部选择。
+
+修正仅在私有测试数据内：首次签发后将实际fake ACME账户目录原子移到retained-first-account并完整保留，未经修改的CertbotProvider在原路径为同一证书的自动due续期注册新的fake账户；断言新账户私钥与旧账户不同，不输出钥匙或其内容。这样无既有授权可复用，仍要求两次实际新HTTP-01、对应Certbot PID/cgroup、精确流量重叠和全部原门槛。明确这是新fake账户强制重新验证的续期资源场景，不代表普通同账户续期行为；不修改官方CA二进制、生产代码或重跑碰随机绿。GET观察在请求开始绑定phase，避免迟到响应归入下一job。
+
+本地已用固定官方Pebble与真实Certbot验证三项ACME测试（含失败挑战和原普通签发/续期）。新增测试强制假CA100%授权复用，保留移走旧账户后自动due续期仍取得新的真实HTTP-01并更新材料；本地真实通过不替代修正head的600秒/受限cgroup测试。
+
+修正批最终完整本地套件590项：466通过、124环境skip；真实Pebble/Certbot三项另行实际通过，不把全套中的环境skip改写为通过。独立11项资源测试/4项ACME fixture测试通过，复审无阻断，文档/编译/diff通过。修正后的完整受限证书profile仍须准确新head实际运行。
