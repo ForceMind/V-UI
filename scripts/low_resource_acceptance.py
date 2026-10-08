@@ -26,7 +26,8 @@ from urllib.request import HTTPCookieProcessor, HTTPSHandler, ProxyHandler, Requ
 import uuid
 
 SOURCE = Path(__file__).resolve().parents[1]
-MEMORY_BYTES = 512 * 1024 * 1024
+MEMORY_PROFILES = (320, 384, 512)
+MEMORY_BYTES = 512 * 1024 * 1024  # Default profile, retained for callers.
 UNIT_PATTERN = re.compile(r"vui-low-resource-[0-9a-f]{32}\.service")
 
 
@@ -59,12 +60,18 @@ def read_pairs(path: Path) -> dict[str, int]:
     return {key: int(value) for key, value in (row.split() for row in path.read_text().splitlines())}
 
 
-def verify_limits(directory: Path) -> dict:
+def memory_bytes(memory_mib: int) -> int:
+    if memory_mib not in MEMORY_PROFILES:
+        raise RuntimeError("Unsupported memory profile")
+    return memory_mib * 1024 * 1024
+
+
+def verify_limits(directory: Path, memory_mib: int = 512) -> dict:
     memory = (directory / "memory.max").read_text().strip()
     swap = (directory / "memory.swap.max").read_text().strip()
     cpu = (directory / "cpu.max").read_text().strip().split()
-    if memory != str(MEMORY_BYTES) or swap != "0":
-        raise RuntimeError("Expected exact 512 MiB memory.max and zero memory.swap.max")
+    if memory != str(memory_bytes(memory_mib)) or swap != "0":
+        raise RuntimeError(f"Expected exact {memory_mib} MiB memory.max and zero memory.swap.max")
     if len(cpu) != 2 or cpu[0] == "max" or int(cpu[0]) <= 0 or int(cpu[0]) != int(cpu[1]):
         raise RuntimeError("Expected exactly one CPU quota")
     return {"memory.max": int(memory), "memory.swap.max": int(swap), "cpu.max": " ".join(cpu)}
@@ -73,6 +80,9 @@ def verify_limits(directory: Path) -> dict:
 def metrics(directory: Path) -> dict:
     result = {name: int((directory / name).read_text()) for name in ("memory.current", "memory.peak")}
     result["memory.events"] = read_pairs(directory / "memory.events")
+    result["memory.stat"] = read_pairs(directory / "memory.stat")
+    if not {"anon", "file"} <= result["memory.stat"].keys() or any(value < 0 for value in result["memory.stat"].values()):
+        raise RuntimeError("Missing or invalid anonymous/file memory accounting")
     result["cpu.stat"] = read_pairs(directory / "cpu.stat")
     if not {"oom", "oom_kill"} <= result["memory.events"].keys():
         raise RuntimeError("Missing OOM accounting")
@@ -108,11 +118,13 @@ def filesystem_type(path: Path) -> str:
 def worker(args) -> int:
     require_hosted_runner()
     directory = cgroup_directory(args.unit)
-    limits = verify_limits(directory)
+    limits = verify_limits(directory, args.memory_mib)
     report = {"schema": 1, "scope": "actual offline stage/activate, HTTPS panel with idle certificate manager, no proxy cores; not full VPS qualification",
               "source_commit": args.source_commit, "unit": args.unit, "limits": limits,
+              "requested_memory_mib": args.memory_mib,
               "accounting": "worker, offline pip, panel, local clients, and descendants in one cgroup; build/download, host OS and pre-existing cache ownership excluded",
               "memory_peak_scope": "lifetime cgroup maximum, not reset per stage",
+              "memory_stat_scope": "stage-end/current snapshots, not composition at lifetime peak; separate kernel reads may differ",
               "stages": [], "complete": False, "outcome": "running"}
     output = args.output
 
@@ -141,6 +153,8 @@ def worker(args) -> int:
             row["cpu_usage_usec"] = after["cpu.stat"]["usage_usec"] - before["cpu.stat"]["usage_usec"]
             row["memory_current_bytes"] = after["memory.current"]
             row["memory_peak_bytes"] = after["memory.peak"]
+            row["memory_stat"] = after["memory.stat"]
+            row["memory_events"] = after["memory.events"]
             checkpoint()
 
     try:
@@ -198,7 +212,7 @@ def worker(args) -> int:
 
             def start():
                 nonlocal log_number
-                log_path = output.parent / f"low-resource-panel-{log_number}.log"
+                log_path = output.parent / f"{output.stem}-panel-{log_number}.log"
                 log_number += 1
                 log = stack.enter_context(log_path.open("w"))
                 command = [sys.executable, "-B", str(SOURCE / "scripts/deploy.py"), "--root", str(root), "run",
@@ -311,20 +325,22 @@ def worker(args) -> int:
 
 
 def systemd_command(args, unit: str, work: Path, worker_output: Path) -> list[str]:
+    memory_bytes(args.memory_mib)  # Validate programmatic callers as well as argparse.
     return ["sudo", "-n", "systemd-run", "--wait", "--pipe", "--unit", unit,
             "--uid", str(os.getuid()), "--gid", str(os.getgid()),
-            "--property", "MemoryMax=512M", "--property", "MemorySwapMax=0",
+            "--property", f"MemoryMax={args.memory_mib}M", "--property", "MemorySwapMax=0",
             "--property", "CPUQuota=100%", "--property", "RuntimeMaxSec=600",
             "--property", "KillMode=control-group", "--property", "OOMPolicy=stop",
             "--setenv=GITHUB_ACTIONS=true", "--setenv=RUNNER_ENVIRONMENT=github-hosted",
             "--setenv=TMPDIR=" + str(work),
             sys.executable, "-B", str(Path(__file__).resolve()), "--worker", "--unit", unit,
             "--bundle", str(args.bundle.resolve()), "--source-commit", args.source_commit,
-            "--output", str(worker_output), "--work-dir", str(work)]
+            "--output", str(worker_output), "--work-dir", str(work), "--memory-mib", str(args.memory_mib)]
 
 
 def coordinator(args) -> int:
     require_hosted_runner()
+    budget = memory_bytes(args.memory_mib)
     if not re.fullmatch(r"[0-9a-f]{40}", args.source_commit):
         raise RuntimeError("An exact source commit is required")
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -334,7 +350,8 @@ def coordinator(args) -> int:
         raise RuntimeError("Refusing to overwrite prior acceptance evidence")
     unit = "vui-low-resource-" + uuid.uuid4().hex + ".service"
     summary = {"schema": 1, "unit": unit, "source_commit": args.source_commit, "outcome": "failed",
-               "scope": "512 MiB cgroup / one CPU quota regression, not a full 512 MiB host", "worker_report": worker_output.name}
+               "scope": f"{args.memory_mib} MiB cgroup / one CPU quota regression, not a full 512 MiB host",
+               "requested_memory_mib": args.memory_mib, "worker_report": worker_output.name}
     with tempfile.TemporaryDirectory(prefix="low-resource-work-", dir=output.parent) as directory:
         command = systemd_command(args, unit, Path(directory), worker_output)
         try:
@@ -345,10 +362,12 @@ def coordinator(args) -> int:
                 raise RuntimeError("Worker accounting report missing (possible OOM or timeout)")
             report = json.loads(worker_output.read_text())
             if (result.returncode != 0 or report.get("outcome") != "passed" or report.get("complete") is not True
-                    or report.get("unit") != unit or report.get("source_commit") != args.source_commit):
+                    or report.get("unit") != unit or report.get("source_commit") != args.source_commit
+                    or report.get("requested_memory_mib") != args.memory_mib
+                    or report.get("limits", {}).get("memory.max") != budget):
                 raise RuntimeError("Worker failed or its final accounting is incomplete")
             assert_no_oom(report["metrics"])
-            if report["metrics"]["memory.peak"] > MEMORY_BYTES:
+            if report["metrics"]["memory.peak"] > budget:
                 raise RuntimeError("Peak exceeded configured cgroup budget")
             summary["outcome"] = "passed"
             summary["metrics"] = report["metrics"]
@@ -383,6 +402,7 @@ def main():
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--memory-mib", type=int, choices=MEMORY_PROFILES, default=512)
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--unit")
     parser.add_argument("--work-dir", type=Path)

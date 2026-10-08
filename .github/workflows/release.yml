@@ -35,7 +35,28 @@ jobs:
           python -B scripts/low_resource_acceptance.py \
             --bundle /tmp/vui-release/vui-linux.zip \
             --source-commit "$VUI_RELEASE_COMMIT" \
-            --output /tmp/vui-release/low-resource.json
+            --memory-mib 512 \
+            --output /tmp/vui-release/low-resource-512.json
+      - name: Verify actual bundle under one CPU and 384 MiB cgroup
+        env:
+          VUI_RELEASE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          python -B scripts/low_resource_acceptance.py \
+            --bundle /tmp/vui-release/vui-linux.zip \
+            --source-commit "$VUI_RELEASE_COMMIT" \
+            --memory-mib 384 \
+            --output /tmp/vui-release/low-resource-384.json
+      - name: Verify actual bundle under one CPU and 320 MiB cgroup
+        env:
+          VUI_RELEASE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          python -B scripts/low_resource_acceptance.py \
+            --bundle /tmp/vui-release/vui-linux.zip \
+            --source-commit "$VUI_RELEASE_COMMIT" \
+            --memory-mib 320 \
+            --output /tmp/vui-release/low-resource-320.json
       - name: Install explicit test browser
         run: python -m playwright install --with-deps chromium
       - name: Verify non-root install HTTPS browser and recovery

@@ -27,10 +27,11 @@ class LowResourceAcceptanceTests(unittest.TestCase):
         for name, text in {"memory.max": str(gate.MEMORY_BYTES), "memory.swap.max": "0",
                            "cpu.max": "100000 100000", "memory.current": "12000000",
                            "memory.peak": "16000000", "memory.events": "low 0\nhigh 0\nmax 2\noom 0\noom_kill 0\n",
+                           "memory.stat": "anon 8000000\nfile 4000000\nslab 123456\n",
                            "cpu.stat": "usage_usec 12345\nuser_usec 12000\nsystem_usec 345\n"}.items():
             (self.cg / name).write_text(text)
         self.args = argparse.Namespace(bundle=self.root / "candidate.zip", source_commit=COMMIT,
-                                       output=self.root / "acceptance.json", unit=UNIT, work_dir=self.root)
+                                       output=self.root / "acceptance.json", unit=UNIT, work_dir=self.root, memory_mib=512)
 
     def test_requires_both_explicit_hosted_markers_and_nonroot_linux(self):
         with patch.object(gate.os, "geteuid", return_value=1001), patch.object(gate.platform, "system", return_value="Linux"):
@@ -63,6 +64,38 @@ class LowResourceAcceptanceTests(unittest.TestCase):
             with self.subTest(name=name, value=value), self.assertRaises(RuntimeError):
                 gate.verify_limits(self.cg)
             (self.cg / name).write_text(original)
+
+    def test_all_memory_profiles_exactly_validated_and_forwarded(self):
+        for profile in (320, 384, 512):
+            with self.subTest(profile=profile):
+                self.args.memory_mib = profile
+                (self.cg / "memory.max").write_text(str(profile * 1024 * 1024))
+                self.assertEqual(gate.verify_limits(self.cg, profile)["memory.max"], profile * 1024 * 1024)
+                other = 512 if profile != 512 else 384
+                with self.assertRaises(RuntimeError): gate.verify_limits(self.cg, other)
+                command = gate.systemd_command(self.args, UNIT, self.root, self.args.output)
+                self.assertIn(f"MemoryMax={profile}M", command)
+                self.assertEqual(command[command.index("--memory-mib") + 1], str(profile))
+        with self.assertRaises(RuntimeError): gate.memory_bytes(1024)
+
+    def test_memory_stat_requires_anon_and_file_and_preserves_other_counters(self):
+        self.assertEqual(gate.metrics(self.cg)["memory.stat"], {"anon": 8000000, "file": 4000000, "slab": 123456})
+        for value in ("anon 1\n", "file 1\n", "anon -1\nfile 2\n"):
+            (self.cg / "memory.stat").write_text(value)
+            with self.subTest(value=value), self.assertRaises(RuntimeError): gate.metrics(self.cg)
+        (self.cg / "memory.stat").unlink()
+        with self.assertRaises(FileNotFoundError): gate.metrics(self.cg)
+
+    def test_coordinator_smaller_profiles_preserve_requested_budget(self):
+        for profile in (320, 384):
+            with self.subTest(profile=profile):
+                self.args.memory_mib = profile
+                self.args.output = self.root / f"acceptance-{profile}.json"
+                status, summary, calls = self.run_coordinator("passed")
+                self.assertEqual(status, 0)
+                self.assertEqual(summary["requested_memory_mib"], profile)
+                self.assertIn(f"{profile} MiB cgroup", summary["scope"])
+                self.assertIn(f"MemoryMax={profile}M", calls[0])
 
     def test_peak_and_cpu_evidence_mandatory(self):
         value = gate.metrics(self.cg)
@@ -114,11 +147,14 @@ class LowResourceAcceptanceTests(unittest.TestCase):
                     raise subprocess.TimeoutExpired(command, 660)
                 if mode != "missing":
                     report = {"unit": unit, "source_commit": COMMIT, "outcome": "passed", "complete": True,
-                              "metrics": gate.metrics(self.cg)}
+                              "metrics": gate.metrics(self.cg), "requested_memory_mib": self.args.memory_mib,
+                              "limits": {"memory.max": gate.memory_bytes(self.args.memory_mib)}}
                     if mode == "partial": report["complete"] = False
                     if mode == "wrong_source": report["source_commit"] = "c" * 40
+                    if mode == "wrong_profile": report["requested_memory_mib"] = 384 if self.args.memory_mib == 512 else 512
+                    if mode == "wrong_limit": report["limits"]["memory.max"] = 123
                     if mode == "oom": report["metrics"]["memory.events"]["oom"] = 1
-                    if mode == "over_peak": report["metrics"]["memory.peak"] = gate.MEMORY_BYTES + 1
+                    if mode == "over_peak": report["metrics"]["memory.peak"] = gate.memory_bytes(self.args.memory_mib) + 1
                     if mode == "failed": report["outcome"] = "failed"
                     report_path.write_text(json.dumps(report))
                 return subprocess.CompletedProcess(command, 1 if mode == "nonzero" else 0)
@@ -138,7 +174,7 @@ class LowResourceAcceptanceTests(unittest.TestCase):
         self.assertFalse(list(self.root.glob("low-resource-work-*")))
 
     def test_coordinator_failures_never_silently_skip(self):
-        for mode in ("missing", "partial", "wrong_source", "oom", "over_peak", "failed", "nonzero", "timeout"):
+        for mode in ("missing", "partial", "wrong_source", "wrong_profile", "wrong_limit", "oom", "over_peak", "failed", "nonzero", "timeout"):
             with self.subTest(mode=mode):
                 self.args.output = self.root / (mode + ".json")
                 status, summary, calls = self.run_coordinator(mode)
@@ -172,6 +208,9 @@ class LowResourceAcceptanceTests(unittest.TestCase):
         self.assertEqual(report["outcome"], "failed")
         self.assertEqual(report["stages"][0]["outcome"], "failed")
         self.assertEqual(report["metrics"]["memory.peak"], 16000000)
+        self.assertEqual(report["metrics"]["memory.stat"]["anon"], 8000000)
+        self.assertEqual(report["stages"][0]["memory_stat"]["file"], 4000000)
+        self.assertEqual(report["stages"][0]["memory_events"]["max"], 2)
         self.assertFalse(list(self.root.glob("installed-*")))
 
     def test_wrong_bundle_source_fails_before_provision_or_launch(self):
@@ -205,6 +244,10 @@ class LowResourceAcceptanceTests(unittest.TestCase):
         self.assertIn("--source-commit", workflow)
         self.assertLess(workflow.index("scripts/low_resource_acceptance.py"), workflow.index("test_release_deployment.py"))
         self.assertIn("/tmp/vui-release/low-resource*.json", workflow)
+        for profile in (320, 384, 512):
+            self.assertIn(f"--memory-mib {profile}", workflow)
+            self.assertIn(f"--output /tmp/vui-release/low-resource-{profile}.json", workflow)
+        self.assertEqual(workflow.count("python -B scripts/low_resource_acceptance.py"), 3)
         self.assertIn("if: always()", workflow)
 
 
