@@ -145,15 +145,15 @@ def filesystem_type(path: Path) -> str:
 
 def duration_profile(args):
     profile = getattr(args, "duration_profile", "smoke")
-    if profile not in {"smoke", "sustained"}:
+    if profile not in {"smoke", "sustained", "interactions"}:
         raise RuntimeError("Unknown duration profile")
-    if profile == "sustained" and args.memory_mib != 512:
-        raise RuntimeError("Sustained profile currently requires the original 512 MiB limit")
+    if profile in {"sustained", "interactions"} and args.memory_mib != 512:
+        raise RuntimeError("Extended profiles currently require the original 512 MiB limit")
     return profile
 
 
 def runtime_seconds(args):
-    return 6600 if duration_profile(args) == "sustained" else 600
+    return {"smoke": 600, "sustained": 6600, "interactions": 1800}[duration_profile(args)]
 
 
 def worker(args) -> int:
@@ -172,6 +172,9 @@ def worker(args) -> int:
         report["scope"] = "30-minute panel and single-core idles plus three 10-minute fixed-rate VLESS/TCP/TLS connection steps; not full VPS or 24-hour qualification"
         report["sustained_load"] = []
         report["accounting"] += "; sustained client/target/generator outside service cgroup, separately measured; short controls remain inside"
+    if profile == "interactions":
+        report["scope"] = "real UI visibility/multi-tab/logout and fixed 100-node export resource diagnostic; not complete VPS qualification"
+        report["accounting"] += "; headed browser/export generator outside service cgroup; same host remains shared"
     output = args.output
 
     def checkpoint():
@@ -348,11 +351,58 @@ def worker(args) -> int:
                 else:
                     time.sleep(60)
                     alive()
-            if profile == "smoke":
+            if profile != "sustained":
                 stage("panel_only_idle_60_seconds", idle)
             else:
                 stage("panel_only_idle_1800_seconds", idle)
                 stage("refresh_session_after_panel_idle", login)
+            if profile == "interactions":
+                def seed_export_fixture():
+                    # Seed synthetic rows without pretending this is the normal
+                    # node-edit API or starting 100 real listeners. API/editor
+                    # correctness remains covered by the existing deployment gate.
+                    code = r'''import sys, json
+from app.models.database import SessionLocal, Inbound
+with SessionLocal() as db:
+    if db.query(Inbound).count(): raise RuntimeError("Fixture requires empty node database")
+    for n in range(100):
+        db.add(Inbound(core="sing-box", remark=f"resource-node-{n:03d}", tag=f"resource-{n:03d}",
+            enable=True, port=20000+n, protocol="vless",
+            settings={"users":[{"uuid":f"11111111-1111-1111-1111-{n+1:012d}","flow":""}]},
+            stream_settings={"tls":{"enabled":True,"server_name":"vpn.example.test",
+                "certificate_path":sys.argv[1],"key_path":sys.argv[2]}}))
+    db.commit()
+'''
+                    subprocess.run([str(python), "-B", "-c", code, str(cert), str(key)],
+                        cwd=payload, env=tools.child_env(payload, data), check=True, timeout=30)
+                    rows = json.loads(api("/api/inbounds")[1])
+                    if len(rows) != 100: raise RuntimeError("Synthetic export fixture not visible")
+                stage("seed_100_synthetic_export_rows", seed_export_fixture)
+                def fixture_rows_not_running():
+                    states=json.loads(api("/api/cores/status")[1])
+                    if any(value.get("running") for value in states.values()):
+                        raise RuntimeError("Synthetic export rows unexpectedly started a managed core")
+                stage("synthetic_export_rows_not_running", fixture_rows_not_running)
+                def interactions():
+                    from scripts.low_resource_interactions import request_interactions
+                    samples = []
+                    last = [0.0, None]
+                    def observe(phase_name):
+                        alive()
+                        if phase_name != last[1] or time.monotonic()-last[0] >= 10:
+                            sample = metrics(directory)
+                            assert_no_oom(sample)
+                            sample.update(observed_monotonic=time.monotonic(), driver_phase=phase_name,
+                                          processes=process_snapshot(directory))
+                            samples.append(sample)
+                            report["interaction_service_samples"] = samples
+                            checkpoint()
+                            last[:] = [time.monotonic(), phase_name]
+                    cookie = "; ".join(item.name+"="+item.value for item in jar)
+                    report["interactions"] = request_interactions(args.work_dir, output, args.unit,
+                        args.source_commit, origin, ca, cert, cookie, observe)
+                stage("browser_visibility_tabs_exports_logout", interactions)
+                stage("login_after_interaction_logout", login)
             from scripts.low_resource_proxy import run_proxy_smoke
             def sustained_load(binary, fixture, ca, port, health):
                 from scripts.low_resource_sustained import CONCURRENCIES, request_load
@@ -401,6 +451,8 @@ def worker(args) -> int:
             stage("restored_https_startup", start)
             stage("old_session_after_restore_denied", lambda: api("/api/auth/me", expected=401))
             stage("restored_login", login)
+            if profile == "interactions":
+                stage("restored_export_rows_still_not_running", fixture_rows_not_running)
             stage("restored_logout", lambda: api("/api/auth/logout", {}))
             stage("final_panel_stop", stop)
         report["outcome"] = "passed"
@@ -478,6 +530,10 @@ def coordinator(args) -> int:
                 sys.path.insert(0, str(SOURCE))
                 from scripts.low_resource_sustained import LoadBroker
                 broker = LoadBroker(Path(directory), output, unit, args.source_commit)
+            elif profile == "interactions":
+                sys.path.insert(0, str(SOURCE))
+                from scripts.low_resource_interactions import InteractionBroker
+                broker = InteractionBroker(Path(directory), output, unit, args.source_commit)
             with broker, output.with_suffix(".log").open("w") as log:
                 result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT,
                                         timeout=runtime_seconds(args) + 60)
@@ -494,6 +550,10 @@ def coordinator(args) -> int:
                 raise RuntimeError("Worker failed or its final accounting is incomplete")
             if profile == "sustained":
                 validate_sustained_stages(report, unit, args.source_commit)
+            elif profile == "interactions":
+                from scripts.low_resource_interactions import validate_result, validate_service_samples
+                validate_result(report.get("interactions", {}), unit, args.source_commit)
+                validate_service_samples(report.get("interaction_service_samples"))
             assert_no_oom(report["metrics"])
             summary["peak_budget_assessment"] = peak_assessment(report["metrics"]["memory.peak"],
                 budget, report["base_page_size_bytes"])
@@ -533,7 +593,7 @@ def main():
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--memory-mib", type=int, choices=MEMORY_PROFILES, default=512)
-    parser.add_argument("--duration-profile", choices=("smoke", "sustained"), default="smoke")
+    parser.add_argument("--duration-profile", choices=("smoke", "sustained", "interactions"), default="smoke")
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--unit")
     parser.add_argument("--work-dir", type=Path)
