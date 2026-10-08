@@ -208,7 +208,7 @@ def validate_result(value, unit, commit, concurrency):
     outside_server(unit, value.get("client_cgroup", ""))
 
 
-def fixed_load(proxy_port, target_port, concurrency, *, duration=DURATION, interval=INTERVAL, progress=None):
+def fixed_load(proxy_port, target_port, concurrency, *, duration=DURATION, interval=INTERVAL, progress=None, record_times=False, stagger=False):
     """One persistent CONNECT/TCP tunnel per lane, one 64-KiB GET per second.
 
     Requests never reconnect/retry. A missed slot or body mismatch fails; time
@@ -217,10 +217,15 @@ def fixed_load(proxy_port, target_port, concurrency, *, duration=DURATION, inter
     start = {"time": None}
     cancelled = threading.Event()
     progress = {} if progress is None else progress
-    progress.update(completed_requests=0, errors=0)
+    progress.update(completed_requests=0, errors=0, first_response_lanes=0)
+    if record_times: progress["response_monotonic"] = []
     progress_lock = threading.Lock()
-    barrier = threading.Barrier(concurrency, action=lambda: start.update(time=time.monotonic()))
-    def lane(_):
+    def ready():
+        start['time'] = time.monotonic()
+        progress['started_monotonic'] = start['time']
+        progress['connected_lanes'] = concurrency
+    barrier = threading.Barrier(concurrency, action=ready)
+    def lane(index):
         client = http.client.HTTPConnection("127.0.0.1", proxy_port, timeout=5)
         client.set_tunnel("127.0.0.1", target_port)
         try:
@@ -231,7 +236,7 @@ def fixed_load(proxy_port, target_port, concurrency, *, duration=DURATION, inter
             for tick in range(duration):
                 if cancelled.is_set():
                     raise RuntimeError("Peer workload lane failed")
-                scheduled = start["time"] + tick * interval
+                scheduled = start["time"] + tick * interval + (index * interval / concurrency if stagger else 0)
                 time.sleep(max(0, scheduled - time.monotonic()))
                 before = time.monotonic()
                 if before - scheduled >= interval:
@@ -244,6 +249,8 @@ def fixed_load(proxy_port, target_port, concurrency, *, duration=DURATION, inter
                 count += 1
                 with progress_lock:
                     progress["completed_requests"] += 1
+                    if count == 1: progress["first_response_lanes"] += 1
+                    if record_times: progress["response_monotonic"].append(time.monotonic())
             time.sleep(max(0, start["time"] + duration * interval - time.monotonic()))
             return count, maximum
         except Exception:

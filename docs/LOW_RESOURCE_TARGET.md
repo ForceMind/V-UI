@@ -217,3 +217,26 @@ ZIP 的中心目录、最多 10,000 个文件条目及至多 4 MB MANIFEST 仍�
 新版资源夹具明确要求隐藏页周期状态请求为0、每标签每端点最多1个完整未结束请求，原生visible端点仍有活动；注销要求真实401、两页在共用15秒deadline内跳登录、后11秒停止轮询，并由独立worker用原Cookie再取得401。初始页面加载与明确的手工刷新不冒充周期轮询。这些更严格断言需新准确提交通过后才登记，不将4f基线当优化结果，不报告节能百分比。真实证书任务叠加、大日志、24小时、真实整机和四平台资源仍待各自验收。
 
 本批最终本地完整套件578项：455通过、123环境skip；两份JavaScript语法、Python编译、文档合同及diff检查通过。Node回归覆盖显隐反复切换、慢请求、手工变更后新读、迟到401、验证期间新注销通知和账户初始化超时；不以这些确定性测试替代新head原生浏览器/受限cgroup结果。
+
+### 69983e9 可见状态轮询实际结果
+
+准确 `69983e929833cc8f0aea54a8dc7e483ccf706fd0` 的普通八组/11 jobs和[严格UI运行](https://github.com/ForceMind/V-UI/actions/runs/37852024588)另1 job均attempt 1、全部步骤成功。[原始ZIP](https://github.com/ForceMind/V-UI/actions/runs/37852024588/artifacts/11583196490) SHA-256 `e902dfb3796a2b144532bd1cd6e02a01666f54ca63d0cac91346d47dbaa5e180`已下载核验；内层包SHA-256 `f3f3bfec0706900457b7f38f5392187754d20f31859c398f6a1c5f6a7ce4e4d0`。
+
+- 可见/隐藏/双标签各60.003/60.001/60.002秒，真实visibility样本61/60/60。可见仍19次system+5次core；隐藏从4f基线26次降为0，双标签从50降为24（全部来自可见页）。每标签每端点最多一个完整未结束请求，所有正向200、零失败/待决。
+- 四导出各600测量请求+1基准响应、固定100节点/60秒，正文稳定且零错误；未把轮询减少算成CPU或功耗下降百分比。
+- 注销阶段取得一个真实状态401后，两页在共用15秒期限内退出，后11秒停止轮询；另有原Cookie重放401。worker35阶段全通过，真实UUID/CA拒绝、代理恢复、备份恢复和整组清理继续通过。
+- 服务一核/512MiB/零swap，累计peak479,522,816字节、max及三种OOM均0；外部浏览器组peak486,576,128字节、max/OOM0，单列记账且清理确认。此head未重复90分钟，不继承972长时结果。
+
+### 真实假CA证书任务与流量叠加（本批实现，实际执行待验）
+
+独立 `certificates` profile由PR标签 `run-low-resource-certificates`显式触发，普通八组及三档短门槛不变。服务保持一核/512MiB/零swap与原一基础页容差；worker1800秒、协调器1860秒、workflow45分钟。已安装包Python运行独立证书子进程，导入的database/manager/provider实际模块文件须属于该payload，提前设置专用数据目录；普通面板数据库须保持零证书/零job，避免第二manager抢同一队列。
+
+真实ChallengeServer、CertificateManager及未经替换的CertbotProvider/Certbot在服务cgroup内；固定官方Pebble、私有TCP/UDP DNS、sing-box客户端与HTTP目标/发生器在另一临时cgroup完整计账。只将显式loopback test_directory/test_ca注入测试构造器，使用自有.test名称和假CA，不改主机信任，不接真实CA。Pebble禁止always-valid和authz复用；真实GET200挑战仅保存token摘要，不上传账户、私钥、DB或challenge内容。
+
+10条持久CONNECT/VLESS/TCP/TLS连接共同保持600秒，每连接每秒一个64KiB请求，共6000次；本profile将十lane错开100ms，减少同步一秒批次留下的测量空档，原sustained默认调度保持。全部连接且每lane首个响应完成后才签发；置专用行到期后仅调用一次process_once，让实际due scheduler生成第二job，再确认不会生成第三job。两个job都必须在实际流量窗口内完成、各有窗口内真实代理响应及新HTTP-01 GET200；不扩大窗口、不补发请求掩盖无重叠。签发/续期须真实成功、SAN/密钥/链验证、serial/revision变化且旧材料字节不变。
+
+在真实challenge返回前只读/proc核对Certbot的父PID、argv限定的CA/webroot/CSR、进程starttime和实际cgroup；不包装Popen或替换provider。每5秒保存服务CPU/内存/OOM和稳定worker/panel/proxy身份，独立严格验证样本完整性、有序时间和累计计数。新单连接恢复、面板恢复、原负向及清理继续必需；异常保留安全job状态/错误码和partial流量。external_metrics截至外部helper退出前，最后包装器清理另行验证。
+
+这批测试的是实际签发/自动续期资源与固定流量叠加，代理TLS仍使用测试静态材料，不称在线节点证书热切换或失败续期保旧已在本profile验证。大日志、更大数据量、24小时、双核心、真实整机及四平台资源资格仍分别待验；无合并、发布、部署或付费资源。
+
+本批最终本地完整套件588项：465通过、123环境skip；新证书资源10项通过（含反例、实际HTTP-01 handler响应不变、外部CA不另起responder），文档、Python编译、workflow解析和diff检查通过。独立复审所报证据规格/完整记账、PID及时间绑定、非零退出、失败partial、namespace模块来源及service样本缺口均已修复并复审无阻断。真实Certbot/Pebble重叠以新准确head CI为准。

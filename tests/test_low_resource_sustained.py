@@ -177,13 +177,19 @@ class SustainedTests(unittest.TestCase):
             def request(self,*args,**kwargs): self.requests+=1
             def getresponse(self): return Response()
             def close(self): self.closed=time.monotonic()
-        with patch.object(load.http.client,'HTTPConnection',Client):
-            result=load.fixed_load(12345,23456,10,duration=2,interval=.03)
-        self.assertEqual(result['requests'],20)
-        self.assertGreaterEqual(result['wall_seconds'],.06)
-        self.assertEqual(len(connections),10)
-        self.assertTrue(all(c.requests==2 and c.closed-c.connected>=.06 for c in connections))
-        self.assertTrue(all(c.tunnel==('127.0.0.1',23456) for c in connections))
+        for stagger in (False,True):
+            connections.clear();progress={}
+            with self.subTest(stagger=stagger),patch.object(load.http.client,'HTTPConnection',Client):
+                result=load.fixed_load(12345,23456,10,duration=2,interval=.03,progress=progress,record_times=True,stagger=stagger)
+            self.assertEqual(result['requests'],20)
+            self.assertGreaterEqual(result['wall_seconds'],.06)
+            self.assertEqual(len(connections),10)
+            self.assertTrue(all(c.requests==2 and c.closed-c.connected>=.06 for c in connections))
+            self.assertTrue(all(c.tunnel==('127.0.0.1',23456) for c in connections))
+            self.assertEqual(progress['first_response_lanes'],10)
+            self.assertEqual(progress['connected_lanes'],10)
+            self.assertEqual(len(progress['response_monotonic']),20)
+            self.assertTrue(all(t>=progress['started_monotonic'] for t in progress['response_monotonic']))
 
     def test_fixed_load_wrong_body_or_reconnection_fails_and_closes(self):
         for bad in ('body','reconnect'):

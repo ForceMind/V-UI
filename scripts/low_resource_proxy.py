@@ -99,7 +99,7 @@ def require_rejection(request, deliveries, log_path, reasons, *, offset=0, timeo
 
 
 def run_proxy_smoke(binary: Path, root: Path, log_prefix: Path, stage, report, panel_check,
-                    *, sustained=None, idle_monitor=None):
+                    *, sustained=None, idle_monitor=None, overlap=None):
     root.mkdir(mode=0o700)
     report["proxy_workload"] = {
         "protocol": "VLESS/TCP/TLS", "core": "verified installed bundled sing-box",
@@ -148,6 +148,8 @@ def run_proxy_smoke(binary: Path, root: Path, log_prefix: Path, stage, report, p
         stage("panel_single_proxy_idle_1800_seconds" if sustained else "panel_single_proxy_idle_60_seconds", idle)
         if sustained:
             sustained(binary, root, ca, port, server_alive)
+        if overlap:
+            overlap(binary, root, ca, port, server_alive, server.process.pid)
             healthy()
         target_port, deliveries = start_http_target(stack)
         client_port = unused_port()

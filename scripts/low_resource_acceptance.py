@@ -145,15 +145,15 @@ def filesystem_type(path: Path) -> str:
 
 def duration_profile(args):
     profile = getattr(args, "duration_profile", "smoke")
-    if profile not in {"smoke", "sustained", "interactions"}:
+    if profile not in {"smoke", "sustained", "interactions", "certificates"}:
         raise RuntimeError("Unknown duration profile")
-    if profile in {"sustained", "interactions"} and args.memory_mib != 512:
+    if profile in {"sustained", "interactions", "certificates"} and args.memory_mib != 512:
         raise RuntimeError("Extended profiles currently require the original 512 MiB limit")
     return profile
 
 
 def runtime_seconds(args):
-    return {"smoke": 600, "sustained": 6600, "interactions": 1800}[duration_profile(args)]
+    return {"smoke": 600, "sustained": 6600, "interactions": 1800, "certificates": 1800}[duration_profile(args)]
 
 
 def worker(args) -> int:
@@ -175,6 +175,9 @@ def worker(args) -> int:
     if profile == "interactions":
         report["scope"] = "real UI visibility/multi-tab/logout and fixed 100-node export resource diagnostic; not complete VPS qualification"
         report["accounting"] += "; headed browser/export generator outside service cgroup; same host remains shared"
+    if profile == "certificates":
+        report["scope"] = "real local-test-CA issuance and due renewal during 10-connection 600-second loopback traffic; not live certificate rotation or full VPS qualification"
+        report["accounting"] += "; certificate manager/responder/Certbot inside; Pebble/DNS/client/target outside service cgroup"
     output = args.output
 
     def checkpoint():
@@ -425,11 +428,40 @@ with SessionLocal() as db:
                             concurrency, binary, fixture, ca, port, observe))
                     report["sustained_load"].append(result)
                     stage(f"panel_recovery_after_{concurrency}_connections", lambda: api("/api/auth/me"))
+            def certificate_overlap(binary, fixture, ca, port, health, proxy_pid):
+                from scripts.low_resource_certificates import request_overlap
+                samples=[];last=[0.0]
+                def identity(pid):
+                    return dict(pid=pid,starttime_ticks=int(Path(f'/proc/{pid}/stat').read_text().rsplit(')',1)[1].split()[19]))
+                report['certificate_service_roles']={name:identity(pid) for name,pid in
+                    (('worker',os.getpid()),('panel',running[0].pid),('proxy',proxy_pid))}
+                def observe():
+                    alive();health()
+                    if time.monotonic()-last[0]>=5:
+                        sample=metrics(directory);assert_no_oom(sample)
+                        processes=process_snapshot(directory)
+                        for process in processes:
+                            try:process['starttime_ticks']=identity(process['pid'])['starttime_ticks']
+                            except FileNotFoundError:process['starttime_ticks']=0
+                        sample.update(observed_monotonic=time.monotonic(),processes=processes)
+                        samples.append(sample);report['certificate_service_samples']=samples
+                        checkpoint();last[0]=time.monotonic()
+                def overlap():
+                    report['certificate_overlap']=request_overlap(args.work_dir,output,args.unit,args.source_commit,
+                        payload,python,binary,fixture,ca,port,observe)
+                stage('real_issue_and_due_renewal_with_10_connections_600_seconds',overlap)
+                def panel_db_untouched():
+                    with sqlite3.connect(data/'v-ui.db') as db:
+                        if db.execute('SELECT COUNT(*) FROM managed_certificates').fetchone()[0] or db.execute('SELECT COUNT(*) FROM certificate_jobs').fetchone()[0]:
+                            raise RuntimeError('Test certificate manager touched panel database')
+                stage('original_panel_certificate_database_untouched',panel_db_untouched)
+                stage('panel_recovery_after_certificate_overlap',lambda:api('/api/auth/me'))
             run_proxy_smoke(payload / "cores" / tools.target_arch() / "sing-box", root / "proxy-fixture",
                             output.with_suffix(""), stage, report,
                             lambda: api("/api/auth/me"),
                             sustained=sustained_load if profile == "sustained" else None,
-                            idle_monitor=monitor_wait if profile == "sustained" else None)
+                            idle_monitor=monitor_wait if profile == "sustained" else None,
+                            overlap=certificate_overlap if profile == "certificates" else None)
             old_cookies = list(jar)
             stage("logout", lambda: api("/api/auth/logout", {}))
             for cookie in old_cookies:
@@ -535,6 +567,10 @@ def coordinator(args) -> int:
                 sys.path.insert(0, str(SOURCE))
                 from scripts.low_resource_interactions import InteractionBroker
                 broker = InteractionBroker(Path(directory), output, unit, args.source_commit)
+            elif profile == "certificates":
+                sys.path.insert(0, str(SOURCE))
+                from scripts.low_resource_certificates import CertificateBroker
+                broker = CertificateBroker(Path(directory), output, unit, args.source_commit)
             with broker, output.with_suffix(".log").open("w") as log:
                 result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT,
                                         timeout=runtime_seconds(args) + 60)
@@ -555,6 +591,12 @@ def coordinator(args) -> int:
                 from scripts.low_resource_interactions import validate_result, validate_service_samples
                 validate_result(report.get("interactions", {}), unit, args.source_commit)
                 validate_service_samples(report.get("interaction_service_samples"))
+            elif profile == "certificates":
+                from scripts.low_resource_certificates import validate_result
+                value=report.get('certificate_overlap',{})
+                validate_result(value.get('external',{}),value.get('service',{}),unit,args.source_commit)
+                from scripts.low_resource_certificates import validate_service_samples
+                validate_service_samples(report.get('certificate_service_samples'),report.get('certificate_service_roles'))
             assert_no_oom(report["metrics"])
             summary["peak_budget_assessment"] = peak_assessment(report["metrics"]["memory.peak"],
                 budget, report["base_page_size_bytes"])
@@ -594,7 +636,7 @@ def main():
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--memory-mib", type=int, choices=MEMORY_PROFILES, default=512)
-    parser.add_argument("--duration-profile", choices=("smoke", "sustained", "interactions"), default="smoke")
+    parser.add_argument("--duration-profile", choices=("smoke", "sustained", "interactions", "certificates"), default="smoke")
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--unit")
     parser.add_argument("--work-dir", type=Path)

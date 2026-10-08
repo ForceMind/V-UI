@@ -1,7 +1,7 @@
 """Disposable browser/export diagnostics, with clients outside service accounting.
 
-This records current polling behavior. It never fakes document visibility or
-claims that hidden tabs already stop polling. Only a local synthetic panel is used.
+This verifies visible-only polling with native document visibility. It never
+fakes hidden state. Only a local synthetic panel is used.
 """
 from __future__ import annotations
 
