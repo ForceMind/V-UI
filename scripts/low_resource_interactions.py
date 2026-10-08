@@ -152,6 +152,7 @@ def validate_result(value, unit, commit):
     from scripts.low_resource_sustained import outside_server
     if (value.get('outcome') != 'passed' or value.get('source_commit') != commit
             or value.get('unit') != unit or value.get('node_count') != 100
+            or value.get('polling_contract') != 'visible-only-state-status'
             or value.get('broker_cleanup_complete') is not True or value.get('cleanup_complete') is not True
             or [p.get('name') for p in value.get('phases', [])] != list(PHASES)):
         raise RuntimeError('Incomplete interaction evidence')
@@ -196,6 +197,11 @@ def validate_result(value, unit, commit):
         visible='tab1' if row['name']=='visible_tab' else 'tab2' if row['name']=='two_tabs' else None
         if visible and any(requests.get(visible+':'+path,0) <= 0 for path in POLL_PATHS):
             raise RuntimeError('Visible tab did not poll both status endpoints')
+        if row['name'] in ('hidden_tab','two_tabs') and any(key.startswith('tab1:') and count for key,count in requests.items()):
+            raise RuntimeError('Hidden tab continued periodic status polling')
+        peaks=row.get('max_inflight_by_endpoint',{})
+        if set(peaks)!=set(requests) or any(type(n) is not int or n!=1 for n in peaks.values()):
+            raise RuntimeError('Status endpoint requests overlapped')
     for index,row in enumerate(value['phases'][3:7]):
         elapsed=row.get('active_seconds')
         if (row.get('path') != EXPORT_PATHS[index] or row.get('requests_completed') != 600
@@ -205,7 +211,8 @@ def validate_result(value, unit, commit):
                 or not re.fullmatch(r'[0-9a-f]{64}', row.get('body_sha256',''))):
             raise RuntimeError('Incomplete fixed export evidence')
     logout=value['phases'][-1]
-    if logout.get('both_tabs_redirected') is not True or logout.get('polling_stopped') is not True:
+    if (logout.get('both_tabs_redirected') is not True or logout.get('polling_stopped') is not True
+            or logout.get('statuses',{}).get('401',0)<1):
         raise RuntimeError('Logout did not stop both tabs')
     if value.get('external_requests') != 0 or value.get('browser_exceptions') != 0:
         raise RuntimeError('Browser isolation or runtime exception failed')
@@ -320,7 +327,9 @@ def track_page(page, label, current, inflight, errors):
         path=urlsplit(request.url).path; row=current['row']
         if row is not None and path in POLL_PATHS:
             key=label+':'+path; row['requests'][key]=row['requests'].get(key,0)+1
-            inflight[request]={'row':row,'status':None}
+            inflight[request]={'row':row,'status':None,'endpoint':key}
+            peaks=row.setdefault('max_inflight_by_endpoint',{})
+            peaks[key]=max(peaks.get(key,0),sum(item['endpoint']==key for item in inflight.values()))
             row['max_inflight']=max(row['max_inflight'],len(inflight))
     def responded(response):
         item=inflight.get(response.request)
@@ -351,6 +360,7 @@ def run(value, output, work):
     group=browser_group(client_unit)
     report = dict(schema=1, outcome='running', unit=value['unit'], source_commit=value['source_commit'],
         node_count=100, client_cgroup=membership(), phases=[], cleanup_complete=False,
+        polling_contract='visible-only-state-status',
         scope='100 synthetic database nodes; actual headed browser visibility and fixed exports; not proxy throughput or certificate renewal',
         visibility_mode='native headed tabs; Playwright focus emulation disabled and background scheduling overrides removed',
         accounting='browser/export generator outside service cgroup; same hosted machine still shared')
@@ -361,7 +371,7 @@ def run(value, output, work):
     current = {'row': None}
     inflight = {}
     def phase(name, action):
-        row = dict(name=name, outcome='running', started_monotonic=time.monotonic(), requests={}, statuses={}, max_inflight=0, request_failures=0)
+        row = dict(name=name, outcome='running', started_monotonic=time.monotonic(), requests={}, statuses={}, max_inflight=0, max_inflight_by_endpoint={}, request_failures=0)
         report['phases'].append(row); current['row'] = row
         atomic_json(work/'interactions.progress.json', {'phase':name})
         atomic_json(output, report)
@@ -470,7 +480,9 @@ def run(value, output, work):
                         return response.status;
                     }""")
                     if status!=200:raise RuntimeError('Synthetic logout failed')
-                    for page in (first,second):page.wait_for_url('**/login',timeout=15000)
+                    deadline=time.monotonic()+15
+                    for page in (first,second):
+                        page.wait_for_url('**/login',timeout=max(1,(deadline-time.monotonic())*1000))
                     count=sum(row['requests'].values());first.wait_for_timeout(11000)
                     if sum(row['requests'].values())!=count:raise RuntimeError('Polling continued after login redirect')
                     row.update(both_tabs_redirected=True,polling_stopped=True)

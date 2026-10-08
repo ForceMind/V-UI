@@ -59,7 +59,7 @@ ZIP 的中心目录、最多 10,000 个文件条目及至多 4 MB MANIFEST 仍�
 ## 证据状态
 
 - 已确认：上述基线源码中的全包/全成员读取与固定 UI 轮询。
-- 本轮候选：流式安装/解包/文件哈希、私有快照与错误清理已实现；本地回归与合成峰值结果见下。准确候选 CI、实际包受限安装、真实 512 MiB VPS 安装/运行/稳定性仍待验收。
+- 本轮候选：流式安装/解包/文件哈希、私有快照与错误清理已实现；本地回归与合成峰值结果见下。准确候选CI、实际包短门槛、部分长负载与原生UI诊断已有后文逐提交证据；新改动须自己的准确head验收，真实512MiB整机与24小时稳定性仍待验收。
 - 未执行：新 Release/tag、生产部署、防火墙或安全组修改、购买/启动新服务器。
 
 
@@ -180,7 +180,7 @@ ZIP 的中心目录、最多 10,000 个文件条目及至多 4 MB MANIFEST 仍�
 
 退出后的systemd-run摘要另显示“Memory peak: 3.0M”，unit.log已not-found且展示默认infinity；这些退役值不替代worker在运行中读取的原始cgroup限额和峰值，差异原样保留。此结果不完成UI、证书叠加、双核心、24小时、整机或四平台资源验收。
 
-### UI与导出资源诊断 profile（实现，准确执行待验）
+### UI与导出资源诊断 profile（初版实现范围，后续结果见下）
 
 新增独立 `interactions` profile 和显式PR标签 `run-low-resource-interactions` 工作流；普通八组、smoke三档和sustained固定合同不变。构建与浏览器安装在限额之外，服务仍512MiB/一核/零swap/原固定一页容差；worker1800秒、协调器1860秒、job45分钟。新head不得继承上节972da2c的长测结果。
 
@@ -201,3 +201,19 @@ ZIP 的中心目录、最多 10,000 个文件条目及至多 4 MB MANIFEST 仍�
 已核对固定[Playwright 1.57主帧初始化源码](https://github.com/microsoft/playwright/blob/v1.57.0/packages/playwright-core/src/server/chromium/crPage.ts)及[启动参数](https://github.com/microsoft/playwright/blob/v1.57.0/packages/playwright-core/src/server/chromium/chromiumSwitches.ts)：框架默认主动模拟页面始终focused/active，并禁用后台节流/后台渲染调度。因此只调用bring_to_front仍不能把测试解释成原生标签可见性。本次修正仅撤销这些测试框架覆盖：在私有临时目录完整复制固定1.57的automation driver/package并保留许可证，只将crPage.js唯一的原session初始化enabled:true改为false，记录前后SHA和精确替换数，通过当前helper进程的driver入口选择副本，退出后还原入口并删除副本；不改已安装包、Chromium二进制、生产源码或核心pin。启动时移除三项后台调度禁用参数，不设置/伪造visibilityState，不冻结页面，不注入visibility事件。不能仅从新的CDP session发false就假定释放了原session的浏览器capture：固定Chromium的[浏览器端实现](https://github.com/chromium/chromium/blob/143.0.7499.4/content/browser/devtools/protocol/emulation_handler.cc)仍保留原session自己的capture handle，因此从原session初始化就不启用它。依然等待并逐秒核验实际浏览器状态，拿不到hidden就失败，不以模拟值或skip换绿。实际效果待修正head重新执行。
 
 同一4bb候选的portable x86_64-musl源码来源API明确返回HTTP403 rate limit exceeded，该job失败且附件步骤跳过；其余三个portable jobs成功。保留这次上游失败，不改核心pin/凭据，不把未完成的准确四目标套件写成通过。此处修正和文档同批提交，不为单段文档另触发完整验收。
+
+### 4f6c62a 原生UI/导出基线与最小轮询优化
+
+准确 `4f6c62a16d6f057a5e7bde0203e005a8ef622841` 的原八组/11 jobs和[独立UI诊断](https://github.com/ForceMind/V-UI/actions/runs/37845908565)均attempt 1、全部步骤成功；其他标签事件对应的90分钟workflow按设计skipped，不当作该head的长测通过。[UI原始ZIP](https://github.com/ForceMind/V-UI/actions/runs/37845908565/artifacts/11580745031) SHA-256 `0a55648249de2567d40e15fe6a7cc450b18dbdf480d2c05952f8c61e10808477`已双重核验，worker34阶段和driver8阶段全通过。内层包SHA-256 `3809e575e02024abdde4477938723716b3fbc9a0bef72a623f2c9b5987f90b07`。
+
+- 可见/真实隐藏/双标签分别持续60.001/60.004/60.002秒，实际visibility采样60/61/60份。可见页system19+core5=24请求；隐藏页system20+core6=26；双标签隐藏26+可见24=50。全200、失败/待决0；24与26的细差来自窗口边界，不表示隐藏更耗CPU。既有最大重叠2是两类接口合计，不证明同端点已出现重复请求。
+- raw、sing-box JSON、Mihomo YAML、保存规则预览均完成600个测量请求另加1个基准响应，各自至少60秒，100节点与摘要稳定、零错。约50秒服务采样窗口CPU分别21.76%/17.79%/60.39%/4.29%；这不是端点最大吞吐、精确全阶段CPU或所有数据量保证。
+- 注销后两页各收到一个401并跳登录，随后11秒无新状态轮询；所有清理通过。服务组一核/512MiB/零swap，peak477,908,992字节（455.770MiB）；外部组peak494,587,904字节（471.676MiB）。双方max/OOM均0，互不相加作为服务预算。driver原文件/副本摘要及唯一布尔改动与本地独立比对一致。
+
+这个基线支持减少隐藏页的周期状态请求。本轮最小产品候选（结果待新head验证）将3秒/10秒固定interval改为可见时、上次请求完成后的timeout；隐藏时清除后续定时任务，显示时立即刷新，不叠加重复timer，正在进行的请求可以完成。每个状态端点单飞，5秒请求上界；手工/变更后刷新排在旧请求后取得新结果，避免复用重启前状态。慢请求跨显隐时最终再取一次新状态，不让旧响应冒充恢复后的刷新。
+
+暂停隐藏轮询不能破坏会话失效。支持BroadcastChannel的同源标签仅广播固定字符串session-ended，不广播用户、Cookie或凭据，不使用Web Storage。收到提示或迟到401时，先以有界、单飞的/api/auth/me验证当前HttpOnly Cookie，避免旧会话的迟到消息踢掉已经重新登录的新页面；在途验证期间的新失效通知使旧结果失效并串行补验，只有确认当前401才停止轮询/跳登录。账户页同样忽略失效前发出的旧/me响应，防止陈旧账户面板重新出现，并保留有效账户的未保存用户名草稿；初始化重验超时则显示可操作的登录表单与提示，不留下空白页面。账户主动退出/修改凭据也通知其他标签。频道不可用时保留显示恢复时的服务器鉴权，不承诺这些旧浏览器具有即时跨标签通知；服务器权限校验始终保留。
+
+新版资源夹具明确要求隐藏页周期状态请求为0、每标签每端点最多1个完整未结束请求，原生visible端点仍有活动；注销要求真实401、两页在共用15秒deadline内跳登录、后11秒停止轮询，并由独立worker用原Cookie再取得401。初始页面加载与明确的手工刷新不冒充周期轮询。这些更严格断言需新准确提交通过后才登记，不将4f基线当优化结果，不报告节能百分比。真实证书任务叠加、大日志、24小时、真实整机和四平台资源仍待各自验收。
+
+本批最终本地完整套件578项：455通过、123环境skip；两份JavaScript语法、Python编译、文档合同及diff检查通过。Node回归覆盖显隐反复切换、慢请求、手工变更后新读、迟到401、验证期间新注销通知和账户初始化超时；不以这些确定性测试替代新head原生浏览器/受限cgroup结果。

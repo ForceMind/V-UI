@@ -39,8 +39,11 @@ class InteractionContracts(unittest.TestCase):
                 row.update(path=interaction.EXPORT_PATHS[int(name[-1])],requests_completed=600,concurrency=10,
                     errors=0,active_seconds=60.01,body_bytes=10000,body_sha256='a'*64)
             else:row.update(both_tabs_redirected=True,polling_stopped=True)
+            if name=='hidden_tab':row.update(requests={},statuses={})
+            if name in ('visible_tab','hidden_tab','two_tabs'):row['max_inflight_by_endpoint']={key:1 for key in row['requests']}
+            if name=='logout':row['statuses']={'401':1}
             phases.append(row)
-        return dict(outcome='passed',source_commit=COMMIT,unit=UNIT,node_count=100,phases=phases,
+        return dict(outcome='passed',source_commit=COMMIT,unit=UNIT,node_count=100,phases=phases,polling_contract='visible-only-state-status',
             cleanup_complete=True,broker_cleanup_complete=True,
             native_focus_driver=dict(playwright_version='1.57.0',changes=1,enabled=False,installed_driver_modified=False,source_sha256='a'*64,copy_sha256='b'*64),
             client_cgroup='0::/system.slice/'+UNIT.removesuffix('.service')+'-browser.service',
@@ -69,21 +72,21 @@ class InteractionContracts(unittest.TestCase):
     def test_missing_mixed_or_incomplete_evidence_rejected(self):
         for field,value in [('source_commit','wrong'),('outcome','running'),('node_count',0),
                             ('broker_cleanup_complete',False),('cleanup_complete',False),
-                            ('client_usage',{}),('native_focus_driver',{}),('external_metrics',{}),('external_requests',1),('browser_exceptions',1),
+                            ('client_usage',{}),('polling_contract','baseline'),('native_focus_driver',{}),('external_metrics',{}),('external_requests',1),('browser_exceptions',1),
                             ('client_cgroup','0::/system.slice/'+UNIT),('phases',[])]:
             row=self.result();row[field]=value
             with self.subTest(field=field),self.assertRaises(RuntimeError):
                 interaction.validate_result(row,UNIT,COMMIT)
         for index,field,value in [(0,'wall_seconds',59),(0,'wall_seconds',float('nan')),
             (1,'visibility',{'tab1':'visible'}),(2,'visibility_samples',1),(0,'statuses',{'401':1}),
-            (0,'requests',{}),(0,'statuses',{}),(2,'requests',{'tab1:/api/system/status':26}),
+            (0,'requests',{}),(0,'max_inflight_by_endpoint',{'tab1:/api/system/status':2}),(1,'requests',{'tab1:/api/system/status':1}),(0,'statuses',{}),(2,'requests',{'tab1:/api/system/status':26}),
             (0,'pending_requests',1),(0,'request_failures',1),(3,'requests_completed',599),(4,'errors',1),(5,'active_seconds',59),
-            (6,'body_sha256','bad'),(7,'both_tabs_redirected',False),(7,'polling_stopped',False)]:
+            (6,'body_sha256','bad'),(7,'both_tabs_redirected',False),(7,'polling_stopped',False),(7,'statuses',{})]:
             row=self.result();row['phases'][index][field]=value
             with self.subTest(index=index,field=field),self.assertRaises(RuntimeError):
                 interaction.validate_result(row,UNIT,COMMIT)
 
-    def test_current_hidden_polling_is_measured_not_assumed_zero(self):
+    def test_optimized_hidden_polling_requires_zero_with_native_visibility(self):
         row=self.result();row['phases'][1]['requests']={};row['phases'][1]['statuses']={}
         interaction.validate_result(row,UNIT,COMMIT)
         source=Path(interaction.__file__).read_text()

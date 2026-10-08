@@ -402,6 +402,7 @@ with SessionLocal() as db:
                     report["interactions"] = request_interactions(args.work_dir, output, args.unit,
                         args.source_commit, origin, ca, cert, cookie, observe)
                 stage("browser_visibility_tabs_exports_logout", interactions)
+                stage("interaction_revoked_cookie_rejected", lambda: api("/api/auth/me", expected=401))
                 stage("login_after_interaction_logout", login)
             from scripts.low_resource_proxy import run_proxy_smoke
             def sustained_load(binary, fixture, ca, port, health):
