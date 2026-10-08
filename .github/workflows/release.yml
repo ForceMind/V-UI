@@ -27,6 +27,15 @@ jobs:
           mkdir -p /tmp/vui-release
           test "$(git rev-parse HEAD)" = "$VUI_SOURCE_COMMIT"
           python scripts/build_bundle.py /tmp/vui-release/vui-linux.zip --source-commit "$VUI_SOURCE_COMMIT" | tee /tmp/vui-release/build.log
+      - name: Verify actual bundle under one CPU and 512 MiB cgroup
+        env:
+          VUI_RELEASE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          python -B scripts/low_resource_acceptance.py \
+            --bundle /tmp/vui-release/vui-linux.zip \
+            --source-commit "$VUI_RELEASE_COMMIT" \
+            --output /tmp/vui-release/low-resource.json
       - name: Install explicit test browser
         run: python -m playwright install --with-deps chromium
       - name: Verify non-root install HTTPS browser and recovery
@@ -50,5 +59,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: vui-rc2-build-and-test-evidence
-          path: /tmp/vui-release/*.log
+          path: |
+            /tmp/vui-release/*.log
+            /tmp/vui-release/low-resource*.json
           retention-days: 7
