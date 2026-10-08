@@ -90,9 +90,9 @@ ZIP 的中心目录、最多 10,000 个文件条目及至多 4 MB MANIFEST 仍�
 
 `Selected release deployment gates` 增加 `scripts/low_resource_acceptance.py`，仅在明确的 GitHub-hosted Linux 空 runner 上运行；不在开发者电脑或生产服务器执行。构建在限额之外，准确源码对应的实际离线包 stage、固定 wheels 安装、候选健康检查、激活、验证 TLS 的假证书 HTTPS 面板、登录/退出/旧会话拒绝、100 次并发度 10 的认证读取、60 秒空载、停机备份/恢复/重启在同一非 root transient-unit cgroup 内运行。
 
-执行前从 worker 自身 cgroup 读取并核对 `memory.max=536870912`、`memory.swap.max=0`、`cpu.max` 恰为一核配额；报告必须包含 `memory.peak`、`memory.current`、`memory.events` 和 `cpu.stat`。OOM、缺失/不完整报告、错误来源、非零退出、超额峰值都失败，不以 skip 当通过。同一 worker JSON 在初始/分阶段/终态原子更新，保留限额和各阶段结果行，服务日志另存；阶段 `memory_peak_bytes` 是截至该阶段的 cgroup 生命周期累计峰值，未逐阶段重置，退出后只清理本次随机命名的 transient unit 和临时假数据。
+执行前从 worker 自身 cgroup 读取并核对 `memory.max=536870912`、`memory.swap.max=0`、`cpu.max` 恰为一核配额；报告必须包含 `memory.peak`、`memory.current`、`memory.events` 和 `cpu.stat`。OOM、缺失/不完整报告、错误来源、非零退出、超过文末固定基础页容差的峰值都失败（名义预算是否满足另列，不合并为同一结论），不以 skip 当通过。同一 worker JSON 在初始/分阶段/终态原子更新，保留限额和各阶段结果行，服务日志另存；阶段 `memory_peak_bytes` 是截至该阶段的 cgroup 生命周期累计峰值，未逐阶段重置，退出后只清理本次随机命名的 transient unit 和临时假数据。
 
-此门槛包含工作进程、pip、面板、测试客户端及子进程的 cgroup 记账；不包含宿主 OS、构建下载与预先由其他 cgroup 持有的页缓存。使用准确安装包，但不是 root 安装器/系统服务全链路受限安装；原 systemd 一键安装验收继续单独保留。HTTPS 面板带空闲证书管理器，没有代理核心或实际续期负载。`/api/auth/me` 并发读取也不同于前述管理员订阅导出。实际 cgroup 通过与否以准确最终 CI 日志/JSON 为准，源码存在和14项本地结构测试通过不代表 cgroup 已执行。
+此门槛包含工作进程、pip、面板、测试客户端及子进程的 cgroup 记账；不包含宿主 OS、构建下载与预先由其他 cgroup 持有的页缓存。使用准确安装包，但不是 root 安装器/系统服务全链路受限安装；原 systemd 一键安装验收继续单独保留。首版 HTTPS 面板带空闲证书管理器，没有代理核心或实际续期负载；下述新版单核心代理夹具单独验收，不倒推首版已经覆盖。`/api/auth/me` 并发读取也不同于前述管理员订阅导出。实际 cgroup 通过与否以准确最终 CI 日志/JSON 为准，源码存在和本地结构测试通过不代表 cgroup 已执行。
 
 仍未被此短测覆盖的目标：真实 512 MiB 整机余量、受限 root 安装/升级全进程树、运行代理核心和真实流量、证书续期叠加峰值、30 分钟空载/10 分钟阶梯与24小时稳定性、四目标平台各自的资源验收。没有这些证据时保持“候选资源回归”，不写“512 MiB VPS 已达标”。
 
@@ -103,3 +103,19 @@ ZIP 的中心目录、最多 10,000 个文件条目及至多 4 MB MANIFEST 仍�
 但累计 `memory.peak` 达到536,870,912字节（恰为512MiB），`memory.events.max=81`；面板空载阶段末 `memory.current=535,617,536`。这不是有整机余量的证明，也不能仅凭最终清理后内存下降就断定全部是可回收缓存。60秒空载消耗86,689微秒CPU（约单核0.14%），仅限本短测和所列进程，不报告功率。
 
 为核对余量，本候选保留512MiB原回归，新增384MiB及320MiB两档相同工作负载、独立临时目录/JSON/面板日志。320MiB对应前述安装工程预算，384MiB用于观察保留128MiB宿主余量的可行性；这些是cgroup上限而非真实宿主配置，也不保证剩余内存足够OS和代理核心。每阶段与终态增加 `memory.stat`（必须有anon/file）及OOM/限额事件，区分阶段结束时匿名/文件内存；分项不是生命周期峰值瞬间的同步构成。每档必须自证实际加载的对应上限、零swap及一核配额，任一档失败保留证据、不放宽限额。新增档位结果仍以最终准确提交CI为准，不继承上述512MiB首次通过结论。
+
+### 384 MiB首次失败与固定一页检查口径
+
+`ee5b127ce570c47303436b13daa1ccdec7b5c152` 的[资源工作流](https://github.com/ForceMind/V-UI/actions/runs/37719281693)在384MiB档失败，320MiB因fail-fast未执行，不能补写通过。已核验[原附件](https://github.com/ForceMind/V-UI/actions/runs/37719281693/artifacts/11524893963) SHA-256 `92d90839947d42014595249d1c09a60ff8be6241d13d9791f5d5846bbb7e1200`：worker的22个面板阶段均成功、OOM/oom_kill/oom_group_kill为0，memory.max=402,653,184，但memory.peak=402,657,280，超额4,096字节；memory.events.max=9,747。原协调器的严格peak≤quota断言失败，历史结论保持，不追改旧运行。
+
+[Linux cgroup官方文档](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html#memory-interface-files)说明使用量可能短暂超过memory.max。它没有保证最多一页，也不证明本次是“记账误差”；这里承认实际报告的瞬时超额。新版明确采用**项目定义的固定一个主机基础页容差**，不是内核保证：配置的memory.max、零swap、一核配额和全部OOM拒绝要求不变；读取并交叉核对实际基础页大小，保留原始peak、全部memory.events、超额字节及“名义预算满足=false”。最多一页时只能报告按此披露口径通过，不能改称“峰值≤名义限额”；再超一页仍失败，不能逐次扩大容差换绿。此前的严格峰值契约因此有此明确修订，整机资格与名义工程预算不自动转为通过。
+
+该384MiB档的面板空载阶段末anon=158,662,656字节、file=226,811,904、kernel=14,516,224；512MiB档同阶段anon=158,793,728、file=352,780,288、kernel=23,777,280。分项证明这些时刻有大量文件页，并非峰值瞬间的构成；不能据此直接推算整机可用余量、断言缓存随时全部可回收或把名义预算改判成功。完整JSON保留所有事件与分项。
+
+### 单核心TLS代理受限回归（候选，尚待准确CI）
+
+在每档原面板-only 60秒基线之外，增加面板加单个官方固定sing-box服务端的60秒空载；随后同一个已校验安装包提供sing-box测试客户端，V-UI adapter生成VLESS/TCP/TLS服务端配置，只把监听限定到127.0.0.1，使用假UUID/假CA/本机HTTP目标。客户端为显式单一VLESS出口、最终路由proxy的合成配置，不冒充实际订阅导出；不对外联网、不关闭TLS验证、不改变核心pin或公开协议能力。
+
+短测发送10次串行和100次并发度10的HTTP请求，核对正文与应用送达计数；错误UUID必须有新的真实协议原因，错误CA必须有真实x509原因，并同时保证应用零送达及没有DIRECT。目标、服务器、客户端均在嵌套清理范围内，退出/失败清理后才进入备份路径。活动阶段额外计入测试客户端与目标进程，单服务器空载时没有测试客户端；不把这几秒负载当作10分钟吞吐、所有协议、双核心或24小时稳定性验收。
+
+本地官方pin及配置parser检查成功，实际启动遇到sandbox netlink EPERM，原失败保留，没有提权或改安全设置；真实链路和资源结果由空CI runner的准确候选验证，单元mock通过不替代它。

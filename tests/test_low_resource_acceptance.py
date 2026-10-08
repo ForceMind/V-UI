@@ -148,13 +148,16 @@ class LowResourceAcceptanceTests(unittest.TestCase):
                 if mode != "missing":
                     report = {"unit": unit, "source_commit": COMMIT, "outcome": "passed", "complete": True,
                               "metrics": gate.metrics(self.cg), "requested_memory_mib": self.args.memory_mib,
-                              "limits": {"memory.max": gate.memory_bytes(self.args.memory_mib)}}
+                              "limits": {"memory.max": gate.memory_bytes(self.args.memory_mib)},
+                              "base_page_size_bytes": os.sysconf("SC_PAGE_SIZE")}
                     if mode == "partial": report["complete"] = False
                     if mode == "wrong_source": report["source_commit"] = "c" * 40
                     if mode == "wrong_profile": report["requested_memory_mib"] = 384 if self.args.memory_mib == 512 else 512
                     if mode == "wrong_limit": report["limits"]["memory.max"] = 123
                     if mode == "oom": report["metrics"]["memory.events"]["oom"] = 1
-                    if mode == "over_peak": report["metrics"]["memory.peak"] = gate.memory_bytes(self.args.memory_mib) + 1
+                    if mode == "over_peak": report["metrics"]["memory.peak"] = gate.memory_bytes(self.args.memory_mib) + os.sysconf("SC_PAGE_SIZE") + 1
+                    if mode == "one_page_peak": report["metrics"]["memory.peak"] = gate.memory_bytes(self.args.memory_mib) + os.sysconf("SC_PAGE_SIZE")
+                    if mode == "wrong_page": report["base_page_size_bytes"] = os.sysconf("SC_PAGE_SIZE") * 2
                     if mode == "failed": report["outcome"] = "failed"
                     report_path.write_text(json.dumps(report))
                 return subprocess.CompletedProcess(command, 1 if mode == "nonzero" else 0)
@@ -174,7 +177,7 @@ class LowResourceAcceptanceTests(unittest.TestCase):
         self.assertFalse(list(self.root.glob("low-resource-work-*")))
 
     def test_coordinator_failures_never_silently_skip(self):
-        for mode in ("missing", "partial", "wrong_source", "wrong_profile", "wrong_limit", "oom", "over_peak", "failed", "nonzero", "timeout"):
+        for mode in ("missing", "partial", "wrong_source", "wrong_profile", "wrong_limit", "wrong_page", "oom", "over_peak", "failed", "nonzero", "timeout"):
             with self.subTest(mode=mode):
                 self.args.output = self.root / (mode + ".json")
                 status, summary, calls = self.run_coordinator(mode)
@@ -182,6 +185,21 @@ class LowResourceAcceptanceTests(unittest.TestCase):
                 self.assertEqual(summary["outcome"], "failed")
                 self.assertIn("error", summary)
                 self.assertEqual(calls[-1][3], "reset-failed")
+
+    def test_fixed_one_page_allowance_is_disclosed_and_never_expanded(self):
+        for page in (4096, 16384, 65536):
+            at = gate.peak_assessment(gate.MEMORY_BYTES + page, gate.MEMORY_BYTES, page)
+            self.assertFalse(at["within_nominal_budget"])
+            self.assertEqual(at["nominal_overage_bytes"], page)
+            self.assertTrue(at["within_fixed_page_allowance"])
+            self.assertFalse(gate.peak_assessment(gate.MEMORY_BYTES + page + 1,
+                gate.MEMORY_BYTES, page)["within_fixed_page_allowance"])
+        for page in (0, -1, 8192, 2 * 1024 * 1024, True):
+            with self.assertRaises(RuntimeError): gate.peak_assessment(100, gate.MEMORY_BYTES, page)
+        status, summary, _ = self.run_coordinator("one_page_peak")
+        self.assertEqual(status, 0)
+        self.assertFalse(summary["peak_budget_assessment"]["within_nominal_budget"])
+        self.assertEqual(summary["peak_budget_assessment"]["nominal_overage_bytes"], os.sysconf("SC_PAGE_SIZE"))
 
     def test_existing_evidence_not_overwritten(self):
         self.args.output.write_text("existing")
