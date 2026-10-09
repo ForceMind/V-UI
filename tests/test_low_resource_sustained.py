@@ -96,9 +96,10 @@ class SustainedTests(unittest.TestCase):
         stages += [dict(name=f"proxy_sustained_{n}_connections_600_seconds", outcome="passed", wall_seconds=600.1)
                    for n in (1, 10, 50)]
         report = dict(stages=stages, sustained_load=[dict(concurrency=n) for n in (1,10,50)])
-        with patch.object(load, "validate_result") as validate:
+        with patch.object(load, "validate_result") as validate, patch("scripts.low_resource_accounting.validate_complete") as accounting:
             gate.validate_sustained_stages(report, UNIT, COMMIT)
             self.assertEqual(validate.call_count, 3)
+            accounting.assert_called_once_with(report, seconds=1800, interval=30)
             for i in range(5):
                 altered = json.loads(json.dumps(report)); altered["stages"][i]["wall_seconds"] = 1
                 with self.subTest(stage=i), self.assertRaises(RuntimeError):
@@ -128,7 +129,7 @@ class SustainedTests(unittest.TestCase):
         rows = gate.process_snapshot(self.root)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["pid"], os.getpid())
-        self.assertEqual(set(rows[0]), {"pid", "ppid", "name", "threads"})
+        self.assertEqual(set(rows[0]), {"pid", "ppid", "name", "threads", "starttime_ticks"})
 
     def test_group_cleanup_escalates_when_leader_already_exited(self):
         signals = []
@@ -243,7 +244,7 @@ class SustainedTests(unittest.TestCase):
         workflow=(source/'.github/workflows/low-resource-sustained.yml').read_text()
         self.assertIn('types: [labeled]',workflow)
         self.assertIn("github.event.label.name == 'run-low-resource-sustained'",workflow)
-        self.assertIn('timeout-minutes: 120',workflow)
+        self.assertIn('timeout-minutes: 150',workflow)
         self.assertIn('--memory-mib 512 --duration-profile sustained',workflow)
         self.assertIn('if: always()',workflow)
         self.assertIn('ref: ${{ github.event.pull_request.head.sha }}',workflow)

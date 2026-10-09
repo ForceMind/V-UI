@@ -34,7 +34,15 @@ def stage():
                                             read_started_monotonic=begin, read_finished_monotonic=begin+.05,
                                             memory_bytes=accounting.parse_rollup(rollup()))
                                        for n, role in ((1, 'worker'), (2, 'panel'), (3, 'other'))]))
-    return dict(accounting_cgroup_root='/sys/fs/cgroup/test', accounting_started_monotonic=100, outcome='passed', wall_seconds=60.01, accounting_roles=dict(worker=1, panel=2), accounting_samples=samples)
+    return dict(accounting_cgroup_root='/sys/fs/cgroup/test', accounting_started_monotonic=100, started_monotonic=99.9, outcome='passed', wall_seconds=60.3, accounting_roles=dict(worker=1, panel=2), accounting_samples=samples)
+
+
+def shift_stage(value, offset):
+    for name in ('started_monotonic','accounting_started_monotonic'):value[name]+=offset
+    for sample in value['accounting_samples']:
+        for name in ('planned_monotonic','started_monotonic','finished_monotonic'):sample[name]+=offset
+        for row in sample['processes']:
+            for name in ('read_started_monotonic','read_finished_monotonic'):row[name]+=offset
 
 
 class AccountingTests(unittest.TestCase):
@@ -128,13 +136,53 @@ class AccountingTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):accounting.validate_complete({'stages':[]})
         panel=stage();panel['name']='panel_only_idle_60_seconds'
         core=copy.deepcopy(panel);core['name']='panel_single_proxy_idle_60_seconds'
-        core['accounting_roles']['core']=4
+        core['accounting_roles'].update(core=4,watchdog=5)
         for sample in core['accounting_samples']:
             row=copy.deepcopy(sample['processes'][0]);row.update(pid=4,start_ticks=40,role='core')
             sample['processes'].append(row)
             sample['members_before']['4']=sample['members_after']['4']='/sys/fs/cgroup/test'
-        report={'unit':'test','stages':[panel,core]}
+            row=copy.deepcopy(row);row.update(pid=5,start_ticks=50,role='watchdog')
+            sample['processes'].append(row)
+            sample['members_before']['5']=sample['members_after']['5']='/sys/fs/cgroup/test'
+        shift_stage(core,2000)
+        report={'unit':'test','worker_pid':1,'service_cgroup':'0::/test','stages':[panel,core]}
         accounting.validate_complete(report)
         for sample in core['accounting_samples']:
             sample['processes'][1]['start_ticks']=42
         with self.assertRaises(RuntimeError):accounting.validate_complete(report)
+
+    def test_long_idle_requires_61_slots_exact_root_and_same_panel_worker(self):
+        import copy
+        panel=stage();panel['name']='panel_only_idle_1800_seconds'
+        panel['wall_seconds']=1800.3
+        template=panel['accounting_samples'][0]
+        panel['accounting_samples']=[]
+        for index in range(61):
+            sample=copy.deepcopy(template);begin=100+index*30
+            sample.update(planned_monotonic=begin,started_monotonic=begin,finished_monotonic=begin+.1)
+            for row in sample['processes']:
+                row.update(read_started_monotonic=begin,read_finished_monotonic=begin+.05)
+            panel['accounting_samples'].append(sample)
+        core=copy.deepcopy(panel);core['name']='panel_single_proxy_idle_1800_seconds'
+        core['accounting_roles'].update(core=4,watchdog=5)
+        for sample in core['accounting_samples']:
+            for pid,role in ((4,'core'),(5,'watchdog')):
+                row=copy.deepcopy(sample['processes'][0]);row.update(pid=pid,start_ticks=pid*10,role=role)
+                sample['processes'].append(row)
+                sample['members_before'][str(pid)]=sample['members_after'][str(pid)]='/sys/fs/cgroup/test'
+        shift_stage(core,2000)
+        report=dict(unit='test',service_cgroup='0::/test',worker_pid=1,stages=[panel,core])
+        accounting.validate_complete(report,seconds=1800,interval=30)
+        for mutation in ('last','root','panel','worker','reported_worker','wrong_window','overlap'):
+            bad=copy.deepcopy(report)
+            if mutation=='last':bad['stages'][1]['accounting_samples'].pop()
+            elif mutation=='root':bad['service_cgroup']='0::/different/test'
+            elif mutation=='reported_worker':bad['worker_pid']=999
+            elif mutation=='wrong_window':bad['stages'][0]['started_monotonic']=1000000
+            elif mutation=='overlap':shift_stage(bad['stages'][1],-2000)
+            else:
+                for sample in bad['stages'][1]['accounting_samples']:
+                    for row in sample['processes']:
+                        if row['role']==mutation:row['start_ticks']+=1
+            with self.subTest(mutation=mutation),self.assertRaises(RuntimeError):
+                accounting.validate_complete(bad,seconds=1800,interval=30)

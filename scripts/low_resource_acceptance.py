@@ -124,7 +124,8 @@ def process_snapshot(directory: Path):
             status = Path(f"/proc/{int(pid)}/status").read_text().splitlines()
             fields = dict(line.split(":", 1) for line in status if ":" in line)
             rows.append({"pid": int(pid), "ppid": int(fields["PPid"]),
-                         "name": fields["Name"].strip(), "threads": int(fields["Threads"])})
+                         "name": fields["Name"].strip(), "threads": int(fields["Threads"]),
+                         "starttime_ticks": int(Path(f"/proc/{int(pid)}/stat").read_text().rsplit(")", 1)[1].split()[19])})
         except FileNotFoundError:
             continue  # The process exited between the two kernel reads.
     return rows
@@ -163,6 +164,7 @@ def worker(args) -> int:
     profile = duration_profile(args)
     report = {"schema": 1, "scope": "actual offline stage/activate, HTTPS panel with idle certificate manager and bounded single sing-box proxy smoke; not full VPS qualification",
               "source_commit": args.source_commit, "unit": args.unit, "limits": limits,
+              "worker_pid": os.getpid(), "service_cgroup": Path("/proc/self/cgroup").read_text().strip(),
               "duration_profile": profile, "requested_memory_mib": args.memory_mib, "base_page_size_bytes": os.sysconf("SC_PAGE_SIZE"),
               "accounting": "worker, offline pip, panel, local clients, and descendants in one cgroup; build/download, host OS and pre-existing cache ownership excluded",
               "memory_peak_scope": "lifetime cgroup maximum, not reset per stage",
@@ -194,7 +196,7 @@ def worker(args) -> int:
     def stage(name, action):
         before = metrics(directory)
         started = time.monotonic()
-        row = {"name": name, "outcome": "running"}
+        row = {"name": name, "outcome": "running", "started_monotonic": started}
         report["stages"].append(row)
         checkpoint()
         try:
@@ -339,33 +341,21 @@ def worker(args) -> int:
             def alive():
                 if running[0].poll() is not None:
                     raise RuntimeError("Panel exited unexpectedly")
-            def monitor_wait(seconds, health):
-                started = time.monotonic()
-                deadline = started + seconds
-                samples = []
-                while time.monotonic() < deadline:
-                    alive()
-                    health()
-                    sample = metrics(directory)
-                    sample["processes"] = process_snapshot(directory)
-                    assert_no_oom(sample)
-                    samples.append({"elapsed_seconds": time.monotonic() - started, **sample})
-                    report["stages"][-1]["samples"] = samples
-                    checkpoint()
-                    time.sleep(min(30, max(0, deadline - time.monotonic())))
-                health()
-            def accounting_wait(seconds, health, core_pid=None):
+            def monitor_wait(seconds, health, core_pid=None, watchdog_pid=None):
+                accounting_wait(seconds, health, core_pid, watchdog_pid, interval=30)
+            def accounting_wait(seconds, health, core_pid=None, watchdog_pid=None, interval=5):
                 from scripts.low_resource_accounting import snapshot
                 roles = {"worker": os.getpid(), "panel": running[0].pid}
                 if core_pid is not None:
                     roles["core"] = core_pid
+                    roles["watchdog"] = watchdog_pid
                 started = time.monotonic()
                 samples = []
                 report["stages"][-1]["accounting_samples"] = samples
                 report["stages"][-1]["accounting_roles"] = roles
                 report["stages"][-1]["accounting_cgroup_root"] = str(directory)
                 report["stages"][-1]["accounting_started_monotonic"] = started
-                for offset in range(0, seconds + 1, 5):
+                for offset in range(0, seconds + 1, interval):
                     planned = started + offset
                     time.sleep(max(0, planned - time.monotonic()))
                     alive()
@@ -373,8 +363,13 @@ def worker(args) -> int:
                     sample = snapshot(directory, roles, metrics)
                     sample["planned_monotonic"] = planned
                     samples.append(sample)
+                    if profile == "sustained":
+                        observed = metrics(directory)
+                        observed.update(observed_monotonic=time.monotonic(), processes=process_snapshot(directory))
+                        assert_no_oom(observed)
+                        report["stages"][-1].setdefault("samples", []).append(observed)
                     checkpoint()
-                    if sample["finished_monotonic"] >= planned + 5:
+                    if sample["finished_monotonic"] >= planned + interval:
                         raise RuntimeError("Accounting snapshot missed its planned slot")
                 health()
             def idle():
@@ -503,24 +498,26 @@ with SessionLocal() as db:
                     if time.monotonic() - last_sample[0] >= 30:
                         sample = metrics(directory)
                         sample["processes"] = process_snapshot(directory)
+                        sample["observed_monotonic"] = time.monotonic()
                         assert_no_oom(sample)
                         report["stages"][-1].setdefault("samples", []).append(sample)
                         checkpoint()
                         last_sample[0] = time.monotonic()
                 for concurrency in CONCURRENCIES:
+                    last_sample[0]=0.0
                     stage(f"refresh_session_before_{concurrency}_connection_load", login)
                     result = stage(f"proxy_sustained_{concurrency}_connections_600_seconds",
                         lambda: request_load(args.work_dir, args.unit, args.source_commit,
                             concurrency, binary, fixture, ca, port, observe))
                     report["sustained_load"].append(result)
                     stage(f"panel_recovery_after_{concurrency}_connections", lambda: api("/api/auth/me"))
-            def certificate_overlap(binary, fixture, ca, port, health, proxy_pid):
+            def certificate_overlap(binary, fixture, ca, port, health, proxy_pid, watchdog_pid):
                 from scripts.low_resource_certificates import request_overlap
                 samples=[];last=[0.0]
                 def identity(pid):
                     return dict(pid=pid,starttime_ticks=int(Path(f'/proc/{pid}/stat').read_text().rsplit(')',1)[1].split()[19]))
                 report['certificate_service_roles']={name:identity(pid) for name,pid in
-                    (('worker',os.getpid()),('panel',running[0].pid),('proxy',proxy_pid))}
+                    (('worker',os.getpid()),('panel',running[0].pid),('proxy',proxy_pid),('watchdog',watchdog_pid))}
                 def observe():
                     alive();health()
                     if time.monotonic()-last[0]>=5:
@@ -530,11 +527,25 @@ with SessionLocal() as db:
                             try:process['starttime_ticks']=identity(process['pid'])['starttime_ticks']
                             except FileNotFoundError:process['starttime_ticks']=0
                         sample.update(observed_monotonic=time.monotonic(),processes=processes)
+                        if 'manager' in report['certificate_service_roles']:
+                            manager_pid=report['certificate_service_roles']['manager']['pid']
+                            thread=report['certificate_manager_thread']
+                            try:
+                                from scripts.low_resource_accounting import start_ticks
+                                sample['manager_thread']=dict(thread,observed_starttime_ticks=start_ticks(Path(f"/proc/{manager_pid}/task/{thread['tid']}/stat").read_text()))
+                            except FileNotFoundError:sample['manager_thread']=None
                         samples.append(sample);report['certificate_service_samples']=samples
                         checkpoint();last[0]=time.monotonic()
+                def bind_roles(manager_ready, responder_ready):
+                    for name, row in (('manager',manager_ready['manager']),('responder',responder_ready['identity'])):
+                        report['certificate_service_roles'][name]={key:row[key] for key in ('pid','starttime_ticks')}
+                    report['certificate_roles_bound_monotonic']=time.monotonic()
+                    report['certificate_manager_thread']=manager_ready['thread']
+                    last[0]=0
+                    observe()
                 def overlap():
                     report['certificate_overlap']=request_overlap(args.work_dir,output,args.unit,args.source_commit,
-                        payload,python,binary,fixture,ca,port,observe)
+                        payload,python,binary,fixture,ca,port,observe,bind_roles)
                 stage('real_issue_and_due_renewal_with_10_connections_600_seconds',overlap)
                 def panel_db_untouched():
                     with sqlite3.connect(data/'v-ui.db') as db:
@@ -548,7 +559,9 @@ with SessionLocal() as db:
                             sustained=sustained_load if profile == "sustained" else None,
                             idle_monitor=monitor_wait if profile == "sustained" else None,
                             overlap=certificate_overlap if profile == "certificates" else None,
-                            accounting_monitor=accounting_wait if profile == "accounting" else None)
+                            accounting_monitor=accounting_wait if profile == "accounting" else None,
+                            server_runtime=dict(python=python,payload=payload,data=data,root=root,origin=origin,
+                                runtime_key=json.loads((release/'READY.json').read_text())['runtime_key']))
             old_cookies = list(jar)
             stage("logout", lambda: api("/api/auth/logout", {}))
             for cookie in old_cookies:
@@ -657,6 +670,8 @@ def validate_sustained_stages(report, unit, commit):
         if (row.get("outcome") != "passed" or type(elapsed) not in (int, float)
                 or not math.isfinite(elapsed) or elapsed < seconds):
             raise RuntimeError("Sustained stage missing or shorter than contracted duration")
+    from scripts.low_resource_accounting import validate_complete
+    validate_complete(report, seconds=1800, interval=30)
     if [row.get("concurrency") for row in report.get("sustained_load", [])] != [1, 10, 50]:
         raise RuntimeError("Sustained connection ladder incomplete")
     for row in report["sustained_load"]:
@@ -664,6 +679,7 @@ def validate_sustained_stages(report, unit, commit):
 
 
 def coordinator(args) -> int:
+    sys.path.insert(0, str(SOURCE))
     require_hosted_runner()
     budget = memory_bytes(args.memory_mib)
     profile = duration_profile(args)
@@ -726,13 +742,21 @@ def coordinator(args) -> int:
                 from app.release_tools import target_key
                 validate_result(value.get('external',{}),value.get('service',{}),unit,args.source_commit,target_key())
                 from scripts.low_resource_certificates import validate_service_samples
-                validate_service_samples(report.get('certificate_service_samples'),report.get('certificate_service_roles'))
+                validate_service_samples(report.get('certificate_service_samples'),report.get('certificate_service_roles'),
+                    value['external']['load_started_monotonic'],value['external']['load_started_monotonic']+value['external']['wall_seconds'],
+                    report.get('certificate_roles_bound_monotonic'),report.get('certificate_manager_thread'))
             elif profile == 'data-backup':
                 from scripts.low_resource_data import validate_complete
                 validate_complete(report,unit,args.source_commit)
             if profile == 'accounting':
                 from scripts.low_resource_accounting import validate_complete
                 validate_complete(report)
+            from scripts.low_resource_service_tree import validate_tree, canonical_cgroup, validate_sample_bindings
+            from app.release_tools import target_key
+            canonical_cgroup(report.get('service_cgroup'), unit)
+            validate_tree(report.get('proxy_workload', {}).get('server_tree', {}), target_key(),
+                          report.get('worker_pid'), report.get('service_cgroup'))
+            validate_sample_bindings(report)
             assert_no_oom(report["metrics"])
             summary["peak_budget_assessment"] = peak_assessment(report["metrics"]["memory.peak"],
                 budget, report["base_page_size_bytes"])
