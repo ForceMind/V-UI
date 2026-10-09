@@ -146,15 +146,15 @@ def filesystem_type(path: Path) -> str:
 
 def duration_profile(args):
     profile = getattr(args, "duration_profile", "smoke")
-    if profile not in {"smoke", "sustained", "interactions", "certificates", "data-backup", "accounting"}:
+    if profile not in {"smoke", "sustained", "interactions", "certificates", "data-backup", "accounting", "dual-core"}:
         raise RuntimeError("Unknown duration profile")
-    if profile in {"sustained", "interactions", "certificates", "data-backup", "accounting"} and args.memory_mib != 512:
+    if profile in {"sustained", "interactions", "certificates", "data-backup", "accounting", "dual-core"} and args.memory_mib != 512:
         raise RuntimeError("Extended profiles currently require the original 512 MiB limit")
     return profile
 
 
 def runtime_seconds(args):
-    return {"smoke": 600, "sustained": 6600, "interactions": 1800, "certificates": 1800, "data-backup": 1800, "accounting": 900}[duration_profile(args)]
+    return {"smoke": 600, "sustained": 6600, "interactions": 1800, "certificates": 1800, "data-backup": 1800, "accounting": 900, "dual-core": 900}[duration_profile(args)]
 
 
 def worker(args) -> int:
@@ -200,6 +200,8 @@ def worker(args) -> int:
     if profile == "accounting":
         report["scope"] = "warm panel and single-core 60-second inclusive memory attribution diagnostic; not 160 MiB or 30-minute idle qualification"
         report["process_accounting_scope"] = "sequential smaps_rollup RSS/PSS/private snapshots of every cgroup descendant; PSS is not memcg charge; observer remains included; no subtraction or cache reset"
+    if profile == "dual-core":
+        report["scope"] = "short installed sing-box and Xray coexistence, controlled stop and explicit restart; not sustained performance, per-core budgets or overload"
     output = args.output
 
     def checkpoint():
@@ -588,6 +590,12 @@ with SessionLocal() as db:
                             accounting_monitor=accounting_wait if profile == "accounting" else None,
                             server_runtime=dict(python=python,payload=payload,data=data,root=root,origin=origin,
                                 runtime_key=json.loads((release/'READY.json').read_text())['runtime_key']))
+            if profile == "dual-core":
+                from scripts.low_resource_dual_core import run as run_dual_core
+                run_dual_core(root / "dual-core-fixture", output.with_suffix(""), stage, report,
+                    dict(python=python,payload=payload,data=data,root=root,origin=origin,
+                        runtime_key=json.loads((release/"READY.json").read_text())["runtime_key"]),
+                    running[0].pid, lambda: api("/api/auth/me"), directory, metrics, checkpoint)
             old_cookies = list(jar)
             stage("logout", lambda: api("/api/auth/logout", {}))
             for cookie in old_cookies:
@@ -803,6 +811,10 @@ def coordinator(args) -> int:
             elif profile == 'data-backup':
                 from scripts.low_resource_data import validate_complete
                 validate_complete(report,unit,args.source_commit)
+            if profile == "dual-core":
+                from scripts.low_resource_dual_core import validate_complete as validate_dual_core
+                from app.release_tools import target_key
+                validate_dual_core(report, unit, args.source_commit, target_key())
             if profile == 'accounting':
                 from scripts.low_resource_accounting import validate_complete
                 validate_complete(report)
@@ -851,7 +863,7 @@ def main():
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--memory-mib", type=int, choices=MEMORY_PROFILES, default=512)
-    parser.add_argument("--duration-profile", choices=("smoke", "sustained", "interactions", "certificates", "data-backup", "accounting"), default="smoke")
+    parser.add_argument("--duration-profile", choices=("smoke", "sustained", "interactions", "certificates", "data-backup", "accounting", "dual-core"), default="smoke")
     parser.add_argument("--trace-install", action="store_true", help="opt-in same-group offline phase accounting")
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--unit")
