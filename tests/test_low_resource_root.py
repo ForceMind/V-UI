@@ -218,29 +218,31 @@ def complete_report():
     identity = {'device': 1, 'inode': 2}
     limits = {'memory.max': 536870912, 'memory.swap.max': 0, 'cpu.max': '100000 100000'}
     def service(unit):
-        return {'properties': {'Slice': PARENT}, 'process': {**process, 'cgroup': '/'+PARENT+'/'+unit}}
+        return {'properties': {'Slice': PARENT, 'ActiveState': 'active', 'ControlGroup': '/'+PARENT+'/'+unit, 'DropInPaths': f'/run/systemd/system/{unit}.d/90-vui-resource.conf'}, 'process': {**process, 'cgroup': '/'+PARENT+'/'+unit}}
     def state(release):
-        return {'current': {'release_id': release}, 'releases': ['a'] if release == 'a' else ['a', 'b'],
-                'ready_releases': ['a'] if release == 'a' else ['a', 'b'],
+        return {'current': {'release_id': release}, 'releases': ['a'] if release == 'a' else ['a', 'a-root-fixture'],
+                'ready_releases': ['a'] if release == 'a' else ['a', 'a-root-fixture'],
                 'services': {unit: service(unit) for unit in root.UNITS[:2]}}
-    before = state('a'); during = state('a'); during['releases'].append('b')
-    after = state('b'); after['services']['v-ui.service']['process']['pid'] = 22
+    before = state('a'); during = state('a'); during['releases'].append('a-root-fixture')
+    during['monotonic'] = 4.5
+    after = state('a-root-fixture'); after['services']['v-ui.service']['process']['pid'] = 22
     bad = {'returncode': 1, 'backup_name': 'before-upgrade-1.zip', 'backup_sha256': 'c'*64,
-           'marker_sha256': 'd'*64, 'current_unchanged': True, 'database_integrity': 'ok',
+           'marker_sha256': hashlib.sha256(b'after-upgrade\n').hexdigest(), 'current_unchanged': True, 'database_integrity': 'ok',
            'rejection_reason': 'Archive checksum mismatch'}
-    details = {'root_install_and_http01': state('a'), 'restored_new_login_and_membership': after,
+    details = {'restored_private_permissions': {str(root.ROOT): {'uid': 998, 'mode': '0o700'}, str(root.ROOT/'data'): {'uid': 998, 'mode': '0o700'}, str(root.ROOT/'data/resource-fixture-marker.txt'): {'uid': 998, 'mode': '0o600'}}, 'root_install_and_http01': state('a'), 'restored_new_login_and_membership': after,
                'fresh_directory_upgrade': {'before': before, 'after': after, 'staging_live_samples': [during], 'backup_name': bad['backup_name']},
                'stopped_bad_digest_preserves_data': bad,
-               'stopped_verified_restore': {**bad, 'returncode': 0, 'marker_sha256': 'e'*64}}
+               'stopped_verified_restore': {**bad, 'returncode': 0, 'marker_sha256': hashlib.sha256(b'before-upgrade\n').hexdigest()}}
+    after['authentication'] = {'old_session_status': 401, 'new_login_status': 200, 'new_session_status': 200, 'http01_status': 200}
     stages = [{'name': name, 'monotonic': i+1, 'parent_identity': identity, 'limits': limits,
                'details': details.get(name, {}), 'metrics': {'memory.peak': i+1,
                'memory.events': {'oom': 0, 'oom_kill': 0, 'max': 0}, 'cpu.stat': {'usage_usec': i+1}}}
               for i, name in enumerate(root.STAGES)]
     unit = PARENT.removesuffix('.slice')+'.service'
-    return {'source_commit': COMMIT, 'slice': PARENT, 'worker_unit': unit, 'worker_exit': 0,
+    return {'source_commit': COMMIT, 'slice': PARENT, 'worker_unit': unit, 'worker_exit': 0, 'worker_started_monotonic': .5, 'worker_finished_monotonic': 10, 'slice_stop': {'state': {'ActiveState': 'inactive'}, 'cgroup_remains': False},
             'cleanup_confirmed': True, 'parent_populated': 0, 'remaining_processes': [],
             'parent_identity': identity, 'limits': limits,
-            'package': {'source_commit': COMMIT, 'a_release_id': 'a', 'b_release_id': 'b',
+            'package': {'source_commit': COMMIT, 'a_release_id': 'a', 'b_release_id': 'a-root-fixture',
                         'a_sha256': 'a'*64, 'b_sha256': 'b'*64, 'product_members_identical': True, 'synthetic_release_only': True},
             'worker': {'source_commit': COMMIT, 'slice': PARENT, 'outcome': 'passed', 'complete': True,
                        'worker': {'uid': [1000]*4, 'cgroup': '/'+PARENT+'/'+unit}, 'parent_identity': identity, 'stages': stages,
@@ -274,7 +276,7 @@ class RootResultValidationTests(unittest.TestCase):
     def test_prepared_b_or_dead_a_does_not_prove_live_stage(self):
         for change in ('prepared', 'generation', 'current'):
             report = complete_report(); details = report['worker']['stages'][4]['details']
-            if change == 'prepared':details['staging_live_samples'][0]['ready_releases'].append('b')
+            if change == 'prepared':details['staging_live_samples'][0]['ready_releases'].append('a-root-fixture')
             if change == 'generation':details['staging_live_samples'][0]['services']['v-ui.service']['process']['pid'] = 999
             if change == 'current':details['after']['current']['release_id'] = 'a'
             with self.subTest(change=change), self.assertRaises(RuntimeError):
@@ -284,4 +286,87 @@ class RootResultValidationTests(unittest.TestCase):
         for key, value in (('backup_name', 'wrong.zip'), ('marker_sha256', 'd'*64), ('returncode', 1)):
             report = complete_report(); report['worker']['stages'][6]['details'][key] = value
             with self.subTest(key=key), self.assertRaises(RuntimeError):
+                root.validate_result(report, COMMIT)
+
+
+class RootFailureClosureTests(unittest.TestCase):
+    def test_fifo_report_is_rejected_without_waiting_for_a_writer(self):
+        import os
+        import time
+        with tempfile.TemporaryDirectory() as directory:
+            fifo = Path(directory)/'report'; os.mkfifo(fifo)
+            start = time.monotonic()
+            with self.assertRaisesRegex(RuntimeError, 'Unsafe worker'):
+                root.worker_report(fifo, os.getuid())
+            self.assertLess(time.monotonic()-start, 1)
+
+    def test_partial_file_write_is_owned_and_can_be_removed_by_inode(self):
+        import os
+        from contextlib import contextmanager
+        original = os.fdopen
+        @contextmanager
+        def partial(fd, mode):
+            with original(fd, mode) as output:
+                class Fails:
+                    def write(self, text):
+                        output.write(text[:3]); output.flush()
+                        raise OSError('synthetic write failure')
+                yield Fails()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'owned'; created = []; identities = {}
+            with patch.object(root.os, 'fdopen', side_effect=partial), self.assertRaises(OSError):
+                root.create_owned_file(path, 'complete unit body', created, identities)
+            self.assertEqual(created, [str(path)])
+            self.assertEqual(path.read_text(), 'com')
+            root.remove_owned_file(path, {'owned_identities': identities})
+            self.assertFalse(path.exists())
+
+    def test_replaced_owned_file_is_not_unlinked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'owned'; created = []; identities = {}
+            root.create_owned_file(path, 'original', created, identities)
+            # Keep the original inode allocated while replacing the pathname.
+            path.rename(path.with_suffix('.original')); path.write_text('replacement')
+            with self.assertRaises(RuntimeError):
+                root.remove_owned_file(path, {'owned_identities': identities})
+            self.assertEqual(path.read_text(), 'replacement')
+
+    def test_slice_stop_error_or_remaining_group_cannot_pass(self):
+        with tempfile.TemporaryDirectory() as directory:
+            group = Path(directory)/'slice'
+            for active, exists in (('active', False), ('inactive', True)):
+                if exists:group.mkdir()
+                with self.subTest(active=active, exists=exists), patch.object(root, 'run', return_value=SimpleNamespace(returncode=1)), patch.object(root, 'unit_properties', return_value={'ActiveState': active}):
+                    with self.assertRaisesRegex(RuntimeError, 'did not stop'):
+                        root.stop_parent_slice(PARENT, {}, group)
+                if exists:group.rmdir()
+            with patch.object(root, 'run', return_value=SimpleNamespace(returncode=0)), patch.object(root, 'unit_properties', return_value={'ActiveState': 'inactive'}):
+                report = {}; root.stop_parent_slice(PARENT, report, group)
+                self.assertFalse(report['slice_stop']['cgroup_remains'])
+
+    def test_corrupt_hard_contracts_are_rejected(self):
+        def stage(report, name):
+            return next(row for row in report['worker']['stages'] if row['name'] == name)
+        def limits(report):
+            report['limits']['memory.max'] = 'max'
+        def root_uid(report):
+            report['worker']['worker']['uid'][1] = 0
+        def leaf(report):
+            service = stage(report, 'root_install_and_http01')['details']['services']['v-ui.service']
+            service['process']['cgroup'] = '/'+PARENT+'/other.service'
+        def permission(report):
+            stage(report, 'restored_private_permissions')['details'] = {}
+        def ready(report):
+            stage(report, 'fresh_directory_upgrade')['details']['after']['ready_releases'].remove('a-root-fixture')
+        def time_window(report):
+            stage(report, 'fresh_directory_upgrade')['details']['staging_live_samples'][0]['monotonic'] = 1e30
+        def nonfinite(report):
+            report['worker']['stages'][3]['monotonic'] = float('nan')
+        def marker(report):
+            stage(report, 'stopped_verified_restore')['details']['marker_sha256'] = '0'*64
+        def failed_stop(report):
+            report['slice_stop']['state']['ActiveState'] = 'active'
+        for mutate in (limits, root_uid, leaf, permission, ready, time_window, nonfinite, marker, failed_stop):
+            report = complete_report(); mutate(report)
+            with self.subTest(mutate=mutate), self.assertRaises(RuntimeError):
                 root.validate_result(report, COMMIT)

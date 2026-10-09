@@ -5,6 +5,7 @@ import argparse
 import grp
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import pwd
@@ -417,7 +418,9 @@ class Gate:
             case.assertEqual(response.read(), b'token.key_authorization')
         finally:
             connection.close()
-        self.record('restored_new_login_and_membership', self.operation('state'))
+        restored_state = self.operation('state')
+        restored_state['authentication'] = {'old_session_status': 401, 'new_login_status': 200, 'new_session_status': 200, 'http01_status': 200}
+        self.record('restored_new_login_and_membership', restored_state)
         self.report.update(outcome='passed', complete=True)
         from scripts.low_resource_acceptance import write_json
         write_json(self.output, self.report)
@@ -426,6 +429,28 @@ class Gate:
 def optional_gate():
     value = os.environ.get('VUI_ROOT_RESOURCE_CONFIG')
     return Gate(json.loads(Path(value).read_text())) if value else None
+
+
+def owned_identity(path):
+    info = path.lstat()
+    return {'device': info.st_dev, 'inode': info.st_ino, 'mode': info.st_mode,
+            'uid': info.st_uid, 'links': info.st_nlink}
+
+
+def create_owned_file(path, text, created, identities):
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    # Ownership starts with successful creation, including a subsequent short
+    # write, fsync or close failure. An expected full body is not an inode ID.
+    created.append(str(path)); identities[str(path)] = owned_identity(path)
+    with os.fdopen(fd, 'w') as output:
+        output.write(text); output.flush(); os.fsync(output.fileno())
+
+
+def remove_owned_file(path, report):
+    expected = report['owned_identities'].get(str(path))
+    if expected is None or owned_identity(path) != expected or not stat.S_ISREG(expected['mode']):
+        raise RuntimeError('Owned file identity changed before cleanup')
+    path.unlink()
 
 
 def bounded_stop(unit, records):
@@ -443,6 +468,16 @@ def bounded_stop(unit, records):
     if state.get('ActiveState') not in ('inactive', 'failed') or int(state.get('MainPID', '0')):
         raise RuntimeError('Owned unit did not stop: '+unit)
     records.append({'unit': unit, 'stop_returncode': stop_returncode, 'final': state})
+
+
+def stop_parent_slice(parent, report, directory=None):
+    directory = directory or Path('/sys/fs/cgroup')/parent
+    stop_slice = run(['systemctl', 'stop', parent], timeout=10, check=False)
+    slice_state = unit_properties(parent)
+    group_remains = directory.exists()
+    report['slice_stop'] = {'returncode': stop_slice.returncode, 'state': slice_state, 'cgroup_remains': group_remains}
+    if slice_state.get('ActiveState') != 'inactive' or group_remains:
+        raise RuntimeError('Owned parent slice did not stop')
 
 
 def cleanup_owned(parent, worker, report):
@@ -508,12 +543,11 @@ def cleanup_owned(parent, worker, report):
         expected = '[Service]\nSlice='+parent+'\n'
         if str(directory) not in report['created_paths']:
             continue
-        if not lexists(dropin):
-            directory.rmdir()
-            continue
-        if dropin.is_symlink() or dropin.read_text() != expected:
-            raise RuntimeError('Owned drop-in identity changed')
-        dropin.unlink(); directory.rmdir()
+        if owned_identity(directory) != report['owned_identities'][str(directory)]:
+            raise RuntimeError('Owned drop-in directory identity changed')
+        if lexists(dropin):
+            remove_owned_file(dropin, report)
+        directory.rmdir()
     if account:
         run(['userdel', 'v-ui'], timeout=10)
         try:
@@ -533,12 +567,10 @@ def cleanup_owned(parent, worker, report):
     run(['systemctl', 'daemon-reload'], timeout=15)
     run(['systemctl', 'reset-failed', *UNITS, worker], timeout=10, check=False)
     preflight(port=False)
-    run(['systemctl', 'stop', parent], timeout=10, check=False)
+    stop_parent_slice(parent, report)
     path = Path('/run/systemd/system')/parent
     expected = '[Slice]\nMemoryMax=536870912\nMemorySwapMax=0\nCPUQuota=100%\nCPUQuotaPeriodSec=100ms\n'
-    if path.is_symlink() or path.read_text() != expected:
-        raise RuntimeError('Owned slice identity changed')
-    path.unlink()
+    remove_owned_file(path, report)
     run(['systemctl', 'daemon-reload'], timeout=15)
     report['cleanup_confirmed'] = True
     return True
@@ -550,6 +582,13 @@ def validate_result(report, commit):
     if report.get('source_commit') != commit or report.get('worker_exit') != 0:
         raise RuntimeError('Source or worker exit mismatch')
     parent = checked_slice(report.get('slice'))
+    if report.get('limits') != {'memory.max': 536870912, 'memory.swap.max': 0, 'cpu.max': '100000 100000'}:
+        raise RuntimeError('Fixed parent limits missing')
+    begin = report['worker_started_monotonic']; end = report['worker_finished_monotonic']
+    if any(type(value) not in (int, float) or not math.isfinite(value) for value in (begin, end)) or not 0 < end-begin <= 920:
+        raise RuntimeError('Invalid worker absolute time window')
+    if report.get('slice_stop', {}).get('state', {}).get('ActiveState') != 'inactive' or report['slice_stop'].get('cgroup_remains') is not False:
+        raise RuntimeError('Parent slice stop not confirmed')
     if report.get('cleanup_confirmed') is not True or report.get('parent_populated') != 0 or report.get('remaining_processes') != []:
         raise RuntimeError('Cleanup not demonstrated')
     worker = report.get('worker', {})
@@ -564,7 +603,7 @@ def validate_result(report, commit):
     for entry in entries:
         if entry['source_commit'] != commit or entry['uid'] != [0]*4 or entry['cgroup'] != worker['worker']['cgroup']:
             raise RuntimeError('Root entry escaped measured worker')
-    if worker['worker']['uid'][0] <= 0:
+    if len(worker['worker']['uid']) != 4 or len(set(worker['worker']['uid'])) != 1 or worker['worker']['uid'][0] <= 0:
         raise RuntimeError('Worker unexpectedly privileged')
     if worker.get('parent_identity') != report.get('parent_identity'):
         raise RuntimeError('Parent identity mismatch')
@@ -572,6 +611,8 @@ def validate_result(report, commit):
     if (package['source_commit'] != commit or package['product_members_identical'] is not True
             or package['synthetic_release_only'] is not True
             or package['a_release_id'] == package['b_release_id']
+            or package['b_release_id'] != package['a_release_id']+'-root-fixture'
+            or not all(re.fullmatch('[0-9a-f]{64}', package[key]) for key in ('a_sha256', 'b_sha256'))
             or package['a_sha256'] == package['b_sha256']):
         raise RuntimeError('Synthetic package contract missing')
     stages = worker.get('stages', [])
@@ -581,7 +622,7 @@ def validate_result(report, commit):
     for row in stages:
         if row['parent_identity'] != report['parent_identity'] or row['limits'] != report['limits']:
             raise RuntimeError('Stage moved outside original parent budget')
-        if row['monotonic'] <= last_time:
+        if type(row['monotonic']) not in (int, float) or not math.isfinite(row['monotonic']) or not begin <= row['monotonic'] <= end or row['monotonic'] <= last_time:
             raise RuntimeError('Invalid root stage order')
         last_time = row['monotonic']
         value = row['metrics']; assert_no_oom(value)
@@ -599,18 +640,27 @@ def validate_result(report, commit):
             raise RuntimeError('Required PID1 services not observed')
         for service, info in state['services'].items():
             membership('0::'+info['process']['cgroup'], parent)
-            if info['process']['uid'][0] <= 0 or info['properties']['Slice'] != parent:
+            uids = info['process']['uid']
+            if (len(uids) != 4 or len(set(uids)) != 1 or uids[0] <= 0
+                    or info['properties']['Slice'] != parent
+                    or info['process']['cgroup'] != '/'+parent+'/'+service
+                    or info['properties'].get('ControlGroup') != info['process']['cgroup']
+                    or info['properties'].get('DropInPaths', '').split() != [f'/run/systemd/system/{service}.d/90-vui-resource.conf']
+                    or info['properties'].get('ActiveState') != 'active'):
                 raise RuntimeError('Wrong service ownership or slice')
     change = details['fresh_directory_upgrade']
     if (change['before']['current']['release_id'] != package['a_release_id']
             or change['after']['current']['release_id'] != package['b_release_id']
             or package['b_release_id'] in change['before']['releases']
             or package['b_release_id'] in change['before']['ready_releases']
+            or package['b_release_id'] not in change['after']['ready_releases']
             or not change['staging_live_samples']):
         raise RuntimeError('New release-directory stage not proved')
     old = change['before']['services']['v-ui.service']['process']
     for sample in change['staging_live_samples']:
-        if (sample['services']['v-ui.service']['process'] != old
+        if (type(sample['monotonic']) not in (int, float) or not math.isfinite(sample['monotonic'])
+                or not stages[3]['monotonic'] <= sample['monotonic'] <= stages[4]['monotonic']
+                or sample['services']['v-ui.service']['process'] != old
                 or sample['current']['release_id'] != package['a_release_id']
                 or package['b_release_id'] not in sample['releases']
                 or package['b_release_id'] in sample['ready_releases']):
@@ -619,15 +669,23 @@ def validate_result(report, commit):
     if (bad.get('rejection_reason') != 'Archive checksum mismatch' or bad['returncode'] == 0 or restored['returncode'] != 0
             or bad['backup_name'] != change['backup_name'] or restored['backup_name'] != change['backup_name']
             or bad['backup_sha256'] != restored['backup_sha256']
-            or bad['marker_sha256'] == restored['marker_sha256']
+            or bad['marker_sha256'] != hashlib.sha256(b'after-upgrade\n').hexdigest()
+            or restored['marker_sha256'] != hashlib.sha256(b'before-upgrade\n').hexdigest()
             or not bad['current_unchanged'] or not restored['current_unchanged']
             or restored['database_integrity'] != 'ok'
             or details['restored_new_login_and_membership']['current']['release_id'] != package['b_release_id']):
         raise RuntimeError('Backup restore identity/semantics missing')
+    permissions = details['restored_private_permissions']
+    expected_paths = {str(ROOT): '0o700', str(ROOT/'data'): '0o700', str(ROOT/'data/resource-fixture-marker.txt'): '0o600'}
+    service_uid = details['root_install_and_http01']['services']['v-ui.service']['process']['uid'][0]
+    if set(permissions) != set(expected_paths) or any(permissions[path] != {'uid': service_uid, 'mode': mode} for path, mode in expected_paths.items()):
+        raise RuntimeError('Restored permissions missing or changed')
+    if details['restored_new_login_and_membership'].get('authentication') != {'old_session_status': 401, 'new_login_status': 200, 'new_session_status': 200, 'http01_status': 200}:
+        raise RuntimeError('Restored authentication semantics missing')
 
 
 def worker_report(path, uid):
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, 'r') as stream:
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_uid != uid or info.st_nlink != 1 or info.st_size > 4*1024*1024:
@@ -671,22 +729,19 @@ def supervisor(args):
     with worker_output.open('x') as file:
         os.fchmod(file.fileno(), 0o600); os.fchown(file.fileno(), args.runner_uid, args.runner_gid)
     slice_path = Path('/run/systemd/system')/parent
-    created = []
+    created = []; identities = {}
     import signal
     def interrupted(signum, frame):
         raise RuntimeError('Supervisor interrupted before completion')
     previous_handlers = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGALRM)}
     signal.setitimer(signal.ITIMER_REAL, 960)
     try:
-        with slice_path.open('x') as file:
-            file.write('[Slice]\nMemoryMax=536870912\nMemorySwapMax=0\nCPUQuota=100%\nCPUQuotaPeriodSec=100ms\n')
-        created.append(str(slice_path))
+        create_owned_file(slice_path, '[Slice]\nMemoryMax=536870912\nMemorySwapMax=0\nCPUQuota=100%\nCPUQuotaPeriodSec=100ms\n', created, identities)
         for unit in UNITS[:2]:
             directory = Path('/run/systemd/system')/(unit+'.d')
             directory.mkdir(mode=0o755)
-            created.append(str(directory))
-            with (directory/'90-vui-resource.conf').open('x') as file:
-                file.write('[Service]\nSlice='+parent+'\n')
+            created.append(str(directory)); identities[str(directory)] = owned_identity(directory)
+            create_owned_file(directory/'90-vui-resource.conf', '[Service]\nSlice='+parent+'\n', created, identities)
         run(['systemctl', 'daemon-reload'])
         run(['systemctl', 'start', parent])
         directory = Path('/sys/fs/cgroup')/parent
@@ -706,11 +761,13 @@ def supervisor(args):
             '--setenv=GITHUB_ACTIONS=true', '--setenv=RUNNER_ENVIRONMENT=github-hosted',
             sys.executable, '-B', '-m', 'unittest', 'discover', '-s', 'tests', '-p', 'test_oneclick_system.py', '-v']
         start = time.monotonic()
+        report['worker_started_monotonic'] = start
         # File output avoids buffering arbitrary subprocess output in supervisor RAM.
         with (work/'root-worker.log').open('w') as log:
             result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=920)
         report['worker_exit'] = result.returncode
-        report['wall_seconds'] = time.monotonic()-start
+        report['worker_finished_monotonic'] = time.monotonic()
+        report['wall_seconds'] = report['worker_finished_monotonic']-start
         report['worker'] = worker_report(worker_output, args.runner_uid)
         if result.returncode or report['worker'].get('outcome') != 'passed' or not report['worker'].get('complete'):
             raise RuntimeError('Measured root worker failed')
@@ -718,20 +775,24 @@ def supervisor(args):
     except Exception as exc:
         report['error'] = type(exc).__name__
     finally:
-        if 'worker' not in report:
-            try:
-                report['worker'] = worker_report(worker_output, args.runner_uid)
-            except Exception as exc:
-                report['partial_worker_error'] = type(exc).__name__
         report['created_paths'] = created
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        for sig in previous_handlers:
-            signal.signal(sig, signal.SIG_IGN)
+        report['owned_identities'] = identities
+        # Cleanup remains bounded and interruptible, even if stop or unlink
+        # stalls. A deadline records failure; it never declares partial cleanup
+        # successful or silently continues deleting state.
+        signal.setitimer(signal.ITIMER_REAL, 180)
         try:
             if not cleanup_owned(parent, worker, report):
                 report['outcome'] = 'failed'
         except Exception as exc:
             report['outcome'] = 'failed'; report['cleanup_error'] = type(exc).__name__
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+        if 'worker' not in report:
+            try:
+                report['worker'] = worker_report(worker_output, args.runner_uid)
+            except Exception as exc:
+                report['partial_worker_error'] = type(exc).__name__
         try:
             if report['outcome'] == 'passed':
                 validate_result(report, args.source_commit)
