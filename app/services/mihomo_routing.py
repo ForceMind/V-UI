@@ -393,6 +393,46 @@ def _overlaps(left: dict[str, str], right: dict[str, str]) -> bool:
     return _covers(left, right) or _covers(right, left)
 
 
+class _MatchIndex:
+    """Per-plan lookup with the exact type and domain-boundary rules of _covers."""
+
+    def __init__(self, matches=()) -> None:
+        self.exact: set[tuple[str, str]] = set()
+        self.suffixes: set[str] = set()
+        self.domain_ancestors: set[str] = set()
+        for match in matches:
+            self.add(match)
+
+    @staticmethod
+    def _ancestors(value: str):
+        yield value
+        for offset, char in enumerate(value):
+            if char == ".":
+                yield value[offset + 1:]
+
+    def add(self, match: dict[str, str]) -> None:
+        kind, value = match["type"], match["value"]
+        self.exact.add((kind, value))
+        if kind in {"DOMAIN", "DOMAIN-SUFFIX"}:
+            self.domain_ancestors.update(self._ancestors(value))
+        if kind == "DOMAIN-SUFFIX":
+            self.suffixes.add(value)
+
+    def covers(self, match: dict[str, str]) -> bool:
+        kind, value = match["type"], match["value"]
+        if (kind, value) in self.exact:
+            return True
+        return kind in {"DOMAIN", "DOMAIN-SUFFIX"} and any(
+            suffix in self.suffixes for suffix in self._ancestors(value)
+        )
+
+    def overlaps(self, match: dict[str, str]) -> bool:
+        return self.covers(match) or (
+            match["type"] == "DOMAIN-SUFFIX"
+            and match["value"] in self.domain_ancestors
+        )
+
+
 def _rule(match: dict[str, str], policy: str) -> str:
     suffix = "" if _is_domain(match) else ",no-resolve"
     return f"{match['type']},{match['value']},{policy}{suffix}"
@@ -446,6 +486,8 @@ def build_rule_plan(routing: dict[str, Any] | None = None) -> dict[str, Any]:
         for zone in zones
     ]
     direct_matches = [_target_match(target) for target in direct_targets]
+    intranet_index = _MatchIndex(intranet_matches)
+    direct_index = _MatchIndex(direct_matches)
 
     warning_sets: dict[str, set[str]] = {}
     sections = [{
@@ -458,6 +500,7 @@ def build_rule_plan(routing: dict[str, Any] | None = None) -> dict[str, Any]:
         ],
     }]
     planned: list[dict[str, Any]] = []
+    planned_index = _MatchIndex()
     policy: dict[str, list[str]] = {}
 
     for local in LOCAL_DOMAINS:
@@ -499,8 +542,9 @@ def build_rule_plan(routing: dict[str, Any] | None = None) -> dict[str, Any]:
     ) -> None:
         rules: list[str] = []
         for match in matches:
-            if any(_covers(entry["match"], match) for entry in planned):
+            if planned_index.covers(match):
                 continue
+            planned_index.add(match)
             planned.append({
                 "match": match,
                 "policy": destination,
@@ -531,7 +575,7 @@ def build_rule_plan(routing: dict[str, Any] | None = None) -> dict[str, Any]:
         if _is_local_target(target, routing["bypass_cgnat"]):
             warn("LOCAL_OVERRIDE", match)
             continue
-        if any(_overlaps(zone, match) for zone in intranet_matches):
+        if intranet_index.overlaps(match):
             warn("INTRANET_OVERRIDE", match)
         effective_direct.append(match)
 
@@ -552,14 +596,14 @@ def build_rule_plan(routing: dict[str, Any] | None = None) -> dict[str, Any]:
 
         if any(_overlaps(local, match) for local in LOCAL_DOMAINS):
             warn("LOCAL_OVERRIDE", match)
-        if any(_overlaps(zone, match) for zone in intranet_matches):
+        if intranet_index.overlaps(match):
             warn("INTRANET_OVERRIDE", match)
-        if any(_overlaps(direct_match, match) for direct_match in direct_matches):
+        if direct_index.overlaps(match):
             warn("DIRECT_OVERRIDE", match)
 
         return not (
-            any(_covers(zone, match) for zone in intranet_matches)
-            or any(_covers(direct_match, match) for direct_match in direct_matches)
+            intranet_index.covers(match)
+            or direct_index.covers(match)
         )
 
     proxy_matches = []
@@ -611,7 +655,7 @@ def build_rule_plan(routing: dict[str, Any] | None = None) -> dict[str, Any]:
         if not _is_domain(match):
             continue
         local = any(_covers(local_match, match) for local_match in LOCAL_DOMAINS)
-        intranet = any(_covers(zone, match) for zone in intranet_matches)
+        intranet = intranet_index.covers(match)
         if local and not intranet:
             continue
         key = _dns_key(match)
