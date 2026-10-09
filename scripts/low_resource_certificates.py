@@ -48,7 +48,7 @@ def wait_file(path, deadline, alive=lambda: None):
 
 
 def external_group(unit):
-    if not re.fullmatch(r'vui-low-resource-[0-9a-f]{32}-certificates\.service', unit):
+    if not re.fullmatch(r'vui-low-resource-[0-9a-f]{32}-(?:certificates|data)\.service', unit):
         raise RuntimeError('Invalid disposable certificate client unit')
     return Path('/sys/fs/cgroup/system.slice') / unit
 

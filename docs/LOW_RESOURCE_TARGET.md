@@ -254,3 +254,30 @@ ZIP 的中心目录、最多 10,000 个文件条目及至多 4 MB MANIFEST 仍�
 本地已用固定官方Pebble与真实Certbot验证三项ACME测试（含失败挑战和原普通签发/续期）。新增测试强制假CA100%授权复用，保留移走旧账户后自动due续期仍取得新的真实HTTP-01并更新材料；本地真实通过不替代修正head的600秒/受限cgroup测试。
 
 修正批最终完整本地套件590项：466通过、124环境skip；真实Pebble/Certbot三项另行实际通过，不把全套中的环境skip改写为通过。独立11项资源测试/4项ACME fixture测试通过，复审无阻断，文档/编译/diff通过。修正后的完整受限证书profile仍须准确新head实际运行。
+
+### b419999 新fake账户证书重验证与流量叠加结果
+
+准确 `b4199992fd250a9466b5f5ee840534272d7031af` 的[证书运行](https://github.com/ForceMind/V-UI/actions/runs/37858552475)与同head普通八组全部attempt 1成功：合计9 runs、12 jobs、130步骤。[原始ZIP](https://github.com/ForceMind/V-UI/actions/runs/37858552475/artifacts/11585941065) SHA-256 `d5ad407158a3f53057dee6ed3b669213b0980bb035c068e41d5eaeb9fd37a85b`及严格validators已独立复核；内层包SHA-256 `92fa97c8d4225b685d62efff27826ab13e23bd1efb720b8a34c81e9c53b3a6a7`。
+
+- 32阶段全passed/complete；服务一核/512MiB/零swap，累计peak477,786,112字节，max及三种OOM均0。峰值在安装阶段已达到，不称证书任务自己的独立峰值；外部CA/DNS/客户端组另计peak56,131,584字节、OOM0。
+- 10持久连接600.002425833秒、6000个64KiB响应、零错误；最大响应5.33ms为该本机固定负载样本。之后新单连接/单请求恢复通过。
+- 两job约2.664/2.612秒，各3次真实HTTP-01 GET200、不同token摘要、两个独立Certbot PID均在服务组；精确job窗口内27/26个代理响应。新fake账户与原账户三个文件保留、不同key均有证据，证书serial/revision改变且旧材料不变。
+- 121份服务采样跨601.54秒，worker/panel/proxy PID及starttime稳定；普通面板DB不含测试证书job。后续UUID/CA真实拒绝、零送达/客户端无DIRECT回退、恢复、注销及整组清理均通过。
+
+4823首次失败保留。此结果只覆盖新fake账户强制重新验证的自动due续期与持续流量叠加，不泛称普通同账户续期或在线证书轮换；不继承972长测或699 UI结果至此head，不称完整512MiB VPS资格。
+
+### 大数据与合成日志停机备份 profile（实施范围）
+
+新增独立 `data-backup` profile及显式 `run-low-resource-data-backup` PR标签。普通八组、既有三档短回归、原一基础页容差及所有OOM拒绝保持；本profile仍一核/512MiB/零swap，worker1800秒、协调器1860秒、job45分钟。
+
+固定1000条直接seed的合成VLESS/TCP/TLS行，不冒充API创建1000监听器；前后断言无托管核心启动。通过真实PUT/If-Match保存512条direct域、512条proxy域及64条内网域（各两个合成DNS地址），并验证缺If-Match 428、旧revision 409、2049项越界422均不改变保存内容/版本；管理员导出匿名401。公共grant只选合法256节点子集，不绕过产品上限。
+
+四管理员端点各一个语义基线、30次串行请求及一批10并发请求，总41次；每端点120秒上界、无重试，不预先承诺大数据持续吞吐。验证三节点格式的1000个唯一假UUID、保存规则DIRECT/FORCE_PROXY及内网DNS语义、稳定正文摘要、无服务端材料字段；raw解码后亦检查。外部客户端置独立临时cgroup计CPU/内存/OOM并整组清理；服务阶段指标将四格式合计，外部逐端点时延不冒充精确逐格式服务CPU。
+
+真实运行中backup必须因已有panel lease拒绝、无成功产物且面板仍健康。停止全部面板/核心后，在服务cgroup内用有界1MiB文本块生成256MiB非稀疏合成日志及64个4096字节小文件；文本块可重复，记录实际压缩比，不使用零填充/稀疏文件。预检至少4GiB磁盘余量，记录生成前余量、data与安装根的allocated file bytes；不清全局缓存或把用户备份数据套用release cold-cache提示。
+
+备份/恢复调用同一已安装Python及已安装app.release_tools；校验来源、真实归档的日志文件集/大小/摘要/0600权限。备份后修改一节点、规则和日志字节；错误SHA必须拒绝且当前数据、CURRENT与recovery列表不变，正确同根恢复后验证SQLite完整性、原业务字段/规则/日志摘要、所有旧会话与grant撤销、恢复前改动数据完整保留于recovery/before-*及无残留staging/journal。重启后旧Cookie401、旧订阅404，新登录/三格式导出/规则正常，token不入面板日志。DB文件整体摘要不要求恢复前后一致，因为撤销授权必须修改DB。
+
+产品没有日志读取/清空/轮转API，核心输出目前为DEVNULL，systemd运维日志由journalctl读取。本批只将普通大日志文件作为真实停机备份负载，不宣称产品日志实时增长或轮转验收。24小时、双核心、受限root升级回滚、四平台资源和真实整机余量仍分别待验，无新产品协议/日志范围、合并、发布、部署或收费资源。
+
+实现存在或本地小尺寸控制流通过不等于256MiB日志/受限资源验收通过；本profile的准确候选执行结果、原始artifact摘要与失败记录以[PR #28当前结论](https://github.com/ForceMind/V-UI/pull/28)逐head登记，不能继承旧head。最终本地完整套件与独立复审结果也在同批PR记录。

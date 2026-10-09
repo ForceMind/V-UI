@@ -145,15 +145,15 @@ def filesystem_type(path: Path) -> str:
 
 def duration_profile(args):
     profile = getattr(args, "duration_profile", "smoke")
-    if profile not in {"smoke", "sustained", "interactions", "certificates"}:
+    if profile not in {"smoke", "sustained", "interactions", "certificates", "data-backup"}:
         raise RuntimeError("Unknown duration profile")
-    if profile in {"sustained", "interactions", "certificates"} and args.memory_mib != 512:
+    if profile in {"sustained", "interactions", "certificates", "data-backup"} and args.memory_mib != 512:
         raise RuntimeError("Extended profiles currently require the original 512 MiB limit")
     return profile
 
 
 def runtime_seconds(args):
-    return {"smoke": 600, "sustained": 6600, "interactions": 1800, "certificates": 1800}[duration_profile(args)]
+    return {"smoke": 600, "sustained": 6600, "interactions": 1800, "certificates": 1800, "data-backup": 1800}[duration_profile(args)]
 
 
 def worker(args) -> int:
@@ -178,6 +178,9 @@ def worker(args) -> int:
     if profile == "certificates":
         report["scope"] = "real local-test-CA issuance and due renewal during 10-connection 600-second loopback traffic; not live certificate rotation or full VPS qualification"
         report["accounting"] += "; certificate manager/responder/Certbot inside; Pebble/DNS/client/target outside service cgroup"
+    if profile == 'data-backup':
+        report['scope']='1000 synthetic nodes, saved large routing, fixed administrator exports and stopped backup/restore of 256MiB synthetic log; not runtime log rotation or full VPS qualification'
+        report['accounting']+='; external export clients separately accounted; generation/hash/backup/restore remain inside service cgroup'
     output = args.output
 
     def checkpoint():
@@ -407,6 +410,61 @@ with SessionLocal() as db:
                 stage("browser_visibility_tabs_exports_logout", interactions)
                 stage("interaction_revoked_cookie_rejected", lambda: api("/api/auth/me", expected=401))
                 stage("login_after_interaction_logout", login)
+            if profile == 'data-backup':
+                from scripts import low_resource_data as large
+                report['large_data']={}
+                stage('seed_1000_synthetic_nodes',lambda:large.seed_nodes(python,payload,data,cert,key))
+                def large_nodes_not_running():
+                    if len(json.loads(api('/api/inbounds')[1]))!=1000:raise RuntimeError('Large node fixture missing')
+                    if any(row.get('running') for row in json.loads(api('/api/cores/status')[1]).values()):raise RuntimeError('Synthetic nodes started listeners')
+                stage('large_synthetic_nodes_not_running',large_nodes_not_running)
+                def routing_request(body,revision,expected):
+                    headers={'Origin':origin,'X-VUI-Request':'1','Content-Type':'application/json'}
+                    if revision is not None:headers['If-Match']='"'+revision+'"'
+                    request=Request(origin+'/api/routing/mihomo',data=json.dumps(body).encode(),headers=headers,method='PUT')
+                    try:response=opener.open(request,timeout=30)
+                    except HTTPError as exc:response=exc
+                    with response:
+                        raw=response.read()
+                        if response.status!=expected:raise RuntimeError('Unexpected routing write status')
+                        return raw
+                def configure_large_rules():
+                    original_revision=json.loads(api('/api/routing/mihomo/snapshot')[1])['revision']
+                    routing_request(large.routing_fixture(),original_revision,200)
+                    saved=json.loads(api('/api/routing/mihomo/snapshot')[1]);revision=saved['revision']
+                    expected_hash=large.digest(data/'mihomo-routing.json')
+                    cases=[(large.routing_fixture(),None,428),(large.routing_fixture(),original_revision,409),
+                        ({**large.routing_fixture(),'direct_domains':[f'extra-{n}.example.test' for n in range(2049)]},revision,422)]
+                    for body,prior,status in cases:
+                        routing_request(body,prior,status)
+                        if large.digest(data/'mihomo-routing.json')!=expected_hash or json.loads(api('/api/routing/mihomo/snapshot')[1])['revision']!=revision:
+                            raise RuntimeError('Rejected routing write changed saved data')
+                    report['large_data']['routing_rejections']=[428,409,422]
+                    report['large_data']['original']={'business':large.business_digest(data),'routing':expected_hash,'revision':revision}
+                stage('large_rules_and_real_conditional_write_rejections',configure_large_rules)
+                def anonymous_export_denied():
+                    anonymous=build_opener(ProxyHandler({}),HTTPSHandler(context=context))
+                    try:anonymous.open(origin+'/api/subscription/raw',timeout=10)
+                    except HTTPError as exc:
+                        if exc.code==401:return
+                        raise
+                    raise RuntimeError('Anonymous administrator export accepted')
+                stage('large_anonymous_export_denied',anonymous_export_denied)
+                grant=json.loads(stage('create_256_node_scoped_grant',lambda:api('/api/subscriptions',
+                    {'label':'synthetic-large-data','server':'vpn.example.test','inbound_ids':list(range(1,257)),'formats':['raw']},expected=201))[1])
+                grant_path=grant['paths']['raw']
+                stage('synthetic_public_grant_before_backup',lambda:api(grant_path))
+                def exports():
+                    cookie='; '.join(item.name+'='+item.value for item in jar)
+                    report['large_data']['exports']=large.request_exports(args.work_dir,output,args.unit,args.source_commit,origin,ca,cookie,alive)
+                stage('large_four_format_exports_serial_and_concurrent',exports)
+                def live_backup_rejected():
+                    target=root/'must-not-exist-live-backup.zip'
+                    result=large.installed_operation(python,payload,data,root,'reject_live_backup',target)
+                    if result.get('rejected') is not True or target.exists():raise RuntimeError('Live backup was not cleanly rejected')
+                    api('/api/auth/me')
+                    report['large_data']['live_backup_rejected']=True
+                stage('large_live_backup_rejected_without_stopping_panel',live_backup_rejected)
             from scripts.low_resource_proxy import run_proxy_smoke
             def sustained_load(binary, fixture, ca, port, health):
                 from scripts.low_resource_sustained import CONCURRENCIES, request_load
@@ -470,10 +528,31 @@ with SessionLocal() as db:
             stage("login_before_backup", login)
             stage("stopped_panel", stop)
             backup = root / "stopped-backup.zip"
-            digest = stage("stopped_backup", lambda: tools.backup(root, backup))
+            if profile == 'data-backup':
+                report['large_data']['logs']=stage('generate_256MiB_and_64_small_logs_inside_service',lambda:large.generate_log_fixture(data))
+                def large_backup():
+                    result=large.installed_operation(python,payload,data,root,'backup',backup)
+                    report['large_data']['archive']=large.verify_archive(root,data,backup,report['large_data']['logs'])
+                    return result['digest']
+                digest=stage('stopped_backup',large_backup)
+            else:
+                digest = stage("stopped_backup", lambda: tools.backup(root, backup))
             with sqlite3.connect(data / "v-ui.db") as db:
                 db.execute("UPDATE users SET username='modified-after-backup'")
-            stage("stopped_restore", lambda: tools.restore(root, backup, digest))
+            if profile == 'data-backup':
+                stage('mutate_large_data_after_backup',lambda:large.mutate_after_backup(data))
+                changed=large.current_snapshot(root,data)
+                def bad_restore():
+                    result=large.installed_operation(python,payload,data,root,'reject_bad_digest',backup,'0'*64)
+                    if result.get('rejected') is not True or large.current_snapshot(root,data)!=changed:
+                        raise RuntimeError('Bad digest damaged existing data or code')
+                    report['large_data']['bad_digest_preserved_data']=True
+                stage('large_bad_digest_restore_preserves_current_data',bad_restore)
+                stage('stopped_restore',lambda:large.installed_operation(python,payload,data,root,'restore',backup,digest))
+                report['large_data']['recovery']=stage('large_business_logs_revocation_and_original_data_retained',
+                    lambda:large.verify_recovery(root,data,report['large_data']['original'],changed,report['large_data']['logs']))
+            else:
+                stage("stopped_restore", lambda: tools.restore(root, backup, digest))
             def verify_restore():
                 with sqlite3.connect(data / "v-ui.db") as db:
                     if db.execute("SELECT username FROM users").fetchone() != ("resource-admin",):
@@ -483,11 +562,26 @@ with SessionLocal() as db:
             stage("restore_data_and_session_revocation", verify_restore)
             stage("restored_https_startup", start)
             stage("old_session_after_restore_denied", lambda: api("/api/auth/me", expected=401))
+            if profile == 'data-backup':
+                stage('old_subscription_after_large_restore_denied',lambda:api(grant_path,expected=404))
             stage("restored_login", login)
+            if profile == 'data-backup':
+                stage('restored_large_nodes_not_running',large_nodes_not_running)
+                def restored_exports():
+                    for path in large.PATHS:large.check_body(path,api(path)[1])
+                    report['large_data']['restored_exports_verified']=True
+                stage('restored_large_exports_and_rules',restored_exports)
             if profile == "interactions":
                 stage("restored_export_rows_still_not_running", fixture_rows_not_running)
             stage("restored_logout", lambda: api("/api/auth/logout", {}))
             stage("final_panel_stop", stop)
+            if profile == 'data-backup':
+                def no_token_in_logs():
+                    for index in range(log_number):
+                        if grant['token'] in (output.parent/f'{output.stem}-panel-{index}.log').read_text(errors='replace'):
+                            raise RuntimeError('Synthetic subscription token leaked to panel log')
+                    report['large_data']['synthetic_token_not_logged']=True
+                stage('large_subscription_token_absent_from_logs',no_token_in_logs)
         report["outcome"] = "passed"
     except Exception as exc:
         report["outcome"] = "failed"
@@ -571,6 +665,10 @@ def coordinator(args) -> int:
                 sys.path.insert(0, str(SOURCE))
                 from scripts.low_resource_certificates import CertificateBroker
                 broker = CertificateBroker(Path(directory), output, unit, args.source_commit)
+            elif profile == "data-backup":
+                sys.path.insert(0,str(SOURCE))
+                from scripts.low_resource_data import DataBroker
+                broker=DataBroker(Path(directory),output,unit,args.source_commit)
             with broker, output.with_suffix(".log").open("w") as log:
                 result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT,
                                         timeout=runtime_seconds(args) + 60)
@@ -597,6 +695,9 @@ def coordinator(args) -> int:
                 validate_result(value.get('external',{}),value.get('service',{}),unit,args.source_commit)
                 from scripts.low_resource_certificates import validate_service_samples
                 validate_service_samples(report.get('certificate_service_samples'),report.get('certificate_service_roles'))
+            elif profile == 'data-backup':
+                from scripts.low_resource_data import validate_complete
+                validate_complete(report,unit,args.source_commit)
             assert_no_oom(report["metrics"])
             summary["peak_budget_assessment"] = peak_assessment(report["metrics"]["memory.peak"],
                 budget, report["base_page_size_bytes"])
@@ -636,7 +737,7 @@ def main():
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--memory-mib", type=int, choices=MEMORY_PROFILES, default=512)
-    parser.add_argument("--duration-profile", choices=("smoke", "sustained", "interactions", "certificates"), default="smoke")
+    parser.add_argument("--duration-profile", choices=("smoke", "sustained", "interactions", "certificates", "data-backup"), default="smoke")
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--unit")
     parser.add_argument("--work-dir", type=Path)
