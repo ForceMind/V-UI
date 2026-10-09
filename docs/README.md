@@ -40,3 +40,4 @@
 
 - [新payload core写回](LOW_RESOURCE_CORE_WRITEBACK.md)：已证实的驻留边界与仅新文件的缓存优化实验。
 - [有界双核心并存与恢复](LOW_RESOURCE_DUAL_CORE.md)：同服务组真实两路、控制停止与显式重启的短验收合同。
+- [CPU配额饱和后的恢复](LOW_RESOURCE_CPU_PRESSURE.md)：有界真实代理压力、原始配额证据和固定恢复时限。
