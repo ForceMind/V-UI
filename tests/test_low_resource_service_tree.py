@@ -7,6 +7,8 @@ import socket
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from scripts.low_resource_service_tree import (WatchedCore, allocator_fields,
     canonical_cgroup, identity, observed_allocator, validate_tree)
@@ -15,11 +17,21 @@ from deploy.system_launcher import panel_environment
 
 class ServiceTreeTests(unittest.TestCase):
     def test_real_installed_watchdog_inherits_policy_and_cleans_group(self):
+        self.exercise_watchdog(0)
+
+    def test_preexec_child_is_not_mistaken_for_a_ready_wrong_core(self):
+        self.exercise_watchdog(.4)
+
+    def exercise_watchdog(self, preexec_delay):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'app/services').mkdir(parents=True)
             shutil.copy(Path(__file__).resolve().parents[1] / 'app/services/core_child.py',
                         root / 'app/services/core_child.py')
+            if preexec_delay:
+                child=root/'app/services/core_child.py'
+                child.write_text(child.read_text().replace('def parent_death():',
+                    'def parent_death():\n        import time\n        time.sleep('+str(preexec_delay)+')'))
             with socket.socket() as sock:
                 sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]
             (root / 'run').write_text('import socket,time\ns=socket.socket()\ns.bind(("127.0.0.1",'+str(port)+'))\ns.listen()\ntime.sleep(60)\n')
@@ -45,6 +57,49 @@ class ServiceTreeTests(unittest.TestCase):
                     validate_tree(invalid, 'x86_64-gnu', os.getpid(), identity(os.getpid())['cgroup'])
             for row in value['roles'].values():
                 self.assertFalse(Path('/proc', str(row['pid'])).exists())
+
+    def test_wrong_ready_command_extra_children_and_stuck_preexec_are_rejected(self):
+        import psutil
+        from unittest.mock import Mock
+        for mode in ('wrong_ready','wrong_pending','extra','stuck'):
+            with self.subTest(mode=mode):
+                core=WatchedCore.__new__(WatchedCore)
+                core.python=Path('/python');core.payload=Path('/payload');core.binary=Path('/core')
+                core.config=Path('/config');core.environment={};core.log=None
+                command=['/python','/payload/app/services/core_child.py',str(os.getpid()),'/core','run','-c','/config']
+                child=Mock();child.cmdline.return_value=command if mode=='stuck' else ['/unexpected']
+                child.net_connections.return_value=[SimpleNamespace(status=psutil.CONN_LISTEN,laddr=SimpleNamespace(port=1234))] if mode=='wrong_ready' else []
+                process=Mock(pid=123);process.poll.return_value=None
+                owner=Mock();owner.children.return_value=[child,child] if mode=='extra' else [child]
+                with patch('scripts.low_resource_service_tree.subprocess.Popen',return_value=process), \
+                        patch('psutil.Process',return_value=owner), \
+                        patch('scripts.low_resource_service_tree.time.monotonic',side_effect=[0,1,13]), \
+                        patch('scripts.low_resource_service_tree.time.sleep'):
+                    with self.assertRaises(RuntimeError):core.start(1234)
+
+    def test_exec_during_listener_probe_does_not_pair_stale_argv(self):
+        import psutil
+        from unittest.mock import Mock
+        core=WatchedCore.__new__(WatchedCore)
+        core.python=Path('/python');core.payload=Path('/payload');core.binary=Path('/core')
+        core.config=Path('/config');core.environment={};core.log=None;core.roles={}
+        command=['/python','/payload/app/services/core_child.py',str(os.getpid()),'/core','run','-c','/config']
+        transitioned=[]
+        child=Mock(pid=124)
+        def probe(**kwargs):
+            transitioned.append(True)
+            return [SimpleNamespace(status=psutil.CONN_LISTEN,laddr=SimpleNamespace(port=1234))]
+        child.net_connections.side_effect=probe
+        child.cmdline.side_effect=lambda:command[3:] if transitioned else command
+        owner=Mock();owner.children.return_value=[child]
+        process=Mock(pid=123);process.poll.return_value=None
+        with patch('scripts.low_resource_service_tree.subprocess.Popen',return_value=process), \
+                patch('psutil.Process',return_value=owner), \
+                patch('scripts.low_resource_service_tree.identity',side_effect=lambda pid:dict(pid=pid)), \
+                patch('scripts.low_resource_service_tree.observed_allocator',return_value={}), \
+                patch.object(core,'check') as checked:
+            core.start(1234)
+        checked.assert_called_once();self.assertEqual(core.core_pid,124)
 
     def test_allowed_environment_fields_and_exact_cgroup(self):
         value = allocator_fields({'MALLOC_MMAP_THRESHOLD_':'131072', 'SECRET':'never record'})

@@ -49,3 +49,13 @@ manager 必须运行产品真实后台线程，记录 TID / starttime 并持续�
 160 MiB 空载预算、真实整机 OS 余量、24 小时、双核心、真正过载、受限 root 全链路和四平台资源矩阵分别保留为未完成项。现有 CI 的 native ARM64 与 musl 环境可继续适配资源测试，不能用兼容性通过代替资源通过。
 
 一次助手环境回退使未提交的早期夹具草稿和未公开大导出 allocator A/B 原始文件丢失。本次从已保存 adac 源码重新构建，不能声称字节恢复；旧本地摘要不充当可独立复核的原始结果。重建 WIP 独立保存，完成审查与重新验证后才更新性能候选。
+
+## 6216512 首次 native 启动观察失败
+
+准确 `6216512fef009181531b759cb561168e65d9e163` 的 [deployment 37901899322](https://github.com/ForceMind/V-UI/actions/runs/37901899322) 首次失败，原始 [artifact 11601864297](https://github.com/ForceMind/V-UI/actions/runs/37901899322/artifacts/11601864297) ZIP SHA256 `43077f39958bec92c65eec9513c2f46e2344d262edef5be323607a7e00af877f` 已下载并独立核验。512 MiB 的前10阶段通过，第11个 `proxy_server_start` 在0.404秒内报 `Unexpected watchdog child command`，服务端日志为空；生命周期峰值478449664字节，max/OOM全零。384/320档和后续浏览器没有运行，不计通过；同提交的 musl 成功不覆盖此失败。
+
+原始日志没有保存观察到的 argv，不能把该次唯一根因写定。源码中实际 `core_child.py` 通过带 preexec hook 的 Popen 创建核心，在 fork 与 exec 之间子进程已经可见、argv 仍可能为 watchdog。对临时复制的真实 watchdog 在 preexec 固定延迟0.4秒，旧夹具确定复现相同错误；这证明观察竞态机制，但不补造首败缺失的 argv。
+
+最小修复只调整夹具就绪判断：先观察实际 listener，再读取 argv，避免将较早的 watchdog argv 与稍后已监听的核心错误配对。只允许未监听的空 argv 或精确原 watchdog argv 在原12秒截止内等待；其他命令、已经监听却argv不对、多子进程、超时仍拒绝。就绪后的身份/父子/cgroup/allocator、实际负向及整组清理不变，产品 watchdog 不修改。
+
+回归覆盖真实延迟 preexec 后正确监听与清理、监听探测期间发生 exec 的读取顺序、错误命令/多子进程和截止拒绝。新准确候选须重新验收，旧失败保留，不原样重跑碰运气。

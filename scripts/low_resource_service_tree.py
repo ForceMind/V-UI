@@ -82,12 +82,24 @@ class WatchedCore:
             if self.process.poll() is not None:
                 raise RuntimeError('Installed watchdog exited before core readiness')
             children = psutil.Process(self.process.pid).children()
+            if len(children) > 1:
+                raise RuntimeError('Installed watchdog has unexpected extra children')
             if len(children) == 1:
                 core = children[0]
-                if core.cmdline() != command[3:]:
-                    raise RuntimeError('Unexpected watchdog child command')
-                if any(s.status == psutil.CONN_LISTEN and s.laddr.port == port
-                       for s in core.net_connections(kind='inet') if s.laddr):
+                listening = any(s.status == psutil.CONN_LISTEN and s.laddr.port == port
+                                for s in core.net_connections(kind='inet') if s.laddr)
+                # Read argv after the listener observation, so a successful
+                # exec between these reads cannot leave a stale watchdog argv
+                # paired with the newly opened core listener.
+                argv = core.cmdline()
+                if argv != command[3:]:
+                    # core_child's preexec hook requires fork: until exec the
+                    # child may still show the watchdog argv (or empty argv).
+                    # Only those exact transient shapes are allowed to wait,
+                    # never a ready listener or an unrelated command.
+                    if listening or argv not in ([], command):
+                        raise RuntimeError('Unexpected watchdog child command')
+                elif listening:
                     self.roles = {'watchdog': identity(self.process.pid), 'core': identity(core.pid)}
                     for row in self.roles.values():
                         row['allocator'] = observed_allocator(row['pid'])
