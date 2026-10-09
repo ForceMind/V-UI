@@ -189,6 +189,8 @@ def observe_certbot(root, expected_cgroup, directory, proc=Path('/proc'), *, par
             if expected_allocator is not None:
                 from scripts.low_resource_service_tree import observed_allocator
                 row['allocator']=observed_allocator(int(entry.name))
+                row['process_group']=os.getpgid(int(entry.name))
+                if row['process_group']!=row['pid']:raise RuntimeError('Certbot process group mismatch')
                 if row['allocator']!=expected_allocator:raise RuntimeError('Certbot allocator differs from manager')
             found.append(row)
         except (OSError,ValueError,IndexError):continue
@@ -422,7 +424,12 @@ def service(request, output):
                 report['responder_group_cleanup_complete']=True
             except Exception as exc:report.update(outcome='failed',responder_group_cleanup_complete=False,cleanup_error=type(exc).__name__)
         checkpoint()
-        report['cleanup_complete']=bool(report.get('background_cleanup_complete') and report.get('responder_group_cleanup_complete')
+        report['certbot_groups_gone']=True
+        for child in report['certbot_processes']:
+            try:os.killpg(child['pid'],0)
+            except ProcessLookupError:pass
+            else:report['certbot_groups_gone']=False
+        report['cleanup_complete']=bool(report['certbot_groups_gone'] and report.get('background_cleanup_complete') and report.get('responder_group_cleanup_complete')
             and report.get('responder',{}).get('outcome')=='passed' and report['responder'].get('drained'))
         if not report['cleanup_complete'] or report['observation_errors']:report['outcome']='failed'
         checkpoint()
@@ -472,6 +479,10 @@ def external(request, output):
             if ready.get('unit')!=request['unit'] or ready.get('source_commit')!=request['source_commit']:
                 raise RuntimeError('Manager readiness provenance mismatch')
             value['manager_ready']=ready
+            bound=wait_file(root/'roles-ready.json',time.monotonic()+60)
+            if bound!=dict(unit=request['unit'],source_commit=request['source_commit'],manager_ready=ready):
+                raise RuntimeError('Service sampling binding acknowledgement mismatch')
+            value['roles_ready']=bound
             progress={};result={};error=[]
             def traffic():
                 try:result.update(fixed_load(port,target.server_address[1],10,progress=progress,record_times=True,stagger=True))
@@ -529,13 +540,14 @@ def request_overlap(work, output, unit, commit, payload, python, binary, fixture
         try:
             def alive():
                 observe()
-                if process.poll() is not None and not (root/'responder.json').exists():raise RuntimeError('Certificate responder failed startup')
+                if process.poll() is not None:raise RuntimeError('Certificate service exited before readiness')
             ready=wait_file(root/'responder.json',time.monotonic()+30,alive)
             request=dict(root=str(root),unit=unit,source_commit=commit,binary=str(binary),fixture=str(fixture),ca=str(ca),server_port=port,
                 duration_seconds=DURATION,concurrency=10,responder=ready,service_report=str(service_output))
             write(work/'certificates.request.json',request)
             manager_ready=wait_file(root/'manager-ready.json',time.monotonic()+60,alive)
             bind_roles(manager_ready,ready)
+            write(root/'roles-ready.json',dict(unit=unit,source_commit=commit,manager_ready=manager_ready))
             def monitor():
                 observe()
                 if service_output.exists() and read(service_output).get('outcome')=='failed':
@@ -576,7 +588,7 @@ def validate_service_samples(samples, roles, load_started, load_finished, roles_
         if any(not integer(role.get(key)) for key in ('pid','starttime_ticks')):raise RuntimeError('Incomplete role identity')
     if len({role['pid'] for role in roles.values()})!=6:raise RuntimeError('Service roles overlap')
     if (any(type(value) not in (int,float) or not math.isfinite(value) for value in (load_started,load_finished,roles_bound))
-            or load_finished-load_started<600 or roles_bound>load_started+10
+            or load_finished-load_started<600 or roles_bound>load_started
             or not isinstance(thread_identity,dict) or set(thread_identity)!={'tid','starttime_ticks'}
             or any(not integer(value) for value in thread_identity.values())):
         raise RuntimeError('Invalid service sampling window or thread identity')
@@ -692,7 +704,7 @@ def validate_residency(external,service,unit,commit):
         if not finite(service.get(field)):raise RuntimeError('Missing real background worker residency')
     if not service['background_started_monotonic']<=start<end<=service['background_alive_until_monotonic']<=service['background_stopped_monotonic']:
         raise RuntimeError('Background worker did not span the complete traffic window')
-    for field in ('background_cleanup_complete','responder_group_cleanup_complete','jobs_complete'):
+    for field in ('background_cleanup_complete','responder_group_cleanup_complete','certbot_groups_gone','jobs_complete'):
         if service.get(field) is not True:raise RuntimeError('Incomplete service residency or cleanup')
     complete=service.get('traffic_complete',{})
     if complete!=dict(unit=unit,source_commit=commit,started_monotonic=start,finished_monotonic=end,
@@ -702,11 +714,13 @@ def validate_residency(external,service,unit,commit):
     if ready!=external.get('manager_ready') or ready!=dict(unit=unit,source_commit=commit,
             manager=manager,thread=service.get('manager_thread'),started_monotonic=service['background_started_monotonic']):
         raise RuntimeError('Background readiness evidence mismatch')
+    if external.get('roles_ready')!=dict(unit=unit,source_commit=commit,manager_ready=ready):
+        raise RuntimeError('Service roles were not bound before traffic')
     thread=service.get('manager_thread',{})
-    if set(thread)!={'tid','starttime_ticks'} or any(type(value) is not int or value<=0 for value in thread.values()):
+    if set(thread)!={'tid','starttime_ticks'} or any(type(value) is not int or value<=0 for value in thread.values()) or thread.get('tid')==manager.get('pid'):
         raise RuntimeError('Missing actual background thread identity')
     policy=dict(mmap_threshold=service['allocator_mmap_threshold'],malloc_tunable_present=False)
-    if service.get('manager_allocator')!=policy or any(child.get('allocator')!=policy for child in service['certbot_processes']):
+    if service.get('manager_allocator')!=policy or any(child.get('allocator')!=policy or child.get('process_group')!=child.get('pid') for child in service['certbot_processes']):
         raise RuntimeError('Manager/Certbot allocator inheritance mismatch')
     identity=responder.get('identity',{})
     for row in (manager,identity):

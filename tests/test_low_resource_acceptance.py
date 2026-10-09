@@ -33,6 +33,15 @@ class LowResourceAcceptanceTests(unittest.TestCase):
         self.args = argparse.Namespace(bundle=self.root / "candidate.zip", source_commit=COMMIT,
                                        output=self.root / "acceptance.json", unit=UNIT, work_dir=self.root, memory_mib=512)
 
+    def test_smoke_coordinator_restores_repository_import_path(self):
+        # Match direct scripts/ entry: no repository root in sys.path. The fake
+        # subprocess below writes a report and never runs sudo/systemd.
+        root=str(SCRIPT.parents[1])
+        with patch.object(gate.sys,'path',[value for value in gate.sys.path if value not in ('',root)]):
+            status,_,_=self.run_coordinator('success')
+            self.assertEqual(status,0)
+            self.assertEqual(gate.sys.path[0],root)
+
     def test_requires_both_explicit_hosted_markers_and_nonroot_linux(self):
         with patch.object(gate.os, "geteuid", return_value=1001), patch.object(gate.platform, "system", return_value="Linux"):
             for env in ({}, {"GITHUB_ACTIONS": "true"}, {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "self-hosted"}):

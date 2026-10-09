@@ -50,8 +50,9 @@ def serve(request, output):
     server=Tracked(('127.0.0.1',request.get('http_port',0)),handler)
     thread=threading.Thread(target=server.serve_forever,kwargs={'poll_interval':.05},daemon=True)
     for name in (signal.SIGTERM,signal.SIGINT):signal.signal(name,lambda *_:stop.set())
+    thread_started=False
     try:
-        thread.start()
+        thread.start();thread_started=True
         connection=http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=3)
         try:
             connection.request('GET','/fixture-readiness')
@@ -70,7 +71,9 @@ def serve(request, output):
     except Exception as exc:
         report.update(outcome='failed',error_type=type(exc).__name__)
     finally:
-        server.shutdown();server.server_close();thread.join(timeout=3)
+        if thread_started:server.shutdown()
+        server.server_close()
+        if thread_started:thread.join(timeout=3)
         deadline=time.monotonic()+6
         while True:
             with lock:active=list(threads);remaining=len(pending)

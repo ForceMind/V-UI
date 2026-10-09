@@ -45,6 +45,25 @@ def evidence():
             started_monotonic=start,finished_monotonic=start+5,requests_before=100,requests_after=110))
         service['challenges'].append(dict(phase=name,status=200,monotonic=start+2,token_sha256=str(index)*64))
         service['certbot_processes'].append(dict(phase=name,pid=index+100,ppid=50,starttime_ticks=1000+index,role='real-certbot',cgroup=SERVICE,observed_monotonic=start+2))
+    policy=dict(mmap_threshold='131072',malloc_tunable_present=False)
+    manager=dict(pid=50,ppid=1,starttime_ticks=500,cgroup=SERVICE,process_group=1)
+    responder=dict(pid=60,ppid=50,starttime_ticks=600,cgroup=SERVICE,process_group=60)
+    thread=dict(tid=51,starttime_ticks=501)
+    ready=dict(unit=UNIT,source_commit=COMMIT,manager=manager,thread=thread,started_monotonic=90)
+    service.update(manager_identity=manager,manager_allocator=policy,manager_thread=thread,manager_ready=ready,
+        background_started_monotonic=90,background_alive_until_monotonic=701,background_stopped_monotonic=702,
+        background_cleanup_complete=True,responder_group_cleanup_complete=True,certbot_groups_gone=True,jobs_complete=True,
+        traffic_complete=dict(unit=UNIT,source_commit=COMMIT,started_monotonic=100,finished_monotonic=700.01,requests=6000,recovery_requests=1))
+    external['manager_ready']=copy.deepcopy(ready)
+    external['roles_ready']=dict(unit=UNIT,source_commit=COMMIT,manager_ready=copy.deepcopy(ready))
+    for index,row in enumerate(service['challenges']):row['sequence']=index+1
+    for row in service['certbot_processes']:row.update(allocator=copy.deepcopy(policy),process_group=row['pid'])
+    service['responder']=dict(identity=responder,allocator=dict(mmap_threshold=None,malloc_tunable_present=False),
+        outcome='passed',started_monotonic=80,stopped_monotonic=703,drained=True,cleanup_complete=True,
+        imported_installed_handler=True,active_requests=0,final_event_count=2,
+        **{key:copy.deepcopy(service[key]) for key in ('challenges','certbot_processes','observation_errors')})
+    jobs=[{key:row[key] for key in ('id','certificate_id','sequence','state','error')} for row in service['jobs']]
+    service['observed_jobs']=copy.deepcopy(jobs);service['final_jobs']=copy.deepcopy(jobs)
     return external,service
 
 
@@ -148,11 +167,11 @@ class CertificateResourceTests(unittest.TestCase):
                 self.assertEqual(len(report['certbot_processes']),int(not fails))
 
     def test_service_samples_require_complete_stable_roles_and_accounting(self):
-        roles={name:dict(pid=index+1,starttime_ticks=100+index) for index,name in enumerate(('worker','panel','proxy'))}
+        roles={name:dict(pid=index+1,starttime_ticks=100+index) for index,name in enumerate(('worker','panel','proxy','watchdog','manager','responder'))}
         metric=evidence()[0]['external_metrics']
         samples=[dict(copy.deepcopy(metric),observed_monotonic=100+i*6,
-                      processes=[dict(role,threads=1,name=name,ppid=0) for name,role in roles.items()]) for i in range(101)]
-        cert.validate_service_samples(samples,roles)
+                      processes=[dict(role,threads=1,name=name,ppid=0) for name,role in roles.items()],manager_thread=dict(tid=51,starttime_ticks=501,observed_starttime_ticks=501)) for i in range(101)]
+        cert.validate_service_samples(samples,roles,100,700,99,dict(tid=51,starttime_ticks=501))
         for mutation in ('nan','reverse','short','cpu','memory','events','processes','restart','worker','panel','proxy','decrease'):
             bad=copy.deepcopy(samples)
             if mutation=='nan':bad[0]['observed_monotonic']=float('nan')
@@ -165,7 +184,7 @@ class CertificateResourceTests(unittest.TestCase):
             elif mutation=='restart':bad[5]['processes'][0]['starttime_ticks']=999
             elif mutation=='decrease':bad[5]['cpu.stat']['usage_usec']=0
             else:bad[5]['processes']=[p for p in bad[5]['processes'] if p['name']!=mutation]
-            with self.subTest(mutation=mutation),self.assertRaises(RuntimeError):cert.validate_service_samples(bad,roles)
+            with self.subTest(mutation=mutation),self.assertRaises(RuntimeError):cert.validate_service_samples(bad,roles,100,700,99,dict(tid=51,starttime_ticks=501))
 
     def test_external_ca_does_not_create_an_unaccounted_responder(self):
         import acme_helpers
@@ -205,5 +224,22 @@ class CertificateResourceTests(unittest.TestCase):
         for unit in ('ssh.service',UNIT,'../anything'):
             with self.assertRaises(RuntimeError):cert.external_group(unit)
 
+
+
+
+    def test_residency_thread_policy_and_journal_fail_closed(self):
+        for mutation in ('manager_early','responder_early','thread_missing','main_thread','journal','background_cleanup','certbot_policy','responder_policy','third_job'):
+            external,service=evidence()
+            if mutation=='manager_early':service['background_alive_until_monotonic']=699
+            elif mutation=='responder_early':service['responder']['stopped_monotonic']=699
+            elif mutation=='thread_missing':service['manager_thread']={}
+            elif mutation=='main_thread':service['manager_thread']['tid']=service['manager_identity']['pid']
+            elif mutation=='journal':service['responder']['final_event_count']=1
+            elif mutation=='background_cleanup':service['background_cleanup_complete']=False
+            elif mutation=='certbot_policy':service['certbot_processes'][0]['allocator']['mmap_threshold']=None
+            elif mutation=='responder_policy':service['responder']['allocator']['mmap_threshold']='131072'
+            elif mutation=='third_job':service['final_jobs'].append(copy.deepcopy(service['final_jobs'][0]))
+            with self.subTest(mutation=mutation),self.assertRaises(RuntimeError):
+                cert.validate_result(external,service,UNIT,COMMIT,'x86_64-gnu')
 
 if __name__=='__main__':unittest.main()

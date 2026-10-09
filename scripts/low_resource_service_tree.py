@@ -4,6 +4,7 @@ The fixture worker is the watchdog's parent. This exercises the real installed
 watchdog/core pair; it is not a claim that the panel API applied this config.
 """
 import os
+import math
 from pathlib import Path
 import re
 import subprocess
@@ -151,6 +152,15 @@ def validate_sample_bindings(report):
     group = report['service_cgroup']
     tree = report['proxy_workload']['server_tree']
     roles = tree['roles']
+    idle = [row for row in report.get('stages', []) if row.get('name')=='panel_only_idle_1800_seconds']
+    idle_roles = {}
+    if report.get('duration_profile')=='sustained':
+        if len(idle)!=1 or not idle[0].get('accounting_samples'):
+            raise RuntimeError('Missing stable panel/worker identity baseline')
+        idle_roles = {row['role']:dict(pid=row['pid'],starttime_ticks=row['start_ticks'])
+            for row in idle[0]['accounting_samples'][0]['processes'] if row['role'] in ('worker','panel')}
+        if set(idle_roles)!={'worker','panel'} or idle_roles['worker']['pid']!=report['worker_pid']:
+            raise RuntimeError('Invalid panel/worker identity baseline')
     for stage in report.get('stages', []):
         account = stage.get('accounting_samples')
         if account:
@@ -169,13 +179,51 @@ def validate_sample_bindings(report):
             samples = stage.get('samples', [])
             if len(samples) < (60 if 'idle' in stage['name'] else 20):
                 raise RuntimeError('Watched service duration samples missing')
+            phase_start=stage.get('started_monotonic');wall=stage.get('wall_seconds')
+            stamps=[sample.get('observed_monotonic') for sample in samples]
+            if (any(type(value) not in (int,float) or not math.isfinite(value) for value in (phase_start,wall,*stamps))
+                    or wall<=0 or any(b<=a or b-a>35 for a,b in zip(stamps,stamps[1:]))
+                    or stamps[0]<phase_start or stamps[-1]>phase_start+wall):
+                raise RuntimeError('Invalid watched service sampling timeline')
+            if stage['name'].startswith('proxy_sustained_'):
+                count=int(stage['name'].split('_')[2])
+                selected=[row for row in report.get('sustained_load',[]) if row.get('concurrency')==count]
+                if len(selected)!=1:raise RuntimeError('Missing actual load timing')
+                load=selected[0];start=load.get('partial_load',{}).get('started_monotonic');duration=load.get('wall_seconds')
+                if (any(type(value) not in (int,float) or not math.isfinite(value) for value in (start,duration))
+                        or duration<600 or start<phase_start or start+duration>phase_start+wall):
+                    raise RuntimeError('Load timing escaped service stage')
+                inside=[stamp for stamp in stamps if start<=stamp<=start+duration]
+                if len(inside)<19 or inside[0]>start+35 or inside[-1]<start+duration-35:
+                    raise RuntimeError('Service samples do not span actual load')
+            from scripts.low_resource_certificates import validate_metrics_record
+            previous_counters=None
             for sample in samples:
-                for binding in roles.values():
+                validate_metrics_record(sample)
+                counters=[sample['memory.peak'],sample['cpu.stat']['usage_usec'],
+                          *[sample['memory.events'][name] for name in ('max','oom','oom_kill','oom_group_kill')]]
+                if previous_counters is not None and any(new<old for new,old in zip(counters,previous_counters)):
+                    raise RuntimeError('Service cumulative metrics moved backwards')
+                previous_counters=counters
+                for binding in {**idle_roles,**roles}.values():
                     rows = [row for row in sample['processes'] if row['pid'] == binding['pid']]
                     if len(rows) != 1 or rows[0].get('starttime_ticks') != binding['starttime_ticks']:
                         raise RuntimeError('Watched service disappeared or restarted during load')
     if report.get('duration_profile') == 'certificates':
         declared = report.get('certificate_service_roles', {})
+        if declared.get('worker',{}).get('pid') != report.get('worker_pid'):
+            raise RuntimeError('Certificate sampled worker differs from actual parent')
         for role, binding in (('proxy', roles['core']), ('watchdog', roles['watchdog'])):
             if declared.get(role) != {key: binding[key] for key in ('pid', 'starttime_ticks')}:
                 raise RuntimeError('Certificate service roles differ from watched core')
+
+        service = report.get('certificate_overlap', {}).get('service', {})
+        manager = service.get('manager_identity', {})
+        if manager.get('ppid') != report.get('worker_pid') or manager.get('cgroup') != group:
+            raise RuntimeError('Certificate manager outside worker accounting tree')
+        for name, binding in (('manager', manager), ('responder', service.get('responder', {}).get('identity', {}))):
+            if declared.get(name) != {key:binding.get(key) for key in ('pid','starttime_ticks')}:
+                raise RuntimeError('Certificate sampled roles differ from actual service identity')
+
+        if report.get('certificate_manager_thread') != service.get('manager_thread'):
+            raise RuntimeError('Certificate sampled thread differs from actual background worker')

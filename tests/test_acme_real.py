@@ -90,6 +90,52 @@ class RealACMETests(unittest.TestCase):
         self.assertTrue((root/'managed/accounts/production').is_dir())
         print('Real ACME: fresh fake account requires HTTP-01 even at 100% authorization reuse; due renewal passed')
 
+    def test_background_worker_with_independent_responder_and_fresh_due_renewal(self):
+        import time
+        from app.certificates.models import CertificateJob
+        from scripts.low_resource_certificates import read,write,retain_fixture_account
+        from test_low_resource_responder import start_responder
+        root=self.root/'background';root.mkdir()
+        with ExitStack() as stack:
+            process,ready,phase=start_responder(stack,root)
+            pebble=PebbleFixture(stack,root,root/'managed/http-webroot',http_port=ready['http_port'],authz_reuse_percent=100)
+            manager=CertificateManager(root/'managed',CertbotProvider(root/'managed',test_directory=pebble.directory,test_ca=pebble.ca),trusted_roots=pebble.root_pem)
+            phase['directory']=pebble.directory
+            manager.start();thread=manager.thread;certificate=[]
+            try:
+                def execute(name,arm,expected_count):
+                    self.assertTrue(manager._process_lock.acquire(timeout=15))
+                    try:
+                        phase['phase']=name;write(root/'phase.json',phase);arm()
+                    finally:manager._process_lock.release()
+                    manager.wakeup.set();deadline=time.monotonic()+30
+                    while True:
+                        self.assertTrue(thread.is_alive());self.assertIsNone(manager.worker_error)
+                        with database.SessionLocal() as db:
+                            jobs=db.query(CertificateJob).order_by(CertificateJob.sequence).all()
+                            self.assertFalse(any(row.state=='failed' for row in jobs),str([(row.state,row.error) for row in jobs]))
+                            if len(jobs)==expected_count and all(row.state=='succeeded' for row in jobs):break
+                        self.assertLess(time.monotonic(),deadline);time.sleep(.05)
+                execute('issue',lambda:certificate.append(manager.create(pebble.domain,'admin@example.test','production',True,True)['certificate_id']),1)
+                first=manager.material(certificate[0]);old=first[0][0].read_bytes()
+                def due():
+                    retain_fixture_account(root)
+                    with database.SessionLocal() as db:
+                        row=db.get(Certificate,certificate[0]);row.renew_at=0;row.last_attempt=0;row.retry_at=0;db.commit()
+                execute('scheduled_renewal',due,2)
+                second=manager.material(certificate[0]);self.assertNotEqual(first[2],second[2])
+                self.assertEqual(first[0][0].read_bytes(),old)
+                self.assertTrue(thread.is_alive())
+            finally:
+                manager.stop();self.assertFalse(thread.is_alive());self.assertIsNone(manager.worker_error)
+        observation=read(root/'responder-report.json')
+        self.assertEqual(process.returncode,0)
+        self.assertEqual(observation['outcome'],'passed');self.assertTrue(observation['drained'])
+        self.assertEqual({row['phase'] for row in observation['challenges']},{'issue','scheduled_renewal'})
+        self.assertEqual(len(observation['certbot_processes']),2)
+        self.assertTrue(all(row['allocator']==phase['manager_allocator'] for row in observation['certbot_processes']))
+        with database.SessionLocal() as db:self.assertEqual(db.query(CertificateJob).count(),2)
+
     def test_http01_failure_does_not_create_active_certificate(self):
         job=self.manager.create('unresolvable.example.test','admin@example.test','production',True,True)
         self.manager.process_once()

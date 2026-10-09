@@ -504,6 +504,7 @@ with SessionLocal() as db:
                         checkpoint()
                         last_sample[0] = time.monotonic()
                 for concurrency in CONCURRENCIES:
+                    last_sample[0]=0.0
                     stage(f"refresh_session_before_{concurrency}_connection_load", login)
                     result = stage(f"proxy_sustained_{concurrency}_connections_600_seconds",
                         lambda: request_load(args.work_dir, args.unit, args.source_commit,

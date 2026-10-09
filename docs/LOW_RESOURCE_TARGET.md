@@ -340,3 +340,7 @@ panel的Certbot及其他子进程会继承默认，因此这是panel服务树的
 新候选仍需自己的记账、普通三档、UI、证书、大数据与完整90分钟回归，尤其检查登录/导出的CPU和时延，不能继承c061记账或5d长测。四平台资源矩阵仍是后续可推进项，GNU默认的musl兼容测试不等于musl资源达标。
 
 本批最终完整本地609项：485通过、124环境skip；阈值下真实Pebble/Certbot三项通过，独立allocator六项、资源75项通过（2skip）及安装/发布工具40项通过，复审无阻断。审查发现的direct-script namespace冲突已由正式deploy package与独立进程入口回归修正；证书自报runtime绕过已绑定worker已验证READY和协调器实际目标，缺阈值/冲突tunable/错误helper来源拒绝。文档、编译、diff通过；本地绿色不代替准确新head全部资源profile。
+
+### 完整服务角色夹具修正
+
+adac 旧拓扑长测已完成，其结果与缺口、新的 watchdog / 独立 HTTP01 / 后台线程驻留和 61 点空载记账合同见[完整服务角色资源夹具](LOW_RESOURCE_SERVICE_TREE.md)。新的准确候选结果待验；旧绿色不自动补足新增覆盖。
