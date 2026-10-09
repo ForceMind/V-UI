@@ -33,6 +33,8 @@ class OneClickSystemTests(unittest.TestCase):
         # Never clean up or overwrite a pre-existing installation on a test host.
         self.assertFalse(root.exists())
         self.assertFalse(Path('/etc/v-ui').exists())
+        from scripts.low_resource_root import optional_gate
+        gate = optional_gate()
         with ExitStack() as stack:
             work = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix='vui-system-test-')))
             ca, cert, key = certificate_files(work, 'installer')
@@ -50,7 +52,10 @@ class OneClickSystemTests(unittest.TestCase):
                 subprocess.run(['sudo','systemctl','daemon-reload'],check=True)
                 subprocess.run(['sudo','rm','-rf','/etc/v-ui','/usr/local/lib/v-ui','/var/lib/v-ui'],check=True)
                 subprocess.run(['sudo','userdel','v-ui'],capture_output=True)
-            stack.callback(cleanup)
+            if gate is None:
+                stack.callback(cleanup)
+            else:
+                cmd = gate.command(cmd)
             child, fd = pty.fork()
             if child == 0:
                 os.execvp(cmd[0], cmd)
@@ -124,6 +129,8 @@ class OneClickSystemTests(unittest.TestCase):
                 self.assertEqual(response.status,expected)
                 if expected==200:self.assertEqual(raw,b'token.key_authorization')
             check_uid('v-ui-http01.service')
+            if gate:
+                gate.installed()
             # A repeated install without explicit upgrade must not touch the running instance.
             repeat=subprocess.run(cmd,capture_output=True,text=True,timeout=30)
             self.assertNotEqual(repeat.returncode,0)
@@ -142,6 +149,10 @@ class OneClickSystemTests(unittest.TestCase):
             else:self.fail('Managed panel failed restart')
             check_uid('v-ui.service')
             self.assertTrue(json.loads(api('/api/certificates/capabilities')[1])['worker_running'])
+            if gate:
+                def login_again():
+                    self.assertEqual(api('/api/auth/login', {'username': 'installer-admin', 'password': password})[0], 200)
+                gate.finish(self, cmd, api, login_again)
             print('One-command systemd: real sudo setup / non-root workers / private state / HTTPS / fd-passed HTTP-01 port80 / auth / repeat refusal / upgrade backup / restart OK')
 
 if __name__=='__main__':unittest.main()
