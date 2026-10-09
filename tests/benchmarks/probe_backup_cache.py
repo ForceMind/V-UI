@@ -23,7 +23,7 @@ def residency(path):
    if libc.mincore(address,size,vector):raise OSError(ctypes.get_errno(),'mincore')
    return dict(size=size,resident_bytes=sum(bool(x&1) for x in vector)*page,allocated_bytes=path.stat().st_blocks*512,inode=path.stat().st_ino)
   finally:libc.munmap(address,size)
-report=dict(head=args.expected_head,scope='assistant disk-backed fixed fake log; mincore per file and process high-water RSS; no cgroup limit, no cache clearing, not resource acceptance',filesystem=subprocess.check_output(['df','-T',str(args.scratch_dir)],text=True),snapshots=[])
+report=dict(head=args.expected_head,probe_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),scope='assistant disk-backed fixed fake log; mincore per file and process high-water RSS; no cgroup limit, no cache clearing, not resource acceptance',filesystem=subprocess.check_output(['df','-T',str(args.scratch_dir)],text=True),snapshots=[])
 with tempfile.TemporaryDirectory(prefix='vui-backup-probe-',dir=args.scratch_dir) as directory:
  work=Path(directory);data=work/'data';data.mkdir(mode=0o700)
  with sqlite3.connect(data/'v-ui.db') as db:
@@ -42,8 +42,10 @@ with tempfile.TemporaryDirectory(prefix='vui-backup-probe-',dir=args.scratch_dir
   return checksum
  tools.create_archive=wrapped
  observe('source_generated')
+ usage=resource.getrusage(resource.RUSAGE_SELF)
  before=time.perf_counter();cpu=time.process_time();archive=work/'backup.zip';checksum=tools.backup(work,archive)
- report.update(wall_seconds=time.perf_counter()-before,cpu_seconds=time.process_time()-cpu,archive_sha256=checksum,archive_bytes=archive.stat().st_size)
+ after_usage=resource.getrusage(resource.RUSAGE_SELF)
+ report.update(wall_seconds=time.perf_counter()-before,cpu_seconds=time.process_time()-cpu,archive_sha256=checksum,archive_bytes=archive.stat().st_size,read_blocks_512=after_usage.ru_inblock-usage.ru_inblock,write_blocks_512=after_usage.ru_oublock-usage.ru_oublock)
  observe('backup_returned_private_snapshot_removed',destination=archive)
  assert not list(work.glob('.backup-*'))
  report['source_hash_after']=tools.file_digest(source);assert report['source_hash_after']==evidence['large_sha256']
