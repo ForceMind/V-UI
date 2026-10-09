@@ -84,7 +84,7 @@ def snapshot(directory, roles, read_metrics, proc_root=Path('/proc')):
 
 
 def validate_stage(value, expected_roles, *, seconds=60, interval=5):
-    if (seconds, interval) not in ((60, 5), (1800, 30)):
+    if (seconds, interval) not in ((30, 5), (60, 5), (1800, 30)):
         raise RuntimeError('Unsupported accounting contract')
     wall = value.get('wall_seconds')
     if value.get('outcome') != 'passed' or type(wall) not in (int, float) or not math.isfinite(wall) or wall < seconds:

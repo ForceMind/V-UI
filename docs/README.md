@@ -39,3 +39,4 @@
 - [新runtime提前写回](LOW_RESOURCE_RUNTIME_WRITEBACK.md)：仅新提取树的缓存提示、失败清理与准确候选对照。
 
 - [新payload core写回](LOW_RESOURCE_CORE_WRITEBACK.md)：已证实的驻留边界与仅新文件的缓存优化实验。
+- [有界双核心并存与恢复](LOW_RESOURCE_DUAL_CORE.md)：同服务组真实两路、控制停止与显式重启的短验收合同。
