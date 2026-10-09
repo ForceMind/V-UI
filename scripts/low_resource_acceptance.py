@@ -249,11 +249,14 @@ def worker(args) -> int:
             trace_context = nullcontext()
             if trace_requested:
                 from scripts.low_resource_install_trace import trace_installation
+                from scripts.low_resource_core_residency import CoreResidency
+                core_residency = CoreResidency()
+                stack.callback(core_residency.close)
                 trace = dict(unit=args.unit, source_commit=args.source_commit,
                     service_cgroup=report['service_cgroup'], phases=[],
                     scope='before/after cumulative group snapshots; checkpoint overhead included; not peak composition')
                 report['installation_trace'] = trace
-                trace_context = trace_installation(tools, trace, lambda: metrics(directory), checkpoint)
+                trace_context = trace_installation(tools, trace, lambda: metrics(directory), checkpoint, core_residency)
             with trace_context:
                 identity = stage("offline_stage_including_wheels", lambda: tools.stage(args.bundle, checksum, root))
             stage("activate", lambda: tools.activate(root, identity))
@@ -777,7 +780,7 @@ def coordinator(args) -> int:
                 raise RuntimeError("Worker failed or its final accounting is incomplete")
             if trace_requested:
                 from scripts.low_resource_install_trace import validate_trace
-                validate_trace(report, unit, args.source_commit, expected_provenance)
+                validate_trace(report, unit, args.source_commit, expected_provenance, require_core_residency=True)
             elif 'installation_trace' in report:
                 raise RuntimeError('Unexpected installation trace in ordinary smoke')
             if profile == "sustained":

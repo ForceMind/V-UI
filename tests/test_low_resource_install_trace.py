@@ -77,6 +77,27 @@ class InstallTraceTests(unittest.TestCase):
             elif kind=='profile':bad['requested_memory_mib']=384
             with self.subTest(kind=kind),self.assertRaises(RuntimeError):trace.validate_trace(bad,UNIT,COMMIT,bad_proof)
 
+    def test_core_observation_order_and_descriptors_close_with_trace_scope(self):
+        tools,_=self.fixture();tools.target_arch=lambda:'x86_64'
+        events=[]
+        observer=SimpleNamespace(capture=lambda *args:events.append(('capture',args)),
+            observe=lambda:events.append(('observe',)) or {},close=lambda:events.append(('close',)))
+        value={'phases':[]}
+        with trace.trace_installation(tools,value,lambda:{},lambda:None,observer):
+            tools.unpack_verified('archive','sha','destination')
+            tools.subprocess.run(['python','-m','ensurepip','--upgrade'])
+            tools.subprocess.run(['python','-m','pip','--isolated','--disable-pip-version-check','install'])
+        self.assertEqual([event[0] for event in events],['capture','observe','observe','observe','close'])
+        self.assertEqual(events[0][1],(Path('destination'),'x86_64','unpack'))
+        self.assertTrue(all('payload_core_residency' in row for row in value['phases']))
+        events.clear()
+        def failed(*args):raise RuntimeError('product')
+        tools.extract_runtime=failed
+        with self.assertRaises(RuntimeError):
+            with trace.trace_installation(tools,{'phases':[]},lambda:{},lambda:None,observer):
+                tools.extract_runtime('a','b')
+        self.assertEqual(events,[('close',)])
+
     def test_product_exception_identity_and_original_functions_survive_probe_failure(self):
         tools,_=self.fixture();failure=RuntimeError('product failed');count=0
         def product(*args):raise failure

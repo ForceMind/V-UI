@@ -51,7 +51,7 @@ def product_provenance(source: Path, commit: str):
 
 
 @contextmanager
-def trace_installation(tools, trace, read_metrics, checkpoint):
+def trace_installation(tools, trace, read_metrics, checkpoint, core_residency=None):
     """Wrap only the existing synchronous stage calls and restore on all exits."""
     originals = {}
     depth = 0
@@ -84,7 +84,12 @@ def trace_installation(tools, trace, read_metrics, checkpoint):
                 row['accounting_error'] = type(exc).__name__
             raise
         else:
+            if core_residency is not None and name == PHASES[0]:
+                destination = args[2] if len(args) > 2 else kwargs['destination']
+                core_residency.capture(Path(destination), tools.target_arch(), result)
             row['after'] = snapshot()
+            if core_residency is not None and name in (PHASES[0], PHASES[2], PHASES[3]):
+                row['payload_core_residency'] = core_residency.observe()
             row['finished_monotonic'] = time.monotonic()
             row['outcome'] = 'passed'
             checkpoint()
@@ -125,9 +130,11 @@ def trace_installation(tools, trace, read_metrics, checkpoint):
         tools.subprocess.run = original_run
         for name, original in originals.items():
             setattr(tools, name, original)
+        if core_residency is not None:
+            core_residency.close()
 
 
-def validate_trace(report, unit, commit, expected_provenance):
+def validate_trace(report, unit, commit, expected_provenance, *, require_core_residency=False):
     from scripts.low_resource_certificates import validate_metrics_record
     from scripts.low_resource_service_tree import canonical_cgroup
     value = report.get('installation_trace', {})
@@ -182,3 +189,7 @@ def validate_trace(report, unit, commit, expected_provenance):
         previous_time = times[-1]
     if previous_metric['cpu.stat']['usage_usec'] - first_cpu > stage['cpu_usage_usec']:
         raise RuntimeError('Installation phase CPU exceeds enclosing stage')
+
+    if require_core_residency:
+        from scripts.low_resource_core_residency import validate_observations
+        validate_observations(rows)
