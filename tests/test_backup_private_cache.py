@@ -1,6 +1,7 @@
 """Backup cache hints may touch only owned copies, never live data or inputs."""
 import hashlib
 import os
+import random
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -43,11 +44,15 @@ class BackupPrivateCacheTests(unittest.TestCase):
         self.assertEqual(sha, hashlib.sha256(self.archive.read_bytes()).hexdigest())
         self.assertTrue(observed)
         self.assertNotIn(self.source.stat().st_ino, [inode for _, inode in observed])
-        copies = {path for path, _ in observed if path != self.archive}
+        copies = {path for path, _ in observed if path.name == "large.log"}
         self.assertTrue(copies)
         self.assertTrue(all(path.name == "large.log" and path.is_relative_to(self.root)
                             and path.relative_to(self.root).parts[0].startswith(".backup-") for path in copies))
-        self.assertIn(self.archive, {path for path, _ in observed})
+        archives = [(path, inode) for path, inode in observed if path.name == "archive.zip"]
+        self.assertTrue(archives)
+        self.assertTrue(all(path.parent.name.startswith(".backup-archive-") and inode == self.archive.stat().st_ino
+                            for path, inode in archives))
+        self.assertEqual(len(observed), sum(path in copies or path.name == 'archive.zip' for path, _ in observed))
         with zipfile.ZipFile(self.archive) as archive:
             self.assertEqual(archive.read("large.log"), self.content)
             self.assertIsNone(archive.testzip())
@@ -68,7 +73,7 @@ class BackupPrivateCacheTests(unittest.TestCase):
             if writing: events.append("zip_closed")
             return result
         def finish(handle):
-            if os.readlink(f"/proc/self/fd/{handle.fileno()}") == str(self.archive):
+            if Path(os.readlink(f"/proc/self/fd/{handle.fileno()}")).name == "archive.zip":
                 events.append("zip_finished")
             return original_finish(handle)
         with patch.object(zipfile.ZipFile, "close", close), patch.object(tools._PrivateArchiveFile, "finish_writes", finish):
@@ -127,14 +132,13 @@ class BackupPrivateCacheTests(unittest.TestCase):
         self.assertFalse(self.archive.exists())
         self.assert_intact()
 
-    def test_zip_sync_failure_removes_owned_partial_but_preserves_replacement(self):
+    def test_zip_sync_failure_cleans_private_partial_and_preserves_public_writer(self):
         original = os.fsync
         for replace in (False, True):
             with self.subTest(replace=replace):
                 def sync(fd):
-                    if os.readlink(f"/proc/self/fd/{fd}") == str(self.archive):
+                    if Path(os.readlink(f"/proc/self/fd/{fd}")).name == "archive.zip":
                         if replace:
-                            self.archive.unlink()
                             self.archive.write_bytes(b"external replacement")
                         raise OSError("archive writeback failed")
                     return original(fd)
@@ -147,6 +151,60 @@ class BackupPrivateCacheTests(unittest.TestCase):
                 else:
                     self.assertFalse(self.archive.exists())
                 self.assert_intact()
+
+    def test_concurrent_public_destination_is_never_overwritten_or_unlinked(self):
+        original = os.link
+        def publish(source, destination, **options):
+            self.assertEqual(Path(destination), self.archive)
+            self.archive.write_bytes(b"concurrent writer")
+            return original(source, destination, **options)
+        with patch.object(os, "link", side_effect=publish):
+            with self.assertRaises(FileExistsError): tools.backup(self.root, self.archive)
+        self.assertEqual(self.archive.read_bytes(), b"concurrent writer")
+        self.assert_intact()
+
+    def test_published_complete_zip_survives_directory_sync_failure(self):
+        with patch.object(tools, "sync_directory", side_effect=OSError("directory sync failed")):
+            with self.assertRaisesRegex(OSError, "directory sync failed"):
+                tools.backup(self.root, self.archive)
+        with zipfile.ZipFile(self.archive) as archive:
+            self.assertIsNone(archive.testzip())
+            self.assertEqual(archive.read("large.log"), self.content)
+        self.assert_intact()
+
+    def test_final_digest_failure_never_publishes_partial_archive(self):
+        original = tools.stream_digest
+        def digest(source, *args, **options):
+            if Path(os.readlink(f"/proc/self/fd/{source.fileno()}")).name == "archive.zip":
+                raise OSError("final archive digest read failed")
+            return original(source, *args, **options)
+        with patch.object(tools, "stream_digest", side_effect=digest):
+            with self.assertRaisesRegex(OSError, "final archive digest read failed"):
+                tools.backup(self.root, self.archive)
+        self.assertFalse(self.archive.exists())
+        self.assert_intact()
+
+    def test_large_compressed_zip_writeback_occurs_before_close_and_at_tail(self):
+        self.content = random.Random(711).randbytes(10 * 1024 * 1024 + 17)
+        self.source.write_bytes(self.content)
+        events = []
+        original_sync, original_close = os.fsync, zipfile.ZipFile.close
+        def sync(fd):
+            if Path(os.readlink(f"/proc/self/fd/{fd}")).name == "archive.zip":
+                events.append("sync")
+            return original_sync(fd)
+        def close(archive):
+            writing = archive.fp is not None and archive.mode == "w"
+            result = original_close(archive)
+            if writing: events.append("closed")
+            return result
+        with patch.object(os, "fsync", side_effect=sync), patch.object(zipfile.ZipFile, "close", close):
+            checksum = tools.backup(self.root, self.archive)
+        self.assertGreater(self.archive.stat().st_size, 8 * 1024 * 1024)
+        self.assertIn("sync", events[:events.index("closed")])
+        self.assertIn("sync", events[events.index("closed") + 1:])
+        self.assertEqual(checksum, hashlib.sha256(self.archive.read_bytes()).hexdigest())
+        self.assert_intact()
 
     def test_existing_destination_is_never_removed(self):
         self.archive.write_bytes(b"existing backup")

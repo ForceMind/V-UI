@@ -1,6 +1,6 @@
 """Offline, per-user release control. No root, daemon installation, or network calls."""
 from __future__ import annotations
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import fcntl
 import hashlib
 import json
@@ -309,12 +309,15 @@ def create_archive(payload: Path, destination: Path, metadata: dict, *, private_
     private_names = frozenset(private_files or ())
     manifest = {**metadata, 'schema':1, 'files':files_in(payload, private_files=private_names)}
     destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, 'wb') as raw:
-        owned = os.fstat(raw.fileno())
-        def same_output(info):
-            return (info.st_dev, info.st_ino) == (owned.st_dev, owned.st_ino)
-        try:
+    # The backup target remains absent until a complete, synced ZIP and digest
+    # exist. Never conditionally unlink a public pathname after an inode check:
+    # another writer can replace it between that check and unlink().
+    temporary = (tempfile.TemporaryDirectory(prefix='.backup-archive-', dir=destination.parent)
+                 if private_files is not None else nullcontext(None))
+    with temporary as directory:
+        archive_path = Path(directory) / 'archive.zip' if directory is not None else destination
+        fd = os.open(archive_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'wb') as raw:
             output = _PrivateArchiveFile(raw) if private_files is not None else raw
             with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as archive:
                 archive.writestr(MANIFEST, json.dumps(manifest, sort_keys=True, indent=2))
@@ -328,24 +331,17 @@ def create_archive(payload: Path, destination: Path, metadata: dict, *, private_
             # ZipFile.close() rewrites headers and writes the central directory.
             if isinstance(output, _PrivateArchiveFile): output.finish_writes()
             raw.flush(); os.fsync(raw.fileno())
-            sync_directory(destination.parent)
-            with destination.open('rb') as handle:
-                if not same_output(os.fstat(handle.fileno())):
-                    raise ReleaseError('Archive destination changed while writing')
-                reader = _PrivateArchiveFile(handle) if private_files is not None else handle
-                checksum = stream_digest(reader)[0]
-            if not same_output(destination.lstat()):
-                raise ReleaseError('Archive destination changed while writing')
-            return checksum
-        except BaseException:
-            # Keep the original fd open until this identity check, so its inode
-            # cannot be reused. Preserve pre-existing or replaced destinations.
-            if private_files is not None:
-                try:
-                    if same_output(destination.lstat()): destination.unlink()
-                except FileNotFoundError:
-                    pass
-            raise
+        with archive_path.open('rb') as handle:
+            reader = _PrivateArchiveFile(handle) if private_files is not None else handle
+            checksum = stream_digest(reader)[0]
+        if directory is not None:
+            # Same-filesystem hard-link publication is atomic and never replaces
+            # an existing destination. Failure only removes our private directory.
+            os.link(archive_path, destination, follow_symlinks=False)
+        # If this fails after publication, leave the complete file in place and
+        # report the durability failure; deleting destination would race writers.
+        sync_directory(destination.parent)
+        return checksum
 
 def unpack_verified(archive_path: Path, expected_sha: str, destination: Path) -> dict:
     if not re.fullmatch(r'[a-f0-9]{64}', expected_sha): raise ReleaseError('Expected archive SHA-256 is required')
