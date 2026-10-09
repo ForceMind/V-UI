@@ -584,8 +584,21 @@ with SessionLocal() as db:
             if profile == 'data-backup':
                 report['large_data']['logs']=stage('generate_256MiB_and_64_small_logs_inside_service',lambda:large.generate_log_fixture(data))
                 def large_backup():
+                    boundaries=[]
+                    report['large_data']['backup_boundaries']=boundaries
+                    def boundary(name):
+                        row=dict(name=name,unit=args.unit,source_commit=args.source_commit,
+                            service_cgroup=Path('/proc/self/cgroup').read_text().strip(),
+                            started_monotonic=time.monotonic())
+                        row['metrics']=metrics(directory)
+                        row['finished_monotonic']=time.monotonic()
+                        boundaries.append(row)
+                        checkpoint()  # Preserve partial evidence if the next operation fails.
+                    boundary('before_installed_backup')
                     result=large.installed_operation(python,payload,data,root,'backup',backup)
+                    boundary('after_installed_backup_before_verification')
                     report['large_data']['archive']=large.verify_archive(root,data,backup,report['large_data']['logs'])
+                    boundary('after_archive_verification')
                     return result['digest']
                 digest=stage('stopped_backup',large_backup)
             else:
