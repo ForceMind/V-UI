@@ -151,6 +151,17 @@ class LowResourceAcceptanceTests(unittest.TestCase):
                               "metrics": gate.metrics(self.cg), "requested_memory_mib": self.args.memory_mib,
                               "limits": {"memory.max": gate.memory_bytes(self.args.memory_mib)},
                               "base_page_size_bytes": os.sysconf("SC_PAGE_SIZE")}
+                    from app.release_tools import target_key
+                    from deploy.system_launcher import panel_environment
+                    from scripts.low_resource_service_tree import allocator_fields
+                    policy = allocator_fields(panel_environment({}, target_key()))
+                    group = '0::/system.slice/' + unit
+                    report.update(worker_pid=10, service_cgroup=group)
+                    report['proxy_workload'] = {'server_tree': dict(
+                        parent_role='resource_fixture_worker', worker_pid=10, runtime_key=target_key(),
+                        policy=policy, cleanup_complete=True, roles={
+                            'watchdog':dict(pid=20,ppid=10,starttime_ticks=1,process_group=20,cgroup=group,allocator=policy),
+                            'core':dict(pid=21,ppid=20,starttime_ticks=2,process_group=20,cgroup=group,allocator=policy)})}
                     if mode == "wrong_duration_profile": report["duration_profile"] = "sustained"
                     if mode == "partial": report["complete"] = False
                     if mode == "wrong_source": report["source_commit"] = "c" * 40

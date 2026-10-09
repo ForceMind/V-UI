@@ -8,7 +8,7 @@ jobs:
   sustained:
     if: github.event.label.name == 'run-low-resource-sustained'
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -35,6 +35,16 @@ jobs:
           chmod 700 /tmp/vui-sustained/preflight-core/sing-box
           export VUI_SUSTAINED_BINARY=/tmp/vui-sustained/preflight-core/sing-box
           python -B -m unittest discover -s tests -p test_low_resource_sustained.py -v 2>&1 | tee /tmp/vui-sustained/preflight.log
+      - name: Preflight installed watched service with inclusive accounting
+        env:
+          VUI_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          python -B scripts/low_resource_acceptance.py \
+            --bundle /tmp/vui-sustained/vui-linux.zip \
+            --source-commit "$VUI_SOURCE_COMMIT" \
+            --memory-mib 512 --duration-profile accounting \
+            --output /tmp/vui-sustained/watched-preflight.json
       - name: Run complete ninety-minute sustained profile
         env:
           VUI_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}

@@ -79,6 +79,7 @@ class LowResourceProxyTests(unittest.TestCase):
         class FakeCore:
             def __init__(self, owner, command, log_path, env):
                 self.process = self
+                self.pid = 100 + len(processes)
                 self.log_path = log_path
                 self.stopped = False
                 log_path.write_text("")

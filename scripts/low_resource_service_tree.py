@@ -144,3 +144,38 @@ def validate_tree(value, runtime_key, worker_pid, service_cgroup):
             raise RuntimeError('Service ancestry, accounting or allocator mismatch')
     if len({worker_pid, watchdog['pid'], core['pid']}) != 3:
         raise RuntimeError('Service process roles overlap')
+
+
+def validate_sample_bindings(report):
+    """Tie phase samples to the independently declared worker and watched pair."""
+    group = report['service_cgroup']
+    tree = report['proxy_workload']['server_tree']
+    roles = tree['roles']
+    for stage in report.get('stages', []):
+        account = stage.get('accounting_samples')
+        if account:
+            for sample in account:
+                expected = {'worker': {'pid': report['worker_pid']}}
+                if 'single_proxy_idle' in stage['name']:
+                    expected.update(roles)
+                for role, binding in expected.items():
+                    rows = [row for row in sample['processes'] if row['role'] == role]
+                    if len(rows) != 1 or rows[0]['pid'] != binding['pid']:
+                        raise RuntimeError('Accounting role differs from actual service tree')
+                    if 'starttime_ticks' in binding and rows[0]['start_ticks'] != binding['starttime_ticks']:
+                        raise RuntimeError('Accounting service process restarted')
+        if report.get('duration_profile') == 'sustained' and (
+                'single_proxy_idle' in stage['name'] or stage['name'].startswith('proxy_sustained_')):
+            samples = stage.get('samples', [])
+            if len(samples) < (60 if 'idle' in stage['name'] else 20):
+                raise RuntimeError('Watched service duration samples missing')
+            for sample in samples:
+                for binding in roles.values():
+                    rows = [row for row in sample['processes'] if row['pid'] == binding['pid']]
+                    if len(rows) != 1 or rows[0].get('starttime_ticks') != binding['starttime_ticks']:
+                        raise RuntimeError('Watched service disappeared or restarted during load')
+    if report.get('duration_profile') == 'certificates':
+        declared = report.get('certificate_service_roles', {})
+        for role, binding in (('proxy', roles['core']), ('watchdog', roles['watchdog'])):
+            if declared.get(role) != {key: binding[key] for key in ('pid', 'starttime_ticks')}:
+                raise RuntimeError('Certificate service roles differ from watched core')

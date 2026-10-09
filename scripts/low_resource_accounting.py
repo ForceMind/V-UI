@@ -83,15 +83,17 @@ def snapshot(directory, roles, read_metrics, proc_root=Path('/proc')):
             'metrics_before': metrics_before, 'metrics_after': metrics_after, 'processes': rows}
 
 
-def validate_stage(value, expected_roles):
+def validate_stage(value, expected_roles, *, seconds=60, interval=5):
+    if (seconds, interval) not in ((60, 5), (1800, 30)):
+        raise RuntimeError('Unsupported accounting contract')
     wall = value.get('wall_seconds')
-    if value.get('outcome') != 'passed' or type(wall) not in (int, float) or not math.isfinite(wall) or wall < 60:
-        raise RuntimeError('Accounting idle did not complete 60 seconds')
+    if value.get('outcome') != 'passed' or type(wall) not in (int, float) or not math.isfinite(wall) or wall < seconds:
+        raise RuntimeError('Accounting idle did not complete contracted duration')
     expected_pids = value.get('accounting_roles', {})
     if set(expected_pids) != set(expected_roles) or any(type(pid) is not int or pid <= 0 for pid in expected_pids.values()) or len(set(expected_pids.values())) != len(expected_roles):
         raise RuntimeError('Missing declared accounting identities')
     samples = value.get('accounting_samples', [])
-    if len(samples) != 13:
+    if len(samples) != seconds // interval + 1:
         raise RuntimeError('Accounting idle samples missing')
     group_root = Path(value.get('accounting_cgroup_root', ''))
     if not group_root.is_relative_to('/sys/fs/cgroup') or group_root == Path('/sys/fs/cgroup'):
@@ -106,8 +108,8 @@ def validate_stage(value, expected_roles):
         begin, end = sample['started_monotonic'], sample['finished_monotonic']
         if not all(type(n) in (int, float) and math.isfinite(n) for n in (begin, end)) or end < begin or (previous is not None and begin < previous):
             raise RuntimeError('Invalid accounting sampling window')
-        planned = origin + index * 5
-        if sample.get('planned_monotonic') != planned or not planned <= begin <= end < planned + 5:
+        planned = origin + index * interval
+        if sample.get('planned_monotonic') != planned or not planned <= begin <= end < planned + interval:
             raise RuntimeError('Missing or late accounting slot')
         previous = end
         rows = sample['processes']
@@ -147,22 +149,26 @@ def validate_stage(value, expected_roles):
             if cumulative is not None and any(new < old for new, old in zip(counters, cumulative)):
                 raise RuntimeError('Cumulative cgroup accounting moved backwards')
             cumulative = counters
-    if samples[-1]['started_monotonic'] < origin + 60:
+    if samples[-1]['started_monotonic'] < origin + seconds:
         raise RuntimeError('Accounting samples do not cover idle window')
 
 
-def validate_complete(report):
+def validate_complete(report, *, seconds=60, interval=5):
     stages = report.get('stages', [])
     panel_identities = None
-    for name, roles in [('panel_only_idle_60_seconds', ('worker', 'panel')),
-                        ('panel_single_proxy_idle_60_seconds', ('worker', 'panel', 'core'))]:
+    for name, roles in [(f'panel_only_idle_{seconds}_seconds', ('worker', 'panel')),
+                        (f'panel_single_proxy_idle_{seconds}_seconds', ('worker', 'panel', 'core', 'watchdog'))]:
         selected = [stage for stage in stages if stage.get('name') == name]
         if len(selected) != 1:
             raise RuntimeError('Accounting idle stage missing or duplicated')
-        if Path(selected[0].get('accounting_cgroup_root', '')).name != report.get('unit'):
+        from scripts.low_resource_service_tree import canonical_cgroup
+        expected_root = canonical_cgroup(report.get('service_cgroup'), report.get('unit'))
+        if selected[0].get('accounting_cgroup_root') != expected_root:
             raise RuntimeError('Accounting root does not match worker unit')
-        validate_stage(selected[0], roles)
+        validate_stage(selected[0], roles, seconds=seconds, interval=interval)
         current = {(row['role'], row['pid'], row['start_ticks']) for row in selected[0]['accounting_samples'][0]['processes'] if row['role'] in ('worker', 'panel')}
+        if selected[0]['accounting_roles']['worker'] != report.get('worker_pid'):
+            raise RuntimeError('Accounting worker differs from report identity')
         if panel_identities is not None and panel_identities != current:
             raise RuntimeError('Worker or panel changed between idle phases')
         panel_identities = current

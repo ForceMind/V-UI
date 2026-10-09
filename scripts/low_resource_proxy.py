@@ -99,7 +99,7 @@ def require_rejection(request, deliveries, log_path, reasons, *, offset=0, timeo
 
 
 def run_proxy_smoke(binary: Path, root: Path, log_prefix: Path, stage, report, panel_check,
-                    *, sustained=None, idle_monitor=None, overlap=None, accounting_monitor=None):
+                    *, sustained=None, idle_monitor=None, overlap=None, accounting_monitor=None, server_runtime=None):
     root.mkdir(mode=0o700)
     report["proxy_workload"] = {
         "protocol": "VLESS/TCP/TLS", "core": "verified installed bundled sing-box",
@@ -122,13 +122,28 @@ def run_proxy_smoke(binary: Path, root: Path, log_prefix: Path, stage, report, p
             path = root / (name + ".json")
             path.write_text(json.dumps(config))
             path.chmod(0o600)
-            core = CoreProcess(owner, [str(binary), "run", "-c", str(path)],
-                               log_prefix.with_name(log_prefix.name + "-" + name + ".log"), None)
+            log_path = log_prefix.with_name(log_prefix.name + "-" + name + ".log")
+            if name == "proxy-server" and server_runtime is not None:
+                from scripts.low_resource_service_tree import WatchedCore
+                from deploy.system_launcher import panel_environment
+                from app.release_tools import child_env
+                env = child_env(server_runtime['payload'], server_runtime['data'])
+                env['VUI_PUBLIC_ORIGIN'] = server_runtime['origin']
+                env['VUI_RELEASE_ROOT'] = str(server_runtime['root'])
+                env = panel_environment(env, server_runtime['runtime_key'])
+                core = WatchedCore(owner, server_runtime['python'], server_runtime['payload'],
+                    binary, path, log_path, env, server_runtime['runtime_key'])
+            else:
+                core = CoreProcess(owner, [str(binary), "run", "-c", str(path)], log_path, None)
             processes.append(core)
             core.start(listen)
             return core
 
         server = stage("proxy_server_start", lambda: launch(stack, "proxy-server", server_config(port, cert, key), port))
+        if server_runtime is not None:
+            evidence['server_tree'] = server.evidence()
+        core_pid = server.core_pid if server_runtime is not None else server.process.pid
+        watchdog_pid = server.process.pid if server_runtime is not None else None
 
         def healthy():
             if server.process.poll() is not None:
@@ -138,20 +153,22 @@ def run_proxy_smoke(binary: Path, root: Path, log_prefix: Path, stage, report, p
         def idle():
             healthy()
             if accounting_monitor:
-                accounting_monitor(IDLE_SECONDS, server_alive, server.process.pid)
+                accounting_monitor(IDLE_SECONDS, server_alive, core_pid, watchdog_pid)
             elif sustained:
-                idle_monitor(1800, lambda: server_alive())
+                idle_monitor(1800, server_alive, core_pid, watchdog_pid)
             else:
                 time.sleep(IDLE_SECONDS)
             healthy()
         def server_alive():
+            if server_runtime is not None:
+                server.check()
             if server.process.poll() is not None:
                 raise RuntimeError("Proxy server exited unexpectedly")
         stage("panel_single_proxy_idle_1800_seconds" if sustained else "panel_single_proxy_idle_60_seconds", idle)
         if sustained:
             sustained(binary, root, ca, port, server_alive)
         if overlap:
-            overlap(binary, root, ca, port, server_alive, server.process.pid)
+            overlap(binary, root, ca, port, server_alive, core_pid, watchdog_pid)
             healthy()
         target_port, deliveries = start_http_target(stack)
         client_port = unused_port()
@@ -195,6 +212,8 @@ def run_proxy_smoke(binary: Path, root: Path, log_prefix: Path, stage, report, p
             stage("proxy_" + name + "_rejected", negative)
     if any(core.process is not None and core.process.poll() is None for core in processes):
         raise RuntimeError("Proxy child survived fixture cleanup")
+    if server_runtime is not None:
+        evidence["server_tree"] = server.evidence()
     evidence["no_direct"] = True
     evidence["cleanup_complete"] = True
     panel_check()
