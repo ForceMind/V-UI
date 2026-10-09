@@ -394,10 +394,28 @@ def unpack_verified(archive_path: Path, expected_sha: str, destination: Path) ->
                     raise ReleaseError('Payload size mismatch')
                 target = destination / name; target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                 with archive.open(name) as source, target.open('xb') as output:
+                    # Exclusive creation cannot follow an existing file/link.
+                    # Only this new private release's exact core files opt in;
+                    # backup paths and old/running core files never do.
+                    cold_core = (manifest.get('kind') == 'release'
+                                 and _cold_digest_artifact(name) and not _packaging_artifact(name))
+                    created = os.fstat(output.fileno()) if cold_core else None
+                    if created is not None and (not stat.S_ISREG(created.st_mode)
+                            or created.st_uid != os.geteuid() or created.st_nlink != 1):
+                        raise ReleaseError('Core output must be a newly owned regular file')
                     writer = (_PrivateArchiveFile(output) if manifest.get('kind') == 'release'
-                              and _packaging_artifact(name) else output)
+                              and _cold_digest_artifact(name) else output)
                     checksum, size = stream_digest(source, writer, info['size'])
                     if isinstance(writer, _PrivateArchiveFile): writer.finish_writes()
+                    if created is not None:
+                        current, opened = target.lstat(), os.fstat(output.fileno())
+                        identity = (created.st_dev, created.st_ino)
+                        if (not stat.S_ISREG(current.st_mode) or current.st_nlink != 1
+                                or current.st_uid != created.st_uid or opened.st_uid != created.st_uid
+                                or opened.st_nlink != 1 or opened.st_size != size
+                                or (current.st_dev, current.st_ino) != identity
+                                or (opened.st_dev, opened.st_ino) != identity):
+                            raise ReleaseError('New core output identity changed during extraction')
                 if size != info['size'] or checksum != info['sha256']: raise ReleaseError('Payload checksum mismatch')
                 target.chmod(info['mode'])
             (destination / MANIFEST).write_text(json.dumps(manifest,sort_keys=True,indent=2))
