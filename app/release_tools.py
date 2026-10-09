@@ -104,6 +104,29 @@ def extract_runtime(archive_path: Path, destination: Path) -> None:
                 elif member.islnk():
                     _normalized_archive_path(PurePosixPath(member.linkname))
             archive.extractall(destination,filter='data')
+        # destination was just created by this extraction. Persist and advise
+        # only its regular files before ensurepip adds a second working set.
+        # Never follow runtime links, inspect old releases or cool user data.
+        if (getattr(os, 'posix_fadvise', None) is not None
+                and getattr(os, 'POSIX_FADV_DONTNEED', None) is not None
+                and hasattr(os, 'O_NOFOLLOW') and hasattr(os, 'fwalk')):
+            def walk_error(error):
+                raise error
+            for _, _, names, directory in os.fwalk(destination, follow_symlinks=False, onerror=walk_error):
+                for name in names:
+                    entry = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                    if stat.S_ISLNK(entry.st_mode):
+                        continue
+                    if not stat.S_ISREG(entry.st_mode):
+                        raise ReleaseError('Unsupported extracted runtime file type')
+                    descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+                    with os.fdopen(descriptor, 'rb') as handle:
+                        opened = os.fstat(handle.fileno())
+                        if (not stat.S_ISREG(opened.st_mode)
+                                or (entry.st_dev, entry.st_ino) != (opened.st_dev, opened.st_ino)):
+                            raise ReleaseError('Extracted runtime file changed before writeback')
+                        os.fsync(handle.fileno())
+                        _PrivateArchiveFile(handle)._discard(0, 0)
     except (ReleaseError,tarfile.TarError,OSError,ValueError,KeyError) as exc:
         shutil.rmtree(destination,ignore_errors=True)
         if isinstance(exc,ReleaseError): raise
