@@ -77,11 +77,11 @@ class PrivateArchiveCacheTests(unittest.TestCase):
                 digest.reset_mock(); release_tools.files_in(root)
                 self.assertTrue(all(not call.kwargs['cold'] for call in digest.call_args_list))
 
-    def test_unpack_cools_only_release_packaging_and_preserves_manifest(self):
+    def test_unpack_cools_only_release_packaging_and_cores_preserving_manifest(self):
         for kind in ('release', 'backup'):
             with self.subTest(kind=kind), tempfile.TemporaryDirectory() as folder:
                 root = Path(folder); source = root / 'source'; source.mkdir()
-                for name in ('wheels/test/demo.whl', 'runtimes/test.tar.gz', 'main.py', 'data/v-ui.db'):
+                for name in ('wheels/test/demo.whl', 'runtimes/test.tar.gz', 'cores/x86_64/sing-box', 'cores/aarch64/xray', 'main.py', 'data/v-ui.db'):
                     path = source / name; path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_bytes(b'fixture')
                 bundle = root / 'bundle.zip'
@@ -92,12 +92,12 @@ class PrivateArchiveCacheTests(unittest.TestCase):
                     return original(handle)
                 with patch.object(release_tools._PrivateArchiveFile, 'finish_writes', record):
                     result = release_tools.unpack_verified(bundle, sha, root / 'out')
-                self.assertEqual(set(cooled), {'demo.whl', 'test.tar.gz'} if kind == 'release' else set())
+                self.assertEqual(set(cooled), {'demo.whl', 'test.tar.gz', 'sing-box', 'xray'} if kind == 'release' else set())
                 with patch.object(release_tools, 'file_digest', wraps=release_tools.file_digest) as digest:
                     self.assertEqual(result, release_tools.verify_payload(root / 'out'))
                     cooled_reads = {call.args[0].relative_to(root / 'out').as_posix()
                                     for call in digest.call_args_list if call.kwargs.get('cold')}
-                self.assertEqual(cooled_reads, {'wheels/test/demo.whl', 'runtimes/test.tar.gz'}
+                self.assertEqual(cooled_reads, {'wheels/test/demo.whl', 'runtimes/test.tar.gz', 'cores/x86_64/sing-box', 'cores/aarch64/xray'}
                                  if kind == 'release' else set())
 
     def test_cold_digest_keeps_integrity_and_propagates_writeback_errors(self):
