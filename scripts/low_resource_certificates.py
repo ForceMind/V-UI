@@ -167,14 +167,14 @@ def new_successful_job(rows, previous, certificate_id):
     return new
 
 
-def observe_certbot(root, expected_cgroup, directory, proc=Path('/proc')):
+def observe_certbot(root, expected_cgroup, directory, proc=Path('/proc'), *, parent_pid=None, expected_allocator=None):
     """Read-only PID identity during an actual challenge; no provider replacement."""
     found=[]
     for entry in proc.iterdir():
         if not entry.name.isdigit():continue
         try:
             stat=entry.joinpath('stat').read_text().rsplit(')',1)[1].split()
-            if int(stat[1])!=os.getpid():continue
+            if int(stat[1])!=(os.getpid() if parent_pid is None else parent_pid):continue
             args=entry.joinpath('cmdline').read_bytes().rstrip(b'\0').decode().split('\0')
             if (len(args)<4 or args[1:4]!=['-B','-c','from certbot.main import main; raise SystemExit(main())']
                     or Path(args[0]).resolve()!=Path(sys.executable).resolve()):continue
@@ -185,33 +185,54 @@ def observe_certbot(root, expected_cgroup, directory, proc=Path('/proc')):
             if membership!=expected_cgroup:continue
             again=entry.joinpath('stat').read_text().rsplit(')',1)[1].split()
             if again[19]!=stat[19]:continue
-            found.append(dict(pid=int(entry.name),ppid=int(stat[1]),starttime_ticks=int(stat[19]),cgroup=membership,role='real-certbot'))
+            row=dict(pid=int(entry.name),ppid=int(stat[1]),starttime_ticks=int(stat[19]),cgroup=membership,role='real-certbot')
+            if expected_allocator is not None:
+                from scripts.low_resource_service_tree import observed_allocator
+                row['allocator']=observed_allocator(int(entry.name))
+                if row['allocator']!=expected_allocator:raise RuntimeError('Certbot allocator differs from manager')
+            found.append(row)
         except (OSError,ValueError,IndexError):continue
     return found
 
 
-def observed_handler(base,root,report,active,lock,identity=member):
+def observed_handler(base,root,report,active,lock,identity=member,on_change=lambda:None):
+    def error(exc):
+        with lock:report['observation_errors'].append(type(exc).__name__)
+    def flush():
+        try:on_change()
+        except Exception as exc:error(exc)
     class Observed(base):
         def do_GET(self):
-            self.request_phase=active['phase']
+            self.phase_snapshot={}
+            try:self.phase_snapshot=dict(active() if callable(active) else active)
+            except Exception as exc:error(exc)
+            self.request_phase=self.phase_snapshot.get('phase')
             self.result_status=None
             super().do_GET()
             if self.result_status==200:
                 with lock:
-                    report['challenges'].append(dict(phase=self.request_phase,status=200,monotonic=time.monotonic(),
+                    sequence=len(report['challenges'])+1
+                    report['challenges'].append(dict(sequence=sequence,phase=self.request_phase,status=200,monotonic=time.monotonic(),
                         token_sha256=hashlib.sha256(self.path.rsplit('/',1)[-1].encode()).hexdigest()))
+                flush()
         def send_response(self,code,*args):
             self.result_status=code
             if self.command=='GET' and code==200:
                 try:
-                    children=observe_certbot(root,identity(),active['directory'])
+                    phase=self.phase_snapshot
+                    options={}
+                    if 'manager_pid' in phase:
+                        from scripts.low_resource_service_tree import identity as process_identity
+                        if process_identity(phase['manager_pid'])['starttime_ticks']!=phase['manager_starttime_ticks']:
+                            raise RuntimeError('Certificate manager identity changed')
+                        options=dict(parent_pid=phase['manager_pid'],expected_allocator=phase['manager_allocator'])
+                    children=observe_certbot(root,identity(),phase['directory'],**options)
                     if len(children)!=1:raise RuntimeError('Expected one waiting Certbot')
                     with lock:
                         child=children[0];child.update(phase=self.request_phase,observed_monotonic=time.monotonic())
                         if not any(c['pid']==child['pid'] and c['phase']==child['phase'] for c in report['certbot_processes']):
                             report['certbot_processes'].append(child)
-                except Exception as exc:
-                    with lock:report['observation_errors'].append(type(exc).__name__)
+                except Exception as exc:error(exc)
             return super().send_response(code,*args)
     return Observed
 
@@ -223,6 +244,7 @@ def service(request, output):
     payload=Path(request['payload']).resolve();root=Path(request['root'])
     unit=request['unit'];commit=request['source_commit']
     sys.path.insert(0,str(payload))
+    sys.path.insert(1,str(SOURCE))
     from app.models import database
     from app.certificates.manager import CertificateManager
     from app.certificates.models import Certificate, CertificateJob
@@ -248,92 +270,173 @@ def service(request, output):
     report=dict(outcome='running',source_commit=commit,unit=unit,service_cgroup=member(),pid=os.getpid(),
         allocator_runtime_key=runtime_key,allocator_mmap_threshold=expected_threshold,allocator_tunables_override=False,
         imported_installed_app=True,isolated_database=True,certbot_version='5.8.0',jobs=[],challenges=[],certbot_processes=[],cleanup_complete=False)
-    lock=threading.Lock();active={'phase':None,'directory':None}
+    from scripts.low_resource_service_tree import identity as process_identity, observed_allocator
+    from scripts.low_resource_sustained import cleanup_process_group
+    from scripts.low_resource_accounting import start_ticks
+    report['manager_identity']=process_identity(os.getpid())
+    report['manager_allocator']=observed_allocator(os.getpid())
     report['observation_errors']=[]
+    responder_output=root/'responder-report.json'
+    responder_request=root/'responder-request.json'
+    active=dict(phase=None,directory=None,manager_pid=os.getpid(),
+                manager_starttime_ticks=report['manager_identity']['starttime_ticks'],
+                manager_allocator=report['manager_allocator'])
+    write(root/'phase.json',active)
+    write(responder_request,dict(root=str(root),payload=str(payload),unit=unit,source_commit=commit,
+                                manager_identity=report['manager_identity']))
+    responder_env={key:value for key,value in os.environ.items()
+                   if key in ('PATH','LANG','LC_ALL','GITHUB_ACTIONS','RUNNER_ENVIRONMENT')}
+    responder_env.update(HOME=str(root),PYTHONDONTWRITEBYTECODE='1',VUI_DATA_DIR=str(root/'data'))
+    manager=None;responder=None;worker_thread=None
+    abort=threading.Event()
+    def signal_stop(*_):
+        abort.set()
+        if manager is not None:manager.stop_event.set();manager.wakeup.set()
+    for name in (signal.SIGTERM,signal.SIGINT):signal.signal(name,signal_stop)
     def checkpoint():
-        with lock:write(output,report)
-    Observed=observed_handler(handler_for(root/'managed/http-webroot'),root,report,active,lock)
-    server=ChallengeServer(('127.0.0.1',0),Observed)
-    thread=threading.Thread(target=server.serve_forever,kwargs={'poll_interval':.05},daemon=True);thread.start()
-    checkpoint()
-    write(root/'responder.json',dict(http_port=server.server_port,pid=os.getpid(),service_cgroup=member(),unit=unit,source_commit=commit))
+        if responder_output.exists():
+            observation=read(responder_output)
+            report['responder']=observation
+            for name in ('challenges','certbot_processes','observation_errors'):
+                report[name]=observation.get(name,[])
+        write(output,report)
+    def background_alive():
+        if abort.is_set():raise RuntimeError('Certificate service interrupted')
+        if responder is None or responder.poll() is not None:raise RuntimeError('Independent responder exited')
+        if worker_thread is not None:
+            if (manager.thread is not worker_thread or not worker_thread.is_alive() or manager.worker_error
+                    or start_ticks(Path(f'/proc/self/task/{worker_thread.native_id}/stat').read_text())!=report['manager_thread']['starttime_ticks']):
+                raise RuntimeError('Certificate background worker stopped or changed')
+    def job_rows():
+        with database.SessionLocal() as db:
+            return [{key:getattr(job,key) for key in ('id','certificate_id','sequence','state','error')}
+                    for job in db.query(CertificateJob).order_by(CertificateJob.sequence).all()]
     try:
-        ca=wait_file(root/'ca.json',time.monotonic()+60)
+        responder=subprocess.Popen([sys.executable,'-B',str(SOURCE/'scripts/low_resource_responder.py'),
+            '--request',str(responder_request),'--output',str(responder_output)],cwd=payload,
+            env=responder_env,start_new_session=True)
+        wait_file(root/'responder.json',time.monotonic()+30,background_alive)
+        checkpoint()
+        ca=wait_file(root/'ca.json',time.monotonic()+60,background_alive)
         url=urlsplit(ca['directory'])
         if url.scheme!='https' or url.hostname!='127.0.0.1' or url.path!='/dir':raise RuntimeError('Only explicit fake loopback CA allowed')
         for key in ('transport_ca','issuance_root'):
             if not Path(ca[key]).resolve(strict=True).is_relative_to(root.resolve()):raise RuntimeError('Fake CA escaped fixture')
-        active['directory']=ca['directory']
+        active['directory']=ca['directory'];write(root/'phase.json',active)
         provider=CertbotProvider(root/'managed',test_directory=ca['directory'],test_ca=Path(ca['transport_ca']))
         manager=CertificateManager(root/'managed',provider,trusted_roots=Path(ca['issuance_root']).read_bytes())
-        signal.signal(signal.SIGTERM,lambda *_:manager.stop_event.set())
+        if abort.is_set():raise RuntimeError('Certificate service interrupted before background start')
+        manager.start();worker_thread=manager.thread
+        report['manager_thread']=dict(tid=worker_thread.native_id,
+            starttime_ticks=start_ticks(Path(f'/proc/self/task/{worker_thread.native_id}/stat').read_text()))
+        report['background_started_monotonic']=time.monotonic();background_alive()
+        ready=dict(unit=unit,source_commit=commit,manager=report['manager_identity'],
+                   thread=report['manager_thread'],started_monotonic=report['background_started_monotonic'])
+        report['manager_ready']=ready;checkpoint();write(root/'manager-ready.json',ready)
         deadline=time.monotonic()+60
         while True:
+            background_alive()
             if time.monotonic()>deadline:raise RuntimeError('No live overlap traffic')
             if (root/'load-progress.json').exists():
                 load=read(root/'load-progress.json')
                 if load.get('connected_lanes')==10 and load.get('first_response_lanes')==10:break
             time.sleep(.1)
         started=load['started_monotonic'];report['load_started_monotonic']=started
-        def execute(name, queue=None):
-            active['phase']=name
-            before=read(root/'load-progress.json')
-            row=dict(name=name,started_monotonic=time.monotonic(),requests_before=before['completed_requests'])
-            report['jobs'].append(row);checkpoint()
-            if time.monotonic()>started+570:raise RuntimeError('Certificate work missed overlap window')
-            with database.SessionLocal() as db:previous={job.id for job in db.query(CertificateJob).all()}
-            if queue:queue()
-            if not manager.process_once():raise RuntimeError('Certificate manager did not process a real job')
-            with database.SessionLocal() as db:
-                jobs=[{key:getattr(job,key) for key in ('id','certificate_id','sequence','state','error')}
-                      for job in db.query(CertificateJob).order_by(CertificateJob.sequence).all()]
-                report['observed_jobs']=jobs
-                row.update(new_successful_job(jobs,previous,identity[0]))
-            # The file is checkpointed every .1s; wait for a post-job live sample.
+        certificate_id=[]
+        def execute(name, arm):
+            # Terminal DB state precedes apply_existing; take the real process
+            # lock before changing phase or arming the next scheduled job.
+            if not manager._process_lock.acquire(timeout=15):raise RuntimeError('Background job did not become idle')
+            try:
+                previous={job['id'] for job in job_rows()}
+                active['phase']=name;write(root/'phase.json',active)
+                before=read(root/'load-progress.json')
+                row=dict(name=name,started_monotonic=time.monotonic(),requests_before=before['completed_requests'])
+                report['jobs'].append(row);checkpoint()
+                arm()
+            finally:manager._process_lock.release()
+            manager.wakeup.set()
+            while True:
+                background_alive()
+                if time.monotonic()>started+570:raise RuntimeError('Certificate work missed overlap window')
+                jobs=job_rows();report['observed_jobs']=jobs;checkpoint()
+                added=[job for job in jobs if job['id'] not in previous]
+                if any(job['state']=='failed' for job in jobs):raise RuntimeError('Real background certificate job failed')
+                if len(added)==1 and added[0]['state']=='succeeded':
+                    row.update(new_successful_job(jobs,previous,certificate_id[0]));break
+                if len(added)>1:raise RuntimeError('Unexpected duplicate background job')
+                time.sleep(.1)
             finished=time.monotonic()
             while True:
-                progress=read(root/'load-progress.json')
+                background_alive();progress=read(root/'load-progress.json')
                 if progress.get('observed_monotonic',0)>=finished:break
                 if time.monotonic()>started+570:raise RuntimeError('No traffic progress after certificate job')
                 time.sleep(.05)
-            row.update(finished_monotonic=finished,requests_after=progress['completed_requests'])
-            # Exact response timestamps are checked against each job window by
-            # the coordinator; coarse progress counters alone are insufficient.
-            checkpoint()
-        identity=[]
-        def create():identity.append(manager.create(DOMAIN,'admin@example.test','production',True,True)['certificate_id'])
+            row.update(finished_monotonic=finished,requests_after=progress['completed_requests']);checkpoint()
+        def create():certificate_id.append(manager.create(DOMAIN,'admin@example.test','production',True,True)['certificate_id'])
         execute('issue',create)
-        first=manager.material(identity[0]);old=[p.read_bytes() for p in first[0]]
+        first=manager.material(certificate_id[0]);old=[p.read_bytes() for p in first[0]]
         serial=x509.load_pem_x509_certificate(old[0]).serial_number
-        report['renewal_account_fixture']=retain_fixture_account(root)
-        checkpoint()
-        with database.SessionLocal() as db:
-            if db.query(CertificateJob).filter(CertificateJob.state.in_(('queued','running'))).count():raise RuntimeError('Concurrent certificate job')
-            row=db.get(Certificate,identity[0]);row.renew_at=0;row.last_attempt=0;row.retry_at=0;db.commit()
-        execute('scheduled_renewal')
+        def due():
+            report['renewal_account_fixture']=retain_fixture_account(root)
+            with database.SessionLocal() as db:
+                if db.query(CertificateJob).filter(CertificateJob.state.in_(('queued','running'))).count():raise RuntimeError('Concurrent certificate job')
+                row=db.get(Certificate,certificate_id[0]);row.renew_at=0;row.last_attempt=0;row.retry_at=0;db.commit()
+        execute('scheduled_renewal',due)
         new_keys=list((root/'managed/accounts/production').rglob('private_key.json'))
         old_keys=list((root/'retained-first-account').rglob('private_key.json'))
         if len(new_keys)!=1 or len(old_keys)!=1 or new_keys[0].read_bytes()==old_keys[0].read_bytes():
             raise RuntimeError('Renewal did not register a distinct fake ACME account')
         report['renewal_account_fixture']['fresh_account_key_distinct']=True
-        second=manager.material(identity[0])
-        second_serial=x509.load_pem_x509_certificate(second[0][0].read_bytes()).serial_number
+        second=manager.material(certificate_id[0]);second_serial=x509.load_pem_x509_certificate(second[0][0].read_bytes()).serial_number
         if first[2]==second[2] or serial==second_serial or [p.read_bytes() for p in first[0]]!=old:raise RuntimeError('Renewal did not preserve old valid material')
-        if manager.process_once():raise RuntimeError('Renewal unexpectedly queued again')
-        with database.SessionLocal() as db:
-            if db.query(Certificate).count()!=1 or db.query(CertificateJob).count()!=2:
-                raise RuntimeError('Certificate fixture row count changed')
-        report.update(no_duplicate_due_job=True,first_revision=first[2],renewed_revision=second[2],first_serial=str(serial),renewed_serial=str(second_serial),
-            old_material_unchanged=True,validated_san_key_chain=True,automatic_due_scheduling=True,outcome='passed')
-        if any(row['finished_monotonic']>=started+570 for row in report['jobs']):raise RuntimeError('Certificate jobs exceeded overlap deadline')
+        report.update(first_revision=first[2],renewed_revision=second[2],first_serial=str(serial),renewed_serial=str(second_serial),
+            old_material_unchanged=True,validated_san_key_chain=True,automatic_due_scheduling=True,jobs_complete=True)
+        expected_jobs=job_rows();checkpoint()
+        terminal=wait_file(root/'traffic-complete.json',started+660,background_alive)
+        if (terminal.get('source_commit')!=commit or terminal.get('unit')!=unit or terminal.get('requests')!=6000
+                or terminal.get('started_monotonic')!=started or terminal.get('finished_monotonic',0)<started+600
+                or terminal.get('recovery_requests')!=1):raise RuntimeError('Invalid complete traffic handshake')
+        report['traffic_complete']=terminal;report['background_alive_until_monotonic']=time.monotonic()
+        background_alive()
+        if job_rows()!=expected_jobs or len(expected_jobs)!=2:raise RuntimeError('Background job set changed while resident')
+        report['no_duplicate_due_job']=True
+        report['outcome']='passed'
     except Exception as exc:
         report.update(outcome='failed',error_type=type(exc).__name__,error=str(exc))
     finally:
-        server.shutdown();server.server_close();thread.join(timeout=3)
-        report['cleanup_complete']=not thread.is_alive()
-        if not report['cleanup_complete']:report['outcome']='failed'
+        try:
+            if manager is not None:
+                manager.stop()
+                report['background_stopped_monotonic']=time.monotonic()
+                report['background_cleanup_complete']=not worker_thread.is_alive() and manager.worker_error is None
+                if not report['background_cleanup_complete']:raise RuntimeError('Background worker did not stop cleanly')
+                report['final_jobs']=job_rows()
+                if report['outcome']=='passed' and report['final_jobs']!=report['observed_jobs']:
+                    raise RuntimeError('Certificate job state changed during stop')
+        except Exception as exc:
+            report.update(outcome='failed',cleanup_error=type(exc).__name__)
+        finally:
+            try:
+                if responder is not None:cleanup_process_group(responder,grace_seconds=12,kill_seconds=3)
+                report['responder_group_cleanup_complete']=True
+            except Exception as exc:report.update(outcome='failed',responder_group_cleanup_complete=False,cleanup_error=type(exc).__name__)
+        checkpoint()
+        report['cleanup_complete']=bool(report.get('background_cleanup_complete') and report.get('responder_group_cleanup_complete')
+            and report.get('responder',{}).get('outcome')=='passed' and report['responder'].get('drained'))
+        if not report['cleanup_complete'] or report['observation_errors']:report['outcome']='failed'
         checkpoint()
     return 0 if report['outcome']=='passed' else 1
+
+
+def wait_terminal(path, deadline):
+    while True:
+        if path.exists():
+            value=read(path)
+            if value.get('outcome')=='failed':raise RuntimeError('Certificate service failed')
+            if value.get('outcome')=='passed' and value.get('cleanup_complete') is True:return value
+        if time.monotonic()>=deadline:raise RuntimeError('Certificate terminal evidence deadline exceeded')
+        time.sleep(.1)
 
 
 def external(request, output):
@@ -365,6 +468,10 @@ def external(request, output):
             core=CoreProcess(stack,[request['binary'],'run','-c',str(path)],output.with_name(output.stem+'-core.log'),None);core.start(port)
             value['client_core_cgroup']=member(core.process.pid)
             if value['client_core_cgroup']!=member():raise RuntimeError('Client escaped external accounting')
+            ready=wait_file(root/'manager-ready.json',time.monotonic()+60)
+            if ready.get('unit')!=request['unit'] or ready.get('source_commit')!=request['source_commit']:
+                raise RuntimeError('Manager readiness provenance mismatch')
+            value['manager_ready']=ready
             progress={};result={};error=[]
             def traffic():
                 try:result.update(fixed_load(port,target.server_address[1],10,progress=progress,record_times=True,stagger=True))
@@ -377,6 +484,8 @@ def external(request, output):
                     write(root/'load-progress.json',snapshot)
                     value['partial_load']=snapshot;write(output,value)
                     if core.process.poll() is not None or pebble.process.poll() is not None:raise RuntimeError('External core or CA exited')
+                    if Path(request['service_report']).exists() and read(Path(request['service_report'])).get('outcome')=='failed':
+                        raise RuntimeError('Certificate service failed during traffic')
                     thread.join(.1)
             finally:
                 # fixed_load has bounded per-request deadlines; stop the client on
@@ -387,10 +496,12 @@ def external(request, output):
             value.update(result,target_requests=counts['requests'],target_connections=counts['connections'],response_monotonic=progress['response_monotonic'],
                 load_started_monotonic=progress['started_monotonic'],first_response_lanes=progress['first_response_lanes'])
             if counts!={'requests':6000,'connections':10}:raise RuntimeError('Certificate overlap delivery mismatch')
-            service_result=read(Path(request['service_report']))
-            if service_result.get('outcome')!='passed':raise RuntimeError('Real certificate service failed')
             before=dict(counts);fixed_load(port,target.server_address[1],1,duration=1)
             value.update(recovery_requests=counts['requests']-before['requests'],recovery_connections=counts['connections']-before['connections'])
+            write(root/'traffic-complete.json',dict(unit=request['unit'],source_commit=request['source_commit'],
+                started_monotonic=value['load_started_monotonic'],finished_monotonic=value['load_started_monotonic']+value['wall_seconds'],
+                requests=value['requests'],recovery_requests=value['recovery_requests']))
+            wait_terminal(Path(request['service_report']),time.monotonic()+40)
         assert_no_direct_log(core.log_path)
         value.update(outcome='passed',cleanup_complete=True,no_direct=True)
     except Exception as exc:
@@ -404,7 +515,7 @@ def external(request, output):
     return 0 if value['outcome']=='passed' else 1
 
 
-def request_overlap(work, output, unit, commit, payload, python, binary, fixture, ca, port, observe):
+def request_overlap(work, output, unit, commit, payload, python, binary, fixture, ca, port, observe, bind_roles=lambda *_:None):
     from app.release_tools import child_env
     from deploy.system_launcher import panel_environment
     runtime_key=read(payload.parent/'READY.json')['runtime_key']
@@ -423,7 +534,16 @@ def request_overlap(work, output, unit, commit, payload, python, binary, fixture
             request=dict(root=str(root),unit=unit,source_commit=commit,binary=str(binary),fixture=str(fixture),ca=str(ca),server_port=port,
                 duration_seconds=DURATION,concurrency=10,responder=ready,service_report=str(service_output))
             write(work/'certificates.request.json',request)
-            result=wait_file(work/'certificates.response.json',time.monotonic()+800,observe)
+            manager_ready=wait_file(root/'manager-ready.json',time.monotonic()+60,alive)
+            bind_roles(manager_ready,ready)
+            def monitor():
+                observe()
+                if service_output.exists() and read(service_output).get('outcome')=='failed':
+                    raise RuntimeError('Certificate service failed while awaiting client result')
+                if process.poll() is not None and not (root/'traffic-complete.json').exists():
+                    raise RuntimeError('Certificate manager exited before complete traffic')
+            result=wait_file(work/'certificates.response.json',time.monotonic()+800,monitor)
+            if result.get('outcome')!='passed':raise RuntimeError('Certificate client helper failed')
             process.wait(timeout=5)
             if process.returncode!=0:raise RuntimeError('Certificate service exited unsuccessfully')
             service_result=read(service_output)
@@ -432,7 +552,7 @@ def request_overlap(work, output, unit, commit, payload, python, binary, fixture
         finally:
             if process.poll() is None:
                 process.terminate()
-                try:process.wait(timeout=12)
+                try:process.wait(timeout=35)
                 except subprocess.TimeoutExpired:process.kill();process.wait(timeout=5)
 
 
@@ -448,13 +568,18 @@ def validate_metrics_record(metric):
     assert_no_oom(metric)
 
 
-def validate_service_samples(samples, roles):
+def validate_service_samples(samples, roles, load_started, load_finished, roles_bound, thread_identity):
     def integer(value):return type(value) is int and value>0
     if (not isinstance(samples,list) or len(samples)<100 or not isinstance(roles,dict)
-            or set(roles)!={'worker','panel','proxy'}):raise RuntimeError('Incomplete service samples or roles')
+            or set(roles)!={'worker','panel','proxy','watchdog','manager','responder'}):raise RuntimeError('Incomplete service samples or roles')
     for role in roles.values():
         if any(not integer(role.get(key)) for key in ('pid','starttime_ticks')):raise RuntimeError('Incomplete role identity')
-    if len({role['pid'] for role in roles.values()})!=3:raise RuntimeError('Service roles overlap')
+    if len({role['pid'] for role in roles.values()})!=6:raise RuntimeError('Service roles overlap')
+    if (any(type(value) not in (int,float) or not math.isfinite(value) for value in (load_started,load_finished,roles_bound))
+            or load_finished-load_started<600 or roles_bound>load_started+10
+            or not isinstance(thread_identity,dict) or set(thread_identity)!={'tid','starttime_ticks'}
+            or any(not integer(value) for value in thread_identity.values())):
+        raise RuntimeError('Invalid service sampling window or thread identity')
     previous=-1;cpu=-1;peak=-1
     for sample in samples:
         stamp=sample.get('observed_monotonic')
@@ -464,13 +589,21 @@ def validate_service_samples(samples, roles):
         cpu=sample['cpu.stat']['usage_usec'];peak=sample['memory.peak']
         processes=sample.get('processes',[])
         if not isinstance(processes,list) or not processes:raise RuntimeError('Missing service processes')
-        for role in roles.values():
+        active_roles=roles if roles_bound <= stamp <= load_finished else {name:row for name,row in roles.items() if name in ('worker','panel','proxy','watchdog')}
+        if load_started <= stamp <= load_finished:
+            observed=sample.get('manager_thread')
+            if observed != dict(thread_identity,observed_starttime_ticks=thread_identity['starttime_ticks']):
+                raise RuntimeError('Certificate background thread disappeared or changed')
+        for role in active_roles.values():
             match=[p for p in processes if p.get('pid')==role['pid']]
             if (len(match)!=1 or match[0].get('starttime_ticks')!=role['starttime_ticks']
                     or not integer(match[0].get('threads')) or not isinstance(match[0].get('name'),str)
                     or not match[0]['name'] or type(match[0].get('ppid')) is not int or match[0]['ppid']<0):
                 raise RuntimeError('Service role disappeared or restarted')
-    if samples[-1]['observed_monotonic']-samples[0]['observed_monotonic']<590:raise RuntimeError('Incomplete service duration')
+    window=[sample['observed_monotonic'] for sample in samples if load_started <= sample['observed_monotonic'] <= load_finished]
+    if (len(window)<100 or window[-1]-window[0]<590 or window[0]>load_started+10
+            or window[-1]<load_finished-10 or any(b-a>10 for a,b in zip(window,window[1:]))):
+        raise RuntimeError('Incomplete service duration')
 
 
 def validate_result(external, service, unit, commit, expected_runtime_key):
@@ -547,6 +680,53 @@ def validate_result(external, service, unit, commit, expected_runtime_key):
         if any(not re.fullmatch(r'[a-f0-9]{64}',c.get('token_sha256','')) for c in challenges):raise RuntimeError('Invalid challenge digest')
         tokens.append({c['token_sha256'] for c in challenges})
     if tokens[0]&tokens[1]:raise RuntimeError('Renewal reused old challenge evidence')
+    validate_residency(external,service,unit,commit)
+
+
+def validate_residency(external,service,unit,commit):
+    from scripts.low_resource_service_tree import canonical_cgroup
+    start=external['load_started_monotonic'];end=start+external['wall_seconds']
+    canonical_cgroup(service['service_cgroup'],unit)
+    def finite(value):return type(value) in (int,float) and math.isfinite(value)
+    for field in ('background_started_monotonic','background_alive_until_monotonic','background_stopped_monotonic'):
+        if not finite(service.get(field)):raise RuntimeError('Missing real background worker residency')
+    if not service['background_started_monotonic']<=start<end<=service['background_alive_until_monotonic']<=service['background_stopped_monotonic']:
+        raise RuntimeError('Background worker did not span the complete traffic window')
+    for field in ('background_cleanup_complete','responder_group_cleanup_complete','jobs_complete'):
+        if service.get(field) is not True:raise RuntimeError('Incomplete service residency or cleanup')
+    complete=service.get('traffic_complete',{})
+    if complete!=dict(unit=unit,source_commit=commit,started_monotonic=start,finished_monotonic=end,
+                      requests=6000,recovery_requests=1):raise RuntimeError('Traffic completion evidence mismatch')
+    manager=service.get('manager_identity',{});responder=service.get('responder',{})
+    ready=service.get('manager_ready',{})
+    if ready!=external.get('manager_ready') or ready!=dict(unit=unit,source_commit=commit,
+            manager=manager,thread=service.get('manager_thread'),started_monotonic=service['background_started_monotonic']):
+        raise RuntimeError('Background readiness evidence mismatch')
+    thread=service.get('manager_thread',{})
+    if set(thread)!={'tid','starttime_ticks'} or any(type(value) is not int or value<=0 for value in thread.values()):
+        raise RuntimeError('Missing actual background thread identity')
+    policy=dict(mmap_threshold=service['allocator_mmap_threshold'],malloc_tunable_present=False)
+    if service.get('manager_allocator')!=policy or any(child.get('allocator')!=policy for child in service['certbot_processes']):
+        raise RuntimeError('Manager/Certbot allocator inheritance mismatch')
+    identity=responder.get('identity',{})
+    for row in (manager,identity):
+        if any(type(row.get(key)) is not int or row[key]<=0 for key in ('pid','ppid','process_group','starttime_ticks')) or row.get('cgroup')!=service['service_cgroup']:
+            raise RuntimeError('Invalid resident service identity')
+    if manager['pid']!=service['pid'] or identity['ppid']!=manager['pid'] or identity['process_group']!=identity['pid'] or manager['pid']==identity['pid']:
+        raise RuntimeError('Independent responder ancestry mismatch')
+    if (responder.get('allocator')!=dict(mmap_threshold=None,malloc_tunable_present=False)
+            or any(responder.get(key) is not True for key in ('drained','cleanup_complete','imported_installed_handler'))
+            or responder.get('outcome')!='passed' or responder.get('active_requests')!=0
+            or not finite(responder.get('started_monotonic')) or not finite(responder.get('stopped_monotonic'))
+            or not responder['started_monotonic']<=start<end<=responder['stopped_monotonic']):
+        raise RuntimeError('Independent responder did not reside or drain correctly')
+    for key in ('challenges','certbot_processes','observation_errors'):
+        if responder.get(key)!=service.get(key):raise RuntimeError('Responder final journal differs from service evidence')
+    if responder.get('final_event_count')!=len(service['challenges']) or [row.get('sequence') for row in service['challenges']]!=list(range(1,len(service['challenges'])+1)):
+        raise RuntimeError('Responder challenge journal incomplete')
+    expected=[{key:job[key] for key in ('id','certificate_id','sequence','state','error')} for job in service['jobs']]
+    if service.get('final_jobs')!=expected or service.get('observed_jobs')!=expected:
+        raise RuntimeError('Background job set changed before final stop')
 
 
 if __name__=='__main__':

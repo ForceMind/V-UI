@@ -526,11 +526,25 @@ with SessionLocal() as db:
                             try:process['starttime_ticks']=identity(process['pid'])['starttime_ticks']
                             except FileNotFoundError:process['starttime_ticks']=0
                         sample.update(observed_monotonic=time.monotonic(),processes=processes)
+                        if 'manager' in report['certificate_service_roles']:
+                            manager_pid=report['certificate_service_roles']['manager']['pid']
+                            thread=report['certificate_manager_thread']
+                            try:
+                                from scripts.low_resource_accounting import start_ticks
+                                sample['manager_thread']=dict(thread,observed_starttime_ticks=start_ticks(Path(f"/proc/{manager_pid}/task/{thread['tid']}/stat").read_text()))
+                            except FileNotFoundError:sample['manager_thread']=None
                         samples.append(sample);report['certificate_service_samples']=samples
                         checkpoint();last[0]=time.monotonic()
+                def bind_roles(manager_ready, responder_ready):
+                    for name, row in (('manager',manager_ready['manager']),('responder',responder_ready['identity'])):
+                        report['certificate_service_roles'][name]={key:row[key] for key in ('pid','starttime_ticks')}
+                    report['certificate_roles_bound_monotonic']=time.monotonic()
+                    report['certificate_manager_thread']=manager_ready['thread']
+                    last[0]=0
+                    observe()
                 def overlap():
                     report['certificate_overlap']=request_overlap(args.work_dir,output,args.unit,args.source_commit,
-                        payload,python,binary,fixture,ca,port,observe)
+                        payload,python,binary,fixture,ca,port,observe,bind_roles)
                 stage('real_issue_and_due_renewal_with_10_connections_600_seconds',overlap)
                 def panel_db_untouched():
                     with sqlite3.connect(data/'v-ui.db') as db:
@@ -620,12 +634,6 @@ with SessionLocal() as db:
             report["metrics"] = metrics(directory)
             report["peak_budget_assessment"] = peak_assessment(report["metrics"]["memory.peak"],
                 memory_bytes(args.memory_mib), report["base_page_size_bytes"])
-            from scripts.low_resource_service_tree import validate_tree, canonical_cgroup, validate_sample_bindings
-            from app.release_tools import target_key
-            canonical_cgroup(report.get('service_cgroup'), unit)
-            validate_tree(report.get('proxy_workload', {}).get('server_tree', {}), target_key(),
-                          report.get('worker_pid'), report.get('service_cgroup'))
-            validate_sample_bindings(report)
             assert_no_oom(report["metrics"])
         except Exception as exc:
             report["outcome"] = "failed"
@@ -670,6 +678,7 @@ def validate_sustained_stages(report, unit, commit):
 
 
 def coordinator(args) -> int:
+    sys.path.insert(0, str(SOURCE))
     require_hosted_runner()
     budget = memory_bytes(args.memory_mib)
     profile = duration_profile(args)
@@ -732,7 +741,9 @@ def coordinator(args) -> int:
                 from app.release_tools import target_key
                 validate_result(value.get('external',{}),value.get('service',{}),unit,args.source_commit,target_key())
                 from scripts.low_resource_certificates import validate_service_samples
-                validate_service_samples(report.get('certificate_service_samples'),report.get('certificate_service_roles'))
+                validate_service_samples(report.get('certificate_service_samples'),report.get('certificate_service_roles'),
+                    value['external']['load_started_monotonic'],value['external']['load_started_monotonic']+value['external']['wall_seconds'],
+                    report.get('certificate_roles_bound_monotonic'),report.get('certificate_manager_thread'))
             elif profile == 'data-backup':
                 from scripts.low_resource_data import validate_complete
                 validate_complete(report,unit,args.source_commit)

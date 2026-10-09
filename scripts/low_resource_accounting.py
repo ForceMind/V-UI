@@ -89,6 +89,10 @@ def validate_stage(value, expected_roles, *, seconds=60, interval=5):
     wall = value.get('wall_seconds')
     if value.get('outcome') != 'passed' or type(wall) not in (int, float) or not math.isfinite(wall) or wall < seconds:
         raise RuntimeError('Accounting idle did not complete contracted duration')
+    phase_start = value.get('started_monotonic')
+    if type(phase_start) not in (int, float) or not math.isfinite(phase_start):
+        raise RuntimeError('Missing accounting stage start')
+    phase_end = phase_start + wall
     expected_pids = value.get('accounting_roles', {})
     if set(expected_pids) != set(expected_roles) or any(type(pid) is not int or pid <= 0 for pid in expected_pids.values()) or len(set(expected_pids.values())) != len(expected_roles):
         raise RuntimeError('Missing declared accounting identities')
@@ -104,6 +108,8 @@ def validate_stage(value, expected_roles, *, seconds=60, interval=5):
     origin = value.get('accounting_started_monotonic')
     if type(origin) not in (int, float) or not math.isfinite(origin):
         raise RuntimeError('Missing accounting origin')
+    if not phase_start <= origin <= phase_end:
+        raise RuntimeError('Accounting origin outside stage')
     for index, sample in enumerate(samples):
         begin, end = sample['started_monotonic'], sample['finished_monotonic']
         if not all(type(n) in (int, float) and math.isfinite(n) for n in (begin, end)) or end < begin or (previous is not None and begin < previous):
@@ -111,6 +117,8 @@ def validate_stage(value, expected_roles, *, seconds=60, interval=5):
         planned = origin + index * interval
         if sample.get('planned_monotonic') != planned or not planned <= begin <= end < planned + interval:
             raise RuntimeError('Missing or late accounting slot')
+        if not phase_start <= begin <= end <= phase_end:
+            raise RuntimeError('Accounting sample outside actual stage')
         previous = end
         rows = sample['processes']
         recorded = {str(row['pid']): row['cgroup'] for row in rows}
@@ -156,6 +164,7 @@ def validate_stage(value, expected_roles, *, seconds=60, interval=5):
 def validate_complete(report, *, seconds=60, interval=5):
     stages = report.get('stages', [])
     panel_identities = None
+    previous_end = None
     for name, roles in [(f'panel_only_idle_{seconds}_seconds', ('worker', 'panel')),
                         (f'panel_single_proxy_idle_{seconds}_seconds', ('worker', 'panel', 'core', 'watchdog'))]:
         selected = [stage for stage in stages if stage.get('name') == name]
@@ -166,6 +175,9 @@ def validate_complete(report, *, seconds=60, interval=5):
         if selected[0].get('accounting_cgroup_root') != expected_root:
             raise RuntimeError('Accounting root does not match worker unit')
         validate_stage(selected[0], roles, seconds=seconds, interval=interval)
+        if previous_end is not None and selected[0]['started_monotonic'] < previous_end:
+            raise RuntimeError('Accounting idle stages overlap')
+        previous_end = selected[0]['started_monotonic'] + selected[0]['wall_seconds']
         current = {(row['role'], row['pid'], row['start_ticks']) for row in selected[0]['accounting_samples'][0]['processes'] if row['role'] in ('worker', 'panel')}
         if selected[0]['accounting_roles']['worker'] != report.get('worker_pid'):
             raise RuntimeError('Accounting worker differs from report identity')
