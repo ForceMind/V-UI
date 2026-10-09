@@ -29,3 +29,14 @@ GNU短测在首个离线stage结束时，320/384MiB已达各自上限和最终�
 协调器在目标cgroup启动前记录`installation_product_provenance`，worker不额外运行Git；校验器将其准确source与worker绑定：与098对照app/web/deploy/third_party、main、VERSION、install.sh、runtime requirements、部署/系统入口、build_bundle、其platform_support依赖及固定runtime/core/frontend准备脚本的Git条目和工作树字节。1458要求全部相同；后续此唯一产品探索仅允许app/release_tools.py条目变化，新增/删除或其余产品变化均拒绝，另记录changed_product_files、前后Git条目摘要及product_bytes_unchanged=false，不能称全部未改。保留路径集合、72个跟踪文件、条目SHA256、baseline和实际source。1458的空差异集合证明这组产品实现/入口未改，不证明新发行ZIP与098逐字相同：manifest的source及诊断文档等包装内容可以不同。两档之间则必须使用同一次构建的同一包摘要。
 
 1458此次只取得离线安装内部证据，未先实施产品优化，不引入新架构或常驻采样器。1458准确运行37946194725已完成：同包两档各29阶段，512 peak477663232/max0，320 peak335544320/max139，OOM均0。320首次max在ensurepip(0→34)，随后pip(34→139)，512最终涨峰在pip；全部相邻间隙无新增peak/max。正式artifact11623977345，ZIP SHA256 `6fac9750816c935fef1c35b56cfd34a897a70cf1e52d7a996b6cb132d437b37b`，原件独立复验通过；这只是改产品前的诊断。真实整机OS余量、24小时、双core、真正过载和受限root升级仍分别待验。
+
+
+## 新私有payload core驻留观测
+
+3ea写回批次的双档/普通回归完成后，仅继续归因尚未消除的pip峰值；产品源码保持3ea。新增诊断在成功解包后打开本次私有payload的sing-box/xray只读fd，核regular、owner、单链接、manifest大小；各级目录和文件均不跟符号链接。两文件合计128,534,638字节（122.58MiB），这是文件长度，不是驻留量。
+
+仅在解包、ensurepip、offline pip后既有memcg边界之后，临时PROT_NONE mmap并调用mincore取得resident位，随后munmap。没有读取文件内容、主动触页、cache advice或修改pip；fd只跨本次离线stage保留，离开包装即关闭，异常路径亦清理，不延长后续备份/恢复的文件生命周期。记录每次观测时间及相同dev/inode/长度、page size、页数和驻留页数。页字节数按整页计，可含末页补齐；三个观察点是离散快照。
+
+mincore只说明文件页当时驻留，不能证明这些页由本cgroup收费，不能把它直接加到memcg file/current或峰值，亦不能由观察倒推瞬间峰值组成。PROT_NONE不读文件，但fd、VMA、向量、报告与checkpoint开销继续入账。接口缺失/拒绝明确记录unavailable；原29阶段仍执行，协调器随后将本次驻留诊断判为未取得，不能伪造零页或通过。只接受准确3个边界及一致文件身份。
+
+此轮新head实际结果待验；不追加产品缓存修改，不重做90分钟。此前3ea/1458资源结果分别保存，不把新诊断默认继承旧CI。
