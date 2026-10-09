@@ -1,4 +1,4 @@
-name: Opt-in unchanged-product installation accounting
+name: Opt-in bounded installation accounting
 on:
   pull_request:
     types: [labeled]
@@ -28,7 +28,7 @@ jobs:
           mkdir -p /tmp/vui-install-trace
           test "$(git rev-parse HEAD)" = "$VUI_SOURCE_COMMIT"
           python scripts/build_bundle.py /tmp/vui-install-trace/vui-linux.zip --source-commit "$VUI_SOURCE_COMMIT" | tee /tmp/vui-install-trace/build.log
-      - name: Preserve all smoke checks and trace unchanged install calls at both caps
+      - name: Preserve all smoke checks and trace install calls at both caps
         env:
           VUI_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
         run: |

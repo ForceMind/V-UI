@@ -1,4 +1,4 @@
-"""Opt-in accounting boundaries around unchanged offline installation calls.
+"""Opt-in accounting boundaries around the offline installation calls.
 
 No cache advice, altered call arguments, omitted verification, or extra product
 process. Snapshots and checkpoints remain charged to the original service group.
@@ -12,6 +12,8 @@ import subprocess
 import time
 
 BASELINE = '098e15a70665520d0c0abfc056e97237237037dc'
+# This candidate changes only extraction writeback in the release controller.
+ALLOWED_PRODUCT_CHANGES = ('app/release_tools.py',)
 PRODUCT_PATHS = ('app', 'web', 'deploy', 'third_party', 'main.py', 'VERSION',
     'install.sh', 'requirements-runtime.txt', 'scripts/deploy.py',
     'scripts/install_system.py', 'scripts/build_bundle.py', 'scripts/platform_support.py',
@@ -29,14 +31,22 @@ def product_provenance(source: Path, commit: str):
         raise RuntimeError('Diagnostic checkout does not match requested source')
     baseline = git('ls-tree', '-r', '--full-tree', BASELINE, '--', *PRODUCT_PATHS)
     current = git('ls-tree', '-r', '--full-tree', commit, '--', *PRODUCT_PATHS)
-    if not baseline or baseline != current:
-        raise RuntimeError('Product source or execution entry changed from qualified baseline')
+    def entries(raw):
+        try:
+            return {line.split(b'\t', 1)[1].decode(): line for line in raw.splitlines()}
+        except (IndexError, UnicodeDecodeError):
+            raise RuntimeError('Malformed product Git entries') from None
+    old, new = entries(baseline), entries(current)
+    changed = sorted(name for name in old.keys() | new.keys() if old.get(name) != new.get(name))
+    if not old or old.keys() != new.keys() or any(name not in ALLOWED_PRODUCT_CHANGES for name in changed):
+        raise RuntimeError('Product source or execution entry changed outside the candidate scope')
     if git('diff', '--name-only', commit, '--', *PRODUCT_PATHS).strip():
         raise RuntimeError('Product working files differ from committed source')
     return dict(baseline_commit=BASELINE, source_commit=commit,
                 product_paths=list(PRODUCT_PATHS), tracked_file_count=len(current.splitlines()),
                 product_git_entries_sha256=hashlib.sha256(current).hexdigest(),
-                product_bytes_unchanged=True,
+                baseline_product_git_entries_sha256=hashlib.sha256(baseline).hexdigest(),
+                changed_product_files=changed, product_bytes_unchanged=not changed,
                 scope='tracked product sources, entry points and builder; diagnostic harness and package metadata differ')
 
 
@@ -126,7 +136,9 @@ def validate_trace(report, unit, commit, expected_provenance):
             or value.get('service_cgroup') != report.get('service_cgroup')
             or expected_provenance.get('source_commit') != commit
             or expected_provenance.get('baseline_commit') != BASELINE
-            or expected_provenance.get('product_bytes_unchanged') is not True):
+            or not isinstance(expected_provenance.get('changed_product_files', []), list)
+            or any(name not in ALLOWED_PRODUCT_CHANGES for name in expected_provenance.get('changed_product_files', []))
+            or expected_provenance.get('product_bytes_unchanged') is not (not expected_provenance.get('changed_product_files', []))):
         raise RuntimeError('Installation trace provenance or profile mismatch')
     canonical_cgroup(value.get('service_cgroup'), unit)
     stages = [s for s in report.get('stages', []) if s.get('name') == 'offline_stage_including_wheels']

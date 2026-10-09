@@ -104,15 +104,22 @@ class InstallTraceTests(unittest.TestCase):
 
     def test_provenance_rejects_changed_products_or_dirty_worktree(self):
         entries=b'100644 blob '+b'1'*40+b'\tapp/release_tools.py\n'
-        for case in ('valid','wrong_head','changed','dirty'):
+        for case in ('valid','allowed_controller','wrong_head','changed','dirty'):
             responses=[(COMMIT if case!='wrong_head' else 'c'*40).encode()+b'\n',entries,
-                       b'changed' if case=='changed' else entries,b'app/main.py\n' if case=='dirty' else b'']
+                       (b'changed' if case=='changed' else entries.replace(b'1'*40,b'2'*40) if case=='allowed_controller' else entries),b'app/main.py\n' if case=='dirty' else b'']
             with self.subTest(case=case),patch.object(trace.subprocess,'check_output',side_effect=responses):
-                if case=='valid':
+                if case in ('valid','allowed_controller'):
                     proof=trace.product_provenance(Path('.'),COMMIT)
-                    self.assertTrue(proof['product_bytes_unchanged']);self.assertEqual(proof['tracked_file_count'],1)
+                    self.assertEqual(proof['product_bytes_unchanged'],case=='valid');self.assertEqual(proof['tracked_file_count'],1)
+                    self.assertEqual(proof['changed_product_files'],[] if case=='valid' else ['app/release_tools.py'])
                 else:
                     with self.assertRaises(RuntimeError):trace.product_provenance(Path('.'),COMMIT)
+
+    def test_provenance_rejects_other_product_changes_and_file_removal(self):
+        base=b'100644 blob '+b'1'*40+b'\tapp/main.py\n'
+        for current in (base.replace(b'1'*40,b'2'*40),b''):
+            with patch.object(trace.subprocess,'check_output',side_effect=[COMMIT.encode(),base,current]):
+                with self.assertRaises(RuntimeError):trace.product_provenance(Path('.'),COMMIT)
 
     def test_opt_in_flag_preserves_default_command_and_limits(self):
         args=SimpleNamespace(memory_mib=320,duration_profile='smoke',bundle=Path('/tmp/bundle'),source_commit=COMMIT)
