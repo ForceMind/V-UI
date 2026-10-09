@@ -47,8 +47,10 @@ at B. Assert the intended private 0600/0700 permissions and non-root ownership.
 All copies, hashes and verification reads remain in the same resource total.
 This fixture does not repeat the separate 256 MiB log/1000-node data profile.
 
-An external supervisor imposes an absolute total deadline. Cleanup stops the
-owned socket first, then services and worker with bounded stop/KILL handling.
+An external supervisor imposes an absolute total deadline. Cleanup first stops the worker and installer/rollback initiators, then the
+owned socket before either product service, with bounded stop/KILL handling.
+The parent must report no remaining descendants and populated=0 before files
+or accounts are removed.
 It captures final parent metrics while the slice still exists, then removes
 only verified owned resources. Cleanup failure cannot pass. Preserve partial
 JSON and safe diagnostics on timeout, OOM or worker failure. Keep the existing

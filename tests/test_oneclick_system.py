@@ -76,7 +76,17 @@ class OneClickSystemTests(unittest.TestCase):
                     exited, value=os.waitpid(child,os.WNOHANG)
                     if exited: status=value;break
                 if status is None:
-                    os.kill(child,signal.SIGTERM);os.waitpid(child,0)
+                    os.kill(child,signal.SIGTERM)
+                    grace=time.monotonic()+2
+                    while time.monotonic()<grace:
+                        if os.waitpid(child,os.WNOHANG)[0]:break
+                        time.sleep(.05)
+                    else:
+                        os.kill(child,signal.SIGKILL)
+                        grace=time.monotonic()+2
+                        while time.monotonic()<grace:
+                            if os.waitpid(child,os.WNOHANG)[0]:break
+                            time.sleep(.05)
                     self.fail('Installer timed out: '+output.decode(errors='replace').replace(password,'[REDACTED]')[-12000:])
             finally: os.close(fd)
             clean=output.decode(errors='replace').replace(password,'[REDACTED]')
@@ -86,6 +96,8 @@ class OneClickSystemTests(unittest.TestCase):
                 clean += '\n' + journal.stdout.replace(password,'[REDACTED]')
             self.assertEqual(os.waitstatus_to_exitcode(status),0,clean[-20000:])
             self.assertNotIn(password,output.decode(errors='replace'))
+            if gate:
+                gate.installer_receipt('initial_install', output.decode(errors='replace'))
             uid=pwd.getpwnam('v-ui').pw_uid;self.assertGreater(uid,0)
             for name in ('v-ui.service','v-ui-http01.socket'):
                 self.assertEqual(subprocess.run(['systemctl','is-enabled','--quiet',name]).returncode,0)
@@ -133,11 +145,15 @@ class OneClickSystemTests(unittest.TestCase):
                 gate.installed()
             # A repeated install without explicit upgrade must not touch the running instance.
             repeat=subprocess.run(cmd,capture_output=True,text=True,timeout=30)
+            if gate:
+                gate.installer_receipt('implicit_repeat', repeat.stdout)
             self.assertNotEqual(repeat.returncode,0)
             self.assertIn('already exists',repeat.stderr)
             check_uid('v-ui.service')
             # Rerunning with --upgrade checks/stages and makes a stopped backup.
             upgraded=subprocess.run(cmd+['--upgrade'],capture_output=True,text=True,timeout=120)
+            if gate:
+                gate.installer_receipt('same_bundle_upgrade', upgraded.stdout)
             self.assertEqual(upgraded.returncode,0,(upgraded.stdout+upgraded.stderr)[-15000:])
             self.assertEqual(api('/api/auth/me')[0],200)
             subprocess.run(['sudo','systemctl','restart','v-ui.service'],check=True)

@@ -20,6 +20,11 @@ SOURCE = Path(__file__).resolve().parents[1]
 ROOT = Path('/var/lib/v-ui')
 RESERVED = (ROOT, Path('/etc/v-ui'), Path('/usr/local/lib/v-ui'))
 UNITS = ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')
+STAGES = ('worker_started', 'root_install_and_http01', 'marker_seeded_before_backups',
+          'original_oneclick_controls_passed', 'fresh_directory_upgrade',
+          'stopped_bad_digest_preserves_data', 'stopped_verified_restore',
+          'restored_private_permissions', 'restored_new_login_and_membership')
+
 SLICE_RE = re.compile(r'vuiroot[0-9a-f]{32}\.slice')
 
 
@@ -36,7 +41,7 @@ def membership(text, parent):
     if len(unified) != 1:
         raise RuntimeError('Expected unified cgroup membership')
     path = Path(unified[0])
-    if not path.is_absolute() or '..' in path.parts or parent not in path.parts:
+    if not path.is_absolute() or '..' in path.parts or len(path.parts) < 2 or path.parts[1] != parent:
         raise RuntimeError('Process escaped measured parent slice')
     return str(path)
 
@@ -80,6 +85,7 @@ def preflight(*, reserved=RESERVED, search_paths=None, accounts=True, port=True)
     for base in search_paths:
         paths.extend(base/name for name in UNITS)
         paths.extend(base/(name+'.d') for name in UNITS)
+        paths.extend(base/name for name in ('service.d', 'socket.d', 'v-.service.d', 'v-ui-.service.d', 'v-.socket.d', 'v-ui-.socket.d'))
         if base.is_dir():
             for entry in base.iterdir():
                 if entry.name.endswith(('.wants', '.requires', '.upholds')) and entry.is_dir():
@@ -94,6 +100,10 @@ def preflight(*, reserved=RESERVED, search_paths=None, accounts=True, port=True)
     if port:
         with socket.socket() as probe:
             probe.bind(('0.0.0.0', 80))
+        if socket.has_ipv6 and Path('/proc/net/if_inet6').exists():
+            with socket.socket(socket.AF_INET6) as probe:
+                probe.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+                probe.bind(('::', 80))
     return {'reserved_paths_absent': True, 'units_absent': True,
             'unit_search_paths': [str(path) for path in search_paths], 'http01_port_free': port}
 
@@ -140,16 +150,38 @@ def synthetic_bundle(source, destination, commit):
             'synthetic_release_only': True}
 
 
+def directory_identity(directory):
+    info = directory.stat()
+    return {'device': info.st_dev, 'inode': info.st_ino}
+
+
+def subtree(directory, parent):
+    result = []
+    for group in [directory, *sorted(directory.rglob('*'))]:
+        if not group.is_dir():
+            continue
+        try:
+            pids = (group/'cgroup.procs').read_text().split()
+        except FileNotFoundError:
+            continue
+        for pid in pids:
+            try:
+                result.append(identity(int(pid), parent))
+            except FileNotFoundError:
+                continue
+    return sorted(result, key=lambda row: row['pid'])
+
+
 def service_identity(unit, parent):
     properties = unit_properties(unit)
     group = properties.get('ControlGroup', '')
     expected_dropin = f'/run/systemd/system/{unit}.d/90-vui-resource.conf'
     if (properties.get('Slice') != parent or properties.get('ActiveState') != 'active'
-            or expected_dropin not in properties.get('DropInPaths', '').split()):
+            or properties.get('DropInPaths', '').split() != [expected_dropin]):
         raise RuntimeError('Service does not use the owned parent/drop-in: '+unit)
     process = identity(int(properties['MainPID']), parent)
     account = pwd.getpwnam('v-ui')
-    if process['uid'] != [account.pw_uid]*4 or process['cgroup'] != group:
+    if process['uid'] != [account.pw_uid]*4 or process['cgroup'] != group or group != '/'+parent+'/'+unit:
         raise RuntimeError('Service ownership or actual membership mismatch')
     return {'properties': properties, 'process': process}
 
@@ -160,6 +192,8 @@ def root_state(parent):
     if own['uid'] != [0]*4:
         raise RuntimeError('Privileged observation did not enter as root')
     state = {'observer': own, 'services': {}}
+    directory = Path('/sys/fs/cgroup')/parent
+    state['observed_subtree'] = subtree(directory, parent)
     for unit in UNITS[:2]:
         if unit_properties(unit).get('ActiveState') == 'active':
             state['services'][unit] = service_identity(unit, parent)
@@ -174,6 +208,7 @@ def root_state(parent):
     if ROOT.exists():
         state['backups'] = sorted(path.name for path in ROOT.glob('before-upgrade-*.zip'))
         state['releases'] = sorted(path.name for path in (ROOT/'releases').iterdir()) if (ROOT/'releases').exists() else []
+        state['ready_releases'] = [name for name in state['releases'] if (ROOT/'releases'/name/'READY.json').is_file()]
     return state
 
 
@@ -217,7 +252,7 @@ def root_operation(action, parent, value=None):
         if action == 'bad-restore':
             if result.returncode == 0 or marker.read_bytes() != before or files_in(ROOT/'data') != before_files:
                 raise RuntimeError('Bad-digest restore failed to preserve marker')
-            if 'digest' not in (result.stdout+result.stderr).lower() and 'sha' not in (result.stdout+result.stderr).lower():
+            if 'Operation refused: Archive checksum mismatch' not in (result.stdout+result.stderr):
                 raise RuntimeError('Bad restore failed for an unrelated reason')
         elif result.returncode != 0 or marker.read_text() != 'before-upgrade\n':
             raise RuntimeError('Verified restore did not recover synthetic data')
@@ -229,7 +264,8 @@ def root_operation(action, parent, value=None):
         if integrity != 'ok':
             raise RuntimeError('Database integrity lost')
         return {'operation': action, 'backup_name': value, 'backup_sha256': digest,
-                'returncode': result.returncode, 'current_unchanged': True,
+                'returncode': result.returncode, 'rejection_reason': 'Archive checksum mismatch' if action == 'bad-restore' else None,
+                'current_unchanged': True,
                 'marker_sha256': file_hash(marker), 'database_integrity': integrity,
                 'observer': own}
     if action == 'permissions':
@@ -251,14 +287,18 @@ class Gate:
         self.directory = Path('/sys/fs/cgroup')/self.parent
         self.output = Path(config['worker_output'])
         self.report = {'source_commit': config['source_commit'], 'slice': self.parent,
-                       'stages': [], 'outcome': 'running', 'complete': False,
-                       'worker': identity(os.getpid(), self.parent)}
+                       'stages': [], 'installer_entries': [], 'outcome': 'running', 'complete': False,
+                       'worker': identity(os.getpid(), self.parent),
+                       'parent_identity': directory_identity(self.directory)}
+        if self.report['parent_identity'] != config['parent_identity']:
+            raise RuntimeError('Parent cgroup identity changed before worker')
         self.record('worker_started')
 
     def record(self, name, details=None):
         from scripts.low_resource_acceptance import metrics, assert_no_oom, verify_limits, write_json
         row = {'name': name, 'monotonic': time.monotonic(), 'limits': verify_limits(self.directory),
-               'metrics': metrics(self.directory), 'details': details or {}}
+               'metrics': metrics(self.directory), 'parent_identity': directory_identity(self.directory),
+               'details': details or {}}
         assert_no_oom(row['metrics'])
         self.report['stages'].append(row)
         write_json(self.output, self.report)
@@ -268,7 +308,20 @@ class Gate:
         if command[:2] != ['sudo', 'bash']:
             raise RuntimeError('Unexpected installer invocation')
         return ['sudo', '-n', sys.executable, '-B', str(Path(__file__).resolve()),
-                '--root-exec', self.parent, '--', *command[1:]]
+                '--source-commit', self.config['source_commit'], '--root-exec', self.parent, '--', *command[1:]]
+
+    def installer_receipt(self, phase, text):
+        lines = [line[len('ROOT_ENTRY '):] for line in text.splitlines() if line.startswith('ROOT_ENTRY ')]
+        if len(lines) != 1:
+            raise RuntimeError('Missing or duplicate privileged installer entry receipt')
+        entry = json.loads(lines[0])
+        expected = '/'+self.parent+'/'+self.parent.removesuffix('.slice')+'.service'
+        if (entry['source_commit'] != self.config['source_commit'] or entry['uid'] != [0]*4
+                or entry['cgroup'] != expected):
+            raise RuntimeError('Wrong privileged installer receipt')
+        self.report['installer_entries'].append({'phase': phase, **entry})
+        from scripts.low_resource_acceptance import write_json
+        write_json(self.output, self.report)
 
     def operation(self, action, value=None):
         command = ['sudo', '-n', sys.executable, '-B', str(Path(__file__).resolve()),
@@ -289,6 +342,7 @@ class Gate:
         package = self.config['package']
         case.assertEqual(before['current']['release_id'], package['a_release_id'])
         case.assertNotIn(package['b_release_id'], before['releases'])
+        case.assertNotIn(package['b_release_id'], before['ready_releases'])
         case.assertIn('v-ui.service', before['services'])
         self.record('original_oneclick_controls_passed', before)
         new_command = list(command)
@@ -310,12 +364,14 @@ class Gate:
         finally:
             stop.set(); observer.join(timeout=140)
         case.assertFalse(observer.is_alive())
+        self.installer_receipt('fresh_directory_upgrade', upgraded.stdout)
         case.assertEqual(upgraded.returncode, 0, (upgraded.stdout+upgraded.stderr)[-12000:])
         # Only accept a sample with B newly present while A is the SAME active
         # generation. Before/after success alone cannot prove live staging.
         old = before['services']['v-ui.service']['process']
         live_stage = [state for state in samples
             if package['b_release_id'] in state.get('releases', [])
+            and package['b_release_id'] not in state.get('ready_releases', [])
             and state.get('current', {}).get('release_id') == package['a_release_id']
             and state.get('services', {}).get('v-ui.service', {}).get('process', {}) == old]
         case.assertTrue(live_stage, 'No real observation of A alive during fresh B staging')
@@ -394,17 +450,31 @@ def cleanup_owned(parent, worker, report):
     import shutil
     from scripts.low_resource_acceptance import metrics
     records = []; errors = []
-    # Prevent socket activation BEFORE stopping the responder/panel/worker.
-    for unit in ('v-ui-http01.socket', 'v-ui-http01.service', 'v-ui.service', worker):
+    slice_path = Path('/run/systemd/system')/parent
+    if str(slice_path) not in report['created_paths']:
+        report['cleanup_confirmed'] = True
+        return True
+    # First remove installer/rollback initiators, which can start services.
+    # Then stop socket activation before either product service.
+    for unit in (worker, 'v-ui-http01.socket', 'v-ui-http01.service', 'v-ui.service'):
         try:
             bounded_stop(unit, records)
         except Exception as exc:
             errors.append({'unit': unit, 'error': type(exc).__name__})
     directory = Path('/sys/fs/cgroup')/parent
     if directory.exists():
-        report['final_metrics'] = metrics(directory)
+        try:
+            report['final_metrics'] = metrics(directory)
+        except RuntimeError as exc:
+            report['final_accounting_error'] = str(exc)
+        if report.get('parent_identity') and directory_identity(directory) != report['parent_identity']:
+            errors.append({'error': 'ParentIdentityChanged'})
+        report['remaining_processes'] = subtree(directory, parent)
+        report['parent_populated'] = int(dict(line.split() for line in (directory/'cgroup.events').read_text().splitlines())['populated'])
+        if report['remaining_processes'] or report['parent_populated']:
+            errors.append({'error': 'ParentStillPopulated'})
     else:
-        errors.append({'error': 'MissingParentBeforeFinalAccounting'})
+        report['final_accounting_error'] = 'MissingParentBeforeFinalAccounting'
     report['stops'] = records
     if errors:
         # Never unlink state or delete an account while an owned process lives.
@@ -436,6 +506,11 @@ def cleanup_owned(parent, worker, report):
         directory = Path('/run/systemd/system')/(unit+'.d')
         dropin = directory/'90-vui-resource.conf'
         expected = '[Service]\nSlice='+parent+'\n'
+        if str(directory) not in report['created_paths']:
+            continue
+        if not lexists(dropin):
+            directory.rmdir()
+            continue
         if dropin.is_symlink() or dropin.read_text() != expected:
             raise RuntimeError('Owned drop-in identity changed')
         dropin.unlink(); directory.rmdir()
@@ -458,7 +533,7 @@ def cleanup_owned(parent, worker, report):
     run(['systemctl', 'daemon-reload'], timeout=15)
     run(['systemctl', 'reset-failed', *UNITS, worker], timeout=10, check=False)
     preflight(port=False)
-    run(['systemctl', 'stop', parent], timeout=10)
+    run(['systemctl', 'stop', parent], timeout=10, check=False)
     path = Path('/run/systemd/system')/parent
     expected = '[Slice]\nMemoryMax=536870912\nMemorySwapMax=0\nCPUQuota=100%\nCPUQuotaPeriodSec=100ms\n'
     if path.is_symlink() or path.read_text() != expected:
@@ -467,6 +542,97 @@ def cleanup_owned(parent, worker, report):
     run(['systemctl', 'daemon-reload'], timeout=15)
     report['cleanup_confirmed'] = True
     return True
+
+
+def validate_result(report, commit):
+    """Reconcile worker claims with the independently retained parent total."""
+    from scripts.low_resource_acceptance import assert_no_oom
+    if report.get('source_commit') != commit or report.get('worker_exit') != 0:
+        raise RuntimeError('Source or worker exit mismatch')
+    parent = checked_slice(report.get('slice'))
+    if report.get('cleanup_confirmed') is not True or report.get('parent_populated') != 0 or report.get('remaining_processes') != []:
+        raise RuntimeError('Cleanup not demonstrated')
+    worker = report.get('worker', {})
+    if worker.get('source_commit') != commit or worker.get('slice') != parent or worker.get('outcome') != 'passed' or worker.get('complete') is not True:
+        raise RuntimeError('Incomplete measured worker')
+    membership('0::'+worker['worker']['cgroup'], parent)
+    if worker['worker']['cgroup'] != '/'+parent+'/'+report['worker_unit']:
+        raise RuntimeError('Worker is not in expected leaf unit')
+    entries = worker.get('installer_entries', [])
+    if [entry.get('phase') for entry in entries] != ['initial_install', 'implicit_repeat', 'same_bundle_upgrade', 'fresh_directory_upgrade']:
+        raise RuntimeError('Root installer receipts incomplete')
+    for entry in entries:
+        if entry['source_commit'] != commit or entry['uid'] != [0]*4 or entry['cgroup'] != worker['worker']['cgroup']:
+            raise RuntimeError('Root entry escaped measured worker')
+    if worker['worker']['uid'][0] <= 0:
+        raise RuntimeError('Worker unexpectedly privileged')
+    if worker.get('parent_identity') != report.get('parent_identity'):
+        raise RuntimeError('Parent identity mismatch')
+    package = report['package']
+    if (package['source_commit'] != commit or package['product_members_identical'] is not True
+            or package['synthetic_release_only'] is not True
+            or package['a_release_id'] == package['b_release_id']
+            or package['a_sha256'] == package['b_sha256']):
+        raise RuntimeError('Synthetic package contract missing')
+    stages = worker.get('stages', [])
+    if [row.get('name') for row in stages] != list(STAGES):
+        raise RuntimeError('Root stage sequence incomplete')
+    last_time = -1; last_peak = 0; last_cpu = 0; last_max = 0
+    for row in stages:
+        if row['parent_identity'] != report['parent_identity'] or row['limits'] != report['limits']:
+            raise RuntimeError('Stage moved outside original parent budget')
+        if row['monotonic'] <= last_time:
+            raise RuntimeError('Invalid root stage order')
+        last_time = row['monotonic']
+        value = row['metrics']; assert_no_oom(value)
+        if (value['memory.peak'] < last_peak or value['cpu.stat']['usage_usec'] < last_cpu
+                or value['memory.events']['max'] < last_max):
+            raise RuntimeError('Cumulative parent accounting regressed')
+        last_peak = value['memory.peak']; last_cpu = value['cpu.stat']['usage_usec']; last_max = value['memory.events']['max']
+    final = report['final_metrics']; assert_no_oom(final)
+    if final['memory.peak'] < last_peak or final['cpu.stat']['usage_usec'] < last_cpu or final['memory.events']['max'] < last_max:
+        raise RuntimeError('Final parent accounting lost measured work')
+    details = {row['name']: row['details'] for row in stages}
+    for name in ('root_install_and_http01', 'restored_new_login_and_membership'):
+        state = details[name]
+        if set(state['services']) != set(UNITS[:2]):
+            raise RuntimeError('Required PID1 services not observed')
+        for service, info in state['services'].items():
+            membership('0::'+info['process']['cgroup'], parent)
+            if info['process']['uid'][0] <= 0 or info['properties']['Slice'] != parent:
+                raise RuntimeError('Wrong service ownership or slice')
+    change = details['fresh_directory_upgrade']
+    if (change['before']['current']['release_id'] != package['a_release_id']
+            or change['after']['current']['release_id'] != package['b_release_id']
+            or package['b_release_id'] in change['before']['releases']
+            or package['b_release_id'] in change['before']['ready_releases']
+            or not change['staging_live_samples']):
+        raise RuntimeError('New release-directory stage not proved')
+    old = change['before']['services']['v-ui.service']['process']
+    for sample in change['staging_live_samples']:
+        if (sample['services']['v-ui.service']['process'] != old
+                or sample['current']['release_id'] != package['a_release_id']
+                or package['b_release_id'] not in sample['releases']
+                or package['b_release_id'] in sample['ready_releases']):
+            raise RuntimeError('Same live A generation during B stage missing')
+    bad = details['stopped_bad_digest_preserves_data']; restored = details['stopped_verified_restore']
+    if (bad.get('rejection_reason') != 'Archive checksum mismatch' or bad['returncode'] == 0 or restored['returncode'] != 0
+            or bad['backup_name'] != change['backup_name'] or restored['backup_name'] != change['backup_name']
+            or bad['backup_sha256'] != restored['backup_sha256']
+            or bad['marker_sha256'] == restored['marker_sha256']
+            or not bad['current_unchanged'] or not restored['current_unchanged']
+            or restored['database_integrity'] != 'ok'
+            or details['restored_new_login_and_membership']['current']['release_id'] != package['b_release_id']):
+        raise RuntimeError('Backup restore identity/semantics missing')
+
+
+def worker_report(path, uid):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, 'r') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != uid or info.st_nlink != 1 or info.st_size > 4*1024*1024:
+            raise RuntimeError('Unsafe worker result file')
+        return json.load(stream)
 
 
 def supervisor(args):
@@ -478,10 +644,17 @@ def supervisor(args):
         raise RuntimeError('Explicit disposable hosted runner required')
     parent = 'vuiroot'+uuid.uuid4().hex+'.slice'
     worker = parent.removesuffix('.slice')+'.service'
-    output = args.output.resolve()
-    work = output.parent
+    import tempfile
+    # Root only creates files beneath its own fresh directory. Never chown a
+    # caller-supplied output parent or follow caller-controlled output links.
+    work = Path(tempfile.mkdtemp(prefix='vui-root-resource-', dir='/tmp'))
+    work.chmod(0o755)
+    output = work/'root-result.json'
+    results = work/'results'
+    results.mkdir(mode=0o700)
+    os.chown(results, args.runner_uid, args.runner_gid)
     config_path = work/'root-worker-config.json'
-    worker_output = work/'root-worker.json'
+    worker_output = results/'root-worker.json'
     report = {'source_commit': args.source_commit, 'slice': parent, 'worker_unit': worker,
               'outcome': 'failed', 'complete': False, 'cleanup_confirmed': False,
               'scope': 'same-product new-release-directory root installation/upgrade/restore; not whole VPS or version migration',
@@ -495,10 +668,15 @@ def supervisor(args):
               'bundle_b': str(bundle_b), 'worker_output': str(worker_output)}
     config_path.write_text(json.dumps(config)); config_path.chmod(0o644)
     # The isolated worker must be able to write its own partial result.
-    worker_output.touch(mode=0o600); os.chown(worker_output, args.runner_uid, args.runner_gid)
-    os.chown(work, args.runner_uid, args.runner_gid)
+    with worker_output.open('x') as file:
+        os.fchmod(file.fileno(), 0o600); os.fchown(file.fileno(), args.runner_uid, args.runner_gid)
     slice_path = Path('/run/systemd/system')/parent
     created = []
+    import signal
+    def interrupted(signum, frame):
+        raise RuntimeError('Supervisor interrupted before completion')
+    previous_handlers = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGALRM)}
+    signal.setitimer(signal.ITIMER_REAL, 960)
     try:
         with slice_path.open('x') as file:
             file.write('[Slice]\nMemoryMax=536870912\nMemorySwapMax=0\nCPUQuota=100%\nCPUQuotaPeriodSec=100ms\n')
@@ -515,6 +693,9 @@ def supervisor(args):
         report['limits'] = verify_limits(directory)
         if report['limits']['cpu.max'] != '100000 100000':
             raise RuntimeError('Unexpected quota period')
+        report['parent_identity'] = directory_identity(directory)
+        config['parent_identity'] = report['parent_identity']
+        config_path.write_text(json.dumps(config))
         report['initial_memory_peak'] = int((directory/'memory.peak').read_text())
         command = ['systemd-run', '--wait', '--pipe', '--unit', worker, '--slice', parent,
             '--uid', str(args.runner_uid), '--gid', str(args.runner_gid),
@@ -530,20 +711,30 @@ def supervisor(args):
             result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=920)
         report['worker_exit'] = result.returncode
         report['wall_seconds'] = time.monotonic()-start
-        report['worker'] = json.loads(worker_output.read_text())
+        report['worker'] = worker_report(worker_output, args.runner_uid)
         if result.returncode or report['worker'].get('outcome') != 'passed' or not report['worker'].get('complete'):
             raise RuntimeError('Measured root worker failed')
         report['outcome'] = 'passed'
     except Exception as exc:
         report['error'] = type(exc).__name__
     finally:
+        if 'worker' not in report:
+            try:
+                report['worker'] = worker_report(worker_output, args.runner_uid)
+            except Exception as exc:
+                report['partial_worker_error'] = type(exc).__name__
         report['created_paths'] = created
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        for sig in previous_handlers:
+            signal.signal(sig, signal.SIG_IGN)
         try:
             if not cleanup_owned(parent, worker, report):
                 report['outcome'] = 'failed'
         except Exception as exc:
             report['outcome'] = 'failed'; report['cleanup_error'] = type(exc).__name__
         try:
+            if report['outcome'] == 'passed':
+                validate_result(report, args.source_commit)
             assert_no_oom(report['final_metrics'])
             report['peak_assessment'] = peak_assessment(report['final_metrics']['memory.peak'], 536870912, os.sysconf('SC_PAGE_SIZE'))
             if not report['peak_assessment']['within_fixed_page_allowance']:
@@ -552,7 +743,10 @@ def supervisor(args):
             report['outcome'] = 'failed'; report['accounting_error'] = type(exc).__name__
         report['complete'] = True
         write_json(output, report)
-        os.chown(output, args.runner_uid, args.runner_gid)
+        output.chmod(0o644)
+        print(json.dumps({'evidence_dir': str(work)}), flush=True)
+        for sig, handler in previous_handlers.items():
+            signal.signal(sig, handler)
     return 0 if report['outcome'] == 'passed' else 1
 
 
@@ -575,7 +769,9 @@ def main():
         own = identity(os.getpid(), args.root_exec)
         if own['uid'] != [0]*4 or not args.command or args.command[0] != '--':
             raise RuntimeError('Expected measured root installer entry')
-        print('ROOT_ENTRY '+json.dumps(own), flush=True)
+        if not re.fullmatch('[0-9a-f]{40}', args.source_commit or ''):
+            raise RuntimeError('Missing source identity at root entry')
+        print('ROOT_ENTRY '+json.dumps({'source_commit': args.source_commit, **own}), flush=True)
         os.execvp(args.command[1], args.command[1:])
     if args.root_operation:
         print(json.dumps(root_operation(args.root_operation, args.slice, args.value)))
@@ -589,11 +785,27 @@ def main():
     if run(['git', '-C', str(SOURCE), 'rev-parse', 'HEAD']).stdout.strip() != args.source_commit:
         raise RuntimeError('Source checkout mismatch')
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    return subprocess.run(['sudo', '-n', '--preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT',
+    result = subprocess.run(['sudo', '-n', '--preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT',
         sys.executable, '-B', str(Path(__file__).resolve()), '--supervisor',
         '--runner-uid', str(os.getuid()), '--runner-gid', str(os.getgid()),
-        '--bundle', str(args.bundle.resolve()), '--output', str(args.output.resolve()),
-        '--source-commit', args.source_commit], timeout=1250).returncode
+        '--bundle', str(args.bundle.resolve()),
+        '--source-commit', args.source_commit], capture_output=True, text=True, timeout=1250)
+    import shutil
+    try:
+        evidence = Path(json.loads(result.stdout)['evidence_dir'])
+        if evidence.parent != Path('/tmp') or not evidence.name.startswith('vui-root-resource-'):
+            raise RuntimeError('Invalid supervisor evidence directory')
+        # These copies run as the original unprivileged coordinator.
+        shutil.copyfile(evidence/'root-result.json', args.output)
+        shutil.copyfile(evidence/'root-worker.log', args.output.with_suffix('.log'))
+        worker = json.loads(args.output.read_text()).get('worker')
+        if worker is not None:
+            args.output.with_name('root-worker.json').write_text(json.dumps(worker, indent=2)+'\n')
+    except Exception:
+        if result.returncode == 0:
+            raise
+        args.output.with_suffix('.supervisor.log').write_text(result.stderr)
+    return result.returncode
 
 
 if __name__ == '__main__':
