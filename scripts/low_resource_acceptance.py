@@ -145,15 +145,15 @@ def filesystem_type(path: Path) -> str:
 
 def duration_profile(args):
     profile = getattr(args, "duration_profile", "smoke")
-    if profile not in {"smoke", "sustained", "interactions", "certificates", "data-backup"}:
+    if profile not in {"smoke", "sustained", "interactions", "certificates", "data-backup", "accounting"}:
         raise RuntimeError("Unknown duration profile")
-    if profile in {"sustained", "interactions", "certificates", "data-backup"} and args.memory_mib != 512:
+    if profile in {"sustained", "interactions", "certificates", "data-backup", "accounting"} and args.memory_mib != 512:
         raise RuntimeError("Extended profiles currently require the original 512 MiB limit")
     return profile
 
 
 def runtime_seconds(args):
-    return {"smoke": 600, "sustained": 6600, "interactions": 1800, "certificates": 1800, "data-backup": 1800}[duration_profile(args)]
+    return {"smoke": 600, "sustained": 6600, "interactions": 1800, "certificates": 1800, "data-backup": 1800, "accounting": 900}[duration_profile(args)]
 
 
 def worker(args) -> int:
@@ -181,6 +181,9 @@ def worker(args) -> int:
     if profile == 'data-backup':
         report['scope']='1000 synthetic nodes, saved large routing, fixed administrator exports and stopped backup/restore of 256MiB synthetic log; not runtime log rotation or full VPS qualification'
         report['accounting']+='; external export clients separately accounted; generation/hash/backup/restore remain inside service cgroup'
+    if profile == "accounting":
+        report["scope"] = "warm panel and single-core 60-second inclusive memory attribution diagnostic; not 160 MiB or 30-minute idle qualification"
+        report["process_accounting_scope"] = "sequential smaps_rollup RSS/PSS/private snapshots of every cgroup descendant; PSS is not memcg charge; observer remains included; no subtraction or cache reset"
     output = args.output
 
     def checkpoint():
@@ -351,8 +354,33 @@ def worker(args) -> int:
                     checkpoint()
                     time.sleep(min(30, max(0, deadline - time.monotonic())))
                 health()
+            def accounting_wait(seconds, health, core_pid=None):
+                from scripts.low_resource_accounting import snapshot
+                roles = {"worker": os.getpid(), "panel": running[0].pid}
+                if core_pid is not None:
+                    roles["core"] = core_pid
+                started = time.monotonic()
+                samples = []
+                report["stages"][-1]["accounting_samples"] = samples
+                report["stages"][-1]["accounting_roles"] = roles
+                report["stages"][-1]["accounting_cgroup_root"] = str(directory)
+                report["stages"][-1]["accounting_started_monotonic"] = started
+                for offset in range(0, seconds + 1, 5):
+                    planned = started + offset
+                    time.sleep(max(0, planned - time.monotonic()))
+                    alive()
+                    health()
+                    sample = snapshot(directory, roles, metrics)
+                    sample["planned_monotonic"] = planned
+                    samples.append(sample)
+                    checkpoint()
+                    if sample["finished_monotonic"] >= planned + 5:
+                        raise RuntimeError("Accounting snapshot missed its planned slot")
+                health()
             def idle():
-                if profile == "sustained":
+                if profile == "accounting":
+                    accounting_wait(60, alive)
+                elif profile == "sustained":
                     monitor_wait(1800, alive)
                 else:
                     time.sleep(60)
@@ -519,7 +547,8 @@ with SessionLocal() as db:
                             lambda: api("/api/auth/me"),
                             sustained=sustained_load if profile == "sustained" else None,
                             idle_monitor=monitor_wait if profile == "sustained" else None,
-                            overlap=certificate_overlap if profile == "certificates" else None)
+                            overlap=certificate_overlap if profile == "certificates" else None,
+                            accounting_monitor=accounting_wait if profile == "accounting" else None)
             old_cookies = list(jar)
             stage("logout", lambda: api("/api/auth/logout", {}))
             for cookie in old_cookies:
@@ -669,6 +698,8 @@ def coordinator(args) -> int:
                 sys.path.insert(0,str(SOURCE))
                 from scripts.low_resource_data import DataBroker
                 broker=DataBroker(Path(directory),output,unit,args.source_commit)
+            elif profile == "accounting":
+                sys.path.insert(0, str(SOURCE))
             with broker, output.with_suffix(".log").open("w") as log:
                 result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT,
                                         timeout=runtime_seconds(args) + 60)
@@ -698,6 +729,9 @@ def coordinator(args) -> int:
             elif profile == 'data-backup':
                 from scripts.low_resource_data import validate_complete
                 validate_complete(report,unit,args.source_commit)
+            if profile == 'accounting':
+                from scripts.low_resource_accounting import validate_complete
+                validate_complete(report)
             assert_no_oom(report["metrics"])
             summary["peak_budget_assessment"] = peak_assessment(report["metrics"]["memory.peak"],
                 budget, report["base_page_size_bytes"])
@@ -737,7 +771,7 @@ def main():
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--memory-mib", type=int, choices=MEMORY_PROFILES, default=512)
-    parser.add_argument("--duration-profile", choices=("smoke", "sustained", "interactions", "certificates", "data-backup"), default="smoke")
+    parser.add_argument("--duration-profile", choices=("smoke", "sustained", "interactions", "certificates", "data-backup", "accounting"), default="smoke")
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--unit")
     parser.add_argument("--work-dir", type=Path)

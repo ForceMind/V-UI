@@ -297,3 +297,26 @@ ZIP 的中心目录、最多 10,000 个文件条目及至多 4 MB MANIFEST 仍�
 本次修正仅补测试准备与观测：真实resource-admin用户名、八个必要初始化GET完成200、相关在途清空后，重新核实tab1 hidden/tab2 visible，再开始注销。安全timeline从建页起记录允许列表路径/方法、请求ID、标签、文档代次、开始/响应/完成及主框架导航，不记录headers、Cookie、body或query。保留至少一个完整status端点401；另外必须看到两页原dashboard文档的当前/auth/me完整401先于登录导航，不能拿/login加载后产生的401补数。真实logout200、共享15秒导航期限、完整11秒无新状态请求及独立worker旧Cookie401均保留。生产JS、原生visibility driver、资源上限和旧长测不改；修正head仍须自己的实际UI与最终汇总证据。
 
 此夹具修正最终本地完整596项：472通过、124环境skip；独立35项相关回归全过，复审无剩余阻断。新增反例拒绝只有/login后401、错文档代次、缺完成/401后传输失败、初始化仍在途、POST冒充GET、logout实际响应晚于声明完成、超时导航及停止窗发请求；文档/编译/diff通过。本地回归不代替新准确head真实浏览器时间线与资源验收。
+
+### 5d839dc 同一候选回归与未达预算
+
+准确 `5d839dcd2dea9932afd684f8d441f8365f3a1754` 已核普通八组及四个独立profile，共12 runs、15 jobs、162步骤的最新结果全部成功。oneclick首轮固定官方核心下载遇HTTP500，安装验收未执行；仅该job一次重跑后attempt2通过，其余attempt1，首败保留于PR。
+
+- [UI37867200130](https://github.com/ForceMind/V-UI/actions/runs/37867200130)：artifact11589555680 SHA-256 `e7a3a511f5b89a3f91b720446838419270da3a26387ea7d2353f456cb163a770`，35阶段，peak480161792/max0/OOM0。可见24/隐藏0/两页24请求，真实logout200、status401、两页原dashboard的/me401之后导航，11秒停止和旧Cookie401均有完整证据。
+- [大数据37868350400](https://github.com/ForceMind/V-UI/actions/runs/37868350400)：artifact11589571727 SHA-256 `00a5429d7b25c39d1d77fae6d4b3a88b6904c477daca7fe94ecefaa3892f6976`，45阶段，256MiB非稀疏日志、1000节点及备份恢复通过。peak536870912恰触512MiB，max3333/OOM0；四导出合计50.259秒、97.654%单核CPU，不能称低功耗或有余量。与557相比源码负载未变，宿主差异不算优化收益。
+- [证书37868350280](https://github.com/ForceMind/V-UI/actions/runs/37868350280)：artifact11589423664 SHA-256 `87bcb8916efcf46e35ecbfd887fd29a236369c8fa05fd6c87d61136cb6e59c9b`，32阶段，peak478920704/max0/OOM0。600.003秒/6000响应，两job各3次新HTTP-01及28/26次窗口内代理响应，保留新fake账户重验证限制。
+- [长测37868349482](https://github.com/ForceMind/V-UI/actions/runs/37868349482)：artifact11592057558 SHA-256 `ac3c55a05b528eb06806dc4560d487f170649aa4cd07ef4996704ab2aa46acd2`，39阶段，peak478846976/max0/OOM0。面板/单core各1800.001/1800.013秒，CPU0.1284%/0.1491%，阶段末总cgroup206.55/297.99MiB；采样范围205.80–206.84/297.19–298.47MiB。1/10/50各600秒、600/6000/30000响应、零错误与逐档新单连接恢复通过。
+
+160MiB空载目标不能登记通过：总cgroup含worker、文件缓存及内核，以上既不是产品净PSS，也不能仅凭总数将净服务占用判为超标。大数据严格语义通过仍不表示512MiB有运行余量或导出低CPU目标达成。四平台已有CI运行条件，资源验收尚需实现；24小时、双核心、真正过载恢复、完整受限root升级及真实整机OS余量仍分别待验。
+
+### 包含全部进程的空载记账诊断（实施范围）
+
+新增显式标签 `run-low-resource-accounting` 的独立accounting profile；一核/512MiB/零swap、原一基础页容差和所有OOM拒绝不变。worker900秒、协调器960秒、job35分钟。普通三档短门槛及其他长profile无需启动此诊断。
+
+实际离线安装、HTTPS登录及100次并发鉴权读取后，面板和单sing-box分别观察60秒，在共同monotonic起点的0、5……60秒共13个计划点读取。每次包括完整cgroup子树成员、Popen来源的worker/panel/core角色及所有other成员，读前后PID/starttime/成员集合，完整前后memory.current/peak/stat/events/cpu.stat，以及每PID的RSS、PSS及Anon/File/Shmem分项、Private/Shared Clean/Dirty/Hugetlb和Swap。每次整体及逐PID时窗保留；读数非原子。缺失、权限失败、PID复用、移组、阶段身份变化或漏槽均拒绝，不补零、不静默省略。
+
+采样器及JSON写入继续计入原组，不移走产品进程、不清缓存。窗口内只核进程存活，HTTPS健康检查位于观察前后；实际60秒预热诊断不替代30分钟空载。按[Linux proc文档](https://docs.kernel.org/filesystems/proc.html)，PSS按共享映射比例分摊；[cgroup v2文档](https://docs.kernel.org/admin-guide/cgroup-v2.html)的总记账覆盖子树及匿名页、页缓存与内核等。进程PSS与memcg计费不是同一口径，未映射缓存和内核不能由进程映射完整说明。私有页与Hugetlb单列，不强制舍入后的分项逐字节相等；不以RSS之和冒充去重物理内存，不用各进程不同时刻最大值之和称峰值，不从总数扣worker或缓存来宣布160MiB通过。
+
+此批先取得可复现来源分解，再决定产品优化点。实现及本地parser/身份反例通过不等于准确新head的受限记账已经通过；结果另按实际CI登记，5d完整证据保留。
+
+本批最终本地603项：479通过、124环境skip；新记账7项及独立sustained 13项另行通过（1环境skip），复审无阻断。保留一次603项失败：原单测将生产1秒槽缩成30ms导致宿主调度失约，随后subTest外引用未赋值result又报错；修正仅使该单测使用真实1秒槽和两tick，并将断言留在subTest内，生产600秒及漏槽拒绝不改。最终完整套件重新通过，文档/编译/YAML/diff检查通过；准确head的CI诊断仍待执行。

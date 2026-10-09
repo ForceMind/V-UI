@@ -99,7 +99,7 @@ def require_rejection(request, deliveries, log_path, reasons, *, offset=0, timeo
 
 
 def run_proxy_smoke(binary: Path, root: Path, log_prefix: Path, stage, report, panel_check,
-                    *, sustained=None, idle_monitor=None, overlap=None):
+                    *, sustained=None, idle_monitor=None, overlap=None, accounting_monitor=None):
     root.mkdir(mode=0o700)
     report["proxy_workload"] = {
         "protocol": "VLESS/TCP/TLS", "core": "verified installed bundled sing-box",
@@ -137,7 +137,9 @@ def run_proxy_smoke(binary: Path, root: Path, log_prefix: Path, stage, report, p
 
         def idle():
             healthy()
-            if sustained:
+            if accounting_monitor:
+                accounting_monitor(IDLE_SECONDS, server_alive, server.process.pid)
+            elif sustained:
                 idle_monitor(1800, lambda: server_alive())
             else:
                 time.sleep(IDLE_SECONDS)
