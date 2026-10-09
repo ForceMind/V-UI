@@ -159,11 +159,22 @@ def runtime_seconds(args):
 
 def worker(args) -> int:
     require_hosted_runner()
-    directory = cgroup_directory(args.unit)
+    backend = getattr(args, 'cgroup_backend', 'systemd')
+    if backend == 'docker-private':
+        # Only the dedicated container entry point supplies this programmatic
+        # mode. Native CLI/path checks remain unchanged; host validates Docker
+        # identity and the real host cgroup before allowing any measured work.
+        from scripts.low_resource_container import private_directory
+        directory = private_directory(args)
+    elif backend == 'systemd':
+        directory = cgroup_directory(args.unit)
+    else:
+        raise RuntimeError('Unknown resource accounting backend')
     limits = verify_limits(directory, args.memory_mib)
     profile = duration_profile(args)
     report = {"schema": 1, "scope": "actual offline stage/activate, HTTPS panel with idle certificate manager and bounded single sing-box proxy smoke; not full VPS qualification",
               "source_commit": args.source_commit, "unit": args.unit, "limits": limits,
+              "cgroup_backend": backend,
               "worker_pid": os.getpid(), "service_cgroup": Path("/proc/self/cgroup").read_text().strip(),
               "duration_profile": profile, "requested_memory_mib": args.memory_mib, "base_page_size_bytes": os.sysconf("SC_PAGE_SIZE"),
               "accounting": "worker, offline pip, panel, local clients, and descendants in one cgroup; build/download, host OS and pre-existing cache ownership excluded",
