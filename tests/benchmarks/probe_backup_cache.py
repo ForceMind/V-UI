@@ -35,9 +35,9 @@ with tempfile.TemporaryDirectory(prefix='vui-backup-probe-',dir=args.scratch_dir
   if payload is not None:files['private_log']=residency(payload/'resource-fixture/logs/large.log')
   if destination is not None:files['archive']=residency(destination)
   report['snapshots'].append(dict(phase=phase,files=files,process_maxrss_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024))
- def wrapped(payload,destination,metadata):
+ def wrapped(payload,destination,metadata,**options):
   observe('private_snapshot_copied_before_hash_and_compress',payload)
-  checksum=original_create(payload,destination,metadata)
+  checksum=original_create(payload,destination,metadata,**options)
   observe('archive_complete_private_snapshot_still_present',payload,destination)
   return checksum
  tools.create_archive=wrapped

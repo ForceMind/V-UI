@@ -136,8 +136,8 @@ def stream_digest(handle, output=None, limit=None):
 def file_digest(path: Path, *, cold=False) -> str:
     with path.open('rb') as handle:
         if cold:
-            # Only caller-selected immutable installation files opt in; never
-            # application data. Preserve every digest check.
+            # Only caller-selected immutable operation-owned files opt in;
+            # never live data or caller-owned inputs. Preserve every digest.
             wrapped = _PrivateArchiveFile(handle)
             if wrapped.advice is not None and wrapped.dontneed is not None:
                 os.fsync(handle.fileno())
@@ -146,7 +146,7 @@ def file_digest(path: Path, *, cold=False) -> str:
 
 
 class _PrivateArchiveFile:
-    """Bound cache for installer-owned immutable files, never user data.
+    """Bound cache for operation-owned immutable files, never live user data.
 
     Cache advice is optional. Writeback errors still fail the operation; an
     unsupported advisory syscall only loses the optimization. Keep this helper
@@ -288,7 +288,7 @@ def _cold_digest_artifact(name: str) -> bool:
             and parts[1] in ('x86_64', 'aarch64') and parts[2] in ('sing-box', 'xray')))
 
 
-def files_in(root: Path, *, cold_install_artifacts=False) -> dict:
+def files_in(root: Path, *, cold_install_artifacts=False, private_files=()) -> dict:
     result = {}
     for path in sorted(root.rglob('*')):
         if path.is_symlink(): raise ReleaseError('Symbolic links are not permitted in payloads or backups')
@@ -297,27 +297,55 @@ def files_in(root: Path, *, cold_install_artifacts=False) -> dict:
         name = path.relative_to(root).as_posix()
         if name == MANIFEST: continue
         if not safe_name(name): raise ReleaseError('Unsafe payload path')
-        cold = cold_install_artifacts and _cold_digest_artifact(name)
+        cold = name in private_files or (cold_install_artifacts and _cold_digest_artifact(name))
         result[name] = {'sha256':file_digest(path, cold=cold), 'size':path.stat().st_size,
                        'mode':0o700 if name.startswith('cores/') and path.name in ('xray','sing-box') else 0o600}
     return result
 
-def create_archive(payload: Path, destination: Path, metadata: dict) -> str:
+def create_archive(payload: Path, destination: Path, metadata: dict, *, private_files=None) -> str:
     if destination.exists(): raise ReleaseError('Destination already exists')
-    manifest = {**metadata, 'schema':1, 'files':files_in(payload)}
+    # Only backup() supplies its own completed private copies. Neither metadata
+    # nor a filename makes a caller-owned payload eligible for cache advice.
+    private_names = frozenset(private_files or ())
+    manifest = {**metadata, 'schema':1, 'files':files_in(payload, private_files=private_names)}
     destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, 'wb') as output, zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(MANIFEST, json.dumps(manifest, sort_keys=True, indent=2))
-        for name, info in manifest['files'].items():
-            entry = zipfile.ZipInfo(name); entry.compress_type = zipfile.ZIP_DEFLATED
-            entry.external_attr = (stat.S_IFREG | info['mode']) << 16
-            entry.file_size = info['size']
-            with (payload / name).open('rb') as source, archive.open(entry, 'w') as target:
-                shutil.copyfileobj(source, target, STREAM_CHUNK)
-    with destination.open('rb') as handle: os.fsync(handle.fileno())
-    sync_directory(destination.parent)
-    return file_digest(destination)
+    with os.fdopen(fd, 'wb') as raw:
+        owned = os.fstat(raw.fileno())
+        def same_output(info):
+            return (info.st_dev, info.st_ino) == (owned.st_dev, owned.st_ino)
+        try:
+            output = _PrivateArchiveFile(raw) if private_files is not None else raw
+            with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr(MANIFEST, json.dumps(manifest, sort_keys=True, indent=2))
+                for name, info in manifest['files'].items():
+                    entry = zipfile.ZipInfo(name); entry.compress_type = zipfile.ZIP_DEFLATED
+                    entry.external_attr = (stat.S_IFREG | info['mode']) << 16
+                    entry.file_size = info['size']
+                    with (payload / name).open('rb') as source, archive.open(entry, 'w') as target:
+                        reader = _PrivateArchiveFile(source) if name in private_names else source
+                        shutil.copyfileobj(reader, target, STREAM_CHUNK)
+            # ZipFile.close() rewrites headers and writes the central directory.
+            if isinstance(output, _PrivateArchiveFile): output.finish_writes()
+            raw.flush(); os.fsync(raw.fileno())
+            sync_directory(destination.parent)
+            with destination.open('rb') as handle:
+                if not same_output(os.fstat(handle.fileno())):
+                    raise ReleaseError('Archive destination changed while writing')
+                reader = _PrivateArchiveFile(handle) if private_files is not None else handle
+                checksum = stream_digest(reader)[0]
+            if not same_output(destination.lstat()):
+                raise ReleaseError('Archive destination changed while writing')
+            return checksum
+        except BaseException:
+            # Keep the original fd open until this identity check, so its inode
+            # cannot be reused. Preserve pre-existing or replaced destinations.
+            if private_files is not None:
+                try:
+                    if same_output(destination.lstat()): destination.unlink()
+                except FileNotFoundError:
+                    pass
+            raise
 
 def unpack_verified(archive_path: Path, expected_sha: str, destination: Path) -> dict:
     if not re.fullmatch(r'[a-f0-9]{64}', expected_sha): raise ReleaseError('Expected archive SHA-256 is required')
@@ -493,17 +521,24 @@ def backup(root: Path, destination: Path) -> str:
     root=private_root(root)
     with stopped(root), tempfile.TemporaryDirectory(prefix='.backup-',dir=root) as temporary:
         data=root/'data'; work=Path(temporary)/'data'; work.mkdir(mode=0o700)
+        private_files = set()
         if not data.is_dir(): raise ReleaseError('No data directory to back up')
         for name in files_in(data):
             if name.endswith(('owner.lock','.db-wal','.db-shm')) or name.startswith('.'): continue
             if name=='v-ui.db': continue
             target=work/name; target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
-            shutil.copyfile(data/name,target);target.chmod(0o600)
+            with (data/name).open('rb') as source, target.open('xb') as output:
+                writer = _PrivateArchiveFile(output)
+                shutil.copyfileobj(source, writer, STREAM_CHUNK)
+                writer.finish_writes()
+            target.chmod(0o600); private_files.add(name)
         if (data/'v-ui.db').is_file():
             with sqlite3.connect(f'file:{data / "v-ui.db"}?mode=ro',uri=True) as src, sqlite3.connect(work/'v-ui.db') as dst:
                 src.backup(dst)
                 if dst.execute('PRAGMA integrity_check').fetchone()[0] != 'ok': raise ReleaseError('Database integrity check failed')
-        return create_archive(work,destination,{'kind':'backup','data_path':str(data),'platform':PLATFORM})
+        # SQLite retains its existing backup/transaction path and is not cooled.
+        return create_archive(work,destination,{'kind':'backup','data_path':str(data),'platform':PLATFORM},
+                              private_files=private_files)
 
 def recover_restore(root: Path):
     root=private_root(root)
