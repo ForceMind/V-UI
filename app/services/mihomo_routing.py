@@ -4,6 +4,7 @@ import ipaddress
 import json
 import os
 import re
+from bisect import bisect_left
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -399,7 +400,7 @@ class _MatchIndex:
     def __init__(self, matches=()) -> None:
         self.exact: set[tuple[str, str]] = set()
         self.suffixes: set[str] = set()
-        self.domain_ancestors: set[str] = set()
+        self._sorted_domains: list[str] | None = None
         for match in matches:
             self.add(match)
 
@@ -413,8 +414,7 @@ class _MatchIndex:
     def add(self, match: dict[str, str]) -> None:
         kind, value = match["type"], match["value"]
         self.exact.add((kind, value))
-        if kind in {"DOMAIN", "DOMAIN-SUFFIX"}:
-            self.domain_ancestors.update(self._ancestors(value))
+        self._sorted_domains = None
         if kind == "DOMAIN-SUFFIX":
             self.suffixes.add(value)
 
@@ -427,9 +427,23 @@ class _MatchIndex:
         )
 
     def overlaps(self, match: dict[str, str]) -> bool:
-        return self.covers(match) or (
-            match["type"] == "DOMAIN-SUFFIX"
-            and match["value"] in self.domain_ancestors
+        if self.covers(match):
+            return True
+        if match["type"] != "DOMAIN-SUFFIX":
+            return False
+        if ("DOMAIN", match["value"]) in self.exact:
+            return True
+        # Reverse each domain once, not once per label. The planned-rule index
+        # only asks covers(), so it never allocates this overlap lookup.
+        if self._sorted_domains is None:
+            self._sorted_domains = sorted(
+                value[::-1] for kind, value in self.exact
+                if kind in {"DOMAIN", "DOMAIN-SUFFIX"}
+            )
+        prefix = match["value"][::-1] + "."
+        offset = bisect_left(self._sorted_domains, prefix)
+        return offset < len(self._sorted_domains) and self._sorted_domains[offset].startswith(
+            prefix
         )
 
 

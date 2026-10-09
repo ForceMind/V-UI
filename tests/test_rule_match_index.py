@@ -2,6 +2,7 @@
 from copy import deepcopy
 from pathlib import Path
 import random
+import tracemalloc
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -34,6 +35,40 @@ class RuleMatchIndexTests(unittest.TestCase):
             for query in matches:
                 self.assertEqual(index.covers(query), any(routing._covers(x, query) for x in inserted))
                 self.assertEqual(index.overlaps(query), any(routing._overlaps(x, query) for x in inserted))
+
+    def test_long_domain_indexes_have_bounded_auxiliary_memory(self):
+        # Public limits: 2048 direct + 2048 proxy + 256 intranet. Many labels
+        # must not create a retained copy of every suffix for every index.
+        rng = random.Random(94876)
+        def match():
+            # Randomize every label: shared tails would hide the old quadratic
+            # retention because the suffix set would deduplicate them.
+            value = ".".join(rng.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(127))
+            self.assertEqual(len(value), 253)
+            return {"type": "DOMAIN-SUFFIX", "value": value}
+        direct = [match() for _ in range(2048)]
+        proxy = [match() for _ in range(2048)]
+        intranet = [match() for _ in range(256)]
+        tracemalloc.start()
+        try:
+            indexes = [routing._MatchIndex(direct), routing._MatchIndex(intranet),
+                       routing._MatchIndex(direct + proxy + intranet)]
+            for index, values in zip(indexes[:2], (direct, intranet)):
+                self.assertTrue(index.overlaps({"type": "DOMAIN-SUFFIX", "value": values[0]["value"].rsplit(".", 1)[-1]}))
+            self.assertTrue(indexes[2].covers(proxy[-1]))
+            self.assertLess(tracemalloc.get_traced_memory()[1], 8 * 1024 * 1024)
+        finally:
+            tracemalloc.stop()
+
+    def test_reverse_lookup_respects_separator_and_mutation(self):
+        index = routing._MatchIndex([{"type": "DOMAIN", "value": "x.example-com"}])
+        query = {"type": "DOMAIN-SUFFIX", "value": "example"}
+        self.assertFalse(index.overlaps(query))
+        index.add({"type": "DOMAIN", "value": "x.example"})
+        self.assertTrue(index.overlaps(query))
+        index.add({"type": "DOMAIN", "value": "a.example.com"})
+        self.assertTrue(index.overlaps({"type": "DOMAIN-SUFFIX", "value": "example.com"}))
+        self.assertFalse(index.overlaps({"type": "DOMAIN", "value": "example.com"}))
 
     def check_plan(self, payload, export=False):
         before = deepcopy(payload)
