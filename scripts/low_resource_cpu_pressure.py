@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 import hashlib
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,7 +22,6 @@ import subprocess
 import sys
 import threading
 import time
-from urllib.request import Request, build_opener, ProxyHandler, HTTPSHandler
 from urllib.parse import urlsplit
 
 SOURCE = Path(__file__).resolve().parents[1]
@@ -53,6 +52,7 @@ def pressure_windows(samples):
         raise RuntimeError('Missing CPU pressure samples')
     windows = []
     streak = 0
+    streak_wall = 0.0
     demonstrated = False
     for index, row in enumerate(samples):
         stamp = row.get('monotonic')
@@ -78,7 +78,7 @@ def pressure_windows(samples):
         utilization = delta['usage_usec'] / (wall * 1_000_000)
         ratio = delta['nr_throttled'] / delta['nr_periods'] if delta['nr_periods'] else 0
         hz = row.get('clock_ticks_per_second')
-        if type(hz) is not int or hz <= 0 or previous.get('clock_ticks_per_second') != hz:
+        if type(hz) is not int or hz != os.sysconf('SC_CLK_TCK') or previous.get('clock_ticks_per_second') != hz:
             raise RuntimeError('Missing process CPU clock units')
         role_ticks = {}
         for name in ('worker', 'panel', 'watchdog', 'core'):
@@ -94,10 +94,15 @@ def pressure_windows(samples):
             role_ticks[name] = ticks
         core_share = role_ticks['core'] / hz / (delta['usage_usec'] / 1_000_000) if delta['usage_usec'] else 0
         worker_cpu = role_ticks['worker'] / hz / wall
+        read_slack = row.get('read_finished_monotonic', stamp) - stamp
+        prior_slack = previous.get('read_finished_monotonic', previous['monotonic']) - previous['monotonic']
+        if sum(role_ticks.values()) / hz > delta['usage_usec'] / 1_000_000 + 8 / hz + read_slack + prior_slack:
+            raise RuntimeError('Role CPU exceeds inclusive service accounting')
         qualifies = (utilization >= .95 and ratio >= .8 and delta['throttled_usec'] > 0
             and completed > 0 and core_share >= .8 and worker_cpu <= .1)
         streak = streak + 1 if qualifies else 0
-        demonstrated |= streak >= 3
+        streak_wall = streak_wall + wall if qualifies else 0
+        demonstrated |= streak >= 3 and streak_wall >= 15
         windows.append(dict(wall_seconds=wall, cpu_delta=delta,
             verified_bytes=completed, utilization_one_core=utilization,
             throttled_period_ratio=ratio, role_cpu_ticks=role_ticks,
@@ -147,6 +152,10 @@ def checked_request(request, work, unit, commit):
     for role in request['roles'].values():
         if role.get('cgroup') != request['service_cgroup'] or identity(role['pid']) != role:
             raise RuntimeError('Pressure service identity mismatch')
+    binary = Path(request['binary']).stat()
+    live_binary = Path(f"/proc/{request['roles']['core']['pid']}/exe").stat()
+    if (binary.st_dev, binary.st_ino) != (live_binary.st_dev, live_binary.st_ino):
+        raise RuntimeError('Pressure client binary is not the installed live server executable')
 
 
 class PressureBroker:
@@ -295,29 +304,94 @@ def response(client):
         raise RuntimeError('Proxy pressure response content changed')
 
 
+def absolute_request(client, deadline, operation):
+    """Interrupt connected sockets at an absolute deadline, including drip feed.
+
+    Connect receives the same remaining timeout; _create_connection registers
+    the raw socket before HTTP CONNECT parsing. HTTPS handshake itself uses
+    the remaining socket timeout, then its SSL socket is registered too.
+    """
+    sockets = []
+    lock = threading.Lock()
+    expired = threading.Event()
+    create = client._create_connection
+    def stop():
+        expired.set()
+        with lock: active = list(sockets)
+        for sock in active:
+            try: sock.shutdown(socket.SHUT_RDWR)
+            except OSError: pass
+            sock.close()
+    def registered(*args, **kwargs):
+        sock = create(*args, **kwargs)
+        with lock: sockets.append(sock)
+        if expired.is_set():
+            sock.close(); raise TimeoutError('Absolute request deadline expired during connect')
+        return sock
+    remaining = deadline - time.monotonic()
+    if remaining <= 0: raise TimeoutError('Absolute request deadline already expired')
+    client.timeout = remaining
+    client._create_connection = registered
+    timer = threading.Timer(remaining, stop)
+    timer.daemon = True
+    timer.start()
+    try:
+        if client.sock is None: client.connect()
+        with lock:
+            if client.sock not in sockets: sockets.append(client.sock)
+        client.sock.settimeout(max(.001, deadline-time.monotonic()))
+        if expired.is_set() or time.monotonic() >= deadline:
+            raise TimeoutError('Absolute request deadline expired after connect')
+        result = operation(client)
+        if expired.is_set() or time.monotonic() > deadline:
+            raise TimeoutError('Absolute request deadline expired')
+        return result
+    except Exception as exc:
+        if expired.is_set() or time.monotonic() > deadline:
+            raise TimeoutError('Absolute request deadline interrupted I/O') from exc
+        raise
+    finally:
+        timer.cancel(); timer.join(timeout=1)
+        client._create_connection = create
+        if timer.is_alive(): raise RuntimeError('Request deadline interrupter survived cleanup')
+
+
 def phase(request, client_pid, proxy_port, target_port, concurrency, budget, checkpoint):
     lock = threading.Lock()
     origin = time.monotonic() + 1
     counts = dict(attempts=0, completed=0, errors=0, budget_exhausted=False)
     row = dict(concurrency=concurrency, origin=origin, duration_seconds=PHASE_SECONDS,
-        pressure_stop_monotonic=origin + PHASE_SECONDS, counts=counts, samples=[], outcome='running')
+        pressure_stop_monotonic=origin + PHASE_SECONDS, counts=counts, samples=[], lanes=[], outcome='running')
     stop = threading.Event()
     def lane():
         client = connection(proxy_port, target_port)
+        lane_record = dict(started_monotonic=time.monotonic(), requests=0, completed=0)
+        with lock: row['lanes'].append(lane_record)
         try:
             time.sleep(max(0, origin - time.monotonic()))
             while not stop.is_set() and time.monotonic() < origin + PHASE_SECONDS:
                 if not budget.reserve():
                     with lock: counts['budget_exhausted'] = True
                     stop.set(); return
-                with lock: counts['attempts'] += 1
-                try: response(client)
-                except (OSError, http.client.HTTPException):
-                    with lock: counts['errors'] += 1
-                    return  # No reconnection or hidden retry in a pressure lane.
-                with lock: counts['completed'] += 1
+                with lock:
+                    counts['attempts'] += 1
+                    lane_record['requests'] += 1
+                    lane_record.setdefault('first_request_monotonic', time.monotonic())
+                try: absolute_request(client, min(time.monotonic()+3, origin+PHASE_SECONDS+3), response)
+                except Exception as exc:
+                    with lock:
+                        counts['errors'] += 1
+                        lane_record['error_type'] = type(exc).__name__
+                    if isinstance(exc, (OSError, http.client.HTTPException)):
+                        return
+                    raise
+                with lock:
+                    counts['completed'] += 1
+                    lane_record['completed'] += 1
+                    lane_record.setdefault('first_response_monotonic', time.monotonic())
         finally:
             client.close()
+            lane_record['finished_monotonic'] = time.monotonic()
     try:
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             futures = [pool.submit(lane) for _ in range(concurrency)]
@@ -344,7 +418,7 @@ def recover(request, row, proxy_port, target_port, client_pid, budget, checkpoin
     """Drain and all probes share 15 seconds from the pressure cutoff."""
     origin = row['pressure_stop_monotonic']
     deadline = origin + RECOVERY_SECONDS
-    opener = build_opener(ProxyHandler({}), HTTPSHandler(context=ssl.create_default_context(cafile=request['panel_ca'])))
+    endpoint = urlsplit(request['panel_origin'])
     recovery = row['recovery'] = dict(origin=origin, deadline=deadline, probes=[], consecutive_success=0)
     for index in range(RECOVERY_SECONDS):
         slot = max(origin + index, time.monotonic())
@@ -356,18 +430,22 @@ def recover(request, row, proxy_port, target_port, client_pid, budget, checkpoin
         probe = dict(started_monotonic=time.monotonic(), success=False)
         client = connection(proxy_port, target_port, max(.001, end-time.monotonic()))
         try:
-            response(client)
+            absolute_request(client, end, response)
             remaining = end - time.monotonic()
             if remaining <= 0: raise TimeoutError('Recovery proxy deadline expired')
-            request_http = Request(request['panel_origin'] + '/api/auth/me', headers={'Cookie': request['cookie']})
-            with opener.open(request_http, timeout=remaining) as panel:
-                body = panel.read(65537)
-                if panel.status != 200 or len(body) > 65536 or not json.loads(body).get('username'):
+            panel = http.client.HTTPSConnection(endpoint.hostname, endpoint.port, timeout=remaining,
+                context=ssl.create_default_context(cafile=request['panel_ca']))
+            def panel_request(connection):
+                connection.request('GET', '/api/auth/me', headers={'Cookie': request['cookie']})
+                result = connection.getresponse(); body = result.read(65537)
+                if result.status != 200 or len(body) > 65536 or not json.loads(body).get('username'):
                     raise RuntimeError('Panel recovery response failed')
+            try: absolute_request(panel, end, panel_request)
+            finally: panel.close()
             evidence = sample(request, client_pid, index, len(BODY))
             if time.monotonic() > end: raise TimeoutError('Recovery round deadline expired')
             probe.update(success=True, proxy_status=200, panel_status=200, body_bytes=len(BODY),
-                service_roles={name: info['identity'] for name, info in evidence['roles'].items()})
+                service_roles={name: info['identity'] for name, info in evidence['roles'].items()}, sample=evidence)
             recovery['consecutive_success'] += 1
         except (OSError, http.client.HTTPException) as exc:
             probe['error_type'] = type(exc).__name__
@@ -402,11 +480,11 @@ def request_pressure(work, output, unit, commit, binary, fixture, ca, port,
         if time.monotonic() >= deadline: raise RuntimeError('CPU pressure broker response timed out')
         observe(); time.sleep(.25)
     value = json.loads(response_path.read_text())
-    validate_result(value, unit, commit)
+    validate_result(value, unit, commit, require_trigger=False)
     return value
 
 
-def validate_result(value, unit, commit):
+def validate_result(value, unit, commit, *, require_trigger=True):
     if (value.get('unit') != unit or value.get('source_commit') != commit
             or value.get('outcome') != 'passed' or value.get('cleanup_complete') is not True
             or value.get('broker_cleanup_complete') is not True or value.get('no_direct') is not True
@@ -432,6 +510,54 @@ def validate_result(value, unit, commit):
     if [row.get('concurrency') for row in phases] != list(CONCURRENCIES):
         raise RuntimeError('CPU pressure phases incomplete')
     demonstrated = False; attempts = 0; successes = 0; last_end = 0
+    prior_sample = None
+    external_roles = None
+    def validate_sample(point):
+        nonlocal prior_sample, external_roles
+        if point.get('clock_ticks_per_second') != os.sysconf('SC_CLK_TCK'):
+            raise RuntimeError('CPU sample clock units changed')
+        if set(point.get('roles', {})) != set(roles):
+            raise RuntimeError('Incomplete service CPU roles')
+        if {name: info['identity'] for name, info in point['roles'].items()} != roles:
+            raise RuntimeError('Service process identity changed in sample')
+        metric = point.get('metrics', {})
+        for key in ('memory.current', 'memory.peak'):
+            if type(metric.get(key)) is not int or metric[key] <= 0:
+                raise RuntimeError('Missing memory accounting under CPU pressure')
+        for section, keys in (('memory.events', ('max','oom','oom_kill','oom_group_kill')),
+                              ('memory.stat', ('anon','file','kernel')), ('cpu.stat', CPU_KEYS)):
+            for key in keys:
+                number = metric.get(section, {}).get(key)
+                if type(number) is not int or number < 0:
+                    raise RuntimeError('Missing pressure accounting counter')
+        if metric['cpu.stat'] != point['cpu']:
+            raise RuntimeError('CPU sample mismatched memcg boundary')
+        if any(metric['memory.events'][key] for key in ('oom','oom_kill','oom_group_kill')):
+            raise RuntimeError('OOM during CPU pressure')
+        if set(point.get('external', {})) != {'generator_target', 'client'}:
+            raise RuntimeError('External CPU/RSS roles incomplete')
+        observed_external = {name: info['identity'] for name, info in point['external'].items()}
+        if external_roles is not None and observed_external != external_roles:
+            raise RuntimeError('External pressure identities changed')
+        external_roles = observed_external
+        for external in point['external'].values():
+            outside_server(unit, external['identity']['cgroup'])
+            if (external['identity']['cgroup'] != value['external_cgroup']
+                    or type(external.get('cpu_ticks')) is not int or external['cpu_ticks'] < 0
+                    or type(external.get('rss_bytes')) is not int or external['rss_bytes'] <= 0):
+                raise RuntimeError('External pressure accounting incomplete')
+        if prior_sample is not None:
+            if point['monotonic'] < prior_sample['read_finished_monotonic']:
+                raise RuntimeError('CPU accounting sample timeline moved backward')
+            previous = prior_sample['metrics']
+            pairs = [(metric['memory.peak'],previous['memory.peak'])]
+            pairs += [(metric['cpu.stat'][key],previous['cpu.stat'][key]) for key in CPU_KEYS]
+            pairs += [(metric['memory.events'][key],previous['memory.events'][key]) for key in ('max','oom','oom_kill','oom_group_kill')]
+            pairs += [(point['roles'][name]['cpu_ticks'],prior_sample['roles'][name]['cpu_ticks']) for name in roles]
+            pairs += [(point['external'][name]['cpu_ticks'],prior_sample['external'][name]['cpu_ticks']) for name in external_roles]
+            if any(a < b for a,b in pairs):
+                raise RuntimeError('Cumulative accounting decreased across pressure/recovery phases')
+        prior_sample = point
     for row in phases:
         if (row.get('outcome') != 'passed' or row.get('duration_seconds') != PHASE_SECONDS
                 or row['origin'] < last_end or row.get('pressure_stop_monotonic') != row['origin'] + PHASE_SECONDS
@@ -442,27 +568,28 @@ def validate_result(value, unit, commit):
                 or any(type(counts.get(key)) is not int or counts[key] < 0 for key in ('attempts', 'completed', 'errors'))
                 or counts['attempts'] != counts['completed'] + counts['errors']):
             raise RuntimeError('CPU pressure request accounting inconsistent')
+        lanes = row.get('lanes', [])
+        if (len(lanes) != row['concurrency']
+                or sum(lane.get('requests', -1) for lane in lanes) != counts['attempts']
+                or sum(lane.get('completed', -1) for lane in lanes) != counts['completed']):
+            raise RuntimeError('Requested pressure lanes missing or counts inconsistent')
+        for lane in lanes:
+            if (not row['origin']-1.25 <= lane.get('started_monotonic', 0) <= lane.get('finished_monotonic', 0) <= row['load_stopped_monotonic']
+                    or type(lane.get('requests')) is not int or type(lane.get('completed')) is not int
+                    or not 0 <= lane['completed'] <= lane['requests']):
+                raise RuntimeError('Invalid pressure lane lifetime')
         samples = row['samples']; assessment = pressure_windows(samples)
         if row.get('pressure') != assessment:
             raise RuntimeError('CPU pressure trigger was not derived from raw counters')
         demonstrated |= assessment['demonstrated']
         for index, point in enumerate(samples):
+            validate_sample(point)
             if not row['origin'] + index * 5 <= point['monotonic'] <= row['origin'] + index * 5 + .25:
                 raise RuntimeError('Pressure samples outside planned window')
             if not point['monotonic'] <= point['read_finished_monotonic'] <= point['monotonic'] + .25:
                 raise RuntimeError('Pressure sample accounting reads too slow')
             if point['verified_bytes'] > counts['completed'] * len(BODY):
                 raise RuntimeError('Sample successes exceed full phase count')
-            if {name: info['identity'] for name, info in point['roles'].items()} != roles:
-                raise RuntimeError('Service process identity changed in sample')
-            if point['metrics']['cpu.stat'] != point['cpu']:
-                raise RuntimeError('CPU sample mismatched memcg boundary')
-            if any(point['metrics']['memory.events'].get(key, -1) != 0 for key in ('oom', 'oom_kill', 'oom_group_kill')):
-                raise RuntimeError('OOM during CPU pressure')
-            for external in point['external'].values():
-                outside_server(unit, external['identity']['cgroup'])
-                if external['identity']['cgroup'] != value['external_cgroup']:
-                    raise RuntimeError('External pressure process accounting group changed')
         recovery = row.get('recovery', {})
         if (recovery.get('origin') != row['pressure_stop_monotonic']
                 or recovery.get('deadline') != row['pressure_stop_monotonic'] + RECOVERY_SECONDS
@@ -472,16 +599,24 @@ def validate_result(value, unit, commit):
         if not 6 <= len(probes) <= RECOVERY_SECONDS:
             raise RuntimeError('Pressure recovery probe count invalid')
         streak = 0; previous = row['load_stopped_monotonic']
+        previous_start = None
         for probe in probes:
             if not previous <= probe['started_monotonic'] <= probe['finished_monotonic'] <= recovery['deadline']:
                 raise RuntimeError('Recovery probe outside fixed deadline')
             if probe['finished_monotonic'] - probe['started_monotonic'] > 1:
                 raise RuntimeError('Recovery probe exceeded one-second round')
+            if previous_start is not None and probe['started_monotonic'] - previous_start < .99:
+                raise RuntimeError('Recovery probes did not follow one-second cadence')
+            previous_start = probe['started_monotonic']
             if probe.get('success') is True:
                 if (probe.get('proxy_status'), probe.get('panel_status'), probe.get('body_bytes')) != (200, 200, len(BODY)):
                     raise RuntimeError('Recovery did not verify both proxy and panel')
                 if probe.get('service_roles') != roles:
                     raise RuntimeError('Recovery used a changed service process tree')
+                point = probe.get('sample', {})
+                if not probe['started_monotonic'] <= point.get('monotonic', 0) <= point.get('read_finished_monotonic', 0) <= probe['finished_monotonic']:
+                    raise RuntimeError('Recovery accounting outside its probe')
+                validate_sample(point)
                 streak += 1
             else: streak = 0
             previous = probe['finished_monotonic']
@@ -490,7 +625,11 @@ def validate_result(value, unit, commit):
         last_end = recovery['completed_monotonic']
         attempts += counts['attempts'] + len(probes)
         successes += counts['completed'] + sum(p.get('success') is True for p in probes)
-    if not demonstrated or value.get('pressure_demonstrated') is not True:
+    if value.get('pressure_demonstrated') is not demonstrated:
+        raise RuntimeError('Pressure trigger declaration differs from observations')
+    if value.get('scenario_outcome') != ('demonstrated' if demonstrated else 'not_triggered'):
+        raise RuntimeError('Missing structured CPU pressure scenario outcome')
+    if require_trigger and not demonstrated:
         raise RuntimeError('Service CPU quota saturation not demonstrated')
     if (value.get('attempts') != attempts or not 0 < attempts <= MAX_ATTEMPTS
             or value.get('reserved_body_bytes') != attempts * len(BODY)):
@@ -506,6 +645,44 @@ def validate_complete(report, unit, commit):
     if tuple(row.get('name') for row in report.get('stages', [])) != expected:
         raise RuntimeError('CPU pressure profile lost or moved original smoke stages')
     validate_result(report.get('cpu_pressure', {}), unit, commit)
+    value = report['cpu_pressure']
+    if report.get('worker_pid') != value['roles']['worker']['pid'] or report.get('service_cgroup') != value['service_cgroup']:
+        raise RuntimeError('CPU pressure roles differ from the measured worker')
+    tree = report.get('proxy_workload', {}).get('server_tree', {}).get('roles', {})
+    for role in ('watchdog', 'core'):
+        if any(tree.get(role, {}).get(key) != number for key, number in value['roles'][role].items()):
+            raise RuntimeError('CPU pressure did not use original installed proxy tree')
+    end = 0
+    for row in report['stages']:
+        start, duration = row.get('started_monotonic'), row.get('wall_seconds')
+        if (row.get('outcome') != 'passed' or type(start) not in (int,float) or not math.isfinite(start)
+                or type(duration) not in (int,float) or not math.isfinite(duration) or duration < 0 or start < end):
+            raise RuntimeError('CPU pressure profile stage failed or has invalid timeline')
+        end = start + duration
+    stage = report['stages'][12]
+    points = [point for phase in value['phases'] for point in
+        [*phase['samples'], *(probe['sample'] for probe in phase['recovery']['probes'] if probe['success'])]]
+    for point in points:
+        if not stage['started_monotonic'] <= point['monotonic'] <= point['read_finished_monotonic'] <= stage['started_monotonic'] + stage['wall_seconds']:
+            raise RuntimeError('Pressure accounting escaped measured stage')
+        if point['metrics']['memory.peak'] > stage.get('memory_peak_bytes', 0) or point['metrics']['memory.peak'] > report.get('metrics', {}).get('memory.peak', 0):
+            raise RuntimeError('Pressure accounting peak exceeds enclosing total')
+    if points[-1]['cpu']['usage_usec']-points[0]['cpu']['usage_usec'] > stage.get('cpu_usage_usec', 0):
+        raise RuntimeError('Pressure CPU exceeds measured stage')
+
+
+@contextmanager
+def tracked_cleanup(value):
+    stack = ExitStack()
+    try:
+        yield stack
+    finally:
+        try:
+            stack.close()
+            value['cleanup_complete'] = True
+        except Exception as exc:
+            value.update(cleanup_complete=False, cleanup_error_type=type(exc).__name__)
+            raise
 
 
 def run(request, output):
@@ -523,7 +700,7 @@ def run(request, output):
     budget = Budget()
     atomic_json(output, value)
     try:
-        with ExitStack() as stack:
+        with tracked_cleanup(value) as stack:
             target, counts = target_server(stack)
             port = unused_port(); config = client_config(port, request['server_port'], request['ca'])
             config['log']['level'] = 'warn'
@@ -545,12 +722,11 @@ def run(request, output):
             value['pressure_demonstrated'] = any(row['pressure']['demonstrated'] for row in value['phases'])
         value['target'] = dict(counts)
         assert_no_direct_log(core.log_path)
-        value.update(cleanup_complete=True, no_direct=True, attempts=budget.attempts,
+        value.update(no_direct=True, attempts=budget.attempts,
             reserved_body_bytes=budget.attempts * len(BODY))
         if len(value['phases']) != len(CONCURRENCIES) or any(x['counts']['budget_exhausted'] for x in value['phases']):
             raise RuntimeError('Fixed pressure budget exhausted before completing planned scenario')
-        if not value['pressure_demonstrated']:
-            raise RuntimeError('Service CPU quota pressure not demonstrated under fixed workload')
+        value['scenario_outcome'] = 'demonstrated' if value['pressure_demonstrated'] else 'not_triggered'
         value['outcome'] = 'passed'
     except Exception as exc:
         value.update(outcome='failed', error_type=type(exc).__name__, error=str(exc),
