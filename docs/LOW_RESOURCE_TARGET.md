@@ -343,4 +343,4 @@ panel的Certbot及其他子进程会继承默认，因此这是panel服务树的
 
 ### 完整服务角色夹具修正
 
-adac 旧拓扑的结果与缺口、新的 watchdog / 独立 HTTP01 / 后台线程驻留和 61 点空载记账合同及准确 `97ba266` 的全套原始结果，见[完整服务角色资源夹具](LOW_RESOURCE_SERVICE_TREE.md)。完整低资源目标仍未验收通过；下一批[原生 ARM64 短时资源门槛](LOW_RESOURCE_ARM64.md)单独按准确提交验收，不继承 x86_64 结果。
+adac 旧拓扑的结果与缺口、新的 watchdog / 独立 HTTP01 / 后台线程驻留和 61 点空载记账合同及准确 `97ba266` 的全套原始结果，见[完整服务角色资源夹具](LOW_RESOURCE_SERVICE_TREE.md)。准确 `88d0c41` 的[原生 GNU ARM64 短时资源门槛](LOW_RESOURCE_ARM64.md)已单独完成。下一批[原生 musl 容器资源门槛](LOW_RESOURCE_MUSL.md)仍待准确提交执行，不继承 GNU 或另一架构结果；完整低资源目标仍未验收通过。
