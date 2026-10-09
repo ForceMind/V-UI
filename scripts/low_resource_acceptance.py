@@ -172,6 +172,9 @@ def worker(args) -> int:
         raise RuntimeError('Unknown resource accounting backend')
     limits = verify_limits(directory, args.memory_mib)
     profile = duration_profile(args)
+    trace_requested = bool(getattr(args, 'trace_install', False))
+    if trace_requested and (profile != 'smoke' or args.memory_mib not in (320, 512)):
+        raise RuntimeError('Installation trace requires the original 320/512 MiB smoke profile')
     report = {"schema": 1, "scope": "actual offline stage/activate, HTTPS panel with idle certificate manager and bounded single sing-box proxy smoke; not full VPS qualification",
               "source_commit": args.source_commit, "unit": args.unit, "limits": limits,
               "cgroup_backend": backend,
@@ -243,7 +246,16 @@ def worker(args) -> int:
         with ExitStack() as stack:
             root = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="installed-", dir=args.work_dir)))
             checksum = args.bundle.with_suffix(args.bundle.suffix + ".sha256").read_text().split()[0]
-            identity = stage("offline_stage_including_wheels", lambda: tools.stage(args.bundle, checksum, root))
+            trace_context = nullcontext()
+            if trace_requested:
+                from scripts.low_resource_install_trace import trace_installation
+                trace = dict(unit=args.unit, source_commit=args.source_commit,
+                    service_cgroup=report['service_cgroup'], phases=[],
+                    scope='before/after cumulative group snapshots; checkpoint overhead included; not peak composition')
+                report['installation_trace'] = trace
+                trace_context = trace_installation(tools, trace, lambda: metrics(directory), checkpoint)
+            with trace_context:
+                identity = stage("offline_stage_including_wheels", lambda: tools.stage(args.bundle, checksum, root))
             stage("activate", lambda: tools.activate(root, identity))
             release, _ = tools.active(root)
             payload, python = release / "payload", release / "runtime/python/bin/python3"
@@ -680,7 +692,7 @@ def systemd_command(args, unit: str, work: Path, worker_output: Path) -> list[st
             sys.executable, "-B", str(Path(__file__).resolve()), "--worker", "--unit", unit,
             "--bundle", str(args.bundle.resolve()), "--source-commit", args.source_commit,
             "--output", str(worker_output), "--work-dir", str(work), "--memory-mib", str(args.memory_mib),
-            "--duration-profile", duration_profile(args)]
+            "--duration-profile", duration_profile(args)] + (["--trace-install"] if getattr(args, "trace_install", False) else [])
 
 
 def validate_sustained_stages(report, unit, commit):
@@ -707,6 +719,13 @@ def coordinator(args) -> int:
     require_hosted_runner()
     budget = memory_bytes(args.memory_mib)
     profile = duration_profile(args)
+    trace_requested = bool(getattr(args, 'trace_install', False))
+    if trace_requested and (profile != 'smoke' or args.memory_mib not in (320, 512)):
+        raise RuntimeError('Installation trace requires the original 320/512 MiB smoke profile')
+    expected_provenance = None
+    if trace_requested:
+        from scripts.low_resource_install_trace import product_provenance
+        expected_provenance = product_provenance(SOURCE, args.source_commit)
     if not re.fullmatch(r"[0-9a-f]{40}", args.source_commit):
         raise RuntimeError("An exact source commit is required")
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -718,6 +737,8 @@ def coordinator(args) -> int:
     summary = {"schema": 1, "unit": unit, "source_commit": args.source_commit, "outcome": "failed",
                "scope": f"{args.memory_mib} MiB cgroup / one CPU quota regression, not a full 512 MiB host",
                "duration_profile": profile, "requested_memory_mib": args.memory_mib, "worker_report": worker_output.name}
+    if trace_requested:
+        summary["installation_product_provenance"] = expected_provenance
     with tempfile.TemporaryDirectory(prefix="low-resource-work-", dir=output.parent) as directory:
         command = systemd_command(args, unit, Path(directory), worker_output)
         try:
@@ -754,6 +775,11 @@ def coordinator(args) -> int:
                     or report.get("limits", {}).get("memory.max") != budget
                     or report.get("base_page_size_bytes") != os.sysconf("SC_PAGE_SIZE")):
                 raise RuntimeError("Worker failed or its final accounting is incomplete")
+            if trace_requested:
+                from scripts.low_resource_install_trace import validate_trace
+                validate_trace(report, unit, args.source_commit, expected_provenance)
+            elif 'installation_trace' in report:
+                raise RuntimeError('Unexpected installation trace in ordinary smoke')
             if profile == "sustained":
                 validate_sustained_stages(report, unit, args.source_commit)
             elif profile == "interactions":
@@ -821,6 +847,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--memory-mib", type=int, choices=MEMORY_PROFILES, default=512)
     parser.add_argument("--duration-profile", choices=("smoke", "sustained", "interactions", "certificates", "data-backup", "accounting"), default="smoke")
+    parser.add_argument("--trace-install", action="store_true", help="opt-in same-group offline phase accounting")
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--unit")
     parser.add_argument("--work-dir", type=Path)

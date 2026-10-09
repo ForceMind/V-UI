@@ -1,0 +1,55 @@
+name: Opt-in unchanged-product installation accounting
+on:
+  pull_request:
+    types: [labeled]
+permissions:
+  contents: read
+jobs:
+  installation:
+    if: github.event.label.name == 'run-low-resource-install-trace'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: pip install -r requirements-test.txt
+      - name: Build one exact-head offline candidate outside resource limit
+        env:
+          VUI_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/vui-install-trace
+          test "$(git rev-parse HEAD)" = "$VUI_SOURCE_COMMIT"
+          python scripts/build_bundle.py /tmp/vui-install-trace/vui-linux.zip --source-commit "$VUI_SOURCE_COMMIT" | tee /tmp/vui-install-trace/build.log
+      - name: Preserve all smoke checks and trace unchanged install calls at both caps
+        env:
+          VUI_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          failed=0
+          for memory in 512 320; do
+            if ! python -B scripts/low_resource_acceptance.py \
+              --bundle /tmp/vui-install-trace/vui-linux.zip \
+              --source-commit "$VUI_SOURCE_COMMIT" \
+              --memory-mib "$memory" --trace-install \
+              --output "/tmp/vui-install-trace/install-${memory}.json"; then
+              failed=1
+            fi
+          done
+          exit "$failed"
+      - name: Preserve diagnostics including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vui-install-trace-evidence-${{ github.event.pull_request.head.sha }}
+          path: |
+            /tmp/vui-install-trace/*.json
+            /tmp/vui-install-trace/*.log
+          retention-days: 7
