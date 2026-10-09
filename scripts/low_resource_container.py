@@ -27,6 +27,9 @@ def private_directory(args, root=Path('/sys/fs/cgroup'), proc=Path('/proc')):
         raise RuntimeError('Private container accounting is only enabled for explicit smoke')
     if (proc/'self/cgroup').read_text().strip() != '0::/' or (proc/'1/cgroup').read_text().strip() != '0::/':
         raise RuntimeError('Expected private container cgroup root for init and worker')
+    mounts=[row.split() for row in (proc/'mounts').read_text().splitlines()]
+    if not any(len(row)>=4 and row[1]==str(root) and row[2]=='cgroup2' and 'ro' in row[3].split(',') for row in mounts):
+        raise RuntimeError('Container cgroup2 mount must be read-only')
     gate.verify_limits(root, args.memory_mib)
     gate.metrics(root)
     return root
@@ -71,15 +74,26 @@ def entry(args):
     ready = dict(**token, worker=process_binding(os.getpid()), init=process_binding(1),
                  uid=os.getuid(), gid=os.getgid(), limits=gate.verify_limits(directory, args.memory_mib),
                  page_size=os.sysconf('SC_PAGE_SIZE'), metrics=gate.metrics(directory),
-                 members=live_members(directory))
+                 members=live_members(directory),observed_monotonic=time.monotonic())
     if set(ready['members']) != {1, os.getpid()}:
         raise RuntimeError('Unexpected initial container processes')
     gate.write_json(prefix/'ready.json', ready)
     wait_marker(prefix/'go.json', token, 120)
     started = time.monotonic()
-    result = gate.worker(args)
+    # Independent of the host coordinator's lifetime. Even if that process is
+    # lost, measured work cannot run forever while the container stays alive.
+    def deadline(signum, frame):
+        raise RuntimeError('Container smoke exceeded its fixed 600-second deadline')
+    previous=signal.signal(signal.SIGALRM,deadline)
+    signal.alarm(gate.runtime_seconds(args))
+    try:
+        result = gate.worker(args)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM,previous)
     terminal = dict(**token, returncode=result, worker=process_binding(os.getpid()),
                     init=process_binding(1), members=live_members(directory),
+                    started_monotonic=started,finished_monotonic=time.monotonic(),
                     wall_seconds=time.monotonic()-started, metrics=gate.metrics(directory))
     if set(terminal['members']) != {1, os.getpid()}:
         terminal['cleanup_error'] = 'Unexpected processes remain after smoke cleanup'

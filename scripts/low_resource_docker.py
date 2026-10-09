@@ -4,10 +4,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -17,6 +19,19 @@ SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE))
 from scripts import low_resource_acceptance as gate
 from scripts.low_resource_service_tree import validate_tree, validate_sample_bindings
+from scripts.low_resource_certificates import validate_metrics_record
+
+SMOKE_STAGES = (
+    'offline_stage_including_wheels','activate','fake_admin_provision','https_startup',
+    'anonymous_denied','untrusted_ca_rejected','login','authenticated_read',
+    '100_authenticated_reads_concurrency_10','panel_only_idle_60_seconds',
+    'proxy_server_start','panel_single_proxy_idle_60_seconds','proxy_client_start',
+    'proxy_10_requests_concurrency_1','proxy_100_requests_concurrency_10',
+    'proxy_wrong_uuid_rejected','proxy_wrong_ca_rejected','logout',
+    'logged_out_replayed_cookie_denied','login_before_backup','stopped_panel',
+    'stopped_backup','stopped_restore','restore_data_and_session_revocation',
+    'restored_https_startup','old_session_after_restore_denied','restored_login',
+    'restored_logout','final_panel_stop')
 
 
 def docker(*args, timeout=30, check=True):
@@ -31,6 +46,57 @@ def inspect_container(container_id):
     if len(rows) != 1 or rows[0].get('Id') != container_id:
         raise RuntimeError('Container identity mismatch')
     return rows[0]
+
+
+def recover_created(name, token, image_id):
+    """Resolve only this invocation's unique name after an uncertain create."""
+    result=docker('inspect',name,check=False)
+    if result.returncode:
+        if 'No such object: '+name in result.stderr or 'No such container: '+name in result.stderr:return None
+        raise RuntimeError('Cannot resolve uncertain container creation')
+    rows=json.loads(result.stdout)
+    if (len(rows)!=1 or rows[0].get('Name')!='/'+name or rows[0].get('Image')!=image_id
+            or rows[0].get('Config',{}).get('Labels',{}).get('vui.resource.unit')!=token['unit']
+            or not re.fullmatch(r'[0-9a-f]{64}',rows[0].get('Id',''))):
+        raise RuntimeError('Uncertain create resolved to an unrelated container')
+    return rows[0]['Id']
+
+
+def cleanup_container(cid, output):
+    """Each exact-ID cleanup attempt continues even if earlier tooling failed."""
+    result={'cleanup_complete':False,'cleanup_diagnostics':[]}
+    if not re.fullmatch(r'[0-9a-f]{64}',cid):
+        return dict(result,cleanup_error='Refusing cleanup without exact container ID')
+    for operation,args,timeout in [('stop',('stop','--time','10',cid),20),
+                                   ('kill',('kill',cid),10),('wait',('wait',cid),20)]:
+        try:
+            value=docker(*args,timeout=timeout,check=False)
+            result['cleanup_diagnostics'].append(dict(operation=operation,returncode=value.returncode))
+        except Exception as exc:
+            result['cleanup_diagnostics'].append(dict(operation=operation,error=type(exc).__name__))
+    try:
+        info=inspect_container(cid)
+        result['exit_state']=info['State'];result['restart_count']=info['RestartCount']
+        if info['State']['Running'] or info['State']['OOMKilled'] or info['RestartCount']:
+            result['cleanup_error']='Container running, OOM or restart status failed'
+    except Exception as exc:
+        result['cleanup_error']='Exit state unavailable: '+type(exc).__name__
+    try:
+        logs=docker('logs',cid,check=False)
+        (output/'container.log').write_text(logs.stdout+logs.stderr)
+        if logs.returncode:result['log_error']='Unable to collect complete Docker log'
+    except Exception as exc:
+        result['log_error']=type(exc).__name__
+    try:
+        removed=docker('rm','--force',cid,check=False)
+        if removed.returncode:raise RuntimeError('Exact container removal failed')
+        absent=docker('inspect',cid,check=False)
+        if (absent.returncode==0 or not any(text+cid in absent.stderr for text in ('No such object: ','No such container: '))):
+            raise RuntimeError('Container absence not confirmed')
+        result['cleanup_complete']=True
+    except Exception as exc:
+        result['cleanup_error']='Removal unconfirmed: '+type(exc).__name__
+    return result
 
 
 def host_identity(pid, proc=Path('/proc')):
@@ -118,7 +184,7 @@ def wait_report(path, container_id, timeout):
 
 
 def validate_counters(host, worker):
-    gate.assert_no_oom(host);gate.assert_no_oom(worker)
+    validate_metrics_record(host);validate_metrics_record(worker)
     for field in ('memory.peak',):
         if host[field]<worker[field]:raise RuntimeError('Host peak precedes worker final accounting')
     for record,fields in [('cpu.stat',('usage_usec',)),('memory.events',('max','oom','oom_kill','oom_group_kill'))]:
@@ -137,10 +203,45 @@ def validate_report(report, token, ready, memory_mib):
             or not re.fullmatch(r'[0-9a-f]{64}',report.get('bundle_sha256',''))):
         raise RuntimeError('Worker report source/backend/identity/limits incomplete')
     stages=report.get('stages',[])
-    if len(stages)!=29 or any(s.get('outcome')!='passed' for s in stages):
+    if report.get('concurrent_workload')!={'requests':100,'concurrency':10,'path':'/api/auth/me','status_200':100}:
+        raise RuntimeError('Authenticated concurrent workload incomplete')
+    if tuple(s.get('name') for s in stages)!=SMOKE_STAGES or any(s.get('outcome')!='passed' for s in stages):
         raise RuntimeError('Smoke stage sequence incomplete')
+    previous_peak=0;previous_end=0;previous_events={k:0 for k in ('max','oom','oom_kill','oom_group_kill')}
+    for stage in stages:
+        wall=stage.get('wall_seconds')
+        start=stage.get('started_monotonic')
+        if (any(type(v) not in (int,float) or not math.isfinite(v) for v in (wall,start))
+                or wall<0 or start<previous_end):
+            raise RuntimeError('Invalid smoke stage duration')
+        previous_end=start+wall
+        if stage['name'].endswith('_idle_60_seconds') and wall<60:
+            raise RuntimeError('Smoke idle was shortened')
+        validate_metrics_record({'memory.current':stage.get('memory_current_bytes'),
+            'memory.peak':stage.get('memory_peak_bytes'),'memory.stat':stage.get('memory_stat'),
+            'memory.events':stage.get('memory_events'),'cpu.stat':{'usage_usec':stage.get('cpu_usage_usec')}})
+        if stage['memory_peak_bytes']<previous_peak:raise RuntimeError('Stage peak moved backwards')
+        previous_peak=stage['memory_peak_bytes']
+        for key,value in previous_events.items():
+            if stage['memory_events'][key]<value:raise RuntimeError('Stage event counter moved backwards')
+        previous_events={key:stage['memory_events'][key] for key in previous_events}
+    proxy=report['proxy_workload']
+    if proxy.get('cleanup_complete') is not True or proxy.get('no_direct') is not True:
+        raise RuntimeError('Proxy cleanup or explicit routing incomplete')
+    if [(v.get('concurrency'),v.get('requests'),v.get('status_200'),v.get('target_deliveries'))
+            for v in proxy.get('positive',[])]!=[(1,10,10,10),(10,100,100,100)]:
+        raise RuntimeError('Proxy positive workload incomplete')
+    if any(row.get('body_bytes')!=19 for row in proxy['positive']):raise RuntimeError('Unexpected proxy body size')
+    for name,markers in [('wrong_uuid',{'unknown uuid'}),('wrong_ca',{'x509','unknown authority'})]:
+        row=proxy.get('negative',{}).get(name,{})
+        if (row.get('attempts')!=1 or row.get('target_deliveries')!=0 or row.get('no_direct') is not True
+                or not markers<=set(row.get('reason_markers',[]))):
+            raise RuntimeError('Proxy negative rejection evidence incomplete')
     validate_tree(report['proxy_workload']['server_tree'],token['target'],report['worker_pid'],'0::/')
-    validate_sample_bindings(report);gate.assert_no_oom(report['metrics'])
+    validate_sample_bindings(report);validate_metrics_record(report['metrics'])
+    if report['metrics']['memory.peak']<previous_peak:raise RuntimeError('Final peak precedes stage peak')
+    if any(report['metrics']['memory.events'][key]<value for key,value in previous_events.items()):
+        raise RuntimeError('Final event counter precedes stage counter')
     if not gate.peak_assessment(report['metrics']['memory.peak'],gate.memory_bytes(memory_mib),ready['page_size'])['within_fixed_page_allowance']:
         raise RuntimeError('Worker exceeded unchanged fixed page allowance')
 
@@ -162,10 +263,12 @@ def coordinator(args):
     token=dict(unit='vui-low-resource-'+uuid.uuid4().hex+'.service',source_commit=args.source_commit,target=args.target)
     summary=dict(schema=1,**token,outcome='failed',backend='docker-private',bundle_sha256=bundle_digest,
                  scope='native musl smoke; limited container includes init/worker/product/clients; host OS/build/prior cache excluded')
-    cid=None
+    cid=None;directory=None;name='vui-resource-'+uuid.uuid4().hex
     try:
         expected=dict(image_id=image['Id'],user=f'{os.getuid()}:{os.getgid()}',memory_bytes=gate.memory_bytes(args.memory_mib))
-        command=['create','--init','--user',expected['user'],'--cgroupns=private',
+        command=['create','--name',name,'--label','vui.resource.unit='+token['unit'],
+                 '--cidfile',str(args.output.resolve()/'container.cid'),
+                 '--init','--user',expected['user'],'--cgroupns=private',
                  '--memory',str(expected['memory_bytes']),'--memory-swap',str(expected['memory_bytes']),
                  '--cpus','1','--restart=no',
                  '--mount',f'type=bind,src={SOURCE},dst=/src,readonly',
@@ -176,11 +279,13 @@ def coordinator(args):
                  '/src/scripts/low_resource_container.py','--bundle','/input/'+args.bundle.name,
                  '--source-commit',args.source_commit,'--target',args.target,'--unit',token['unit'],
                  '--output','/evidence/worker.json','--work-dir','/work','--memory-mib',str(args.memory_mib)]
-        cid=docker(*command).stdout.strip()
-        if not re.fullmatch(r'[0-9a-f]{64}',cid):raise RuntimeError('Docker create returned invalid ID')
+        created=docker(*command).stdout.strip()
+        if not re.fullmatch(r'[0-9a-f]{64}',created):raise RuntimeError('Docker create returned invalid ID')
+        cid=created
         summary['container_id']=cid;docker('start',cid)
         ready=wait_report(args.output/'ready.json',cid,120)
         if any(ready.get(k)!=v for k,v in token.items()) or ready.get('gid')!=os.getgid():raise RuntimeError('Wrong READY source or group')
+        validate_metrics_record(ready['metrics'])
         info=inspect_container(cid);validate_config(info,expected)
         init=host_identity(info['State']['Pid']);directory=host_directory(cid,init)
         bound=bind_worker(directory,init,ready,os.getuid())
@@ -189,18 +294,31 @@ def coordinator(args):
             raise RuntimeError('Host/container limits or page sizes differ')
         summary.update(image_id=image['Id'],image_architecture=image['Architecture'],host_init=init,
                        host_worker=bound,host_cgroup=str(directory),limits=limits,ready_metrics=gate.metrics(directory))
+        validate_counters(summary['ready_metrics'],ready['metrics'])
         gate.write_json(args.output/'host-ready.json',summary)
+        go_time=time.monotonic()
         gate.write_json(args.output/'go.json',token)
         terminal=wait_report(args.output/'terminal.json',cid,gate.runtime_seconds(args)+60)
         if (any(terminal.get(k)!=v for k,v in token.items()) or terminal.get('returncode')!=0
                 or terminal.get('worker')!=ready['worker'] or terminal.get('init')!=ready['init']
                 or terminal.get('cleanup_error')):
             raise RuntimeError('Container worker failed or changed identity')
+        validate_counters(terminal['metrics'],ready['metrics'])
         info=inspect_container(cid);validate_config(info,expected)
         if host_identity(info['State']['Pid'])!=init or bind_worker(directory,init,ready,os.getuid())!=bound:
             raise RuntimeError('Container restarted or replaced a process')
         report=json.loads((args.output/'worker.json').read_text());validate_report(report,token,ready,args.memory_mib)
         if report['bundle_sha256']!=bundle_digest:raise RuntimeError('Worker installed different bundle bytes')
+        stamps=[ready.get('observed_monotonic'),terminal.get('started_monotonic'),terminal.get('finished_monotonic'),terminal.get('wall_seconds')]
+        if (any(type(v) not in (int,float) or not math.isfinite(v) for v in stamps)
+                or not stamps[0]<=go_time<=stamps[1]<stamps[2]<=time.monotonic()
+                or not 120<=stamps[3]<=gate.runtime_seconds(args)+5
+                or abs((stamps[2]-stamps[1])-stamps[3])>1
+                or report['stages'][0]['started_monotonic']<stamps[1]
+                or report['stages'][-1]['started_monotonic']+report['stages'][-1]['wall_seconds']>stamps[2]):
+            raise RuntimeError('Container smoke escaped attested measurement window')
+        validate_counters(report['metrics'],ready['metrics'])
+        validate_counters(terminal['metrics'],report['metrics'])
         final=gate.metrics(directory);gate.verify_limits(directory,args.memory_mib)
         validate_counters(final,report['metrics']);validate_counters(final,terminal['metrics'])
         summary['host_terminal_metrics']=final
@@ -215,27 +333,27 @@ def coordinator(args):
     except Exception as exc:
         summary['error']=str(exc)
     finally:
-        if cid:
+        if cid is None:
             try:
-                info=inspect_container(cid)
-                if info['State']['Running']:
-                    docker('stop','--time','10',cid,timeout=20,check=False)
-                    if inspect_container(cid)['State']['Running']:
-                        docker('kill',cid,timeout=10)
-                    docker('wait',cid,timeout=20)
-                info=inspect_container(cid)
-                summary['exit_state']=info['State'];summary['restart_count']=info['RestartCount']
-                logs=docker('logs',cid,check=False)
-                (args.output/'container.log').write_text(logs.stdout+logs.stderr)
-                if info['State']['Running']:
-                    raise RuntimeError('Container remained running after stop/kill')
-                docker('rm',cid)
-                if docker('inspect',cid,check=False).returncode==0:raise RuntimeError('Container still exists after removal')
-                summary['cleanup_complete']=True
-                if info['State']['OOMKilled'] or info['RestartCount']:
-                    raise RuntimeError('Container OOM or restart status failed')
+                cid=recover_created(name,token,image['Id'])
+                if cid:summary['recovered_container_id']=cid
             except Exception as exc:
-                summary['cleanup_error']=str(exc);summary['outcome']='failed'
+                summary['cleanup_error']=str(exc)
+        if cid:
+            if summary['outcome']!='passed' or getattr(args,'cancelled',False):
+                try:
+                    if directory is None:
+                        info=inspect_container(cid)
+                        directory=host_directory(cid,host_identity(info['State']['Pid']))
+                    summary['host_failure_metrics']=gate.metrics(directory)
+                except Exception as exc:
+                    summary['failure_accounting_error']=type(exc).__name__
+                try:gate.write_json(args.output/'host-failure.json',summary)
+                except Exception as exc:summary['failure_checkpoint_error']=type(exc).__name__
+            summary.update(cleanup_container(cid,args.output))
+        if (getattr(args,'cancelled',False) or summary.get('cleanup_error')
+                or summary.get('log_error') or not summary.get('cleanup_complete')):
+            summary['outcome']='failed'
         gate.write_json(args.output/'summary.json',summary)
     print(json.dumps(summary))
     return 0 if summary['outcome']=='passed' else 1
@@ -249,7 +367,12 @@ def main():
     p.add_argument('--target',choices=('x86_64-musl','aarch64-musl'),required=True)
     p.add_argument('--output',type=Path,required=True)
     p.add_argument('--memory-mib',type=int,choices=gate.MEMORY_PROFILES,default=512)
-    a=p.parse_args();a.duration_profile='smoke';os.umask(0o077)
+    a=p.parse_args();a.duration_profile='smoke';a.cancelled=False;os.umask(0o077)
+    def terminate(signum,frame):
+        if not a.cancelled:
+            a.cancelled=True
+            raise RuntimeError('Host coordinator interrupted; cleaning exact container')
+    signal.signal(signal.SIGTERM,terminate);signal.signal(signal.SIGINT,terminate)
     return coordinator(a)
 
 
