@@ -723,7 +723,8 @@ def coordinator(args) -> int:
             elif profile == "certificates":
                 from scripts.low_resource_certificates import validate_result
                 value=report.get('certificate_overlap',{})
-                validate_result(value.get('external',{}),value.get('service',{}),unit,args.source_commit)
+                from app.release_tools import target_key
+                validate_result(value.get('external',{}),value.get('service',{}),unit,args.source_commit,target_key())
                 from scripts.low_resource_certificates import validate_service_samples
                 validate_service_samples(report.get('certificate_service_samples'),report.get('certificate_service_roles'))
             elif profile == 'data-backup':

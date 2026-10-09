@@ -320,3 +320,23 @@ ZIP 的中心目录、最多 10,000 个文件条目及至多 4 MB MANIFEST 仍�
 此批先取得可复现来源分解，再决定产品优化点。实现及本地parser/身份反例通过不等于准确新head的受限记账已经通过；结果另按实际CI登记，5d完整证据保留。
 
 本批最终本地603项：479通过、124环境skip；新记账7项及独立sustained 13项另行通过（1环境skip），复审无阻断。保留一次603项失败：原单测将生产1秒槽缩成30ms导致宿主调度失约，随后subTest外引用未赋值result又报错；修正仅使该单测使用真实1秒槽和两tick，并将断言留在subTest内，生产600秒及漏槽拒绝不改。最终完整套件重新通过，文档/编译/YAML/diff检查通过；准确head的CI诊断仍待执行。
+
+### c061b9e 完整空载记账与GNU分配器候选
+
+准确 `c061b9ed95374a342e893c2127126f6d5156866b` 的普通八组加独立accounting，共9 runs、12 jobs、129步骤，全部attempt1 success。[记账37877297535](https://github.com/ForceMind/V-UI/actions/runs/37877297535)的artifact11592344750 ZIP SHA-256 `06b1fc42beb7c70fdd5af1e3086e3fc3a552873dd99eb4bde745da079c0d4b12`已下载和独立严格复核。29阶段、两段60.014/60.029秒各13固定槽，peak479453184/max0/三种OOM0；原真实拒绝、零送达、恢复、撤权和清理完整。
+
+单core段13次均值：panel PSS123.6263MiB（匿名103.0511），core PSS53.1367MiB（匿名11.6953/文件41.4414），worker71.9944MiB。panel+core逐样本合计均值176.763MiB；最后采样cgroup current292249600字节，stage结束另292495360，不混为同一读点。这是映射PSS归因，不是memcg净计费，160MiB预算仍不能通过。普通三档512/384/320峰值477544448/402653184/335544320、max0/69/143、OOM0；后两档触限。
+
+该数据促使分阶段测量真正的panel：在助手电脑同一个c061离线包、原installed controller及HTTPS入口，用相同Argon2id参数、合成账号、登录和100次并发度10鉴权读取做两轮交替对照。复现命令：`python tests/benchmark_panel_allocator.py --bundle BUNDLE --sha256 b97186d0003e214cdf931e927b662cc0889e2082ac2d2e9bc75e37dda060714b --source-commit c061b9ed95374a342e893c2127126f6d5156866b --work-dir DISK_BACKED_DIRECTORY --output NEW_JSON`。只使用既有可信包，在私有临时根安装并清理；输出存在即拒绝。新launcher可能自己设置默认，脚本只记录请求的override，不能把新版“未传入变量”自动当原动态阈值。
+
+[本地原始JSON](evidence/panel-allocator-c061-local.json)为overlay磁盘、未施加cgroup配额、没有core、3秒后观测，不当CI/30分钟/160MiB验收。GNU默认动态分配器两轮暖态PSS126.823/124.710MiB、匿名103.625/101.574；新进程仅设置 `MALLOC_MMAP_THRESHOLD_=131072` 后PSS83.839/84.245、匿名61.012/61.207。请求全部成功；登录时延0.082/0.068与0.070/0.066秒，100请求总时长0.571/0.364与0.408/0.390秒为少量本机样本，不能声称CPU或时延改进。较早临时诊断首次reset不存在账号被正确拒绝；修正为先create后reset。另一次/tmp对照实为tmpfs，单独保留且不作磁盘证据；本文件只登记完成的磁盘复现。
+
+同参数Argon2微测也能重现：主线程dummy hash后，在工作线程verify留下约19MiB匿名页；静态mmap阈值后不再保留同量页。这支持“已释放的大块被分配器保留”这个可复现来源，不表示全部面板内存都由密码校验导致，也不降低密码成本。[GNU分配器文档](https://sourceware.org/glibc/manual/latest/html_node/Memory-Allocation-Tunables.html)说明未显式设置时阈值动态调整，显式设置后静态，大块使用mmap可在free后归还；更多mmap/munmap及页对齐仍可能增加工作，必须检查完整工作负载。
+
+候选最小修改只在两个真实panel exec入口按已选择runtime_key对GNU提供128KiB默认：非root deploy run及systemd/OpenRC的system launcher panel模式。显式单变量值保留；新system输入仅允许ASCII无符号64位十进制，非法值拒绝，不悄悄替换。系统launcher不扩大任意GLIBC_TUNABLES/LD_*等原过滤；非root入口已有GLIBC_TUNABLES继承和其优先级保持。musl、通用child_env、stage/admin/backup和HTTP01两种启动模式不加默认。
+
+panel的Certbot及其他子进程会继承默认，因此这是panel服务树的分配策略，不声称只影响一个PID。新增provider环境继承/过滤测试，真实Certbot/Pebble在该阈值下验证。独立证书资源夹具同步采用同一默认，必须证明helper来自installed payload、实际runtime target与协调器匹配、变量存在且没有覆盖malloc的GLIBC tunable。两个历史生产入口均保持原校验和权限边界；不移进程、不清缓存、不改Argon2参数或原固定资源门槛。
+
+新候选仍需自己的记账、普通三档、UI、证书、大数据与完整90分钟回归，尤其检查登录/导出的CPU和时延，不能继承c061记账或5d长测。四平台资源矩阵仍是后续可推进项，GNU默认的musl兼容测试不等于musl资源达标。
+
+本批最终完整本地609项：485通过、124环境skip；阈值下真实Pebble/Certbot三项通过，独立allocator六项、资源75项通过（2skip）及安装/发布工具40项通过，复审无阻断。审查发现的direct-script namespace冲突已由正式deploy package与独立进程入口回归修正；证书自报runtime绕过已绑定worker已验证READY和协调器实际目标，缺阈值/冲突tunable/错误helper来源拒绝。文档、编译、diff通过；本地绿色不代替准确新head全部资源profile。

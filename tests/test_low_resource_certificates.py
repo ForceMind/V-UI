@@ -32,7 +32,7 @@ def evidence():
         response_monotonic=[100+i//10 for i in range(6000)],load_started_monotonic=100,first_response_lanes=10,
         external_metrics={'memory.current':1000,'memory.peak':2000,'memory.stat':{'anon':100,'file':100},'cpu.stat':{'usage_usec':1000},
                           'memory.events':{'oom':0,'oom_kill':0,'oom_group_kill':0,'max':0}})
-    service=dict(outcome='passed',unit=UNIT,source_commit=COMMIT,cleanup_complete=True,service_cgroup=SERVICE,pid=50,
+    service=dict(allocator_runtime_key='x86_64-gnu',allocator_mmap_threshold='131072',allocator_tunables_override=False,outcome='passed',unit=UNIT,source_commit=COMMIT,cleanup_complete=True,service_cgroup=SERVICE,pid=50,
         imported_installed_app=True,isolated_database=True,certbot_version='5.8.0',automatic_due_scheduling=True,
         old_material_unchanged=True,validated_san_key_chain=True,no_duplicate_due_job=True,observation_errors=[],
         first_revision='a'*64,renewed_revision='b'*64,first_serial='100',renewed_serial='200',load_started_monotonic=100,
@@ -53,7 +53,7 @@ class CertificateResourceTests(unittest.TestCase):
         with patch.dict(os.environ,{},clear=True),self.assertRaises(RuntimeError):cert.service({},Path('/unused'))
 
     def test_complete_evidence_and_original_limits(self):
-        cert.validate_result(*evidence(),UNIT,COMMIT)
+        cert.validate_result(*evidence(),UNIT,COMMIT,'x86_64-gnu')
         self.assertEqual(gate.runtime_seconds(SimpleNamespace(duration_profile='certificates',memory_mib=512)),1800)
         for memory in (320,384):
             with self.assertRaises(RuntimeError):gate.duration_profile(SimpleNamespace(duration_profile='certificates',memory_mib=memory))
@@ -69,15 +69,15 @@ class CertificateResourceTests(unittest.TestCase):
             ('external_metrics',{'memory.events':{'oom':1,'oom_kill':0}}),('external_metrics',{'memory.events':{'oom':0}})]
         for key,value in mutations:
             external,service=evidence();external[key]=value
-            with self.subTest(key=key),self.assertRaises(RuntimeError):cert.validate_result(external,service,UNIT,COMMIT)
+            with self.subTest(key=key),self.assertRaises(RuntimeError):cert.validate_result(external,service,UNIT,COMMIT,'x86_64-gnu')
 
     def test_real_jobs_material_and_challenge_evidence_required(self):
-        for key,value in [('outcome','running'),('cleanup_complete',False),('imported_installed_app',False),('isolated_database',False),
+        for key,value in [('allocator_runtime_key','aarch64-musl'),('allocator_mmap_threshold',None),('allocator_tunables_override',True),('outcome','running'),('cleanup_complete',False),('imported_installed_app',False),('isolated_database',False),
             ('certbot_version','other'),('automatic_due_scheduling',False),('no_duplicate_due_job',False),
             ('old_material_unchanged',False),('validated_san_key_chain',False),('observation_errors',['OSError']),
             ('first_revision','b'*64),('first_serial','200'),('challenges',[]),('certbot_processes',[]),('service_cgroup',CLIENT)]:
             external,service=evidence();service[key]=value
-            with self.subTest(key=key),self.assertRaises(RuntimeError):cert.validate_result(external,service,UNIT,COMMIT)
+            with self.subTest(key=key),self.assertRaises(RuntimeError):cert.validate_result(external,service,UNIT,COMMIT,'x86_64-gnu')
         for changed in ('before','after','no_overlap','failed','reused_token','wrong_child','wrong_certificate','old_sequence'):
             external,service=evidence();job=service['jobs'][1]
             if changed=='before':job['started_monotonic']=99
@@ -88,7 +88,7 @@ class CertificateResourceTests(unittest.TestCase):
             elif changed=='wrong_child':service['certbot_processes'][1]['cgroup']=CLIENT
             elif changed=='wrong_certificate':job['certificate_id']='other'
             else:job['sequence']=1
-            with self.subTest(changed=changed),self.assertRaises(RuntimeError):cert.validate_result(external,service,UNIT,COMMIT)
+            with self.subTest(changed=changed),self.assertRaises(RuntimeError):cert.validate_result(external,service,UNIT,COMMIT,'x86_64-gnu')
 
     def test_exactly_one_new_successful_job(self):
         jobs=evidence()[1]['jobs']

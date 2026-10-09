@@ -235,8 +235,18 @@ def service(request, output):
             or importlib.metadata.version('certbot')!='5.8.0'
             or unit not in member().split('/')):
         raise RuntimeError('Installed certificate service provenance failed')
+    from deploy.system_launcher import panel_environment
+    runtime_key=read(payload.parent/'READY.json')['runtime_key']
+    if not Path(sys.modules[panel_environment.__module__].__file__).resolve().is_relative_to(payload):
+        raise RuntimeError('Allocator helper did not come from installed payload')
+    expected_threshold=panel_environment({},runtime_key).get('MALLOC_MMAP_THRESHOLD_')
+    if any(item.split('=',1)[0].startswith('glibc.malloc.') for item in os.environ.get('GLIBC_TUNABLES','').split(':')):
+        raise RuntimeError('Certificate fixture has a conflicting GNU malloc tunable')
+    if os.environ.get('MALLOC_MMAP_THRESHOLD_')!=expected_threshold:
+        raise RuntimeError('Certificate service did not use the panel allocator default')
     database.init_db()
     report=dict(outcome='running',source_commit=commit,unit=unit,service_cgroup=member(),pid=os.getpid(),
+        allocator_runtime_key=runtime_key,allocator_mmap_threshold=expected_threshold,allocator_tunables_override=False,
         imported_installed_app=True,isolated_database=True,certbot_version='5.8.0',jobs=[],challenges=[],certbot_processes=[],cleanup_complete=False)
     lock=threading.Lock();active={'phase':None,'directory':None}
     report['observation_errors']=[]
@@ -396,13 +406,15 @@ def external(request, output):
 
 def request_overlap(work, output, unit, commit, payload, python, binary, fixture, ca, port, observe):
     from app.release_tools import child_env
+    from deploy.system_launcher import panel_environment
+    runtime_key=read(payload.parent/'READY.json')['runtime_key']
     root=work/'certificate-fixture';root.mkdir(mode=0o700)
     service_output=output.with_name(output.stem+'-certificate-service.json')
     service_request=root/'service.request.json'
     write(service_request,dict(root=str(root),payload=str(payload),unit=unit,source_commit=commit))
     with service_output.with_suffix('.log').open('w') as log:
         process=subprocess.Popen([str(python),'-B',str(Path(__file__).resolve()),'service','--request',str(service_request),'--output',str(service_output)],
-            cwd=payload,env=child_env(payload,root/'data'),stdout=log,stderr=subprocess.STDOUT)
+            cwd=payload,env=panel_environment(child_env(payload,root/'data'),runtime_key),stdout=log,stderr=subprocess.STDOUT)
         try:
             def alive():
                 observe()
@@ -415,7 +427,7 @@ def request_overlap(work, output, unit, commit, payload, python, binary, fixture
             process.wait(timeout=5)
             if process.returncode!=0:raise RuntimeError('Certificate service exited unsuccessfully')
             service_result=read(service_output)
-            validate_result(result,service_result,unit,commit)
+            validate_result(result,service_result,unit,commit,runtime_key)
             return dict(external=result,service=service_result)
         finally:
             if process.poll() is None:
@@ -461,7 +473,7 @@ def validate_service_samples(samples, roles):
     if samples[-1]['observed_monotonic']-samples[0]['observed_monotonic']<590:raise RuntimeError('Incomplete service duration')
 
 
-def validate_result(external, service, unit, commit):
+def validate_result(external, service, unit, commit, expected_runtime_key):
     from scripts.low_resource_sustained import outside_server,BODY
     from scripts.low_resource_acceptance import assert_no_oom
     def number(value):return type(value) in (int,float) and math.isfinite(value) and value>=0
@@ -472,6 +484,13 @@ def validate_result(external, service, unit, commit):
     for value in (external,service):
         if value.get('outcome')!='passed' or value.get('unit')!=unit or value.get('source_commit')!=commit or value.get('cleanup_complete') is not True:
             raise RuntimeError('Certificate overlap provenance or completion failed')
+    from deploy.system_launcher import panel_environment
+    expected_threshold=panel_environment({},expected_runtime_key).get('MALLOC_MMAP_THRESHOLD_')
+    if (service.get('allocator_runtime_key')!=expected_runtime_key
+            or 'allocator_mmap_threshold' not in service
+            or service.get('allocator_tunables_override') is not False
+            or service.get('allocator_mmap_threshold')!=expected_threshold):
+        raise RuntimeError('Certificate allocator policy evidence missing')
     outside_server(unit,external.get('client_cgroup',''))
     if (external.get('client_core_cgroup')!=external['client_cgroup'] or external.get('pebble_cgroup')!=external['client_cgroup']
             or unit not in service.get('service_cgroup','').split('/')):
