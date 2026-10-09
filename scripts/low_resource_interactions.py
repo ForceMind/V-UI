@@ -214,6 +214,7 @@ def validate_result(value, unit, commit):
     if (logout.get('both_tabs_redirected') is not True or logout.get('polling_stopped') is not True
             or logout.get('statuses',{}).get('401',0)<1):
         raise RuntimeError('Logout did not stop both tabs')
+    validate_logout_trace(logout,value.get('session_trace',{}))
     if value.get('external_requests') != 0 or value.get('browser_exceptions') != 0:
         raise RuntimeError('Browser isolation or runtime exception failed')
     usage = value.get('client_usage', {})
@@ -321,6 +322,114 @@ def wait_native_visibility(pages, expected, *, timeout=5):
         next(iter(pages.values())).wait_for_timeout(100)
 
 
+INITIAL_PATHS=('/api/auth/me',*POLL_PATHS,'/api/inbounds','/api/subscription/mihomo-warnings',
+               '/api/routing/mihomo/catalog','/api/routing/mihomo','/api/routing/mihomo/preview')
+TRACE_PATHS=(*INITIAL_PATHS,'/api/auth/logout')
+
+
+class SessionTrace:
+    """Safe lifecycle evidence from page creation, including phase boundaries."""
+    def __init__(self,current):
+        self.current=current;self.requests=[];self.navigations=[];self.pending={};self.pages={}
+    def attach(self,page,tab):
+        key=len(self.pages)+1;state={'tab':tab,'generation':0,'path':'other'};self.pages[key]=state
+        def phase():return self.current['row']['name'] if self.current['row'] else None
+        def navigated(frame):
+            if frame!=page.main_frame:return
+            path=urlsplit(frame.url).path
+            state.update(generation=state['generation']+1,path=path if path in ('/ui/','/login') else 'other')
+            self.navigations.append(dict(page_id=key,tab=tab,document_generation=state['generation'],
+                document_path=state['path'],monotonic=time.monotonic()))
+        def requested(request):
+            path=urlsplit(request.url).path
+            if path not in TRACE_PATHS:return
+            row=dict(id=len(self.requests)+1,page_id=key,tab=tab,document_generation=state['generation'],
+                document_path=state['path'],path=path,method=request.method,started_monotonic=time.monotonic(),
+                phase_at_start=phase(),completed=False,failed=False)
+            self.requests.append(row);self.pending[request]=row
+        def responded(response):
+            row=self.pending.get(response.request)
+            if row is not None:row.update(status=response.status,response_monotonic=time.monotonic())
+        def finished(request):
+            row=self.pending.pop(request,None)
+            if row is not None:row.update(completed=True,finished_monotonic=time.monotonic(),phase_at_finish=phase())
+        def failed(request):
+            row=self.pending.pop(request,None)
+            if row is not None:row.update(failed=True,failed_monotonic=time.monotonic(),phase_at_finish=phase())
+        page.on('framenavigated',navigated);page.on('request',requested);page.on('response',responded)
+        page.on('requestfinished',finished);page.on('requestfailed',failed)
+        return key
+    def ready(self,key):
+        state=self.pages[key]
+        rows=[r for r in self.requests if r['page_id']==key and r['document_generation']==state['generation']]
+        if (state['path']!='/ui/' or any(r['page_id']==key for r in self.pending.values())
+                or any(r['failed'] for r in rows)):
+            return None
+        complete={r['path'] for r in rows if r['completed'] and r.get('status')==200 and r.get('method')=='GET'}
+        if not set(INITIAL_PATHS)<=complete:return None
+        return dict(page_id=key,tab=state['tab'],document_generation=state['generation'],document_path='/ui/',
+                    ready_monotonic=time.monotonic(),completed_paths=list(INITIAL_PATHS))
+    def wait_ready(self,page,key):
+        from playwright.sync_api import expect
+        expect(page.locator('.el-dropdown-link')).to_contain_text('resource-admin',timeout=15000)
+        deadline=time.monotonic()+15
+        while True:
+            ready=self.ready(key)
+            if ready:return ready
+            if time.monotonic()>=deadline:raise RuntimeError('Dashboard authentication/initial requests not complete')
+            page.wait_for_timeout(50)
+    def snapshot(self):return dict(requests=self.requests,navigations=self.navigations)
+
+
+def validate_logout_trace(row,trace):
+    def moment(value):return type(value) in (int,float) and math.isfinite(value) and value>=0
+    prepared=row.get('prepared_pages',[]);requests=trace.get('requests',[]);navigations=trace.get('navigations',[])
+    if len(prepared)!=2 or {p.get('tab') for p in prepared}!={'tab1','tab2'} or len({p.get('page_id') for p in prepared})!=2:raise RuntimeError('Logout did not start from two authenticated dashboards')
+    for key in ('started_monotonic','logout_completed_monotonic','stopped_from','stopped_until'):
+        if not moment(row.get(key)):raise RuntimeError('Missing logout timeline boundaries')
+    if (row['logout_completed_monotonic']<row['started_monotonic'] or row['stopped_from']<row['logout_completed_monotonic']
+            or row['stopped_until']-row['stopped_from']<11):raise RuntimeError('Incomplete logout stop interval')
+    if row.get('pre_logout_visibility')!={'tab1':'hidden','tab2':'visible'}:raise RuntimeError('Logout visibility precondition missing')
+    ids=[r.get('id') for r in requests]
+    if len(ids)!=len(set(ids)):raise RuntimeError('Duplicate request evidence')
+    for r in requests:
+        if r.get('path') not in TRACE_PATHS or r.get('method') not in ('GET','POST') or not moment(r.get('started_monotonic')):
+            raise RuntimeError('Invalid safe request timeline')
+        if r.get('completed'):
+            if (r.get('failed') or type(r.get('status')) is not int or not moment(r.get('response_monotonic'))
+                    or not moment(r.get('finished_monotonic')) or not r['started_monotonic']<=r['response_monotonic']<=r['finished_monotonic']):
+                raise RuntimeError('Request completion is not proven')
+    def complete(r,status):return r.get('completed') is True and r.get('failed') is False and r.get('status')==status
+    originals={(p.get('page_id'),p.get('document_generation')) for p in prepared}
+    logout=[r for r in requests if r.get('document_path')=='/ui/' and (r.get('page_id'),r.get('document_generation')) in originals and r['path']=='/api/auth/logout' and r['method']=='POST' and complete(r,200)
+            and r['started_monotonic']>=row['started_monotonic']]
+    if len(logout)!=1:raise RuntimeError('Real successful logout request missing')
+    if logout[0]['response_monotonic']>row['logout_completed_monotonic'] or logout[0]['finished_monotonic']>row['stopped_from']:
+        raise RuntimeError('Logout completion contradicts request timeline')
+    status_denials=[]
+    for p in prepared:
+        if (p.get('document_path')!='/ui/' or type(p.get('page_id')) is not int or type(p.get('document_generation')) is not int
+                or not moment(p.get('ready_monotonic')) or p['ready_monotonic']>row['started_monotonic']
+                or set(p.get('completed_paths',[]))!=set(INITIAL_PATHS)):raise RuntimeError('Invalid dashboard readiness')
+        original=[r for r in requests if r.get('page_id')==p['page_id'] and r.get('tab')==p['tab'] and r.get('document_generation')==p['document_generation'] and r.get('document_path')=='/ui/']
+        for path in INITIAL_PATHS:
+            if not any(r['path']==path and r.get('method')=='GET' and complete(r,200) and r['finished_monotonic']<=p['ready_monotonic'] for r in original):
+                raise RuntimeError('Dashboard initialization response missing')
+        if any(r['started_monotonic']<=p['ready_monotonic'] and (not r.get('completed') or r.get('finished_monotonic',float('inf'))>p['ready_monotonic']) for r in original):
+            raise RuntimeError('Dashboard was marked ready with pending requests')
+        nav=[n for n in navigations if n.get('page_id')==p['page_id'] and n.get('tab')==p['tab'] and n.get('document_path')=='/login'
+             and n.get('document_generation',0)>p['document_generation'] and moment(n.get('monotonic')) and n['monotonic']>=row['started_monotonic']]
+        if not nav:raise RuntimeError('Login navigation missing')
+        arrived=min(n['monotonic'] for n in nav)
+        if arrived>row['logout_completed_monotonic']+15 or arrived>row['stopped_from']:raise RuntimeError('Logout navigation exceeded common deadline')
+        denials=[r for r in original if r.get('method')=='GET' and complete(r,401) and r['response_monotonic']>=logout[0]['started_monotonic'] and r['finished_monotonic']<=arrived]
+        if not any(r['path']=='/api/auth/me' for r in denials):raise RuntimeError('Dashboard current-session refusal before navigation missing')
+        status_denials.extend(r for r in denials if r['path'] in POLL_PATHS)
+    if not status_denials:raise RuntimeError('Original dashboard status refusal missing')
+    if any(r['path'] in POLL_PATHS and row['stopped_from']<=r['started_monotonic']<=row['stopped_until'] for r in requests):
+        raise RuntimeError('Status request during stopped observation')
+
+
 def track_page(page, label, current, inflight, errors):
     page.on('pageerror', lambda error: errors.append(type(error).__name__))
     def requested(request):
@@ -369,6 +478,7 @@ def run(value, output, work):
     cookie = value['cookie']
     external, errors = [], []
     current = {'row': None}
+    trace=SessionTrace(current);report['session_trace']=trace.snapshot()
     inflight = {}
     def phase(name, action):
         row = dict(name=name, outcome='running', started_monotonic=time.monotonic(), requests={}, statuses={}, max_inflight=0, max_inflight_by_endpoint={}, request_failures=0)
@@ -415,14 +525,14 @@ def run(value, output, work):
                 context.route('**/*',only_local)
                 context.add_cookies([dict(name='__Host-vui_session',value=cookie.split('=',1)[1],url=origin,
                                          secure=True,httpOnly=True,sameSite='Strict')])
-                first=context.new_page();track_page(first,'tab1',current,inflight,errors);first.goto(origin+'/ui/')
+                first=context.new_page();track_page(first,'tab1',current,inflight,errors);first_key=trace.attach(first,'tab1');first.goto(origin+'/ui/')
                 expect(first.locator('.logo')).to_contain_text('V-UI')
                 first.bring_to_front();wait_native_visibility({'tab1':first},{'tab1':'visible'})
                 phase('visible_tab',lambda row:observe_pages(row,{'tab1':first},{'tab1':'visible'}))
                 blank=context.new_page();blank.goto('about:blank')
                 blank.bring_to_front();wait_native_visibility({'tab1':first},{'tab1':'hidden'})
                 phase('hidden_tab',lambda row:observe_pages(row,{'tab1':first},{'tab1':'hidden'}))
-                second=context.new_page();track_page(second,'tab2',current,inflight,errors);second.goto(origin+'/ui/')
+                second=context.new_page();track_page(second,'tab2',current,inflight,errors);second_key=trace.attach(second,'tab2');second.goto(origin+'/ui/')
                 expect(second.locator('.logo')).to_contain_text('V-UI')
                 second.bring_to_front();wait_native_visibility({'tab1':first,'tab2':second},{'tab1':'hidden','tab2':'visible'})
                 phase('two_tabs',lambda row:observe_pages(row,{'tab1':first,'tab2':second},{'tab1':'hidden','tab2':'visible'}))
@@ -467,23 +577,37 @@ def run(value, output, work):
                         time.sleep(max(0,start+SECONDS-time.monotonic()))
                         row['active_seconds']=time.monotonic()-start
                     phase('export_'+str(index),exports)
-                first=context.new_page();track_page(first,'tab1',current,inflight,errors);first.goto(origin+'/ui/')
-                second=context.new_page();track_page(second,'tab2',current,inflight,errors);second.goto(origin+'/ui/')
-                expect(second.locator('.logo')).to_contain_text('V-UI')
+                first=context.new_page();track_page(first,'tab1',current,inflight,errors);first_key=trace.attach(first,'tab1');first.goto(origin+'/ui/')
+                second=context.new_page();track_page(second,'tab2',current,inflight,errors);second_key=trace.attach(second,'tab2');second.goto(origin+'/ui/')
+                prepared=[trace.wait_ready(first,first_key),trace.wait_ready(second,second_key)]
+                second.bring_to_front();wait_native_visibility({'tab1':first,'tab2':second},{'tab1':'hidden','tab2':'visible'})
+                prepared=[trace.wait_ready(first,first_key),trace.wait_ready(second,second_key)]
                 def logout(row):
+                    row.update(prepared_pages=prepared,pre_logout_visibility={'tab1':first.evaluate('document.visibilityState'),'tab2':second.evaluate('document.visibilityState')})
                     status=first.evaluate("""async () => {
                         const response = await fetch('/api/auth/logout', {
                             method: 'POST', credentials: 'same-origin',
                             headers: {'Content-Type': 'application/json', 'X-VUI-Request': '1'},
                             body: '{}'
                         });
+                        await response.arrayBuffer();
                         return response.status;
                     }""")
                     if status!=200:raise RuntimeError('Synthetic logout failed')
-                    deadline=time.monotonic()+15
+                    observed_deadline=time.monotonic()+5
+                    while True:
+                        completed=[r for r in trace.requests if r['page_id']==first_key and r['path']=='/api/auth/logout'
+                                   and r['started_monotonic']>=row['started_monotonic'] and r['completed']]
+                        if completed:break
+                        if time.monotonic()>=observed_deadline:raise RuntimeError('Logout request completion event missing')
+                        first.wait_for_timeout(20)
+                    row['logout_completed_monotonic']=completed[0]['finished_monotonic']
+                    deadline=row['logout_completed_monotonic']+15
                     for page in (first,second):
                         page.wait_for_url('**/login',timeout=max(1,(deadline-time.monotonic())*1000))
+                    row['stopped_from']=time.monotonic()
                     count=sum(row['requests'].values());first.wait_for_timeout(11000)
+                    row['stopped_until']=time.monotonic()
                     if sum(row['requests'].values())!=count:raise RuntimeError('Polling continued after login redirect')
                     row.update(both_tabs_redirected=True,polling_stopped=True)
                 phase('logout',logout)

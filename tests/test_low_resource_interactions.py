@@ -16,6 +16,26 @@ UNIT='vui-low-resource-'+'a'*32+'.service'
 COMMIT='b'*40
 
 
+def logout_evidence():
+    requests=[];ready=[];nav=[]
+    def request(page,path,status,start,end,method='GET',generation=1,document='/ui/'):
+        row=dict(id=len(requests)+1,page_id=page,tab=f'tab{page}',document_generation=generation,document_path=document,
+            path=path,method=method,started_monotonic=start,response_monotonic=(start+end)/2,finished_monotonic=end,
+            completed=True,failed=False,status=status,phase_at_start=None,phase_at_finish='logout')
+        requests.append(row);return row
+    for page in (1,2):
+        for path in interaction.INITIAL_PATHS:request(page,path,200,1,1.5)
+        ready.append(dict(page_id=page,tab=f'tab{page}',document_generation=1,document_path='/ui/',ready_monotonic=1.8,
+                          completed_paths=list(interaction.INITIAL_PATHS)))
+        nav.append(dict(page_id=page,tab=f'tab{page}',document_generation=2,document_path='/login',monotonic=4))
+    request(1,'/api/auth/logout',200,2.1,2.3,'POST')
+    request(2,'/api/system/status',401,2.5,3)
+    request(2,'/api/auth/me',401,3,3.3);request(1,'/api/auth/me',401,3.4,3.8)
+    row=dict(started_monotonic=2,logout_completed_monotonic=2.4,stopped_from=4.1,stopped_until=15.2,
+             prepared_pages=ready,pre_logout_visibility={'tab1':'hidden','tab2':'visible'})
+    return row,dict(requests=requests,navigations=nav)
+
+
 class InteractionContracts(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
@@ -43,7 +63,8 @@ class InteractionContracts(unittest.TestCase):
             if name in ('visible_tab','hidden_tab','two_tabs'):row['max_inflight_by_endpoint']={key:1 for key in row['requests']}
             if name=='logout':row['statuses']={'401':1}
             phases.append(row)
-        return dict(outcome='passed',source_commit=COMMIT,unit=UNIT,node_count=100,phases=phases,polling_contract='visible-only-state-status',
+        logout,trace=logout_evidence();phases[-1].update(logout)
+        return dict(session_trace=trace,outcome='passed',source_commit=COMMIT,unit=UNIT,node_count=100,phases=phases,polling_contract='visible-only-state-status',
             cleanup_complete=True,broker_cleanup_complete=True,
             native_focus_driver=dict(playwright_version='1.57.0',changes=1,enabled=False,installed_driver_modified=False,source_sha256='a'*64,copy_sha256='b'*64),
             client_cgroup='0::/system.slice/'+UNIT.removesuffix('.service')+'-browser.service',
@@ -163,6 +184,56 @@ class InteractionContracts(unittest.TestCase):
         self.assertEqual(row['requests'],{'tab1:/api/system/status':2})
         self.assertEqual(row['request_failures'],1)
         self.assertFalse(inflight)
+
+    def test_logout_trace_requires_original_document_refusal_and_complete_stop_window(self):
+        row,trace=logout_evidence();interaction.validate_logout_trace(row,trace)
+        for bad in ('after_login','wrong_generation','incomplete','body_failure','no_status','pending_at_ready','deadline','stop_request','short_stop','missing_startup','post_initialization','post_refusal','late_logout'):
+            r,t=copy.deepcopy((row,trace))
+            denials=[q for q in t['requests'] if q['status']==401]
+            if bad=='after_login':
+                for q in denials:q.update(document_path='/login',document_generation=2)
+            elif bad=='wrong_generation':denials[-1]['document_generation']=2
+            elif bad=='incomplete':denials[-1]['completed']=False
+            elif bad=='body_failure':denials[-1]['failed']=True
+            elif bad=='no_status':t['requests'].remove(denials[0])
+            elif bad=='pending_at_ready':t['requests'][0]['finished_monotonic']=2.2
+            elif bad=='deadline':t['navigations'][0]['monotonic']=18
+            elif bad=='stop_request':
+                q=copy.deepcopy(denials[0]);q.update(id=999,started_monotonic=5,response_monotonic=5.1,finished_monotonic=5.2);t['requests'].append(q)
+            elif bad=='short_stop':r['stopped_until']=r['stopped_from']+10.9
+            elif bad=='post_initialization':
+                for q in t['requests']:
+                    if q['status']==200 and q['path']!='/api/auth/logout':q['method']='POST'
+            elif bad=='post_refusal':
+                for q in denials:q['method']='POST'
+            elif bad=='late_logout':
+                for q in t['requests']:
+                    if q['path']=='/api/auth/logout':q.update(response_monotonic=100,finished_monotonic=101)
+            else:t['requests'].pop(0)
+            with self.subTest(bad=bad),self.assertRaises(RuntimeError):interaction.validate_logout_trace(r,t)
+
+    def test_session_trace_keeps_cross_phase_requests_without_credentials(self):
+        class Page:
+            def __init__(self):self.events={};self.main_frame=argparse.Namespace(url='https://127.0.0.1:12345/ui/')
+            def on(self,event,callback):self.events[event]=callback
+        class Request:
+            method='GET'
+            url='https://127.0.0.1:12345/api/auth/me?secret=not-recorded'
+        page=Page();current={'row':None};trace=interaction.SessionTrace(current);key=trace.attach(page,'tab1')
+        page.events['framenavigated'](page.main_frame)
+        request=Request();page.events['request'](request)
+        current['row']={'name':'logout'}
+        page.events['response'](argparse.Namespace(request=request,status=401));page.events['requestfinished'](request)
+        row=trace.requests[0]
+        self.assertIsNone(row['phase_at_start']);self.assertEqual(row['phase_at_finish'],'logout')
+        self.assertEqual(row['document_generation'],1);self.assertEqual(row['document_path'],'/ui/')
+        self.assertTrue(row['completed']);self.assertEqual(row['status'],401)
+        self.assertNotIn('secret',json.dumps(trace.snapshot()));self.assertIsNone(trace.ready(key))
+        page.main_frame.url='https://127.0.0.1:12345/login';page.events['framenavigated'](page.main_frame)
+        after=Request();page.events['request'](after)
+        self.assertEqual(trace.requests[-1]['document_generation'],2)
+        self.assertEqual(trace.requests[-1]['document_path'],'/login')
+        self.assertIsNone(trace.ready(key))
 
     def test_native_focus_uses_isolated_exact_driver_copy_and_restores_transport(self):
         from playwright._impl import _transport, _driver
