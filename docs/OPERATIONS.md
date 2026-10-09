@@ -80,6 +80,8 @@ sudo systemctl stop v-ui.service v-ui-http01.service v-ui-http01.socket
 sudo -u v-ui "$PY" -B "$APP/scripts/deploy.py" --root "$ROOT" backup "$ROOT/manual-backup.zip"
 ```
 
+性能候选的[私有备份缓存方案](LOW_RESOURCE_BACKUP_CACHE.md)要求目标目录所在文件系统支持硬链接，以便完整归档无覆盖发布；不支持时安全失败。若归档发布后的目录同步失败，命令仍报错，但会保留已完成文件，不自动删除或覆盖该路径。此行为只属于性能候选，未晋升为冻结 0.4.7 附件。
+
 恢复会撤销旧管理会话和订阅令牌。出现 `RESTORE_PENDING.json` 时保持停机并执行 `recover-restore`，不要手工删除日志绕过检查。
 
 证书故障不要通过关闭 TLS 验证绕过。更多见 [TROUBLESHOOTING.md](TROUBLESHOOTING.md)。

@@ -65,7 +65,7 @@ def safe_path(name):
 
 
 class _PrivateArchiveFile:
-    """Bound cache for installer-owned immutable files, never user data.
+    """Bound cache for operation-owned immutable files, never live user data.
 
     Cache advice is optional. Writeback errors still fail the operation; an
     unsupported advisory syscall only loses the optimization. Keep this helper

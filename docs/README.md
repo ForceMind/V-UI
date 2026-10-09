@@ -6,7 +6,9 @@
 | --- | --- |
 | 1 vCPU / 512 MiB 安装运行目标与实测边界 | [LOW_RESOURCE_TARGET.md](LOW_RESOURCE_TARGET.md) |
 | 405 同提交四平台及完整资源基线、未达预算 | [LOW_RESOURCE_405_BASELINE.md](LOW_RESOURCE_405_BASELINE.md) |
+| 071 大规则优化与完整同提交验收基线 | [LOW_RESOURCE_071_BASELINE.md](LOW_RESOURCE_071_BASELINE.md) |
 | 大规则导出索引、差分合同与本地诊断边界 | [LOW_RESOURCE_RULE_INDEX.md](LOW_RESOURCE_RULE_INDEX.md) |
+| 停机备份私有缓存与无覆盖发布边界 | [LOW_RESOURCE_BACKUP_CACHE.md](LOW_RESOURCE_BACKUP_CACHE.md) |
 | 新服务器安装/首次证书/创建管理员 | [INSTALLATION.md](INSTALLATION.md) |
 | 申请/测试/自动续期/面板或节点绑定 | [CERTIFICATES.md](CERTIFICATES.md) |
 | 节点、规则、DNS、专用订阅 | [CONFIGURATION.md](CONFIGURATION.md) |
