@@ -1,0 +1,146 @@
+"""Resource-fixture use of the installed product watchdog and inherited policy.
+
+The fixture worker is the watchdog's parent. This exercises the real installed
+watchdog/core pair; it is not a claim that the panel API applied this config.
+"""
+import os
+from pathlib import Path
+import re
+import subprocess
+import time
+
+from scripts.low_resource_accounting import start_ticks
+
+
+def allocator_fields(environment):
+    threshold = environment.get('MALLOC_MMAP_THRESHOLD_')
+    if threshold is not None and (not re.fullmatch(r'[0-9]+', threshold)
+                                  or int(threshold) > 2 ** 64 - 1):
+        raise RuntimeError('Invalid allocator threshold')
+    return {'mmap_threshold': threshold,
+            'malloc_tunable_present': any(part.startswith('glibc.malloc.')
+                for part in environment.get('GLIBC_TUNABLES', '').split(':'))}
+
+
+def observed_allocator(pid):
+    # Never serialize the environment: it may contain unrelated credentials.
+    with Path(f'/proc/{pid}/environ').open('rb') as stream:
+        raw = stream.read(1024 * 1024 + 1)
+    if len(raw) > 1024 * 1024:
+        raise RuntimeError('Service environment exceeded observation bound')
+    selected = {}
+    for entry in raw.split(b'\0'):
+        key, separator, value = entry.partition(b'=')
+        if separator and key in (b'MALLOC_MMAP_THRESHOLD_', b'GLIBC_TUNABLES'):
+            selected[key.decode('ascii')] = value.decode('ascii')
+    return allocator_fields(selected)
+
+
+def identity(pid):
+    proc = Path(f'/proc/{pid}')
+    stat = (proc / 'stat').read_text()
+    fields = stat.rsplit(')', 1)[1].split()
+    value = dict(pid=pid, ppid=int(fields[1]), starttime_ticks=start_ticks(stat),
+                 cgroup=(proc / 'cgroup').read_text().strip(), process_group=os.getpgid(pid))
+    if start_ticks((proc / 'stat').read_text()) != value['starttime_ticks']:
+        raise RuntimeError('Service process identity changed')
+    return value
+
+
+def canonical_cgroup(value, unit):
+    if not isinstance(value, str) or not re.fullmatch(r'0::/[^\n]+', value):
+        raise RuntimeError('Invalid unified service cgroup')
+    path = value[3:]
+    if any(part in ('', '.', '..') for part in path[1:].split('/')) or Path(path).name != unit:
+        raise RuntimeError('Service cgroup does not match unit')
+    return '/sys/fs/cgroup' + path
+
+
+class WatchedCore:
+    def __init__(self, stack, python, payload, binary, config, log_path, environment, runtime_key):
+        self.python, self.payload, self.binary = Path(python), Path(payload), Path(binary)
+        self.config, self.log_path = Path(config), Path(log_path)
+        self.environment, self.runtime_key = environment, runtime_key
+        self.policy = allocator_fields(environment)
+        if self.policy['malloc_tunable_present']:
+            raise RuntimeError('Conflicting allocator tunable in fixture')
+        self.process = None
+        self.roles = {}
+        self.cleanup_complete = False
+        self.log = stack.enter_context(self.log_path.open('w'))
+        stack.callback(self.close)
+
+    def start(self, port):
+        import psutil
+        command = [str(self.python), str(self.payload / 'app/services/core_child.py'),
+                   str(os.getpid()), str(self.binary), 'run', '-c', str(self.config)]
+        self.process = subprocess.Popen(command, cwd=self.payload, env=self.environment,
+            stdout=self.log, stderr=subprocess.STDOUT, start_new_session=True)
+        deadline = time.monotonic() + 12
+        while time.monotonic() < deadline:
+            if self.process.poll() is not None:
+                raise RuntimeError('Installed watchdog exited before core readiness')
+            children = psutil.Process(self.process.pid).children()
+            if len(children) == 1:
+                core = children[0]
+                if core.cmdline() != command[3:]:
+                    raise RuntimeError('Unexpected watchdog child command')
+                if any(s.status == psutil.CONN_LISTEN and s.laddr.port == port
+                       for s in core.net_connections(kind='inet') if s.laddr):
+                    self.roles = {'watchdog': identity(self.process.pid), 'core': identity(core.pid)}
+                    for row in self.roles.values():
+                        row['allocator'] = observed_allocator(row['pid'])
+                    self.check()
+                    return
+            time.sleep(.05)
+        raise RuntimeError('Installed core listener readiness deadline exceeded')
+
+    @property
+    def core_pid(self):
+        return self.roles['core']['pid']
+
+    def check(self):
+        if self.process is None or self.process.poll() is not None or not self.roles:
+            raise RuntimeError('Installed watchdog/core unavailable')
+        parent = identity(os.getpid())
+        for name, expected in self.roles.items():
+            current = identity(expected['pid'])
+            if current != {key: val for key, val in expected.items() if key != 'allocator'}:
+                raise RuntimeError('Service process identity changed')
+            if observed_allocator(expected['pid']) != self.policy:
+                raise RuntimeError('Service allocator inheritance mismatch')
+            if current['cgroup'] != parent['cgroup'] or current['process_group'] != self.process.pid:
+                raise RuntimeError('Service escaped worker accounting or process group')
+            if current['ppid'] != (os.getpid() if name == 'watchdog' else self.process.pid):
+                raise RuntimeError('Service ancestry mismatch')
+
+    def close(self):
+        if self.process is not None:
+            from scripts.low_resource_sustained import cleanup_process_group
+            cleanup_process_group(self.process)
+        self.cleanup_complete = True
+
+    def evidence(self):
+        return dict(parent_role='resource_fixture_worker', worker_pid=os.getpid(),
+                    runtime_key=self.runtime_key, policy=self.policy, roles=self.roles,
+                    cleanup_complete=self.cleanup_complete)
+
+
+def validate_tree(value, runtime_key, worker_pid, service_cgroup):
+    from deploy.system_launcher import panel_environment
+    expected = allocator_fields(panel_environment({}, runtime_key))
+    if value.get('runtime_key') != runtime_key or value.get('policy') != expected:
+        raise RuntimeError('Service allocator policy or platform mismatch')
+    if value.get('parent_role') != 'resource_fixture_worker' or value.get('worker_pid') != worker_pid:
+        raise RuntimeError('Service parent evidence mismatch')
+    if value.get('cleanup_complete') is not True or set(value.get('roles', {})) != {'watchdog', 'core'}:
+        raise RuntimeError('Incomplete watched service tree')
+    watchdog, core = (value['roles'][name] for name in ('watchdog', 'core'))
+    for row, parent in ((watchdog, worker_pid), (core, watchdog.get('pid'))):
+        if any(type(row.get(key)) is not int or row[key] <= 0 for key in ('pid','ppid','starttime_ticks','process_group')):
+            raise RuntimeError('Invalid service process identity')
+        if (row['ppid'] != parent or row['cgroup'] != service_cgroup
+                or row['process_group'] != watchdog['pid'] or row.get('allocator') != expected):
+            raise RuntimeError('Service ancestry, accounting or allocator mismatch')
+    if len({worker_pid, watchdog['pid'], core['pid']}) != 3:
+        raise RuntimeError('Service process roles overlap')
