@@ -351,6 +351,47 @@ REQUIRED_STAGES=(
     'restored_large_exports_and_rules','restored_logout','final_panel_stop','large_subscription_token_absent_from_logs')
 
 
+
+BACKUP_BOUNDARIES=('before_installed_backup','after_installed_backup_before_verification','after_archive_verification')
+
+
+def validate_backup_boundaries(report,unit,commit):
+    from scripts.low_resource_certificates import validate_metrics_record
+    rows=report.get('large_data',{}).get('backup_boundaries')
+    if not isinstance(rows,list) or [r.get('name') for r in rows]!=list(BACKUP_BOUNDARIES):
+        raise RuntimeError('Missing ordered backup boundary accounting')
+    stage=next(s for s in report['stages'] if s['name']=='stopped_backup')
+    start=stage.get('started_monotonic');wall=stage['wall_seconds']
+    if type(start) not in (int,float) or not math.isfinite(start) or start<0:
+        raise RuntimeError('Missing backup stage clock')
+    previous_finished=start;previous=None
+    for row in rows:
+        if (row.get('unit')!=unit or row.get('source_commit')!=commit
+                or row.get('service_cgroup')!=report.get('service_cgroup')
+                or not isinstance(row.get('service_cgroup'),str)
+                or not row['service_cgroup'].startswith('0::/')
+                or not row['service_cgroup'].endswith('/'+unit)):
+            raise RuntimeError('Backup boundary source or cgroup mismatch')
+        times=[row.get('started_monotonic'),row.get('finished_monotonic')]
+        if (any(type(t) not in (int,float) or not math.isfinite(t) for t in times)
+                or not previous_finished<=times[0]<=times[1]<=start+wall):
+            raise RuntimeError('Backup boundary clock outside stage')
+        metric=row.get('metrics');validate_metrics_record(metric)
+        if metric['memory.peak']>stage['memory_peak_bytes']:
+            raise RuntimeError('Backup boundary peak exceeds final stage peak')
+        for key in ('max','oom','oom_kill','oom_group_kill'):
+            if metric['memory.events'][key]>stage['memory_events'][key]:
+                raise RuntimeError('Backup boundary events exceed final stage events')
+        if previous is not None:
+            if (metric['memory.peak']<previous['memory.peak']
+                    or metric['cpu.stat']['usage_usec']<previous['cpu.stat']['usage_usec']
+                    or any(metric['memory.events'][k]<previous['memory.events'][k] for k in ('max','oom','oom_kill','oom_group_kill'))):
+                raise RuntimeError('Backup boundary cumulative counters decreased')
+        previous=metric;previous_finished=times[1]
+    if rows[-1]['metrics']['cpu.stat']['usage_usec']-rows[0]['metrics']['cpu.stat']['usage_usec']>stage['cpu_usage_usec']:
+        raise RuntimeError('Backup boundary CPU exceeds entire stage')
+
+
 def validate_complete(report,unit,commit):
     from scripts.low_resource_certificates import validate_metrics_record
     if report.get('duration_profile')!='data-backup':raise RuntimeError('Wrong data profile')
@@ -365,6 +406,7 @@ def validate_complete(report,unit,commit):
             if type(stage.get(key)) is not int or stage[key]<0:raise RuntimeError('Missing large-data stage resource accounting')
         validate_metrics_record({'memory.current':stage['memory_current_bytes'],'memory.peak':stage['memory_peak_bytes'],
             'cpu.stat':{'usage_usec':stage['cpu_usage_usec']},'memory.stat':stage.get('memory_stat'),'memory.events':stage.get('memory_events')})
+    validate_backup_boundaries(report,unit,commit)
     value=report.get('large_data',{});validate_exports(value.get('exports',{}),unit,commit)
     if value.get('routing_rejections')!=[428,409,422] or any(value.get(k) is not True for k in
             ('live_backup_rejected','bad_digest_preserved_data','restored_exports_verified','synthetic_token_not_logged')):raise RuntimeError('Missing large-data control evidence')

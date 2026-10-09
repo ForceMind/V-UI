@@ -81,10 +81,27 @@ class LargeDataTests(unittest.TestCase):
                          expanded_bytes=data.LOG_BYTES+64*4096,sha256='b'*64,compression_ratio=100000000/(data.LOG_BYTES+64*4096),installed_root_allocated_file_bytes=500000000),
             recovery={k:True for k in ('business_restored','routing_restored','log_files_restored','database_integrity',
                 'old_sessions_revoked','old_grant_revoked','pre_restore_data_preserved','selected_code_unchanged','temporary_cleanup_complete')})
-        report=dict(duration_profile='data-backup',large_data=large,stages=[dict(name=n,outcome='passed',wall_seconds=1,
+        report=dict(duration_profile='data-backup',service_cgroup='0::/system.slice/'+unit,large_data=large,stages=[dict(name=n,outcome='passed',started_monotonic=10,wall_seconds=1,
             memory_current_bytes=1000,memory_peak_bytes=2000,cpu_usage_usec=1000,memory_stat=metrics['memory.stat'],memory_events=metrics['memory.events'])
             for n in data.REQUIRED_STAGES])
+        large['backup_boundaries']=[dict(name=name,unit=unit,source_commit=commit,service_cgroup=report['service_cgroup'],
+            started_monotonic=10+i*.2,finished_monotonic=10.1+i*.2,metrics=copy.deepcopy(metrics))
+            for i,name in enumerate(data.BACKUP_BOUNDARIES)]
         data.validate_complete(report,unit,commit)
+        for kind in ('missing','order','source','cgroup','clock','nan','metrics','peak','events','cpu','decreased'):
+            bad=copy.deepcopy(report);rows=bad['large_data']['backup_boundaries']
+            if kind=='missing':rows.pop()
+            elif kind=='order':rows.reverse()
+            elif kind=='source':rows[1]['source_commit']='c'*40
+            elif kind=='cgroup':rows[1]['service_cgroup']='0::/another.service'
+            elif kind=='clock':rows[1]['finished_monotonic']=12
+            elif kind=='nan':rows[1]['started_monotonic']=float('nan')
+            elif kind=='metrics':del rows[1]['metrics']['memory.stat']['file']
+            elif kind=='peak':rows[1]['metrics']['memory.peak']=3000
+            elif kind=='events':rows[1]['metrics']['memory.events']['max']=1
+            elif kind=='cpu':rows[-1]['metrics']['cpu.stat']['usage_usec']=2001
+            elif kind=='decreased':rows[1]['metrics']['cpu.stat']['usage_usec']=999
+            with self.subTest(boundary=kind),self.assertRaises(RuntimeError):data.validate_complete(bad,unit,commit)
         for kind in ('stage','order','stage_cpu','oom','nan','cleanup','grant','before','digest','token','log_size','missing_file','source','short_count','rule_semantics','allocated_nan','archive_nan','ratio_nan','body_overlimit'):
             bad=copy.deepcopy(report);value=bad['large_data']
             if kind=='stage':bad['stages'].pop()
