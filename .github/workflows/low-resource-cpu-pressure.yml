@@ -1,0 +1,50 @@
+name: Opt-in bounded CPU quota pressure recovery
+on:
+  pull_request:
+    types: [labeled]
+permissions:
+  contents: read
+jobs:
+  cpu-pressure:
+    if: github.event.label.name == 'run-low-resource-cpu-pressure'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: pip install -r requirements-test.txt
+      - name: Verify unchanged product and build exact-head candidate
+        env:
+          VUI_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/vui-cpu-pressure
+          test "$(git rev-parse HEAD)" = "$VUI_SOURCE_COMMIT"
+          git diff --exit-code 5f44a2fb4a9ac0c32bc09b9a7859fc8ea8629154 -- app web deploy third_party main.py VERSION install.sh requirements-runtime.txt scripts/deploy.py scripts/install_system.py scripts/build_bundle.py scripts/platform_support.py scripts/fetch_portable_runtimes.py scripts/fetch_test_cores.py scripts/prepare_frontend.py scripts/vendor_frontend.py
+          python scripts/build_bundle.py /tmp/vui-cpu-pressure/vui-linux.zip --source-commit "$VUI_SOURCE_COMMIT" | tee /tmp/vui-cpu-pressure/build.log
+      - name: Run bounded CPU quota pressure and original smoke controls
+        env:
+          VUI_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          python -B scripts/low_resource_acceptance.py \
+            --bundle /tmp/vui-cpu-pressure/vui-linux.zip \
+            --source-commit "$VUI_SOURCE_COMMIT" \
+            --memory-mib 512 --duration-profile cpu-pressure \
+            --output /tmp/vui-cpu-pressure/low-resource-cpu-pressure.json
+      - name: Preserve diagnostics including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vui-cpu-pressure-evidence-${{ github.event.pull_request.head.sha }}
+          path: |
+            /tmp/vui-cpu-pressure/*.json
+            /tmp/vui-cpu-pressure/*.log
+          retention-days: 7

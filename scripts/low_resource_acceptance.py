@@ -146,15 +146,15 @@ def filesystem_type(path: Path) -> str:
 
 def duration_profile(args):
     profile = getattr(args, "duration_profile", "smoke")
-    if profile not in {"smoke", "sustained", "interactions", "certificates", "data-backup", "accounting", "dual-core"}:
+    if profile not in {"smoke", "sustained", "interactions", "certificates", "data-backup", "accounting", "dual-core", "cpu-pressure"}:
         raise RuntimeError("Unknown duration profile")
-    if profile in {"sustained", "interactions", "certificates", "data-backup", "accounting", "dual-core"} and args.memory_mib != 512:
+    if profile in {"sustained", "interactions", "certificates", "data-backup", "accounting", "dual-core", "cpu-pressure"} and args.memory_mib != 512:
         raise RuntimeError("Extended profiles currently require the original 512 MiB limit")
     return profile
 
 
 def runtime_seconds(args):
-    return {"smoke": 600, "sustained": 6600, "interactions": 1800, "certificates": 1800, "data-backup": 1800, "accounting": 900, "dual-core": 900}[duration_profile(args)]
+    return {"smoke": 600, "sustained": 6600, "interactions": 1800, "certificates": 1800, "data-backup": 1800, "accounting": 900, "dual-core": 900, "cpu-pressure": 900}[duration_profile(args)]
 
 
 def worker(args) -> int:
@@ -202,6 +202,9 @@ def worker(args) -> int:
         report["process_accounting_scope"] = "sequential smaps_rollup RSS/PSS/private snapshots of every cgroup descendant; PSS is not memcg charge; observer remains included; no subtraction or cache reset"
     if profile == "dual-core":
         report["scope"] = "short installed sing-box and Xray coexistence, controlled stop and explicit restart; not sustained performance, per-core budgets or overload"
+    if profile == "cpu-pressure":
+        report["scope"] = "bounded service CPU-quota saturation and recovery scenario; not memory/connection exhaustion or throughput qualification"
+        report["accounting"] += "; pressure client/target/generator and their observer outside service group, per-process CPU/RSS separate; panel/watchdog/core/worker remain inside"
     output = args.output
 
     def checkpoint():
@@ -581,12 +584,24 @@ with SessionLocal() as db:
                             raise RuntimeError('Test certificate manager touched panel database')
                 stage('original_panel_certificate_database_untouched',panel_db_untouched)
                 stage('panel_recovery_after_certificate_overlap',lambda:api('/api/auth/me'))
+            def cpu_pressure(binary, fixture, proxy_ca, port, health, proxy_pid, watchdog_pid):
+                from scripts.low_resource_cpu_pressure import request_pressure
+                from scripts.low_resource_service_tree import identity
+                roles = {name: identity(pid) for name, pid in
+                    (('worker', os.getpid()), ('panel', running[0].pid), ('core', proxy_pid), ('watchdog', watchdog_pid))}
+                def observe():
+                    alive(); health()
+                def exercise():
+                    cookie = '; '.join(item.name + '=' + item.value for item in jar)
+                    report['cpu_pressure'] = request_pressure(args.work_dir, output, args.unit, args.source_commit,
+                        binary, fixture, proxy_ca, port, origin, ca, cookie, roles, observe)
+                stage('cpu_quota_pressure_and_recovery', exercise)
             run_proxy_smoke(payload / "cores" / tools.target_arch() / "sing-box", root / "proxy-fixture",
                             output.with_suffix(""), stage, report,
                             lambda: api("/api/auth/me"),
                             sustained=sustained_load if profile == "sustained" else None,
                             idle_monitor=monitor_wait if profile == "sustained" else None,
-                            overlap=certificate_overlap if profile == "certificates" else None,
+                            overlap=(certificate_overlap if profile == "certificates" else cpu_pressure if profile == "cpu-pressure" else None),
                             accounting_monitor=accounting_wait if profile == "accounting" else None,
                             server_runtime=dict(python=python,payload=payload,data=data,root=root,origin=origin,
                                 runtime_key=json.loads((release/'READY.json').read_text())['runtime_key']))
@@ -758,6 +773,10 @@ def coordinator(args) -> int:
                 sys.path.insert(0, str(SOURCE))
                 from scripts.low_resource_sustained import LoadBroker
                 broker = LoadBroker(Path(directory), output, unit, args.source_commit)
+            elif profile == "cpu-pressure":
+                sys.path.insert(0, str(SOURCE))
+                from scripts.low_resource_cpu_pressure import PressureBroker
+                broker = PressureBroker(Path(directory), output, unit, args.source_commit)
             elif profile == "interactions":
                 sys.path.insert(0, str(SOURCE))
                 from scripts.low_resource_interactions import InteractionBroker
@@ -811,6 +830,9 @@ def coordinator(args) -> int:
             elif profile == 'data-backup':
                 from scripts.low_resource_data import validate_complete
                 validate_complete(report,unit,args.source_commit)
+            if profile == "cpu-pressure":
+                from scripts.low_resource_cpu_pressure import validate_complete as validate_cpu_pressure
+                validate_cpu_pressure(report, unit, args.source_commit)
             if profile == "dual-core":
                 from scripts.low_resource_dual_core import validate_complete as validate_dual_core
                 from app.release_tools import target_key
@@ -863,7 +885,7 @@ def main():
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--memory-mib", type=int, choices=MEMORY_PROFILES, default=512)
-    parser.add_argument("--duration-profile", choices=("smoke", "sustained", "interactions", "certificates", "data-backup", "accounting", "dual-core"), default="smoke")
+    parser.add_argument("--duration-profile", choices=("smoke", "sustained", "interactions", "certificates", "data-backup", "accounting", "dual-core", "cpu-pressure"), default="smoke")
     parser.add_argument("--trace-install", action="store_true", help="opt-in same-group offline phase accounting")
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--unit")
