@@ -224,7 +224,7 @@ def complete_report():
                 'ready_releases': ['a'] if release == 'a' else ['a', 'a-root-fixture'],
                 'services': {unit: service(unit) for unit in root.UNITS[:2]}}
     before = state('a'); during = state('a'); during['releases'].append('a-root-fixture')
-    during['monotonic'] = 4.5
+    during['monotonic'] = 4.46
     after = state('a-root-fixture'); after['services']['v-ui.service']['process']['pid'] = 22
     bad = {'returncode': 1, 'backup_name': 'before-upgrade-1.zip', 'backup_sha256': 'c'*64,
            'marker_sha256': hashlib.sha256(b'after-upgrade\n').hexdigest(), 'current_unchanged': True, 'database_integrity': 'ok',
@@ -236,10 +236,10 @@ def complete_report():
     after['authentication'] = {'old_session_status': 401, 'new_login_status': 200, 'new_session_status': 200, 'http01_status': 200}
     stages = [{'name': name, 'monotonic': i+1, 'parent_identity': identity, 'limits': limits,
                'details': details.get(name, {}), 'metrics': {'memory.current': i+1, 'memory.peak': i+1, 'memory.stat': {'anon': 1, 'file': 0},
-               'memory.events': {'oom': 0, 'oom_kill': 0, 'max': 0}, 'cpu.stat': {'usage_usec': i+1}}}
+               'memory.events': {'oom': 0, 'oom_kill': 0, 'oom_group_kill': 0, 'max': 0}, 'cpu.stat': {'usage_usec': i+1}}}
               for i, name in enumerate(root.STAGES)]
     unit = PARENT.removesuffix('.slice')+'.service'
-    return {'source_commit': COMMIT, 'slice': PARENT, 'worker_unit': unit, 'worker_exit': 0, 'worker_started_monotonic': .5, 'worker_finished_monotonic': 10, 'slice_stop': {'state': {'ActiveState': 'inactive'}, 'cgroup_remains': False},
+    report = {'source_commit': COMMIT, 'slice': PARENT, 'worker_unit': unit, 'worker_exit': 0, 'worker_started_monotonic': .5, 'worker_finished_monotonic': 10, 'slice_stop': {'state': {'ActiveState': 'inactive'}, 'cgroup_remains': False},
             'cleanup_confirmed': True, 'parent_populated': 0, 'remaining_processes': [],
             'parent_identity': identity, 'limits': limits,
             'package': {'source_commit': COMMIT, 'a_release_id': 'a', 'b_release_id': 'a-root-fixture',
@@ -249,6 +249,26 @@ def complete_report():
                        'installer_entries': [{'phase': phase, 'pid': 21, 'ppid': 20, 'starttime_ticks': 2, 'source_commit': COMMIT, 'uid': [0]*4, 'cgroup': '/'+PARENT+'/'+unit}
                            for phase in ('initial_install', 'implicit_repeat', 'same_bundle_upgrade', 'fresh_directory_upgrade')]},
             'final_metrics': copy.deepcopy(stages[-1]['metrics'])}
+    from scripts import low_resource_root_trace as trace
+    root_observer = {**process, 'uid': [0]*4, 'cgroup': '/'+PARENT+'/'+unit}
+    samples = [{'type': 'sample', 'sample': {
+        'started_monotonic': start, 'state_monotonic': start+.01,
+        'metrics_started_monotonic': start+.02, 'metrics_finished_monotonic': start+.03,
+        'finished_monotonic': start+.04, 'parent_identity': identity, 'limits': limits,
+        'metrics': copy.deepcopy(stages[3]['metrics']), 'observer': root_observer,
+        'observer_self_cpu_seconds': .01, 'observer_reaped_children_cpu_seconds': .02,
+        'processes': [{**root_observer, 'role': 'unclassified'},
+                      {**report['worker']['worker'], 'role': 'unclassified'}], 'state': None,
+        'state_error': 'ServiceUnavailable'}} for start in (4.1, 4.45, 4.8)]
+    samples[1]['sample']['state'] = {key: value for key, value in during.items() if key != 'monotonic'}
+    samples[1]['sample']['state_error'] = None
+    report['upgrade_accounting'] = {'read_error': None, 'bytes': 1000, 'rows': [
+        {'type': 'header', 'source_commit': COMMIT, 'slice': PARENT,
+         'interval_seconds': trace.INTERVAL_SECONDS, 'max_samples': trace.MAX_SAMPLES,
+         'max_bytes': trace.MAX_BYTES}, *samples,
+        {'type': 'finished', 'sample_count': 3, 'returncode': 0, 'error': None,
+         'command_started_monotonic': 4.2, 'command_finished_monotonic': 4.7}]}
+    return report
 
 
 class RootResultValidationTests(unittest.TestCase):

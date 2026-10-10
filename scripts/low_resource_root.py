@@ -33,6 +33,10 @@ class FixtureDeadline(BaseException):
     """Must cross inner best-effort cleanup handlers to the outer supervisor."""
 
 
+class ServiceUnavailable(RuntimeError):
+    """A service stopped between read-only samples; never an identity failure."""
+
+
 def checked_slice(name):
     if not isinstance(name, str) or not SLICE_RE.fullmatch(name):
         raise RuntimeError('Invalid owned parent slice')
@@ -181,9 +185,11 @@ def service_identity(unit, parent):
     properties = unit_properties(unit)
     group = properties.get('ControlGroup', '')
     expected_dropin = f'/run/systemd/system/{unit}.d/90-vui-resource.conf'
-    if (properties.get('Slice') != parent or properties.get('ActiveState') != 'active'
+    if (properties.get('Slice') != parent
             or properties.get('DropInPaths', '').split() != [expected_dropin]):
         raise RuntimeError('Service does not use the owned parent/drop-in: '+unit)
+    if properties.get('ActiveState') != 'active':
+        raise ServiceUnavailable('Service stopped during observation')
     process = identity(int(properties['MainPID']), parent)
     account = pwd.getpwnam('v-ui')
     if process['uid'] != [account.pw_uid]*4 or process['cgroup'] != group or group != '/'+parent+'/'+unit:
@@ -218,6 +224,9 @@ def root_state(parent):
 
 
 def root_operation(action, parent, value=None):
+    if action == 'accounting':
+        from scripts.low_resource_root_trace import capture
+        return capture(parent)
     own = identity(os.getpid(), parent)
     if own['uid'] != [0]*4:
         raise RuntimeError('Expected measured root operation')
@@ -343,6 +352,7 @@ class Gate:
     def finish(self, case, command, api, login):
         """Runs after all original install/repeat/same-bundle/restart assertions."""
         import threading
+        from scripts import low_resource_root_trace as trace
         before = self.operation('state')
         package = self.config['package']
         case.assertEqual(before['current']['release_id'], package['a_release_id'])
@@ -354,21 +364,56 @@ class Gate:
         new_command[new_command.index('--bundle')+1] = self.config['bundle_b']
         new_command[new_command.index('--sha256')+1] = package['b_sha256']
         samples = []; errors = []; stop = threading.Event()
+        journal = trace.Journal(self.output.parent/'root-upgrade.jsonl', {
+            'source_commit': self.config['source_commit'], 'slice': self.parent,
+            'interval_seconds': trace.INTERVAL_SECONDS, 'max_samples': trace.MAX_SAMPLES,
+            'max_bytes': trace.MAX_BYTES})
+        def observe_once():
+            sample = self.operation('accounting')
+            journal.append({'type': 'sample', 'sample': sample})
+            state = sample['state']
+            if state is not None:
+                state['monotonic'] = sample['state_monotonic']
+                samples.append(state)
         def observe():
-            while not stop.wait(.25):
+            while not stop.wait(trace.INTERVAL_SECONDS):
                 try:
-                    state = self.operation('state')
-                    state['monotonic'] = time.monotonic()
-                    samples.append(state)
+                    observe_once()
                 except Exception as exc:
                     errors.append(type(exc).__name__)
+                    break  # Preserve the prefix; never hide a failed observation.
+        try:
+            observe_once()
+        except BaseException:
+            journal.close()
+            raise
         observer = threading.Thread(target=observe, daemon=True)
         observer.start()
+        upgraded = None; command_error = None
+        command_started = time.monotonic()
         try:
             upgraded = run(new_command+['--upgrade'], timeout=240, check=False)
+        except BaseException as exc:
+            command_error = type(exc).__name__
+            raise
         finally:
+            command_finished = time.monotonic()
             stop.set(); observer.join(timeout=140)
+            if not observer.is_alive():
+                try:
+                    try:
+                        observe_once()
+                    except Exception as exc:
+                        errors.append(type(exc).__name__)
+                    journal.append({'type': 'finished', 'sample_count': journal.sample_count,
+                        'command_started_monotonic': command_started,
+                        'command_finished_monotonic': command_finished,
+                        'returncode': upgraded.returncode if upgraded is not None else None,
+                        'error': command_error or (errors[0] if errors else None)})
+                finally:
+                    journal.close()
         case.assertFalse(observer.is_alive())
+        case.assertFalse(errors, 'Upgrade accounting capture failed')
         self.installer_receipt('fresh_directory_upgrade', upgraded.stdout)
         case.assertEqual(upgraded.returncode, 0, (upgraded.stdout+upgraded.stderr)[-12000:])
         # Only accept a sample with B newly present while A is the SAME active
@@ -715,6 +760,8 @@ def validate_result(report, commit):
         raise RuntimeError('Restored permissions missing or changed')
     if details['restored_new_login_and_membership'].get('authentication') != {'old_session_status': 401, 'new_login_status': 200, 'new_session_status': 200, 'http01_status': 200}:
         raise RuntimeError('Restored authentication semantics missing')
+    from scripts.low_resource_root_trace import validate
+    validate(report)
 
 
 def worker_report(path, uid):
@@ -827,6 +874,11 @@ def supervisor(args):
             except Exception as exc:
                 report['partial_worker_error'] = type(exc).__name__
         try:
+            from scripts.low_resource_root_trace import read_journal
+            report['upgrade_accounting'] = read_journal(results/'root-upgrade.jsonl', args.runner_uid)
+        except Exception as exc:
+            report['upgrade_accounting_error'] = type(exc).__name__
+        try:
             if report['outcome'] == 'passed':
                 validate_result(report, args.source_commit)
             assert_no_oom(report['final_metrics'])
@@ -853,7 +905,7 @@ def main():
     parser.add_argument('--supervisor', action='store_true')
     parser.add_argument('--runner-uid', type=int)
     parser.add_argument('--runner-gid', type=int)
-    parser.add_argument('--root-operation', choices=('state', 'seed', 'mutate', 'bad-restore', 'restore', 'permissions'))
+    parser.add_argument('--root-operation', choices=('state', 'accounting', 'seed', 'mutate', 'bad-restore', 'restore', 'permissions'))
     parser.add_argument('--slice')
     parser.add_argument('--value')
     parser.add_argument('--root-exec')
