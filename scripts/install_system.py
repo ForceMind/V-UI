@@ -36,6 +36,7 @@ MARKER = '# Managed by V-UI guarded installer v1\n'
 UNIT_DIR = Path('/etc/systemd/system')
 UNITS = ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')
 MAX_ARCHIVE = 850_000_000
+INSTALL_LOCK = Path('/run/lock/v-ui-install.lock')
 # Compatibility names for older tooling/tests; new installs select a backend dynamically.
 MARKER=service_support.MARKER
 UNIT_DIR=service_support.SYSTEMD_DIR
@@ -52,6 +53,52 @@ def stop_existing_units(names):
 
 class InstallError(RuntimeError):
     pass
+
+
+@contextmanager
+def _installation_lock(path: Path, *, owner=0):
+    """Share the fixed installer/controller lease without following links.
+
+    ``owner`` is an internal fixture seam, never a command-line option. Production
+    callers always use the root owner and the fixed INSTALL_LOCK. A root-owned
+    sticky lock directory is allowed: it protects an existing root-owned leaf
+    even on distributions whose /run/lock is mode 1777.
+    """
+    path = Path(path)
+    if not path.is_absolute() or '..' in path.parts:
+        raise InstallError('Invalid installation lock path')
+    parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    lock = None
+    try:
+        parts = path.parent.parts[1:]
+        for index in range(len(parts) + 1):
+            info = os.fstat(parent)
+            sticky_parent = index == len(parts) and bool(info.st_mode & stat.S_ISVTX)
+            if info.st_uid not in (0, owner) or (info.st_mode & 0o022 and not sticky_parent):
+                raise InstallError('Installation lock directory is not trusted')
+            if index < len(parts):
+                child = os.open(parts[index], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                dir_fd=parent)
+                os.close(parent)
+                parent = child
+        lock = os.open(path.name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                       0o600, dir_fd=parent)
+        info = os.fstat(lock)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != owner or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) != 0o600):
+            raise InstallError('Installation lock is not a private regular owner file')
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise InstallError('Another installer or managed operation is running') from None
+        named = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        if (named.st_dev, named.st_ino) != (info.st_dev, info.st_ino):
+            raise InstallError('Installation lock identity changed')
+        yield
+    finally:
+        if lock is not None:
+            os.close(lock)
+        os.close(parent)
 
 
 def command(args, **kwargs):
@@ -499,9 +546,7 @@ def main():
         return
     if os.geteuid() == 0:
         os.umask(0o077)
-        with open('/run/lock/v-ui-install.lock', 'a+') as lock:
-            try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError: raise InstallError('Another installer is running') from None
+        with _installation_lock(INSTALL_LOCK):
             install(args)
     else:
         if not args.dry_run: raise InstallError('Run this guarded setup with sudo')

@@ -2,11 +2,18 @@
 import hashlib
 import io
 import json
+from pathlib import Path
+import stat
+import shutil
+import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
+from scripts import build_release_kit, install_ops_control
 from scripts.publish_release import (
     ASSETS,
+    COMMON_ASSETS,
     KIT_ASSETS,
     REQUIRED,
     TARGETS,
@@ -127,6 +134,122 @@ class ReleasePromotionTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(final[name]).hexdigest(),digest)
         record=json.loads(final['RELEASE.json'])
         self.assertEqual(record['targets'],list(TARGETS))
+
+    def test_control_distribution_sets_are_closed_and_consistent(self):
+        source_names={name for _,name in build_release_kit.SOURCE_ASSETS}
+        self.assertEqual(COMMON_ASSETS,install_ops_control.COMMON_ASSETS)
+        self.assertEqual(source_names|{'vui-source.zip','RELEASE.json','RELEASE_NOTES.md'},COMMON_ASSETS)
+        self.assertEqual({name: source for source,name in build_release_kit.SOURCE_ASSETS}
+                         | {'RELEASE_NOTES.md':'docs/RELEASE_NOTES.md'},install_ops_control.SOURCE_MEMBERS)
+        self.assertTrue({'install_ops_control.py','system_launcher.py','system_ops.py',
+                         'ops_worker.py','release_tools.py','v-ui'} <= source_names)
+
+    def test_actual_builder_packages_control_sources_and_installer_verifies_full_kit(self):
+        root=Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            work=Path(directory)
+            source=work/'bundle.zip'
+            raw=io.BytesIO()
+            with zipfile.ZipFile(raw,'w') as archive:
+                archive.writestr('MANIFEST.json',json.dumps({
+                    'schema':1,'kind':'release','source_commit':SHA,'version':'0.3.1',
+                    'release_id':'fixture','platform':'linux-multi-cpython312','targets':['x86_64-gnu']}))
+            source.write_bytes(raw.getvalue())
+            destination=work/'kit'
+            def archive_source(command, **kwargs):
+                self.assertEqual(command[:3],['git','archive','--format=zip'])
+                output=Path(next(value[9:] for value in command if value.startswith('--output=')))
+                with zipfile.ZipFile(output,'w') as archive:
+                    archive.comment=SHA.encode()
+                    archive.writestr('VERSION','0.3.1')
+                    for source,_ in (*build_release_kit.SOURCE_ASSETS,('docs/RELEASE_NOTES.md','RELEASE_NOTES.md')):
+                        archive.writestr(source,(root/source).read_bytes())
+            with patch.object(build_release_kit.subprocess,'run',side_effect=archive_source):
+                build_release_kit.build(source,destination,SHA)
+            self.assertEqual({path.name for path in destination.iterdir()},KIT_ASSETS)
+            for path,name in build_release_kit.SOURCE_ASSETS:
+                self.assertEqual((destination/name).read_bytes(),(root/path).read_bytes())
+            checksum=hashlib.sha256((destination/'SHA256SUMS').read_bytes()).hexdigest()
+            code,record=install_ops_control.verify_kit(destination,checksum)
+            self.assertEqual(record['source_commit'],SHA)
+            self.assertIn(b'def operate(',code['system_ops.py'])
+            self.assertIn(b'class _MaintenanceSession(',code['release_tools.py'])
+            self.assertIn(b'/usr/bin/python3 -B -I -S',code['v-ui'])
+            raw=io.BytesIO()
+            with zipfile.ZipFile(raw,'w') as archive:
+                for path in destination.iterdir():archive.writestr(path.name,path.read_bytes())
+            self.assertEqual(set(validate_kit(raw.getvalue(),SHA,'0.3.1')),KIT_ASSETS)
+            with self.assertRaisesRegex(ValueError,'empty'):
+                build_release_kit.build(source,destination,SHA)
+
+    def test_missing_extra_or_linked_control_asset_fails_promotion(self):
+        with zipfile.ZipFile(io.BytesIO(self.kit())) as archive:
+            files={name:archive.read(name) for name in archive.namelist()}
+        for change in ('missing','extra','duplicate','symlink','corrupt'):
+            output=io.BytesIO()
+            with zipfile.ZipFile(output,'w') as archive:
+                for name,content in files.items():
+                    if name=='ops_worker.py' and change=='missing':continue
+                    if name=='ops_worker.py' and change=='symlink':
+                        link=zipfile.ZipInfo(name)
+                        link.create_system=3
+                        link.external_attr=(stat.S_IFLNK|0o777)<<16
+                        archive.writestr(link,content)
+                    elif name=='ops_worker.py' and change=='corrupt':archive.writestr(name,b'modified')
+                    else:archive.writestr(name,content)
+                if change=='extra':archive.writestr('unrelated.py',b'extra')
+                if change=='duplicate':
+                    with self.assertWarns(UserWarning):archive.writestr('ops_worker.py',files['ops_worker.py'])
+            with self.subTest(change=change),self.assertRaises(ReleaseGateError):
+                validate_kit(output.getvalue(),SHA,'0.3.1')
+
+    def test_builder_never_mixes_dirty_working_tree_with_exact_commit_bundle(self):
+        root=Path(__file__).resolve().parents[1]
+        snapshots={source:(root/source).read_bytes() for source,_ in
+                   (*build_release_kit.SOURCE_ASSETS,('docs/RELEASE_NOTES.md','RELEASE_NOTES.md'))}
+        copy=shutil.copyfile
+        with tempfile.TemporaryDirectory() as directory:
+            work=Path(directory)
+            source=work/'bundle.zip'
+            with zipfile.ZipFile(source,'w') as archive:
+                archive.writestr('MANIFEST.json',json.dumps({
+                    'source_commit':SHA,'version':'0.3.1','release_id':'fixture',
+                    'platform':'linux-multi-cpython312','targets':['x86_64-gnu']}))
+            def dirty_copy(input_path, output_path):
+                if Path(input_path) in {root/name for name in snapshots}:
+                    Path(output_path).write_bytes(b'dirty uncommitted root code')
+                    return output_path
+                return copy(input_path,output_path)
+            def exact_archive(command, **kwargs):
+                output=Path(next(value[9:] for value in command if value.startswith('--output=')))
+                with zipfile.ZipFile(output,'w') as archive:
+                    archive.comment=SHA.encode()
+                    for name,content in snapshots.items():archive.writestr(name,content)
+            with patch.object(build_release_kit.shutil,'copyfile',side_effect=dirty_copy), \
+                    patch.object(build_release_kit.subprocess,'run',side_effect=exact_archive):
+                build_release_kit.build(source,work/'kit',SHA)
+            for path,name in (*build_release_kit.SOURCE_ASSETS,('docs/RELEASE_NOTES.md','RELEASE_NOTES.md')):
+                self.assertEqual((work/'kit'/name).read_bytes(),snapshots[path])
+
+            def wrong_commit_archive(command, **kwargs):
+                exact_archive(command,**kwargs)
+                output=Path(next(value[9:] for value in command if value.startswith('--output=')))
+                with zipfile.ZipFile(output,'a') as archive:archive.comment=b'b'*40
+            with patch.object(build_release_kit.subprocess,'run',side_effect=wrong_commit_archive):
+                with self.assertRaisesRegex(ValueError,'exact commit'):
+                    build_release_kit.build(source,work/'wrong-source',SHA)
+            self.assertFalse((work/'wrong-source/SHA256SUMS').exists())
+
+            def old_commit_archive(command, **kwargs):
+                output=Path(next(value[9:] for value in command if value.startswith('--output=')))
+                with zipfile.ZipFile(output,'w') as archive:
+                    archive.comment=SHA.encode()
+                    for name,content in snapshots.items():
+                        if name!='scripts/install_ops_control.py':archive.writestr(name,content)
+            with patch.object(build_release_kit.subprocess,'run',side_effect=old_commit_archive):
+                with self.assertRaises(KeyError):
+                    build_release_kit.build(source,work/'old-source',SHA)
+            self.assertFalse((work/'old-source/SHA256SUMS').exists())
 
 
 if __name__=='__main__':

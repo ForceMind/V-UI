@@ -2,6 +2,8 @@
 
 受管实例默认根目录为 `/var/lib/v-ui`。实际服务命令取决于安装时检测到的 service manager。
 
+全局 `v-ui` 受信控制入口是单独、显式安装的候选组件，见[受管终端控制](MANAGED_OPERATIONS.md)。默认一键安装不会新增该入口；下文包内非 root 菜单继续可用。仓库内软件测试不等于已在你的主机安装或验证了新的 root 控制层。
+
 ## systemd
 
 ```sh
@@ -100,11 +102,10 @@ V-UI 不自动删除旧规则，因为端口可能被别的服务复用。
 停止面板后，以 `v-ui` 用户和活动版本 `$PY` 执行：
 
 ```sh
-sudo -u v-ui env VUI_DATA_DIR="$ROOT/data" PYTHONPATH="$APP" \
-  "$PY" -B -m app.admin set-password my_admin
+sudo -u v-ui "$PY" -B "$APP/scripts/deploy.py" --root "$ROOT" admin set-password my_admin
 ```
 
-密码交互输入，不放 shell 历史。
+密码交互输入，不放 shell 历史。此入口取得操作锁和面板锁；不要同时运行绕过该入口的 `python -m app.admin`、直接 `main.py` 或其他写库脚本。
 
 ## 备份 / 恢复
 
@@ -113,7 +114,8 @@ sudo -u v-ui env VUI_DATA_DIR="$ROOT/data" PYTHONPATH="$APP" \
 systemd 示例：
 
 ```sh
-sudo systemctl stop v-ui.service v-ui-http01.service v-ui-http01.socket
+sudo systemctl stop v-ui-http01.socket
+sudo systemctl stop v-ui-http01.service v-ui.service
 sudo -u v-ui "$PY" -B "$APP/scripts/deploy.py" --root "$ROOT" backup "$ROOT/manual-backup.zip"
 ```
 

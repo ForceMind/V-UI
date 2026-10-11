@@ -459,7 +459,7 @@ def installed_menu_stage_smoke(python, payload, root, bundle, checksum, *, panel
     return {'menu_stage': 'installed-PTY synthetic-manifest-only candidate / real offline stage+health / cancel / bad SHA / cross-target / broken health / duplicate / operation lease+reentry / unchanged CURRENT+old release+data+PID / continued verified HTTPS OK'}
 
 
-def portable_menu_stage_smoke(python, payload, root, bundle, checksum):
+def portable_menu_stage_smoke(python, payload, root, bundle, checksum, *, managed_smoke=None):
     """All native target gates exercise a real installed HTTPS panel, not systemd."""
     # Generate a disposable certificate with installed cryptography, so the
     # portable gate's distro Python only needs its standard library.
@@ -517,8 +517,12 @@ cert=(x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(
                     except (OSError, URLError):
                         assert time.monotonic() < deadline, 'Old HTTPS panel not ready: ' + (fixture / 'panel.log').read_text()
                         time.sleep(.1)
-                return installed_menu_stage_smoke(python, payload, root, bundle, checksum,
+                result = installed_menu_stage_smoke(python, payload, root, bundle, checksum,
                     panel=panel, probe=probe)
+                if managed_smoke is not None:
+                    result.update(managed_smoke(python, payload, root, bundle, checksum,
+                        panel=panel, probe=probe))
+                return result
             finally:
                 panel.terminate()
                 try:
