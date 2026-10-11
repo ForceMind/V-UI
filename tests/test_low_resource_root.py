@@ -218,7 +218,8 @@ def complete_report():
     identity = {'device': 1, 'inode': 2}
     limits = {'memory.max': 536870912, 'memory.swap.max': 0, 'cpu.max': '100000 100000'}
     def service(unit):
-        return {'properties': {'Slice': PARENT, 'ActiveState': 'active', 'ControlGroup': '/'+PARENT+'/'+unit, 'DropInPaths': f'/run/systemd/system/{unit}.d/90-vui-resource.conf'}, 'process': {**process, 'cgroup': '/'+PARENT+'/'+unit}}
+        service_process = {**process, 'pid': 13 if unit == 'v-ui-http01.service' else 11}
+        return {'properties': {'Slice': PARENT, 'ActiveState': 'active', 'MainPID': str(service_process['pid']), 'ControlGroup': '/'+PARENT+'/'+unit, 'DropInPaths': f'/run/systemd/system/{unit}.d/90-vui-resource.conf'}, 'process': {**service_process, 'cgroup': '/'+PARENT+'/'+unit}}
     def state(release):
         return {'current': {'release_id': release}, 'releases': ['a'] if release == 'a' else ['a', 'a-root-fixture'],
                 'ready_releases': ['a'] if release == 'a' else ['a', 'a-root-fixture'],
@@ -226,6 +227,7 @@ def complete_report():
     before = state('a'); during = state('a'); during['releases'].append('a-root-fixture')
     during['monotonic'] = 4.46
     after = state('a-root-fixture'); after['services']['v-ui.service']['process']['pid'] = 22
+    after['services']['v-ui.service']['properties']['MainPID'] = '22'
     bad = {'returncode': 1, 'backup_name': 'before-upgrade-1.zip', 'backup_sha256': 'c'*64,
            'marker_sha256': hashlib.sha256(b'after-upgrade\n').hexdigest(), 'current_unchanged': True, 'database_integrity': 'ok',
            'rejection_reason': 'Archive checksum mismatch'}
@@ -250,7 +252,7 @@ def complete_report():
                            for phase in ('initial_install', 'implicit_repeat', 'same_bundle_upgrade', 'fresh_directory_upgrade')]},
             'final_metrics': copy.deepcopy(stages[-1]['metrics'])}
     from scripts import low_resource_root_trace as trace
-    root_observer = {**process, 'uid': [0]*4, 'cgroup': '/'+PARENT+'/'+unit}
+    root_observer = {**process, 'pid': 12, 'uid': [0]*4, 'cgroup': '/'+PARENT+'/'+unit}
     samples = [{'type': 'sample', 'sample': {
         'started_monotonic': start, 'state_monotonic': start+.01,
         'metrics_started_monotonic': start+.02, 'metrics_finished_monotonic': start+.03,
@@ -262,8 +264,19 @@ def complete_report():
         'state_error': 'ServiceUnavailable'}} for start in (4.1, 4.45, 4.8)]
     samples[1]['sample']['state'] = {key: value for key, value in during.items() if key != 'monotonic'}
     samples[1]['sample']['state_error'] = None
+    launch_baseline = {'schema_version': 1, 'systemd_version': 255, 'manager_version': '255', 'executor_version': '255',
+        'manager': {'device': 7, 'inode': 42, 'mode': 0o100755, 'uid': 0,
+                    'size': 4096, 'mtime_ns': 100000, 'ctime_ns': 200000},
+        'executor': {'device': 7, 'inode': 43, 'mode': 0o100755, 'uid': 0,
+                     'size': 4096, 'mtime_ns': 100000, 'ctime_ns': 200000}}
+    for row in samples:
+        row['sample']['launch_baseline'] = copy.deepcopy(launch_baseline)
+    for unit, info in samples[1]['sample']['state']['services'].items():
+        info['execution'] = {'schema_version': 1, 'image': 'runtime',
+            'exe': {**launch_baseline['executor'], 'inode': 44, 'uid': 998},
+            'template': 'panel' if unit == 'v-ui.service' else 'http01', 'error': None}
     report['upgrade_accounting'] = {'read_error': None, 'bytes': 1000, 'rows': [
-        {'type': 'header', 'source_commit': COMMIT, 'slice': PARENT,
+        {'type': 'header', 'schema_version': trace.SCHEMA_VERSION, 'source_commit': COMMIT, 'slice': PARENT,
          'interval_seconds': trace.INTERVAL_SECONDS, 'max_samples': trace.MAX_SAMPLES,
          'max_bytes': trace.MAX_BYTES}, *samples,
         {'type': 'finished', 'sample_count': 3, 'returncode': 0, 'error': None,

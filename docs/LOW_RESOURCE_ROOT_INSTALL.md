@@ -3,14 +3,16 @@
 Status: the original root fixture qualified at `d745c61`; bounded upgrade
 accounting qualified at `4c1d97b` in
 [run 38101639709](https://github.com/ForceMind/V-UI/actions/runs/38101639709).
-The later `a2eb07f` product change and the exact product gate below still need
-their own root qualification; neither inherits that earlier success.
+The later `a2eb07f` product change, pinned by `afce914`, still needs its own
+root qualification: the one `afce914` attempt failed strict process-identity
+validation, as retained below. The launch-evidence candidate is local only;
+neither it nor the product inherits earlier root success.
 The original local suite had 746 tests, 621 passed and 125 environment skips; 32 focused
 fixture contracts independently passed. These do not prove root/systemd resources.
 The accepted `bc24c55` CPU recovery and ordinary gates remain separate evidence.
 The original and `4c1d97b` product bytes remained at `5f44a2f`.
 
-## Exact reviewed product delta (new gate candidate)
+## Exact reviewed product delta at afce914
 
 The previous workflow required every protected product path to match
 `5f44a2fb4a9ac0c32bc09b9a7859fc8ea8629154`. It correctly refuses the later
@@ -52,12 +54,118 @@ does not protect against edits to the guard, fixture or dependency installer
 themselves, which still require review. The exact label-event head qualifies
 only itself if the PR subsequently advances.
 
-Only workflow provenance, its non-root temporary-Git contract tests and this
-document change in this batch. Product files, root harness, action pins,
-standard runner, permissions, measured limits, cleanup and artifact retention
-remain unchanged. After local/independent checks and ordinary exact-head CI,
-one explicitly approved root-label trigger is planned. Until its raw evidence
-passes review, actual installation/upgrade peak improvement remains unverified.
+That batch changed only workflow provenance, its non-root temporary-Git tests
+and this document. Product files, root harness, action pins, standard runner,
+permissions, measured limits, cleanup and artifact retention were unchanged.
+Its local 805 tests had 680 passes and 125 environment skips; 17 new methods
+passed independent review. Ordinary exact-head CI had eight workflows,
+11 jobs and 119 steps, all attempt 1 success. Source and deployment artifacts
+were independently checked. The subsequent single approved root attempt
+failed; ordinary application-cgroup results cannot override that failure.
+
+## Retained afce914 failure and launch-evidence candidate
+
+[Run 38105188427](https://github.com/ForceMind/V-UI/actions/runs/38105188427),
+job 114369090001, attempt 1, failed the measurement step after the exact
+provenance guard and build passed. Artifact 11689024892 is 44468 bytes;
+its official and downloaded ZIP SHA256 is
+`6f84dc8e663d998797fe78e2b2e43d27a43ca1a2033b269425dbe6c7208b7259`.
+ZIP CRC and both complete protected trees were independently verified.
+
+Both unmodified validators reproduce `Process credentials changed` in
+sample 46 of 53: PID 3543, PPID 1, starttime 16557, UID `[0,0,0,0]`, in the
+exact `v-ui.service` leaf. The classifier labeled every member of that leaf
+`managed-panel` without executable evidence. The state read just before this
+scan had no active services. The next sample has the same PID/start/leaf,
+UID `[999,999,999,999]`, MainPID 3543 and active service state. This supports
+a launch-transition hypothesis, but does not prove what executed as root.
+The old report has no executable evidence and must remain rejected.
+
+The worker completed all nine stages and four root entries with exit 0;
+bad-digest refusal, verified restore/session revocation and full cleanup are
+retained functional observations. Final parent peak was 488783872 bytes
+(466.140625 MiB), with max/OOM counters zero. This is a failed run's diagnostic
+number, not accepted performance. Compared with the old passing 4c1d run,
+the number is 26.3125 MiB lower, but upgrade wall increased from 30.224419 to
+39.907910 seconds and parent CPU from 47.895975 to 79.167031 seconds.
+Neither a stable improvement nor an exclusive cause follows from two runs.
+The 53 embedded rows reconstruct 316602 bytes; the original JSONL was not
+separately uploaded. Pin hashing also moved inside the extraction boundary,
+so internal phase durations are not directly comparable.
+
+### Evidence model, not a product privilege exception
+
+The product launcher already refuses root before loading the selected release.
+Keep that behavior, both service units and their `User=v-ui` configuration
+unchanged. The [systemd v255 Type=simple contract](https://github.com/systemd/systemd/blob/v255/man/systemd.service.xml#L147-L168)
+allows a start to be reported before process attributes and product execution
+are complete. Its [separate executor](https://github.com/systemd/systemd/blob/v255/src/core/execute.c#L405-L425)
+also means matching only the PID 1 executable is insufficient. These upstream
+sources explain a possible mechanism; they do not establish the old runner's
+actual version or retroactively prove the missing executable observation.
+
+The local candidate changes only the accounting fixture, pure synthetic tests
+and this contract. Product bytes and the exact workflow pin above stay fixed.
+It adds versioned, bounded executable evidence for the two exact managed
+service leaves. Roles, full UIDs and pending observations are preserved;
+root observations are never relabeled as unknown or discarded to pass.
+
+- Trust only explicitly supported running-manager versions and fixed system
+  manager/executor files with verified numerical file identities, root owner,
+  regular type, non-group/other-writable modes and trusted parent directories.
+  This fixture candidate supports only the reviewed v255 execution model;
+  other manager versions fail closed without changing product compatibility.
+  Record the running manager's Version property, not systemctl's client version.
+  Query the verified fixed executor's pure `--version` entry and require its
+  complete build version to match the manager, with image identities checked
+  before and after. The [v255 parser's early exit](https://github.com/systemd/systemd/blob/v255/src/core/executor.c#L53-L81)
+  precedes deserialization or service execution; no arbitrary executable is run.
+  A package replacement, deleted image or mismatched pinned executor inode
+  fails closed; no basename/path fallback or arbitrary PID 1 FD scan.
+- Recheck process identity and actual executable identity around bounded
+  observation. A root observation with a read failure, changed executable,
+  mixed UID, wrong parent/leaf or unknown image remains a hard failure.
+  Raw argv, argv hashes, executable paths and environment are not serialized.
+- A root observation may become pending only with PPID 1, full UID 0 and the
+  exact trusted pre-product systemd image. Permit at most two consecutive pending sample observations
+  and at most the existing five-second gap budget. Closure requires the same
+  PID/start/leaf, PPID 1, all four service UIDs, matching MainPID and the real
+  runtime executable with the complete expected application command template.
+  Merely reaching the launcher or UID 999 is insufficient. Missing closure,
+  replacement PID, a late closure or product-to-executor reversal fails.
+  A MainPID observed at a recognized non-root pre-execution or launcher state
+  also needs that finite closure, even if no earlier UID 0 sample was captured.
+- The accounting-only state path retains pending launch records separately;
+  it does not call them active product services. Ordinary service checks and
+  all nine stages still reject root. Effective Slice, drop-ins, membership
+  and other hard errors are not converted into stop/start races. Original
+  live-A/not-ready-B proof still requires the same genuinely non-root service.
+- Keep the original sampling frequency, row/sample/byte caps, full-command
+  coverage, cumulative resource accounting and cleanup. New reads remain in
+  the measured parent, including those two bounded version-query subprocesses
+  per sample, and their observed costs remain reported. The two-sample
+  and five-second bounds are conservative fixture gates, not systemd promises.
+
+Finite /proc observations are not atomic and cannot rule out an unobserved
+short-lived root execution or malicious ABA on a compromised host. The claim
+is narrower: observed product root and unproved transitions fail, and an
+exception requires contemporaneous trusted-image evidence plus bounded
+same-generation application closure. Historical reports lacking these fields
+cannot gain that exception. The policy deliberately also rejects an otherwise
+legitimate non-root stop or fast exec if its sampled executable/identity reads
+race; no disappearance exemption is inferred. Local tests cannot promise a
+future real observation will be conclusive. This candidate has not run root CI; any
+later root qualification requires its own reviewed head and explicit trigger.
+
+Local candidate validation on Python 3.12.14: 854 tests in 64.085 seconds,
+729 passed and 125 environment skips. The 49 new launch methods and 249
+explicit subtest cases passed; the full root/provenance/trace/launch subset
+had 114 methods and 485 subtest cases, all passed without skips. Independent
+review reran those 114 methods in 11.519 seconds and found no remaining
+blocker. Documentation, Python compilation, application JavaScript and shell
+syntax, and diff checks passed. Product and workflow bytes remain unchanged
+from afce914. These local results do not qualify root/systemd resources or
+revise the retained failed run.
 
 ## Bounded contract
 

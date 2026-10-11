@@ -197,17 +197,41 @@ def service_identity(unit, parent):
     return {'properties': properties, 'process': process}
 
 
-def root_state(parent):
-    """Safe summary only: never serialize cookies, database rows or key material."""
-    own = identity(os.getpid(), parent)
-    if own['uid'] != [0]*4:
-        raise RuntimeError('Privileged observation did not enter as root')
-    state = {'observer': own, 'services': {}}
-    directory = Path('/sys/fs/cgroup')/parent
-    state['observed_subtree'] = subtree(directory, parent)
-    for unit in UNITS[:2]:
-        if unit_properties(unit).get('ActiveState') == 'active':
-            state['services'][unit] = service_identity(unit, parent)
+def accounting_service_identity(unit, parent, baseline, configuration):
+    """Accounting alone retains startup observations outside normal services."""
+    from scripts import low_resource_root_trace as trace
+    properties = unit_properties(unit)
+    group = properties.get('ControlGroup', '')
+    expected_dropin = f'/run/systemd/system/{unit}.d/90-vui-resource.conf'
+    if (properties.get('Slice') != parent
+            or properties.get('DropInPaths', '').split() != [expected_dropin]
+            or group not in ('', '/'+parent+'/'+unit)):
+        raise RuntimeError('Service does not use the owned parent/drop-in: '+unit)
+    pid = int(properties.get('MainPID', '0'))
+    if not pid:
+        return None, None
+    try:
+        process = identity(pid, parent)
+    except (FileNotFoundError, ProcessLookupError):
+        # Any earlier subtree identity remains separately retained below.
+        return None, None
+    if process['cgroup'] != group or group != '/'+parent+'/'+unit:
+        raise RuntimeError('Service actual membership mismatch')
+    observed = trace.observed_process(process, parent, ROOT, identity,
+                                     baseline=baseline, configuration=configuration)
+    evidence = observed['execution']
+    entry = {'properties': properties, 'process': process, 'execution': evidence}
+    service_uid = pwd.getpwnam('v-ui').pw_uid
+    if (properties.get('ActiveState') == 'active' and process['uid'] == [service_uid]*4
+            and process['ppid'] == 1 and evidence['error'] is None
+            and evidence['image'] == 'runtime'
+            and evidence['template'] == trace.MANAGED_UNITS[unit][1]):
+        return entry, None
+    return None, entry
+
+
+def state_summary(state):
+    """Read metadata before accounting observes any managed/root identity."""
     if (ROOT/'CURRENT.json').exists():
         state['current'] = json.loads((ROOT/'CURRENT.json').read_text())
     config = Path('/etc/v-ui/service.json')
@@ -220,6 +244,49 @@ def root_state(parent):
         state['backups'] = sorted(path.name for path in ROOT.glob('before-upgrade-*.zip'))
         state['releases'] = sorted(path.name for path in (ROOT/'releases').iterdir()) if (ROOT/'releases').exists() else []
         state['ready_releases'] = [name for name in state['releases'] if (ROOT/'releases'/name/'READY.json').is_file()]
+
+
+def root_state(parent, *, accounting=False, baseline=None, configuration=None):
+    """Safe summary only: never serialize cookies, database rows or key material."""
+    own = identity(os.getpid(), parent)
+    if own['uid'] != [0]*4:
+        raise RuntimeError('Privileged observation did not enter as root')
+    state = {'observer': own, 'services': {}}
+    if accounting:
+        state_summary(state)
+    directory = Path('/sys/fs/cgroup')/parent
+    if accounting:
+        try:
+            state['observed_subtree'] = subtree(directory, parent)
+        except (FileNotFoundError, ProcessLookupError):
+            # Enumeration may already have read a root member before a later
+            # PID disappears. Never downgrade that partial prefix to state=None.
+            raise RuntimeError('Accounting subtree observation failed') from None
+    else:
+        state['observed_subtree'] = subtree(directory, parent)
+    if accounting:
+        from scripts import low_resource_root_trace as trace
+        state['service_transitions'] = {}
+        state['observed_subtree'] = [trace.observed_process(
+            process, parent, ROOT, identity, baseline=baseline, configuration=configuration)
+            if trace.managed_unit(process, parent) is not None else process
+            for process in state['observed_subtree']]
+        for unit in UNITS[:2]:
+            try:
+                service, transition = accounting_service_identity(unit, parent, baseline, configuration)
+            except (OSError, subprocess.SubprocessError):
+                state['observation_error'] = 'service_read_failed'
+                break  # Preserve earlier managed/root observations in this sample.
+            if service is not None:
+                state['services'][unit] = service
+            if transition is not None:
+                state['service_transitions'][unit] = transition
+    else:
+        for unit in UNITS[:2]:
+            if unit_properties(unit).get('ActiveState') == 'active':
+                state['services'][unit] = service_identity(unit, parent)
+    if not accounting:
+        state_summary(state)
     return state
 
 
@@ -367,7 +434,7 @@ class Gate:
         journal = trace.Journal(self.output.parent/'root-upgrade.jsonl', {
             'source_commit': self.config['source_commit'], 'slice': self.parent,
             'interval_seconds': trace.INTERVAL_SECONDS, 'max_samples': trace.MAX_SAMPLES,
-            'max_bytes': trace.MAX_BYTES})
+            'max_bytes': trace.MAX_BYTES, 'schema_version': trace.SCHEMA_VERSION})
         def observe_once():
             sample = self.operation('accounting')
             journal.append({'type': 'sample', 'sample': sample})

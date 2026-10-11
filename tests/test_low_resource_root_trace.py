@@ -150,6 +150,8 @@ class RootTraceJournalTests(unittest.TestCase):
 class RootTraceFailureRetentionTests(unittest.TestCase):
     def test_root_identity_failure_is_never_hidden_as_transition(self):
         with patch.object(root, 'identity', return_value={'uid': [0]*4}), \
+                patch.object(trace, 'execution_baseline', return_value={}), \
+                patch.object(trace, 'service_configuration', return_value={}), \
                 patch.object(root, 'root_state', side_effect=RuntimeError('wrong effective slice')):
             with self.assertRaisesRegex(RuntimeError, 'wrong effective slice'):
                 trace.capture(PARENT)
