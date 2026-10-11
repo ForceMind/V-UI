@@ -8,6 +8,7 @@
 | 申请/测试/自动续期/面板或节点绑定 | [CERTIFICATES.md](CERTIFICATES.md) |
 | 节点、规则、DNS、专用订阅 | [CONFIGURATION.md](CONFIGURATION.md) |
 | 终端菜单、只读状态/完整校验、候选准备；更新、备份与恢复 | [OPERATIONS.md](OPERATIONS.md) |
+| 显式全局 `v-ui` 候选入口、受信 kit、systemd 维护事务与资格边界 | [MANAGED_OPERATIONS.md](MANAGED_OPERATIONS.md) |
 | 访问失败/签发失败/核心未生效 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
 | 管理API、令牌和错误状态 | [API.md](API.md) |
 | 已验证与未验证的协议/部署范围 | [COMPATIBILITY.md](COMPATIBILITY.md) |

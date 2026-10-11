@@ -25,6 +25,7 @@ from app import release_tools as tools
 from loopback_helpers import certificate_files, unused_port
 from scripts.ops_menu_smoke import (content_snapshot, fixture_bundle, installed_menu_smoke,
     installed_menu_stage_smoke)
+from scripts.managed_ops_smoke import installed_managed_ops_smoke
 
 
 class MenuStageFixtureTests(unittest.TestCase):
@@ -164,6 +165,8 @@ class ReleaseDeploymentTests(unittest.TestCase):
                     self.assertTrue(response.read())
             print(installed_menu_stage_smoke(python,payload,root,bundle,checksum,
                 panel=running[-1],probe=old_https_probe)['menu_stage'])
+            print(json.dumps(installed_managed_ops_smoke(python,payload,root,bundle,checksum,
+                panel=running[-1],probe=old_https_probe),sort_keys=True))
             with self.assertRaises(HTTPError) as error:api('/api/inbounds')
             self.assertEqual(error.exception.code,401)
             with self.assertRaises(tools.ReleaseError):tools.backup(root,root/'forbidden-live.zip')
