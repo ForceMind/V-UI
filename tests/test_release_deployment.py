@@ -23,7 +23,63 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from app import release_tools as tools
 from loopback_helpers import certificate_files, unused_port
-from scripts.ops_menu_smoke import installed_menu_smoke
+from scripts.ops_menu_smoke import (content_snapshot, fixture_bundle, installed_menu_smoke,
+    installed_menu_stage_smoke)
+
+
+class MenuStageFixtureTests(unittest.TestCase):
+    """Fast harness regressions; these tiny archives are not runtime acceptance."""
+
+    def test_success_fixture_changes_only_manifest_identity(self):
+        import zipfile
+        with tempfile.TemporaryDirectory(prefix='vui-menu-fixture-unit-') as directory:
+            root=Path(directory);payload=root/'payload';payload.mkdir(mode=0o700)
+            for name in ('main.py','runtime.tar.gz','dependency.whl','source-provenance.json'):
+                (payload/name).write_bytes(('synthetic fixture '+name).encode())
+            source=root/'source.zip'
+            tools.create_archive(payload,source,{'kind':'release','release_id':'original',
+                'targets':['x86_64-gnu'],'source_commit':'a'*40})
+            original=source.read_bytes();candidate=root/'candidate.zip'
+            checksum=fixture_bundle(source,candidate,'synthetic-menu-candidate')
+            self.assertEqual(checksum,tools.digest(candidate.read_bytes()))
+            self.assertEqual(source.read_bytes(),original)
+            with zipfile.ZipFile(source) as before,zipfile.ZipFile(candidate) as after:
+                self.assertEqual(before.namelist(),after.namelist())
+                for name in before.namelist():
+                    if name!='MANIFEST.json':self.assertEqual(before.read(name),after.read(name))
+                manifest=json.loads(before.read('MANIFEST.json'))
+                manifest['release_id']='synthetic-menu-candidate'
+                self.assertEqual(manifest,json.loads(after.read('MANIFEST.json')))
+
+    def test_negative_fixture_changes_are_explicit_and_checksum_valid(self):
+        import zipfile
+        with tempfile.TemporaryDirectory(prefix='vui-menu-fixture-unit-') as directory:
+            root=Path(directory);payload=root/'payload';payload.mkdir(mode=0o700)
+            (payload/'main.py').write_bytes(b'pass\n')
+            (payload/'runtime.tar.gz').write_bytes(b'synthetic runtime bytes')
+            source=root/'source.zip'
+            tools.create_archive(payload,source,{'kind':'release','release_id':'original',
+                'targets':['x86_64-gnu']})
+            cross=root/'cross.zip'
+            cross_sha=fixture_bundle(source,cross,'wrong-target',targets=['aarch64-gnu'])
+            cross_meta=tools.unpack_verified(cross,cross_sha,root/'cross-unpacked')
+            self.assertEqual(cross_meta['targets'],['aarch64-gnu'])
+            self.assertEqual((root/'cross-unpacked'/'main.py').read_bytes(),b'pass\n')
+            broken=root/'broken.zip';marker=root/'health-marker'
+            broken_sha=fixture_bundle(source,broken,'broken-health',broken_health=True,health_marker=marker)
+            tools.unpack_verified(broken,broken_sha,root/'broken-unpacked')
+            with zipfile.ZipFile(source) as before,zipfile.ZipFile(broken) as after:
+                self.assertEqual(before.read('runtime.tar.gz'),after.read('runtime.tar.gz'))
+            with self.assertRaisesRegex(RuntimeError,'synthetic menu candidate health failure'):
+                exec((root/'broken-unpacked'/'main.py').read_text(),{})
+            self.assertEqual(marker.read_bytes(),b'candidate-health-started\n')
+
+    def test_snapshot_detects_same_size_bytes_even_with_preserved_mtime(self):
+        with tempfile.TemporaryDirectory(prefix='vui-menu-snapshot-unit-') as directory:
+            root=Path(directory);path=root/'data';path.write_bytes(b'old')
+            original=path.stat();before=content_snapshot(root)
+            path.write_bytes(b'new');os.utime(path,ns=(original.st_atime_ns,original.st_mtime_ns))
+            self.assertNotEqual(content_snapshot(root),before)
 
 
 @unittest.skipUnless(os.getenv('VUI_RELEASE_BUNDLE'), 'explicit built-package deployment gate')
@@ -102,6 +158,12 @@ class ReleaseDeploymentTests(unittest.TestCase):
                 self.assertEqual(status,200)
                 self.assertIn('Secure',headers['Set-Cookie']);self.assertIn('__Host-vui_session',headers['Set-Cookie'])
             start()
+            def old_https_probe():
+                with opener.open(origin+'/login',timeout=3) as response:
+                    self.assertEqual(response.status,200)
+                    self.assertTrue(response.read())
+            print(installed_menu_stage_smoke(python,payload,root,bundle,checksum,
+                panel=running[-1],probe=old_https_probe)['menu_stage'])
             with self.assertRaises(HTTPError) as error:api('/api/inbounds')
             self.assertEqual(error.exception.code,401)
             with self.assertRaises(tools.ReleaseError):tools.backup(root,root/'forbidden-live.zip')
