@@ -94,6 +94,14 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 page.get_by_role('button', name='登录面板', exact=True).click()
                 page.wait_for_url('**/ui/')
                 menu = page.get_by_role('menuitem', name='安全中心', exact=True)
+                def tab_to_menu():
+                    expect(menu).to_have_attribute('tabindex', '0')
+                    # Bound a real keyboard traversal; programmatic focus hides tabindex defects.
+                    for _ in range(20):
+                        page.keyboard.press('Tab')
+                        if menu.evaluate('(element) => element === document.activeElement'):
+                            break
+                    expect(menu).to_be_focused()
                 def check_notice():
                     region = page.get_by_role('region', name='安全中心', exact=True)
                     expect(region).to_be_visible()
@@ -107,22 +115,25 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     self.assertEqual(security_requests, [])
                     return notice
                 # Keyboard activation exposes the scope before there is anything to submit.
-                menu.focus(); expect(menu).to_be_focused(); menu.press('Enter')
+                tab_to_menu()
+                menu.press('Escape')
+                expect(page.get_by_role('region', name='安全中心', exact=True)).to_have_count(0)
+                menu.press('Enter')
                 notice = check_notice()
                 for _ in range(3):
                     menu.click(); notice.click(); check_notice()
                 page.get_by_role('menuitem', name='系统状态', exact=True).click()
                 expect(page.get_by_role('region', name='安全中心', exact=True)).to_have_count(0)
-                menu.focus(); menu.press('Enter'); check_notice()
+                tab_to_menu(); menu.press('Space'); check_notice()
                 # The existing SPA returns to the dashboard after reload/full-page history.
-                page.reload(); menu.focus(); menu.press('Enter'); check_notice()
+                page.reload(); tab_to_menu(); menu.press('Enter'); check_notice()
                 page.get_by_role('menuitem', name='面板设置', exact=True).click()
                 page.wait_for_url('**/account')
                 page.go_back(); page.wait_for_url('**/ui/')
-                menu.focus(); menu.press('Enter'); check_notice()
+                tab_to_menu(); menu.press('Space'); check_notice()
                 page.go_forward(); page.wait_for_url('**/account')
                 page.go_back(); page.wait_for_url('**/ui/')
-                menu.focus(); menu.press('Enter'); check_notice()
+                tab_to_menu(); menu.press('Enter'); check_notice()
                 self.assertEqual(errors, [])
                 self.assertEqual(external, [])
                 self.assertEqual(security_requests, [])

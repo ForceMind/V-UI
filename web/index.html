@@ -48,7 +48,11 @@
                     <el-icon><Setting /></el-icon>
                     <span>面板设置</span>
                 </el-menu-item>
-                <el-menu-item index="security">
+                <el-menu-item
+                    index="security"
+                    tabindex="0"
+                    @keydown.enter.prevent="handleSelect('security')"
+                    @keydown.space.prevent="handleSelect('security')">
                     <el-icon><Lock /></el-icon>
                     <span>安全中心</span>
                 </el-menu-item>

@@ -42,6 +42,20 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
     assert.equal('banIp' in state, false, 'remove the unsupported action, not only its button');
     assert.equal('banIpInput' in state, false);
   }
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const menu = html.match(/<el-menu-item\b[^>]*\bindex="security"[^>]*>/);
+  assert.ok(menu, 'security navigation remains available');
+  const attrs = new Map([...menu[0].matchAll(/([:@\w.-]+)="([^"]*)"/g)].map(match => [match[1], match[2]]));
+  assert.equal(attrs.get('tabindex'), '0', 'the security menu must be reachable by Tab');
+  const keys = ['@keydown.enter.prevent', '@keydown.space.prevent'];
+  assert.deepEqual([...attrs.keys()].filter(key => key.startsWith('@keydown')).sort(), keys);
+  const state = setup();
+  for (const key of keys) {
+    state.handleSelect('dashboard');
+    vm.runInNewContext(attrs.get(key), state);
+    assert.equal(state.currentView.value, 'security', key);
+    assert.deepEqual(requests, [], 'keyboard activation must only select the read-only view');
+  }
   assert.deepEqual(messages, [], 'an unavailable action must not report success or a late failure');
   assert.doesNotMatch(fs.readFileSync('web/js/app.js', 'utf8'), /\/api\/security\//);
 })().catch(error => {console.error(error); process.exitCode = 1;});
