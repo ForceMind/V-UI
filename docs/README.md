@@ -4,6 +4,12 @@
 
 | 阅读目标 | 文档 |
 | --- | --- |
+| 1 vCPU / 512 MiB 安装运行目标与实测边界 | [LOW_RESOURCE_TARGET.md](LOW_RESOURCE_TARGET.md) |
+| 405 同提交四平台及完整资源基线、未达预算 | [LOW_RESOURCE_405_BASELINE.md](LOW_RESOURCE_405_BASELINE.md) |
+| 071 大规则优化与完整同提交验收基线 | [LOW_RESOURCE_071_BASELINE.md](LOW_RESOURCE_071_BASELINE.md) |
+| 大规则导出索引、差分合同与本地诊断边界 | [LOW_RESOURCE_RULE_INDEX.md](LOW_RESOURCE_RULE_INDEX.md) |
+| 停机备份私有缓存与无覆盖发布边界 | [LOW_RESOURCE_BACKUP_CACHE.md](LOW_RESOURCE_BACKUP_CACHE.md) |
+| 离线安装同包短边界归因 | [LOW_RESOURCE_INSTALL_TRACE.md](LOW_RESOURCE_INSTALL_TRACE.md) |
 | 新服务器安装/首次证书/创建管理员 | [INSTALLATION.md](INSTALLATION.md) |
 | 申请/测试/自动续期/面板或节点绑定 | [CERTIFICATES.md](CERTIFICATES.md) |
 | 节点、规则、DNS、专用订阅 | [CONFIGURATION.md](CONFIGURATION.md) |
@@ -29,3 +35,13 @@
 [alpha.2认证](AUTH_ALPHA2.md)、[alpha.5导出](EXPORT_ALPHA5.md)、[alpha.6工作区](WORKSPACE_ALPHA6.md)、[rc.1真实链路](LOOPBACK_RC1.md)、[rc.2手动部署](DEPLOYMENT_RC2.md)、[v0.4.2主线收口](MAINLINE_CLOSURE_20261005.md)、[v0.4.3 WS主线收口](VLESS_WS_CLOSURE_043.md)、[v0.4.4 gRPC主线收口](VLESS_GRPC_CLOSURE_044.md)、[gRPC 原候选与失败历史](VLESS_GRPC_044.md)、[HY2 原候选与失败历史](HYSTERIA2_045.md)、[原始计划复核](ROADMAP_REVIEW_20261001.md)、[迭代证据](ITERATIONS.md)。其“未实现/当前版本”指当时状态，不覆盖当前功能文档。
 
 文档使用example域名和假凭据。不要把真实令牌、私钥、完整数据库或未加密备份复制进公开Issue。
+
+- [新runtime提前写回](LOW_RESOURCE_RUNTIME_WRITEBACK.md)：仅新提取树的缓存提示、失败清理与准确候选对照。
+
+- [新payload core写回](LOW_RESOURCE_CORE_WRITEBACK.md)：已证实的驻留边界与仅新文件的缓存优化实验。
+- [有界双核心并存与恢复](LOW_RESOURCE_DUAL_CORE.md)：同服务组真实两路、控制停止与显式重启的短验收合同。
+- [CPU配额饱和后的恢复](LOW_RESOURCE_CPU_PRESSURE.md)：有界真实代理压力、原始配额证据和固定恢复时限。
+
+- [Root 安装父组资源合同](LOW_RESOURCE_ROOT_INSTALL.md)：d745 同产品新目录升级及停机恢复已验；新有界升级归因采样待自己的准确提交验证。
+
+- [新 runtime 压缩归档冷读](LOW_RESOURCE_RUNTIME_ARCHIVE_CACHE.md)：4c1d root 全窗证据支持的私有文件候选、身份保护与本地机制实验；实际峰值改善待准确候选验证。

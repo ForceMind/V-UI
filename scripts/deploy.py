@@ -1,6 +1,7 @@
 """Offline per-user deployment controller. Read docs/DEPLOYMENT_RC2.md first."""
 from __future__ import annotations
 import argparse
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -43,6 +44,8 @@ def main():
                 result=subprocess.run([str(python),'-B','-m','app.admin',args.action,args.username],cwd=payload,env=env)
                 raise SystemExit(result.returncode)
         else:
+            from deploy.system_launcher import panel_environment
+            env=panel_environment(env,json.loads((release/'READY.json').read_text())['runtime_key'])
             command=[str(python),'-B','-m','app.serve','--root',str(root),'--origin',args.origin,
                      '--bind',args.bind,'--port',str(args.port)]
             if args.cert or args.key:

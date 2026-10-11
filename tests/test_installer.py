@@ -74,7 +74,7 @@ class InstallerTests(unittest.TestCase):
             z.writestr('MANIFEST.json',json.dumps(manifest))
             for name,data in files.items():z.writestr(name,data)
         sha=hashlib.sha256(path.read_bytes()).hexdigest()
-        raw,archive,meta=installer.verify_archive(path,sha);self.assertEqual(meta,manifest);archive.close()
+        raw,archive,meta=installer.verify_archive(path,sha);self.assertEqual(meta,manifest);archive.close();raw.close()
         with zipfile.ZipFile(path,'a') as z:z.writestr('extra','unexpected')
         with self.assertRaises(installer.InstallError):installer.verify_archive(path,hashlib.sha256(path.read_bytes()).hexdigest())
     def test_root_file_updates_refuse_symlink_ancestors(self):

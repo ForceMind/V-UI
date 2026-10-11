@@ -1,8 +1,123 @@
 addEventListener('pageshow', (event) => { if (event.persisted) location.reload(); });
 // Session cookies are HttpOnly. Do not persist credentials in Web Storage.
+// One request per status endpoint, shared by timer and manual refresh callers.
+function singleStatusRequest(task) {
+    let pending = null, queued = null;
+    function refresh(...args) {
+        if (pending) return pending;
+        refresh.pending = true;
+        pending = Promise.resolve().then(() => task(...args)).finally(() => {
+            pending = null;
+            refresh.pending = false;
+        });
+        return pending;
+    }
+    refresh.pending = false;
+    refresh.fresh = (...args) => {
+        if (!pending) return refresh(...args);
+        if (!queued) queued = pending.catch(() => {}).then(() => {
+            queued = null;
+            return refresh(...args);
+        });
+        return queued;
+    };
+    return refresh;
+}
+
+function visibleStatusPoller(task, interval, environment = {}) {
+    const page = environment.document || document;
+    const later = environment.setTimeout || setTimeout;
+    const cancel = environment.clearTimeout || clearTimeout;
+    const failed = environment.onError || ((error) => console.error('Status polling failed', error));
+    let timer = null, running = false, stopped = false, refreshAfterFlight = false;
+    const clear = () => { if (timer !== null) { cancel(timer); timer = null; } };
+    const schedule = () => {
+        clear();
+        if (!stopped && !page.hidden) timer = later(run, interval);
+    };
+    async function run() {
+        clear();
+        if (stopped || page.hidden) return;
+        if (running) { refreshAfterFlight = true; return; }
+        // A manual refresh may already own this endpoint. Await it, then fetch
+        // once more for the newly visible page rather than displaying old data.
+        refreshAfterFlight = refreshAfterFlight || task.pending === true;
+        running = true;
+        try { await task(); }
+        catch (error) { failed(error); }
+        finally {
+            running = false;
+            if (stopped || page.hidden) refreshAfterFlight = false;
+            else if (refreshAfterFlight) { refreshAfterFlight = false; void run(); }
+            else schedule();
+        }
+    }
+    const changed = () => {
+        clear();
+        if (page.hidden) refreshAfterFlight = false;
+        else void run();
+    };
+    page.addEventListener('visibilitychange', changed);
+    schedule(); // Initial page data has already been fetched by onMounted.
+    return { stop() {
+        stopped = true; refreshAfterFlight = false; clear();
+        page.removeEventListener('visibilitychange', changed);
+    } };
+}
+
+const statusPollers = [];
+let adminSessionEnded = false;
+let adminSessionChannel = null;
+try {
+    if (typeof BroadcastChannel === 'function') adminSessionChannel = new BroadcastChannel('vui-admin-session');
+} catch (_) { /* Older browsers still revalidate immediately when shown. */ }
+function endAdminSession(announce = false) {
+    if (adminSessionEnded) return;
+    adminSessionEnded = true;
+    statusPollers.forEach(poller => poller.stop());
+    try { if (announce && adminSessionChannel) adminSessionChannel.postMessage('session-ended'); } catch (_) {}
+    try { if (adminSessionChannel) adminSessionChannel.close(); } catch (_) {}
+    location.replace('/login');
+}
+if (adminSessionChannel) adminSessionChannel.onmessage = (event) => {
+    if (event.data === 'session-ended') void checkAdminSession(false, true);
+};
+
+let adminSessionCheck = null, announceConfirmedSessionEnd = false, adminCheckGeneration = 0;
+function checkAdminSession(announce = false, newEvidence = false) {
+    if (adminSessionEnded) return Promise.resolve(null);
+    announceConfirmedSessionEnd = announceConfirmedSessionEnd || announce;
+    if (newEvidence) adminCheckGeneration++;
+    if (adminSessionCheck) return adminSessionCheck;
+    let checkedGeneration = -1;
+    // Messages received during an older check invalidate its result. Keep one
+    // request in flight, then verify the latest cookie instead of losing logout.
+    adminSessionCheck = Promise.resolve().then(async () => {
+        while (!adminSessionEnded) {
+            const generation = adminCheckGeneration;
+            let response = null;
+            try {
+                response = await axios.get('/api/auth/me', {
+                    timeout: 5000, validateStatus: status => status === 200 || status === 401
+                });
+            } catch (_) { /* A network failure is not evidence of invalid credentials. */ }
+            if (generation !== adminCheckGeneration) continue;
+            checkedGeneration = generation;
+            if (response?.status === 401) endAdminSession(announceConfirmedSessionEnd);
+            return response?.status === 200 ? response.data : null;
+        }
+        return null;
+    }).finally(() => {
+        adminSessionCheck = null;
+        // Cover a notification queued between the final result and this cleanup.
+        if (!adminSessionEnded && checkedGeneration !== adminCheckGeneration) void checkAdminSession();
+        else announceConfirmedSessionEnd = false;
+    });
+    return adminSessionCheck;
+}
 axios.defaults.headers.common['X-VUI-Request'] = '1';
 axios.interceptors.response.use(response => response, error => {
-    if (error.response?.status === 401) location.replace('/login');
+    if (error.response?.status === 401) return checkAdminSession(true, true).then(() => Promise.reject(error));
     return Promise.reject(error);
 });
 
@@ -160,29 +275,31 @@ const app = createApp({
             if (key === 'settings') userForm.username = currentUser.value.username;
             if (key === 'site') fetchSiteFiles();
             if (key === 'subscriptions') {
-                fetchCoreStatus();
+                fetchCoreStatus.fresh();
                 fetchRoutingPreview();
                 fetchMihomoWarnings();
             }
         };
 
-        const fetchSystemStatus = async () => {
+        const fetchSystemStatus = singleStatusRequest(async () => {
+            if (adminSessionEnded) return;
             try {
-                const res = await axios.get('/api/system/status');
+                const res = await axios.get('/api/system/status', { timeout: 5000 });
                 systemStatus.value = res.data;
             } catch (error) {
                 console.error('Failed to fetch status', error);
             }
-        };
+        });
 
-        const fetchCoreStatus = async () => {
+        const fetchCoreStatus = singleStatusRequest(async () => {
+            if (adminSessionEnded) return;
             try {
-                const res = await axios.get('/api/cores/status');
+                const res = await axios.get('/api/cores/status', { timeout: 5000 });
                 coreStatus.value = res.data;
             } catch (error) {
                 console.error('Failed to fetch core status', error);
             }
-        };
+        });
 
         const fetchInbounds = async () => {
             try {
@@ -483,12 +600,12 @@ const app = createApp({
                 }
                 showAddInbound.value = false;
                 editingInboundId.value = null;
-                await Promise.all([fetchInbounds(), fetchCoreStatus()]);
+                await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
             } catch (error) {
                 const detail = error.response?.data?.detail;
                 if (error.response?.status === 409 && detail?.saved) {
                     ElMessage.warning('设置已保存为期望状态，但核心未应用：' + (detail.message || 'validation failed'));
-                    await Promise.all([fetchInbounds(), fetchCoreStatus()]);
+                    await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
                     return;
                 }
                 ElMessage.error(
@@ -511,7 +628,7 @@ const app = createApp({
                 );
                 await axios.delete(`/api/inbounds/${row.id}`);
                 ElMessage.success('Deleted successfully');
-                await Promise.all([fetchInbounds(), fetchCoreStatus()]);
+                await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
             } catch (error) {
                 if (error !== 'cancel') {
                     ElMessage.error('Failed to delete inbound');
@@ -533,7 +650,7 @@ const app = createApp({
                 } else {
                     ElMessage.success(`${core} restarted`);
                 }
-                await fetchCoreStatus();
+                await fetchCoreStatus.fresh();
             } catch (error) {
                 ElMessage.error(
                     error.response?.data?.detail ||
@@ -627,17 +744,22 @@ const app = createApp({
             try {
                 currentUser.value = (await axios.get('/api/auth/me')).data;
             } catch (error) {
-                return; // No polling or privileged UI activity before login.
+                if (adminSessionEnded) return;
+                const verified = await checkAdminSession();
+                if (!verified) return; // Never poll without current server authentication.
+                currentUser.value = verified;
             }
+            if (adminSessionEnded) return;
             await Promise.all([
-                fetchSystemStatus(),
-                fetchCoreStatus(),
+                fetchSystemStatus.fresh(),
+                fetchCoreStatus.fresh(),
                 fetchInbounds(),
                 fetchRouting(),
                 fetchMihomoWarnings()
             ]);
-            setInterval(fetchSystemStatus, 3000);
-            setInterval(fetchCoreStatus, 10000);
+            if (adminSessionEnded) return;
+            statusPollers.push(visibleStatusPoller(fetchSystemStatus, 3000));
+            statusPollers.push(visibleStatusPoller(fetchCoreStatus, 10000));
         });
 
         return {
