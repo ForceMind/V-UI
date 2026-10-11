@@ -1,10 +1,12 @@
 """Independent launch-evidence adversarial tests: fake procfs, no root/services.
 
-Every executable identity and service account in this module is synthetic.
+Most cases use synthetic identities; a retained CI fixture contains only exact
+non-secret numeric process/executable metadata and bounded service properties.
 Nothing starts systemd, executes a product binary, or reads real /proc secrets.
 """
 from contextlib import ExitStack
 import copy
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -618,6 +620,430 @@ class LaunchSequenceValidationTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):trace.validate(report)
         report['upgrade_accounting']['rows'][0].pop('schema_version')
         with self.assertRaises(RuntimeError):trace.validate(report)
+
+
+class ShutdownDirectionValidationTests(unittest.TestCase):
+    """A proven active generation may stop; launch obligations cannot disappear."""
+
+    UNITS = (('v-ui.service', 'panel'), ('v-ui-http01.service', 'http01'))
+
+    def product(self, unit):
+        return observed(unit, 'runtime', SERVICE_UID,
+                        'http01' if unit == 'v-ui-http01.service' else 'panel')
+
+    def set_state(self, sample, unit, row, *, active='active', normal=True,
+                  subtree=True, scan=True):
+        """Keep independent observations so a later mutation cannot edit history."""
+        entry = service_state(copy.deepcopy(row))
+        entry['properties']['ActiveState'] = active
+        sample['state'] = {'services': {}, 'service_transitions': {},
+                           'observed_subtree': [copy.deepcopy(row)] if subtree else []}
+        sample['state']['services' if normal else 'service_transitions'][unit] = entry
+        sample['state_error'] = None
+        sample['processes'] = [process for process in sample['processes']
+                               if trace.managed_unit(process, PARENT) is None]
+        if scan:
+            sample['processes'].append(copy.deepcopy(row))
+
+    def stopping_report(self, unit='v-ui.service', *, count=1, scan=True):
+        product = self.product(unit)
+        report = launch_report([product] * (count + 1) + [None], unit=unit)
+        self.set_state(rows(report)[2], unit, product)
+        for sample in rows(report)[3:-1]:
+            self.set_state(sample, unit, product, active='deactivating', normal=False,
+                           scan=scan)
+        rows(report)[-1].update(state={'services': {}, 'service_transitions': {},
+                                     'observed_subtree': []}, state_error=None)
+        return report
+
+    @staticmethod
+    def execution_mutations():
+        return [(field, lambda process, field=field:
+                 process['execution']['exe'].__setitem__(
+                     field, process['execution']['exe'][field] + 1))
+                for field in ('device', 'inode', 'mode', 'uid', 'size', 'mtime_ns', 'ctime_ns')]
+
+    def test_active_then_same_generation_stop_and_disappearance_are_not_a_launch(self):
+        for unit, _ in self.UNITS:
+            for scan in (False, True):
+                with self.subTest(unit=unit, same_row_scan_present=scan):
+                    report = self.stopping_report(unit, scan=scan)
+                    trace.validate(report)
+                    root.validate_result(report, COMMIT)
+                    machine = trace.LaunchTransitions(PARENT, SERVICE_UID)
+                    for index, sample in enumerate(rows(report)):
+                        machine.sample(sample, index)
+                        self.assertFalse(machine.pending)
+                    machine.finish()
+
+    def test_stop_can_span_more_than_two_samples_and_five_seconds_without_launch(self):
+        for unit, _ in self.UNITS:
+            with self.subTest(unit=unit):
+                report = self.stopping_report(unit, count=11)
+                self.assertGreater(rows(report)[-2]['finished_monotonic'] -
+                                   rows(report)[3]['started_monotonic'], 5)
+                trace.validate(report)
+                root.validate_result(report, COMMIT)
+
+    def test_stop_does_not_bypass_whole_report_time_metrics_or_cleanup_guards(self):
+        for unit, _ in self.UNITS:
+            for label, mutate in (
+                    ('sample-window', lambda report: rows(report)[3].update(
+                        finished_monotonic=rows(report)[4]['started_monotonic'] + 6)),
+                    ('state-window', lambda report: rows(report)[3].update(state_monotonic=100)),
+                    ('cumulative-peak', lambda report: rows(report)[3]['metrics'].update(
+                        **{'memory.peak': 0})),
+                    ('cleanup', lambda report: report.update(cleanup_confirmed=False))):
+                report = self.stopping_report(unit)
+                mutate(report)
+                with self.subTest(unit=unit, case=label), self.assertRaises(RuntimeError):
+                    root.validate_result(report, COMMIT)
+
+    def test_deactivating_requires_earlier_normal_active_mainpid_not_only_scan(self):
+        for unit, _ in self.UNITS:
+            for prior in ('absent', 'scan-only', 'subtree-only', 'activating-product',
+                          'launcher-only'):
+                report = self.stopping_report(unit)
+                sample = rows(report)[2]
+                product = self.product(unit)
+                if prior in ('absent', 'scan-only', 'subtree-only'):
+                    self.set_state(sample, unit, product, subtree=prior == 'subtree-only',
+                                   scan=prior == 'scan-only')
+                    sample['state']['services'] = {}
+                else:
+                    if prior == 'launcher-only':
+                        product['execution']['template'] = 'launcher-' + product['execution']['template']
+                    self.set_state(sample, unit, product, active='activating', normal=False)
+                with self.subTest(unit=unit, prior=prior), self.assertRaises(RuntimeError):
+                    trace.validate(report)
+
+    def test_stop_rejects_every_identity_uid_template_image_and_executable_change(self):
+        for unit, template in self.UNITS:
+            mutations = [
+                ('pid', lambda process: process.update(pid=3544)),
+                ('start', lambda process: process.update(starttime_ticks=16558)),
+                ('ppid', lambda process: process.update(ppid=2)),
+                ('leaf', lambda process: process.update(cgroup='/' + PARENT + '/other.service')),
+                ('all-root', lambda process: process.update(uid=[0] * 4)),
+                ('other-service-uid', lambda process: process.update(uid=[999] * 4)),
+                ('image', lambda process: process['execution'].update(image='other')),
+                ('template', lambda process: process['execution'].update(template='launcher-' + template)),
+                ('missing-exe', lambda process: process['execution'].update(exe=None)),
+                *self.execution_mutations(),
+                *[(f'uid-{index}', lambda process, index=index: process['uid'].__setitem__(index, 0))
+                  for index in range(4)],
+            ]
+            for label, mutate in mutations:
+                report = self.stopping_report(unit)
+                changed = self.product(unit)
+                mutate(changed)
+                self.set_state(rows(report)[3], unit, changed, active='deactivating', normal=False)
+                with self.subTest(unit=unit, mutation=label), self.assertRaises(RuntimeError):
+                    trace.validate(report)
+            for bad_pid in ('0', '9999', None):
+                report = self.stopping_report(unit)
+                properties = rows(report)[3]['state']['service_transitions'][unit]['properties']
+                properties['MainPID'] = bad_pid
+                with self.subTest(unit=unit, MainPID=bad_pid), self.assertRaises(RuntimeError):
+                    trace.validate(report)
+
+    def test_correct_binding_in_another_service_cannot_borrow_prior_active_proof(self):
+        for prior_unit, _ in self.UNITS:
+            unit = next(unit for unit, _ in self.UNITS if unit != prior_unit)
+            report = self.stopping_report(prior_unit)
+            self.set_state(rows(report)[3], unit, self.product(unit),
+                           active='deactivating', normal=False)
+            # Other baseline service IDs differ from this generation's PID/start.
+            with self.subTest(prior=prior_unit, stop=unit), self.assertRaises(RuntimeError):
+                trace.validate(report)
+
+    def test_later_active_record_cannot_replace_any_prior_executable_fingerprint_field(self):
+        for unit, _ in self.UNITS:
+            for field, mutate in self.execution_mutations():
+                report = self.stopping_report(unit, count=2)
+                changed = self.product(unit)
+                mutate(changed)
+                self.set_state(rows(report)[3], unit, changed)
+                self.set_state(rows(report)[4], unit, changed, active='deactivating', normal=False)
+                with self.subTest(unit=unit, field=field), self.assertRaises(RuntimeError):
+                    trace.validate(report)
+
+    def test_active_fingerprint_does_not_alias_mutable_input_records(self):
+        for unit, _ in self.UNITS:
+            for field in ('exe', 'uid'):
+                report = self.stopping_report(unit)
+                active, stopping = rows(report)[2:4]
+                machine = trace.LaunchTransitions(PARENT, SERVICE_UID)
+                machine.sample(active, 0)
+                entry = active['state']['services'][unit]
+                changed = self.product(unit)
+                if field == 'exe':
+                    entry['execution']['exe']['inode'] += 1
+                    changed['execution']['exe']['inode'] += 1
+                else:
+                    # Changing historical input must not corrupt the saved proof
+                    # and invalidate a later unchanged observation.
+                    entry['process']['uid'][0] = 0
+                    machine.sample(stopping, 1)
+                    machine.finish()
+                    continue
+                self.set_state(stopping, unit, changed, active='deactivating', normal=False)
+                with self.subTest(unit=unit, field=field), self.assertRaises(RuntimeError):
+                    machine.sample(stopping, 1)
+
+    def test_root_or_nonroot_pending_cannot_be_closed_by_deactivating(self):
+        for unit, template in self.UNITS:
+            for uid, image, pattern in ((0, 'systemd-executor', 'other'),
+                                        (SERVICE_UID, 'systemd-executor', 'other'),
+                                        (SERVICE_UID, 'runtime', 'launcher-' + template),
+                                        (SERVICE_UID, 'runtime', template)):
+                for historical_active in (False, True):
+                    pending = observed(unit, image, uid, pattern)
+                    product = self.product(unit)
+                    history = {**copy.deepcopy(product), 'pid': 3544, 'starttime_ticks': 16500}
+                    sequence = ([history] if historical_active else []) + [pending, product, None]
+                    report = launch_report(sequence, unit=unit)
+                    generated = rows(report)[2:]
+                    position = int(historical_active)
+                    self.set_state(generated[position], unit, pending,
+                                   active='activating', normal=False)
+                    self.set_state(generated[position + 1], unit, product,
+                                   active='deactivating', normal=False)
+                    with self.subTest(unit=unit, uid=uid, image=image,
+                                      template=pattern, history=historical_active), \
+                            self.assertRaises(RuntimeError):
+                        trace.validate(report)
+
+    def test_existing_pending_wins_even_over_exact_same_generation_active_history(self):
+        for unit, _ in self.UNITS:
+            report = self.stopping_report(unit, count=2)
+            self.set_state(rows(report)[3], unit, self.product(unit),
+                           active='activating', normal=False)
+            machine = trace.LaunchTransitions(PARENT, SERVICE_UID)
+            for index, sample in enumerate(rows(report)[:4]):
+                machine.sample(sample, index)
+            self.assertEqual(len(machine.pending), 1)
+            with self.subTest(unit=unit), self.assertRaises(RuntimeError):
+                machine.sample(rows(report)[4], 4)
+
+    def test_earlier_bad_subtree_record_cannot_be_washed_by_later_good_stop_records(self):
+        for unit, template in self.UNITS:
+            mutations = [
+                ('root-executor', lambda process: process.update(
+                    uid=[0] * 4, execution=observed(unit)['execution'])),
+                ('launcher', lambda process: process['execution'].update(template='launcher-' + template)),
+                ('unknown', lambda process: process['execution'].update(image='other', template='other')),
+                *self.execution_mutations(),
+            ]
+            for label, mutate in mutations:
+                report = self.stopping_report(unit)
+                early = rows(report)[3]['state']['observed_subtree'][0]
+                mutate(early)
+                with self.subTest(unit=unit, early=label), self.assertRaises(RuntimeError):
+                    trace.validate(report)
+
+    def test_changed_stop_mainpid_cannot_be_washed_by_unchanged_subtree_or_later_scan(self):
+        for unit, template in self.UNITS:
+            mutations = [
+                ('pid', lambda process: process.update(pid=3544)),
+                ('start', lambda process: process.update(starttime_ticks=16558)),
+                ('ppid', lambda process: process.update(ppid=2)),
+                ('leaf', lambda process: process.update(cgroup='/' + PARENT + '/other.service')),
+                ('image', lambda process: process['execution'].update(image='other')),
+                ('template', lambda process: process['execution'].update(template='launcher-' + template)),
+                *self.execution_mutations(),
+                *[(f'uid-{index}', lambda process, index=index: process['uid'].__setitem__(index, 0))
+                  for index in range(4)],
+            ]
+            for label, mutate in mutations:
+                report = self.stopping_report(unit)
+                sample = rows(report)[3]
+                changed = self.product(unit)
+                mutate(changed)
+                entry = service_state(changed)
+                entry['properties']['ActiveState'] = 'deactivating'
+                sample['state']['service_transitions'][unit] = entry
+                with self.subTest(unit=unit, mainpid=label), self.assertRaises(RuntimeError):
+                    trace.validate(report)
+
+    def test_later_scan_cannot_regress_or_change_any_active_executable_field(self):
+        for unit, template in self.UNITS:
+            mutations = [
+                ('root-executor', lambda process: process.update(
+                    uid=[0] * 4, execution=observed(unit)['execution'])),
+                ('executor', lambda process: process.update(execution=observed(unit)['execution'])),
+                ('manager', lambda process: process.update(execution=observed(unit, 'systemd-manager')['execution'])),
+                ('launcher', lambda process: process['execution'].update(template='launcher-' + template)),
+                ('unknown', lambda process: process['execution'].update(image='other', template='other')),
+                *self.execution_mutations(),
+            ]
+            for label, mutate in mutations:
+                report = self.stopping_report(unit)
+                mutate(rows(report)[3]['processes'][-1])
+                with self.subTest(unit=unit, later=label), self.assertRaises(RuntimeError):
+                    trace.validate(report)
+
+    def test_all_stop_observation_errors_still_fail_at_every_observation_location(self):
+        for unit, _ in self.UNITS:
+            for location in ('subtree', 'mainpid', 'scan'):
+                for error in ('identity_changed', 'exe_changed', 'read_denied',
+                              'process_vanished', 'invalid_cmdline', 'observation_failed'):
+                    report = self.stopping_report(unit)
+                    sample = rows(report)[3]
+                    target = {'subtree': sample['state']['observed_subtree'][0],
+                              'mainpid': sample['state']['service_transitions'][unit],
+                              'scan': sample['processes'][-1]}[location]
+                    target['execution']['error'] = error
+                    with self.subTest(unit=unit, location=location, error=error), \
+                            self.assertRaises(RuntimeError):
+                        trace.validate(report)
+            report = self.stopping_report(unit)
+            rows(report)[3]['state']['observation_error'] = 'service_read_failed'
+            with self.subTest(unit=unit, error='state-error'), self.assertRaises(RuntimeError):
+                trace.validate(report)
+
+    def test_unsupported_transition_active_states_fail_even_with_prior_active_proof(self):
+        for unit, _ in self.UNITS:
+            for state in ('inactive', 'failed', 'reloading', 'maintenance',
+                          'refreshing', 'unknown', '', None, 1):
+                report = self.stopping_report(unit)
+                rows(report)[3]['state']['service_transitions'][unit]['properties']['ActiveState'] = state
+                with self.subTest(unit=unit, state=state), self.assertRaises(RuntimeError):
+                    trace.validate(report)
+            report = self.stopping_report(unit)
+            rows(report)[3]['state']['service_transitions'][unit]['properties'].pop('ActiveState')
+            with self.subTest(unit=unit, state='missing'), self.assertRaises(RuntimeError):
+                trace.validate(report)
+
+    def test_same_row_root_executor_then_active_mainpid_is_processed_in_observation_order(self):
+        for unit, _ in self.UNITS:
+            product = self.product(unit)
+            report = launch_report([product], unit=unit)
+            sample = rows(report)[2]
+            self.set_state(sample, unit, product)
+            sample['state']['observed_subtree'] = [observed(unit)]
+            with self.subTest(unit=unit):
+                # Preloading normal active records before the earlier root subtree
+                # would invent a product-to-executor regression in this valid launch.
+                trace.validate(report)
+                machine = trace.LaunchTransitions(PARENT, SERVICE_UID)
+                machine.sample(sample, 0)
+                self.assertFalse(machine.pending)
+                machine.finish()
+
+    def test_old_generation_stop_does_not_exempt_new_generation_launch(self):
+        for unit, template in self.UNITS:
+            old = self.product(unit)
+            new = {**observed(unit), 'pid': 3544, 'starttime_ticks': 17000}
+            launcher = {**copy.deepcopy(new), 'uid': [SERVICE_UID] * 4,
+                        'execution': observed(unit, 'runtime', SERVICE_UID,
+                                              'launcher-' + template)['execution']}
+            product = {**copy.deepcopy(launcher),
+                       'execution': self.product(unit)['execution']}
+            report = launch_report([old, old, None, launcher, product], unit=unit)
+            self.set_state(rows(report)[3], unit, old, active='deactivating', normal=False)
+            launching = rows(report)[5]
+            self.set_state(launching, unit, launcher, normal=False)
+            launching['state']['observed_subtree'] = [new]
+            with self.subTest(unit=unit):
+                trace.validate(report)
+                machine = trace.LaunchTransitions(PARENT, SERVICE_UID)
+                for index, sample in enumerate(rows(report)):
+                    machine.sample(sample, index)
+                    self.assertEqual(bool(machine.pending), index == 5)
+                machine.finish()
+            self.set_state(rows(report)[6], unit, product, active='deactivating', normal=False)
+            with self.subTest(unit=unit, close='stop'), self.assertRaises(RuntimeError):
+                trace.validate(report)
+
+    def test_schema_two_is_rejected_without_relabeling_historical_evidence(self):
+        self.assertEqual(trace.SCHEMA_VERSION, 3)
+        for version in (None, 1, 2):
+            report = self.stopping_report()
+            header = report['upgrade_accounting']['rows'][0]
+            if version is None:
+                header.pop('schema_version')
+            else:
+                header['schema_version'] = version
+            with self.subTest(version=version), self.assertRaises(RuntimeError):
+                trace.validate(report)
+
+
+class Retained886ObservationTests(unittest.TestCase):
+    """Exact safe metadata projection; never recertifies the original failed run."""
+
+    def fixture(self):
+        path = Path(__file__).parent / 'fixtures/root_886_stop_launch_observations.json'
+        contents = path.read_bytes()
+        self.assertEqual(hashlib.sha256(contents).hexdigest(),
+                         '126554b2a48c1a3be65613bdb01bd076bdf5d3ce07592ce8964d19818763141f')
+        fixture = json.loads(contents)
+        self.assertEqual(fixture['source']['commit'], '886832fdd5fd75076ed98b626089a7a8df7f31bf')
+        self.assertEqual(fixture['source']['artifact_zip_sha256'],
+                         '708d393da0cfb4ff49fa803c88fed8516bfab30aa1071ad118f69785ac8c73df')
+        self.assertEqual(fixture['source']['member_sha256'],
+                         '6fd9ee8c67ab93a16183cb59f23ebffd0e2190d85539ae280739923ab1775431')
+        self.assertEqual(fixture['source']['original_accounting_schema_version'], 2)
+        self.assertEqual([row['sample_index'] for row in fixture['samples']], [26, 27, 28, 41, 42])
+        return fixture
+
+    def test_exact_samples_26_27_28_stop_without_creating_a_launch_obligation(self):
+        fixture = self.fixture()
+        samples = [row['sample'] for row in fixture['samples'][:3]]
+        active = samples[0]['state']['services']['v-ui.service']
+        stopping = samples[1]['state']['service_transitions']['v-ui.service']
+        self.assertEqual(active['process'], stopping['process'])
+        self.assertEqual(active['execution'], stopping['execution'])
+        self.assertEqual((active['process']['pid'], active['process']['starttime_ticks'],
+                          active['process']['ppid'], active['process']['uid']),
+                         (2847, 11672, 1, [999] * 4))
+        self.assertEqual(active['properties']['ActiveState'], 'active')
+        self.assertEqual(stopping['properties']['ActiveState'], 'deactivating')
+        self.assertEqual(samples[2]['processes'], [])
+        machine = trace.LaunchTransitions(fixture['slice'], fixture['service_uid'])
+        for index, sample in zip((26, 27, 28), samples):
+            machine.sample(sample, index)
+            self.assertFalse(machine.pending)
+        machine.finish()
+
+    def test_exact_samples_41_42_preserve_root_executor_then_launcher_then_active(self):
+        fixture = self.fixture()
+        launching, active = [row['sample'] for row in fixture['samples'][3:]]
+        early = launching['state']['observed_subtree'][0]
+        main = launching['state']['service_transitions']['v-ui.service']
+        self.assertEqual((early['pid'], early['starttime_ticks'], early['uid']),
+                         (3358, 14986, [0] * 4))
+        self.assertEqual(early['execution']['image'], 'systemd-executor')
+        self.assertEqual(early['execution']['exe'], launching['launch_baseline']['executor'])
+        self.assertEqual(main['process']['uid'], [999] * 4)
+        self.assertEqual(main['execution']['template'], 'launcher-panel')
+        self.assertEqual(main['properties']['ActiveState'], 'active')
+        self.assertEqual(launching['processes'][0]['execution'], main['execution'])
+        machine = trace.LaunchTransitions(fixture['slice'], fixture['service_uid'])
+        machine.sample(launching, 41)
+        key = (3358, 14986, '/' + fixture['slice'] + '/v-ui.service')
+        self.assertEqual(set(machine.pending), {key})
+        with self.assertRaises(RuntimeError):
+            machine.finish()
+        machine.sample(active, 42)
+        self.assertFalse(machine.pending)
+        machine.finish()
+
+    def test_retained_new_launch_still_fails_if_it_disappears_or_claims_shutdown(self):
+        fixture = self.fixture()
+        for replacement in ('gone', 'stop'):
+            machine = trace.LaunchTransitions(fixture['slice'], fixture['service_uid'])
+            machine.sample(fixture['samples'][3]['sample'], 41)
+            sample = copy.deepcopy(fixture['samples'][4]['sample'])
+            if replacement == 'gone':
+                sample['processes'] = []
+                sample['state'] = {'services': {}, 'service_transitions': {}, 'observed_subtree': []}
+            else:
+                entry = sample['state']['services'].pop('v-ui.service')
+                entry['properties']['ActiveState'] = 'deactivating'
+                sample['state']['service_transitions']['v-ui.service'] = entry
+            with self.subTest(replacement=replacement), self.assertRaises(RuntimeError):
+                machine.sample(sample, 42)
 
 
 class TrustedExecutableBaselineTests(unittest.TestCase):

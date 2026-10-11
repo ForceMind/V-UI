@@ -5,7 +5,8 @@ accounting qualified at `4c1d97b` in
 [run 38101639709](https://github.com/ForceMind/V-UI/actions/runs/38101639709).
 The later `a2eb07f` product change, pinned by `afce914`, still needs its own
 root qualification: the one `afce914` attempt failed strict process-identity
-validation, as retained below. The launch-evidence candidate is local only;
+validation, and the later `886832f` launch-evidence attempt failed on stop
+direction, as retained below. The stop-direction candidate is local only;
 neither it nor the product inherits earlier root success.
 The original local suite had 746 tests, 621 passed and 125 environment skips; 32 focused
 fixture contracts independently passed. These do not prove root/systemd resources.
@@ -63,7 +64,7 @@ passed independent review. Ordinary exact-head CI had eight workflows,
 were independently checked. The subsequent single approved root attempt
 failed; ordinary application-cgroup results cannot override that failure.
 
-## Retained afce914 failure and launch-evidence candidate
+## Retained afce914 failure and 886832f launch evidence
 
 [Run 38105188427](https://github.com/ForceMind/V-UI/actions/runs/38105188427),
 job 114369090001, attempt 1, failed the measurement step after the exact
@@ -104,9 +105,9 @@ also means matching only the PID 1 executable is insufficient. These upstream
 sources explain a possible mechanism; they do not establish the old runner's
 actual version or retroactively prove the missing executable observation.
 
-The local candidate changes only the accounting fixture, pure synthetic tests
-and this contract. Product bytes and the exact workflow pin above stay fixed.
-It adds versioned, bounded executable evidence for the two exact managed
+The `886832f` change modified only the accounting fixture, pure synthetic tests
+and this contract. Product bytes and the exact workflow pin above stayed fixed.
+It added versioned, bounded executable evidence for the two exact managed
 service leaves. Roles, full UIDs and pending observations are preserved;
 root observations are never relabeled as unknown or discarded to pass.
 
@@ -154,10 +155,11 @@ same-generation application closure. Historical reports lacking these fields
 cannot gain that exception. The policy deliberately also rejects an otherwise
 legitimate non-root stop or fast exec if its sampled executable/identity reads
 race; no disappearance exemption is inferred. Local tests cannot promise a
-future real observation will be conclusive. This candidate has not run root CI; any
-later root qualification requires its own reviewed head and explicit trigger.
+future real observation will be conclusive. The subsequent `886832f` root
+attempt below failed; later qualification still requires its own reviewed
+head and explicit trigger.
 
-Local candidate validation on Python 3.12.14: 854 tests in 64.085 seconds,
+Local `886832f` validation on Python 3.12.14: 854 tests in 64.085 seconds,
 729 passed and 125 environment skips. The 49 new launch methods and 249
 explicit subtest cases passed; the full root/provenance/trace/launch subset
 had 114 methods and 485 subtest cases, all passed without skips. Independent
@@ -166,6 +168,63 @@ blocker. Documentation, Python compilation, application JavaScript and shell
 syntax, and diff checks passed. Product and workflow bytes remain unchanged
 from afce914. These local results do not qualify root/systemd resources or
 revise the retained failed run.
+
+## Retained 886832f failure and local stop-direction candidate
+
+[Run 38107946398](https://github.com/ForceMind/V-UI/actions/runs/38107946398),
+job 114377334377, attempt 1, failed the measurement gate at exact source
+`886832fdd5fd75076ed98b626089a7a8df7f31bf`. Artifact 11689489678 is 44479 bytes;
+its official and downloaded ZIP SHA256 is
+`708d393da0cfb4ff49fa803c88fed8516bfab30aa1071ad118f69785ac8c73df`.
+The failed schema-2 report remains **RED**. Both original validators reproduce
+`Pending launch disappeared or changed generation`; local diagnostic replay
+does not requalify that run or change its source, schema or outcome.
+
+The exact observations identify a stop, not a new launch. At zero-based sample
+index 26, normal active MainPID 2847, starttime 11672, PPID 1, full UID 999 and
+the exact panel runtime/template are proven in the service leaf. Index 27
+records that same generation and full executable fingerprint as `deactivating`;
+index 28 no longer sees it. The old validator created a new launch obligation
+at index 27 and then rejected its expected disappearance. Separately, index 41
+really observes a new root systemd-executor generation first, then its non-root
+launcher in the same sample; index 42 proves its active panel MainPID. Those
+ordered launch observations and their bounded closure must remain required.
+
+The worker's nine stages, four root entries and cleanup completed, with zero
+max/OOM counters and final parent peak 484073472 bytes (461.6484375 MiB).
+These are retained diagnostics from a failed gate, not accepted resource
+performance or proof of stable improvement. Its 48 embedded accounting samples
+reconstruct 331962 bytes; the original JSONL was not separately uploaded.
+
+The new local candidate changes only this validator, its tests and this
+contract. The accounting header advances to schema 3; execution evidence
+remains schema 1, with all existing fields and budgets unchanged. It does not
+change the collector, product, workflow, sampling or measured commands.
+
+- Record an immutable active proof only after a normal `services` entry proves
+  an active, fully validated application MainPID. The key is PID, starttime and
+  exact full service leaf; its fingerprint retains PPID, all four UIDs, image,
+  command-template enum and all seven numerical executable-identity fields.
+  A generic process scan or an application-shaped observation cannot supply it.
+- Preserve subtree, MainPID, then generic-scan observation order. Do not preload
+  a later active MainPID proof before earlier observations in its sample. Once
+  registered, every later same-generation observation must match the original
+  immutable fingerprint, including subsequent active entries and generic scans.
+- A `deactivating` MainPID may avoid a new launch obligation only with the exact
+  prior active proof and no existing pending obligation. Missing proof, changed
+  generation/fingerprint or prior pending work fails closed. A stop never
+  cancels a root, unknown or launcher obligation. Other transition states may
+  use the original bounded launch path only when `active` or `activating`;
+  absent, unknown, inactive, failed and reloading states fail closed.
+- Retain every credential, execution, binding, regression, observation-error
+  and resource guard. No vanished-process or read-error waiver is added. A
+  genuine launch still needs its same-generation active application closure
+  within two pending samples and five seconds.
+
+This candidate is unqualified local test-harness work. The schema-2 artifact
+remains rejected by the schema-3 full validator; any replay of its unmodified
+observations through the transition state machine is a diagnostic only. It
+does not authorize or imply another root run, publication, merge or release.
 
 ## Bounded contract
 

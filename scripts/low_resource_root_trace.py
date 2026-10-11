@@ -25,7 +25,7 @@ ROLES = {'unclassified', 'managed-panel', 'managed-http01', 'controller-stage',
          'runtime-pip-install', 'runtime-pip-check', 'candidate-health'}
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 EXECUTION_SCHEMA_VERSION = 1
 MANAGED_UNITS = {'v-ui.service': ('managed-panel', 'panel'),
                  'v-ui-http01.service': ('managed-http01', 'http01')}
@@ -386,6 +386,7 @@ class LaunchTransitions:
         self.pending = {}
         self.product_seen = set()
         self.application_seen = set()
+        self.active_proofs = {}
 
     def sample(self, sample, index):
         from scripts import low_resource_root as root
@@ -400,7 +401,7 @@ class LaunchTransitions:
         if state is not None:
             if state.get('observation_error') is not None:
                 raise RuntimeError('Accounting state observation failed')
-            records += [(process, False, False) for process in state.get('observed_subtree', [])
+            records += [(process, False, False, None) for process in state.get('observed_subtree', [])
                         if managed_unit(process, self.parent) is not None]
             for collection in ('services', 'service_transitions'):
                 entries = state.get(collection, {})
@@ -429,10 +430,11 @@ class LaunchTransitions:
                     if normal and properties.get('ActiveState') != 'active':
                         raise RuntimeError('Normal accounting service is not active')
                     records.append(({**process, 'role': MANAGED_UNITS[unit][0],
-                                     'execution': entry.get('execution')}, normal, True))
-        records += [(process, False, False) for process in sample['processes']
+                                     'execution': entry.get('execution')}, normal, True,
+                                    properties.get('ActiveState')))
+        records += [(process, False, False, None) for process in sample['processes']
                     if managed_unit(process, self.parent) is not None]
-        for process, normal, main in records:
+        for process, normal, main, active_state in records:
             if set(process) != {'pid', 'ppid', 'uid', 'starttime_ticks', 'cgroup', 'role', 'execution'}:
                 raise RuntimeError('Unknown managed process evidence fields')
             unit = managed_unit(process, self.parent)
@@ -459,6 +461,11 @@ class LaunchTransitions:
                     and evidence['exe'] in (baseline['manager'], baseline['executor'])):
                 raise RuntimeError('System image mislabeled as product runtime')
             key = (process['pid'], process['starttime_ticks'], process['cgroup'])
+            fingerprint = (process['ppid'], tuple(process['uid']), evidence['image'],
+                           evidence['template'], tuple(evidence['exe'][field]
+                                                       for field in sorted(EXE_FIELDS)))
+            if key in self.active_proofs and self.active_proofs[key] != fingerprint:
+                raise RuntimeError('Active service execution fingerprint changed')
             seen.add(key)
             if preexec and key in self.product_seen:
                 raise RuntimeError('Product generation regressed to pre-exec')
@@ -470,8 +477,16 @@ class LaunchTransitions:
                     self.pending[key] = {'started': sample['started_monotonic'], 'samples': set()}
             elif uids != [self.service_uid] * 4:
                 raise RuntimeError('Managed process credentials changed')
-            if main and not normal and key not in self.pending:
-                self.pending[key] = {'started': sample['started_monotonic'], 'samples': set()}
+            if main and not normal:
+                if active_state == 'deactivating':
+                    # A proven active generation may stop; it cannot discharge
+                    # an earlier launch obligation or borrow a generic scan.
+                    if key not in self.active_proofs or key in self.pending:
+                        raise RuntimeError('Stopping service lacks prior active execution proof')
+                elif active_state not in ('active', 'activating'):
+                    raise RuntimeError('Unknown service transition direction')
+                elif key not in self.pending:
+                    self.pending[key] = {'started': sample['started_monotonic'], 'samples': set()}
             if not preexec:
                 self.product_seen.add(key)
             valid_product = (evidence['image'] == 'runtime' and evidence['template'] == template
@@ -500,6 +515,11 @@ class LaunchTransitions:
                     obligation['samples'].add(index)
                     if len(obligation['samples']) > 2:
                         raise RuntimeError('Pending launch exceeded sample limit')
+            if normal:
+                # Register only after this active MainPID passed every guard.
+                # Immutable values retain the first proof for later observations
+                # in subtree -> MainPID -> scan order, without same-row preload.
+                self.active_proofs.setdefault(key, fingerprint)
         for key, obligation in self.pending.items():
             if key not in seen:
                 raise RuntimeError('Pending launch disappeared or changed generation')
