@@ -18,7 +18,7 @@ def main():
     install=commands.add_parser('stage');install.add_argument('archive',type=Path);install.add_argument('--sha256',required=True)
     switch=commands.add_parser('activate');switch.add_argument('release_id')
     commands.add_parser('rollback');commands.add_parser('status');commands.add_parser('recover-restore')
-    commands.add_parser('menu',help='交互式只读运维菜单（须以安装目录所有者运行）')
+    commands.add_parser('menu',help='交互式运维菜单（含候选准备）（须以安装目录所有者运行）')
     copy=commands.add_parser('backup');copy.add_argument('destination',type=Path)
     undo=commands.add_parser('restore');undo.add_argument('archive',type=Path);undo.add_argument('--sha256',required=True)
     admin=commands.add_parser('admin');admin.add_argument('action',choices=['create','set-password']);admin.add_argument('username')

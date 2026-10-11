@@ -72,7 +72,7 @@ class MenuTests(unittest.TestCase):
                 patch.object(release_tools, 'supported_environment', side_effect=AssertionError('pidfd')):
             code, text = self.run_menu('0\n')
         self.assertEqual(code, 0, text)
-        self.assertIn('只读运维菜单', text)
+        self.assertIn('运维菜单', text)
         self.assertEqual(tree_snapshot(self.root), before)
 
     def test_all_readonly_paths_do_not_call_mutating_tools(self):
@@ -93,7 +93,7 @@ class MenuTests(unittest.TestCase):
                     patch.object(menu, '_directory', side_effect=AssertionError('directory read')):
                 code, text = self.run_menu('3\n', input_tty=input_tty, output_tty=output_tty)
                 self.assertEqual(code, 2, text)
-                self.assertNotIn('只读运维菜单', text)
+                self.assertNotIn('V-UI 运维菜单', text)
 
     def test_root_wrong_owner_missing_and_unsafe_permissions_refused(self):
         for identity in ('geteuid', 'getuid'):
@@ -138,7 +138,7 @@ class MenuTests(unittest.TestCase):
             account.return_value.pw_uid = os.geteuid() + 1
             code, text = self.run_menu('3\n')
         self.assertEqual(code, 1)
-        self.assertNotIn('只读运维菜单', text)
+        self.assertNotIn('V-UI 运维菜单', text)
         active.assert_not_called()
 
     def test_metadata_only_does_not_read_manifest_or_full_tree(self):
