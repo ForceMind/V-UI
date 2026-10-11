@@ -23,6 +23,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from app import release_tools as tools
 from loopback_helpers import certificate_files, unused_port
+from scripts.ops_menu_smoke import installed_menu_smoke
 
 
 @unittest.skipUnless(os.getenv('VUI_RELEASE_BUNDLE'), 'explicit built-package deployment gate')
@@ -57,6 +58,8 @@ class ReleaseDeploymentTests(unittest.TestCase):
             self.assertTrue(lock.is_file())
             self.assertTrue(all('--hash=sha256:' in line for line in lock.read_text().splitlines()))
             self.assertFalse(any(name.endswith(('.ttf','.otf','.woff','.woff2')) for name in manifest['files']))
+            self.assertIn('app/ops_menu.py',manifest['files'])
+            print(installed_menu_smoke(python,payload,root)['menu'])
             data=root/'data';password='Synthetic-release-test-password!'
             provision=subprocess.run([str(python),'-B','-c',
                 'import sys;from app.services.auth_service import provision_admin;provision_admin("release-admin",sys.stdin.read())'],

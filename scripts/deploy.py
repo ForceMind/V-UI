@@ -18,13 +18,20 @@ def main():
     install=commands.add_parser('stage');install.add_argument('archive',type=Path);install.add_argument('--sha256',required=True)
     switch=commands.add_parser('activate');switch.add_argument('release_id')
     commands.add_parser('rollback');commands.add_parser('status');commands.add_parser('recover-restore')
+    commands.add_parser('menu',help='交互式只读运维菜单（须以安装目录所有者运行）')
     copy=commands.add_parser('backup');copy.add_argument('destination',type=Path)
     undo=commands.add_parser('restore');undo.add_argument('archive',type=Path);undo.add_argument('--sha256',required=True)
     admin=commands.add_parser('admin');admin.add_argument('action',choices=['create','set-password']);admin.add_argument('username')
     launch=commands.add_parser('run')
     launch.add_argument('--origin',required=True);launch.add_argument('--cert');launch.add_argument('--key')
     launch.add_argument('--bind',default='127.0.0.1');launch.add_argument('--port',type=int,default=8443)
-    args=p.parse_args();supported_environment();os.umask(0o077);root=private_root(args.root)
+    args=p.parse_args()
+    if args.command=='menu':
+        # The installer extracts only this controller and release_tools.py.
+        # Keep the optional installed-payload consumer out of its bootstrap path.
+        from app.ops_menu import run_menu
+        raise SystemExit(run_menu(args.root))
+    supported_environment();os.umask(0o077);root=private_root(args.root)
     if args.command=='stage': print(stage(args.archive,args.sha256,root))
     elif args.command=='activate': activate(root,args.release_id);print('Activated verified release; start explicitly after checking configuration')
     elif args.command=='rollback':

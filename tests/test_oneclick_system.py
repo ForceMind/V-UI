@@ -20,6 +20,7 @@ from http.cookies import SimpleCookie
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from loopback_helpers import certificate_files, unused_port
+from scripts.ops_menu_smoke import MenuSession
 
 
 @unittest.skipUnless(os.getenv('VUI_SYSTEM_INSTALL_TEST') == '1', 'explicit ephemeral systemd installer gate')
@@ -92,6 +93,26 @@ class OneClickSystemTests(unittest.TestCase):
                 line=next(line for line in status.splitlines() if line.startswith('Uid:'))
                 self.assertEqual(int(line.split()[1]),uid)
             check_uid('v-ui.service')
+            # Read the actual managed installation using its portable runtime,
+            # always as v-ui, never executing service-owned code as root.
+            installed=json.loads(Path('/etc/v-ui/service.json').read_text())
+            identity=installed['release_id']
+            self.assertRegex(identity,r'\A[A-Za-z0-9][A-Za-z0-9._-]{0,100}\Z')
+            release=root/'releases'/identity;payload=release/'payload'
+            menu=['sudo','-u','v-ui',str(release/'runtime/python/bin/python3'),'-B',
+                  str(payload/'scripts/deploy.py'),'--root',str(root),'menu']
+            with MenuSession(menu,cwd='/tmp',env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1'}) as session:
+                session.expect()
+                session.send('1\n');status=session.expect()
+                self.assertIn('v-ui.service: active (running)',status)
+                self.assertIn('v-ui-http01.socket: active (listening)',status)
+                self.assertIn('v-ui-http01.service: inactive (dead)',status)
+                self.assertIn('HTTP-01: 按需响应已就绪',status)
+                session.send('2\n');metadata=session.expect()
+                self.assertIn('面板地址: '+origin,metadata)
+                self.assertIn('服务管理器: systemd',metadata)
+                self.assertNotIn('bootstrap_python',metadata)
+                session.send('0\n');session.finish()
             context=ssl.create_default_context(cafile=ca)
             cookie=''
             def api(path,body=None):

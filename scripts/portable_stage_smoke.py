@@ -8,6 +8,7 @@ import sys
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from app import release_tools
+from scripts.ops_menu_smoke import installed_menu_smoke
 
 def main():
     p=argparse.ArgumentParser()
@@ -21,6 +22,10 @@ def main():
     ready=release_tools.verify_runtime(release)
     python=release_tools.runtime_python(release)
     env=release_tools.child_env(release/"payload",args.root/"data")
+    # This is an already staged, disposable acceptance fixture. Select it only
+    # for the menu consumer; the menu itself must never activate or create data.
+    release_tools.atomic_json(args.root/"CURRENT.json",{"release_id":identity,"previous_id":None})
+    menu=installed_menu_smoke(python,release/"payload",args.root)
     probe=subprocess.run([str(python),"-B","-c",
         "import fastapi,pydantic_core,cryptography,sqlalchemy,certbot;print('runtime-imports-ok')"],
         cwd=release/"payload",env=env,capture_output=True,text=True,timeout=30)
@@ -35,6 +40,6 @@ def main():
             raise SystemExit((result.stdout or "")+(result.stderr or ""))
         versions[name]=((result.stdout or "")+(result.stderr or "")).splitlines()[0]
     print(json.dumps({"target":ready["runtime_key"],"release_id":identity,
-                      "runtime":probe.stdout.strip(),"cores":versions}))
+                      "runtime":probe.stdout.strip(),"cores":versions,**menu}))
 
 if __name__=="__main__":main()
