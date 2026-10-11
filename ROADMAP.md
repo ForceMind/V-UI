@@ -18,6 +18,10 @@ REALITY/Vision v0.4.7 已由 [PR #24](https://github.com/ForceMind/V-UI/pull/24)
 
 产品 0.4.7 范围已冻结，当前进入[发布准备](docs/RELEASING.md)。本次最终文档提交的准确 CI 与同提交四目标附件核验以对应 PR/发布准备证据为准，本文不预先声明通过。截至 2026-10-06 本次检查，未新建 tag/Draft Release/公开 Release、晋升附件或生产部署；先完成 0.4.7 交付决定，再进入独立 UDP/DNS 实现阶段。
 
+## 1 vCPU / 512 MiB 性能目标（2026-10-07 新增）
+
+安装和运行均以 1 vCPU、512 MiB 总内存及低空载开销为目标，详见[资源验收合同](docs/LOW_RESOURCE_TARGET.md)。先解决整包驻留内存与峰值测量，再按证据优化运行时；目前未完成真实小型 VPS 验收。使用独立性能 PR，不改写冻结 0.4.7 制品，不改变协议范围、人工发布或真实部署边界。
+
 ## v0.3.0 基线
 
 认证、只读订阅、安全核心应用/恢复、ToClash 分流、真实 VLESS/TCP/TLS 链路、Certbot HTTP-01 生命周期和首版 systemd 一键安装已经形成基线。

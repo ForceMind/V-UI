@@ -1,0 +1,600 @@
+{
+  "source": {
+    "commit": "886832fdd5fd75076ed98b626089a7a8df7f31bf",
+    "run_url": "https://github.com/ForceMind/V-UI/actions/runs/38107946398",
+    "artifact_url": "https://github.com/ForceMind/V-UI/actions/runs/38107946398/artifacts/11689489678",
+    "artifact_zip_sha256": "708d393da0cfb4ff49fa803c88fed8516bfab30aa1071ad118f69785ac8c73df",
+    "member": "root-result.json",
+    "member_sha256": "6fd9ee8c67ab93a16183cb59f23ebffd0e2190d85539ae280739923ab1775431",
+    "original_accounting_schema_version": 2,
+    "original_failure": "Pending launch disappeared or changed generation"
+  },
+  "projection": "Exact selected observation fields from zero-based accounting sample indexes. Non-managed processes and unrelated state/metrics omitted; retained identities, execution evidence, service properties, times, and observation order are unchanged. This is a local state-machine regression fixture, not a replacement full-run report or schema-3 CI result.",
+  "slice": "vuiroot13cda19ec10841cdaac974578ebb934f.slice",
+  "service_uid": 999,
+  "samples": [
+    {
+      "sample_index": 26,
+      "original_sample_canonical_sha256": "f7fd20c2249fc1e00bbdc9f170a6163cc486f7cae6ecd85e828d1920de4f66dc",
+      "sample": {
+        "started_monotonic": 139.089464188,
+        "finished_monotonic": 139.118936252,
+        "state_monotonic": 139.11143925,
+        "launch_baseline": {
+          "schema_version": 1,
+          "systemd_version": 255,
+          "manager_version": "255.4-1ubuntu8.17",
+          "executor_version": "255.4-1ubuntu8.17",
+          "manager": {
+            "device": 66305,
+            "inode": 4858,
+            "mode": 33261,
+            "uid": 0,
+            "size": 100816,
+            "mtime_ns": 1785251085000000000,
+            "ctime_ns": 1788497651268897813
+          },
+          "executor": {
+            "device": 66305,
+            "inode": 4865,
+            "mode": 33261,
+            "uid": 0,
+            "size": 137792,
+            "mtime_ns": 1785251085000000000,
+            "ctime_ns": 1788497651269897820
+          }
+        },
+        "processes": [
+          {
+            "pid": 2847,
+            "ppid": 1,
+            "uid": [
+              999,
+              999,
+              999,
+              999
+            ],
+            "starttime_ticks": 11672,
+            "cgroup": "/vuiroot13cda19ec10841cdaac974578ebb934f.slice/v-ui.service",
+            "role": "managed-panel",
+            "execution": {
+              "schema_version": 1,
+              "image": "runtime",
+              "exe": {
+                "device": 66305,
+                "inode": 9181131,
+                "mode": 33261,
+                "uid": 999,
+                "size": 30913848,
+                "mtime_ns": 1704067200000000000,
+                "ctime_ns": 1791688741499468019
+              },
+              "template": "panel",
+              "error": null
+            }
+          }
+        ],
+        "state": {
+          "services": {
+            "v-ui.service": {
+              "properties": {
+                "MainPID": "2847",
+                "Slice": "vuiroot13cda19ec10841cdaac974578ebb934f.slice",
+                "ControlGroup": "/vuiroot13cda19ec10841cdaac974578ebb934f.slice/v-ui.service",
+                "LoadState": "loaded",
+                "ActiveState": "active",
+                "FragmentPath": "/etc/systemd/system/v-ui.service",
+                "DropInPaths": "/run/systemd/system/v-ui.service.d/90-vui-resource.conf"
+              },
+              "process": {
+                "pid": 2847,
+                "ppid": 1,
+                "uid": [
+                  999,
+                  999,
+                  999,
+                  999
+                ],
+                "starttime_ticks": 11672,
+                "cgroup": "/vuiroot13cda19ec10841cdaac974578ebb934f.slice/v-ui.service"
+              },
+              "execution": {
+                "schema_version": 1,
+                "image": "runtime",
+                "exe": {
+                  "device": 66305,
+                  "inode": 9181131,
+                  "mode": 33261,
+                  "uid": 999,
+                  "size": 30913848,
+                  "mtime_ns": 1704067200000000000,
+                  "ctime_ns": 1791688741499468019
+                },
+                "template": "panel",
+                "error": null
+              }
+            }
+          },
+          "service_transitions": {},
+          "observed_subtree": [
+            {
+              "pid": 2847,
+              "ppid": 1,
+              "uid": [
+                999,
+                999,
+                999,
+                999
+              ],
+              "starttime_ticks": 11672,
+              "cgroup": "/vuiroot13cda19ec10841cdaac974578ebb934f.slice/v-ui.service",
+              "role": "managed-panel",
+              "execution": {
+                "schema_version": 1,
+                "image": "runtime",
+                "exe": {
+                  "device": 66305,
+                  "inode": 9181131,
+                  "mode": 33261,
+                  "uid": 999,
+                  "size": 30913848,
+                  "mtime_ns": 1704067200000000000,
+                  "ctime_ns": 1791688741499468019
+                },
+                "template": "panel",
+                "error": null
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "sample_index": 27,
+      "original_sample_canonical_sha256": "32580e43bcb865ece1f188f3c20829b1d1625fe5117c974958fe5626ba708ae8",
+      "sample": {
+        "started_monotonic": 139.739799408,
+        "finished_monotonic": 139.764871653,
+        "state_monotonic": 139.760527522,
+        "launch_baseline": {
+          "schema_version": 1,
+          "systemd_version": 255,
+          "manager_version": "255.4-1ubuntu8.17",
+          "executor_version": "255.4-1ubuntu8.17",
+          "manager": {
+            "device": 66305,
+            "inode": 4858,
+            "mode": 33261,
+            "uid": 0,
+            "size": 100816,
+            "mtime_ns": 1785251085000000000,
+            "ctime_ns": 1788497651268897813
+          },
+          "executor": {
+            "device": 66305,
+            "inode": 4865,
+            "mode": 33261,
+            "uid": 0,
+            "size": 137792,
+            "mtime_ns": 1785251085000000000,
+            "ctime_ns": 1788497651269897820
+          }
+        },
+        "processes": [
+          {
+            "pid": 2847,
+            "ppid": 1,
+            "uid": [
+              999,
+              999,
+              999,
+              999
+            ],
+            "starttime_ticks": 11672,
+            "cgroup": "/vuiroot13cda19ec10841cdaac974578ebb934f.slice/v-ui.service",
+            "role": "managed-panel",
+            "execution": {
+              "schema_version": 1,
+              "image": "runtime",
+              "exe": {
+                "device": 66305,
+                "inode": 9181131,
+                "mode": 33261,
+                "uid": 999,
+                "size": 30913848,
+                "mtime_ns": 1704067200000000000,
+                "ctime_ns": 1791688741499468019
+              },
+              "template": "panel",
+              "error": null
+            }
+          }
+        ],
+        "state": {
+          "services": {},
+          "service_transitions": {
+            "v-ui.service": {
+              "properties": {
+                "MainPID": "2847",
+                "Slice": "vuiroot13cda19ec10841cdaac974578ebb934f.slice",
+                "ControlGroup": "/vuiroot13cda19ec10841cdaac974578ebb934f.slice/v-ui.service",
+                "LoadState": "loaded",
+                "ActiveState": "deactivating",
+                "FragmentPath": "/etc/systemd/system/v-ui.service",
+                "DropInPaths": "/run/systemd/system/v-ui.service.d/90-vui-resource.conf"
+              },
+              "process": {
+                "pid": 2847,
+                "ppid": 1,
+                "uid": [
+                  999,
+                  999,
+                  999,
+                  999
+                ],
+                "starttime_ticks": 11672,
+                "cgroup": "/vuiroot13cda19ec10841cdaac974578ebb934f.slice/v-ui.service"
+              },
+              "execution": {
+                "schema_version": 1,
+                "image": "runtime",
+                "exe": {
+                  "device": 66305,
+                  "inode": 9181131,
+                  "mode": 33261,
+                  "uid": 999,
+                  "size": 30913848,
+                  "mtime_ns": 1704067200000000000,
+                  "ctime_ns": 1791688741499468019
+                },
+                "template": "panel",
+                "error": null
+              }
+            }
+          },
+          "observed_subtree": [
+            {
+              "pid": 2847,
+              "ppid": 1,
+              "uid": [
+                999,
+                999,
+                999,
+                999
+              ],
+              "starttime_ticks": 11672,
+              "cgroup": "/vuiroot13cda19ec10841cdaac974578ebb934f.slice/v-ui.service",
+              "role": "managed-panel",
+              "execution": {
+                "schema_version": 1,
+                "image": "runtime",
+                "exe": {
+                  "device": 66305,
+                  "inode": 9181131,
+                  "mode": 33261,
+                  "uid": 999,
+                  "size": 30913848,
+                  "mtime_ns": 1704067200000000000,
+                  "ctime_ns": 1791688741499468019
+                },
+                "template": "panel",
+                "error": null
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "sample_index": 28,
+      "original_sample_canonical_sha256": "057e576ebeea2422a6df1f3ada3bcbddfdd3db905beb32acc8087f6fa4d66d4c",
+      "sample": {
+        "started_monotonic": 140.417842153,
+        "finished_monotonic": 140.441209673,
+        "state_monotonic": 140.437706665,
+        "launch_baseline": {
+          "schema_version": 1,
+          "systemd_version": 255,
+          "manager_version": "255.4-1ubuntu8.17",
+          "executor_version": "255.4-1ubuntu8.17",
+          "manager": {
+            "device": 66305,
+            "inode": 4858,
+            "mode": 33261,
+            "uid": 0,
+            "size": 100816,
+            "mtime_ns": 1785251085000000000,
+            "ctime_ns": 1788497651268897813
+          },
+          "executor": {
+            "device": 66305,
+            "inode": 4865,
+            "mode": 33261,
+            "uid": 0,
+            "size": 137792,
+            "mtime_ns": 1785251085000000000,
+            "ctime_ns": 1788497651269897820
+          }
+        },
+        "processes": [],
+        "state": {
+          "services": {},
+          "service_transitions": {},
+          "observed_subtree": []
+        }
+      }
+    },
+    {
+      "sample_index": 41,
+      "original_sample_canonical_sha256": "c4d06818b47bfae4bb64f186ce3af04c9708dc186261af073b98eb54b3106920",
+      "sample": {
+        "started_monotonic": 149.787628905,
+        "finished_monotonic": 149.898032619,
+        "state_monotonic": 149.89272205,
+        "launch_baseline": {
+          "schema_version": 1,
+          "systemd_version": 255,
+          "manager_version": "255.4-1ubuntu8.17",
+          "executor_version": "255.4-1ubuntu8.17",
+          "manager": {
+            "device": 66305,
+            "inode": 4858,
+            "mode": 33261,
+            "uid": 0,
+            "size": 100816,
+            "mtime_ns": 1785251085000000000,
+            "ctime_ns": 1788497651268897813
+          },
+          "executor": {
+            "device": 66305,
+            "inode": 4865,
+            "mode": 33261,
+            "uid": 0,
+            "size": 137792,
+            "mtime_ns": 1785251085000000000,
+            "ctime_ns": 1788497651269897820
+          }
+        },
+        "processes": [
+          {
+            "pid": 3358,
+            "ppid": 1,
+            "uid": [
+              999,
+              999,
+              999,
+              999
+            ],
+            "starttime_ticks": 14986,
+            "cgroup": "/vuiroot13cda19ec10841cdaac974578ebb934f.slice/v-ui.service",
+            "role": "managed-panel",
+            "execution": {
+              "schema_version": 1,
+              "image": "runtime",
+              "exe": {
+                "device": 66305,
+                "inode": 9189451,
+                "mode": 33261,
+                "uid": 999,
+                "size": 30913848,
+                "mtime_ns": 1704067200000000000,
+                "ctime_ns": 1791688793269156726
+              },
+              "template": "launcher-panel",
+              "error": null
+            }
+          }
+        ],
+        "state": {
+          "services": {},
+          "service_transitions": {
+            "v-ui.service": {
+              "properties": {
+                "MainPID": "3358",
+                "Slice": "vuiroot13cda19ec10841cdaac974578ebb934f.slice",
+                "ControlGroup": "/vuiroot13cda19ec10841cdaac974578ebb934f.slice/v-ui.service",
+                "LoadState": "loaded",
+                "ActiveState": "active",
+                "FragmentPath": "/etc/systemd/system/v-ui.service",
+                "DropInPaths": "/run/systemd/system/v-ui.service.d/90-vui-resource.conf"
+              },
+              "process": {
+                "pid": 3358,
+                "ppid": 1,
+                "uid": [
+                  999,
+                  999,
+                  999,
+                  999
+                ],
+                "starttime_ticks": 14986,
+                "cgroup": "/vuiroot13cda19ec10841cdaac974578ebb934f.slice/v-ui.service"
+              },
+              "execution": {
+                "schema_version": 1,
+                "image": "runtime",
+                "exe": {
+                  "device": 66305,
+                  "inode": 9189451,
+                  "mode": 33261,
+                  "uid": 999,
+                  "size": 30913848,
+                  "mtime_ns": 1704067200000000000,
+                  "ctime_ns": 1791688793269156726
+                },
+                "template": "launcher-panel",
+                "error": null
+              }
+            }
+          },
+          "observed_subtree": [
+            {
+              "pid": 3358,
+              "ppid": 1,
+              "uid": [
+                0,
+                0,
+                0,
+                0
+              ],
+              "starttime_ticks": 14986,
+              "cgroup": "/vuiroot13cda19ec10841cdaac974578ebb934f.slice/v-ui.service",
+              "role": "managed-panel",
+              "execution": {
+                "schema_version": 1,
+                "image": "systemd-executor",
+                "exe": {
+                  "device": 66305,
+                  "inode": 4865,
+                  "mode": 33261,
+                  "uid": 0,
+                  "size": 137792,
+                  "mtime_ns": 1785251085000000000,
+                  "ctime_ns": 1788497651269897820
+                },
+                "template": "other",
+                "error": null
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "sample_index": 42,
+      "original_sample_canonical_sha256": "82c177fab4021e58f9d7d05b93241e80c3d55c852af22c4edd3deb5b4e66071d",
+      "sample": {
+        "started_monotonic": 150.601621377,
+        "finished_monotonic": 150.62821105,
+        "state_monotonic": 150.623947468,
+        "launch_baseline": {
+          "schema_version": 1,
+          "systemd_version": 255,
+          "manager_version": "255.4-1ubuntu8.17",
+          "executor_version": "255.4-1ubuntu8.17",
+          "manager": {
+            "device": 66305,
+            "inode": 4858,
+            "mode": 33261,
+            "uid": 0,
+            "size": 100816,
+            "mtime_ns": 1785251085000000000,
+            "ctime_ns": 1788497651268897813
+          },
+          "executor": {
+            "device": 66305,
+            "inode": 4865,
+            "mode": 33261,
+            "uid": 0,
+            "size": 137792,
+            "mtime_ns": 1785251085000000000,
+            "ctime_ns": 1788497651269897820
+          }
+        },
+        "processes": [
+          {
+            "pid": 3358,
+            "ppid": 1,
+            "uid": [
+              999,
+              999,
+              999,
+              999
+            ],
+            "starttime_ticks": 14986,
+            "cgroup": "/vuiroot13cda19ec10841cdaac974578ebb934f.slice/v-ui.service",
+            "role": "managed-panel",
+            "execution": {
+              "schema_version": 1,
+              "image": "runtime",
+              "exe": {
+                "device": 66305,
+                "inode": 9189451,
+                "mode": 33261,
+                "uid": 999,
+                "size": 30913848,
+                "mtime_ns": 1704067200000000000,
+                "ctime_ns": 1791688793269156726
+              },
+              "template": "panel",
+              "error": null
+            }
+          }
+        ],
+        "state": {
+          "services": {
+            "v-ui.service": {
+              "properties": {
+                "MainPID": "3358",
+                "Slice": "vuiroot13cda19ec10841cdaac974578ebb934f.slice",
+                "ControlGroup": "/vuiroot13cda19ec10841cdaac974578ebb934f.slice/v-ui.service",
+                "LoadState": "loaded",
+                "ActiveState": "active",
+                "FragmentPath": "/etc/systemd/system/v-ui.service",
+                "DropInPaths": "/run/systemd/system/v-ui.service.d/90-vui-resource.conf"
+              },
+              "process": {
+                "pid": 3358,
+                "ppid": 1,
+                "uid": [
+                  999,
+                  999,
+                  999,
+                  999
+                ],
+                "starttime_ticks": 14986,
+                "cgroup": "/vuiroot13cda19ec10841cdaac974578ebb934f.slice/v-ui.service"
+              },
+              "execution": {
+                "schema_version": 1,
+                "image": "runtime",
+                "exe": {
+                  "device": 66305,
+                  "inode": 9189451,
+                  "mode": 33261,
+                  "uid": 999,
+                  "size": 30913848,
+                  "mtime_ns": 1704067200000000000,
+                  "ctime_ns": 1791688793269156726
+                },
+                "template": "panel",
+                "error": null
+              }
+            }
+          },
+          "service_transitions": {},
+          "observed_subtree": [
+            {
+              "pid": 3358,
+              "ppid": 1,
+              "uid": [
+                999,
+                999,
+                999,
+                999
+              ],
+              "starttime_ticks": 14986,
+              "cgroup": "/vuiroot13cda19ec10841cdaac974578ebb934f.slice/v-ui.service",
+              "role": "managed-panel",
+              "execution": {
+                "schema_version": 1,
+                "image": "runtime",
+                "exe": {
+                  "device": 66305,
+                  "inode": 9189451,
+                  "mode": 33261,
+                  "uid": 999,
+                  "size": 30913848,
+                  "mtime_ns": 1704067200000000000,
+                  "ctime_ns": 1791688793269156726
+                },
+                "template": "panel",
+                "error": null
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

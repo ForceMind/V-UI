@@ -158,7 +158,7 @@ def installation_lock():
 ops.installation_lock=installation_lock
 ops.verify_installation=lambda: ('systemd',types.SimpleNamespace(pw_uid=os.getuid(),pw_gid=os.getgid()))
 ops.PYTHON=PYTHON; ops.WORKER=WORKER
-ops.cgroup_empty=lambda unit: unit in ops.SYSTEMD_UNITS[:2]
+ops.cgroup_empty=lambda unit: unit in ops.SYSTEMD_UNITS
 fake_states={unit:'active' if unit != 'v-ui-http01.service' else 'inactive' for unit in ops.SYSTEMD_UNITS}
 class FakeServices(ops.Services):
     def __init__(self,manager,cancelled=None):
@@ -179,11 +179,14 @@ class FakeServices(ops.Services):
         assert arguments[3]=='--property='+','.join(ops.PROPERTIES)
         unit=arguments[4]; assert unit in self.units
         active=self.states[unit]=='active'; socket=unit.endswith('.socket')
+        socket_state='running' if self.states['v-ui-http01.service']=='active' else 'listening'
         fields={'LoadState':'loaded','NeedDaemonReload':'no','FragmentPath':'/etc/systemd/system/'+unit,
             'DropInPaths':'','ActiveState':'active' if active else 'inactive',
-            'SubState':('listening' if socket else 'running') if active else 'dead',
-            'MainPID':'123' if active and not socket else '0','ControlGroup':'/system.slice/'+unit if active and not socket else '',
-            'User':'' if socket else 'v-ui','Group':'' if socket else 'v-ui','KillMode':'' if socket else 'control-group'}
+            'SubState':(socket_state if socket else 'running') if active else 'dead',
+            'MainPID':'123' if active and not socket else '0','ControlPID':'0',
+            'ControlGroup':'/system.slice/'+unit if active else '',
+            'User':'' if socket else 'v-ui','Group':'' if socket else 'v-ui','KillMode':'control-group'}
+        if socket: fields.pop('MainPID')
         return 0,('\\n'.join(key+'='+value for key,value in fields.items())+'\\n').encode('ascii')
 ops.Services=FakeServices
 ActualChild=ops.Child

@@ -48,7 +48,11 @@
                     <el-icon><Setting /></el-icon>
                     <span>面板设置</span>
                 </el-menu-item>
-                <el-menu-item index="security">
+                <el-menu-item
+                    index="security"
+                    tabindex="0"
+                    @keydown.enter.prevent="handleSelect('security')"
+                    @keydown.space.prevent="handleSelect('security')">
                     <el-icon><Lock /></el-icon>
                     <span>安全中心</span>
                 </el-menu-item>
@@ -495,16 +499,18 @@
                     </el-card>
                 </div>
 
-                <div v-if="currentView === 'security'">
-                    <h3>安全中心</h3>
+                <section v-if="currentView === 'security'" aria-labelledby="security-center-heading">
+                    <h3 id="security-center-heading">安全中心</h3>
                     <el-card style="max-width: 600px">
-                        <el-input v-model="banIpInput" placeholder="输入恶意 IP">
-                            <template #append>
-                                <el-button @click="banIp">封禁</el-button>
-                            </template>
-                        </el-input>
+                        <el-alert
+                            title="本版本不支持主机防火墙与 SSH 管理"
+                            description="V-UI 无法封禁 IP 或开放端口，也不采集 SSH 登录日志。请通过主机或云服务商的管理工具处理；面板不会更改防火墙规则或 SSH 设置。"
+                            type="info"
+                            :closable="false"
+                            show-icon>
+                        </el-alert>
                     </el-card>
-                </div>
+                </section>
             </el-main>
         </el-container>
     </el-container>

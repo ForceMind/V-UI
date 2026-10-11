@@ -43,7 +43,7 @@ ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C', 'LC_ALL': 'C',
        'HOME': '/', 'PYTHONDONTWRITEBYTECODE': '1'}
 SYSTEMD_UNITS = ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')
 OPENRC_UNITS = ('v-ui', 'v-ui-http01')
-PROPERTIES = ('LoadState', 'ActiveState', 'SubState', 'MainPID', 'ControlGroup',
+PROPERTIES = ('LoadState', 'ActiveState', 'SubState', 'MainPID', 'ControlPID', 'ControlGroup',
               'User', 'Group', 'KillMode', 'NeedDaemonReload', 'FragmentPath', 'DropInPaths')
 ACTIONS = ('start', 'stop', 'restart', 'backup', 'restore', 'activate', 'recover-restore', 'stage')
 HEX = re.compile(r'[a-f0-9]{64}\Z')
@@ -428,7 +428,7 @@ def run_command(command, cancelled=None, timeout=COMMAND_TIMEOUT):
 
 
 def cgroup_empty(unit):
-    if unit not in SYSTEMD_UNITS[:2]:
+    if unit not in SYSTEMD_UNITS:
         raise Refused('unknown service cgroup')
     target = CGROUP_ROOT / 'system.slice' / unit
     # Do not treat missing/unmounted cgroup root as proof of inactivity.
@@ -529,17 +529,20 @@ class Services:
                 raise Refused('unexpected systemd property')
             fields[key] = value
         socket = unit.endswith('.socket')
-        common = set(PROPERTIES) - {'User', 'Group', 'KillMode', 'MainPID', 'ControlGroup'}
-        required = common if socket else set(PROPERTIES)
+        # Socket units share systemd's exec/cgroup/kill properties, but have
+        # ControlPID rather than a service MainPID. Missing fields are not zero.
+        required = set(PROPERTIES) - {'MainPID'} if socket else set(PROPERTIES)
         if not required <= set(fields):
             raise Refused('incomplete systemd status')
         if (fields['LoadState'] != 'loaded' or fields['NeedDaemonReload'] != 'no'
                 or fields['FragmentPath'] != '/etc/systemd/system/' + unit
-                or fields['DropInPaths'] != ''):
+                or fields['DropInPaths'] != '' or fields['ControlPID'] != '0'):
             raise Refused('systemd configuration drift')
         if socket:
-            if (fields.get('MainPID', '') not in ('', '0')
-                    or any(fields.get(key, '') != '' for key in ('ControlGroup', 'User', 'Group', 'KillMode'))):
+            if (('MainPID' in fields and fields['MainPID'] != '0')
+                    or fields['ControlGroup'] not in ('', '/system.slice/' + unit)
+                    or fields['User'] != '' or fields['Group'] != ''
+                    or fields['KillMode'] != 'control-group'):
                 raise Refused('unexpected socket process properties')
         else:
             if (fields['User'] != 'v-ui' or fields['Group'] != 'v-ui'
@@ -548,7 +551,8 @@ class Services:
                     or fields['ControlGroup'] not in ('', '/system.slice/' + unit)):
                 raise Refused('unsafe service process properties')
         state = (fields['ActiveState'], fields['SubState'])
-        if state == ('active', 'listening' if socket else 'running'):
+        active_states = {('active', 'listening'), ('active', 'running')} if socket else {('active', 'running')}
+        if state in active_states:
             if not socket and (fields['MainPID'] == '0' or fields['ControlGroup'] != '/system.slice/' + unit):
                 raise Refused('active service missing process identity')
             return 'active'
@@ -584,7 +588,7 @@ class Services:
             raise Refused('services remain active')
         if self.manager != 'systemd':
             raise Refused('OpenRC descendant quiescence cannot be proved')
-        if not all(cgroup_empty(unit) for unit in SYSTEMD_UNITS[:2]):
+        if not all(cgroup_empty(unit) for unit in SYSTEMD_UNITS):
             raise Refused('service descendants remain')
 
     def restore(self, desired):

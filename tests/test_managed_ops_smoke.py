@@ -3,13 +3,16 @@
 These do not replace the real target bundle runs in the portable/deployment
 gates, and do not claim a root installation or real service-manager acceptance.
 """
+import ast
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from scripts.managed_ops_smoke import (_audit_trace, _copy_control, _database_values,
     _seed_fake_data, _write_drivers, FIXTURE_VERSION, HARNESS_VERSION, WRAPPER_BYTES,
@@ -42,9 +45,62 @@ def evidence():
 
 
 class ManagedConsumerFixtureTests(unittest.TestCase):
+    def fake_services(self):
+        """Run the actual emitted fixture backend with the product state parser."""
+        source = Path(__file__).resolve().parents[1]
+        spec = importlib.util.spec_from_file_location('managed_fixture_product_ops', source / 'deploy/system_ops.py')
+        ops = importlib.util.module_from_spec(spec); spec.loader.exec_module(ops)
+        with tempfile.TemporaryDirectory(prefix='vui-managed-state-unit-') as temporary:
+            root = Path(temporary)
+            driver = _write_drivers(root, root / 'instance', root / 'python', root / 'config.json')
+            fixture_class = next(item for item in ast.parse(driver.read_text()).body
+                if isinstance(item, ast.ClassDef) and item.name == 'FakeServices')
+        states = {unit: 'inactive' if unit == 'v-ui-http01.service' else 'active' for unit in ops.SYSTEMD_UNITS}
+        namespace = {'ops': ops, 'fake_states': states, 'record': lambda *args, **kwargs: None,
+            'locks': lambda *args: self.fail('State-only unit must not mutate services')}
+        exec(compile(ast.Module(body=[fixture_class], type_ignores=[]), '<actual fixture backend>', 'exec'), namespace)
+        return ops, namespace['FakeServices']('systemd')
+
     def test_evidence_versions_explicitly_separate_fixture_and_product(self):
         self.assertEqual(HARNESS_VERSION, 'managed-package-consumer-v1')
         self.assertIn('simulated-root-trust-fake-services', FIXTURE_VERSION)
+
+    def test_fake_socket_has_real_exec_cgroup_properties_and_active_substates(self):
+        ops, services = self.fake_services()
+        unit = 'v-ui-http01.socket'
+        command = ['show', '--no-pager', '--all', '--property=' + ','.join(ops.PROPERTIES), unit]
+        for responder, substate in (('inactive', 'listening'), ('active', 'running')):
+            with self.subTest(responder=responder):
+                services.states['v-ui-http01.service'] = responder
+                code, output = services._run(command)
+                fields = dict(line.split('=', 1) for line in output.decode().splitlines())
+                self.assertEqual(code, 0)
+                self.assertEqual(fields['KillMode'], 'control-group')
+                self.assertEqual(fields['ControlPID'], '0')
+                self.assertEqual(fields['ControlGroup'], '/system.slice/' + unit)
+                self.assertEqual(fields['User'], '')
+                self.assertEqual(fields['Group'], '')
+                self.assertNotIn('MainPID', fields)
+                self.assertEqual(fields['SubState'], substate)
+                self.assertEqual(services.state(unit), 'active')
+        with patch.object(ops, 'cgroup_empty', return_value=True) as empty:
+            services.states.update({unit: 'inactive' for unit in ops.SYSTEMD_UNITS})
+            services.prove_stopped()
+            self.assertEqual([call.args[0] for call in empty.call_args_list], list(ops.SYSTEMD_UNITS))
+
+    def test_fake_socket_contract_does_not_hide_unsafe_or_unknown_states(self):
+        ops, services = self.fake_services()
+        original = services._run
+        for field, value in (('ControlPID', '7'), ('KillMode', ''), ('ControlGroup', '/system.slice/ssh.service'),
+                             ('SubState', 'start-pre'), ('User', 'v-ui')):
+            with self.subTest(field=field, value=value):
+                def response(arguments, **kwargs):
+                    code, raw = original(arguments, **kwargs)
+                    fields = dict(line.split('=', 1) for line in raw.decode().splitlines())
+                    fields[field] = value
+                    return code, ('\n'.join(name + '=' + item for name, item in fields.items()) + '\n').encode()
+                with patch.object(services, '_run', side_effect=response):
+                    with self.assertRaises(ops.Refused): services.state('v-ui-http01.socket')
 
     def test_generated_drivers_compile_without_production_environment_hooks(self):
         with tempfile.TemporaryDirectory(prefix='vui-managed-driver-unit-') as temporary:

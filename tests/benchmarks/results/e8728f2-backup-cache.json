@@ -1,0 +1,164 @@
+{
+  "head": "e8728f2b35295cf35feef63bd7c9ff0713283905",
+  "scope": "assistant disk-backed fixed fake log; mincore per file and process high-water RSS; no cgroup limit, no cache clearing, not resource acceptance",
+  "filesystem": "Filesystem     Type    1K-blocks    Used Available Use% Mounted on\noverlay        overlay  32978704 7621552  23663048  25% /workspace/scratch/a9f90eb3c4c8\n",
+  "snapshots": [
+    {
+      "phase": "source_generated",
+      "files": {
+        "original_log": {
+          "size": 268435456,
+          "resident_bytes": 268435456,
+          "allocated_bytes": 268435456,
+          "inode": 1610864
+        }
+      },
+      "process_maxrss_bytes": 21889024
+    },
+    {
+      "phase": "private_snapshot_copied_before_hash_and_compress",
+      "files": {
+        "original_log": {
+          "size": 268435456,
+          "resident_bytes": 268435456,
+          "allocated_bytes": 268435456,
+          "inode": 1610864
+        },
+        "private_log": {
+          "size": 268435456,
+          "resident_bytes": 117440512,
+          "allocated_bytes": 268439552,
+          "inode": 1610935
+        }
+      },
+      "process_maxrss_bytes": 22282240
+    },
+    {
+      "phase": "archive_complete_private_snapshot_still_present",
+      "files": {
+        "original_log": {
+          "size": 268435456,
+          "resident_bytes": 268435456,
+          "allocated_bytes": 268435456,
+          "inode": 1610864
+        },
+        "private_log": {
+          "size": 268435456,
+          "resident_bytes": 0,
+          "allocated_bytes": 268439552,
+          "inode": 1610935
+        },
+        "archive": {
+          "size": 88268855,
+          "resident_bytes": 0,
+          "allocated_bytes": 88272896,
+          "inode": 1611001
+        }
+      },
+      "process_maxrss_bytes": 22499328
+    },
+    {
+      "phase": "backup_returned_private_snapshot_removed",
+      "files": {
+        "original_log": {
+          "size": 268435456,
+          "resident_bytes": 268435456,
+          "allocated_bytes": 268435456,
+          "inode": 1610864
+        },
+        "archive": {
+          "size": 88268855,
+          "resident_bytes": 0,
+          "allocated_bytes": 88272896,
+          "inode": 1611001
+        }
+      },
+      "process_maxrss_bytes": 22499328
+    }
+  ],
+  "log": {
+    "large_bytes": 268435456,
+    "large_sha256": "36eb9c62491ef8ae38bc8bd8ee086d5ec32b6aa0578c40ef6eb35c3db6c5ca52",
+    "small_file_count": 64,
+    "small_file_bytes": 4096,
+    "small_sha256": {
+      "small-000.log": "e174d6d6ccc4ea71dc2bc24cde2be08e0b16b2c23053f7b5d8fef4e9733e1239",
+      "small-001.log": "09f3179a64d2d5718b8c8699b767486b2638cd42690a836401d7fda3a63c6e19",
+      "small-002.log": "c97de1fff2c848a8088db8fb10bf94a04e8b9d9c6546bd1c063e4316368bf691",
+      "small-003.log": "417cbfa80ab050134a0dec312d82dcb4277f753852716d7bb07cc8ca8def0231",
+      "small-004.log": "fd766385909b1a3843e398d589ece7bcea691f726a8a0843314a9893a34432b0",
+      "small-005.log": "e0bf88fd79ed6c509668584c3d7f3101a0e48037ae077baa1d910801e9dc992f",
+      "small-006.log": "f7499e758d6a190fbf3fd4bea336211cf567d76b2b1518079859e22adec34497",
+      "small-007.log": "dfb315414e41631adca7fd7b630aa1ddccd56bf8d4a38f910679eb2042762f27",
+      "small-008.log": "d7036077259e42b2f3263312ddf20f6d28b39a5ed47c247c9a14f45b57aaed88",
+      "small-009.log": "7c1a9bdeef649052eac668a1844bb4344f2b3f6b5e191954e6efbc46ef604e64",
+      "small-010.log": "65dc3f608b12d6a9720274e4d9f77159d52d2fd165f335d3bb6768815f83e21d",
+      "small-011.log": "940f00758c10bcd6c9bf48a38f52e80cd04e52de0a4909c27724972ebef4e256",
+      "small-012.log": "5c8b3f905e5d5192a68592cfaa74a690bf51b2852bb42bb0bbd187b31250c6c6",
+      "small-013.log": "5b349cc3a25183d6bfdbe9ea4d62718b7e80c9f4e35821ca61bfc608de055c6c",
+      "small-014.log": "767d23dc77267e2774f3fd27eb2376d98681361bce10c52e59c08a9e55d7ad0a",
+      "small-015.log": "fd2801f8f9a3c8cbd6d6dd3e6177d71a5e9f877546d6d65d9f7c5a46f9bff11d",
+      "small-016.log": "c3f485818440b283f23ed48c51cc2c2a82bc222b67c73ef5d648293d3dffaaa8",
+      "small-017.log": "2f781c7d993db12061b9894ca9083c62041c0aca68f2879307d0e20e1f617205",
+      "small-018.log": "334a57070dd99272ea531043cbf5e73877f3e689c4263ccbe16c7a998ca8bfbc",
+      "small-019.log": "0853e7eb78fecc381b17ac9412728d06c78eee6699a820a90f65c6014b5ae8ec",
+      "small-020.log": "94d6672156f0ff33b52b3f4f145343676cb0d2a1a5c6c6fbe00e1185e256c12c",
+      "small-021.log": "c0504c57766363f3ba389888769c308539af4becbe568a17e9092d468d5b69ae",
+      "small-022.log": "9ad783412e698fdb3bdc729fb84fa14e1e6303bce99cceadfa2c43e49154db7f",
+      "small-023.log": "e9126dad6c6ce2ef36a875785f7215d5e06b7ba235134787ab9986a73dc619fe",
+      "small-024.log": "bd4ff34aae37259288d8fbff5d16422b7e7c5816e7d8813f0f69b0333703e483",
+      "small-025.log": "6fceb26f8b16d0b3183a361c3660972aa3088fb3285517bfb02a11dad58c969f",
+      "small-026.log": "03a620ea1a579f0cf7eef171bd6c725d5fac1895da3a528399ac84c37ce87c3a",
+      "small-027.log": "22de82f71dd8a3c406add6e5abe24ea6c2cd91564c2853b75ff717725a72a24b",
+      "small-028.log": "90975464f7d2c1049e8f94486716637e9bfb00bd8f9ed65d24b3953940fce3d9",
+      "small-029.log": "3ea28127791340ca1593c8a562d641056bd466b56cbcffd28dcb5b37cca21ba1",
+      "small-030.log": "76932571bc83f7e45640d08f9a1770af8d0b8a8ae1a63e3ca40e43d571611b7a",
+      "small-031.log": "227ff99d4b764d831c94f6844650c86f1b04c3d2fa675ecc2b6930dbe4ab1090",
+      "small-032.log": "7225738263a844443a72d321345c45dc207022e8663c6b593a35b250bbacb531",
+      "small-033.log": "d0b04d740074d993c381f65e0b3267d32a4da5811e7ad2bb312f4e253730ed5d",
+      "small-034.log": "e68b44730693a5a92ce6139bcd2d35c9e778a26bccf3369d210199b2c194aa52",
+      "small-035.log": "26bf07792a3023b95faf6e512b5156957619654d15db7c5c5886b22b1285ad4b",
+      "small-036.log": "a1a9baa699d7b763730d553d68d3c202f526141ba403d2b7790556115b1d010d",
+      "small-037.log": "edb7bfe3dba18bd9ec94bb5845bf40cb4cacb98d99a7941bf463c334b28589e2",
+      "small-038.log": "acecee9fc2cbc7cd7991a15f87382b2ab218f3ab27e3b5d7d0daf8895685aa41",
+      "small-039.log": "ec0cf3f98393ba0f1f93bdcf0b935b90796656bb8bb7bfe09bbb04fa9c981954",
+      "small-040.log": "8cf12120ae655e005beb1ddce31805dd5a541d0c7f5f03fc8653484e1cf88852",
+      "small-041.log": "46f96a6de4a1588d5fc31eeb8ff1312e1ac6a6bfd0a21a558f061cf214ee4c96",
+      "small-042.log": "7e53ffe77deffa889885a55835882302c0565dc6dc2bc3755d687e97201231a5",
+      "small-043.log": "1a1fce636ff3e19bb57ef7485b4bd2828727bd9aa0c06deb5fc55178df6b9199",
+      "small-044.log": "eb4e9542ab58936a35c9b00275d4d3ecc55d3c50a555f612f8dec8a1ce191229",
+      "small-045.log": "481c959440bd8ff1afd134a7764f9db39edbcf5a291e58ed940b519876569175",
+      "small-046.log": "301dbb0298a0f05e39caa979b09a58955f4600c5a19840746f867600354b8977",
+      "small-047.log": "79c722522d6dd09ddaac682dbdbd5d77304f816b31ee4d341a17bf756faa593b",
+      "small-048.log": "bdaceb65700eebaccbdc6403b727ad4fc2114ab99fc424b149b1dee4c5747d34",
+      "small-049.log": "3f849fc064480a57df1957f2ca74ec3a6a6b13ab53cac45f6873db25ae40e315",
+      "small-050.log": "e3b587a6081be31f209ea2d2d78c2774382225a72fe9045638cf400581ec7d8c",
+      "small-051.log": "79dce0ae94287492df9b16bfe8adecae48f2e564d99208384e8566954c9b518d",
+      "small-052.log": "4ab90f69e336a0dd6092810d84a4809646f61136d93535cb5dc9d6d66058564e",
+      "small-053.log": "96af85ce3f54674906463e1cd9fd378f57d2b63e96713c0fdd1d7a77a845cbde",
+      "small-054.log": "1b3aefe66b9e41cca533abd0a0d4922a639fbad8c192446535bfa8fda3c3b061",
+      "small-055.log": "7c8c21253fdf90c4101b537eab8f15a861be788380adfc3f0850b603da02aa28",
+      "small-056.log": "341f2577fed7950eaabda66e06a25845072dba9c8038abdd80ea9f2a08787bef",
+      "small-057.log": "f04858e47f06c675df82a883cc1b62c1bdcf47b562710968e3c7180737f22556",
+      "small-058.log": "05c1f885500ea83db1b2889b547dd747334ab4d6838f8fabf7a69026485b1a7b",
+      "small-059.log": "dfc0f9e0f1edf95994a668682fa09723a7c033eff8a8222db60ca00290eea21b",
+      "small-060.log": "80c8dcc47ecdc339cbbe993ff53e45f429962c6d2c99cddcadc07ccdb997f8ac",
+      "small-061.log": "492b989dd662858846b7596e2764c7cfd7991c862f6c37f5213513bf10bd14cc",
+      "small-062.log": "05a9a2ff81a9baac53614b4825cf9634bfb32b5c6d61f0002f85c26a6be5fca2",
+      "small-063.log": "11f9c2a5aa2b4ea04ac86b1129553fe84c3bb95ce370253233b071b28fcb6dd7"
+    },
+    "generator": "1MiB deterministic textual blocks repeated; no sparse or zero-filled file",
+    "allocated_bytes": 268435456,
+    "disk_free_before_bytes": 24230932480,
+    "data_allocated_file_bytes": 268718080
+  },
+  "wall_seconds": 6.129999343000236,
+  "cpu_seconds": 6.103206181,
+  "archive_sha256": "ebde2b35c961eb67de9f62e9ac218701905bf5871cd2ed30db6518fd01cc4299",
+  "archive_bytes": 88268855,
+  "source_hash_after": "36eb9c62491ef8ae38bc8bd8ee086d5ec32b6aa0578c40ef6eb35c3db6c5ca52",
+  "bad_digest_rejected": true,
+  "restored_and_revoked": true,
+  "prior_data_retained": true,
+  "temporary_cleanup": true
+}
