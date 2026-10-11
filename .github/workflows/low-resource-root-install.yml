@@ -20,15 +20,39 @@ jobs:
           python-version: '3.12'
       - name: Install test dependencies
         run: pip install -r requirements-test.txt
-      - name: Verify unchanged product and build exact-head candidate
+      - name: Verify exact reviewed product delta and build exact-head candidate
         env:
           VUI_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/vui-root-evidence
-          test "$(git rev-parse HEAD)" = "$VUI_SOURCE_COMMIT"
-          git diff --exit-code 5f44a2fb4a9ac0c32bc09b9a7859fc8ea8629154 -- app web deploy third_party main.py VERSION install.sh requirements-runtime.txt scripts/deploy.py scripts/install_system.py scripts/build_bundle.py scripts/platform_support.py scripts/fetch_portable_runtimes.py scripts/fetch_test_cores.py scripts/prepare_frontend.py scripts/vendor_frontend.py
-          python scripts/build_bundle.py /tmp/vui-root-evidence/vui-linux.zip --source-commit "$VUI_SOURCE_COMMIT" | tee /tmp/vui-root-evidence/build.log
+          {
+            BASELINE=5f44a2fb4a9ac0c32bc09b9a7859fc8ea8629154
+            REVIEWED_ENTRY=$'100644 blob d3cb78d1045dc70ac070e126de27b73eda612e52\tapp/release_tools.py'
+            PRODUCT_PATHS=(app web deploy third_party main.py VERSION install.sh requirements-runtime.txt scripts/deploy.py scripts/install_system.py scripts/build_bundle.py scripts/platform_support.py scripts/fetch_portable_runtimes.py scripts/fetch_test_cores.py scripts/prepare_frontend.py scripts/vendor_frontend.py)
+            ACTUAL_HEAD="$(git rev-parse HEAD)"
+            printf 'baseline=%s\nexpected_source=%s\nactual_head=%s\n' "$BASELINE" "${VUI_SOURCE_COMMIT:-<missing>}" "$ACTUAL_HEAD"
+            test -n "${VUI_SOURCE_COMMIT:-}"
+            test "$ACTUAL_HEAD" = "$VUI_SOURCE_COMMIT"
+            ACTUAL_ENTRY="$(git ls-tree --full-tree "$VUI_SOURCE_COMMIT" -- app/release_tools.py)"
+            printf 'expected_entry=%s\nactual_entry=%s\n' "$REVIEWED_ENTRY" "$ACTUAL_ENTRY"
+            test "$ACTUAL_ENTRY" = "$REVIEWED_ENTRY"
+            # The builder imports product Python before its own clean check.
+            # Authenticate tracked worktree AND index before that import.
+            git -c core.filemode=true diff --no-ext-diff --no-textconv --exit-code "$VUI_SOURCE_COMMIT" -- "${PRODUCT_PATHS[@]}"
+            git -c core.filemode=true diff --cached --no-ext-diff --no-textconv --exit-code "$VUI_SOURCE_COMMIT" -- "${PRODUCT_PATHS[@]}"
+            printf '\nbaseline_protected_tree:\n'
+            git ls-tree -r --full-tree "$BASELINE" -- "${PRODUCT_PATHS[@]}"
+            printf '\ncandidate_protected_tree:\n'
+            git ls-tree -r --full-tree "$VUI_SOURCE_COMMIT" -- "${PRODUCT_PATHS[@]}"
+            printf '\nactual_product_delta:\n'
+            git diff --no-ext-diff --no-textconv --name-status "$BASELINE" "$VUI_SOURCE_COMMIT" -- "${PRODUCT_PATHS[@]}"
+            # This exclusion is valid only after the exact mode/type/blob/path
+            # pin and both clean checks above. It is not a path-only allowlist.
+            git diff --no-ext-diff --no-textconv --exit-code "$BASELINE" "$VUI_SOURCE_COMMIT" -- "${PRODUCT_PATHS[@]}" ':(top,exclude,literal)app/release_tools.py'
+          } > /tmp/vui-root-evidence/build.log 2>&1
+          cat /tmp/vui-root-evidence/build.log
+          python scripts/build_bundle.py /tmp/vui-root-evidence/vui-linux.zip --source-commit "$VUI_SOURCE_COMMIT" 2>&1 | tee -a /tmp/vui-root-evidence/build.log
       - name: Measure guarded root install and fresh-directory upgrade in one parent slice
         env:
           VUI_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}

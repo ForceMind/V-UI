@@ -1,11 +1,63 @@
 # Root installation and new release-directory resource gate
 
 Status: the original root fixture qualified at `d745c61`; bounded upgrade
-accounting below is a new test-only candidate and awaits its own qualification.
+accounting qualified at `4c1d97b` in
+[run 38101639709](https://github.com/ForceMind/V-UI/actions/runs/38101639709).
+The later `a2eb07f` product change and the exact product gate below still need
+their own root qualification; neither inherits that earlier success.
 The original local suite had 746 tests, 621 passed and 125 environment skips; 32 focused
 fixture contracts independently passed. These do not prove root/systemd resources.
 The accepted `bc24c55` CPU recovery and ordinary gates remain separate evidence.
-Product bytes remain at `5f44a2f`; this fixture must not change them.
+The original and `4c1d97b` product bytes remained at `5f44a2f`.
+
+## Exact reviewed product delta (new gate candidate)
+
+The previous workflow required every protected product path to match
+`5f44a2fb4a9ac0c32bc09b9a7859fc8ea8629154`. It correctly refuses the later
+[private runtime archive change](LOW_RESOURCE_RUNTIME_ARCHIVE_CACHE.md).
+The new guard permits exactly one reviewed entry, not arbitrary future edits
+to an allowed filename:
+
+```text
+100644 blob d3cb78d1045dc70ac070e126de27b73eda612e52<TAB>app/release_tools.py
+```
+
+`<TAB>` above denotes the literal separator in `git ls-tree`. The product file
+SHA256 is `9c737e840c9b3b15dabaf16bc3041e78c8923214f2e466bf89d58d380db21c04`.
+The complete original protected-path list and old baseline remain fixed.
+
+Before any builder Python import, shell checks require the exact label-event
+source to equal HEAD, the complete mode/type/blob/path entry above, and clean
+protected tracked working files **and** index against that same source.
+This order matters: `build_bundle.py` imports the release controller before
+its own later dirty-tree check. Git external diff/textconv are disabled and
+file-mode checking is explicit for these comparisons.
+
+Only after those checks does the original baseline comparison gain one quoted
+literal exclusion, `:(top,exclude,literal)app/release_tools.py`. A different
+blob, executable mode, link, absent file, dirty reviewed file, or any added,
+removed, renamed or changed protected file elsewhere must still fail before
+building or starting the root fixture. Documentation-only descendants may
+qualify, but only with the same pinned product entry and other protected bytes.
+
+Baseline/source identities, expected/actual entry, both complete protected
+trees and the actual changed-path list are retained in `build.log`; subsequent
+builder output appends rather than replacing the provenance. Failed guards
+also leave that log for the existing always-run artifact upload.
+
+The guard is root-specific. It does not reuse the broader historical allowlist
+or different baseline from the installation trace. It authenticates Git-tracked
+product inputs, not an arbitrarily contaminated runner or untracked files; it
+does not protect against edits to the guard, fixture or dependency installer
+themselves, which still require review. The exact label-event head qualifies
+only itself if the PR subsequently advances.
+
+Only workflow provenance, its non-root temporary-Git contract tests and this
+document change in this batch. Product files, root harness, action pins,
+standard runner, permissions, measured limits, cleanup and artifact retention
+remain unchanged. After local/independent checks and ordinary exact-head CI,
+one explicitly approved root-label trigger is planned. Until its raw evidence
+passes review, actual installation/upgrade peak improvement remains unverified.
 
 ## Bounded contract
 
@@ -84,9 +136,9 @@ only 15.664 MiB. The 121.324 MiB peak increase occurred somewhere within the
 only about 15.318 seconds of it and have no corresponding resource snapshots.
 End-of-stage anon/file values cannot identify the peak's composition or cause.
 
-## Bounded upgrade accounting candidate
+## Bounded upgrade accounting at 4c1d97b
 
-This slice changes only the fixture, its tests and documentation. Product
+That slice changed only the fixture, its tests and documentation. Product
 bytes, installer arguments, verification reads, original nine stages, parent
 limits and cleanup remain unchanged. No cache advice, peak reset, skipped
 validation or process moved outside the measured parent is introduced.
@@ -139,4 +191,7 @@ Local candidate validation: Python 3.12.14, 762 tests, 637 passed and 125
 environment skips in 59.821 seconds; 48 root-specific tests independently
 passed without skips. Documents, compilation, shell/JavaScript syntax and diff
 checks passed; protected product paths remain byte-identical to `5f44a2f`.
-These results do not qualify actual root/systemd resources or new CI.
+Those local results alone did not qualify root/systemd resources. The subsequent
+4c1d run linked above passed all nine stages and cleanup with 48 accounting
+samples, a 516374528-byte peak and zero max/OOM events. Its original evidence
+does not qualify the later product or gate candidate.
