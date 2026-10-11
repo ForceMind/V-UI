@@ -43,3 +43,5 @@
 - [CPU配额饱和后的恢复](LOW_RESOURCE_CPU_PRESSURE.md)：有界真实代理压力、原始配额证据和固定恢复时限。
 
 - [Root 安装父组资源合同](LOW_RESOURCE_ROOT_INSTALL.md)：d745 同产品新目录升级及停机恢复已验；新有界升级归因采样待自己的准确提交验证。
+
+- [新 runtime 压缩归档冷读](LOW_RESOURCE_RUNTIME_ARCHIVE_CACHE.md)：4c1d root 全窗证据支持的私有文件候选、身份保护与本地机制实验；实际峰值改善待准确候选验证。

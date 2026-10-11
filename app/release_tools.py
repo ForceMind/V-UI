@@ -84,10 +84,104 @@ def _normalized_archive_path(value: PurePosixPath) -> tuple[str, ...]:
     return tuple(stack)
 
 
-def extract_runtime(archive_path: Path, destination: Path) -> None:
+@contextmanager
+def _private_runtime_tar(payload: Path, key: str, expected_sha: str, payload_identity):
+    """Read only the new stage-owned runtime archive through a pinned descriptor.
+
+    Generic extraction and caller-owned archives never opt in. The payload's
+    identity is captured before stage renames its freshly unpacked directory.
+    Keep the full runtime pin check on the same fd subsequently used by tar.
+    """
+    if (not isinstance(expected_sha, str) or not re.fullmatch(r'[a-f0-9]{64}', expected_sha)
+            or key not in ('x86_64-gnu', 'aarch64-gnu', 'x86_64-musl', 'aarch64-musl')):
+        raise ReleaseError('Portable Python runtime pin mismatch')
+    path = payload / 'runtimes' / (key + '.tar.gz')
+    if any(getattr(os, name, None) is None for name in ('O_DIRECTORY', 'O_NOFOLLOW', 'O_NONBLOCK')):
+        # Without safe traversal, never advise a source whose private identity
+        # cannot be established. Still hash every byte on the same plain fd
+        # used by tar, with the original content and extraction checks intact.
+        if not path.is_file():
+            raise ReleaseError('Portable Python runtime pin mismatch')
+        with path.open('rb') as source:
+            if stream_digest(source, limit=MAX_ARCHIVE)[0] != expected_sha:
+                raise ReleaseError('Portable Python runtime pin mismatch')
+            source.seek(0)
+            with tarfile.open(fileobj=source, mode='r:gz') as archive:
+                yield archive
+        return
+
+    def directory_identity(entry):
+        return entry.st_dev, entry.st_ino, entry.st_mode, entry.st_uid, entry.st_gid
+
+    def file_identity(entry):
+        return (*directory_identity(entry), entry.st_size, entry.st_nlink,
+                entry.st_mtime_ns, entry.st_ctime_ns)
+
+    descriptors = []; bindings = []; raw = None
+    try:
+        parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+        descriptors.append(parent)
+        for name in payload.absolute().parts[1:]:
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            descriptors.append(child)
+            entry = os.fstat(child)
+            bindings.append((parent, name, child, directory_identity(entry)))
+            parent = child
+        entry = os.fstat(parent)
+        if ((entry.st_dev, entry.st_ino) != payload_identity or entry.st_uid != os.geteuid()
+                or not stat.S_ISDIR(entry.st_mode) or stat.S_IMODE(entry.st_mode) != 0o700):
+            raise ReleaseError('Runtime archive payload identity changed')
+        directory = os.open('runtimes', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        descriptors.append(directory)
+        bindings.append((parent, 'runtimes', directory, directory_identity(os.fstat(directory))))
+        name = key + '.tar.gz'
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        descriptors.append(fd)
+        entry = os.fstat(fd)
+        identity = file_identity(entry)
+        if (not stat.S_ISREG(entry.st_mode) or entry.st_uid != os.geteuid()
+                or stat.S_IMODE(entry.st_mode) != 0o600 or entry.st_nlink != 1
+                or not 0 < entry.st_size <= MAX_ARCHIVE):
+            raise ReleaseError('Runtime archive must be a new private regular file')
+        if file_identity(os.stat(name, dir_fd=directory, follow_symlinks=False)) != identity:
+            raise ReleaseError('Runtime archive identity changed before reading')
+        raw = os.fdopen(fd, 'rb', closefd=False)
+        reader = _PrivateArchiveFile(raw)
+        if reader.advice is not None and reader.dontneed is not None:
+            os.fsync(fd)
+        if stream_digest(reader, limit=MAX_ARCHIVE)[0] != expected_sha:
+            raise ReleaseError('Portable Python runtime pin mismatch')
+        reader.seek(0)
+        with tarfile.open(fileobj=reader, mode='r:gz') as archive:
+            yield archive
+        for parent, component, child, before in bindings:
+            if (directory_identity(os.fstat(child)) != before
+                    or directory_identity(os.stat(component, dir_fd=parent, follow_symlinks=False)) != before):
+                raise ReleaseError('Runtime archive parent identity changed during extraction')
+        if (file_identity(os.fstat(fd)) != identity
+                or file_identity(os.stat(name, dir_fd=directory, follow_symlinks=False)) != identity):
+            raise ReleaseError('Runtime archive identity changed during extraction')
+        # gzip may stop before reading raw EOF. Advise this same completed fd,
+        # never reopen the pathname or follow a replacement for final cleanup.
+        reader._discard(0, 0)
+    finally:
+        active_error = sys.exc_info()[0] is not None
+        close_error = None
+        if raw is not None:
+            try: raw.close()
+            except OSError as error: close_error = error
+        for descriptor in reversed(descriptors):
+            try: os.close(descriptor)
+            except OSError as error:
+                if close_error is None: close_error = error
+        if close_error is not None and not active_error:
+            raise close_error
+
+
+def extract_runtime(archive_path: Path, destination: Path, *, _private_archive=None) -> None:
     destination.mkdir(parents=True,mode=0o700)
     try:
-        with tarfile.open(archive_path,'r:gz') as archive:
+        with (_private_archive if _private_archive is not None else tarfile.open(archive_path,'r:gz')) as archive:
             members=archive.getmembers()
             if len(members)>50000 or sum(max(0,m.size) for m in members)>650_000_000:
                 raise ReleaseError('Portable Python archive exceeds limits')
@@ -109,7 +203,7 @@ def extract_runtime(archive_path: Path, destination: Path) -> None:
         # Never follow runtime links, inspect old releases or cool user data.
         if (getattr(os, 'posix_fadvise', None) is not None
                 and getattr(os, 'POSIX_FADV_DONTNEED', None) is not None
-                and hasattr(os, 'O_NOFOLLOW') and hasattr(os, 'fwalk')):
+                and all(getattr(os, name, None) is not None for name in ('O_NOFOLLOW', 'O_NONBLOCK', 'fwalk'))):
             def walk_error(error):
                 raise error
             for _, _, names, directory in os.fwalk(destination, follow_symlinks=False, onerror=walk_error):
@@ -504,12 +598,13 @@ def stage(archive: Path, expected_sha: str, root: Path) -> str:
         if final.exists() or final.is_symlink(): raise ReleaseError('Release already exists; never overwrite a prepared version')
         final.mkdir(parents=True,mode=0o700)
         try:
+            created_payload = payload.lstat()
             os.replace(payload,final/'payload')
             runtime_archive=final/'payload'/'runtimes'/(key+'.tar.gz')
             pin=(meta.get('portable_runtime_pins') or {}).get(key,{})
-            if not runtime_archive.is_file() or file_digest(runtime_archive, cold=True)!=pin.get('sha256'):
-                raise ReleaseError('Portable Python runtime pin mismatch')
-            extract_runtime(runtime_archive,final/'runtime')
+            private_archive = _private_runtime_tar(final/'payload', key, pin.get('sha256'),
+                (created_payload.st_dev, created_payload.st_ino))
+            extract_runtime(runtime_archive,final/'runtime',_private_archive=private_archive)
             python=runtime_python(final)
             env=child_env(final/'payload',root/'data')
             subprocess.run([str(python),'-m','ensurepip','--upgrade'],env=env,check=True,timeout=60,stdout=subprocess.DEVNULL)
