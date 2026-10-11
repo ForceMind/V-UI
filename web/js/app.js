@@ -30,7 +30,6 @@ const app = createApp({
         const editingInboundId = ref(null);
         const inboundCredentials = ref({});
         const restartingCore = ref('');
-        const banIpInput = ref('');
         const showQrDialog = ref(false);
         const qrLink = ref('');
         const siteFiles = ref([]);
@@ -546,19 +545,6 @@ const app = createApp({
 
         const updateProfile = () => { location.assign('/account'); };
 
-        const banIp = async () => {
-            if (!banIpInput.value) return;
-            try {
-                await axios.post(
-                    `/api/security/ban_ip?ip=${encodeURIComponent(banIpInput.value)}`
-                );
-                ElMessage.success(`IP ${banIpInput.value} banned`);
-                banIpInput.value = '';
-            } catch (error) {
-                ElMessage.error('Failed to ban IP');
-            }
-        };
-
         const showQrCode = async (row) => {
             try {
                 const res = await axios.get(
@@ -652,7 +638,6 @@ const app = createApp({
             protocolOptions,
             colors,
             restartingCore,
-            banIpInput,
             currentUser,
             userForm,
             mihomoWarnings,
@@ -685,7 +670,6 @@ const app = createApp({
             deleteInbound,
             updateProfile,
             restartCore,
-            banIp,
             showQrCode,
             copyLink,
             subscriptionUrl,
