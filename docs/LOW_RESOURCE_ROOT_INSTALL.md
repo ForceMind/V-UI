@@ -1,17 +1,43 @@
 # Root installation and new release-directory resource gate
 
-Status: the original root fixture qualified at `d745c61`; bounded upgrade
+Status (2026-10-11): exact `a373d47` has passed guarded root qualification;
+see the result below and the [current closure](LOW_RESOURCE_CLOSURE_20261011.md).
+The original root fixture qualified at `d745c61`; bounded upgrade
 accounting qualified at `4c1d97b` in
 [run 38101639709](https://github.com/ForceMind/V-UI/actions/runs/38101639709).
-The later `a2eb07f` product change, pinned by `afce914`, still needs its own
-root qualification: the one `afce914` attempt failed strict process-identity
-validation, and the later `886832f` launch-evidence attempt failed on stop
-direction, as retained below. The stop-direction candidate is local only;
-neither it nor the product inherits earlier root success.
-The original local suite had 746 tests, 621 passed and 125 environment skips; 32 focused
+The later `a2eb07f` product change, pinned by `afce914`, is included in the
+a373 success. The failed `afce914` process-identity attempt and `886832f`
+stop-direction attempt remain failed, with their full history below.
+References below to local candidates describe those historical stages.
+The local suite recorded by `d745c61` (commit date 2026-10-10, UTC+08:00) had 746 tests,
+621 passed and 125 environment skips; 32 focused
 fixture contracts independently passed. These do not prove root/systemd resources.
 The accepted `bc24c55` CPU recovery and ordinary gates remain separate evidence.
 The original and `4c1d97b` product bytes remained at `5f44a2f`.
+
+## Qualified a373 result (2026-10-11)
+
+Exact source `a373d4770263a0d464a662362081999c2ff4d5a1`, tree
+`1bdd283168d22b644d6b234b41365160d10e2027`, passed
+[run 38138976883 / job 114468681304](https://github.com/ForceMind/V-UI/actions/runs/38138976883/job/114468681304)
+at attempt 1. Original [artifact 11702023918](https://github.com/ForceMind/V-UI/actions/runs/38138976883/artifacts/11702023918)
+ZIP SHA256 is `a37b63e4ccef2de28af148ecafebc43982e0b87511438df5a9736db63ea56f5a`.
+The exact-source full root/trace validators and independent original-artifact
+audit pass: nine stages, four root-entry receipts, 46 schema-3 samples and
+complete cleanup. See the [public audit](https://github.com/ForceMind/V-UI/pull/28#issuecomment-6105096999).
+
+The one-CPU, 512 MiB, zero-swap parent peaked at 494,104,576 bytes
+(471.21484375 MiB), with 40.78515625 MiB nominal margin and all max/OOM
+counters zero. This is the complete measured parent, not the worker leaf;
+coordinator, build and host/PID1/socket overhead remain outside it.
+It does not establish whole-host margin or the 320 MiB engineering budget.
+
+This run observed no managed-root launch sample and no `service_transitions`.
+It did not reproduce the 886 race live. The stop-direction fix is separately
+supported by adversarial contracts and faithful historical-observation replay;
+the old full validators' failures and rejected schema-2 report stay unchanged.
+Product/root collector bytes remain identical at later `0f6c3e6`, but this
+root result belongs to a373, not a new root run on 0f6c or a docs descendant.
 
 ## Exact reviewed product delta at afce914
 

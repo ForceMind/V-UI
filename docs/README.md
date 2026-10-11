@@ -4,6 +4,7 @@
 
 | 阅读目标 | 文档 |
 | --- | --- |
+| 2026-10-11 低资源软件收口、准确证据与剩余整机验收 | [LOW_RESOURCE_CLOSURE_20261011.md](LOW_RESOURCE_CLOSURE_20261011.md) |
 | 1 vCPU / 512 MiB 安装运行目标与实测边界 | [LOW_RESOURCE_TARGET.md](LOW_RESOURCE_TARGET.md) |
 | 405 同提交四平台及完整资源基线、未达预算 | [LOW_RESOURCE_405_BASELINE.md](LOW_RESOURCE_405_BASELINE.md) |
 | 071 大规则优化与完整同提交验收基线 | [LOW_RESOURCE_071_BASELINE.md](LOW_RESOURCE_071_BASELINE.md) |
@@ -42,6 +43,6 @@
 - [有界双核心并存与恢复](LOW_RESOURCE_DUAL_CORE.md)：同服务组真实两路、控制停止与显式重启的短验收合同。
 - [CPU配额饱和后的恢复](LOW_RESOURCE_CPU_PRESSURE.md)：有界真实代理压力、原始配额证据和固定恢复时限。
 
-- [Root 安装父组资源合同](LOW_RESOURCE_ROOT_INSTALL.md)：d745 同产品新目录升级及停机恢复已验；新有界升级归因采样待自己的准确提交验证。
+- [Root 安装父组资源合同](LOW_RESOURCE_ROOT_INSTALL.md)：2026-10-11 准确 a373 安装/新目录升级/恢复通过，父组峰值 471.21484375 MiB、max/OOM 全零；历史失败及未现场复现的停启竞态保留。
 
-- [新 runtime 压缩归档冷读](LOW_RESOURCE_RUNTIME_ARCHIVE_CACHE.md)：4c1d root 全窗证据支持的私有文件候选、身份保护与本地机制实验；实际峰值改善待准确候选验证。
+- [新 runtime 压缩归档冷读](LOW_RESOURCE_RUNTIME_ARCHIVE_CACHE.md)：私有新文件的身份保护与本地机制实验；该产品字节已在 a373 root 验收，不据单次峰值断言因果或稳定改善。
