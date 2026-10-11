@@ -466,7 +466,27 @@ with SessionLocal() as db:
                 stage("login_after_interaction_logout", login)
             if profile == 'data-backup':
                 from scripts import low_resource_data as large
-                report['large_data']={}
+                report['large_data']=dict(lifecycle_boundaries=[],lifecycle_boundary_schema=1,
+                    lifecycle_boundary_limits=dict(large.LIFECYCLE_LIMITS),
+                    lifecycle_boundary_scope=large.LIFECYCLE_SCOPE)
+                def lifecycle_boundary(name):
+                    rows=report['large_data']['lifecycle_boundaries']
+                    if len(rows)>=len(large.LIFECYCLE_BOUNDARIES) or name!=large.LIFECYCLE_BOUNDARIES[len(rows)]:
+                        raise RuntimeError('Unexpected data lifecycle boundary')
+                    started=time.monotonic();cpu_started=time.process_time()
+                    row=dict(name=name,unit=args.unit,source_commit=args.source_commit,
+                        service_cgroup=Path('/proc/self/cgroup').read_text().strip(),
+                        started_monotonic=started,metrics=metrics(directory))
+                    cpu_finished=time.process_time();finished=time.monotonic()
+                    row.update(finished_monotonic=finished,
+                        snapshot_observer_self_cpu_seconds=cpu_finished-cpu_started,
+                        snapshot_observer_wall_seconds=finished-started)
+                    # Costs above cover the snapshot only. Validation, serialization
+                    # and this checkpoint remain included in the service cgroup.
+                    large.validate_lifecycle_rows(rows+[row],args.unit,args.source_commit,
+                        report['service_cgroup'],allow_oom=True)
+                    rows.append(row)
+                    checkpoint()  # Persist each valid prefix before the next action.
                 stage('seed_1000_synthetic_nodes',lambda:large.seed_nodes(python,payload,data,cert,key))
                 def large_nodes_not_running():
                     if len(json.loads(api('/api/inbounds')[1]))!=1000:raise RuntimeError('Large node fixture missing')
@@ -645,16 +665,32 @@ with SessionLocal() as db:
                 db.execute("UPDATE users SET username='modified-after-backup'")
             if profile == 'data-backup':
                 stage('mutate_large_data_after_backup',lambda:large.mutate_after_backup(data))
+                lifecycle_boundary('before_current_snapshot')
                 changed=large.current_snapshot(root,data)
+                lifecycle_boundary('after_current_snapshot')
                 def bad_restore():
+                    lifecycle_boundary('before_installed_bad_digest_restore')
                     result=large.installed_operation(python,payload,data,root,'reject_bad_digest',backup,'0'*64)
-                    if result.get('rejected') is not True or large.current_snapshot(root,data)!=changed:
+                    if result.get('rejected') is not True:
                         raise RuntimeError('Bad digest damaged existing data or code')
+                    lifecycle_boundary('after_installed_bad_digest_rejection_before_preservation_check')
+                    if large.current_snapshot(root,data)!=changed:
+                        raise RuntimeError('Bad digest damaged existing data or code')
+                    lifecycle_boundary('after_bad_digest_preservation_check')
                     report['large_data']['bad_digest_preserved_data']=True
                 stage('large_bad_digest_restore_preserves_current_data',bad_restore)
-                stage('stopped_restore',lambda:large.installed_operation(python,payload,data,root,'restore',backup,digest))
-                report['large_data']['recovery']=stage('large_business_logs_revocation_and_original_data_retained',
-                    lambda:large.verify_recovery(root,data,report['large_data']['original'],changed,report['large_data']['logs']))
+                def large_restore():
+                    lifecycle_boundary('before_installed_restore')
+                    result=large.installed_operation(python,payload,data,root,'restore',backup,digest)
+                    lifecycle_boundary('after_installed_restore')
+                    return result
+                stage('stopped_restore',large_restore)
+                def large_recovery():
+                    lifecycle_boundary('before_recovery_verification')
+                    result=large.verify_recovery(root,data,report['large_data']['original'],changed,report['large_data']['logs'])
+                    lifecycle_boundary('after_recovery_verification')
+                    return result
+                report['large_data']['recovery']=stage('large_business_logs_revocation_and_original_data_retained',large_recovery)
             else:
                 stage("stopped_restore", lambda: tools.restore(root, backup, digest))
             def verify_restore():

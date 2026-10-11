@@ -355,6 +355,257 @@ REQUIRED_STAGES=(
 BACKUP_BOUNDARIES=('before_installed_backup','after_installed_backup_before_verification','after_archive_verification')
 
 
+LIFECYCLE_BOUNDARIES=('before_current_snapshot','after_current_snapshot',
+    'before_installed_bad_digest_restore','after_installed_bad_digest_rejection_before_preservation_check',
+    'after_bad_digest_preservation_check','before_installed_restore','after_installed_restore',
+    'before_recovery_verification','after_recovery_verification')
+LIFECYCLE_LIMITS={'max_rows':9,'max_row_bytes':16*1024,'max_total_bytes':128*1024}
+LIFECYCLE_SCOPE=('Nine fixed same-cgroup snapshots around unchanged lifecycle calls; the first two occupy the '
+    'un-staged gap after mutation. Snapshot observer costs include identity and metric reads only; validation, '
+    'compact JSON serialization and checkpoint work are not captured by those costs and remain charged to the '
+    'service group. A successful path adds exactly nine checkpoints. Byte caps cover compact sorted-key ASCII '
+    'JSON rows, not whole checkpoint I/O. '
+    'Lifetime peak and cumulative event deltas include observers and intervening checkpoints; they do not '
+    'establish single-operation causation or peak composition.')
+_LIFECYCLE_EVENTS=('max','oom','oom_kill','oom_group_kill')
+_LIFECYCLE_STAGES=('large_bad_digest_restore_preserves_current_data','stopped_restore',
+    'large_business_logs_revocation_and_original_data_retained')
+
+
+def _lifecycle_number(value):
+    return type(value) in (int,float) and 0<=value<=sys.float_info.max and math.isfinite(value)
+
+
+def _lifecycle_metrics(metric,allow_oom):
+    # A fixed-depth shape also bounds serializer allocations for malformed rows.
+    if not isinstance(metric,dict) or len(metric)!=5 or set(metric)!={'memory.current','memory.peak','memory.stat','memory.events','cpu.stat'}:
+        raise RuntimeError('Invalid lifecycle metric shape')
+    for key in ('memory.current','memory.peak'):
+        if type(metric[key]) is not int or not 0<=metric[key]<2**64:
+            raise RuntimeError('Invalid lifecycle memory accounting')
+    if not metric['memory.peak']:raise RuntimeError('Missing lifecycle peak')
+    for section,required in (('memory.stat',('anon','file')),('memory.events',_LIFECYCLE_EVENTS),('cpu.stat',('usage_usec',))):
+        values=metric[section]
+        if (not isinstance(values,dict) or len(values)>128 or not set(required)<=values.keys()
+                or any(not isinstance(key,str) or not re.fullmatch(r'[A-Za-z0-9_.]{1,128}',key)
+                    or type(value) is not int or not 0<=value<2**64 for key,value in values.items())):
+            raise RuntimeError('Invalid lifecycle resource accounting')
+    if not allow_oom:
+        from scripts.low_resource_certificates import validate_metrics_record
+        validate_metrics_record(metric)
+
+
+def _lifecycle_counters(before,after):
+    if (after['memory.peak']<before['memory.peak']
+            or after['cpu.stat']['usage_usec']<before['cpu.stat']['usage_usec']
+            or not before['memory.events'].keys()<=after['memory.events'].keys()
+            or any(after['memory.events'][key]<count for key,count in before['memory.events'].items())):
+        raise RuntimeError('Lifecycle cumulative counters decreased')
+
+
+def _lifecycle_stage_floor(stage,metric):
+    # Stage CPU is a delta, so only lifetime peak and event counters are anchors.
+    if 'memory_peak_bytes' in stage:
+        peak=stage['memory_peak_bytes']
+        if type(peak) is not int or peak<=0 or metric['memory.peak']<peak:
+            raise RuntimeError('Lifecycle peak below completed stage')
+    if 'memory_events' in stage:
+        events=stage['memory_events']
+        if (not isinstance(events,dict) or not set(_LIFECYCLE_EVENTS)<=events.keys()
+                or not events.keys()<=metric['memory.events'].keys()
+                or any(type(count) is not int or count<0 or metric['memory.events'][key]<count
+                    for key,count in events.items())):
+            raise RuntimeError('Lifecycle events below completed stage')
+
+
+def validate_lifecycle_rows(rows,unit,commit,service_cgroup,*,allow_oom=False):
+    """Validate a bounded row prefix, without claiming stage completion."""
+    from scripts.low_resource_service_tree import canonical_cgroup
+    if (not isinstance(unit,str) or not re.fullmatch(r'vui-low-resource-[0-9a-f]{32}\.service',unit)
+            or not isinstance(commit,str) or not re.fullmatch(r'[0-9a-f]{40}',commit)
+            or not isinstance(service_cgroup,str) or len(service_cgroup)>4096):
+        raise RuntimeError('Invalid lifecycle source identity')
+    canonical_cgroup(service_cgroup,unit)
+    if not isinstance(rows,list) or len(rows)>LIFECYCLE_LIMITS['max_rows']:
+        raise RuntimeError('Lifecycle row count exceeded')
+    fields={'name','unit','source_commit','service_cgroup','started_monotonic','finished_monotonic',
+        'metrics','snapshot_observer_self_cpu_seconds','snapshot_observer_wall_seconds'}
+    previous=None;finished=0;total=2  # Brackets in the canonical serialized list.
+    encoder=json.JSONEncoder(sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False)
+    for index,row in enumerate(rows):
+        if (not isinstance(row,dict) or len(row)!=len(fields) or set(row)!=fields or row.get('name')!=LIFECYCLE_BOUNDARIES[index]
+                or row.get('unit')!=unit or row.get('source_commit')!=commit or row.get('service_cgroup')!=service_cgroup):
+            raise RuntimeError('Invalid ordered lifecycle row or source')
+        if any(not _lifecycle_number(row[key]) for key in
+                ('started_monotonic','finished_monotonic','snapshot_observer_self_cpu_seconds','snapshot_observer_wall_seconds')):
+            raise RuntimeError('Invalid lifecycle observation clock or cost')
+        if (not finished<=row['started_monotonic']<=row['finished_monotonic']
+                or not math.isclose(row['snapshot_observer_wall_seconds'],
+                    row['finished_monotonic']-row['started_monotonic'],rel_tol=1e-9,abs_tol=1e-12)):
+            raise RuntimeError('Inconsistent lifecycle observation window')
+        _lifecycle_metrics(row['metrics'],allow_oom)
+        if previous is not None:_lifecycle_counters(previous,row['metrics'])
+        previous=row['metrics'];finished=row['finished_monotonic']
+        size=0
+        for chunk in encoder.iterencode(row):
+            size+=len(chunk.encode('ascii'))
+            if size>LIFECYCLE_LIMITS['max_row_bytes']:raise RuntimeError('Lifecycle row byte budget exceeded')
+        total+=size+(index>0)
+        if total>LIFECYCLE_LIMITS['max_total_bytes']:raise RuntimeError('Lifecycle total byte budget exceeded')
+    return total
+
+
+def _validate_lifecycle_report(report,unit,commit,complete):
+    if (not isinstance(report,dict) or report.get('duration_profile')!='data-backup'
+            or report.get('unit')!=unit or report.get('source_commit')!=commit
+            or type(report.get('requested_memory_mib')) is not int or report['requested_memory_mib']!=512):
+        raise RuntimeError('Lifecycle report source mismatch')
+    if complete and (report.get('outcome')!='passed' or report.get('complete') is not True):
+        raise RuntimeError('Lifecycle report did not complete successfully')
+    limits=report.get('limits',{});cpu=limits.get('cpu.max','') if isinstance(limits,dict) else ''
+    if (not isinstance(limits,dict) or type(limits.get('memory.max')) is not int
+            or limits['memory.max']!=512*1024*1024 or type(limits.get('memory.swap.max')) is not int
+            or limits['memory.swap.max']!=0 or not isinstance(cpu,str)
+            or not re.fullmatch(r'[1-9][0-9]* [1-9][0-9]*',cpu) or cpu.split()[0]!=cpu.split()[1]):
+        raise RuntimeError('Invalid lifecycle service limits')
+    value=report.get('large_data',{})
+    if not isinstance(value,dict):raise RuntimeError('Invalid lifecycle accounting object')
+    rows=value.get('lifecycle_boundaries',[])
+    if complete or 'large_data' in report:
+        bounds=value.get('lifecycle_boundary_limits')
+        if (type(value.get('lifecycle_boundary_schema')) is not int or value['lifecycle_boundary_schema']!=1
+                or not isinstance(bounds,dict) or bounds!=LIFECYCLE_LIMITS
+                or any(type(v) is not int for v in bounds.values())
+                or value.get('lifecycle_boundary_scope')!=LIFECYCLE_SCOPE
+                or 'lifecycle_boundaries' not in value):
+            raise RuntimeError('Missing fixed lifecycle schema, scope or budgets')
+    validate_lifecycle_rows(rows,unit,commit,report.get('service_cgroup'),allow_oom=not complete)
+    if complete and len(rows)!=len(LIFECYCLE_BOUNDARIES):raise RuntimeError('Incomplete lifecycle boundary accounting')
+    stages=report.get('stages',[])
+    if not isinstance(stages,list) or any(not isinstance(stage,dict) or not isinstance(stage.get('name'),str) for stage in stages):
+        raise RuntimeError('Invalid lifecycle stage records')
+    by_name={stage['name']:stage for stage in stages}
+    if len(by_name)!=len(stages):raise RuntimeError('Duplicate lifecycle stages')
+    relevant=('stopped_backup','mutate_large_data_after_backup',*_LIFECYCLE_STAGES,'restore_data_and_session_revocation')
+    observed=[stage['name'] for stage in stages if stage['name'] in relevant]
+    if observed!=list(relevant[:len(observed)]):raise RuntimeError('Lifecycle stage progress out of order')
+    for index,stage in enumerate(stages):
+        outcome=stage.get('outcome')
+        if outcome not in ('running','failed','passed') or (complete or index<len(stages)-1) and outcome!='passed':
+            raise RuntimeError('Lifecycle stage started after unfinished predecessor')
+    for name,needed,done in zip(_LIFECYCLE_STAGES,(2,5,7),(5,7,9)):
+        stage=by_name.get(name)
+        if stage is not None and (len(rows)<needed or stage.get('outcome')=='passed' and len(rows)<done):
+            raise RuntimeError('Lifecycle prefix conflicts with stage progress')
+    if any(stage['name'] in REQUIRED_STAGES[REQUIRED_STAGES.index(_LIFECYCLE_STAGES[-1])+1:] for stage in stages) and len(rows)!=9:
+        raise RuntimeError('Later stage started before lifecycle completed')
+    if not rows:
+        final=report.get('metrics')
+        if final is not None:
+            _lifecycle_metrics(final,not complete)
+            if 'accounting_error' not in report:
+                for stage in stages:_lifecycle_stage_floor(stage,final)
+        return {'observation_count':0,'qualification':False,'oom_observed':bool(final and any(
+            final.get('memory.events',{}).get(key,0) for key in ('oom','oom_kill','oom_group_kill')))}
+    mutate=by_name.get('mutate_large_data_after_backup',{})
+    if mutate.get('outcome')!='passed':raise RuntimeError('Snapshot gap lacks completed mutation')
+
+    def window(stage):
+        start=stage.get('started_monotonic')
+        if not _lifecycle_number(start):raise RuntimeError('Missing lifecycle stage clock')
+        wall=stage.get('wall_seconds')
+        if 'wall_seconds' not in stage:
+            if complete or stage.get('outcome')=='passed':raise RuntimeError('Missing completed lifecycle stage clock')
+            return start,None
+        if not _lifecycle_number(wall) or not math.isfinite(start+wall):raise RuntimeError('Invalid lifecycle stage duration')
+        return start,start+wall
+
+    previous_end=0
+    for name in observed:
+        start,end=window(by_name[name])
+        if start<previous_end:raise RuntimeError('Overlapping lifecycle stages')
+        previous_end=start if end is None else end
+    _,gap_start=window(mutate)
+    if gap_start is None:raise RuntimeError('Missing snapshot gap start')
+    bad_stage=by_name.get(_LIFECYCLE_STAGES[0]);gap_end=window(bad_stage)[0] if bad_stage else None
+    if complete and gap_end is None:raise RuntimeError('Missing snapshot gap end')
+    for row in rows[:2]:
+        if row['started_monotonic']<gap_start or gap_end is not None and row['finished_monotonic']>gap_end:
+            raise RuntimeError('Initial lifecycle snapshots outside un-staged gap')
+    # Original backup measurements remain a separate contract. Use their last
+    # observed boundary as the cumulative anchor, never a stage CPU delta.
+    backup=value.get('backup_boundaries')
+    if (not isinstance(backup,list) or len(backup)!=len(BACKUP_BOUNDARIES)
+            or any(not isinstance(row,dict) or row.get('name')!=name for row,name in zip(backup,BACKUP_BOUNDARIES))):
+        raise RuntimeError('Missing earlier backup boundary anchor')
+    anchor=backup[-1]
+    if (anchor.get('unit')!=unit or anchor.get('source_commit')!=commit
+            or anchor.get('service_cgroup')!=report['service_cgroup']
+            or not _lifecycle_number(anchor.get('started_monotonic'))
+            or not _lifecycle_number(anchor.get('finished_monotonic'))
+            or not anchor['started_monotonic']<=anchor['finished_monotonic']<=rows[0]['started_monotonic']):
+        raise RuntimeError('Invalid earlier backup boundary anchor')
+    anchor_start,anchor_end=window(by_name['stopped_backup'])
+    if (anchor['started_monotonic']<anchor_start
+            or anchor_end is not None and anchor['finished_monotonic']>anchor_end):
+        raise RuntimeError('Backup anchor outside its stage')
+    _lifecycle_metrics(anchor.get('metrics'),not complete)
+    _lifecycle_counters(anchor['metrics'],rows[0]['metrics'])
+    # Known prior stage endpoints precede these observations in the unchanged
+    # control flow, even though stage wall time excludes its final checkpoint.
+    indices={stage['name']:index for index,stage in enumerate(stages)}
+    preceding=(indices['mutate_large_data_after_backup']+1,)*2
+    preceding+=tuple(indices[name] for name,count in zip(_LIFECYCLE_STAGES,(3,2,2))
+        if name in indices for _ in range(count))
+    for row,stop in zip(rows,preceding):
+        for earlier in stages[:stop]:_lifecycle_stage_floor(earlier,row['metrics'])
+    for name,first,last in zip(_LIFECYCLE_STAGES,(2,5,7),(5,7,9)):
+        selected=rows[first:last]
+        if not selected:continue
+        stage=by_name.get(name)
+        if stage is None:raise RuntimeError('Lifecycle observation lacks its stage')
+        start,end=window(stage)
+        for row in selected:
+            if row['started_monotonic']<start or end is not None and row['finished_monotonic']>end:
+                raise RuntimeError('Lifecycle observation outside enclosing stage')
+            peak=stage.get('memory_peak_bytes');events=stage.get('memory_events')
+            if 'memory_peak_bytes' in stage:
+                if type(peak) is not int or peak<=0 or row['metrics']['memory.peak']>peak:
+                    raise RuntimeError('Lifecycle peak exceeds enclosing stage')
+            elif complete or stage.get('outcome')=='passed':raise RuntimeError('Missing completed stage peak')
+            if 'memory_events' in stage:
+                if (not isinstance(events,dict) or any(type(events.get(key)) is not int or events[key]<0
+                        or row['metrics']['memory.events'][key]>events[key] for key in row['metrics']['memory.events'])):
+                    raise RuntimeError('Lifecycle events exceed enclosing stage')
+            elif complete or stage.get('outcome')=='passed':raise RuntimeError('Missing completed stage events')
+        cpu=stage.get('cpu_usage_usec')
+        if 'cpu_usage_usec' in stage:
+            if (type(cpu) is not int or cpu<0
+                    or selected[-1]['metrics']['cpu.stat']['usage_usec']-selected[0]['metrics']['cpu.stat']['usage_usec']>cpu):
+                raise RuntimeError('Lifecycle CPU delta exceeds enclosing stage')
+        elif complete or stage.get('outcome')=='passed':raise RuntimeError('Missing completed stage CPU')
+    final=report.get('metrics')
+    if complete or final is not None:
+        _lifecycle_metrics(final,not complete)
+        if complete or 'accounting_error' not in report:
+            _lifecycle_counters(rows[-1]['metrics'],final)
+            for stage in stages:_lifecycle_stage_floor(stage,final)
+    return {'observation_count':len(rows),'qualification':False,
+        'oom_observed':any(row['metrics']['memory.events'][key] for row in [anchor,*rows]
+            for key in ('oom','oom_kill','oom_group_kill')) or bool(final and any(
+                final.get('memory.events',{}).get(key,0) for key in ('oom','oom_kill','oom_group_kill')))}
+
+
+def validate_lifecycle_boundaries(report,unit,commit):
+    """Require all nine observations; no diagnostic-prefix fallback."""
+    _validate_lifecycle_report(report,unit,commit,True)
+
+
+def validate_lifecycle_prefix(report,unit,commit):
+    """Validate only available failure evidence, never qualify a completed run."""
+    return _validate_lifecycle_report(report,unit,commit,False)
+
+
 def validate_backup_boundaries(report,unit,commit):
     from scripts.low_resource_certificates import validate_metrics_record
     rows=report.get('large_data',{}).get('backup_boundaries')
@@ -407,6 +658,7 @@ def validate_complete(report,unit,commit):
         validate_metrics_record({'memory.current':stage['memory_current_bytes'],'memory.peak':stage['memory_peak_bytes'],
             'cpu.stat':{'usage_usec':stage['cpu_usage_usec']},'memory.stat':stage.get('memory_stat'),'memory.events':stage.get('memory_events')})
     validate_backup_boundaries(report,unit,commit)
+    validate_lifecycle_boundaries(report,unit,commit)
     value=report.get('large_data',{});validate_exports(value.get('exports',{}),unit,commit)
     if value.get('routing_rejections')!=[428,409,422] or any(value.get(k) is not True for k in
             ('live_backup_rejected','bad_digest_preserved_data','restored_exports_verified','synthetic_token_not_logged')):raise RuntimeError('Missing large-data control evidence')

@@ -15,6 +15,106 @@ from app import release_tools as release
 from app.services.routing_validation import build_rule_plan
 
 
+UNIT='vui-low-resource-'+('a'*32)+'.service'
+COMMIT='b'*40
+
+# Original data-backup sequence, fixed independently of the validator's subset.
+DATA_STAGE_NAMES=(
+    'offline_stage_including_wheels',
+    'activate',
+    'fake_admin_provision',
+    'https_startup',
+    'anonymous_denied',
+    'untrusted_ca_rejected',
+    'login',
+    'authenticated_read',
+    '100_authenticated_reads_concurrency_10',
+    'panel_only_idle_60_seconds',
+    'seed_1000_synthetic_nodes',
+    'large_synthetic_nodes_not_running',
+    'large_rules_and_real_conditional_write_rejections',
+    'large_anonymous_export_denied',
+    'create_256_node_scoped_grant',
+    'synthetic_public_grant_before_backup',
+    'large_four_format_exports_serial_and_concurrent',
+    'large_live_backup_rejected_without_stopping_panel',
+    'proxy_server_start',
+    'panel_single_proxy_idle_60_seconds',
+    'proxy_client_start',
+    'proxy_10_requests_concurrency_1',
+    'proxy_100_requests_concurrency_10',
+    'proxy_wrong_uuid_rejected',
+    'proxy_wrong_ca_rejected',
+    'logout',
+    'logged_out_replayed_cookie_denied',
+    'login_before_backup',
+    'stopped_panel',
+    'generate_256MiB_and_64_small_logs_inside_service',
+    'stopped_backup',
+    'mutate_large_data_after_backup',
+    'large_bad_digest_restore_preserves_current_data',
+    'stopped_restore',
+    'large_business_logs_revocation_and_original_data_retained',
+    'restore_data_and_session_revocation',
+    'restored_https_startup',
+    'old_session_after_restore_denied',
+    'old_subscription_after_large_restore_denied',
+    'restored_login',
+    'restored_large_nodes_not_running',
+    'restored_large_exports_and_rules',
+    'restored_logout',
+    'final_panel_stop',
+    'large_subscription_token_absent_from_logs',
+)
+
+
+def complete_data_report():
+    """Independent ordered fixture; snapshot hashing is in the unstaged gap."""
+    unit=UNIT;commit=COMMIT
+    clocks={name:(10+index*10,1) for index,name in enumerate(data.REQUIRED_STAGES)}
+    # Keep readable lifecycle clocks while including all 45 historical stages.
+    pending=[];previous_end=0
+    for name in DATA_STAGE_NAMES:
+        if name not in clocks:
+            pending.append(name);continue
+        start,wall=clocks[name];step=(start-previous_end)/(len(pending)+1)
+        for offset,item in enumerate(pending,1):clocks[item]=(previous_end+offset*step,min(.5,step/2))
+        pending=[];previous_end=start+wall
+    metrics={'memory.current':1000,'memory.peak':2000,'memory.stat':{'anon':100,'file':100},
+             'memory.events':{'oom':0,'oom_kill':0,'oom_group_kill':0,'max':3},'cpu.stat':{'usage_usec':1000,'core_sched.force_idle_usec':0}}
+    export=dict(outcome='passed',unit=unit,source_commit=commit,node_count=1000,cleanup_complete=True,broker_cleanup_complete=True,
+        client_cgroup='0::/system.slice/'+unit.removesuffix('.service')+'-data.service',external_metrics=metrics,
+        phases=[dict(path=p,outcome='passed',completed=40,baseline=1,serial=30,concurrent=10,concurrency=10,errors=0,
+                     semantics_verified=True,body_bytes=50000,body_sha256='a'*64,wall_seconds=2,max_response_seconds=.2) for p in data.PATHS])
+    large=dict(exports=export,routing_rejections=[428,409,422],live_backup_rejected=True,bad_digest_preserved_data=True,
+        restored_exports_verified=True,synthetic_token_not_logged=True,
+        logs=dict(large_bytes=data.LOG_BYTES,allocated_bytes=data.LOG_BYTES,disk_free_before_bytes=8*1024**3,
+                  data_allocated_file_bytes=data.LOG_BYTES+64*4096,large_sha256='a'*64,small_file_count=64,small_file_bytes=4096,
+                  small_sha256={f'small-{n:03d}.log':'a'*64 for n in range(64)}),
+        archive=dict(archive_contains_log_files=True,archive_source='installed app.release_tools',archive_bytes=100000000,
+                     expanded_bytes=data.LOG_BYTES+64*4096,sha256='b'*64,compression_ratio=100000000/(data.LOG_BYTES+64*4096),installed_root_allocated_file_bytes=500000000),
+        recovery={k:True for k in ('business_restored','routing_restored','log_files_restored','database_integrity',
+            'old_sessions_revoked','old_grant_revoked','pre_restore_data_preserved','selected_code_unchanged','temporary_cleanup_complete')})
+    report=dict(outcome='passed',complete=True,unit=unit,source_commit=commit,requested_memory_mib=512,
+        limits={'memory.max':512*1024*1024,'memory.swap.max':0,'cpu.max':'100000 100000'},
+        metrics=copy.deepcopy(metrics),duration_profile='data-backup',service_cgroup='0::/system.slice/'+unit,large_data=large,stages=[dict(name=n,outcome='passed',started_monotonic=clocks[n][0],wall_seconds=clocks[n][1],
+        memory_current_bytes=1000,memory_peak_bytes=2000,cpu_usage_usec=1000,memory_stat=copy.deepcopy(metrics['memory.stat']),memory_events=copy.deepcopy(metrics['memory.events']))
+        for n in DATA_STAGE_NAMES])
+    large['backup_boundaries']=[dict(name=name,unit=unit,source_commit=commit,service_cgroup=report['service_cgroup'],
+        started_monotonic=110+i*.2,finished_monotonic=110.1+i*.2,metrics=copy.deepcopy(metrics))
+        for i,name in enumerate(data.BACKUP_BOUNDARIES)]
+    large.update(lifecycle_boundary_schema=1,lifecycle_boundary_limits=dict(data.LIFECYCLE_LIMITS),
+        lifecycle_boundary_scope=data.LIFECYCLE_SCOPE,lifecycle_boundaries=[])
+    stamps=(122,124,130.1,130.3,130.5,140.1,140.4,150.1,150.5)
+    for index,(name,stamp) in enumerate(zip(data.LIFECYCLE_BOUNDARIES,stamps)):
+        metric=copy.deepcopy(metrics);metric['cpu.stat']['usage_usec']=1400+index*100
+        large['lifecycle_boundaries'].append(dict(name=name,unit=unit,source_commit=commit,
+            service_cgroup=report['service_cgroup'],started_monotonic=stamp,finished_monotonic=stamp+.01,
+            metrics=metric,snapshot_observer_self_cpu_seconds=.0001,snapshot_observer_wall_seconds=.01))
+    report['metrics']['cpu.stat']['usage_usec']=5000
+    return report
+
+
 class LargeDataTests(unittest.TestCase):
     def test_all_1000_nodes_and_saved_rule_semantics(self):
         uuids=[f'11111111-1111-1111-1111-{n+1:012d}' for n in range(1000)]
@@ -65,28 +165,7 @@ class LargeDataTests(unittest.TestCase):
             self.assertTrue(all(verified.values()))
 
     def test_complete_report_rejects_missing_security_data_and_resource_evidence(self):
-        unit='vui-low-resource-'+('a'*32)+'.service';commit='b'*40
-        metrics={'memory.current':1000,'memory.peak':2000,'memory.stat':{'anon':100,'file':100},
-                 'memory.events':{'oom':0,'oom_kill':0,'oom_group_kill':0,'max':0},'cpu.stat':{'usage_usec':1000}}
-        export=dict(outcome='passed',unit=unit,source_commit=commit,node_count=1000,cleanup_complete=True,broker_cleanup_complete=True,
-            client_cgroup='0::/system.slice/'+unit.removesuffix('.service')+'-data.service',external_metrics=metrics,
-            phases=[dict(path=p,outcome='passed',completed=40,baseline=1,serial=30,concurrent=10,concurrency=10,errors=0,
-                         semantics_verified=True,body_bytes=50000,body_sha256='a'*64,wall_seconds=2,max_response_seconds=.2) for p in data.PATHS])
-        large=dict(exports=export,routing_rejections=[428,409,422],live_backup_rejected=True,bad_digest_preserved_data=True,
-            restored_exports_verified=True,synthetic_token_not_logged=True,
-            logs=dict(large_bytes=data.LOG_BYTES,allocated_bytes=data.LOG_BYTES,disk_free_before_bytes=8*1024**3,
-                      data_allocated_file_bytes=data.LOG_BYTES+64*4096,large_sha256='a'*64,small_file_count=64,small_file_bytes=4096,
-                      small_sha256={f'small-{n:03d}.log':'a'*64 for n in range(64)}),
-            archive=dict(archive_contains_log_files=True,archive_source='installed app.release_tools',archive_bytes=100000000,
-                         expanded_bytes=data.LOG_BYTES+64*4096,sha256='b'*64,compression_ratio=100000000/(data.LOG_BYTES+64*4096),installed_root_allocated_file_bytes=500000000),
-            recovery={k:True for k in ('business_restored','routing_restored','log_files_restored','database_integrity',
-                'old_sessions_revoked','old_grant_revoked','pre_restore_data_preserved','selected_code_unchanged','temporary_cleanup_complete')})
-        report=dict(duration_profile='data-backup',service_cgroup='0::/system.slice/'+unit,large_data=large,stages=[dict(name=n,outcome='passed',started_monotonic=10,wall_seconds=1,
-            memory_current_bytes=1000,memory_peak_bytes=2000,cpu_usage_usec=1000,memory_stat=metrics['memory.stat'],memory_events=metrics['memory.events'])
-            for n in data.REQUIRED_STAGES])
-        large['backup_boundaries']=[dict(name=name,unit=unit,source_commit=commit,service_cgroup=report['service_cgroup'],
-            started_monotonic=10+i*.2,finished_monotonic=10.1+i*.2,metrics=copy.deepcopy(metrics))
-            for i,name in enumerate(data.BACKUP_BOUNDARIES)]
+        unit=UNIT;commit=COMMIT;report=complete_data_report()
         data.validate_complete(report,unit,commit)
         for kind in ('missing','order','source','cgroup','clock','nan','metrics','peak','events','cpu','decreased'):
             bad=copy.deepcopy(report);rows=bad['large_data']['backup_boundaries']
@@ -94,11 +173,11 @@ class LargeDataTests(unittest.TestCase):
             elif kind=='order':rows.reverse()
             elif kind=='source':rows[1]['source_commit']='c'*40
             elif kind=='cgroup':rows[1]['service_cgroup']='0::/another.service'
-            elif kind=='clock':rows[1]['finished_monotonic']=12
+            elif kind=='clock':rows[1]['finished_monotonic']=112
             elif kind=='nan':rows[1]['started_monotonic']=float('nan')
             elif kind=='metrics':del rows[1]['metrics']['memory.stat']['file']
             elif kind=='peak':rows[1]['metrics']['memory.peak']=3000
-            elif kind=='events':rows[1]['metrics']['memory.events']['max']=1
+            elif kind=='events':rows[1]['metrics']['memory.events']['max']=4
             elif kind=='cpu':rows[-1]['metrics']['cpu.stat']['usage_usec']=2001
             elif kind=='decreased':rows[1]['metrics']['cpu.stat']['usage_usec']=999
             with self.subTest(boundary=kind),self.assertRaises(RuntimeError):data.validate_complete(bad,unit,commit)
