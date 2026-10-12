@@ -1,5 +1,31 @@
 # V-UI 0.4.7
 
+## 2026-10-12 集成候选更新（未发布）
+
+本候选在产品 `0.4.7` 上沿历史继承 PR #28–33 的低资源、后台与菜单工作，详见[完整矩阵](INTEGRATED_OPERATIONS_CANDIDATE.md)。它们尚未合并，当前主线仍为 `a6aa84d`；本次未创建 tag/Draft Release/公开 Release，未向 Release 上传或晋升资产，也未操作用户主机。
+
+### 已实现的集成范围
+
+- 低资源：流式完整读取、私有文件缓存生命周期、GNU allocator、状态轮询及恢复保护，保留完整摘要/成员/路径/权限与数据保全检查
+- 网页后台：不支持的主机安全控制改为明确的只读说明，覆盖键盘、重复点击/导航及会话过期；不把说明入口视为实际封禁能力
+- 包内服务用户菜单：只读状态、安装记录、明确选择后的完整校验、可信本地候选准备，不自动提权
+- 全局受管菜单：管理员须从完整独立可信 kit [显式安装 root-owned 控制组件](MANAGED_OPERATIONS.md)，再运行 `sudo /usr/local/sbin/v-ui`；默认 `install.sh` 不添加全局入口。systemd 支持启停/重启、停服备份、恢复、候选激活/代码回退和中断恢复；OpenRC 只查询与纯候选准备，拒绝启停及依赖停服的数据写动作。单独切换 CURRENT 不更新 root-owned 控制组件、launcher、安装记录或服务模板
+- VMess 测试：两客户端 CA/SNI 负向改用既有有界拒绝证据收集器，移除被动 2 秒轮询；仍要求同一新日志行中的真实 x509/指定原因、零应用送达、无 DIRECT、停进程后的送达检查及失败清理。本地合成 RED 只证明旧调用方的契约缺口，不能唯一归因历史真实网络失败
+
+### 准确证据与仍待完成的门槛
+
+[PR #33](https://github.com/ForceMind/V-UI/pull/33) 的文档基线 `09f2cf4ec39adfbb345d8aa40b94558c64c93936` 已完成普通八组、11 jobs、119 steps 全部 attempt 1，并核验 9 个原始 artifact。真实受管 root/systemd 资格仍准确属于 `f50942f1b399c7c397df532d04f9143e2527aaa8` 的 [run 38203515936](https://github.com/ForceMind/V-UI/actions/runs/38203515936)：空白临时 Ubuntu 24.04 x86_64/systemd/cgroup v2、11 个必需阶段（含 cleanup）及自有资源清理确认；没有在 09f2 重跑 root。本次含测试修复的新 head 尚待独立审查、自己的普通八组 CI 和同提交原件核验，不能继承旧提交的通过结论或预填未来 SHA。
+
+[f509 收口](MANAGED_OPERATIONS_CLOSURE_20261012.md)保留首次 VMess x509 原因缺失、unchanged-code attempt 2、旧 root harness 失败及清理未确认事实；后续通过不抹去它们。普通四目标包消费与真实 root/init 分开记录，合成同代码 A→B→A 不等于真实跨版本/schema 迁移，构造中断恢复不等于真实断电实验。
+
+[低资源收口](LOW_RESOURCE_CLOSURE_20261011.md)仍只支持有界软件结论：历史大数据用例已到 512 MiB、零余量，短 cgroup smoke 不能拼成真实 1 vCPU/512 MiB 整机或连续 24 小时完整负载验收；160 MiB 完整空载/320 MiB 安装升级预算、其他平台真实 root/init 仍未达证。协议、固定 pin、四 Linux 目标和 SNI/网络范围不扩展，UDP/DNS 等后续阶段未实现，XHTTP/HTTPUpgrade 公开导出仍阻断。
+
+[人工发布流程](RELEASING.md)现按发布脚本聚合 19 项资产；默认 `publish=false` 也会创建 Draft Release 并上传资产，绝非 dry-run。候选验收不授权合并、tag、Release、附件晋升或用户主机部署。
+
+## 2026-10-06 协议发布准备记录（历史）
+
+以下保留当时状态和各阶段证据；其中“本次/当前”指原记录，不替代上述新候选的准确验收。
+
 REALITY/Vision 已由 [PR #24](https://github.com/ForceMind/V-UI/pull/24) 完成独立审查、准确候选八组、正常合并和准确主线八组，见[收口记录](REALITY_VISION_CLOSURE_047.md)。本文件为发布准备说明；截至 2026-10-06 本次检查，没有创建正式 Release、附件晋升或生产部署。[PR #25 XHTTP 刻画](XHTTP_CHARACTERIZATION_CLOSURE_048.md)也已完成准确候选/主线验收，不改变产品版本 0.4.7 或公共支持。产品范围冻结；本次最终文档提交的 CI 与同提交四目标附件核验以对应 PR/发布准备证据为准，本文不预先声明通过，也不能以旧提交的结果替代。
 
 ## 继承基线

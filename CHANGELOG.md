@@ -1,5 +1,17 @@
 # 变更日志
 
+## 2026-10-12 — 0.4.7 低资源、后台与完整运维集成候选（未发布）
+
+- 同一候选沿历史继承 PR #28–33 的低资源软件修复、后台安全中心修正、服务用户菜单和受管系统菜单；`VERSION` 仍为 `0.4.7`。这些 PR 仍未合并，主线保持 `a6aa84d`，完成范围见[集成矩阵](docs/INTEGRATED_OPERATIONS_CANDIDATE.md)
+- 低资源部分保留流式完整读取、私有文件缓存生命周期、GNU allocator 和状态轮询优化及恢复保护；后台把不支持的主机安全控制明确为只读说明，保留键盘和重复导航回归。包内非 root 菜单提供状态、安装记录、显式完整校验及可信本地候选准备
+- 全局 `sudo /usr/local/sbin/v-ui` 须由管理员从完整独立可信 kit 显式安装 root-owned 控制组件；默认 `install.sh` 不添加此入口。systemd 提供启停/重启、停服备份、恢复、候选激活/代码回退及中断恢复；OpenRC 仅查询与纯候选准备，拒绝启停及依赖停服的数据写动作。CURRENT 切换不更新 root-owned 系统组件，详见[受管控制契约](docs/MANAGED_OPERATIONS.md)
+- [PR #33](https://github.com/ForceMind/V-UI/pull/33) 的文档基线 `09f2cf4ec39adfbb345d8aa40b94558c64c93936` 已完成普通八组、11 jobs、119 steps 全部 attempt 1 与 9 个原始 artifact 核验；真实 root/systemd 资格仍只属于 `f50942f` 的 [run 38203515936](https://github.com/ForceMind/V-UI/actions/runs/38203515936)，11 个必需阶段含 cleanup，且自有资源清理确认。没有 09f2 root 重验，也不把这些旧结果转移给本次新 head
+- 本次测试修复将 VMess 两客户端 CA/SNI 的被动 2 秒轮询替换为既有有界拒绝证据收集器；保持同一新日志行上的真实 x509/指定原因、零应用送达、无 DIRECT、停进程后的送达检查及失败清理。本地合成 RED 证明旧调用方不满足该重试契约，不证明历史真实网络失败的唯一原因。本次新 head 的独立审查、普通八组与同提交原件仍待完成，不预填未来 SHA 或通过结论
+- 历史 VMess 原因缺失、root harness 首次失败及 unchanged-code 重跑保持原判，见[受管候选收口](docs/MANAGED_OPERATIONS_CLOSURE_20261012.md)。[低资源收口](docs/LOW_RESOURCE_CLOSURE_20261011.md)的大数据用例达到 512 MiB、零余量；真实 1 vCPU/512 MiB 整机、24 小时完整负载、160/320 MiB 工程预算、其他平台真实 root/init、跨版本/schema 迁移与真实断电恢复仍未获资格
+- 保持已验收协议边界、固定核心 pin 与四 Linux 目标；不扩展 UDP/DNS、SNI 能力或网络范围，XHTTP/HTTPUpgrade 公开导出仍阻断。当前发布聚合为 [19 项资产](docs/RELEASING.md#发布资产)；`publish=false` 仍会创建 Draft Release 并上传，不是 dry-run。本次未合并 master 或创建 tag/Release，未向 Release 上传或晋升资产，也未操作用户主机
+
+以下历史条目保留当时的候选、待验收与失败状态，不覆盖上述集成候选进展。
+
 ## 2026-10-06 — 0.4.7 打包范围说明修正（发布准备）
 
 - 修正打包 UI 的 Xray REALITY 警告：Xray 组合仍未验收、不能公开导出；sing-box REALITY/Vision 的既有有界验收按兼容矩阵说明，保留原条件与成功提示

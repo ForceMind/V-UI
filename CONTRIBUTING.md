@@ -108,6 +108,29 @@ TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合
 仅 HTTP/TCP；sing-box `network: tcp`，Mihomo TUIC adapter 硬编码 UDP 能力，省略无效 `udp: false`，不称关闭 UDP。QUIC 需要节点 UDP 可达，应用 UDP 未验收。固定 pin/构建不变，无真实 CA/防火墙变更、tag/Release、附件晋升或部署；完整边界见[TUIC 契约](docs/TUIC_046.md)。
 
 
+## VMess TLS 拒绝取证回归（2026-10-12 候选）
+
+历史 [f509 链路 attempt 1](https://github.com/ForceMind/V-UI/actions/runs/38193879566/job/114632226906)
+缺少必需 x509/unknown-authority 日志，unchanged-code attempt 2 才通过；
+[原件与边界](docs/MANAGED_OPERATIONS_CLOSURE_20261012.md#首次失败保持原判)不改判。
+本候选修复既有测试的一次请求后被动 2 秒等待，不改变产品、固定核心、TLS 校验或公开协议。
+
+- 四条实际 VMess 调用（Mihomo/sing-box × CA/SNI）复用既有有界取证 helper。
+  首个请求前捕获独立客户端日志边界，只接受起点位于该边界之后的同一日志行同时包含 x509 与指定原因；
+  旧行未完成的追加后缀、分散在两行的片段、超时或普通 TLS 启动日志均不够。
+- 使用 helper 原有 12 秒重试启动窗口；过期后不再启动请求。在期限内启动的请求
+  可以稍后返回真实原因，因此不称整个测试严格 12 秒完成；单次 HTTP 请求仍有原 3 秒超时，
+  客户端 stop 保留原有 TERM 等待 5 秒和必要 KILL 等待 3 秒。
+- 所有重试共享固定零应用送达基线，不因重试或晚到请求重新计数；成功或异常都停止客户端，
+  stop 自身报错仍检查最终计数。原请求/取证异常优先保留，清理异常以 cause 链保留，
+  不让清理检查覆盖原始失败。成功输出选同一条具体原因行。
+- `test_vmess_rejection_evidence.py` 直接调用四个实际测试方法，以确定性假时钟、假请求及临时日志
+  复现等待、旧日志、送达和清理边界；它不启动真实核心，也不证明原 CI 网络失败的唯一原因。
+  `test_tls_rejection_evidence.py` 另验共享 helper 的新行边界；原 TUIC/REALITY/XHTTP 负例保持。
+- 本地入口：`PYTHONPATH=.:tests python -m unittest test_vmess_rejection_evidence test_tls_rejection_evidence test_tuic_rejection_evidence test_reality_rejection_evidence test_xhttp_contract -v`。
+  实际二进制链路仍由准确最终提交的原 loopback CI 验证；默认 skip、确定性单测和历史真实链路分别记录，
+  不把一次绿色 CI 或重跑声称为任意调度/网络下永久无失败。本候选结果另记对应 PR，不预填未来 head。
+
 ## v0.4.7 REALITY / Vision 已验收回归
 
 最终候选 `70cc2f4` 与正常签名 master `6b049262` 已完成独立审查及准确八组验收，详见[收口](docs/REALITY_VISION_CLOSURE_047.md)。首次 master 链路继承 VMess/Mihomo CA 测试的被动 2 秒轮询未捕获必需 x509 原因，整组失败保留；unchanged-code attempt 2 成功不证明此不稳定性已永久修复。

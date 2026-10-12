@@ -23,6 +23,7 @@ from loopback_helpers import (
     unused_port,
     http_through,
     CoreProcess,
+    require_rejection_evidence,
 )
 
 
@@ -212,15 +213,39 @@ class VMessLoopbackTests(unittest.TestCase):
             "Failed VMess proxy must not reach target through DIRECT",
         )
 
-    def wait_tls_evidence(self,path):
-        deadline=time.monotonic()+2
-        log=""
-        while time.monotonic()<deadline:
-            log=path.read_text().lower()
-            if "x509" in log:
-                return log
-            time.sleep(.05)
-        return log
+    def stop_tls_client(self,process):
+        stop_failure=None
+        try:
+            process.stop()
+        except BaseException as failure:
+            stop_failure=failure
+        try:
+            self.assertEqual(len(self.requests),0,
+                             "Rejected TLS request reached the target (checked after client stop)")
+        except BaseException as delivery_failure:
+            if stop_failure is not None:
+                raise stop_failure from delivery_failure
+            raise
+        if stop_failure is not None:
+            raise stop_failure
+
+    def assert_tls_rejection(self,process,port,reason,host="forced.example.test"):
+        try:
+            offset=len(process.log_path.read_text(errors="replace"))
+            log=require_rejection_evidence(
+                self,process.log_path,
+                lambda: self.assert_failure_without_direct_fallback(port,host),
+                self.requests,("x509",reason),expected_count=0,log_offset=offset,
+                label="x509 rejection",
+            )
+        except BaseException as failure:
+            try:
+                self.stop_tls_client(process)
+            except BaseException as cleanup_failure:
+                raise failure from cleanup_failure
+            raise
+        self.stop_tls_client(process)
+        return next(line for line in log.splitlines() if "x509" in line and reason in line)
 
     def test_real_vmess_tls_proxy_in_mihomo_and_public_singbox_subscription(self):
         grant=self.issue_grant()
@@ -248,12 +273,8 @@ class VMessLoopbackTests(unittest.TestCase):
 
     def test_untrusted_certificate_is_rejected(self):
         process,port=self.start_mihomo(trust=False)
-        self.assert_failure_without_direct_fallback(port)
-        log=self.wait_tls_evidence(self.root/("mihomo-"+str(port)+".log"))
-        process.stop()
-        self.assertIn("x509",log)
-        self.assertIn("unknown authority",log)
-        print("VMess/TLS Mihomo untrusted CA: "+next(line for line in log.splitlines() if "x509" in line))
+        evidence=self.assert_tls_rejection(process,port,"unknown authority")
+        print("VMess/TLS Mihomo untrusted CA: "+evidence)
 
     def test_wrong_server_name_is_rejected(self):
         with database.SessionLocal() as db:
@@ -264,12 +285,8 @@ class VMessLoopbackTests(unittest.TestCase):
             row.stream_settings=stream
             db.commit()
         process,port=self.start_mihomo()
-        self.assert_failure_without_direct_fallback(port)
-        log=self.wait_tls_evidence(self.root/("mihomo-"+str(port)+".log"))
-        process.stop()
-        self.assertIn("x509",log)
-        self.assertIn("wrong.example.test",log)
-        print("VMess/TLS Mihomo wrong SNI: "+next(line for line in log.splitlines() if "x509" in line))
+        evidence=self.assert_tls_rejection(process,port,"wrong.example.test")
+        print("VMess/TLS Mihomo wrong SNI: "+evidence)
 
 
     def test_wrong_uuid_is_rejected_by_singbox_without_direct_fallback(self):
@@ -284,12 +301,8 @@ class VMessLoopbackTests(unittest.TestCase):
 
     def test_untrusted_certificate_is_rejected_by_singbox(self):
         process,port=self.start_singbox_client(trust=False)
-        self.assert_failure_without_direct_fallback(port,host="127.0.0.1")
-        log=self.wait_tls_evidence(process.log_path)
-        process.stop()
-        self.assertIn("x509",log)
-        self.assertIn("unknown authority",log)
-        print("VMess/TLS sing-box untrusted CA: "+next(line for line in log.splitlines() if "x509" in line))
+        evidence=self.assert_tls_rejection(process,port,"unknown authority",host="127.0.0.1")
+        print("VMess/TLS sing-box untrusted CA: "+evidence)
 
     def test_wrong_server_name_is_rejected_by_singbox(self):
         with database.SessionLocal() as db:
@@ -300,12 +313,8 @@ class VMessLoopbackTests(unittest.TestCase):
             row.stream_settings=stream
             db.commit()
         process,port=self.start_singbox_client()
-        self.assert_failure_without_direct_fallback(port,host="127.0.0.1")
-        log=self.wait_tls_evidence(process.log_path)
-        process.stop()
-        self.assertIn("x509",log)
-        self.assertIn("wrong.example.test",log)
-        print("VMess/TLS sing-box wrong SNI: "+next(line for line in log.splitlines() if "x509" in line))
+        evidence=self.assert_tls_rejection(process,port,"wrong.example.test",host="127.0.0.1")
+        print("VMess/TLS sing-box wrong SNI: "+evidence)
 
 
 if __name__=="__main__":
