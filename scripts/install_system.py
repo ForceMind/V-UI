@@ -6,7 +6,6 @@ from contextlib import contextmanager
 import fcntl
 import hashlib
 import http.client
-import io
 import ipaddress
 import json
 import os
@@ -36,6 +35,8 @@ MARKER = '# Managed by V-UI guarded installer v1\n'
 UNIT_DIR = Path('/etc/systemd/system')
 UNITS = ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')
 MAX_ARCHIVE = 850_000_000
+INSTALL_LOCK = Path('/run/lock/v-ui-install.lock')
+STREAM_CHUNK = 1024 * 1024
 # Compatibility names for older tooling/tests; new installs select a backend dynamically.
 MARKER=service_support.MARKER
 UNIT_DIR=service_support.SYSTEMD_DIR
@@ -54,6 +55,52 @@ class InstallError(RuntimeError):
     pass
 
 
+@contextmanager
+def _installation_lock(path: Path, *, owner=0):
+    """Share the fixed installer/controller lease without following links.
+
+    ``owner`` is an internal fixture seam, never a command-line option. Production
+    callers always use the root owner and the fixed INSTALL_LOCK. A root-owned
+    sticky lock directory is allowed: it protects an existing root-owned leaf
+    even on distributions whose /run/lock is mode 1777.
+    """
+    path = Path(path)
+    if not path.is_absolute() or '..' in path.parts:
+        raise InstallError('Invalid installation lock path')
+    parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    lock = None
+    try:
+        parts = path.parent.parts[1:]
+        for index in range(len(parts) + 1):
+            info = os.fstat(parent)
+            sticky_parent = index == len(parts) and bool(info.st_mode & stat.S_ISVTX)
+            if info.st_uid not in (0, owner) or (info.st_mode & 0o022 and not sticky_parent):
+                raise InstallError('Installation lock directory is not trusted')
+            if index < len(parts):
+                child = os.open(parts[index], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                dir_fd=parent)
+                os.close(parent)
+                parent = child
+        lock = os.open(path.name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                       0o600, dir_fd=parent)
+        info = os.fstat(lock)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != owner or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) != 0o600):
+            raise InstallError('Installation lock is not a private regular owner file')
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise InstallError('Another installer or managed operation is running') from None
+        named = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        if (named.st_dev, named.st_ino) != (info.st_dev, info.st_ino):
+            raise InstallError('Installation lock identity changed')
+        yield
+    finally:
+        if lock is not None:
+            os.close(lock)
+        os.close(parent)
+
+
 def command(args, **kwargs):
     return subprocess.run([str(x) for x in args], check=True, **kwargs)
 
@@ -64,41 +111,131 @@ def safe_path(name):
             and all(part not in ('', '.', '..') for part in name.split('/')))
 
 
-def verify_archive(path, sha):
+class _PrivateArchiveFile:
+    """Bound cache for operation-owned immutable files, never live user data.
+
+    Cache advice is optional. Writeback errors still fail the operation; an
+    unsupported advisory syscall only loses the optimization. Keep this helper
+    identical in the standalone installer and release controller.
+    """
+    def __init__(self, handle):
+        self.handle = handle
+        self.pending = 0
+        self.read_pending = 0
+        self.advice = getattr(os, 'posix_fadvise', None)
+        self.dontneed = getattr(os, 'POSIX_FADV_DONTNEED', None)
+        self.page_size = os.sysconf('SC_PAGESIZE')
+
+    def __getattr__(self, name):
+        return getattr(self.handle, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return self.handle.__exit__(*args)
+
+    def _discard(self, offset, size):
+        if self.advice is not None and self.dontneed is not None:
+            try:
+                self.advice(self.handle.fileno(), offset, size, self.dontneed)
+            except OSError:
+                # Some filesystems/kernels do not implement advisory eviction.
+                pass
+
+    def finish_writes(self):
+        self.handle.flush()
+        if self.pending and self.advice is not None and self.dontneed is not None:
+            os.fsync(self.handle.fileno())  # Dirty pages cannot be discarded.
+            self._discard(0, 0)
+        self.pending = 0
+
+    def write(self, data):
+        count = self.handle.write(data)
+        self.pending += count
+        if self.pending >= 8 * 1024 * 1024:
+            self.finish_writes()
+        return count
+
+    def read(self, size=-1):
+        if size == 0:
+            return self.handle.read(0)  # A zero-byte request is not EOF.
+        offset = self.handle.tell()
+        data = self.handle.read(size)
+        # Revisit the consumed prefix in batches: a previous hint can race
+        # kernel readahead/LRU insertion. Partial trailing pages are retained.
+        self.read_pending += len(data)
+        end = ((offset + len(data)) // self.page_size) * self.page_size
+        if not data:
+            self._discard(0, 0)
+        elif self.read_pending >= 8 * 1024 * 1024 and end:
+            self._discard(0, end)
+            self.read_pending = 0
+        return data
+
+
+def verify_archive(path, sha, *, temp_dir=None):
     if not re.fullmatch(r'[a-f0-9]{64}', sha or ''):
         raise InstallError('A trusted 64-character SHA-256 is required')
-    with Path(path).open('rb') as handle:
-        raw = handle.read(MAX_ARCHIVE + 1)
-    if len(raw) > MAX_ARCHIVE or hashlib.sha256(raw).hexdigest() != sha:
-        raise InstallError('Bundle checksum mismatch; nothing was installed')
-    archive = zipfile.ZipFile(io.BytesIO(raw))
-    entries = archive.infolist()
-    names = [item.filename for item in entries]
-    if (len(names) > 10000 or len(set(names)) != len(names) or not all(safe_path(n) for n in names)
-            or sum(e.file_size for e in entries) > 1_100_000_000):
-        raise InstallError('Unsafe bundle paths or size')
-    for entry in entries:
-        if entry.is_dir() or stat.S_IFMT(entry.external_attr >> 16) not in (0, stat.S_IFREG) or entry.flag_bits & 1:
-            raise InstallError('Bundle contains a link, directory or encrypted entry')
-    if 'MANIFEST.json' not in names or archive.getinfo('MANIFEST.json').file_size > 4_000_000:
-        raise InstallError('Missing or oversized manifest')
-    meta = json.loads(archive.read('MANIFEST.json'))
-    if (not isinstance(meta, dict) or meta.get('schema') != 1 or meta.get('kind') != 'release'
-            or meta.get('platform') != 'linux-multi-cpython312'
-            or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,100}', meta.get('release_id', ''))):
-        raise InstallError('Not a supported V-UI bundle')
-    if not isinstance(meta.get('files'), dict) or set(names) != set(meta['files']) | {'MANIFEST.json'}:
-        raise InstallError('Manifest file set mismatch')
-    for name, info in meta['files'].items():
-        content = archive.read(name)
-        if info['mode'] not in (0o600, 0o700) or len(content) != info['size'] or hashlib.sha256(content).hexdigest() != info['sha256']:
-            raise InstallError('Payload checksum or mode mismatch')
-    if platform_support.target_key() not in meta.get('targets', []):
-        raise InstallError('Bundle does not contain this Linux architecture/libc target: '+platform_support.target_key())
-    for name in ('scripts/deploy.py', 'app/release_tools.py', 'deploy/system_launcher.py'):
-        if name not in meta['files']:
-            raise InstallError('Bundle predates the managed one-command installer')
-    return raw, archive, meta
+    # A private file-backed snapshot preserves digest-before-use even if the
+    # caller replaces or modifies the original bundle while installation runs.
+    # Select a disk-backed directory on low-memory hosts: /var/tmp can also
+    # be tmpfs. The unlinked 0600 file lives until install/dry-run exits.
+    snapshot = _PrivateArchiveFile(tempfile.TemporaryFile(prefix='vui-verified-', dir=temp_dir or '/var/tmp'))
+    archive = None
+    try:
+        checksum = hashlib.sha256(); size = 0
+        with Path(path).open('rb') as handle:
+            while True:
+                chunk = handle.read(min(STREAM_CHUNK, MAX_ARCHIVE + 1 - size))
+                if not chunk: break
+                size += len(chunk)
+                if size > MAX_ARCHIVE:
+                    raise InstallError('Bundle checksum mismatch; nothing was installed')
+                checksum.update(chunk); snapshot.write(chunk)
+        if checksum.hexdigest() != sha:
+            raise InstallError('Bundle checksum mismatch; nothing was installed')
+        snapshot.finish_writes()
+        snapshot.seek(0)
+        archive = zipfile.ZipFile(snapshot)
+        entries = archive.infolist()
+        names = [item.filename for item in entries]
+        if (len(names) > 10000 or len(set(names)) != len(names) or not all(safe_path(n) for n in names)
+                or sum(e.file_size for e in entries) > 1_100_000_000):
+            raise InstallError('Unsafe bundle paths or size')
+        for entry in entries:
+            if entry.is_dir() or stat.S_IFMT(entry.external_attr >> 16) not in (0, stat.S_IFREG) or entry.flag_bits & 1:
+                raise InstallError('Bundle contains a link, directory or encrypted entry')
+        if 'MANIFEST.json' not in names or archive.getinfo('MANIFEST.json').file_size > 4_000_000:
+            raise InstallError('Missing or oversized manifest')
+        meta = json.loads(archive.read('MANIFEST.json'))
+        if (not isinstance(meta, dict) or meta.get('schema') != 1 or meta.get('kind') != 'release'
+                or meta.get('platform') != 'linux-multi-cpython312'
+                or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,100}', meta.get('release_id', ''))):
+            raise InstallError('Not a supported V-UI bundle')
+        if not isinstance(meta.get('files'), dict) or set(names) != set(meta['files']) | {'MANIFEST.json'}:
+            raise InstallError('Manifest file set mismatch')
+        for name, info in meta['files'].items():
+            if (type(info['size']) is not int or info['size'] != archive.getinfo(name).file_size
+                    or info['mode'] not in (0o600, 0o700)):
+                raise InstallError('Payload size or mode mismatch')
+            checksum = hashlib.sha256(); size = 0
+            with archive.open(name) as content:
+                for chunk in iter(lambda: content.read(STREAM_CHUNK), b''):
+                    size += len(chunk); checksum.update(chunk)
+            if info['mode'] not in (0o600, 0o700) or size != info['size'] or checksum.hexdigest() != info['sha256']:
+                raise InstallError('Payload checksum or mode mismatch')
+        if platform_support.target_key() not in meta.get('targets', []):
+            raise InstallError('Bundle does not contain this Linux architecture/libc target: '+platform_support.target_key())
+        for name in ('scripts/deploy.py', 'app/release_tools.py', 'deploy/system_launcher.py'):
+            if name not in meta['files']:
+                raise InstallError('Bundle predates the managed one-command installer')
+        snapshot.seek(0)
+        return snapshot, archive, meta
+    except Exception:
+        if archive is not None: archive.close()
+        snapshot.close()
+        raise
 
 
 def fqdn(value):
@@ -216,7 +353,11 @@ def write_root_file(path, raw, mode=0o644):
     fd, name = tempfile.mkstemp(prefix='.vui-', dir=path.parent)
     try:
         with os.fdopen(fd, 'wb') as handle:
-            handle.write(raw); handle.flush(); os.fsync(handle.fileno())
+            if hasattr(raw, 'read'):
+                shutil.copyfileobj(raw, handle, STREAM_CHUNK)
+            else:
+                handle.write(raw)
+            handle.flush(); os.fsync(handle.fileno())
         os.chmod(name, mode); os.replace(name, path)
     finally:
         if os.path.exists(name): os.unlink(name)
@@ -336,7 +477,12 @@ def https_health(config, cafile=None):
 
 def install(args):
     validate_options(args)
-    raw, archive, meta = verify_archive(args.bundle, args.sha256)
+    snapshot, archive, meta = verify_archive(args.bundle, args.sha256, temp_dir=getattr(args, 'archive_temp_dir', None))
+    with snapshot, archive:
+        return install_verified(args, snapshot, archive, meta)
+
+
+def install_verified(args, snapshot, archive, meta):
     existing=CONFIG.exists()
     info=check_platform()
     manager=info['init']
@@ -403,10 +549,18 @@ def install(args):
     # A tiny verified controller is extracted as data; it is never executed as root.
     with tempfile.TemporaryDirectory(prefix='.installer-', dir=ROOT) as directory:
         work = Path(directory); os.chown(work, uid, gid)
-        bundle = work / 'bundle.zip'; bundle.write_bytes(raw); os.chmod(bundle, 0o600); os.chown(bundle, uid, gid)
+        bundle = work / 'bundle.zip'
+        snapshot.seek(0)
+        with _PrivateArchiveFile(bundle.open('xb')) as output:
+            shutil.copyfileobj(snapshot, output, STREAM_CHUNK)
+            output.finish_writes()
+        os.chmod(bundle, 0o600); os.chown(bundle, uid, gid)
         for name in ('scripts/deploy.py', 'app/release_tools.py'):
             path = work/name; path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            os.chown(path.parent, uid, gid); path.write_bytes(archive.read(name)); os.chmod(path, 0o600); os.chown(path, uid, gid)
+            os.chown(path.parent, uid, gid)
+            with archive.open(name) as source, path.open('xb') as output:
+                shutil.copyfileobj(source, output, STREAM_CHUNK)
+            os.chmod(path, 0o600); os.chown(path, uid, gid)
         controller = work/'scripts/deploy.py'
         prepared = ROOT/'releases'/meta['release_id']/'READY.json'
         if not prepared.exists():
@@ -427,7 +581,8 @@ def install(args):
             release=ROOT/'releases'/meta['release_id']
             runtime_python=release/'runtime/python/bin/python3'
             config['bootstrap_python']=str(runtime_python)
-            write_root_file(CONTROL/'launcher.py', archive.read('deploy/system_launcher.py'))
+            with archive.open('deploy/system_launcher.py') as source:
+                write_root_file(CONTROL/'launcher.py', source)
             for path,(value,mode) in service_support.service_files(config).items():
                 write_root_file(path,value.encode(),mode)
             write_root_file(CONFIG, json.dumps({**config, 'ready': False}, indent=2).encode())
@@ -472,6 +627,7 @@ def install(args):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--bundle', required=True, type=Path); p.add_argument('--sha256', required=True)
+    p.add_argument('--archive-temp-dir', type=Path, help='Existing disk-backed directory for the private verification snapshot (default: /var/tmp; avoid tmpfs on low-memory hosts)')
     p.add_argument('--domain'); p.add_argument('--email'); p.add_argument('--admin', default='admin')
     p.add_argument('--port',type=int,default=8443);p.add_argument('--bind',default='0.0.0.0')
     p.add_argument('--node-port',type=int,default=10443,help='Default node TCP port to preflight/open')
@@ -499,9 +655,7 @@ def main():
         return
     if os.geteuid() == 0:
         os.umask(0o077)
-        with open('/run/lock/v-ui-install.lock', 'a+') as lock:
-            try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError: raise InstallError('Another installer is running') from None
+        with _installation_lock(INSTALL_LOCK):
             install(args)
     else:
         if not args.dry_run: raise InstallError('Run this guarded setup with sudo')

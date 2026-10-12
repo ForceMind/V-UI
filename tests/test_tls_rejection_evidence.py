@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from loopback_helpers import require_tls_rejection
+from loopback_helpers import require_tls_rejection, require_rejection_evidence
 
 
 class TLSRejectionEvidenceTests(unittest.TestCase):
@@ -86,6 +86,39 @@ class TLSRejectionEvidenceTests(unittest.TestCase):
             raise RuntimeError('fixture failure')
         with self.assertRaisesRegex(RuntimeError, 'fixture failure'):
             self.observe(unexpected)
+
+    def test_offset_inside_old_line_does_not_accept_its_appended_reason(self):
+        old = 'old unfinished configuration: '
+        self.path.write_text(old + 'x509: unknown authority\n')
+        with self.assertRaisesRegex(AssertionError, 'No actual credential rejection'):
+            require_rejection_evidence(self, self.path, lambda: None, self.requests,
+                ('x509', 'unknown authority'), log_offset=len(old), timeout=3)
+
+    def test_complete_line_after_partial_old_line_can_supply_the_reason(self):
+        old = 'old unfinished configuration: '
+        self.path.write_text(old + 'x509: unrelated old-line tail\n')
+        calls = []
+        def request():
+            calls.append(1)
+            with self.path.open('a') as stream:
+                stream.write('x509: unknown authority\n')
+        log = require_rejection_evidence(self, self.path, request, self.requests,
+            ('x509', 'unknown authority'), log_offset=len(old), timeout=3)
+        self.assertEqual(calls, [1])
+        self.assertNotIn('old-line tail', log)
+        self.assertIn('x509: unknown authority', log)
+
+    def test_offsets_on_or_after_newline_accept_only_the_following_line(self):
+        old = 'x509: obsolete cause\n'
+        self.path.write_text(old + 'x509: unknown authority\n')
+        for offset in (len(old) - 1, len(old)):
+            with self.subTest(offset=offset):
+                log = require_rejection_evidence(self, self.path,
+                    lambda: self.fail('A complete fresh cause is already present'),
+                    self.requests, ('x509', 'unknown authority'),
+                    log_offset=offset, timeout=3)
+                self.assertNotIn('obsolete cause', log)
+                self.assertIn('x509: unknown authority', log)
 
 
 if __name__ == '__main__':

@@ -108,6 +108,29 @@ TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合
 仅 HTTP/TCP；sing-box `network: tcp`，Mihomo TUIC adapter 硬编码 UDP 能力，省略无效 `udp: false`，不称关闭 UDP。QUIC 需要节点 UDP 可达，应用 UDP 未验收。固定 pin/构建不变，无真实 CA/防火墙变更、tag/Release、附件晋升或部署；完整边界见[TUIC 契约](docs/TUIC_046.md)。
 
 
+## VMess TLS 拒绝取证回归（2026-10-12 候选）
+
+历史 [f509 链路 attempt 1](https://github.com/ForceMind/V-UI/actions/runs/38193879566/job/114632226906)
+缺少必需 x509/unknown-authority 日志，unchanged-code attempt 2 才通过；
+[原件与边界](docs/MANAGED_OPERATIONS_CLOSURE_20261012.md#首次失败保持原判)不改判。
+本候选修复既有测试的一次请求后被动 2 秒等待，不改变产品、固定核心、TLS 校验或公开协议。
+
+- 四条实际 VMess 调用（Mihomo/sing-box × CA/SNI）复用既有有界取证 helper。
+  首个请求前捕获独立客户端日志边界，只接受起点位于该边界之后的同一日志行同时包含 x509 与指定原因；
+  旧行未完成的追加后缀、分散在两行的片段、超时或普通 TLS 启动日志均不够。
+- 使用 helper 原有 12 秒重试启动窗口；过期后不再启动请求。在期限内启动的请求
+  可以稍后返回真实原因，因此不称整个测试严格 12 秒完成；单次 HTTP 请求仍有原 3 秒超时，
+  客户端 stop 保留原有 TERM 等待 5 秒和必要 KILL 等待 3 秒。
+- 所有重试共享固定零应用送达基线，不因重试或晚到请求重新计数；成功或异常都停止客户端，
+  stop 自身报错仍检查最终计数。原请求/取证异常优先保留，清理异常以 cause 链保留，
+  不让清理检查覆盖原始失败。成功输出选同一条具体原因行。
+- `test_vmess_rejection_evidence.py` 直接调用四个实际测试方法，以确定性假时钟、假请求及临时日志
+  复现等待、旧日志、送达和清理边界；它不启动真实核心，也不证明原 CI 网络失败的唯一原因。
+  `test_tls_rejection_evidence.py` 另验共享 helper 的新行边界；原 TUIC/REALITY/XHTTP 负例保持。
+- 本地入口：`PYTHONPATH=.:tests python -m unittest test_vmess_rejection_evidence test_tls_rejection_evidence test_tuic_rejection_evidence test_reality_rejection_evidence test_xhttp_contract -v`。
+  实际二进制链路仍由准确最终提交的原 loopback CI 验证；默认 skip、确定性单测和历史真实链路分别记录，
+  不把一次绿色 CI 或重跑声称为任意调度/网络下永久无失败。本候选结果另记对应 PR，不预填未来 head。
+
 ## v0.4.7 REALITY / Vision 已验收回归
 
 最终候选 `70cc2f4` 与正常签名 master `6b049262` 已完成独立审查及准确八组验收，详见[收口](docs/REALITY_VISION_CLOSURE_047.md)。首次 master 链路继承 VMess/Mihomo CA 测试的被动 2 秒轮询未捕获必需 x509 原因，整组失败保留；unchanged-code attempt 2 成功不证明此不稳定性已永久修复。
@@ -139,3 +162,12 @@ TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合
 首次前置本地执行：默认 487 项中实际 367 项通过、120 项明确环境 skip；XHTTP contract 7 项与选取 parser 3 项通过；最终工作树选取 10 方法（3 parser + 1 XHTTP 正向 + 6 负向）重验全部通过、无 skip，仅明确排除已有 netlink 阻断的 HTTPUpgrade-gap 方法。完整前置 11 方法中 10 方法通过，HTTPUpgrade 方法两项子测试在 sing-box 启动时报 netlink EPERM，整组 `FAILED (failures=2)`。XHTTP 两条路径正向/六类负向的通过与此阻断分别记录，独立服务端 TLS 1.3/h2 探测不称客户端抓包；这些本地结果不替代后续已完成的准确候选/主线 CI，详见[执行结果](docs/XHTTP_CHARACTERIZATION_048.md#首次前置本地执行结果2026-10-06)。
 
 HTTPUpgrade 原样 URI 的晚期 VLESS read 错误不会可靠出现在固定 Mihomo 日志；首次候选 77c264ab 链路 100 项中该原因断言失败已保留。修正仅使用独立验证 TLS 的协议 recorder 和同 bytes 对真实固定 sing-box 的 replay：实际 GET Upgrade 与 raw VLESS header/假 UUID/TCP/目标必须明确区分，真实 HTTP400/正文、直接 URI 零送达、canonical 成功和普通 TCP 错误传输对照分别必需。recorder 不转发、不计作应用送达；EOF/超时/截断/错误 UUID/command/目标/TLS 或一般错误都不得通过。默认单元中的 mock recorder 不输出真实 TLS/核心通过消息。完整原因、首次失败与修正门槛见[刻画记录](docs/XHTTP_CHARACTERIZATION_048.md#首次准确候选-ci-失败与观察修正)。
+
+
+### HTTPUpgrade recorder 的有界观察与收尾
+
+`test_httpupgrade_recorder_evidence.py` 用确定性调用者回归和实际临时 TLS socket 分别验证记录器生命周期；合成字节不能称为真实核心证据。原生 YAML 和原样 URI 共用一个应用计数基线，最多三次请求启动、相隔至少四秒、十二秒观察窗口；第三次后仍被动观察到窗口结束。已接受但未完成的连接不追加请求，任何完整记录出现即停止重发；错误记录不能被后续成功覆盖。请求自身的既有三秒无响应读取可能越过重发启动窗口，不能把十二秒说成整个用例总时限。
+
+记录器在启动线程前登记连接，最多接受十六个；TLS 握手与后续分片读取共用四秒绝对预算。先停止客户端，再释放已完成观察、停止接受并最多五秒等待全部 handler 收尾；线程启动、异常退出、关闭失败、溢出和排空超时都保留为失败。最终快照和固定应用计数必须在收尾后校验；异常路径同样检查送达，并保留原失败及嵌套清理原因。此处仍不转发、不生成协议响应，也不替代实际 sing-box HTTP400/正文、原样 URI 零送达、canonical 转发及普通 TCP 对照。
+
+2026-10-12 的 [abbe489 链路首轮](https://github.com/ForceMind/V-UI/actions/runs/38207674929/attempts/1)在第二次 recorder 调用未观察到协议 bytes；同代码重跑成功分别保留。上述确定性负例证明旧观察/清理边界的不足，不证明那次 CI 网络时序的唯一原因，也不把重跑成功当永久修复。

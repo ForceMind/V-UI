@@ -319,7 +319,12 @@ def require_rejection_evidence(testcase, log_path, rejected_request, requests,
     deadline = time.monotonic() + timeout
     while True:
         testcase.assertEqual(len(requests), before, "A rejected TLS request reached the target")
-        log = log_path.read_text(errors="replace")[log_offset:].lower()
+        text = log_path.read_text(errors="replace")
+        log = text[log_offset:]
+        if log_offset and text[log_offset - 1:log_offset] != "\n":
+            # A newly appended suffix of an old partial line is not a new line.
+            log = log.partition("\n")[2]
+        log = log.lower()
         if any(all(reason in line for reason in reasons) for line in log.splitlines()):
             testcase.assertEqual(len(requests), before, "A rejected TLS request arrived late")
             return log

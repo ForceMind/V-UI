@@ -1,0 +1,3 @@
+#!/bin/sh
+# Fixed root-owned entry point. No escalation, bootstrap runtime or user imports.
+exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/ LANG=C LC_ALL=C /usr/bin/python3 -B -I -S /usr/local/lib/v-ui/system_ops.py "$@"

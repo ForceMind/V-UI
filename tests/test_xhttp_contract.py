@@ -201,6 +201,11 @@ class HTTPUpgradeWireEvidenceTests(unittest.TestCase):
         fixture.prepare_client = Mock(return_value=([], {}))
         fixture.unique_path = Mock(return_value='fake-log')
         fixture.assert_failure = Mock()
+        def core(stack, *args):
+            process = Mock(); process.process.poll.return_value = None
+            stack.callback(process.stop)
+            return process
+        self.enterContext(patch.object(preflight, 'CoreProcess', side_effect=core))
         return preflight, fixture
 
     def test_recorded_bytes_are_separate_from_application_delivery(self):
@@ -208,16 +213,20 @@ class HTTPUpgradeWireEvidenceTests(unittest.TestCase):
         with patch.object(preflight, 'start_protocol_recorder', side_effect=[
                     (1111, self.observed(self.native())), (1112, self.observed(self.vless()))]), \
                 patch.object(preflight, 'unused_port', return_value=1113), \
-                patch.object(preflight, 'CoreProcess'), patch.object(preflight.time, 'sleep'):
+                patch.object(preflight.time, 'sleep'):
             self.assertEqual(fixture.observe_httpupgrade_protocols(), self.vless())
             self.assertEqual(fixture.requests, [])
 
     def test_valid_record_cannot_hide_late_application_delivery(self):
         preflight, fixture = self.fixture()
-        process = Mock(); process.stop.side_effect = lambda: fixture.requests.append('forbidden')
+        process = Mock(); process.process.poll.return_value = None
+        process.stop.side_effect = lambda: fixture.requests.append('forbidden')
+        def core(stack, *args):
+            stack.callback(process.stop)
+            return process
         with patch.object(preflight, 'start_protocol_recorder', return_value=(1111, self.observed(self.native()))), \
                 patch.object(preflight, 'unused_port', return_value=1113), \
-                patch.object(preflight, 'CoreProcess', return_value=process), patch.object(preflight.time, 'sleep'):
+                patch.object(preflight, 'CoreProcess', side_effect=core), patch.object(preflight.time, 'sleep'):
             with self.assertRaisesRegex(AssertionError, 'Recorder traffic reached application'):
                 fixture.observe_httpupgrade_protocols()
 
@@ -229,7 +238,7 @@ class HTTPUpgradeWireEvidenceTests(unittest.TestCase):
             with self.subTest(update=update), \
                     patch.object(preflight, 'start_protocol_recorder', return_value=(1111, records)), \
                     patch.object(preflight, 'unused_port', return_value=1113), \
-                    patch.object(preflight, 'CoreProcess'), patch.object(preflight.time, 'sleep'):
+                    patch.object(preflight.time, 'sleep'):
                 with self.assertRaises(AssertionError): fixture.observe_httpupgrade_protocols()
 
 

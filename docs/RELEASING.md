@@ -2,6 +2,19 @@
 
 正式Release是一次明确的公开写操作，不等同于PR、版本字符串或Actions候选附件。此流程只晋升经过验收的完整套件，不在发布时重新构建“另一份看似相同的包”。
 
+## 0.4.7 集成候选状态（2026-10-12，未发布）
+
+- 同一候选沿历史继承 PR #28–33 的低资源软件修复、后台安全中心说明、非 root 服务用户菜单、可信候选准备和全局受管菜单，见[完成矩阵](INTEGRATED_OPERATIONS_CANDIDATE.md)。`VERSION` 保持 `0.4.7`；PR #28–33 尚未合并，主线仍为 `a6aa84d`。本次未合并 master 或创建 tag/Draft Release/公开 Release，未向 Release 上传或晋升资产，也未操作用户主机
+- 全局 `sudo /usr/local/sbin/v-ui` 需要从完整独立可信 kit [显式安装 root-owned 组件](MANAGED_OPERATIONS.md)，默认 `install.sh` 不添加它。systemd 提供服务控制和依赖停服的数据事务；OpenRC 仅查询与纯候选准备，拒绝服务启停及依赖停服的数据写动作。单独选择 CURRENT 不升级 root-owned 控制源码、launcher、安装记录或服务模板，不能把候选准备当作完整系统升级
+- [PR #33](https://github.com/ForceMind/V-UI/pull/33) 的文档基线 `09f2cf4ec39adfbb345d8aa40b94558c64c93936` 已完成普通八组/11 jobs/119 steps 全部 attempt 1 与 9 个原始 artifact 核验。真实 root/systemd 资格只属于 `f50942f` 的 [run 38203515936](https://github.com/ForceMind/V-UI/actions/runs/38203515936)，11 个必需阶段含 cleanup、自有资源清理确认；没有 09f2 root 重验。源码、普通 CI/包消费、root/init 资格与公开发布不得互相替代
+- 本次新候选另含 VMess CA/SNI 负向的有界证据收集修复，移除被动 2 秒轮询，保留新日志行上的真实 x509/指定原因、零送达、无 DIRECT、清理及停进程后的送达检查。本地合成 RED 说明契约缺口，不证明历史真实网络失败的唯一原因。新 head 尚待自己的独立审查、普通八组 CI 和同提交原件核验；不预填自身 SHA 或未来成功，也不能晋升 09f2/f509 的旧包冒充它
+- [受管候选历史](MANAGED_OPERATIONS_CLOSURE_20261012.md)与[低资源失败记录](LOW_RESOURCE_CLOSURE_20261011.md)保留。真实 1 vCPU/512 MiB 整机、24 小时完整负载、160/320 MiB 工程预算、其他平台真实 root/init、跨版本/schema 迁移与真实断电恢复尚未获资格。既有协议、核心 pin、SNI 与网络范围不扩展，UDP/DNS 等未来阶段不纳入本次，XHTTP/HTTPUpgrade 公开导出仍阻断
+- 当前发布脚本的完整聚合是下文所列 19 项资产，与 oneclick 原始 kit 的 16 个成员及 Actions artifact 数量不同。`publish=false` 会创建 Draft Release 并上传，仍是发布写操作，绝非 dry-run；须在下述人工门槛及明确授权下执行。候选通过不解除发布或主机权限边界
+
+## 2026-10-06 发布准备背景（历史）
+
+以下至“前置条件”前保留当时的状态、旧套件核验和后续要求；不把旧记录的待验收项或通过结论移植给上述新候选。
+
 当前 v0.4.7 [REALITY/Vision 已完成主线收口](REALITY_VISION_CLOSURE_047.md)：独立审查、准确候选八组和正常合并后的准确主线八组已验收。首次 REALITY 前置 HEADERS 断言失败、最终 master 继承 VMess/Mihomo CA 被动轮询缺少 x509 原因的首次失败及 unchanged-code attempt 2 通过均保留；重跑不表示旧轮询问题永久修复。[PR #25 XHTTP 刻画](XHTTP_CHARACTERIZATION_CLOSURE_048.md)已正常合并至签名 master `66dbe70cfa86fe140fa1b69d3896244ab17a0e3c`，与候选 `f7996c579418d1ffe5df06fc12677cf22a42e034` 的 tree 相同，独立审查及两端各八组/11 jobs/全部步骤 attempt 1 成功。仅测试/文档，产品 VERSION 仍为 0.4.7，公开 XHTTP/HTTPUpgrade 支持保持阻断。产品范围冻结，先完成本版发布准备和交付决定，再推进独立 UDP/DNS 实现；现有只读审计不构成实现验收。
 
 截至 2026-10-06 本次检查，未晋升附件、创建 Draft Release 或执行新建 tag/公开 Release/生产部署；源码、原始 CI artifact、已核验附件与公开发布分别记录。完成代码、PR、CI 或发布准备不等于获准创建发布草稿或公开发布；任何发布操作仍受下述人工门槛与明确授权边界约束。
@@ -43,11 +56,14 @@ GitHub权限只在该人工工作流的发布job授予contents:write/actions:rea
 
 ## 发布资产
 
+发布脚本 `scripts/publish_release.py` 的 `ASSETS` 精确包含以下 **19 项**；四目标包之外的入口与控制 helper 也必须来自同一准确提交，须完整提供每个固定文件。
+
 - vui-linux-x86_64-gnu.zip：经过同提交 one-click/systemd 验收的固定离线包。
 - vui-linux-aarch64-gnu.zip：经过同提交 ARM64 原生 portable 验收的固定离线包。
 - vui-linux-x86_64-musl.zip：经过同提交 Alpine/musl 原生 portable 验收的固定离线包。
 - vui-linux-aarch64-musl.zip：经过同提交 ARM64 Alpine/musl 原生 portable 验收的固定离线包。
-- install.sh、install_system.py：同提交安装入口和root初始化控制器。
+- install.sh、install_system.py、platform_support.py、firewall_support.py、service_support.py、system_launcher.py：6 个同提交安装入口、平台/防火墙/服务 helper 与 canonical launcher。
+- install_ops_control.py、system_ops.py、ops_worker.py、release_tools.py、v-ui：5 个同提交显式受管控制安装器、控制器、降权 worker、发布工具与全局入口。
 - vui-source.zip：准确提交的源码。
 - SHA256SUMS：全部固定资产的整文件摘要。
 - RELEASE.json：版本、源码提交、release_id和平台元数据。

@@ -20,7 +20,7 @@ import yaml
 from loopback_helpers import (certificate_files, CoreProcess, http_through,
     require_rejection_evidence, start_http_target, unused_port)
 from xhttp_helpers import (FAILURES, SNI, TARGET_BODY,
-    classify_protocol_bytes, mihomo_config, mihomo_proxy, rejection_reason,
+    chain_cleanup_errors, classify_protocol_bytes, mihomo_config, mihomo_proxy, rejection_reason,
     require_httpupgrade_bad_request, share_uri, singbox_gap_server,
     singbox_xhttp_client, start_protocol_recorder, xray_server)
 
@@ -191,34 +191,77 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
 
     def observe_httpupgrade_protocols(self):
         captured = None
+        baseline = len(self.requests)  # One baseline spans both client lifetimes.
         for client, expected in (('mihomo', 'httpupgrade'), ('mihomo-uri', 'vless')):
-            baseline = len(self.requests)
-            with ExitStack() as observation_stack:
-                recorder_port, observations = start_protocol_recorder(observation_stack, self.cert, self.key)
-                port = unused_port()
-                command, env = self.prepare_client(client, port, recorder_port, httpupgrade=True)
-                process = CoreProcess(observation_stack, command, self.unique_path('wire-'+client, 'log'), env)
-                process.start(port)
-                # This no-forward recorder is not a proxy success/rejection
-                # oracle. Only actual complete protocol bytes count below.
-                self.assert_failure(port, baseline)
-                deadline = time.monotonic()+3
-                records = observations.snapshot()
-                while not records and time.monotonic() < deadline:
-                    time.sleep(.02); records = observations.snapshot()
-                self.assertTrue(records, 'No actual protocol bytes observed')
+            observation_stack, client_stack = ExitStack(), ExitStack()
+            primary = None
+            attempts = 0
+
+            def validate(records):
                 for record in records:
-                    self.assertTrue('error' not in record, 'Protocol recorder reported incomplete or failed TLS observation')
+                    self.assertTrue('error' not in record,
+                        'Protocol recorder reported incomplete or failed TLS observation: '+client)
                     self.assertEqual(record['sni'], SNI)
                     self.assertEqual(record['alpn'], 'http/1.1')
                     self.assertIn(record['tls'], ('TLSv1.2', 'TLSv1.3'))
                     self.assertEqual(classify_protocol_bytes(record['payload'], self.target_port), expected)
-                if expected == 'vless': captured = records[0]['payload']
-                process.stop(); time.sleep(.1)
+
+            def target_unchanged():
                 self.assertEqual(len(self.requests), baseline, 'Recorder traffic reached application target')
-                self.assertTrue(observations.snapshot() == records, 'Recorder changed after observation boundary')
-                print(f'HTTPUpgrade separate wire recorder {client}: verified TLS/SNI/http1.1; '
-                      f'actual {expected} bytes; application delta=0; no forwarding')
+
+            try:
+                target_unchanged()
+                recorder_port, observations = start_protocol_recorder(observation_stack, self.cert, self.key)
+                port = unused_port()
+                command, env = self.prepare_client(client, port, recorder_port, httpupgrade=True)
+                process = CoreProcess(client_stack, command, self.unique_path('wire-'+client, 'log'), env)
+                process.start(port)
+                start = time.monotonic()
+                deadline, next_request = start+12, start
+                # A timeout from this non-forwarding endpoint is not evidence.
+                # Retry only an empty attempt, never an incomplete/error record.
+                while True:
+                    target_unchanged()
+                    self.assertIsNone(process.process.poll(), 'Recorder client exited: '+client)
+                    records = observations.snapshot()
+                    if records:
+                        validate(records)
+                        break
+                    now = time.monotonic()
+                    if now >= deadline:
+                        self.fail(f'No actual protocol bytes observed: {client}; attempts={attempts}; '
+                                  f'state={observations.state()}')
+                    if attempts < 3 and now >= next_request and not observations.state()['active']:
+                        attempts += 1
+                        next_request = now+4
+                        self.assert_failure(port, baseline)
+                        target_unchanged()
+                    else:
+                        time.sleep(min(.02, deadline-now))
+            except BaseException as exc:
+                primary = exc
+
+            # Stop the actual client, then seal/drain every accepted handler.
+            # Separate stacks prevent cleanup errors from replacing the first
+            # evidence failure, and keep the final delivery check unconditional.
+            errors = []
+            for action in (client_stack.close, observation_stack.close,
+                           lambda: time.sleep(.1), target_unchanged):
+                try:
+                    action()
+                except BaseException as exc:
+                    errors.append(exc)
+            if primary is not None:
+                raise chain_cleanup_errors([primary, *errors])
+            if errors:
+                raise chain_cleanup_errors(errors)
+            records = observations.snapshot()
+            self.assertTrue(records, 'No final actual protocol bytes observed: '+client)
+            validate(records)
+            if expected == 'vless': captured = records[0]['payload']
+            print(f'HTTPUpgrade separate wire recorder {client}: verified TLS/SNI/http1.1; '
+                  f'actual {expected} bytes; attempts={attempts}; state={observations.state()}; '
+                  'sealed/drained; application delta=0; no forwarding')
         self.assertIsNotNone(captured)
         return captured
 

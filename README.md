@@ -68,6 +68,12 @@ HTTPS登录 → 节点管理 → 新建已验证TLS节点，选择托管证书�
 
 证书管理可从导航进入：申请、测试签发、查看到期与失败原因、暂停自动续期、绑定面板或TLS节点。测试证书不能用于上线；续期失败保留旧材料但不会延长旧证书有效期。服务停止期间续期检查暂停，恢复服务后继续。
 
+### 终端运维（PR #33 候选）
+
+[包内服务用户菜单](docs/OPERATIONS.md#终端运维菜单)提供状态、版本、完整校验和可信本地候选准备；[全局 `v-ui` 菜单](docs/MANAGED_OPERATIONS.md)另外提供 systemd 启停/重启、候选激活/代码回退、备份/恢复及中断恢复。全局入口须从完整可信 kit 显式安装 root-owned 控制组件，默认 `install.sh` 不会添加它，单独切换 CURRENT 也不更新这些组件。OpenRC 当前仅支持查询与纯候选准备。
+
+[PR #33](https://github.com/ForceMind/V-UI/pull/33) 的准确 `f50942f` 已完成普通八组 CI、四目标包消费与一次空白临时 Ubuntu/systemd 主机的真实全局菜单资格；[完成矩阵](docs/INTEGRATED_OPERATIONS_CANDIDATE.md)及[收口证据与限制](docs/MANAGED_OPERATIONS_CLOSURE_20261012.md)分别列明。PR 仍为 Draft，未合并、未发布、未在用户服务器安装；真实 512 MiB 整机与 24 小时负载仍未验收。
+
 ## 文档
 
 [完整文档入口](docs/README.md) · [安装](docs/INSTALLATION.md) · [证书](docs/CERTIFICATES.md) · [分流/订阅](docs/CONFIGURATION.md) · [维护/备份/恢复](docs/OPERATIONS.md) · [常见故障](docs/TROUBLESHOOTING.md) · [API](docs/API.md) · [兼容范围](docs/COMPATIBILITY.md) · [安全](SECURITY.md) · [开发](CONTRIBUTING.md) · [正式发布](docs/RELEASING.md) · [变更日志](CHANGELOG.md)

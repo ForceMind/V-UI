@@ -20,6 +20,7 @@ from http.cookies import SimpleCookie
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from loopback_helpers import certificate_files, unused_port
+from scripts.ops_menu_smoke import MenuSession
 
 
 @unittest.skipUnless(os.getenv('VUI_SYSTEM_INSTALL_TEST') == '1', 'explicit ephemeral systemd installer gate')
@@ -33,6 +34,8 @@ class OneClickSystemTests(unittest.TestCase):
         # Never clean up or overwrite a pre-existing installation on a test host.
         self.assertFalse(root.exists())
         self.assertFalse(Path('/etc/v-ui').exists())
+        from scripts.low_resource_root import optional_gate
+        gate = optional_gate()
         with ExitStack() as stack:
             work = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix='vui-system-test-')))
             ca, cert, key = certificate_files(work, 'installer')
@@ -50,7 +53,10 @@ class OneClickSystemTests(unittest.TestCase):
                 subprocess.run(['sudo','systemctl','daemon-reload'],check=True)
                 subprocess.run(['sudo','rm','-rf','/etc/v-ui','/usr/local/lib/v-ui','/var/lib/v-ui'],check=True)
                 subprocess.run(['sudo','userdel','v-ui'],capture_output=True)
-            stack.callback(cleanup)
+            if gate is None:
+                stack.callback(cleanup)
+            else:
+                cmd = gate.command(cmd)
             child, fd = pty.fork()
             if child == 0:
                 os.execvp(cmd[0], cmd)
@@ -71,7 +77,17 @@ class OneClickSystemTests(unittest.TestCase):
                     exited, value=os.waitpid(child,os.WNOHANG)
                     if exited: status=value;break
                 if status is None:
-                    os.kill(child,signal.SIGTERM);os.waitpid(child,0)
+                    os.kill(child,signal.SIGTERM)
+                    grace=time.monotonic()+2
+                    while time.monotonic()<grace:
+                        if os.waitpid(child,os.WNOHANG)[0]:break
+                        time.sleep(.05)
+                    else:
+                        os.kill(child,signal.SIGKILL)
+                        grace=time.monotonic()+2
+                        while time.monotonic()<grace:
+                            if os.waitpid(child,os.WNOHANG)[0]:break
+                            time.sleep(.05)
                     self.fail('Installer timed out: '+output.decode(errors='replace').replace(password,'[REDACTED]')[-12000:])
             finally: os.close(fd)
             clean=output.decode(errors='replace').replace(password,'[REDACTED]')
@@ -81,6 +97,8 @@ class OneClickSystemTests(unittest.TestCase):
                 clean += '\n' + journal.stdout.replace(password,'[REDACTED]')
             self.assertEqual(os.waitstatus_to_exitcode(status),0,clean[-20000:])
             self.assertNotIn(password,output.decode(errors='replace'))
+            if gate:
+                gate.installer_receipt('initial_install', output.decode(errors='replace'))
             uid=pwd.getpwnam('v-ui').pw_uid;self.assertGreater(uid,0)
             for name in ('v-ui.service','v-ui-http01.socket'):
                 self.assertEqual(subprocess.run(['systemctl','is-enabled','--quiet',name]).returncode,0)
@@ -92,6 +110,26 @@ class OneClickSystemTests(unittest.TestCase):
                 line=next(line for line in status.splitlines() if line.startswith('Uid:'))
                 self.assertEqual(int(line.split()[1]),uid)
             check_uid('v-ui.service')
+            # Read the actual managed installation using its portable runtime,
+            # always as v-ui, never executing service-owned code as root.
+            installed=json.loads(Path('/etc/v-ui/service.json').read_text())
+            identity=installed['release_id']
+            self.assertRegex(identity,r'\A[A-Za-z0-9][A-Za-z0-9._-]{0,100}\Z')
+            release=root/'releases'/identity;payload=release/'payload'
+            menu=['sudo','-u','v-ui',str(release/'runtime/python/bin/python3'),'-B',
+                  str(payload/'scripts/deploy.py'),'--root',str(root),'menu']
+            with MenuSession(menu,cwd='/tmp',env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1'}) as session:
+                session.expect()
+                session.send('1\n');status=session.expect()
+                self.assertIn('v-ui.service: active (running)',status)
+                self.assertIn('v-ui-http01.socket: active (listening)',status)
+                self.assertIn('v-ui-http01.service: inactive (dead)',status)
+                self.assertIn('HTTP-01: 按需响应已就绪',status)
+                session.send('2\n');metadata=session.expect()
+                self.assertIn('面板地址: '+origin,metadata)
+                self.assertIn('服务管理器: systemd',metadata)
+                self.assertNotIn('bootstrap_python',metadata)
+                session.send('0\n');session.finish()
             context=ssl.create_default_context(cafile=ca)
             cookie=''
             def api(path,body=None):
@@ -124,13 +162,19 @@ class OneClickSystemTests(unittest.TestCase):
                 self.assertEqual(response.status,expected)
                 if expected==200:self.assertEqual(raw,b'token.key_authorization')
             check_uid('v-ui-http01.service')
+            if gate:
+                gate.installed()
             # A repeated install without explicit upgrade must not touch the running instance.
             repeat=subprocess.run(cmd,capture_output=True,text=True,timeout=30)
+            if gate:
+                gate.installer_receipt('implicit_repeat', repeat.stdout)
             self.assertNotEqual(repeat.returncode,0)
             self.assertIn('already exists',repeat.stderr)
             check_uid('v-ui.service')
             # Rerunning with --upgrade checks/stages and makes a stopped backup.
             upgraded=subprocess.run(cmd+['--upgrade'],capture_output=True,text=True,timeout=120)
+            if gate:
+                gate.installer_receipt('same_bundle_upgrade', upgraded.stdout)
             self.assertEqual(upgraded.returncode,0,(upgraded.stdout+upgraded.stderr)[-15000:])
             self.assertEqual(api('/api/auth/me')[0],200)
             subprocess.run(['sudo','systemctl','restart','v-ui.service'],check=True)
@@ -142,6 +186,10 @@ class OneClickSystemTests(unittest.TestCase):
             else:self.fail('Managed panel failed restart')
             check_uid('v-ui.service')
             self.assertTrue(json.loads(api('/api/certificates/capabilities')[1])['worker_running'])
+            if gate:
+                def login_again():
+                    self.assertEqual(api('/api/auth/login', {'username': 'installer-admin', 'password': password})[0], 200)
+                gate.finish(self, cmd, api, login_again)
             print('One-command systemd: real sudo setup / non-root workers / private state / HTTPS / fd-passed HTTP-01 port80 / auth / repeat refusal / upgrade backup / restart OK')
 
 if __name__=='__main__':unittest.main()

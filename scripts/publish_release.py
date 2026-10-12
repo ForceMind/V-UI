@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import urllib.error
 import urllib.parse
@@ -18,7 +19,9 @@ TARGETS=('x86_64-gnu','aarch64-gnu','x86_64-musl','aarch64-musl')
 REQUIRED={'test.yml','toclash.yml','loopback.yml','release.yml','acme.yml',
           'oneclick.yml','portable.yml','docs.yml'}
 COMMON_ASSETS={'install.sh','install_system.py','platform_support.py','firewall_support.py',
-               'service_support.py','vui-source.zip','RELEASE.json','RELEASE_NOTES.md'}
+               'service_support.py','install_ops_control.py','system_launcher.py',
+               'system_ops.py','ops_worker.py','release_tools.py','v-ui',
+               'vui-source.zip','RELEASE.json','RELEASE_NOTES.md'}
 BUNDLE_ASSETS={'vui-linux-'+target+'.zip' for target in TARGETS}
 ASSETS=COMMON_ASSETS|BUNDLE_ASSETS|{'SHA256SUMS'}
 KIT_ASSETS=COMMON_ASSETS|{'vui-linux-x86_64-gnu.zip','SHA256SUMS'}
@@ -68,6 +71,10 @@ def _archive_files(raw: bytes, expected: set[str], limit: int) -> dict[str,bytes
             raise ReleaseGateError('Unexpected artifact entries')
         if sum(item.file_size for item in archive.infolist())>limit:
             raise ReleaseGateError('Artifact exceeds size limit')
+        if any(item.is_dir() or item.flag_bits & 1 or
+               stat.S_IFMT(item.external_attr >> 16) not in (0, stat.S_IFREG)
+               for item in archive.infolist()):
+            raise ReleaseGateError('Artifact contains a link, directory or encrypted entry')
         return {name:archive.read(name) for name in names}
 
 

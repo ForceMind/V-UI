@@ -1,6 +1,7 @@
 """Offline per-user deployment controller. Read docs/DEPLOYMENT_RC2.md first."""
 from __future__ import annotations
 import argparse
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -18,13 +19,20 @@ def main():
     install=commands.add_parser('stage');install.add_argument('archive',type=Path);install.add_argument('--sha256',required=True)
     switch=commands.add_parser('activate');switch.add_argument('release_id')
     commands.add_parser('rollback');commands.add_parser('status');commands.add_parser('recover-restore')
+    commands.add_parser('menu',help='交互式运维菜单（含候选准备）（须以安装目录所有者运行）')
     copy=commands.add_parser('backup');copy.add_argument('destination',type=Path)
     undo=commands.add_parser('restore');undo.add_argument('archive',type=Path);undo.add_argument('--sha256',required=True)
     admin=commands.add_parser('admin');admin.add_argument('action',choices=['create','set-password']);admin.add_argument('username')
     launch=commands.add_parser('run')
     launch.add_argument('--origin',required=True);launch.add_argument('--cert');launch.add_argument('--key')
     launch.add_argument('--bind',default='127.0.0.1');launch.add_argument('--port',type=int,default=8443)
-    args=p.parse_args();supported_environment();os.umask(0o077);root=private_root(args.root)
+    args=p.parse_args()
+    if args.command=='menu':
+        # The installer extracts only this controller and release_tools.py.
+        # Keep the optional installed-payload consumer out of its bootstrap path.
+        from app.ops_menu import run_menu
+        raise SystemExit(run_menu(args.root))
+    supported_environment();os.umask(0o077);root=private_root(args.root)
     if args.command=='stage': print(stage(args.archive,args.sha256,root))
     elif args.command=='activate': activate(root,args.release_id);print('Activated verified release; start explicitly after checking configuration')
     elif args.command=='rollback':
@@ -43,6 +51,8 @@ def main():
                 result=subprocess.run([str(python),'-B','-m','app.admin',args.action,args.username],cwd=payload,env=env)
                 raise SystemExit(result.returncode)
         else:
+            from deploy.system_launcher import panel_environment
+            env=panel_environment(env,json.loads((release/'READY.json').read_text())['runtime_key'])
             command=[str(python),'-B','-m','app.serve','--root',str(root),'--origin',args.origin,
                      '--bind',args.bind,'--port',str(args.port)]
             if args.cert or args.key:
