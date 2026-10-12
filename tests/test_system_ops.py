@@ -212,7 +212,9 @@ class ServiceTests(unittest.TestCase):
         socket = unit.endswith('.socket')
         fields = {'LoadState': 'loaded', 'ActiveState': 'active' if active else 'inactive',
                   'SubState': ('listening' if socket else 'running') if active else 'dead',
-                  'NeedDaemonReload': 'no', 'FragmentPath': '/etc/systemd/system/' + unit, 'DropInPaths': ''}
+                  'NeedDaemonReload': 'no', 'FragmentPath': '/etc/systemd/system/' + unit, 'DropInPaths': '',
+                  'ControlPID': '0', 'ControlGroup': '/system.slice/' + unit if active else '',
+                  'User': '' if socket else 'v-ui', 'Group': '' if socket else 'v-ui', 'KillMode': 'control-group'}
         if not socket:
             fields.update(MainPID='123' if active else '0', ControlGroup='/system.slice/' + unit if active else '',
                           User='v-ui', Group='v-ui', KillMode='control-group')
@@ -238,6 +240,7 @@ class ServiceTests(unittest.TestCase):
                  'ActiveState': ['failed', 'activating', 'deactivating', 'unknown', ''],
                  'SubState': ['failed', 'exited', 'auto-restart'],
                  'MainPID': ['1', '-1', '01', '', '0; /bin/sh'],
+                 'ControlPID': ['1', '-1', '00', '', 'unknown'],
                  'ControlGroup': ['/user.slice/other', '/system.slice/../v-ui.service', '/'],
                  'User': ['root', '0', ''], 'Group': ['root', '0', ''],
                  'KillMode': ['process', 'none', 'mixed', ''], 'NeedDaemonReload': ['yes', ''],
@@ -259,6 +262,40 @@ class ServiceTests(unittest.TestCase):
                        self.result({**fields, 'ExecStart': '/tmp/evil'})):
             with patch.object(backend, '_run', return_value=result), self.assertRaises(ops.Refused):
                 backend.state('v-ui.service')
+
+    def test_socket_real_systemd_properties_and_running_substate(self):
+        # systemd v255 dbus.c registers the Socket exec/cgroup/kill vtables;
+        # socket.c maps both LISTENING and RUNNING to ACTIVE. No host is used.
+        backend = self.backend(); unit = 'v-ui-http01.socket'
+        for state, substate in (('active', 'listening'), ('active', 'running'), ('inactive', 'dead')):
+            for cgroup in ('', '/system.slice/' + unit):
+                for main_pid in (None, '0'):
+                    fields = {**self.properties(unit, state == 'active'), 'SubState': substate,
+                              'ControlGroup': cgroup}
+                    if main_pid is not None: fields['MainPID'] = main_pid
+                    with self.subTest(state=state, substate=substate, cgroup=cgroup, main_pid=main_pid), \
+                            patch.object(backend, '_run', return_value=self.result(fields)):
+                        self.assertEqual(backend.state(unit), state)
+
+    def test_socket_missing_unknown_process_or_drift_properties_refuse(self):
+        backend = self.backend(); unit = 'v-ui-http01.socket'
+        fields = self.properties(unit, True)
+        cases = {'ControlPID': ['1', '-1', '00', '', 'unknown'], 'MainPID': ['1', '-1', '', '00'],
+                 'KillMode': ['', 'process', 'none', 'mixed'], 'User': ['root', '0', 'v-ui'],
+                 'Group': ['root', '0', 'v-ui'], 'ControlGroup': ['/system.slice/v-ui.service', '/', '/user.slice/x'],
+                 'ActiveState': ['activating', 'deactivating', 'failed', 'unknown'],
+                 'SubState': ['start-pre', 'stop-pre', 'failed', 'dead', 'unknown']}
+        for field, values in cases.items():
+            for value in values:
+                with self.subTest(field=field, value=value), \
+                        patch.object(backend, '_run', return_value=self.result({**fields, field: value})), \
+                        self.assertRaises(ops.Refused):
+                    backend.state(unit)
+        for field in fields:
+            with self.subTest(missing=field), patch.object(backend, '_run',
+                    return_value=self.result({key:value for key,value in fields.items() if key != field})), \
+                    self.assertRaises(ops.Refused):
+                backend.state(unit)
 
     def test_service_operations_share_deadline_and_emergency_has_fixed_budget(self):
         backend = self.backend()
@@ -302,6 +339,15 @@ class ServiceTests(unittest.TestCase):
         with patch.object(backend, 'snapshot', return_value=inactive), patch.object(ops, 'cgroup_empty', side_effect=[True, False]), \
                 self.assertRaises(ops.Refused):
             backend.prove_stopped()
+        with patch.object(backend, 'snapshot', return_value=inactive), \
+                patch.object(ops, 'cgroup_empty', side_effect=[True, True, False]) as check, \
+                self.assertRaises(ops.Refused):
+            backend.prove_stopped()
+        self.assertEqual([call.args[0] for call in check.call_args_list], list(ops.SYSTEMD_UNITS))
+        with patch.object(backend, 'snapshot', return_value=inactive), \
+                patch.object(ops, 'cgroup_empty', return_value=True) as check:
+            backend.prove_stopped()
+        self.assertEqual([call.args[0] for call in check.call_args_list], list(ops.SYSTEMD_UNITS))
         with patch.object(backend, 'snapshot', return_value={**inactive, 'v-ui-http01.socket': 'active'}), \
                 patch.object(ops, 'cgroup_empty', side_effect=AssertionError('do not check yet')), self.assertRaises(ops.Refused):
             backend.prove_stopped()
@@ -322,6 +368,13 @@ class ServiceTests(unittest.TestCase):
                 (child / 'cgroup.procs').write_text('')
                 self.assertTrue(ops.cgroup_empty('v-ui.service'))
                 self.assertTrue(ops.cgroup_empty('v-ui-http01.service'))
+                self.assertTrue(ops.cgroup_empty('v-ui-http01.socket'))
+                socket_group = root / 'system.slice/v-ui-http01.socket'
+                socket_group.mkdir()
+                (socket_group / 'cgroup.procs').write_text('314\n')
+                self.assertFalse(ops.cgroup_empty('v-ui-http01.socket'))
+                (socket_group / 'cgroup.procs').write_text('')
+                self.assertTrue(ops.cgroup_empty('v-ui-http01.socket'))
                 (child / 'link').symlink_to(root)
                 with self.assertRaises(ops.Refused):
                     ops.cgroup_empty('v-ui.service')

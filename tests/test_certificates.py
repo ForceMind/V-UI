@@ -132,7 +132,17 @@ class CertificateTests(unittest.TestCase):
         self.assertFalse(self.manager.process_once())
         self.manager.set_auto_renew(identity,True)
         fresh=CertificateManager(self.manager.root,self.provider,trusted_roots=self.manager.trusted_roots)
+        with database.SessionLocal() as db:
+            before={row.id for row in db.query(CertificateJob).all()}
         self.assertTrue(fresh.process_once());self.assertEqual(self.provider.calls,2)
+        with database.SessionLocal() as db:
+            jobs=db.query(CertificateJob).order_by(CertificateJob.sequence).all()
+            self.assertEqual(len(jobs),2)
+            self.assertEqual(len({row.id for row in jobs}-before),1)
+            self.assertTrue(all(row.state=='succeeded' and row.error is None and row.certificate_id==identity for row in jobs))
+            self.assertLess(jobs[0].sequence,jobs[1].sequence)
+        self.assertFalse(fresh.process_once());self.assertEqual(self.provider.calls,2)
+        with database.SessionLocal() as db:self.assertEqual(db.query(CertificateJob).count(),2)
 
     def test_interrupted_job_is_not_immediately_duplicated(self):
         job=self.manager.create('retry.example.test','a@example.test','production',True,True)

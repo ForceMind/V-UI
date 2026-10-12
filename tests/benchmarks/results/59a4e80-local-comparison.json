@@ -1,0 +1,1941 @@
+{
+  "head": "59a4e80de4f46cb03b41f8f6b55bfd92337dcfab",
+  "scope": "assistant local direct synchronous route bodies with temporary fake 1000-node DB; one CPU affinity, no cgroup cap; excludes HTTP/auth/concurrency; not resource acceptance; alternating original-405 frozen planner vs index in same process, same fake DB and validated identical bodies",
+  "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
+  "kernel": "6.18.44",
+  "machine": "x86_64",
+  "libc": [
+    "glibc",
+    "2.41"
+  ],
+  "affinity": [
+    0
+  ],
+  "routes": [
+    {
+      "path": "/api/subscription/raw",
+      "body_bytes": 212000,
+      "sha256": "c94b07737def699e5b44f6be4c70712facb9d33b0524641c6feef9a877d6c28d",
+      "runs": {
+        "reference": [
+          {
+            "wall": 0.0731810580000456,
+            "cpu": 0.07317837700000007
+          },
+          {
+            "wall": 0.06706347699946491,
+            "cpu": 0.06704139399999987
+          },
+          {
+            "wall": 0.06672276400058763,
+            "cpu": 0.06672570499999986
+          },
+          {
+            "wall": 0.06401462999929208,
+            "cpu": 0.0640173970000002
+          },
+          {
+            "wall": 0.12411797800086788,
+            "cpu": 0.12412000699999992
+          },
+          {
+            "wall": 0.0959593709994806,
+            "cpu": 0.0959543650000001
+          },
+          {
+            "wall": 0.0786226340023859,
+            "cpu": 0.07862661999999987
+          },
+          {
+            "wall": 0.11929959999906714,
+            "cpu": 0.11926673799999987
+          }
+        ],
+        "indexed": [
+          {
+            "wall": 0.12670920599703095,
+            "cpu": 0.12671063000000005
+          },
+          {
+            "wall": 0.06582053700185497,
+            "cpu": 0.06582302500000003
+          },
+          {
+            "wall": 0.07336879099966609,
+            "cpu": 0.07336276100000005
+          },
+          {
+            "wall": 0.0605155070006731,
+            "cpu": 0.060518437000000036
+          },
+          {
+            "wall": 0.071127109000372,
+            "cpu": 0.07112086499999992
+          },
+          {
+            "wall": 0.07448027200007346,
+            "cpu": 0.07448324299999998
+          },
+          {
+            "wall": 0.08233274599842844,
+            "cpu": 0.08232533799999997
+          },
+          {
+            "wall": 0.07847405999928014,
+            "cpu": 0.07847673700000013
+          }
+        ]
+      },
+      "profile_rows": {
+        "reference": [
+          {
+            "file": "/tmp/benchmark_vui_exports_ab.py",
+            "line": 27,
+            "name": "invoke",
+            "calls": 1,
+            "self_seconds": 1.5293e-05,
+            "cumulative_seconds": 0.323985248
+          },
+          {
+            "file": "app/api/subscription.py",
+            "line": 22,
+            "name": "raw_subscription",
+            "calls": 1,
+            "self_seconds": 0.002309376,
+            "cumulative_seconds": 0.32346192100000004
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 357,
+            "name": "base64_subscription",
+            "calls": 1,
+            "self_seconds": 0.000129577,
+            "cumulative_seconds": 0.303482368
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 237,
+            "name": "validated_node",
+            "calls": 2000,
+            "self_seconds": 0.014368643,
+            "cumulative_seconds": 0.22448809
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 282,
+            "name": "validated_nodes",
+            "calls": 1,
+            "self_seconds": 0.000705353,
+            "cumulative_seconds": 0.152363555
+          },
+          {
+            "file": "~",
+            "line": 0,
+            "name": "<method 'join' of 'str' objects>",
+            "calls": 3001,
+            "self_seconds": 0.0021623420000000003,
+            "cumulative_seconds": 0.151317784
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 361,
+            "name": "<genexpr>",
+            "calls": 1001,
+            "self_seconds": 0.0005856990000000001,
+            "cumulative_seconds": 0.150531138
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 289,
+            "name": "share_link",
+            "calls": 1000,
+            "self_seconds": 0.0024220220000000002,
+            "cumulative_seconds": 0.149945439
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 31,
+            "name": "node_host",
+            "calls": 4000,
+            "self_seconds": 0.0019475820000000002,
+            "cumulative_seconds": 0.128329577
+          },
+          {
+            "file": "app/services/subscription_tokens.py",
+            "line": 39,
+            "name": "normalize_server",
+            "calls": 4000,
+            "self_seconds": 0.013158277000000001,
+            "cumulative_seconds": 0.125849975
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 55,
+            "name": "_verified_tls",
+            "calls": 2000,
+            "self_seconds": 0.009355857,
+            "cumulative_seconds": 0.094308895
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 40,
+            "name": "_common",
+            "calls": 2000,
+            "self_seconds": 0.005692389,
+            "cumulative_seconds": 0.08556735900000001
+          },
+          {
+            "file": "~",
+            "line": 0,
+            "name": "<built-in method builtins.any>",
+            "calls": 6000,
+            "self_seconds": 0.010193766,
+            "cumulative_seconds": 0.055014362000000004
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/ipaddress.py",
+            "line": 28,
+            "name": "ip_address",
+            "calls": 4000,
+            "self_seconds": 0.007294747000000001,
+            "cumulative_seconds": 0.042934739
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/urllib/parse.py",
+            "line": 978,
+            "name": "urlencode",
+            "calls": 1000,
+            "self_seconds": 0.009389205000000001,
+            "cumulative_seconds": 0.041993013
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 729,
+            "name": "unique_proxy_names",
+            "calls": 1,
+            "self_seconds": 0.0009326310000000001,
+            "cumulative_seconds": 0.029954217
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/urllib/parse.py",
+            "line": 929,
+            "name": "quote_plus",
+            "calls": 10000,
+            "self_seconds": 0.004897446000000001,
+            "cumulative_seconds": 0.029267465000000003
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/copy.py",
+            "line": 118,
+            "name": "deepcopy",
+            "calls": 23000,
+            "self_seconds": 0.014953762,
+            "cumulative_seconds": 0.028691977
+          },
+          {
+            "file": "app/services/subscription_tokens.py",
+            "line": 42,
+            "name": "<genexpr>",
+            "calls": 54000,
+            "self_seconds": 0.019276542,
+            "cumulative_seconds": 0.028590041
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/copy.py",
+            "line": 217,
+            "name": "_deepcopy_dict",
+            "calls": 1000,
+            "self_seconds": 0.004597938,
+            "cumulative_seconds": 0.026326785000000002
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/urllib/parse.py",
+            "line": 875,
+            "name": "quote",
+            "calls": 11000,
+            "self_seconds": 0.006362508,
+            "cumulative_seconds": 0.026212327
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/ipaddress.py",
+            "line": 1286,
+            "name": "__init__",
+            "calls": 4000,
+            "self_seconds": 0.0040596700000000005,
+            "cumulative_seconds": 0.025879887
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/ipaddress.py",
+            "line": 1187,
+            "name": "_ip_int_from_string",
+            "calls": 4000,
+            "self_seconds": 0.0038288650000000003,
+            "cumulative_seconds": 0.020919699
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/re/__init__.py",
+            "line": 169,
+            "name": "fullmatch",
+            "calls": 10000,
+            "self_seconds": 0.004546292,
+            "cumulative_seconds": 0.018826784000000003
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 133,
+            "name": "_vless_node",
+            "calls": 2000,
+            "self_seconds": 0.004707298,
+            "cumulative_seconds": 0.017508446
+          }
+        ],
+        "indexed": [
+          {
+            "file": "/tmp/benchmark_vui_exports_ab.py",
+            "line": 27,
+            "name": "invoke",
+            "calls": 1,
+            "self_seconds": 1.2429e-05,
+            "cumulative_seconds": 0.28773661300000003
+          },
+          {
+            "file": "app/api/subscription.py",
+            "line": 22,
+            "name": "raw_subscription",
+            "calls": 1,
+            "self_seconds": 0.002397881,
+            "cumulative_seconds": 0.287481109
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 357,
+            "name": "base64_subscription",
+            "calls": 1,
+            "self_seconds": 0.000126059,
+            "cumulative_seconds": 0.26692312500000004
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 237,
+            "name": "validated_node",
+            "calls": 2000,
+            "self_seconds": 0.00752328,
+            "cumulative_seconds": 0.196190482
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 282,
+            "name": "validated_nodes",
+            "calls": 1,
+            "self_seconds": 0.000703431,
+            "cumulative_seconds": 0.134032582
+          },
+          {
+            "file": "~",
+            "line": 0,
+            "name": "<method 'join' of 'str' objects>",
+            "calls": 3001,
+            "self_seconds": 0.0015009300000000001,
+            "cumulative_seconds": 0.133061445
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 361,
+            "name": "<genexpr>",
+            "calls": 1001,
+            "self_seconds": 0.000541674,
+            "cumulative_seconds": 0.132335651
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 289,
+            "name": "share_link",
+            "calls": 1000,
+            "self_seconds": 0.002217241,
+            "cumulative_seconds": 0.131793977
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 31,
+            "name": "node_host",
+            "calls": 4000,
+            "self_seconds": 0.0019191820000000002,
+            "cumulative_seconds": 0.11529019700000001
+          },
+          {
+            "file": "app/services/subscription_tokens.py",
+            "line": 39,
+            "name": "normalize_server",
+            "calls": 4000,
+            "self_seconds": 0.009813975,
+            "cumulative_seconds": 0.11303201500000001
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 55,
+            "name": "_verified_tls",
+            "calls": 2000,
+            "self_seconds": 0.008711486000000001,
+            "cumulative_seconds": 0.085911656
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 40,
+            "name": "_common",
+            "calls": 2000,
+            "self_seconds": 0.005642523,
+            "cumulative_seconds": 0.073752655
+          },
+          {
+            "file": "~",
+            "line": 0,
+            "name": "<built-in method builtins.any>",
+            "calls": 6000,
+            "self_seconds": 0.00910465,
+            "cumulative_seconds": 0.05323311
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/urllib/parse.py",
+            "line": 978,
+            "name": "urlencode",
+            "calls": 1000,
+            "self_seconds": 0.006721876000000001,
+            "cumulative_seconds": 0.035149204
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/ipaddress.py",
+            "line": 28,
+            "name": "ip_address",
+            "calls": 4000,
+            "self_seconds": 0.0042223550000000006,
+            "cumulative_seconds": 0.030652022
+          },
+          {
+            "file": "app/services/subscription_tokens.py",
+            "line": 42,
+            "name": "<genexpr>",
+            "calls": 54000,
+            "self_seconds": 0.017536484,
+            "cumulative_seconds": 0.029353014
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 729,
+            "name": "unique_proxy_names",
+            "calls": 1,
+            "self_seconds": 0.001160681,
+            "cumulative_seconds": 0.029300283000000003
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/copy.py",
+            "line": 118,
+            "name": "deepcopy",
+            "calls": 23000,
+            "self_seconds": 0.014517344000000001,
+            "cumulative_seconds": 0.027802448
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/urllib/parse.py",
+            "line": 929,
+            "name": "quote_plus",
+            "calls": 10000,
+            "self_seconds": 0.0036042920000000003,
+            "cumulative_seconds": 0.026051729000000003
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/copy.py",
+            "line": 217,
+            "name": "_deepcopy_dict",
+            "calls": 1000,
+            "self_seconds": 0.004710665,
+            "cumulative_seconds": 0.025907430000000002
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/urllib/parse.py",
+            "line": 875,
+            "name": "quote",
+            "calls": 11000,
+            "self_seconds": 0.005805878,
+            "cumulative_seconds": 0.023741457
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/ipaddress.py",
+            "line": 1286,
+            "name": "__init__",
+            "calls": 4000,
+            "self_seconds": 0.003139728,
+            "cumulative_seconds": 0.019727631000000002
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 133,
+            "name": "_vless_node",
+            "calls": 2000,
+            "self_seconds": 0.004213443,
+            "cumulative_seconds": 0.017971949
+          },
+          {
+            "file": "app/services/inbound_service.py",
+            "line": 199,
+            "name": "list_inbounds",
+            "calls": 1,
+            "self_seconds": 8.393e-06,
+            "cumulative_seconds": 0.016995725
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/sqlalchemy/orm/query.py",
+            "line": 2746,
+            "name": "all",
+            "calls": 1,
+            "self_seconds": 2.2453e-05,
+            "cumulative_seconds": 0.016819149000000002
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/subscription/sing-box.json",
+      "body_bytes": 229176,
+      "sha256": "a442415bc60dbe24338b3eaecb10fff1a71f04a419f1d460bd0874b45a17af9a",
+      "runs": {
+        "reference": [
+          {
+            "wall": 0.03887729800044326,
+            "cpu": 0.038876922000000036
+          },
+          {
+            "wall": 0.0361703070011572,
+            "cpu": 0.03617324199999983
+          },
+          {
+            "wall": 0.03919231799955014,
+            "cpu": 0.03919497999999999
+          },
+          {
+            "wall": 0.04053472200030228,
+            "cpu": 0.04053836699999991
+          },
+          {
+            "wall": 0.13255144900176674,
+            "cpu": 0.13255324299999982
+          },
+          {
+            "wall": 0.03941925400067703,
+            "cpu": 0.03942280199999981
+          },
+          {
+            "wall": 0.0445886139968934,
+            "cpu": 0.04459181499999998
+          },
+          {
+            "wall": 0.044294829000136815,
+            "cpu": 0.04429845499999985
+          }
+        ],
+        "indexed": [
+          {
+            "wall": 0.042376453002361814,
+            "cpu": 0.04238048999999977
+          },
+          {
+            "wall": 0.08980480500031263,
+            "cpu": 0.08980639499999965
+          },
+          {
+            "wall": 0.04548063699985505,
+            "cpu": 0.045484159999999996
+          },
+          {
+            "wall": 0.04777223900237004,
+            "cpu": 0.04773329999999998
+          },
+          {
+            "wall": 0.04747879699789337,
+            "cpu": 0.047469430000000035
+          },
+          {
+            "wall": 0.03978809900218039,
+            "cpu": 0.03973383400000019
+          },
+          {
+            "wall": 0.054992339999444084,
+            "cpu": 0.05499508300000011
+          },
+          {
+            "wall": 0.11625450900100986,
+            "cpu": 0.11624466399999989
+          }
+        ]
+      },
+      "profile_rows": {
+        "reference": [
+          {
+            "file": "/tmp/benchmark_vui_exports_ab.py",
+            "line": 27,
+            "name": "invoke",
+            "calls": 1,
+            "self_seconds": 1.3381000000000001e-05,
+            "cumulative_seconds": 0.166369289
+          },
+          {
+            "file": "app/api/subscription.py",
+            "line": 37,
+            "name": "singbox_subscription",
+            "calls": 1,
+            "self_seconds": 0.003026532,
+            "cumulative_seconds": 0.166047565
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 377,
+            "name": "singbox_client_config",
+            "calls": 1,
+            "self_seconds": 0.0017146120000000001,
+            "cumulative_seconds": 0.14055083300000001
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 282,
+            "name": "validated_nodes",
+            "calls": 1,
+            "self_seconds": 0.000637773,
+            "cumulative_seconds": 0.137980116
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 237,
+            "name": "validated_node",
+            "calls": 1000,
+            "self_seconds": 0.0065973030000000005,
+            "cumulative_seconds": 0.104641573
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 31,
+            "name": "node_host",
+            "calls": 2000,
+            "self_seconds": 0.0011043980000000001,
+            "cumulative_seconds": 0.058423745000000006
+          },
+          {
+            "file": "app/services/subscription_tokens.py",
+            "line": 39,
+            "name": "normalize_server",
+            "calls": 2000,
+            "self_seconds": 0.0055595490000000004,
+            "cumulative_seconds": 0.057155565000000005
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 55,
+            "name": "_verified_tls",
+            "calls": 1000,
+            "self_seconds": 0.0035709300000000004,
+            "cumulative_seconds": 0.044654408
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 40,
+            "name": "_common",
+            "calls": 1000,
+            "self_seconds": 0.003029898,
+            "cumulative_seconds": 0.038139718
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 729,
+            "name": "unique_proxy_names",
+            "calls": 1,
+            "self_seconds": 0.000944921,
+            "cumulative_seconds": 0.032700770000000004
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/copy.py",
+            "line": 118,
+            "name": "deepcopy",
+            "calls": 23000,
+            "self_seconds": 0.017267726,
+            "cumulative_seconds": 0.031420918
+          },
+          {
+            "file": "~",
+            "line": 0,
+            "name": "<built-in method builtins.any>",
+            "calls": 3000,
+            "self_seconds": 0.00503253,
+            "cumulative_seconds": 0.02755596
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/copy.py",
+            "line": 217,
+            "name": "_deepcopy_dict",
+            "calls": 1000,
+            "self_seconds": 0.005066702,
+            "cumulative_seconds": 0.026589381000000002
+          },
+          {
+            "file": "app/services/inbound_service.py",
+            "line": 199,
+            "name": "list_inbounds",
+            "calls": 1,
+            "self_seconds": 1.2328000000000001e-05,
+            "cumulative_seconds": 0.020204231
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/sqlalchemy/orm/query.py",
+            "line": 2746,
+            "name": "all",
+            "calls": 1,
+            "self_seconds": 2.7802000000000002e-05,
+            "cumulative_seconds": 0.019948617000000002
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/sqlalchemy/engine/result.py",
+            "line": 1372,
+            "name": "all",
+            "calls": 1,
+            "self_seconds": 0.00011850900000000001,
+            "cumulative_seconds": 0.018941182
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/sqlalchemy/engine/result.py",
+            "line": 1282,
+            "name": "_fetchall_impl",
+            "calls": 1,
+            "self_seconds": 2.103e-06,
+            "cumulative_seconds": 0.018807240000000003
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/sqlalchemy/engine/result.py",
+            "line": 1890,
+            "name": "_fetchall_impl",
+            "calls": 1,
+            "self_seconds": 7.3071e-05,
+            "cumulative_seconds": 0.018805137
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/sqlalchemy/orm/loading.py",
+            "line": 214,
+            "name": "chunks",
+            "calls": 2,
+            "self_seconds": 0.0009304150000000001,
+            "cumulative_seconds": 0.018704665000000002
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/ipaddress.py",
+            "line": 28,
+            "name": "ip_address",
+            "calls": 2000,
+            "self_seconds": 0.00223937,
+            "cumulative_seconds": 0.016726544
+          },
+          {
+            "file": "app/services/subscription_tokens.py",
+            "line": 42,
+            "name": "<genexpr>",
+            "calls": 27000,
+            "self_seconds": 0.008348301,
+            "cumulative_seconds": 0.013568730000000001
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/ipaddress.py",
+            "line": 1286,
+            "name": "__init__",
+            "calls": 2000,
+            "self_seconds": 0.0017222720000000002,
+            "cumulative_seconds": 0.010465836000000001
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 133,
+            "name": "_vless_node",
+            "calls": 1000,
+            "self_seconds": 0.0023215930000000003,
+            "cumulative_seconds": 0.009990807
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/sqlalchemy/dialects/sqlite/base.py",
+            "line": 1097,
+            "name": "process",
+            "calls": 2000,
+            "self_seconds": 0.0005613430000000001,
+            "cumulative_seconds": 0.009295630000000001
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 50,
+            "name": "<genexpr>",
+            "calls": 19000,
+            "self_seconds": 0.006633621,
+            "cumulative_seconds": 0.008954700000000001
+          }
+        ],
+        "indexed": [
+          {
+            "file": "/tmp/benchmark_vui_exports_ab.py",
+            "line": 27,
+            "name": "invoke",
+            "calls": 1,
+            "self_seconds": 1.1516000000000001e-05,
+            "cumulative_seconds": 0.15965496
+          },
+          {
+            "file": "app/api/subscription.py",
+            "line": 37,
+            "name": "singbox_subscription",
+            "calls": 1,
+            "self_seconds": 0.0022493500000000002,
+            "cumulative_seconds": 0.15940421300000002
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 377,
+            "name": "singbox_client_config",
+            "calls": 1,
+            "self_seconds": 0.003532784,
+            "cumulative_seconds": 0.134729136
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 282,
+            "name": "validated_nodes",
+            "calls": 1,
+            "self_seconds": 0.000574879,
+            "cumulative_seconds": 0.13032431
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 237,
+            "name": "validated_node",
+            "calls": 1000,
+            "self_seconds": 0.004140874,
+            "cumulative_seconds": 0.095064757
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 31,
+            "name": "node_host",
+            "calls": 2000,
+            "self_seconds": 0.000941704,
+            "cumulative_seconds": 0.054438061
+          },
+          {
+            "file": "app/services/subscription_tokens.py",
+            "line": 39,
+            "name": "normalize_server",
+            "calls": 2000,
+            "self_seconds": 0.005180987000000001,
+            "cumulative_seconds": 0.053325564000000006
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 55,
+            "name": "_verified_tls",
+            "calls": 1000,
+            "self_seconds": 0.003838024,
+            "cumulative_seconds": 0.040690963000000004
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 40,
+            "name": "_common",
+            "calls": 1000,
+            "self_seconds": 0.002531448,
+            "cumulative_seconds": 0.036110306
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 729,
+            "name": "unique_proxy_names",
+            "calls": 1,
+            "self_seconds": 0.0012757670000000001,
+            "cumulative_seconds": 0.034684674000000006
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/copy.py",
+            "line": 118,
+            "name": "deepcopy",
+            "calls": 23000,
+            "self_seconds": 0.016320341000000002,
+            "cumulative_seconds": 0.033027791
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/copy.py",
+            "line": 217,
+            "name": "_deepcopy_dict",
+            "calls": 1000,
+            "self_seconds": 0.00617084,
+            "cumulative_seconds": 0.030959581000000003
+          },
+          {
+            "file": "~",
+            "line": 0,
+            "name": "<built-in method builtins.any>",
+            "calls": 3000,
+            "self_seconds": 0.004610127,
+            "cumulative_seconds": 0.027898409000000002
+          },
+          {
+            "file": "app/services/inbound_service.py",
+            "line": 199,
+            "name": "list_inbounds",
+            "calls": 1,
+            "self_seconds": 1.7187e-05,
+            "cumulative_seconds": 0.020076430000000003
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/sqlalchemy/orm/query.py",
+            "line": 2746,
+            "name": "all",
+            "calls": 1,
+            "self_seconds": 5.0095e-05,
+            "cumulative_seconds": 0.019705001
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/sqlalchemy/engine/result.py",
+            "line": 1372,
+            "name": "all",
+            "calls": 1,
+            "self_seconds": 0.00010003900000000001,
+            "cumulative_seconds": 0.018843796
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/sqlalchemy/engine/result.py",
+            "line": 1282,
+            "name": "_fetchall_impl",
+            "calls": 1,
+            "self_seconds": 1.6930000000000001e-06,
+            "cumulative_seconds": 0.018727131
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/sqlalchemy/engine/result.py",
+            "line": 1890,
+            "name": "_fetchall_impl",
+            "calls": 1,
+            "self_seconds": 6.0341000000000004e-05,
+            "cumulative_seconds": 0.018725438
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/sqlalchemy/orm/loading.py",
+            "line": 214,
+            "name": "chunks",
+            "calls": 2,
+            "self_seconds": 0.000746958,
+            "cumulative_seconds": 0.018641451
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/ipaddress.py",
+            "line": 28,
+            "name": "ip_address",
+            "calls": 2000,
+            "self_seconds": 0.002038143,
+            "cumulative_seconds": 0.015666173000000002
+          },
+          {
+            "file": "app/services/subscription_tokens.py",
+            "line": 42,
+            "name": "<genexpr>",
+            "calls": 27000,
+            "self_seconds": 0.008782,
+            "cumulative_seconds": 0.01532029
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/ipaddress.py",
+            "line": 1286,
+            "name": "__init__",
+            "calls": 2000,
+            "self_seconds": 0.001534456,
+            "cumulative_seconds": 0.010459939000000001
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/sqlalchemy/dialects/sqlite/base.py",
+            "line": 1097,
+            "name": "process",
+            "calls": 2000,
+            "self_seconds": 0.000474581,
+            "cumulative_seconds": 0.009058249
+          },
+          {
+            "file": "app/services/validated_export.py",
+            "line": 133,
+            "name": "_vless_node",
+            "calls": 1000,
+            "self_seconds": 0.002154309,
+            "cumulative_seconds": 0.00890779
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/sqlalchemy/sql/sqltypes.py",
+            "line": 2999,
+            "name": "process",
+            "calls": 2000,
+            "self_seconds": 0.000488349,
+            "cumulative_seconds": 0.008583668000000001
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/subscription/mihomo.yaml",
+      "body_bytes": 520340,
+      "sha256": "84f071aa2bcffc32af2ae863c929701125931cc94daf23f99a23ea63910a7552",
+      "runs": {
+        "reference": [
+          {
+            "wall": 1.0992419340000197,
+            "cpu": 1.099031599
+          },
+          {
+            "wall": 0.9987908359980793,
+            "cpu": 0.9986880959999986
+          },
+          {
+            "wall": 1.032921225996688,
+            "cpu": 1.0327946059999995
+          },
+          {
+            "wall": 1.0671650870026497,
+            "cpu": 1.067017163000001
+          },
+          {
+            "wall": 0.9822917409983347,
+            "cpu": 0.9821853769999986
+          },
+          {
+            "wall": 1.0315157369986991,
+            "cpu": 1.0314030580000004
+          },
+          {
+            "wall": 0.9005274070004816,
+            "cpu": 0.900413958999998
+          },
+          {
+            "wall": 0.9761401460018533,
+            "cpu": 0.9760243969999998
+          }
+        ],
+        "indexed": [
+          {
+            "wall": 0.48100197999883676,
+            "cpu": 0.4809403510000001
+          },
+          {
+            "wall": 0.5174878449979587,
+            "cpu": 0.5172015390000002
+          },
+          {
+            "wall": 0.5223966930025199,
+            "cpu": 0.5223464249999985
+          },
+          {
+            "wall": 0.5370466560016212,
+            "cpu": 0.5369179279999994
+          },
+          {
+            "wall": 0.5932234450010583,
+            "cpu": 0.5930950939999988
+          },
+          {
+            "wall": 0.5400420670011954,
+            "cpu": 0.5399152839999992
+          },
+          {
+            "wall": 0.49617983900316176,
+            "cpu": 0.49614414000000195
+          },
+          {
+            "wall": 0.609295194997685,
+            "cpu": 0.6091888889999986
+          }
+        ]
+      },
+      "profile_rows": {
+        "reference": [
+          {
+            "file": "/tmp/benchmark_vui_exports_ab.py",
+            "line": 27,
+            "name": "invoke",
+            "calls": 1,
+            "self_seconds": 1.408e-05,
+            "cumulative_seconds": 3.510356562
+          },
+          {
+            "file": "app/api/subscription.py",
+            "line": 27,
+            "name": "mihomo_subscription",
+            "calls": 1,
+            "self_seconds": 0.00380261,
+            "cumulative_seconds": 3.510052014
+          },
+          {
+            "file": "app/services/mihomo_subscription.py",
+            "line": 9,
+            "name": "mihomo_config",
+            "calls": 1,
+            "self_seconds": 0.00029279100000000004,
+            "cumulative_seconds": 3.362337773
+          },
+          {
+            "file": "app/services/routing_validation.py",
+            "line": 113,
+            "name": "build_rule_plan",
+            "calls": 1,
+            "self_seconds": 0.00037619700000000004,
+            "cumulative_seconds": 1.9230691540000002
+          },
+          {
+            "file": "~",
+            "line": 0,
+            "name": "<built-in method builtins.any>",
+            "calls": 21885,
+            "self_seconds": 0.130482234,
+            "cumulative_seconds": 1.8826457790000002
+          },
+          {
+            "file": "tests/fixtures/rule_plan_405b64a.py",
+            "line": 3,
+            "name": "build_rule_plan",
+            "calls": 1,
+            "self_seconds": 0.004324313000000001,
+            "cumulative_seconds": 1.856214625
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 381,
+            "name": "_covers",
+            "calls": 1708454,
+            "self_seconds": 0.8223116220000001,
+            "cumulative_seconds": 1.2731604220000001
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/__init__.py",
+            "line": 263,
+            "name": "safe_dump",
+            "calls": 1,
+            "self_seconds": 1.4973e-05,
+            "cumulative_seconds": 1.2496575360000002
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/__init__.py",
+            "line": 215,
+            "name": "dump_all",
+            "calls": 1,
+            "self_seconds": 0.00290432,
+            "cumulative_seconds": 1.249642563
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/representer.py",
+            "line": 26,
+            "name": "represent",
+            "calls": 1,
+            "self_seconds": 0.00032652,
+            "cumulative_seconds": 1.2461907300000001
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/serializer.py",
+            "line": 46,
+            "name": "serialize",
+            "calls": 1,
+            "self_seconds": 0.000461023,
+            "cumulative_seconds": 1.161656123
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/serializer.py",
+            "line": 78,
+            "name": "serialize_node",
+            "calls": 32568,
+            "self_seconds": 0.10187905100000001,
+            "cumulative_seconds": 1.1405663590000001
+          },
+          {
+            "file": "tests/fixtures/rule_plan_405b64a.py",
+            "line": 120,
+            "name": "effective_proxy",
+            "calls": 541,
+            "self_seconds": 0.001579658,
+            "cumulative_seconds": 0.966814582
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 111,
+            "name": "emit",
+            "calls": 34781,
+            "self_seconds": 0.043034383,
+            "cumulative_seconds": 0.9629992140000001
+          },
+          {
+            "file": "tests/fixtures/rule_plan_405b64a.py",
+            "line": 67,
+            "name": "add_section",
+            "calls": 70,
+            "self_seconds": 0.001850747,
+            "cumulative_seconds": 0.6519857600000001
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 392,
+            "name": "_overlaps",
+            "calls": 346548,
+            "self_seconds": 0.10824947900000001,
+            "cumulative_seconds": 0.6171219050000001
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 232,
+            "name": "expect_node",
+            "calls": 32568,
+            "self_seconds": 0.040901402,
+            "cumulative_seconds": 0.60677948
+          },
+          {
+            "file": "tests/fixtures/rule_plan_405b64a.py",
+            "line": 76,
+            "name": "<genexpr>",
+            "calls": 624403,
+            "self_seconds": 0.128711356,
+            "cumulative_seconds": 0.60017167
+          },
+          {
+            "file": "tests/fixtures/rule_plan_405b64a.py",
+            "line": 131,
+            "name": "<genexpr>",
+            "calls": 277533,
+            "self_seconds": 0.054652821000000004,
+            "cumulative_seconds": 0.54446335
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 395,
+            "name": "expect_block_mapping_key",
+            "calls": 13231,
+            "self_seconds": 0.016342817000000003,
+            "cumulative_seconds": 0.328881493
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 626,
+            "name": "analyze_scalar",
+            "calls": 30359,
+            "self_seconds": 0.22988112700000002,
+            "cumulative_seconds": 0.30917107400000005
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 376,
+            "name": "expect_block_sequence_item",
+            "calls": 9321,
+            "self_seconds": 0.010017126000000001,
+            "cumulative_seconds": 0.29922865800000004
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 266,
+            "name": "expect_scalar",
+            "calls": 30359,
+            "self_seconds": 0.027538499,
+            "cumulative_seconds": 0.29297862
+          },
+          {
+            "file": "tests/fixtures/rule_plan_405b64a.py",
+            "line": 136,
+            "name": "<genexpr>",
+            "calls": 277533,
+            "self_seconds": 0.050284183,
+            "cumulative_seconds": 0.25661416200000003
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 377,
+            "name": "_is_domain",
+            "calls": 3419674,
+            "self_seconds": 0.25433637000000003,
+            "cumulative_seconds": 0.25433637000000003
+          }
+        ],
+        "indexed": [
+          {
+            "file": "/tmp/benchmark_vui_exports_ab.py",
+            "line": 27,
+            "name": "invoke",
+            "calls": 1,
+            "self_seconds": 1.1937000000000001e-05,
+            "cumulative_seconds": 1.839086779
+          },
+          {
+            "file": "app/api/subscription.py",
+            "line": 27,
+            "name": "mihomo_subscription",
+            "calls": 1,
+            "self_seconds": 0.0043118390000000005,
+            "cumulative_seconds": 1.8387792870000002
+          },
+          {
+            "file": "app/services/mihomo_subscription.py",
+            "line": 9,
+            "name": "mihomo_config",
+            "calls": 1,
+            "self_seconds": 0.000259792,
+            "cumulative_seconds": 1.7401268840000002
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/__init__.py",
+            "line": 263,
+            "name": "safe_dump",
+            "calls": 1,
+            "self_seconds": 1.0716e-05,
+            "cumulative_seconds": 1.336600596
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/__init__.py",
+            "line": 215,
+            "name": "dump_all",
+            "calls": 1,
+            "self_seconds": 0.003031059,
+            "cumulative_seconds": 1.33658988
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/representer.py",
+            "line": 26,
+            "name": "represent",
+            "calls": 1,
+            "self_seconds": 0.000115314,
+            "cumulative_seconds": 1.3334312480000001
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/serializer.py",
+            "line": 46,
+            "name": "serialize",
+            "calls": 1,
+            "self_seconds": 0.000322795,
+            "cumulative_seconds": 1.177326142
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/serializer.py",
+            "line": 78,
+            "name": "serialize_node",
+            "calls": 32568,
+            "self_seconds": 0.102104947,
+            "cumulative_seconds": 1.151516921
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 111,
+            "name": "emit",
+            "calls": 34781,
+            "self_seconds": 0.039739022000000006,
+            "cumulative_seconds": 0.9807152760000001
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 232,
+            "name": "expect_node",
+            "calls": 32568,
+            "self_seconds": 0.042470848000000005,
+            "cumulative_seconds": 0.6145406840000001
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 395,
+            "name": "expect_block_mapping_key",
+            "calls": 13231,
+            "self_seconds": 0.018943023,
+            "cumulative_seconds": 0.335035346
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 626,
+            "name": "analyze_scalar",
+            "calls": 30359,
+            "self_seconds": 0.23457196600000002,
+            "cumulative_seconds": 0.321327965
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 376,
+            "name": "expect_block_sequence_item",
+            "calls": 9321,
+            "self_seconds": 0.010775567000000002,
+            "cumulative_seconds": 0.310722516
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 266,
+            "name": "expect_scalar",
+            "calls": 30359,
+            "self_seconds": 0.026435201000000002,
+            "cumulative_seconds": 0.290396617
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 469,
+            "name": "process_tag",
+            "calls": 32568,
+            "self_seconds": 0.01722285,
+            "cumulative_seconds": 0.265150583
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 494,
+            "name": "choose_scalar_style",
+            "calls": 30359,
+            "self_seconds": 0.013320589,
+            "cumulative_seconds": 0.245287523
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 515,
+            "name": "process_scalar",
+            "calls": 30359,
+            "self_seconds": 0.017197708000000003,
+            "cumulative_seconds": 0.244558286
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 409,
+            "name": "expect_block_mapping_simple_value",
+            "calls": 12224,
+            "self_seconds": 0.010097814,
+            "cumulative_seconds": 0.237238724
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 1080,
+            "name": "write_plain",
+            "calls": 30359,
+            "self_seconds": 0.14835999700000002,
+            "cumulative_seconds": 0.227360578
+          },
+          {
+            "file": "app/services/routing_validation.py",
+            "line": 68,
+            "name": "normalize_routing",
+            "calls": 3,
+            "self_seconds": 0.001185614,
+            "cumulative_seconds": 0.214145315
+          },
+          {
+            "file": "app/services/routing_validation.py",
+            "line": 113,
+            "name": "build_rule_plan",
+            "calls": 1,
+            "self_seconds": 0.00043670700000000005,
+            "cumulative_seconds": 0.20844257000000002
+          },
+          {
+            "file": "app/services/routing_validation.py",
+            "line": 18,
+            "name": "parse_routing_target",
+            "calls": 3264,
+            "self_seconds": 0.020711315,
+            "cumulative_seconds": 0.189732858
+          },
+          {
+            "file": "app/services/routing_validation.py",
+            "line": 75,
+            "name": "targets",
+            "calls": 6,
+            "self_seconds": 0.010372051,
+            "cumulative_seconds": 0.188024613
+          },
+          {
+            "file": "/workspace/scratch/a9f90eb3c4c8/vui-recovery-20261009/.venv/lib/python3.12/site-packages/yaml/emitter.py",
+            "line": 437,
+            "name": "check_simple_key",
+            "calls": 12224,
+            "self_seconds": 0.023868593,
+            "cumulative_seconds": 0.180207051
+          },
+          {
+            "file": "~",
+            "line": 0,
+            "name": "<built-in method builtins.any>",
+            "calls": 21821,
+            "self_seconds": 0.029264107,
+            "cumulative_seconds": 0.15949833800000002
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/routing/mihomo/preview",
+      "body_bytes": 213202,
+      "sha256": "a0c000de7cf0f305677ffc5af02d092bf2cfe7f47d23e0448e3721882043f8ed",
+      "runs": {
+        "reference": [
+          {
+            "wall": 0.5467815029987833,
+            "cpu": 0.5467547890000013
+          },
+          {
+            "wall": 0.5624723859982623,
+            "cpu": 0.5623837850000015
+          },
+          {
+            "wall": 0.5693971709988546,
+            "cpu": 0.569313073
+          },
+          {
+            "wall": 0.5661346249980852,
+            "cpu": 0.5661080199999979
+          },
+          {
+            "wall": 0.557057600999542,
+            "cpu": 0.5569273500000023
+          },
+          {
+            "wall": 0.5635877660024562,
+            "cpu": 0.5635730500000022
+          },
+          {
+            "wall": 0.5689028430024337,
+            "cpu": 0.5687014179999998
+          },
+          {
+            "wall": 0.5632071069994709,
+            "cpu": 0.5631372830000032
+          }
+        ],
+        "indexed": [
+          {
+            "wall": 0.07479675099966698,
+            "cpu": 0.07476704799999823
+          },
+          {
+            "wall": 0.07240577300035511,
+            "cpu": 0.0724543329999996
+          },
+          {
+            "wall": 0.06564739799796371,
+            "cpu": 0.0656389130000008
+          },
+          {
+            "wall": 0.11652814300032333,
+            "cpu": 0.1165000030000023
+          },
+          {
+            "wall": 0.07865259499885724,
+            "cpu": 0.07865515700000003
+          },
+          {
+            "wall": 0.07612455200069235,
+            "cpu": 0.07612763699999903
+          },
+          {
+            "wall": 0.07895553900016239,
+            "cpu": 0.07895704899999956
+          },
+          {
+            "wall": 0.08822885599875008,
+            "cpu": 0.08823125800000042
+          }
+        ]
+      },
+      "profile_rows": {
+        "reference": [
+          {
+            "file": "/tmp/benchmark_vui_exports_ab.py",
+            "line": 27,
+            "name": "invoke",
+            "calls": 1,
+            "self_seconds": 0.000140612,
+            "cumulative_seconds": 2.261854997
+          },
+          {
+            "file": "app/api/routing.py",
+            "line": 62,
+            "name": "saved_preview",
+            "calls": 1,
+            "self_seconds": 8.192e-06,
+            "cumulative_seconds": 2.260219546
+          },
+          {
+            "file": "app/services/routing_validation.py",
+            "line": 113,
+            "name": "build_rule_plan",
+            "calls": 1,
+            "self_seconds": 0.0006304380000000001,
+            "cumulative_seconds": 2.1882838550000003
+          },
+          {
+            "file": "tests/fixtures/rule_plan_405b64a.py",
+            "line": 3,
+            "name": "build_rule_plan",
+            "calls": 1,
+            "self_seconds": 0.005276648,
+            "cumulative_seconds": 2.106260042
+          },
+          {
+            "file": "~",
+            "line": 0,
+            "name": "<built-in method builtins.any>",
+            "calls": 17541,
+            "self_seconds": 0.139452871,
+            "cumulative_seconds": 2.07868792
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 381,
+            "name": "_covers",
+            "calls": 1708454,
+            "self_seconds": 0.928258542,
+            "cumulative_seconds": 1.444752953
+          },
+          {
+            "file": "tests/fixtures/rule_plan_405b64a.py",
+            "line": 120,
+            "name": "effective_proxy",
+            "calls": 541,
+            "self_seconds": 0.0021919,
+            "cumulative_seconds": 1.097183285
+          },
+          {
+            "file": "tests/fixtures/rule_plan_405b64a.py",
+            "line": 67,
+            "name": "add_section",
+            "calls": 70,
+            "self_seconds": 0.0027075510000000003,
+            "cumulative_seconds": 0.733484266
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 392,
+            "name": "_overlaps",
+            "calls": 346548,
+            "self_seconds": 0.114985347,
+            "cumulative_seconds": 0.709633405
+          },
+          {
+            "file": "tests/fixtures/rule_plan_405b64a.py",
+            "line": 76,
+            "name": "<genexpr>",
+            "calls": 624403,
+            "self_seconds": 0.150140244,
+            "cumulative_seconds": 0.6748621290000001
+          },
+          {
+            "file": "tests/fixtures/rule_plan_405b64a.py",
+            "line": 131,
+            "name": "<genexpr>",
+            "calls": 277533,
+            "self_seconds": 0.065055709,
+            "cumulative_seconds": 0.630213604
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 377,
+            "name": "_is_domain",
+            "calls": 3419674,
+            "self_seconds": 0.28199038000000004,
+            "cumulative_seconds": 0.28199038000000004
+          },
+          {
+            "file": "tests/fixtures/rule_plan_405b64a.py",
+            "line": 136,
+            "name": "<genexpr>",
+            "calls": 277533,
+            "self_seconds": 0.054022352,
+            "cumulative_seconds": 0.280114107
+          },
+          {
+            "file": "~",
+            "line": 0,
+            "name": "<method 'endswith' of 'str' objects>",
+            "calls": 1705408,
+            "self_seconds": 0.235266573,
+            "cumulative_seconds": 0.235266573
+          },
+          {
+            "file": "app/services/routing_validation.py",
+            "line": 68,
+            "name": "normalize_routing",
+            "calls": 2,
+            "self_seconds": 0.0005497680000000001,
+            "cumulative_seconds": 0.15264491700000002
+          },
+          {
+            "file": "app/services/routing_validation.py",
+            "line": 18,
+            "name": "parse_routing_target",
+            "calls": 2176,
+            "self_seconds": 0.014305211000000002,
+            "cumulative_seconds": 0.136534326
+          },
+          {
+            "file": "app/services/routing_validation.py",
+            "line": 75,
+            "name": "targets",
+            "calls": 4,
+            "self_seconds": 0.007452902000000001,
+            "cumulative_seconds": 0.136453196
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 190,
+            "name": "parse_routing_target",
+            "calls": 2112,
+            "self_seconds": 0.009933595,
+            "cumulative_seconds": 0.094439643
+          },
+          {
+            "file": "tests/fixtures/rule_plan_405b64a.py",
+            "line": 129,
+            "name": "<genexpr>",
+            "calls": 35165,
+            "self_seconds": 0.007044662,
+            "cumulative_seconds": 0.079018657
+          },
+          {
+            "file": "tests/fixtures/rule_plan_405b64a.py",
+            "line": 108,
+            "name": "<genexpr>",
+            "calls": 33280,
+            "self_seconds": 0.0062957690000000005,
+            "cumulative_seconds": 0.07407954500000001
+          },
+          {
+            "file": "tests/fixtures/rule_plan_405b64a.py",
+            "line": 188,
+            "name": "<genexpr>",
+            "calls": 70589,
+            "self_seconds": 0.01456695,
+            "cumulative_seconds": 0.072900221
+          },
+          {
+            "file": "app/api/routing.py",
+            "line": 26,
+            "name": "snapshot",
+            "calls": 1,
+            "self_seconds": 2.7430000000000002e-06,
+            "cumulative_seconds": 0.071927499
+          },
+          {
+            "file": "app/services/routing_store.py",
+            "line": 46,
+            "name": "read_snapshot",
+            "calls": 1,
+            "self_seconds": 8.8824e-05,
+            "cumulative_seconds": 0.071924756
+          },
+          {
+            "file": "app/services/routing_store.py",
+            "line": 32,
+            "name": "_read",
+            "calls": 1,
+            "self_seconds": 8.6252e-05,
+            "cumulative_seconds": 0.071605084
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 280,
+            "name": "normalize_routing",
+            "calls": 1,
+            "self_seconds": 0.000285865,
+            "cumulative_seconds": 0.054224534000000005
+          }
+        ],
+        "indexed": [
+          {
+            "file": "/tmp/benchmark_vui_exports_ab.py",
+            "line": 27,
+            "name": "invoke",
+            "calls": 1,
+            "self_seconds": 0.000149266,
+            "cumulative_seconds": 0.329833731
+          },
+          {
+            "file": "app/api/routing.py",
+            "line": 62,
+            "name": "saved_preview",
+            "calls": 1,
+            "self_seconds": 8.283e-06,
+            "cumulative_seconds": 0.32828834700000004
+          },
+          {
+            "file": "app/services/routing_validation.py",
+            "line": 113,
+            "name": "build_rule_plan",
+            "calls": 1,
+            "self_seconds": 0.001537371,
+            "cumulative_seconds": 0.245828757
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 469,
+            "name": "build_rule_plan",
+            "calls": 1,
+            "self_seconds": 0.00435519,
+            "cumulative_seconds": 0.16859183800000002
+          },
+          {
+            "file": "app/services/routing_validation.py",
+            "line": 68,
+            "name": "normalize_routing",
+            "calls": 2,
+            "self_seconds": 0.002423348,
+            "cumulative_seconds": 0.157106514
+          },
+          {
+            "file": "app/services/routing_validation.py",
+            "line": 18,
+            "name": "parse_routing_target",
+            "calls": 2176,
+            "self_seconds": 0.014805457000000001,
+            "cumulative_seconds": 0.139322414
+          },
+          {
+            "file": "~",
+            "line": 0,
+            "name": "<built-in method builtins.any>",
+            "calls": 17477,
+            "self_seconds": 0.025623032,
+            "cumulative_seconds": 0.136940163
+          },
+          {
+            "file": "app/services/routing_validation.py",
+            "line": 75,
+            "name": "targets",
+            "calls": 4,
+            "self_seconds": 0.00707213,
+            "cumulative_seconds": 0.13684353900000001
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 190,
+            "name": "parse_routing_target",
+            "calls": 2112,
+            "self_seconds": 0.010381836,
+            "cumulative_seconds": 0.105751707
+          },
+          {
+            "file": "app/api/routing.py",
+            "line": 26,
+            "name": "snapshot",
+            "calls": 1,
+            "self_seconds": 1.7130000000000002e-06,
+            "cumulative_seconds": 0.082451307
+          },
+          {
+            "file": "app/services/routing_store.py",
+            "line": 46,
+            "name": "read_snapshot",
+            "calls": 1,
+            "self_seconds": 8.389600000000001e-05,
+            "cumulative_seconds": 0.082449594
+          },
+          {
+            "file": "app/services/routing_store.py",
+            "line": 32,
+            "name": "_read",
+            "calls": 1,
+            "self_seconds": 9.4052e-05,
+            "cumulative_seconds": 0.082057375
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 182,
+            "name": "_unsafe_text",
+            "calls": 2240,
+            "self_seconds": 0.001474248,
+            "cumulative_seconds": 0.05720291
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 280,
+            "name": "normalize_routing",
+            "calls": 1,
+            "self_seconds": 0.000269194,
+            "cumulative_seconds": 0.054248745
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 286,
+            "name": "normalize_targets",
+            "calls": 2,
+            "self_seconds": 0.001597328,
+            "cumulative_seconds": 0.047433655000000005
+          },
+          {
+            "file": "app/services/routing_validation.py",
+            "line": 14,
+            "name": "_unsafe_text",
+            "calls": 2432,
+            "self_seconds": 0.001208124,
+            "cumulative_seconds": 0.043359187
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/ipaddress.py",
+            "line": 28,
+            "name": "ip_address",
+            "calls": 4672,
+            "self_seconds": 0.008412735000000001,
+            "cumulative_seconds": 0.040210423
+          },
+          {
+            "file": "app/services/routing_validation.py",
+            "line": 15,
+            "name": "<genexpr>",
+            "calls": 57088,
+            "self_seconds": 0.023866424,
+            "cumulative_seconds": 0.036869446
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 186,
+            "name": "<genexpr>",
+            "calls": 53632,
+            "self_seconds": 0.016932410000000002,
+            "cumulative_seconds": 0.025881811
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/urllib/parse.py",
+            "line": 469,
+            "name": "urlsplit",
+            "calls": 2176,
+            "self_seconds": 0.010700744,
+            "cumulative_seconds": 0.025495774000000002
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 590,
+            "name": "effective_proxy",
+            "calls": 541,
+            "self_seconds": 0.0010769500000000001,
+            "cumulative_seconds": 0.020192163000000003
+          },
+          {
+            "file": "~",
+            "line": 0,
+            "name": "<built-in method builtins.all>",
+            "calls": 4288,
+            "self_seconds": 0.003104953,
+            "cumulative_seconds": 0.018473069
+          },
+          {
+            "file": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/ipaddress.py",
+            "line": 1929,
+            "name": "__init__",
+            "calls": 4288,
+            "self_seconds": 0.007111835,
+            "cumulative_seconds": 0.017215319
+          },
+          {
+            "file": "~",
+            "line": 0,
+            "name": "<built-in method builtins.ord>",
+            "calls": 212096,
+            "self_seconds": 0.016793175,
+            "cumulative_seconds": 0.016793175
+          },
+          {
+            "file": "app/services/mihomo_routing.py",
+            "line": 381,
+            "name": "_covers",
+            "calls": 15312,
+            "self_seconds": 0.012231188,
+            "cumulative_seconds": 0.016617798
+          }
+        ]
+      }
+    }
+  ],
+  "reference_head": "405b64a34c0ca691f14afe39eddd60bb1885b300"
+}

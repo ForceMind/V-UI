@@ -1,6 +1,6 @@
 # 受管终端控制（候选）
 
-这层软件将固定的全局 `v-ui` 入口连接到受管服务及已有的版本、备份、恢复实现。它是独立于默认安装器的显式组件；不能因为包里出现源码就认为系统已经安装了这个命令。本文描述实现和验收边界，不代表已在用户主机安装，也不替代真实 systemd / OpenRC 和 root 安装资格。
+这层软件将固定的全局 `v-ui` 入口连接到受管服务及已有的版本、备份、恢复实现。它是独立于默认安装器的显式组件；不能因为包里出现源码就认为系统已经安装了这个命令。准确 `f50942f` 已在一次明确授权、空白临时 Ubuntu 24.04 x86_64 主机取得真实 root/systemd 资格，见[收口记录](MANAGED_OPERATIONS_CLOSURE_20261012.md)。这不代表已在用户主机安装，也不扩大到其他主机或 OpenRC 写操作。
 
 ## 安装消费点与信任
 
@@ -10,7 +10,15 @@
 sudo /usr/bin/python3 -B -I -S ./install_ops_control.py --kit . --sha256 '<可信 SHA256SUMS 文件摘要>'
 ```
 
-这条命令实际安装安全关键的 root-owned 文件，必须由主机操作者明确选择。当前开发只在云端临时目录中以非 root 假安装/假服务测试，不执行此系统安装命令。默认 `install.sh` 不调用新安装器，在线 `--version` 的固定下载路径也不自动添加这些组件；必须使用完整 kit，不能把服务用户可写 payload 当作 root 控制源码来源。
+这条命令实际安装安全关键的 root-owned 文件，必须由主机操作者明确选择。上述临时主机资格已实际消费完整可信 kit、安装固定全局入口并执行真实菜单；普通包内假服务测试仍是另一层证据。默认 `install.sh` 不调用新安装器，在线 `--version` 的固定下载路径也不自动添加这些组件；必须使用完整 kit，不能把服务用户可写 payload 当作 root 控制源码来源。
+
+安装完成后，已有管理员在交互终端通过固定入口启动菜单：
+
+```sh
+sudo /usr/local/sbin/v-ui
+```
+
+普通用户直接调用该入口会被拒绝；包装器不会自动提权，也不会授予 sudo 权限。
 
 摘要验证字节完整性，不认证来源。安装器本体及 kit 必须在执行之前从独立可信来源接受；未知脚本内部的自验不能证明该脚本本身可信。安装器不新增账号、sudoers、SUID、capability 或常驻代理，不改变防火墙、SSH、服务启用状态或网络设置。新文件为固定的 `/usr/local/sbin/v-ui` 和 `/usr/local/lib/v-ui/` 下控制源码与 receipt；不向用户任意输入的系统路径写文件。
 
@@ -20,11 +28,17 @@ receipt 精确绑定安装记录、launcher、固定服务文件、控制组件�
 
 如果控制组件发布中断且 receipt 缺失，只能在显式 `--refresh`、至少存在一个固定目标、每个现存目标都具备预期 root 权限/类型且逐字节匹配同一份已接受 kit 时补齐缺项；普通重试不自动接管。任何未知内容、链接或不同版本混合残留都拒绝，需要人工核查，不能声称任意安装中断都可自动恢复。此规则与用户数据库的 restore journal 分开，绝不为修复控制入口删除用户数据。
 
+### 应用版本与系统控制组件分别升级
+
+菜单的候选准备和版本切换只更新服务用户的 release/CURRENT，不替换 root-owned launcher、安装记录、服务模板或本控制组件。旧控制器继续运行其已验收的 worker 和 release-tools；不能把一次 CURRENT 切换称为这些系统组件也已升级。
+
+包含系统组件变化的完整版本应先按[既有受管安装器升级流程](OPERATIONS.md)更新 canonical launcher、安装记录和服务文件，再使用同一准确版本、独立可信的完整 kit 显式安装或 `--refresh` 控制组件。例如本候选纳入了低内存 launcher 变更，只有旧 launcher 的实例会被新 kit 拒绝。这是来源匹配保护，不应通过忽略 receipt、改用服务用户 payload 或删除旧 bootstrap runtime 绕过。本次已验证同包安装器升级及同 kit 构造残留的显式 refresh；不同系统组件的真实跨版本升级仍需对应系统层资格。
+
 ## 系统控制与事务
 
 系统命令、服务名和环境固定。查询错误、未知状态、切换中、总线不可达或超时不是“已经停止”；状态快照也不是 HTTPS、证书或代理链路健康证明。所有写动作需在可信菜单内新输入确认。EOF、非 TTY 或确认前中断不开始写操作。
 
-systemd 先停止 HTTP-01 socket，避免 responder 再次被 socket 激活，再停止面板和 responder 两个服务。除了服务停用终态，还验证固定 units 的 cgroup 没有残留进程；不只看 MainPID 或锁是否能获取。加载的服务需匹配固定 FragmentPath、无 DropInPaths、无待 daemon-reload、专用 User/Group、受管 KillMode 等约束。当前需要 cgroup v2；缺失或无法验证时拒绝写入。
+systemd 先发送 HTTP-01 socket 停止请求，避免 responder 再次被 socket 激活，再向面板和 responder 两个服务发送停止请求。systemd 依赖关系可让 responder 先于 socket 完成停止；请求发送顺序不等于各 unit 的停止完成顺序。除了服务停用终态，还验证固定 units 的 cgroup 没有残留进程；不只看 MainPID 或锁是否能获取。加载的服务需匹配固定 FragmentPath、无 DropInPaths、无待 daemon-reload、专用 User/Group、受管 KillMode 等约束。当前需要 cgroup v2；缺失或无法验证时拒绝写入。
 
 OpenRC 现有 status 文本不能充分证明 core、certbot、watchdog 后代全部静止。当前仅查询状态；依赖停启服务的动作全部拒绝，不把一次 `rc-service stop` 成功等同于可安全恢复数据。纯候选准备不控制服务，可单独执行。各平台的代码/假服务测试与真实 init 生命周期验证分开记录。
 
@@ -50,7 +64,7 @@ stage 与 restore 输入文件必须由既有 `v-ui` 用户拥有且为 owner-on
 
 - 纯软件层：临时私有目录、真实文件锁/SQLite、已知合成包、假服务状态、协议失败、进程期限及 PTY 交互。
 - 打包层：完整 kit 固定成员、哈希、安装消费者依赖闭包和四 target 原件分别检查。
-- 系统层：真实新组件安装、降权、init 管理和故障恢复需要另行在明确为空的临时主机执行；此前旧安装器的 CI 不替代这一资格。
+- 系统层：准确 `f50942f` 的新组件安装、真实全局入口、worker 降权、systemd/socket 生命周期、合成数据恢复及自有资源清理已通过一次独立资格；仅限上述 Ubuntu 主机与[收口记录](MANAGED_OPERATIONS_CLOSURE_20261012.md)中的场景。此前旧安装器 CI、假服务及四目标包消费不替代它。
 - 部署层：上述任何测试都不表示已经操作用户服务器或已公开发布。
 
-准确提交的测试次数、失败和未执行项写入对应 PR 验收记录。未得到本层真实 root/init 证据前，不称此候选控制器可直接投入生产。
+准确提交的测试次数、失败和未执行项见[收口记录](MANAGED_OPERATIONS_CLOSURE_20261012.md)与 [PR #33](https://github.com/ForceMind/V-UI/pull/33)。这是有界候选资格，不是任意主机、跨版本迁移、真实断电恢复或生产可用性保证；后续纯文档 head 的普通 CI 与附件须单独核验，不能改称新 head 重跑了 root 验收。

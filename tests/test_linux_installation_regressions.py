@@ -1,6 +1,6 @@
 """Socket and command-only checks: never modify host services or firewalls."""
 import argparse
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 import io
 from pathlib import Path
 import socket
@@ -146,7 +146,7 @@ class LinuxInstallationRegressions(unittest.TestCase):
                 return original_check(port, bind)
         blocked = Mock(side_effect=AssertionError('Host mutation reached before port conflict'))
         with patch.object(installer, 'CONFIG', self.root / 'service.json'), \
-             patch.object(installer, 'verify_archive', return_value=(b'', None, {'release_id': 'test'})), \
+             patch.object(installer, 'verify_archive', return_value=(io.BytesIO(), nullcontext(), {'release_id': 'test'})), \
              patch.object(installer, 'check_platform', return_value={'init': manager, 'name': 'fixture', 'target': 'x86_64-gnu'}), \
              patch.object(installer, 'check_reserved'), \
              patch.object(installer, 'probe_ipv6', return_value=True), \
@@ -237,7 +237,7 @@ class LinuxInstallationRegressions(unittest.TestCase):
             assume_external_ports_open=True, dry_run=True, upgrade=False,
             bundle='unused.zip', sha256='0' * 64)
         with patch.object(installer, 'CONFIG', self.root / 'service.json'), \
-             patch.object(installer, 'verify_archive', return_value=(b'', None, {'release_id': 'test'})), \
+             patch.object(installer, 'verify_archive', return_value=(io.BytesIO(), nullcontext(), {'release_id': 'test'})), \
              patch.object(installer, 'check_platform', return_value={'init': 'openrc', 'name': 'fixture', 'target': 'x86_64-gnu'}), \
              patch.object(installer, 'check_reserved'), \
              patch.object(installer, 'probe_ipv6', return_value=False), \

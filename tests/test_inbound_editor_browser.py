@@ -22,6 +22,124 @@ from loopback_helpers import unused_port
 from scripts.prepare_frontend import prepare
 
 
+@unittest.skipUnless(os.getenv('VUI_NODE_BROWSER') == '1', 'explicit panel browser gate')
+class SecurityCenterBrowserTests(unittest.TestCase):
+    def test_scope_notice_navigation_without_security_requests(self):
+        """Run the real localized panel, without installed cores or host security access."""
+        from playwright.sync_api import sync_playwright, expect
+        source = Path(__file__).resolve().parents[1]
+        assets = Path(os.environ['VUI_FRONTEND_ASSETS']).resolve()
+        password = 'Synthetic-security-center-password!'
+        with ExitStack() as stack:
+            root = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix='vui-security-browser-')))
+            payload = root / 'payload'
+            payload.mkdir()
+            for name in ('app', 'web'):
+                shutil.copytree(source / name, payload / name, ignore=shutil.ignore_patterns('__pycache__', 'vendor'))
+            shutil.copyfile(source / 'main.py', payload / 'main.py')
+            shutil.copytree(assets, payload / 'web/vendor')
+            prepare(payload)
+            (root / 'bin').mkdir()
+            env = {**os.environ, 'PYTHONPATH': str(payload), 'VUI_DATA_DIR': str(root / 'data'),
+                   'VUI_BIN_DIR': str(root / 'bin'), 'VUI_PUBLIC_ORIGIN': '', 'VUI_CERTIFICATES_ENABLED': '0'}
+            code = '''import sys,uvicorn
+from app.models.database import init_db
+from app.services.auth_service import provision_admin
+init_db()
+provision_admin('security-admin',sys.stdin.read())
+import main
+uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=False,access_log=False)
+'''
+            logpath = root / 'server.log'
+            log = stack.enter_context(logpath.open('w'))
+            process = subprocess.Popen([sys.executable, '-B', '-c', code], cwd=payload, env=env,
+                stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT, text=True)
+            def stop():
+                process.terminate()
+                try: process.wait(timeout=15)
+                except subprocess.TimeoutExpired: process.kill(); process.wait(timeout=5)
+            stack.callback(stop)
+            process.stdin.write(password); process.stdin.close()
+            deadline = time.monotonic() + 20
+            match = None
+            while time.monotonic() < deadline:
+                if process.poll() is not None: self.fail(logpath.read_text())
+                match = re.search(r'Uvicorn running on http://127\.0\.0\.1:(\d+)', logpath.read_text())
+                if match: break
+                time.sleep(.05)
+            self.assertIsNotNone(match, logpath.read_text())
+            base = 'http://127.0.0.1:' + match.group(1)
+            with sync_playwright() as p, ExitStack() as browser_stack:
+                options = {'headless': True}
+                if os.getenv('VUI_TEST_CHROMIUM'): options['executable_path'] = os.environ['VUI_TEST_CHROMIUM']
+                browser = p.chromium.launch(**options)
+                browser_stack.callback(browser.close)
+                context = browser.new_context(viewport={'width': 1280, 'height': 900})
+                errors, external, security_requests = [], [], []
+                def local_only(route):
+                    url = route.request.url
+                    if not url.startswith(base + '/'):
+                        external.append(url); route.abort()
+                    elif urlsplit(url).path.startswith('/api/security/'):
+                        # A regression is recorded and blocked before reaching any host endpoint.
+                        security_requests.append((route.request.method, url)); route.abort()
+                    else:
+                        route.continue_()
+                context.route('**/*', local_only)
+                page = context.new_page()
+                page.on('pageerror', lambda error: errors.append(str(error)))
+                page.goto(base + '/login')
+                page.locator('#login-name').fill('security-admin')
+                page.locator('#login-password').fill(password)
+                page.get_by_role('button', name='登录面板', exact=True).click()
+                page.wait_for_url('**/ui/')
+                menu = page.get_by_role('menuitem', name='安全中心', exact=True)
+                def tab_to_menu():
+                    expect(menu).to_have_attribute('tabindex', '0')
+                    # Bound a real keyboard traversal; programmatic focus hides tabindex defects.
+                    for _ in range(20):
+                        page.keyboard.press('Tab')
+                        if menu.evaluate('(element) => element === document.activeElement'):
+                            break
+                    expect(menu).to_be_focused()
+                def check_notice():
+                    region = page.get_by_role('region', name='安全中心', exact=True)
+                    expect(region).to_be_visible()
+                    expect(region.get_by_role('heading', name='安全中心', exact=True)).to_be_visible()
+                    notice = region.get_by_role('alert')
+                    for text in ('本版本不支持主机防火墙与 SSH 管理', '无法封禁 IP 或开放端口',
+                                 '不采集 SSH 登录日志', '请通过主机或云服务商的管理工具处理'):
+                        expect(notice).to_contain_text(text)
+                        self.assertIn(text, region.aria_snapshot())
+                    expect(region.locator('input, button, form, [role="button"], [role="textbox"]')).to_have_count(0)
+                    self.assertEqual(security_requests, [])
+                    return notice
+                # Keyboard activation exposes the scope before there is anything to submit.
+                tab_to_menu()
+                menu.press('Escape')
+                expect(page.get_by_role('region', name='安全中心', exact=True)).to_have_count(0)
+                menu.press('Enter')
+                notice = check_notice()
+                for _ in range(3):
+                    menu.click(); notice.click(); check_notice()
+                page.get_by_role('menuitem', name='系统状态', exact=True).click()
+                expect(page.get_by_role('region', name='安全中心', exact=True)).to_have_count(0)
+                tab_to_menu(); menu.press('Space'); check_notice()
+                # The existing SPA returns to the dashboard after reload/full-page history.
+                page.reload(); tab_to_menu(); menu.press('Enter'); check_notice()
+                page.get_by_role('menuitem', name='面板设置', exact=True).click()
+                page.wait_for_url('**/account')
+                page.go_back(); page.wait_for_url('**/ui/')
+                tab_to_menu(); menu.press('Space'); check_notice()
+                page.go_forward(); page.wait_for_url('**/account')
+                page.go_back(); page.wait_for_url('**/ui/')
+                tab_to_menu(); menu.press('Enter'); check_notice()
+                self.assertEqual(errors, [])
+                self.assertEqual(external, [])
+                self.assertEqual(security_requests, [])
+                self.assertEqual(list((root / 'bin').iterdir()), [])
+
+
 @unittest.skipUnless(os.getenv('VUI_NODE_BROWSER') == '1', 'explicit node editor browser/core gate')
 class InboundEditorBrowserTests(unittest.TestCase):
     def test_managed_security_transitions_refresh_export_and_restore(self):

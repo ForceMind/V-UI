@@ -80,26 +80,33 @@ def start_dual_dns(stack, answers):
 
 
 class PebbleFixture:
-    def __init__(self, stack, root: Path, webroot: Path, domain='panel.example.test'):
+    def __init__(self, stack, root: Path, webroot: Path, domain='panel.example.test', *, http_port=None, authz_reuse_percent=0):
+        if type(authz_reuse_percent) is not int or not 0 <= authz_reuse_percent <= 100:
+            raise ValueError("Invalid fake CA authorization reuse percentage")
         self.root, self.webroot, self.domain = root, webroot, domain
         self.ca, cert, key = certificate_files(root, 'pebble-server')
-        self.http = ThreadingHTTPServer(('127.0.0.1', 0), handler_for(webroot))
-        self.http.daemon_threads=True
-        self.thread=threading.Thread(target=self.http.serve_forever,daemon=True);self.thread.start()
-        def close_http():self.http.shutdown();self.http.server_close();self.thread.join(timeout=3)
-        stack.callback(close_http)
+        self.http = None
+        if http_port is None:
+            self.http = ThreadingHTTPServer(('127.0.0.1', 0), handler_for(webroot))
+            self.http.daemon_threads=True
+            self.thread=threading.Thread(target=self.http.serve_forever,daemon=True);self.thread.start()
+            def close_http():self.http.shutdown();self.http.server_close();self.thread.join(timeout=3)
+            stack.callback(close_http)
+            http_port = self.http.server_port
+        elif type(http_port) is not int or not 1024 <= http_port <= 65535:
+            raise ValueError('Explicit loopback HTTP-01 responder port required')
         dns=DnsAnswers('PEBBLE_DNS',{domain:'127.0.0.1'})
         dns_port=start_dual_dns(stack,dns)
         port,management=unused_port(),unused_port()
         config={'pebble':{'listenAddress':f'127.0.0.1:{port}',
             'managementListenAddress':f'127.0.0.1:{management}',
             'certificate':str(cert),'privateKey':str(key),
-            'httpPort':self.http.server_port,'tlsPort':unused_port(),
+            'httpPort':http_port,'tlsPort':unused_port(),
             'externalAccountBindingRequired':False,'retryAfter':{'authz':1,'order':1},
             'keyAlgorithm':'ecdsa','profiles':{'default':{'description':'VUI certificate tests','validityPeriod':7776000}}}}
         path=root/'pebble.json';path.write_text(json.dumps(config))
         self.log_path=root/'pebble.log';log=stack.enter_context(self.log_path.open('w'))
-        env={**os.environ,'PEBBLE_VA_NOSLEEP':'1','PEBBLE_WFE_NONCEREJECT':'0','PEBBLE_AUTHZREUSE':'0'}
+        env={**os.environ,'PEBBLE_VA_NOSLEEP':'1','PEBBLE_WFE_NONCEREJECT':'0','PEBBLE_AUTHZREUSE':str(authz_reuse_percent)}
         env.pop('PEBBLE_VA_ALWAYS_VALID',None)
         binary=os.environ['VUI_TEST_PEBBLE']
         self.process=subprocess.Popen([binary,'-config',str(path),'-dnsserver',f'127.0.0.1:{dns_port}'],

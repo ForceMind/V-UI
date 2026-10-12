@@ -117,6 +117,30 @@ class AuthenticationTests(unittest.TestCase):
         self.assertIsNone(auth_service.authenticate(first))
         self.assertIsNotNone(auth_service.authenticate(second))
 
+    def test_sustained_boundaries_refresh_without_extending_session_lifetime(self):
+        self.assertEqual(auth_service.SESSION_SECONDS, 3600)
+        start = int(time.time())
+        with patch.object(auth_service.time, "time", return_value=start) as clock:
+            self.assertEqual(self.login().status_code, 200)
+            original = self.client.cookies.get("__Host-vui_session")
+            clock.return_value = start + 3601
+            self.assertEqual(self.client.get("/api/auth/me", headers={"Cookie": "__Host-vui_session=" + original}).status_code, 401)
+            # Reproduce the sustained sequence with explicit refresh after the
+            # first idle and before each load; never extend production TTL.
+            self.assertEqual(self.login().status_code, 200)
+            base = clock.return_value
+            clock.return_value = base + 1800
+            self.assertEqual(self.client.get("/api/auth/me").status_code, 200)
+            self.assertEqual(self.login().status_code, 200)
+            clock.return_value = base + 3601
+            self.assertEqual(self.client.get("/api/auth/me").status_code, 200)
+            for elapsed in (3601, 4202, 4803):
+                clock.return_value = base + elapsed
+                self.assertEqual(self.login().status_code, 200)
+                clock.return_value += 601
+                self.assertEqual(self.client.get("/api/auth/me").status_code, 200)
+            self.assertEqual(self.client.get("/api/auth/me", headers={"Cookie": "__Host-vui_session=" + original}).status_code, 401)
+
     def test_expired_session_is_denied(self):
         self.login()
         with database.SessionLocal() as db:

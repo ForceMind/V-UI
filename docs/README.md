@@ -4,11 +4,20 @@
 
 | 阅读目标 | 文档 |
 | --- | --- |
+| 2026-10-11 低资源软件收口、准确证据与剩余整机验收 | [LOW_RESOURCE_CLOSURE_20261011.md](LOW_RESOURCE_CLOSURE_20261011.md) |
+| 1 vCPU / 512 MiB 安装运行目标与实测边界 | [LOW_RESOURCE_TARGET.md](LOW_RESOURCE_TARGET.md) |
+| 405 同提交四平台及完整资源基线、未达预算 | [LOW_RESOURCE_405_BASELINE.md](LOW_RESOURCE_405_BASELINE.md) |
+| 071 大规则优化与完整同提交验收基线 | [LOW_RESOURCE_071_BASELINE.md](LOW_RESOURCE_071_BASELINE.md) |
+| 大规则导出索引、差分合同与本地诊断边界 | [LOW_RESOURCE_RULE_INDEX.md](LOW_RESOURCE_RULE_INDEX.md) |
+| 停机备份私有缓存与无覆盖发布边界 | [LOW_RESOURCE_BACKUP_CACHE.md](LOW_RESOURCE_BACKUP_CACHE.md) |
+| 离线安装同包短边界归因 | [LOW_RESOURCE_INSTALL_TRACE.md](LOW_RESOURCE_INSTALL_TRACE.md) |
 | 新服务器安装/首次证书/创建管理员 | [INSTALLATION.md](INSTALLATION.md) |
 | 申请/测试/自动续期/面板或节点绑定 | [CERTIFICATES.md](CERTIFICATES.md) |
 | 节点、规则、DNS、专用订阅 | [CONFIGURATION.md](CONFIGURATION.md) |
 | 终端菜单、只读状态/完整校验、候选准备；更新、备份与恢复 | [OPERATIONS.md](OPERATIONS.md) |
 | 显式全局 `v-ui` 候选入口、受信 kit、systemd 维护事务与资格边界 | [MANAGED_OPERATIONS.md](MANAGED_OPERATIONS.md) |
+| 后台、低资源与运维菜单的同版本完成矩阵 | [INTEGRATED_OPERATIONS_CANDIDATE.md](INTEGRATED_OPERATIONS_CANDIDATE.md) |
+| PR #33 准确 f509 普通 CI、真实受管系统资格、首次失败与未验收边界 | [MANAGED_OPERATIONS_CLOSURE_20261012.md](MANAGED_OPERATIONS_CLOSURE_20261012.md) |
 | 访问失败/签发失败/核心未生效 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
 | 管理API、令牌和错误状态 | [API.md](API.md) |
 | 已验证与未验证的协议/部署范围 | [COMPATIBILITY.md](COMPATIBILITY.md) |
@@ -30,3 +39,13 @@
 [alpha.2认证](AUTH_ALPHA2.md)、[alpha.5导出](EXPORT_ALPHA5.md)、[alpha.6工作区](WORKSPACE_ALPHA6.md)、[rc.1真实链路](LOOPBACK_RC1.md)、[rc.2手动部署](DEPLOYMENT_RC2.md)、[v0.4.2主线收口](MAINLINE_CLOSURE_20261005.md)、[v0.4.3 WS主线收口](VLESS_WS_CLOSURE_043.md)、[v0.4.4 gRPC主线收口](VLESS_GRPC_CLOSURE_044.md)、[gRPC 原候选与失败历史](VLESS_GRPC_044.md)、[HY2 原候选与失败历史](HYSTERIA2_045.md)、[原始计划复核](ROADMAP_REVIEW_20261001.md)、[迭代证据](ITERATIONS.md)。其“未实现/当前版本”指当时状态，不覆盖当前功能文档。
 
 文档使用example域名和假凭据。不要把真实令牌、私钥、完整数据库或未加密备份复制进公开Issue。
+
+- [新runtime提前写回](LOW_RESOURCE_RUNTIME_WRITEBACK.md)：仅新提取树的缓存提示、失败清理与准确候选对照。
+
+- [新payload core写回](LOW_RESOURCE_CORE_WRITEBACK.md)：已证实的驻留边界与仅新文件的缓存优化实验。
+- [有界双核心并存与恢复](LOW_RESOURCE_DUAL_CORE.md)：同服务组真实两路、控制停止与显式重启的短验收合同。
+- [CPU配额饱和后的恢复](LOW_RESOURCE_CPU_PRESSURE.md)：有界真实代理压力、原始配额证据和固定恢复时限。
+
+- [Root 安装父组资源合同](LOW_RESOURCE_ROOT_INSTALL.md)：2026-10-11 准确 a373 安装/新目录升级/恢复通过，父组峰值 471.21484375 MiB、max/OOM 全零；历史失败及未现场复现的停启竞态保留。
+
+- [新 runtime 压缩归档冷读](LOW_RESOURCE_RUNTIME_ARCHIVE_CACHE.md)：私有新文件的身份保护与本地机制实验；该产品字节已在 a373 root 验收，不据单次峰值断言因果或稳定改善。
