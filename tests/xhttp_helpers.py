@@ -105,13 +105,19 @@ def rejection_reason(failure):
 WIRE_LIMIT = 4096
 
 
-def read_protocol_bytes(conn):
+def read_protocol_bytes(conn, *, deadline=None):
     """Read one bounded complete header, rejecting EOF/timeout as evidence."""
+    import time
     payload = bytearray()
     while b'\r\n\r\n' not in payload:
         if len(payload) >= WIRE_LIMIT:
             raise ValueError('Protocol observation exceeded the byte limit')
         try:
+            if deadline is not None:
+                remaining = deadline-time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                conn.settimeout(remaining)
             chunk = conn.recv(WIRE_LIMIT + 1 - len(payload))
         except TimeoutError:
             raise ValueError('Timed out before complete protocol bytes') from None
@@ -185,22 +191,75 @@ def require_httpupgrade_bad_request(status, reason, body):
         raise ValueError('Missing actual fixed-server HTTP400 Bad Request response')
 
 
+def chain_cleanup_errors(errors):
+    """Preserve nested cleanup causes when appending later boundary failures."""
+    first = tail = errors[0]
+    seen = {id(first)}
+    for error in errors[1:]:
+        while tail.__cause__ is not None and id(tail.__cause__) not in seen:
+            tail = tail.__cause__
+            seen.add(id(tail))
+        if id(error) not in seen:
+            tail.__cause__ = error
+            tail = error
+            seen.add(id(error))
+    return first
+
+
 class ProtocolObservations:
+    """Bounded, sticky evidence and dispatch accounting, never a success oracle."""
     def __init__(self):
         import threading
-        self.lock = threading.Lock()
+        self.lock = threading.Condition()
         self.records = []
         self.release = threading.Event()
+        self.accepted = self.active = 0
+        self.failure = None
+
+    def begin(self):
+        with self.lock:
+            if self.accepted >= 16:
+                self.failure = 'Protocol recorder connection limit exceeded'
+                return False
+            self.accepted += 1
+            self.active += 1
+            return True
+
+    def end(self):
+        with self.lock:
+            self.active -= 1
+            self.lock.notify_all()
 
     def append(self, record):
         with self.lock:
             if len(self.records) >= 16:
-                raise ValueError('Protocol recorder connection limit exceeded')
-            self.records.append(record)
+                self.failure = 'Protocol recorder record limit exceeded'
+            else:
+                self.records.append(dict(record))
 
     def snapshot(self):
         with self.lock:
-            return [dict(record) for record in self.records]
+            records = [dict(record) for record in self.records]
+            if self.failure:
+                records.append({'error': self.failure})
+            return records
+
+    def fail(self, message):
+        with self.lock:
+            self.failure = self.failure or message
+
+    def state(self):
+        with self.lock:
+            return {'accepted': self.accepted, 'active': self.active}
+
+    def drain(self, timeout=5):
+        with self.lock:
+            if not self.lock.wait_for(lambda: self.active == 0, timeout=timeout):
+                self.failure = 'Protocol recorder drain timed out'
+            if len(self.records) != self.accepted:
+                self.failure = self.failure or 'Protocol recorder completion count mismatch'
+            if self.failure:
+                raise AssertionError(self.failure)
 
 
 def start_protocol_recorder(stack, cert, key):
@@ -208,6 +267,7 @@ def start_protocol_recorder(stack, cert, key):
     import socketserver
     import ssl
     import threading
+    import time
     observations = ProtocolObservations()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(cert, key)
@@ -217,25 +277,69 @@ def start_protocol_recorder(stack, cert, key):
 
     class Handler(socketserver.BaseRequestHandler):
         def handle(self):
+            deadline = time.monotonic()+4
             self.request.settimeout(4)
             try:
                 with context.wrap_socket(self.request, server_side=True) as conn:
                     record = {'sni': getattr(conn, '_vui_sni', None),
                         'alpn': conn.selected_alpn_protocol(), 'tls': conn.version(),
-                        'payload': read_protocol_bytes(conn)}
+                        'payload': read_protocol_bytes(conn, deadline=deadline)}
                     observations.append(record)
-                    # Hold without inventing a protocol response. The test
-                    # observes the bytes, stops the client, then releases us.
+                    # Hold without inventing a response; cleanup first stops
+                    # the client, then releases all completed observations.
                     observations.release.wait(8)
             except (OSError, ValueError) as exc:
-                observations.append({'error': str(exc)})
+                observations.append({'error': type(exc).__name__+': '+str(exc)[:160]})
 
-    server = socketserver.ThreadingTCPServer(('127.0.0.1', 0), Handler)
-    server.daemon_threads = True
+    class Server(socketserver.ThreadingTCPServer):
+        daemon_threads = True
+
+        def process_request(self, request, client_address):
+            # Claim before spawning: shutdown synchronizes this dispatch with
+            # sealing, unlike accounting only when a handler happens to run.
+            if not observations.begin():
+                self.shutdown_request(request)
+                return
+            try:
+                super().process_request(request, client_address)
+            except Exception:
+                observations.append({'error': 'Protocol handler dispatch failed'})
+                observations.end()
+                self.shutdown_request(request)
+
+        def process_request_thread(self, request, client_address):
+            try:
+                super().process_request_thread(request, client_address)
+            except BaseException:
+                # ThreadingMixIn does not catch a shutdown_request exception.
+                # Even teardown after valid bytes must leave sticky failure.
+                observations.fail('Protocol handler teardown failed')
+            finally:
+                observations.end()
+
+        def handle_error(self, request, client_address):
+            observations.append({'error': 'Unexpected protocol handler failure'})
+
+    server = Server(('127.0.0.1', 0), Handler)
     thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .02}, daemon=True)
     thread.start()
+
     def close():
         observations.release.set()
-        server.shutdown(); server.server_close(); thread.join(timeout=2)
+
+        def join():
+            thread.join(timeout=2)
+            if thread.is_alive():
+                raise AssertionError('Protocol serving thread did not stop')
+
+        errors = []
+        for action in (server.shutdown, server.server_close, join, observations.drain):
+            try:
+                action()
+            except BaseException as exc:
+                observations.fail('Protocol recorder cleanup failed')
+                errors.append(exc)
+        if errors:
+            raise chain_cleanup_errors(errors)
     stack.callback(close)
     return server.server_address[1], observations
