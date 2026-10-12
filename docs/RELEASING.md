@@ -2,7 +2,17 @@
 
 正式Release是一次明确的公开写操作，不等同于PR、版本字符串或Actions候选附件。此流程只晋升经过验收的完整套件，不在发布时重新构建“另一份看似相同的包”。
 
-## 0.4.7 集成候选状态（2026-10-12，未发布）
+## 0.4.7 当前交付准备
+
+[PR #35](https://github.com/ForceMind/V-UI/pull/35) 已正常合并，固定产品代码基线 `02d8038d5c06301cd81fb5ee1c776ce53b8bd4b7` 的准确八组 CI、四目标新包与19项资产技术组合已核，详见[主线收口](MAINLINE_OPERATIONS_CLOSURE_20261012.md)。PR #28–34 的代码历史都已进入主线，旧 stack PR 的 open/merged 状态另列，不能混为一谈。
+
+本轮后续仅文档更新；最终发布仍必须使用当时准确 default HEAD 的最新八组与同提交四目标/19项附件，不能直接晋升02d8旧包替代最终文档头。候选与最终主线验收账本留在对应 PR，不为记录其自身 SHA 追加循环提交。下文所有发布门禁保持不变。
+
+版本仍为0.4.7，尚未创建 tag、Draft Release 或公开 Release，没有附件晋升或用户主机操作。软件合并不授予发布或实际安全关键安装权限；真实受管 root 资格仅属f509原run，整机/24h及其他未验边界见主线记录。原始 oneclick kit16成员、最终发布19项资产/18校验行与 Actions artifact数量分别统计。
+
+## 2026-10-12 合并前集成候选状态（历史，未发布）
+
+以下“未合并/master a6aa/新head待验”保留候选形成时的事实，不替代上方当前交付准备和固定已验代码基线。
 
 - 同一候选沿历史继承 PR #28–33 的低资源软件修复、后台安全中心说明、非 root 服务用户菜单、可信候选准备和全局受管菜单，见[完成矩阵](INTEGRATED_OPERATIONS_CANDIDATE.md)。`VERSION` 保持 `0.4.7`；PR #28–33 尚未合并，主线仍为 `a6aa84d`。本次未合并 master 或创建 tag/Draft Release/公开 Release，未向 Release 上传或晋升资产，也未操作用户主机
 - 全局 `sudo /usr/local/sbin/v-ui` 需要从完整独立可信 kit [显式安装 root-owned 组件](MANAGED_OPERATIONS.md)，默认 `install.sh` 不添加它。systemd 提供服务控制和依赖停服的数据事务；OpenRC 仅查询与纯候选准备，拒绝服务启停及依赖停服的数据写动作。单独选择 CURRENT 不升级 root-owned 控制源码、launcher、安装记录或服务模板，不能把候选准备当作完整系统升级

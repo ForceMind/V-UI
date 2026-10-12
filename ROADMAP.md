@@ -2,6 +2,14 @@
 
 ## 当前状态
 
+0.4.7 的低资源、后台、完整运维软件及 VMess/HTTPUpgrade 证据质量修复已由 [PR #35](https://github.com/ForceMind/V-UI/pull/35) 正常进入主线。固定产品代码基线 `02d8038d5c06301cd81fb5ee1c776ce53b8bd4b7` 的准确八组与新四目标制品已验，见[主线收口](docs/MAINLINE_OPERATIONS_CLOSURE_20261012.md)。本轮八个软件工作包不等于整个路线完成；后续六主题和未获资格项仍保留，先完成0.4.7交付决定。
+
+尚未创建 tag/Release、晋升附件或操作用户主机。后续本轮仅文档提交的准确 CI/最终主线包以承载 PR 账本为准，不在文档中追写自身未来 SHA。
+
+### 协议阶段记录（历史）
+
+以下保留2026-10-05至10-06各协议阶段的当时状态；其中“当前/本次待验”指对应阶段，不覆盖上方已验集成代码基线。
+
 v0.4.2 已在 2026-10-05 以 16 个正常 merge commit 收口到 `master` 的 `0225ce4`，PR #14 明确排除。准确主线的八组工作流、11 个 job 和四目标 Linux 附件均已核验；当时未创建 Draft Release、版本 tag、公开 Release 或部署。完整提交、tree 和验收链接见[主线收口记录](docs/MAINLINE_CLOSURE_20261005.md)。
 
 v0.4.3 由 [PR #18](https://github.com/ForceMind/V-UI/pull/18) 正常合并至 `1b3ec40cd3bb640246d12afa104db0aec08ce336`，八组工作流、11 个 job 和每一步均成功，成为已验证 WS 基线；见[WS 收口记录](docs/VLESS_WS_CLOSURE_043.md)。该阶段未创建 tag/Release/部署，也未晋升 WS 候选附件。

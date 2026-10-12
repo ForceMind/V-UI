@@ -1,9 +1,20 @@
 # V-UI 文档
 
+当前产品仍为 **0.4.7**。低资源、网页后台、终端菜单和质量修复已正常进入主线；固定产品代码基线02d8的准确CI/四目标包及八项软件目标见[主线收口](MAINLINE_OPERATIONS_CLOSURE_20261012.md)，后续仅文档头的准确验收在承载PR账本。
+
+软件入主线、f509原root/systemd资格和Release晋升是三件不同的事。[日常操作](OPERATIONS.md)的“未晋升附件”及[受管操作合同](MANAGED_OPERATIONS.md)的“候选”不表示代码仍未进入主线；公开Release尚未创建，真实整机/24h及其他未验边界仍保留。
+
+## 协议文档导读（2026-10-06 历史）
+
+以下保留当时的状态与失败背景，不替代上方当前集成入口。
+
 当前产品文档按 **v0.4.7** 组织，[REALITY/Vision](REALITY_VISION_CLOSURE_047.md)及 [TUIC v0.4.6](TUIC_CLOSURE_046.md)与此前协议/安全修复均有准确主线验收。REALITY 首次主线 VMess CA 原因日志缺失和 unchanged-code attempt 2 成功分别保留，重跑不证明轮询不稳定性已永久修复。[PR #25 XHTTP 刻画](XHTTP_CHARACTERIZATION_CLOSURE_048.md)已在准确候选/主线各八组、11 jobs、全部步骤 attempt 1 通过；不提高产品版本、不开放 XHTTP/HTTPUpgrade 公共导出。产品 0.4.7 范围冻结并进入[发布准备](RELEASING.md)，最终文档提交与同提交附件的验收以对应 PR/发布准备证据为准，本文不预先声明通过。截至 2026-10-06 本次检查，未新建 tag/Draft Release/公开 Release 或晋升附件。源码、配置检查、候选/主线、附件晋升、发布和部署分别记录。
+
+## 当前文档入口
 
 | 阅读目标 | 文档 |
 | --- | --- |
+| 当前已合入主线的软件范围、准确02d8验收及后续边界 | [MAINLINE_OPERATIONS_CLOSURE_20261012.md](MAINLINE_OPERATIONS_CLOSURE_20261012.md) |
 | 2026-10-11 低资源软件收口、准确证据与剩余整机验收 | [LOW_RESOURCE_CLOSURE_20261011.md](LOW_RESOURCE_CLOSURE_20261011.md) |
 | 1 vCPU / 512 MiB 安装运行目标与实测边界 | [LOW_RESOURCE_TARGET.md](LOW_RESOURCE_TARGET.md) |
 | 405 同提交四平台及完整资源基线、未达预算 | [LOW_RESOURCE_405_BASELINE.md](LOW_RESOURCE_405_BASELINE.md) |
@@ -17,7 +28,7 @@
 | 终端菜单、只读状态/完整校验、候选准备；更新、备份与恢复 | [OPERATIONS.md](OPERATIONS.md) |
 | 显式全局 `v-ui` 候选入口、受信 kit、systemd 维护事务与资格边界 | [MANAGED_OPERATIONS.md](MANAGED_OPERATIONS.md) |
 | 后台、低资源与运维菜单的同版本完成矩阵 | [INTEGRATED_OPERATIONS_CANDIDATE.md](INTEGRATED_OPERATIONS_CANDIDATE.md) |
-| PR #33 准确 f509 普通 CI、真实受管系统资格、首次失败与未验收边界 | [MANAGED_OPERATIONS_CLOSURE_20261012.md](MANAGED_OPERATIONS_CLOSURE_20261012.md) |
+| 历史 PR #33/f509 普通 CI、准确 root 资格及首次失败（不替代新头验收） | [MANAGED_OPERATIONS_CLOSURE_20261012.md](MANAGED_OPERATIONS_CLOSURE_20261012.md) |
 | 访问失败/签发失败/核心未生效 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
 | 管理API、令牌和错误状态 | [API.md](API.md) |
 | 已验证与未验证的协议/部署范围 | [COMPATIBILITY.md](COMPATIBILITY.md) |
