@@ -22,6 +22,8 @@ from urllib.request import HTTPCookieProcessor, HTTPSHandler, ProxyHandler, Requ
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from app import release_tools as tools
+from brand_helpers import (BRAND_MEMBERS, check_page_brand, check_image_csp,
+    check_readme_picture, observe_image_csp, fetch_brand_asset, validate_brand_assets)
 from loopback_helpers import certificate_files, unused_port
 from scripts.ops_menu_smoke import (content_snapshot, fixture_bundle, installed_menu_smoke,
     installed_menu_stage_smoke)
@@ -104,6 +106,13 @@ class ReleaseDeploymentTests(unittest.TestCase):
             self.assertEqual(manifest['protocol_profile'],
                 'bounded cumulative sing-box exports (including VLESS REALITY/Vision); see docs/COMPATIBILITY.md for exact combinations and application UDP limits')
             self.assertIn('docs/COMPATIBILITY.md',manifest['files'])
+            brand_assets = {}
+            for name in BRAND_MEMBERS:
+                self.assertIn(name, manifest['files'])
+                self.assertEqual((payload/name).read_bytes(), (source/name).read_bytes())
+                brand_assets[Path(name).name] = (payload/name).read_bytes()
+            validate_brand_assets(brand_assets)
+
             packed_page=(payload/'web/index.html').read_text()
             xray=re.search(r'<el-alert\s+v-if="newInbound.core === \'xray\'"[^>]*>',packed_page)
             self.assertIsNotNone(xray)
@@ -192,15 +201,23 @@ class ReleaseDeploymentTests(unittest.TestCase):
                 try:
                     browser_context=browser.new_context(viewport={'width':1280,'height':900})
                     page=browser_context.new_page();external=[];errors=[]
+                    observe_image_csp(page)
+                    check_readme_picture(browser_context, origin, (payload/"README.md").read_text())
                     page.on('pageerror',lambda error:errors.append(str(error)))
                     def only_local(route):
                         if not route.request.url.startswith(origin+'/'):external.append(route.request.url);route.abort()
                         else:route.continue_()
                     page.route('**/*',only_local)
                     page.goto(origin+'/login')
+                    check_page_brand(page, origin)
+                    check_image_csp(page)
+                    for name in BRAND_MEMBERS:
+                        content = fetch_brand_asset(page, origin, '/ui/'+name.removeprefix('web/'))
+                        self.assertEqual(content, (payload/name).read_bytes())
                     page.locator('#login-name').fill('release-admin');page.locator('#login-password').fill(password)
                     page.get_by_role('button',name='登录面板',exact=True).click();page.wait_for_url('**/ui/')
-                    expect(page.locator('.logo')).to_contain_text('V-UI')
+                    check_page_brand(page, origin)
+                    expect(page.get_by_role('heading', name='V-UI', exact=True)).to_be_visible()
                     page.get_by_text('入站节点',exact=True).first.click()
                     page.get_by_role('button',name='添加节点',exact=True).click()
                     dialog=page.get_by_role('dialog')
@@ -247,6 +264,15 @@ class ReleaseDeploymentTests(unittest.TestCase):
 
                     page.get_by_text('Mihomo 分流',exact=True).first.click();page.wait_for_url('**/workspace')
                     expect(page.locator('#workspace')).to_be_visible()
+                    page.set_viewport_size({'width':390,'height':844})
+                    check_page_brand(page, origin, mobile=True)
+                    check_image_csp(page)
+                    for path in ('/certificates', '/account'):
+                        page.goto(origin+path)
+                        check_page_brand(page, origin, mobile=True)
+                        check_image_csp(page)
+                    page.set_viewport_size({'width':1280,'height':900})
+                    check_page_brand(page, origin)
                     self.assertEqual(external,[],'Packaged UI must not load CDN assets')
                     self.assertEqual(errors,[],'The real legacy dashboard must run, not just return HTML')
                 finally:browser.close()
