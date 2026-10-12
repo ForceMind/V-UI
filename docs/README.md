@@ -1,8 +1,10 @@
 # V-UI 文档
 
-当前产品仍为 **0.4.7**。低资源、网页后台、终端菜单和质量修复已正常进入主线；固定产品代码基线02d8的准确CI/四目标包及八项软件目标见[主线收口](MAINLINE_OPERATIONS_CLOSURE_20261012.md)，后续仅文档头的准确验收在承载PR账本。
+当前产品文档按 **v0.4.7** 组织。新用户从[产品README](../README.md)开始，再按下表选择操作指南；实际下载、公开状态和资产以[官方Releases](https://github.com/ForceMind/V-UI/releases)为准。不存在或不完整的版本不能安装，不追随latest。
 
-软件入主线、f509原root/systemd资格和Release晋升是三件不同的事。[日常操作](OPERATIONS.md)的“未晋升附件”及[受管操作合同](MANAGED_OPERATIONS.md)的“候选”不表示代码仍未进入主线；公开Release尚未创建，真实整机/24h及其他未验边界仍保留。
+网页后台、服务用户菜单、全局受管控制与低资源软件已进入主线；主线93c8的文档收口及独立准确验收见[PR #36](https://github.com/ForceMind/V-UI/pull/36)。后续提交必须核自己的CI与包。默认安装不添加全局v-ui，真实f509 root/systemd资格、普通四平台包消费、正式发布和用户部署分别归属。
+
+[当前发布说明](RELEASE_NOTES.md)聚焦使用者，旧[README快照](README_HISTORY_20261012.md)和[发布准备原始记录](RELEASE_PREPARATION_HISTORY_20261012.md)保留历史状态与失败，不作为当前可下载或已部署的证明。
 
 ## 协议文档导读（2026-10-06 历史）
 
@@ -14,7 +16,7 @@
 
 | 阅读目标 | 文档 |
 | --- | --- |
-| 当前已合入主线的软件范围、准确02d8验收及后续边界 | [MAINLINE_OPERATIONS_CLOSURE_20261012.md](MAINLINE_OPERATIONS_CLOSURE_20261012.md) |
+| 产品代码集成基线、准确02d8验收及后续边界 | [MAINLINE_OPERATIONS_CLOSURE_20261012.md](MAINLINE_OPERATIONS_CLOSURE_20261012.md) |
 | 2026-10-11 低资源软件收口、准确证据与剩余整机验收 | [LOW_RESOURCE_CLOSURE_20261011.md](LOW_RESOURCE_CLOSURE_20261011.md) |
 | 1 vCPU / 512 MiB 安装运行目标与实测边界 | [LOW_RESOURCE_TARGET.md](LOW_RESOURCE_TARGET.md) |
 | 405 同提交四平台及完整资源基线、未达预算 | [LOW_RESOURCE_405_BASELINE.md](LOW_RESOURCE_405_BASELINE.md) |
@@ -26,7 +28,7 @@
 | 申请/测试/自动续期/面板或节点绑定 | [CERTIFICATES.md](CERTIFICATES.md) |
 | 节点、规则、DNS、专用订阅 | [CONFIGURATION.md](CONFIGURATION.md) |
 | 终端菜单、只读状态/完整校验、候选准备；更新、备份与恢复 | [OPERATIONS.md](OPERATIONS.md) |
-| 显式全局 `v-ui` 候选入口、受信 kit、systemd 维护事务与资格边界 | [MANAGED_OPERATIONS.md](MANAGED_OPERATIONS.md) |
+| 显式全局 `v-ui` 入口、受信 kit、systemd 维护事务与资格边界 | [MANAGED_OPERATIONS.md](MANAGED_OPERATIONS.md) |
 | 后台、低资源与运维菜单的同版本完成矩阵 | [INTEGRATED_OPERATIONS_CANDIDATE.md](INTEGRATED_OPERATIONS_CANDIDATE.md) |
 | 历史 PR #33/f509 普通 CI、准确 root 资格及首次失败（不替代新头验收） | [MANAGED_OPERATIONS_CLOSURE_20261012.md](MANAGED_OPERATIONS_CLOSURE_20261012.md) |
 | 访问失败/签发失败/核心未生效 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |

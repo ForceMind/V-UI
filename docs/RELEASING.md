@@ -2,13 +2,13 @@
 
 正式Release是一次明确的公开写操作，不等同于PR、版本字符串或Actions候选附件。此流程只晋升经过验收的完整套件，不在发布时重新构建“另一份看似相同的包”。
 
-## 0.4.7 当前交付准备
+## 0.4.7 制品来源与交付边界
 
-[PR #35](https://github.com/ForceMind/V-UI/pull/35) 已正常合并，固定产品代码基线 `02d8038d5c06301cd81fb5ee1c776ce53b8bd4b7` 的准确八组 CI、四目标新包与19项资产技术组合已核，详见[主线收口](MAINLINE_OPERATIONS_CLOSURE_20261012.md)。PR #28–34 的代码历史都已进入主线，旧 stack PR 的 open/merged 状态另列，不能混为一谈。
+产品代码集成基线02d8见[主线收口](MAINLINE_OPERATIONS_CLOSURE_20261012.md)，其后93c8的准确主线CI与同源四目标/19资产验收见[PR #36](https://github.com/ForceMind/V-UI/pull/36)。后续README或其他文档提交同样必须完成自己的候选、正常合并、准确主线及新制品验收；不能晋升旧基线包冒充新头。
 
-本轮后续仅文档更新；最终发布仍必须使用当时准确 default HEAD 的最新八组与同提交四目标/19项附件，不能直接晋升02d8旧包替代最终文档头。候选与最终主线验收账本留在对应 PR，不为记录其自身 SHA 追加循环提交。下文所有发布门禁保持不变。
+版本仍为0.4.7。本文描述发布流程，不预先声称某个tag、Draft或公开Release已存在。公开状态以[Releases](https://github.com/ForceMind/V-UI/releases)与具体发布run为准；最终结果记录在承载PR/Release账本，不为把自身SHA写回文档再创建循环提交。部署到用户主机是单独的操作。
 
-版本仍为0.4.7，尚未创建 tag、Draft Release 或公开 Release，没有附件晋升或用户主机操作。软件合并不授予发布或实际安全关键安装权限；真实受管 root 资格仅属f509原run，整机/24h及其他未验边界见主线记录。原始 oneclick kit16成员、最终发布19项资产/18校验行与 Actions artifact数量分别统计。
+实际受管root/systemd资格只属于f509原run；普通包消费、整机/24h及其他未验边界保持。原始oneclick kit16成员、发布19资产/18校验行、Actions artifact数量是不同计数。下面的准确HEAD/最新八组/同来源/不得覆盖门禁始终适用，不能因已有发布意向跳过。
 
 ## 2026-10-12 合并前集成候选状态（历史，未发布）
 

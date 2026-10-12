@@ -1,16 +1,17 @@
-# 受管终端控制（候选）
+# 受管终端控制
 
 这层软件将固定的全局 `v-ui` 入口连接到受管服务及已有的版本、备份、恢复实现。它是独立于默认安装器的显式组件；不能因为包里出现源码就认为系统已经安装了这个命令。准确 `f50942f` 已在一次明确授权、空白临时 Ubuntu 24.04 x86_64 主机取得真实 root/systemd 资格，见[收口记录](MANAGED_OPERATIONS_CLOSURE_20261012.md)。这不代表已在用户主机安装，也不扩大到其他主机或 OpenRC 写操作。
 
 ## 安装消费点与信任
 
-完整、独立可信且已验收的 release kit 包含 `install_ops_control.py`、`system_ops.py`、`ops_worker.py`、`release_tools.py`、`v-ui` 与对应清单和既有服务模板。审阅并独立确认整个 `SHA256SUMS` 文件的可信 SHA-256 后，显式安装命令为：
+完整、独立可信且已验收的 release kit 包含 `install_ops_control.py`、`system_ops.py`、`ops_worker.py`、`release_tools.py`、`v-ui` 与对应清单和既有服务模板。按[完整套件与root私有副本](INSTALLATION.md#3-本地完整套件)只完成下载、校验与私有副本准备（已有实例不要重复首次系统安装）后，保留同一终端的 `ROOT_KIT` 和 `KIT_SHA`。审阅并独立确认整个 `SHA256SUMS` 文件的可信 SHA-256 后，显式安装命令为：
 
 ```sh
-sudo /usr/bin/python3 -B -I -S ./install_ops_control.py --kit . --sha256 '<可信 SHA256SUMS 文件摘要>'
+sudo /usr/bin/python3 -B -I -S "$ROOT_KIT/install_ops_control.py" \
+  --kit "$ROOT_KIT" --sha256 "$KIT_SHA"
 ```
 
-这条命令实际安装安全关键的 root-owned 文件，必须由主机操作者明确选择。上述临时主机资格已实际消费完整可信 kit、安装固定全局入口并执行真实菜单；普通包内假服务测试仍是另一层证据。默认 `install.sh` 不调用新安装器，在线 `--version` 的固定下载路径也不自动添加这些组件；必须使用完整 kit，不能把服务用户可写 payload 当作 root 控制源码来源。
+这条命令实际安装安全关键的 root-owned 文件，必须由主机操作者明确选择。仅当对应版本已在[官方 Releases](https://github.com/ForceMind/V-UI/releases)公开，且19个固定资产齐全并校验后，才将它视为可分发完整 kit。安装脚本自身的信任须在执行前建立；不要只运行包内未知脚本再信任其自验。上述临时主机资格已实际消费完整可信 kit、安装固定全局入口并执行真实菜单；普通包内假服务测试仍是另一层证据。默认 `install.sh` 不调用新安装器，在线 `--version` 的固定下载路径也不自动添加这些组件；必须使用完整 kit，不能把服务用户可写 payload 当作 root 控制源码来源。
 
 安装完成后，已有管理员在交互终端通过固定入口启动菜单：
 
