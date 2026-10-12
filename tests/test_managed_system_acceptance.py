@@ -3,6 +3,7 @@ import argparse
 from contextlib import ExitStack
 import copy
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -263,6 +264,158 @@ class QualificationContracts(unittest.TestCase):
         for action in ('state','seed','mutate','make-invalid','prepare-recovery'):
             compile(gate.service_program(action),'<nonroot-fixture>','exec')
         with self.assertRaises(gate.QualificationError):gate.service_program('execute shell')
+
+    def test_dependency_shutdown_times_are_not_command_dispatch_order(self):
+        from deploy import system_ops as ops
+        from scripts import service_support
+        import http.client
+        # Canonical Requires= pulls the responder into the socket stop job.
+        # systemd socket Before=service reverses during shutdown, so that job
+        # completes responder then socket before the next panel stop command.
+        units=service_support.service_files({'service_manager':'systemd','bootstrap_python':'/fixed/python','ipv6':False})
+        self.assertIn('Requires=v-ui-http01.socket\n',units[gate.UNIT_DIR/'v-ui-http01.service'][0])
+        self.assertIn('Service=v-ui-http01.service\n',units[gate.UNIT_DIR/'v-ui-http01.socket'][0])
+        states={name:True for name in gate.UNITS};times={};commands=[]
+        def properties(unit):
+            socket=unit.endswith('.socket');active=states[unit]
+            fields={'LoadState':'loaded','ActiveState':'active' if active else 'inactive',
+                'SubState':('listening' if socket else 'running') if active else 'dead',
+                'NeedDaemonReload':'no','FragmentPath':str(gate.UNIT_DIR/unit),'DropInPaths':'',
+                'ControlPID':'0','ControlGroup':'/system.slice/'+unit if active else '',
+                'User':'' if socket else 'v-ui','Group':'' if socket else 'v-ui','KillMode':'control-group'}
+            if not socket:fields['MainPID']='123' if active else '0'
+            return 0,''.join(key+'='+value+'\n' for key,value in fields.items()).encode()
+        def command(argv,*args,**kwargs):
+            commands.append(argv)
+            if argv[1]=='show':return properties(argv[-1])
+            self.assertEqual(argv[1],'stop')
+            if argv[-1]==gate.UNITS[2]:
+                states[gate.UNITS[1]]=False;times[gate.UNITS[1]]=10
+                states[gate.UNITS[2]]=False;times[gate.UNITS[2]]=20
+            elif states[argv[-1]]:
+                states[argv[-1]]=False;times[argv[-1]]=30
+            return 0,b''
+        class ReachedStart(Exception):pass
+        def menu(action):
+            if action=='stop':ops.Services('systemd').stop_all()
+            elif action=='start':raise ReachedStart()
+        self.qual.account={'uid':123,'gid':123};(self.base/'ops-control.json').write_text('{}')
+        connection=Mock();connection.getresponse.return_value.status=404
+        with patch.object(self.qual,'capture_owned'),patch.object(self.qual,'states',return_value={name:'active' for name in gate.UNITS}), \
+                patch.object(self.qual,'control_install',return_value=0),patch.object(gate,'CONTROL',self.base), \
+                patch.object(ops,'verify_installation',return_value=('systemd',Mock(pw_uid=123))), \
+                patch.object(ops,'trusted_executable'),patch.object(ops,'run_command',side_effect=command), \
+                patch.object(ops,'cgroup_empty',return_value=True) as empty, \
+                patch.object(http.client,'HTTPConnection',return_value=connection), \
+                patch.object(self.qual,'menu',side_effect=menu), \
+                patch.object(self.qual,'run',side_effect=lambda argv:Mock(stdout=str(times[argv[-1]])+'\n')):
+            with self.assertRaises(ReachedStart):self.qual.finish(self,[],Mock(),Mock())
+        self.assertEqual([argv for argv in commands if argv[1]=='stop'],
+                         [['/usr/bin/systemctl','stop',name] for name in (gate.UNITS[2],gate.UNITS[0],gate.UNITS[1])])
+        self.assertEqual([call.args[0] for call in empty.call_args_list],list(gate.UNITS)*2)
+        self.assertFalse(times[gate.UNITS[2]]<=times[gate.UNITS[0]]<=times[gate.UNITS[1]])
+        row=next(row for row in self.qual.report['phases'] if row['phase']=='stop_timestamp_observation')
+        self.assertEqual(row['inactive_monotonic'],times)
+        self.assertNotIn('stop_start',[row['phase'] for row in self.qual.report['phases']])
+
+    def test_timestamp_observations_require_positive_bounded_ascii_uint64(self):
+        for value in (1,2**64-1):
+            self.assertEqual(gate.stop_timestamp(str(value)),value)
+            self.assertEqual(gate.stop_timestamp(str(value)+'\n'),value)
+        for raw in ('','0','0\n','-1','+1','01',' 1','1 ','1\n2','1\r\n','١',
+                    str(2**64),'9'*1000,None):
+            with self.subTest(raw=raw):
+                self.qual.report['checkpoints']=[];self.qual.report['phases']=[]
+                with patch.object(self.qual,'menu') as menu,patch.object(self.qual,'stopped'), \
+                        patch.object(self.qual,'run',return_value=Mock(stdout=raw)), \
+                        patch.object(self.qual,'api_ready') as api:
+                    with self.assertRaisesRegex(gate.QualificationError,'invalid_stop_timestamp'):
+                        self.qual.stop_start(Mock())
+                    self.assertEqual([call.args[0] for call in menu.call_args_list],['stop'])
+                    api.assert_not_called()
+                self.assertEqual(self.qual.report['checkpoints'][-1],
+                    {'name':'stop_timestamps','status':'failed','error_type':'QualificationError',
+                     'error_code':'invalid_stop_timestamp'})
+                self.assertNotIn('stop_start',[row['phase'] for row in self.qual.report['phases']])
+
+    def test_stop_proof_rejects_each_unknown_active_or_residual_unit_before_start(self):
+        from deploy import system_ops as ops
+        for bad_unit in gate.UNITS:
+            for problem in ('unknown','active','residual','missing'):
+                with self.subTest(unit=bad_unit,problem=problem):
+                    self.qual.report['checkpoints']=[];self.qual.report['phases']=[]
+                    def command(argv,*args,**kwargs):
+                        unit=argv[-1];socket=unit.endswith('.socket')
+                        if problem=='missing' and unit==bad_unit:return 4,b''
+                        active=problem=='active' and unit==bad_unit
+                        fields={'LoadState':'loaded','ActiveState':'active' if active else 'inactive',
+                            'SubState':('listening' if socket else 'running') if active else 'dead',
+                            'NeedDaemonReload':'no','FragmentPath':str(gate.UNIT_DIR/unit),'DropInPaths':'',
+                            'ControlPID':'0','ControlGroup':'/system.slice/'+unit if active else '',
+                            'User':'' if socket else 'v-ui','Group':'' if socket else 'v-ui','KillMode':'control-group'}
+                        if not socket:fields['MainPID']='123' if active else '0'
+                        if problem=='unknown' and unit==bad_unit:fields['ActiveState']='unknown'
+                        return 0,''.join(key+'='+value+'\n' for key,value in fields.items()).encode()
+                    with patch.object(ops,'trusted_executable'),patch.object(ops,'run_command',side_effect=command), \
+                            patch.object(ops,'cgroup_empty',side_effect=lambda unit:not (problem=='residual' and unit==bad_unit)), \
+                            patch.object(self.qual,'menu') as menu,patch.object(self.qual,'run') as timestamps:
+                        with self.assertRaises(ops.Refused):self.qual.stop_start(Mock())
+                        self.assertEqual([call.args[0] for call in menu.call_args_list],['stop'])
+                        timestamps.assert_not_called()
+                    self.assertEqual(self.qual.report['checkpoints'][-1]['name'],'stop_proof')
+                    self.assertEqual(self.qual.report['checkpoints'][-1]['status'],'failed')
+                    self.assertNotIn('stop_start',[row['phase'] for row in self.qual.report['phases']])
+
+    def test_stop_start_success_records_observations_and_bounded_separate_checkpoints(self):
+        with patch.object(self.qual,'menu') as menu,patch.object(self.qual,'stopped') as proof, \
+                patch.object(self.qual,'run',side_effect=[Mock(stdout=str(value)) for value in (30,10,20)]) as run, \
+                patch.object(self.qual,'api_ready') as api,patch.object(self.qual,'states',return_value={}):
+            self.qual.stop_start(Mock())
+        self.assertEqual([call.args[0] for call in menu.call_args_list],['stop','start'])
+        proof.assert_called_once_with();api.assert_called_once()
+        self.assertEqual([call.args[0][-1] for call in run.call_args_list],list(gate.UNITS))
+        self.assertEqual(self.qual.report['checkpoints'],
+            [{'name':name,'status':status} for name in gate.CHECKPOINT_NAMES for status in ('begin','passed')])
+        self.assertEqual(len(self.qual.report['checkpoints']),gate.CHECKPOINT_LIMIT)
+        phases=[row['phase'] for row in self.qual.report['phases']]
+        self.assertEqual(phases,['stop_timestamp_observation','stop_start'])
+        for name in ('unknown/private-path','stop_menu'):
+            with self.assertRaisesRegex(gate.QualificationError,'checkpoint_contract_violation'):
+                with self.qual.checkpoint(name):pass
+        self.assertEqual(len(self.qual.report['checkpoints']),gate.CHECKPOINT_LIMIT)
+
+    def test_checkpoints_and_prefixed_records_cannot_complete_required_phases(self):
+        for name in gate.CHECKPOINT_NAMES:
+            with self.qual.checkpoint(name):pass
+        self.qual.report['outcome']='awaiting_cleanup'
+        self.qual.report['phases']=[{'phase':name,'owned_resources_removed':True}
+            for name in gate.REQUIRED_PHASES if name!='stop_start']
+        for suffix in ('.begin','.passed','_observation'):
+            self.qual.report['phases'].append({'phase':'stop_start'+suffix})
+        self.qual.finalize_report()
+        self.assertEqual(self.qual.report['outcome'],'failed')
+
+    def test_error_codes_suppress_unsafe_text_in_artifact_and_cli(self):
+        secret='token=super-secret /private/customer/path raw-transcript'
+        cases=[gate.QualificationError(secret),gate.QualificationError('invalid_stop_timestamp '+secret),
+               RuntimeError(secret),AssertionError(secret),ValueError(secret),
+               subprocess.TimeoutExpired(secret,3,output=secret,stderr=secret)]
+        self.assertEqual(gate.safe_error(gate.QualificationError('invalid_stop_timestamp'))['error_code'],
+                         'invalid_stop_timestamp')
+        for exception in cases:
+            self.qual.report['checkpoints']=[]
+            with self.assertRaises(type(exception)):
+                with self.qual.checkpoint('stop_menu'):raise exception
+            diagnostic=gate.safe_error(exception)
+            self.qual.report.update(outcome='failed',**diagnostic);self.qual.finalize_report()
+            self.assertNotIn(secret,self.qual.output.read_text())
+            self.assertNotIn('/private/',json.dumps(self.qual.report))
+            output=io.StringIO()
+            with patch.object(gate,'run_qualification',side_effect=exception),patch.object(gate.sys,'stderr',output):
+                self.assertEqual(gate.main(['--kit',str(self.base),'--sha256','b'*64,
+                    '--source-commit',COMMIT,'--evidence-dir',str(self.base/'evidence')]),1)
+            self.assertNotIn(secret,output.getvalue())
+            self.assertIn(diagnostic['error_code'],output.getvalue())
 
     def test_clean_direct_cli_default_refuses_without_creating_evidence(self):
         output=self.base/'not-created'

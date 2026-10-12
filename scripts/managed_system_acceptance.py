@@ -60,8 +60,89 @@ REQUIRED_PHASES = ('baseline', 'control_installed', 'menu_cancel', 'stop_start',
                    'recover_restore', 'partial_refresh', 'cleanup')
 
 
+CHECKPOINT_NAMES = ('stop_menu', 'stop_proof', 'stop_timestamps', 'start_menu', 'start_api')
+CHECKPOINT_LIMIT = 2 * len(CHECKPOINT_NAMES)
+ERROR_CODES = frozenset({
+    'backup_result_missing',
+    'bounded_child_failed',
+    'bundle_source_metadata_mismatch',
+    'cancel_changed_services',
+    'checkout_head_mismatch',
+    'checkpoint_contract_violation',
+    'cleanup_ownership_not_established',
+    'command_output_limit',
+    'control_install_failed',
+    'duplicate_json',
+    'evidence_directory_must_be_empty',
+    'exact_source_commit_required',
+    'explicit_exact_head_disposable_runner_authorization_required',
+    'fixture_account_replaced',
+    'fixture_configuration_changed',
+    'fixture_configuration_replaced',
+    'harness_dependency_blob_mismatch',
+    'install_changed_service_state',
+    'insufficient_menu_cleanup_budget',
+    'invalid_stop_timestamp',
+    'kit_source_or_target_mismatch',
+    'no_cleanup_rights',
+    'other_fixture_gate_must_not_be_active',
+    'owned_resource_replaced',
+    'panel_response_not_established',
+    'partial_files_not_claimed',
+    'partial_fixture_target_changed',
+    'partial_install_adopted_without_refresh',
+    'privileged_cleanup_unconfirmed',
+    'qualification_deadline',
+    'qualification_phases_incomplete',
+    'real_worker_identity_not_observed',
+    'real_worker_identity_unobserved',
+    'real_systemd_cgroup_v2_required',
+    'recovery_preservation_failed',
+    'restore_data_not_established',
+    'same_kit_partial_refresh_failed',
+    'supervisor_must_be_nonroot',
+    'ubuntu_24_04_required',
+    'ubuntu_x86_64_only',
+    'unclaimable_resource',
+    'unclaimed_partial_installation',
+    'unclaimed_resources_remain',
+    'unexpected_baseline_command',
+    'unexpected_fixture_account',
+    'unit_not_fixture_canonical',
+    'unknown_service_fixture_action',
+    'worker_did_not_demote',
+    'wrapper_not_accepted_kit',
+})
+
+
 class QualificationError(RuntimeError):
     """Only bounded diagnostic codes are emitted; never raw child output."""
+
+
+def safe_error(exc):
+    """Static diagnostics only: exception text/argv/paths are never serialized."""
+    if type(exc) is QualificationError:
+        code=exc.args[0] if len(exc.args)==1 and type(exc.args[0]) is str else None
+        return {'error_type':'QualificationError',
+                'error_code':code if code in ERROR_CODES else 'qualification_refused'}
+    for kind, label, code in ((subprocess.TimeoutExpired,'TimeoutExpired','child_timeout'),
+            (subprocess.SubprocessError,'SubprocessError','child_process_error'),
+            (AssertionError,'AssertionError','assertion_failed'),
+            (OSError,'OSError','host_operation_error'),
+            (RuntimeError,'RuntimeError','runtime_refused'),
+            (KeyboardInterrupt,'KeyboardInterrupt','interrupted'),
+            (SystemExit,'SystemExit','interrupted')):
+        if isinstance(exc,kind):return {'error_type':label,'error_code':code}
+    return {'error_type':'UnexpectedError','error_code':'unexpected_error'}
+
+
+def stop_timestamp(raw):
+    """A bounded positive uint64 observation, never command-dispatch evidence."""
+    if type(raw) is not str or not re.fullmatch(r'[1-9][0-9]{0,19}\n?',raw):
+        raise QualificationError('invalid_stop_timestamp')
+    value=int(raw)
+    if value>2**64-1:raise QualificationError('invalid_stop_timestamp')
+    return value
 
 
 def require_gate(commit, environ=None, *, uid=None):
@@ -475,7 +556,7 @@ class Qualification:
         self.deadline=time.monotonic()+min(1800,budget);self.creation_started=False;self.menu_in_flight=False
         self.cleanup_uncertain=False
         self.ledger={};self.account=None;self.unit_hashes={};self.work=None;self.config_hash=None;self.control_records={}
-        self.report={'schema':1,'provenance':provenance,'outcome':'running','phases':[],
+        self.report={'schema':1,'provenance':provenance,'outcome':'running','phases':[],'checkpoints':[],
                      'root_programs':{name:hashlib.sha256(root_program(value).encode()).hexdigest()
                                       for name,value in (('menu',_root_menu),('cleanup',_root_cleanup))}}
 
@@ -488,6 +569,24 @@ class Qualification:
         # Freeze each observation before later lifecycle operations mutate ledgers.
         self.report['phases'].append(json.loads(json.dumps({'phase':phase,**details})))
         self.output.write_text(json.dumps(self.report,sort_keys=True,indent=2)+'\n')
+
+    @contextmanager
+    def checkpoint(self, name):
+        rows=self.report['checkpoints']
+        if (name not in CHECKPOINT_NAMES or any(row['name']==name for row in rows)
+                or len(rows)+2>CHECKPOINT_LIMIT):
+            raise QualificationError('checkpoint_contract_violation')
+        rows.append({'name':name,'status':'begin'})
+        self.output.write_text(json.dumps(self.report,sort_keys=True,indent=2)+'\n')
+        try:
+            yield
+        except BaseException as exc:
+            rows.append({'name':name,'status':'failed',**safe_error(exc)})
+            raise
+        else:
+            rows.append({'name':name,'status':'passed'})
+        finally:
+            self.output.write_text(json.dumps(self.report,sort_keys=True,indent=2)+'\n')
 
     def finalize_report(self):
         actual={row['phase'] for row in self.report['phases']}
@@ -638,6 +737,30 @@ class Qualification:
             time.sleep(.1)
         raise QualificationError('panel_response_not_established')
 
+    def stop_start(self, api):
+        with self.checkpoint('stop_menu'):
+            self.menu('stop')
+        with self.checkpoint('stop_proof'):
+            # Keep the production exact-three-unit inactive/cgroup proof. The
+            # timestamps below neither substitute for nor weaken that proof.
+            self.stopped()
+        with self.checkpoint('stop_timestamps'):
+            times={}
+            for name in UNITS:
+                raw=self.run(['/usr/bin/systemctl','show',
+                    '--property=InactiveEnterTimestampMonotonic','--value',name]).stdout
+                times[name]=stop_timestamp(raw)
+            # Requires= plus socket Before=service can complete responder first
+            # inside the socket stop transaction. Completion order cannot prove
+            # controller dispatch order; the latter has a source-bound unit test.
+            self.record('stop_timestamp_observation',inactive_monotonic=times,
+                        interpretation='unit_completion_times_not_command_dispatch_order')
+        with self.checkpoint('start_menu'):
+            self.menu('start')
+        with self.checkpoint('start_api'):
+            self.api_ready(api,200)
+        self.record('stop_start',states=self.states())
+
     def finish(self, case, command, api, login):
         self.capture_owned();self.record('baseline',states=self.states())
         before=self.states()
@@ -655,15 +778,7 @@ class Qualification:
         connection=http.client.HTTPConnection('127.0.0.1',80,timeout=5)
         try:connection.request('GET','/login');response=connection.getresponse();response.read();case.assertEqual(response.status,404)
         finally:connection.close()
-        self.menu('stop');self.stopped()
-        times={}
-        for name in UNITS:
-            raw=self.run(['/usr/bin/systemctl','show','--property=InactiveEnterTimestampMonotonic','--value',name]).stdout.strip()
-            if not raw.isdecimal():raise QualificationError('missing_stop_timestamp')
-            times[name]=int(raw)
-        if not (times[UNITS[2]]<=times[UNITS[0]]<=times[UNITS[1]]):raise QualificationError('wrong_stop_completion_order')
-        self.menu('start');self.api_ready(api,200)
-        self.record('stop_start',inactive_monotonic=times,states=self.states())
+        self.stop_start(api)
         before=self.states();self.menu('restart');case.assertEqual(self.states(),before)
         self.record('restart')
         before_data=self.service('seed')
@@ -759,12 +874,14 @@ def run_qualification(args):
                         # The original fixture also owns sudo/PTY children. An
                         # exception is not proof that those descendants exited.
                         qualification.cleanup_uncertain=True
-                        qualification.report.update(outcome='failed',error_type=type(exc).__name__)
+                        qualification.report.update(outcome='failed',**safe_error(exc))
                         raise
                     finally:
                         try:qualification.cleanup()
                         except BaseException as exc:
-                            qualification.report.update(outcome='failed',cleanup_error=type(exc).__name__)
+                            diagnostic=safe_error(exc)
+                            qualification.report.update(outcome='failed',cleanup_error=diagnostic['error_type'],
+                                                        cleanup_error_code=diagnostic['error_code'])
                             raise
                         finally:
                             qualification.finalize_report()
@@ -784,7 +901,9 @@ def main(argv=None):
     try:
         run_qualification(args)
     except BaseException as exc:
-        print('Managed system qualification did not pass: '+type(exc).__name__,file=sys.stderr)
+        diagnostic=safe_error(exc)
+        print('Managed system qualification did not pass: '+diagnostic['error_type']+
+              ':'+diagnostic['error_code'],file=sys.stderr)
         return 1
     print('Exact-head managed system qualification passed; synthetic private data was not exported.')
     return 0
