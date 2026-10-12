@@ -45,6 +45,7 @@
 | 威胁边界/漏洞报告/秘密数据处理 | [安全说明](../SECURITY.md) |
 | 本地开发与各类测试入口 | [贡献指南](../CONTRIBUTING.md) |
 | 准备官方Release而非手工上传未知包 | [RELEASING.md](RELEASING.md) |
+| Logo 图标、浅/深色字标与归属 | [BRAND.md](BRAND.md) |
 
 ## 历史实现与验收资料
 

@@ -20,6 +20,7 @@ import yaml
 from app import release_tools
 from loopback_helpers import unused_port
 from scripts.prepare_frontend import prepare
+from brand_helpers import check_page_brand, observe_image_csp
 
 
 @unittest.skipUnless(os.getenv('VUI_NODE_BROWSER') == '1', 'explicit panel browser gate')
@@ -87,12 +88,15 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                         route.continue_()
                 context.route('**/*', local_only)
                 page = context.new_page()
+                observe_image_csp(page)
                 page.on('pageerror', lambda error: errors.append(str(error)))
                 page.goto(base + '/login')
                 page.locator('#login-name').fill('security-admin')
                 page.locator('#login-password').fill(password)
                 page.get_by_role('button', name='登录面板', exact=True).click()
                 page.wait_for_url('**/ui/')
+                check_page_brand(page, base)
+                expect(page.get_by_role('heading', name='V-UI', exact=True)).to_be_visible()
                 menu = page.get_by_role('menuitem', name='安全中心', exact=True)
                 def tab_to_menu():
                     expect(menu).to_have_attribute('tabindex', '0')

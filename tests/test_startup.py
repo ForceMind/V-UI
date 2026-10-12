@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+from brand_helpers import check_page_brand, check_image_csp, check_readme_picture, observe_image_csp
 from http.cookiejar import CookieJar
 from urllib.error import HTTPError
 from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_opener
@@ -24,12 +25,16 @@ def check_browser(base_url):
         try:
             context = browser.new_context(viewport={"width": 390, "height": 844})
             page = context.new_page()
+            observe_image_csp(page)
+            check_readme_picture(context, base_url, (Path(__file__).resolve().parents[1] / "README.md").read_text())
             # The account pages use only local assets. Other panel CDN widgets
             # are outside this auth smoke test; never depend on them for login.
             page.route("https://unpkg.com/**", lambda route: route.abort())
             page.route("https://cdnjs.cloudflare.com/**", lambda route: route.abort())
             page.goto(base_url + "/login")
             expect(page.locator("#login-form")).to_be_visible()
+            check_page_brand(page, base_url, mobile=True)
+            check_image_csp(page)
             page.locator("#login-name").fill("tester")
             page.locator("#login-password").fill("wrong-password")
             page.get_by_role("button", name="登录面板").click()
@@ -38,10 +43,20 @@ def check_browser(base_url):
             page.get_by_role("button", name="登录面板").click()
             page.wait_for_url("**/ui/", wait_until="domcontentloaded")
             assert context.request.get(base_url + "/api/auth/me").status == 200
+            check_page_brand(page, base_url)
+            for path in ("/workspace", "/certificates"):
+                page.goto(base_url + path)
+                check_page_brand(page, base_url, mobile=True)
+                check_image_csp(page)
+                page.set_viewport_size({"width": 1280, "height": 900})
+                check_page_brand(page, base_url)
+                page.set_viewport_size({"width": 390, "height": 844})
             page.goto(base_url + "/account")
             expect(page.locator("#current-name")).to_have_text("tester")
             page.reload()
             expect(page.locator("#account-panel")).to_be_visible()
+            check_page_brand(page, base_url, mobile=True)
+            check_image_csp(page)
             assert page.evaluate("Object.keys(localStorage).length + Object.keys(sessionStorage).length") == 0
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             page.locator("#profile-name").fill("tester-new")
@@ -58,7 +73,7 @@ def check_browser(base_url):
             page.get_by_role("button", name="退出登录", exact=True).click()
             expect(page.locator("#login-form")).to_be_visible()
             assert context.request.get(base_url + "/api/subscription/mihomo.yaml").status == 401
-            print("Browser auth smoke: login / reload / rename / re-login / logout / mobile layout OK")
+            print("Browser auth smoke: login / reload / rename / re-login / logout / local logos / favicon / image CSP / mobile layout OK")
         finally:
             browser.close()
 

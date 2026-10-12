@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="web/brand/vui-wordmark-dark.svg">
+  <img src="web/brand/vui-wordmark-light.svg" alt="V-UI：蓝青双带 V 标识" width="176" height="183">
+</picture>
+
 # V-UI
 
 **面向个人自托管的代理管理面板：管理节点与证书，生成完整 Mihomo 分流订阅，用受管流程维护服务和数据。**
@@ -233,6 +238,7 @@ OpenRC 使用 `sudo rc-service v-ui status` 与 `sudo rc-service v-ui-http01 sta
 | 故障、安全和 API | [排错](docs/TROUBLESHOOTING.md) · [安全](SECURITY.md) · [API](docs/API.md) |
 | 版本内容与正式资产 | [发布说明](docs/RELEASE_NOTES.md) · [变更日志](CHANGELOG.md) · [发布流程](docs/RELEASING.md) |
 | 开发、完整路线与验收历史 | [贡献指南](CONTRIBUTING.md) · [路线图](ROADMAP.md) · [文档索引](docs/README.md) |
+| Logo 资源、浅/深色用法与归属 | [视觉标识](docs/BRAND.md) |
 
 0.4.7 的网页后台、两类菜单、低资源软件修复和质量修复已进入主线，准确制品验收见[产品代码收口](docs/MAINLINE_OPERATIONS_CLOSURE_20261012.md)与 [PR #36](https://github.com/ForceMind/V-UI/pull/36)。后续提交必须有自己的准确验收；版本号、旧 CI 或文档描述不能替代对应 Release 的来源核对。[原 README 审计快照](docs/README_HISTORY_20261012.md)保留旧记录。
 

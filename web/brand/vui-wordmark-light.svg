@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="830" viewBox="0 0 800 830" role="img" aria-labelledby="vui-title">
+  <title id="vui-title">V-UI</title>
+  <desc>蓝青 V 标识与深蓝 V-UI 字标，适用于浅色背景。</desc>
+  <defs>
+    <linearGradient id="vui-blue" x1="0" y1="0" x2="470" y2="554" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0864ff"/><stop offset="1" stop-color="#0054f5"/>
+    </linearGradient>
+    <linearGradient id="vui-cyan" x1="389" y1="242" x2="741" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00cbe7"/><stop offset="1" stop-color="#00d4eb"/>
+    </linearGradient>
+    <symbol id="vui-symbol" viewBox="0 0 800 600">
+      <g transform="translate(30 24)">
+        <path fill="#fff" d="M354 242H389L480 404C500 456 478 511 431 548L369 554C402 554 430 522 452 480C468 451 466 435 449 407Z"/>
+        <path fill="url(#vui-blue)" d="M16 0H173C201 0 222 12 236 36L449 407C466 435 468 451 452 480C430 522 402 554 369 554H318C295 554 278 545 266 524L3 27C-5 12 1 0 16 0Z"/>
+        <path fill="url(#vui-cyan)" d="M565 0H723C737 0 745 12 737 27L477 496C465 521 449 540 431 548C478 511 500 456 480 404L389 242L511 34C524 12 542 0 565 0Z"/>
+      </g>
+    </symbol>
+  </defs>
+  <use href="#vui-symbol" x="0" y="0" width="800" height="600"/>
+  <g fill="#081839" transform="translate(30 24)" aria-hidden="true">
+    <path d="M73 608H118L173 724L231 608H277L194 770H151Z"/>
+    <path d="M280 676H354V707H280Z"/>
+    <path d="M388 608H430V707C430 727 442 736 477 736C511 736 524 727 524 707V608H565V706C565 748 538 773 477 773C414 773 388 748 388 706Z"/>
+    <path d="M608 608H650V770H608Z"/>
+  </g>
+</svg>
