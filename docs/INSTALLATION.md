@@ -2,7 +2,7 @@
 
 ## 1. 环境检测
 
-0.3.1 一键安装器不再按 Ubuntu 名称做白名单。启动后先读取系统信息并检测：
+0.4.7 一键安装器继承能力检测模型，不按 Ubuntu 名称做白名单。启动后先读取系统信息并检测：
 
 - 发行版 / `/etc/os-release`；
 - CPU：x86_64 或 ARM64；
@@ -21,7 +21,7 @@
 - `vui-linux-x86_64-musl.zip`
 - `vui-linux-aarch64-musl.zip`
 
-未经适配的 CPU、init、声明式/只读系统会明确停止，不猜命令修改系统。
+不支持的CPU/init会明确拒绝。NixOS和声明式/只读系统不在支持范围，请勿运行安装器；现有检测不保证提前识别这些环境。版本操作还要求Linux pidfd等内核能力及实际运行时libc ABI兼容，不承诺所有旧内核/libc版本均可运行。
 
 ## 2. 端口和防火墙
 
@@ -46,8 +46,8 @@ UFW / firewalld 缺规则时按精确端口/协议列出（例如 `10443/tcp` �
 已验收 v0.4.5/HY2 与 v0.4.6/TUIC 沿用的安装器可接受可重复参数：
 
 ```sh
-sudo bash install.sh --bundle ./vui-linux-x86_64-gnu.zip --sha256 '<可信 SHA256>' \
-  --node-port 10443 --node-udp-port 10443 --node-udp-port 20443
+# 先完成下节可信kit/root私有副本准备；在首次安装调用中追加这些参数。
+run_vui_local_installer --node-port 10443 --node-udp-port 10443 --node-udp-port 20443
 ```
 
 - 每个 `--node-udp-port` 必须为 1024–65535；不传时 UDP 声明为空，不会根据默认 TCP 节点端口自动增加 UDP 规则。
@@ -60,27 +60,86 @@ sudo bash install.sh --bundle ./vui-linux-x86_64-gnu.zip --sha256 '<可信 SHA25
 
 UDP 安装行为和 HY2 集成仍需最终准确候选/主线门槛；固定二进制前置通过不表示真实安装或部署完成，见[HY2 契约](HYSTERIA2_045.md)。
 
-## 3. 本地验收包
+## 3. 本地完整套件
 
-选择与机器 target 匹配的包并核对摘要：
+先在[官方 Releases](https://github.com/ForceMind/V-UI/releases)确认版本已公开、19项固定资产齐全，并接受该软件来源。以下使用Bash、curl、sha256sum和已有管理员sudo权限；不会让服务用户可写的下载目录成为root执行源码目录。`KIT_SHA` 是**整个SHA256SUMS文件的可信SHA-256**，应从已接受的发布记录/独立核验结果取得；摘要不是签名，不能以未知下载的自算值认证来源。请把示例target换为当前机器实际目标。
 
 ```sh
+set -euo pipefail
+umask 077
+VERSION=v0.4.7
+TARGET=x86_64-gnu
+KIT_SHA='<填写已接受的 SHA256SUMS 整文件 SHA-256>'
+case "$TARGET" in x86_64-gnu|aarch64-gnu|x86_64-musl|aarch64-musl) ;; *) exit 1;; esac
+case "$KIT_SHA" in ''|*[!0-9a-f]*) echo '请先填写可信摘要'; exit 1;; esac
+test "${#KIT_SHA}" -eq 64
+KIT="$(mktemp -d)"
+cd "$KIT"
+ASSETS=(
+  install.sh install_system.py platform_support.py firewall_support.py service_support.py
+  install_ops_control.py system_launcher.py system_ops.py ops_worker.py release_tools.py v-ui
+  vui-source.zip RELEASE.json RELEASE_NOTES.md SHA256SUMS
+  vui-linux-x86_64-gnu.zip vui-linux-aarch64-gnu.zip
+  vui-linux-x86_64-musl.zip vui-linux-aarch64-musl.zip
+)
+for file in "${ASSETS[@]}"; do
+  curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --location \
+    --retry 2 --connect-timeout 15 --max-time 300 \
+    "https://github.com/ForceMind/V-UI/releases/download/$VERSION/$file" -o "$file"
+done
+printf '%s  SHA256SUMS\n' "$KIT_SHA" | sha256sum -c -
 sha256sum -c SHA256SUMS
-SHA="$(awk '$2=="vui-linux-x86_64-gnu.zip" {print $1}' SHA256SUMS)"
-sudo bash install.sh --bundle ./vui-linux-x86_64-gnu.zip --sha256 "$SHA"
+ROOT_KIT="$(sudo mktemp -d /root/vui-kit.XXXXXXXX)"
+for file in "${ASSETS[@]}"; do
+  sudo install -o root -g root -m 0600 "$file" "$ROOT_KIT/$file"
+done
+# 复制后立即从root私有副本复核；此步只运行系统sha工具，不执行kit代码。
+sudo /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root \
+  /bin/bash -c '
+    set -euo pipefail
+    cd -- "$1"
+    printf "%s  SHA256SUMS\n" "$2" | sha256sum -c -
+    sha256sum -c SHA256SUMS
+  ' -- "$ROOT_KIT" "$KIT_SHA"
+run_vui_local_installer() {
+  sudo /usr/bin/env -i \
+    PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root PYTHONDONTWRITEBYTECODE=1 \
+    /bin/bash -c '
+      set -euo pipefail
+      cd -- "$1"
+      printf "%s  SHA256SUMS\n" "$2" | sha256sum -c -
+      sha256sum -c SHA256SUMS
+      BUNDLE="vui-linux-$3.zip"
+      SHA="$(awk -v file="$BUNDLE" '\''$2 == file {print $1}'\'' SHA256SUMS)"
+      shift 3
+      exec /bin/bash ./install.sh --bundle "./$BUNDLE" --sha256 "$SHA" "$@"
+    ' -- "$ROOT_KIT" "$KIT_SHA" "$TARGET" "$@"
+}
 ```
 
-也可以显式提供非秘密参数：
+到此只完成套件下载、root私有副本和调用函数定义，尚未运行系统安装。准备安装全局控制层或升级已有实例时，不要再执行下面的首次安装调用。
+
+首次系统安装时，再在同一终端明确运行：
 
 ```sh
-sudo bash install.sh --bundle ./vui-linux-x86_64-gnu.zip --sha256 "$SHA" \
+run_vui_local_installer
+```
+
+19项资产包含项目自己的`vui-source.zip`；GitHub自动生成的“Source code” ZIP/TAR不替代它。单目标Actions kit不是最终四目标完整资产集合。临时下载目录与root私有副本都保留供核查，本示例不自动删除目录。
+
+也可以在同一终端使用上方函数显式提供非秘密参数；**只有已阅读并同意CA条款时才传`--accept-terms`**：
+
+```sh
+run_vui_local_installer \
   --domain panel.example.com --email admin@example.com --admin my_admin \
   --port 8443 --node-port 10443 --accept-terms
 ```
 
-管理员密码只从控制终端交互读取，不接受密码命令参数。
+这是替代上方交互安装的调用，不是要求首次成功后再执行第二次。管理员密码只从控制终端读取两次，要求15–128字符，不接受密码命令参数，也没有默认密码。默认管理员名为`admin`。成功后用安装器输出的`Panel: https://<域名>:<端口>/login`登录；证书警告应先排错，不绕过。
 
-`--dry-run` 会验证包并输出平台、防火墙和端口结果，不创建账号、服务或规则。
+同时提供`--domain`和`--email`时，代码不会再弹出域名/邮箱/CA条款询问；自动签发必须事先同意后显式传`--accept-terms`。初次操作建议使用完整交互流程。
+
+Python安装控制器的`--dry-run`会验证包并输出平台、防火墙/端口结果，不创建账号、服务或规则；仍读取完整包并可能提示域名/邮箱。外层`install.sh`进入控制器前可能安装引导工具/取得Python，在线`--version`还会下载文件，所以整个shell入口不是零写入或完全离线的dry-run。
 
 ## 4. 服务后端
 
@@ -117,12 +176,19 @@ root 只负责系统初始化和受管服务文件；应用、核心与 Certbot 
 
 ## 7. 官方 Release 一键安装
 
-当前文档对应 **v0.4.7 REALITY/Vision 集成候选**，版本号不代表该版本已经公开发布。下面仅展示正式 Release 公布且资产核对完成后的命令，不能视为当前可用下载地址；安装入口须来自同一可信仓库或已验收套件：
+本指南按 **v0.4.7** 编写。先在[官方 Releases](https://github.com/ForceMind/V-UI/releases)核对对应版本公开状态和完整资产；未公开、缺文件、404或摘要不符时停止。不要混用 `latest`、分支文件与其他版本。安装入口的固定版本下载/校验步骤见[README快速安装](../README.md#快速安装)，入口本身也必须来自独立接受的可信来源：
 
 ```sh
-sudo bash install.sh --version v0.4.7
+# 按README完成固定入口校验/root私有副本及函数定义后：
+run_vui_installer --version v0.4.7
 ```
 
 脚本先检测 `x86_64/aarch64 + gnu/musl`，再从该明确版本下载对应目标包、安装控制器和 `SHA256SUMS`，逐个验证摘要后执行。不会下载 `latest`，也不会在发布时重新构建包。
 
 HTTP-01 条件见 [CERTIFICATES.md](CERTIFICATES.md)，升级/备份见 [OPERATIONS.md](OPERATIONS.md)。
+
+## 8. 菜单与首次维护
+
+默认安装不会创建全局 `v-ui`。包内服务用户菜单和全局受管菜单是不同入口，见[运维指南](OPERATIONS.md#终端运维菜单)与[显式全局组件安装](MANAGED_OPERATIONS.md#安装消费点与信任)。不要用 root 运行服务用户拥有的 portable Python/payload。
+
+升级前保留离机备份和原启动锚点 runtime。正式 Release、源码验收、受管 root/init 资格与用户主机部署分别判断；安装或发布成功不产生整机/24小时稳定性保证。

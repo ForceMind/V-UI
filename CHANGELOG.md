@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-10-12 — 0.4.7 用户文档与发行说明整理
+
+- README改为产品入口：严格协议/平台矩阵、固定版本可信下载、首次登录、两类菜单、安全升级/备份恢复、资源与已知限制
+- 同步安装/运维/发布说明，修正把完整shell引导称为零写入dry-run的歧义；无产品、版本、依赖pin或workflow变化
+- [原README](docs/README_HISTORY_20261012.md)与[原发布说明](docs/RELEASE_PREPARATION_HISTORY_20261012.md)归档保留。下列“未发布/候选”属于对应历史时点；实际公开状态以[Releases](https://github.com/ForceMind/V-UI/releases)为准，不在提交前预填发布成功
+
 ## 2026-10-12 — 0.4.7 产品代码已正常进入主线（未发布）
 
 - [PR #35](https://github.com/ForceMind/V-UI/pull/35) 正常合并的固定产品代码基线为 `02d8038d5c06301cd81fb5ee1c776ce53b8bd4b7`，tree `4f0d20027bdbda02c73f03c4d76d7425a7c650ea`；PR #28–34 的代码历史均已包含，不表示每个 stack PR 自身都显示 merged

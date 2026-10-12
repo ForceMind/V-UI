@@ -2,7 +2,7 @@
 
 受管实例默认根目录为 `/var/lib/v-ui`。实际服务命令取决于安装时检测到的 service manager。
 
-全局 `v-ui` 受信控制入口是单独、显式安装的候选组件，见[受管终端控制](MANAGED_OPERATIONS.md)。默认一键安装不会新增该入口；下文包内非 root 菜单继续可用。仓库内软件测试不等于已在你的主机安装或验证了新的 root 控制层。
+全局 `v-ui` 受信控制入口是单独、显式安装的组件，见[受管终端控制](MANAGED_OPERATIONS.md)。默认一键安装不会新增该入口；下文包内非 root 菜单继续可用。仓库内软件测试不等于已在你的主机安装或验证了新的 root 控制层。
 
 ## systemd
 
@@ -72,10 +72,10 @@ CURRENT/READY 和受管 service.json 均限制 16 KiB，使用 nofollow、文件
 
 ## 受管升级
 
-必须使用与当前机器 target 一致、同一发布版本验收过的包：
+必须使用与当前机器target一致、同一发布版本验收过的完整可信套件。先按[安装指南](INSTALLATION.md#3-本地完整套件)准备root私有副本及`run_vui_local_installer`，再沿用原实例的域名、邮箱、管理员、端口、bind和证书模式。以下示例仅适用于这些值与原安装相符、且操作者已接受CA条款的情况：
 
 ```sh
-sudo bash install.sh --bundle ./vui-linux-x86_64-gnu.zip --sha256 '<可信 SHA256>' \
+run_vui_local_installer \
   --domain panel.example.com --email admin@example.com --admin my_admin \
   --port 8443 --node-port 10443 --accept-terms --upgrade
 ```
@@ -119,7 +119,7 @@ sudo systemctl stop v-ui-http01.service v-ui.service
 sudo -u v-ui "$PY" -B "$APP/scripts/deploy.py" --root "$ROOT" backup "$ROOT/manual-backup.zip"
 ```
 
-性能候选的[私有备份缓存方案](LOW_RESOURCE_BACKUP_CACHE.md)要求目标目录所在文件系统支持硬链接，以便完整归档无覆盖发布；不支持时安全失败。若归档发布后的目录同步失败，命令仍报错，但会保留已完成文件，不自动删除或覆盖该路径。此行为只属于性能候选，未晋升为冻结 0.4.7 附件。
+本版的[私有备份缓存方案](LOW_RESOURCE_BACKUP_CACHE.md)要求目标目录所在文件系统支持硬链接，以便完整归档无覆盖发布；不支持时安全失败。若归档发布后的目录同步失败，命令仍报错，但会保留已完成文件，不自动删除或覆盖该路径。这项实现已进入0.4.7主线及其验收包；正式分发仍须核对所选Release与同提交资产，不能混用早期候选。
 
 恢复会撤销旧管理会话和订阅令牌。出现 `RESTORE_PENDING.json` 时保持停机并执行 `recover-restore`，不要手工删除日志绕过检查。
 

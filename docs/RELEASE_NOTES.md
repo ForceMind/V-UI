@@ -1,59 +1,49 @@
 # V-UI 0.4.7
 
-## 主线软件集成状态（2026-10-12，未发布）
+0.4.7 是累计版本：中文网页后台、固定官方核心、图形化证书、严格订阅导出和受管终端维护。实际公开状态、目标提交与下载资产见[官方 Releases](https://github.com/ForceMind/V-UI/releases)；本文件不以版本号预先证明发布成功。下方文档链接固定到v0.4.7 tag，只有该版本正式创建后才可用，不随master滚动。
 
-低资源软件、后台说明、服务用户菜单、全局受管菜单及两项证据稳定性修复已通过 [PR #35](https://github.com/ForceMind/V-UI/pull/35) 正常进入主线，固定产品代码基线为 `02d8038d5c06301cd81fb5ee1c776ce53b8bd4b7`。准确主线八组/11 jobs/119 steps 全 attempt 1，四目标新包、真实浏览器和19项资产技术组合分别验收，见[主线收口与原件](MAINLINE_OPERATIONS_CLOSURE_20261012.md)。后续仅文档提交的准确验收记录在承载 PR，不用旧包冒充新头。
+## 本版内容
 
-这关闭的是本轮八个软件工作包，不是整个后续路线。全局入口仍需显式安装可信 root-owned 组件；实际 root/systemd 资格仅属于 f509 原 run。OpenRC 写动作、真实小内存整机/24h、160/320 MiB 工程预算等边界不变。没有创建 tag、Draft/公开 Release 或部署用户主机；“已进主线”不等于已发布。
+- 管理员认证、会话撤销、专用订阅令牌、节点/格式授权、有效期、轮换及撤销；无默认密码
+- sing-box 公开基线：VLESS TCP/WS/gRPC TLS、VLESS direct TCP REALITY/Vision、Trojan TCP/TLS、VMess TCP/TLS、三种Shadowsocks AEAD、Hysteria2、TUIC v5，严格范围见[兼容矩阵](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/COMPATIBILITY.md)
+- ToClash两种模式、40项预设、规则预览和完整Mihomo YAML；URI/Base64与sing-box连接JSON不承载同等完整规则
+- Certbot HTTP-01单域名、测试/正式隔离、自动续期、面板热更新和TLS节点绑定；失败保留旧材料，不延长旧证书有效期
+- 非root包内菜单：状态、安装/活动版本、显式完整校验、可信本地候选准备
+- 可选全局受管菜单：固定root-owned入口与降权worker、systemd启停/重启、停机备份、恢复、激活/代码回退及中断恢复；需要显式安装完整可信kit
+- 流式完整校验、私有缓存生命周期、GNU allocator和状态轮询等低资源软件修复，保留完整路径/成员/摘要/权限与恢复检查
+- VMess TLS负向及HTTPUpgrade记录器的有界证据/清理回归；真实原因、零送达和无DIRECT断言不降级
+- 面向用户重整README、安装、菜单和发布文档；历史失败、未验场景与旧记录保留
 
-## 2026-10-12 合并前集成候选更新（历史，未发布）
+## 下载与安装
 
-以下“尚未合并/主线 a6aa/待验”是候选形成时的快照。最新已验产品代码归属见上方主线记录，历史内容与首次失败保持。
+发布资产共19项：四个CPU/libc目标ZIP，固定安装/控制helper、源码ZIP、RELEASE.json、RELEASE_NOTES.md和SHA256SUMS。具体清单见[发布流程](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/RELEASING.md#发布资产)。选定完整同版本资产，核来源与摘要；不使用latest，不混用旧包。
 
-本候选在产品 `0.4.7` 上沿历史继承 PR #28–33 的低资源、后台与菜单工作，详见[完整矩阵](INTEGRATED_OPERATIONS_CANDIDATE.md)。它们尚未合并，当前主线仍为 `a6aa84d`；本次未创建 tag/Draft Release/公开 Release，未向 Release 上传或晋升资产，也未操作用户主机。
+推荐从[README固定版本安装](https://github.com/ForceMind/V-UI/blob/v0.4.7/README.md#快速安装)开始。系统安装使用管理员权限，应用/核心/证书任务使用专用服务用户；默认TCP80、8443和10443会预检，节点UDP需独立声明。安装器不接管原站点，不修改SSH，不自动启用防火墙。
 
-### 已实现的集成范围
+默认安装**不提供全局v-ui命令**。包内菜单使用服务用户调用；全局入口须按[独立可信kit安装合同](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/MANAGED_OPERATIONS.md#安装消费点与信任)显式安装。不要以root运行服务用户可写的portable Python或payload脚本。
 
-- 低资源：流式完整读取、私有文件缓存生命周期、GNU allocator、状态轮询及恢复保护，保留完整摘要/成员/路径/权限与数据保全检查
-- 网页后台：不支持的主机安全控制改为明确的只读说明，覆盖键盘、重复点击/导航及会话过期；不把说明入口视为实际封禁能力
-- 包内服务用户菜单：只读状态、安装记录、明确选择后的完整校验、可信本地候选准备，不自动提权
-- 全局受管菜单：管理员须从完整独立可信 kit [显式安装 root-owned 控制组件](MANAGED_OPERATIONS.md)，再运行 `sudo /usr/local/sbin/v-ui`；默认 `install.sh` 不添加全局入口。systemd 支持启停/重启、停服备份、恢复、候选激活/代码回退和中断恢复；OpenRC 只查询与纯候选准备，拒绝启停及依赖停服的数据写动作。单独切换 CURRENT 不更新 root-owned 控制组件、launcher、安装记录或服务模板
-- VMess 测试：两客户端 CA/SNI 负向改用既有有界拒绝证据收集器，移除被动 2 秒轮询；仍要求同一新日志行中的真实 x509/指定原因、零应用送达、无 DIRECT、停进程后的送达检查及失败清理。本地合成 RED 只证明旧调用方的契约缺口，不能唯一归因历史真实网络失败
+## 升级和数据
 
-### 准确证据与仍待完成的门槛
+1. 保留受限访问的离机备份，并核对当前target、活动release ID及启动锚点。
+2. 使用同版本完整可信安装器/包按[受管升级](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/OPERATIONS.md#受管升级)操作；CPU/libc/init迁移不属于普通升级。
+3. 菜单stage只准备，不切CURRENT；activate先备份再选择已准备版本。单独切换不会更新root-owned控制层、launcher或服务模板。
+4. 备份含未加密秘密。恢复撤销旧会话/订阅授权；失败或RESTORE_PENDING时保持停机，按recover-restore处理，不删journal或空建数据库。
 
-[PR #33](https://github.com/ForceMind/V-UI/pull/33) 的文档基线 `09f2cf4ec39adfbb345d8aa40b94558c64c93936` 已完成普通八组、11 jobs、119 steps 全部 attempt 1，并核验 9 个原始 artifact。真实受管 root/systemd 资格仍准确属于 `f50942f1b399c7c397df532d04f9143e2527aaa8` 的 [run 38203515936](https://github.com/ForceMind/V-UI/actions/runs/38203515936)：空白临时 Ubuntu 24.04 x86_64/systemd/cgroup v2、11 个必需阶段（含 cleanup）及自有资源清理确认；没有在 09f2 重跑 root。本次含测试修复的新 head 尚待独立审查、自己的普通八组 CI 和同提交原件核验，不能继承旧提交的通过结论或预填未来 SHA。
+代码回退不恢复旧数据。保留旧bootstrap runtime；不要用删除目录掩盖升级问题。不同版本/schema迁移与真实断电恢复没有被同代码合成A→B→A测试代替。
 
-[f509 收口](MANAGED_OPERATIONS_CLOSURE_20261012.md)保留首次 VMess x509 原因缺失、unchanged-code attempt 2、旧 root harness 失败及清理未确认事实；后续通过不抹去它们。普通四目标包消费与真实 root/init 分开记录，合成同代码 A→B→A 不等于真实跨版本/schema 迁移，构造中断恢复不等于真实断电实验。
+## 已知限制
 
-[低资源收口](LOW_RESOURCE_CLOSURE_20261011.md)仍只支持有界软件结论：历史大数据用例已到 512 MiB、零余量，短 cgroup smoke 不能拼成真实 1 vCPU/512 MiB 整机或连续 24 小时完整负载验收；160 MiB 完整空载/320 MiB 安装升级预算、其他平台真实 root/init 仍未达证。协议、固定 pin、四 Linux 目标和 SNI/网络范围不扩展，UDP/DNS 等后续阶段未实现，XHTTP/HTTPUpgrade 公开导出仍阻断。
+- XHTTP/HTTPUpgrade公开导出仍阻断；真实能力刻画不代表完整产品支持。Xray组合不自动继承sing-box公开矩阵。
+- 除三种Shadowsocks AEAD已有UDP基线，其他协议的通用应用UDP/DNS扩围未完成。HY2/TUIC节点QUIC需要UDP端口，但本版只验HTTP/TCP应用负载。
+- OpenRC支持既有安装、状态查询与纯候选准备；全局菜单依赖停启的写动作拒绝。受管systemd写事务需要可验证的cgroup v2与固定服务来源。
+- DNS-01/通配符、核心自动升级、任意YAML导入合并、容器/NixOS等不在本版范围；后台不提供网站托管、SSH或主机封禁能力。
+- 真实1vCPU/512MiB整机及24小时完整负载未获资格。大数据归档场景达到512MiB峰值/零余量；160/320MiB仍是未证工程预算，不能当最低配置保证。
+- 固定gRPC Lite错误CA/SNI可能让调用者超时；TLS拒绝由真实诊断确认，不能关闭验证规避。
 
-[人工发布流程](RELEASING.md)现按发布脚本聚合 19 项资产；默认 `publish=false` 也会创建 Draft Release 并上传资产，绝非 dry-run。候选验收不授权合并、tag、Release、附件晋升或用户主机部署。
+## 验收与来源
 
-## 2026-10-06 协议发布准备记录（历史）
+产品代码基线、主线与候选来源、普通CI、真实root/systemd、包消费和公开发布分别记录。准确最终提交必须有自己的八组CI及同提交四目标资产，发布不重新构建另一套包。真实受管root资格仍仅属于[f509历史run](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/MANAGED_OPERATIONS_CLOSURE_20261012.md)，没有移植为每个后续head的root重验。
 
-以下保留当时状态和各阶段证据；其中“本次/当前”指原记录，不替代上述新候选的准确验收。
+[主线产品收口](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/MAINLINE_OPERATIONS_CLOSURE_20261012.md) · [PR #36准确文档主线验收](https://github.com/ForceMind/V-UI/pull/36) · [低资源证据](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/LOW_RESOURCE_CLOSURE_20261011.md) · [原发布准备历史](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/RELEASE_PREPARATION_HISTORY_20261012.md)
 
-REALITY/Vision 已由 [PR #24](https://github.com/ForceMind/V-UI/pull/24) 完成独立审查、准确候选八组、正常合并和准确主线八组，见[收口记录](REALITY_VISION_CLOSURE_047.md)。本文件为发布准备说明；截至 2026-10-06 本次检查，没有创建正式 Release、附件晋升或生产部署。[PR #25 XHTTP 刻画](XHTTP_CHARACTERIZATION_CLOSURE_048.md)也已完成准确候选/主线验收，不改变产品版本 0.4.7 或公共支持。产品范围冻结；本次最终文档提交的 CI 与同提交四目标附件核验以对应 PR/发布准备证据为准，本文不预先声明通过，也不能以旧提交的结果替代。
-
-## 继承基线
-
-[v0.4.2](MAINLINE_CLOSURE_20261005.md)、[WS](VLESS_WS_CLOSURE_043.md)、[gRPC](VLESS_GRPC_CLOSURE_044.md)、[HY2](HYSTERIA2_CLOSURE_045.md)、[PR #23 普通响应安全修复](INBOUND_RESPONSE_CLOSURE_20261006.md)与 [TUIC v0.4.6](TUIC_CLOSURE_046.md)分别保持已验收边界，PR #14 仍排除。TUIC master `df8a980b` 八组/11 jobs/全部步骤成功，deployment 首次上游 403 后 unchanged-code attempt 2 通过，其余七组 attempt 1。旧[候选发布说明](RELEASE_NOTES_046.md)保留为历史。
-
-## 已验收范围
-
-- sing-box 1.14.2 服务端/客户端与 Mihomo 1.19.32，官方 pin/摘要/构建不变；VLESS、direct TCP、精确 `xtls-rprx-vision`、一个 UUID、一个规范 16 位 hex short ID、匹配 X25519 公私钥、显式 SNI、Chrome
-- VLESS URI、Mihomo YAML、sing-box JSON 保留必要客户端参数；私钥及参考握手地址仅在服务器。无 ALPN 覆盖、托管证书、额外传输/核心、multiplex 或应用 UDP 扩围
-- UUID/私钥/short ID 不回显，空输入保持；独立 UUID/short ID 替换，未知/高级导入字段拒绝，不能静默清除后公开。普通响应保持 PR #23 allowlist
-- 参考 TLS 握手与应用目标分别计数；认证失败可产生参考回落，异步伪装 GET 不保证完成。错误 UUID/flow/key/short ID/SNI 要求真实拒绝原因、应用零送达、无 DIRECT；不以超时/EOF 代替
-- REALITY 证书绑定在持久化前拒绝；有效 legacy raw 安全切换在保存后清除旧绑定。复现只观察到旧代码残留 binding/error 状态，未观察到 REALITY 被续期覆盖；有效 TLS 的 desired/applied 与停止待应用语义保留
-
-## 当前证据
-
-裸前置准确 `a44b5ce20edcaee1ee3b26c34b7c21badfe5bf7b` 八组/11 jobs/全部步骤 attempt 1 成功。[链路 82 项](https://github.com/ForceMind/V-UI/actions/runs/37471617751)及独立 HY2 8/TUIC 8 通过，Mihomo YAML、sing-box JSON、实际 URI importer 均验证正向和五类负向。首次 `6776950` 的 9 个伪装 HEADERS 断言失败保留，修正没有更换核心或放松认证/应用送达门槛。
-
-最终候选 `70cc2f4` 与正常签名 master `6b049262` tree 相同；候选八组全部 attempt 1，主线八组最终成功。主线链路首次继承 VMess/Mihomo CA 用例缺少必需 x509 原因，unchanged-code attempt 2 取得真实 unknown-authority 原因后通过，其余七组 attempt 1；该重跑不证明被动日志轮询不稳定性已永久修复。真实链路 89 项及独立 HY2 8/TUIC 8，公开订阅、严格编辑、Chrome/秘密回填、取消/刷新/再编辑/导出及损坏后停机恢复均有准确主线证据。原有 ACME/安装/40 项 ToClash/四目标 Linux 与完整八组不减，见[主线收口](REALITY_VISION_CLOSURE_047.md)；完整来源与前置/审查失败历史见[阶段契约](REALITY_VISION_047.md)。
-
-[PR #25 XHTTP 刻画](XHTTP_CHARACTERIZATION_CLOSURE_048.md)最终候选 `f7996c5` 与签名 master `66dbe70c` 同 tree，分别八组/11 jobs/全部步骤 attempt 1 成功。链路各 101 项、独立 HY2 8/TUIC 8；默认 496 项中 375 执行、121 明确 skip，真实核心与继承 REALITY 完整 Chromium 流程分别验收。XHTTP 的 Mihomo YAML/实际 URI 路径正向及六类负向通过；HTTPUpgrade 原生成功、原样 URI 失败、独立协议 recorder、同 bytes 验证 TLS replay 的实际 HTTP400 与普通 TCP 对照分别记录。sing-box 1.14.2 不支持 XHTTP，HTTPUpgrade 仍有固定 Mihomo URI 转换缺口，公开导出保持阻断。首次 `77c264a` CI 缺少晚期日志原因的失败及源码诊断/审查修正保留于[刻画记录](XHTTP_CHARACTERIZATION_048.md)。
-
-历史本地 netlink/socket/Chromium EPERM 按原结果保留，不写成运行通过；当前 XHTTP 本地运行与 HTTPUpgrade netlink 阻断另见刻画记录，不泛化为所有本地测试不可运行。源码、配置检查、真实链路、浏览器、包验证、发布与部署分别记录。本轮未新建 tag/Draft Release/公开 Release、晋升附件、操作真实 CA/账户或修改实际防火墙；已有历史 `v1.0.0` tag 不变。先完成本版发布准备与交付决定，再推进独立 UDP/DNS 实现；[人工发布边界](RELEASING.md)不变。
+V-UI使用[MIT License](https://github.com/ForceMind/V-UI/blob/v0.4.7/LICENSE)。第三方核心、Certbot、ToClash及依赖遵循各自许可；来源与许可见[NOTICE](https://github.com/ForceMind/V-UI/blob/v0.4.7/third_party/NOTICE.md)及包内provenance/license文件。
