@@ -1,4 +1,14 @@
-# 完整运维候选完成矩阵
+# 完整运维软件完成矩阵
+
+## 当前产品代码归属
+
+本轮八项软件目标已通过 [PR #35](https://github.com/ForceMind/V-UI/pull/35) 正常进入主线，固定产品代码基线为 `02d8038d5c06301cd81fb5ee1c776ce53b8bd4b7`。准确主线普通 CI、四目标新包/消费者、浏览器和19项资产技术组合见[主线收口](MAINLINE_OPERATIONS_CLOSURE_20261012.md)。这八项不代表整个 ROADMAP 完成，亦不把普通包消费替代真实 root/init 或整机资格。
+
+PR #28–34 的代码历史已包含；旧 stack PR 是否仍 open 与代码祖先关系分别记录。未创建 Release、晋升附件或操作用户主机。实际受管 root/systemd 资格准确属于下方 f509 原 run；后续文档头的准确普通 CI/包验收留在承载 PR，不回填自身未来 SHA。
+
+## f509 原候选矩阵（2026-10-12，历史）
+
+以下“本候选/仍为Draft/不合并master/后续待验”指原阶段及原 PR 状态。保留原实现合同、失败边界和资格归属，当前集成情况以上方固定产品代码基线为准。
 
 本候选将低资源软件修复、后台无效安全入口修正、服务用户菜单与全局受管菜单放在同一份源码中。整合保留 [PR #28](https://github.com/ForceMind/V-UI/pull/28)、[PR #29](https://github.com/ForceMind/V-UI/pull/29)、[PR #30](https://github.com/ForceMind/V-UI/pull/30)、[PR #31](https://github.com/ForceMind/V-UI/pull/31) 和 [PR #32](https://github.com/ForceMind/V-UI/pull/32) 的历史，不修改其头或主线。旧 PR 分别通过不等于本候选已经整体通过。
 
