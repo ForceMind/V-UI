@@ -2,13 +2,13 @@
 
 更新日期：2026-10-15。契约：[DUAL_PROXY_RELAY_CONTRACT.md](DUAL_PROXY_RELAY_CONTRACT.md)。计划基线：`a9f9b5d9c0dd2aada5e8f5f2270b2ce93440d5ff`。
 
-## 当前结论（最新登记至 2026-10-15 19:59 UTC）
+## 当前结论（最新登记至 2026-10-15 20:21 UTC）
 
 - M0 已正常合并 [PR #40](https://github.com/ForceMind/V-UI/pull/40)，候选与准确主线各八组 / 11 jobs / 最新全部步骤 attempt 1 成功。
 - M1 [PR #41](https://github.com/ForceMind/V-UI/pull/41) 已正常合并至 `f95150a`。修复候选 `419727ae` 八组 / 11 jobs / 最新全部步骤 attempt 1 成功，候选与主线 tree 相同。准确主线八组 / 11 个最新 jobs / 全部最新步骤现已成功，11 个 checkout 日志均为 `f95150a`；one-click 与 portable 为 attempt 2，其余 attempt 1。首次 HTTPS health 未确诊失败与 GitHub 403 保留，不称全 attempt 1 或永久修复。
-- M2 [PR #42](https://github.com/ForceMind/V-UI/pull/42) 已正常合并至 `e1aaa8e`。修复候选 `02c6436` 八组 / 11 jobs / 最新全部步骤 attempt 1 成功，候选与主线 tree 相同。主线 test、docs、ACME、ToClash、one-click 已成功，portable、loopback、deployment 尚待终态。实现边界见 [M2 说明](DUAL_PROXY_RELAY_M2.md)。
-- M3 [Draft PR #43](https://github.com/ForceMind/V-UI/pull/43) 未合并。当前候选 `5331a2f` 的真实浏览器 11 个方法有 8 个失败：测试登录跳到依赖 CDN 的 dashboard，CDN 被阻断后 `axios is not defined`。同候选 loopback 的诊断 20 个方法全部通过，但严格导出 7 个方法有 1 个因显式 DNS TLS 错证书缺少新鲜 x509/certificate 理由而失败。两项窄修已本地集成至 `488f2d9`，改后真实浏览器及严格导出 CI 尚未验收，PR 仍未合并。
-- M4 离线恢复上一冻结 `11d3560` 全套 1,748 项完成，1,572 pass / 176 明确 skip；现已正常合入 M3 浏览器及严格导出修复，须在新冻结上重跑准确全套，尚未推送。四目标实际包消费与准确候选 CI 尚未运行，不称整体可发布完成。
+- M2 [PR #42](https://github.com/ForceMind/V-UI/pull/42) 已正常合并至 `e1aaa8ed51c29164b8e1d5ce0010ce63ad644bfa`。候选与准确主线各八组 / 11 jobs / 全部最新步骤 attempt 1 成功，主线 11 个 checkout 已逐一核对准确 SHA；候选与主线 tree 相同。实现边界见 [M2 说明](DUAL_PROXY_RELAY_M2.md)。
+- M3 [Draft PR #43](https://github.com/ForceMind/V-UI/pull/43) 未合并。新候选 `9ed53006c0f1c41a7be57b03284e62210752c7ad` / tree `57822ce48f3aa3e1e920366dd61841d398d093f0` 的本地全套 1,682 项：1,506 pass / 176 skip，142.142 秒；八组 CI 尚待终态。新真实 proxy browser 步骤已成功，Test 后续步骤仍在运行。上一候选 `09b` 的真实诊断 20 / 严格导出 10 方法均通过，浏览器 7/8 通过；fieldset 的 Playwright 语义窄修已合入新候选，原失败保留。
+- M4 首次远端候选 `4b2c0db` 八组终态为 5 success / 3 failure（Test、portable、deployment）。三个 portable 目标及 deployment 的 managed smoke 共因已复现：把保留的稳定 sibling lease 当成数据目录，末端验收找错锁路径；已完成验收修订和独审，生产锁逻辑未改。上一集成冻结 `bea77b0` 本地全套 1,755 项通过（1,579 pass / 176 skip），新修订仍须重新冻结、完整本地套件与准确 CI，不能继承旧成功或称整体可发布完成。
 
 M0–M4 仍按独立 PR 推进。M1 保存草稿不会启用代理；当前代码合并、准确主线复验、四目标制品和整体发布资格分别登记。真实用户线路 / 外部设备、真实 1 vCPU / 512 MiB / 24 小时没有新增验收证据。
 
@@ -20,9 +20,9 @@ M0–M4 仍按独立 PR 推进。M1 保存草稿不会启用代理；当前代�
 | --- | --- | --- |
 | M0 合同冻结 | 已合并；候选/主线各八组完成 | 已有准确 checkout 和同 tree 证据，见历史追加 |
 | M1 导入与数据层 | PR #41 已合并；修复候选与准确主线八组完成 | 主线 one-click / portable 为 attempt 2；原失败与未确诊原因保留 |
-| M2 双开关运行与事务 | PR #42 已合并；修复候选八组完成 | 准确主线 portable / loopback / deployment 终态 |
-| M3 面板诊断与导出 | PR #43 候选修订中，未合并 | 两项窄修后新准确候选全部门槛，尤其真实浏览器与严格导出 |
-| M4 整体可发布候选 | 离线恢复本地全套与独审完成；整体未验收 | 已合入 M3 两项修复，重跑新冻结的准确全套，再验准确候选/主线八组与同提交四目标新资产 |
+| M2 双开关运行与事务 | PR #42 已合并；候选与准确主线八组完成 | 两边均为全部最新步骤 attempt 1，主线 11 个 checkout 已核 |
+| M3 面板诊断与导出 | PR #43 新候选 `9ed5300` 验收中，未合并 | proxy browser 步骤已通过，仍等全部 workflows/jobs/steps 终态 |
+| M4 整体可发布候选 | 首候选 5 success / 3 failure；修订待准确验收 | 纳入 fieldset 与 managed lease audit 修订，重跑新全套和新准确 CI / 四目标消费 |
 
 ## 准确提交证据索引
 
@@ -31,10 +31,10 @@ M0–M4 仍按独立 PR 推进。M1 保存草稿不会启用代理；当前代�
 | 规划基线 | `a9f9b5d9c0dd2aada5e8f5f2270b2ce93440d5ff`，只作起点 |
 | M0 候选 / master / tree | `2165eb71ae3de95ad177ba759c77cbe9095dfca4` / `a8a5b5890f283ac1c968b4b0a6048b03c170498b` / `0b4592a188cf6d8dc761782065c22e026ec71aab`；双方各八组完成 |
 | M1 修复候选 / 本地同 tree / master | `419727aeb1684e156fc474e6c0e9425a9bdc92b9` / `853e97584009898c922636e06abd73517bbad32d` / `f95150a`；tree `df71c2247fbaad208ae80a5ab54e4b3cca21a96f`；候选与准确主线八组完成 |
-| M2 修复候选 / 本地同 tree / master | `02c6436d2e2bb097045543b37bfe42f43b13cb49` / `a3f5bda78a2f30c6947f18bf850082ce9849301d` / `e1aaa8e`；tree `e4689751700e125454eed4fd466b28f8aff4c7ef` |
-| M3 当前候选 / tree | `5331a2f` / `cd297da`；原真实浏览器和严格导出失败保留；本地修订 `488f2d9` 待准确 CI，未合并 |
-| M4 本地候选 / tree | `11d356044b8e7b82be8493a73bf8ede689802053` / `a6a8f17f47203a03372f2cf05af87ce895d3938f`；该冻结本地全套完成；后续集成 `8fb8a95` 须重跑，不能继承成功 |
-| 新功能同提交四目标制品 | M4 实际包门槛未运行，未取得整体资格 |
+| M2 修复候选 / 本地同 tree / master | `02c6436d2e2bb097045543b37bfe42f43b13cb49` / `a3f5bda78a2f30c6947f18bf850082ce9849301d` / `e1aaa8ed51c29164b8e1d5ce0010ce63ad644bfa`；tree `e4689751700e125454eed4fd466b28f8aff4c7ef`；候选与准确主线八组完成 |
+| M3 当前候选 / tree | `9ed53006c0f1c41a7be57b03284e62210752c7ad` / `57822ce48f3aa3e1e920366dd61841d398d093f0`；八组待终态，未合并 |
+| M4 上一集成冻结 / tree | `bea77b04f44f3f65e08333d32e818807f616f986` / `cbdfca6755583d0679f33768abc4e09de1354998`；本地全套完成，后续 managed audit 修订须重验 |
+| 新功能同提交四目标制品 | M4 首候选实际包门槛失败；新修订四目标须重新构建与消费，未取得整体资格 |
 | 新功能真实用户线路 / 外部客户端 | 未测试，不能用 CI loopback 代替 |
 | 真实 1 vCPU / 512 MiB / 24 小时 | 未验收，不由新增单测补发资格 |
 | 新功能发布 / 生产部署 | 未执行；独立于代码合并 |
@@ -198,3 +198,18 @@ M4 通过正常 merge `8fb8a95b02784b7397a4f77bca359aa2c7cca858` 合入上述集
 M1 master `f95150a` 的八个 workflows / 11 个最新 jobs / 全部最新步骤已成功，11 个 job 的 checkout 日志逐一核对均为准确 `f95150a`。one-click 为 attempt 2；portable 为 attempt 2，未失败的三个目标保留原成功 job 证据；其他 workflows 为 attempt 1。这里按最新 job 组合核验，不把重跑 workflow 写成四个目标都重新执行或全部 attempt 1。
 
 原 one-click attempt 1 的 HTTPS health 10 秒窗口 `connection refused` 仍未确诊；同 SHA、不改代码/测试/超时/runner 的重跑成功不证明环境时序假设或永久修复。原 portable x86_64 musl 的上游 GitHub HTTP 403 / rate limit 失败也保留。候选及主线收口只属于 M1，不给 M3 新修复、M4 或未测试的用户线路/外部设备补发资格。
+
+
+## 2026-10-15 20:21 UTC M2 收口及 M3/M4 新失败与修订登记
+
+- M2 master `e1aaa8ed51c29164b8e1d5ce0010ce63ad644bfa` 已取得八组 / 11 个最新 jobs / 全部最新步骤 attempt 1 成功；11 个 checkout 日志均核对该准确 SHA。最终结果已追加到 PR #42，不将以前的运行中快照改写为当时成功。
+- M3 上一候选 `09b` 的实际 loopback 已通过，包含真实诊断 20 / 严格导出 10 方法；浏览器 8 个真实方法有 7 个通过，唯一失败是将 `fieldset` 用 Playwright 的原生控件 enabled 语义判断。窄修只调整测试：同时核对 DOM disabled 属性、六个原生控件、重复提交防护和取消后的迟到响应，生产 UI 不变。
+- M3 新候选 `9ed53006c0f1c41a7be57b03284e62210752c7ad` 与本地 `5af62d911f359afae5c72ef488124d3531b3e639` 同 tree `57822ce48f3aa3e1e920366dd61841d398d093f0`；准确本地 1,682 项，1,506 pass / 176 skip，142.142 秒。新 proxy browser 步骤已成功，但八组整体及 Test 后续步骤仍待终态，不提前登记合并。
+
+M4 首次远端候选 `4b2c0db` 八组终态为 5 success / 3 failure（Test、portable、deployment）。portable 的 native-arm64 job `116642662780`、arm-musl `116642663222`、x86-musl `116642663257`，以及 deployment [run 38798960038 / job 116642663735](https://github.com/ForceMind/V-UI/actions/runs/38798960038/job/116642663735)，都在 `installed_managed_ops_smoke` 末端遇到 `Expected real instance lease`。这不是下载或限流错误。deployment 在此之前已实际输出新 offline recovery 四状态、4 次 restore、8 次错误计划拒绝、8 次活跃 writer 拒绝成功；该局部成功不改变整组失败。
+
+新稳定 lease 正确保留在原名字：managed recovery 将旧目录移回 `data` 后，`recovery/.before-<id>.owner.lease` 仍存在。旧验收把 `recovery` 下每个条目都当成数据目录，遂在该 lease 文件下寻找 `runtime/xray/owner.lock`。真实 isolated worker 复现证明 canonical 与 consumed-predecessor 两个 stable lease 在 `done` 时均持有、在 `writers_released` 后均释放；原循环依然精确 RED。这是包验收路径定位错误，未复现生产锁泄漏。普通本地全套未运行显式启用的真实 package gates，原 fixture 单测也未覆盖该末端目录枚举，所以未捕获。
+
+修订只涉及验收脚本和测试：对已记录的三个真实代际逐一检查九个 component locks，另检查两个实际 stable siblings；要求精确 recovery 条目集合，缺失、未知额外条目、符号链接/中间目录链接、非零内容、危险权限/所有权/硬链接或仍 busy 均失败。不是过滤文件或跳过缺锁。实际包 driver 还要求稳定租约跨过 `done` 保持持有，直到 `writers_released` 才释放。19 个新增负向/正向方法及真实 copied-worker 生命周期回归通过，独审无剩余阻断；这不替代新准确提交四目标实际包验收。
+
+M4 已正常合入 fieldset 修复的上一冻结 `bea77b04f44f3f65e08333d32e818807f616f986` / tree `cbdfca6755583d0679f33768abc4e09de1354998` 全套 1,755 项：1,579 pass / 176 skip，157.114 秒，exit 0。上述 managed audit 修订会产生新冻结，必须重建准确 source archive、重跑完整套件及所有新准确 CI；首候选失败和旧全套成功都保留，不能借用旧包或旧成功补发资格。

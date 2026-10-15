@@ -78,6 +78,16 @@
 
 每次真实登录均等待 dashboard 菜单挂载并验证 Axios/Vue 已加载，外网请求和 pageerror 记录从登录起完整保留，不再清空旧的外网记录；缺资产直接失败，不使用 CDN 或假库兜底。新增静态打包与缺 Axios 负例只证明准备路径，不能代替 Chromium。本地已知 socket EPERM 不变，修订后的 8 项真实浏览器流程仍需准确新候选 CI 验收。
 
+### 固定 Playwright 的 fieldset 断言修订
+
+候选 `09b2a7f41df581f0c243b809fa99775ee5311b80` 的 [Test run 38798399348](https://github.com/ForceMind/V-UI/actions/runs/38798399348) 浏览器步骤 14 项中 1 项失败：7 个真实流程通过，取消/刷新/历史/会话过期流程停在 `fieldset#import-fields` 的 `to_be_disabled()`；日志 9 次确认元素已有 `disabled` 属性，但 matcher 返回 enabled。该流程未跑完，不计通过。
+
+固定 [Playwright 1.57 roleUtils.ts](https://github.com/microsoft/playwright/blob/v1.57.0/packages/injected/src/roleUtils.ts#L1019-L1038) 的原生 disabled 标签列表不含 fieldset 自身；对 input、select、textarea、button 则检查 disabled fieldset 祖先。这是断言目标的语义差异，不靠修改生产字段、依赖版本或超时解决。修订同时检查 fieldset 的 DOM property/属性和六个真实子控件的继承禁用；恢复可编辑时也不再用无法证明状态的 fieldset enabled matcher。
+
+未完成的预览期间，原生按钮重复激活必须产生零 click 事件且没有第二个预览请求，取消仍可操作。取消后原文、文件和名称清空，保存禁用；迟到响应不能重新打开预览或恢复原文。原有刷新/后退/会话过期、所有页面错误/日志与隐私断言保留。新增单元测试仅验证断言逐项接线；新候选真实 Chromium 仍待 CI，本地已知权限限制不重试。
+
+同一 `09b2a7f` 的 [loopback run 38798399434 / job 116640760988](https://github.com/ForceMind/V-UI/actions/runs/38798399434/job/116640760988) 已终态成功：诊断 20 项（8 个夹具、12 个真实测试）7.152 秒；严格导出 10 项（3 个夹具、6 个真实测试、1 个 parser）23.007 秒。sing-box 与 Mihomo 的错误 DoH 证书名称负例均取得该次新鲜 x509 原因及实际/预期两名称，最终 drain 与零完整应用送达审计通过。这是 `09b2a7f` 的真实链路证据，不替代 fieldset 修订后新候选的完整 CI 或浏览器验收。
+
 独立复核还发现既有双标签用例只监听第一页的 pageerror/console。现于创建任何页面前注册 context 的 page 事件，让每个新页共享完整错误和 console 审计，外网 guard 仍覆盖整个 context；双页事件回归只验证观察器，不冒充 Chromium 的真实双页流程。
 
 ### 严格导出 DoH 证书名负例的证据修订

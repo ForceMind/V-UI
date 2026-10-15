@@ -12,8 +12,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sqlite3
+import stat
 import tempfile
 import threading
 import time
@@ -46,7 +48,7 @@ def _copy_control(payload, control):
                'ops_worker.py': 'deploy/ops_worker.py',
                'release_tools.py': 'app/release_tools.py', 'v-ui': 'deploy/v-ui',
                'data_owner.py': 'app/data_owner.py',
-                   'proxy_store.py': 'app/services/proxy_store.py',
+               'proxy_store.py': 'app/services/proxy_store.py',
                'upstream_profile.py': 'app/services/upstream_profile.py'}
     digests = {}
     for destination, relative in sources.items():
@@ -88,6 +90,57 @@ def _database_values(data):
                 'grants': db.execute('SELECT revoked FROM subscription_grants').fetchall()}
 
 
+def _audit_released_writer_leases(root, retained, interrupted, pending_old):
+    """Audit the exact fixture inventory, including consumed-path sibling locks.
+
+    A stable lease stays at its original name after its data directory moves.
+    Retained generations carry their component locks, but do not necessarily
+    have their own sibling leases. Never classify arbitrary entries as data or
+    skip a missing lock merely because its generation has moved.
+    """
+    root, retained, interrupted, pending_old = map(Path, (root, retained, interrupted, pending_old))
+    recovery = root / 'recovery'
+    assert all(path.parent == recovery for path in (retained, interrupted, pending_old))
+    assert re.fullmatch(r'before-[a-f0-9]{32}', retained.name)
+    assert re.fullmatch(r'interrupted-[a-f0-9]{32}', interrupted.name)
+    assert re.fullmatch(r'before-[a-f0-9]{32}', pending_old.name)
+    assert len({retained, interrupted, pending_old}) == 3
+    assert not os.path.lexists(pending_old), 'Consumed predecessor path remains'
+    assert not os.path.lexists(root / 'RESTORE_PENDING.json'), 'Restore journal remains'
+    stable = (root / '.data.owner.lease',
+              pending_old.with_name('.' + pending_old.name + '.owner.lease'))
+
+    def directory(path):
+        assert path.is_dir() and not path.is_symlink(), 'Expected real writer generation directory'
+
+    def released(path):
+        assert path.is_file() and not path.is_symlink(), 'Expected real instance lease'
+        info = path.lstat()
+        assert (stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid()
+                and info.st_nlink == 1 and info.st_size == 0
+                and stat.S_IMODE(info.st_mode) == 0o600), 'Unsafe instance lease'
+        assert not _lease_busy(path), 'Writer lease leaked after worker exit'
+        after = path.lstat()
+        signature = lambda value: (value.st_dev, value.st_ino, value.st_mode,
+                                  value.st_uid, value.st_nlink, value.st_size)
+        assert signature(info) == signature(after), 'Instance lease changed during audit'
+
+    directory(root); directory(recovery)
+    assert set(recovery.iterdir()) == {retained, interrupted, stable[1]}, 'Unexpected recovery inventory'
+    generations = (root / 'data', retained, interrupted)
+    for generation in generations:
+        directory(generation)
+        for name in WRITER_LOCKS:
+            parent = generation
+            for part in Path(name).parts[:-1]:
+                parent /= part
+                directory(parent)
+            released(generation / name)
+    for path in stable:
+        released(path)
+    return {'generations': 3, 'component_locks': 9, 'stable_siblings': 2}
+
+
 def _write_drivers(control, root, python, config, *, controller=None):
     """The only injected paths/trust live in these disposable test scripts."""
     worker = control / 'fixture_worker_driver.py'
@@ -116,7 +169,7 @@ raise SystemExit(worker['_run'](Path(ROOT),api,sys.stdin.fileno(),sys.stdout))
                  'CONTROLLER = Path(' + repr(str(controller or control / 'system_ops.py')) + ')\n'
                  'PYTHON = Path(' + repr(str(python)) + ')\n'
                  'WORKER = Path(' + repr(str(worker)) + ')\n')
-    driver.write_text('''import fcntl,importlib.util,json,os,sys,time,types
+    driver.write_text('''import fcntl,importlib.util,json,os,stat,sys,time,types
 from contextlib import contextmanager
 from pathlib import Path
 ''' + constants + '''
@@ -136,10 +189,19 @@ def busy(path):
         except BlockingIOError: return True
         fcntl.flock(fd,fcntl.LOCK_UN); return False
     finally: os.close(fd)
+def stable_busy(path):
+    assert path.is_file() and not path.is_symlink(), 'required stable writer lease missing'
+    info=path.lstat()
+    assert (stat.S_ISREG(info.st_mode) and info.st_uid==os.geteuid() and info.st_nlink==1
+            and info.st_size==0 and stat.S_IMODE(info.st_mode)==0o600), 'unsafe stable writer lease'
+    return busy(path)
 def locks(operation, writers=None):
     assert busy(ROOT/'.operation.lock') is operation, 'operation lease lifecycle'
     if writers is not None:
         assert busy(ROOT/'.panel.lease') is writers, 'panel lease lifecycle'
+        stable=ROOT/'.data.owner.lease'
+        if writers or os.path.lexists(stable):
+            assert stable_busy(stable) is writers, 'canonical stable writer lease lifecycle'
         paths=[ROOT/'data']
         if not writers:
             paths+=sorted((ROOT/'recovery').glob('before-*'))
@@ -198,6 +260,11 @@ class FixtureChild(ActualChild):
         assert command==[str(PYTHON),'-B','-I','-S',str(WORKER)], 'unexpected host command'
         assert account.pw_uid==os.getuid() and account.pw_gid==os.getgid()
         self.action=None
+        self.recovery_lease=None
+        journal=ROOT/'RESTORE_PENDING.json'
+        if journal.is_file():
+            previous=ROOT/json.loads(journal.read_text())['old']
+            self.recovery_lease=previous.with_name('.'+previous.name+'.owner.lease')
         self.previous_recovery=set((ROOT/'recovery').glob('before-*'))
         self.previous_interrupted=set((ROOT/'recovery').glob('interrupted-*'))
         # Keep the production flags, including explicit -B: -I ignores the
@@ -221,12 +288,18 @@ class FixtureChild(ActualChild):
                     for name in ('runtime/xray/owner.lock','runtime/sing-box/owner.lock','certificates/.worker.lock'):
                         assert busy(path/name), 'old writer generation released before restore completion'
             if self.action=='recover-restore':
+                assert self.recovery_lease is not None
+                assert stable_busy(self.recovery_lease), 'predecessor stable lease released before recovery completion'
                 interrupted=set((ROOT/'recovery').glob('interrupted-*'))-self.previous_interrupted
                 assert len(interrupted)==1
                 for path in interrupted:
                     for name in ('runtime/xray/owner.lock','runtime/sing-box/owner.lock','certificates/.worker.lock'):
                         assert busy(path/name), 'interrupted generation released before recovery completion'
-        elif value['event']=='writers_released': locks(True,False)
+        elif value['event']=='writers_released':
+            locks(True,False)
+            assert not stable_busy(ROOT/'.data.owner.lease'), 'canonical stable lease not released'
+            if self.action=='recover-restore':
+                assert not stable_busy(self.recovery_lease), 'predecessor stable lease not released'
         record('receive',action=self.action,value=value)
         return value
     def exit_zero(self):
@@ -456,14 +529,13 @@ def installed_managed_ops_smoke(python, payload, root, bundle, checksum, *, pane
             transactions = _audit_trace(events)
             assert not _lease_busy(private / '.operation.lock')
             assert not _lease_busy(private / '.panel.lease')
-            for generation in [private / 'data', *sorted((private / 'recovery').iterdir())]:
-                for name in WRITER_LOCKS:
-                    assert not _lease_busy(generation / name), 'Writer lease leaked after worker exit'
-            assert not (private / 'RESTORE_PENDING.json').exists()
+            writer_audit = _audit_released_writer_leases(private, recovery[0],
+                interrupted_generations[0], pending_old)
             assert sum(stage_started <= at <= stage_finished for at in observations) >= 2, 'Missing concurrent verified HTTPS observations'
             assert not failures, failures
             result = {'managed_ops': {
                 'harness_version': HARNESS_VERSION, 'fixture_version': FIXTURE_VERSION,
+                'writer_lease_audit': writer_audit,
                 'target': source_ready['runtime_key'], 'product_version': manifest.get('version'),
                 'source_commit': manifest.get('source_commit'),
                 'package_release_id': identity, 'package_sha256': checksum, 'control_sha256': digests,
