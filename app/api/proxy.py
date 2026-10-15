@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Header, HTTPException, Response
+from fastapi import APIRouter, Header, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.proxy_store import (
@@ -48,6 +48,14 @@ class SettingsPayload(StrictPayload):
 
 def get_store() -> ProxyStore:
     return ProxyStore()
+
+
+def single_header(request: Request, name: str, value: str | None) -> str | None:
+    # HTTP clients/proxies may send separate physical fields instead of one
+    # comma-joined value. Starlette's scalar Header otherwise selects the first.
+    if len(request.headers.getlist(name)) > 1:
+        raise HTTPException(422, 'INVALID_REVISION' if name == 'if-match' else 'INVALID_IDEMPOTENCY_KEY')
+    return value
 
 
 def expected_revision(value: str | None) -> str:
@@ -109,9 +117,9 @@ def read_settings(response: Response):
 
 
 @router.put('/settings')
-def save_settings(payload: SettingsPayload, response: Response,
+def save_settings(payload: SettingsPayload, response: Response, request: Request,
                   if_match: str | None = Header(default=None)):
-    revision = expected_revision(if_match)
+    revision = expected_revision(single_header(request, 'if-match', if_match))
     values = payload.model_dump(exclude={'local_password'})
     try:
         result = get_store().save_draft(values, revision, local_password=payload.local_password)
@@ -121,9 +129,9 @@ def save_settings(payload: SettingsPayload, response: Response,
 
 
 @router.post('/profiles')
-def create_profile(payload: ProfilePayload, response: Response,
+def create_profile(payload: ProfilePayload, response: Response, request: Request,
                    if_match: str | None = Header(default=None)):
-    revision = expected_revision(if_match)
+    revision = expected_revision(single_header(request, 'if-match', if_match))
     try:
         inspection = preview_upstreams(payload.content, source_format=payload.format).to_dict()
         ignored = inspection['ignored_sections']

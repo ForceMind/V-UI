@@ -181,5 +181,24 @@ class ProxyApiTests(unittest.TestCase):
         self.apply.assert_not_called()
 
 
+    def test_duplicate_physical_revision_headers_are_rejected_before_writes(self):
+        original = self.snapshot()
+        current = original.headers['etag']
+        settings = original.json()['settings']
+        settings.pop('local_password_set')
+        settings['local_port'] = 19999
+        for second in (current, '"' + '0' * 64 + '"'):
+            headers = [*HEADERS.items(), ('If-Match', current), ('if-match', second)]
+            for method, path, payload in (
+                ('PUT', '/api/proxy/settings', settings),
+                ('POST', '/api/proxy/profiles', {'format': 'uri', 'content': URI, 'candidate_index': 0})):
+                with self.subTest(second=second, method=method):
+                    result = self.client.request(method, path, json=payload, headers=headers)
+                    self.assertEqual(result.status_code, 422, result.text)
+                    self.assertEqual(result.json()['detail'], 'INVALID_REVISION')
+        self.assertEqual(self.snapshot().json(), original.json())
+        self.apply.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()
