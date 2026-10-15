@@ -261,6 +261,7 @@ const app = createApp({
         };
 
         const handleSelect = (key) => {
+            if (key === 'proxy') { location.assign('/proxy'); return; }
             if (key === 'certificates') { location.assign('/certificates'); return; }
             if (['routing', 'subscriptions'].includes(key)) { location.assign('/workspace'); return; }
             if (key === 'settings') { location.assign('/account'); return; }

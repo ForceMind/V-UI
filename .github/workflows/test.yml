@@ -40,6 +40,7 @@ jobs:
           node --check web/js/app.js
           node --check web/js/workspace.js
           node --check web/js/certificates.js
+          node --check web/js/proxy.js
       - name: Run tests
         run: python -m unittest discover -s tests -v
       - name: Fetch checksum-pinned real cores
@@ -64,8 +65,13 @@ jobs:
         env:
           VUI_WORKSPACE_BROWSER: "1"
         run: python -m unittest discover -s tests -p test_workspace_browser.py -v
-      - name: Prepare checksum-pinned editor frontend
+      - name: Prepare checksum-pinned browser frontend
         run: python scripts/vendor_frontend.py /tmp/vui-editor-web
+      - name: Browser proxy import, drafts and runtime UI lifecycle
+        env:
+          VUI_PROXY_BROWSER: "1"
+          VUI_FRONTEND_ASSETS: /tmp/vui-editor-web
+        run: python -m unittest discover -s tests -p test_proxy_browser.py -v
       - name: Browser managed-certificate editor transitions and restore
         env:
           VUI_NODE_BROWSER: "1"

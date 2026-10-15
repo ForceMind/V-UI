@@ -126,7 +126,7 @@ class BrandAssetTests(unittest.TestCase):
 
     def test_every_html_uses_local_favicon_and_accessible_actual_brand_image(self):
         pages = sorted((ROOT / 'web').glob('*.html'))
-        self.assertEqual({page.name for page in pages}, {'account.html', 'index.html', 'workspace.html', 'certificates.html'})
+        self.assertEqual({page.name for page in pages}, {'account.html', 'index.html', 'workspace.html', 'certificates.html', 'proxy.html'})
         for page in pages:
             with self.subTest(page=page.name):
                 markup = BrandHTML(page.read_text())

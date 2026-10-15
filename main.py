@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.staticfiles import StaticFiles
-from app.api import auth, certificates, cores, files, inbounds, proxy, routing, security, singbox, subscription, subscriptions, system, xray
+from app.api import auth, certificates, cores, files, inbounds, proxy, proxy_diagnostics, proxy_exports, routing, security, singbox, subscription, subscriptions, system, xray
 from app.models.database import DB_PATH, init_db
 from app.middleware.auth import AdminAuthMiddleware, configured_origin
 from app.services.core_manager import core_manager
@@ -23,6 +23,8 @@ app.include_router(inbounds.router,prefix='/api/inbounds',tags=['Inbounds'])
 app.include_router(cores.router,prefix='/api/cores',tags=['Cores'])
 app.include_router(routing.router,prefix='/api/routing',tags=['Routing'])
 app.include_router(proxy.router,prefix='/api/proxy',tags=['Server egress'])
+app.include_router(proxy_diagnostics.router,prefix='/api/proxy',tags=['Server egress diagnostics'])
+app.include_router(proxy_exports.router,prefix='/api/proxy',tags=['Strict relay exports'])
 app.include_router(subscription.router,prefix='/api/subscription',tags=['Subscription'])
 app.include_router(subscriptions.router,prefix='/api/subscriptions',tags=['Subscription grants'])
 app.include_router(subscriptions.public_router)
@@ -58,6 +60,7 @@ async def startup_event():
 
 @app.on_event('shutdown')
 async def shutdown_event():
+    proxy_diagnostics.close_diagnostics_if_created()
     certificates.get_manager().stop()
     core_manager.stop_all()
 
@@ -73,6 +76,10 @@ def account_page():
 @app.get('/certificates',include_in_schema=False)
 def certificates_page():
     return FileResponse(os.path.join(get_web_path(),'certificates.html'),headers={'Content-Security-Policy':"default-src 'none'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
+
+@app.get('/proxy',include_in_schema=False)
+def proxy_page():
+    return FileResponse(os.path.join(get_web_path(),'proxy.html'),headers={'Content-Security-Policy':"default-src 'none'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
 
 @app.get('/workspace',include_in_schema=False)
 def workspace_page():

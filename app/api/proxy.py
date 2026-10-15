@@ -93,9 +93,10 @@ def snapshot_response(value: dict, response: Response) -> dict:
 def capabilities():
     return {
         'schema_version': 1,
-        'implementation_stage': 'transactional-runtime',
+        'implementation_stage': 'panel-diagnostics-exports',
         'apply_available': True,
-        'diagnostics_available': False,
+        'diagnostics_available': True,
+        'strict_exports_available': True,
         'full_system_proxy': False,
         'local_listen': '127.0.0.1',
         'qualified_ingress': ['sing-box-vless-tcp-tls'],

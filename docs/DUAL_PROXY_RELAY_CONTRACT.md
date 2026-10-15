@@ -301,6 +301,16 @@ UI 显示 Cloudflare DNS 与 ipify 服务名，说明后者会看到本次代理
 
 新增严格中转完整配置时须无 DIRECT 候选、无业务 DNS 直连兜底；与既有 ToClash 分流模式并列，不替换用户原规则。VLESS URI 仅是节点资料，不能承诺设备系统 DNS、ICMP 或所有程序接管。新增 V2Ray/Xray JSON **导入**不等于新增通用 JSON 导出承诺。curl 使用显式 HTTP CONNECT 或 `socks5h`，Git 仅 HTTPS 明确代理；默认示例无真实密码，不把密码放完整命令行、shell 历史或诊断附件。
 
+### 7.4 M3 候选 API 与界面补充
+
+`implementation_stage=panel-diagnostics-exports` 的候选在完成 M3 门槛后开放诊断和严格导出，独立字段 `diagnostics_available` / `strict_exports_available` 表示该能力，不改变 `full_system_proxy=false`。实现和未完成验收见 [M3 说明](DUAL_PROXY_RELAY_M3.md)。
+
+诊断 POST 精确 `{upstream_id, base_revision}`，202 返回任务；GET/DELETE `/api/proxy/diagnostics/{job_id}` 限同一管理员。任务 ID 为 `diag_` +32位小写hex，结果绑定草稿修订及 catalog1，300秒后过期，内存最多128项。公共字段精确为 `{job_id, upstream_id, revision, catalog_version, state, created_at, finished_at, expires_at, code, stages, pinned_address, resolved_at, exit_ip, stale}`；阶段记录 `{stage,status,code,observed_at,endpoint}`。DNS没有独立完整观察时保持证据不足，外部客户端始终未测试，过期/修订变化使原通过状态失效。
+
+严格导出 POST `/api/proxy/exports/mihomo.yaml` 或 `/api/proxy/exports/sing-box.json`，精确 `{base_revision,inbound_id,server}`；只导出当前提交且运行的中转活动版本，响应no-store附件及活动ETag。首期server只接受明确公网IP，TLS身份来自原入口；不影响普通域名节点导出。文件只有国内入口所需现有凭据，不含海外材料。保留业务主机名到国内完整答案检查；应用先解析只提交IP时按该IP检查，不推断未提供的域名。客户端明确127.0.0.1混合代理及独立1053DNS监听，不改系统DNS、不开放LAN、不提供DIRECT候选、不宣称全机接管。
+
+两个新增POST请求原始体均限2KiB，额外字段/重复成员/额外query拒绝。面板应用必须以同一保存修订的预检结果展示覆盖并再次明确确认；预检不是网络成功证明，不锁住可独立变更的节点数据库，最终应用仍重读和安全检查。
+
 ## 8. M0–M4 独立退出门槛
 
 每阶段独立 PR、独立审查、准确候选 SHA、正常合并及准确 master SHA，后续修改不能沿用先前 SHA 的成功。各阶段代码只开放自己已达到资格的能力。
