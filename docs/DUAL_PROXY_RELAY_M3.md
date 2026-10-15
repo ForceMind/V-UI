@@ -61,3 +61,11 @@
 - 已保留本地 Chromium/socket、核心 netlink 权限失败，以及初次 fixture parser/诊断计数缺陷；不得把环境失败改为通过或删掉安全断言。当前仍以独立 PR 的准确 head/master 八组、具体 workflow/job/step/attempt 为最终事实。
 
 公开版本仍为 0.4.8，核心 pins 不变。本阶段不创建 Release/tag、不部署真实服务器；实际外部设备、海外出口地理位置、真实小型 VPS/24 小时稳定性另记未测试。
+
+### 首次 M3 CI 的 HTTP 夹具关闭修订
+
+首候选 `a3e6e0d53ab0cc422896b2734bf1100be5952067` 的普通测试 [run 38794061939](https://github.com/ForceMind/V-UI/actions/runs/38794061939) 在 1,672 项中有 1 个失败（176 skip），浏览器步骤因此未运行：Python HTTP handler 把未完成 headers 的 EOF 当作结束，在关闭已接收连接时产生一次晚到 `do_GET`。零送达断言保留了此真实失败。
+
+诊断假目标现在只对带真实空 header 终止行的 HTTP/1.1 请求执行应用处理；不清空计数、不删除已接收连接、不绕过最终 drain/Counter 审计。新增确定性 EOF 负例及完整 HTTPS 请求正例，完整请求关闭后仍保留实际计数；四种生命周期用例各重复 100 次。这里的零送达指零完整 HTTP 应用请求，不是目标未收到 TCP、TLS 或部分 HTTP 字节。修订只限测试假目标，生产 worker、协议/TLS 原因、路由和禁止 DIRECT 断言不变。新候选须重新完成全套及实际浏览器/诊断/导出门槛。
+
+同一首候选 loopback [run 38794061714](https://github.com/ForceMind/V-UI/actions/runs/38794061714) 的策略 4、双跳 26、事务 4 项均通过；诊断 17 方法中另有同一 EOF 夹具失败及 1 个 DoH 失败原因匹配错误，严格导出步骤未运行。真实固定核心是 `dns: lookup failed for api64.ipify.org: (exchange4: servfail | exchange6: servfail)`，不是旧期待 `server failure`。测试改为同一行同时要求准确目标名、DNS lookup failed 和两族明确 SERVFAIL，次序可交换；新增错域名/缺族/分行/泛超时拒绝回归。生产路径不变，零完整 HTTP 应用请求及全 DNS/final drain 断言保留。

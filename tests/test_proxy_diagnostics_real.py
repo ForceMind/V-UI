@@ -16,6 +16,8 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import functools
 from http.server import BaseHTTPRequestHandler
+import http.client
+import io
 import ipaddress
 import json
 import os
@@ -107,10 +109,43 @@ class _CertificateTraffic(Traffic):
         return super().start_tls(token, context)
 
 
+class _CompleteHeaderReader:
+    """Observe the header terminator without buffering or hiding any delivery."""
+    def __init__(self, source):
+        self.source = source
+        self.complete = False
+
+    def readline(self, limit=-1):
+        line = self.source.readline(limit)
+        if line in (b"\r\n", b"\n"):
+            self.complete = True
+        return line
+
+
+class _CompleteHeaderHTTPHandler(BaseHTTPRequestHandler):
+    def parse_request(self):
+        # BaseHTTPRequestHandler accepts EOF as an end to headers. During
+        # tracked shutdown that could dispatch a previously incomplete request
+        # after the peer was closed. This fixed HTTP/1.1 fixture requires an
+        # actual blank header terminator before application dispatch; complete
+        # requests remain counted, including those delivered during cleanup.
+        source = self.rfile
+        headers = _CompleteHeaderReader(source)
+        self.rfile = headers
+        try:
+            parsed = super().parse_request()
+        finally:
+            self.rfile = source
+        if parsed and not headers.complete:
+            self.close_connection = True
+            return False
+        return parsed
+
+
 def fake_ipify(stack, cert, key):
     traffic = _CertificateTraffic()
     state = {"response": "normal", "headers": [], "tls_context": traffic}
-    class Handler(BaseHTTPRequestHandler):
+    class Handler(_CompleteHeaderHTTPHandler):
         def log_message(self, *args):
             pass
         def do_GET(self):
@@ -204,7 +239,31 @@ def fixture_child():
     return worker.main()
 
 
+def _refusal_lines(text, *reasons):
+    return [line for line in text.lower().splitlines()
+            if all(reason.lower() in line for reason in reasons)]
+
+
+def _dns_refusal_reasons():
+    return ("dns: lookup failed for " + _CATALOG + ":",
+            "exchange4: servfail", "exchange6: servfail")
+
+
 class DiagnosticFixtureHarnessTests(unittest.TestCase):
+    def test_dns_refusal_requires_exact_host_both_families_and_same_line(self):
+        valid = "error dns: lookup failed for api64.ipify.org: (exchange4: servfail | exchange6: servfail)"
+        self.assertEqual(_refusal_lines(valid, *_dns_refusal_reasons()), [valid])
+        self.assertEqual(len(_refusal_lines(valid.replace("exchange4: servfail | exchange6: servfail",
+            "exchange6: servfail | exchange4: servfail"), *_dns_refusal_reasons())), 1)
+        invalid = ("context deadline exceeded", "server failure",
+            valid.replace("api64.ipify.org", "unrelated.example"),
+            valid.replace("exchange6: servfail", "exchange6: deadline exceeded"),
+            valid.replace("exchange4: servfail", "exchange4: success"),
+            valid.replace(" | ", "\n"), "dns: exchanged api64.ipify.org servfail 0")
+        for text in invalid:
+            with self.subTest(text=text):
+                self.assertEqual(_refusal_lines(text, *_dns_refusal_reasons()), [])
+
     def test_fixture_manifest_cannot_add_arbitrary_host_provider_or_policy(self):
         value = {"target_port": 18000, "upstream_port": 18001, "doh_port": 18002,
                  "core_log": "/unused", "children_file": "/unused"}
@@ -259,6 +318,34 @@ class DiagnosticFixtureHarnessTests(unittest.TestCase):
             self.assertFalse(closing.is_alive())
             self.assertEqual(traffic.pending(), 0)
             self.assertEqual(traffic.snapshot(), [], "Closing incomplete HTTP created a late application delivery")
+
+    def test_complete_request_line_with_header_eof_never_dispatches(self):
+        for headers in (b"", b"Host: api64.ipify.org", b"Host: api64.ipify.org\r\n"):
+            with self.subTest(headers=headers):
+                handler = _CompleteHeaderHTTPHandler.__new__(_CompleteHeaderHTTPHandler)
+                handler.raw_requestline = b"GET /?format=json HTTP/1.1\r\n"
+                handler.rfile = io.BytesIO(headers)
+                handler.wfile = io.BytesIO()
+                self.assertFalse(handler.parse_request())
+                self.assertTrue(handler.close_connection)
+
+    def test_complete_https_request_is_counted_and_remains_after_close(self):
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            ca, cert, key = fixture_certificates(Path(directory))
+            port, traffic, _ = fake_ipify(stack, cert, key)
+            context = ssl.create_default_context(cafile=str(ca))
+            with socket.create_connection((TARGET, port), timeout=2) as peer:
+                with context.wrap_socket(peer, server_hostname=_CATALOG) as secure:
+                    secure.sendall(b"GET /?format=json HTTP/1.1\r\nHost: api64.ipify.org\r\nConnection: close\r\n\r\n")
+                    response = http.client.HTTPResponse(secure)
+                    response.begin()
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(json.loads(response.read()), {"ip": "127.0.0.1"})
+            expected = [("127.0.0.1", _CATALOG, "/?format=json")]
+            self.assertEqual(traffic.snapshot(), expected)
+            stack.close()
+            self.assertEqual(traffic.pending(), 0)
+            self.assertEqual(traffic.snapshot(), expected)
 
     def test_accepted_pre_tls_socket_is_pending_and_drained_at_close(self):
         self.check_accepted_connection_lifecycle(False)
@@ -461,7 +548,7 @@ class DiagnosticRealWorkerTests(unittest.TestCase):
 
     def refusal_reason(self, path, *reasons):
         text = Path(path).read_text(errors="replace").lower() if Path(path).exists() else ""
-        found = [line for line in text.splitlines() if all(reason.lower() in line for reason in reasons)]
+        found = _refusal_lines(text, *reasons)
         self.assertTrue(found, "Missing actual refusal reason: " + self.sanitized(text))
         print("diagnostic refusal: " + self.sanitized(found[-1]))
 
@@ -534,7 +621,7 @@ class DiagnosticRealWorkerTests(unittest.TestCase):
         result, _ = self.run_worker(profile)
         self.assertNotEqual(result["code"], "DIAGNOSTIC_COMPLETE")
         self.assert_dns_path()
-        self.refusal_reason(self.manifest["core_log"], "server failure")
+        self.refusal_reason(self.manifest["core_log"], *_dns_refusal_reasons())
 
     def test_redirect_is_not_followed(self):
         profile = self.start_upstream("tls")
