@@ -2,11 +2,19 @@
 
 正式Release是一次明确的公开写操作，不等同于PR、版本字符串或Actions候选附件。此流程只晋升经过验收的完整套件，不在发布时重新构建“另一份看似相同的包”。
 
-## 0.4.7 制品来源与交付边界
+## 当前状态：0.4.7 已发布，0.4.8 未发布
+
+[官方 v0.4.7 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.7) 于 2026-10-13 01:26:40 UTC 公开，tag 指向主线 `c5d50ee14b08da57bdc13c150b4ed501e9484023`；2026-10-15 只读核对为非 draft、非 prerelease，元数据列有 19 项资产。该只读状态核对不重做包字节验收，也不表示部署到用户主机。已发布 tag 和资产保持不变。
+
+当前 `VERSION`/应用版本为 **0.4.8（UNRELEASED）**，仅[安装入口退出状态、清理和引导失败修复](INSTALLER_EXIT_STATUS_048.md)。本次不执行 tag、Draft Release、Release 附件上传/晋升、公开发布或生产部署；`publish=false` 仍是创建草稿和上传的发布写操作。准确候选、主线 CI 与同提交制品必须重新验收，不能借用 0.4.7 的旧包或旧成功记录。0.4.8 未来若获发布授权，仍须满足下方完整人工门禁。
+
+当前分支的 `--version v0.4.8` 安装示例仅供正式发布之后使用，**现在不要执行**；必须先核对正式公开状态和完整 19 项资产。需要正式版的用户请使用[固定 v0.4.7 文档](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/INSTALLATION.md)，并先阅读[旧安装器的问题和排错边界](INSTALLER_EXIT_STATUS_048.md)。
+
+## 0.4.7 制品来源与交付边界（历史准备记录）
 
 产品代码集成基线02d8见[主线收口](MAINLINE_OPERATIONS_CLOSURE_20261012.md)，其后93c8的准确主线CI与同源四目标/19资产验收见[PR #36](https://github.com/ForceMind/V-UI/pull/36)。后续README或其他文档提交同样必须完成自己的候选、正常合并、准确主线及新制品验收；不能晋升旧基线包冒充新头。
 
-版本仍为0.4.7。本文描述发布流程，不预先声称某个tag、Draft或公开Release已存在。公开状态以[Releases](https://github.com/ForceMind/V-UI/releases)与具体发布run为准；最终结果记录在承载PR/Release账本，不为把自身SHA写回文档再创建循环提交。部署到用户主机是单独的操作。
+以下保留 0.4.7 发布前的来源约束及准备背景；当时“待验/未发布”不覆盖上方已核实的公开状态。最终结果记录在承载 PR/Release 账本，不为把自身 SHA 写回文档再创建循环提交。部署到用户主机是单独的操作。
 
 实际受管root/systemd资格只属于f509原run；普通包消费、整机/24h及其他未验边界保持。原始oneclick kit16成员、发布19资产/18校验行、Actions artifact数量是不同计数。下面的准确HEAD/最新八组/同来源/不得覆盖门禁始终适用，不能因已有发布意向跳过。
 
@@ -29,7 +37,7 @@
 
 截至 2026-10-06 本次检查，未晋升附件、创建 Draft Release 或执行新建 tag/公开 Release/生产部署；源码、原始 CI artifact、已核验附件与公开发布分别记录。完成代码、PR、CI 或发布准备不等于获准创建发布草稿或公开发布；任何发布操作仍受下述人工门槛与明确授权边界约束。
 
-## 0.4.7 当前准备状态（2026-10-06）
+## 0.4.7 准备状态（2026-10-06 历史）
 
 - v0.4.2、WS 0.4.3、gRPC 0.4.4、HY2 0.4.5、TUIC 0.4.6、REALITY/Vision 0.4.7 与 PR #25 刻画均有各自准确主线验收；这些历史阶段未因此成为正式 Release。当前准备一个累计产品 0.4.7，不回填旧阶段发布、不将刻画称为产品 0.4.8。
 - 本次只读检查的 [Releases API](https://api.github.com/repos/ForceMind/V-UI/releases?per_page=100) 返回空列表；已存在历史 tag `v1.0.0` → `196c9b97ded5ef2391e01cefff408f516fbac508`，保持不动，不能据此推导本轮已发布。未发现 v0.4.x tag；本轮未创建 tag/Draft Release/公开 Release 或晋升附件。
@@ -83,7 +91,7 @@ GitHub权限只在该人工工作流的发布job授予contents:write/actions:rea
 
 ## 公开后检查
 
-核对Release公开状态、tag目标、下载文件摘要和文档链接。可在独立临时 Linux 机器复核在线 `install.sh --version v0.4.7` 的自动目标选择路径；线上URL只有该版本确实发布后才存在。
+核对 Release 公开状态、tag 目标、下载文件摘要和文档链接。**0.4.8 目前未发布，以下入口仅供未来该版本正式公开且完整 19 项资产验收后使用：** `install.sh --version v0.4.8`。自动目标选择复核须使用独立临时 Linux 机器；线上 URL 只有该版本确实公开后才可用，版本字符串本身不证明下载存在。
 
 外部CA域名验证、云安全组和真实用户网络需要用户自己的配置，不属于维护者自动取得的授权。不要把发布流程顺手变成登录真实VPS部署。
 
