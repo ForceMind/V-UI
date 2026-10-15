@@ -69,3 +69,23 @@
 诊断假目标现在只对带真实空 header 终止行的 HTTP/1.1 请求执行应用处理；不清空计数、不删除已接收连接、不绕过最终 drain/Counter 审计。新增确定性 EOF 负例及完整 HTTPS 请求正例，完整请求关闭后仍保留实际计数；四种生命周期用例各重复 100 次。这里的零送达指零完整 HTTP 应用请求，不是目标未收到 TCP、TLS 或部分 HTTP 字节。修订只限测试假目标，生产 worker、协议/TLS 原因、路由和禁止 DIRECT 断言不变。新候选须重新完成全套及实际浏览器/诊断/导出门槛。
 
 同一首候选 loopback [run 38794061714](https://github.com/ForceMind/V-UI/actions/runs/38794061714) 的策略 4、双跳 26、事务 4 项均通过；诊断 17 方法中另有同一 EOF 夹具失败及 1 个 DoH 失败原因匹配错误，严格导出步骤未运行。真实固定核心是 `dns: lookup failed for api64.ipify.org: (exchange4: servfail | exchange6: servfail)`，不是旧期待 `server failure`。测试改为同一行同时要求准确目标名、DNS lookup failed 和两族明确 SERVFAIL，次序可交换；新增错域名/缺族/分行/泛超时拒绝回归。生产路径不变，零完整 HTTP 应用请求及全 DNS/final drain 断言保留。
+
+### M3 Chromium 登录依赖修订
+
+候选 `5331a2f` 的 [Test run 38795984444 / job 116632375614](https://github.com/ForceMind/V-UI/actions/runs/38795984444/job/116632375614) 普通 full suite 通过；代理浏览器步骤 11 项中 8 项失败，均在严格 pageerror 断言记录 `axios is not defined`。这些是真实失败，不能用普通测试通过替代。
+
+原因是浏览器真实登录先落到 `/ui/`：源码 dashboard 引用开发 CDN，而 M3 测试正确阻断外网后仍执行了依赖 Axios 的本地 `app.js`。独立 `/proxy` 使用原生 fetch，不依赖 Axios。测试现在复用既有打包 `prepare_frontend.py` 和 `vendor_frontend.py` 固定 checksum 资产，在隔离 payload 中提供完整同源 dashboard，再进入 M3 页面；CI 的同一次资产准备移到 M3 浏览器步骤前，节点编辑器继续复用。没有修改登录目的地、生产脚本或依赖 pins。
+
+每次真实登录均等待 dashboard 菜单挂载并验证 Axios/Vue 已加载，外网请求和 pageerror 记录从登录起完整保留，不再清空旧的外网记录；缺资产直接失败，不使用 CDN 或假库兜底。新增静态打包与缺 Axios 负例只证明准备路径，不能代替 Chromium。本地已知 socket EPERM 不变，修订后的 8 项真实浏览器流程仍需准确新候选 CI 验收。
+
+独立复核还发现既有双标签用例只监听第一页的 pageerror/console。现于创建任何页面前注册 context 的 page 事件，让每个新页共享完整错误和 console 审计，外网 guard 仍覆盖整个 context；双页事件回归只验证观察器，不冒充 Chromium 的真实双页流程。
+
+### 严格导出 DoH 证书名负例的证据修订
+
+后续 loopback [run 38795984798 / job 116632376318](https://github.com/ForceMind/V-UI/actions/runs/38795984798/job/116632376318) 的诊断 20 项通过；严格导出 7 个方法中 1 个失败。失败发生在 sing-box 显式 DNS 的错误证书名子例：新日志出现本次 `bad-dns-sing-box.example.test` 查询及连接受控 DoH 的 VLESS 信息，但 12 秒内未取得要求的同条 `x509` / `certificate` 原因，随后 Mihomo 对应负例尚未执行。保留该失败，不能把调用者超时、零 DNS 应用查询或旧日志解释为 TLS 拒绝证据。
+
+固定源码说明原因记录边界：[sing-box 1.14.2 的 DNS 异步路径](https://github.com/SagerNet/sing-box/blob/v1.14.2/dns/router.go)将非 legacy 交换错误交给 callback；[UDP DNS handler](https://github.com/SagerNet/sing-box/blob/v1.14.2/protocol/dns/handle.go)取消请求，不保证普通 debug logger 输出 TLS 原因。[DoH HTTP/2 transport](https://github.com/SagerNet/sing-box/blob/v1.14.2/dns/transport/https_transport.go)使用固定依赖 [x/net v0.57.0](https://github.com/golang/net/blob/v0.57.0/http2/transport_common.go)，其诊断日志可记录实际 TLS dial 错误。
+
+修订仅为错误 DoH 证书名的 sing-box 测试子进程增加 `GODEBUG=http2debug=1`，不改变生产配置、普通子进程、TLS 校验、核心 pins、请求次数或观测期限。拒绝断言收紧为同条新日志同时包含 `x509`、`certificate`、错误名和原证书名；全生命周期目标/DNS 计数、普通 DNS 零使用、无 DIRECT 和最终 drain 均保留。重复 client label 原本已使用递增独立路径，没有日志覆盖，新增回归固定此事实。
+
+独立临时 CA/DoH 夹具实测正确名 TLS 握手通过、错误名产生真实 hostname-mismatch 且没有 DNS 应用查询；这只是夹具控制，不替代固定客户端负例。25 个相关单元/夹具及两固定客户端的 4 个 parser 子例通过。本地完整负例在上游核心启动时仍报 netlink EPERM，未执行到 DoH 场景且未转 skip；改后真实拒绝结果及准确候选/主线资格仍待 CI 验证。

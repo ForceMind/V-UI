@@ -4,11 +4,14 @@ Import/draft tests use the authenticated application and isolated real parser /
 private store. Runtime/apply/diagnostic response fixtures test browser behaviour
 only: they are not evidence of a proxy connection or an external device path.
 VUI_PROXY_BROWSER=1 is an opt-in gate; missing browser/dependencies fail when on.
+The real login lands on the dashboard, so its checksum-pinned frontend assets
+must be prepared too; blocking its development CDN leaves app.js without Axios.
 """
 from copy import deepcopy
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import re
 import shutil
 import subprocess
@@ -18,12 +21,40 @@ import time
 import unittest
 from urllib.parse import urlparse
 
+from scripts.prepare_frontend import ASSETS, prepare
+
 
 ROOT = Path(__file__).resolve().parents[1]
 UUID = '11111111-1111-4111-8111-111111111111'
 URI = f'vless://{UUID}@upstream.example.test:443?security=tls&sni=upstream.example.test#Synthetic%20TLS'
 PROFILE_ID = 'up_' + '1' * 32
 PASSWORD = 'Synthetic-proxy-browser-password!'
+
+
+def prepare_browser_payload(destination, assets):
+    """Exercise the existing packaged UI, including the real login destination."""
+    # Assets are fetched and integrity-checked by scripts/vendor_frontend.py in
+    # CI, exactly as for the node editor browser gate. Never stub libraries or
+    # allow the browser to fetch a CDN as a fallback.
+    for target in ASSETS.values():
+        if not (assets / Path(target).name).is_file():
+            raise ValueError('Missing pinned browser frontend asset: ' + target)
+    destination.mkdir()
+    for name in ('app', 'web'):
+        shutil.copytree(ROOT / name, destination / name,
+                        ignore=shutil.ignore_patterns('__pycache__', 'vendor'))
+    shutil.copyfile(ROOT / 'main.py', destination / 'main.py')
+    shutil.copytree(assets, destination / 'web/vendor')
+    prepare(destination)
+    return destination
+
+
+def observe_browser_pages(context, errors, console):
+    """Register before creating pages so the second tab shares the same audit."""
+    def observe(page):
+        page.on('pageerror', lambda error: errors.append(str(error)))
+        page.on('console', lambda message: console.append(message.text))
+    context.on('page', observe)
 
 
 def outbound(name='Synthetic JSON'):
@@ -48,6 +79,59 @@ def fixture_snapshot(revision='a' * 64):
 
 
 class ProxyPageStaticTests(unittest.TestCase):
+    def test_all_browser_pages_keep_errors_and_console_in_shared_audit(self):
+        class Events:
+            def __init__(self):
+                self.handlers = {}
+            def on(self, event, handler):
+                self.handlers[event] = handler
+            def emit(self, event, value):
+                self.handlers[event](value)
+        context = Events()
+        errors, console = [], []
+        observe_browser_pages(context, errors, console)
+        pages = [Events(), Events()]
+        for index, page in enumerate(pages):
+            context.emit('page', page)
+            page.emit('pageerror', RuntimeError('page-' + str(index)))
+            page.emit('console', SimpleNamespace(text='message-' + str(index)))
+        self.assertEqual(errors, ['page-0', 'page-1'])
+        self.assertEqual(console, ['message-0', 'message-1'])
+
+    def test_login_payload_has_local_libraries_before_dashboard_script(self):
+        # Synthetic bytes test packaging only; real browser CI consumes the
+        # unchanged checksum-pinned assets, not these placeholder files.
+        original = (ROOT / 'web/index.html').read_bytes()
+        with tempfile.TemporaryDirectory(prefix='vui-proxy-payload-') as tmp:
+            root = Path(tmp)
+            assets = root / 'assets'
+            assets.mkdir()
+            for target in ASSETS.values():
+                (assets / Path(target).name).write_text('/* synthetic packaging fixture */')
+            payload = prepare_browser_payload(root / 'payload', assets)
+            html = (payload / 'web/index.html').read_text()
+            scripts = re.findall(r'<script[^>]+src="([^"]+)"', html)
+            self.assertIn('vendor/axios.js', scripts)
+            self.assertLess(scripts.index('vendor/axios.js'), scripts.index('js/app.js'))
+            self.assertFalse(any('://' in source for source in scripts))
+            for source in scripts:
+                self.assertTrue((payload / 'web' / source).is_file(), source)
+            for path in ('main.py', 'web/proxy.html', 'web/js/proxy.js', 'web/js/account.js'):
+                self.assertEqual((payload / path).read_bytes(), (ROOT / path).read_bytes())
+        self.assertEqual((ROOT / 'web/index.html').read_bytes(), original)
+
+    def test_missing_pinned_browser_asset_fails_without_cdn_fallback(self):
+        with tempfile.TemporaryDirectory(prefix='vui-proxy-payload-') as tmp:
+            root = Path(tmp)
+            assets = root / 'assets'
+            assets.mkdir()
+            for target in ASSETS.values():
+                if target != 'vendor/axios.js':
+                    (assets / Path(target).name).write_text('/* synthetic packaging fixture */')
+            with self.assertRaisesRegex(ValueError, 'Missing pinned browser frontend asset: vendor/axios.js'):
+                prepare_browser_payload(root / 'payload', assets)
+            self.assertFalse((root / 'payload').exists())
+
     def test_secret_storage_and_offline_assets_contract(self):
         script = (ROOT / 'web/js/proxy.js').read_text()
         html = (ROOT / 'web/proxy.html').read_text()
@@ -105,6 +189,10 @@ class ProxyPageRouteTests(unittest.TestCase):
         browser = next(step for step in steps if step.get('env', {}).get('VUI_PROXY_BROWSER') == '1')
         self.assertIn('test_proxy_browser.py', browser['run'])
         self.assertNotIn('continue-on-error', browser)
+        assets = next(step for step in steps if 'scripts/vendor_frontend.py ' in step.get('run', ''))
+        self.assertLess(steps.index(assets), steps.index(browser))
+        self.assertEqual(browser['env']['VUI_FRONTEND_ASSETS'], '/tmp/vui-editor-web')
+        self.assertEqual(assets['run'], 'python scripts/vendor_frontend.py /tmp/vui-editor-web')
         self.assertTrue(any('node --check web/js/proxy.js' in step.get('run', '') for step in steps))
 
 
@@ -115,10 +203,12 @@ class ProxyBrowserTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix='vui-proxy-browser-')
         self.addCleanup(self.tmp.cleanup)
         self.work = Path(self.tmp.name)
+        payload = prepare_browser_payload(self.work / 'payload',
+                                          Path(os.environ['VUI_FRONTEND_ASSETS']).resolve())
         self.logpath = self.work / 'server.log'
         self.log = self.logpath.open('w')
         self.addCleanup(self.log.close)
-        env = {**os.environ, 'PYTHONPATH': str(ROOT), 'PYTHONDONTWRITEBYTECODE': '1',
+        env = {**os.environ, 'PYTHONPATH': str(payload), 'PYTHONDONTWRITEBYTECODE': '1',
                'VUI_PUBLIC_ORIGIN': '', 'VUI_DATA_DIR': str(self.work / 'data'),
                'VUI_BIN_DIR': str(self.work / 'no-cores'), 'VUI_CERTIFICATES_ENABLED': '0'}
         code = '''import sys,uvicorn
@@ -127,7 +217,7 @@ provision_admin('tester',sys.stdin.read())
 import main
 uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=False,access_log=False)
 '''
-        self.server = subprocess.Popen([sys.executable, '-B', '-c', code], cwd=self.work,
+        self.server = subprocess.Popen([sys.executable, '-B', '-c', code], cwd=payload,
                                        env=env, stdin=subprocess.PIPE, stdout=self.log,
                                        stderr=subprocess.STDOUT, text=True)
         self.server.stdin.write(PASSWORD)
@@ -155,10 +245,9 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         self.browser = self.playwright.chromium.launch(**options)
         self.addCleanup(self.browser.close)
         self.context = self.browser.new_context(viewport={'width': 390, 'height': 844})
-        self.page = self.context.new_page()
         self.external, self.errors, self.console = [], [], []
-        self.page.on('pageerror', lambda error: self.errors.append(str(error)))
-        self.page.on('console', lambda message: self.console.append(message.text))
+        observe_browser_pages(self.context, self.errors, self.console)
+        self.page = self.context.new_page()
         def guard(route):
             if not route.request.url.startswith(self.base + '/'):
                 self.external.append(route.request.url)
@@ -167,7 +256,6 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 route.continue_()
         self.context.route('**/*', guard)
         self.login(self.page)
-        self.external.clear()  # Historical dashboard CDN is outside this page's scope.
 
     def stop_server(self):
         self.server.terminate()
@@ -178,11 +266,18 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
             self.server.wait(timeout=5)
 
     def login(self, page):
+        from playwright.sync_api import expect
         page.goto(self.base + '/login')
         page.locator('#login-name').fill('tester')
         page.locator('#login-password').fill(PASSWORD)
         page.get_by_role('button', name='登录面板', exact=True).click()
         page.wait_for_url('**/ui/')
+        # Wait for the real dashboard to mount, rather than navigating away
+        # before its scripts execute. Keep every login error/request recorded.
+        expect(page.get_by_role('menuitem', name='代理与中转', exact=True)).to_be_visible()
+        self.assertTrue(page.evaluate("typeof axios === 'function' && typeof Vue.createApp === 'function'"))
+        self.assertEqual(self.external, [])
+        self.assertEqual(self.errors, [])
 
     def open_page(self, page=None):
         from playwright.sync_api import expect
@@ -422,7 +517,6 @@ rules:
         expect(page.locator('#proxy-workspace')).to_be_visible()
         expect(page.locator('#import-content')).to_have_value('')
         self.assertEqual(len(self.context.request.get(self.base + '/api/proxy/settings').json()['upstreams']), 0)
-        self.external.clear()  # Login's existing dashboard assets are unrelated.
         self.assert_private()
 
     def test_mocked_apply_uncertainty_double_click_and_get_commit_confirmation(self):

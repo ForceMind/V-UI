@@ -6,14 +6,17 @@ Enabled tests fail, never skip, on missing pins or host restrictions. Temporary
 CA trust and loopback fixture endpoints do not alter system/network settings.
 """
 import copy
+from contextlib import ExitStack
 from dataclasses import replace
 import json
 import os
 from pathlib import Path
 import socket
+import ssl
 import struct
 import subprocess
 import threading
+import tempfile
 import time
 from types import SimpleNamespace
 import unittest
@@ -28,11 +31,72 @@ from app.services.proxy_apply import ProxyApplyCoordinator
 from app.services.proxy_export import StrictExportError, StrictRelayExporter
 from app.services.proxy_policy import VerifiedEndpoint, compile_proxy_policy
 from app.services.proxy_store import ProxyStore
-from loopback_helpers import _recv_exact, dns_query
-from proxy_loopback_support import DENIED, DOH, INGRESS, SNI, TARGET, UPSTREAM, UPSTREAM_EGRESS, listen_port, udp_target, udp_through
+from loopback_helpers import _recv_exact, certificate_files, dns_query
+from proxy_loopback_support import (DENIED, DOH, INGRESS, SNI, TARGET, UPSTREAM, UPSTREAM_EGRESS,
+                                    BusinessAnswers, doh_target, listen_port, udp_target, udp_through)
 from test_proxy_double_hop import DoubleHopFixture, INGRESS_UUID, UPSTREAM_UUID, FLOW, SHORT_ID, REALITY_SNI
 from test_proxy_exports import ExportFixture
 from tests.test_proxy_store import profile, writable_settings
+
+
+WRONG_DNS_IDENTITY = "wrong.example.test"
+
+
+def dns_rejection_environment(environment, kind, wrong_dns_identity):
+    env = environment.copy()
+    if kind == "sing-box" and wrong_dns_identity:
+        # Pinned 1.14.2 dns/router.go finishExchangeAsync forwards errors without
+        # logging them; protocol/dns/handle.go cancels the UDP request. Its DoH
+        # transport uses x/net v0.57.0 HTTP/2, whose transport_common.go logs the
+        # actual TLS dial failure with http2debug=1. Enable that only for this
+        # fake-credential negative child, not the runtime or positive clients.
+        # https://github.com/SagerNet/sing-box/blob/v1.14.2/dns/transport/https_transport.go
+        # https://github.com/golang/net/blob/v0.57.0/http2/transport_common.go
+        debug = [flag for flag in env.get("GODEBUG", "").split(",")
+                 if flag and not flag.startswith("http2debug=")]
+        env["GODEBUG"] = ",".join([*debug, "http2debug=1"])
+    return env
+
+
+class StrictExportEvidenceFixtureTests(unittest.TestCase):
+    """Evidence-helper controls; these do not replace fixed-client acceptance."""
+    def test_http2_diagnostics_are_scoped_to_wrong_identity_singbox_child(self):
+        original = {"GODEBUG": "gctrace=0,http2debug=2,http2debug=0",
+                    "SSL_CERT_FILE": "/fixture/trust.pem", "SSL_CERT_DIR": "/fixture/empty"}
+        before = original.copy()
+        for kind in ("sing-box", "mihomo"):
+            for wrong in (False, True):
+                with self.subTest(kind=kind, wrong=wrong):
+                    result = dns_rejection_environment(original, kind, wrong)
+                    expected = {**original, "GODEBUG": "gctrace=0,http2debug=1"} if kind == "sing-box" and wrong else original
+                    self.assertEqual(result, expected)
+                    self.assertIsNot(result, original)
+                    self.assertEqual(original, before)
+        self.assertEqual(dns_rejection_environment({}, "sing-box", True), {"GODEBUG": "http2debug=1"})
+
+    def test_repeated_client_labels_have_distinct_configuration_and_log_paths(self):
+        fixture = DoubleHopFixture()
+        fixture.root, fixture.sequence = Path("/fixture"), 0
+        paths = [fixture.path("strict-sing-box", suffix) for suffix in ("json", "log", "json", "log")]
+        self.assertEqual(len(set(paths)), 4)
+        self.assertNotEqual(paths[1], paths[3])
+
+    def test_controlled_doh_certificate_accepts_expected_name_and_rejects_wrong_name(self):
+        with ExitStack() as stack:
+            root = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="vui-strict-dns-identity-")))
+            ca, cert, key = certificate_files(root)
+            answers = BusinessAnswers()
+            port = doh_target(stack, answers, cert, key)
+            context = ssl.create_default_context(cafile=str(ca))
+            with socket.create_connection((DOH, port), timeout=2) as raw:
+                with context.wrap_socket(raw, server_hostname=SNI) as peer:
+                    self.assertTrue(peer.getpeercert())
+            with socket.create_connection((DOH, port), timeout=2) as raw:
+                with self.assertRaises(ssl.SSLCertVerificationError) as caught:
+                    context.wrap_socket(raw, server_hostname=WRONG_DNS_IDENTITY)
+            self.assertIn("Hostname mismatch", caught.exception.verify_message)
+            self.assertIn(WRONG_DNS_IDENTITY, caught.exception.verify_message)
+            self.assertEqual(answers.snapshot(), [], "A rejected TLS identity sent a DoH application query")
 
 
 @unittest.skipUnless(os.getenv("VUI_PROXY_EXPORT_REAL") == "1" or os.getenv("VUI_PROXY_LOOPBACK") == "1",
@@ -139,7 +203,7 @@ class StrictExportLoopbackTests(DoubleHopFixture):
             config["outbounds"][0]["server"] = INGRESS
             server = config["dns"]["servers"][0]
             server.update(server=DOH, server_port=self.doh_port)
-            server["tls"]["server_name"] = "wrong.example.test" if wrong_dns_identity else SNI
+            server["tls"]["server_name"] = WRONG_DNS_IDENTITY if wrong_dns_identity else SNI
             config["log"] = {"level": "debug"}
         else:
             config["mixed-port"] = port
@@ -147,11 +211,12 @@ class StrictExportLoopbackTests(DoubleHopFixture):
             config["dns"]["listen"] = f"{INGRESS}:{dns_port}"
             for name in ("nameserver", "default-nameserver", "proxy-server-nameserver"):
                 config["dns"][name] = [value.replace("1.1.1.1", DOH + ":" + str(self.doh_port))
-                    .replace("cloudflare-dns.com", "wrong.example.test" if wrong_dns_identity else SNI)
+                    .replace("cloudflare-dns.com", WRONG_DNS_IDENTITY if wrong_dns_identity else SNI)
                     for value in config["dns"][name]]
             config["log-level"] = "debug"
         self.assertNotIn("DIRECT", json.dumps(config))
-        process = self.process("strict-" + kind, config, client="mihomo" if kind == "mihomo" else "singbox")
+        process = self.process("strict-" + kind, config, client="mihomo" if kind == "mihomo" else "singbox",
+                               env=dns_rejection_environment(self.env, kind, wrong_dns_identity))
         self.start_process(process, port)
         # DNS is an explicit local facility, not a wildcard/system listener.
         with socket.create_connection((INGRESS, dns_port), timeout=2):
@@ -260,7 +325,7 @@ class StrictExportLoopbackTests(DoubleHopFixture):
             for kind in ("sing-box", "mihomo"):
                 _, process, dns_port = self.exported_client(kind, wrong_dns_identity=True)
                 self.rejection(lambda: self.dns_request(dns_port, "bad-dns-" + kind + ".example.test", success=False),
-                               process, ("x509", "certificate"))
+                               process, ("x509", "certificate", WRONG_DNS_IDENTITY, SNI))
         self.assertEqual(self.answers.snapshot(), before_dns, "Unverified TLS sent a DNS query or used fallback")
 
     def test_dns_inbound_cannot_forward_malformed_http_and_mixed_udp_is_rejected(self):
