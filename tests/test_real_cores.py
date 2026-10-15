@@ -26,7 +26,8 @@ class PinnedCoreTests(unittest.TestCase):
                     self.assertFalse(runtime.apply(config, activate=False)['applied'])
                     path = Path(tmp) / 'bad.json'
                     atomic_write(path, b'{this is not json')
-                    with self.assertRaises(CoreError): runtime.check(path)
+                    with self.assertRaisesRegex(CoreError, "^Candidate configuration was rejected by the pinned core$"):
+                        runtime.check(path)
                     print('Pinned core positive/negative config check:', name)
 
 

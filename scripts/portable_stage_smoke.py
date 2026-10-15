@@ -11,6 +11,7 @@ from app import release_tools
 from scripts.ops_menu_smoke import installed_menu_smoke, portable_menu_stage_smoke
 from scripts.managed_ops_smoke import installed_managed_ops_smoke
 from scripts.proxy_import_smoke import installed_proxy_import_smoke
+from scripts.proxy_policy_smoke import installed_proxy_policy_smoke
 
 def main():
     p=argparse.ArgumentParser()
@@ -29,6 +30,7 @@ def main():
     release_tools.atomic_json(args.root/"CURRENT.json",{"release_id":identity,"previous_id":None})
     menu=installed_menu_smoke(python,release/"payload",args.root)
     menu.update(installed_proxy_import_smoke(python,release/"payload",args.root))
+    menu.update(installed_proxy_policy_smoke(python,release/"payload",args.root))
     menu.update(portable_menu_stage_smoke(python,release/"payload",args.root,args.bundle,args.sha256,
         managed_smoke=installed_managed_ops_smoke))
     probe=subprocess.run([str(python),"-B","-c",

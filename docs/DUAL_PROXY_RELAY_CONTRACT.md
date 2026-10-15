@@ -173,10 +173,11 @@ JSON `allowInsecure` 与 YAML `skip-cert-verify` 只能省略或严格 `false`�
 | --- | --- | --- | --- |
 | `POST /api/proxy/import/preview` | `{format, content}` | 脱敏 `{source_format, source_fingerprint, candidates, ignored_sections, notice_codes}`；不持久化、不启监听 | M1 |
 | `POST /api/proxy/profiles` | `{format, content, candidate_index, name, acknowledged_ignored_sections}`；`name` 可省略或 `null`；必需 `If-Match` | 重新解析、显式选择、保存规范化 profile 与秘密；201 返回 `{snapshot, upstream_id}` 及新 `ETag`；不自动选为出口、不应用 | M1 |
-| `GET /api/proxy/capabilities` | 无 body | 明确 `draft-only`、`apply_available=false`，格式/协议/限额；不声称运行可用 | M1 |
+| `GET /api/proxy/capabilities` | 无 body | M1 为 `draft-only` / `apply_available=false`；M2 合格候选为 `transactional-runtime` / `true`，诊断资格独立 | M1–M2 |
 | `GET /api/proxy/settings` | 无 body | `{revision, settings, upstreams, active, pending}` 及 `ETag: "<revision>"` | M1 |
 | `PUT /api/proxy/settings` | schema 1 可写 settings；本机密码仅独立 write-only 字段；必需 `If-Match` | 保存草稿；返回相同形状的脱敏快照及新 `ETag` | M1 |
-| `POST /api/proxy/apply` | `{base_revision}` | 同版本完整检查/事务应用；只有活动提交成功才表示生效 | M2 |
+| `POST /api/proxy/check` | `{base_revision}` | 绑定准确草稿的 bootstrap、资格及核心语法检查；不启监听，不是线路诊断 | M2 |
+| `POST /api/proxy/apply` | `{base_revision}`；必需 `Idempotency-Key` | 同版本完整检查/事务应用；只有活动提交成功才表示生效 | M2 |
 | `/api/proxy/diagnostics` | 后续仅已保存候选 ID、revision 与受控测试项 | 有界任务、状态、取消；不得接受任意 URL/命令 | M3 |
 
 候选摘要精确字段为 `{index, name, protocol, server, server_port, transport, tls_mode, supported, reason_code, reason}`；支持候选的 reason 字段为空，不支持候选的原因来自受控错误码，不能带源输入。`notice_codes` 单独承载 provider 未读取等受控提醒。
@@ -184,6 +185,8 @@ JSON `allowInsecure` 与 YAML `skip-cert-verify` 只能省略或严格 `false`�
 PUT 可写字段精确为 `schema_version`、`local_proxy_enabled`、`relay_enabled`、`selected_upstream_id`、`local_port`、`local_username`、可选 `local_password`、`dns_policy_version`、`deny_policy_version`；不能提交服务端 refs、`local_password_set`、活动字段或任意监听地址。schema/策略版本可默认 1，其余设置在更新时明确填写。
 
 `If-Match` 只允许一个准确的 64 位小写 hex revision（可带一对双引号），不接受 wildcard、弱 ETag 或多个值。缺失 428 `REVISION_REQUIRED`；格式错误 422 `INVALID_REVISION`；冲突 409 `PROXY_REVISION_CONFLICT`；确认集错误 422 `IGNORED_SECTIONS_ACKNOWLEDGEMENT_REQUIRED`；其余非法导入/设置 422 `UPSTREAM_OR_SETTINGS_INVALID`；私有存储不可用 503 `PROXY_STORAGE_UNAVAILABLE`。原始请求体超限返回 413。内部解析原因可用于脱敏候选，HTTP 异常不直接 stringify 原异常；不得把错误显示为配置已保存。
+
+M2 补充：`base_revision` 和 `Idempotency-Key` 均为准确 64 位小写 hex，幂等键不接受引号或多值；缺键 428、非法键 422。客户端一次明确应用生成一个新键，网络结果不确定时沿用原键重试，不能双击制造两个应用；显式重新应用才用新键刷新 bootstrap。历史已终止但不再是当前活动状态的键返回 409，不能回报当前已生效。`/check` 仅作配置预检，不能据此显示 TLS、REALITY、代理认证或 HTTPS 成功。
 
 M1 **不注册可成功启用代理的 `/apply`**，没有运行时接线不能返回成功。诊断接口只有 M3 达到安全门槛才开放；不能用返回假成功的占位接口代替。
 
@@ -208,7 +211,7 @@ M1 **不注册可成功启用代理的 `/apply`**，没有运行时接线不能�
 
 本节常量在 M0 冻结，M2 必须按相同常量取得固定核心检查和真实双跳证据；没有证据不开放应用，不在实现中静默换服务或退回系统 DNS。
 
-- 业务 DNS 固定 Cloudflare DoH：连接 `1.1.1.1:443`，TLS `server_name=cloudflare-dns.com`，路径 `/dns-query`，DNS wireformat；明确 `detour=所选上游`。不依赖全局 final 的隐含效果，无普通 DNS 或 direct fallback。DNS 失败终止连接。
+- 业务 DNS 固定 Cloudflare DoH：连接 `1.1.1.1:443`，TLS `server_name=cloudflare-dns.com`，路径 `/dns-query`，DNS wireformat；明确 `detour=所选上游`。不依赖全局 final 的隐含效果，无普通 DNS 或 direct fallback。没有可用已校验地址或核心返回整体解析失败时终止连接；双族部分成功的精确语义见下方修订记录。
 - 业务域名执行“先经上述 DoH 解析 → 检查全部结果 → 用同一结果拨号”，不能检查后再解析，避免 DNS rebinding。
 - 上游 IP + 独立 SNI 无 bootstrap。域名上游只在显式检查/应用时使用现有系统 resolver，经独立有界 worker，最长 3 秒；它只解析上游终止地址，不接收业务目标。
 - 对 bootstrap 返回的全部地址执行 public/禁止地址/自身地址检查，任一禁止则整体拒绝。结果按 IPv4 优先、同地址族规范数值升序稳定排序，选一个已检查 IP 固定写入核心 outbound，保留原独立 SNI。
@@ -219,20 +222,29 @@ Cloudflare wireformat 及 HTTPS 服务依据：[官方 DoH 请求说明](https:/
 
 ### 5.3 `deny_policy_version=1`
 
-以下为冻结的最小明确 CIDR 集，拒绝匹配任意一项的字面 IP、bootstrap、业务 DNS 或诊断地址结果：
+以下为冻结的最小明确 CIDR 集，拒绝匹配任意一项的字面 IP、bootstrap、业务 DNS 或诊断地址结果；运行层以固定内核解码后的真实地址检查，IPv4-mapped 的精确处理见下方修订记录：
 
 | 地址族 | CIDR |
 | --- | --- |
 | IPv4 | `0.0.0.0/8`、`10.0.0.0/8`、`100.64.0.0/10`、`127.0.0.0/8`、`169.254.0.0/16`、`172.16.0.0/12`、`192.0.0.0/24`、`192.0.2.0/24`、`192.168.0.0/16`、`198.18.0.0/15`、`198.51.100.0/24`、`203.0.113.0/24`、`224.0.0.0/4`、`240.0.0.0/4` |
 | IPv6 | `::/128`、`::1/128`、`::ffff:0:0/96`、`64:ff9b::/96`、`64:ff9b:1::/48`、`100::/64`、`2001::/23`、`2001:db8::/32`、`2002::/16`、`fc00::/7`、`fe80::/10`、`ff00::/8` |
 
-IPv6 还必须在 `2000::/3` global-unicast 范围内；IPv4-mapped/转换地址不能绕过 IPv4 或动态自身检查，以上映射/转换 CIDR 在一期直接拒绝。IPv6 scope ID 拒绝。Python/核心的 private 判定仅为额外防线，不代替明确表。
+IPv6 还必须在 `2000::/3` global-unicast 范围内；IPv4-mapped/转换地址不能绕过 IPv4 或动态自身检查。bootstrap 保留原始输入表示，以上映射/转换 CIDR 直接拒绝；运行流量若已被固定内核归一化为 IPv4，就必须按同一真实 IPv4 禁区及自身规则处理，不声称还能识别被丢弃的原始地址族。IPv6 scope ID 拒绝。Python/核心的 private 判定仅为额外防线，不代替明确表。
 
 应用快照额外加入全部自身网卡地址、面板端点受控解析的全部地址和其他自身监听地址，精确 `/32` 或 `/128` 拒绝；不能只比较端口。所选上游固定 IP 也加入业务/诊断目标拒绝集合，防止业务重新指向上游自身。`169.254.0.0/16` 覆盖常见 link-local metadata；`100.64.0.0/10` 同时覆盖 `100.100.100.200`，不只防单一云厂商地址。
 
 任何解析结果包含禁止地址时整次拒绝，不挑剩下公网结果继续。上游自身地址检查在连接前执行，导入仅语法成功不表示地址允许。禁止集合与动态自身地址快照参与编译配置身份；改变静态集合须升级策略版本并补充 IPv4/IPv6、多答复、rebinding、metadata 和自身目标负例。
 
 生产 API、环境变量与配置中没有关闭防护的入口。私网测试例外只能由独立测试 policy 构造器注入，不能打包为生产绕过选项。M2 必须验明上述常量及实际核心结果一致，不以“待后续选表”代替安全边界。
+
+### 5.4 M2 固定核心行为修订（2026-10-15）
+
+M0 中“整个 IPv4-mapped /96 在运行层一律拒绝”和未限定的“DNS 失败终止连接”超出了固定内核的可观察语义。M2 独立源码审查发现以下边界，明确修订而不改 pin、隐藏失败或削弱私网/自身/metadata 防护：
+
+1. sing-box 1.14.2 固定依赖 `sing 87c33f17688f` 的 SOCKS 地址解码先执行 `Unwrap()`；例如 `::ffff:8.8.4.4` 成为 `8.8.4.4` 后再进入路由。公网映射表示可以按该真实公网 IPv4 经上游；私网、自身、metadata 的任何映射表示仍必须被同一 IPv4 规则拒绝。保留 mapped CIDR 对尚未归一化值的额外防御，但不把它描述为能恢复已经丢失的地址族。证据：[固定 serializer](https://github.com/SagerNet/sing/blob/87c33f17688f/common/metadata/serializer.go#L145-L151)、[Unwrap](https://github.com/SagerNet/sing/blob/87c33f17688f/common/metadata/addr.go#L32-L39)、[SOCKS reader](https://github.com/SagerNet/sing/blob/87c33f17688f/protocol/socks/socks5/protocol.go#L204-L222)。
+2. `prefer_ipv4` 并行 A/AAAA 查询，一族失败但另一族返回地址时会使用成功族；这不是改用普通 DNS 或 DIRECT。成功返回的**全部**地址仍经过禁止集合检查并原样用于拨号；两族均无可用结果/整体解析错误时必须拒绝，不能重解析绕过或回退系统 DNS。证据：[固定 DNS client](https://github.com/SagerNet/sing-box/blob/v1.14.2/dns/client.go#L449-L472)。
+
+必须追加实际核心的 mapped 私网/自身/metadata wire 负例、双族部分成功/整体失败、多答复与 rebinding 用例。源码和 Python 单测不能替代这些真实证据；结果以 M2 PR 登记为准，未运行继续标未验收。静态禁止集合本身没有改变，策略版本仍为 1。
 
 ## 6. 应用事务与失败关闭
 
@@ -330,3 +342,12 @@ M0 的文档收口不解锁 M2 应用，也不声称 M1–M4 已完成。真实�
 八组沿用[贡献指南](../CONTRIBUTING.md)中的 Test V-UI、ToClash、真实 loopback、deployment、ACME、one-click、portable、documents/release contracts；须核 workflow、job、每一步和 attempt，不只看总体灯。候选、merge tree、最终 master 分别绑定证据，不预填未来 SHA。
 
 四目标为 `x86_64-gnu`、`aarch64-gnu`、`x86_64-musl`、`aarch64-musl`，以同一准确提交的新资产和对应原生启动/组件消费结果验收。不继承旧 0.4.8 制品，不把构建成功等于实际安装或生产部署。历史失败、unchanged-code 重跑、环境阻断和首次证据不足保留；queued/running/skipped/解析检查不等于相应场景通过。
+
+
+### 2026-10-15 M2 存储边界补充
+
+状态及单个 journal 意图按准确规范 JSON 编码各限 2,000,000 bytes；历史不自动清除。应用准备前必须保留提交和终止两种结果的全部体积，超限在写入及运行切换前返回 `PROXY_CAPACITY_EXHAUSTED`，旧运行不受影响。不得将有界容量满误判为损坏并停止旧运行；离线历史维护另行实现，不承诺无限操作。
+
+运行秘密目录/文件分别 0700/0600、服务所有、禁止链接与目录替换；唯一兼容例外是安全目录下旧版服务所有、单链接、零字节且不可由组/其他写入的 `owner.lock` 可保持 0644/0640，不在线改变权限。核心配置解析与启动消费同一已验证、保持生命周期的文件描述符。底层启动失败不能在事务安全校验前自动启动旧配置。
+
+CI 原有部分 PR workflow 会 checkout 临时 merge SHA；账本必须记录实际 checkout SHA 和 tree，确认与候选 tree 相同后才能按相同源码验收，不能仅凭检查关联的 head SHA 认定。M2 起主工作流明确 checkout 候选 head，合并后另外核准确 master；外部 ToClash 固定参考 checkout 不改变。

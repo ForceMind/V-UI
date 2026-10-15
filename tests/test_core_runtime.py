@@ -114,12 +114,12 @@ class SafeCoreRuntimeTests(unittest.TestCase):
     def test_commit_failure_restores_state_even_after_pointer_replace(self):
         self.runtime.apply(self.config)
         old = self.runtime.state_file.read_bytes()
-        real_write = atomic_write
+        real_write = self.runtime._write
         def fail_once(path, content):
             real_write(path, content)
             if path == self.runtime.state_file and content != old:
                 raise OSError('simulated directory fsync error')
-        with patch('app.services.core_runtime.atomic_write', side_effect=fail_once):
+        with patch.object(self.runtime, '_write', side_effect=fail_once):
             with self.assertRaises(CoreError): self.runtime.apply({**self.config, 'value': 2})
         self.assertEqual(old, self.runtime.state_file.read_bytes())
         self.assertTrue(self.runtime.status()['running'])
@@ -155,6 +155,74 @@ time.sleep(60)
             self.assertTrue(all(not c.is_running() or c.status() == psutil.STATUS_ZOMBIE for c in children))
         finally:
             if parent.poll() is None: parent.kill(); parent.wait()
+
+    def test_verified_fd_survives_watchdog_spawn_and_entire_core_lifetime(self):
+        self.binary.write_text(FAKE.replace('time.sleep(90)', """if c.get('reread'):
+ conn,_=s.accept()
+ conn.sendall(open(sys.argv[-1], 'rb').read())
+ conn.close()
+time.sleep(90)"""))
+        config = {**self.config, 'reread': True}
+        self.runtime.apply(config)
+        fd = self.runtime._config_fd
+        self.assertIsNotNone(fd)
+        self.assertEqual(Path(f'/proc/{os.getpid()}/fd/{fd}').read_bytes(), encode(config))
+        with socket.create_connection(('127.0.0.1', config['inbounds'][0]['listen_port']), timeout=3) as conn:
+            self.assertEqual(conn.recv(65536), encode(config))
+        self.runtime.stop()
+        self.assertIsNone(self.runtime._config_fd)
+        with self.assertRaises(OSError): os.fstat(fd)
+
+    def test_check_uses_verified_fd_and_discards_all_config_output(self):
+        self.runtime._claim()
+        path = self.runtime.root / (revision(self.config) + '.json')
+        atomic_write(path, encode(self.config))
+        original = subprocess.run
+        checks = []
+        def run(command, **kwargs):
+            if command[1] == 'check':
+                checks.append(command[-1])
+                self.assertTrue(command[-1].startswith(f'/proc/{os.getpid()}/fd/'))
+                self.assertEqual(Path(command[-1]).read_bytes(), encode(self.config))
+                self.assertEqual(kwargs['stdout'], subprocess.DEVNULL)
+                self.assertEqual(kwargs['stderr'], subprocess.DEVNULL)
+            return original(command, **kwargs)
+        with patch('app.services.core_runtime.subprocess.run', side_effect=run):
+            self.runtime.check(path)
+        self.assertEqual(len(checks), 1)
+        self.assertFalse(Path(checks[0]).exists())
+
+    def test_recovery_after_child_exit_releases_the_old_config_descriptor(self):
+        self.runtime.apply(self.config)
+        old_pid = self.runtime.process.pid
+        self.runtime.process.terminate()
+        self.runtime.process.wait(timeout=3)
+        self.runtime.recover()
+        self.assertNotEqual(self.runtime.process.pid, old_pid)
+        self.assertTrue(self.runtime.status()['running'])
+        self.assertIsNotNone(self.runtime._config_fd)
+
+    def test_unsafe_state_cannot_prevent_stop_or_leave_recovery_running(self):
+        for operation in ('stop', 'recover'):
+            with self.subTest(operation=operation):
+                self.runtime.apply(self.config)
+                self.runtime.state_file.chmod(0o644)
+                with self.assertRaises(CoreError): getattr(self.runtime, operation)()
+                self.assertIsNone(self.runtime.process)
+                self.assertIsNone(self.runtime._config_fd)
+                # Test cleanup is offline; production never repairs permissions.
+                self.runtime.state_file.chmod(0o600)
+
+    def test_xray_fd_check_and_launch_explicitly_select_json_format(self):
+        self.runtime.name = 'xray'
+        fake = FAKE.replace('sing-box version 1.14.2', 'Xray 26.3.27')
+        fake = fake.replace("c = json.load(open(sys.argv[-1]))", """if '-format=json' not in sys.argv: sys.exit(9)
+c = json.load(open(sys.argv[-1]))""")
+        fake = fake.replace("if sys.argv[1] == 'check':", "if '-test' in sys.argv:")
+        self.binary.write_text(fake)
+        self.runtime.apply(self.config)
+        self.assertTrue(self.runtime.status()['running'])
+        self.assertIsNotNone(self.runtime._config_fd)
 
     def test_new_files_are_owner_only(self):
         self.runtime.apply(self.config)

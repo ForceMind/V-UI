@@ -4,11 +4,13 @@
 
 ## 当前结论
 
-M0 已形成独立 [Draft PR #40](https://github.com/ForceMind/V-UI/pull/40)，候选 `2165eb71ae3de95ad177ba759c77cbe9095dfca4`、tree `0b4592a188cf6d8dc761782065c22e026ec71aab`。独立合同审查及文档检查通过；其准确 CI、合并和主线结果以该 PR 后续账本为准，本段不预填成功。
+M0 已正常合并 [PR #40](https://github.com/ForceMind/V-UI/pull/40)：候选 `2165eb71ae3de95ad177ba759c77cbe9095dfca4`，最终 master `a8a5b5890f283ac1c968b4b0a6048b03c170498b`，tree 同为 `0b4592a188cf6d8dc761782065c22e026ec71aab`。候选与主线各八组 / 11 jobs / 最新全部步骤 attempt 1 成功，实际 checkout 证据见下方补充。
 
-M1 安全导入、私有版本化草稿、管理 API 和备份兼容已实现，正在独立候选验收；见[实现说明](DUAL_PROXY_RELAY_M1.md)。M2–M4 尚未取得资格。保存 M1 草稿不会启用代理，`/api/proxy/apply` 尚不开放。
+M1 [Draft PR #41](https://github.com/ForceMind/V-UI/pull/41) 最新候选 `a7b0d22e9d7f606595af75a4d0418200abd61a5a`，tree `3530a98308d2e22484cf6e1d6d925bf6e37d0beb`。先前候选 `0e26555` 八组成功，但发现重复物理 If-Match 请求头未拒绝，已修复并重新验收，不能沿用旧成功。新 tree 本地完整 1,377 项，1,250 pass / 127 skip（129.837 秒）；截至 18:12 UTC 新 CI 七组成功，deployment 尚在运行，不提前登记合并。
 
-已批准按双开关方案推进，M0–M4 各自独立 PR。当前在收口 M0 准确 CI，并准备 M1 独立候选；下表仅按已取得的证据更新，不能把目标理解为已完成功能。
+M2 来源路由、运行事务和安全修订已实现，准备独立准确候选；见[实现说明](DUAL_PROXY_RELAY_M2.md)。M3 面板/诊断并行开发，M2–M4 均未取得整体资格。M1 保存草稿不会启用代理；M2 候选的应用接口只有通过真实门槛后才可随该阶段合并交付。
+
+已批准按双开关方案推进，M0–M4 各自独立 PR。下表仅按已取得证据更新，目标不等于完成功能。
 
 本轮不改变产品版本或固定核心，不创建 tag/Release、不替换历史资产、不部署真实服务器。已有发布/协议/安装器历史保持原记录；它们不是新功能的准确提交验收。
 
@@ -16,9 +18,9 @@ M1 安全导入、私有版本化草稿、管理 API 和备份兼容已实现，
 
 | 阶段 | 当前状态 | 退出门槛 / 下一证据 |
 | --- | --- | --- |
-| M0 合同冻结 | 独立审查通过，PR #40 准确 CI 进行中 | 字段/API/四状态/拒绝边界审查；文档检查；独立 PR、准确候选与主线证据 |
-| M1 导入与数据层 | 实现与专项独立审查通过，待准确候选及 CI | 三格式/两类上游、隔离解析限额、秘密、迁移、版本冲突；不开放应用 |
-| M2 双开关运行与事务 | 未验收 | 四状态/12 切换、已冻结 DNS/禁止地址目录的真实检查、入口全覆盖门禁、安全回滚、真实核心 |
+| M0 合同冻结 | 已合并；候选/主线各八组完成 | 字段/API/四状态/拒绝边界审查；文档检查；独立 PR、准确候选与主线证据 |
+| M1 导入与数据层 | PR #41 修订候选验收中 | 三格式/两类上游、隔离解析限额、秘密、迁移、版本冲突；不开放应用 |
+| M2 双开关运行与事务 | 本地实现与独立审查，真实 CI 未完成 | 四状态/12 切换、已冻结 DNS/禁止地址目录的真实检查、入口全覆盖门禁、安全回滚、真实核心 |
 | M3 面板诊断与导出 | 未验收 | 完整浏览器生命周期、诊断 SSRF/限额、无秘密、普通导出与严格中转并列 |
 | M4 整体可发布候选 | 未验收 | 独立审查、准确候选八组、正常合并、准确主线八组、同提交四目标新资产 |
 
@@ -54,3 +56,15 @@ A01 的 12 条切换必须逐条有实际监听/两个出口/活动 revision 证
 本账本初始化时尚无新功能运行结果。规划基线 `a9f9b5d9` 的既有套件预检由开发协调方记录为 1,245 项、1,118 通过 / 127 明确 skip；固定 Xray 26.3.27 与 sing-box 1.14.2 的一个既有正/负配置检查通过。这些是基线预检，不是 M0 准确候选证据，也不是双跳功能证据。后续失败按时间追加原判，不删除旧失败、不把 unchanged-code 重跑写成永久修复；环境权限/网络/平台阻断、测试未启用与产品缺陷分别说明。
 
 DNS resolver、禁止地址 CIDR、bootstrap 地址固定策略及诊断服务目录已在 M0 契约中具体冻结；M2/M3 仍须分别验证这些常量在固定核心中的实际行为，以及四目标解析资源限制。在必需真实门槛完成之前，不开放相应代理应用/诊断；不能以系统 DNS/direct 兜底消除阻断。
+
+
+## 2026-10-15 18:12 UTC 证据追加
+
+上方 17:33 的旧快照保留为历史，不代表当前状态。
+
+- M0 候选八组：one-click [38776661667](https://github.com/ForceMind/V-UI/actions/runs/38776661667)、ACME [38776661747](https://github.com/ForceMind/V-UI/actions/runs/38776661747)、portable [38776661724](https://github.com/ForceMind/V-UI/actions/runs/38776661724)、docs [38776661611](https://github.com/ForceMind/V-UI/actions/runs/38776661611)、ToClash [38776661760](https://github.com/ForceMind/V-UI/actions/runs/38776661760)、test [38776661619](https://github.com/ForceMind/V-UI/actions/runs/38776661619)、loopback [38776661664](https://github.com/ForceMind/V-UI/actions/runs/38776661664)、deployment [38776661718](https://github.com/ForceMind/V-UI/actions/runs/38776661718)。八组 / 11 jobs / 步骤 attempt 1 全成功。
+- M0 实际 checkout：原部分 PR jobs checkout `3b4bd54dea7d640516f0da9579bb0d4eeb501211`，其 tree 与候选完全相同，均为 `0b4592a188cf6d8dc761782065c22e026ec71aab`；其余包/安装 jobs 直接 checkout 候选。已逐 job 核日志中的 `git log -1 --format=%H`。ToClash 第二个 checkout 是其另一个固定参考仓库，不是 V-UI 提交。
+- M0 master 八组：loopback [38778990100](https://github.com/ForceMind/V-UI/actions/runs/38778990100)、one-click [38778989917](https://github.com/ForceMind/V-UI/actions/runs/38778989917)、deployment [38778989970](https://github.com/ForceMind/V-UI/actions/runs/38778989970)、ACME [38778990027](https://github.com/ForceMind/V-UI/actions/runs/38778990027)、test [38778990033](https://github.com/ForceMind/V-UI/actions/runs/38778990033)、ToClash [38778990000](https://github.com/ForceMind/V-UI/actions/runs/38778990000)、docs [38778990063](https://github.com/ForceMind/V-UI/actions/runs/38778990063)、portable [38778989920](https://github.com/ForceMind/V-UI/actions/runs/38778989920)。准确主线八组 / 11 jobs / 步骤 attempt 1 全成功，deployment 最后于 17:59 UTC 完成。
+- M1 新候选原默认 checkout 的实际 SHA 为 `6161326d45ad7787b49d3a035714fc29e0bca004`，tree `3530a98308d2e22484cf6e1d6d925bf6e37d0beb` 与新候选相同。六个已完成组的 job checkout 日志已核，包/安装组直接使用候选 head；最终仍须等 deployment 及全部 job/step 终态。M2 起将主 checkout 明确固定 head，合并后继续核 master。
+- M2 首次本地冻结 `8b4b793` 未推送：独立审查发现并修复底层提前回滚、运行文件路径安全、容量耗尽语义、重复物理请求头和负向测试晚到请求记账问题；这些修复会产生新候选。容量 API 初版专项遗漏草稿 catch 的一项失败保留，修复后 draft/runtime API 21 项通过；额外真实私有 store + SQLite 变更后的容量耗尽测试确认旧运行仍 ON、状态字节未变。
+- 本地真实核心启动仍因 netlink 权限失败，Chromium 启动受 socket 权限失败；原结果保留。固定 parser、模拟事务和静态/UI route 测试通过均不替代真实链路/浏览器 CI。Xray 首次 fd 路径缺少扩展名的 parser 失败由显式 JSON 格式修复；相对 TLS 路径按原 Xray binary-dir 语义验证，未改变生产解析行为。

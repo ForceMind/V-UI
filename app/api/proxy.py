@@ -1,6 +1,6 @@
 """Authenticated, bounded import and draft management for server egress.
 
-M1 deliberately has no apply endpoint: saving a draft never changes networking.
+Draft changes stay separate from explicit checked, commit-last application.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from fastapi import APIRouter, Header, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.proxy_store import (
-    ProxyConflict, ProxyStorageError, ProxyStore, ProxyValidationError,
+    ProxyCapacityError, ProxyConflict, ProxyStorageError, ProxyStore, ProxyValidationError,
 )
 from app.services.upstream_import import preview_upstreams, select_upstream
 from app.services.upstream_profile import UpstreamValidationError
@@ -32,6 +32,10 @@ class ProfilePayload(ImportPayload):
     candidate_index: int = Field(ge=0, le=127)
     name: str | None = Field(default=None, min_length=1, max_length=128)
     acknowledged_ignored_sections: list[str] = Field(default_factory=list, max_length=128)
+
+
+class ApplyPayload(StrictPayload):
+    base_revision: str = Field(pattern=r'^[0-9a-f]{64}$', min_length=64, max_length=64)
 
 
 class SettingsPayload(StrictPayload):
@@ -73,6 +77,8 @@ def safe_error(exc: Exception) -> HTTPException:
     # Never stringify parser/storage exceptions: input may contain credentials.
     if isinstance(exc, ProxyConflict):
         return HTTPException(409, 'PROXY_REVISION_CONFLICT')
+    if isinstance(exc, ProxyCapacityError):
+        return HTTPException(409, 'PROXY_CAPACITY_EXHAUSTED')
     if isinstance(exc, ProxyStorageError):
         return HTTPException(503, 'PROXY_STORAGE_UNAVAILABLE')
     return HTTPException(422, 'UPSTREAM_OR_SETTINGS_INVALID')
@@ -87,8 +93,12 @@ def snapshot_response(value: dict, response: Response) -> dict:
 def capabilities():
     return {
         'schema_version': 1,
-        'implementation_stage': 'draft-only',
-        'apply_available': False,
+        'implementation_stage': 'transactional-runtime',
+        'apply_available': True,
+        'diagnostics_available': False,
+        'full_system_proxy': False,
+        'local_listen': '127.0.0.1',
+        'qualified_ingress': ['sing-box-vless-tcp-tls'],
         'formats': ['uri', 'v2ray-json', 'clash-yaml'],
         'upstream_profiles': ['vless-tcp-tls', 'vless-tcp-reality-vision'],
         'core_version': '1.14.2',
@@ -124,7 +134,7 @@ def save_settings(payload: SettingsPayload, response: Response, request: Request
     try:
         result = get_store().save_draft(values, revision, local_password=payload.local_password)
         return snapshot_response(result, response)
-    except (ProxyStorageError, ProxyConflict, ProxyValidationError, UpstreamValidationError) as exc:
+    except (ProxyCapacityError, ProxyStorageError, ProxyConflict, ProxyValidationError, UpstreamValidationError) as exc:
         raise safe_error(exc) from None
 
 
@@ -151,3 +161,68 @@ def create_profile(payload: ProfilePayload, response: Response, request: Request
         return result
     except (ValueError, UnicodeError) as exc:
         raise safe_error(exc) from None
+
+
+def get_core_manager():
+    from app.services.core_manager import core_manager
+    return core_manager
+
+
+def runtime_error(exc: Exception) -> HTTPException:
+    from app.services.proxy_apply import ProxyApplyError
+    from app.services.proxy_policy import PolicyError
+    from app.services.proxy_resolution import ResolutionError
+    if isinstance(exc, ProxyApplyError):
+        return HTTPException(503 if exc.code in {'RECOVERY_REQUIRED', 'RUNTIME_MISMATCH',
+                             'MISSING_ACTIVE_CONTEXT'} else 409, 'PROXY_' + exc.code)
+    if isinstance(exc, PolicyError):
+        return HTTPException(409, {'code': 'PROXY_POLICY_REJECTED', 'reason': exc.code,
+                                   'coverage': exc.coverage})
+    if isinstance(exc, ResolutionError):
+        return HTTPException(422, 'PROXY_' + exc.code)
+    if isinstance(exc, (ProxyCapacityError, ProxyConflict, ProxyStorageError, ProxyValidationError)):
+        return safe_error(exc)
+    # Do not stringify core failures, OS details, paths, or rejected input.
+    return HTTPException(409, 'PROXY_RUNTIME_UNAVAILABLE')
+
+
+@router.post('/check')
+def check_candidate(payload: ApplyPayload, response: Response):
+    from app.services.core_runtime import CoreError
+    from app.services.proxy_policy import PolicyError
+    from app.services.proxy_resolution import ResolutionError
+    manager = get_core_manager()
+    try:
+        # A configuration check can bootstrap the upstream address. It is not
+        # a successful TLS/authentication/HTTPS diagnostic or a live listener.
+        result = manager.check_proxy(payload.base_revision)
+        snapshot_response(result['snapshot'], response)
+        return result
+    except (CoreError, PolicyError, ResolutionError, ProxyConflict,
+            ProxyCapacityError, ProxyStorageError, ProxyValidationError) as exc:
+        raise runtime_error(exc) from None
+
+
+@router.post('/apply')
+def apply_candidate(payload: ApplyPayload, response: Response, request: Request,
+                    idempotency_key: str | None = Header(default=None)):
+    from app.services.core_runtime import CoreError
+    from app.services.proxy_policy import PolicyError
+    from app.services.proxy_resolution import ResolutionError
+    idempotency_key = single_header(request, 'idempotency-key', idempotency_key)
+    if idempotency_key is None:
+        raise HTTPException(428, 'IDEMPOTENCY_KEY_REQUIRED')
+    if (len(idempotency_key) != 64 or
+            any(character not in '0123456789abcdef' for character in idempotency_key)):
+        raise HTTPException(422, 'INVALID_IDEMPOTENCY_KEY')
+    try:
+        # Manager additionally gates stale enabled runtimes from other cores;
+        # directly calling the coordinator would omit that global ingress gate.
+        result = get_core_manager().apply_proxy(payload.base_revision, idempotency_key)
+        if result.get('applied') is not True or result.get('phase') != 'committed':
+            raise HTTPException(409, 'PROXY_TRANSACTION_NOT_ACTIVE')
+        snapshot_response(result['snapshot'], response)
+        return result
+    except (CoreError, PolicyError, ResolutionError, ProxyConflict,
+            ProxyCapacityError, ProxyStorageError, ProxyValidationError) as exc:
+        raise runtime_error(exc) from None

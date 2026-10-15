@@ -11,6 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -31,6 +32,17 @@ jobs:
           python -m unittest discover -s tests -p 'test_*loopback*.py' -v 2>&1 | tee /tmp/vui-rc1/result.log
           python -m unittest discover -s tests -p test_hysteria2_managed_certificate.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
           python -m unittest discover -s tests -p test_tuic_managed_certificate.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
+      - name: Exercise dual-switch policy and real double-hop transitions
+        env:
+          VUI_TEST_CORES: /tmp/vui-rc1/cores
+          VUI_TEST_MIHOMO: /tmp/vui-rc1/client/mihomo
+          VUI_PROXY_LOOPBACK: "1"
+        run: |
+          set -euo pipefail
+          export VUI_DATA_DIR="$(mktemp -d)"
+          python -m unittest discover -s tests -p test_proxy_policy_real.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
+          python -m unittest discover -s tests -p test_proxy_double_hop.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
+          python -m unittest discover -s tests -p test_proxy_apply_real.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
       - name: Preserve pin and test evidence only
         if: always()
         uses: actions/upload-artifact@v4
