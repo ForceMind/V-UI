@@ -1,20 +1,51 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 from pathlib import Path
 
 from sqlalchemy import Boolean, Column, Integer, JSON, String, create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.pool import NullPool
+
+from app.data_owner import data_owner
 
 DATA_DIR = Path(os.getenv("VUI_DATA_DIR", "data"))
-DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "v-ui.db"
 
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_PATH}"
 
+class _OwnedConnection(sqlite3.Connection):
+    """Keep the tree leased until SQLite has stopped using this inode."""
+    _data_owner = None
+
+    def close(self):
+        try:
+            super().close()
+        finally:
+            owner, self._data_owner = self._data_owner, None
+            if owner is not None:
+                owner.__exit__(None, None, None)
+
+
+def _connect():
+    owner = data_owner(DATA_DIR)
+    owner.__enter__()
+    try:
+        DATA_DIR.mkdir(mode=0o700, exist_ok=True)
+        connection = sqlite3.connect(str(DB_PATH), check_same_thread=False, factory=_OwnedConnection)
+        connection._data_owner = owner
+        return connection
+    except BaseException:
+        owner.__exit__(None, None, None)
+        raise
+
+
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
+    creator=_connect,
+    # Never retain a connection to an old data inode across an offline restore.
+    poolclass=NullPool,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -66,8 +97,9 @@ def _migrate_legacy_schema() -> None:
 
 
 def init_db() -> None:
-    Base.metadata.create_all(bind=engine)
-    _migrate_legacy_schema()
+    with data_owner(Path(engine.url.database).absolute().parent):
+        Base.metadata.create_all(bind=engine)
+        _migrate_legacy_schema()
 
 
 def get_db():

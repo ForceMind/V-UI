@@ -7,6 +7,7 @@ from pathlib import Path
 import ssl
 import sys
 from urllib.parse import urlsplit
+from app.data_owner import data_owner
 from app.release_tools import ReleaseError, active, lease, private_root, supported_environment, target_arch
 
 
@@ -28,7 +29,7 @@ def run() -> None:
     args=parser.parse_args()
     supported_environment(); os.umask(0o077)
     root=private_root(args.root)
-    if (root/'RESTORE_PENDING.json').exists(): raise ReleaseError('Interrupted restore requires recover-restore')
+    if os.path.lexists(root/'RESTORE_PENDING.json'): raise ReleaseError('Interrupted restore requires recover-restore')
     if not 1024 <= args.port <= 65535: raise ReleaseError('Use an unprivileged port in 1024–65535')
     ipaddress.ip_address(args.bind)
     os.environ['VUI_PUBLIC_ORIGIN']=args.origin
@@ -37,7 +38,7 @@ def run() -> None:
     origin=configured_origin()
     if not origin.startswith('https://') or (urlsplit(origin).port or 443) != args.port:
         raise ReleaseError('Direct HTTPS origin and listening port must match')
-    with lease(root/'.panel.lease'):
+    with lease(root/'.panel.lease'), data_owner(root/'data'):
         release,_=active(root); payload=release/'payload'
         if Path(__file__).resolve().parents[1] != payload.resolve():
             raise ReleaseError('Selected release changed; rerun the active release command')

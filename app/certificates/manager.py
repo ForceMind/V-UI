@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import uuid
 
 from sqlalchemy import text, func
+from app.data_owner import data_owner
 from app.models import database
 from app.certificates.models import Certificate, CertificateJob, CertificateBinding
 from app.certificates.material import (CertificateError, domain_name, email_address,
@@ -153,6 +154,10 @@ class CertificateManager:
                     CertificateJob.created_at < now() - 30 * 86400).delete(synchronize_session=False)
 
     def process_once(self):
+        with data_owner(self.root.parent):
+            return self._process_once_owned()
+
+    def _process_once_owned(self):
         if not self._process_lock.acquire(blocking=False): return False
         try:
             self.root.mkdir(parents=True, exist_ok=True, mode=0o700)

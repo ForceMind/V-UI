@@ -9,7 +9,7 @@ import sys
 sys.dont_write_bytecode=True
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from app.release_tools import (ReleaseError,active,activate,backup,child_env,private_root,
-    recover_restore,restore,stage,stopped,supported_environment)
+    recover_restore,restore,stage,stopped,supported_environment,lease)
 
 
 def main():
@@ -47,7 +47,9 @@ def main():
         release,_=active(root);payload=release/'payload';python=release/'runtime'/'python'/'bin'/'python3'
         env=child_env(payload,root/'data')
         if args.command=='admin':
-            with stopped(root):
+            with lease(root/'.operation.lock'), lease(root/'.panel.lease'):
+                if (root/'RESTORE_PENDING.json').exists():
+                    raise ReleaseError('Interrupted restore requires recover-restore')
                 result=subprocess.run([str(python),'-B','-m','app.admin',args.action,args.username],cwd=payload,env=env)
                 raise SystemExit(result.returncode)
         else:

@@ -69,6 +69,7 @@ class MaintenanceWorkerTests(unittest.TestCase):
         self.control.mkdir(mode=0o700)
         shutil.copyfile(REPO / 'deploy/ops_worker.py', self.control / 'ops_worker.py')
         shutil.copyfile(REPO / 'app/release_tools.py', self.control / 'release_tools.py')
+        shutil.copyfile(REPO / 'app/data_owner.py', self.control / 'data_owner.py')
         for name in ('proxy_store.py', 'upstream_profile.py'):
             shutil.copyfile(REPO / 'app/services' / name, self.control / name)
 

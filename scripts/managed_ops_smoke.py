@@ -45,7 +45,8 @@ def _copy_control(payload, control):
     sources = {'system_ops.py': 'deploy/system_ops.py',
                'ops_worker.py': 'deploy/ops_worker.py',
                'release_tools.py': 'app/release_tools.py', 'v-ui': 'deploy/v-ui',
-               'proxy_store.py': 'app/services/proxy_store.py',
+               'data_owner.py': 'app/data_owner.py',
+                   'proxy_store.py': 'app/services/proxy_store.py',
                'upstream_profile.py': 'app/services/upstream_profile.py'}
     digests = {}
     for destination, relative in sources.items():

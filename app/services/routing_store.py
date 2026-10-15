@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from app.data_owner import DataOwnerError, data_owner
 from app.services.routing_validation import normalize_routing
 
 ROUTING_FILE = Path(os.getenv('VUI_DATA_DIR', 'data')) / 'mihomo-routing.json'
@@ -20,6 +21,14 @@ class RoutingConflict(ValueError):
 
 @contextmanager
 def locked(exclusive: bool):
+    try:
+        with data_owner(ROUTING_FILE.parent), _routing_lock(exclusive):
+            yield
+    except DataOwnerError:
+        raise RoutingStorageError('Routing storage is in use or unsafe') from None
+
+@contextmanager
+def _routing_lock(exclusive: bool):
     ROUTING_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with (ROUTING_FILE.parent / '.routing.lock').open('a+b') as handle:
         os.chmod(handle.name, 0o600)

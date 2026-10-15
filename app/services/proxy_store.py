@@ -27,6 +27,8 @@ import stat
 import threading
 import uuid
 
+from app.data_owner import DataOwnerError, data_owner
+
 
 MAX_BYTES = 2_000_000
 MAX_UPSTREAMS = 128
@@ -155,7 +157,7 @@ class ProxyStore:
         _require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid()
                  and (stat.S_IMODE(info.st_mode) == 0o700 if private else not info.st_mode & 0o022))
 
-    def _data_fd(self) -> int:
+    def _data_fd(self, *, initialize: bool = True) -> int:
         fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
         try:
             parts = self.data_dir.parts[1:]
@@ -169,7 +171,7 @@ class ProxyStore:
                     child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
                 except FileNotFoundError:
                     # Only the selected data directory may be bootstrapped.
-                    if index != len(parts) - 1:
+                    if not initialize or index != len(parts) - 1:
                         raise
                     try:
                         os.mkdir(part, mode=0o700, dir_fd=fd)
@@ -276,11 +278,19 @@ class ProxyStore:
             raise
 
     @contextmanager
+    def _ownership(self):
+        try:
+            with data_owner(self.data_dir):
+                yield
+        except DataOwnerError:
+            raise ProxyStorageError("Proxy storage is in use or unsafe; offline recovery cannot overlap a writer") from None
+
+    @contextmanager
     def _locked(self, allow_uncertain: bool = False, initialize: bool = True):
-        with self._thread_lock:
+        with self._thread_lock, self._ownership():
             data = lock = root = revisions = secrets = None
             try:
-                data = self._data_fd()
+                data = self._data_fd(initialize=initialize)
                 lock = os.open(".proxy-state.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
                                0o600, dir_fd=data)
                 self._check_file(lock)
