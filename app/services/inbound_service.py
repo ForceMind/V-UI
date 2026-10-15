@@ -332,7 +332,7 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
     return core, protocol, port, settings, stream_settings
 
 
-def create_inbound(db: Session, payload: dict) -> Inbound:
+def _create_inbound(db: Session, payload: dict) -> Inbound:
     core, protocol, port, settings, stream_settings = _prepared_payload(payload)
 
     duplicate = (
@@ -359,13 +359,16 @@ def create_inbound(db: Session, payload: dict) -> Inbound:
         tag=payload.get("tag") or f"{core}-{protocol}-{port}",
     )
     db.add(item)
-    db.commit()
+    _commit_inbound_change(db)
     db.refresh(item)
     return item
 
 
-def update_inbound(db: Session, inbound_id: int, payload: dict) -> Inbound:
+def _update_inbound(db: Session, inbound_id: int, payload: dict) -> Inbound:
     item = get_inbound(db, inbound_id)
+    # API handlers may have loaded this identity before waiting for our lock.
+    # Refresh so omitted fields do not overwrite a concurrent committed edit.
+    db.refresh(item)
     core, protocol, port, settings, stream_settings = _prepared_payload(
         payload,
         existing=item,
@@ -396,14 +399,53 @@ def update_inbound(db: Session, inbound_id: int, payload: dict) -> Inbound:
     item.stream_settings = stream_settings
     item.tag = payload.get("tag", item.tag) or f"{core}-{protocol}-{port}"
 
-    db.commit()
+    _commit_inbound_change(db)
     db.refresh(item)
     return item
 
 
-def delete_inbound(db: Session, inbound_id: int) -> str:
+def _delete_inbound(db: Session, inbound_id: int) -> str:
     item = get_inbound(db, inbound_id)
+    db.refresh(item)
     core = item.core or "xray"
     db.delete(item)
-    db.commit()
+    _commit_inbound_change(db)
     return core
+
+
+def _commit_inbound_change(db: Session) -> None:
+    from app.services.core_manager import CoreError, core_manager
+    # A new row needs its actual primary key for source-binding compilation.
+    # Flush remains inside the SQL transaction and the shared operation lock;
+    # rejection rolls it back, rather than persisting an unsafe enabled node.
+    db.flush()
+    try:
+        core_manager.validate_inbound_change(list_inbounds(db))
+    except CoreError as exc:
+        raise HTTPException(409, {"saved": False, "applied": False, "message": str(exc)}) from None
+    db.commit()
+
+
+def _mutate_inbound(db: Session, operation, *args):
+    from app.services.core_manager import core_manager
+    with core_manager.lock:
+        try:
+            return operation(db, *args)
+        except Exception:
+            # Roll back only the unfinished SQL transaction. This cannot
+            # undo a commit that succeeded before a later refresh failed.
+            # Runtime apply has its separate saved/not-applied result.
+            db.rollback()
+            raise
+
+
+def create_inbound(db: Session, payload: dict) -> Inbound:
+    return _mutate_inbound(db, _create_inbound, payload)
+
+
+def update_inbound(db: Session, inbound_id: int, payload: dict) -> Inbound:
+    return _mutate_inbound(db, _update_inbound, inbound_id, payload)
+
+
+def delete_inbound(db: Session, inbound_id: int) -> str:
+    return _mutate_inbound(db, _delete_inbound, inbound_id)

@@ -130,48 +130,188 @@ class SingBoxAdapter(BaseCoreAdapter):
 class CoreManager:
     def __init__(self) -> None:
         self.adapters = {"xray": XrayAdapter(), "sing-box": SingBoxAdapter()}
+        # All panel-mediated ingress mutations, proxy transitions and core
+        # operations share this process lock. SQLite and the runtime journal
+        # remain separate commit domains; a saved row is not an applied row.
         self.lock = threading.RLock()
+        self._proxy_coordinator = None
 
     def get(self, core: str) -> BaseCoreAdapter:
         if core not in self.adapters:
             raise CoreError("Unsupported core")
         return self.adapters[core]
 
+    @property
+    def proxy_coordinator(self):
+        if self._proxy_coordinator is not None:
+            return self._proxy_coordinator
+        from app.services.proxy_apply import ProxyApplyCoordinator
+        from app.services.proxy_store import ProxyStore
+        # Resolve the configured data directory at operation time, just as the
+        # draft API does. No cached private snapshot may survive a state change.
+        return ProxyApplyCoordinator(
+            ProxyStore(), self.get("sing-box").runtime,
+            lambda rows: self.get("sing-box").build_config(
+                item for item in rows if item.core == "sing-box"),
+            self.lock, rows_provider=self._all_rows,
+            panel_origin=os.getenv("VUI_PUBLIC_ORIGIN"),
+        )
+
+    @staticmethod
+    def _all_rows() -> list[Inbound]:
+        from app.models import database
+        with database.SessionLocal() as db:
+            return db.query(Inbound).order_by(Inbound.id).all()
+
+    def _stop_untrusted(self, message: str) -> None:
+        for adapter in self.adapters.values():
+            try:
+                adapter.runtime.stop(persist=False)
+            except (CoreError, OSError):
+                pass
+            adapter.runtime.last_error = message
+
+    def _compiled_active(self, rows):
+        from app.services.proxy_store import ProxyConflict, ProxyStorageError, ProxyValidationError
+        from app.services.proxy_policy import PolicyError
+        from app.services.proxy_resolution import ResolutionError
+        try:
+            return self.proxy_coordinator.compile_active(rows)
+        except CoreError as exc:
+            if getattr(exc, "code", None) in {"RECOVERY_REQUIRED", "RUNTIME_MISMATCH", "MISSING_ACTIVE_CONTEXT"}:
+                self._stop_untrusted("Proxy state is unavailable; core operations blocked")
+            raise
+        except (ProxyConflict, ProxyStorageError, ProxyValidationError, PolicyError, ResolutionError):
+            raise CoreError("Active proxy policy is unavailable or rejects this ingress snapshot") from None
+
+    def validate_inbound_change(self, rows: Iterable[Inbound]) -> None:
+        """Guard the complete prospective DB snapshot before its commit.
+
+        Compilation checks all cores, qualification and precise source binding.
+        It cannot activate a newer draft, and makes no upstream DNS lookup.
+        Runtime failure after the later DB commit is reported as saved/not
+        applied; it never permits a fallback to an ordinary sing-box config.
+        """
+        with self.lock:
+            self._compiled_active(list(rows))
+
+    def _check_proxy_runtime_gate(self, coordinator, expected_revision: str) -> None:
+        from app.services.proxy_store import ProxyConflict
+        draft = coordinator.store.load_draft()
+        if draft["revision"] != expected_revision:
+            raise ProxyConflict("Proxy draft changed before apply")
+        if draft["settings"]["relay_enabled"]:
+            # A previous failed Xray delete/disable can leave an older direct
+            # runtime even though its DB rows are now disabled. That runtime
+            # must not survive an all-ingress relay claim.
+            xray = self.get("xray").runtime
+            if xray.state()["enabled"] or xray.status()["running"]:
+                raise CoreError("Stop the remaining Xray runtime before enabling relay")
+
+    def check_proxy(self, expected_revision: str) -> dict:
+        from app.services.proxy_store import ProxyStorageError
+        with self.lock:
+            try:
+                coordinator = self.proxy_coordinator
+                self._check_proxy_runtime_gate(coordinator, expected_revision)
+                return coordinator.check(expected_revision, self._all_rows())
+            except ProxyStorageError:
+                self._stop_untrusted("Proxy state is unavailable; core operations blocked")
+                raise
+
+    def apply_proxy(self, expected_revision: str, transaction_id: str) -> dict:
+        from app.services.proxy_store import ProxyStorageError
+        with self.lock:
+            try:
+                coordinator = self.proxy_coordinator
+                if coordinator.store.transaction(transaction_id) is None:
+                    self._check_proxy_runtime_gate(coordinator, expected_revision)
+                # Existing IDs are resolved before draft inspection, preserving
+                # idempotent replay after a newer draft has been saved.
+                return coordinator.apply(expected_revision, transaction_id, self._all_rows())
+            except ProxyStorageError:
+                self._stop_untrusted("Proxy state is unavailable; core operations blocked")
+                raise
+
+    def _apply_rows(self, core: str, rows: list[Inbound], *, activate: bool) -> dict:
+        adapter = self.get(core)
+        compiled = self._compiled_active(rows)
+        if core == "sing-box" and compiled is not None:
+            return self.proxy_coordinator.reconcile(rows, activate=activate)
+        # Xray mutations cannot reset the independent sing-box policy. They
+        # still pass the complete all-core qualification gate when relay is ON.
+        config = adapter.build_config(item for item in rows if item.core == core)
+        return adapter.runtime.apply(config, activate=activate)
+
     def apply(self, core: str, inbounds: Iterable[Inbound], restart: bool = True) -> dict:
         with self.lock:
-            adapter = self.get(core)
-            return adapter.runtime.apply(adapter.build_config(inbounds), activate=restart)
+            self.get(core)
+            supplied = list(inbounds)
+            if any(item.core != core for item in supplied):
+                raise CoreError("Inbound snapshot contains another core")
+            # Callers supplying only one core must not hide enabled rows from
+            # the other core from the global relay qualification gate.
+            rows = [item for item in self._all_rows() if item.core != core] + supplied
+            return self._apply_rows(core, rows, activate=restart)
 
     def apply_database(self, core: str, *, activate: bool = True) -> dict:
-        from app.models import database
-        with self.lock, database.SessionLocal() as db:
-            rows = db.query(Inbound).filter(Inbound.core == core).order_by(Inbound.id).all()
-            return self.apply(core, rows, restart=activate)
+        with self.lock:
+            return self._apply_rows(core, self._all_rows(), activate=activate)
 
     def status(self) -> dict:
-        from app.models import database
-        with self.lock, database.SessionLocal() as db:
+        with self.lock:
+            rows = self._all_rows()
             result = {}
+            try:
+                compiled = self._compiled_active(rows)
+                policy_error = None
+            except CoreError as exc:
+                compiled, policy_error = None, str(exc)
             for name, adapter in self.adapters.items():
                 status = adapter.status()
-                rows = db.query(Inbound).filter(Inbound.core == name).order_by(Inbound.id).all()
-                desired = revision(adapter.build_config(rows))
-                status.update(desired_revision=desired, dirty=desired != status["applied_revision"])
+                if policy_error:
+                    status.update(desired_revision=None, dirty=True, policy_error=policy_error)
+                else:
+                    config = (compiled.config if name == "sing-box" and compiled is not None
+                              else adapter.build_config(item for item in rows if item.core == name))
+                    desired = revision(config)
+                    status.update(desired_revision=desired, dirty=desired != status["applied_revision"])
                 result[name] = status
             return result
 
     def recover_all(self):
-        for adapter in self.adapters.values():
+        with self.lock:
             try:
-                adapter.runtime.recover()
+                # Resolve the proxy journal and committed strategy before ANY
+                # core may auto-start. Corruption never implies default OFF.
+                coordinator = self.proxy_coordinator
+                coordinator.recover()
+                active = coordinator.store.load_active()
+                if active is not None and active["settings"]["relay_enabled"]:
+                    # No old Xray commit is eligible for relay. Keep stopped
+                    # even when desired DB deletion had failed to apply earlier.
+                    self.get("xray").runtime.stop(persist=False)
+                    return
+            except (CoreError, ValueError, OSError):
+                self._stop_untrusted("Proxy recovery failed; automatic core startup blocked")
+                return
+            try:
+                self.get("xray").runtime.recover()
             except CoreError as exc:
-                adapter.runtime.last_error = str(exc)
+                self.get("xray").runtime.last_error = str(exc)
+
+    def stop(self, core: str) -> dict:
+        with self.lock:
+            adapter = self.get(core)
+            adapter.stop()
+            return adapter.status()
 
     def stop_all(self) -> None:
-        for adapter in self.adapters.values():
-            if adapter._runtime is not None:
-                adapter.runtime.close()
-                adapter._runtime = None
+        with self.lock:
+            for adapter in self.adapters.values():
+                if adapter._runtime is not None:
+                    adapter.runtime.close()
+                    adapter._runtime = None
 
 
 core_manager = CoreManager()

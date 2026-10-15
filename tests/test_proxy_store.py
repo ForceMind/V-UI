@@ -12,7 +12,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from app.services.proxy_store import ProxyStore, ProxyStorageError, ProxyConflict, ProxyValidationError
+from app.services.proxy_store import MAX_BYTES, ProxyCapacityError, ProxyStore, ProxyStorageError, ProxyConflict, ProxyValidationError, _canonical
 
 
 FAKE_UUID = "11111111-1111-4111-8111-111111111111"
@@ -30,6 +30,32 @@ def profile():
 
 def writable_settings(snapshot):
     return {key: value for key, value in snapshot["settings"].items() if key != "local_password_set"}
+
+
+def near_full_history(store, *, minimum_bytes=MAX_BYTES // 2 + 1024):
+    """Build valid retained history without thousands of fsyncs in a unit test."""
+    path = store.path / "state.json"
+    state = json.loads(path.read_text())
+    active = store.load_active()
+    context = active.get("runtime_context")
+    if context is None:
+        context = {"schema_version": 1, "kind": "apply", "candidate_core_revision": "a" * 64,
+                   "previous_core_revision": None, "previous_enabled": False, "policy_identity": "b" * 64,
+                   "endpoint": None, "self_addresses": []}
+    def record(identifier):
+        return {"transaction_id": identifier, "revision": active["revision"], "phase": "aborted",
+                "core_revision": None, "runtime_context": context}
+    sample = "history-000000"
+    increment = len(_canonical({sample: record(sample)})) - 1
+    count = (minimum_bytes - len(_canonical(state)) + increment - 1) // increment
+    for index in range(max(1, count)):
+        identifier = f"history-{index:06d}"
+        state["transactions"][identifier] = record(identifier)
+    raw = _canonical(state)
+    assert minimum_bytes <= len(raw) <= MAX_BYTES
+    path.write_bytes(raw)
+    store.read_snapshot()  # Confirm the stress fixture is a valid readable store.
+    return raw
 
 
 class ProxyStoreTests(unittest.TestCase):
@@ -54,6 +80,175 @@ class ProxyStoreTests(unittest.TestCase):
     def apply(self, snapshot, transaction="apply-test", core="core-test"):
         self.store.begin_apply(snapshot["revision"], transaction)
         return self.store.commit_apply(transaction, core)
+
+    def context(self, snapshot, *, kind="apply", previous=None, candidate="a" * 64):
+        return {"schema_version": 1, "kind": kind, "candidate_core_revision": candidate,
+                "previous_core_revision": previous, "previous_enabled": previous is not None,
+                "policy_identity": "b" * 64,
+                "endpoint": {"profile_id": snapshot["settings"]["selected_upstream_id"],
+                             "revision": snapshot["revision"], "host": "upstream.example",
+                             "addresses": ["8.8.4.4"], "resolved_at": 1},
+                "self_addresses": ["127.0.0.1", "192.168.8.2"]}
+
+    def test_m1_state_migration_preserves_draft_active_and_all_private_material(self):
+        snapshot = self.enabled(local=True)
+        self.apply(snapshot)
+        draft = self.store.save_draft({**writable_settings(snapshot), "relay_enabled": False}, snapshot["revision"])
+        path = self.store.path / "state.json"
+        legacy = json.loads(path.read_text())
+        legacy.pop("active_transaction_id")  # Exact old M1 state shape.
+        path.write_text(json.dumps(legacy))
+        material = {str(path): path.read_bytes() for folder in ("secrets", "revisions")
+                    for path in (self.store.path / folder).glob("*.json")}
+        reloaded = ProxyStore(self.data)
+        self.assertEqual(reloaded.read_snapshot(), draft)
+        self.assertTrue(reloaded.load_active()["settings"]["relay_enabled"])
+        self.assertFalse(reloaded.load_draft()["settings"]["relay_enabled"])
+        self.assertEqual(reloaded.load_active()["local_password"], FAKE_PASSWORD)
+        self.assertEqual(reloaded.load_draft()["upstreams"][snapshot["settings"]["selected_upstream_id"]]["uuid"], FAKE_UUID)
+        self.assertIsNone(reloaded.load_active()["runtime_context"])
+        self.assertIsNone(reloaded.read_snapshot()["active"]["pinned_address"])
+        self.assertIsNone(reloaded.read_snapshot()["active"]["resolved_at"])
+        self.assertEqual(material, {name: Path(name).read_bytes() for name in material})
+
+    def test_runtime_context_is_private_and_commit_must_match_candidate(self):
+        snapshot = self.enabled()
+        context = self.context(snapshot)
+        pending = self.store.begin_apply(snapshot["revision"], "runtime", runtime_context=context)
+        self.assertEqual(pending["runtime_context"], context)
+        self.assertNotIn("runtime_context", self.store.read_snapshot()["pending"])
+        self.assertNotIn("192.168.8.2", json.dumps(self.store.read_snapshot()))
+        with self.assertRaises(ProxyConflict):
+            self.store.commit_apply("runtime", "c" * 64)
+        self.assertIsNotNone(self.store.recoverable_pending())
+        self.store.commit_apply("runtime", "a" * 64)
+        self.assertEqual(self.store.load_active()["runtime_context"], context)
+        self.assertEqual(ProxyStore(self.data).read_snapshot()["active"]["pinned_address"], "8.8.4.4")
+        self.assertEqual(ProxyStore(self.data).read_snapshot()["active"]["resolved_at"], 1)
+        self.assertNotIn("runtime_context", json.dumps(self.store.read_snapshot()))
+
+    def test_reconciliation_journals_active_only_with_newer_unpublished_draft(self):
+        snapshot = self.enabled()
+        self.apply(snapshot, core="a" * 64)
+        draft = self.store.save_draft({**writable_settings(snapshot), "relay_enabled": False}, snapshot["revision"])
+        context = self.context(snapshot, kind="reconcile", previous="a" * 64, candidate="c" * 64)
+        for revision, core in ((draft["revision"], "a" * 64), (snapshot["revision"], "b" * 64)):
+            with self.assertRaises(ProxyConflict):
+                self.store.begin_reconcile(revision, "reconcile", expected_core_revision=core, runtime_context=context)
+        self.store.begin_reconcile(snapshot["revision"], "reconcile", expected_core_revision="a" * 64, runtime_context=context)
+        self.assertEqual(ProxyStore(self.data).recoverable_pending()["revision"], snapshot["revision"])
+        result = self.store.commit_apply("reconcile", "c" * 64)
+        self.assertEqual(result["revision"], draft["revision"])
+        self.assertEqual(result["active"]["revision"], snapshot["revision"])
+        self.assertEqual(result["active"]["core_revision"], "c" * 64)
+        self.assertFalse(result["settings"]["relay_enabled"])
+        self.assertTrue(result["active"]["settings"]["relay_enabled"])
+
+    def test_recovery_metadata_is_strict_and_cannot_choose_uncommitted_rollback(self):
+        snapshot = self.enabled()
+        self.apply(snapshot, core="a" * 64)
+        context = self.context(snapshot, previous="a" * 64)
+        for delta in ({"config": {"secret": "not-allowed"}}, {"previous_core_revision": "b" * 64},
+                      {"previous_enabled": 1}, {"self_addresses": ["::1%scope"]}, {"endpoint": {}}):
+            with self.subTest(delta=delta), self.assertRaises(ProxyStorageError):
+                self.store.begin_apply(snapshot["revision"], "bad", runtime_context={**context, **delta})
+        self.assertIsNone(self.store.recoverable_pending())
+
+    def test_active_transaction_pointer_is_strictly_bound_to_active_identity(self):
+        self.apply(self.enabled())
+        path = self.store.path / "state.json"
+        state = json.loads(path.read_text())
+        for value in (None, [], "nonexistent", "../../bad"):
+            path.write_text(json.dumps({**state, "active_transaction_id": value}))
+            with self.subTest(value=value), self.assertRaises(ProxyStorageError):
+                self.store.load_active()
+        path.write_text(json.dumps(state))
+        self.assertEqual(self.store.load_active()["core_revision"], "core-test")
+
+    def test_capacity_is_distinct_from_corruption_and_keeps_full_history_readable(self):
+        snapshot = self.enabled()
+        self.apply(snapshot, core="a" * 64)
+        before = near_full_history(self.store)
+        with patch.object(self.store, "_atomic_json", wraps=self.store._atomic_json) as writes:
+            with self.assertRaises(ProxyCapacityError) as error:
+                self.store.begin_apply(snapshot["revision"], "capacity-rejected", runtime_context=self.context(snapshot, previous="a" * 64))
+        self.assertNotIsInstance(error.exception, ProxyStorageError)
+        writes.assert_not_called()
+        self.assertEqual((self.store.path / "state.json").read_bytes(), before)
+        self.assertIsNone(self.store.recoverable_pending())
+        self.assertFalse((self.store.path / "write-intent.json").exists())
+        self.assertTrue(self.store.read_snapshot()["active"]["settings"]["relay_enabled"])
+
+    def test_capacity_rejects_draft_and_secret_edits_before_any_object_write(self):
+        snapshot = self.enabled(local=True)
+        self.apply(snapshot, core="a" * 64)
+        near_full_history(self.store)
+        before = {str(path): path.read_bytes() for path in self.store.path.rglob("*.json")}
+        settings = {**writable_settings(snapshot), "local_port": 9000}
+        mutations = (lambda: self.store.save_draft(settings, snapshot["revision"], local_password="different-fake-password"),
+                     lambda: self.store.save_upstream({**profile(), "uuid": FAKE_UUID_2}, snapshot["revision"]),
+                     lambda: self.store.save_upstream({**profile(), "uuid": FAKE_UUID_2}, snapshot["revision"],
+                                                     profile_id=snapshot["settings"]["selected_upstream_id"]))
+        for mutation in mutations:
+            with self.assertRaises(ProxyCapacityError):
+                mutation()
+            self.assertEqual({str(path): path.read_bytes() for path in self.store.path.rglob("*.json")}, before)
+        self.assertIsNone(self.store.recoverable_pending())
+        self.assertEqual(self.store.load_active()["local_password"], FAKE_PASSWORD)
+
+    def test_exact_admission_reserves_both_terminal_writes_for_worst_context(self):
+        snapshot = self.enabled()
+        self.apply(snapshot, core="a" * 64)
+        path = self.store.path / "state.json"
+        baseline = path.read_bytes()
+        context = self.context(snapshot, previous="a" * 64, candidate="c" * 64)
+        context["self_addresses"] = [f"2001:4860:abcd:1234:5678:9abc:def0:{0x1000 + index:x}" for index in range(4096)]
+        context["endpoint"]["addresses"] = [f"8.8.4.{index}" for index in range(1, 33)]
+        for outcome in ("committed", "aborted"):
+            with self.subTest(outcome=outcome):
+                path.write_bytes(baseline)
+                state = json.loads(baseline)
+                transaction = ("worst-" + outcome).ljust(128, "t")
+                pending = {"transaction_id": transaction, "revision": snapshot["revision"],
+                           "base_active_revision": state["active_revision"], "base_core_revision": state["core_revision"],
+                           "phase": "prepared", "runtime_context": context}
+                prepared = {**state, "pending": pending}
+                committed = self.store._terminal_state(prepared, pending, "committed", "c" * 64)
+                aborted = self.store._terminal_state(prepared, pending, "aborted")
+                def intent(old, new):
+                    return len(_canonical({"schema_version": 1, "previous": old, "candidate": new}))
+                required = max(intent(state, prepared), intent(prepared, committed), intent(prepared, aborted),
+                               len(_canonical(prepared)), len(_canonical(committed)), len(_canonical(aborted)))
+                self.assertLess(intent(state, prepared), required)
+                with patch("app.services.proxy_store.MAX_BYTES", required - 1):
+                    with self.assertRaises(ProxyCapacityError):
+                        self.store.begin_apply(snapshot["revision"], transaction, runtime_context=context)
+                self.assertEqual(path.read_bytes(), baseline)
+                self.assertFalse((self.store.path / "write-intent.json").exists())
+                with patch("app.services.proxy_store.MAX_BYTES", required):
+                    self.store.begin_apply(snapshot["revision"], transaction, runtime_context=context)
+                    with self.assertRaises(ProxyConflict):
+                        self.store.save_draft(writable_settings(snapshot), snapshot["revision"])
+                    if outcome == "committed":
+                        self.store.commit_apply(transaction, "c" * 64)
+                    else:
+                        self.store.abort_apply(transaction)
+                    self.assertEqual(self.store.transaction(transaction)["phase"], outcome)
+                    self.assertIsNone(self.store.recoverable_pending())
+                self.assertFalse((self.store.path / "write-intent.json").exists())
+
+    def test_legacy_admission_reserves_maximum_later_core_identifier(self):
+        snapshot = self.enabled()
+        state = json.loads((self.store.path / "state.json").read_text())
+        pending = {"transaction_id": "legacy-capacity", "revision": snapshot["revision"],
+                   "base_active_revision": None, "base_core_revision": None, "phase": "prepared"}
+        prepared = {**state, "pending": pending}
+        committed = self.store._terminal_state(prepared, pending, "committed", "x" * 128)
+        limit = len(_canonical({"schema_version": 1, "previous": prepared, "candidate": committed}))
+        with patch("app.services.proxy_store.MAX_BYTES", limit):
+            self.store.begin_apply(snapshot["revision"], "legacy-capacity")
+            self.store.commit_apply("legacy-capacity", "z" * 128)
+        self.assertEqual(self.store.load_active()["core_revision"], "z" * 128)
 
     def test_fresh_defaults_are_explicitly_unapplied(self):
         self.assertFalse(self.initial["settings"]["local_proxy_enabled"])

@@ -294,6 +294,9 @@ class CertificateManager:
                     if '_vui' in stream:
                         stream['_vui']['server_name'] = domain
                     row.stream_settings = stream
+                    db.flush()
+                    core_manager.validate_inbound_change(
+                        db.query(database.Inbound).order_by(database.Inbound.id).all())
                     db.commit()
                     # Do not resurrect a manually stopped core during renewal.
                     runtime = core_manager.get(row.core).status()

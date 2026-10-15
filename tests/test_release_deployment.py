@@ -29,6 +29,7 @@ from scripts.ops_menu_smoke import (content_snapshot, fixture_bundle, installed_
     installed_menu_stage_smoke)
 from scripts.managed_ops_smoke import installed_managed_ops_smoke
 from scripts.proxy_import_smoke import installed_proxy_import_smoke
+from scripts.proxy_policy_smoke import installed_proxy_policy_smoke
 
 
 class MenuStageFixtureTests(unittest.TestCase):
@@ -128,6 +129,7 @@ class ReleaseDeploymentTests(unittest.TestCase):
             self.assertIn('app/ops_menu.py',manifest['files'])
             print(installed_menu_smoke(python,payload,root)['menu'])
             print(installed_proxy_import_smoke(python,payload,root))
+            print(installed_proxy_policy_smoke(python,payload,root))
             data=root/'data';password='Synthetic-release-test-password!'
             provision=subprocess.run([str(python),'-B','-c',
                 'import sys;from app.services.auth_service import provision_admin;provision_admin("release-admin",sys.stdin.read())'],

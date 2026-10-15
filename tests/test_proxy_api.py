@@ -7,7 +7,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.api import proxy
-from app.services.proxy_store import ProxyStore
+from app.services.proxy_store import ProxyCapacityError, ProxyStore
 import main
 
 ORIGIN = 'https://panel.example.test'
@@ -102,6 +102,22 @@ class ProxyApiTests(unittest.TestCase):
                 self.assertEqual(result.status_code, expected, result.text)
         self.assertEqual(self.snapshot().json()['upstreams'], [])
 
+    def test_capacity_errors_are_conflicts_without_private_details(self):
+        snapshot = self.snapshot()
+        with patch.object(self.store, 'save_upstream', side_effect=ProxyCapacityError('secret-capacity-detail')):
+            result = self.add_profile()
+        self.assertEqual(result.status_code, 409, result.text)
+        self.assertEqual(result.json()['detail'], 'PROXY_CAPACITY_EXHAUSTED')
+        self.assertNotIn('secret-capacity-detail', result.text)
+        settings = snapshot.json()['settings']
+        settings.pop('local_password_set')
+        with patch.object(self.store, 'save_draft', side_effect=ProxyCapacityError('secret-capacity-detail')):
+            result = self.client.put('/api/proxy/settings', json=settings,
+                headers={**HEADERS, 'If-Match': snapshot.headers['etag']})
+        self.assertEqual(result.status_code, 409, result.text)
+        self.assertEqual(result.json()['detail'], 'PROXY_CAPACITY_EXHAUSTED')
+        self.assertEqual(self.snapshot().json(), snapshot.json())
+
     def test_four_valid_draft_combinations_do_not_apply(self):
         result = self.add_profile()
         self.assertEqual(result.status_code, 201, result.text)
@@ -159,11 +175,14 @@ class ProxyApiTests(unittest.TestCase):
         self.assertEqual(result.status_code, 413, result.text)
         self.apply.assert_not_called()
 
-    def test_stage_capability_is_honest_and_apply_not_exposed(self):
+    def test_capability_keeps_runtime_and_diagnostics_separate(self):
         capabilities = self.client.get('/api/proxy/capabilities').json()
-        self.assertFalse(capabilities['apply_available'])
-        self.assertEqual(capabilities['implementation_stage'], 'draft-only')
-        self.assertEqual(self.client.post('/api/proxy/apply', json={}, headers=HEADERS).status_code, 404)
+        self.assertTrue(capabilities['apply_available'])
+        self.assertFalse(capabilities['diagnostics_available'])
+        self.assertFalse(capabilities['full_system_proxy'])
+        self.assertEqual(capabilities['implementation_stage'], 'transactional-runtime')
+        self.assertEqual(capabilities['local_listen'], '127.0.0.1')
+        self.assertEqual(self.client.post('/api/proxy/apply', json={}, headers=HEADERS).status_code, 422)
         self.apply.assert_not_called()
 
     def test_version_fields_reject_boolean_float_string_and_unknown_versions(self):

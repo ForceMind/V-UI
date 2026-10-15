@@ -4,6 +4,13 @@ This module never starts a core, edits the inbound database, or chooses a direct
 fallback. ``load_*`` are internal, credential-bearing interfaces; only
 ``read_snapshot`` and mutation return values are suitable for ordinary APIs.
 An interrupted apply must be reconciled by the runtime, not guessed from drafts.
+
+History is retained without pruning. Each state/object/intent has a finite
+2,000,000-byte bound; an intent holds both old and new state, so admission may
+fill before the standalone state reaches that size. Capacity is checked before
+writes and reserves both terminal transaction outcomes. Exhaustion rejects new
+changes without stopping a valid committed runtime or altering retained history.
+Archival/compaction is a separate maintenance operation, not implicit cleanup.
 """
 from __future__ import annotations
 
@@ -11,6 +18,7 @@ from contextlib import contextmanager
 import copy
 import fcntl
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -37,6 +45,10 @@ _PUBLIC_SETTINGS = {
 
 class ProxyStorageError(ValueError):
     """State is unknown/unavailable; callers must fail closed."""
+
+
+class ProxyCapacityError(ValueError):
+    """A new write cannot fit; existing state is valid and remains usable."""
 
 
 class ProxyConflict(ValueError):
@@ -215,7 +227,8 @@ class ProxyStore:
 
     @staticmethod
     def _atomic_bytes(directory: int, name: str, raw: bytes):
-        _require(len(raw) <= MAX_BYTES)
+        if len(raw) > MAX_BYTES:
+            raise ProxyCapacityError("Proxy history capacity is full; no changes were applied")
         # Refuse unsafe targets before rename; no open/truncate follows a link.
         ProxyStore._read_bytes(directory, name, optional=True)
         temp = ".stage-" + uuid.uuid4().hex
@@ -326,7 +339,9 @@ class ProxyStore:
     def _validate_state(state: dict, store_id: str):
         _require(isinstance(state, dict) and set(state) == {
             "schema_version", "store_id", "draft_revision", "active_revision",
-            "core_revision", "pending", "transactions"})
+            "core_revision", "pending", "transactions"} or isinstance(state, dict) and set(state) == {
+            "schema_version", "store_id", "draft_revision", "active_revision", "core_revision",
+            "pending", "transactions", "active_transaction_id"})
         _require(type(state["schema_version"]) is int and state["schema_version"] == 1 and state["store_id"] == store_id)
         _require(isinstance(state["draft_revision"], str) and _HEX.fullmatch(state["draft_revision"]) is not None)
         active = state["active_revision"]
@@ -336,21 +351,94 @@ class ProxyStore:
         _require(isinstance(state["transactions"], dict))
         for transaction_id, result in state["transactions"].items():
             _require(isinstance(transaction_id, str) and _TX.fullmatch(transaction_id) is not None)
-            _require(isinstance(result, dict) and set(result) == {"transaction_id", "revision", "phase", "core_revision"})
+            _require(isinstance(result, dict) and set(result) in ({"transaction_id", "revision", "phase", "core_revision"},
+                {"transaction_id", "revision", "phase", "core_revision", "runtime_context"}))
             _require(result["transaction_id"] == transaction_id and result["phase"] in ("committed", "aborted"))
             _require(isinstance(result["revision"], str) and _HEX.fullmatch(result["revision"]) is not None)
             _require(result["core_revision"] is None if result["phase"] == "aborted" else isinstance(result["core_revision"], str) and _TX.fullmatch(result["core_revision"]) is not None)
+            if "runtime_context" in result:
+                ProxyStore._validate_runtime_context(result["runtime_context"], result["revision"])
+                if result["phase"] == "committed":
+                    _require(result["runtime_context"]["candidate_core_revision"] == result["core_revision"])
         committed = [result for result in state["transactions"].values() if result["phase"] == "committed"]
         # Absent active is valid only before the first successful apply. An
         # erased active pointer must not turn a previously applied store OFF.
         _require(not committed if active is None else any(
             result["revision"] == active and result["core_revision"] == core for result in committed))
+        if "active_transaction_id" in state:
+            _require(isinstance(state["active_transaction_id"], str) and _TX.fullmatch(state["active_transaction_id"]) is not None)
+            transaction = state["transactions"].get(state["active_transaction_id"])
+            _require(transaction is not None and transaction["phase"] == "committed"
+                     and transaction["revision"] == active and transaction["core_revision"] == core)
         pending = state["pending"]
         if pending is not None:
-            _require(isinstance(pending, dict) and set(pending) == {"transaction_id", "revision", "base_active_revision", "base_core_revision", "phase"})
+            _require(isinstance(pending, dict) and set(pending) in ({"transaction_id", "revision", "base_active_revision", "base_core_revision", "phase"},
+                {"transaction_id", "revision", "base_active_revision", "base_core_revision", "phase", "runtime_context"}))
             _require(isinstance(pending["transaction_id"], str) and _TX.fullmatch(pending["transaction_id"]) is not None)
             _require(pending["transaction_id"] not in state["transactions"] and pending["phase"] == "prepared")
-            _require(pending["revision"] == state["draft_revision"] and pending["base_active_revision"] == active and pending["base_core_revision"] == core)
+            context = pending.get("runtime_context")
+            if "runtime_context" in pending:
+                ProxyStore._validate_runtime_context(context, pending["revision"])
+                if active is not None:
+                    _require(context["previous_core_revision"] == core)
+            target = active if context and context["kind"] == "reconcile" else state["draft_revision"]
+            _require(pending["revision"] == target and pending["base_active_revision"] == active and pending["base_core_revision"] == core)
+
+    @staticmethod
+    def _validate_runtime_context(context, revision):
+        """Private, bounded recovery metadata; never raw configs or paths."""
+        _require(isinstance(context, dict) and set(context) == {
+            "schema_version", "kind", "candidate_core_revision", "previous_core_revision",
+            "previous_enabled", "policy_identity", "endpoint", "self_addresses"})
+        _require(type(context["schema_version"]) is int and context["schema_version"] == 1)
+        _require(context["kind"] in ("apply", "reconcile"))
+        for key in ("candidate_core_revision", "policy_identity"):
+            _require(isinstance(context[key], str) and _HEX.fullmatch(context[key]) is not None)
+        previous = context["previous_core_revision"]
+        _require(previous is None or isinstance(previous, str) and _HEX.fullmatch(previous) is not None)
+        _require(type(context["previous_enabled"]) is bool and (previous is not None or not context["previous_enabled"]))
+        endpoint = context["endpoint"]
+        if endpoint is not None:
+            _require(isinstance(endpoint, dict) and set(endpoint) == {"profile_id", "revision", "host", "addresses", "resolved_at"})
+            _require(isinstance(endpoint["profile_id"], str) and _ID.fullmatch(endpoint["profile_id"]) is not None)
+            _require(endpoint["revision"] == revision and type(endpoint["resolved_at"]) is int and endpoint["resolved_at"] >= 0)
+            from app.services.upstream_profile import server_host, UpstreamValidationError
+            try:
+                server_host(endpoint["host"])
+            except (UpstreamValidationError, TypeError):
+                _require(False)
+            _require(type(endpoint["addresses"]) is list and 1 <= len(endpoint["addresses"]) <= 32)
+        if endpoint is not None:
+            try:
+                ordered = sorted(set(endpoint["addresses"]), key=lambda value: (ipaddress.ip_address(value).version, int(ipaddress.ip_address(value))))
+                _require(ordered == endpoint["addresses"])
+            except (ValueError, TypeError):
+                _require(False)
+        addresses = context["self_addresses"]
+        _require(type(addresses) is list and len(addresses) <= 4096)
+        for address in addresses + ([] if endpoint is None else endpoint["addresses"]):
+            _require(type(address) is str and "%" not in address)
+            try:
+                _require(str(ipaddress.ip_address(address)) == address)
+            except ValueError:
+                _require(False)
+
+    @staticmethod
+    def _public_pending(pending):
+        return None if pending is None else {key: copy.deepcopy(pending[key]) for key in (
+            "transaction_id", "revision", "base_active_revision", "base_core_revision", "phase")}
+
+    @staticmethod
+    def _active_context(state):
+        # The core revision is part of the active identity, including node/cert
+        # reconciliation that intentionally leaves the proxy revision alone.
+        if "active_transaction_id" in state:
+            return copy.deepcopy(state["transactions"][state["active_transaction_id"]].get("runtime_context"))
+        for result in reversed(list(state["transactions"].values())):
+            if (result["phase"] == "committed" and result["revision"] == state["active_revision"]
+                    and result["core_revision"] == state["core_revision"]):
+                return copy.deepcopy(result.get("runtime_context"))
+        return None
 
     def _revision(self, revisions: int, secrets: int, revision: str) -> tuple[dict, dict, str | None]:
         doc = self._read_json(revisions, revision + ".json")
@@ -437,14 +525,50 @@ class ProxyStore:
         active = None
         if state["active_revision"] is not None:
             active_doc, _, _ = self._revision(revisions, secrets, state["active_revision"])
+            context = self._active_context(state)
+            endpoint = context.get("endpoint") if context and any(active_doc["settings"][key] for key in _FLAGS) else None
             active = {"revision": state["active_revision"], "settings": self._public_settings(active_doc["settings"]),
-                      "core_revision": state["core_revision"]}
+                      "core_revision": state["core_revision"],
+                      "pinned_address": endpoint["addresses"][0] if endpoint else None,
+                      "resolved_at": endpoint["resolved_at"] if endpoint else None}
         return {"revision": state["draft_revision"], "settings": self._public_settings(doc["settings"]),
-                "upstreams": upstreams, "active": active, "pending": copy.deepcopy(state["pending"])}
+                "upstreams": upstreams, "active": active, "pending": self._public_pending(state["pending"])}
+
+    @staticmethod
+    def _check_state_capacity(old, new):
+        """Exact encoded limits, BEFORE touching an intent or commit record."""
+        if old == new:
+            return
+        intent = {"schema_version": 1, "previous": old, "candidate": new}
+        if len(_canonical(new)) > MAX_BYTES or len(_canonical(intent)) > MAX_BYTES:
+            raise ProxyCapacityError("Proxy history capacity is full; no changes were applied")
+
+    @staticmethod
+    def _terminal_state(state, pending, phase, core_revision=None):
+        """One constructor shared by admission and the actual terminal write."""
+        transaction_id = pending["transaction_id"]
+        result = {"transaction_id": transaction_id, "revision": pending["revision"],
+                  "phase": phase, "core_revision": core_revision}
+        if "runtime_context" in pending:
+            result["runtime_context"] = copy.deepcopy(pending["runtime_context"])
+        changed = {**state, "pending": None, "transactions": {**state["transactions"], transaction_id: result}}
+        if phase == "committed":
+            changed.update(active_revision=pending["revision"], core_revision=core_revision,
+                           active_transaction_id=transaction_id)
+        return changed
+
+    @classmethod
+    def _check_doc_capacity(cls, state, doc):
+        raw = _canonical(doc)
+        if len(raw) > MAX_BYTES:
+            raise ProxyCapacityError("Proxy draft capacity is full; no changes were applied")
+        changed = {**state, "draft_revision": hashlib.sha256(raw).hexdigest()}
+        cls._check_state_capacity(state, changed)
 
     def _commit_state(self, root, old, new):
         if old == new:
             return
+        self._check_state_capacity(old, new)
         # A durable intent guards against an unconfirmed rename/fsync. If even
         # rollback fails, readers stop rather than infer an effective OFF mode.
         self._atomic_json(root, "write-intent.json", {"schema_version": 1, "previous": old, "candidate": new})
@@ -469,6 +593,7 @@ class ProxyStore:
             raise ProxyConflict("An apply is pending recovery; drafts cannot change")
 
     def _save_doc(self, root, revisions, secrets, state, doc):
+        self._check_doc_capacity(state, doc)
         revision = _digest(doc)
         self._immutable(revisions, revision + ".json", doc)
         self._revision(revisions, secrets, revision)
@@ -480,10 +605,12 @@ class ProxyStore:
         with self._locked(initialize=initialize) as (_, revisions, secrets, state, _):
             return self._snapshot(revisions, secrets, state)
 
-    def _load(self, active: bool) -> dict | None:
+    def _load(self, active: bool, *, reject_pending: bool = False) -> dict | None:
         with self._locked() as (_, revisions, secrets, state, _):
             # Validate both roots even when the requested one is absent.
             self._snapshot(revisions, secrets, state)
+            if reject_pending and state["pending"] is not None:
+                raise ProxyConflict("An apply is pending recovery")
             revision = state["active_revision"] if active else state["draft_revision"]
             if revision is None:
                 return None
@@ -491,13 +618,14 @@ class ProxyStore:
             return {"revision": revision, "settings": copy.deepcopy(doc["settings"]),
                     "upstreams": profiles, "local_password": password,
                     "core_revision": state["core_revision"] if active else None,
-                    "pending": copy.deepcopy(state["pending"])}
+                    "pending": self._public_pending(state["pending"]),
+                    "runtime_context": self._active_context(state) if active else None}
 
     def load_draft(self) -> dict:
         return self._load(False)
 
-    def load_active(self) -> dict | None:
-        return self._load(True)
+    def load_active(self, *, reject_pending: bool = False) -> dict | None:
+        return self._load(True, reject_pending=reject_pending)
 
     def save_upstream(self, profile: dict, expected_revision: str, *, profile_id: str | None = None,
                       source_format: str = "manual", source_fingerprint: str | None = None) -> dict:
@@ -531,10 +659,11 @@ class ProxyStore:
                       "public_key": normalized["tls"].pop("public_key"), "short_id": normalized["tls"].pop("short_id")}
             secret_revision = _digest(secret)
             secret_ref = old_entry["secret_ref"] if old_entry and old_entry["secret_revision"] == secret_revision else "sec_" + uuid.uuid4().hex
-            self._immutable(secrets, secret_ref + ".json", secret)
             doc["upstreams"][profile_id] = {"profile": normalized, "secret_ref": secret_ref,
                                             "secret_revision": secret_revision, "source_format": source_format,
                                             "source_fingerprint": source_fingerprint}
+            self._check_doc_capacity(state, doc)
+            self._immutable(secrets, secret_ref + ".json", secret)
             return {"snapshot": self._save_doc(root, revisions, secrets, state, doc), "upstream_id": profile_id}
 
     def save_draft(self, settings: dict, expected_revision: str, *, local_password: str | None = None) -> dict:
@@ -552,6 +681,7 @@ class ProxyStore:
             doc["settings"] = _settings(settings, ref)
             if doc["settings"]["selected_upstream_id"] is not None and doc["settings"]["selected_upstream_id"] not in profiles:
                 raise ProxyValidationError("Selected upstream does not exist")
+            self._check_doc_capacity(state, doc)
             if secret is not None:
                 self._immutable(secrets, ref + ".json", secret)
             return self._save_doc(root, revisions, secrets, state, doc)
@@ -588,26 +718,68 @@ class ProxyStore:
             doc["local_password_revision"] = None
             return self._save_doc(root, revisions, secrets, state, doc)
 
-    def begin_apply(self, expected_revision: str, transaction_id: str) -> dict:
+    def transaction(self, transaction_id: str) -> dict | None:
+        """Internal lookup for idempotent requests, including a newer draft."""
+        if not isinstance(transaction_id, str) or not _TX.fullmatch(transaction_id):
+            raise ProxyValidationError("Apply transaction ID is invalid")
+        with self._locked() as (_, revisions, secrets, state, _):
+            self._snapshot(revisions, secrets, state)
+            result = state["transactions"].get(transaction_id)
+            if result is None and state["pending"] and state["pending"]["transaction_id"] == transaction_id:
+                result = state["pending"]
+            return copy.deepcopy(result)
+
+    def begin_apply(self, expected_revision: str, transaction_id: str, *, runtime_context: dict | None = None) -> dict:
+        return self._begin(expected_revision, transaction_id, runtime_context=runtime_context)
+
+    def begin_reconcile(self, expected_revision: str, transaction_id: str, *, expected_core_revision: str,
+                        runtime_context: dict) -> dict:
+        """Journal an active-only node/certificate change; never publish draft."""
+        return self._begin(expected_revision, transaction_id, runtime_context=runtime_context,
+                           reconcile=True, expected_core_revision=expected_core_revision)
+
+    def _begin(self, expected_revision, transaction_id, *, runtime_context=None,
+               reconcile=False, expected_core_revision=None):
         if not isinstance(transaction_id, str) or not _TX.fullmatch(transaction_id):
             raise ProxyValidationError("Apply transaction ID is invalid")
         with self._locked() as (root, revisions, secrets, state, _):
             self._snapshot(revisions, secrets, state)
-            if expected_revision != state["draft_revision"]:
-                raise ProxyConflict("Proxy draft changed before apply")
+            target = state["active_revision"] if reconcile else state["draft_revision"]
+            if expected_revision != target or reconcile and expected_core_revision != state["core_revision"]:
+                raise ProxyConflict("Proxy snapshot changed before apply")
+            if runtime_context is not None:
+                self._validate_runtime_context(runtime_context, expected_revision)
+                _require(runtime_context["kind"] == ("reconcile" if reconcile else "apply"))
+                if state["active_revision"] is not None:
+                    _require(runtime_context["previous_core_revision"] == state["core_revision"])
+            elif reconcile:
+                raise ProxyValidationError("Runtime context is required for reconciliation")
             previous = state["transactions"].get(transaction_id)
             if previous:
-                if previous["revision"] != expected_revision:
+                if (previous["revision"] != expected_revision or runtime_context is not None
+                        and previous.get("runtime_context") != runtime_context):
                     raise ProxyConflict("Apply transaction ID was already used for another revision")
                 return copy.deepcopy(previous)
             if state["pending"]:
-                if state["pending"]["transaction_id"] != transaction_id:
+                if (state["pending"]["transaction_id"] != transaction_id or runtime_context is not None
+                        and state["pending"].get("runtime_context") != runtime_context):
                     raise ProxyConflict("Another apply is pending recovery")
                 return copy.deepcopy(state["pending"])
             pending = {"transaction_id": transaction_id, "revision": expected_revision,
                        "base_active_revision": state["active_revision"], "base_core_revision": state["core_revision"],
                        "phase": "prepared"}
-            self._commit_state(root, state, {**state, "pending": pending})
+            if runtime_context is not None:
+                pending["runtime_context"] = copy.deepcopy(runtime_context)
+            prepared = {**state, "pending": pending}
+            # Admission guarantees room for BOTH outcomes. Draft mutations are
+            # blocked while prepared, so no writer can consume this reserve.
+            # Old M1 callers do not name the core until commit; reserve its
+            # maximum accepted identifier length rather than assume SHA-256.
+            candidate = runtime_context["candidate_core_revision"] if runtime_context is not None else "x" * 128
+            self._check_state_capacity(state, prepared)
+            self._check_state_capacity(prepared, self._terminal_state(prepared, pending, "committed", candidate))
+            self._check_state_capacity(prepared, self._terminal_state(prepared, pending, "aborted"))
+            self._commit_state(root, state, prepared)
             return copy.deepcopy(pending)
 
     def commit_apply(self, transaction_id: str, core_revision: str) -> dict:
@@ -625,10 +797,10 @@ class ProxyStore:
             pending = state["pending"]
             if pending is None or pending["transaction_id"] != transaction_id:
                 raise ProxyConflict("No matching pending apply exists")
-            result = {"transaction_id": transaction_id, "revision": pending["revision"],
-                      "phase": "committed", "core_revision": core_revision}
-            changed = {**state, "active_revision": pending["revision"], "core_revision": core_revision,
-                       "pending": None, "transactions": {**state["transactions"], transaction_id: result}}
+            context = pending.get("runtime_context")
+            if context is not None and context["candidate_core_revision"] != core_revision:
+                raise ProxyConflict("Core revision does not match the prepared candidate")
+            changed = self._terminal_state(state, pending, "committed", core_revision)
             self._commit_state(root, state, changed)
             return self._snapshot(revisions, secrets, changed)
 
@@ -646,9 +818,7 @@ class ProxyStore:
             pending = state["pending"]
             if pending is None or pending["transaction_id"] != transaction_id:
                 raise ProxyConflict("No matching pending apply exists")
-            result = {"transaction_id": transaction_id, "revision": pending["revision"],
-                      "phase": "aborted", "core_revision": None}
-            changed = {**state, "pending": None, "transactions": {**state["transactions"], transaction_id: result}}
+            changed = self._terminal_state(state, pending, "aborted")
             self._commit_state(root, state, changed)
             return self._snapshot(revisions, secrets, changed)
 
