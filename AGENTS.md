@@ -1,5 +1,13 @@
 # V-UI 开发约束
 
+## 2026-10-15 双开关开发范围更新
+
+已批准按[双开关代理与中转契约](docs/DUAL_PROXY_RELAY_CONTRACT.md)持续开发，M0–M4 各自独立 PR；[进度与证据账本](docs/DUAL_PROXY_RELAY_PROGRESS.md)区分草稿、实现和准确验收。本次新范围取代下方仅限安装器/发布准备的历史范围，不修改历史事实。两个独立开关必须覆盖四状态和 12 条切换；首期 sing-box/VLESS/TCP/TLS 接入，任何启用且未获资格的入口阻止整体中转，不得静默直出。未完成 M2 前不得开放应用，秘密不得进入普通响应。
+
+计划内正常开发、修复、测试、文档、提交、推送和独立 PR 按批准范围推进；准确候选验收后正常合并，再核准确 master。保留历史，不强推；不含发布、生产部署、历史资产删除、费用、凭据或安全敏感权限变更。`VERSION`、固定核心和既有发布边界保持；后续历史条目继续按各自日期解释。
+
+## 既有约束与历史证据
+
 先读ROADMAP.md、docs/README.md和最近PR。用户已授权完善正式发布、所有文档、一键部署与图形化自动证书；仍不等于授权登录真实VPS、替实际域名同意CA条款或跳过验收公开Release。
 
 - 保持每个阶段独立 PR；PR #14 仍排除。v0.4.2、WS v0.4.3、gRPC v0.4.4 和 HY2 v0.4.5 已正常合并收口。HY2 最终 master 838c66d9974dd9f3a944641a2e9e03cc200e0bbe/tree e12287d8ebbea233142d58191ee5141a0a49a17a；PR #23 安全修复最终 master 8e0d07463e59b52856f55fa33346a760a38b4705/tree fda9f9d8a26dd21bdf0e441ab5d9bbc7ec0dbdd8，两者最终八组/11 jobs/全部步骤 attempt 1 成功。详见 docs/HYSTERIA2_CLOSURE_045.md、docs/INBOUND_RESPONSE_CLOSURE_20261006.md；历史失败保留。
