@@ -111,8 +111,12 @@ class AdminAuthMiddleware:
         if path == "/api/files" or path.startswith("/api/files/"):
             await reject(503, "Site hosting is disabled until it has an isolated origin")
             return
-        if path.startswith("/api/auth/") and request.method == "POST":
+        bounded_auth = path.startswith("/api/auth/") and request.method == "POST"
+        bounded_proxy = path.startswith("/api/proxy/") and request.method in {"POST", "PUT", "PATCH"}
+        if bounded_auth or bounded_proxy:
             # Bound actual bytes, not just an attacker-controlled Content-Length.
+            byte_limit = 8192 if bounded_auth else 2_097_152
+            label = "Authentication" if bounded_auth else "Proxy settings"
             body = bytearray()
             try:
                 deadline = time.monotonic() + 10
@@ -120,14 +124,15 @@ class AdminAuthMiddleware:
                     message = await asyncio.wait_for(receive(), max(0.001, deadline - time.monotonic()))
                     if message["type"] == "http.disconnect":
                         return
-                    body.extend(message.get("body", b""))
-                    if len(body) > 8192:
-                        await reject(413, "Authentication request is too large")
+                    chunk = message.get("body", b"")
+                    if len(body) + len(chunk) > byte_limit:
+                        await reject(413, label + " request is too large")
                         return
+                    body.extend(chunk)
                     if not message.get("more_body", False):
                         break
             except asyncio.TimeoutError:
-                await reject(408, "Authentication request timed out")
+                await reject(408, label + " request timed out")
                 return
             original_receive, delivered = receive, False
 

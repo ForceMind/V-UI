@@ -111,7 +111,7 @@ class PrivateArchiveCacheTests(unittest.TestCase):
     def test_writeback_failure_closes_snapshots_and_removes_partial_unpack(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); payload = root / 'payload'; payload.mkdir()
-            for name in ('scripts/deploy.py', 'app/release_tools.py', 'deploy/system_launcher.py',
+            for name in (*install_system.CONTROLLER_MEMBERS, 'deploy/system_launcher.py',
                          'runtimes/test.tar.gz'):
                 path = payload / name; path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b'fake-controller-or-runtime')

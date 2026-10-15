@@ -132,14 +132,15 @@ class OneClickSystemTests(unittest.TestCase):
                 session.send('0\n');session.finish()
             context=ssl.create_default_context(cafile=ca)
             cookie=''
-            def api(path,body=None):
+            def api(path,body=None,*,method=None,extra_headers=()):
                 nonlocal cookie
                 data=b'' if body is None else json.dumps(body).encode()
                 with socket.create_connection(('127.0.0.1',port),timeout=5) as connection:
                     with context.wrap_socket(connection,server_hostname=domain) as tls:
-                        headers=[('GET' if body is None else 'POST')+' '+path+' HTTP/1.0',
+                        headers=[(method or ('GET' if body is None else 'POST'))+' '+path+' HTTP/1.0',
                             'Host: '+domain+':'+str(port),'Origin: '+origin,'X-VUI-Request: 1',
                             'Content-Type: application/json','Content-Length: '+str(len(data))]
+                        headers.extend(extra_headers)
                         if cookie:headers.append('Cookie: '+cookie)
                         tls.sendall(('\r\n'.join(headers)+'\r\n\r\n').encode()+data)
                         response=http.client.HTTPResponse(tls);response.begin();raw=response.read()
@@ -171,12 +172,37 @@ class OneClickSystemTests(unittest.TestCase):
             self.assertNotEqual(repeat.returncode,0)
             self.assertIn('already exists',repeat.stderr)
             check_uid('v-ui.service')
+            # Existing fake M1 proxy drafts must survive the actual installer
+            # controller's stopped backup. No apply or network change is made.
+            status, raw = api('/api/proxy/settings')
+            self.assertEqual(status, 200)
+            initial = json.loads(raw)
+            status, raw = api('/api/proxy/profiles', {
+                'format': 'uri', 'candidate_index': 0,
+                'content': 'vless://11111111-1111-4111-8111-111111111111@upstream.example:443'
+                           '?security=tls&type=tcp&sni=upstream.example#Upgrade-fixture'},
+                extra_headers=['If-Match: ' + initial['revision']])
+            self.assertEqual(status, 201, raw)
+            profile = json.loads(raw)
+            settings = {key: value for key, value in profile['snapshot']['settings'].items()
+                        if key != 'local_password_set'}
+            settings.update(local_proxy_enabled=True, relay_enabled=True,
+                            selected_upstream_id=profile['upstream_id'],
+                            local_username='upgrade-fixture', local_password='Fake-upgrade-password!')
+            status, raw = api('/api/proxy/settings', settings, method='PUT',
+                              extra_headers=['If-Match: ' + profile['snapshot']['revision']])
+            self.assertEqual(status, 200, raw)
+            saved_proxy = json.loads(raw)
+            self.assertIsNone(saved_proxy['active'])
+            self.assertTrue(saved_proxy['settings']['local_password_set'])
+            self.assertNotIn(b'Fake-upgrade-password!', raw)
             # Rerunning with --upgrade checks/stages and makes a stopped backup.
             upgraded=subprocess.run(cmd+['--upgrade'],capture_output=True,text=True,timeout=120)
             if gate:
                 gate.installer_receipt('same_bundle_upgrade', upgraded.stdout)
             self.assertEqual(upgraded.returncode,0,(upgraded.stdout+upgraded.stderr)[-15000:])
             self.assertEqual(api('/api/auth/me')[0],200)
+            self.assertEqual(json.loads(api('/api/proxy/settings')[1]), saved_proxy)
             subprocess.run(['sudo','systemctl','restart','v-ui.service'],check=True)
             deadline=time.monotonic()+20
             while time.monotonic()<deadline:

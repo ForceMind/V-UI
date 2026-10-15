@@ -72,8 +72,10 @@ def main():
     args.work_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='archive-bench-', dir=args.work_dir) as folder:
         work = Path(folder); bundle = work / 'fixture.zip'
-        files = {'scripts/deploy.py': b'# synthetic controller\n', 'app/release_tools.py': b'# synthetic api\n',
-                 'deploy/system_launcher.py': b'# synthetic launcher\n'}
+        members = getattr(install_system, 'CONTROLLER_MEMBERS',
+                          ('scripts/deploy.py', 'app/release_tools.py'))
+        files = {name: b'# synthetic offline dependency\n' for name in members}
+        files['deploy/system_launcher.py'] = b'# synthetic launcher\n'
         block = bytes(range(256)) * 4096; checksum = hashlib.sha256()
         for _ in range(args.member_mib): checksum.update(block)
         entries = {name: {'size': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'mode': 0o600}

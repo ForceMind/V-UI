@@ -185,7 +185,8 @@ def trusted_executable(path):
 
 def fixed_files(manager):
     base = {CONFIG, CONTROL / 'launcher.py', CONTROL / 'system_ops.py', WORKER,
-            CONTROL / 'release_tools.py', WRAPPER}
+            CONTROL / 'release_tools.py', CONTROL / 'proxy_store.py',
+            CONTROL / 'upstream_profile.py', WRAPPER}
     if manager == 'systemd':
         return base | {Path('/etc/systemd/system') / name for name in SYSTEMD_UNITS}
     if manager == 'openrc':

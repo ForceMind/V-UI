@@ -20,8 +20,8 @@ class ArchiveStreamingTests(unittest.TestCase):
         self.stack = ExitStack(); self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
         self.payload = self.root / 'source'; self.payload.mkdir(mode=0o700)
-        for name in ('scripts/deploy.py', 'app/release_tools.py', 'deploy/system_launcher.py'):
-            path = self.payload / name; path.parent.mkdir(exist_ok=True)
+        for name in (*installer.CONTROLLER_MEMBERS, 'deploy/system_launcher.py'):
+            path = self.payload / name; path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b'# fixture\n')
         # Larger than one stream buffer, small enough to run in normal unit CI.
         (self.payload / 'large.bin').write_bytes(b'x' * (tools.STREAM_CHUNK * 3 + 17))

@@ -65,7 +65,7 @@ class InstallerTests(unittest.TestCase):
         with self.assertRaises(installer.InstallError):installer.verify_archive(path,sha)
         self.assertFalse((self.root.parent/'outside').exists())
     def test_hash_correct_bundle_must_have_complete_manifest_and_controller(self):
-        files={'scripts/deploy.py':b'# controller','app/release_tools.py':b'# api','deploy/system_launcher.py':b'# launcher'}
+        files={name:b'# verified fixture' for name in (*installer.CONTROLLER_MEMBERS, 'deploy/system_launcher.py')}
         manifest={'schema':1,'kind':'release','release_id':'0.3.1-fixture','platform':'linux-multi-cpython312',
                   'targets':[installer.platform_support.target_key()],'files':{
             name:{'size':len(data),'sha256':hashlib.sha256(data).hexdigest(),'mode':0o600} for name,data in files.items()}}
@@ -110,5 +110,7 @@ class InstallerTests(unittest.TestCase):
         self.assertIn('os.setuid(account.pw_uid)',source)
         self.assertIn("with open('/dev/tty'",source)
         self.assertNotIn('shell=True',source)
+        self.assertEqual(source.count("[sys.executable,'-B','-I','-S',str(controller)"), 4)
+        self.assertNotIn("[sys.executable,'-B',str(controller)", source)
 
 if __name__=='__main__':unittest.main()

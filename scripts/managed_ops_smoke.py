@@ -44,7 +44,9 @@ def _copy_control(payload, control):
     manifest = json.loads((payload / 'MANIFEST.json').read_text())
     sources = {'system_ops.py': 'deploy/system_ops.py',
                'ops_worker.py': 'deploy/ops_worker.py',
-               'release_tools.py': 'app/release_tools.py', 'v-ui': 'deploy/v-ui'}
+               'release_tools.py': 'app/release_tools.py', 'v-ui': 'deploy/v-ui',
+               'proxy_store.py': 'app/services/proxy_store.py',
+               'upstream_profile.py': 'app/services/upstream_profile.py'}
     digests = {}
     for destination, relative in sources.items():
         source = payload / relative

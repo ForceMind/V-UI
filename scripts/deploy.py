@@ -28,7 +28,7 @@ def main():
     launch.add_argument('--bind',default='127.0.0.1');launch.add_argument('--port',type=int,default=8443)
     args=p.parse_args()
     if args.command=='menu':
-        # The installer extracts only this controller and release_tools.py.
+        # The installer extracts only the stdlib offline controller closure.
         # Keep the optional installed-payload consumer out of its bootstrap path.
         from app.ops_menu import run_menu
         raise SystemExit(run_menu(args.root))

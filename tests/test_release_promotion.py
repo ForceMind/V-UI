@@ -164,6 +164,8 @@ class ReleasePromotionTests(unittest.TestCase):
                     archive.writestr('VERSION','0.3.1')
                     for source,_ in (*build_release_kit.SOURCE_ASSETS,('docs/RELEASE_NOTES.md','RELEASE_NOTES.md')):
                         archive.writestr(source,(root/source).read_bytes())
+                    for member in install_ops_control.SOURCE_DEPENDENCIES.values():
+                        archive.writestr(member, (root/member).read_bytes())
             with patch.object(build_release_kit.subprocess,'run',side_effect=archive_source):
                 build_release_kit.build(source,destination,SHA)
             self.assertEqual({path.name for path in destination.iterdir()},KIT_ASSETS)
