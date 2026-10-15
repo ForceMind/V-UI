@@ -57,6 +57,27 @@ def observe_browser_pages(context, errors, console):
     context.on('page', observe)
 
 
+IMPORT_CONTROLS = ('import-format', 'import-file', 'import-content',
+                   'preview-import', 'import-name', 'save-import')
+
+
+def expect_import_fieldset(page, disabled, expect):
+    # Playwright 1.57 roleUtils.ts excludes FIELDSET itself from its native
+    # disabled matcher, but checks disabled-fieldset ancestry on form controls.
+    fieldset = expect(page.locator('#import-fields'))
+    fieldset.to_have_js_property('disabled', disabled)
+    if disabled:
+        fieldset.to_have_attribute('disabled', '')
+    else:
+        fieldset.not_to_have_attribute('disabled', '')
+    for identifier in IMPORT_CONTROLS:
+        control = expect(page.locator('#' + identifier))
+        if disabled:
+            control.to_be_disabled()
+        elif identifier != 'save-import':  # Separately gated by explicit selection.
+            control.to_be_enabled()
+
+
 def outbound(name='Synthetic JSON'):
     return {'protocol': 'vless', 'tag': name,
             'settings': {'vnext': [{'address': 'upstream.example.test', 'port': 443,
@@ -79,6 +100,33 @@ def fixture_snapshot(revision='a' * 64):
 
 
 class ProxyPageStaticTests(unittest.TestCase):
+    def test_import_fieldset_assertions_require_property_attribute_and_controls(self):
+        # Unit-check assertion wiring, not Chromium's disabled implementation.
+        def check(disabled, missing=None):
+            observed = []
+            def expect(selector):
+                def verify(kind, *args):
+                    item = (selector, kind, args)
+                    observed.append(item)
+                    if item == missing:
+                        raise AssertionError('Synthetic fieldset/control regression')
+                return SimpleNamespace(**{
+                    kind: lambda *args, kind=kind: verify(kind, *args)
+                    for kind in ('to_have_js_property', 'to_have_attribute',
+                                 'not_to_have_attribute', 'to_be_disabled', 'to_be_enabled')})
+            expect_import_fieldset(SimpleNamespace(locator=lambda selector: selector), disabled, expect)
+            return observed
+        for disabled in (True, False):
+            expected = [('#import-fields', 'to_have_js_property', ('disabled', disabled)),
+                        ('#import-fields', 'to_have_attribute' if disabled else 'not_to_have_attribute',
+                         ('disabled', ''))]
+            expected += [('#' + identifier, 'to_be_disabled' if disabled else 'to_be_enabled', ())
+                         for identifier in IMPORT_CONTROLS if disabled or identifier != 'save-import']
+            self.assertEqual(check(disabled), expected)
+            for item in expected:
+                with self.subTest(disabled=disabled, assertion=item), self.assertRaises(AssertionError):
+                    check(disabled, missing=item)
+
     def test_all_browser_pages_keep_errors_and_console_in_shared_audit(self):
         class Events:
             def __init__(self):
@@ -300,7 +348,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         page.locator('#import-content').fill(content)
         page.locator('#preview-import').click()
         expect(page.locator('#import-preview')).to_be_visible()
-        expect(page.locator('#import-fields')).to_be_enabled()
+        expect_import_fieldset(page, False, expect)
 
     def save_import(self, index=0, page=None):
         from playwright.sync_api import expect
@@ -481,13 +529,36 @@ rules:
         page.locator('#import-content').fill(URI)
         with page.expect_request('**/api/proxy/import/preview'):
             page.locator('#preview-import').click()
-        expect(page.locator('#import-fields')).to_be_disabled()
+        expect_import_fieldset(page, True, expect)
+        # Native click() honours inherited fieldset disabling. No forced event
+        # dispatch or shortened timeout: repeated activation must not reach the
+        # handler and issue another preview while the first fetch is unresolved.
+        clicks = page.locator('#preview-import').evaluate('''button => {
+            let clicks = 0;
+            const record = () => clicks++;
+            button.addEventListener('click', record);
+            button.click(); button.click();
+            button.removeEventListener('click', record);
+            return clicks;
+        }''')
+        self.assertEqual(clicks, 0)
+        self.assertEqual(len(held), 1)
+        expect(page.locator('#close-import')).to_be_enabled()
         page.locator('#close-import').click()
         expect(page.locator('#import-content')).to_have_value('')
+        expect(page.locator('#import-file')).to_have_value('')
+        expect(page.locator('#import-name')).to_have_value('')
+        expect(page.locator('#save-import')).to_be_disabled()
+        # Even a late native activation after close cannot resubmit cleared data.
+        page.locator('#preview-import').evaluate('button => button.click()')
         self.assertEqual(len(held), 1)
         held[0].fulfill(json={'candidates': [], 'ignored_sections': [], 'notice_codes': []})
         page.unroute('**/api/proxy/import/preview')
         expect(page.locator('#import-dialog')).not_to_be_visible()
+        expect(page.locator('#import-content')).to_have_value('')
+        expect(page.locator('#import-file')).to_have_value('')
+        expect(page.locator('#import-preview')).not_to_be_visible()
+        self.assertEqual(len(held), 1)
         self.import_text()
         page.locator('#close-import').click()
         expect(page.locator('#import-content')).to_have_value('')
