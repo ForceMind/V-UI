@@ -4,6 +4,7 @@ No system service, account, production directory, CA or real core is touched.
 The synthetic runtime implements only the isolated health-check HTTP contract.
 """
 from contextlib import ExitStack
+import ast
 import hashlib
 import io
 import json
@@ -69,6 +70,7 @@ class MaintenanceWorkerTests(unittest.TestCase):
         self.control.mkdir(mode=0o700)
         shutil.copyfile(REPO / 'deploy/ops_worker.py', self.control / 'ops_worker.py')
         shutil.copyfile(REPO / 'app/release_tools.py', self.control / 'release_tools.py')
+        shutil.copyfile(REPO / 'app/data_owner.py', self.control / 'data_owner.py')
         for name in ('proxy_store.py', 'upstream_profile.py'):
             shutil.copyfile(REPO / 'app/services' / name, self.control / name)
 
@@ -351,6 +353,61 @@ class MaintenanceWorkerTests(unittest.TestCase):
                 self.assert_writers(self.data, False)
                 if displaced: self.assert_writers(displaced[0], False)
                 session.close()
+
+    def test_installed_smoke_audits_real_recovery_siblings_after_worker_release(self):
+        from scripts.managed_ops_smoke import _audit_released_writer_leases, _write_drivers
+        from scripts.ops_menu_smoke import _lease_busy
+        archive = self.root / 'original-backup.zip'
+        checksum = tools.backup(self.root, archive)
+        restore = self.session('restore', archive=archive, sha256=checksum)
+        restore.execute(); restore.release_writers(); restore.close()
+        retained = list((self.root / 'recovery').glob('before-*'))
+        self.assertEqual(len(retained), 1)
+        pending_old = self.recovery_fixture()
+        driver = _write_drivers(self.control, self.root, Path(sys.executable), self.config)
+        functions = [node for node in ast.parse(driver.read_text()).body
+                     if isinstance(node, ast.FunctionDef) and node.name in ('busy', 'stable_busy', 'locks')]
+        self.assertEqual(len(functions), 3)
+        namespace = {'ROOT': self.root, 'Path': Path, 'os': os,
+                     'fcntl': __import__('fcntl'), 'stat': __import__('stat')}
+        exec(compile(ast.Module(body=functions, type_ignores=[]),
+                     '<actual installed fixture lease assertions>', 'exec'), namespace)
+        process = self.start_worker()
+        self.request(process, 'recover-restore')
+        self.send(process, {'command': 'proceed'})
+        self.assertEqual(self.event(process), {'event': 'done', 'ok': True})
+        namespace['locks'](True, True)
+        displaced = list((self.root / 'recovery').glob('interrupted-*'))
+        self.assertEqual(len(displaced), 1)
+        stable = (self.root / '.data.owner.lease',
+                  pending_old.with_name('.' + pending_old.name + '.owner.lease'))
+        for path in stable:
+            self.assertTrue(_lease_busy(path), 'Actual worker must retain both stable locks through done')
+            self.assertTrue(namespace['stable_busy'](path))
+        with self.assertRaises(AssertionError):
+            _audit_released_writer_leases(self.root, retained[0], displaced[0], pending_old)
+        self.send(process, {'command': 'release_writers'})
+        self.assertEqual(self.event(process), {'event': 'writers_released'})
+        namespace['locks'](True, False)
+        for path in stable:
+            self.assertFalse(_lease_busy(path))
+            self.assertFalse(namespace['stable_busy'](path))
+        self.assertEqual(_audit_released_writer_leases(
+            self.root, retained[0], displaced[0], pending_old),
+            {'generations': 3, 'component_locks': 9, 'stable_siblings': 2})
+        # Retain the old audit's exact RED against real recovery output. Merely
+        # filtering non-directories would hide unknown entries or leaked leases.
+        with self.assertRaisesRegex(AssertionError, 'Expected real instance lease'):
+            for generation in [self.data, *sorted((self.root / 'recovery').iterdir())]:
+                for name in LOCKS:
+                    _lease_busy(generation / name)
+        self.send(process, {'command': 'finish'})
+        self.assertEqual(process.wait(timeout=5), 0)
+        self.assertFalse(_lease_busy(self.root / '.operation.lock'))
+        self.assertFalse(_lease_busy(self.root / '.panel.lease'))
+        self.assertEqual(_audit_released_writer_leases(
+            self.root, retained[0], displaced[0], pending_old),
+            {'generations': 3, 'component_locks': 9, 'stable_siblings': 2})
 
     def test_recover_worker_missing_data_then_holds_operation_through_finish(self):
         self.recovery_fixture(current_present=False)

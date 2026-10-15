@@ -191,37 +191,38 @@ class ControlInstallTests(unittest.TestCase):
         self.assert_not_published()
 
     def test_source_dependency_missing_link_oversize_or_duplicate_refuses_before_writes(self):
-        for failure in ('missing', 'link', 'oversize', 'duplicate'):
-            with self.subTest(failure=failure):
-                self.write_kit()
-                path = self.kit / 'vui-source.zip'
-                with zipfile.ZipFile(path) as source:
-                    members = {name: source.read(name) for name in source.namelist()}
-                selected = installer.SOURCE_DEPENDENCIES['proxy_store.py']
-                raw = members.pop(selected)
-                with zipfile.ZipFile(path, 'w') as source:
-                    source.comment = b'a' * 40
-                    for name, content in members.items():
-                        source.writestr(name, content)
-                    if failure == 'link':
-                        entry = zipfile.ZipInfo(selected)
-                        entry.create_system = 3
-                        entry.external_attr = (stat.S_IFLNK | 0o777) << 16
-                        source.writestr(entry, b'/mutable/payload')
-                    elif failure == 'oversize':
-                        source.writestr(selected, b'#' * (installer.MAX_CODE + 1))
-                    elif failure == 'duplicate':
-                        import warnings
-                        with warnings.catch_warnings():
-                            warnings.simplefilter('ignore', UserWarning)
-                            source.writestr(selected, raw)
-                            source.writestr(selected, raw)
-                self.rehash()
-                with self.assertRaises(installer.InstallError):
-                    self.install()
-                self.assert_not_published()
-                self.assertFalse(self.lock.exists())
-                self.run.assert_not_called()
+        for dependency in installer.SOURCE_DEPENDENCIES:
+            for failure in ('missing', 'link', 'oversize', 'duplicate'):
+                with self.subTest(dependency=dependency, failure=failure):
+                    self.write_kit()
+                    path = self.kit / 'vui-source.zip'
+                    with zipfile.ZipFile(path) as source:
+                        members = {name: source.read(name) for name in source.namelist()}
+                    selected = installer.SOURCE_DEPENDENCIES[dependency]
+                    raw = members.pop(selected)
+                    with zipfile.ZipFile(path, 'w') as source:
+                        source.comment = b'a' * 40
+                        for name, content in members.items():
+                            source.writestr(name, content)
+                        if failure == 'link':
+                            entry = zipfile.ZipInfo(selected)
+                            entry.create_system = 3
+                            entry.external_attr = (stat.S_IFLNK | 0o777) << 16
+                            source.writestr(entry, b'/mutable/payload')
+                        elif failure == 'oversize':
+                            source.writestr(selected, b'#' * (installer.MAX_CODE + 1))
+                        elif failure == 'duplicate':
+                            import warnings
+                            with warnings.catch_warnings():
+                                warnings.simplefilter('ignore', UserWarning)
+                                source.writestr(selected, raw)
+                                source.writestr(selected, raw)
+                    self.rehash()
+                    with self.assertRaises(installer.InstallError):
+                        self.install()
+                    self.assert_not_published()
+                    self.assertFalse(self.lock.exists())
+                    self.run.assert_not_called()
 
     def test_internal_source_dependencies_do_not_expand_public_kit_assets(self):
         verified, _ = installer.verify_kit(self.kit, self.sha)
@@ -443,6 +444,28 @@ class ControlInstallTests(unittest.TestCase):
         upgraded = self.install(refresh=True)
         self.assertEqual(set(upgraded['files']) - set(old['files']),
                          {str(self.control / name) for name in installer.SOURCE_DEPENDENCIES})
+
+    def test_explicit_refresh_migrates_intact_m1_receipt_with_only_owner_helper_missing(self):
+        old = self.install()
+        owner = self.control / 'data_owner.py'
+        old['files'].pop(str(owner))
+        owner.unlink()
+        installer.RECEIPT.write_text(json.dumps(old))
+        with self.assertRaises(installer.InstallError): self.install()
+        owner.write_bytes(b'unreceipted helper')
+        owner.chmod(0o644)
+        with self.assertRaisesRegex(installer.InstallError, 'Unreceipted dependency'):
+            self.install(refresh=True)
+        owner.unlink()
+        dependency = self.control / 'proxy_store.py'
+        raw = dependency.read_bytes()
+        dependency.write_bytes(raw + b'\n# changed M1 dependency')
+        with self.assertRaisesRegex(installer.InstallError, 'control code drift'):
+            self.install(refresh=True)
+        dependency.write_bytes(raw)
+        upgraded = self.install(refresh=True)
+        self.assertEqual(set(upgraded['files']) - set(old['files']), {str(owner)})
+        self.assertEqual(owner.read_bytes(), (REPO / 'app/data_owner.py').read_bytes())
 
     def test_partial_publish_fails_closed_without_usable_wrapper_or_receipt(self):
         original_replace = os.replace

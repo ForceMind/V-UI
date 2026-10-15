@@ -58,6 +58,7 @@ SOURCE_MEMBERS = {
 # Internal controller dependencies are authenticated by the complete source ZIP
 # digest and commit binding above; they are not additional top-level kit assets.
 SOURCE_DEPENDENCIES = {
+    'data_owner.py': 'app/data_owner.py',
     'proxy_store.py': 'app/services/proxy_store.py',
     'upstream_profile.py': 'app/services/upstream_profile.py',
 }
@@ -383,11 +384,14 @@ def validate_existing(hashes, interpreter, manager, refresh, verified):
     receipt = load_json(read_file(RECEIPT, root=True, mode=0o644, limit=MAX_JSON)[0])
     expected = set(hashes) | {str(path) for path in paths}
     dependencies = {str(CONTROL / name) for name in SOURCE_DEPENDENCIES}
-    # A prior controller had no proxy dependencies. Only explicit refresh may
-    # migrate that exact old receipt, after checking every old control digest.
-    legacy = (refresh and isinstance(receipt, dict)
-              and isinstance(receipt.get('files'), dict)
-              and set(receipt['files']) == expected - dependencies)
+    # Explicit refresh may migrate either exact earlier closure: the original
+    # controller without proxy dependencies, or M1 without the data-owner helper.
+    # Every previously receipted byte must still match; no extras are adopted.
+    missing = (expected - set(receipt['files']) if isinstance(receipt, dict)
+               and isinstance(receipt.get('files'), dict) else set())
+    legacy = (refresh and isinstance(receipt, dict) and isinstance(receipt.get('files'), dict)
+              and missing in (dependencies, {str(CONTROL / 'data_owner.py')})
+              and set(receipt['files']) == expected - missing)
     if (not isinstance(receipt, dict) or set(receipt) != RECEIPT_KEYS
             or type(receipt.get('schema')) is not int or receipt['schema'] != 1
             or receipt.get('service_manager') != manager
@@ -403,13 +407,13 @@ def validate_existing(hashes, interpreter, manager, refresh, verified):
         raise InstallError('Existing control receipt is unrelated or incompatible')
     actual = dict(hashes)
     for path, (_, mode) in paths.items():
-        if legacy and str(path) in dependencies:
+        if legacy and str(path) in missing:
             if path.exists() or path.is_symlink():
                 raise InstallError('Unreceipted dependency already exists; inspect manually')
             continue
         actual[str(path)] = read_file(path, root=True, mode=mode)[1]
     if any(receipt['files'][str(path)] != actual[str(path)] for path in paths
-           if not legacy or str(path) not in dependencies):
+           if not legacy or str(path) not in missing):
         raise InstallError('Existing control code drift; refusing to re-endorse changed helpers or wrapper')
     if not refresh:
         if receipt['files'] != actual or any(receipt[key] != value for key, value in interpreter.items()):

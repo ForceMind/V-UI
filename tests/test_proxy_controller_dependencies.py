@@ -55,7 +55,7 @@ class IsolatedProxyControllerTests(unittest.TestCase):
         # Neither cwd nor PYTHONPATH may provide trusted controller dependencies.
         self.hostile = self.base / 'untrusted'
         (self.hostile / 'app/services').mkdir(parents=True)
-        for name in ('app/__init__.py', 'app/services/__init__.py', 'app/services/proxy_store.py'):
+        for name in ('app/__init__.py', 'app/data_owner.py', 'app/services/__init__.py', 'app/services/proxy_store.py'):
             (self.hostile / name).write_text('raise RuntimeError("MUTABLE_PAYLOAD_WAS_IMPORTED")')
         self.env = {'PATH': '/usr/bin:/bin', 'HOME': str(self.hostile),
                     'PYTHONPATH': str(self.hostile), 'LANG': 'C.UTF-8'}
@@ -117,7 +117,7 @@ class IsolatedProxyControllerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assert_preserved()
 
-    def test_pre_fix_two_file_controller_reproduces_missing_app_services(self):
+    def test_pre_fix_two_file_controller_refuses_missing_stdlib_closure(self):
         for name in ('scripts/deploy.py', 'app/release_tools.py'):
             target = self.control / name
             target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -125,7 +125,7 @@ class IsolatedProxyControllerTests(unittest.TestCase):
         backup = self.base / 'should-not-exist.zip'
         result = self.run_controller('backup', backup)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("No module named 'app.services'", result.stderr)
+        self.assertIn("No module named 'app.data_owner'", result.stderr)
         self.assertFalse(backup.exists())
         self.assertEqual(self.store.read_snapshot(), self.snapshot)
 
@@ -143,9 +143,10 @@ class IsolatedProxyControllerTests(unittest.TestCase):
 
     def test_managed_worker_missing_sibling_refuses_without_loading_mutable_fallback(self):
         sources = {'ops_worker.py': 'deploy/ops_worker.py', 'release_tools.py': 'app/release_tools.py',
+                   'data_owner.py': 'app/data_owner.py',
                    'proxy_store.py': 'app/services/proxy_store.py',
                    'upstream_profile.py': 'app/services/upstream_profile.py'}
-        for missing in ('proxy_store.py', 'upstream_profile.py'):
+        for missing in ('data_owner.py', 'proxy_store.py', 'upstream_profile.py'):
             with self.subTest(missing=missing):
                 for name, source in sources.items():
                     target = self.control / name
@@ -164,6 +165,7 @@ class IsolatedProxyControllerTests(unittest.TestCase):
 
     def test_managed_sibling_loader_backs_up_and_restores_without_payload_import(self):
         for name, source in {'ops_worker.py': 'deploy/ops_worker.py', 'release_tools.py': 'app/release_tools.py',
+                             'data_owner.py': 'app/data_owner.py',
                              'proxy_store.py': 'app/services/proxy_store.py',
                              'upstream_profile.py': 'app/services/upstream_profile.py'}.items():
             shutil.copyfile(REPO / source, self.control / name)
@@ -172,7 +174,7 @@ from pathlib import Path
 worker=runpy.run_path(sys.argv[1]); api=worker['_load_release_tools']()
 root=Path(sys.argv[2]); backup=Path(sys.argv[3])
 checksum=api.backup(root,backup); api.restore(root,backup,checksum)
-for name in ('app.services.proxy_store','app.services.upstream_profile'):
+for name in ('app.data_owner','app.services.proxy_store','app.services.upstream_profile'):
     assert Path(sys.modules[name].__file__).parent==Path(sys.argv[1]).parent
 assert sys.modules['app'].__path__==[]
 assert sys.modules['app.services'].__path__==[]

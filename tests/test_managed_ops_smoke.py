@@ -4,19 +4,23 @@ These do not replace the real target bundle runs in the portable/deployment
 gates, and do not claim a root installation or real service-manager acceptance.
 """
 import ast
+from contextlib import contextmanager
+import fcntl
 import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from scripts.managed_ops_smoke import (_audit_trace, _copy_control, _database_values,
+from scripts.managed_ops_smoke import (_audit_released_writer_leases, _audit_trace,
+    _copy_control, _database_values,
     _seed_fake_data, _write_drivers, FIXTURE_VERSION, HARNESS_VERSION, WRAPPER_BYTES,
-    SUCCESS_ACTIONS)
+    SUCCESS_ACTIONS, WRITER_LOCKS)
 
 
 def evidence():
@@ -42,6 +46,265 @@ def evidence():
         event('exit_zero', action=action)
         event('closed', action=action)
     return result
+
+
+class ManagedReleasedLeaseInventoryTests(unittest.TestCase):
+    """Private fake generations; real filesystem metadata and flock checks."""
+
+    EXPECTED_COUNTS = {'generations': 3, 'component_locks': 9, 'stable_siblings': 2}
+
+    @contextmanager
+    def layout(self):
+        with tempfile.TemporaryDirectory(prefix='vui-managed-leases-unit-') as temporary:
+            root = Path(temporary) / 'instance'
+            root.mkdir(mode=0o700)
+            recovery = root / 'recovery'; recovery.mkdir(mode=0o700)
+            retained = recovery / ('before-' + '1' * 32)
+            interrupted = recovery / ('interrupted-' + '2' * 32)
+            pending_old = recovery / ('before-' + '3' * 32)
+            for generation in (root / 'data', retained, interrupted):
+                generation.mkdir(mode=0o700)
+                for relative in WRITER_LOCKS:
+                    lock = generation / relative
+                    lock.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                    lock.touch(mode=0o600)
+            for lease in self.stable_leases(root, pending_old):
+                lease.touch(mode=0o600)
+            yield root, retained, interrupted, pending_old
+
+    @staticmethod
+    def stable_leases(root, pending_old):
+        return root / '.data.owner.lease', pending_old.with_name('.' + pending_old.name + '.owner.lease')
+
+    @staticmethod
+    def generations(root, retained, interrupted, pending_old):
+        return root / 'data', retained, interrupted
+
+    def test_exact_inventory_preserves_consumed_generation_stable_sibling(self):
+        with self.layout() as layout:
+            root, retained, interrupted, pending_old = layout
+            leases = self.stable_leases(root, pending_old)
+            before = {path: path.stat() for path in leases}
+            self.assertFalse(pending_old.exists())
+            self.assertEqual(set((root / 'recovery').iterdir()), {retained, interrupted, leases[1]})
+            for _ in range(2):
+                self.assertEqual(_audit_released_writer_leases(*layout), self.EXPECTED_COUNTS)
+            self.assertEqual({path: path.stat() for path in leases}, before)
+            self.assertFalse(pending_old.exists(), 'Audit must not recreate the consumed generation')
+
+    def test_every_expected_generation_is_mandatory(self):
+        for index in range(3):
+            with self.subTest(generation=index), self.layout() as layout:
+                generation = self.generations(*layout)[index]
+                shutil.rmtree(generation)
+                with self.assertRaises(AssertionError):
+                    _audit_released_writer_leases(*layout)
+                self.assertFalse(generation.exists(), 'Missing generations must not be repaired or skipped')
+
+    def test_every_component_lock_is_mandatory_in_every_generation(self):
+        for index in range(3):
+            for relative in WRITER_LOCKS:
+                with self.subTest(generation=index, lock=relative), self.layout() as layout:
+                    lock = self.generations(*layout)[index] / relative
+                    lock.unlink()
+                    with self.assertRaises(AssertionError):
+                        _audit_released_writer_leases(*layout)
+                    self.assertFalse(lock.exists(), 'Audit must not create a missing writer lock')
+
+    def test_every_writer_ancestor_directory_is_mandatory(self):
+        for index in range(3):
+            for relative in ('runtime', 'runtime/xray', 'runtime/sing-box', 'certificates'):
+                with self.subTest(generation=index, directory=relative), self.layout() as layout:
+                    directory = self.generations(*layout)[index] / relative
+                    shutil.rmtree(directory)
+                    with self.assertRaises(AssertionError):
+                        _audit_released_writer_leases(*layout)
+                    self.assertFalse(directory.exists())
+
+    def test_both_stable_siblings_are_mandatory(self):
+        for index in range(2):
+            with self.subTest(lease=index), self.layout() as layout:
+                root, _, _, pending_old = layout
+                lease = self.stable_leases(root, pending_old)[index]
+                lease.unlink()
+                with self.assertRaises(AssertionError):
+                    _audit_released_writer_leases(*layout)
+                self.assertFalse(lease.exists(), 'Audit must not create a missing stable lease')
+
+    def test_every_held_component_lock_is_rejected(self):
+        for index in range(3):
+            for relative in WRITER_LOCKS:
+                for kind in (fcntl.LOCK_EX, fcntl.LOCK_SH):
+                    with self.subTest(generation=index, lock=relative, kind=kind), self.layout() as layout:
+                        lock = self.generations(*layout)[index] / relative
+                        with lock.open('r+b') as held:
+                            fcntl.flock(held, kind | fcntl.LOCK_NB)
+                            with self.assertRaises(AssertionError):
+                                _audit_released_writer_leases(*layout)
+                        self.assertEqual(_audit_released_writer_leases(*layout), self.EXPECTED_COUNTS)
+
+    def test_both_held_stable_siblings_are_rejected(self):
+        for index in range(2):
+            for kind in (fcntl.LOCK_EX, fcntl.LOCK_SH):
+                with self.subTest(lease=index, kind=kind), self.layout() as layout:
+                    root, _, _, pending_old = layout
+                    lease = self.stable_leases(root, pending_old)[index]
+                    with lease.open('r+b') as held:
+                        fcntl.flock(held, kind | fcntl.LOCK_NB)
+                        with self.assertRaises(AssertionError):
+                            _audit_released_writer_leases(*layout)
+                    self.assertEqual(_audit_released_writer_leases(*layout), self.EXPECTED_COUNTS)
+
+    def test_unknown_recovery_entries_are_not_filtered_out(self):
+        entries = [('unexplained-file', 'file'), ('unexplained-directory', 'directory'),
+            ('before-' + '4' * 32, 'directory'), ('interrupted-' + '4' * 32, 'directory'),
+            ('.before-' + '4' * 32 + '.owner.lease', 'file'),
+            ('.before-' + '1' * 32 + '.owner.lease', 'file'),
+            ('.interrupted-' + '2' * 32 + '.owner.lease', 'file'),
+            ('unexplained-dangling-link', 'symlink')]
+        for name, kind in entries:
+            with self.subTest(name=name, kind=kind), self.layout() as layout:
+                root = layout[0]
+                extra = root / 'recovery' / name
+                if kind == 'directory': extra.mkdir(mode=0o700)
+                elif kind == 'symlink': extra.symlink_to(root.parent / 'missing-target')
+                else: extra.touch(mode=0o600)
+                with self.assertRaises(AssertionError):
+                    _audit_released_writer_leases(*layout)
+
+    def test_symlink_generations_are_rejected_even_when_the_target_is_complete(self):
+        for index in range(3):
+            for dangling in (False, True):
+                with self.subTest(generation=index, dangling=dangling), self.layout() as layout:
+                    generation = self.generations(*layout)[index]
+                    target = layout[0].parent / 'redirected-generation'
+                    if dangling: shutil.rmtree(generation)
+                    else: generation.rename(target)
+                    generation.symlink_to(target, target_is_directory=True)
+                    with self.assertRaises(AssertionError):
+                        _audit_released_writer_leases(*layout)
+
+    def test_symlink_component_locks_are_rejected(self):
+        for index in range(3):
+            for relative in WRITER_LOCKS:
+                for dangling in (False, True):
+                    with self.subTest(generation=index, lock=relative, dangling=dangling), self.layout() as layout:
+                        lock = self.generations(*layout)[index] / relative
+                        target = layout[0].parent / 'redirected-lock'
+                        if dangling: lock.unlink()
+                        else: lock.rename(target)
+                        lock.symlink_to(target)
+                        with self.assertRaises(AssertionError):
+                            _audit_released_writer_leases(*layout)
+
+    def test_symlink_writer_ancestor_directories_are_rejected(self):
+        for index in range(3):
+            for relative in ('runtime', 'runtime/xray', 'runtime/sing-box', 'certificates'):
+                with self.subTest(generation=index, directory=relative), self.layout() as layout:
+                    directory = self.generations(*layout)[index] / relative
+                    target = layout[0].parent / 'redirected-writer-directory'
+                    directory.rename(target)
+                    directory.symlink_to(target, target_is_directory=True)
+                    with self.assertRaises(AssertionError):
+                        _audit_released_writer_leases(*layout)
+
+    def test_symlink_stable_siblings_are_rejected(self):
+        for index in range(2):
+            for dangling in (False, True):
+                with self.subTest(lease=index, dangling=dangling), self.layout() as layout:
+                    root, _, _, pending_old = layout
+                    lease = self.stable_leases(root, pending_old)[index]
+                    target = root.parent / 'redirected-stable-lease'
+                    if dangling: lease.unlink()
+                    else: lease.rename(target)
+                    lease.symlink_to(target)
+                    with self.assertRaises(AssertionError):
+                        _audit_released_writer_leases(*layout)
+
+    def test_non_regular_component_locks_are_rejected_without_opening_them(self):
+        for index in range(3):
+            for relative in WRITER_LOCKS:
+                for kind in ('directory', 'fifo'):
+                    with self.subTest(generation=index, lock=relative, kind=kind), self.layout() as layout:
+                        lock = self.generations(*layout)[index] / relative
+                        lock.unlink()
+                        if kind == 'directory': lock.mkdir(mode=0o700)
+                        else: os.mkfifo(lock, mode=0o600)
+                        with self.assertRaises(AssertionError):
+                            _audit_released_writer_leases(*layout)
+
+    def test_non_regular_stable_siblings_are_rejected_without_opening_them(self):
+        for index in range(2):
+            for kind in ('directory', 'fifo'):
+                with self.subTest(lease=index, kind=kind), self.layout() as layout:
+                    root, _, _, pending_old = layout
+                    lease = self.stable_leases(root, pending_old)[index]
+                    lease.unlink()
+                    if kind == 'directory': lease.mkdir(mode=0o700)
+                    else: os.mkfifo(lease, mode=0o600)
+                    with self.assertRaises(AssertionError):
+                        _audit_released_writer_leases(*layout)
+
+    def test_foreign_owned_stable_siblings_are_rejected(self):
+        actual_lstat = Path.lstat
+        for index in range(2):
+            with self.subTest(lease=index), self.layout() as layout:
+                root, _, _, pending_old = layout
+                lease = self.stable_leases(root, pending_old)[index]
+                def foreign_owner(path):
+                    info = actual_lstat(path)
+                    if path == lease:
+                        values = list(info); values[4] = info.st_uid + 1001
+                        return os.stat_result(values)
+                    return info
+                with patch.object(Path, 'lstat', autospec=True, side_effect=foreign_owner):
+                    with self.assertRaises(AssertionError):
+                        _audit_released_writer_leases(*layout)
+
+    def test_unsafe_stable_sibling_modes_are_rejected_without_repair(self):
+        for index in range(2):
+            for mode in (0o644, 0o660, 0o400, 0o700, 0o1600):
+                with self.subTest(lease=index, mode=oct(mode)), self.layout() as layout:
+                    root, _, _, pending_old = layout
+                    lease = self.stable_leases(root, pending_old)[index]
+                    lease.chmod(mode)
+                    with self.assertRaises(AssertionError):
+                        _audit_released_writer_leases(*layout)
+                    self.assertEqual(lease.stat().st_mode & 0o7777, mode)
+
+    def test_nonempty_stable_siblings_are_rejected_without_truncation(self):
+        for index in range(2):
+            with self.subTest(lease=index), self.layout() as layout:
+                root, _, _, pending_old = layout
+                lease = self.stable_leases(root, pending_old)[index]
+                lease.write_bytes(b'not a stable lease\n')
+                with self.assertRaises(AssertionError):
+                    _audit_released_writer_leases(*layout)
+                self.assertEqual(lease.read_bytes(), b'not a stable lease\n')
+
+    def test_hardlinked_stable_siblings_are_rejected(self):
+        for index in range(2):
+            with self.subTest(lease=index), self.layout() as layout:
+                root, _, _, pending_old = layout
+                lease = self.stable_leases(root, pending_old)[index]
+                alias = root.parent / 'extra-stable-link'
+                os.link(lease, alias)
+                with self.assertRaises(AssertionError):
+                    _audit_released_writer_leases(*layout)
+                self.assertEqual(lease.stat().st_nlink, 2)
+                self.assertEqual(lease.stat().st_ino, alias.stat().st_ino)
+
+    def test_consumed_predecessor_and_restore_journal_must_really_be_absent(self):
+        for name in ('pending_old', 'journal'):
+            for kind in ('file', 'directory', 'dangling-symlink'):
+                with self.subTest(path=name, kind=kind), self.layout() as layout:
+                    root, _, _, pending_old = layout
+                    unexpected = pending_old if name == 'pending_old' else root / 'RESTORE_PENDING.json'
+                    if kind == 'directory': unexpected.mkdir(mode=0o700)
+                    elif kind == 'dangling-symlink': unexpected.symlink_to(root.parent / 'missing-target')
+                    else: unexpected.write_text('{}')
+                    with self.assertRaises(AssertionError):
+                        _audit_released_writer_leases(*layout)
 
 
 class ManagedConsumerFixtureTests(unittest.TestCase):
@@ -121,7 +384,7 @@ class ManagedConsumerFixtureTests(unittest.TestCase):
             payload.mkdir(); control.mkdir(); (payload / 'app/services').mkdir(parents=True); (payload / 'deploy').mkdir()
             files = {}
             for name in ('deploy/system_ops.py', 'deploy/ops_worker.py', 'app/release_tools.py', 'deploy/v-ui',
-                         'app/services/proxy_store.py', 'app/services/upstream_profile.py'):
+                         'app/data_owner.py', 'app/services/proxy_store.py', 'app/services/upstream_profile.py'):
                 raw = WRAPPER_BYTES if name.endswith('/v-ui') else b'# unit fixture, not product code\n'
                 (payload / name).write_bytes(raw)
                 files[name] = {'size': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}

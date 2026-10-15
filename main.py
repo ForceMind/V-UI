@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.staticfiles import StaticFiles
 from app.api import auth, certificates, cores, files, inbounds, proxy, proxy_diagnostics, proxy_exports, routing, security, singbox, subscription, subscriptions, system, xray
+from app.data_owner import data_owner
 from app.models.database import DB_PATH, init_db
 from app.middleware.auth import AdminAuthMiddleware, configured_origin
 from app.services.core_manager import core_manager
@@ -50,19 +51,36 @@ async def validation_error(request: Request,exc: RequestValidationError):
 
 @app.on_event('startup')
 async def startup_event():
-    configured_origin()
-    install_log_redaction()
-    init_db()
-    core_manager.recover_all()
-    if os.getenv('VUI_CERTIFICATES_ENABLED') == '1':
-        certificates.get_manager().start()
-    if os.name=='posix' and DB_PATH.is_file(): DB_PATH.chmod(0o600)
+    owner = data_owner(DB_PATH.parent)
+    owner.__enter__()
+    app.state.data_owner = owner
+    try:
+        configured_origin()
+        install_log_redaction()
+        init_db()
+        core_manager.recover_all()
+        if os.getenv('VUI_CERTIFICATES_ENABLED') == '1':
+            certificates.get_manager().start()
+        if os.name=='posix' and DB_PATH.is_file(): DB_PATH.chmod(0o600)
+    except BaseException:
+        await shutdown_event()
+        raise
 
 @app.on_event('shutdown')
 async def shutdown_event():
-    proxy_diagnostics.close_diagnostics_if_created()
-    certificates.get_manager().stop()
-    core_manager.stop_all()
+    try:
+        proxy_diagnostics.close_diagnostics_if_created()
+    finally:
+        try:
+            certificates.get_manager().stop()
+        finally:
+            try:
+                core_manager.stop_all()
+            finally:
+                owner = getattr(app.state, 'data_owner', None)
+                app.state.data_owner = None
+                if owner is not None:
+                    owner.__exit__(None, None, None)
 
 def get_web_path() -> str:
     base=sys._MEIPASS if getattr(sys,'frozen',False) else os.path.dirname(os.path.abspath(__file__))

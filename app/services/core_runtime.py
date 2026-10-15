@@ -20,6 +20,8 @@ import uuid
 
 import psutil
 
+from app.data_owner import DataOwnerError, data_owner
+
 VERSIONS = {"xray": "26.3.27", "sing-box": "1.14.2"}
 
 
@@ -233,6 +235,7 @@ class CoreRuntime:
         self.process: subprocess.Popen | None = None
         self.lock = threading.RLock()
         self.lease = None
+        self._data_owner = None
         self._root_fd = None
         self._config_fd = None
         self.last_error = None
@@ -264,6 +267,25 @@ class CoreRuntime:
                 os.close(directory)
 
     def _claim(self):
+        owner = None
+        try:
+            if (self._data_owner is None and self.root.parent.name == "runtime"
+                    and self.root.name == self.name):
+                candidate = data_owner(self.root.parent.parent)
+                candidate.__enter__()
+                owner = candidate
+            self._claim_core()
+        except BaseException as exc:
+            if owner is not None:
+                owner.__exit__(None, None, None)
+            if isinstance(exc, DataOwnerError):
+                raise CoreError("Data is in use or unsafe; core ownership refused") from None
+            raise
+        else:
+            if owner is not None:
+                self._data_owner = owner
+
+    def _claim_core(self):
         with self._directory(create=True) as directory:
             if self.lease is not None:
                 return
@@ -608,6 +630,9 @@ class CoreRuntime:
             if self._root_fd is not None:
                 os.close(self._root_fd)
                 self._root_fd = None
+            owner, self._data_owner = self._data_owner, None
+            if owner is not None:
+                owner.__exit__(None, None, None)
 
     def status(self) -> dict:
         try:

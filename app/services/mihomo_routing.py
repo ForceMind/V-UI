@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from app.data_owner import data_owner
+
 DATA_DIR = Path(os.getenv("VUI_DATA_DIR", "data"))
-DATA_DIR.mkdir(parents=True, exist_ok=True)
 ROUTING_FILE = DATA_DIR / "mihomo-routing.json"
 
 DIRECT_DNS = ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
@@ -359,10 +360,12 @@ def load_routing() -> dict[str, Any]:
 
 def save_routing(payload: dict[str, Any]) -> dict[str, Any]:
     routing = normalize_routing(payload)
-    temp = ROUTING_FILE.with_suffix(".json.tmp")
-    with temp.open("w", encoding="utf-8") as handle:
-        json.dump(routing, handle, ensure_ascii=False, indent=2)
-    temp.replace(ROUTING_FILE)
+    with data_owner(ROUTING_FILE.parent):
+        ROUTING_FILE.parent.mkdir(mode=0o700, exist_ok=True)
+        temp = ROUTING_FILE.with_suffix(".json.tmp")
+        with temp.open("w", encoding="utf-8") as handle:
+            json.dump(routing, handle, ensure_ascii=False, indent=2)
+        temp.replace(ROUTING_FILE)
     return routing
 
 

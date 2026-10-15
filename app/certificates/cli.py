@@ -59,13 +59,13 @@ def main():
     p.add_argument('--domain',required=True);p.add_argument('--email',required=True)
     p.add_argument('--accept-terms',action='store_true',required=True)
     args=p.parse_args()
-    from app.release_tools import private_root,stopped,supported_environment
+    from app.release_tools import private_root,writer_operation,supported_environment
     supported_environment();os.umask(0o077);root=private_root(args.root)
     os.environ['VUI_DATA_DIR']=str(root/'data')
     # The manager/database imports happen after locating the actual data directory.
     from app.certificates.manager import CertificateManager
     from app.models.database import init_db
-    with stopped(root):
+    with writer_operation(root):
         init_db();manager=CertificateManager(root/'data'/'certificates')
         if args.command=='bootstrap':
             result=bootstrap_panel(manager,args.domain,args.email,accept_terms=args.accept_terms)

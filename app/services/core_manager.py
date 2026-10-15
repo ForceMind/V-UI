@@ -10,7 +10,6 @@ from app.services.core_runtime import CoreRuntime, CoreError, revision
 
 DATA_DIR = Path(os.getenv("VUI_DATA_DIR", "data"))
 BIN_DIR = Path(os.getenv("VUI_BIN_DIR", "bin"))
-DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _runtime_mapping(value: dict | None) -> dict:

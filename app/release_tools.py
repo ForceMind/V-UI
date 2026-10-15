@@ -381,9 +381,42 @@ def lease(path: Path):
         finally: fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 @contextmanager
+def _offline_writers(data: Path):
+    """Stable whole-data exclusion plus leases used by older source workers."""
+    from app.data_owner import data_owner, DataOwnerError
+    try:
+        with ExitStack() as stack:
+            stack.enter_context(data_owner(data, exclusive=True))
+            if os.path.lexists(data):
+                with _maintenance_directory(data): pass
+                for relative, name in (('runtime/xray', 'owner.lock'),
+                                       ('runtime/sing-box', 'owner.lock'),
+                                       ('certificates', '.worker.lock')):
+                    directory = data / relative
+                    if os.path.lexists(directory):
+                        stack.enter_context(_maintenance_lease(directory, name))
+            yield
+    except DataOwnerError:
+        raise ReleaseError('A data writer is active or its ownership is unsafe; stop it first') from None
+
+
+@contextmanager
+def writer_operation(root: Path):
+    """Stopped in-process writer; let it claim its own component worker locks."""
+    from app.data_owner import data_owner, DataOwnerError
+    try:
+        with lease(root / '.operation.lock'), lease(root / '.panel.lease'), data_owner(root / 'data', exclusive=True):
+            if os.path.lexists(root / 'RESTORE_PENDING.json'):
+                raise ReleaseError('An interrupted restore requires recover-restore before writes')
+            yield
+    except DataOwnerError:
+        raise ReleaseError('A data writer is active or its ownership is unsafe; stop it first') from None
+
+
+@contextmanager
 def stopped(root: Path):
-    with lease(root / '.operation.lock'), lease(root / '.panel.lease'):
-        if (root / 'RESTORE_PENDING.json').exists():
+    with lease(root / '.operation.lock'), lease(root / '.panel.lease'), _offline_writers(root / 'data'):
+        if os.path.lexists(root / 'RESTORE_PENDING.json'):
             raise ReleaseError('An interrupted restore requires recover-restore before other operations')
         guard = _StoppedGuard(root)
         try: yield guard
@@ -406,7 +439,7 @@ class _StoppedGuard(_OperationGuard):
     """In-process proof of the existing stopped() scope."""
     def _check(self):
         self._check_operation()
-        if (self.root / 'RESTORE_PENDING.json').exists():
+        if os.path.lexists(self.root / 'RESTORE_PENDING.json'):
             raise ReleaseError('An interrupted restore requires recover-restore before other operations')
 
     def _prepare_replacement(self, work: Path):
@@ -743,25 +776,39 @@ def _backup_locked(guard: _StoppedGuard, destination: Path) -> str:
 
 def recover_restore(root: Path):
     root=private_root(root)
-    with lease(root/'.operation.lock'), lease(root/'.panel.lease'):
+    with lease(root/'.operation.lock'), lease(root/'.panel.lease'), _offline_writers(root / 'data'):
         guard = _StoppedGuard(root)
-        try: _recover_restore_locked(guard)
+        try:
+            with ExitStack() as writers:
+                if os.path.lexists(root / 'RESTORE_PENDING.json'):
+                    _, _, _, old = _maintenance_recovery_snapshot(root, legacy=True)
+                    if (root / old).exists():
+                        writers.enter_context(_offline_writers(root / old))
+                _recover_restore_locked(guard)
         finally: guard._valid = False
 
 
 def _recover_restore_locked(guard: _StoppedGuard):
     guard._check_recovery(); root=guard.root
     journal=root/'RESTORE_PENDING.json'
-    if not journal.exists(): return
-    value=json.loads(journal.read_text()); old=value['old']
+    if not os.path.lexists(journal): return
+    _, _, raw, old = _maintenance_recovery_snapshot(root, legacy=type(guard) is _StoppedGuard)
+    value=json.loads(raw)
     if not safe_name(old) or not old.startswith('recovery/before-'):
         raise ReleaseError('Invalid recovery journal; manual inspection required')
     previous=root/old; data=root/'data'
+    expected = value.get('source_sha256')
+    if expected is not None:
+        source = previous if previous.is_dir() else data
+        if recovery_tree_digest(source) != expected:
+            raise ReleaseError('Recovery source changed; journal and data retained')
     if previous.is_dir():
         if data.exists(): os.replace(data,guard._recovery_interrupted_path())
         os.replace(previous,data)
     elif not data.exists(): raise ReleaseError('Original data is missing; restore from an external backup')
     sync_directory(root/'recovery');sync_directory(root)
+    if expected is not None and recovery_tree_digest(data) != expected:
+        raise ReleaseError('Restored source validation failed; journal retained')
     journal.unlink();sync_directory(root)
 
 def restore(root: Path, archive: Path, expected_sha: str):
@@ -880,18 +927,26 @@ def _maintenance_lease(directory: Path, name: str):
     with _maintenance_directory(directory) as parent:
         fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
                      0o600, dir_fd=parent)
-    try:
-        info = os.fstat(fd)
-        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
-                or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o600):
-            raise ReleaseError('Unsafe maintenance lease')
-        try: fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise ReleaseError('Service or another operation is active; stop it first') from None
-        try: yield
-        finally: fcntl.flock(fd, fcntl.LOCK_UN)
-    finally:
-        os.close(fd)
+        try:
+            def verify():
+                info = os.fstat(fd)
+                mode = stat.S_IMODE(info.st_mode)
+                legacy_core = (name == 'owner.lock' and info.st_size == 0
+                               and mode & ~0o644 == 0 and mode & 0o600 == 0o600)
+                linked = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                        or info.st_uid != os.geteuid() or not (mode == 0o600 or legacy_core)
+                        or (info.st_dev, info.st_ino) != (linked.st_dev, linked.st_ino)):
+                    raise ReleaseError('Unsafe maintenance lease')
+            verify()
+            try: fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise ReleaseError('Service or another operation is active; stop it first') from None
+            verify()
+            try: yield
+            finally: verify()
+        finally:
+            os.close(fd)
 
 
 _MAINTENANCE_CONFIG = Path('/etc/v-ui/service.json')
@@ -987,7 +1042,7 @@ def _maintenance_snapshot(root: Path):
         os.close(fd)
 
 
-def _maintenance_recovery_snapshot(root: Path):
+def _maintenance_recovery_snapshot(root: Path, *, legacy=False):
     """Read one bounded private journal; never follow its paths or create data."""
     with _maintenance_directory(root) as parent:
         root_info = os.fstat(parent)
@@ -1018,13 +1073,21 @@ def _maintenance_recovery_snapshot(root: Path):
                     result[name] = value
                 return result
             value = json.loads(raw, object_pairs_hook=unique)
-            if (not isinstance(value, dict) or set(value) != {'old'}
+            extended = {'old', 'schema_version', 'kind', 'source_sha256', 'target_sha256', 'plan_sha256'}
+            if (not isinstance(value, dict) or set(value) not in ({'old'}, extended)
                     or not isinstance(value['old'], str)
-                    or not re.fullmatch(r'recovery/before-[a-f0-9]{32}', value['old'])):
+                    or not re.fullmatch(r'recovery/before-[A-Za-z0-9_-]{1,128}' if legacy and set(value) == {'old'}
+                                        else r'recovery/before-[a-f0-9]{32}', value['old'])):
+                raise ReleaseError('Invalid restore recovery journal')
+            if set(value) == extended and (type(value['schema_version']) is not int
+                    or value['schema_version'] != 2 or value['kind'] != 'proxy-recovery'
+                    or any(not isinstance(value[key], str) or not re.fullmatch(r'[a-f0-9]{64}', value[key])
+                           for key in ('source_sha256', 'target_sha256', 'plan_sha256'))):
                 raise ReleaseError('Invalid restore recovery journal')
         finally:
             os.close(fd)
-    with _maintenance_directory(root / 'recovery'): pass
+    if not legacy or set(value) != {'old'}:
+        with _maintenance_directory(root / 'recovery'): pass
     return root_info.st_dev, root_info.st_ino, raw, value['old']
 
 
@@ -1145,15 +1208,20 @@ class _MaintenanceSession(_StoppedGuard):
                 or meta['release_id'] != self._identity):
             raise ReleaseError('Release not prepared')
 
-    def _lock_data(self, data: Path):
+    def _lock_data(self, data: Path, *, stable=True, create=True):
+        if stable:
+            from app.data_owner import data_owner
+            self._writers.enter_context(data_owner(data, exclusive=True))
         with _maintenance_directory(data): pass
-        for parent in (data / 'runtime', data / 'runtime' / 'xray',
-                       data / 'runtime' / 'sing-box', data / 'certificates'):
-            with _maintenance_directory(parent, create=True): pass
+        if create:
+            for parent in (data / 'runtime', data / 'runtime' / 'xray',
+                           data / 'runtime' / 'sing-box', data / 'certificates'):
+                with _maintenance_directory(parent, create=True): pass
         for directory, name in ((data / 'runtime' / 'xray', 'owner.lock'),
                                 (data / 'runtime' / 'sing-box', 'owner.lock'),
                                 (data / 'certificates', '.worker.lock')):
-            self._writers.enter_context(_maintenance_lease(directory, name))
+            if create or os.path.lexists(directory):
+                self._writers.enter_context(_maintenance_lease(directory, name))
 
     def _check(self):
         self._state_is('executing')
@@ -1168,7 +1236,7 @@ class _MaintenanceSession(_StoppedGuard):
 
     def _prepare_replacement(self, work: Path):
         self._check()
-        self._lock_data(work)
+        self._lock_data(work, stable=False)
 
     def _recovery_directories(self):
         old = self._recovery_snapshot[3]
@@ -1216,8 +1284,15 @@ class _MaintenanceSession(_StoppedGuard):
             if self._action == 'recover-restore':
                 if _maintenance_recovery_snapshot(self.root) != self._recovery_snapshot:
                     raise ReleaseError('Restore recovery journal changed during maintenance')
+                # The canonical name may be absent after the first rename.
+                # Its stable lease must survive rollback and journal clearing,
+                # until release_writers explicitly permits a service restart.
+                from app.data_owner import data_owner
+                self._writers.enter_context(data_owner(self.root / 'data', exclusive=True))
+                raw = self._recovery_snapshot[2]
+                fingerprinted = raw is not None and json.loads(raw).get('kind') == 'proxy-recovery'
                 for data in self._recovery_directories():
-                    self._lock_data(data)
+                    self._lock_data(data, stable=data != self.root / 'data', create=not fingerprinted)
             else:
                 self._lock_data(self.root / 'data')
             self._valid = True
@@ -1271,3 +1346,72 @@ class _MaintenanceSession(_StoppedGuard):
         self._operation.close()
         self._operation_active = False
         self._state = 'closed'
+
+
+_RECOVERY_LOCKS = {'.proxy-state.lock', 'runtime/xray/owner.lock',
+                   'runtime/sing-box/owner.lock', 'certificates/.worker.lock'}
+
+
+def recovery_tree_digest(data: Path, *, copy_to: Path | None = None) -> str:
+    """Bounded descriptor-based fingerprint/copy; excludes only transient leases.
+
+    This intentionally accepts corrupt bytes, never unsafe file ownership or
+    links. It can preserve an unknown policy without interpreting it as OFF.
+    Caller holds the stable exclusive data-owner lease throughout.
+    """
+    records = []; total = 0; count = 0
+    with _maintenance_directory(data) as root:
+        identity = os.fstat(root)
+        if copy_to is not None:
+            copy_to.mkdir(mode=0o700)
+        def failure(error):
+            raise error
+        for current, directories, files, directory in os.fwalk(data, follow_symlinks=False, onerror=failure):
+            directories.sort(); files.sort()
+            relative = Path(current).relative_to(data)
+            for name in directories + files:
+                count += 1
+                if count > 32768: raise ReleaseError('Recovery source contains too many entries')
+                entry = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                path = (relative / name).as_posix()
+                if not safe_name(path) or entry.st_uid != os.geteuid():
+                    raise ReleaseError('Unsafe recovery source entry')
+                if stat.S_ISDIR(entry.st_mode):
+                    if entry.st_mode & 0o077: raise ReleaseError('Recovery directories must be private')
+                    records.append([path, 'directory'])
+                    if copy_to is not None: (copy_to / path).mkdir(mode=0o700)
+                    continue
+                if not stat.S_ISREG(entry.st_mode) or entry.st_nlink != 1:
+                    raise ReleaseError('Recovery requires owned regular files without links')
+                if path in _RECOVERY_LOCKS:
+                    if entry.st_size or entry.st_mode & 0o022:
+                        raise ReleaseError('Unsafe transient recovery lease')
+                    continue
+                if entry.st_mode & 0o077: raise ReleaseError('Recovery files must be private')
+                total += entry.st_size
+                if total > MAX_EXPANDED: raise ReleaseError('Recovery source exceeds size limit')
+                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+                try:
+                    signature = lambda info: (info.st_dev, info.st_ino, info.st_mode, info.st_uid,
+                        info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+                    if signature(entry) != signature(os.fstat(fd)):
+                        raise ReleaseError('Recovery source changed before reading')
+                    with os.fdopen(fd, 'rb', closefd=False) as source:
+                        target = (copy_to / path).open('xb') if copy_to is not None else nullcontext()
+                        with target as output:
+                            checksum, size = stream_digest(source, output, MAX_EXPANDED)
+                            if output is not None:
+                                os.fchmod(output.fileno(), stat.S_IMODE(entry.st_mode))
+                                output.flush(); os.fsync(output.fileno())
+                    if (size != entry.st_size or signature(entry) != signature(os.fstat(fd))
+                            or signature(entry) != signature(os.stat(name, dir_fd=directory, follow_symlinks=False))):
+                        raise ReleaseError('Recovery source changed while reading')
+                    records.append([path, stat.S_IMODE(entry.st_mode), size, checksum])
+                finally:
+                    os.close(fd)
+        named = data.lstat()
+        if (identity.st_dev, identity.st_ino) != (named.st_dev, named.st_ino):
+            raise ReleaseError('Recovery data directory changed')
+    if copy_to is not None:
+        for current, _, _ in os.walk(copy_to, topdown=False): sync_directory(Path(current))
+    return digest(json.dumps(sorted(records), sort_keys=True, separators=(',', ':')).encode())
