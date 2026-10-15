@@ -1,8 +1,63 @@
 #!/usr/bin/env bash
 # Trusted local kit: sudo bash install.sh --bundle ... --sha256 ...
-# After the candidate is published: sudo bash install.sh --version v0.4.7 [installer arguments]
+# After the candidate is published: sudo bash install.sh --version v0.4.8 [installer arguments]
 set -euo pipefail
 umask 077
+
+BOOTSTRAP_RUNTIME_DIR=''
+WORK=''
+TEMP_ALLOCATING=0
+TEMP_SIGNAL_STATUS=0
+
+cleanup_all() {
+  local status="$1" directory
+  trap - EXIT
+  # A second handled signal must not replace the original exit status or interrupt
+  # the other directory's cleanup. SIGKILL/power loss cannot be handled here.
+  trap '' INT TERM
+  for directory in "$WORK" "$BOOTSTRAP_RUNTIME_DIR"; do
+    if [[ -n "$directory" ]]; then
+      if ! rm -rf -- "$directory"; then
+        printf 'Warning: could not remove installer temporary directory: %s\n' "$directory" >&2 || :
+      fi
+    fi
+  done
+  exit "$status"
+}
+
+handle_signal() {
+  if [[ "$TEMP_ALLOCATING" -eq 1 ]]; then
+    # Bash may run a pending trap after mktemp finishes but before its output has
+    # been assigned. Register ownership before honoring that caught signal.
+    if [[ "$TEMP_SIGNAL_STATUS" -eq 0 ]]; then TEMP_SIGNAL_STATUS="$1"; fi
+  else
+    exit "$1"
+  fi
+}
+
+trap 'cleanup_all "$?"' EXIT
+trap 'handle_signal 130' INT
+trap 'handle_signal 143' TERM
+
+allocate_temp_dir() {
+  local directory='' status=0
+  TEMP_ALLOCATING=1
+  if directory="$(mktemp -d)"; then
+    :
+  else
+    status=$?
+  fi
+  # A terminated mktemp can already have printed its newly created directory.
+  # Own that path on failure as well, before processing a pending parent signal.
+  if [[ -n "$directory" ]]; then
+    printf -v "$1" '%s' "$directory"
+  elif [[ "$status" -eq 0 ]]; then
+    status=1
+  fi
+  TEMP_ALLOCATING=0
+  if [[ "$TEMP_SIGNAL_STATUS" -ne 0 ]]; then exit "$TEMP_SIGNAL_STATUS"; fi
+  return "$status"
+}
 
 detect_target() {
   local arch libc
@@ -69,16 +124,16 @@ bootstrap_portable_python() {
   command -v curl >/dev/null 2>&1 || return 1
   command -v sha256sum >/dev/null 2>&1 || return 1
   command -v tar >/dev/null 2>&1 || return 1
-  root="$(mktemp -d)"
-  BOOTSTRAP_RUNTIME_DIR="$root"
+  allocate_temp_dir BOOTSTRAP_RUNTIME_DIR || return 1
+  root="$BOOTSTRAP_RUNTIME_DIR"
   archive="$root/python.tar.gz"
-  curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --location --retry 2 --connect-timeout 15 --max-time 300 "$url" -o "$archive"
-  printf '%s  %s\n' "$sha" "$archive" | sha256sum -c - >/dev/null
-  tar -xzf "$archive" -C "$root"
+  # This function is called from an || list. Do not rely on errexit inside it.
+  curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --location --retry 2 --connect-timeout 15 --max-time 300 "$url" -o "$archive" || return 1
+  printf '%s  %s\n' "$sha" "$archive" | sha256sum -c - >/dev/null || return 1
+  tar -xzf "$archive" -C "$root" || return 1
   [[ -x "$root/python/bin/python3" ]] || return 1
-  printf '%s\n' "$root/python/bin/python3"
+  PYTHON="$root/python/bin/python3"
 }
-BOOTSTRAP_RUNTIME_DIR=''
 PYTHON="$(find_python || true)"
 if [[ -z "$PYTHON" ]]; then
   [[ "${EUID:-$(id -u)}" -eq 0 ]] || { echo 'Run with sudo so prerequisites can be installed.' >&2; exit 1; }
@@ -87,16 +142,14 @@ if [[ -z "$PYTHON" ]]; then
 fi
 if [[ -z "$PYTHON" ]]; then
   echo 'System Python is still too old; using the fixed portable bootstrap runtime.'
-  PYTHON="$(bootstrap_portable_python)" || { echo 'Could not obtain the verified portable installer runtime.' >&2; exit 1; }
+  bootstrap_portable_python || { echo 'Could not obtain the verified portable installer runtime.' >&2; exit 1; }
 fi
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-cleanup_bootstrap() { [[ -n "$BOOTSTRAP_RUNTIME_DIR" ]] && rm -rf -- "$BOOTSTRAP_RUNTIME_DIR"; }
-trap cleanup_bootstrap EXIT
 if [[ "${1:-}" != '--version' ]]; then
   if [[ -f "$SCRIPT_DIR/scripts/install_system.py" ]]; then
-    exec "$PYTHON" "$SCRIPT_DIR/scripts/install_system.py" "$@"
+    if "$PYTHON" "$SCRIPT_DIR/scripts/install_system.py" "$@"; then exit 0; else exit $?; fi
   elif [[ -f "$SCRIPT_DIR/install_system.py" ]]; then
-    exec "$PYTHON" "$SCRIPT_DIR/install_system.py" "$@"
+    if "$PYTHON" "$SCRIPT_DIR/install_system.py" "$@"; then exit 0; else exit $?; fi
   fi
   printf '%s\n' 'Local installer is missing. Use the complete verified kit or --version vX.Y.Z.' >&2
   exit 1
@@ -105,9 +158,7 @@ VERSION="${2:-}"
 [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'An explicit stable vX.Y.Z version is required' >&2; exit 1; }
 shift 2
 command -v curl >/dev/null || { echo 'Install curl first' >&2; exit 1; }
-WORK="$(mktemp -d)"
-cleanup_all() { rm -rf -- "$WORK"; cleanup_bootstrap; }
-trap cleanup_all EXIT
+allocate_temp_dir WORK
 BASE="https://github.com/ForceMind/V-UI/releases/download/$VERSION"
 TARGET="$(detect_target)"
 BUNDLE="vui-linux-$TARGET.zip"

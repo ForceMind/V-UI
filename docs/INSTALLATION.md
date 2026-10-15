@@ -1,8 +1,12 @@
 # 安装与首次运行
 
+本页是 **v0.4.8（UNRELEASED）** 的安装准备文档，当前源码只修复安装 shell 的退出码、临时目录生命周期和引导失败拦截。**下方安装命令现在不要执行；只有 0.4.8 正式公开且完整 19 项资产可用并核验后才可使用。** 需要当前正式版请查看 [v0.4.7 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.7) 和[固定 v0.4.7 安装指南](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/INSTALLATION.md)，并留意下方已知问题。不要混用分支入口与旧 Release 资产。
+
+**v0.4.7 安装器注意事项：** 在线路径的清理可能将成功或原失败状态改写为 1；便携 Python 引导还有临时目录归属与失败门禁缺口。若退出非零，保留输出并先核对控制器日志、活动版本和服务健康，不能一律视为成功，也不要盲目重跑。0.4.8 的修复和 shell 回归边界见[安装器修复说明](INSTALLER_EXIT_STATUS_048.md)，已发布资产不会原地替换。
+
 ## 1. 环境检测
 
-0.4.7 一键安装器继承能力检测模型，不按 Ubuntu 名称做白名单。启动后先读取系统信息并检测：
+0.4.8 一键安装器沿用 0.4.7 的能力检测模型，不按 Ubuntu 名称做白名单。启动后先读取系统信息并检测：
 
 - 发行版 / `/etc/os-release`；
 - CPU：x86_64 或 ARM64；
@@ -62,12 +66,12 @@ UDP 安装行为和 HY2 集成仍需最终准确候选/主线门槛；固定二�
 
 ## 3. 本地完整套件
 
-先在[官方 Releases](https://github.com/ForceMind/V-UI/releases)确认版本已公开、19项固定资产齐全，并接受该软件来源。以下使用Bash、curl、sha256sum和已有管理员sudo权限；不会让服务用户可写的下载目录成为root执行源码目录。`KIT_SHA` 是**整个SHA256SUMS文件的可信SHA-256**，应从已接受的发布记录/独立核验结果取得；摘要不是签名，不能以未知下载的自算值认证来源。请把示例target换为当前机器实际目标。
+以下是 0.4.8 发布后的准备示例；目前未发布，不要运行。先在[官方 Releases](https://github.com/ForceMind/V-UI/releases)确认版本已公开、19项固定资产齐全，并接受该软件来源。以下使用Bash、curl、sha256sum和已有管理员sudo权限；不会让服务用户可写的下载目录成为root执行源码目录。`KIT_SHA` 是**整个SHA256SUMS文件的可信SHA-256**，应从已接受的发布记录/独立核验结果取得；摘要不是签名，不能以未知下载的自算值认证来源。请把示例target换为当前机器实际目标。
 
 ```sh
 set -euo pipefail
 umask 077
-VERSION=v0.4.7
+VERSION=v0.4.8
 TARGET=x86_64-gnu
 KIT_SHA='<填写已接受的 SHA256SUMS 整文件 SHA-256>'
 case "$TARGET" in x86_64-gnu|aarch64-gnu|x86_64-musl|aarch64-musl) ;; *) exit 1;; esac
@@ -176,11 +180,11 @@ root 只负责系统初始化和受管服务文件；应用、核心与 Certbot 
 
 ## 7. 官方 Release 一键安装
 
-本指南按 **v0.4.7** 编写。先在[官方 Releases](https://github.com/ForceMind/V-UI/releases)核对对应版本公开状态和完整资产；未公开、缺文件、404或摘要不符时停止。不要混用 `latest`、分支文件与其他版本。安装入口的固定版本下载/校验步骤见[README快速安装](../README.md#快速安装)，入口本身也必须来自独立接受的可信来源：
+**本节为 v0.4.8（UNRELEASED）的发布后示例，现在不要执行。** 只有在[官方 Releases](https://github.com/ForceMind/V-UI/releases)确认该版本正式公开且完整 19 项资产可用并核验后才可安装；未公开、缺文件、404或摘要不符时停止。不要混用 `latest`、分支文件与其他版本。安装入口的固定版本下载/校验步骤见[README快速安装](../README.md#快速安装)，入口本身也必须来自独立接受的可信来源：
 
 ```sh
 # 按README完成固定入口校验/root私有副本及函数定义后：
-run_vui_installer --version v0.4.7
+run_vui_installer --version v0.4.8
 ```
 
 脚本先检测 `x86_64/aarch64 + gnu/musl`，再从该明确版本下载对应目标包、安装控制器和 `SHA256SUMS`，逐个验证摘要后执行。不会下载 `latest`，也不会在发布时重新构建包。

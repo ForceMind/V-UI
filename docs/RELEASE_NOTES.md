@@ -1,8 +1,18 @@
-# V-UI 0.4.7
+# V-UI 0.4.8
 
-0.4.7 是累计版本：中文网页后台、固定官方核心、图形化证书、严格订阅导出和受管终端维护。实际公开状态、目标提交与下载资产见[官方 Releases](https://github.com/ForceMind/V-UI/releases)；本文件不以版本号预先证明发布成功。下方文档链接固定到v0.4.7 tag，只有该版本正式创建后才可用，不随master滚动。
+## UNRELEASED：安装入口修复
 
-## 本版内容
+0.4.8 是未发布的安装器修复版本。shell 入口保留安装控制器的退出状态，跟踪并清理自己创建的临时目录；便携 Python 下载、固定摘要校验和解压失败均须在执行前明确拒绝。清理/信号处理提前注册，本地入口不再以 `exec` 绕过所需清理。具体实现契约和测试边界见[安装器修复说明](INSTALLER_EXIT_STATUS_048.md)。
+
+新增回归通过真实 Bash 进程和假工具检查 shell 行为，不能替代真实 root/systemd、四平台制品或生产部署验收。准确候选/主线测试结果在承载 PR 记录，本文不预先声明通过。协议、HTTPS/TLS 校验、核心和 Python pin、安装/运行时权限边界均不扩展；XHTTP/HTTPUpgrade 公开导出继续阻断。
+
+当前正式版下载入口仍为下面的 v0.4.7 Release 及固定 tag 文档，注意其[安装器已知问题](INSTALLER_EXIT_STATUS_048.md)。本分支 0.4.8 安装示例仅供未来正式公开且完整 19 项资产验收后使用，现在不要执行。本次不创建 0.4.8 tag/Draft Release/公开 Release，不替换旧资产或部署；源码版本号不代表可下载发行版。
+
+## 已发布基线：V-UI 0.4.7
+
+0.4.7 是累计版本：中文网页后台、固定官方核心、图形化证书、严格订阅导出和受管终端维护。[官方 v0.4.7 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.7) 于 2026-10-13 01:26:40 UTC 公开，tag 指向 `c5d50ee14b08da57bdc13c150b4ed501e9484023`，19 项资产元数据已于 2026-10-15 只读复核。下方累计功能及验收来源属于 0.4.7，文档链接固定到该 tag，不将旧结果移植给 0.4.8。
+
+### 0.4.7 累计内容
 
 - 管理员认证、会话撤销、专用订阅令牌、节点/格式授权、有效期、轮换及撤销；无默认密码
 - sing-box 公开基线：VLESS TCP/WS/gRPC TLS、VLESS direct TCP REALITY/Vision、Trojan TCP/TLS、VMess TCP/TLS、三种Shadowsocks AEAD、Hysteria2、TUIC v5，严格范围见[兼容矩阵](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/COMPATIBILITY.md)
@@ -15,7 +25,7 @@
 - 面向用户重整README、安装、菜单和发布文档；历史失败、未验场景与旧记录保留
 - 已确认的蓝青 V 标识接入 README、登录/后台导航与 favicon；本地轻量 SVG，无新增字体或运行依赖
 
-## 下载与安装
+### 0.4.7 下载与安装
 
 发布资产共19项：四个CPU/libc目标ZIP，固定安装/控制helper、源码ZIP、RELEASE.json、RELEASE_NOTES.md和SHA256SUMS。具体清单见[发布流程](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/RELEASING.md#发布资产)。选定完整同版本资产，核来源与摘要；不使用latest，不混用旧包。
 
@@ -23,7 +33,7 @@
 
 默认安装**不提供全局v-ui命令**。包内菜单使用服务用户调用；全局入口须按[独立可信kit安装合同](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/MANAGED_OPERATIONS.md#安装消费点与信任)显式安装。不要以root运行服务用户可写的portable Python或payload脚本。
 
-## 升级和数据
+### 0.4.7 升级和数据
 
 1. 保留受限访问的离机备份，并核对当前target、活动release ID及启动锚点。
 2. 使用同版本完整可信安装器/包按[受管升级](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/OPERATIONS.md#受管升级)操作；CPU/libc/init迁移不属于普通升级。
@@ -32,7 +42,7 @@
 
 代码回退不恢复旧数据。保留旧bootstrap runtime；不要用删除目录掩盖升级问题。不同版本/schema迁移与真实断电恢复没有被同代码合成A→B→A测试代替。
 
-## 已知限制
+### 0.4.7 已知限制
 
 - XHTTP/HTTPUpgrade公开导出仍阻断；真实能力刻画不代表完整产品支持。Xray组合不自动继承sing-box公开矩阵。
 - 除三种Shadowsocks AEAD已有UDP基线，其他协议的通用应用UDP/DNS扩围未完成。HY2/TUIC节点QUIC需要UDP端口，但本版只验HTTP/TCP应用负载。
@@ -41,7 +51,7 @@
 - 真实1vCPU/512MiB整机及24小时完整负载未获资格。大数据归档场景达到512MiB峰值/零余量；160/320MiB仍是未证工程预算，不能当最低配置保证。
 - 固定gRPC Lite错误CA/SNI可能让调用者超时；TLS拒绝由真实诊断确认，不能关闭验证规避。
 
-## 验收与来源
+### 0.4.7 验收与来源
 
 产品代码基线、主线与候选来源、普通CI、真实root/systemd、包消费和公开发布分别记录。准确最终提交必须有自己的八组CI及同提交四目标资产，发布不重新构建另一套包。真实受管root资格仍仅属于[f509历史run](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/MANAGED_OPERATIONS_CLOSURE_20261012.md)，没有移植为每个后续head的root重验。
 

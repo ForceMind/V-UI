@@ -7,7 +7,9 @@
 
 **面向个人自托管的代理管理面板：管理节点与证书，生成完整 Mihomo 分流订阅，用受管流程维护服务和数据。**
 
-**v0.4.7** · FastAPI + SQLite · 中文网页后台 · Linux x86_64 / ARM64
+**开发版本 v0.4.8（UNRELEASED）** · FastAPI + SQLite · 中文网页后台 · Linux x86_64 / ARM64
+
+当前正式发布为 [v0.4.7](https://github.com/ForceMind/V-UI/releases/tag/v0.4.7)，2026-10-13 从主线 `c5d50ee14b08da57bdc13c150b4ed501e9484023` 发布。0.4.8 仅修复安装入口的退出码、临时目录生命周期和引导失败拦截，尚未发布；不扩大协议或运行时范围。见[安装器修复与验收边界](docs/INSTALLER_EXIT_STATUS_048.md)。
 
 [下载与发布](https://github.com/ForceMind/V-UI/releases) · [快速安装](#快速安装) · [协议范围](#协议与客户端支持) · [终端菜单](#终端运维菜单) · [完整文档](docs/README.md) · [报告问题](https://github.com/ForceMind/V-UI/issues)
 
@@ -72,17 +74,21 @@ V-UI 不依赖 Redis、常驻 Node.js 或在线订阅转换服务。运行包包
 
 ### 1. 固定版本，先核来源
 
-先打开[官方 Releases](https://github.com/ForceMind/V-UI/releases)，确认 **v0.4.7 已公开且包含完整 19 项资产**。如果版本尚未公开、下载返回 404、文件不齐或摘要不匹配，停止安装；不要换成 `latest`、混用分支文件或改摘要跳过检查。
+**本节是 v0.4.8（UNRELEASED）的安装准备示例，现在不要执行。** 只有该版本正式公开且完整 19 项资产可用后，才能按本节安装；未公开、404、缺文件或摘要不符时停止，不换成 `latest`、不混用分支文件或旧资产，也不改摘要跳过检查。
 
-以下命令从固定版本下载安装入口并校验它；**请先审阅官方仓库、发行说明及安装脚本，确认这是你信任的软件来源，再执行管理员安装**。同站点下载的 SHA-256 是完整性检查，不是独立签名，也不能让未知脚本变得可信。
+需要当前正式版的用户，请查看 [v0.4.7 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.7) 和[固定 v0.4.7 安装文档](https://github.com/ForceMind/V-UI/blob/v0.4.7/README.md#快速安装)，并先阅读下面的已知问题。
+
+**已知安装入口问题：** v0.4.7 在线路径可能在安装控制器成功后仍返回非零，或掩盖原失败码；便携 Python 引导还有临时目录清理与失败拦截缺口。非零不能直接判定安装未发生，也不能一律忽略。请保留完整输出，核对安装日志、活动版本和服务健康后处理；不要盲目重复安装。源码中的 0.4.8 修复不会改变已发布的 v0.4.7 资产，详见[安装器说明](docs/INSTALLER_EXIT_STATUS_048.md)。
+
+以下命令仅供 0.4.8 正式发布后的安装准备，现在不要执行。届时从固定版本下载安装入口并校验它；**请先审阅官方仓库、发行说明及安装脚本，确认这是你信任的软件来源，再执行管理员安装**。同站点下载的 SHA-256 是完整性检查，不是独立签名，也不能让未知脚本变得可信。
 
 ```sh
 # 在一个新的空目录中执行；已存在同名目录时停止，避免混入旧文件。
 set -eu
 umask 077
-mkdir vui-v0.4.7-install
-cd vui-v0.4.7-install
-BASE='https://github.com/ForceMind/V-UI/releases/download/v0.4.7'
+mkdir vui-v0.4.8-install
+cd vui-v0.4.8-install
+BASE='https://github.com/ForceMind/V-UI/releases/download/v0.4.8'
 curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fL \
   "$BASE/SHA256SUMS" -o SHA256SUMS
 curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fL \
@@ -98,6 +104,8 @@ sudo install -o root -g root -m 0600 ./install.sh "$ROOT_BOOTSTRAP/install.sh"
 
 ### 2. 交互式安装
 
+本节同样仅适用于 0.4.8 正式公开、完整资产核验完成之后，现在不要执行。
+
 ```sh
 # 沿用上一步同一终端中的ROOT_BOOTSTRAP和INSTALL_SHA。
 run_vui_installer() {
@@ -110,7 +118,7 @@ run_vui_installer() {
       exec /bin/bash ./install.sh "$@"
     ' -- "$ROOT_BOOTSTRAP" "$INSTALL_SHA" "$@"
 }
-run_vui_installer --version v0.4.7
+run_vui_installer --version v0.4.8
 ```
 
 入口自动选择对应平台包，并校验固定安装 helper 与 ZIP 的摘要。按提示填写面板域名、联系邮箱，确认你控制域名、阅读并同意 CA 条款，再在终端设置管理员密码。默认管理员名称为 `admin`，可用 `--admin` 更改；密码为15–128字符。**没有预置密码，也不要把密码放进命令行或公开日志**。
@@ -121,7 +129,7 @@ run_vui_installer --version v0.4.7
 
 ```sh
 # 首次执行上方安装命令时，根据计划追加；无需先装一次再重复安装。
-run_vui_installer --version v0.4.7 --node-udp-port 10443
+run_vui_installer --version v0.4.8 --node-udp-port 10443
 ```
 
 UDP 声明可以重复，不会自动创建节点，也不持久保存为后续升级参数。TCP 与 UDP 同号仍是不同规则。新增规则会有独立确认；不要把端口预检当作公网连通保证。
@@ -237,10 +245,11 @@ OpenRC 使用 `sudo rc-service v-ui status` 与 `sudo rc-service v-ui-http01 sta
 | 菜单、升级、备份、恢复与回退 | [运维指南](docs/OPERATIONS.md) · [全局受管控制](docs/MANAGED_OPERATIONS.md) |
 | 故障、安全和 API | [排错](docs/TROUBLESHOOTING.md) · [安全](SECURITY.md) · [API](docs/API.md) |
 | 版本内容与正式资产 | [发布说明](docs/RELEASE_NOTES.md) · [变更日志](CHANGELOG.md) · [发布流程](docs/RELEASING.md) |
+| 0.4.8 安装器退出码与清理修复（未发布） | [修复范围和验收边界](docs/INSTALLER_EXIT_STATUS_048.md) |
 | 开发、完整路线与验收历史 | [贡献指南](CONTRIBUTING.md) · [路线图](ROADMAP.md) · [文档索引](docs/README.md) |
 | Logo 资源、浅/深色用法与归属 | [视觉标识](docs/BRAND.md) |
 
-0.4.7 的网页后台、两类菜单、低资源软件修复和质量修复已进入主线，准确制品验收见[产品代码收口](docs/MAINLINE_OPERATIONS_CLOSURE_20261012.md)与 [PR #36](https://github.com/ForceMind/V-UI/pull/36)。后续提交必须有自己的准确验收；版本号、旧 CI 或文档描述不能替代对应 Release 的来源核对。[原 README 审计快照](docs/README_HISTORY_20261012.md)保留旧记录。
+0.4.7 已正式发布；网页后台、两类菜单、低资源软件修复和质量修复的历史主线及制品验收见[产品代码收口](docs/MAINLINE_OPERATIONS_CLOSURE_20261012.md)与 [PR #36](https://github.com/ForceMind/V-UI/pull/36)。后续提交必须有自己的准确验收；版本号、旧 CI 或文档描述不能替代对应 Release 的来源核对。[原 README 审计快照](docs/README_HISTORY_20261012.md)保留旧记录。
 
 尚未支持的后续方向包括通用 UDP/DNS 扩围、DNS-01/通配符、核心自动升级/回滚、任意 YAML 导入合并、容器和 NixOS 等声明式部署。网站托管、SSH 管理和主机封禁不是本版后台能力。
 
