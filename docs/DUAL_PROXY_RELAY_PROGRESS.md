@@ -68,3 +68,24 @@ DNS resolver、禁止地址 CIDR、bootstrap 地址固定策略及诊断服务�
 - M1 新候选原默认 checkout 的实际 SHA 为 `6161326d45ad7787b49d3a035714fc29e0bca004`，tree `3530a98308d2e22484cf6e1d6d925bf6e37d0beb` 与新候选相同。六个已完成组的 job checkout 日志已核，包/安装组直接使用候选 head；最终仍须等 deployment 及全部 job/step 终态。M2 起将主 checkout 明确固定 head，合并后继续核 master。
 - M2 首次本地冻结 `8b4b793` 未推送：独立审查发现并修复底层提前回滚、运行文件路径安全、容量耗尽语义、重复物理请求头和负向测试晚到请求记账问题；这些修复会产生新候选。容量 API 初版专项遗漏草稿 catch 的一项失败保留，修复后 draft/runtime API 21 项通过；额外真实私有 store + SQLite 变更后的容量耗尽测试确认旧运行仍 ON、状态字节未变。
 - 本地真实核心启动仍因 netlink 权限失败，Chromium 启动受 socket 权限失败；原结果保留。固定 parser、模拟事务和静态/UI route 测试通过均不替代真实链路/浏览器 CI。Xray 首次 fd 路径缺少扩展名的 parser 失败由显式 JSON 格式修复；相对 TLS 路径按原 Xray binary-dir 语义验证，未改变生产解析行为。
+
+## 2026-10-15 18:28 UTC 首次 M2 准确 CI
+
+- M2 [Draft PR #42](https://github.com/ForceMind/V-UI/pull/42) 首候选 `02e7f5ba9945a8fba5c6dfa0dc12cee1c9ba387c`，tree `a5babce883fc435bd4f1c6330a4035a878b9a0d8`，与本地 `b705899` 相同。准确源码完整本地 1,575 项：1,427 pass / 148 明确 skip，135.657 秒。固定 parser 两项独立通过，包含四状态/两类上游和两核心的正向与明确 parser 拒绝原因。
+- one-click [38784477152](https://github.com/ForceMind/V-UI/actions/runs/38784477152) / job `116592815486` 失败：升级时已有代理状态触发精简控制器缺少 `app.services`；根因属于 M1 备份依赖闭包。M1 虽八组已成功仍暂停合并，必须先修复并重新验收。不是防火墙修改请求，也不以清除代理状态解决。
+- loopback [38784477040](https://github.com/ForceMind/V-UI/actions/runs/38784477040) / job `116592814917`：既有 101 项、独立 HY2 8 / TUIC 8 通过；M2 policy real 4 项通过。double-hop 23 方法中 12 个真实方法和 10 个 fixture 方法通过，一个 DNS 故障方法造成 4 次 failure；整组失败。真实事务 4 项因前一步失败未运行。
+- 该 DNS 故障首因是固定核心实际原因 `servfail` 与测试期待 `server failure` 不同。旧 helper 在等待匹配原因时重复发请求，造成数百查询；失败阶段停核心后，subTest 又继续制造无新日志的 timeout 失败。修订为每次负例只发一次，随后仅轮询新日志；必须匹配准确业务名字、DNS lookup 和真实两族 SERVFAIL/deadline 语义，不接受泛超时。三个新增 fixture 回归验证一次请求、旧日志不可用、认证/业务超时不能代替 DNS 或认证原因；13 fixture 通过，真实重跑仍待新候选。保留原 4 次失败与计数证据。
+- 此次通过的 TLS/REALITY 四状态/12 切换及两客户端方法只属于上述首候选的局部结果，不能在整组失败时宣布 M2 完成。新源码需全部重跑，实际用户海外/外部设备仍未测。
+## M1 精简控制器依赖修复（2026-10-15）
+
+M1 原候选 `a7b0d22e9d7f606595af75a4d0418200abd61a5a` 的八组 CI 已成功，但 M2 首次实际安装升级暴露了覆盖缺口：只提取 `deploy.py`/`release_tools.py` 的离线控制器，在已有代理状态时备份因缺失 `app.services.proxy_store` 失败。保留 [one-click run 38784477152](https://github.com/ForceMind/V-UI/actions/runs/38784477152)；旧绿灯不能证明新修复合格。
+
+修复从同一完整校验的 bundle/source ZIP 提取 `proxy_store.py` 与 `upstream_profile.py`，不读可变已安装 payload，不新增公开顶层资产。受管 worker 在 `-I -S` 下只绑定固定可信兄弟文件；控制 receipt 必须覆盖新依赖。旧精确 receipt 只允许显式 refresh 并校验旧文件完整性，不接纳未登记的额外依赖。安装器四文件闭包同样用隔离 Python，提取和校验发生在停止服务之前。
+
+新增真实非 root、隔离子进程备份/恢复检查已提交 ON/ON 假代理状态、上游与本机密码一致性、旧节点及撤销旧会话/订阅；保留旧两文件缺陷的预期 RED 再现。缺失/篡改依赖、恶意 cwd/PYTHONPATH/site、受管 worker 缺失兄弟模块均必须拒绝且不改状态。实际 systemd 升级门槛增加保存两个开关 ON 草稿后再升级并逐字比较安全快照，不启用代理或修改测试主机网络。精简包/控制器/安装和恢复分别验证，不以完整源码单测代替。
+
+此追加为修复候选说明，准确修复 SHA、本地全套、独立审查与新八组 CI 结果以后续候选/PR 记录为准；未提前声称通过。
+
+修复本地首冻 `1e0c2c9` 全套 1,386 项中出现 6 个旧合成归档夹具错误（127 明确 skip）：5 个流式归档、1 个发布 kit 构造夹具缺少新闭包；实际控制器专项 172 通过 / 1 真实 systemd skip。同步这几个夹具及独立归档内存 benchmark 的依赖集合，不放宽生产成员校验。原失败日志保留；新候选须重跑。
+
+首次 M2 八组现已全部终态：6 success / 2 failure，全部 attempt 1；deployment 的末项实际 bundle 低资源 cgroup 门槛成功不改变上述两个失败。M1 新闭包修复和 M2 DNS 单次真实请求证据修复均须随新候选重跑。

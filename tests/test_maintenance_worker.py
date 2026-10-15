@@ -69,6 +69,8 @@ class MaintenanceWorkerTests(unittest.TestCase):
         self.control.mkdir(mode=0o700)
         shutil.copyfile(REPO / 'deploy/ops_worker.py', self.control / 'ops_worker.py')
         shutil.copyfile(REPO / 'app/release_tools.py', self.control / 'release_tools.py')
+        for name in ('proxy_store.py', 'upstream_profile.py'):
+            shutil.copyfile(REPO / 'app/services' / name, self.control / name)
 
     def prepared(self, identity, *, healthy=True):
         source = self.base / ('source-' + identity)
@@ -642,6 +644,46 @@ class MaintenanceWorkerTests(unittest.TestCase):
         self.assertEqual(done['event'], 'done'); self.assertIs(done['ok'], True)
         self.assert_writers(self.data, True)
         self.finish(process)
+
+    def test_real_worker_protocol_proxy_backup_restore_preserves_all_four_states_and_secrets(self):
+        from tests.test_proxy_controller_dependencies import seed_proxy
+        store = seed_proxy(self.data)
+        for local, relay in ((False, False), (True, False), (False, True), (True, True)):
+            with self.subTest(local=local, relay=relay):
+                current = store.read_snapshot()
+                settings = {key: value for key, value in current['settings'].items()
+                            if key != 'local_password_set'}
+                settings.update(local_proxy_enabled=local, relay_enabled=relay)
+                draft = store.save_draft(settings, current['revision'])
+                transaction = 'fixture-state-' + str(int(local)) + str(int(relay))
+                store.begin_apply(draft['revision'], transaction)
+                store.commit_apply(transaction, transaction + '-core')
+                before = store.load_active()
+                snapshot = store.read_snapshot()
+                process = self.start_worker()
+                self.request(process, 'backup')
+                self.send(process, {'command': 'proceed'})
+                result = self.event(process)
+                self.assertIs(result['ok'], True)
+                self.assert_writers(self.data, True)
+                self.assertTrue(self.busy(self.root / '.panel.lease'))
+                self.assertTrue(self.busy(self.root / '.operation.lock'))
+                self.finish(process)
+                archive = self.root / 'backups' / result['backup_name']
+                process = self.start_worker()
+                self.request(process, 'restore', path=str(archive), sha256=result['backup_sha256'])
+                self.send(process, {'command': 'proceed'})
+                self.assertEqual(self.event(process), {'event': 'done', 'ok': True})
+                self.assert_writers(self.data, True)
+                self.assertTrue(self.busy(self.root / '.panel.lease'))
+                self.assertTrue(self.busy(self.root / '.operation.lock'))
+                self.finish(process)
+                self.assertEqual(store.load_active(), before)
+                self.assertEqual(store.read_snapshot(), snapshot)
+                with sqlite3.connect(self.data / 'v-ui.db') as db:
+                    self.assertEqual(db.execute('SELECT remark FROM inbounds').fetchall(), [('original-node',)])
+                    self.assertEqual(db.execute('SELECT count(*) FROM admin_sessions').fetchone()[0], 0)
+                    self.assertEqual(db.execute('SELECT revoked FROM subscription_grants').fetchone()[0], 1)
 
     def test_real_worker_start_verifies_then_releases_writers(self):
         process = self.start_worker()

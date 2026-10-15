@@ -128,6 +128,84 @@ class ProxyFixtureTests(unittest.TestCase):
         self.assertIsNone(case._negative_phase)
         self.assertTrue(any("cleanup also failed" in note for note in caught.exception.__notes__))
 
+    def rejection_fixture(self, path, *, dns=False):
+        evidence, answers, _ = self.evidence_fixture()
+        case = DoubleHopFixture()
+        case.evidence = evidence
+        case.ordinary_answers = evidence.ordinary
+        case.ingress = SimpleNamespace(log_path=path)
+        case.sanitized = lambda text: text
+        case._negative_phase = {"baseline": evidence.target_baseline(), "dns": dns}
+        return case, answers
+
+    def test_rejection_sends_once_then_polls_an_async_fresh_dns_reason(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary)/"ingress.log"
+            name = "servfail.example.test"
+            line = f"dns: lookup failed for {name}: (exchange6: servfail | exchange4: servfail)\n"
+            path.write_text(line)  # Old matching evidence cannot satisfy this request.
+            case, answers = self.rejection_fixture(path, dns=True)
+            answers.failed.add(name)
+            calls, written = [], threading.Event()
+            def write_reason():
+                with path.open("a") as log:
+                    log.write(line)
+                written.set()
+            timer = threading.Timer(.1, write_reason)
+            def request():
+                calls.append(True)
+                for family in (1, 28):
+                    answers.answer(dns_query(name, family), UPSTREAM_EGRESS)
+                timer.start()
+                raise ProxyRejected("Caller received proxy refusal before the core log flushed")
+            request.dns_name = name
+            try:
+                case.rejection(request, case.ingress,
+                               (f"dns: lookup failed for {name}:", "exchange4: servfail", "exchange6: servfail"),
+                               timeout=1)
+                self.assertTrue(written.is_set(), "Returned before the fresh reason was written")
+            finally:
+                timer.join(timeout=2)
+            self.assertEqual(calls, [True])
+            self.assertEqual(case.evidence.dns, Counter({(UPSTREAM_EGRESS, name, 1): 1,
+                                                       (UPSTREAM_EGRESS, name, 28): 1}))
+            case.evidence.assert_exact(self)
+
+    def test_rejection_never_reissues_when_only_stale_or_timeout_evidence_exists(self):
+        for fresh in ("", "connection: context deadline exceeded\n"):
+            with self.subTest(fresh=fresh), tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary)/"ingress.log"
+                path.write_text("connection: unknown uuid\n")
+                case, _ = self.rejection_fixture(path)
+                calls = []
+                def request():
+                    calls.append(True)
+                    with path.open("a") as log:
+                        log.write(fresh)
+                    raise TimeoutError("A caller timeout is not an authentication reason")
+                with self.assertRaisesRegex(AssertionError, "No fresh actual rejection reason"):
+                    case.rejection(request, case.ingress, ("unknown uuid",), timeout=.1)
+                self.assertEqual(calls, [True])
+                case.evidence.assert_exact(self)
+
+    def test_dns_deadline_requires_the_failed_lookup_and_requested_name(self):
+        for fresh in ("connection: context deadline exceeded\n",
+                      "dns: lookup failed for unrelated.example.test: context deadline exceeded\n"):
+            with self.subTest(fresh=fresh), tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary)/"ingress.log"
+                path.write_text("")
+                case, _ = self.rejection_fixture(path)
+                calls = []
+                def request():
+                    calls.append(True)
+                    path.write_text(fresh)
+                    raise ProxyRejected("DNS route refused")
+                with self.assertRaisesRegex(AssertionError, "No fresh actual rejection reason"):
+                    case.rejection(request, case.ingress,
+                                   ("dns: lookup failed for timeout.example.test:", "context deadline exceeded"),
+                                   timeout=.1)
+                self.assertEqual(calls, [True])
+
     def test_unfinished_dns_drain_fails_explicitly_at_its_bound(self):
         evidence, answers, _ = self.evidence_fixture()
         case = DoubleHopFixture()
@@ -581,22 +659,24 @@ class DoubleHopFixture(unittest.TestCase):
                     self.success(self.local_port, auth=AUTH, protocol=protocol)
 
     def rejection(self, request, process, reasons, *, timeout=12):
-        """Every negative needs a fresh, specific core reason and zero delivery."""
+        """Send once, then poll fresh specific core evidence with zero delivery."""
         self.assertIsNotNone(self._negative_phase, "Every rejection belongs to an explicit fixed-baseline phase")
         baseline = self._negative_phase["baseline"]
         self.evidence.assert_targets(self, baseline)
         offset = len(process.log_path.read_text(errors="replace"))
         ingress_offset = len(self.ingress.log_path.read_text(errors="replace")) if self.ingress else 0
         deadline = time.monotonic() + timeout
+        if self._negative_phase["dns"] and getattr(request, "dns_name", None):
+            self.evidence.expect_dns(request.dns_name)
+        # A late log flush must never create another network request or another
+        # expected DNS pair. Missing/wrong evidence is a failure of this request.
+        try:
+            result = request()
+        except (OSError, http.client.HTTPException):
+            pass
+        else:
+            self.fail("Rejected operation unexpectedly succeeded: " + repr(result))
         while True:
-            if self._negative_phase["dns"] and getattr(request, "dns_name", None):
-                self.evidence.expect_dns(request.dns_name)
-            try:
-                result = request()
-            except (OSError, http.client.HTTPException):
-                pass
-            else:
-                self.fail("Rejected operation unexpectedly succeeded: " + repr(result))
             self.evidence.assert_targets(self, baseline)
             fresh = process.log_path.read_text(errors="replace")[offset:].lower()
             lines = [line for line in fresh.splitlines() if all(reason in line for reason in reasons)]
@@ -828,23 +908,24 @@ class ProxyDoubleHopTests(DoubleHopFixture):
         self.activate("11")
         self.success(self.local_port, auth=AUTH)
         for fault in ("servfail", "timeout"):
-            with self.subTest(fault=fault):
-                name = fault + ".example.test"
-                self.ordinary_answers.hosts[name] = TARGET
-                if fault == "servfail":
-                    self.answers.failed.add(name)
-                    reasons = ("server failure",)
-                else:
-                    self.answers.delays.update({(name, 1): 12, (name, 28): 12})
-                    reasons = ("context deadline exceeded",)
-                with self.negative_phase(dns=True):
-                    self.rejection(self.negative_request(host=name, timeout=15), self.ingress, reasons, timeout=20)
-                self.assertIn((UPSTREAM_EGRESS, name, 1), self.answers.snapshot())
-                self.assertTrue(all(peer == UPSTREAM_EGRESS for peer, _, _ in self.answers.snapshot()))
-                self.answers.failed.discard(name)
-                self.answers.delays.pop((name, 1), None)
-                self.answers.delays.pop((name, 28), None)
-                self.success(self.local_port, auth=AUTH, host=name)
+            # These faults share live processes. A failed phase stops them, so
+            # abort this sequence rather than continuing against dead listeners.
+            name = fault + ".example.test"
+            self.ordinary_answers.hosts[name] = TARGET
+            if fault == "servfail":
+                self.answers.failed.add(name)
+                reasons = (f"dns: lookup failed for {name}:", "exchange4: servfail", "exchange6: servfail")
+            else:
+                self.answers.delays.update({(name, 1): 12, (name, 28): 12})
+                reasons = (f"dns: lookup failed for {name}:", "context deadline exceeded")
+            with self.negative_phase(dns=True):
+                self.rejection(self.negative_request(host=name, timeout=15), self.ingress, reasons, timeout=20)
+            self.assertIn((UPSTREAM_EGRESS, name, 1), self.answers.snapshot())
+            self.assertTrue(all(peer == UPSTREAM_EGRESS for peer, _, _ in self.answers.snapshot()))
+            self.answers.failed.discard(name)
+            self.answers.delays.pop((name, 1), None)
+            self.answers.delays.pop((name, 28), None)
+            self.success(self.local_port, auth=AUTH, host=name)
 
     def test_partial_dns_family_failure_uses_checked_successful_answers(self):
         self.start_upstream("tls")

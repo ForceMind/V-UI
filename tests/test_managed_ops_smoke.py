@@ -118,9 +118,10 @@ class ManagedConsumerFixtureTests(unittest.TestCase):
     def test_control_copy_requires_manifest_hashes_and_exact_unexecuted_wrapper(self):
         with tempfile.TemporaryDirectory(prefix='vui-managed-copy-unit-') as temporary:
             root = Path(temporary); payload = root / 'payload'; control = root / 'control'
-            payload.mkdir(); control.mkdir(); (payload / 'app').mkdir(); (payload / 'deploy').mkdir()
+            payload.mkdir(); control.mkdir(); (payload / 'app/services').mkdir(parents=True); (payload / 'deploy').mkdir()
             files = {}
-            for name in ('deploy/system_ops.py', 'deploy/ops_worker.py', 'app/release_tools.py', 'deploy/v-ui'):
+            for name in ('deploy/system_ops.py', 'deploy/ops_worker.py', 'app/release_tools.py', 'deploy/v-ui',
+                         'app/services/proxy_store.py', 'app/services/upstream_profile.py'):
                 raw = WRAPPER_BYTES if name.endswith('/v-ui') else b'# unit fixture, not product code\n'
                 (payload / name).write_bytes(raw)
                 files[name] = {'size': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}

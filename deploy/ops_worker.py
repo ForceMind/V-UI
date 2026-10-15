@@ -1,6 +1,6 @@
 """Private non-root maintenance worker for the root-owned managed controller.
 
-The installed copy loads only its sibling, trusted release_tools.py. It never
+The installed copy loads only its trusted sibling modules. It never
 controls services and never accepts commands that skip ownership or leases.
 The root controller must prove service quiescence before sending proceed, then
 keep the worker alive until service recovery is verified and finish is sent.
@@ -17,6 +17,7 @@ import selectors
 import signal
 import sys
 import time
+import types
 
 
 ROOT = Path('/var/lib/v-ui')
@@ -177,15 +178,38 @@ def _run(root, release_tools, input_fd, output, *, timeout=TIMEOUT):
 
 
 def _load_release_tools():
-    # -I -S deliberately excludes the working directory, PYTHONPATH and site
-    # hooks. The trusted installer places this exact module beside the worker.
-    path = Path(__file__).resolve().with_name('release_tools.py')
-    spec = importlib.util.spec_from_file_location('_vui_managed_release_tools', path)
-    if spec is None or spec.loader is None:
-        raise WorkerError('Maintenance implementation unavailable')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    # The root controller verified these fixed sibling files against its receipt.
+    # -I -S excludes cwd/PYTHONPATH/site hooks. Do not add a package payload (or
+    # any directory) to sys.path: create inert, pathless namespaces and load only
+    # the two exact stdlib dependencies needed by backup/restore. No app startup,
+    # parser, core binary, or service-owned installed code is imported here.
+    directory = Path(__file__).resolve().parent
+    names = ('app', 'app.services', 'app.services.upstream_profile',
+             'app.services.proxy_store')
+    if any(name in sys.modules for name in names):
+        raise WorkerError('Unexpected application modules in isolated worker')
+    loaded = []
+    try:
+        for name in names[:2]:
+            package = types.ModuleType(name)
+            package.__path__ = []
+            sys.modules[name] = package
+            loaded.append(name)
+        for name, filename in (('app.services.upstream_profile', 'upstream_profile.py'),
+                               ('app.services.proxy_store', 'proxy_store.py'),
+                               ('_vui_managed_release_tools', 'release_tools.py')):
+            spec = importlib.util.spec_from_file_location(name, directory / filename)
+            if spec is None or spec.loader is None:
+                raise WorkerError('Maintenance implementation unavailable')
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            loaded.append(name)
+            spec.loader.exec_module(module)
+        return module
+    except BaseException:
+        for name in reversed(loaded):
+            sys.modules.pop(name, None)
+        raise
 
 
 def main():
