@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.staticfiles import StaticFiles
-from app.api import auth, certificates, cores, files, inbounds, routing, security, singbox, subscription, subscriptions, system, xray
+from app.api import auth, certificates, cores, files, inbounds, proxy, routing, security, singbox, subscription, subscriptions, system, xray
 from app.models.database import DB_PATH, init_db
 from app.middleware.auth import AdminAuthMiddleware, configured_origin
 from app.services.core_manager import core_manager
@@ -22,6 +22,7 @@ app.include_router(system.router,prefix='/api/system',tags=['System'])
 app.include_router(inbounds.router,prefix='/api/inbounds',tags=['Inbounds'])
 app.include_router(cores.router,prefix='/api/cores',tags=['Cores'])
 app.include_router(routing.router,prefix='/api/routing',tags=['Routing'])
+app.include_router(proxy.router,prefix='/api/proxy',tags=['Server egress'])
 app.include_router(subscription.router,prefix='/api/subscription',tags=['Subscription'])
 app.include_router(subscriptions.router,prefix='/api/subscriptions',tags=['Subscription grants'])
 app.include_router(subscriptions.public_router)
@@ -41,7 +42,7 @@ async def invalid_export(request: Request,exc: ExportError):
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request,exc: RequestValidationError):
-    if request.url.path.startswith(('/api/auth/','/api/subscriptions','/sub/')):
+    if request.url.path.startswith(('/api/auth/','/api/subscriptions','/sub/','/api/proxy/')):
         return JSONResponse({'detail':'Invalid request'},status_code=422)
     return await request_validation_exception_handler(request,exc)
 

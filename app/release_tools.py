@@ -436,13 +436,16 @@ def _cold_digest_artifact(name: str) -> bool:
             and parts[1] in ('x86_64', 'aarch64') and parts[2] in ('sing-box', 'xray')))
 
 
-def files_in(root: Path, *, cold_install_artifacts=False, private_files=()) -> dict:
+def files_in(root: Path, *, cold_install_artifacts=False, private_files=(), excluded=()) -> dict:
     result = {}
     for path in sorted(root.rglob('*')):
+        name = path.relative_to(root).as_posix()
+        # Only the stopped backup path excludes its separately validated proxy
+        # snapshot. Standalone payload/archive verification excludes nothing.
+        if any(name == prefix or name.startswith(prefix + '/') for prefix in excluded): continue
         if path.is_symlink(): raise ReleaseError('Symbolic links are not permitted in payloads or backups')
         if path.is_dir(): continue
         if not path.is_file(): raise ReleaseError('Only regular files are permitted')
-        name = path.relative_to(root).as_posix()
         if name == MANIFEST: continue
         if not safe_name(name): raise ReleaseError('Unsafe payload path')
         cold = name in private_files or (cold_install_artifacts and _cold_digest_artifact(name))
@@ -705,7 +708,23 @@ def _backup_locked(guard: _StoppedGuard, destination: Path) -> str:
         data=root/'data'; work=Path(temporary)/'data'; work.mkdir(mode=0o700)
         private_files = set()
         if not data.is_dir(): raise ReleaseError('No data directory to back up')
-        for name in files_in(data):
+        # The initialized marker is required to distinguish saved state from a
+        # never-applied installation. Copy it only as part of a validated,
+        # locked proxy snapshot; do not broaden the general hidden-file rule.
+        proxy_names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
+        if any(os.path.lexists(data / name) for name in proxy_names):
+            from app.services.proxy_store import ProxyStore, ProxyStorageError
+            try:
+                with ProxyStore(data).backup_snapshot() as entries:
+                    for name, content in entries:
+                        target = work / name
+                        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                        with target.open('xb') as output:
+                            output.write(content); output.flush(); os.fsync(output.fileno())
+                        target.chmod(0o600); private_files.add(name)
+            except ProxyStorageError:
+                raise ReleaseError('Proxy state is unsafe or incomplete; no backup was created') from None
+        for name in files_in(data, excluded=proxy_names):
             if name.endswith(('owner.lock','.db-wal','.db-shm')) or name.startswith('.'): continue
             if name=='v-ui.db': continue
             target=work/name; target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -758,6 +777,52 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
         if meta.get('kind') != 'backup' or meta.get('data_path') != str(root/'data'):
             raise ReleaseError('Backup belongs to a different data path; automatic path rewriting is not supported')
         (work/MANIFEST).unlink()
+        proxy_names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
+        incoming_proxy = None
+        if any(os.path.lexists(work / name) for name in proxy_names):
+            from app.services.proxy_store import ProxyStore, ProxyStorageError
+            try:
+                if os.path.lexists(work / '.proxy-state.lock'):
+                    raise ReleaseError('Backup contains a transient proxy lock')
+                # ZIP stores regular files only. A genuinely empty secrets
+                # directory has no member; rebuild that exact structural path
+                # in private staging, then validate every reference and object.
+                for name in ('proxy-state', 'proxy-state/revisions', 'proxy-state/secrets'):
+                    directory = work / name
+                    if name == 'proxy-state/secrets' and not directory.exists():
+                        directory.mkdir(mode=0o700)
+                    # Recursive extraction mkdir may use the caller's umask for
+                    # intermediate directories. These exact directories belong
+                    # to this new private extraction, never to live user data.
+                    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                    try:
+                        if os.fstat(fd).st_uid != os.geteuid(): raise ReleaseError('Unsafe extracted proxy directory')
+                        os.fchmod(fd, 0o700); os.fsync(fd)
+                    finally:
+                        os.close(fd)
+                with ProxyStore(work).backup_snapshot() as entries:
+                    for _ in entries: pass
+                incoming_proxy = ProxyStore(work).read_snapshot(initialize=False)
+                if incoming_proxy['pending'] is not None:
+                    raise ReleaseError('Backup contains an unresolved proxy apply; dedicated recovery is required')
+            except (ProxyStorageError, OSError):
+                raise ReleaseError('Backup proxy state is unsafe or incomplete; existing data was not replaced') from None
+        if any(os.path.lexists(root / 'data' / name) for name in proxy_names):
+            # Restore is not a mode-decrease confirmation. Neither legacy nor
+            # proxy-bearing backups may silently replace an ON policy with OFF.
+            from app.services.proxy_store import ProxyStore, ProxyStorageError
+            try:
+                current = ProxyStore(root / 'data').read_snapshot(initialize=False)
+            except ProxyStorageError:
+                raise ReleaseError('Current proxy policy is unknown; dedicated recovery is required') from None
+            if current['pending'] is not None:
+                raise ReleaseError('Current proxy apply is unresolved; dedicated recovery is required')
+            active = current['active']
+            incoming_active = incoming_proxy['active'] if incoming_proxy is not None else None
+            if active and any(active['settings'][key] and (
+                    incoming_active is None or not incoming_active['settings'][key])
+                    for key in ('local_proxy_enabled', 'relay_enabled')):
+                raise ReleaseError('Backup would turn off an active proxy; explicitly disable and commit those settings before restoring it')
         db_path=work/'v-ui.db'
         if not db_path.is_file(): raise ReleaseError('Backup has no database')
         with sqlite3.connect(db_path) as db:

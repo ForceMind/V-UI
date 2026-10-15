@@ -1,5 +1,7 @@
 # V-UI 文档
 
+双开关功能的 [M1 安全导入与草稿实现](DUAL_PROXY_RELAY_M1.md)单独记录实现、恢复边界与包内解析门槛；草稿接口不代表代理运行已生效。
+
 2026-10-15 新增：[双开关代理与中转一期契约](DUAL_PROXY_RELAY_CONTRACT.md)及[进度与证据账本](DUAL_PROXY_RELAY_PROGRESS.md)。已批准 M0–M4 独立阶段开发，当前首先收口 M0；这些是待实现契约和实际证据入口，不表示中转已可用或已发布。下方安装器/发布文字保留原阶段状态，新范围及资格以该契约和准确证据为准。
 
 当前源码/开发文档为 **v0.4.8**（UNRELEASED），仅包含[安装器退出状态与清理修复](INSTALLER_EXIT_STATUS_048.md)。当前正式发布为 [v0.4.7](https://github.com/ForceMind/V-UI/releases/tag/v0.4.7)，发布于 2026-10-13，tag 指向 `c5d50ee14b08da57bdc13c150b4ed501e9484023`；正式版用户请使用[固定 v0.4.7 文档](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/README.md)并先阅读[旧安装器已知问题](INSTALLER_EXIT_STATUS_048.md)。当前分支的 0.4.8 安装示例仅供发布后准备，现在不要执行。新用户从[产品 README](../README.md)开始，再按下表选择操作指南；不存在或不完整的版本不能安装，不追随 latest。
