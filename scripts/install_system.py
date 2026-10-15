@@ -37,6 +37,11 @@ UNITS = ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')
 MAX_ARCHIVE = 850_000_000
 INSTALL_LOCK = Path('/run/lock/v-ui-install.lock')
 STREAM_CHUNK = 1024 * 1024
+# Complete stdlib-only dependency closure of the offline backup/restore controller.
+# Every member must come from the same checksum-verified bundle, never the
+# mutable installed payload. Keep the public release-kit asset set unchanged.
+CONTROLLER_MEMBERS = ('scripts/deploy.py', 'app/release_tools.py',
+                      'app/services/proxy_store.py', 'app/services/upstream_profile.py')
 # Compatibility names for older tooling/tests; new installs select a backend dynamically.
 MARKER=service_support.MARKER
 UNIT_DIR=service_support.SYSTEMD_DIR
@@ -227,7 +232,7 @@ def verify_archive(path, sha, *, temp_dir=None):
                 raise InstallError('Payload checksum or mode mismatch')
         if platform_support.target_key() not in meta.get('targets', []):
             raise InstallError('Bundle does not contain this Linux architecture/libc target: '+platform_support.target_key())
-        for name in ('scripts/deploy.py', 'app/release_tools.py', 'deploy/system_launcher.py'):
+        for name in (*CONTROLLER_MEMBERS, 'deploy/system_launcher.py'):
             if name not in meta['files']:
                 raise InstallError('Bundle predates the managed one-command installer')
         snapshot.seek(0)
@@ -236,6 +241,22 @@ def verify_archive(path, sha, *, temp_dir=None):
         if archive is not None: archive.close()
         snapshot.close()
         raise
+
+
+def extract_controller(archive, work, uid, gid):
+    """Copy only the verified offline dependency closure, without executing it."""
+    for name in CONTROLLER_MEMBERS:
+        path = work / name
+        parent = work
+        for part in Path(name).parts[:-1]:
+            parent = parent / part
+            if not parent.exists():
+                parent.mkdir(mode=0o700)
+                os.chown(parent, uid, gid)
+        with archive.open(name) as source, path.open('xb') as output:
+            shutil.copyfileobj(source, output, STREAM_CHUNK)
+        os.chmod(path, 0o600)
+        os.chown(path, uid, gid)
 
 
 def fqdn(value):
@@ -547,6 +568,8 @@ def install_verified(args, snapshot, archive, meta):
     http_name='v-ui-http01.socket' if manager=='systemd' else 'v-ui-http01'
     was_running=service_support.is_active(manager,panel_name)
     # A tiny verified controller is extracted as data; it is never executed as root.
+    # Its complete stdlib closure runs with isolated/no-site Python, so cwd,
+    # PYTHONPATH and service-user site hooks cannot supply its dependencies.
     with tempfile.TemporaryDirectory(prefix='.installer-', dir=ROOT) as directory:
         work = Path(directory); os.chown(work, uid, gid)
         bundle = work / 'bundle.zip'
@@ -555,16 +578,11 @@ def install_verified(args, snapshot, archive, meta):
             shutil.copyfileobj(snapshot, output, STREAM_CHUNK)
             output.finish_writes()
         os.chmod(bundle, 0o600); os.chown(bundle, uid, gid)
-        for name in ('scripts/deploy.py', 'app/release_tools.py'):
-            path = work/name; path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            os.chown(path.parent, uid, gid)
-            with archive.open(name) as source, path.open('xb') as output:
-                shutil.copyfileobj(source, output, STREAM_CHUNK)
-            os.chmod(path, 0o600); os.chown(path, uid, gid)
+        extract_controller(archive, work, uid, gid)
         controller = work/'scripts/deploy.py'
         prepared = ROOT/'releases'/meta['release_id']/'READY.json'
         if not prepared.exists():
-            as_service([sys.executable,'-B',str(controller),'--root',str(ROOT),'stage',str(bundle),'--sha256',args.sha256])
+            as_service([sys.executable,'-B','-I','-S',str(controller),'--root',str(ROOT),'stage',str(bundle),'--sha256',args.sha256])
         elif json.loads(prepared.read_text()).get('archive_sha256') != args.sha256:
             raise InstallError('Prepared release has another archive digest; refusing overwrite')
         stopped = False
@@ -575,9 +593,9 @@ def install_verified(args, snapshot, archive, meta):
             stopped = True
             if existing and (ROOT/'data/v-ui.db').exists():
                 target = ROOT/('before-upgrade-'+str(time.time_ns())+'.zip')
-                as_service([sys.executable,'-B',str(controller),'--root',str(ROOT),'backup',str(target)])
+                as_service([sys.executable,'-B','-I','-S',str(controller),'--root',str(ROOT),'backup',str(target)])
                 print('Private pre-update backup:', target)
-            as_service([sys.executable,'-B',str(controller),'--root',str(ROOT),'activate',meta['release_id']])
+            as_service([sys.executable,'-B','-I','-S',str(controller),'--root',str(ROOT),'activate',meta['release_id']])
             release=ROOT/'releases'/meta['release_id']
             runtime_python=release/'runtime/python/bin/python3'
             config['bootstrap_python']=str(runtime_python)
@@ -613,7 +631,7 @@ def install_verified(args, snapshot, archive, meta):
                         write_root_file(path, content, mode); os.chown(path, owner, group)
                     service_support.reload(manager)
                 if previous and previous != meta['release_id']:
-                    as_service([sys.executable,'-B',str(controller),'--root',str(ROOT),'activate',previous])
+                    as_service([sys.executable,'-B','-I','-S',str(controller),'--root',str(ROOT),'activate',previous])
                 if was_running:
                     service_support.start(manager,[http_name,panel_name])
             raise

@@ -55,6 +55,12 @@ SOURCE_MEMBERS = {
     'ops_worker.py': 'deploy/ops_worker.py', 'release_tools.py': 'app/release_tools.py',
     'v-ui': 'deploy/v-ui', 'RELEASE_NOTES.md': 'docs/RELEASE_NOTES.md',
 }
+# Internal controller dependencies are authenticated by the complete source ZIP
+# digest and commit binding above; they are not additional top-level kit assets.
+SOURCE_DEPENDENCIES = {
+    'proxy_store.py': 'app/services/proxy_store.py',
+    'upstream_profile.py': 'app/services/upstream_profile.py',
+}
 RECEIPT_KEYS = {'schema', 'service_manager', 'system_python', 'interpreter_resolved',
                 'interpreter_sha256', 'files'}
 MAX_CODE = 4_000_000
@@ -228,6 +234,12 @@ def verify_kit(directory, sha256):
                     raise InstallError('Source archive contains an unsafe control member')
                 if digest(source.read(entry)) != values[name]:
                     raise InstallError('Control asset differs from exact-commit source: ' + name)
+            for name, member in SOURCE_DEPENDENCIES.items():
+                entry = source.getinfo(member)
+                if (entry.is_dir() or entry.flag_bits & 1 or entry.file_size > MAX_CODE
+                        or stat.S_IFMT(entry.external_attr >> 16) not in (0, stat.S_IFREG)):
+                    raise InstallError('Source archive contains an unsafe dependency member')
+                verified[name] = source.read(entry)
     except (zipfile.BadZipFile, KeyError, RuntimeError) as exc:
         if isinstance(exc, InstallError):
             raise
@@ -342,7 +354,7 @@ def inspect_instance(verified, record):
 
 
 def destinations():
-    return {CONTROL / name: (name, 0o644) for name in ('system_ops.py', 'ops_worker.py', 'release_tools.py')} | {
+    return {CONTROL / name: (name, 0o644) for name in ('system_ops.py', 'ops_worker.py', 'release_tools.py', *SOURCE_DEPENDENCIES)} | {
         ENTRY: ('v-ui', 0o755)}
 
 
@@ -370,10 +382,16 @@ def validate_existing(hashes, interpreter, manager, refresh, verified):
         return
     receipt = load_json(read_file(RECEIPT, root=True, mode=0o644, limit=MAX_JSON)[0])
     expected = set(hashes) | {str(path) for path in paths}
+    dependencies = {str(CONTROL / name) for name in SOURCE_DEPENDENCIES}
+    # A prior controller had no proxy dependencies. Only explicit refresh may
+    # migrate that exact old receipt, after checking every old control digest.
+    legacy = (refresh and isinstance(receipt, dict)
+              and isinstance(receipt.get('files'), dict)
+              and set(receipt['files']) == expected - dependencies)
     if (not isinstance(receipt, dict) or set(receipt) != RECEIPT_KEYS
             or type(receipt.get('schema')) is not int or receipt['schema'] != 1
             or receipt.get('service_manager') != manager
-            or not isinstance(receipt.get('files'), dict) or set(receipt['files']) != expected
+            or not isinstance(receipt.get('files'), dict) or (set(receipt['files']) != expected and not legacy)
             or receipt.get('system_python') != str(SYSTEM_PYTHON)
             or not isinstance(receipt.get('interpreter_resolved'), str)
             or not Path(receipt['interpreter_resolved']).is_absolute()
@@ -385,8 +403,13 @@ def validate_existing(hashes, interpreter, manager, refresh, verified):
         raise InstallError('Existing control receipt is unrelated or incompatible')
     actual = dict(hashes)
     for path, (_, mode) in paths.items():
+        if legacy and str(path) in dependencies:
+            if path.exists() or path.is_symlink():
+                raise InstallError('Unreceipted dependency already exists; inspect manually')
+            continue
         actual[str(path)] = read_file(path, root=True, mode=mode)[1]
-    if any(receipt['files'][str(path)] != actual[str(path)] for path in paths):
+    if any(receipt['files'][str(path)] != actual[str(path)] for path in paths
+           if not legacy or str(path) not in dependencies):
         raise InstallError('Existing control code drift; refusing to re-endorse changed helpers or wrapper')
     if not refresh:
         if receipt['files'] != actual or any(receipt[key] != value for key, value in interpreter.items()):

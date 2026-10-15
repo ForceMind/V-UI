@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -16,6 +17,7 @@ import zipfile
 from scripts import build_release_kit, install_ops_control as installer, service_support
 
 REPO = Path(__file__).resolve().parents[1]
+REAL_RUN = subprocess.run
 
 
 class ControlInstallTests(unittest.TestCase):
@@ -93,6 +95,8 @@ class ControlInstallTests(unittest.TestCase):
             source.comment = b'a' * 40
             for name, member in installer.SOURCE_MEMBERS.items():
                 source.writestr(member, (self.kit / name).read_bytes())
+            for member in installer.SOURCE_DEPENDENCIES.values():
+                source.writestr(member, (REPO / member).read_bytes())
         self.rehash()
 
     def rehash(self):
@@ -115,7 +119,7 @@ class ControlInstallTests(unittest.TestCase):
         self.assertEqual(receipt['interpreter_resolved'], str(self.real_python))
         self.assertEqual(receipt, json.loads(installer.RECEIPT.read_bytes()))
         expected = {self.config, self.control / 'launcher.py', self.entry,
-                    *(self.control / name for name in ('system_ops.py', 'ops_worker.py', 'release_tools.py')),
+                    *(self.control / name for name in ('system_ops.py', 'ops_worker.py', 'release_tools.py', *installer.SOURCE_DEPENDENCIES)),
                     *(self.units / name for name in ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket'))}
         self.assertEqual(set(receipt['files']), {str(path) for path in expected})
         for path in expected:
@@ -123,7 +127,9 @@ class ControlInstallTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o755 if path == self.entry else 0o644)
             self.assertFalse(path.stat().st_mode & (stat.S_ISUID | stat.S_ISGID))
         for path, (name, _) in installer.destinations().items():
-            self.assertEqual(path.read_bytes(), (self.kit / name).read_bytes())
+            expected_bytes = ((REPO / installer.SOURCE_DEPENDENCIES[name]).read_bytes()
+                              if name in installer.SOURCE_DEPENDENCIES else (self.kit / name).read_bytes())
+            self.assertEqual(path.read_bytes(), expected_bytes)
         self.assertIn(b'/usr/bin/python3 -B -I -S /usr/local/lib/v-ui/system_ops.py', self.entry.read_bytes())
         self.assertIn(b'def operate(', (self.control / 'system_ops.py').read_bytes())
         self.assertIn(b'class _MaintenanceSession(', (self.control / 'release_tools.py').read_bytes())
@@ -183,6 +189,47 @@ class ControlInstallTests(unittest.TestCase):
             with self.assertRaises(installer.InstallError):
                 installer.install(self.kit, hashlib.sha256(raw).hexdigest())
         self.assert_not_published()
+
+    def test_source_dependency_missing_link_oversize_or_duplicate_refuses_before_writes(self):
+        for failure in ('missing', 'link', 'oversize', 'duplicate'):
+            with self.subTest(failure=failure):
+                self.write_kit()
+                path = self.kit / 'vui-source.zip'
+                with zipfile.ZipFile(path) as source:
+                    members = {name: source.read(name) for name in source.namelist()}
+                selected = installer.SOURCE_DEPENDENCIES['proxy_store.py']
+                raw = members.pop(selected)
+                with zipfile.ZipFile(path, 'w') as source:
+                    source.comment = b'a' * 40
+                    for name, content in members.items():
+                        source.writestr(name, content)
+                    if failure == 'link':
+                        entry = zipfile.ZipInfo(selected)
+                        entry.create_system = 3
+                        entry.external_attr = (stat.S_IFLNK | 0o777) << 16
+                        source.writestr(entry, b'/mutable/payload')
+                    elif failure == 'oversize':
+                        source.writestr(selected, b'#' * (installer.MAX_CODE + 1))
+                    elif failure == 'duplicate':
+                        import warnings
+                        with warnings.catch_warnings():
+                            warnings.simplefilter('ignore', UserWarning)
+                            source.writestr(selected, raw)
+                            source.writestr(selected, raw)
+                self.rehash()
+                with self.assertRaises(installer.InstallError):
+                    self.install()
+                self.assert_not_published()
+                self.assertFalse(self.lock.exists())
+                self.run.assert_not_called()
+
+    def test_internal_source_dependencies_do_not_expand_public_kit_assets(self):
+        verified, _ = installer.verify_kit(self.kit, self.sha)
+        self.assertEqual(set(verified), installer.CODE_ASSETS | installer.SOURCE_DEPENDENCIES.keys())
+        self.assertTrue(installer.SOURCE_DEPENDENCIES.keys().isdisjoint(installer.COMMON_ASSETS))
+        for name, member in installer.SOURCE_DEPENDENCIES.items():
+            self.assertEqual(verified[name], (REPO / member).read_bytes())
+            self.assertFalse((self.kit / name).exists())
 
     def test_kit_symlink_hardlink_and_linked_parent_are_rejected(self):
         path = self.kit / 'system_ops.py'
@@ -371,10 +418,36 @@ class ControlInstallTests(unittest.TestCase):
                 self.install(refresh=True)
             path.write_bytes(original)
 
+    def test_explicit_refresh_migrates_only_an_intact_legacy_receipt(self):
+        old = self.install()
+        for name in installer.SOURCE_DEPENDENCIES:
+            path = self.control / name
+            old['files'].pop(str(path))
+            path.unlink()
+        installer.RECEIPT.write_text(json.dumps(old))
+        with self.assertRaises(installer.InstallError):
+            self.install()
+        # Unreceipted pre-existing dependency bytes may not be adopted.
+        extra = self.control / 'proxy_store.py'
+        extra.write_bytes(b'untrusted dependency')
+        extra.chmod(0o644)
+        with self.assertRaisesRegex(installer.InstallError, 'Unreceipted dependency'):
+            self.install(refresh=True)
+        extra.unlink()
+        helper = self.control / 'ops_worker.py'
+        raw = helper.read_bytes()
+        helper.write_bytes(raw + b'\n# drift')
+        with self.assertRaisesRegex(installer.InstallError, 'control code drift'):
+            self.install(refresh=True)
+        helper.write_bytes(raw)
+        upgraded = self.install(refresh=True)
+        self.assertEqual(set(upgraded['files']) - set(old['files']),
+                         {str(self.control / name) for name in installer.SOURCE_DEPENDENCIES})
+
     def test_partial_publish_fails_closed_without_usable_wrapper_or_receipt(self):
         original_replace = os.replace
         self.install()
-        for fail_at in range(1, 6):
+        for fail_at in range(1, len(installer.destinations()) + 2):
             # Reconstruct an intact fake installation for each write boundary.
             for path in (*installer.destinations(), installer.RECEIPT):
                 path.unlink(missing_ok=True)
@@ -479,13 +552,19 @@ class ControlInstallTests(unittest.TestCase):
     def test_actual_installed_worker_loads_its_packaged_maintenance_implementation(self):
         self.install()
         path = self.control / 'ops_worker.py'
-        spec = importlib.util.spec_from_file_location('_test_installed_worker', path)
-        worker = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(worker)
-        implementation = worker._load_release_tools()
-        self.assertEqual(Path(implementation.__file__), self.control / 'release_tools.py')
-        self.assertTrue(callable(implementation._MaintenanceSession))
-        self.assertTrue(callable(implementation._MaintenanceSession.execute))
+        # Load in the real isolated worker context, never sharing app modules
+        # with this test process. The latter would hide a missing dependency.
+        code = ('import runpy,sys;from pathlib import Path;'
+                'm=runpy.run_path(sys.argv[1]);api=m["_load_release_tools"]();'
+                'assert Path(api.__file__)==Path(sys.argv[1]).with_name("release_tools.py");'
+                'assert callable(api._MaintenanceSession.execute);'
+                'from app.services.proxy_store import ProxyStore;'
+                'assert Path(sys.modules[ProxyStore.__module__].__file__).parent==Path(sys.argv[1]).parent')
+        # setUp mocks the OS capability subprocess only; use the saved function
+        # for this genuine interpreter process.
+        result = REAL_RUN([sys.executable, '-B', '-I', '-S', '-c', code, str(path)],
+                          cwd='/', capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_actual_controller_consumes_installer_receipt_and_rejects_drift(self):
         receipt = self.install()
