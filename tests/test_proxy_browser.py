@@ -1,0 +1,633 @@
+"""Real Chromium lifecycle checks for the proxy UI.
+
+Import/draft tests use the authenticated application and isolated real parser /
+private store. Runtime/apply/diagnostic response fixtures test browser behaviour
+only: they are not evidence of a proxy connection or an external device path.
+VUI_PROXY_BROWSER=1 is an opt-in gate; missing browser/dependencies fail when on.
+"""
+from copy import deepcopy
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from urllib.parse import urlparse
+
+
+ROOT = Path(__file__).resolve().parents[1]
+UUID = '11111111-1111-4111-8111-111111111111'
+URI = f'vless://{UUID}@upstream.example.test:443?security=tls&sni=upstream.example.test#Synthetic%20TLS'
+PROFILE_ID = 'up_' + '1' * 32
+PASSWORD = 'Synthetic-proxy-browser-password!'
+
+
+def outbound(name='Synthetic JSON'):
+    return {'protocol': 'vless', 'tag': name,
+            'settings': {'vnext': [{'address': 'upstream.example.test', 'port': 443,
+                                   'users': [{'id': UUID, 'encryption': 'none'}]}]},
+            'streamSettings': {'network': 'tcp', 'security': 'tls',
+                               'tlsSettings': {'serverName': 'upstream.example.test'}}}
+
+
+def fixture_snapshot(revision='a' * 64):
+    settings = {'schema_version': 1, 'local_proxy_enabled': False,
+                'relay_enabled': True, 'selected_upstream_id': PROFILE_ID,
+                'local_port': 7891, 'local_username': 'synthetic-user',
+                'local_password_set': True, 'dns_policy_version': 1,
+                'deny_policy_version': 1}
+    return {'revision': revision, 'settings': settings,
+            'upstreams': [{'id': PROFILE_ID, 'name': 'Synthetic upstream',
+                           'server': 'upstream.example.test', 'server_port': 443,
+                           'tls': {'mode': 'tls'}, 'uuid_set': True}],
+            'active': None, 'pending': None}
+
+
+class ProxyPageStaticTests(unittest.TestCase):
+    def test_secret_storage_and_offline_assets_contract(self):
+        script = (ROOT / 'web/js/proxy.js').read_text()
+        html = (ROOT / 'web/proxy.html').read_text()
+        self.assertNotIn('localStorage', script)
+        self.assertNotIn('sessionStorage', script)
+        self.assertNotIn('innerHTML', script)
+        self.assertNotIn('console.', script)
+        self.assertIn("addEventListener('pagehide'", script)
+        self.assertIn("addEventListener('popstate'", script)
+        self.assertIn("'If-Match'", script)
+        self.assertIn("'Idempotency-Key'", script)
+        self.assertIn('crypto.getRandomValues', script)
+        self.assertNotRegex(html, r'<script[^>]*src="https?://')
+        self.assertIn('socks5h', html)
+        self.assertIn('Cloudflare', html)
+        self.assertIn('ipify', html)
+        self.assertNotIn(UUID, html)
+        ids = re.findall(r'id="([^"]+)"', html)
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertFalse(set(re.findall(r"\$\('([^']+)'\)", script)) - set(ids))
+
+
+class ProxyPageRouteTests(unittest.TestCase):
+    def test_page_csp_navigation_and_api_auth_boundary(self):
+        from fastapi.testclient import TestClient
+        from unittest.mock import patch
+        import main
+        origin = 'https://panel.example.test'
+        with patch('app.middleware.auth.configured_origin', return_value=origin), \
+                patch('app.middleware.auth.authenticate', return_value=None):
+            client = TestClient(main.app, base_url=origin)
+            response = client.get('/proxy')
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('id="proxy-workspace"', response.text)
+            self.assertEqual(response.headers['content-security-policy'],
+                             client.get('/certificates').headers['content-security-policy'])
+            self.assertIn("script-src 'self'", response.headers['content-security-policy'])
+            self.assertIn("connect-src 'self'", response.headers['content-security-policy'])
+            self.assertEqual(response.headers['cache-control'], 'no-store')
+            self.assertEqual(client.get('/api/proxy/settings').status_code, 401)
+            self.assertNotIn(UUID, response.text)
+        index = (ROOT / 'web/index.html').read_text()
+        script = (ROOT / 'web/js/app.js').read_text()
+        self.assertIn('index="proxy"', index)
+        self.assertIn("if (key === 'proxy') { location.assign('/proxy'); return; }", script)
+
+    def test_ci_uses_exact_head_and_explicit_non_skipping_browser_gate(self):
+        import yaml
+        workflow = yaml.safe_load((ROOT / '.github/workflows/test.yml').read_text())
+        steps = workflow['jobs']['test']['steps']
+        checkout = next(step for step in steps if step.get('uses', '').startswith('actions/checkout@'))
+        self.assertEqual(checkout['with']['ref'], '${{ github.event.pull_request.head.sha || github.sha }}')
+        self.assertIs(checkout['with']['persist-credentials'], False)
+        self.assertTrue(any('git rev-parse HEAD' in step.get('run', '') for step in steps))
+        browser = next(step for step in steps if step.get('env', {}).get('VUI_PROXY_BROWSER') == '1')
+        self.assertIn('test_proxy_browser.py', browser['run'])
+        self.assertNotIn('continue-on-error', browser)
+        self.assertTrue(any('node --check web/js/proxy.js' in step.get('run', '') for step in steps))
+
+
+@unittest.skipUnless(os.getenv('VUI_PROXY_BROWSER') == '1', 'explicit proxy browser gate')
+class ProxyBrowserTests(unittest.TestCase):
+    def setUp(self):
+        from playwright.sync_api import sync_playwright
+        self.tmp = tempfile.TemporaryDirectory(prefix='vui-proxy-browser-')
+        self.addCleanup(self.tmp.cleanup)
+        self.work = Path(self.tmp.name)
+        self.logpath = self.work / 'server.log'
+        self.log = self.logpath.open('w')
+        self.addCleanup(self.log.close)
+        env = {**os.environ, 'PYTHONPATH': str(ROOT), 'PYTHONDONTWRITEBYTECODE': '1',
+               'VUI_PUBLIC_ORIGIN': '', 'VUI_DATA_DIR': str(self.work / 'data'),
+               'VUI_BIN_DIR': str(self.work / 'no-cores'), 'VUI_CERTIFICATES_ENABLED': '0'}
+        code = '''import sys,uvicorn
+from app.services.auth_service import provision_admin
+provision_admin('tester',sys.stdin.read())
+import main
+uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=False,access_log=False)
+'''
+        self.server = subprocess.Popen([sys.executable, '-B', '-c', code], cwd=self.work,
+                                       env=env, stdin=subprocess.PIPE, stdout=self.log,
+                                       stderr=subprocess.STDOUT, text=True)
+        self.server.stdin.write(PASSWORD)
+        self.server.stdin.close()
+        self.addCleanup(self.stop_server)
+        deadline = time.monotonic() + 15
+        match = None
+        while time.monotonic() < deadline:
+            if self.server.poll() is not None:
+                self.fail(self.logpath.read_text())
+            match = re.search(r'Uvicorn running on http://127\.0\.0\.1:(\d+)', self.logpath.read_text())
+            if match:
+                break
+            time.sleep(.05)
+        self.assertIsNotNone(match, self.logpath.read_text())
+        self.base = 'http://127.0.0.1:' + match.group(1)
+        self.playwright = sync_playwright().start()
+        self.addCleanup(self.playwright.stop)
+        executable = os.environ.get('VUI_BROWSER_EXECUTABLE')
+        if not executable and not Path(self.playwright.chromium.executable_path).exists():
+            executable = shutil.which('chromium') or shutil.which('chromium-browser')
+        options = {'headless': True}
+        if executable:
+            options['executable_path'] = executable
+        self.browser = self.playwright.chromium.launch(**options)
+        self.addCleanup(self.browser.close)
+        self.context = self.browser.new_context(viewport={'width': 390, 'height': 844})
+        self.page = self.context.new_page()
+        self.external, self.errors, self.console = [], [], []
+        self.page.on('pageerror', lambda error: self.errors.append(str(error)))
+        self.page.on('console', lambda message: self.console.append(message.text))
+        def guard(route):
+            if not route.request.url.startswith(self.base + '/'):
+                self.external.append(route.request.url)
+                route.abort()
+            else:
+                route.continue_()
+        self.context.route('**/*', guard)
+        self.login(self.page)
+        self.external.clear()  # Historical dashboard CDN is outside this page's scope.
+
+    def stop_server(self):
+        self.server.terminate()
+        try:
+            self.server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self.server.kill()
+            self.server.wait(timeout=5)
+
+    def login(self, page):
+        page.goto(self.base + '/login')
+        page.locator('#login-name').fill('tester')
+        page.locator('#login-password').fill(PASSWORD)
+        page.get_by_role('button', name='登录面板', exact=True).click()
+        page.wait_for_url('**/ui/')
+
+    def open_page(self, page=None):
+        from playwright.sync_api import expect
+        page = page or self.page
+        # Exercise the CSP-protected M3 page backed by authenticated APIs.
+        page.goto(self.base + '/proxy')
+        expect(page.locator('#proxy-workspace')).to_be_visible()
+        expect(page.locator('#refresh')).to_be_enabled()
+        return page
+
+    def draft_only(self):
+        self.context.route('**/api/proxy/capabilities', lambda route: route.fulfill(
+            json={'apply_available': False, 'diagnostics_available': False}))
+
+    def import_text(self, content=URI, source='uri', page=None):
+        from playwright.sync_api import expect
+        page = page or self.page
+        page.locator('#open-import').click()
+        page.locator('#import-format').select_option(source)
+        page.locator('#import-content').fill(content)
+        page.locator('#preview-import').click()
+        expect(page.locator('#import-preview')).to_be_visible()
+        expect(page.locator('#import-fields')).to_be_enabled()
+
+    def save_import(self, index=0, page=None):
+        from playwright.sync_api import expect
+        page = page or self.page
+        page.locator(f'#candidates input[value="{index}"]').check()
+        for checkbox in page.locator('#ignored-sections input').all():
+            checkbox.check()
+        page.locator('#save-import').click()
+        expect(page.locator('#import-dialog')).not_to_be_visible()
+        expect(page.locator('#notice')).to_contain_text('上游已保存')
+        expect(page.locator('#import-content')).to_have_value('')
+        expect(page.locator('#import-file')).to_have_value('')
+
+    def assert_private(self):
+        self.assertEqual(self.page.evaluate('Object.keys(localStorage).length+Object.keys(sessionStorage).length'), 0)
+        self.assertNotIn(UUID, self.page.content())
+        self.assertNotIn(PASSWORD, self.page.content())
+        self.assertNotIn(UUID, self.logpath.read_text())
+        self.assertNotIn(PASSWORD, self.logpath.read_text())
+        self.assertFalse(any(UUID in message or PASSWORD in message for message in self.console))
+        self.assertFalse(self.page.evaluate('document.documentElement.scrollWidth > innerWidth'))
+        self.assertEqual(self.external, [])
+        self.assertEqual(self.errors, [])
+
+    def test_actual_import_four_states_and_write_only_credentials(self):
+        from playwright.sync_api import expect
+        self.draft_only()
+        page = self.open_page()
+        expect(page.locator('#draft-mode')).to_contain_text('00')
+        expect(page.locator('#upstream-area')).not_to_be_visible()
+        page.locator('#relay-enabled').check()
+        expect(page.locator('#draft-mode')).to_contain_text('01')
+        expect(page.locator('#local-settings')).not_to_be_visible()
+        self.import_text()
+        expect(page.locator('#save-import')).to_be_disabled()
+        self.assertEqual(page.locator('#candidates input:checked').count(), 0)
+        self.save_import()
+        expect(page.locator('#upstream')).to_have_value('')
+        upstream_id = self.context.request.get(self.base + '/api/proxy/settings').json()['upstreams'][0]['id']
+        page.locator('#upstream').select_option(upstream_id)
+        page.locator('#save').click()
+        expect(page.locator('#draft-state')).to_contain_text('01')
+        expect(page.locator('#active-state')).to_contain_text('尚无')
+        expect(page.locator('#apply')).to_be_disabled()
+        expect(page.locator('#diagnostics')).to_be_disabled()
+        page.locator('#local-enabled').check()
+        expect(page.locator('#draft-mode')).to_contain_text('11')
+        page.locator('#local-username').fill('synthetic-local')
+        page.locator('#local-password').fill('Synthetic-local-secret-1')
+        page.locator('#save').click()
+        expect(page.locator('#draft-state')).to_contain_text('11')
+        expect(page.locator('#local-password')).to_have_value('')
+        expect(page.locator('#local-username')).to_have_value('')
+        expect(page.locator('#credential-state')).to_contain_text('密码已设置')
+        first = self.context.request.get(self.base + '/api/proxy/settings').json()
+        page.locator('#relay-enabled').uncheck()
+        page.locator('#save').click()
+        expect(page.locator('#draft-state')).to_contain_text('10')
+        retained = self.context.request.get(self.base + '/api/proxy/settings').json()
+        self.assertEqual(retained['settings']['local_username'], 'synthetic-local')
+        self.assertTrue(retained['settings']['local_password_set'])
+        self.assertNotEqual(first['revision'], retained['revision'])
+        page.locator('#local-enabled').uncheck()
+        expect(page.locator('#upstream-area')).not_to_be_visible()
+        page.locator('#save').click()
+        expect(page.locator('#draft-state')).to_contain_text('00')
+        page.reload()
+        expect(page.locator('#draft-state')).to_contain_text('00')
+        page.locator('#relay-enabled').check()
+        expect(page.locator('#upstream')).to_have_value(upstream_id)
+        self.assertEqual(len(self.context.request.get(self.base + '/api/proxy/settings').json()['upstreams']), 1)
+        self.assert_private()
+
+    def test_actual_json_yaml_acknowledgement_upload_limits_and_safe_text(self):
+        from playwright.sync_api import expect
+        self.draft_only()
+        page = self.open_page()
+        page.locator('#relay-enabled').check()
+        content = json.dumps({'outbounds': [outbound('<img src=x onerror=alert(1)>'), outbound('Second candidate'),
+                                            {'protocol': 'trojan', 'tag': 'Unsupported candidate'}],
+                              'dns': {'servers': ['1.1.1.1']}, 'routing': {'rules': []}})
+        self.import_text(content, 'v2ray-json')
+        self.assertEqual(page.locator('#candidates input').count(), 3)
+        self.assertEqual(page.locator('#candidates img').count(), 0)
+        expect(page.locator('#candidates')).to_contain_text('<img src=x onerror=alert(1)>')
+        expect(page.locator('#candidates input[value="2"]')).to_be_disabled()
+        page.locator('#candidates input[value="1"]').check()
+        expect(page.locator('#save-import')).to_be_disabled()
+        page.locator('#ignored-sections input').first.check()
+        expect(page.locator('#save-import')).to_be_disabled()
+        self.save_import(index=1)
+        page.locator('#open-import').click()
+        page.locator('#import-format').select_option('clash-yaml')
+        yaml = f'''proxies:
+  - name: YAML candidate
+    type: vless
+    server: upstream.example.test
+    port: 443
+    uuid: {UUID}
+    tls: true
+    servername: upstream.example.test
+    udp: false
+rules:
+  - MATCH,anything
+'''
+        page.locator('#import-file').set_input_files({'name': 'synthetic.yaml', 'mimeType': 'text/yaml', 'buffer': yaml.encode()})
+        expect(page.locator('#import-content')).to_have_value(yaml)
+        page.locator('#preview-import').click()
+        expect(page.locator('#import-preview')).to_be_visible()
+        self.save_import()
+        page.locator('#open-import').click()
+        page.locator('#import-file').set_input_files({'name': 'too-large.txt', 'mimeType': 'text/plain', 'buffer': b'x' * (1048576 + 1)})
+        expect(page.locator('#import-notice')).to_contain_text('超过 1 MiB')
+        expect(page.locator('#import-content')).to_have_value('')
+        page.locator('#import-file').set_input_files({'name': 'invalid.txt', 'mimeType': 'text/plain', 'buffer': b'\xff\xfe'})
+        expect(page.locator('#import-notice')).to_contain_text('有效 UTF-8')
+        page.locator('#import-content').fill('界' * 349526)
+        expect(page.locator('#import-content')).to_have_value('')
+        expect(page.locator('#import-notice')).to_contain_text('超过 1 MiB')
+        page.locator('#close-import').click()
+        result = self.context.request.get(self.base + '/api/proxy/settings').json()
+        self.assertEqual(len(result['upstreams']), 2)
+        self.assertNotIn(UUID, json.dumps(result))
+        # Independent server enforcement: bypassing the UI still cannot submit >1 MiB content.
+        response = self.context.request.post(self.base + '/api/proxy/import/preview',
+            headers={'X-VUI-Request': '1', 'Origin': self.base},
+            data={'format': 'uri', 'content': 'x' * 1048577})
+        self.assertIn(response.status, (413, 422))
+        self.assert_private()
+
+    def test_actual_two_tabs_conflict_preserves_edits_and_requires_review(self):
+        from playwright.sync_api import expect
+        self.draft_only()
+        first = self.open_page()
+        first.locator('#relay-enabled').check()
+        self.import_text()
+        self.save_import()
+        upstream = self.context.request.get(self.base + '/api/proxy/settings').json()['upstreams'][0]['id']
+        first.locator('#upstream').select_option(upstream)
+        first.locator('#save').click()
+        expect(first.locator('#draft-state')).to_contain_text('01')
+        second = self.open_page(self.context.new_page())
+        first.locator('#local-enabled').check()
+        first.locator('#local-username').fill('first-user')
+        first.locator('#local-password').fill('Synthetic-first-secret')
+        first.locator('#local-port').fill('7991')
+        first.locator('#save').click()
+        expect(first.locator('#notice')).to_contain_text('草稿已保存')
+        second.locator('#local-enabled').check()
+        second.locator('#local-username').fill('second-user')
+        second.locator('#local-password').fill('Synthetic-second-secret')
+        second.locator('#local-port').fill('7992')
+        second.locator('#save').click()
+        expect(second.locator('#conflict')).to_be_visible()
+        expect(second.locator('#local-port')).to_have_value('7992')
+        expect(second.locator('#save')).to_be_disabled()
+        expect(second.locator('#notice')).to_contain_text('冲突')
+        expect(second.locator('#active-state')).to_contain_text('尚无')
+        second.locator('#rebase').click()
+        second.locator('#save').click()
+        expect(second.locator('#notice')).to_contain_text('草稿已保存')
+        self.assertEqual(self.context.request.get(self.base + '/api/proxy/settings').json()['settings']['local_port'], 7992)
+        first.locator('#refresh').click()
+        expect(first.locator('#local-port')).to_have_value('7992')
+        second.close()
+        self.assert_private()
+
+    def test_cancel_refresh_history_and_expired_session_clear_secrets(self):
+        from playwright.sync_api import expect
+        self.draft_only()
+        page = self.open_page()
+        page.locator('#relay-enabled').check()
+        # Cancel while an actual browser fetch is unresolved; a late response
+        # must not reopen the dialog or restore the raw credential-bearing input.
+        held = []
+        page.route('**/api/proxy/import/preview', lambda route: held.append(route))
+        page.locator('#open-import').click()
+        page.locator('#import-content').fill(URI)
+        with page.expect_request('**/api/proxy/import/preview'):
+            page.locator('#preview-import').click()
+        expect(page.locator('#import-fields')).to_be_disabled()
+        page.locator('#close-import').click()
+        expect(page.locator('#import-content')).to_have_value('')
+        self.assertEqual(len(held), 1)
+        held[0].fulfill(json={'candidates': [], 'ignored_sections': [], 'notice_codes': []})
+        page.unroute('**/api/proxy/import/preview')
+        expect(page.locator('#import-dialog')).not_to_be_visible()
+        self.import_text()
+        page.locator('#close-import').click()
+        expect(page.locator('#import-content')).to_have_value('')
+        page.locator('#open-import').click()
+        expect(page.locator('#import-preview')).not_to_be_visible()
+        expect(page.locator('#import-content')).to_have_value('')
+        page.locator('#import-content').fill(URI)
+        page.reload()
+        expect(page.locator('#proxy-workspace')).to_be_visible()
+        expect(page.locator('#import-dialog')).not_to_be_visible()
+        expect(page.locator('#import-content')).to_have_value('')
+        page.locator('#relay-enabled').check()
+        page.locator('#open-import').click()
+        page.locator('#import-content').fill(URI)
+        page.goto(self.base + '/account')
+        page.go_back()
+        expect(page.locator('#proxy-workspace')).to_be_visible()
+        expect(page.locator('#import-content')).to_have_value('')
+        page.locator('#relay-enabled').check()
+        page.locator('#open-import').click()
+        page.locator('#import-content').fill(URI)
+        self.context.clear_cookies()
+        page.locator('#preview-import').click()
+        page.wait_for_url('**/login')
+        self.login(page)
+        page.goto(self.base + '/proxy')
+        expect(page.locator('#proxy-workspace')).to_be_visible()
+        expect(page.locator('#import-content')).to_have_value('')
+        self.assertEqual(len(self.context.request.get(self.base + '/api/proxy/settings').json()['upstreams']), 0)
+        self.external.clear()  # Login's existing dashboard assets are unrelated.
+        self.assert_private()
+
+    def test_mocked_apply_uncertainty_double_click_and_get_commit_confirmation(self):
+        from playwright.sync_api import expect
+        state = fixture_snapshot()
+        requests = []
+        mode = {'apply': 'abort', 'get_active': False}
+        def runtime(route):
+            path = urlparse(route.request.url).path
+            if path.endswith('/capabilities'):
+                route.fulfill(json={'apply_available': True, 'diagnostics_available': False})
+            elif path.endswith('/settings'):
+                current = deepcopy(state)
+                if mode['get_active']:
+                    current['active'] = {'revision': state['revision'], 'settings': state['settings'], 'core_revision': 'c' * 64}
+                route.fulfill(json=current)
+            elif path.endswith('/apply'):
+                requests.append((route.request.headers.get('idempotency-key'), route.request.post_data_json))
+                if mode['apply'] == 'abort':
+                    route.abort('failed')
+                else:
+                    committed = deepcopy(state)
+                    committed['active'] = {'revision': state['revision'], 'settings': state['settings'], 'core_revision': 'c' * 64}
+                    route.fulfill(json={'applied': True, 'phase': 'committed', 'snapshot': committed})
+            elif path.endswith('/check'):
+                route.fulfill(json={'valid': True, 'applied': False, 'phase': 'checked', 'revision': state['revision'], 'snapshot': state, 'coverage': [
+                    {'inbound_id': 7, 'core': 'sing-box', 'protocol': 'vless', 'transport': 'tcp', 'qualified': True, 'reason': 'QUALIFIED_VLESS_TCP_TLS'}],
+                    'pinned_address': '8.8.8.8', 'resolved_at': 1})
+            else:
+                route.fulfill(status=404, json={'detail': 'not found'})
+        self.context.route('**/api/proxy/**', runtime)
+        page = self.open_page()
+        page.locator('#check').click()
+        expect(page.locator('#check-summary')).to_contain_text('未进行 TLS')
+        expect(page.locator('#coverage')).to_contain_text('符合本期接入资格')
+        page.locator('#apply').click()
+        expect(page.locator('#apply-review')).to_be_visible()
+        self.assertEqual(requests, [], 'Preflight review must never apply automatically')
+        # Two same-turn explicit confirm clicks must produce only one request.
+        page.locator('#confirm-apply').evaluate('(button)=>{button.click();button.click();}')
+        expect(page.locator('#retry-apply')).to_be_visible()
+        self.assertEqual(len(requests), 1)
+        self.assertRegex(requests[0][0], r'^[0-9a-f]{64}$')
+        self.assertEqual(requests[0][1], {'base_revision': state['revision']})
+        expect(page.locator('#active-state')).to_contain_text('尚无')
+        mode['apply'] = 'success'
+        page.locator('#retry-apply').click()
+        expect(page.locator('#notice')).to_contain_text('未确认当前活动修订')
+        self.assertEqual(requests[0], requests[1])
+        expect(page.locator('#active-state')).to_contain_text('尚无')
+        mode['get_active'] = True
+        page.locator('#apply').click()
+        expect(page.locator('#apply-review')).to_be_visible()
+        page.locator('#confirm-apply').click()  # Explicitly starts a new transaction.
+        expect(page.locator('#notice')).to_contain_text('重新读取活动修订确认')
+        self.assertNotEqual(requests[1][0], requests[2][0])
+        expect(page.locator('#active-state')).to_contain_text('01')
+        expect(page.locator('#external-state')).to_contain_text('未测')
+        self.assert_private()
+
+    def test_mocked_apply_review_invalidations_and_relay_off_warning(self):
+        from playwright.sync_api import expect
+        state = fixture_snapshot()
+        state['active'] = {'revision': 'b' * 64, 'settings': deepcopy(state['settings']), 'core_revision': 'c' * 64}
+        state['settings']['relay_enabled'] = False
+        requests = []
+        def runtime(route):
+            path = urlparse(route.request.url).path
+            if path.endswith('/capabilities'):
+                route.fulfill(json={'apply_available': True})
+            elif path.endswith('/settings'):
+                route.fulfill(json=state)
+            elif path.endswith('/check'):
+                route.fulfill(json={'valid': True, 'phase': 'checked', 'applied': False,
+                    'revision': state['revision'], 'snapshot': state, 'coverage': [
+                    {'inbound_id': 7, 'core': 'sing-box', 'protocol': 'vless', 'transport': 'tcp', 'qualified': True}]})
+            elif path.endswith('/apply'):
+                requests.append(route.request.post_data_json)
+                route.fulfill(status=409, json={'detail': 'PROXY_CAPACITY_EXHAUSTED'})
+            else:
+                route.fulfill(status=404, json={'detail': 'not found'})
+        self.context.route('**/api/proxy/**', runtime)
+        page = self.open_page()
+        page.locator('#apply').click()
+        expect(page.locator('#review-mode')).to_contain_text('00')
+        expect(page.locator('#review-disable-warning')).to_be_visible()
+        expect(page.locator('#review-disable-warning')).to_contain_text('恢复普通服务器出口')
+        expect(page.locator('#review-coverage')).to_contain_text('入口 7')
+        self.assertEqual(requests, [])
+        page.locator('#relay-enabled').check()
+        expect(page.locator('#apply-review')).not_to_be_visible()
+        expect(page.locator('#confirm-apply')).to_be_disabled()
+        page.locator('#relay-enabled').uncheck()
+        page.locator('#apply').click()
+        expect(page.locator('#apply-review')).to_be_visible()
+        page.locator('#refresh').click()
+        expect(page.locator('#apply-review')).not_to_be_visible()
+        page.locator('#apply').click()
+        expect(page.locator('#apply-review')).to_be_visible()
+        page.locator('#confirm-apply').click()
+        expect(page.locator('#notice')).to_contain_text('历史容量已满')
+        expect(page.locator('#notice')).to_contain_text('原运行配置保持不变')
+        self.assertEqual(requests, [{'base_revision': state['revision']}])
+        expect(page.locator('#active-state')).to_contain_text('01')
+        self.assert_private()
+
+    def test_mocked_strict_export_uses_active_revision_and_download_without_preview(self):
+        from playwright.sync_api import expect
+        state = fixture_snapshot()
+        state['active'] = {'revision': 'b' * 64, 'settings': deepcopy(state['settings']), 'core_revision': 'c' * 64}
+        state['settings']['relay_enabled'] = False  # Newer draft is not exportable capability.
+        requests = []
+        fault = {'code': None}
+        def runtime(route):
+            path = urlparse(route.request.url).path
+            if path.endswith('/capabilities'):
+                route.fulfill(json={'apply_available': True, 'strict_exports_available': True})
+            elif path.endswith('/settings'):
+                route.fulfill(json=state)
+            elif '/exports/' in path:
+                requests.append((path, route.request.post_data_json))
+                if fault['code']:
+                    route.fulfill(status=409, json={'detail': fault['code']})
+                else:
+                    route.fulfill(body='test-only-uuid: ' + UUID, headers={'Content-Type': 'application/yaml',
+                        'ETag': '"' + state['active']['revision'] + '"'})
+            else:
+                route.fulfill(status=404, json={'detail': 'not found'})
+        self.context.route('**/api/proxy/**', runtime)
+        page = self.open_page()
+        expect(page.locator('#export-mihomo')).to_be_enabled()
+        page.locator('#export-inbound').fill('7')
+        page.locator('#export-server').fill('node.example.test')
+        page.locator('#export-mihomo').click()
+        expect(page.locator('#export-notice')).to_contain_text('不接受域名')
+        self.assertEqual(requests, [])
+        page.locator('#export-server').fill('8.8.8.8')
+        with page.expect_download() as event:
+            page.locator('#export-mihomo').evaluate('(button)=>{button.click();button.click();}')
+        downloaded = event.value
+        self.assertEqual(downloaded.suggested_filename, 'vui-strict-relay.yaml')
+        self.assertEqual(Path(downloaded.path()).read_text(), 'test-only-uuid: ' + UUID)
+        expect(page.locator('#export-notice')).to_contain_text('未执行设备端到端验证')
+        self.assertEqual(requests, [('/api/proxy/exports/mihomo.yaml',
+            {'base_revision': 'b' * 64, 'inbound_id': 7, 'server': '8.8.8.8'})])
+        fault['code'] = 'STRICT_EXPORT_STATE_MISMATCH'
+        page.locator('#export-singbox').click()
+        expect(page.locator('#export-notice')).to_contain_text('严格导出已阻止')
+        state['active']['settings']['relay_enabled'] = False
+        page.locator('#refresh').click()
+        expect(page.locator('#export-mihomo')).to_be_disabled()
+        self.assert_private()
+
+    def test_mocked_diagnostics_layers_stale_and_cancellation(self):
+        from playwright.sync_api import expect
+        state = fixture_snapshot()
+        job = {'job_id': 'diagnostic-fixture', 'upstream_id': PROFILE_ID,
+               'revision': state['revision'], 'catalog_version': 1, 'state': 'completed',
+               'stale': False, 'pinned_address': '8.8.8.8', 'resolved_at': 1,
+               'exit_ip': '9.9.9.9', 'stages': [
+                   {'stage': stage, 'status': 'passed', 'code': ''}
+                   for stage in ('configuration', 'tcp', 'tls_or_reality', 'proxy_forwarding', 'https_exit')
+               ] + [{'stage': 'dns', 'status': 'insufficient_evidence', 'code': 'DNS_PATH_BOUND_TO_HTTPS'},
+                    {'stage': 'external_client', 'status': 'not_tested', 'code': ''}]}
+        starts, cancels = [], []
+        def runtime(route):
+            path = urlparse(route.request.url).path
+            if path.endswith('/capabilities'):
+                route.fulfill(json={'apply_available': True, 'diagnostics_available': True})
+            elif path.endswith('/settings'):
+                route.fulfill(json=state)
+            elif path.endswith('/diagnostics'):
+                starts.append(route.request.post_data_json)
+                route.fulfill(json=job)
+            elif '/diagnostics/' in path:
+                if route.request.method == 'DELETE':
+                    cancels.append(path)
+                    job['state'] = 'cancelled'
+                route.fulfill(json=job)
+            else:
+                route.fulfill(status=404, json={'detail': 'not found'})
+        self.context.route('**/api/proxy/**', runtime)
+        page = self.open_page()
+        expect(page.locator('#diagnostics')).to_be_disabled()
+        page.locator('#diagnostic-consent').check()
+        page.locator('#diagnostics').click()
+        expect(page.locator('#diagnostic-summary')).to_contain_text('已结束')
+        self.assertEqual(starts, [{'upstream_id': PROFILE_ID, 'base_revision': state['revision']}])
+        expect(page.locator('[data-stage="dns"]')).to_have_attribute('data-status', 'insufficient_evidence')
+        expect(page.locator('[data-stage="external_client"]')).to_have_attribute('data-status', 'not_tested')
+        expect(page.locator('[data-stage="https_exit"]')).to_have_attribute('data-status', 'passed')
+        state['revision'] = 'b' * 64
+        page.locator('#refresh').click()
+        expect(page.locator('#diagnostic-summary')).to_contain_text('不能沿用结果')
+        expect(page.locator('[data-stage="https_exit"]')).to_have_attribute('data-status', 'expired')
+        job['state'] = 'running'
+        job['revision'] = state['revision']
+        page.locator('#diagnostics').click()
+        expect(page.locator('#cancel-diagnostics')).to_be_visible()
+        page.locator('#cancel-diagnostics').click()
+        expect(page.locator('#diagnostic-summary')).to_contain_text('已取消')
+        self.assertEqual(len(cancels), 1)
+        expect(page.locator('#external-state')).to_contain_text('未测')
+        self.assert_private()
+
+
+if __name__ == '__main__':
+    unittest.main()

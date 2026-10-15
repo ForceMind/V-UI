@@ -43,6 +43,8 @@ jobs:
           python -m unittest discover -s tests -p test_proxy_policy_real.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
           python -m unittest discover -s tests -p test_proxy_double_hop.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
           python -m unittest discover -s tests -p test_proxy_apply_real.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
+          python -m unittest discover -s tests -p test_proxy_diagnostics_real.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
+          python -m unittest discover -s tests -p test_proxy_exports_real.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
       - name: Preserve pin and test evidence only
         if: always()
         uses: actions/upload-artifact@v4

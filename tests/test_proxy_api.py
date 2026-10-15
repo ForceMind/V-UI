@@ -178,9 +178,10 @@ class ProxyApiTests(unittest.TestCase):
     def test_capability_keeps_runtime_and_diagnostics_separate(self):
         capabilities = self.client.get('/api/proxy/capabilities').json()
         self.assertTrue(capabilities['apply_available'])
-        self.assertFalse(capabilities['diagnostics_available'])
+        self.assertTrue(capabilities['diagnostics_available'])
+        self.assertTrue(capabilities['strict_exports_available'])
         self.assertFalse(capabilities['full_system_proxy'])
-        self.assertEqual(capabilities['implementation_stage'], 'transactional-runtime')
+        self.assertEqual(capabilities['implementation_stage'], 'panel-diagnostics-exports')
         self.assertEqual(capabilities['local_listen'], '127.0.0.1')
         self.assertEqual(self.client.post('/api/proxy/apply', json={}, headers=HEADERS).status_code, 422)
         self.apply.assert_not_called()

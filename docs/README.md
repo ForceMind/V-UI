@@ -72,3 +72,5 @@
 - [新 runtime 压缩归档冷读](LOW_RESOURCE_RUNTIME_ARCHIVE_CACHE.md)：私有新文件的身份保护与本地机制实验；该产品字节已在 a373 root 验收，不据单次峰值断言因果或稳定改善。
 
 - [双开关 M2：来源路由与运行事务](DUAL_PROXY_RELAY_M2.md)：候选实现、固定内核边界修订、恢复和准确验收入口。
+
+- [双开关 M3：面板、分层诊断与严格导出](DUAL_PROXY_RELAY_M3.md)：候选交互、固定诊断目录、证据语义与独立导出边界。
