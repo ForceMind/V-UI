@@ -68,6 +68,29 @@ METHODS = (
 )
 TCP_METHODS = ("test_tcp_https_mihomo_double_hop", "test_tcp_https_singbox_double_hop")
 DNS_METHODS = ("test_same_domain_same_port_dns_rebinding",)
+# Freeze the client selected by each actual fixture call. Raw-XUDP method
+# names do not identify their device core: in particular test_10 starts singbox.
+# Fault suffixes are expanded only from FAULTS below, never inferred from text.
+CASE_CLIENTS = {
+    "test_01_naked_mihomo_tls_xudp_ipv4_double_hop": "mihomo",
+    "test_02_naked_singbox_tls_xudp_ipv4_double_hop": "singbox",
+    "test_03_guarded_mihomo_exact_payload_address_and_port": "mihomo",
+    "test_04_guarded_singbox_exact_payload_address_and_port": "singbox",
+    "test_05_mihomo_upstream_uuid_ca_sni_stop_recovery": "mihomo",
+    "test_06_singbox_upstream_uuid_ca_sni_stop_recovery": "singbox",
+    "test_07_mihomo_device_uuid_ca_sni": "mihomo",
+    "test_08_singbox_device_uuid_ca_sni": "singbox",
+    "test_09_raw_xudp_doh_all_answers_private_mixed_and_fail_closed": "mihomo",
+    "test_10_raw_xudp_partial_dns_family_and_both_failed_no_fallback": "singbox",
+    "test_11_naked_raw_xudp_retarget_positive_control": "mihomo",
+    "test_12_guarded_raw_xudp_cannot_retarget_private_self_upstream_or_port": "mihomo",
+    "test_13_guarded_raw_domain_rebinding_cannot_escape_checked_address": "mihomo",
+    "test_14_guarded_udp_idle_drains_and_new_association_recovers": "mihomo",
+    "test_15_guarded_new_associations_reject_udp_53_443_and_low_ports": "mihomo",
+    "test_tcp_https_mihomo_double_hop": "mihomo",
+    "test_tcp_https_singbox_double_hop": "singbox",
+    "test_same_domain_same_port_dns_rebinding": "mihomo",
+}
 FAULTS = {METHODS[4]: ("uuid", "ca", "sni", "stopped"),
           METHODS[5]: ("uuid", "ca", "sni", "stopped"),
           METHODS[6]: ("uuid", "ca", "sni"), METHODS[7]: ("uuid", "ca", "sni")}
@@ -465,13 +488,23 @@ def verify_case_evidence(phase, directory):
     return rows
 
 
+def case_client(case):
+    if case in CASE_CLIENTS:
+        return CASE_CLIENTS[case]
+    for method, faults in FAULTS.items():
+        if case in {method + "-" + fault for fault in faults}:
+            return CASE_CLIENTS[method]
+    raise ExperimentError("Unknown fixture case: " + case)
+
+
 def expected_process_roles(phase):
+    require(phase in ("baseline", "patched"), "Unknown process-ledger phase")
     result = Counter()
     for case in expected_cases(phase):
         if case == METHODS[15]:
             result.update((case, role) for role in ("overseas", "guarded", "device-singbox", "device-mihomo"))
             continue
-        kind = "singbox" if "singbox" in case else "mihomo"
+        kind = case_client(case)
         result.update((case, role) for role in ("overseas", "domestic", "device-" + kind))
         if phase == "patched" and any(case.startswith(method + "-") for method in FAULTS):
             result.update({(case, "domestic-reconfigured"): 2, (case, "device-reconfigured-" + kind): 2})
@@ -489,6 +522,9 @@ def verify_isolation(phase, records, candidate, stock):
     require(sum(item["role"] == "domestic-reconfigured" for item in domestic)
             == (0 if phase == "baseline" else 28), "Domestic restart coverage mismatch")
     for item in records:
+        expected_mihomo = item["role"] in ("device-mihomo", "device-reconfigured-mihomo")
+        require(type(item["mihomo"]) is bool and item["mihomo"] is expected_mihomo,
+                "Process role and declared core family disagree")
         expected = candidate if item["role"] in DOMESTIC_ROLES else stock["mihomo" if item["mihomo"] else "sing-box"]
         require(item["binary"] == expected["path"] and item["sha256"] == expected["sha256"],
                 "Candidate leaked into a non-domestic role or wrong binary ran")

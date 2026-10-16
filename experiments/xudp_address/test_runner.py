@@ -1,5 +1,7 @@
 """Pure guardrail tests. No real cores, sockets, network, or product overrides."""
 from collections import Counter
+from copy import deepcopy
+import ast
 import hashlib
 import importlib.util
 import io
@@ -44,6 +46,80 @@ def suite_summary(phase="baseline", tcp=False, dns=False):
              "status": "failed" if method in failed else "passed"} for method in methods],
             "failures": failures, "nonpass": [], "passed_methods": len(methods) - len(failed),
             "failed_methods": len(failed), "failure_records": len(failures)}
+
+
+def source_fixture_plan():
+    """Read calls in frozen source, independently of runner expectation tables."""
+    original = ast.parse((runner.ROOT / "tests/test_restricted_udp_preflight.py").read_text())
+    extra = ast.parse(Path(runner.__file__).read_text())
+    functions = {node.name: node for tree in (original, extra) for node in ast.walk(tree)
+                 if isinstance(node, ast.FunctionDef)}
+    wrappers = {"guarded_echo", "upstream_faults", "device_faults", "exercise"}
+    tracked = {"start", "echo", "reject", "raw_reject", "restart_domestic_and_device"}
+
+    def metrics(node):
+        if isinstance(node, ast.For):
+            body = sum((metrics(child) for child in node.body), Counter())
+            if not body:
+                return Counter()
+            if not isinstance(node.iter, (ast.Tuple, ast.List)):
+                raise AssertionError("A counted fixture loop needs explicit source review")
+            return Counter({key: value * len(node.iter.elts) for key, value in body.items()})
+        if isinstance(node, (ast.While, ast.If)):
+            body = sum((metrics(child) for child in [*node.body, *node.orelse]), Counter())
+            if body:
+                raise AssertionError("A conditional fixture count needs explicit source review")
+            return Counter()
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            receiver = node.func.value
+            if isinstance(receiver, ast.Name):
+                if receiver.id in ("f", "fixture") and node.func.attr in tracked:
+                    return Counter({node.func.attr: 1})
+                if receiver.id == "self" and node.func.attr in wrappers:
+                    return metrics(functions[node.func.attr])
+        return sum((metrics(child) for child in ast.iter_child_nodes(node)), Counter())
+
+    plan = {}
+    for name, function in functions.items():
+        if not (name.startswith("test_") and len(name) > 7 and name[5:7].isdigit()
+                or name in (*runner.TCP_METHODS, *runner.DNS_METHODS)):
+            continue
+        calls = [node for node in ast.walk(function)
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                 and isinstance(node.func.value, ast.Name)
+                 and ((node.func.value.id in ("f", "fixture") and node.func.attr == "start")
+                      or (node.func.value.id == "self" and node.func.attr in wrappers))]
+        if len(calls) != 1 or not calls[0].args or not isinstance(calls[0].args[0], ast.Constant):
+            raise AssertionError("Fixture client call needs explicit source review: " + name)
+        call = calls[0]
+        faults = ()
+        if call.func.attr in ("upstream_faults", "device_faults"):
+            fault_loop = next(node for node in ast.walk(functions[call.func.attr])
+                              if isinstance(node, ast.For) and isinstance(node.target, ast.Name)
+                              and node.target.id == "fault")
+            faults = tuple(ast.literal_eval(fault_loop.iter))
+        plan[name] = {"client": call.args[0].value, "faults": faults, "metrics": metrics(function)}
+    parser = functions["test_candidate_shapes_with_exact_core_parser_only"]
+    shapes = next(node for node in ast.walk(parser) if isinstance(node, ast.For))
+    parser_roles = tuple(ast.literal_eval(item.elts[0]) for item in shapes.iter.elts)
+    return plan, parser_roles
+
+
+def source_process_roles(phase):
+    plan, parser_roles = source_fixture_plan()
+    result = Counter()
+    for method, row in plan.items():
+        if phase == "baseline" and method in (*runner.TCP_METHODS, *runner.DNS_METHODS):
+            continue
+        cases = [method + "-" + fault for fault in row["faults"]] if row["faults"] else [method]
+        for case in cases:
+            result.update((case, role) for role in ("overseas", "domestic", "device-" + row["client"]))
+            if phase == "patched":
+                restarts = row["metrics"]["restart_domestic_and_device"] // len(cases)
+                result.update({(case, "domestic-reconfigured"): restarts,
+                               (case, "device-reconfigured-" + row["client"]): restarts})
+    result.update(("test_candidate_shapes_with_exact_core_parser_only", role) for role in parser_roles)
+    return +result
 
 
 class ProvenanceTests(unittest.TestCase):
@@ -366,7 +442,7 @@ class ResultAssessmentTests(unittest.TestCase):
                  "mihomo": {"path": "/mihomo", "sha256": "c" * 64}}
         for phase, count in (("baseline", 79), ("patched", 144)):
             records = []
-            for (case, role), number in runner.expected_process_roles(phase).items():
+            for (case, role), number in source_process_roles(phase).items():
                 mihomo = "mihomo" in role
                 identity = candidate if role in runner.DOMESTIC_ROLES else stock["mihomo" if mihomo else "sing-box"]
                 launches = 0 if case == runner.METHODS[15] else 1
@@ -388,6 +464,94 @@ class ResultAssessmentTests(unittest.TestCase):
             records.remove(overseas)
             with self.assertRaisesRegex(runner.ExperimentError, "per-case process roles"):
                 runner.verify_isolation(phase, records, candidate, stock)
+
+    def test_explicit_client_map_matches_every_frozen_fixture_call(self):
+        plan, parser_roles = source_fixture_plan()
+        self.assertEqual(len(plan), 18)
+        self.assertEqual(runner.CASE_CLIENTS, {name: row["client"] for name, row in plan.items()})
+        self.assertEqual(parser_roles, ("overseas", "guarded", "device-singbox", "device-mihomo"))
+        self.assertEqual(runner.FAULTS, {name: row["faults"] for name, row in plan.items() if row["faults"]})
+        for phase in ("baseline", "patched"):
+            self.assertEqual(runner.expected_process_roles(phase), source_process_roles(phase))
+        for invalid in ("test_unknown_singbox", runner.METHODS[4] + "-unknown"):
+            with self.subTest(case=invalid), self.assertRaises(runner.ExperimentError):
+                runner.case_client(invalid)
+
+    def test_observation_and_restart_counts_come_from_actual_source_calls(self):
+        plan, _ = source_fixture_plan()
+        # Per-method decomposition comes from the original call sites and literal
+        # loop lengths. It does not manufacture records from runner constants.
+        per_method = [
+            (1, 1, 0, 0, 0), (1, 1, 0, 0, 0), (1, 2, 0, 0, 0), (1, 2, 0, 0, 0),
+            (4, 8, 4, 0, 8), (4, 8, 4, 0, 8), (3, 6, 3, 0, 6), (3, 6, 3, 0, 6),
+            (1, 1, 1, 7, 0), (1, 1, 0, 1, 0), (1, 0, 0, 0, 0), (1, 0, 0, 0, 0),
+            (1, 0, 0, 1, 0), (1, 1, 0, 0, 0), (1, 1, 3, 0, 0),
+        ]
+        keys = ("start", "echo", "reject", "raw_reject", "restart_domestic_and_device")
+        original_names = sorted(name for name in plan if name[5:7].isdigit())
+        self.assertEqual(len(original_names), 15)
+        for name, counts in zip(original_names, per_method):
+            self.assertEqual(tuple(plan[name]["metrics"][key] for key in keys), counts, name)
+        original = sum((plan[name]["metrics"] for name in original_names), Counter())
+        self.assertEqual(tuple(original[key] for key in keys), (25, 38, 18, 9, 28))
+        self.assertEqual(plan[runner.TCP_METHODS[0]]["metrics"], Counter(start=1))
+        self.assertEqual(plan[runner.TCP_METHODS[1]]["metrics"], Counter(start=1))
+        self.assertEqual(plan[runner.DNS_METHODS[0]]["metrics"], Counter(start=1, raw_reject=1))
+        total = sum((row["metrics"] for row in plan.values()), Counter())
+        self.assertEqual(tuple(total[key] for key in keys), (28, 38, 18, 10, 28))
+        # Three processes per start, two per restart, plus four official parsers.
+        self.assertEqual(original["start"] * 3 + 4, 79)
+        self.assertEqual(total["start"] * 3 + total["restart_domestic_and_device"] * 2 + 4, 144)
+        self.assertEqual(total["start"] + total["restart_domestic_and_device"], 56)
+
+    def test_real_first_attempt_test_10_uses_official_singbox(self):
+        # Projection of CI 38943133607, candidate 93856d1, preserved unchanged in
+        # xudp-93856d1-first-attempt.zip / logs/baseline/process-binaries.json.
+        observed = {"case": "test_10_raw_xudp_partial_dns_family_and_both_failed_no_fallback",
+                    "role": "device-singbox", "mihomo": False, "parser_passed": True,
+                    "binary": "/tmp/vui-xudp-official/cores/sing-box",
+                    "sha256": "07d2866a6c908281a56053f0e7d454918501592f2f258526f2ebe826dab58793",
+                    "launches": [{"pid": 10842, "ready": True,
+                                  "sha256": "07d2866a6c908281a56053f0e7d454918501592f2f258526f2ebe826dab58793"}]}
+        self.assertNotIn("singbox", observed["case"])
+        self.assertEqual(runner.case_client(observed["case"]), "singbox")
+        for phase in ("baseline", "patched"):
+            roles = runner.expected_process_roles(phase)
+            self.assertEqual(roles[(observed["case"], observed["role"])], 1)
+            self.assertEqual(roles[(observed["case"], "device-mihomo")], 0)
+        self.assertEqual(observed["sha256"], runner.STOCK_HASHES["sing-box"])
+        # The genuine record passes all unchanged identity/readiness/hash checks.
+        candidate = {"path": "/candidate", "sha256": "a" * 64}
+        stock = {"sing-box": {"path": observed["binary"], "sha256": observed["sha256"]},
+                 "mihomo": {"path": "/mihomo", "sha256": runner.STOCK_HASHES["mihomo"]}}
+        records = []
+        for (case, role), number in source_process_roles("baseline").items():
+            mihomo = role == "device-mihomo"
+            identity = candidate if role == "domestic" else stock["mihomo" if mihomo else "sing-box"]
+            for _ in range(number):
+                records.append({"case": case, "role": role, "mihomo": mihomo,
+                                "binary": identity["path"], "sha256": identity["sha256"], "parser_passed": True,
+                                "launches": [] if role == "guarded" or case == runner.METHODS[15] else
+                                [{"pid": 42, "ready": True, "sha256": identity["sha256"]}]})
+        index = next(index for index, row in enumerate(records)
+                     if row["case"] == observed["case"] and row["role"] == observed["role"])
+        records[index] = deepcopy(observed)
+        runner.verify_isolation("baseline", records, candidate, stock)
+        for field, value in (("sha256", "0" * 64), ("binary", "/candidate"), ("parser_passed", False)):
+            bad = deepcopy(records)
+            bad[index][field] = value
+            with self.subTest(field=field), self.assertRaises(runner.ExperimentError):
+                runner.verify_isolation("baseline", bad, candidate, stock)
+        for field, value in (("ready", False), ("sha256", "0" * 64), ("pid", None)):
+            bad = deepcopy(records)
+            bad[index]["launches"][0][field] = value
+            with self.subTest(launch_field=field), self.assertRaises(runner.ExperimentError):
+                runner.verify_isolation("baseline", bad, candidate, stock)
+        bad = deepcopy(records)
+        bad[index].update(mihomo=True, binary=stock["mihomo"]["path"], sha256=stock["mihomo"]["sha256"])
+        bad[index]["launches"][0]["sha256"] = stock["mihomo"]["sha256"]
+        with self.assertRaisesRegex(runner.ExperimentError, "core family"):
+            runner.verify_isolation("baseline", bad, candidate, stock)
 
     def test_raw_port_classifier_also_rejects_later_observations(self):
         source = runner.ROOT / "tests/test_restricted_udp_preflight.py"
