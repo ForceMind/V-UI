@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 import unittest
 
 from test_proxy_browser import prepare_browser_payload, observe_browser_pages
@@ -24,6 +25,20 @@ from test_upstream_import_capabilities import inbound, UUID, SHORT_ID, HOST
 
 ROOT = Path(__file__).resolve().parents[1]
 PASSWORD = 'Synthetic-tcp-upstream-browser-password!'
+
+
+def isolated_panel_route_guard(base, external):
+    """Capture the panel origin outside Playwright's (route, request) arguments."""
+    # Playwright's sync wrapper counts *all* declared parameters, including
+    # defaults and keyword-only parameters, before forwarding positional args.
+    # Keep this callback single-argument; a default base parameter is unsafe.
+    def guard(route):
+        if not route.request.url.startswith(base + '/'):
+            external.append(route.request.url)
+            route.abort()
+        else:
+            route.continue_()
+    return guard
 
 
 def export_fixture_nodes():
@@ -46,6 +61,40 @@ def export_fixture_nodes():
 
 
 class TCPUpstreamExportStaticTests(unittest.TestCase):
+    def test_playwright_callback_dispatch_preserves_each_panel_origin_guard(self):
+        from playwright._impl._impl_to_api_mapping import ImplToApiMapping
+        mapping = ImplToApiMapping()
+        external, observed = [], []
+        bases = ('http://127.0.0.1:12001', 'http://127.0.0.1:12002')
+        guards = [mapping.wrap_handler(isolated_panel_route_guard(base, external)) for base in bases]
+        for index, guard in enumerate(guards):
+            for url, allowed in ((bases[index] + '/login', True),
+                                 (bases[index] + '/api/subscription/upstream/1', True),
+                                 (bases[1 - index] + '/login', False),
+                                 ('https://third-party.example/script.js', False),
+                                 (bases[index] + '.evil.example/script.js', False)):
+                with self.subTest(panel=index, url=url):
+                    request = SimpleNamespace(url=url)
+                    calls = []
+                    route = SimpleNamespace(request=request,
+                        abort=lambda: calls.append('abort'),
+                        continue_=lambda: calls.append('continue'))
+                    # This is the actual 1.57 wrapper used by sync BrowserContext
+                    # routing. It receives both arguments even for one-arg handlers.
+                    guard(route, request)
+                    self.assertEqual(calls, ['continue' if allowed else 'abort'])
+                    if not allowed:
+                        observed.append(url)
+        self.assertEqual(external, observed)
+        # Verify the regression mechanism itself: a second default parameter
+        # would consume Request, not retain a captured panel origin.
+        received = []
+        def two_argument_handler(route, base=bases[0]):
+            received.append(base)
+        request = SimpleNamespace(url=bases[1] + '/login')
+        mapping.wrap_handler(two_argument_handler)(object(), request)
+        self.assertEqual(received, [request])
+
     def test_dedicated_profile_and_ephemeral_secret_boundary(self):
         script = (ROOT / 'web/js/app.js').read_text()
         section = script.split('        const upstreamExport = reactive(', 1)[1].split('        const siteFiles =', 1)[0]
@@ -160,13 +209,7 @@ class TCPUpstreamExportBrowserTests(unittest.TestCase):
                 URL.revokeObjectURL = url => {exportBlobAudit.revoked.push(url); return revoke(url)};
             })()''')
             observe_browser_pages(context, self.errors, self.console)
-            def guard(route, base=instance['base']):
-                if not route.request.url.startswith(base + '/'):
-                    self.external.append(route.request.url)
-                    route.abort()
-                else:
-                    route.continue_()
-            context.route('**/*', guard)
+            context.route('**/*', isolated_panel_route_guard(instance['base'], self.external))
             page = context.new_page()
             instance['page'] = page
             page.on('request', lambda request: self.export_requests.append(request)
@@ -442,15 +485,36 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         from playwright.sync_api import expect
         pending = []
         def delay(route):
-            response = route.fetch()
-            self.assertEqual(response.status, 200)
-            pending.append((route, response))
+            # Do no fetching/asserting in the event callback. A failed real
+            # fetch must fail the test directly, not hide behind a UI timeout.
+            pending.append((route, None))
         def wait_pending():
             deadline = time.monotonic() + 10
             while not pending and time.monotonic() < deadline:
                 self.page.wait_for_timeout(20)
             self.assertEqual(len(pending), 1)
+            route, response = pending[0]
+            self.assertIsNone(response)
+            response = route.fetch(timeout=10000)
+            pending[0] = (route, response)
+            self.assertEqual(response.status, 200)
+        def fulfill_pending():
+            route, response = pending.pop()
+            try:
+                route.fulfill(response=response)
+            finally:
+                response.dispose()
+        def cleanup_pending():
+            self.source['context'].unroute('**/api/subscription/upstream/*', delay)
+            while pending:
+                route, response = pending.pop()
+                try:
+                    route.abort()
+                finally:
+                    if response is not None:
+                        response.dispose()
         self.source['context'].route('**/api/subscription/upstream/*', delay)
+        self.addCleanup(cleanup_pending)
         self.open_export()
         self.page.locator('#upstream-export-request').click()
         expect(self.page.locator('#upstream-export-request')).to_be_disabled()
@@ -459,14 +523,12 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         self.assertEqual(len(self.export_requests), 1)
         self.close_export()
         self.open_export(2)
-        route, response = pending.pop()
-        route.fulfill(response=response)
+        fulfill_pending()
         self.assert_cleared()
         self.page.locator('#upstream-export-request').click()
         wait_pending()
         self.page.locator('#upstream-export-server').fill('new.example.test')
-        route, response = pending.pop()
-        route.fulfill(response=response)
+        fulfill_pending()
         self.assert_cleared()
         self.page.locator('#upstream-export-ack').check()
         self.page.locator('#upstream-export-request').click()
@@ -478,8 +540,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         self.assertEqual(logout.status, 200)
         self.page.evaluate('void checkAdminSession(true, true)')
         self.page.wait_for_url('**/login')
-        route, response = pending.pop()
-        route.fulfill(response=response)
+        fulfill_pending()
         self.assert_cleared()
         self.assert_private()
 
