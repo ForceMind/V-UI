@@ -32,7 +32,7 @@ class RecorderConsumerEvidenceTests(unittest.TestCase):
         self.enterContext(patch.object(preflight, 'unused_port', return_value=1234))
         self.process = Mock()
         self.process.process.poll.return_value = None
-        self.enterContext(patch.object(preflight, 'CoreProcess', side_effect=self.core))
+        self.enterContext(patch.object(preflight, 'ReadyMihomoProcess', side_effect=self.core))
         self.observers = []
         self.finished = []
         self.calls = []
