@@ -21,7 +21,7 @@ class Channel {
 function context(ChannelType){
  let errorHandler;
  const c={addEventListener(){},location:{hash:'',replace(value){c.redirects.push(value)}},redirects:[],stops:0,authStatus:401,authChecks:0,
-  Vue:{createApp(options){c.setup=options.setup;return {component(){},use(){},mount(){}}},ref:v=>({value:v}),reactive:v=>v,computed:f=>({get value(){return f()}}),onMounted(fn){c.mounted=fn}},ElementPlus:{ElMessage:{success(){},error(){}},ElMessageBox:{}},ElementPlusIconsVue:{},
+  Vue:{createApp(options){c.setup=options.setup;return {component(){},use(){},mount(){}}},ref:v=>({value:v}),reactive:v=>v,computed:f=>({get value(){return f()}}),watch(){},onMounted(fn){c.mounted=fn}},ElementPlus:{ElMessage:{success(){},error(){}},ElMessageBox:{}},ElementPlusIconsVue:{},
   axios:{defaults:{headers:{common:{}}},interceptors:{response:{use(ok,bad){errorHandler=bad}}},get:async(url,options)=>{assert.equal(url,'/api/auth/me');assert.equal(options.timeout,5000);assert.equal(options.validateStatus(401),true);assert.equal(options.validateStatus(500),false);c.authChecks++;return {status:c.authStatus,data:{username:'fresh'}}}},console};
  if(ChannelType)c.BroadcastChannel=ChannelType;
  vm.createContext(c);vm.runInContext(source,c);c.error=()=>errorHandler;

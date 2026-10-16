@@ -1,5 +1,9 @@
 # V-UI 开发约束
 
+## 2026-10-16 D1 显式 TCP-only 上游导出
+
+D0 已在准确 master `13c884a0539cf9822fca2fe2db58325fa4644048` 收口，见 PR #46；用户持续开发授权下，下一有界实际功能为 [D1 契约](docs/TCP_UPSTREAM_EXPORT_CONTRACT.md)。单独的管理员“导出为中转上游（仅 TCP）”用途 profile，URI 与单节点 Clash YAML，必须完成真实双实例 API 导出→导入及固定 TLS/REALITY 双跳。普通导出/订阅保持，导入仍严格拒绝 UDP 选项，默认双关和已验运行策略不变。D2 UDP 双跳暂不启动。只在准确候选/主线与四目标验收后正常合并，不发布或部署。
+
 ## 2026-10-16 UDP / DNS 门槛与导入保真
 
 用户已要求继续已定开发计划；M0–M4 已于准确 master `9a97ad13aae2fabb5ed969fdc0f930c36fdc55b7` 收口，最终证据在 PR #44。下一有界阶段按 [UDP / DNS 能力门槛](docs/UDP_DNS_CAPABILITY_GATES.md)推进：明确拒绝尚未获资格的上游 UDP/packet encoding、真实导出→导入保真回归、既有 Shadowsocks UDP/DNS 实验和双开关拒绝门槛。不静默丢字段，不改普通节点默认、不扩大双跳 UDP/TUN、不换固定核心或 VERSION。正常开发/独立 PR/准确候选与主线验收边界沿用；新发布、真实部署、网络安全设置和凭据仍不包含在开发授权内。

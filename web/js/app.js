@@ -66,6 +66,7 @@ function visibleStatusPoller(task, interval, environment = {}) {
 }
 
 const statusPollers = [];
+const clearAdminSecrets = [];
 let adminSessionEnded = false;
 let adminSessionChannel = null;
 try {
@@ -74,6 +75,7 @@ try {
 function endAdminSession(announce = false) {
     if (adminSessionEnded) return;
     adminSessionEnded = true;
+    clearAdminSecrets.forEach(clear => clear());
     statusPollers.forEach(poller => poller.stop());
     try { if (announce && adminSessionChannel) adminSessionChannel.postMessage('session-ended'); } catch (_) {}
     try { if (adminSessionChannel) adminSessionChannel.close(); } catch (_) {}
@@ -117,11 +119,14 @@ function checkAdminSession(announce = false, newEvidence = false) {
 }
 axios.defaults.headers.common['X-VUI-Request'] = '1';
 axios.interceptors.response.use(response => response, error => {
-    if (error.response?.status === 401) return checkAdminSession(true, true).then(() => Promise.reject(error));
+    if (error.response?.status === 401) {
+        clearAdminSecrets.forEach(clear => clear());
+        return checkAdminSession(true, true).then(() => Promise.reject(error));
+    }
     return Promise.reject(error);
 });
 
-const { createApp, ref, onMounted, reactive, computed } = Vue;
+const { createApp, ref, onMounted, reactive, computed, watch } = Vue;
 const { ElMessage, ElMessageBox } = ElementPlus;
 const {
     Odometer,
@@ -147,6 +152,112 @@ const app = createApp({
         const restartingCore = ref('');
         const showQrDialog = ref(false);
         const qrLink = ref('');
+        const upstreamExport = reactive({
+            open: false, inboundId: null, name: '', server: '', format: 'uri',
+            acknowledged: false, busy: false, content: '', error: '', notice: ''
+        });
+        let upstreamExportGeneration = 0, upstreamExportController = null, upstreamExportURL = null;
+        const clearUpstreamExport = () => {
+            upstreamExportGeneration++;
+            if (upstreamExportController) upstreamExportController.abort();
+            upstreamExportController = null;
+            if (upstreamExportURL) URL.revokeObjectURL(upstreamExportURL);
+            upstreamExportURL = null;
+            upstreamExport.content = '';
+            upstreamExport.error = '';
+            upstreamExport.notice = '';
+            upstreamExport.busy = false;
+        };
+        const closeUpstreamExport = () => {
+            clearUpstreamExport();
+            upstreamExport.open = false;
+            upstreamExport.inboundId = null;
+            upstreamExport.name = '';
+            upstreamExport.server = '';
+            upstreamExport.acknowledged = false;
+        };
+        const openUpstreamExport = (row) => {
+            closeUpstreamExport();
+            upstreamExport.inboundId = row.id;
+            upstreamExport.name = row.remark || `${row.protocol}:${row.port}`;
+            upstreamExport.format = 'uri';
+            upstreamExport.open = true;
+        };
+        watch(() => [upstreamExport.server, upstreamExport.format, upstreamExport.inboundId], () => {
+            clearUpstreamExport();
+            upstreamExport.acknowledged = false;
+        }, { flush: 'sync' });
+        watch(() => upstreamExport.acknowledged, clearUpstreamExport, { flush: 'sync' });
+        watch(() => upstreamExport.open, (open) => { if (!open) closeUpstreamExport(); }, { flush: 'sync' });
+        watch(currentView, closeUpstreamExport, { flush: 'sync' });
+        clearAdminSecrets.push(closeUpstreamExport);
+        addEventListener('pagehide', closeUpstreamExport);
+        addEventListener('popstate', closeUpstreamExport);
+
+        const requestUpstreamExport = async () => {
+            if (upstreamExport.busy || !upstreamExport.open || adminSessionEnded ||
+                !upstreamExport.inboundId || !upstreamExport.server || !upstreamExport.acknowledged) return;
+            clearUpstreamExport();
+            const generation = upstreamExportGeneration;
+            upstreamExportController = new AbortController();
+            upstreamExport.busy = true;
+            try {
+                const response = await axios.post(`/api/subscription/upstream/${upstreamExport.inboundId}`, {
+                    format: upstreamExport.format, server: upstreamExport.server, acknowledge_tcp_only: true
+                }, { responseType: 'text', transformResponse: [value => value],
+                    signal: upstreamExportController.signal, timeout: 15000 });
+                if (generation !== upstreamExportGeneration || !upstreamExport.open || adminSessionEnded) return;
+                if (response.headers['x-vui-export-profile'] !== 'tcp-upstream-v1' ||
+                    typeof response.data !== 'string' || !response.data.length) throw new Error('Invalid export response');
+                upstreamExport.content = response.data;
+            } catch (error) {
+                if (generation !== upstreamExportGeneration || !upstreamExport.open || adminSessionEnded) return;
+                clearUpstreamExport();
+                const status = error.response?.status;
+                upstreamExport.error = status === 403 ? '无权导出：请使用管理员会话并从当前面板重试。' :
+                    status === 404 ? '节点不存在，请刷新节点列表。' :
+                    status === 409 ? '此节点不具备 TCP 中转上游导出资格：仅支持已启用且未设置定时过期的单用户 sing-box VLESS TCP TLS / REALITY。' :
+                    status === 422 ? '请填写有效的字面主机或 IP，并确认导出格式和 TCP-only 用途。' :
+                    '导出失败，旧内容已清除，请重试。';
+            } finally {
+                if (generation === upstreamExportGeneration) {
+                    upstreamExport.busy = false;
+                    upstreamExportController = null;
+                }
+            }
+        };
+        const copyUpstreamExport = async () => {
+            if (!upstreamExport.open || !upstreamExport.content || adminSessionEnded) return;
+            const generation = upstreamExportGeneration;
+            try {
+                await navigator.clipboard.writeText(upstreamExport.content);
+                if (generation === upstreamExportGeneration) upstreamExport.notice = '已复制含连接凭据的内容。';
+            } catch (_) {
+                if (generation !== upstreamExportGeneration) return;
+                upstreamExport.notice = '复制失败。请在下方文本框中手动选择并复制；内容含连接凭据。';
+                const output = document.getElementById('upstream-export-content');
+                if (output) { output.focus(); output.select(); }
+            }
+        };
+        const downloadUpstreamExport = () => {
+            if (!upstreamExport.open || !upstreamExport.content || adminSessionEnded) return;
+            if (upstreamExportURL) URL.revokeObjectURL(upstreamExportURL);
+            const yaml = upstreamExport.format === 'clash-yaml';
+            upstreamExportURL = URL.createObjectURL(new Blob([upstreamExport.content], {
+                type: yaml ? 'application/yaml;charset=utf-8' : 'text/plain;charset=utf-8'
+            }));
+            const url = upstreamExportURL;
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = yaml ? 'upstream-tcp.yaml' : 'upstream-tcp.txt';
+            try { anchor.click(); }
+            finally {
+                setTimeout(() => {
+                    URL.revokeObjectURL(url);
+                    if (upstreamExportURL === url) upstreamExportURL = null;
+                }, 0);
+            }
+        };
         const siteFiles = ref([]);
         const currentUser = ref({ username: '' });
         const mihomoWarnings = ref([]);
@@ -302,6 +413,7 @@ const app = createApp({
         });
 
         const fetchInbounds = async () => {
+            closeUpstreamExport();
             try {
                 const res = await axios.get('/api/inbounds');
                 inbounds.value = res.data;
@@ -767,6 +879,12 @@ const app = createApp({
             managedCertificates,
             showQrDialog,
             qrLink,
+            upstreamExport,
+            openUpstreamExport,
+            closeUpstreamExport,
+            requestUpstreamExport,
+            copyUpstreamExport,
+            downloadUpstreamExport,
             routingCatalog,
             routingPreview,
             routingForm,

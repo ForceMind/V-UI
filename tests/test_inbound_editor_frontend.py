@@ -18,7 +18,7 @@ const stored={id:47,core:'sing-box',protocol:'vless',remark:'reality',port:10447
  skip_cert_verify:false,reality_uuid:'',reality_short_id:'',reality_uuid_set:true,reality_short_id_set:true,reality_private_key_set:true}};
 const app={component(){},use(){},mount(){}};
 const sandbox={addEventListener(){},location:{hash:''},
- Vue:{createApp(o){setup=o.setup;return app},ref:v=>({value:v}),reactive:v=>v,computed:f=>({get value(){return f()}}),onMounted(){}},
+ Vue:{createApp(o){setup=o.setup;return app},ref:v=>({value:v}),reactive:v=>v,computed:f=>({get value(){return f()}}),watch(){},onMounted(){}},
  ElementPlus:{ElMessage:{success(){},error(m){throw Error(m)}},ElMessageBox:{}},ElementPlusIconsVue:{},
  axios:{defaults:{headers:{common:{}}},interceptors:{response:{use(){}}},
  async get(url){return {data:url==='/api/inbounds/47/editor'?clone(stored):[]}},
@@ -73,7 +73,7 @@ const app = {component() {}, use() {}, mount() {}};
 const sandbox = {
   addEventListener() {}, location: {hash: ''},
   Vue: {createApp(options) {setup = options.setup; return app;}, ref: value => ({value}),
-    reactive: value => value, computed: fn => ({get value() {return fn();}}), onMounted() {}},
+    reactive: value => value, computed: fn => ({get value() {return fn();}}), watch(){},onMounted() {}},
   ElementPlus: {ElMessage: {success() {}, error(message) {throw Error(message);}}, ElMessageBox: {}},
   ElementPlusIconsVue: {},
   axios: {defaults: {headers: {common: {}}}, interceptors: {response: {use() {}}},
@@ -185,7 +185,7 @@ const app = {component() {}, use() {}, mount() {}};
 const sandbox = {
   addEventListener() {}, location: {hash: ''},
   Vue: {createApp(options) {setup = options.setup; return app;}, ref: value => ({value}),
-    reactive: value => value, computed: fn => ({get value() {return fn();}}), onMounted() {}},
+    reactive: value => value, computed: fn => ({get value() {return fn();}}), watch(){},onMounted() {}},
   ElementPlus: {ElMessage: {success() {}, error(message) {throw Error(message);}}, ElMessageBox: {}},
   ElementPlusIconsVue: {},
   axios: {defaults: {headers: {common: {}}}, interceptors: {response: {use() {}}},
@@ -292,7 +292,7 @@ const app = {component() {}, use() {}, mount() {}};
 const sandbox = {
   addEventListener() {}, location: {hash: ''},
   Vue: {createApp(options) {setup = options.setup; return app;}, ref: value => ({value}),
-    reactive: value => value, computed: fn => ({get value() {return fn();}}), onMounted() {}},
+    reactive: value => value, computed: fn => ({get value() {return fn();}}), watch(){},onMounted() {}},
   ElementPlus: {ElMessage: {success() {}, error(message) {throw Error(message);}}, ElMessageBox: {}},
   ElementPlusIconsVue: {},
   axios: {defaults: {headers: {common: {}}}, interceptors: {response: {use() {}}},
@@ -343,7 +343,7 @@ const stored={id:45,core:'sing-box',protocol:'hysteria2',port:10445,remark:'hy2'
 const app={component(){},use(){},mount(){}};
 const sandbox={addEventListener(){},location:{hash:''},
  Vue:{createApp(o){setup=o.setup;return app;},ref:v=>({value:v}),reactive:v=>v,
- computed:fn=>({get value(){return fn();}}),onMounted(){}},
+ computed:fn=>({get value(){return fn();}}),watch(){},onMounted(){}},
  ElementPlus:{ElMessage:{success(){},error(m){throw Error(m);}},ElMessageBox:{}},ElementPlusIconsVue:{},
  axios:{defaults:{headers:{common:{}}},interceptors:{response:{use(){}}},
  async get(url){return {data:url.endsWith('/editor')?clone(stored):[]};},
@@ -391,7 +391,7 @@ const stored={id:45,core:'sing-box',protocol:'tuic',port:10445,remark:'tuic',ena
 const app={component(){},use(){},mount(){}};
 const sandbox={addEventListener(){},location:{hash:''},
  Vue:{createApp(o){setup=o.setup;return app;},ref:v=>({value:v}),reactive:v=>v,
- computed:fn=>({get value(){return fn();}}),onMounted(){}},
+ computed:fn=>({get value(){return fn();}}),watch(){},onMounted(){}},
  ElementPlus:{ElMessage:{success(){},error(m){throw Error(m);}},ElMessageBox:{}},ElementPlusIconsVue:{},
  axios:{defaults:{headers:{common:{}}},interceptors:{response:{use(){}}},
  async get(url){return {data:url.endsWith('/editor')?clone(stored):[]};},

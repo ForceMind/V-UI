@@ -6,7 +6,7 @@
 
 双开关 M0–M4 已在 `9a97ad13` 完成准确主线和同提交四目标验收，见[最终验收 PR #44](https://github.com/ForceMind/V-UI/pull/44)。面板入口“代理与中转” `/proxy`，双开关默认关；[使用说明](DUAL_PROXY_RELAY_M3.md)、[一期边界](DUAL_PROXY_RELAY_CONTRACT.md)、[离线恢复](DUAL_PROXY_RELAY_OFFLINE_RECOVERY.md)及[证据账本](DUAL_PROXY_RELAY_PROGRESS.md)分别说明行为和已测范围。用户真实线路/外部设备仍未测试。
 
-新阶段 [UDP / DNS 能力门槛与导入保真](UDP_DNS_CAPABILITY_GATES.md)正在实现和独立验收，不预称通用 UDP 支持或发布。
+[UDP / DNS 能力门槛与导入保真](UDP_DNS_CAPABILITY_GATES.md)已在 `13c884a` 完成准确主线和同提交四目标验收，见 [PR #46](https://github.com/ForceMind/V-UI/pull/46)；不代表通用 UDP 中转。下一有界功能 [D1：显式 TCP-only 上游导出](TCP_UPSTREAM_EXPORT_CONTRACT.md)正在实现与独立验收，操作入口见[专用导出使用说明](TCP_UPSTREAM_EXPORT.md)。普通导出/导入拒绝边界保持，不预称新功能已发布。
 
 ## 以下为 2026-10-15 收口前入口快照（历史保留）
 
@@ -32,6 +32,7 @@
 
 | 阅读目标 | 文档 |
 | --- | --- |
+| 专用 TCP 上游 URI/YAML 导出、另一实例导入与凭据处理 | [TCP_UPSTREAM_EXPORT.md](TCP_UPSTREAM_EXPORT.md) |
 | 双开关四状态、上游导入、失败关闭及分阶段门槛 | [DUAL_PROXY_RELAY_CONTRACT.md](DUAL_PROXY_RELAY_CONTRACT.md) |
 | 双开关 M0–M4 实际进度、准确提交与未验收边界 | [DUAL_PROXY_RELAY_PROGRESS.md](DUAL_PROXY_RELAY_PROGRESS.md) |
 | 0.4.8 未发布安装器修复、shell 回归与剩余验收 | [INSTALLER_EXIT_STATUS_048.md](INSTALLER_EXIT_STATUS_048.md) |
