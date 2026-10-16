@@ -5,19 +5,147 @@ an Internet DNS resolver, fragmentation, TUN, UDP/53 or UDP/443 qualification.
 """
 from collections import Counter
 from contextlib import ExitStack
+from http.server import ThreadingHTTPServer
 import ipaddress
+import shlex
 import socket
 import socketserver
+import ssl
 import struct
 import threading
 import time
 
 from loopback_helpers import _recv_exact, _socks_address_from_stream, _socks_udp_target
+from proxy_loopback_support import BoundCoreProcess, serve
 
 CLIENT = "127.0.0.1"
 SERVER = "127.0.0.2"
 TARGET = "127.0.0.3"
 EGRESS = "127.0.0.4"
+
+
+def attach_failure_context(error, label, collect):
+    """Diagnostics must never replace the failure being diagnosed."""
+    try:
+        error.add_note(label + collect())
+    except Exception as diagnostic_error:
+        try:
+            error.add_note(label + "collection failed: " + type(diagnostic_error).__name__)
+        except Exception:
+            pass  # Even a custom exception's broken add_note keeps its identity.
+
+
+def await_mihomo_ready(process, marker, *, timeout=5):
+    """Wait for one incarnation's post-up, never retry an application request.
+
+    Fixed v1.19.32 main.go executes post-up only after hub.Parse returns;
+    executor.ApplyConfig has already called tunnel.OnRunning at that point.
+    A listening mixed socket (or a successful SOCKS reply) precedes OnRunning.
+    The shell's PPID ties this fresh marker to the exact child being checked.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        status = process.poll()
+        if status is not None:
+            raise AssertionError(f"Mihomo exited before post-up readiness: pid={process.pid} status={status}")
+        if marker.exists():
+            value = marker.read_text()
+            if value == f"{process.pid}\n":
+                if process.poll() is not None:
+                    raise AssertionError("Mihomo exited as its readiness marker arrived")
+                return
+            if value.endswith("\n"):
+                raise AssertionError("Mihomo readiness marker belongs to another process: " + repr(value))
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"Mihomo post-up readiness deadline exceeded: pid={process.pid}")
+        time.sleep(min(.01, max(0, deadline - time.monotonic())))
+
+
+class ReadyMihomoProcess(BoundCoreProcess):
+    """Test-only startup barrier using the fixed binary's supported post-up hook."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.base_command = list(self.command)
+        self.generation = 0
+        self.ready_marker = None
+
+    def start(self, port, host=CLIENT):
+        self.generation += 1
+        marker = self.log_path.with_name(self.log_path.name + f".ready-{self.generation}")
+        if marker.exists():
+            raise AssertionError("Refusing a pre-existing Mihomo readiness marker: " + str(marker))
+        self.ready_marker = marker
+        # ExecShell captures successful stdout; write only to this temporary
+        # fixture file. No controller, credentials, host setting or network I/O.
+        hook = "printf '%s\\n' \"$PPID\" > " + shlex.quote(str(marker))
+        self.command = self.base_command + ["-post-up", hook]
+        super().start(port, host)
+        await_mihomo_ready(self.process, marker)
+
+
+class LifecycleTrace:
+    """In-memory diagnostics, emitted only if the enclosing fixture fails."""
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.events = []
+
+    def record(self, event, **fields):
+        with self.lock:
+            self.events.append({"monotonic_ns": time.monotonic_ns(), "event": event, **fields})
+
+    def snapshot(self):
+        with self.lock:
+            return list(self.events)
+
+
+def recording_https_server(stack, host, handler, cert, key, accounting, *, trace):
+    """The existing tracked TLS fixture semantics plus handshake/close reasons.
+
+    Used only while constructing this independent UDP fixture's HTTPS/DoH
+    servers. Keep pre-handshake accounting, bounded sockets and final drain.
+    """
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert, key)
+    context.set_alpn_protocols(["http/1.1"])
+
+    class Server(ThreadingHTTPServer):
+        address_family = socket.AF_INET6 if ":" in host else socket.AF_INET
+
+        def get_request(self):
+            stream, address = super().get_request()
+            stream.settimeout(3)
+            token = accounting.opened(stream)
+            trace.record("tls.accepted", endpoint=self.server_address, peer=address, token=token)
+            return stream, address
+
+        def process_request_thread(self, request, address):
+            token, stream, stage = id(request), request, "wrap"
+            try:
+                stream = accounting.start_tls(token, context)
+                stage = "handshake"
+                stream.do_handshake()
+                trace.record("tls.established", endpoint=self.server_address, peer=address, token=token)
+                stage = "http"
+                self.finish_request(stream, address)
+            except (OSError, ValueError) as exc:
+                trace.record("tls.error", endpoint=self.server_address, peer=address, token=token,
+                             stage=stage, error_type=type(exc).__name__, reason=str(exc))
+            finally:
+                try:
+                    self.shutdown_request(stream)
+                finally:
+                    accounting.closed(token)
+                    trace.record("tls.closed", endpoint=self.server_address, peer=address, token=token, stage=stage)
+
+        def close_tracked_connections(self):
+            deadline = time.monotonic() + 3
+            while accounting.connection_count():
+                accounting.close_connections()
+                if time.monotonic() >= deadline:
+                    raise AssertionError("Accepted fixture connections did not drain at close")
+                time.sleep(.025)
+
+    return serve(stack, Server((host, 0), handler))
 
 
 def paired_port(host):

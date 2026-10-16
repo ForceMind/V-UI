@@ -11,10 +11,12 @@ new client export support, or new double-hop UDP forwarding is implied.
 """
 from collections import Counter
 from contextlib import ExitStack, contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
 import socket
+import ssl
 import struct
 import subprocess
 import tempfile
@@ -34,12 +36,15 @@ from app.services.mihomo_routing import default_routing
 from app.services.routing_store import read_snapshot, save_routing
 import test_subscription_tokens as grants
 import test_proxy_double_hop as double_hop
-from loopback_helpers import dns_query
+import proxy_loopback_support as proxy_support
+from loopback_helpers import certificate_files, dns_query
 from proxy_loopback_support import BoundCoreProcess, udp_target
 from udp_dns_capability_helpers import (
     CLIENT, SERVER, TARGET, EGRESS, DatagramTarget, SocksDatagrams,
     decode_socks_datagram, dns_response, fresh_lines, isolated_rejection_offset,
     observe_rejection, paired_port,
+    await_mihomo_ready, ReadyMihomoProcess, LifecycleTrace, recording_https_server,
+    attach_failure_context,
 )
 
 METHODS = ("aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305")
@@ -51,6 +56,134 @@ PARSER_ENABLED = os.getenv("VUI_UDP_DNS_PARSER") == "1"
 
 class DatagramFixtureTests(unittest.TestCase):
     """Fixture self-tests, deliberately separate from real-core evidence."""
+    def test_mihomo_ready_waits_after_tcp_listener_without_request_retry(self):
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+            process = ReadyMihomoProcess(stack, ["fake-mihomo"], Path(temporary)/"core.log", {})
+            fake = SimpleNamespace(pid=4321, poll=lambda: None)
+            listener_ready, returned = threading.Event(), threading.Event()
+            errors = []
+            def tcp_only_start(owner, port, host):
+                owner.process = fake
+                listener_ready.set()
+            def start():
+                try:
+                    process.start(18080)
+                    returned.set()
+                except Exception as exc:
+                    errors.append(exc)
+            with patch.object(BoundCoreProcess, "start", tcp_only_start), patch.object(process, "stop"):
+                thread = threading.Thread(target=start)
+                thread.start()
+                self.assertTrue(listener_ready.wait(1))
+                self.assertFalse(returned.wait(.03), "TCP listening alone released application traffic")
+                process.ready_marker.write_text("4321\n")
+                thread.join(1)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual(errors, [])
+                self.assertTrue(returned.is_set())
+                self.assertEqual(process.generation, 1)
+                self.assertEqual(process.command.count("-post-up"), 1)
+            process.process = None
+
+    def test_mihomo_ready_fails_for_missing_exited_or_foreign_process(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            marker = Path(temporary)/"ready"
+            live = SimpleNamespace(pid=4321, poll=lambda: None)
+            with self.assertRaisesRegex(AssertionError, "deadline exceeded"):
+                await_mihomo_ready(live, marker, timeout=.02)
+            with self.assertRaisesRegex(AssertionError, "exited before"):
+                await_mihomo_ready(SimpleNamespace(pid=4321, poll=lambda: 7), marker)
+            marker.write_text("4320\n")
+            with self.assertRaisesRegex(AssertionError, "another process"):
+                await_mihomo_ready(live, marker)
+
+    def test_mihomo_ready_partial_and_previous_generation_never_qualify(self):
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+            root = Path(temporary)
+            marker = root/"partial"
+            marker.write_text("4321")
+            with self.assertRaisesRegex(AssertionError, "deadline exceeded"):
+                await_mihomo_ready(SimpleNamespace(pid=4321, poll=lambda: None), marker, timeout=.02)
+            process = ReadyMihomoProcess(stack, ["fake-mihomo"], root/"core.log", {})
+            (root/"core.log.ready-1").write_text("4321\n")
+            with patch.object(BoundCoreProcess, "start") as start:
+                with self.assertRaisesRegex(AssertionError, "pre-existing"):
+                    process.start(18080)
+                start.assert_not_called()
+            # A second generation cannot accept the old generation's valid PID.
+            fake = SimpleNamespace(pid=4321, poll=lambda: None)
+            def tcp_only_start(owner, port, host):
+                owner.process = fake
+            real_wait = await_mihomo_ready
+            with patch.object(BoundCoreProcess, "start", tcp_only_start), \
+                 patch("udp_dns_capability_helpers.await_mihomo_ready",
+                       side_effect=lambda proc, path: real_wait(proc, path, timeout=.02)):
+                with self.assertRaisesRegex(AssertionError, "deadline exceeded"):
+                    process.start(18080)
+                self.assertEqual(process.ready_marker.name, "core.log.ready-2")
+            process.process = None
+
+    def test_tls_diagnostics_keep_handshake_failure_and_final_close(self):
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+            _, cert, key = certificate_files(Path(temporary))
+            trace = LifecycleTrace()
+            with patch.object(proxy_support, "tracked_https_server",
+                              lambda *args: recording_https_server(*args, trace=trace)):
+                port, traffic = proxy_support.https_target(stack, TARGET, cert, key)
+            with socket.create_connection((TARGET, port), timeout=1) as stream:
+                stream.sendall(b"not a TLS handshake\r\n")
+            deadline = time.monotonic() + 1
+            while not any(event["event"] == "tls.closed" for event in trace.snapshot()):
+                self.assertLess(time.monotonic(), deadline, "TLS diagnostic thread did not finish")
+                time.sleep(.01)
+            errors = [event for event in trace.snapshot() if event["event"] == "tls.error"]
+            self.assertEqual(len(errors), 1)
+            self.assertEqual(errors[0]["stage"], "handshake")
+            self.assertEqual(errors[0]["error_type"], "SSLError")
+            self.assertTrue(errors[0]["reason"])
+            self.assertEqual(traffic.snapshot(), [])
+            self.assertEqual(traffic.pending(), 0)
+
+    def test_failure_context_preserves_original_exception_and_missing_positive(self):
+        case = DualSwitchDatagramRejectionTests()
+        case.lifecycle = LifecycleTrace()
+        case.failure_details = lambda label: "sanitized core context; missing positive; UDP not sent"
+        expected = Counter({("target", "positive-control"): 1})
+        baseline = expected.copy()
+        case.evidence = SimpleNamespace(targets=expected)
+        original = ssl.SSLEOFError("original positive TLS EOF")
+        with self.assertRaises(ssl.SSLEOFError) as caught:
+            with case.failure_context("positive-control"):
+                raise original
+        self.assertIs(caught.exception, original)
+        self.assertIn("missing positive; UDP not sent", original.__notes__[0])
+        self.assertEqual(case.evidence.targets, baseline)
+        self.assertEqual(case.lifecycle.snapshot()[-1]["error_type"], "SSLEOFError")
+        for problem in (OSError("missing log file"), ValueError("redaction failed")):
+            with self.subTest(diagnostic=type(problem).__name__):
+                def collect():
+                    raise problem
+                same_error = ssl.SSLEOFError("original core failure")
+                with self.assertRaises(ssl.SSLEOFError) as preserved:
+                    try:
+                        raise same_error
+                    except BaseException as exc:
+                        attach_failure_context(exc, "fixture context: ", collect)
+                        raise
+                self.assertIs(preserved.exception, same_error)
+                self.assertIn("collection failed", same_error.__notes__[0])
+        class BrokenNotes(ssl.SSLEOFError):
+            def add_note(self, value):
+                raise RuntimeError("note attachment failed")
+        unnotable = BrokenNotes("original error without working notes")
+        with self.assertRaises(BrokenNotes) as preserved:
+            try:
+                raise unnotable
+            except BaseException as exc:
+                attach_failure_context(exc, "fixture context: ", lambda: "diagnostic")
+                raise
+        self.assertIs(preserved.exception, unnotable)
+
     def test_dns_answers_preserve_transaction_question_and_exact_rdata(self):
         for kind, value in ((1, socket.inet_aton("192.0.2.17")),
                             (28, socket.inet_pton(socket.AF_INET6, "2001:db8::17")),
@@ -260,7 +393,8 @@ class ShadowsocksFixture(unittest.TestCase):
             check = [self.singbox, "check", "-c", str(path)]
         result = subprocess.run(check, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        return BoundCoreProcess(stack, command, root/(label + ".log"), dict(os.environ))
+        process_class = ReadyMihomoProcess if kind == "mihomo" else BoundCoreProcess
+        return process_class(stack, command, root/(label + ".log"), dict(os.environ))
 
     @contextmanager
     def scenario(self, method, kind, *, failure=None, start=True):
@@ -315,6 +449,11 @@ class ShadowsocksFixture(unittest.TestCase):
                 yield value
             except BaseException as exc:
                 primary = exc
+                attach_failure_context(exc, "UDP fixture core context: ", lambda: double_hop.safe_log("\n".join(
+                    f"{process.log_path.name} pid={getattr(process.process, 'pid', None)} "
+                    f"status={process.process.poll() if process.process else None}\n"
+                    + process.log_path.read_text(errors="replace") for process in processes),
+                    (PASSWORD, "wrong-password")))
                 raise
             finally:
                 # No producer survives the final quiet-window audit. Target
@@ -439,13 +578,183 @@ class ShadowsocksDatagramLoopbackTests(ShadowsocksFixture):
                         self.exchange(association, target, f"recovered-{time.monotonic_ns()}".encode())
 
 
+@unittest.skipUnless(RUNTIME_ENABLED, "Set VUI_UDP_DNS_LOOPBACK=1 for fixed Mihomo startup evidence")
+class MihomoStartupLoopbackTests(unittest.TestCase):
+    """Deterministic startup-mechanism reproduction, not UDP qualification."""
+    @classmethod
+    def setUpClass(cls):
+        cls.mihomo = os.getenv("VUI_TEST_MIHOMO")
+        if not cls.mihomo:
+            raise AssertionError("Enabled startup characterization requires the fixed Mihomo path")
+        result = subprocess.run([cls.mihomo, "-v"], capture_output=True, text=True, timeout=15)
+        if result.returncode or not result.stdout.startswith("Mihomo Meta v1.19.32 "):
+            raise AssertionError("Fixed startup core pin mismatch: " + result.stdout + result.stderr)
+
+    def test_listener_and_socks_reply_precede_running_but_fresh_marker_gates_request(self):
+        with tempfile.TemporaryDirectory(prefix="vui-mihomo-startup-") as temporary, ExitStack() as stack:
+            root, trace = Path(temporary), LifecycleTrace()
+            ca, cert, key = certificate_files(root)
+            with patch.object(proxy_support, "tracked_https_server",
+                              lambda *args: recording_https_server(*args, trace=trace)):
+                target_port, traffic = proxy_support.https_target(stack, TARGET, cert, key)
+            requested, release = threading.Event(), threading.Event()
+            requests = []
+            class Provider(BaseHTTPRequestHandler):
+                def log_message(self, *args):
+                    pass
+                def do_GET(self):
+                    requests.append(self.path)
+                    requested.set()
+                    if not release.wait(4):
+                        self.send_error(504)
+                        return
+                    body = b"payload:\n  - DOMAIN,unused.example.test\n"
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+            provider_port = proxy_support.serve(stack, ThreadingHTTPServer((CLIENT, 0), Provider))
+            port = paired_port(CLIENT)
+            # A static local data-only provider holds loadProvider before
+            # OnRunning. DIRECT here is solely the explicit loopback reference
+            # path; it is not a proxy-export or negative-fallback experiment.
+            config = {"mixed-port": port, "bind-address": CLIENT, "allow-lan": False,
+                      "mode": "rule", "log-level": "debug", "ipv6": False,
+                      "find-process-mode": "off", "geo-auto-update": False,
+                      "dns": {"enable": False}, "rules": ["MATCH,DIRECT"],
+                      "rule-providers": {"startup-barrier": {
+                          "type": "http", "behavior": "classical", "format": "yaml",
+                          "url": f"http://{CLIENT}:{provider_port}/rules.yaml", "interval": 0}}}
+            path = root/"client.yaml"
+            path.write_text(yaml.safe_dump(config))
+            process = ReadyMihomoProcess(stack, [self.mihomo, "-d", str(root), "-f", str(path)],
+                                         root/"client.log", dict(os.environ))
+            started, errors = threading.Event(), []
+            def start():
+                try:
+                    process.start(port)
+                    started.set()
+                except Exception as exc:
+                    errors.append(exc)
+            thread = threading.Thread(target=start)
+            thread.start()
+            try:
+                self.assertTrue(requested.wait(3), "Local provider never entered the bounded startup hold")
+                self.assertFalse(started.is_set(), "Readiness gate returned while provider loading was held")
+                self.assertFalse(process.ready_marker.exists())
+                # The old listener-only gate is satisfied, and SOCKS CONNECT
+                # replies success, yet routing deliberately closes before TLS.
+                with proxy_support.tunnel(port, TARGET, target_port, protocol="socks5h", timeout=1) as stream:
+                    context = ssl.create_default_context(cafile=str(ca))
+                    with self.assertRaises((ssl.SSLEOFError, ConnectionResetError)) as closed:
+                        with context.wrap_socket(stream, server_hostname=double_hop.SNI):
+                            self.fail("TLS unexpectedly reached a target before Running")
+                self.assertEqual(traffic.snapshot(), [])
+                self.assertFalse(any(event["event"] == "tls.accepted" for event in trace.snapshot()))
+                release.set()
+                thread.join(6)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual(errors, [])
+                self.assertTrue(started.is_set())
+                self.assertEqual(process.ready_marker.read_text(), f"{process.process.pid}\n")
+                self.assertEqual(proxy_support.https_through(port, TARGET, target_port, ca, "after-running",
+                                                             protocol="socks5h"), (200, proxy_support.BODY))
+                self.assertEqual(traffic.snapshot(), [(CLIENT, TARGET, "/after-running")])
+                self.assertEqual(requests, ["/rules.yaml"])
+                print("Mihomo startup mechanism: SOCKS success before Running yielded "
+                      + type(closed.exception).__name__ + "; fresh post-up PID marker then one HTTPS request succeeded")
+            except BaseException as exc:
+                attach_failure_context(exc, "Mihomo startup context: ", lambda:
+                                       repr(trace.snapshot()) + "\n" + process.log_path.read_text(errors="replace"))
+                raise
+            finally:
+                release.set()
+                thread.join(6)
+                process.stop()
+
+
 @unittest.skipUnless(RUNTIME_ENABLED, "Set VUI_UDP_DNS_LOOPBACK=1 for additional dual-switch UDP rejection")
 class DualSwitchDatagramRejectionTests(double_hop.DoubleHopFixture):
+    def setUp(self):
+        self.lifecycle = LifecycleTrace()
+        with patch.object(proxy_support, "tracked_https_server",
+                          lambda *args: recording_https_server(*args, trace=self.lifecycle)):
+            super().setUp()
+
+    def process(self, label, config, *, client="singbox", env=None):
+        if client == "mihomo":
+            # Limit the startup barrier to this independent fixture. The
+            # existing general-purpose helper and fixed binary stay unchanged.
+            with patch.object(double_hop, "BoundCoreProcess", ReadyMihomoProcess):
+                return super().process(label, config, client=client, env=env)
+        return super().process(label, config, client=client, env=env)
+
+    def start_process(self, process, port, host=CLIENT):
+        self.lifecycle.record("core.start", log=process.log_path.name, endpoint=(host, port))
+        super().start_process(process, port, host)
+        self.lifecycle.record("core.ready", log=process.log_path.name, endpoint=(host, port),
+                              pid=process.process.pid,
+                              marker=str(getattr(process, "ready_marker", None)))
+
+    def stop_evidence_processes(self):
+        self.lifecycle.record("cores.stop.begin")
+        running = super().stop_evidence_processes()
+        self.lifecycle.record("cores.stop.end", stopped=[{
+            "log": process.log_path.name, "pid": process.process.pid,
+            "status": process.process.poll()} for process in running])
+        return running
+
+    def failure_details(self, label):
+        targets = []
+        for traffic, expected in self.evidence.targets.items():
+            actual = Counter(traffic.snapshot())
+            targets.append({"name": "target" if traffic is self.target else "denied",
+                            "missing": repr(expected - actual), "unexpected": repr(actual - expected),
+                            "pending": traffic.pending()})
+        actual_dns = Counter(self.answers.snapshot())
+        data = {"phase": label, "current_state": getattr(self, "current_state", None),
+                "target_port": self.target_port, "doh_port": self.doh_port,
+                "ingress_port": self.ingress_port, "upstream_port": self.upstream_port,
+                "local_port": self.local_port, "targets": targets,
+                "dns_missing": repr(self.evidence.dns - actual_dns),
+                "dns_unexpected": repr(actual_dns - self.evidence.dns),
+                "ordinary_dns": self.ordinary_answers.queries,
+                "udp": [{"missing": repr(expected - Counter(packets)),
+                         "unexpected": repr(Counter(packets) - expected)}
+                        for packets, expected in self.evidence.udp],
+                "cores": [{"log": process.log_path.name,
+                           "endpoint": getattr(process, "fixture_endpoint", None),
+                           "pid": getattr(process.process, "pid", None),
+                           "status": process.process.poll() if process.process else None,
+                           "ready_marker": str(getattr(process, "ready_marker", None))}
+                          for process in self.core_processes],
+                "timeline": self.lifecycle.snapshot()}
+        return self.sanitized(json.dumps(data, sort_keys=True) + "\n" + self.logs())
+
+    @contextmanager
+    def failure_context(self, label):
+        self.lifecycle.record("phase.begin", phase=label)
+        try:
+            yield
+        except BaseException as exc:
+            self.lifecycle.record("phase.error", phase=label, error_type=type(exc).__name__, reason=str(exc))
+            attach_failure_context(exc, "UDP/DNS failure context: ", lambda: self.failure_details(label))
+            raise  # Preserve the original exception and all lifetime expectations.
+
+    def finish_evidence(self):
+        with self.failure_context("final-stop-and-drain"):
+            super().finish_evidence()
+
+    def final_evidence_audit(self):
+        with self.failure_context("after-final-close"):
+            super().final_evidence_audit()
+
     def udp_rejections(self, state):
         routes = ("local",) if state == "10" else ("singbox", "mihomo")
         for route in routes:
             for payload_label in ("binary", "dns"):
-                with self.subTest(state=state, route=route, payload=payload_label):
+                with self.subTest(state=state, route=route, payload=payload_label), \
+                     self.failure_context(f"state={state} route={route} payload={payload_label}"):
                     # Fixed reject lines identify the UDP rule, not the target.
                     # Each one-send case therefore gets entirely fresh cores and
                     # logs, plus a distinct live target port. Never reuse a late
@@ -456,7 +765,9 @@ class DualSwitchDatagramRejectionTests(double_hop.DoubleHopFixture):
                     self.activate(state)
                     auth = double_hop.AUTH if route == "local" else None
                     proxy_port = self.local_port if route == "local" else self.start_client(route, udp=True)[0]
+                    self.lifecycle.record("positive-control.begin", proxy_port=proxy_port)
                     self.success(proxy_port, auth=auth, protocol="socks5h")
+                    self.lifecycle.record("positive-control.end", proxy_port=proxy_port)
                     port, packets = udp_target(self.stack)
                     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as control:
                         control.bind((CLIENT, 0))
@@ -475,6 +786,7 @@ class DualSwitchDatagramRejectionTests(double_hop.DoubleHopFixture):
                             reasons = ("network=udp", "reject")
                             offset = isolated_rejection_offset(self.ingress.log_path, reasons)
                             association.send(TARGET, port, payload)
+                            self.lifecycle.record("udp.sent", target=(TARGET, port), payload_label=payload_label)
                             observe_rejection(association, target, self.ingress.log_path, offset, reasons)
                     self.assertEqual(self.answers.snapshot(), before_dns,
                                      "DNS-looking application UDP triggered resolution")

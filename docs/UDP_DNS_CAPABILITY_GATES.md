@@ -82,3 +82,23 @@ QUIC 传输 UDP、SOCKS5 UDP ASSOCIATE 建立、配置 parser 成功、TCP liste
 保留的失败与修复：初始真实导出导入用例 21 个失败子例、旧原因码预期 1 项失败、嵌套未知字段被专码遮盖 32 个失败子例，均保留原输出并修复回归。独审还实际复现旧通用 helper 可把旧 partial 日志补全误认为新请求拒绝；新增 D06/D07 改用每个数据报独立核心/日志、关联成功后取 offset、单次真实发送记录、严格完整新日志及完整观察窗口，8 个 helper 自测和独审通过。未修改旧 helper 或抹去失败证据。
 
 本地真实核心因 netlink EPERM 启动失败，实际 Chromium 因 socket EPERM 在 setUp 失败；没有为其提权或将失败改为跳过。它们不能替代准确候选 CI 的真实验收。准确提交、最终完整套件、真实成功/失败/未运行、独立审查和 CI 链接由本阶段 PR 追加；本文件不填写未来 SHA 或预先授予 UDP 资格。M0–M4 旧失败与最终验收保留于[进度账本](DUAL_PROXY_RELAY_PROGRESS.md)及 PR #44。
+
+### 7.1 候选成功与主线失败均保留
+
+[PR #45](https://github.com/ForceMind/V-UI/pull/45) 的准确候选 `b50c0754adec1331f8d020cf44ccdff41afd928f` / tree `7a269e140af2889c9c38fcb7f087ee55b416a077` 完成八工作流 / 11 jobs / 122 steps 全部 attempt 1 成功；完整套件 1,806 项（1,621 pass / 185 skip），真实代理面板 16 项（9 个浏览器流程、7 个静态/路由）全部通过。真实 loopback 主集合 117 项通过，新增 7 方法的固定完整循环与强制断言覆盖 54 场景；不是 54 份逐包原始日志。
+
+正常合并后的同树 master `400c078f0d8e26bc442efec8e079d1fe738a90a3` 在[独立 loopback 验收](https://github.com/ForceMind/V-UI/actions/runs/38899514974)失败。首发是 D07 / state01 / Mihomo / binary 的正向 HTTPS 对照收到 TLS EOF，尚未发送 HTTP GET 或该子例 UDP；后续 3 个 FAIL 是同一正向预期未送达的连带账本失败，不能称为 UDP 泄漏或 DIRECT。原失败没有 rerun 覆盖，400c078 未获得最终验收资格，已下载的原 kit 只作保留证据。
+
+已确认的测试缺口：TCP listener readiness 不保证 Mihomo 已进入 Running；固定源码先建立 listener，随后完成 provider 加载和 GC，再进入 Running。SOCKS 先回复成功，非 Running 隧道可直接关闭连接。原 HTTPS 异常还会绕过附带核心日志的断言，目标 TLS 错误也未保留，因此无法从这一次旧日志认定唯一根因。修复候选需增加精确初始化门槛和失败取证，保留原单次请求、正向 DNS/HTTPS 对照、超时及全生命周期断言；不能靠睡眠、重发或去掉缺失期望换绿。
+
+固定源码依据：[Mihomo executor.ApplyConfig](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/hub/executor/executor.go)、[tunnel 状态处理](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/tunnel/tunnel.go)、[SOCKS 握手](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/listener/socks/tcp.go)、[main 初始化与 post-up 时序](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/main.go)。后续修复的真实结果由独立 PR 登记，不能以本段源码推断替代实际运行。
+
+### 7.2 精确启动门槛与独立机制复现
+
+修复仅影响本文件新增测试的 Mihomo fixture。使用固定二进制已有 `-post-up`：`hub.Parse` / `ApplyConfig` / `OnRunning` 完成后，静态本地 `printf` 最后写入每代唯一临时文件及 shell 的父 PID。等待逻辑核对该代路径、完整 PID 与核心仍存活；旧文件、错误 PID、部分内容、退出或 deadline 都不能授予 readiness。它不是固定延时或业务请求重试，不修改二进制、系统设置、通用旧 helper 或用户导入能力，也不执行导入内容/provider 脚本。
+
+独立真实机制测试使用纯 loopback 的静态 YAML provider，仅把数据返回暂缓以阻塞 `loadProvider`。本地固定 Mihomo 1.19.32 已确定性复现：TCP 与 SOCKS 答复成功后 TLS EOF、目标零 accepted/GET；释放加载后同进程出现新鲜 PID 标记，单次 HTTPS 成功。实现测试 0.133 秒通过，独审连同 13 项 helper 共 14 项在 0.540 秒通过；原 400c078 现场缺证仍不能倒推为唯一根因。这里显式的 loopback DIRECT 只作初始化参考路径，不属于代理转发或失败兜底资格实验。
+
+新增失败上下文保留并重新抛原异常，记录脱敏核心日志、进程/PID/端口、当前与期望的 HTTP/DNS/UDP 差额，以及目标 TLS accept/握手/错误/关闭时间线；不清除未满足期望。原 54 场景的 HTTPS/DNS 正向对照、单次 UDP、完整负向观察与清理审计均保持。
+
+此时专项共有 22 个方法：13 helper、1 parser（6 组合）、原 7 个真实 UDP 方法（54 场景）、1 个独立启动机制方法。parser/helper 默认运行结果为 14 pass / 8 显式 skip；独立机制的本地真实通过单独登记，不挪入 54。修复提交仍须独审、完整套件、准确候选和合并后主线的八组 CI，不能继承 PR #45 或单独机制通过。
