@@ -21,15 +21,22 @@ def digest(data):
 
 
 def allowed_names():
-    logs = {"build.log", "baseline.log", "patched.log"}
+    logs = {"build.log", "baseline.log", "patched.log", "observations.log"}
     for phase in ("baseline", "patched"):
         logs.update(phase + "/" + name for name in ("result.json", "process-binaries.json", "suite.log", "runner-error.log"))
         logs.update(phase + "/cases/" + name + suffix for name in expected_cases(phase) for suffix in (".json", ".log"))
         logs.update(phase + "/delivery-ledgers/" + name + ".json" for name in expected_cases(phase))
-    source = {"go-control-verification.json"}
+    logs.update("observations/" + name for name in
+                ("result.json", "process-binaries.json", "suite.log", "runner-error.log",
+                 "observations/domain-freeze.json", "observations/idle-sockets.json"))
+    for name in ("observe_domain_freeze", "observe_idle_sockets"):
+        logs.update("observations/cases/" + name + suffix for suffix in (".json", ".log"))
+        logs.add("observations/delivery-ledgers/" + name + ".json")
+    source = {"go-control-verification.json", "timeout-observation-verification.json"}
     for phase in ("baseline", "patched"):
         source.update(phase + suffix for suffix in ("-go-tests.jsonl", "-go-tests.stderr", "-go-test-exit.json",
-                      "-module-graph.jsonl", "-verified-module-graph.json", "-provenance.json"))
+                      "-module-graph.jsonl", "-verified-module-graph.json", "-provenance.json",
+                      "-timeout-observations.jsonl", "-timeout-observations.stderr", "-timeout-observation-exit.json"))
     return {"logs": logs, "source": source,
             "official": {"cores/provenance.json", "client/mihomo-provenance.json"}}
 

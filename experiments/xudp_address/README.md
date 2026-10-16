@@ -1,6 +1,6 @@
 # D2 connected-XUDP 地址隔离实验
 
-状态：源码编译与 Go 对照、未改源码真实双跳 RED 均已实际执行；进程账本的客户端期望分类失败，补丁真实双跳尚未执行。产品仍是已验 D1 TCP-only；PR #48 原失败不可覆盖或授予新资格。
+状态：隔离源码补丁真实运行 18/20；原端口错误已消失，但域名回映断言和 idle 生命周期仍失败。当前仅增加独立、有界观察，不修改 RemoteAddr 补丁或原 20 项断言。产品仍是已验 D1 TCP-only；PR #48 原失败不可覆盖或授予新资格。
 
 ## 问题与假设
 
@@ -51,3 +51,13 @@ connected wrapper 对后续不同目的地址的写操作忽略新地址，paylo
 
 - 候选 `93856d1da922fd765b5a9a6861ac5c1a088185f8`，[run 38943133607](https://github.com/ForceMind/V-UI/actions/runs/38943133607)，attempt 1：43 项控制测试、两版编译与严格 Go RED/GREEN 通过。真实基线 17 项在 21.692 秒内得到 5 PASS、12 FAIL / 22 个准确原端口失败；79 条进程账本只有 test10 客户端身份的预设分类错位：原 fixture 明确启动 sing-box，分类器却因方法名没有 singbox 而推成 Mihomo。未改运行过程、原例和二进制；补丁步骤未执行，不能推断其结果。
 - 第二轮 artifact `12062854903`，ZIP SHA-256 `fe78c991a0cbab37c76d5662c868c24e1d1c972b0d299f8134bca5b3dd8d4138`；99 项内部摘要均核实。修复须将所有 case 的客户端角色冻结为显式映射，禁止通过放宽角色、散列、重启次数或进程数量来通过。新候选完整重走两版编译及运行对照。
+
+- 候选 `b8c806a1b3d5051cea20e18c4feed3a79b69f2b1`，[run 38944324010](https://github.com/ForceMind/V-UI/actions/runs/38944324010)，attempt 1：46 控制测试和 Go/编译通过；真实 baseline17=5PASS/12FAIL/22准确端口（23.137s）；patched 原17=15PASS/2FAIL（94.063s），另 TCP2（1.904s）和同域同端口DNS1（3.000s）通过，总18/20。test13改变端口后返回初始域名，返回域名不在原断言允许集合，第二回复port/payload和后续新关联尚未验；test14配置2s、6s内海外UDP socket未回收，后续恢复尚未验。退出清理EOF不是idle成功。
+- 第三轮 artifact `12064677339`，ZIP SHA-256 `c1c4bdc3903bae54c19ca908a1797b86c566976a1a1b6ef4c1cc92081975cefc`，190内部摘要全核；144角色/142启动、56国内实验实例含28重配，其他端官方hash，29份寿命账本无额外送达。独立审查隔离成立，但整体qualified=false。原源补丁保持不变，没有加入生命周期修复。
+
+## 后续两个有界观察（不改判原失败）
+
+1. 固定 sing 依赖微测试：对照支持/不支持 read deadline 的阻塞 PacketConn，分别记录派生 ctx.Done、ReadPacket、Close 和复制结束回调。仅使用现有 Go 工具、原依赖图；观察 timer 取消是否传递到阻塞读，明确等待和 cleanup 上限。观察测试成功仅表示证据完整，不表示 idle 已修复。
+2. 独立实际国内-only观察：冻结初始域名↔已审核 IP/port，记录原/改端口帧完整回复host/port/payload摘要/session身份，禁区送达零、新关联重新拒绝；另外保持2s/6s idle界限，记录受控两跳PID/socket FD/inode/tuple及单调时间、末包时刻、显式关闭和最终清理。采样不能发业务包续期，异常/身份缺失/晚期送达必须失败。
+3. 原 20 项与全部失败仍保留原样执行；观察步骤在源码对照门槛成功后独立运行，即使原 patched 步骤失败也保留证据。不得用continue-on-error把整体CI改绿，不将观察结果当产品资格。
+4. 若证实独立取消传播缺口，先报告微测试和运行证据、停止当前补丁扩展；需要另行生命周期修复设计与完整回归，不自动修改产品pin/共享VMess路径/发布核心。

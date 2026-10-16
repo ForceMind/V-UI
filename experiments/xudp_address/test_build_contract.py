@@ -5,6 +5,7 @@ import hashlib
 import ast
 import subprocess
 import unittest
+import yaml
 
 from build_experiment import SING_VERSION, verify_module_graph
 
@@ -43,9 +44,29 @@ class DependencyGraphTests(unittest.TestCase):
 
 
 class ProductionIsolationTests(unittest.TestCase):
+    def test_independent_observation_never_overrides_original_failure(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = yaml.safe_load((root / ".github/workflows/xudp-address-experiment.yml").read_text())
+        job = workflow["jobs"]["source-experiment"]
+        self.assertNotIn("continue-on-error", job)
+        for step in job["steps"]:
+            self.assertNotIn("continue-on-error", step)
+        build = next(s for s in job["steps"] if s.get("id") == "source_build")
+        self.assertIn("verify_go_controls.py", build["run"])
+        self.assertIn("verify_timeout_observations.py", build["run"])
+        observe = next(s for s in job["steps"] if "observe_runtime.py" in s.get("run", ""))
+        self.assertEqual(observe["if"], "${{ !cancelled() && steps.source_build.outcome == 'success' }}")
+        self.assertIn("--phase patched", observe["run"])
+        self.assertIn("/tmp/vui-xudp-source/patched/sing-box", observe["run"])
+        originals = [s for s in job["steps"] if "run_experiment.py" in s.get("run", "")]
+        self.assertEqual(len(originals), 2)
+        self.assertTrue(all("set -euo pipefail" in s["run"] for s in originals))
+
     def test_runtime_packager_and_publish_workflows_are_unchanged(self):
         root = Path(__file__).resolve().parents[2]
         hashes = {
+            'experiments/xudp_address/remoteaddr.patch': 'ee08c4049b05d0fd72b1609839af574fe9be59b5e6c1ed4a1da54f0ffcb3a8ae',
+            'experiments/xudp_address/xudp_remoteaddr_experiment_test.go': '84fdd740d5024125c13404423fc4fce17746745fa3db6f871d89067b60499d9b',
             'scripts/build_bundle.py': '6a31474fe46560e61f6f8e899185aaa881f64a14396165edbbbad53edb294f54',
             '.github/workflows/publish.yml': '8c2645f89a883684ae5b7f3f7177a89ab8a5b54ef7582cf438777e3dc2003d31',
             '.github/workflows/release.yml': '28111d7097e38f8446c33577f6e3c555aeb6938e8e714795fbb73b8f35a3a4e2',

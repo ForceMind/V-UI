@@ -99,11 +99,13 @@ def main():
     if changed != ["xudp.go"] or re.findall(r"^--- a/(.+)$", patch_text, re.M) != ["xudp.go"]:
         raise ValueError("Experiment patch must change exactly sing-vmess/xudp.go")
     test = Path(__file__).with_name("xudp_remoteaddr_experiment_test.go").resolve(strict=True)
+    observation_test = Path(__file__).with_name("timeout_observation_test.go").resolve(strict=True)
     source_hashes = {"sing_box_go_mod": sha256(box / "go.mod"),
                      "sing_box_go_sum": sha256(box / "go.sum"),
                      "sing_vmess_xudp": sha256(vmess / "xudp.go"),
                      "sing_vmess_go_mod": sha256(vmess / "go.mod"),
-                     "test_sha256": sha256(test), "patch_sha256": sha256(patch)}
+                     "test_sha256": sha256(test), "patch_sha256": sha256(patch),
+                     "timeout_observation_test_sha256": sha256(observation_test)}
     expected_graph = None
     for phase in ("baseline", "patched"):
         phase_dir = output / phase
@@ -112,8 +114,9 @@ def main():
         vmess_copy = output / (phase + "-sing-vmess")
         shutil.copytree(box, box_copy, ignore=shutil.ignore_patterns(".git"))
         shutil.copytree(vmess, vmess_copy, ignore=shutil.ignore_patterns(".git"))
-        shutil.copyfile(test, vmess_copy / test.name)
-        command([Path(go).with_name("gofmt"), "-w", vmess_copy / test.name], vmess_copy, env)
+        for test_source in (test, observation_test):
+            shutil.copyfile(test_source, vmess_copy / test_source.name)
+            command([Path(go).with_name("gofmt"), "-w", vmess_copy / test_source.name], vmess_copy, env)
         if phase == "patched":
             command(["git", "apply", "--check", patch], vmess_copy, env)
             command(["git", "apply", patch], vmess_copy, env)
@@ -147,6 +150,12 @@ def main():
         # The independent verifier checks named RED/GREEN assertions, not just
         # a nonzero exit. Keep both controls even when a later gate fails.
         (evidence / (phase + "-go-test-exit.json")).write_text(json.dumps({"returncode": unit.returncode}))
+        observation = subprocess.run([go, "test", "-json", "-count=1", "-timeout=20s",
+                                      "-run", "^TestObservationXUDP", "github.com/sagernet/sing-vmess"],
+                                     cwd=box_copy, env=env, text=True, capture_output=True, timeout=60)
+        (evidence / (phase + "-timeout-observations.jsonl")).write_text(observation.stdout)
+        (evidence / (phase + "-timeout-observations.stderr")).write_text(observation.stderr)
+        (evidence / (phase + "-timeout-observation-exit.json")).write_text(json.dumps({"returncode": observation.returncode}))
         if sha256(box_copy / "go.sum") != source_hashes["sing_box_go_sum"]:
             raise ValueError("Experimental unit tests changed the fixed core go.sum")
         provenance = {"schema_version": 1, "kind": KIND, "phase": phase,
@@ -165,8 +174,10 @@ def main():
                       "phase_source_hashes": {"go_mod": sha256(box_copy / "go.mod"),
                                               "go_sum": sha256(box_copy / "go.sum"),
                                               "xudp": sha256(vmess_copy / "xudp.go"),
-                                              "formatted_test": sha256(vmess_copy / test.name)},
-                      "go_test_returncode": unit.returncode}
+                                              "formatted_test": sha256(vmess_copy / test.name),
+                                              "formatted_timeout_observation_test": sha256(vmess_copy / observation_test.name)},
+                      "go_test_returncode": unit.returncode,
+                      "timeout_observation_returncode": observation.returncode}
         (phase_dir / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
         shutil.copyfile(phase_dir / "provenance.json", evidence / (phase + "-provenance.json"))
     if sha256(output / "baseline/sing-box") == sha256(output / "patched/sing-box"):

@@ -45,6 +45,7 @@ jobs:
           python scripts/fetch_test_cores.py /tmp/vui-xudp-official/cores
           python scripts/fetch_mihomo.py /tmp/vui-xudp-official/client
       - name: Build two distinct source controls and record unit RED and GREEN
+        id: source_build
         run: |
           set -euo pipefail
           mkdir -p /tmp/vui-xudp-logs
@@ -54,6 +55,7 @@ jobs:
             --output /tmp/vui-xudp-source \
             2>&1 | tee /tmp/vui-xudp-logs/build.log
           python experiments/xudp_address/verify_go_controls.py /tmp/vui-xudp-source/evidence
+          python experiments/xudp_address/verify_timeout_observations.py /tmp/vui-xudp-source/evidence
       - name: Reproduce exact unmodified-source runtime failure
         env:
           VUI_TEST_CORES: /tmp/vui-xudp-official/cores
@@ -80,6 +82,20 @@ jobs:
             --provenance /tmp/vui-xudp-source/patched/provenance.json \
             --output /tmp/vui-xudp-logs/patched \
             2>&1 | tee /tmp/vui-xudp-logs/patched.log
+      - name: Observe frozen domain mapping and bounded idle lifetime independently
+        if: ${{ !cancelled() && steps.source_build.outcome == 'success' }}
+        env:
+          VUI_TEST_CORES: /tmp/vui-xudp-official/cores
+          VUI_TEST_MIHOMO: /tmp/vui-xudp-official/client/mihomo
+        run: |
+          set -euo pipefail
+          export VUI_DATA_DIR="$(mktemp -d)"
+          python experiments/xudp_address/observe_runtime.py \
+            --phase patched \
+            --candidate /tmp/vui-xudp-source/patched/sing-box \
+            --provenance /tmp/vui-xudp-source/patched/provenance.json \
+            --output /tmp/vui-xudp-logs/observations \
+            2>&1 | tee /tmp/vui-xudp-logs/observations.log
       - name: Validate and sanitize the explicit evidence allowlist
         if: always()
         run: |

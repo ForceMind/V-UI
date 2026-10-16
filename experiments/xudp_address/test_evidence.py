@@ -2,7 +2,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from prepare_evidence import stage
+from prepare_evidence import allowed_names, stage
 
 
 class EvidenceIsolationTests(unittest.TestCase):
@@ -36,6 +36,22 @@ class EvidenceIsolationTests(unittest.TestCase):
                     (logs / 'baseline/result.json').write_text('not json')
                 with self.assertRaises(ValueError): stage(logs, root / 'no-source', root / 'no-official', root / 'out')
                 self.assertFalse((root / 'out').exists())
+
+    def test_observations_have_an_exact_text_only_allowlist(self):
+        allowed = allowed_names()
+        expected = {
+            "observations/result.json", "observations/process-binaries.json",
+            "observations/suite.log", "observations/runner-error.log",
+            "observations/observations/domain-freeze.json", "observations/observations/idle-sockets.json",
+            "observations/cases/observe_domain_freeze.json", "observations/cases/observe_domain_freeze.log",
+            "observations/cases/observe_idle_sockets.json", "observations/cases/observe_idle_sockets.log",
+            "observations/delivery-ledgers/observe_domain_freeze.json",
+            "observations/delivery-ledgers/observe_idle_sockets.json",
+        }
+        self.assertEqual({x for x in allowed["logs"] if x.startswith("observations/")}, expected)
+        for name in ("observations/sing-box", "observations/config.json", "observations/unexpected.log"):
+            self.assertNotIn(name, allowed["logs"])
+        self.assertIn("timeout-observation-verification.json", allowed["source"])
 
     def test_official_binaries_are_never_selected_and_previous_evidence_is_preserved(self):
         with tempfile.TemporaryDirectory() as directory:
