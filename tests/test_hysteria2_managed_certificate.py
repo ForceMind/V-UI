@@ -1,4 +1,5 @@
 """Managed Hysteria2 TLS preserves secrets and separates issuance from application."""
+from proxy_loopback_support import ReadyMihomoProcess
 from contextlib import ExitStack
 from copy import deepcopy
 import json
@@ -311,7 +312,7 @@ class Hysteria2ManagedRealCoreTests(unittest.TestCase):
             with self.subTest(client=client, phase=phase), ExitStack() as processes:
                 port = unused_port()
                 command, env = self.prepare_client(client, port, server_port)
-                process = CoreProcess(processes, command, self.unique_path(client, 'log'), env)
+                process = (ReadyMihomoProcess if client in ("mihomo", "mihomo-uri") else CoreProcess)(processes, command, self.unique_path(client, 'log'), env)
                 process.start(port)
                 self.assert_success(port)
                 self.assertIsNone(process.process.poll(), self.logs())

@@ -5,19 +5,100 @@ an Internet DNS resolver, fragmentation, TUN, UDP/53 or UDP/443 qualification.
 """
 from collections import Counter
 from contextlib import ExitStack
+from http.server import ThreadingHTTPServer
 import ipaddress
 import socket
 import socketserver
+import ssl
 import struct
 import threading
 import time
 
 from loopback_helpers import _recv_exact, _socks_address_from_stream, _socks_udp_target
+from proxy_loopback_support import (
+    serve, ReadyMihomoProcess, await_mihomo_ready, fresh_lines,
+)
 
 CLIENT = "127.0.0.1"
 SERVER = "127.0.0.2"
 TARGET = "127.0.0.3"
 EGRESS = "127.0.0.4"
+
+
+def attach_failure_context(error, label, collect):
+    """Diagnostics must never replace the failure being diagnosed."""
+    try:
+        error.add_note(label + collect())
+    except Exception as diagnostic_error:
+        try:
+            error.add_note(label + "collection failed: " + type(diagnostic_error).__name__)
+        except Exception:
+            pass  # Even a custom exception's broken add_note keeps its identity.
+
+
+class LifecycleTrace:
+    """In-memory diagnostics, emitted only if the enclosing fixture fails."""
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.events = []
+
+    def record(self, event, **fields):
+        with self.lock:
+            self.events.append({"monotonic_ns": time.monotonic_ns(), "event": event, **fields})
+
+    def snapshot(self):
+        with self.lock:
+            return list(self.events)
+
+
+def recording_https_server(stack, host, handler, cert, key, accounting, *, trace):
+    """The existing tracked TLS fixture semantics plus handshake/close reasons.
+
+    Used only while constructing this independent UDP fixture's HTTPS/DoH
+    servers. Keep pre-handshake accounting, bounded sockets and final drain.
+    """
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert, key)
+    context.set_alpn_protocols(["http/1.1"])
+
+    class Server(ThreadingHTTPServer):
+        address_family = socket.AF_INET6 if ":" in host else socket.AF_INET
+
+        def get_request(self):
+            stream, address = super().get_request()
+            stream.settimeout(3)
+            token = accounting.opened(stream)
+            trace.record("tls.accepted", endpoint=self.server_address, peer=address, token=token)
+            return stream, address
+
+        def process_request_thread(self, request, address):
+            token, stream, stage = id(request), request, "wrap"
+            try:
+                stream = accounting.start_tls(token, context)
+                stage = "handshake"
+                stream.do_handshake()
+                trace.record("tls.established", endpoint=self.server_address, peer=address, token=token)
+                stage = "http"
+                self.finish_request(stream, address)
+            except (OSError, ValueError) as exc:
+                trace.record("tls.error", endpoint=self.server_address, peer=address, token=token,
+                             stage=stage, error_type=type(exc).__name__, reason=str(exc))
+            finally:
+                try:
+                    self.shutdown_request(stream)
+                finally:
+                    accounting.closed(token)
+                    trace.record("tls.closed", endpoint=self.server_address, peer=address, token=token, stage=stage)
+
+        def close_tracked_connections(self):
+            deadline = time.monotonic() + 3
+            while accounting.connection_count():
+                accounting.close_connections()
+                if time.monotonic() >= deadline:
+                    raise AssertionError("Accepted fixture connections did not drain at close")
+                time.sleep(.025)
+
+    return serve(stack, Server((host, 0), handler))
 
 
 def paired_port(host):
@@ -232,14 +313,6 @@ class SocksDatagrams:
         if (target_host, target_port) != (host, port):
             raise AssertionError("SOCKS response destination identity mismatch")
         return payload
-
-
-def fresh_lines(path, offset):
-    text = path.read_text(errors="replace")
-    fresh = text[offset:]
-    if offset and text[offset - 1:offset] != "\n":
-        fresh = fresh.partition("\n")[2]
-    return fresh.lower().splitlines()
 
 
 def isolated_rejection_offset(path, reasons):

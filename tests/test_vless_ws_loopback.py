@@ -3,6 +3,7 @@
 Only temporary CAs, databases, listeners and client homes are used. Host is
 client metadata: sing-box's WS listener enforces path, not the Host header.
 """
+from proxy_loopback_support import ReadyMihomoProcess
 import base64
 from contextlib import ExitStack
 from copy import deepcopy
@@ -254,7 +255,7 @@ class VLESSWebSocketLoopbackTests(unittest.TestCase):
             path = self.exported_singbox(grant, port)
             self.check_command([self.singbox, "check", "-c", str(path)], env=env)
             command = [self.singbox, "run", "-c", str(path)]
-        process = CoreProcess(self.stack, command, self.root / f"{client}-client-{port}.log", env)
+        process = (ReadyMihomoProcess if client in ("mihomo", "mihomo-uri") else CoreProcess)(self.stack, command, self.root / f"{client}-client-{port}.log", env)
         process.start(port)
         return process, port
 

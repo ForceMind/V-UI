@@ -3,6 +3,7 @@
 Only HTTP/TCP application forwarding is qualified. Reference/camouflage traffic
 is expected and counted separately; no third-party handshake site is contacted.
 """
+from proxy_loopback_support import ReadyMihomoProcess
 import base64
 from contextlib import ExitStack
 import http.client
@@ -221,7 +222,7 @@ class RealityPreflightLoopbackTests(unittest.TestCase):
                     for mutation in ((None, failure) if failure else (None,)):
                         port = unused_port()
                         command, env = self.prepare_client(client, port, server_port, failure=mutation)
-                        process = CoreProcess(processes, command, self.unique_path(client, 'log'), env)
+                        process = (ReadyMihomoProcess if client in ("mihomo", "mihomo-uri") else CoreProcess)(processes, command, self.unique_path(client, 'log'), env)
                         self.start_process(process, port)
                         before = traffic.snapshot()
                         try:

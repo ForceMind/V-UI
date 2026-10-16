@@ -4,6 +4,7 @@ The application adapter builds the actual server; public URI/YAML/JSON must
 preserve the same profile. The clients use unchanged checksum-pinned binaries,
 with temporary CA trust only. No custom authority or UDP behavior is claimed.
 """
+from proxy_loopback_support import ReadyMihomoProcess
 import base64
 from contextlib import ExitStack
 from copy import deepcopy
@@ -377,7 +378,7 @@ class VLESSGRPCLoopbackTests(unittest.TestCase):
                         self.update_export(mutation)
                         port = unused_port()
                         command, env = self.prepare_client(client, grant, port, failure=mutation)
-                        process = CoreProcess(processes, command, self.unique_path(client, "log"), env)
+                        process = (ReadyMihomoProcess if client in ("mihomo", "mihomo-uri") else CoreProcess)(processes, command, self.unique_path(client, "log"), env)
                         try:
                             process.start(port)
                             if mutation is None:

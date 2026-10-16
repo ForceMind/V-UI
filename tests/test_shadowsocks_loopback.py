@@ -1,4 +1,5 @@
 """v0.4.1: real sing-box Shadowsocks server with Mihomo/sing-box TCP+UDP clients."""
+from proxy_loopback_support import ReadyMihomoProcess
 from contextlib import ExitStack
 import json
 import os
@@ -125,7 +126,7 @@ class ShadowsocksLoopbackTests(unittest.TestCase):
         grant=grant or self.issue_grant()
         port=unused_port()
         path=self.exported_mihomo(grant,port)
-        process=CoreProcess(
+        process=ReadyMihomoProcess(
             self.stack,
             [os.environ["VUI_TEST_MIHOMO"],"-d",str(self.root/("mihomo-data-"+str(port))),
              "-f",str(path)],

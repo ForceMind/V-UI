@@ -205,7 +205,7 @@ class HTTPUpgradeWireEvidenceTests(unittest.TestCase):
             process = Mock(); process.process.poll.return_value = None
             stack.callback(process.stop)
             return process
-        self.enterContext(patch.object(preflight, 'CoreProcess', side_effect=core))
+        self.enterContext(patch.object(preflight, 'ReadyMihomoProcess', side_effect=core))
         return preflight, fixture
 
     def test_recorded_bytes_are_separate_from_application_delivery(self):
@@ -226,7 +226,7 @@ class HTTPUpgradeWireEvidenceTests(unittest.TestCase):
             return process
         with patch.object(preflight, 'start_protocol_recorder', return_value=(1111, self.observed(self.native()))), \
                 patch.object(preflight, 'unused_port', return_value=1113), \
-                patch.object(preflight, 'CoreProcess', side_effect=core), patch.object(preflight.time, 'sleep'):
+                patch.object(preflight, 'ReadyMihomoProcess', side_effect=core), patch.object(preflight.time, 'sleep'):
             with self.assertRaisesRegex(AssertionError, 'Recorder traffic reached application'):
                 fixture.observe_httpupgrade_protocols()
 
