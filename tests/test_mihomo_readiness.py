@@ -16,6 +16,7 @@ from test_proxy_double_hop import DoubleHopFixture
 # Audited persistent-client construction sites. Parser/version subprocess.run
 # and the HY2/TUIC sing-box-only UDP-server Popen paths are intentionally absent.
 SITES = {
+    ("restricted_udp_preflight_helpers.py", "RestrictedUdpFixture.process"): "bool-factory",
     ("test_loopback_chain.py", "LoopbackChainTests.start"): "direct",
     ("test_trojan_loopback.py", "TrojanLoopbackTests.start_mihomo"): "direct",
     ("test_vmess_loopback.py", "VMessLoopbackTests.start_mihomo"): "direct",
@@ -155,12 +156,12 @@ class SharedMihomoReadinessTests(unittest.TestCase):
                 if mode == "direct":
                     self.assertEqual(ast.unparse(expression), "ReadyMihomoProcess")
                 else:
-                    variable = "kind" if mode == "udp-factory" else "client"
-                    variants = ("mihomo", "mihomo-uri") if mode == "mixed" else ("mihomo",)
+                    variable = "mihomo" if mode == "bool-factory" else "kind" if mode == "udp-factory" else "client"
+                    variants = (True,) if mode == "bool-factory" else ("mihomo", "mihomo-uri") if mode == "mixed" else ("mihomo",)
                     for variant in variants:
                         self.assertIs(eval(compile(ast.Expression(expression), filename, "eval"),
                                            {"__builtins__": {}}, {**choices, variable: variant}), ReadyMihomoProcess)
-                    other = "sing-box" if mode == "udp-factory" else "singbox"
+                    other = False if mode == "bool-factory" else "sing-box" if mode == "udp-factory" else "singbox"
                     self.assertIs(eval(compile(ast.Expression(expression), filename, "eval"),
                                        {"__builtins__": {}}, {**choices, variable: other}),
                                   BoundCoreProcess if mode.endswith("factory") else CoreProcess)

@@ -1,5 +1,9 @@
 # V-UI 文档
 
+## 2026-10-16 后续阶段 D2
+
+[D1 / PR #47](https://github.com/ForceMind/V-UI/pull/47) 已在准确 master `a98da9af` 完成候选/主线八组与同提交四目标验收，尚未发布。用户要求继续，下一有界阶段为[受限设备 UDP 中转](RESTRICTED_UDP_RELAY_CONTRACT.md)。当前只处于固定核心真实可行性验证，默认仍拒绝中转 UDP，不能预称新能力已开放。
+
 ## 当前入口（2026-10-16）
 
 正式版为 [v0.4.8](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8)，发布于 2026-10-15，来源 `a9f9b5d9` 的安装器修复；正式版用户使用[固定 v0.4.8 文档](https://github.com/ForceMind/V-UI/blob/v0.4.8/docs/README.md)。当前源码版本仍标 **v0.4.8**，其后新增功能尚未正式发布。

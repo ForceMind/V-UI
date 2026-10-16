@@ -1,5 +1,9 @@
 # V-UI 开发路线
 
+## 2026-10-16 后续阶段 D2
+
+[D1 / PR #47](https://github.com/ForceMind/V-UI/pull/47) 已在准确 master `a98da9af` 完成候选/主线八组与同提交四目标验收，尚未发布。用户要求继续，下一有界阶段为[受限设备 UDP 中转](docs/RESTRICTED_UDP_RELAY_CONTRACT.md)。当前只处于固定核心真实可行性验证，默认仍拒绝中转 UDP，不能预称新能力已开放。
+
 ## 2026-10-16 D1 当前开发目标
 
 D0 已由 [PR #45/#46](https://github.com/ForceMind/V-UI/pull/46)在准确 master `13c884a0539cf9822fca2fe2db58325fa4644048` 完成八工作流 / 11 jobs / 122 steps 全部 attempt 1 成功与同提交四目标 19 项资产核验；原失败保留在 PR，旧候选成功不替代主线结果。新有界功能为 [D1：显式 TCP-only 中转上游导出](docs/TCP_UPSTREAM_EXPORT_CONTRACT.md)，让本项目节点通过专用 URI / 单节点 Clash YAML 直接进入另一实例的既有上游导入，须经真实双实例 API、浏览器及 TLS/REALITY 双跳验收。普通导出和严格导入保持；UDP 双跳尚未开放。本期仍在实现，准确资格以其承载 PR 为准。
