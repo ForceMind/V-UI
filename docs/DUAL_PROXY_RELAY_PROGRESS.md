@@ -2,7 +2,19 @@
 
 更新日期：2026-10-15。契约：[DUAL_PROXY_RELAY_CONTRACT.md](DUAL_PROXY_RELAY_CONTRACT.md)。计划基线：`a9f9b5d9c0dd2aada5e8f5f2270b2ce93440d5ff`。
 
-## 当前结论（最新登记至 2026-10-15 20:21 UTC）
+## 当前结论（2026-10-16 追加已完成验收）
+
+M0–M4 全部完成。[PR #43](https://github.com/ForceMind/V-UI/pull/43)最终候选 `9ed53006c0f1c41a7be57b03284e62210752c7ad` 与 master `9bd11dc9f1d0d0419047e97ebc965f71d3dbc988` 的 tree 同为 `57822ce48f3aa3e1e920366dd61841d398d093f0`，双方八组 / 11 jobs / 全部步骤 attempt 1 成功；8 项真实 Chromium 流程通过，原失败保留。
+
+[PR #44](https://github.com/ForceMind/V-UI/pull/44)最终候选 `6b1765310757fc3b24caa7ccf80fa912d1e9e7e7` 与签名 master `9a97ad13aae2fabb5ed969fdc0f930c36fdc55b7` 的 tree 同为 `841ef19bf2ebc1e85f32758a3773b22c9b1f7c05`。准确候选和主线各八组 / 11 jobs / 全部步骤 attempt 1 成功；主线 122 steps 与 11 个 checkout 已核。完整套件 1,775 项、1,599 pass / 176 skip（140.623 秒）；专项另行启用真实核心/浏览器，不能把 skip 算通过。
+
+主线证据：[test](https://github.com/ForceMind/V-UI/actions/runs/38805540223)、[真实链路](https://github.com/ForceMind/V-UI/actions/runs/38805540127)、[portable](https://github.com/ForceMind/V-UI/actions/runs/38805540069)、[deployment](https://github.com/ForceMind/V-UI/actions/runs/38805540226)、[one-click](https://github.com/ForceMind/V-UI/actions/runs/38805540153)、[ACME](https://github.com/ForceMind/V-UI/actions/runs/38805540004)、[ToClash](https://github.com/ForceMind/V-UI/actions/runs/38805540053)、[docs](https://github.com/ForceMind/V-UI/actions/runs/38805540116)。四目标实际包恢复、四状态/12 切换、真实跨进程稳定租约与组件锁均通过。
+
+同一主线的四份原始官方构建附件经外层 hash、19 项资产、401 源码文件重建 tree、每目标 220 个成员/37 个 wheel、MANIFEST/来源/跨目标一致性检查通过，原件未改。完整离线审计报告 SHA-256 为 `69dfffd722e623ee9fa24d73c35b4e5088dc89b6a62269fd2debb4516386cbba`。首次审计命中已知上游公开测试材料后暂停并保留失败；随后按官方 PyPI 完整 wheel hash、版本、精确路径和内容摘要与独立官方 sdist 核验分类。每目标 62 项公开依赖材料中包含 15 个公开测试私钥；未知私钥仍阻断，未改包或采用整目录豁免。该离线审计不宣称官方签名、上游二进制/npm tarball 独立重放或动态测试身份非使用证明。
+
+新功能尚未正式发布或部署，真实用户外部设备/海外线路及真实小 VPS/24 小时未验收。下述旧快照与失败原文保留；本次续开发按独立 [D0 门槛](UDP_DNS_CAPABILITY_GATES.md)取得新准确提交证据，不借本节旧成功。
+
+## 历史结论（当时最新登记至 2026-10-15 20:21 UTC）
 
 - M0 已正常合并 [PR #40](https://github.com/ForceMind/V-UI/pull/40)，候选与准确主线各八组 / 11 jobs / 最新全部步骤 attempt 1 成功。
 - M1 [PR #41](https://github.com/ForceMind/V-UI/pull/41) 已正常合并至 `f95150a`。修复候选 `419727ae` 八组 / 11 jobs / 最新全部步骤 attempt 1 成功，候选与主线 tree 相同。准确主线八组 / 11 个最新 jobs / 全部最新步骤现已成功，11 个 checkout 日志均为 `f95150a`；one-click 与 portable 为 attempt 2，其余 attempt 1。首次 HTTPS health 未确诊失败与 GitHub 403 保留，不称全 attempt 1 或永久修复。

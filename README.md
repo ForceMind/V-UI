@@ -7,9 +7,9 @@
 
 **面向个人自托管的代理管理面板：管理节点与证书，生成完整 Mihomo 分流订阅，用受管流程维护服务和数据。**
 
-**开发版本 v0.4.8（UNRELEASED）** · FastAPI + SQLite · 中文网页后台 · Linux x86_64 / ARM64
+**正式版 v0.4.8；主线含后续未发布功能** · FastAPI + SQLite · 中文网页后台 · Linux x86_64 / ARM64
 
-当前正式发布为 [v0.4.7](https://github.com/ForceMind/V-UI/releases/tag/v0.4.7)，2026-10-13 从主线 `c5d50ee14b08da57bdc13c150b4ed501e9484023` 发布。0.4.8 仅修复安装入口的退出码、临时目录生命周期和引导失败拦截，尚未发布；不扩大协议或运行时范围。见[安装器修复与验收边界](docs/INSTALLER_EXIT_STATUS_048.md)。
+当前正式版 [v0.4.8](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8) 于 2026-10-15 从 `a9f9b5d9c0dd2aada5e8f5f2270b2ce93440d5ff` 发布，仅修复安装入口的退出码、临时目录生命周期和引导失败拦截；见[安装器修复边界](docs/INSTALLER_EXIT_STATUS_048.md)。其后双开关“代理与中转”已在准确主线 `9a97ad13` 完成[独立验收](https://github.com/ForceMind/V-UI/pull/44)，但不包含在该已发布版本中。当前继续 [UDP / DNS 与导入保真门槛](docs/UDP_DNS_CAPABILITY_GATES.md)，不覆盖旧版本或预称新增 UDP 资格。
 
 [下载与发布](https://github.com/ForceMind/V-UI/releases) · [快速安装](#快速安装) · [协议范围](#协议与客户端支持) · [终端菜单](#终端运维菜单) · [完整文档](docs/README.md) · [报告问题](https://github.com/ForceMind/V-UI/issues)
 
@@ -74,13 +74,13 @@ V-UI 不依赖 Redis、常驻 Node.js 或在线订阅转换服务。运行包包
 
 ### 1. 固定版本，先核来源
 
-**本节是 v0.4.8（UNRELEASED）的安装准备示例，现在不要执行。** 只有该版本正式公开且完整 19 项资产可用后，才能按本节安装；未公开、404、缺文件或摘要不符时停止，不换成 `latest`、不混用分支文件或旧资产，也不改摘要跳过检查。
+**本节安装已发布的 v0.4.8 安装器修复基线，不包含主线后续双开关功能。** 每次安装仍须确认该固定版本正式公开且完整 19 项资产可用并核验；404、缺文件或摘要不符时停止，不换成 `latest`、不混用分支文件或旧资产，也不改摘要跳过检查。
 
-需要当前正式版的用户，请查看 [v0.4.7 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.7) 和[固定 v0.4.7 安装文档](https://github.com/ForceMind/V-UI/blob/v0.4.7/README.md#快速安装)，并先阅读下面的已知问题。
+正式版资产见 [v0.4.8 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8)。旧 v0.4.7 用户仍须注意下面的历史安装入口问题；旧资产不会原地替换。
 
 **已知安装入口问题：** v0.4.7 在线路径可能在安装控制器成功后仍返回非零，或掩盖原失败码；便携 Python 引导还有临时目录清理与失败拦截缺口。非零不能直接判定安装未发生，也不能一律忽略。请保留完整输出，核对安装日志、活动版本和服务健康后处理；不要盲目重复安装。源码中的 0.4.8 修复不会改变已发布的 v0.4.7 资产，详见[安装器说明](docs/INSTALLER_EXIT_STATUS_048.md)。
 
-以下命令仅供 0.4.8 正式发布后的安装准备，现在不要执行。届时从固定版本下载安装入口并校验它；**请先审阅官方仓库、发行说明及安装脚本，确认这是你信任的软件来源，再执行管理员安装**。同站点下载的 SHA-256 是完整性检查，不是独立签名，也不能让未知脚本变得可信。
+以下从固定版本下载安装入口并校验它；**请先审阅官方仓库、发行说明及安装脚本，确认这是你信任的软件来源，再执行管理员安装**。同站点下载的 SHA-256 是完整性检查，不是独立签名，也不能让未知脚本变得可信。
 
 ```sh
 # 在一个新的空目录中执行；已存在同名目录时停止，避免混入旧文件。
@@ -104,7 +104,7 @@ sudo install -o root -g root -m 0600 ./install.sh "$ROOT_BOOTSTRAP/install.sh"
 
 ### 2. 交互式安装
 
-本节同样仅适用于 0.4.8 正式公开、完整资产核验完成之后，现在不要执行。
+仅在上一步完成固定 v0.4.8 来源及完整性核验后执行；公开版本存在不代替本机安装权限和网络设置确认。
 
 ```sh
 # 沿用上一步同一终端中的ROOT_BOOTSTRAP和INSTALL_SHA。
@@ -245,7 +245,7 @@ OpenRC 使用 `sudo rc-service v-ui status` 与 `sudo rc-service v-ui-http01 sta
 | 菜单、升级、备份、恢复与回退 | [运维指南](docs/OPERATIONS.md) · [全局受管控制](docs/MANAGED_OPERATIONS.md) |
 | 故障、安全和 API | [排错](docs/TROUBLESHOOTING.md) · [安全](SECURITY.md) · [API](docs/API.md) |
 | 版本内容与正式资产 | [发布说明](docs/RELEASE_NOTES.md) · [变更日志](CHANGELOG.md) · [发布流程](docs/RELEASING.md) |
-| 0.4.8 安装器退出码与清理修复（未发布） | [修复范围和验收边界](docs/INSTALLER_EXIT_STATUS_048.md) |
+| 已发布 0.4.8 安装器退出码与清理修复 | [修复范围和历史验收边界](docs/INSTALLER_EXIT_STATUS_048.md) |
 | 开发、完整路线与验收历史 | [贡献指南](CONTRIBUTING.md) · [路线图](ROADMAP.md) · [文档索引](docs/README.md) |
 | Logo 资源、浅/深色用法与归属 | [视觉标识](docs/BRAND.md) |
 

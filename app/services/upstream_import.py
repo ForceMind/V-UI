@@ -453,6 +453,28 @@ def _false_only(value, key):
         _fail("UNSUPPORTED_OPTION", "An unsupported or insecure client option is enabled")
 
 
+def _reject_udp_capability():
+    _fail("UDP_CAPABILITY_NOT_QUALIFIED",
+          "UDP and packet encoding are not qualified for dual-proxy upstream import")
+
+
+def _packet_encoding_requested(value, allowed_fields, field):
+    # Recognize this rejected capability without adding it to the allowlist.
+    # Other unknown fields retain their existing error and take precedence.
+    # Every value is rejected, including empty/false values: never strip or
+    # reinterpret an explicit packet-encoding declaration as TCP-only.
+    return field in value and not (value.keys() - (allowed_fields | {field}))
+
+
+def _reject_clash_udp_capability(value):
+    # Before a dedicated capability rejection, preserve shape/unknown errors
+    # for the one recognized nested mapping. Do not default missing fields or
+    # inspect arbitrary metadata; the input is still rejected in every case.
+    if "reality-opts" in value:
+        strict_mapping(value["reality-opts"], {"public-key", "short-id"})
+    _reject_udp_capability()
+
+
 def _base(name, host, port, uid, mode, sni, *, alpn, transport="tcp", flow="", encryption="none",
           fingerprint="", key="", short=""):
     return UpstreamProfile.from_dict({"name": name, "server": host, "server_port": port, "uuid": uid,
@@ -497,6 +519,8 @@ def _uri_profile(text):
         pairs = parse_qsl(parts.query, keep_blank_values=True, strict_parsing=True,
                           encoding="utf-8", errors="strict", max_num_fields=32)
         query = _duplicate_object(pairs)
+        if _packet_encoding_requested(query, URI_FIELDS, "packetEncoding"):
+            _reject_udp_capability()
         strict_mapping(query, URI_FIELDS, {"security", "sni"})
         for key, value in query.items():
             literal_string(key)
@@ -552,10 +576,14 @@ def _clash_profile(value):
         _fail("INVALID_SHAPE", "A proxy must be an object")
     if value.get("type") != "vless":
         _fail("UNSUPPORTED_PROTOCOL", "Only VLESS upstreams are supported")
+    if _packet_encoding_requested(value, CLASH_FIELDS, "packet-encoding"):
+        _reject_clash_udp_capability(value)
     strict_mapping(value, CLASH_FIELDS, {"type", "server", "port", "uuid", "tls", "servername"})
     if value["tls"] is not True:
         _fail("UNSUPPORTED_SECURITY", "TLS must be explicitly enabled")
     _false_only(value, "skip-cert-verify")
+    if value.get("udp") is True:
+        _reject_clash_udp_capability(value)
     _false_only(value, "udp")
     reality = value.get("reality-opts")
     mode = "reality" if "reality-opts" in value else "tls"

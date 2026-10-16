@@ -26,6 +26,8 @@ jobs:
         env:
           VUI_TEST_CORES: /tmp/vui-rc1/cores
           VUI_TEST_MIHOMO: /tmp/vui-rc1/client/mihomo
+          VUI_UDP_DNS_LOOPBACK: "1"
+          VUI_UDP_DNS_PARSER: "1"
         run: |
           set -euo pipefail
           export VUI_DATA_DIR="$(mktemp -d)"
