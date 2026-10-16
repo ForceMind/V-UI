@@ -53,6 +53,8 @@ class ProductionIsolationTests(unittest.TestCase):
             self.assertEqual(source.count(witness), 1)
             self.assertEqual(source.count(ready), 1)
             self.assertLess(source.index(witness), source.index(ready))
+        overlap = next(line for line in source.splitlines() if 'counts["route_callback_workers"]==expectedCallbacks' in line)
+        self.assertIn('routeLifecycleChannelReady(f.onCloseEntered)', overlap)
 
     def test_lifecycle_build_has_three_separate_source_identities(self):
         self.assertEqual(PHASES, ('baseline', 'patched', 'lifecycle'))

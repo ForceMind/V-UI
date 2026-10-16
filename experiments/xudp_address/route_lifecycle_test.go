@@ -486,7 +486,7 @@ func TestLifecycleXUDPCancelEOFCompetition(t *testing.T) {
     if f.log.phase=="lifecycle"{expectedCallbacks=1}
     if !routeLifecycleAwait(t,func()bool{
         counts:=routeLifecycleWorkerCounts()
-        return routeLifecycleChannelReady(f.out.preCloseEntered) && f.onCloseCalls.Load()==1 && f.ctx.Err()!=nil && counts["route_callback_workers"]==expectedCallbacks
+        return routeLifecycleChannelReady(f.out.preCloseEntered) && routeLifecycleChannelReady(f.onCloseEntered) && f.onCloseCalls.Load()==1 && f.ctx.Err()!=nil && counts["route_callback_workers"]==expectedCallbacks
     },"first-copy handler overlaps held Close"){t.Fatal("competition window not established")}
     counts:=routeLifecycleWorkerCounts()
     f.log.event("race_window",map[string]any{"pre_close_gate_entered":true,"outbound_closed":f.out.closedState.Load(),
