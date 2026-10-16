@@ -22,6 +22,17 @@ jobs:
         run: |
           python scripts/fetch_test_cores.py /tmp/vui-rc1/cores
           python scripts/fetch_mihomo.py /tmp/vui-rc1/client
+      - name: Prove restricted IPv4 XUDP double-hop preconditions
+        env:
+          VUI_TEST_CORES: /tmp/vui-rc1/cores
+          VUI_TEST_MIHOMO: /tmp/vui-rc1/client/mihomo
+          VUI_RESTRICTED_UDP_PREFLIGHT: "1"
+          VUI_RESTRICTED_UDP_PARSER: "1"
+          VUI_RESTRICTED_UDP_EVIDENCE: /tmp/vui-rc1/restricted-udp
+        run: |
+          set -euo pipefail
+          export VUI_DATA_DIR="$(mktemp -d)"
+          python -m unittest discover -s tests -p test_restricted_udp_preflight.py -v 2>&1 | tee /tmp/vui-rc1/restricted-udp-preflight.log
       - name: Exercise actual TLS proxy and local DNS paths
         env:
           VUI_TEST_CORES: /tmp/vui-rc1/cores
@@ -66,4 +77,6 @@ jobs:
             /tmp/vui-rc1/cores/provenance.json
             /tmp/vui-rc1/client/mihomo-provenance.json
             /tmp/vui-rc1/result.log
+            /tmp/vui-rc1/restricted-udp-preflight.log
+            /tmp/vui-rc1/restricted-udp
           retention-days: 7
