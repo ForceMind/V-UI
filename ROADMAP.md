@@ -1,5 +1,13 @@
 # V-UI 开发路线
 
+## 2026-10-16 当前阶段
+
+双开关 M0–M4 已正常合并至 `9a97ad13aae2fabb5ed969fdc0f930c36fdc55b7`；准确主线八工作流 / 11 jobs / 122 steps 全部 attempt 1 成功，四目标 19 项资产完成独立完整性校验，见 [PR #44](https://github.com/ForceMind/V-UI/pull/44)及[进度账本](docs/DUAL_PROXY_RELAY_PROGRESS.md)。真实外部设备/海外线路、小 VPS/24 小时及新功能正式发布仍独立待办。
+
+下一有界交付为 [D0：UDP / DNS 能力门槛与导入保真](docs/UDP_DNS_CAPABILITY_GATES.md)：明确 UDP/packet encoding 导入拒绝诊断，真实普通导出→导入回归，固定核心的普通 Shadowsocks UDP/DNS 与双开关 UDP 拒绝实验。新增实现和门槛须核自己的准确候选/主线，不将配置字段、DNS listener 或 QUIC 传输误报成通用应用 UDP 支持。
+
+当前正式版 [v0.4.8](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8)已于 2026-10-15 10:57 UTC 从 `a9f9b5d9c0dd2aada5e8f5f2270b2ce93440d5ff` 发布（19 项资产）；仅含安装器修复。后续主线虽然 `VERSION` 保持 0.4.8，双开关和 D0 不在该公开版本内，不能覆盖旧 tag/资产或声称已经发布。以下旧快照保持原文和日期。
+
 ## 2026-10-15 新增当前开发目标
 
 双开关代理与中转已获准按[一期契约](docs/DUAL_PROXY_RELAY_CONTRACT.md)持续开发，M0–M4 分别独立 PR。当前首个收口目标为 M0 合同冻结；最终软件目标为四状态、12 条有向切换、严格导入、失败关闭、面板诊断与同提交四目标验收。实际进度及准确候选/主线证据见[进度账本](docs/DUAL_PROXY_RELAY_PROGRESS.md)，不预称实现或通过。

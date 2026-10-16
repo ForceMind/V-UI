@@ -1,5 +1,11 @@
 # 开发与验证
 
+## 2026-10-16 UDP / DNS 与上游导入门槛
+
+下一有界阶段按 [D0 合同](docs/UDP_DNS_CAPABILITY_GATES.md)实施，不改普通节点默认或放开双跳 UDP。`test_upstream_import_capabilities.py` 用真实导出函数验证可保真输入与明确拒绝；`test_proxy_browser.py` 新增真实 UI 能力提示、禁选/重复激活、取消和刷新后状态不变。`test_udp_dns_capability_loopback.py` 通过既有 loopback glob 运行固定核心 Shadowsocks UDP/DNS 与双开关拒绝测试；helper 单元、真实子例数和 skip 分开记录。没有真实核心开关时明确 skip，打开开关后缺核心/权限或失败原因不足均 fail。
+
+固定版本、唯一假数据、可达控制、fresh 实际拒绝原因、全窗口目标账本和最终清理 drain 是硬门槛；不得把 timeout、parser 成功、DNS listener 或 QUIC socket 记成应用 UDP 成功。准确候选/主线和四平台实际包继续验收；本阶段不发布或部署。
+
 先读[主计划](ROADMAP.md)和[开发约束](AGENTS.md)。保持一个版本一个目标、独立PR、保留用户数据；不要把临时实验直接放进master或把未验证协议标成可用。
 
 ## 环境

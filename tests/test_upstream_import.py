@@ -173,7 +173,8 @@ class UpstreamImportTests(unittest.TestCase):
         for key in ("dialer-proxy", "smux", "packet-encoding", "ws-opts", "grpc-opts", "plugin", "certificate", "encryption"):
             node = clash()
             node[key] = "private-fixture"
-            self.unsupported(as_yaml(node), "UNKNOWN_FIELD")
+            expected = "UDP_CAPABILITY_NOT_QUALIFIED" if key == "packet-encoding" else "UNKNOWN_FIELD"
+            self.unsupported(as_yaml(node), expected)
         for key in ("allowInsecure", "insecure", "path", "host", "headerType", "serviceName", "spx", "ech", "privateKey"):
             self.unsupported(uri(**{key: "private-fixture"}), "UNKNOWN_FIELD")
 
@@ -225,7 +226,8 @@ class UpstreamImportTests(unittest.TestCase):
             for key in ("skip-cert-verify", "udp"):
                 node = clash()
                 node[key] = value
-                self.unsupported(as_yaml(node), "UNSUPPORTED_OPTION")
+                expected = "UDP_CAPABILITY_NOT_QUALIFIED" if key == "udp" and value is True else "UNSUPPORTED_OPTION"
+                self.unsupported(as_yaml(node), expected)
         for value in (False, "true", 1, None):
             node = clash()
             node["tls"] = value

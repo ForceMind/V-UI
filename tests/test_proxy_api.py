@@ -1,5 +1,6 @@
 """M1 egress API: real parser/store, fake admin, no networking side effects."""
 import json
+from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -32,6 +33,40 @@ class ProxyApiTests(unittest.TestCase):
         result = self.client.get('/api/proxy/settings')
         self.assertEqual(result.status_code, 200, result.text)
         return result
+
+    def test_udp_capability_rejection_cannot_mutate_an_existing_private_store(self):
+        self.assertEqual(self.add_profile().status_code, 201)
+        before = self.snapshot()
+        root = Path(self.temp.name)
+        files_before = {str(path.relative_to(root)): path.read_bytes()
+                        for path in root.rglob('*') if path.is_file()}
+        inputs = [
+            ('uri', URI.split('#')[0] + '&packetEncoding=xudp#Rejected'),
+            ('clash-yaml', json.dumps({'name': 'Rejected', 'type': 'vless',
+                'server': 'upstream.example.test', 'port': 443, 'uuid': UUID,
+                'tls': True, 'servername': 'upstream.example.test', 'udp': True,
+                'packet-encoding': 'xudp'})),
+        ]
+        for source_format, content in inputs:
+            with self.subTest(source_format=source_format):
+                preview = self.client.post('/api/proxy/import/preview',
+                    json={'format': source_format, 'content': content}, headers=HEADERS)
+                self.assertEqual(preview.status_code, 200, preview.text)
+                self.assertFalse(preview.json()['candidates'][0]['supported'])
+                self.assertEqual(preview.json()['candidates'][0]['reason_code'],
+                                 'UDP_CAPABILITY_NOT_QUALIFIED')
+                for _ in range(2):
+                    saved = self.client.post('/api/proxy/profiles',
+                        json={'format': source_format, 'content': content, 'candidate_index': 0},
+                        headers={**HEADERS, 'If-Match': before.headers['etag']})
+                    self.assertEqual(saved.status_code, 422, saved.text)
+                    self.assertEqual(saved.json()['detail'], 'UPSTREAM_OR_SETTINGS_INVALID')
+                    self.assertNotIn(UUID, saved.text)
+                    self.assertEqual(self.snapshot().json(), before.json())
+        files_after = {str(path.relative_to(root)): path.read_bytes()
+                       for path in root.rglob('*') if path.is_file()}
+        self.assertEqual(files_before, files_after)
+        self.apply.assert_not_called()
 
     def add_profile(self, **extra):
         revision = self.snapshot().headers['etag']

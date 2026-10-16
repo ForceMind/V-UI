@@ -4,6 +4,9 @@
     const MAX_INPUT_BYTES = 1048576;
     const REVISION = /^[0-9a-f]{64}$/;
     const modes = {'00':'普通模式', '10':'仅本机显式代理', '01':'仅设备接入中转', '11':'本机代理与接入中转'};
+    const importReasons = {
+        UDP_CAPABILITY_NOT_QUALIFIED:'此节点声明了 UDP 或 packet encoding，目前尚未获得双开关上游导入资格。不会自动删除这些字段或降为 TCP-only；普通节点导出与中转上游的支持范围不同。'
+    };
     const errors = {
         DIAGNOSTIC_BUSY:'诊断并发已满，请等待当前任务完成。',
         DIAGNOSTIC_RATE_LIMITED:'诊断启动间隔至少 30 秒，请稍后再试。',
@@ -423,7 +426,7 @@
             radio.addEventListener('change',selectionReady);
             const description=element('span',candidate.name||'未命名候选');
             description.append(element('small',(candidate.protocol||'')+' / '+(candidate.transport||'')+' / '+(candidate.tls_mode||'')+' · '+(candidate.server||'')+':'+(candidate.server_port??'')));
-            if (!candidate.supported) description.append(element('small','不支持：'+(candidate.reason||candidate.reason_code||'超出本期范围')));
+            if (!candidate.supported) description.append(element('small','不支持：'+(importReasons[candidate.reason_code]||candidate.reason||candidate.reason_code||'超出本期范围')));
             label.append(radio,description); $('candidates').append(label);
         });
         if (!value.candidates.length) $('candidates').append(element('p','没有可选择的候选节点。'));

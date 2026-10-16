@@ -479,6 +479,47 @@ rules:
         self.assertIn(response.status, (413, 422))
         self.assert_private()
 
+    def test_actual_udp_capability_rejection_preserves_saved_state(self):
+        from playwright.sync_api import expect
+        self.draft_only()
+        page = self.open_page()
+        before_response = self.context.request.get(self.base + '/api/proxy/settings')
+        self.assertEqual(before_response.status, 200)
+        before = before_response.json()
+        writes = []
+        self.context.on('request', lambda request: writes.append(request.url)
+                        if request.method == 'POST' and request.url.endswith('/api/proxy/profiles') else None)
+        page.locator('#relay-enabled').check()
+        inputs = [
+            ('uri', URI.split('#')[0] + '&packetEncoding=xudp#UDP-candidate'),
+            ('clash-yaml', json.dumps({'name': 'UDP candidate', 'type': 'vless',
+                 'server': 'upstream.example.test', 'port': 443, 'uuid': UUID,
+                 'tls': True, 'servername': 'upstream.example.test', 'udp': True,
+                 'packet-encoding': 'xudp'})),
+        ]
+        for source, content in inputs:
+            with self.subTest(source=source):
+                self.import_text(content, source)
+                expect(page.locator('#candidates')).to_contain_text('尚未获得双开关上游导入资格')
+                expect(page.locator('#candidates')).to_contain_text('不会自动删除这些字段')
+                expect(page.locator('#candidates input')).to_be_disabled()
+                expect(page.locator('#save-import')).to_be_disabled()
+                # A real disabled control must not post even after repeated native activation.
+                page.locator('#save-import').evaluate('(button) => { button.click(); button.click(); }')
+                self.assertEqual(writes, [])
+                page.locator('#close-import').click()
+                expect(page.locator('#import-dialog')).not_to_be_visible()
+                expect(page.locator('#import-content')).to_have_value('')
+                expect(page.locator('#import-file')).to_have_value('')
+                self.assertEqual(self.context.request.get(self.base + '/api/proxy/settings').json(), before)
+        page.reload()
+        expect(page.locator('#proxy-workspace')).to_be_visible()
+        expect(page.locator('#draft-mode')).to_contain_text('00')
+        expect(page.locator('#relay-enabled')).not_to_be_checked()
+        expect(page.locator('#local-enabled')).not_to_be_checked()
+        self.assertEqual(writes, [])
+        self.assert_private()
+
     def test_actual_two_tabs_conflict_preserves_edits_and_requires_review(self):
         from playwright.sync_api import expect
         self.draft_only()

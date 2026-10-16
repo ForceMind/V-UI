@@ -1,5 +1,15 @@
 # V-UI 文档
 
+## 当前入口（2026-10-16）
+
+正式版为 [v0.4.8](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8)，发布于 2026-10-15，来源 `a9f9b5d9` 的安装器修复；正式版用户使用[固定 v0.4.8 文档](https://github.com/ForceMind/V-UI/blob/v0.4.8/docs/README.md)。当前源码版本仍标 **v0.4.8**，其后新增功能尚未正式发布。
+
+双开关 M0–M4 已在 `9a97ad13` 完成准确主线和同提交四目标验收，见[最终验收 PR #44](https://github.com/ForceMind/V-UI/pull/44)。面板入口“代理与中转” `/proxy`，双开关默认关；[使用说明](DUAL_PROXY_RELAY_M3.md)、[一期边界](DUAL_PROXY_RELAY_CONTRACT.md)、[离线恢复](DUAL_PROXY_RELAY_OFFLINE_RECOVERY.md)及[证据账本](DUAL_PROXY_RELAY_PROGRESS.md)分别说明行为和已测范围。用户真实线路/外部设备仍未测试。
+
+新阶段 [UDP / DNS 能力门槛与导入保真](UDP_DNS_CAPABILITY_GATES.md)正在实现和独立验收，不预称通用 UDP 支持或发布。
+
+## 以下为 2026-10-15 收口前入口快照（历史保留）
+
 双开关候选新增[有界离线恢复](DUAL_PROXY_RELAY_OFFLINE_RECOVERY.md)：准确计划、完整数据交换和写入者停机证明；不代表 M4 或四目标验收完成。
 
 双开关功能的 [M1 安全导入与草稿实现](DUAL_PROXY_RELAY_M1.md)单独记录实现、恢复边界与包内解析门槛；草稿接口不代表代理运行已生效。
