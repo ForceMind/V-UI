@@ -1,0 +1,98 @@
+name: Isolated XUDP logical address experiment
+on:
+  push:
+    branches: [experiment/xudp-remoteaddr-20261016]
+permissions:
+  contents: read
+jobs:
+  source-experiment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing-box
+          ref: af6e64c3b69e6132ebaee0e1a3d24e93903f6709
+          path: .experiment-source/sing-box
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing-vmess
+          ref: 31ec11e8790c48a4bf11711806a61e929ee6b89d
+          path: .experiment-source/sing-vmess
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Require the existing official runner toolchain
+        run: |
+          set -euo pipefail
+          GO_BIN="$RUNNER_TOOL_CACHE/go/1.25.14/x64/bin"
+          test -x "$GO_BIN/go"
+          test "$(GOTOOLCHAIN=local "$GO_BIN/go" version)" = 'go version go1.25.14 linux/amd64'
+          printf '%s\n' "$GO_BIN" >> "$GITHUB_PATH"
+          printf '%s\n' 'GOTOOLCHAIN=local' >> "$GITHUB_ENV"
+      - name: Install existing test dependencies and test experiment controls
+        run: |
+          pip install -r requirements-test.txt
+          python -m unittest discover -s experiments/xudp_address -p 'test_*.py' -v
+      - name: Fetch unchanged official peer and client pins
+        run: |
+          python scripts/fetch_test_cores.py /tmp/vui-xudp-official/cores
+          python scripts/fetch_mihomo.py /tmp/vui-xudp-official/client
+      - name: Build two distinct source controls and record unit RED and GREEN
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/vui-xudp-logs
+          python experiments/xudp_address/build_experiment.py \
+            --sing-box .experiment-source/sing-box \
+            --sing-vmess .experiment-source/sing-vmess \
+            --output /tmp/vui-xudp-source \
+            2>&1 | tee /tmp/vui-xudp-logs/build.log
+          python experiments/xudp_address/verify_go_controls.py /tmp/vui-xudp-source/evidence
+      - name: Reproduce exact unmodified-source runtime failure
+        env:
+          VUI_TEST_CORES: /tmp/vui-xudp-official/cores
+          VUI_TEST_MIHOMO: /tmp/vui-xudp-official/client/mihomo
+        run: |
+          set -euo pipefail
+          export VUI_DATA_DIR="$(mktemp -d)"
+          python experiments/xudp_address/run_experiment.py \
+            --phase baseline \
+            --candidate /tmp/vui-xudp-source/baseline/sing-box \
+            --provenance /tmp/vui-xudp-source/baseline/provenance.json \
+            --output /tmp/vui-xudp-logs/baseline \
+            2>&1 | tee /tmp/vui-xudp-logs/baseline.log
+      - name: Test patched domestic only with unchanged official peers
+        env:
+          VUI_TEST_CORES: /tmp/vui-xudp-official/cores
+          VUI_TEST_MIHOMO: /tmp/vui-xudp-official/client/mihomo
+        run: |
+          set -euo pipefail
+          export VUI_DATA_DIR="$(mktemp -d)"
+          python experiments/xudp_address/run_experiment.py \
+            --phase patched \
+            --candidate /tmp/vui-xudp-source/patched/sing-box \
+            --provenance /tmp/vui-xudp-source/patched/provenance.json \
+            --output /tmp/vui-xudp-logs/patched \
+            2>&1 | tee /tmp/vui-xudp-logs/patched.log
+      - name: Validate and sanitize the explicit evidence allowlist
+        if: always()
+        run: |
+          python experiments/xudp_address/prepare_evidence.py \
+            --logs /tmp/vui-xudp-logs \
+            --source /tmp/vui-xudp-source/evidence \
+            --official /tmp/vui-xudp-official \
+            --output /tmp/vui-xudp-upload
+      - name: Preserve evidence only, never experiment binaries or runtime secrets
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vui-xudp-source-experiment-evidence
+          path: /tmp/vui-xudp-upload
+          retention-days: 7
+          if-no-files-found: warn

@@ -1,0 +1,14 @@
+diff --git a/xudp.go b/xudp.go
+--- a/xudp.go
++++ b/xudp.go
+@@ -33 +33,10 @@
++// RemoteAddr returns the initial logical UDP destination. The transport peer
++// remains available through the embedded Conn.
++func (c *XUDPConn) RemoteAddr() net.Addr {
++	if c.destination.IsIP() {
++		return c.destination.UDPAddr()
++	}
++	return c.destination
++}
++
+ func (c *XUDPConn) Read(p []byte) (n int, err error) {
