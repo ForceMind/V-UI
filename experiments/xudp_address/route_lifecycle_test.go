@@ -257,15 +257,15 @@ func (c *routeLifecycleEndpoint) Close() error {
     c.log.event("endpoint_close",map[string]any{"role":c.role,"call":calls,"first":first})
     if first {
         if c.preCloseGate != nil {
-            close(c.preCloseEntered)
             c.log.event("fixture_pre_close_blocked",map[string]any{"role":c.role})
+            close(c.preCloseEntered)
             <-c.preCloseGate
         }
         close(c.closed)
         c.closedState.Store(true) // Resource signal closed, not merely Close entered.
         if c.closeGate != nil {
-            close(c.closeBlocked)
             c.log.event("fixture_close_blocked",map[string]any{"role":c.role})
+            close(c.closeBlocked)
             <-c.closeGate
         }
     }

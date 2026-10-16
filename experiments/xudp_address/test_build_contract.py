@@ -44,6 +44,16 @@ class DependencyGraphTests(unittest.TestCase):
 
 
 class ProductionIsolationTests(unittest.TestCase):
+    def test_route_blocking_witness_is_published_before_readiness(self):
+        source = Path(__file__).with_name('route_lifecycle_test.go').read_text()
+        for event, signal in (('fixture_pre_close_blocked', 'preCloseEntered'),
+                              ('fixture_close_blocked', 'closeBlocked')):
+            witness = 'c.log.event("' + event + '",map[string]any{"role":c.role})'
+            ready = 'close(c.' + signal + ')'
+            self.assertEqual(source.count(witness), 1)
+            self.assertEqual(source.count(ready), 1)
+            self.assertLess(source.index(witness), source.index(ready))
+
     def test_lifecycle_build_has_three_separate_source_identities(self):
         self.assertEqual(PHASES, ('baseline', 'patched', 'lifecycle'))
         self.assertEqual(ROUTE_SOURCE_SHA256, 'af68e556e07dfa861f1dc46c2f7232595c7912acb491b6077e555c61dda8b78c')
