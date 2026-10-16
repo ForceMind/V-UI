@@ -44,7 +44,7 @@ jobs:
         run: |
           python scripts/fetch_test_cores.py /tmp/vui-xudp-official/cores
           python scripts/fetch_mihomo.py /tmp/vui-xudp-official/client
-      - name: Build two distinct source controls and record unit RED and GREEN
+      - name: Build three isolated source controls and record independent gates
         id: source_build
         run: |
           set -euo pipefail
@@ -54,8 +54,9 @@ jobs:
             --sing-vmess .experiment-source/sing-vmess \
             --output /tmp/vui-xudp-source \
             2>&1 | tee /tmp/vui-xudp-logs/build.log
-          python experiments/xudp_address/verify_go_controls.py /tmp/vui-xudp-source/evidence
-          python experiments/xudp_address/verify_timeout_observations.py /tmp/vui-xudp-source/evidence
+          python experiments/xudp_address/verify_go_controls.py /tmp/vui-xudp-source/evidence --include-lifecycle
+          python experiments/xudp_address/verify_timeout_observations.py /tmp/vui-xudp-source/evidence --include-lifecycle
+          python experiments/xudp_address/verify_route_lifecycle.py /tmp/vui-xudp-source/evidence
       - name: Reproduce exact unmodified-source runtime failure
         env:
           VUI_TEST_CORES: /tmp/vui-xudp-official/cores
@@ -96,6 +97,48 @@ jobs:
             --provenance /tmp/vui-xudp-source/patched/provenance.json \
             --output /tmp/vui-xudp-logs/observations \
             2>&1 | tee /tmp/vui-xudp-logs/observations.log
+      - name: Record baseline lifecycle comparison with official peers
+        if: ${{ !cancelled() && steps.source_build.outcome == 'success' }}
+        env:
+          VUI_TEST_CORES: /tmp/vui-xudp-official/cores
+          VUI_TEST_MIHOMO: /tmp/vui-xudp-official/client/mihomo
+        run: |
+          set -euo pipefail
+          export VUI_DATA_DIR="$(mktemp -d)"
+          python experiments/xudp_address/lifecycle_runtime.py \
+            --phase baseline \
+            --candidate /tmp/vui-xudp-source/baseline/sing-box \
+            --provenance /tmp/vui-xudp-source/baseline/lifecycle-provenance.json \
+            --output /tmp/vui-xudp-logs/lifecycle-baseline \
+            2>&1 | tee /tmp/vui-xudp-logs/lifecycle-baseline.log
+      - name: Record patched lifecycle comparison with official peers
+        if: ${{ !cancelled() && steps.source_build.outcome == 'success' }}
+        env:
+          VUI_TEST_CORES: /tmp/vui-xudp-official/cores
+          VUI_TEST_MIHOMO: /tmp/vui-xudp-official/client/mihomo
+        run: |
+          set -euo pipefail
+          export VUI_DATA_DIR="$(mktemp -d)"
+          python experiments/xudp_address/lifecycle_runtime.py \
+            --phase patched \
+            --candidate /tmp/vui-xudp-source/patched/sing-box \
+            --provenance /tmp/vui-xudp-source/patched/lifecycle-provenance.json \
+            --output /tmp/vui-xudp-logs/lifecycle-patched \
+            2>&1 | tee /tmp/vui-xudp-logs/lifecycle-patched.log
+      - name: Record address-plus-lifecycle comparison with official peers
+        if: ${{ !cancelled() && steps.source_build.outcome == 'success' }}
+        env:
+          VUI_TEST_CORES: /tmp/vui-xudp-official/cores
+          VUI_TEST_MIHOMO: /tmp/vui-xudp-official/client/mihomo
+        run: |
+          set -euo pipefail
+          export VUI_DATA_DIR="$(mktemp -d)"
+          python experiments/xudp_address/lifecycle_runtime.py \
+            --phase lifecycle \
+            --candidate /tmp/vui-xudp-source/lifecycle/sing-box \
+            --provenance /tmp/vui-xudp-source/lifecycle/lifecycle-provenance.json \
+            --output /tmp/vui-xudp-logs/lifecycle-lifecycle \
+            2>&1 | tee /tmp/vui-xudp-logs/lifecycle-lifecycle.log
       - name: Validate and sanitize the explicit evidence allowlist
         if: always()
         run: |

@@ -53,6 +53,21 @@ def recorded_shape(name, supported):
 
 
 class TimeoutObservationVerifierTests(unittest.TestCase):
+    def test_third_arm_cannot_omit_or_replace_fixed_dependency_observations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.fixture(root)
+            phases = ('baseline', 'patched', 'lifecycle')
+            with self.assertRaises(FileNotFoundError): verify(root, phases)
+            for suffix in ('-timeout-observations.jsonl', '-timeout-observation-exit.json'):
+                (root / ('lifecycle' + suffix)).write_bytes((root / ('patched' + suffix)).read_bytes())
+            result = verify(root, phases)
+            self.assertEqual(set(result['phases']), set(phases))
+            self.assertEqual(result['phases']['patched'], result['phases']['lifecycle'])
+            (root / 'lifecycle-timeout-observation-exit.json').write_text('{"returncode": 1}')
+            with self.assertRaises(ValueError): verify(root, phases)
+            with self.assertRaises(ValueError): verify(root, ('lifecycle',))
+
     def fixture(self, root):
         for phase in ('baseline', 'patched'):
             rows = []

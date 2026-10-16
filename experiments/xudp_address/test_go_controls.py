@@ -9,6 +9,19 @@ from verify_go_controls import CHILDREN, FAILURE_MARKERS, GREEN, RED, verify
 
 
 class GoControlEvidenceTests(unittest.TestCase):
+    def test_lifecycle_arm_requires_separate_complete_green_address_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.recorded_fixture(root)
+            phases = ('baseline', 'patched', 'lifecycle')
+            with self.assertRaises(FileNotFoundError): verify(root, phases)
+            for suffix in ('-go-tests.jsonl', '-go-test-exit.json'):
+                shutil.copyfile(root / ('patched' + suffix), root / ('lifecycle' + suffix))
+            self.assertEqual(set(verify(root, phases)), set(phases))
+            (root / 'lifecycle-go-test-exit.json').write_text('{"returncode": 1}')
+            with self.assertRaises(ValueError): verify(root, phases)
+            with self.assertRaises(ValueError): verify(root, ('patched', 'lifecycle'))
+
     def fixture(self, root):
         for phase in ("baseline", "patched"):
             rows = [{"Test": name, "Action": "fail" if phase == "baseline" and name in RED else "pass"}

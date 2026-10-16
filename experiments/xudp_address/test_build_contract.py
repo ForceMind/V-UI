@@ -7,7 +7,7 @@ import subprocess
 import unittest
 import yaml
 
-from build_experiment import SING_VERSION, verify_module_graph
+from build_experiment import SING_VERSION, PHASES, ROUTE_SOURCE_SHA256, verify_module_graph
 
 
 class DependencyGraphTests(unittest.TestCase):
@@ -44,6 +44,17 @@ class DependencyGraphTests(unittest.TestCase):
 
 
 class ProductionIsolationTests(unittest.TestCase):
+    def test_lifecycle_build_has_three_separate_source_identities(self):
+        self.assertEqual(PHASES, ('baseline', 'patched', 'lifecycle'))
+        self.assertEqual(ROUTE_SOURCE_SHA256, 'af68e556e07dfa861f1dc46c2f7232595c7912acb491b6077e555c61dda8b78c')
+        source = Path(__file__).with_name('build_experiment.py').read_text()
+        self.assertIn('vui-xudp-lifecycle-source-experiment', source)
+        self.assertIn('schema_version=2', source)
+        self.assertIn('lifecycle-provenance.json', source)
+        self.assertIn('"before_sha256": source_hashes["sing_box_route_conn"]', source)
+        self.assertIn('"after_sha256": provenance["phase_source_hashes"]["route_conn"]', source)
+        self.assertIn('env={**env, "VUI_LIFECYCLE_PHASE": phase}', source)
+
     def test_independent_observation_never_overrides_original_failure(self):
         root = Path(__file__).resolve().parents[2]
         workflow = yaml.safe_load((root / ".github/workflows/xudp-address-experiment.yml").read_text())
@@ -54,6 +65,8 @@ class ProductionIsolationTests(unittest.TestCase):
         build = next(s for s in job["steps"] if s.get("id") == "source_build")
         self.assertIn("verify_go_controls.py", build["run"])
         self.assertIn("verify_timeout_observations.py", build["run"])
+        self.assertEqual(build["run"].count("--include-lifecycle"), 2)
+        self.assertIn("verify_route_lifecycle.py", build["run"])
         observe = next(s for s in job["steps"] if "observe_runtime.py" in s.get("run", ""))
         self.assertEqual(observe["if"], "${{ !cancelled() && steps.source_build.outcome == 'success' }}")
         self.assertIn("--phase patched", observe["run"])
@@ -61,10 +74,20 @@ class ProductionIsolationTests(unittest.TestCase):
         originals = [s for s in job["steps"] if "run_experiment.py" in s.get("run", "")]
         self.assertEqual(len(originals), 2)
         self.assertTrue(all("set -euo pipefail" in s["run"] for s in originals))
+        lifecycle = [s for s in job['steps'] if 'lifecycle_runtime.py' in s.get('run', '')]
+        self.assertEqual(len(lifecycle), 3)
+        for phase, step in zip(PHASES, lifecycle):
+            self.assertEqual(step['if'], "${{ !cancelled() && steps.source_build.outcome == 'success' }}")
+            self.assertIn('--phase ' + phase, step['run'])
+            self.assertIn('/' + phase + '/lifecycle-provenance.json', step['run'])
+            self.assertIn('--output /tmp/vui-xudp-logs/lifecycle-' + phase, step['run'])
+            self.assertIn('set -euo pipefail', step['run'])
 
     def test_runtime_packager_and_publish_workflows_are_unchanged(self):
         root = Path(__file__).resolve().parents[2]
         hashes = {
+            'experiments/xudp_address/run_experiment.py': 'f87addb8df97e801566ffe0266eb1f0ee349f9967ea1dabcfdc2ee70f2f04544',
+            'experiments/xudp_address/observe_runtime.py': '318e539cb9ea7d1a205b0aee904956d48824a05bbd349dc11472fe7e653dfd64',
             'experiments/xudp_address/remoteaddr.patch': 'ee08c4049b05d0fd72b1609839af574fe9be59b5e6c1ed4a1da54f0ffcb3a8ae',
             'experiments/xudp_address/xudp_remoteaddr_experiment_test.go': '84fdd740d5024125c13404423fc4fce17746745fa3db6f871d89067b60499d9b',
             'scripts/build_bundle.py': '6a31474fe46560e61f6f8e899185aaa881f64a14396165edbbbad53edb294f54',

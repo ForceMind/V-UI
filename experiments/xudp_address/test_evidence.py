@@ -6,6 +6,23 @@ from prepare_evidence import allowed_names, stage
 
 
 class EvidenceIsolationTests(unittest.TestCase):
+    def test_three_lifecycle_arms_allow_only_the_exact_text_matrix(self):
+        allowed = allowed_names()
+        for phase in ('baseline', 'patched', 'lifecycle'):
+            prefix = 'lifecycle-' + phase + '/'
+            names = {name[len(prefix):] for name in allowed['logs'] if name.startswith(prefix)}
+            self.assertEqual(len(names), 115)
+            self.assertEqual(sum(name.startswith('cases/') for name in names), 70)
+            self.assertEqual(sum(name.startswith('delivery-ledgers/') for name in names), 35)
+            self.assertEqual(sum(name.startswith('observations/') for name in names), 6)
+            self.assertTrue(all(Path(name).suffix in ('.json', '.log') for name in names))
+            for name in ('config.json', 'sing-box', 'lifecycle.patch', 'observations/unknown.json'):
+                self.assertNotIn(prefix + name, allowed['logs'])
+            self.assertIn(phase + '-lifecycle-provenance.json', allowed['source'])
+            self.assertIn(phase + '-route-lifecycle-tests.jsonl', allowed['source'])
+        self.assertNotIn('lifecycle-provenance.json', allowed['source'])
+        self.assertNotIn('lifecycle/provenance.json', allowed['source'])
+
     def test_allowlisted_text_is_hashed_and_fixture_values_redacted(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

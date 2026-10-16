@@ -57,9 +57,11 @@ def canonical_marker(marker):
     return match[1] + " got=" + endpoint(match[2]) + " want=" + endpoint(match[3])
 
 
-def verify(directory):
+def verify(directory, phases=("baseline", "patched")):
     summary = {}
-    for phase in ("baseline", "patched"):
+    if tuple(phases) not in (("baseline", "patched"), ("baseline", "patched", "lifecycle")):
+        raise ValueError("Unexpected source-control phases")
+    for phase in phases:
         rows = [json.loads(line) for line in (directory / (phase + "-go-tests.jsonl")).read_text().splitlines()]
         if not rows or any(x.get("Action") == "skip" for x in rows):
             raise ValueError("Empty or skipped Go experiment: " + phase)
@@ -93,4 +95,7 @@ def verify(directory):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path)
-    print(json.dumps(verify(parser.parse_args().directory), indent=2))
+    parser.add_argument("--include-lifecycle", action="store_true")
+    args = parser.parse_args()
+    print(json.dumps(verify(args.directory, ("baseline", "patched", "lifecycle")
+                            if args.include_lifecycle else ("baseline", "patched")), indent=2))

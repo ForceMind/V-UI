@@ -93,9 +93,11 @@ def verify_events(name, events):
             'classification': 'deadline_released_read' if supported else 'context_cancel_did_not_release_read'}
 
 
-def verify(directory):
+def verify(directory, phases=('baseline', 'patched')):
     summary = {'scope': 'Fixed dependency observation only; product idle qualification remains false', 'phases': {}}
-    for phase in ('baseline', 'patched'):
+    need(tuple(phases) in (('baseline', 'patched'), ('baseline', 'patched', 'lifecycle')),
+         'Unexpected source-control phases')
+    for phase in phases:
         rows = [json.loads(line) for line in (directory / (phase + '-timeout-observations.jsonl')).read_text().splitlines()]
         need(rows and not any(x.get('Action') in ('skip', 'fail') for x in rows), 'Failed, empty or skipped lifecycle observation')
         need(all(x.get('Package') == 'github.com/sagernet/sing-vmess' for x in rows),
@@ -120,4 +122,7 @@ def verify(directory):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directory', type=Path)
-    print(json.dumps(verify(parser.parse_args().directory), indent=2))
+    parser.add_argument('--include-lifecycle', action='store_true')
+    args = parser.parse_args()
+    print(json.dumps(verify(args.directory, ('baseline', 'patched', 'lifecycle')
+                            if args.include_lifecycle else ('baseline', 'patched')), indent=2))

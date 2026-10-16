@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 
 from run_experiment import expected_cases
+from lifecycle_runtime import ARTIFACT_ALLOWLIST as LIFECYCLE_ARTIFACT_ALLOWLIST
 
 FIXTURE_IDS = ("11111111-1111-4111-8111-111111111111",
                "22222222-2222-4222-8222-222222222222",
@@ -32,11 +33,17 @@ def allowed_names():
     for name in ("observe_domain_freeze", "observe_idle_sockets"):
         logs.update("observations/cases/" + name + suffix for suffix in (".json", ".log"))
         logs.add("observations/delivery-ledgers/" + name + ".json")
-    source = {"go-control-verification.json", "timeout-observation-verification.json"}
-    for phase in ("baseline", "patched"):
+    for phase in ("baseline", "patched", "lifecycle"):
+        logs.add("lifecycle-" + phase + ".log")
+        logs.update("lifecycle-" + phase + "/" + name for name in LIFECYCLE_ARTIFACT_ALLOWLIST)
+    source = {"go-control-verification.json", "timeout-observation-verification.json", "route-lifecycle-verification.json"}
+    for phase in ("baseline", "patched", "lifecycle"):
         source.update(phase + suffix for suffix in ("-go-tests.jsonl", "-go-tests.stderr", "-go-test-exit.json",
-                      "-module-graph.jsonl", "-verified-module-graph.json", "-provenance.json",
-                      "-timeout-observations.jsonl", "-timeout-observations.stderr", "-timeout-observation-exit.json"))
+                      "-module-graph.jsonl", "-verified-module-graph.json", "-lifecycle-provenance.json",
+                      "-timeout-observations.jsonl", "-timeout-observations.stderr", "-timeout-observation-exit.json",
+                      "-route-lifecycle-tests.jsonl", "-route-lifecycle-tests.stderr", "-route-lifecycle-exit.json"))
+        if phase != "lifecycle":
+            source.add(phase + "-provenance.json")
     return {"logs": logs, "source": source,
             "official": {"cores/provenance.json", "client/mihomo-provenance.json"}}
 
