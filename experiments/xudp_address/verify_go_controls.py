@@ -1,6 +1,8 @@
 """Reject arbitrary build/test errors masquerading as the expected RED control."""
 import argparse
 import json
+import ipaddress
+import re
 from pathlib import Path
 
 PREFIX = "TestExperimentXUDP"
@@ -27,6 +29,32 @@ FAILURE_MARKERS = {
 CHILDREN = {name for name in FAILURE_MARKERS if "/" in name} | {WRITE + "/WriteTo", WRITE + "/WritePacket"}
 
 
+def canonical_marker(marker):
+    # Fixed sing's wrapper renders IPv4 as mapped IPv6; compare the actual
+    # address and port, never weaken the seven exact assertion identities.
+    match = re.fullmatch(r"([A-Z_]+) got=(\S+) want=(\S+)", marker)
+    if match is None:
+        raise ValueError("Malformed Go address failure marker")
+
+    def endpoint(value):
+        host, separator, port = value.rpartition(":")
+        if not separator or not re.fullmatch(r"[1-9][0-9]{0,4}", port) or int(port) > 65535:
+            raise ValueError("Malformed Go address endpoint")
+        if host.startswith("[") and host.endswith("]"):
+            address = ipaddress.IPv6Address(host[1:-1])
+            address = address.ipv4_mapped or address
+        elif ":" in host or "[" in host or "]" in host or not host:
+            raise ValueError("Malformed Go address host")
+        else:
+            try:
+                address = ipaddress.IPv4Address(host)
+            except ValueError:
+                return host + ":" + port  # Exact FQDN spelling is retained.
+        return ("[" + str(address) + "]" if address.version == 6 else str(address)) + ":" + port
+
+    return match[1] + " got=" + endpoint(match[2]) + " want=" + endpoint(match[3])
+
+
 def verify(directory):
     summary = {}
     for phase in ("baseline", "patched"):
@@ -44,9 +72,9 @@ def verify(directory):
                              for name in CHILDREN}
         if len(children) != len(CHILDREN) or {x["Test"]: x["Action"] for x in children} != expected_children:
             raise ValueError("Go subtest RED/GREEN coverage differs: " + phase)
-        markers = [(x.get("Test"), line.split("D2_EXPECTED_", 1)[-1])
+        markers = [(x.get("Test"), canonical_marker(line.split("D2_EXPECTED_", 1)[-1]))
                    for x in rows for line in x.get("Output", "").splitlines() if "D2_EXPECTED_" in line]
-        expected_markers = [(name, marker.split("D2_EXPECTED_", 1)[1]) for name, marker in FAILURE_MARKERS.items()]
+        expected_markers = [(name, canonical_marker(marker.split("D2_EXPECTED_", 1)[1])) for name, marker in FAILURE_MARKERS.items()]
         if sorted(markers) != sorted(expected_markers if phase == "baseline" else []):
             raise ValueError("Go failure is not the seven exact original address/tuple assertions: " + phase)
         package = [x for x in rows if "Test" not in x and x.get("Action") in ("pass", "fail")]

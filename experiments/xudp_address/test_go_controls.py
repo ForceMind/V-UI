@@ -1,4 +1,6 @@
 import json
+import hashlib
+import shutil
 from pathlib import Path
 import tempfile
 import unittest
@@ -19,6 +21,49 @@ class GoControlEvidenceTests(unittest.TestCase):
             rows.append({"Action": "fail" if phase == "baseline" else "pass", "Elapsed": .1})
             (root / (phase + "-go-tests.jsonl")).write_text("\n".join(json.dumps(x) for x in rows))
             (root / (phase + "-go-test-exit.json")).write_text(json.dumps({"returncode": 1 if phase == "baseline" else 0}))
+
+    def recorded_fixture(self, root):
+        # Unmodified public CI output, run 38941756173 / candidate 31540bd.
+        # Independent of FAILURE_MARKERS: catches a verifier invented from itself.
+        source = Path(__file__).parent / "fixtures" / "run_38941756173"
+        hashes = {
+            "baseline-go-tests.jsonl": "c688178217023c52453bbe6acca028321c33756714498fabf717e577ea349807",
+            "patched-go-tests.jsonl": "a77ec47bb14e8b385c1ecd7a3f1abb5adf45ae5936dd7c14b5a15076006534cf",
+            "baseline-go-test-exit.json": "64a1526b099d75eed9d9da41a5562dcc164b6ffddeb729dd371c4496bbcded05",
+            "patched-go-test-exit.json": "c365161d39236fe0f1d32937fbc549796b8487d8faf65ed3879b96897c78ea5d",
+        }
+        for name, digest in hashes.items():
+            self.assertEqual(hashlib.sha256((source / name).read_bytes()).hexdigest(), digest)
+            shutil.copyfile(source / name, root / name)
+
+    def test_recorded_first_run_preserves_exact_mapped_wrapper_tuple(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.recorded_fixture(root)
+            result = verify(root)
+            self.assertEqual(result["baseline"]["expected_address_failure_count"], 7)
+            self.assertEqual(result["patched"]["expected_address_failure_count"], 0)
+
+    def test_recorded_wrapper_rejects_changed_ip_or_port(self):
+        for actual in ("[::ffff:127.0.0.3]:24443", "[::ffff:127.0.0.2]:12345"):
+            with self.subTest(actual=actual), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.recorded_fixture(root)
+                path = root / "baseline-go-tests.jsonl"
+                original = path.read_text()
+                self.assertEqual(original.count("got=[::ffff:127.0.0.2]:24443"), 2)
+                path.write_text(original.replace("got=[::ffff:127.0.0.2]:24443", "got=" + actual))
+                with self.assertRaisesRegex(ValueError, "seven exact"):
+                    verify(root)
+
+    def test_recorded_wrapper_accepts_equivalent_ipv4_representations(self):
+        for actual in ("127.0.0.2:24443", "[::ffff:7f00:2]:24443"):
+            with self.subTest(actual=actual), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.recorded_fixture(root)
+                path = root / "baseline-go-tests.jsonl"
+                path.write_text(path.read_text().replace("got=[::ffff:127.0.0.2]:24443", "got=" + actual))
+                self.assertEqual(verify(root)["baseline"]["expected_address_failure_count"], 7)
 
     def test_exact_red_green_names_required(self):
         with tempfile.TemporaryDirectory() as directory:

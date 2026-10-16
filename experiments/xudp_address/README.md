@@ -1,6 +1,6 @@
 # D2 connected-XUDP 地址隔离实验
 
-状态：实验准备，尚无源码补丁运行结果。产品仍是已验 D1 TCP-only；PR #48 原失败不可覆盖或授予新资格。
+状态：首轮源码编译与 Go 对照已实际执行，证据核验器失败，真实双跳尚未执行。产品仍是已验 D1 TCP-only；PR #48 原失败不可覆盖或授予新资格。
 
 ## 问题与假设
 
@@ -42,3 +42,9 @@ connected wrapper 对后续不同目的地址的写操作忽略新地址，paylo
 - [固定 core 的 connected 路由](https://github.com/SagerNet/sing-box/blob/af6e64c3b69e6132ebaee0e1a3d24e93903f6709/route/conn.go#L164-L200)
 - [固定 XUDP 类型](https://github.com/SagerNet/sing-vmess/blob/31ec11e8790c48a4bf11711806a61e929ee6b89d/xudp.go#L18-L39)
 - [已核官方 runner 工具清单](https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md)
+
+## 实验失败账本
+
+- 候选 `31540bd22231283ca1d2faf3874a4409820dfd79`，[run 38941756173](https://github.com/ForceMind/V-UI/actions/runs/38941756173)，attempt 1：40 项控制测试通过，两版官方源码均成功编译；Go 基线 3 RED / 2 GREEN、补丁 5 GREEN。证据核验器把 wrapper 实际输出 `[::ffff:127.0.0.2]:24443` 错写成普通 IPv4，因而在两个预期 tuple 失败的文本分类处拒绝。原始端口仍严格等于错误的外层 TCP 端口，此错误未改变 Go 断言或补丁。两个真实运行步骤未执行，不能据此获得双跳资格。
+- 首轮 artifact `12062903149`，ZIP SHA-256 `333979f3b35b162612c88ec6570fcd66f92106db331818968fdd4b4eb8cba38b`；15 项内部条目散列均核实，两版归一化模块图逐字节相同，无二进制。原样 Go JSONL/退出状态保存于 `fixtures/run_38941756173/`，测试以原 manifest 摘要锁定，不能只用核验器自身常量合成预期。
+- 修复仅把地址文本按实际 IP 规范化（IPv4-mapped 与相应 IPv4 等价），端口、目标、七个具体断言名称与数量保持严格。变 IP、变端口、任意失败原因、缺子例均拒绝。新候选必须重新编译并完整运行 RED/GREEN 及双跳；首轮失败不重写、不作成功资格。
