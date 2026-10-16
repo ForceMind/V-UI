@@ -45,7 +45,7 @@ class GoControlEvidenceTests(unittest.TestCase):
             self.assertEqual(result["patched"]["expected_address_failure_count"], 0)
 
     def test_recorded_wrapper_rejects_changed_ip_or_port(self):
-        for actual in ("[::ffff:127.0.0.3]:24443", "[::ffff:127.0.0.2]:12345"):
+        for actual in ("[::ffff:127.0.0.3]:24443", "[::ffff:127.0.0.2]:12345", "[::ffff:127.0.0.2%eth0]:24443"):
             with self.subTest(actual=actual), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 self.recorded_fixture(root)
@@ -53,7 +53,7 @@ class GoControlEvidenceTests(unittest.TestCase):
                 original = path.read_text()
                 self.assertEqual(original.count("got=[::ffff:127.0.0.2]:24443"), 2)
                 path.write_text(original.replace("got=[::ffff:127.0.0.2]:24443", "got=" + actual))
-                with self.assertRaisesRegex(ValueError, "seven exact"):
+                with self.assertRaises(ValueError):
                     verify(root)
 
     def test_recorded_wrapper_accepts_equivalent_ipv4_representations(self):

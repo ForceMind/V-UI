@@ -40,6 +40,8 @@ def canonical_marker(marker):
         host, separator, port = value.rpartition(":")
         if not separator or not re.fullmatch(r"[1-9][0-9]{0,4}", port) or int(port) > 65535:
             raise ValueError("Malformed Go address endpoint")
+        if "%" in host:
+            raise ValueError("Scoped Go address endpoint is outside the frozen fixture")
         if host.startswith("[") and host.endswith("]"):
             address = ipaddress.IPv6Address(host[1:-1])
             address = address.ipv4_mapped or address
