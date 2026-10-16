@@ -83,6 +83,10 @@ OTHER_CONSTRUCTIONS = {
     ('test_vless_ws_loopback.py', 'VLESSWebSocketLoopbackTests.start_server', 'CoreProcess'),
     ('test_vmess_loopback.py', 'VMessLoopbackTests.setUp', 'CoreProcess'),
     ('test_vmess_loopback.py', 'VMessLoopbackTests.start_singbox_client', 'CoreProcess'),
+    # D1 launches two real uvicorn panels, not client cores. Their sing-box
+    # children remain under production CoreRuntime; Mihomo uses DoubleHopFixture.
+    ('tcp_upstream_export_helpers.py', 'HTTPPanel.start', 'Popen'),
+    ('test_tcp_upstream_export_browser.py', 'TCPUpstreamExportBrowserTests.start_panel', 'Popen'),
     ('test_workspace_browser.py', 'WorkspaceBrowserTests.test_drafts_persistence_grants_rotation_and_revocation', 'Popen'),
     ('test_xhttp_preflight_loopback.py', 'XHTTPPreflightLoopbackTests.test_httpupgrade_actual_uri_wrong_transport_control', 'CoreProcess'),
     ('test_xhttp_preflight_loopback.py', 'XHTTPPreflightLoopbackTests.verify_clients', 'CoreProcess'),

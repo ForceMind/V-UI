@@ -47,6 +47,16 @@ jobs:
           python -m unittest discover -s tests -p test_proxy_apply_real.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
           python -m unittest discover -s tests -p test_proxy_diagnostics_real.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
           python -m unittest discover -s tests -p test_proxy_exports_real.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
+      - name: Exercise two-instance TCP upstream export import and real relay
+        env:
+          VUI_TEST_CORES: /tmp/vui-rc1/cores
+          VUI_TEST_MIHOMO: /tmp/vui-rc1/client/mihomo
+          VUI_PROXY_LOOPBACK: "1"
+          VUI_TCP_UPSTREAM_LOOPBACK: "1"
+        run: |
+          set -euo pipefail
+          export VUI_DATA_DIR="$(mktemp -d)"
+          python -m unittest discover -s tests -p test_tcp_upstream_export_real.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
       - name: Preserve pin and test evidence only
         if: always()
         uses: actions/upload-artifact@v4

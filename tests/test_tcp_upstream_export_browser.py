@@ -1,0 +1,499 @@
+"""D1 real-browser exports between two isolated, authenticated panel instances.
+
+Successful exports always come from the real HTTP endpoint and seeded node
+models. Both import preview and save use the target's real parser/private store.
+Delayed-response and clipboard-denial fixtures exercise browser lifecycle only;
+they do not establish runtime forwarding (covered by the double-hop gate).
+VUI_TCP_UPSTREAM_BROWSER=1 requires all dependencies; it never skips on failure.
+"""
+from copy import deepcopy
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+
+from test_proxy_browser import prepare_browser_payload, observe_browser_pages
+from test_upstream_import_capabilities import inbound, UUID, SHORT_ID, HOST
+
+ROOT = Path(__file__).resolve().parents[1]
+PASSWORD = 'Synthetic-tcp-upstream-browser-password!'
+
+
+def export_fixture_nodes():
+    nodes = []
+    for index, reality in enumerate((False, True), 1):
+        node = inbound(reality)
+        node.id = index
+        node.remark = 'Synthetic ' + ('REALITY' if reality else 'TLS')
+        node.port = 10442 + index
+        nodes.append(deepcopy(vars(node)))
+    unsupported = deepcopy(nodes[0])
+    unsupported.update(id=3, remark='Unsupported transport', port=10445)
+    unsupported['stream_settings']['transport'] = {'type': 'ws', 'path': '/test'}
+    nodes.append(unsupported)
+    unknown = deepcopy(nodes[0])
+    unknown.update(id=4, remark='<img src=x onerror=alert(1)>', port=10446)
+    unknown['stream_settings']['unqualified_option'] = 'synthetic-private-option'
+    nodes.append(unknown)
+    return nodes
+
+
+class TCPUpstreamExportStaticTests(unittest.TestCase):
+    def test_dedicated_profile_and_ephemeral_secret_boundary(self):
+        script = (ROOT / 'web/js/app.js').read_text()
+        section = script.split('        const upstreamExport = reactive(', 1)[1].split('        const siteFiles =', 1)[0]
+        for forbidden in ('localStorage', 'sessionStorage', 'console.', 'innerHTML', 'location.'):
+            self.assertNotIn(forbidden, section)
+        for required in ('AbortController', 'upstreamExportGeneration', 'URL.revokeObjectURL',
+                         "addEventListener('pagehide'", "addEventListener('popstate'",
+                         'acknowledge_tcp_only: true', "'tcp-upstream-v1'", 'output.select()'):
+            self.assertIn(required, section)
+        self.assertIn('clearAdminSecrets.forEach(clear => clear());', script)
+        html = (ROOT / 'web/index.html').read_text()
+        self.assertIn('@click="openUpstreamExport(scope.row)"', html)
+        self.assertIn(':value="upstreamExport.content" readonly', html)
+        self.assertNotIn('v-html="upstreamExport', html)
+        self.assertIn('@click="showQrCode(scope.row)"', html)
+        self.assertEqual(len(re.findall(r'id="upstream-export-content"', html)), 1)
+
+    def test_actual_pinned_vue_controller_secret_lifecycle(self):
+        assets = os.getenv('VUI_FRONTEND_ASSETS')
+        if not assets and os.getenv('VUI_TCP_UPSTREAM_BROWSER') != '1':
+            self.skipTest('checksum-pinned Vue assets are prepared by the browser gate')
+        self.assertTrue(assets, 'Explicit browser gate requires VUI_FRONTEND_ASSETS')
+        vue = Path(assets) / 'vue.js'
+        self.assertTrue(vue.is_file(), 'Missing checksum-pinned Vue asset')
+        # Real Vue reactivity/watches, with only DOM/network effects replaced.
+        # This is controller coverage, not a substitute for Chromium/API tests.
+        code = r'''
+const vm = require('vm'), fs = require('fs'), assert = require('assert');
+const pending = [], events = {}, revoked = [], urls = [];
+let api, interceptor;
+const context = vm.createContext({ setTimeout, clearTimeout, AbortController, Blob, console,
+    location: {hash:'', replace(){}}, navigator:{clipboard:{writeText:async () => {}}},
+    addEventListener(name,callback){events[name]=callback},
+    URL:{createObjectURL(){const u='blob:'+urls.length;urls.push(u);return u},revokeObjectURL(u){revoked.push(u)}},
+    axios:{ defaults:{headers:{common:{}}}, interceptors:{response:{use(_,bad){interceptor=bad}}},
+      post(url,data,options){return new Promise((resolve,reject)=>pending.push({url,data,options,resolve,reject}))},
+      get(){return Promise.resolve({status:401})}},
+    ElementPlus:{ElMessage:{},ElMessageBox:{}}, ElementPlusIconsVue:{} });
+vm.runInContext(fs.readFileSync(process.argv[1],'utf8'),context);
+context.document={getElementById(){return {focus(){},select(){}}},createElement(){return {click(){}}}};
+context.Vue={...context.Vue,onMounted(){},createApp({setup}){api=setup();return{component(){},use(){},mount(){}}}};
+vm.runInContext(fs.readFileSync(process.argv[2],'utf8'),context);
+const success=(content='synthetic-credential')=>({data:content,headers:{'x-vui-export-profile':'tcp-upstream-v1'}});
+(async()=>{
+ const state=api.upstreamExport;
+ api.openUpstreamExport({id:1,remark:'one'});
+ await api.requestUpstreamExport(); assert.equal(pending.length,0);
+ state.server='node.example'; await api.requestUpstreamExport();assert.equal(pending.length,0);
+ state.acknowledged=true; const old=api.requestUpstreamExport();assert.equal(pending.length,1);
+ state.server='new.example'; assert(!state.acknowledged);assert(pending[0].options.signal.aborted);
+ pending.shift().resolve(success('old-secret'));await old;assert.equal(state.content,'');
+ state.acknowledged=true;const current=api.requestUpstreamExport();pending.shift().resolve(success());await current;
+ assert.equal(state.content,'synthetic-credential');assert(!state.busy);
+ api.downloadUpstreamExport();api.closeUpstreamExport();assert.equal(state.content,'');assert.equal(state.inboundId,null);assert(revoked.length);
+ api.openUpstreamExport({id:2});state.server='node.example';state.acknowledged=true;
+ const failed=api.requestUpstreamExport();pending.shift().reject({response:{status:409,data:'never-show-this'}});await failed;
+ assert(!state.busy);assert.equal(state.content,'');assert(state.error.includes('不具备'));assert(!state.error.includes('never-show-this'));
+ const req=api.requestUpstreamExport();events.pagehide();pending.shift().resolve(success('pagehide-secret'));await req;assert.equal(state.content,'');assert(!state.open);
+ api.openUpstreamExport({id:3});state.server='node.example';state.acknowledged=true;
+ const afterSession=api.requestUpstreamExport();vm.runInContext('endAdminSession()',context);pending.shift().resolve(success('session-secret'));await afterSession;
+ assert.equal(state.content,'');assert(!state.open);
+ console.log('Actual pinned Vue controller: confirmation, synchronous invalidation, late success, failure, Blob revocation, pagehide, session end passed');
+})().catch(error=>{console.error(error);process.exitCode=1});
+
+'''
+        result = subprocess.run(['node', '-e', code, str(vue), str(ROOT / 'web/js/app.js')],
+                                text=True, capture_output=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('session end passed', result.stdout)
+
+    def test_test_nodes_are_distinct_and_use_only_synthetic_credentials(self):
+        nodes = export_fixture_nodes()
+        self.assertEqual([node['id'] for node in nodes], [1, 2, 3, 4])
+        self.assertEqual(len({node['port'] for node in nodes}), 4)
+        self.assertEqual(nodes[0]['settings']['users'][0]['uuid'], UUID)
+        self.assertIn('reality', nodes[1]['stream_settings']['tls'])
+        self.assertIn('transport', nodes[2]['stream_settings'])
+        self.assertIn('unqualified_option', nodes[3]['stream_settings'])
+
+
+@unittest.skipUnless(os.getenv('VUI_TCP_UPSTREAM_BROWSER') == '1', 'explicit TCP upstream browser gate')
+class TCPUpstreamExportBrowserTests(unittest.TestCase):
+    def setUp(self):
+        from playwright.sync_api import sync_playwright
+        self.tmp = tempfile.TemporaryDirectory(prefix='vui-tcp-upstream-browser-')
+        self.addCleanup(self.tmp.cleanup)
+        self.work = Path(self.tmp.name)
+        self.nodes = export_fixture_nodes()
+        assets = Path(os.environ['VUI_FRONTEND_ASSETS']).resolve()
+        self.payload = prepare_browser_payload(self.work / 'payload', assets)
+        self.instances = {name: self.start_panel(name, self.nodes if name == 'source' else [])
+                          for name in ('source', 'target')}
+        self.playwright = sync_playwright().start()
+        self.addCleanup(self.playwright.stop)
+        options = {'headless': True}
+        executable = os.getenv('VUI_TEST_CHROMIUM') or os.getenv('VUI_BROWSER_EXECUTABLE')
+        if not executable and not Path(self.playwright.chromium.executable_path).exists():
+            executable = shutil.which('chromium') or shutil.which('chromium-browser')
+        if executable:
+            options['executable_path'] = executable
+        self.browser = self.playwright.chromium.launch(**options)
+        self.addCleanup(self.browser.close)
+        self.external, self.errors, self.console, self.export_requests = [], [], [], []
+        for name, instance in self.instances.items():
+            context = self.browser.new_context(viewport={'width': 1440, 'height': 1000}, accept_downloads=True)
+            self.addCleanup(context.close)
+            instance['context'] = context
+            context.add_init_script('''(() => {
+                const create = URL.createObjectURL.bind(URL), revoke = URL.revokeObjectURL.bind(URL);
+                window.exportBlobAudit = {created: [], revoked: []};
+                URL.createObjectURL = value => {const url = create(value); exportBlobAudit.created.push(url); return url};
+                URL.revokeObjectURL = url => {exportBlobAudit.revoked.push(url); return revoke(url)};
+            })()''')
+            observe_browser_pages(context, self.errors, self.console)
+            def guard(route, base=instance['base']):
+                if not route.request.url.startswith(base + '/'):
+                    self.external.append(route.request.url)
+                    route.abort()
+                else:
+                    route.continue_()
+            context.route('**/*', guard)
+            page = context.new_page()
+            instance['page'] = page
+            page.on('request', lambda request: self.export_requests.append(request)
+                    if '/api/subscription/upstream/' in request.url else None)
+            self.login(instance)
+        self.source, self.target = self.instances['source'], self.instances['target']
+        self.page = self.source['page']
+        self.open_nodes()
+
+    def start_panel(self, name, nodes):
+        directory = self.work / name
+        directory.mkdir()
+        logpath = directory / 'server.log'
+        log = logpath.open('w')
+        self.addCleanup(log.close)
+        env = {**os.environ, 'PYTHONPATH': str(self.payload), 'PYTHONDONTWRITEBYTECODE': '1',
+               'VUI_PUBLIC_ORIGIN': '', 'VUI_DATA_DIR': str(directory / 'data'),
+               'VUI_BIN_DIR': str(directory / 'no-cores'), 'VUI_CERTIFICATES_ENABLED': '0'}
+        code = '''import json,sys,uvicorn
+from app.models.database import init_db,SessionLocal,Inbound
+from app.services.auth_service import provision_admin
+fixture=json.loads(sys.stdin.read())
+init_db()
+provision_admin('export-tester',fixture['password'])
+with SessionLocal() as db:
+ for values in fixture['nodes']: db.add(Inbound(**values))
+ db.commit()
+import main
+uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=False,access_log=False)
+'''
+        process = subprocess.Popen([sys.executable, '-B', '-c', code], cwd=self.payload, env=env,
+                                   stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT, text=True)
+        def stop():
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        self.addCleanup(stop)
+        process.stdin.write(json.dumps({'password': PASSWORD, 'nodes': nodes}))
+        process.stdin.close()
+        deadline, match = time.monotonic() + 20, None
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                self.fail(logpath.read_text())
+            match = re.search(r'Uvicorn running on http://127\.0\.0\.1:(\d+)', logpath.read_text())
+            if match:
+                break
+            time.sleep(.05)
+        self.assertIsNotNone(match, logpath.read_text())
+        return {'base': 'http://127.0.0.1:' + match.group(1), 'directory': directory, 'logpath': logpath}
+
+    def login(self, instance):
+        from playwright.sync_api import expect
+        page = instance['page']
+        page.goto(instance['base'] + '/login')
+        page.locator('#login-name').fill('export-tester')
+        page.locator('#login-password').fill(PASSWORD)
+        with page.expect_response(lambda response: response.url.endswith('/api/inbounds')) as initial_nodes:
+            page.get_by_role('button', name='登录面板', exact=True).click()
+            page.wait_for_url('**/ui/')
+        self.assertEqual(initial_nodes.value.status, 200)
+        expect(page.get_by_role('menuitem', name='代理与中转', exact=True)).to_be_visible()
+
+    def open_nodes(self):
+        from playwright.sync_api import expect
+        self.page.get_by_role('menuitem', name='入站节点', exact=True).click()
+        expect(self.page.get_by_role('button', name='导出为中转上游（仅 TCP）', exact=True)).to_have_count(4)
+
+    def open_export(self, node=1, fmt='uri', server=HOST):
+        from playwright.sync_api import expect
+        self.page.get_by_role('button', name='导出为中转上游（仅 TCP）', exact=True).nth(node - 1).click()
+        expect(self.page.locator('#upstream-export-panel')).to_be_visible()
+        expect(self.page.locator('#upstream-export-server')).to_have_value('')
+        expect(self.page.locator('#upstream-export-request')).to_be_disabled()
+        self.page.locator('#upstream-export-server').fill(server)
+        self.page.locator('#upstream-export-format').select_option(fmt)
+        expect(self.page.locator('#upstream-export-request')).to_be_disabled()
+        self.page.locator('#upstream-export-ack').check()
+
+    def generate(self):
+        from playwright.sync_api import expect
+        with self.page.expect_response(lambda response: '/api/subscription/upstream/' in response.url) as pending:
+            self.page.locator('#upstream-export-request').click()
+        response = pending.value
+        self.assertEqual(response.status, 200)
+        self.assertIn('no-store', response.headers['cache-control'])
+        self.assertEqual(response.headers['x-vui-export-profile'], 'tcp-upstream-v1')
+        expect(self.page.locator('#upstream-export-content')).to_be_visible()
+        value = self.page.locator('#upstream-export-content').input_value()
+        self.assertEqual(value, response.text())
+        return value
+
+    def close_export(self):
+        from playwright.sync_api import expect
+        self.page.locator('#upstream-export-cancel').click()
+        expect(self.page.locator('#upstream-export-panel')).not_to_be_visible()
+        self.assert_cleared()
+
+    def assert_cleared(self):
+        self.assertEqual(self.page.evaluate("document.querySelector('#upstream-export-content')?.value || ''"), '')
+        self.assertNotIn(UUID, self.page.content())
+        self.assertNotIn(SHORT_ID, self.page.content())
+
+    def assert_private(self):
+        for instance in self.instances.values():
+            page = instance['page']
+            self.assertEqual(page.evaluate('Object.keys(localStorage).length+Object.keys(sessionStorage).length'), 0)
+            for secret in (UUID, SHORT_ID, PASSWORD, self.nodes[1]['stream_settings']['tls']['reality']['private_key']):
+                self.assertNotIn(secret, page.url)
+                self.assertNotIn(secret, instance['logpath'].read_text())
+                self.assertFalse(any(secret in message for message in self.console))
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self.external, [])
+
+    def test_real_tls_reality_uri_yaml_copy_download_and_target_import(self):
+        from playwright.sync_api import expect
+        from app.services.proxy_store import ProxyStore
+        from app.services.upstream_import import select_upstream
+        from app.models.database import Inbound
+        from app.services.tcp_upstream_export import tcp_upstream_profile
+        target = self.target['page']
+        target.goto(self.target['base'] + '/proxy')
+        expect(target.locator('#draft-mode')).to_contain_text('00')
+        source_before = self.source['context'].request.get(self.source['base'] + '/api/inbounds').json()
+        self.source['context'].grant_permissions(['clipboard-read', 'clipboard-write'], origin=self.source['base'])
+        expected_profiles = []
+        for node in (1, 2):
+            for fmt in ('uri', 'clash-yaml'):
+                with self.subTest(node=node, format=fmt):
+                    prior = len(self.export_requests)
+                    self.open_export(node, fmt)
+                    self.assertEqual(len(self.export_requests), prior)  # No implicit credential fetch.
+                    content = self.generate()
+                    request = self.export_requests[-1]
+                    self.assertEqual(request.method, 'POST')
+                    self.assertEqual(request.post_data_json, {'format': fmt, 'server': HOST, 'acknowledge_tcp_only': True})
+                    self.assertEqual(request.headers['x-vui-request'], '1')
+                    self.assertNotIn('?', request.url)
+                    self.assertIn(UUID, content)
+                    self.assertNotIn('private_key', content)
+                    self.assertNotIn('/private/', content)
+                    if fmt == 'uri':
+                        self.page.locator('#upstream-export-copy').click()
+                        expect(self.page.locator('#upstream-export-notice')).to_contain_text('已复制')
+                        transferred = self.page.evaluate('navigator.clipboard.readText()')
+                        self.assertEqual(transferred, content)
+                    with self.page.expect_download() as download:
+                        self.page.locator('#upstream-export-download').click()
+                    self.assertEqual(download.value.suggested_filename,
+                                     'upstream-tcp.yaml' if fmt == 'clash-yaml' else 'upstream-tcp.txt')
+                    downloaded = Path(download.value.path()).read_text()
+                    self.assertEqual(downloaded, content)
+                    self.page.wait_for_function('exportBlobAudit.created.every(url => exportBlobAudit.revoked.includes(url))')
+                    if fmt == 'clash-yaml':
+                        transferred = downloaded
+                        self.assertIs(__import__('yaml').safe_load(content)['udp'], False)
+                    target.locator('#relay-enabled').check()
+                    target.locator('#open-import').click()
+                    target.locator('#import-format').select_option(fmt)
+                    target.locator('#import-content').fill(transferred)
+                    target.locator('#preview-import').click()
+                    expect(target.locator('#import-preview')).to_be_visible()
+                    expect(target.locator('#save-import')).to_be_disabled()
+                    self.assertEqual(target.locator('#candidates input:checked').count(), 0)
+                    target.locator('#candidates input[value="0"]').check()
+                    target.locator('#save-import').click()
+                    expect(target.locator('#import-dialog')).not_to_be_visible()
+                    expect(target.locator('#notice')).to_contain_text('上游已保存')
+                    expect(target.locator('#import-content')).to_have_value('')
+                    canonical = tcp_upstream_profile(Inbound(**self.nodes[node - 1]), HOST).to_dict()
+                    self.assertEqual(select_upstream(content, 0, fmt).to_dict(), canonical)
+                    expected_profiles.append(canonical)
+                    saved = list(ProxyStore(self.target['directory'] / 'data').load_draft()['upstreams'].values())
+                    self.assertCountEqual(saved, expected_profiles)
+                    self.close_export()
+        snapshot = self.target['context'].request.get(self.target['base'] + '/api/proxy/settings').json()
+        self.assertEqual(len(snapshot['upstreams']), 4)
+        self.assertIs(snapshot['settings']['local_proxy_enabled'], False)
+        self.assertIs(snapshot['settings']['relay_enabled'], False)  # Import alone never applies or enables.
+        self.assertIsNone(snapshot['active'])
+        self.assertNotIn(UUID, json.dumps(snapshot))
+        self.assertEqual(self.source['context'].request.get(self.source['base'] + '/api/inbounds').json(), source_before)
+        self.assert_private()
+
+    def test_confirmation_changes_copy_failure_close_refresh_and_history_clear(self):
+        from playwright.sync_api import expect
+        self.open_export()
+        self.generate()
+        self.page.evaluate("Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: async () => {throw new Error('synthetic denial')}}})")
+        self.page.locator('#upstream-export-copy').click()
+        expect(self.page.locator('#upstream-export-notice')).to_contain_text('复制失败')
+        self.assertEqual(self.page.locator('#upstream-export-content').evaluate('(e) => e.selectionEnd - e.selectionStart'),
+                         len(self.page.locator('#upstream-export-content').input_value()))
+        self.page.locator('#upstream-export-server').fill('changed.example.test')
+        self.assert_cleared()
+        expect(self.page.locator('#upstream-export-ack')).not_to_be_checked()
+        self.page.locator('#upstream-export-ack').check()
+        self.generate()
+        self.page.locator('#upstream-export-format').select_option('clash-yaml')
+        self.assert_cleared()
+        expect(self.page.locator('#upstream-export-ack')).not_to_be_checked()
+        self.page.locator('#upstream-export-ack').check()
+        self.generate()
+        self.page.locator('#upstream-export-ack').uncheck()
+        self.assert_cleared()
+        self.page.locator('#upstream-export-ack').check()
+        self.generate()
+        self.page.keyboard.press('Escape')
+        expect(self.page.locator('#upstream-export-panel')).not_to_be_visible()
+        self.assert_cleared()
+        self.open_export(2)
+        self.generate()
+        self.page.reload()
+        expect(self.page.get_by_role('menuitem', name='入站节点', exact=True)).to_be_visible()
+        self.assert_cleared()
+        self.open_nodes()
+        self.open_export()
+        self.generate()
+        self.page.evaluate("dispatchEvent(new PopStateEvent('popstate'))")
+        expect(self.page.locator('#upstream-export-panel')).not_to_be_visible()
+        self.assert_cleared()
+        self.open_export()
+        self.generate()
+        self.page.get_by_role('button', name='刷新节点', exact=True).evaluate('(element) => element.click()')
+        expect(self.page.locator('#upstream-export-panel')).not_to_be_visible()
+        self.assert_cleared()
+        self.assert_private()
+
+    def test_real_ineligible_unknown_missing_invalid_and_permission_failures(self):
+        from playwright.sync_api import expect
+        for node in (3, 4):
+            self.open_export(node)
+            with self.page.expect_response(lambda response: '/api/subscription/upstream/' in response.url) as result:
+                self.page.locator('#upstream-export-request').click()
+            self.assertEqual(result.value.status, 409)
+            expect(self.page.locator('#upstream-export-error')).to_contain_text('不具备')
+            self.assert_cleared()
+            self.assertEqual(self.page.locator('#upstream-export-panel img').count(), 0)
+            self.close_export()
+        self.open_export(server='bad.example/path')
+        self.page.locator('#upstream-export-request').click()
+        expect(self.page.locator('#upstream-export-error')).to_contain_text('有效的字面主机')
+        self.assert_cleared()
+        self.close_export()
+        self.open_export()
+        self.generate()
+        def deny(route):
+            headers = dict(route.request.headers)
+            headers.pop('x-vui-request', None)
+            route.continue_(headers=headers)
+        self.source['context'].route('**/api/subscription/upstream/*', deny)
+        with self.page.expect_response(lambda response: '/api/subscription/upstream/' in response.url) as result:
+            self.page.locator('#upstream-export-request').click()
+        self.assertEqual(result.value.status, 403)
+        expect(self.page.locator('#upstream-export-error')).to_contain_text('无权导出')
+        self.assert_cleared()
+        self.source['context'].unroute('**/api/subscription/upstream/*', deny)
+        self.close_export()
+        with sqlite3.connect(self.source['directory'] / 'data/v-ui.db') as database:
+            database.execute('DELETE FROM inbounds WHERE id=1')
+        self.open_export()
+        with self.page.expect_response(lambda response: '/api/subscription/upstream/' in response.url) as result:
+            self.page.locator('#upstream-export-request').click()
+        self.assertEqual(result.value.status, 404)
+        expect(self.page.locator('#upstream-export-error')).to_contain_text('节点不存在')
+        self.assert_cleared()
+        self.close_export()
+        self.assert_private()
+
+    def test_real_response_cannot_restore_after_cancel_node_change_or_session_end(self):
+        from playwright.sync_api import expect
+        pending = []
+        def delay(route):
+            response = route.fetch()
+            self.assertEqual(response.status, 200)
+            pending.append((route, response))
+        def wait_pending():
+            deadline = time.monotonic() + 10
+            while not pending and time.monotonic() < deadline:
+                self.page.wait_for_timeout(20)
+            self.assertEqual(len(pending), 1)
+        self.source['context'].route('**/api/subscription/upstream/*', delay)
+        self.open_export()
+        self.page.locator('#upstream-export-request').click()
+        expect(self.page.locator('#upstream-export-request')).to_be_disabled()
+        self.page.locator('#upstream-export-request').evaluate('(button) => {button.click(); button.click()}')
+        wait_pending()
+        self.assertEqual(len(self.export_requests), 1)
+        self.close_export()
+        self.open_export(2)
+        route, response = pending.pop()
+        route.fulfill(response=response)
+        self.assert_cleared()
+        self.page.locator('#upstream-export-request').click()
+        wait_pending()
+        self.page.locator('#upstream-export-server').fill('new.example.test')
+        route, response = pending.pop()
+        route.fulfill(response=response)
+        self.assert_cleared()
+        self.page.locator('#upstream-export-ack').check()
+        self.page.locator('#upstream-export-request').click()
+        wait_pending()
+        # Real server logout revokes the cookie. The dashboard's own session
+        # revalidation then clears secrets before an older success can return.
+        logout = self.source['context'].request.post(self.source['base'] + '/api/auth/logout',
+            headers={'Origin': self.source['base'], 'X-VUI-Request': '1'})
+        self.assertEqual(logout.status, 200)
+        self.page.evaluate('void checkAdminSession(true, true)')
+        self.page.wait_for_url('**/login')
+        route, response = pending.pop()
+        route.fulfill(response=response)
+        self.assert_cleared()
+        self.assert_private()
+
+    def test_real_session_401_clears_displayed_export(self):
+        self.open_export()
+        self.generate()
+        logout = self.source['context'].request.post(self.source['base'] + '/api/auth/logout',
+            headers={'Origin': self.source['base'], 'X-VUI-Request': '1'})
+        self.assertEqual(logout.status, 200)
+        self.page.locator('#upstream-export-request').click()
+        self.page.wait_for_url('**/login')
+        self.assert_cleared()
+        self.assert_private()
+
+
+if __name__ == '__main__':
+    unittest.main()

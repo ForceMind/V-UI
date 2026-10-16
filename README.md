@@ -9,7 +9,7 @@
 
 **正式版 v0.4.8；主线含后续未发布功能** · FastAPI + SQLite · 中文网页后台 · Linux x86_64 / ARM64
 
-当前正式版 [v0.4.8](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8) 于 2026-10-15 从 `a9f9b5d9c0dd2aada5e8f5f2270b2ce93440d5ff` 发布，仅修复安装入口的退出码、临时目录生命周期和引导失败拦截；见[安装器修复边界](docs/INSTALLER_EXIT_STATUS_048.md)。其后双开关“代理与中转”已在准确主线 `9a97ad13` 完成[独立验收](https://github.com/ForceMind/V-UI/pull/44)，但不包含在该已发布版本中。当前继续 [UDP / DNS 与导入保真门槛](docs/UDP_DNS_CAPABILITY_GATES.md)，不覆盖旧版本或预称新增 UDP 资格。
+当前正式版 [v0.4.8](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8) 于 2026-10-15 从 `a9f9b5d9c0dd2aada5e8f5f2270b2ce93440d5ff` 发布，仅修复安装入口的退出码、临时目录生命周期和引导失败拦截；见[安装器修复边界](docs/INSTALLER_EXIT_STATUS_048.md)。其后双开关“代理与中转”已在准确主线 `9a97ad13` 完成[独立验收](https://github.com/ForceMind/V-UI/pull/44)，但不包含在该已发布版本中。[UDP / DNS 与导入保真门槛](docs/UDP_DNS_CAPABILITY_GATES.md)已在 `13c884a` 完成[独立验收](https://github.com/ForceMind/V-UI/pull/46)。当前新增独立“[导出为中转上游（仅 TCP）](docs/TCP_UPSTREAM_EXPORT.md)”功能并按 [D1 契约](docs/TCP_UPSTREAM_EXPORT_CONTRACT.md)验收，不覆盖旧版本或预称新增 UDP 资格。
 
 [下载与发布](https://github.com/ForceMind/V-UI/releases) · [快速安装](#快速安装) · [协议范围](#协议与客户端支持) · [终端菜单](#终端运维菜单) · [完整文档](docs/README.md) · [报告问题](https://github.com/ForceMind/V-UI/issues)
 

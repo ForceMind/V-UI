@@ -18,7 +18,7 @@ const request = async (url) => {requests.push(url); return {data: []};};
 const sandbox = {
   addEventListener() {}, location: {hash: ''},
   Vue: {createApp(options) {setup = options.setup; return app;}, ref: value => ({value}),
-    reactive: value => value, computed: fn => ({get value() {return fn();}}), onMounted() {}},
+    reactive: value => value, computed: fn => ({get value() {return fn();}}), watch(){},onMounted() {}},
   ElementPlus: {ElMessage: {success: message => messages.push(message),
     error: message => messages.push(message), warning: message => messages.push(message)}, ElMessageBox: {}},
   ElementPlusIconsVue: {},
