@@ -93,7 +93,7 @@ QUIC 传输 UDP、SOCKS5 UDP ASSOCIATE 建立、配置 parser 成功、TCP liste
 
 固定源码依据：[Mihomo executor.ApplyConfig](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/hub/executor/executor.go)、[tunnel 状态处理](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/tunnel/tunnel.go)、[SOCKS 握手](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/listener/socks/tcp.go)、[main 初始化与 post-up 时序](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/main.go)。后续修复的真实结果由独立 PR 登记，不能以本段源码推断替代实际运行。
 
-### 7.2 精确启动门槛与独立机制复现
+### 7.2 首次局部修复与独立机制复现（历史候选）
 
 修复仅影响本文件新增测试的 Mihomo fixture。使用固定二进制已有 `-post-up`：`hub.Parse` / `ApplyConfig` / `OnRunning` 完成后，静态本地 `printf` 最后写入每代唯一临时文件及 shell 的父 PID。等待逻辑核对该代路径、完整 PID 与核心仍存活；旧文件、错误 PID、部分内容、退出或 deadline 都不能授予 readiness。它不是固定延时或业务请求重试，不修改二进制、系统设置、通用旧 helper 或用户导入能力，也不执行导入内容/provider 脚本。
 
@@ -102,3 +102,13 @@ QUIC 传输 UDP、SOCKS5 UDP ASSOCIATE 建立、配置 parser 成功、TCP liste
 新增失败上下文保留并重新抛原异常，记录脱敏核心日志、进程/PID/端口、当前与期望的 HTTP/DNS/UDP 差额，以及目标 TLS accept/握手/错误/关闭时间线；不清除未满足期望。原 54 场景的 HTTPS/DNS 正向对照、单次 UDP、完整负向观察与清理审计均保持。
 
 此时专项共有 22 个方法：13 helper、1 parser（6 组合）、原 7 个真实 UDP 方法（54 场景）、1 个独立启动机制方法。parser/helper 默认运行结果为 14 pass / 8 显式 skip；独立机制的本地真实通过单独登记，不挪入 54。修复提交仍须独审、完整套件、准确候选和合并后主线的八组 CI，不能继承 PR #45 或单独机制通过。
+
+### 7.3 共用生命周期修复与旧门槛回归
+
+[PR #46](https://github.com/ForceMind/V-UI/pull/46) 首候选 `4c2ebff9ee2603bb9f9d8be3aa18dc8ef492046d` / tree `5de0541ce36ffcd8421eeb8cca02bf9cc331e9ee` 的八工作流最终为七成功、一失败，全部 attempt 1，未重跑覆盖。其[独立 loopback 任务](https://github.com/ForceMind/V-UI/actions/runs/38901890566)中第一集合 123 项通过（包含新增 54 场景及初始化机制）；随后旧双跳 26 项中的上游停止/恢复负例在 Mihomo、正常停止子例缺少必需的 `connect: connection refused` 新鲜证据，故失败。观察进程的新鲜日志为空，不能据此声称请求从未到达、发生泄漏或认定唯一根因。该候选未合并；第一集合通过不能替代旧门槛。
+
+第二次修复将已复现的 `ReadyMihomoProcess` / `await_mihomo_ready` 移至共用 `tests/proxy_loopback_support.py`，所有已审 Mihomo 客户端构造点显式选择它，包括 `mihomo-uri`、托管证书流程、双跳工厂及其应用/严格导出/UDP 派生 fixture。负例为隔离证据而重启同一个对象时，也必须重新取得当前 PID、当前代唯一标记；不复用旧标记。通用 `CoreProcess`、sing-box/Xray 启动、QUIC 服务端和 parser/version 检查语义不变。不依赖可执行文件名猜测、不增加固定等待时间、不重发业务请求。
+
+旧双跳拒绝检查同步使用共用严格日志切片：跨越 offset 的旧部分行丢弃，新未换行末行暂不可作为原因，只有新完整行能匹配本次明确拒绝。`connection-refused`、认证/x509 原因、目标零送达、无普通 DNS/DIRECT 兜底及最终 drain 仍是硬门槛。缺少原因时记录脱敏进程/PID/端口/标记、核心日志和原单次请求异常，不用诊断收集失败取代原断言，也不清除生命周期账本。
+
+静态调用清单审计与 helper 单元仅证明接入和失败语义，不能当作真实核心转发成功。准确修复候选必须重新完成全部旧/新核心、浏览器、完整套件及八工作流；正常合并后再次验收准确主线和同提交四目标资产。最终 SHA、计数与原失败/修复结果记录在 PR #46，不提前授予资格；产品功能、版本与发布范围均不因此扩大。

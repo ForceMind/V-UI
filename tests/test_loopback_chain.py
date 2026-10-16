@@ -1,4 +1,5 @@
 """rc.1: real TLS/proxy/DNS tests using the actual scoped subscription response."""
+from proxy_loopback_support import ReadyMihomoProcess
 from contextlib import ExitStack
 from copy import deepcopy
 import json
@@ -99,7 +100,7 @@ class LoopbackChainTests(unittest.TestCase):
         if not trust:
             other,_,_=certificate_files(self.root,'untrusted')
             env['SSL_CERT_FILE']=str(other)
-        self.client_core=CoreProcess(self.stack,[os.environ['VUI_TEST_MIHOMO'],'-d',str(self.root/'client-data'),'-f',str(path)],self.root/'client.log',env)
+        self.client_core=ReadyMihomoProcess(self.stack,[os.environ['VUI_TEST_MIHOMO'],'-d',str(self.root/'client-data'),'-f',str(path)],self.root/'client.log',env)
         self.client_core.start(self.proxy_port)
         # Wait for the actual DNS listener separately from the TCP proxy listener.
         deadline=time.monotonic()+5

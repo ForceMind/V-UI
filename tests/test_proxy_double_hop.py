@@ -13,6 +13,7 @@ separate transaction suite owns journal/active-revision and rollback assertions.
 from contextlib import ExitStack, contextmanager
 from collections import Counter
 from copy import deepcopy
+import base64
 import hashlib
 import http.client
 import json
@@ -43,7 +44,7 @@ from reality_helpers import (
 from test_reality_preflight_loopback import keypair, safe_log
 from proxy_loopback_support import (
     BODY, DENIED, DIRECT_EGRESS, DOH, INGRESS, SNI, TARGET, UPSTREAM,
-    UPSTREAM_EGRESS, BoundCoreProcess, BusinessAnswers, DeliveryEvidence, Traffic, ProxyRejected,
+    UPSTREAM_EGRESS, BoundCoreProcess, ReadyMihomoProcess, fresh_lines, BusinessAnswers, DeliveryEvidence, Traffic, ProxyRejected,
     doh_target, https_control, https_target, https_through, listen_port,
     ordinary_dns_target, tunnel, udp_target, udp_through,
 )
@@ -187,6 +188,67 @@ class ProxyFixtureTests(unittest.TestCase):
                     case.rejection(request, case.ingress, ("unknown uuid",), timeout=.1)
                 self.assertEqual(calls, [True])
                 case.evidence.assert_exact(self)
+
+    def test_rejection_discards_an_old_partial_line_even_when_suffix_matches(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary)/"ingress.log"
+            path.write_text("OLD REQUEST incomplete prefix: ")
+            case, _ = self.rejection_fixture(path)
+            calls = []
+            original = ProxyRejected("SOCKS association failed before UDP send")
+            def request():
+                calls.append(True)
+                with path.open("a") as log:
+                    log.write("network=udp action=reject\n")
+                raise original
+            with self.assertRaisesRegex(AssertionError, "No fresh actual rejection reason") as caught:
+                case.rejection(request, case.ingress, ("network=udp", "reject"), timeout=.05)
+            self.assertEqual(calls, [True])
+            self.assertIs(caught.exception.__cause__, original)
+            self.assertIn("OLD REQUEST incomplete prefix", caught.exception.__notes__[0])
+            case.evidence.assert_exact(self)
+
+    def test_rejection_diagnostic_failure_preserves_missing_reason_and_request_cause(self):
+        for broken in ("context", "sanitizer"):
+            with self.subTest(component=broken), tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary)/"ingress.log"
+                path.write_text("")
+                case, _ = self.rejection_fixture(path)
+                original = ssl.SSLEOFError("client closed before the required upstream reason")
+                calls = []
+                def request():
+                    calls.append(True)
+                    raise original
+                unavailable = lambda *args: (_ for _ in ()).throw(OSError("log unavailable"))
+                if broken == "context":
+                    case.rejection_failure_context = unavailable
+                else:
+                    case.sanitized = unavailable
+                with self.assertRaisesRegex(AssertionError, "No fresh actual rejection reason") as caught:
+                    case.rejection(request, case.ingress, ("connect: connection refused",), timeout=.01)
+                self.assertIs(caught.exception.__cause__, original)
+                self.assertEqual(calls, [True])
+                self.assertIn("diagnostic collection failed", caught.exception.__notes__[0])
+
+    def test_rejection_failure_context_redacts_fake_identity_and_auth_values(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary)/"ingress.log"
+            basic = base64.b64encode((USERNAME + ":" + PASSWORD).encode()).decode()
+            secrets = (INGRESS_UUID, UPSTREAM_UUID, WRONG_UUID, USERNAME, PASSWORD, basic,
+                       "fake-private-key", "fake-public-key", "fake-wrong-public-key")
+            path.write_text("connect: connection refused " + " ".join(secrets) + "\n")
+            case, _ = self.rejection_fixture(path)
+            del case.sanitized  # Exercise the actual fixture's redaction.
+            case.private_key, case.public_key, case.wrong_public_key = secrets[-3:]
+            child = SimpleNamespace(pid=4321, poll=lambda: None)
+            case.ingress.process = child
+            case.ingress.fixture_endpoint = (INGRESS, 18080)
+            message = case.rejection_failure_context(case.ingress, ProxyRejected(" ".join(secrets)), lambda: None)
+            for secret in secrets:
+                self.assertNotIn(secret, message)
+            self.assertIn("connect: connection refused", message)
+            self.assertIn('"pid": 4321', message)
+            self.assertIn('"endpoint": ["127.0.0.1", 18080]', message)
 
     def test_dns_deadline_requires_the_failed_lookup_and_requested_name(self):
         for fresh in ("connection: context deadline exceeded\n",
@@ -459,7 +521,9 @@ class DoubleHopFixture(unittest.TestCase):
         return self.root/f"{self.sequence:04d}-{name}.{suffix}"
 
     def sanitized(self, text):
-        return safe_log(text, (self.private_key, self.public_key, self.wrong_public_key))
+        basic = base64.b64encode((USERNAME + ":" + PASSWORD).encode()).decode()
+        return safe_log(text, (self.private_key, self.public_key, self.wrong_public_key,
+                              INGRESS_UUID, UPSTREAM_UUID, WRONG_UUID, USERNAME, PASSWORD, basic))
 
     def logs(self):
         return self.sanitized("\n".join(path.name + ":\n" + path.read_text(errors="replace")
@@ -479,7 +543,8 @@ class DoubleHopFixture(unittest.TestCase):
             command = [self.singbox, "run", "-c", str(path)]
         result = subprocess.run(check, text=True, capture_output=True, timeout=15, env=env or self.env)
         self.assertEqual(result.returncode, 0, self.sanitized(result.stdout + result.stderr))
-        return BoundCoreProcess(self.stack, command, self.path(label, "log"), env or self.env)
+        process_class = ReadyMihomoProcess if client == "mihomo" else BoundCoreProcess
+        return process_class(self.stack, command, self.path(label, "log"), env or self.env)
 
     def start_process(self, process, port, host=INGRESS):
         process.fixture_endpoint = (host, port)
@@ -670,15 +735,16 @@ class DoubleHopFixture(unittest.TestCase):
             self.evidence.expect_dns(request.dns_name)
         # A late log flush must never create another network request or another
         # expected DNS pair. Missing/wrong evidence is a failure of this request.
+        request_error = None
         try:
             result = request()
-        except (OSError, http.client.HTTPException):
-            pass
+        except (OSError, http.client.HTTPException) as exc:
+            request_error = exc
         else:
             self.fail("Rejected operation unexpectedly succeeded: " + repr(result))
         while True:
             self.evidence.assert_targets(self, baseline)
-            fresh = process.log_path.read_text(errors="replace")[offset:].lower()
+            fresh = "\n".join(fresh_lines(process.log_path, offset))
             lines = [line for line in fresh.splitlines() if all(reason in line for reason in reasons)]
             if lines:
                 self.evidence.assert_targets(self, baseline)
@@ -689,8 +755,35 @@ class DoubleHopFixture(unittest.TestCase):
                 print("double-hop refusal: " + self.sanitized(lines[-1]))
                 return fresh
             if time.monotonic() >= deadline:
-                self.fail("No fresh actual rejection reason " + repr(reasons) + ":\n" + self.sanitized(fresh))
+                failure = AssertionError("No fresh actual rejection reason " + repr(reasons))
+                try:
+                    failure.add_note(self.sanitized("Fresh complete lines:\n" + fresh) + "\n"
+                                     + self.rejection_failure_context(process, request_error, request))
+                except Exception as diagnostic_error:
+                    failure.add_note("Rejection diagnostic collection failed: " + type(diagnostic_error).__name__)
+                raise failure from request_error
             time.sleep(.05)
+
+    def rejection_failure_context(self, observed_process, request_error, request):
+        """Failure-only, sanitized lifecycle evidence; never a substitute reason."""
+        processes = list(getattr(self, "core_processes", [])) + [observed_process]
+        if self.ingress:
+            processes.append(self.ingress)
+        unique = {process.log_path: process for process in processes}
+        status = []
+        logs = []
+        for path, process in unique.items():
+            child = getattr(process, "process", None)
+            status.append({"log": path.name, "pid": getattr(child, "pid", None),
+                           "returncode": child.poll() if child else None,
+                           "endpoint": getattr(process, "fixture_endpoint", None),
+                           "ready_marker": str(getattr(process, "ready_marker", None))})
+            logs.append(path.name + ":\n" + path.read_text(errors="replace"))
+        details = {"request_error_type": type(request_error).__name__,
+                   "request_error": str(request_error), "dns_name": getattr(request, "dns_name", None),
+                   "state": getattr(self, "current_state", None), "cores": status}
+        return self.sanitized("Rejection failure context: " + json.dumps(details, sort_keys=True)
+                              + "\n" + "\n".join(logs))
 
     def negative_request(self, port=None, *, auth=AUTH, protocol="socks5h", host=TARGET, target_port=None, timeout=3):
         def request():

@@ -116,7 +116,7 @@ class DatagramFixtureTests(unittest.TestCase):
                 owner.process = fake
             real_wait = await_mihomo_ready
             with patch.object(BoundCoreProcess, "start", tcp_only_start), \
-                 patch("udp_dns_capability_helpers.await_mihomo_ready",
+                 patch("proxy_loopback_support.await_mihomo_ready",
                        side_effect=lambda proc, path: real_wait(proc, path, timeout=.02)):
                 with self.assertRaisesRegex(AssertionError, "deadline exceeded"):
                     process.start(18080)
@@ -680,14 +680,6 @@ class DualSwitchDatagramRejectionTests(double_hop.DoubleHopFixture):
         with patch.object(proxy_support, "tracked_https_server",
                           lambda *args: recording_https_server(*args, trace=self.lifecycle)):
             super().setUp()
-
-    def process(self, label, config, *, client="singbox", env=None):
-        if client == "mihomo":
-            # Limit the startup barrier to this independent fixture. The
-            # existing general-purpose helper and fixed binary stay unchanged.
-            with patch.object(double_hop, "BoundCoreProcess", ReadyMihomoProcess):
-                return super().process(label, config, client=client, env=env)
-        return super().process(label, config, client=client, env=env)
 
     def start_process(self, process, port, host=CLIENT):
         self.lifecycle.record("core.start", log=process.log_path.name, endpoint=(host, port))

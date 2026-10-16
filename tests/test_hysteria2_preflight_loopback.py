@@ -4,6 +4,7 @@ Only HTTP/TCP payloads are tested. QUIC itself requires a UDP listener; that
 socket is not evidence of forwarded-UDP support. No obfs, hop, bandwidth, ALPN
 or fingerprint overrides are supplied: the existing pinned defaults are used.
 """
+from proxy_loopback_support import ReadyMihomoProcess
 from contextlib import ExitStack
 import http.client
 import json
@@ -214,7 +215,7 @@ class Hysteria2PreflightLoopbackTests(unittest.TestCase):
                     for mutation in ((None, failure) if failure else (None,)):
                         port = unused_port()
                         command, env = self.prepare_client(client, port, server_port, failure=mutation)
-                        process = CoreProcess(processes, command, self.unique_path(client, "log"), env)
+                        process = (ReadyMihomoProcess if client in ("mihomo", "mihomo-uri") else CoreProcess)(processes, command, self.unique_path(client, "log"), env)
                         try:
                             process.start(port)
                             if mutation is None:

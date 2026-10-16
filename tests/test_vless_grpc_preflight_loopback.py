@@ -6,6 +6,7 @@ TLS probe proves that the real server negotiates h2; successful requests then
 exercise each real client's gRPC transport without an intermediary or DIRECT
 fallback. No custom HTTP authority behavior is claimed.
 """
+from proxy_loopback_support import ReadyMihomoProcess
 from contextlib import ExitStack
 import http.client
 from itertools import product
@@ -290,7 +291,7 @@ class VLESSGRPCPreflightLoopbackTests(unittest.TestCase):
                             client, port, server_port, fingerprint=fingerprint,
                             alpn=alpn, failure=mutation, service_name=service_name,
                         )
-                        process = CoreProcess(processes, command, self.unique_path(client, "log"), env)
+                        process = (ReadyMihomoProcess if client in ("mihomo", "mihomo-uri") else CoreProcess)(processes, command, self.unique_path(client, "log"), env)
                         try:
                             process.start(port)
                             if mutation is None:

@@ -6,6 +6,7 @@ or fingerprint tuning is supplied. ALPN h3 is explicit and zero-RTT is off.
 TUIC v5 is selected by UUID/password. Mihomo advertises UDP capability even
 with udp:false; this fixture tests HTTP/TCP only and makes no UDP claim.
 """
+from proxy_loopback_support import ReadyMihomoProcess
 from contextlib import ExitStack
 import http.client
 import json
@@ -224,7 +225,7 @@ class TUICPreflightLoopbackTests(unittest.TestCase):
                     for mutation in ((None, failure) if failure else (None,)):
                         port = unused_port()
                         command, env = self.prepare_client(client, port, server_port, failure=mutation)
-                        process = CoreProcess(processes, command, self.unique_path(client, "log"), env)
+                        process = (ReadyMihomoProcess if client in ("mihomo", "mihomo-uri") else CoreProcess)(processes, command, self.unique_path(client, "log"), env)
                         try:
                             process.start(port)
                             if mutation is None:

@@ -1,4 +1,5 @@
 """v0.4.2: actual sing-box VMess/TLS server and Mihomo client paths."""
+from proxy_loopback_support import ReadyMihomoProcess
 from contextlib import ExitStack
 from copy import deepcopy
 import json
@@ -153,7 +154,7 @@ class VMessLoopbackTests(unittest.TestCase):
         if not trust:
             other,_,_=certificate_files(self.root,"untrusted")
             env["SSL_CERT_FILE"]=str(other)
-        process=CoreProcess(
+        process=ReadyMihomoProcess(
             self.stack,
             [os.environ["VUI_TEST_MIHOMO"],"-d",str(self.root/("mihomo-data-"+str(port))),
              "-f",str(path)],

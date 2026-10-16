@@ -3,6 +3,7 @@
 No application compiler/exporter is enabled. Provider `-t` is deliberately not
 called proof of URI payload support. Runtime is required in real isolated CI.
 """
+from proxy_loopback_support import ReadyMihomoProcess
 from contextlib import ExitStack
 import http.client
 import json
@@ -168,7 +169,7 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
                         with ExitStack() as client_stack:
                             port = unused_port()
                             command, env = self.prepare_client(client, port, server_port, failure=mutation)
-                            process = CoreProcess(client_stack, command, self.unique_path(client, 'log'), env)
+                            process = ReadyMihomoProcess(client_stack, command, self.unique_path(client, 'log'), env)
                             process.start(port)
                             if mutation is None:
                                 self.assert_success(port)
@@ -214,7 +215,7 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
                 recorder_port, observations = start_protocol_recorder(observation_stack, self.cert, self.key)
                 port = unused_port()
                 command, env = self.prepare_client(client, port, recorder_port, httpupgrade=True)
-                process = CoreProcess(client_stack, command, self.unique_path('wire-'+client, 'log'), env)
+                process = ReadyMihomoProcess(client_stack, command, self.unique_path('wire-'+client, 'log'), env)
                 process.start(port)
                 start = time.monotonic()
                 deadline, next_request = start+12, start
@@ -341,7 +342,7 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
                         with ExitStack() as client_stack:
                             port = unused_port()
                             command, env = self.prepare_client(client, port, server_port, httpupgrade=True)
-                            process = CoreProcess(client_stack, command, self.unique_path('gap-'+client, 'log'), env)
+                            process = ReadyMihomoProcess(client_stack, command, self.unique_path('gap-'+client, 'log'), env)
                             process.start(port)
                             if upgrade and client == 'mihomo-uri':
                                 baseline = len(self.requests)

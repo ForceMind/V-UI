@@ -12,6 +12,7 @@ from collections import Counter
 from http import client as http_client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
+import shlex
 import socket
 import socketserver
 import ssl
@@ -446,3 +447,60 @@ class BoundCoreProcess(CoreProcess):
             except OSError:
                 time.sleep(.03)
         raise AssertionError("Core listener not ready: " + self.log_path.read_text(errors="replace"))
+
+
+def await_mihomo_ready(process, marker, *, timeout=5):
+    """Wait for one incarnation's post-up, never retry an application request.
+
+    Fixed v1.19.32 main.go executes post-up only after hub.Parse returns;
+    executor.ApplyConfig has already called tunnel.OnRunning at that point.
+    A listening mixed socket (or a successful SOCKS reply) precedes OnRunning.
+    The shell's PPID ties this fresh marker to the exact child being checked.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        status = process.poll()
+        if status is not None:
+            raise AssertionError(f"Mihomo exited before post-up readiness: pid={process.pid} status={status}")
+        if marker.exists():
+            value = marker.read_text()
+            if value == f"{process.pid}\n":
+                if process.poll() is not None:
+                    raise AssertionError("Mihomo exited as its readiness marker arrived")
+                return
+            if value.endswith("\n"):
+                raise AssertionError("Mihomo readiness marker belongs to another process: " + repr(value))
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"Mihomo post-up readiness deadline exceeded: pid={process.pid}")
+        time.sleep(min(.01, max(0, deadline - time.monotonic())))
+
+
+class ReadyMihomoProcess(BoundCoreProcess):
+    """Test-only startup barrier using the fixed binary's supported post-up hook."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.base_command = list(self.command)
+        self.generation = 0
+        self.ready_marker = None
+
+    def start(self, port, host=INGRESS):
+        self.generation += 1
+        marker = self.log_path.with_name(self.log_path.name + f".ready-{self.generation}")
+        if marker.exists():
+            raise AssertionError("Refusing a pre-existing Mihomo readiness marker: " + str(marker))
+        self.ready_marker = marker
+        # ExecShell captures successful stdout; write only to this temporary
+        # fixture file. No controller, credentials, host setting or network I/O.
+        hook = "printf '%s\\n' \"$PPID\" > " + shlex.quote(str(marker))
+        self.command = self.base_command + ["-post-up", hook]
+        super().start(port, host)
+        await_mihomo_ready(self.process, marker)
+
+
+def fresh_lines(path, offset):
+    """Only newline-terminated records wholly after the checkpoint qualify."""
+    text = path.read_text(errors="replace")
+    fresh = text[offset:]
+    if offset and text[offset - 1:offset] != "\n":
+        fresh = fresh.partition("\n")[2]
+    return fresh.lower().split("\n")[:-1]
