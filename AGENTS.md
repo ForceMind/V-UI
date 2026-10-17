@@ -2,7 +2,7 @@
 
 ## 2026-10-17 D2 共享 mux 有界生命周期实验
 
-用户继续授权下，从准确实验 `160cfdc` 独立分支 `experiment/xudp-mux-lifecycle-20261017` 验证共享 writer 的有界排队、关联取消与帧完整性。固定源码/pin、产品 UDP 关闭、禁止合并不完整实验和发布部署的边界不变。先审 [机制合同](experiments/xudp_mux/DESIGN.md)，再准确提交 race/debug/真实 ConnectionManager 与独立审查；机制绿灯不替代官方客户端/TLS/VMess 运行时资格。保留此前全部失败与原断言，不上传实验核心。
+用户继续授权下，从准确实验 `160cfdc` 独立分支 `experiment/xudp-mux-lifecycle-20261017` 验证共享 writer 的有界排队、关联取消与帧完整性。固定源码/pin、产品 UDP 关闭、禁止合并不完整实验和发布部署的边界不变。先审 [机制合同](experiments/xudp_mux/DESIGN.md)，再准确提交 race/debug/真实 ConnectionManager 与独立审查；机制绿灯不替代官方客户端/TLS/VMess 运行时资格。保留此前全部失败与原断言。用户已明确允许本次源码补丁、route 补丁及测试文本提交该公开隔离分支；不得上传实验二进制，不发布、不部署。
 
 ## 2026-10-16 D2 隔离源码地址实验
 

@@ -55,3 +55,76 @@ jobs:
           path: /tmp/vui-xudp-mux/evidence
           retention-days: 7
           if-no-files-found: warn
+
+  runtime-matrix:
+    needs: mux-experiment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing-box
+          ref: af6e64c3b69e6132ebaee0e1a3d24e93903f6709
+          path: .experiment-source/sing-box
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing-vmess
+          ref: 31ec11e8790c48a4bf11711806a61e929ee6b89d
+          path: .experiment-source/sing-vmess
+          persist-credentials: false
+      - name: Use the existing fixed runner Go compiler
+        run: |
+          set -euo pipefail
+          GO_BIN="$RUNNER_TOOL_CACHE/go/1.25.14/x64/bin"
+          test "$(GOTOOLCHAIN=local "$GO_BIN/go" version)" = 'go version go1.25.14 linux/amd64'
+          printf '%s\n' "$GO_BIN" >> "$GITHUB_PATH"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: vui-xudp-mux-evidence
+          path: /tmp/vui-xudp-mux-mechanism
+      - name: Install existing test dependencies and verify runtime controls
+        run: |
+          pip install -r requirements-test.txt
+          python3 - <<'PY'
+          import unittest
+          suite = unittest.TestLoader().discover('experiments/xudp_mux/runtime', pattern='test_*.py')
+          assert suite.countTestCases() == 26, 'Missing or unexpected runtime controls'
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          assert result.wasSuccessful() and not result.skipped
+          PY
+      - name: Fetch unchanged official peer and device binaries
+        run: |
+          python3 scripts/fetch_test_cores.py /tmp/vui-xudp-mux-official/cores
+          python3 scripts/fetch_mihomo.py /tmp/vui-xudp-mux-official/client
+      - name: Build runtime candidates and require exact mechanism source equivalence
+        run: |
+          python3 experiments/xudp_mux/runtime/build_candidates.py             --sing-box .experiment-source/sing-box             --sing-vmess .experiment-source/sing-vmess             --output /tmp/vui-xudp-mux-candidates
+          python3 experiments/xudp_mux/runtime/compare_mechanism.py             --mechanism /tmp/vui-xudp-mux-mechanism             --candidates /tmp/vui-xudp-mux-candidates
+      - name: Run original RED ledger and real lifecycle VMess and shared TCP compatibility
+        env:
+          VUI_TEST_CORES: /tmp/vui-xudp-mux-official/cores
+          VUI_TEST_MIHOMO: /tmp/vui-xudp-mux-official/client/mihomo
+        run: |
+          export VUI_DATA_DIR="$(mktemp -d)"
+          python3 experiments/xudp_mux/runtime/run_matrix.py             --candidates /tmp/vui-xudp-mux-candidates             --output /tmp/vui-xudp-mux-runtime
+      - name: Prepare strictly allowlisted runtime text evidence
+        if: always()
+        id: evidence
+        run: |
+          python3 experiments/xudp_mux/runtime/prepare_evidence.py             --runtime /tmp/vui-xudp-mux-runtime             --build /tmp/vui-xudp-mux-candidates/evidence             --output /tmp/vui-xudp-mux-runtime-upload
+      - name: Preserve runtime evidence without experimental binaries
+        if: ${{ !cancelled() && steps.evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vui-xudp-mux-runtime-evidence
+          path: /tmp/vui-xudp-mux-runtime-upload
+          retention-days: 7
+          if-no-files-found: error
