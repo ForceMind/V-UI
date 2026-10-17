@@ -490,10 +490,10 @@ index 6e72c20..584e0ce 100644
  func (c *serverMuxPacketConn) LocalAddr() net.Addr {
 diff --git a/mux_writer.go b/mux_writer.go
 new file mode 100644
-index 0000000..060379f
+index 0000000..df40bb1
 --- /dev/null
 +++ b/mux_writer.go
-@@ -0,0 +1,207 @@
+@@ -0,0 +1,215 @@
 +package vmess
 +
 +// Isolated experiment. One bounded owner for the shared parent byte stream.
@@ -663,11 +663,7 @@ index 0000000..060379f
 +            op:=&muxWrite{stream:s,frame:frame.Bytes(),done:make(chan struct{})}
 +            s.pending=op;c.queue=append(c.queue,op)
 +            c.changedLocked();c.streamAccess.Unlock()
-+            select {
-+            case <-op.done:return op.err
-+            case <-s.done:return net.ErrClosed
-+            case <-c.ctx.Done():return net.ErrClosed
-+            }
++            return op.wait(s.done,c.ctx.Done())
 +        }
 +        changed:=c.changed;c.streamAccess.Unlock()
 +        select {case <-changed:case <-s.done:return net.ErrClosed;case <-c.ctx.Done():return net.ErrClosed}
@@ -700,4 +696,16 @@ index 0000000..060379f
 +        c.streamAccess.Lock();c.finishLocked(op,err);c.streamAccess.Unlock()
 +        if err!=nil {c.cancel(err);return}
 +    }
++}
++
++// A completion already linearized under streamAccess wins over a later Close.
++// Conversely finishLocked preserves canceled=true when Close won first.
++func (op *muxWrite) wait(streamDone,parentDone <-chan struct{}) error {
++    select {case <-op.done:return op.err;default:}
++    select {
++    case <-op.done:return op.err
++    case <-streamDone:
++    case <-parentDone:
++    }
++    select {case <-op.done:return op.err;default:return net.ErrClosed}
 +}

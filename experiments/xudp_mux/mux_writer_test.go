@@ -63,7 +63,7 @@ func TestMuxBoundedQueuedCancel(t *testing.T){
  h:=newHarness(t);a:=h.udp(1);b:=h.udp(2);d1:=writeUDP(a,[]byte("first"));await(t,func()bool{return h.server.active.Load()==1},"first inflight");d2:=writeUDP(b,[]byte("must-not-be-written"));await(t,func()bool{_,f,_:=h.stats();return f==2},"queued second")
  _=b.Close();result(t,d2,true);f:=h.read();if f.id!=1||string(f.data)!="first"{t.Fatal("first changed")};result(t,d1,false);f=h.read();if f.id!=2||f.status!=StatusEnd{t.Fatal("queued data not withdrawn")};h.assertBound()
 }
-func TestMuxBoundedPartialFrameCancel(t *testing.T){for _,prefix:=range []int{1,4,14}{t.Run(string(rune('a'+prefix)),func(t *testing.T){
+func TestMuxBoundedPartialFrameCancel(t *testing.T){for _,prefix:=range []int{1,4,22}{t.Run(string(rune('a'+prefix)),func(t *testing.T){
  h:=newHarness(t);c:=h.udp(8);payload:=bytes.Repeat([]byte("x"),128);done:=writeUDP(c,payload);head:=make([]byte,prefix);_=h.client.SetReadDeadline(time.Now().Add(bound));if _,err:=io.ReadFull(h.client,head);err!=nil{t.Fatal(err)};_=h.client.SetReadDeadline(time.Time{});_=c.Close();result(t,done,true)
  // Feed consumed prefix back into the parser without changing the actual writer.
  h.client=&prefixConn{Conn:h.client,reader:io.MultiReader(bytes.NewReader(head),h.client)}
@@ -149,4 +149,10 @@ func TestMuxBoundedSameIDNewPayloadBeforeOldEnd(t *testing.T){
 func TestMuxBoundedCanceledBufferOwnership(t *testing.T){
  h:=newHarness(t);c:=h.udp(1);buffer:=buf.NewSize(64);_,_=buffer.WriteString("packet-owned-copy");callerBytes:=buffer.Bytes();done:=make(chan error,1);go func(){done<-c.WritePacket(buffer,target)}();await(t,func()bool{return h.server.active.Load()==1},"packet buffer inflight");_=c.Close();result(t,done,true);buffer.Leak();for i:=range callerBytes{callerBytes[i]='z'}
  f:=h.read();if string(f.data)!="packet-owned-copy"{t.Fatal("writer retained released caller buffer")};if h.read().status!=StatusEnd{t.Fatal("missing End")}
+}
+
+func TestMuxBoundedCompletionBeforeCloseReportsSuccess(t *testing.T){
+ done:=make(chan struct{});close(done);closed:=make(chan struct{});close(closed)
+ op:=&muxWrite{done:done};if err:=op.wait(closed,closed);err!=nil{t.Fatal("later Close hid completed bytes",err)}
+ op.err=net.ErrClosed;if err:=op.wait(closed,closed);!errors.Is(err,net.ErrClosed){t.Fatal("canceled terminal result changed",err)}
 }

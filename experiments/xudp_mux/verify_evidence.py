@@ -8,7 +8,7 @@ UNIT_CASES = (
  'LargeTCPCancelPartialCount','EveryOutputEntrypoint','CloseRaceAndTombstoneReuse',
  'UnknownKeepFlood','CapacityNewAndParentCancel','ParentErrorReleasesWaiters',
  'RejectOversizedUDP','LargeConcurrentTCPCallsStayContiguous','CancelLinearization',
- 'RejectedPayloadConsumedBeforeWaiting','SameIDNewPayloadBeforeOldEnd','CanceledBufferOwnership',
+ 'RejectedPayloadConsumedBeforeWaiting','SameIDNewPayloadBeforeOldEnd','CanceledBufferOwnership','CompletionBeforeCloseReportsSuccess',
 )
 ROUTE_CASES = ('TestMuxRouteReplyBackpressure','TestMuxRouteEndBackpressure')
 
@@ -32,7 +32,7 @@ def verify_tests(data,names):
     need(set(top)==set(names),'Missing or unexpected top-level tests')
     need(all(result=='pass' for result in terminal.values()),'Failed/skipped tests')
     if any(name.startswith('TestMuxBounded') for name in names):
-        expected=set(names)|{'TestMuxBoundedPartialFrameCancel/'+suffix for suffix in ('b','e','o')}
+        expected=set(names)|{'TestMuxBoundedPartialFrameCancel/'+suffix for suffix in ('b','e','w')}
         need(set(terminal)==expected,'Missing or unexpected subtest leaves')
     need(any(row.get('Action')=='pass' and 'Test' not in row for row in data),'Package did not pass')
     return len(terminal)
