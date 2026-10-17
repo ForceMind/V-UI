@@ -10,6 +10,7 @@ UNIT_CASES = (
  'RejectOversizedUDP','LargeConcurrentTCPCallsStayContiguous','CancelLinearization',
  'RejectedPayloadConsumedBeforeWaiting','SameIDNewPayloadBeforeOldEnd','CanceledBufferOwnership','CompletionBeforeCloseReportsSuccess',
 )
+ENCRYPTED_CASES = ('TestMuxEncryptedAES','TestMuxEncryptedChaCha')
 ROUTE_CASES = ('TestMuxRouteReplyBackpressure','TestMuxRouteEndBackpressure')
 
 def need(condition,message):
@@ -67,8 +68,11 @@ def verify_route(path,arm):
 
 def verify_all(directory):
     directory=Path(directory)
-    result={'route':[verify_route(directory/(arm+'-route.stdout'),arm) for arm in ('route-only','mux')], 'unit':{},'product_qualified':False}
+    result={'route':[verify_route(directory/(arm+'-route.stdout'),arm) for arm in ('route-only','mux')], 'unit':{},'encrypted':{},'product_qualified':False}
     for label in ('unit-race','unit-debug'):
         result['unit'][label]=verify_tests(rows(directory/('mux-'+label+'.stdout')),['TestMuxBounded'+name for name in UNIT_CASES])
+    for arm in ('route-only','mux'):
+        for label in ('encrypted-race','encrypted-debug'):
+            result['encrypted'][arm+'-'+label]=verify_tests(rows(directory/(arm+'-'+label+'.stdout')),ENCRYPTED_CASES)
     (directory/'VERIFICATION.json').write_text(json.dumps(result,indent=2)+'\n')
     return result

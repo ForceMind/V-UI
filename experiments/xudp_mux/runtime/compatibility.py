@@ -118,6 +118,8 @@ def vmess_case(f, module, events, security):
             response, relay = association.stream.recvfrom(65535)
             c.need(relay == association.relay, "VMess reply came from the wrong SOCKS relay")
             host, port, received = helper.decode_socks_datagram(response)
+            events.event("encrypted_mux_actual_reply", index=index, host=host, port=port,
+                         payload=c.observer.payload_identity(received))
             c.need((host, port, received) == (f.target.host, f.target.port, body),
                    "Encrypted/chunked VMess changed reply address, port or payload")
             f.audit()

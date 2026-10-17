@@ -1,4 +1,5 @@
 import hashlib
+import verify_evidence
 from pathlib import Path
 import re
 import unittest
@@ -72,3 +73,15 @@ class RouteVerifierMutationTests(unittest.TestCase):
             if action=='snapshot':data.pop(0)
             else:data=[row for row in data if row.get('Test')!='TestMuxRouteReplyBackpressure']
             with self.assertRaises(ValueError):self.check(data,'mux')
+
+class EncryptedContractTests(unittest.TestCase):
+    def test_both_ciphers_are_named_and_required(self):
+        source=(HERE/'mux_encrypted_test.go').read_text()
+        names=re.findall(r'func (TestMuxEncrypted\w+)\(',source)
+        self.assertEqual(set(names),set(verify_evidence.ENCRYPTED_CASES))
+        self.assertEqual(len(names),2)
+        for names in (verify_evidence.ENCRYPTED_CASES, verify_evidence.ENCRYPTED_CASES[:1]):
+            rows=[{'Action':'pass','Test':name} for name in names]+[{'Action':'pass'}]
+            if len(names)==2:self.assertEqual(verify_evidence.verify_tests(rows,verify_evidence.ENCRYPTED_CASES),2)
+            else:
+                with self.assertRaises(ValueError):verify_evidence.verify_tests(rows,verify_evidence.ENCRYPTED_CASES)

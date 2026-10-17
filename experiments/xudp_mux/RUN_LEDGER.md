@@ -21,3 +21,33 @@ attempt; source changes require a new exact-head run rather than retrying for gr
   `161746df3543cf858fdf3df2c1f65b0df810633cd42f3d9a818703c9ab54ed78`.
   All 30 manifest entries were verified by size and SHA-256 after download.
   `VERIFICATION_FAILED.json` correctly rejects the absent executed mux tests.
+
+## 2026-10-17 mechanism green, real large-UDP compatibility red
+
+- Commit: `a2f91cb707bd5a63484e82d22c3de09b03bbb125`, tree
+  `c8c5a6fb7c2bbbeab0a83017875e8b2344f51bdf`.
+- [Run 39007081471, attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39007081471):
+  mechanism job success, runtime job failure. No unchanged-code retry.
+- Mechanism: race/debug each passed all 17 top-level and 3 child terminals.
+  Actual route controls retained reply/End copy counts 2/1; the mux arm had zero
+  copy/callback/canceler workers before reads were restored, an open parent and
+  exactly one parent writer. Parent shutdown joined all recorded work.
+- Same exact commit, formatted implementation bytes, ordered patch chain,
+  compiler digest and normalized module graph matched the runtime build.
+- Both runtime arms retained original 19/20 RED, passed all six independent
+  lifecycle cases, and passed the real verified-TLS shared-parent TCP case:
+  two 196,742-byte streams, complete framing and a later UDP sibling.
+- In both arms, both encrypted VMess cases passed 1/8,192 bytes, then delivered
+  only the exact 15,992-byte prefix of 32,768 bytes to the target. The 60,000-byte
+  requests did not run. All four cases remain failures; no truncated payload is
+  accepted as a success. [Fixed-source buffer analysis](SOCKS_BUFFER_BOUNDARY.md)
+  is distinct from actual syscall observation.
+- Mechanism artifact `12090903218`: 90,789 bytes, SHA-256
+  `b753a5e0741d94b6930e118399a5af16c6eef7c79d1b66244c06685e80def330`,
+  all 30 manifest members independently verified.
+- Runtime artifact `12091353576`: 399,085 bytes, SHA-256
+  `f9902b8c8e646d6b5b93ae47a84c9d1d1a4e68531b38cff870969231cf99d362`,
+  all 277 sanitized text members independently verified.
+- Next diagnostic adds real encrypted Client-to-Service normal-flow tests to
+  both arms and records actual runtime replies before the unchanged assertions.
+  It does not relax the original device compatibility gate.

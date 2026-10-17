@@ -36,6 +36,8 @@ def compare(mechanism, candidates):
     verification = c.read_json(mechanism / 'VERIFICATION.json')
     c.need(verification['product_qualified'] is False and len(verification['route']) == 2,
            'Missing mechanism verification')
+    c.need(verification.get('encrypted') == {arm+'-'+label: 2 for arm in c.ARMS
+           for label in ('encrypted-race','encrypted-debug')}, 'Missing direct encrypted-flow tests')
     identity = c.source_identity()
     for arm in c.ARMS:
         runtime = c.read_json(candidates / arm / 'provenance.json')

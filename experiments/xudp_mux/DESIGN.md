@@ -26,3 +26,21 @@ Two new arms use identical tests and fixed dependencies: route-only (frozen addr
 Cover actual mux reply and End backpressure, prefix/partial-frame write and recovery, queued cancellation, caller-buffer reuse, concurrent TCP/UDP output entrypoints, close/cancel races and exactly-once End, unknown-Keep flood, slot exhaustion, same-ID tombstone reuse, bounded bytes/frames, sibling recovery, and parent cancellation/error joins. Route tests exercise actual ConnectionManager and actual HandleMuxConnection. Old helper/test13 and original gates are not edited. New Go controls are not a substitute for TLS/official-device end-to-end runtime qualification.
 
 Local Python/static checks, compiled Go/race checks and actual transport tests are reported separately. No unrun stage is green. Any failure is retained with exact commit, attempt and logs; unchanged-code reruns cannot erase it. This experiment cannot merge into product, alter pins, upload experimental binaries, release, deploy or contact upstream.
+## Supplemental encrypted-flow diagnostic
+
+After the first real runtime matrix, the official SOCKS device sent only a
+15,992-byte prefix of a requested 32,768-byte datagram to the application target
+in both arms and both ciphers. The original compatibility assertions remain red.
+See [the preserved ledger](RUN_LEDGER.md) and [buffer analysis](SOCKS_BUFFER_BOUNDARY.md).
+
+The same fixed `Client` and real `Service.NewConnection` are now exercised in
+both arms with AES-128-GCM and ChaCha20-Poly1305, global padding and authenticated
+length, using actual CommandMux encrypted streams over `net.Pipe`. A dedicated
+test file bypasses SOCKS only; it does not bypass the VMess service or encryption.
+It interleaves framed UDP payloads of 32,768/60,000/65,535/1 bytes and 196,742 TCP bytes in
+four <=65,535-byte mux frames on one parent, verifies exact tuples/payloads and
+ordered End, then closes the parent and joins Service, handler and caller work.
+The 65,535-byte value exercises the mux uint16 limit, not an IP datagram capacity.
+Both arms run that identical file under race and debug modes. This diagnostic
+does not pass the official-device large-UDP gate, test encrypted backpressure
+cancellation, or prove one application call maps to one encrypted wire chunk.
