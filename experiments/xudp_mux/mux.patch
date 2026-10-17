@@ -1,8 +1,8 @@
 diff --git a/mux.go b/mux.go
-index 6e72c20..584e0ce 100644
+index 6e72c20..6e355c6 100644
 --- a/mux.go
 +++ b/mux.go
-@@ -1,19 +1,16 @@
+@@ -1,59 +1,58 @@
  package vmess
  
  import (
@@ -21,8 +21,8 @@ index 6e72c20..584e0ce 100644
 -	"github.com/sagernet/sing/common/bufio"
  	E "github.com/sagernet/sing/common/exceptions"
  	M "github.com/sagernet/sing/common/metadata"
- 	N "github.com/sagernet/sing/common/network"
-@@ -21,39 +18,42 @@ import (
+-	N "github.com/sagernet/sing/common/network"
+ )
  
  func HandleMuxConnection(ctx context.Context, conn net.Conn, source M.Socksaddr, handler Handler) error {
  	ctx, cancel := context.WithCancelCause(ctx)
@@ -90,7 +90,7 @@ index 6e72c20..584e0ce 100644
  }
  
  func (c *serverSession) recvLoop(cancel context.CancelCauseFunc) error {
-@@ -66,15 +66,13 @@ func (c *serverSession) recvLoop(cancel context.CancelCauseFunc) error {
+@@ -66,15 +65,13 @@ func (c *serverSession) recvLoop(cancel context.CancelCauseFunc) error {
  	}
  }
  
@@ -113,7 +113,7 @@ index 6e72c20..584e0ce 100644
  	var length uint16
  	err := binary.Read(c.conn, binary.BigEndian, &length)
  	if err != nil {
-@@ -119,83 +117,52 @@ func (c *serverSession) recv() error {
+@@ -119,83 +116,52 @@ func (c *serverSession) recv() error {
  		}
  	}
  
@@ -226,7 +226,7 @@ index 6e72c20..584e0ce 100644
  
  	if !destination.IsValid() {
  		destination = stream.destination
-@@ -203,7 +170,8 @@ func (c *serverSession) recv() error {
+@@ -203,7 +169,8 @@ func (c *serverSession) recv() error {
  
  	err = c.recvTo(stream, data, destination)
  	if err != nil {
@@ -236,7 +236,7 @@ index 6e72c20..584e0ce 100644
  	}
  
  	return nil
-@@ -229,159 +197,11 @@ func (c *serverSession) recvTo(stream *serverStream, data *buf.Buffer, destinati
+@@ -229,159 +196,11 @@ func (c *serverSession) recvTo(stream *serverStream, data *buf.Buffer, destinati
  	}
  }
  
@@ -397,7 +397,7 @@ index 6e72c20..584e0ce 100644
  }
  
  func (c *serverMuxConn) Read(b []byte) (n int, err error) {
-@@ -389,32 +209,22 @@ func (c *serverMuxConn) Read(b []byte) (n int, err error) {
+@@ -389,32 +208,22 @@ func (c *serverMuxConn) Read(b []byte) (n int, err error) {
  }
  
  func (c *serverMuxConn) Write(b []byte) (n int, err error) {
@@ -436,7 +436,7 @@ index 6e72c20..584e0ce 100644
  }
  
  func (c *serverMuxConn) LocalAddr() net.Addr {
-@@ -448,6 +258,7 @@ type serverMuxPacketConn struct {
+@@ -448,6 +257,7 @@ type serverMuxPacketConn struct {
  	pipe        *io.PipeReader
  	session     *serverSession
  	destination M.Socksaddr
@@ -444,7 +444,7 @@ index 6e72c20..584e0ce 100644
  }
  
  func (c *serverMuxPacketConn) Read(b []byte) (n int, err error) {
-@@ -499,37 +310,22 @@ func (c *serverMuxPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Sock
+@@ -499,37 +309,22 @@ func (c *serverMuxPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Sock
  }
  
  func (c *serverMuxPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
