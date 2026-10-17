@@ -1,0 +1,703 @@
+diff --git a/mux.go b/mux.go
+index 6e72c20..584e0ce 100644
+--- a/mux.go
++++ b/mux.go
+@@ -1,19 +1,16 @@
+ package vmess
+ 
+ import (
+-	std_bufio "bufio"
+ 	"context"
+ 	"encoding/binary"
+ 	"io"
+ 	"net"
+ 	"os"
+ 	"sync"
+-	"sync/atomic"
+ 	"time"
+ 
+ 	"github.com/sagernet/sing/common"
+ 	"github.com/sagernet/sing/common/buf"
+-	"github.com/sagernet/sing/common/bufio"
+ 	E "github.com/sagernet/sing/common/exceptions"
+ 	M "github.com/sagernet/sing/common/metadata"
+ 	N "github.com/sagernet/sing/common/network"
+@@ -21,39 +18,42 @@ import (
+ 
+ func HandleMuxConnection(ctx context.Context, conn net.Conn, source M.Socksaddr, handler Handler) error {
+ 	ctx, cancel := context.WithCancelCause(ctx)
+-	session := &serverSession{
+-		ctx:          ctx,
+-		source:       source,
+-		conn:         conn,
+-		directWriter: bufio.NewExtendedWriter(conn),
+-		handler:      handler,
+-		streams:      make(map[uint16]*serverStream),
+-		writer:       std_bufio.NewWriter(conn),
+-	}
+-	go func() {
+-		<-ctx.Done()
+-		session.cleanup(ctx.Err())
+-	}()
++	session := &serverSession{ctx: ctx, cancel: cancel, source: source, conn: conn,
++		handler: handler, streams: make(map[uint16]*serverStream),
++		changed: make(chan struct{}), wake: make(chan struct{}, 1), writerDone: make(chan struct{})}
++	watcherDone := make(chan struct{})
++	go session.writeLoop()
++	go func() { defer close(watcherDone); <-ctx.Done(); session.shutdown(ctx.Err()) }()
++	defer func() { cancel(net.ErrClosed); <-watcherDone; <-session.writerDone }()
+ 	return session.recvLoop(cancel)
+ }
+ 
+ type serverSession struct {
+-	ctx          context.Context
+-	source       M.Socksaddr
+-	conn         net.Conn
+-	directWriter N.ExtendedWriter
+-	handler      Handler
+-	streamAccess sync.RWMutex
+-	streams      map[uint16]*serverStream
+-	writer       *std_bufio.Writer
+-	writeAccess  sync.Mutex
+-	writeRace    uint32
++	ctx context.Context
++	cancel context.CancelCauseFunc
++	source M.Socksaddr
++	conn net.Conn
++	handler Handler
++	streamAccess sync.Mutex
++	streams map[uint16]*serverStream
++	queue []*muxWrite
++	changed chan struct{}
++	wake chan struct{}
++	writerDone chan struct{}
++	closed bool
++	reject *muxWrite
+ }
+ 
+ type serverStream struct {
+-	network     byte
++	id uint16
++	network byte
+ 	destination M.Socksaddr
+-	pipe        *io.PipeWriter
++	pipe *io.PipeWriter
++	done chan struct{}
++	closed bool
++	pending *muxWrite
++	endQueued bool
++	writeGate chan struct{}
+ }
+ 
+ func (c *serverSession) recvLoop(cancel context.CancelCauseFunc) error {
+@@ -66,15 +66,13 @@ func (c *serverSession) recvLoop(cancel context.CancelCauseFunc) error {
+ 	}
+ }
+ 
+-func (c *serverSession) cleanup(err error) {
+-	c.streamAccess.Lock()
+-	for _, stream := range c.streams {
+-		_ = stream.pipe.CloseWithError(err)
+-	}
+-	c.streamAccess.Unlock()
+-}
+-
+-func (c *serverSession) recv() error {
++func (c *serverSession) recv() (result error) {
++    var reject *muxWrite
++    defer func() {
++        if reject != nil && result == nil {
++            select { case <-reject.done: result=reject.err; case <-c.ctx.Done(): result=net.ErrClosed }
++        }
++    }()
+ 	var length uint16
+ 	err := binary.Read(c.conn, binary.BigEndian, &length)
+ 	if err != nil {
+@@ -119,83 +117,52 @@ func (c *serverSession) recv() error {
+ 		}
+ 	}
+ 
++    // Read at most one complete incoming payload before any admission wait.
++    // A sequential write-then-read peer can then consume a prior End, including
++    // same-ID tombstone reuse and explicit over-capacity rejection.
++    var data *buf.Buffer
++    if option&OptionData == OptionData {
++        err = binary.Read(c.conn, binary.BigEndian, &length)
++        if err != nil {return err}
++        if length > 0 {
++            data=buf.NewSize(int(length))
++            defer data.Release()
++            if _,err=data.ReadFullFrom(c.conn,int(length));err!=nil{return err}
++        }
++    }
+ 	var stream *serverStream
+ 	switch status {
+ 	case StatusNew:
+-		pipeIn, pipeOut := io.Pipe()
+-		stream = &serverStream{
+-			network,
+-			destination,
+-			pipeOut,
+-		}
+-		c.streamAccess.Lock()
+-		c.streams[sessionID] = stream
+-		c.streamAccess.Unlock()
+-		switch network {
+-		case NetworkTCP, NetworkUDP:
+-		default:
+-			return E.New("bad network: ", network)
+-		}
+-		go func() {
++		switch network { case NetworkTCP, NetworkUDP: default: return E.New("bad network: ", network) }
++		var pipeIn *io.PipeReader
++		stream, pipeIn, err = c.newStream(sessionID, network, destination)
++		if err != nil { return err }
++		if stream == nil { reject=c.rejectFrame(sessionID); break }
++		go func(stream *serverStream) {
+ 			if network == NetworkTCP {
+-				conn := &serverMuxConn{
+-					sessionID,
+-					pipeIn,
+-					c,
+-				}
++				conn := &serverMuxConn{sessionID: sessionID, pipe: pipeIn, session: c, stream: stream}
+ 				c.handler.NewConnectionEx(c.ctx, conn, c.source, destination, nil)
+ 			} else {
+-				conn := &serverMuxPacketConn{
+-					sessionID,
+-					pipeIn,
+-					c,
+-					destination,
+-				}
++				conn := &serverMuxPacketConn{sessionID: sessionID, pipe: pipeIn, session: c, destination: destination, stream: stream}
+ 				c.handler.NewPacketConnectionEx(c.ctx, conn, c.source, destination, nil)
+ 			}
+-		}()
++		}(stream)
+ 	case StatusKeep:
+-		var loaded bool
+ 		c.streamAccess.Lock()
+-		stream, loaded = c.streams[sessionID]
++		stream = c.streams[sessionID]
++		if stream != nil && stream.closed { stream = nil }
+ 		c.streamAccess.Unlock()
+-		if !loaded {
+-			go c.syncClose(sessionID, true)
+-		}
++		if stream == nil { reject=c.rejectUnknown(sessionID) }
+ 	case StatusEnd:
+-		if option&OptionError == OptionError {
+-			err = E.New("remote closed wth error")
+-		}
+-		c.localClose(sessionID, err)
++		if option&OptionError == OptionError { err = E.New("remote closed with error") }
++		c.streamAccess.Lock(); existing := c.streams[sessionID]; c.streamAccess.Unlock()
++		if existing != nil { c.closeStream(existing, false, err) }
+ 	case StatusKeepAlive:
+ 	default:
+ 		return E.New("bad session status: ", status)
+ 	}
+ 
+-	if option&OptionData != OptionData {
+-		return nil
+-	}
+-
+-	err = binary.Read(c.conn, binary.BigEndian, &length)
+-	if err != nil {
+-		return err
+-	}
+-
+-	if length == 0 {
+-		return nil
+-	}
+-
+-	if stream == nil {
+-		return common.Error(io.CopyN(io.Discard, c.conn, int64(length)))
+-	}
+-
+-	data := buf.NewSize(int(length))
+-	defer data.Release()
+-
+-	_, err = data.ReadFullFrom(c.conn, int(length))
+-	if err != nil {
+-		return err
+-	}
++    if data==nil || stream==nil {return nil}
+ 
+ 	if !destination.IsValid() {
+ 		destination = stream.destination
+@@ -203,7 +170,8 @@ func (c *serverSession) recv() error {
+ 
+ 	err = c.recvTo(stream, data, destination)
+ 	if err != nil {
+-		return c.close(sessionID, err)
++		c.closeStream(stream, true, err)
++		return nil
+ 	}
+ 
+ 	return nil
+@@ -229,159 +197,11 @@ func (c *serverSession) recvTo(stream *serverStream, data *buf.Buffer, destinati
+ 	}
+ }
+ 
+-func (c *serverSession) syncWrite(sessionID uint16, data []byte) (int, error) {
+-	writeRace := atomic.AddUint32(&c.writeRace, 1)
+-	c.writeAccess.Lock()
+-	defer c.writeAccess.Unlock()
+-	err := c.writeFrame(sessionID, data)
+-	if err != nil {
+-		return 0, err
+-	}
+-	if writeRace == atomic.LoadUint32(&c.writeRace) {
+-		err = c.writer.Flush()
+-		if err != nil {
+-			return 0, err
+-		}
+-	}
+-	return len(data), nil
+-}
+-
+-func (c *serverSession) writeFrame(sessionID uint16, data []byte) error {
+-	err := binary.Write(c.writer, binary.BigEndian, uint16(4))
+-	if err != nil {
+-		return err
+-	}
+-	err = binary.Write(c.writer, binary.BigEndian, sessionID)
+-	if err != nil {
+-		return err
+-	}
+-	err = binary.Write(c.writer, binary.BigEndian, uint8(StatusKeep))
+-	if err != nil {
+-		return err
+-	}
+-	err = binary.Write(c.writer, binary.BigEndian, uint8(OptionData))
+-	if err != nil {
+-		return err
+-	}
+-	err = binary.Write(c.writer, binary.BigEndian, uint16(len(data)))
+-	if err != nil {
+-		return err
+-	}
+-	return common.Error(c.writer.Write(data))
+-}
+-
+-func (c *serverSession) syncWritePacket(sessionID uint16, data []byte, destination M.Socksaddr) (int, error) {
+-	writeRace := atomic.AddUint32(&c.writeRace, 1)
+-	c.writeAccess.Lock()
+-	defer c.writeAccess.Unlock()
+-	err := c.writePacketFrame(sessionID, data, destination)
+-	if err != nil {
+-		return 0, err
+-	}
+-	if writeRace == atomic.LoadUint32(&c.writeRace) {
+-		err = c.writer.Flush()
+-		if err != nil {
+-			return 0, err
+-		}
+-	}
+-	return len(data), nil
+-}
+-
+-func (c *serverSession) writePacketFrame(sessionID uint16, data []byte, destination M.Socksaddr) error {
+-	err := binary.Write(c.writer, binary.BigEndian, uint16(5+AddressSerializer.AddrPortLen(destination)))
+-	if err != nil {
+-		return err
+-	}
+-	err = binary.Write(c.writer, binary.BigEndian, sessionID)
+-	if err != nil {
+-		return err
+-	}
+-	err = binary.Write(c.writer, binary.BigEndian, uint8(StatusKeep))
+-	if err != nil {
+-		return err
+-	}
+-	err = binary.Write(c.writer, binary.BigEndian, uint8(OptionData))
+-	if err != nil {
+-		return err
+-	}
+-	if destination.IsValid() {
+-		err = binary.Write(c.writer, binary.BigEndian, uint8(NetworkUDP))
+-		if err != nil {
+-			return err
+-		}
+-		err = AddressSerializer.WriteAddrPort(c.writer, destination)
+-		if err != nil {
+-			return err
+-		}
+-	}
+-	err = binary.Write(c.writer, binary.BigEndian, uint16(len(data)))
+-	if err != nil {
+-		return err
+-	}
+-	return common.Error(c.writer.Write(data))
+-}
+-
+-func (c *serverSession) close(sessionID uint16, err error) error {
+-	if c.localClose(sessionID, err) {
+-		return c.syncClose(sessionID, err != nil)
+-	}
+-	return nil
+-}
+-
+-func (c *serverSession) localClose(sessionID uint16, err error) bool {
+-	var closed bool
+-	c.streamAccess.Lock()
+-	if session, loaded := c.streams[sessionID]; loaded {
+-		delete(c.streams, sessionID)
+-		_ = session.pipe.CloseWithError(err)
+-		closed = true
+-	}
+-	c.streamAccess.Unlock()
+-	return closed
+-}
+-
+-func (c *serverSession) syncClose(sessionID uint16, hasError bool) error {
+-	writeRace := atomic.AddUint32(&c.writeRace, 1)
+-	c.writeAccess.Lock()
+-	defer c.writeAccess.Unlock()
+-	err := c.writeCloseFrame(sessionID, hasError)
+-	if err != nil {
+-		return err
+-	}
+-	if writeRace == atomic.LoadUint32(&c.writeRace) {
+-		err = c.writer.Flush()
+-		if err != nil {
+-			return err
+-		}
+-	}
+-	return nil
+-}
+-
+-func (c *serverSession) writeCloseFrame(sessionID uint16, hasError bool) error {
+-	err := binary.Write(c.writer, binary.BigEndian, uint16(4))
+-	if err != nil {
+-		return err
+-	}
+-	err = binary.Write(c.writer, binary.BigEndian, sessionID)
+-	if err != nil {
+-		return err
+-	}
+-	err = binary.Write(c.writer, binary.BigEndian, uint8(StatusEnd))
+-	if err != nil {
+-		return err
+-	}
+-	var option uint8
+-	if hasError {
+-		option = OptionError
+-	}
+-	err = binary.Write(c.writer, binary.BigEndian, option)
+-	return err
+-}
+-
+ type serverMuxConn struct {
+ 	sessionID uint16
+ 	pipe      *io.PipeReader
+ 	session   *serverSession
++	stream *serverStream
+ }
+ 
+ func (c *serverMuxConn) Read(b []byte) (n int, err error) {
+@@ -389,32 +209,22 @@ func (c *serverMuxConn) Read(b []byte) (n int, err error) {
+ }
+ 
+ func (c *serverMuxConn) Write(b []byte) (n int, err error) {
+-	return c.session.syncWrite(c.sessionID, b)
++	return c.session.writeData(c.stream, b, M.Socksaddr{}, false)
+ }
+ 
+ func (c *serverMuxConn) WriteBuffer(buffer *buf.Buffer) error {
+-	dataLen := buffer.Len()
+-	header := buf.With(buffer.ExtendHeader(8))
+-	common.Must(
+-		binary.Write(header, binary.BigEndian, uint16(4)),
+-		binary.Write(header, binary.BigEndian, c.sessionID),
+-		binary.Write(header, binary.BigEndian, uint8(StatusKeep)),
+-		binary.Write(header, binary.BigEndian, uint8(OptionData)),
+-		binary.Write(header, binary.BigEndian, uint16(dataLen)),
+-	)
+-	return c.session.directWriter.WriteBuffer(buffer)
++	defer buffer.Release()
++	_, err := c.session.writeData(c.stream, buffer.Bytes(), M.Socksaddr{}, false)
++	return err
+ }
+ 
+ func (c *serverMuxConn) FrontHeadroom() int {
+ 	return 8
+ }
+ 
+-func (c *serverMuxConn) UpstreamWriter() any {
+-	return c.session.directWriter
+-}
+-
+ func (c *serverMuxConn) Close() error {
+-	return c.session.close(c.sessionID, nil)
++	c.session.closeStream(c.stream, true, nil)
++	return nil
+ }
+ 
+ func (c *serverMuxConn) LocalAddr() net.Addr {
+@@ -448,6 +258,7 @@ type serverMuxPacketConn struct {
+ 	pipe        *io.PipeReader
+ 	session     *serverSession
+ 	destination M.Socksaddr
++	stream *serverStream
+ }
+ 
+ func (c *serverMuxPacketConn) Read(b []byte) (n int, err error) {
+@@ -499,37 +310,22 @@ func (c *serverMuxPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Sock
+ }
+ 
+ func (c *serverMuxPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
+-	return c.session.syncWritePacket(c.sessionID, p, M.SocksaddrFromNet(addr))
++	return c.session.writeData(c.stream, p, M.SocksaddrFromNet(addr), true)
+ }
+ 
+ func (c *serverMuxPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
+-	dataLen := buffer.Len()
+-	header := buf.With(buffer.ExtendHeader(9 + AddressSerializer.AddrPortLen(destination)))
+-	common.Must(
+-		binary.Write(header, binary.BigEndian, uint16(5+AddressSerializer.AddrPortLen(destination))),
+-		binary.Write(header, binary.BigEndian, c.sessionID),
+-		binary.Write(header, binary.BigEndian, uint8(StatusKeep)),
+-		binary.Write(header, binary.BigEndian, uint8(OptionData)),
+-		binary.Write(header, binary.BigEndian, uint8(NetworkUDP)),
+-	)
+-	err := AddressSerializer.WriteAddrPort(header, destination)
+-	if err != nil {
+-		return err
+-	}
+-	common.Must(binary.Write(header, binary.BigEndian, uint16(dataLen)))
+-	return c.session.directWriter.WriteBuffer(buffer)
++	defer buffer.Release()
++	_, err := c.session.writeData(c.stream, buffer.Bytes(), destination, true)
++	return err
+ }
+ 
+ func (c *serverMuxPacketConn) FrontHeadroom() int {
+ 	return 9 + M.MaxSocksaddrLength
+ }
+ 
+-func (c *serverMuxPacketConn) UpstreamWriter() any {
+-	return c.session.directWriter
+-}
+-
+ func (c *serverMuxPacketConn) Close() error {
+-	return c.session.close(c.sessionID, nil)
++	c.session.closeStream(c.stream, true, nil)
++	return nil
+ }
+ 
+ func (c *serverMuxPacketConn) LocalAddr() net.Addr {
+diff --git a/mux_writer.go b/mux_writer.go
+new file mode 100644
+index 0000000..060379f
+--- /dev/null
++++ b/mux_writer.go
+@@ -0,0 +1,207 @@
++package vmess
++
++// Isolated experiment. One bounded owner for the shared parent byte stream.
++import (
++    "bytes"
++    "encoding/binary"
++    "io"
++    "net"
++
++    E "github.com/sagernet/sing/common/exceptions"
++    M "github.com/sagernet/sing/common/metadata"
++)
++
++const muxMaxStreams = 64
++const muxMaxPayload = 65535
++const muxMaxFrame = 65807
++
++type muxWrite struct {
++    stream *serverStream
++    frame []byte
++    end bool
++    started bool
++    done chan struct{}
++    err error
++    canceled bool
++    control bool
++}
++
++// All state helpers below require streamAccess. No transport I/O under it.
++func (c *serverSession) changedLocked() {
++    close(c.changed)
++    c.changed = make(chan struct{})
++    select { case c.wake <- struct{}{}: default: }
++}
++func (c *serverSession) finishLocked(op *muxWrite, err error) {
++    op.frame = nil
++    if op.canceled {err=net.ErrClosed}
++    op.err = err
++    close(op.done)
++    s := op.stream
++    if op.control {
++        c.reject=nil
++    } else if op.end {
++        if c.streams[s.id] == s { delete(c.streams, s.id) }
++    } else {
++        s.pending = nil
++        if s.closed && !s.endQueued && c.streams[s.id] == s { delete(c.streams, s.id) }
++    }
++    c.changedLocked()
++}
++func (c *serverSession) newStream(id uint16, network byte, destination M.Socksaddr) (*serverStream, *io.PipeReader, error) {
++    for {
++        c.streamAccess.Lock()
++        if c.closed || c.ctx.Err() != nil { c.streamAccess.Unlock(); return nil,nil,net.ErrClosed }
++        existing := c.streams[id]
++        if existing != nil && !existing.closed { c.streamAccess.Unlock(); return nil,nil,E.New("duplicate active mux session") }
++        if existing == nil && len(c.streams) < muxMaxStreams {
++            reader,writer := io.Pipe()
++            s := &serverStream{id:id,network:network,destination:destination,pipe:writer,done:make(chan struct{}),writeGate:make(chan struct{},1)}
++            c.streams[id]=s
++            c.changedLocked()
++            c.streamAccess.Unlock()
++            return s,reader,nil
++        }
++        if existing==nil {c.streamAccess.Unlock();return nil,nil,nil}
++        changed := c.changed
++        c.streamAccess.Unlock()
++        // Only the single recv loop calls this. Capacity and tombstone pressure
++        // backpressure incoming traffic; they never kill a healthy parent.
++        select { case <-changed: case <-c.ctx.Done(): return nil,nil,net.ErrClosed }
++    }
++}
++// The single recv loop owns one additional fixed rejection slot. It consumes
++// the rejected request payload before waiting for its explicit error-End.
++func (c *serverSession) rejectUnknown(id uint16) *muxWrite {
++    c.streamAccess.Lock()
++    existing:=c.streams[id]
++    c.streamAccess.Unlock()
++    if existing!=nil {return nil}
++    return c.rejectFrame(id)
++}
++func (c *serverSession) rejectFrame(id uint16) *muxWrite {
++    c.streamAccess.Lock();defer c.streamAccess.Unlock()
++    if c.closed {return nil}
++    op:=muxEnd(&serverStream{id:id},true)
++    op.control=true
++    c.reject=op
++    c.queue=append(c.queue,op)
++    c.changedLocked()
++    return op
++}
++func muxEnd(s *serverStream, hasError bool) *muxWrite {
++    option:=byte(0);if hasError {option=OptionError}
++    return &muxWrite{stream:s,frame:[]byte{0,4,byte(s.id>>8),byte(s.id),StatusEnd,option},end:true,done:make(chan struct{})}
++}
++func (c *serverSession) closeStream(s *serverStream, sendEnd bool, err error) {
++    c.streamAccess.Lock()
++    defer c.streamAccess.Unlock()
++    if c.closed || c.streams[s.id]!=s || s.closed {return}
++    s.closed=true
++    if s.pending!=nil {s.pending.canceled=true}
++    close(s.done)
++    if s.pipe!=nil {_=s.pipe.CloseWithError(err)}
++    // Reserve End before withdrawing data; finishLocked must not release the
++    // tombstone before its End has actually completed.
++    s.endQueued=sendEnd
++    if op:=s.pending;op!=nil && !op.started {
++        for i,queued:=range c.queue {if queued==op {
++            copy(c.queue[i:],c.queue[i+1:]);c.queue[len(c.queue)-1]=nil;c.queue=c.queue[:len(c.queue)-1]
++            c.finishLocked(op,net.ErrClosed);break
++        }}
++    }
++    if sendEnd {c.queue=append(c.queue,muxEnd(s,err!=nil))} else if s.pending==nil {delete(c.streams,s.id)}
++    c.changedLocked()
++}
++func (c *serverSession) shutdown(err error) {
++    c.streamAccess.Lock()
++    if c.closed {c.streamAccess.Unlock();return}
++    c.closed=true
++    for _,s:=range c.streams {
++        if s.pending!=nil {s.pending.canceled=true}
++        if !s.closed {s.closed=true;close(s.done)}
++        if s.pipe!=nil {_=s.pipe.CloseWithError(err)}
++    }
++    queued:=c.queue;c.queue=nil
++    for _,op:=range queued {c.finishLocked(op,err)}
++    c.streams=make(map[uint16]*serverStream)
++    c.changedLocked();c.streamAccess.Unlock()
++    // Parent cancellation/failure owns this operation. Association Close never
++    // reaches this path or changes a parent deadline.
++    _=c.conn.Close()
++}
++func (c *serverSession) writeData(s *serverStream, data []byte, destination M.Socksaddr, packet bool) (int,error) {
++    if packet && len(data)>muxMaxPayload {return 0,io.ErrShortBuffer}
++    select {case s.writeGate<-struct{}{}:case <-s.done:return 0,net.ErrClosed;case <-c.ctx.Done():return 0,net.ErrClosed}
++    defer func(){<-s.writeGate}()
++    // TCP's API accepts large writes; split rather than truncate a uint16.
++    total:=0
++    for len(data)>0 || (total==0 && packet) {
++        size:=len(data);if size>muxMaxPayload {size=muxMaxPayload}
++        if err:=c.writeOne(s,data[:size],destination,packet);err!=nil {return total,err}
++        total+=size;data=data[size:]
++        if packet {break}
++    }
++    return total,nil
++}
++func (c *serverSession) writeOne(s *serverStream, data []byte, destination M.Socksaddr, packet bool) error {
++    for {
++        c.streamAccess.Lock()
++        if c.closed || s.closed || c.streams[s.id]!=s || c.ctx.Err()!=nil {c.streamAccess.Unlock();return net.ErrClosed}
++        if s.pending==nil {
++            headerLen:=4
++            if packet {headerLen=5+AddressSerializer.AddrPortLen(destination)}
++            frameLen:=2+headerLen+2+len(data)
++            if frameLen>muxMaxFrame {c.streamAccess.Unlock();return io.ErrShortBuffer}
++            // Admission precedes allocation. Never retain caller-owned bytes.
++            frame:=bytes.NewBuffer(make([]byte,0,frameLen))
++            _=binary.Write(frame,binary.BigEndian,uint16(headerLen))
++            _=binary.Write(frame,binary.BigEndian,s.id)
++            frame.Write([]byte{StatusKeep,OptionData})
++            if packet {
++                frame.WriteByte(NetworkUDP)
++                if err:=AddressSerializer.WriteAddrPort(frame,destination);err!=nil {c.streamAccess.Unlock();return err}
++            }
++            _=binary.Write(frame,binary.BigEndian,uint16(len(data)))
++            frame.Write(data)
++            op:=&muxWrite{stream:s,frame:frame.Bytes(),done:make(chan struct{})}
++            s.pending=op;c.queue=append(c.queue,op)
++            c.changedLocked();c.streamAccess.Unlock()
++            select {
++            case <-op.done:return op.err
++            case <-s.done:return net.ErrClosed
++            case <-c.ctx.Done():return net.ErrClosed
++            }
++        }
++        changed:=c.changed;c.streamAccess.Unlock()
++        select {case <-changed:case <-s.done:return net.ErrClosed;case <-c.ctx.Done():return net.ErrClosed}
++    }
++}
++func (c *serverSession) writeLoop() {
++    defer close(c.writerDone)
++    for {
++        c.streamAccess.Lock()
++        if c.closed || c.ctx.Err()!=nil {c.streamAccess.Unlock();return}
++        if len(c.queue)==0 {
++            c.streamAccess.Unlock()
++            select {case <-c.wake:case <-c.ctx.Done():return}
++            continue
++        }
++        op:=c.queue[0]
++        copy(c.queue,c.queue[1:]);c.queue[len(c.queue)-1]=nil;c.queue=c.queue[:len(c.queue)-1]
++        op.started=true
++        frame:=op.frame
++        c.streamAccess.Unlock()
++        var err error
++        for len(frame)>0 {
++            var n int
++            n,err=c.conn.Write(frame)
++            if n<0 || n>len(frame) {err=io.ErrShortWrite;n=0}
++            frame=frame[n:]
++            if err!=nil {break}
++            if n==0 {err=io.ErrNoProgress;break}
++        }
++        c.streamAccess.Lock();c.finishLocked(op,err);c.streamAccess.Unlock()
++        if err!=nil {c.cancel(err);return}
++    }
++}

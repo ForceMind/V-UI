@@ -1,0 +1,13 @@
+diff --git a/route/conn.go b/route/conn.go
+--- a/route/conn.go
++++ b/route/conn.go
+@@ -275,6 +275,9 @@
+ 		// Close only the owned outbound; never cancel the inbound mux parent.
+ 		stop := context.AfterFunc(ctx, func() {
+ 			_ = remotePacketConn.Close()
++			// The bounded mux Close cancels this association's pending write.
++			// It does not close the shared parent or truncate an in-flight frame.
++			_ = conn.Close()
+ 		})
+ 		originalOnClose := onClose
+ 		onClose = func(err error) {

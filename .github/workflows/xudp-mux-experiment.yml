@@ -1,0 +1,50 @@
+name: Isolated bounded XUDP mux experiment
+on:
+  push:
+    branches: [experiment/xudp-mux-lifecycle-20261017]
+permissions:
+  contents: read
+jobs:
+  mux-experiment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing-box
+          ref: af6e64c3b69e6132ebaee0e1a3d24e93903f6709
+          path: .experiment-source/sing-box
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing-vmess
+          ref: 31ec11e8790c48a4bf11711806a61e929ee6b89d
+          path: .experiment-source/sing-vmess
+          persist-credentials: false
+      - name: Use the existing fixed runner Go compiler
+        run: |
+          set -euo pipefail
+          GO_BIN="$RUNNER_TOOL_CACHE/go/1.25.14/x64/bin"
+          test "$(GOTOOLCHAIN=local "$GO_BIN/go" version)" = 'go version go1.25.14 linux/amd64'
+          printf '%s\n' "$GO_BIN" >> "$GITHUB_PATH"
+      - name: Validate frozen boundaries and Python controls
+        run: python3 -m unittest discover -s experiments/xudp_mux -p 'test_*.py' -v
+      - name: Compile and exercise two actual-route arms plus bounded mux race and debug tests
+        run: |
+          set -euo pipefail
+          python3 experiments/xudp_mux/build_and_test.py \
+            --sing-box .experiment-source/sing-box \
+            --sing-vmess .experiment-source/sing-vmess \
+            --output /tmp/vui-xudp-mux
+      - name: Preserve test evidence only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vui-xudp-mux-evidence
+          path: /tmp/vui-xudp-mux/evidence
+          retention-days: 7
+          if-no-files-found: warn
