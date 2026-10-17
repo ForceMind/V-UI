@@ -32,7 +32,14 @@ jobs:
           test "$(GOTOOLCHAIN=local "$GO_BIN/go" version)" = 'go version go1.25.14 linux/amd64'
           printf '%s\n' "$GO_BIN" >> "$GITHUB_PATH"
       - name: Validate frozen boundaries and Python controls
-        run: python3 -m unittest discover -s experiments/xudp_mux -p 'test_*.py' -v
+        run: |
+          python3 - <<'PY'
+          import unittest
+          suite = unittest.TestLoader().discover('experiments/xudp_mux', pattern='test_*.py')
+          assert suite.countTestCases() == 12, 'Missing or unexpected Python controls'
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          assert result.wasSuccessful() and not result.skipped, 'Controls failed or skipped'
+          PY
       - name: Compile and exercise two actual-route arms plus bounded mux race and debug tests
         run: |
           set -euo pipefail

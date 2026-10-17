@@ -2,7 +2,10 @@ import hashlib
 from pathlib import Path
 import re
 import unittest
-from verify_evidence import verify_tests
+from verify_evidence import verify_tests, verify_route
+import copy
+import json
+import tempfile
 ROOT=Path(__file__).resolve().parents[2]
 HERE=Path(__file__).resolve().parent
 class ContractTests(unittest.TestCase):
@@ -34,3 +37,38 @@ class ContractTests(unittest.TestCase):
         self.assertIn('branches: [experiment/xudp-mux-lifecycle-20261017]',y)
         self.assertIn('path: /tmp/vui-xudp-mux/evidence',y)
         self.assertNotIn('workflow_dispatch',y)
+
+class RouteVerifierMutationTests(unittest.TestCase):
+    def fixture(self, arm):
+        data=[]
+        for name in ('TestMuxRouteReplyBackpressure','TestMuxRouteEndBackpressure'):
+            events=[{'case':name,'event':'mux_arm_snapshot','seq':1,'arm':arm,'parent_writers':int(arm=='mux'),'route_copies':0 if arm=='mux' else (2 if 'Reply' in name else 1),'route_callbacks':0,'cancelers':0,'parent_transport_open':True,'owned_outbound_closed':True},
+                    {'case':name,'event':'restore_reads','seq':2}, {'case':name,'event':'cleanup_start','seq':3},
+                    {'case':name,'event':'cleanup_joined','seq':4,'route_copy_workers':0,'route_callback_workers':0,'canceler_workers':0,'mux_cleanup_workers':0,'active_transport_writes':0,'test_owned_workers_joined':True,'actual_route_workers_joined':True}]
+            data.extend({'Action':'output','Test':name,'Output':'XUDP_ROUTE_LIFECYCLE '+json.dumps(row)} for row in events)
+            data.append({'Action':'pass','Test':name})
+        data.append({'Action':'pass'})
+        return data
+    def check(self, data, arm):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'go.jsonl';path.write_text('\n'.join(json.dumps(row) for row in data)+'\n')
+            return verify_route(path,arm)
+    def test_valid_red_and_green_are_distinct(self):
+        for arm in ('route-only','mux'):self.assertEqual(self.check(self.fixture(arm),arm)['arm'],arm)
+    def test_mutated_ownership_worker_order_or_join_is_rejected(self):
+        mutations=[('mux_arm_snapshot','parent_writers',0),('mux_arm_snapshot','route_copies',1),('mux_arm_snapshot','route_callbacks',1),('mux_arm_snapshot','cancelers',1),('mux_arm_snapshot','parent_transport_open',False),('mux_arm_snapshot','owned_outbound_closed',False),('mux_arm_snapshot','seq',3),('cleanup_joined','actual_route_workers_joined',False),('cleanup_joined','active_transport_writes',1)]
+        for event,key,value in mutations:
+            with self.subTest(event=event,key=key):
+                data=self.fixture('mux')
+                for row in data:
+                    if 'Output' not in row:continue
+                    parsed=json.loads(row['Output'].split('XUDP_ROUTE_LIFECYCLE ',1)[1])
+                    if parsed['event']==event:
+                        parsed[key]=value;row['Output']='XUDP_ROUTE_LIFECYCLE '+json.dumps(parsed);break
+                with self.assertRaises(ValueError):self.check(data,'mux')
+    def test_missing_snapshot_or_test_is_rejected(self):
+        for action in ('snapshot','test'):
+            data=self.fixture('mux')
+            if action=='snapshot':data.pop(0)
+            else:data=[row for row in data if row.get('Test')!='TestMuxRouteReplyBackpressure']
+            with self.assertRaises(ValueError):self.check(data,'mux')
