@@ -71,6 +71,8 @@ class AuthArchiveTests(unittest.TestCase):
             ('fixed-hash',lambda v:v['input-identity.json']['binaries']['official'].update(sha256='0'*64)),
             ('tcp-body',lambda v:v['cases/'+a.METHODS[2]+'.json']['observations'][0].update(body_sha256='0'*64)),
             ('group-live',lambda v:v['owned-group.json'].update(process_group_gone=False)),
+            ('extra-case',lambda v:v['process-binaries.json'].append({**v['process-binaries.json'][0],'case':'unexpected'})),
+            ('role-family',lambda v:v['process-binaries.json'][1].update(mihomo=True,origin='mihomo',sha256=r.MIHOMO,version='1.19.32')),
             ('launch-extra',lambda v:v['process-binaries.json'][0]['launches'].append({'pid':999,'ready':True,'birth_time':999})),
             ('method-failed',lambda v:v['RESULT.json']['methods'][0].update(status='failed'))]
         source,original=self.fixture()

@@ -258,7 +258,8 @@ jobs:
         if: ${{ !cancelled() && steps.auth.outcome != 'skipped' }}
         run: |
           python experiments/standard_client_udp/prepare_controls.py --legacy-repository ../legacy \
-            --runtime /tmp/vui-candidate-auth --arm candidate --output /tmp/vui-candidate-auth-upload
+            --runtime /tmp/vui-candidate-auth --arm candidate --output /tmp/vui-candidate-auth-upload \
+            --build-evidence /tmp/vui-standard-owner-build/evidence
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: ${{ !cancelled() && steps.auth_evidence.outcome == 'success' }}
         with:
