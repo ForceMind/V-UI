@@ -1,6 +1,6 @@
 # 国内 UDP 候选精简：有限依赖分析与对照计划
 
-状态：设计/静态分析，尚无精简核心运行结果。本任务接续[已完成的四点与 1200 字节诊断](STANDARD_CLIENT_UDP_DIAGNOSTIC_RESULTS_20261018.md)，从研究提交 `119fbfe76a83c4f1b4ff4ab0f6bf203ce8bdaa25` 独立工作树推进。仅研究国内服务器代码范围，不改变产品 pin、普通导出、relay UDP 拒绝、发布或部署边界。
+状态：准确 93d 的有限构建与两组运行已独核收口，见[结果](DOMESTIC_UDP_REDUCTION_RESULTS_20261018.md)。下文保留原设计与范围；不授产品 UDP 资格。本任务接续[已完成的四点与 1200 字节诊断](STANDARD_CLIENT_UDP_DIAGNOSTIC_RESULTS_20261018.md)，从研究提交 `119fbfe76a83c4f1b4ff4ab0f6bf203ce8bdaa25` 独立工作树推进。仅研究国内服务器代码范围，不改变产品 pin、普通导出、relay UDP 拒绝、发布或部署边界。
 
 ## 已有依据与本次问题
 
@@ -66,3 +66,7 @@ lifecycle 只选原 12 个顶层 + 5 个 guard 子项，明确排除仅旧 lifec
 实现源码独审记录：准确 `6c6fba5`（公开同 tree `32a1a485`）的新增 Python 控制 12/12、零 skip；本地 10.987 秒，独立隔离复核 12.673 秒。既有适配控制 39/39、本地 16.408 秒，属于原控制回归，不代表 Go/core/runtime 已跑。
 
 差异检查口径：从完整设计 checkpoint `23993e1` 起，`git diff --check` 会报告 `count.patch` 原样冻结 hunk 的空 context 行、context 空格+tab 与末尾空行；这是保留源补丁字节带来的已知 patch 文件 whitespace，不改写原始来源来消除提示。排除该一个 `.patch` 后其余完整差异检查通过；`check_docs.py` 通过。Go 与两组真实运行仍须等待准确 CI 及文本归档独核。
+
+## 本轮运行记录
+
+准确 `93d29465` 的两 case / 四 leaf 已在 run 39175898750 attempt 1 完成，见[独立结果页](DOMESTIC_UDP_REDUCTION_RESULTS_20261018.md)。完整构建与运行原档已独核通过，本有限计划收口；不扩矩阵、不将两臂整组对照称逐补丁最小性证明。后续精简 head 的认证/目的地址/DNS 守卫和普通包多轮/真实网络门槛仍待单独计划。

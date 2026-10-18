@@ -184,6 +184,32 @@
           "expires_at": "2026-10-25T22:47:45Z"
         }
       ]
+    },
+    {
+      "run_id": 39175898750,
+      "run_attempt": 1,
+      "head_sha": "93d29465ef328665b8d08b9cd0357a47c0eb6daf",
+      "conclusion": "success",
+      "artifacts": [
+        {
+          "artifact_id": 12154875315,
+          "name": "domestic-udp-full-reference-text",
+          "zip_bytes": 908147,
+          "zip_sha256": "151f579e40f291d3243994bd36e24fedcfff6e974b0f03eb862f6642e2254e88",
+          "text_files": 438,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39175898750/artifacts/12154875315",
+          "expires_at": "2026-10-25T23:29:21Z"
+        },
+        {
+          "artifact_id": 12154657681,
+          "name": "domestic-udp-reduced-text",
+          "zip_bytes": 755192,
+          "zip_sha256": "0736f8ea44a329f6332a5c8a23d090326c4c0d7ff4168ac3c56fa55440f9e578",
+          "text_files": 143,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39175898750/artifacts/12154657681",
+          "expires_at": "2026-10-25T23:30:03Z"
+        }
+      ]
     }
   ]
 }

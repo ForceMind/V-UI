@@ -1,6 +1,6 @@
 # 标准客户端、两跳与实验边界
 
-2026-10-18 更新。产品[每入口 TCP](PER_INBOUND_ROUTING_CONTRACT.md)已完成；独立标准客户端 UDP 研究已有新的实际结果，完整容量与同关联 idle 门槛仍红。准确源码、逐组结果、归档与剩余计划见[本轮研究记录](STANDARD_CLIENT_UDP_RESULTS_20261018.md)，不授手机真机资格。
+2026-10-18 更新。产品[每入口 TCP](PER_INBOUND_ROUTING_CONTRACT.md)已完成；独立标准客户端 UDP 研究已有新的实际结果，原完整容量与 60000 前置的同关联 idle 门槛仍红；另列 1200 字节有限门槛已有通过证据。准确源码、逐组结果、归档与剩余计划见[本轮研究记录](STANDARD_CLIENT_UDP_RESULTS_20261018.md)，不授手机真机资格。
 
 ## 已有事实
 
@@ -60,3 +60,9 @@
 另列 1200 字节 first → 完整六秒静默观察 → 不同 hash 的单次新包，保持同一应用 control/UDP/relay，释放与 next-packet 可用性分别判定。全 stock 首包 tuple 错使窗口/恢复未执行；候选首轮 raw 两包完整但 verifier 模块缓存错误且缺 post-identity，保留红灯；两 case 有限夹具修复单独归档。详见准确结果，不与原 D 的 60000 前置或已有认证资格混用。
 
 准确 a37 的有限修复补测中，candidate 国内 + candidate 海外、candidate 国内 + 官方海外两组均完成两个不同 1200 字节完整往返，原应用关联不变，末首包回复后整六秒观察窗中 server leg 约 2.05 秒释放，下一包只发一次。这说明本固定小包条件不必替换海外核心；八补丁最小子集、真实 App/TUN/MTU、长期/并发/多次恢复仍未验证。产品 UDP 拒绝保持，完整容量和原 D 仍红。
+
+## 国内-only 精简充分候选
+
+[准确 93d 对照](DOMESTIC_UDP_REDUCTION_RESULTS_20261018.md)在 stock Mihomo + 官方海外、owner 缺省下，只改变国内：完整八补丁参考与四原补丁加 Count 精简版均完成两个不同 1200 字节完整往返，原应用关联与六秒零发送窗口保持，server leg 分别约 2.054/2.085 秒释放。精简版仅四条生产源码路径，无 receive/owner/private lease；准确编译、race/debug、归档和原始运行均独核通过。
+
+这得到本固定条件的较小国内-only充分集，不证明每个保留补丁必要或可直接合入产品。精简 head 的认证/目的地址/DNS 守卫、普通包多轮并发、实际现成 App/TUN/MTU/公网尚未验收；原大包红灯与产品 relay UDP 拒绝保持，不要求自研手机 App或替换海外核心。

@@ -63,3 +63,7 @@ E、stock I、产品 P4、auth 没有重跑，不把先前 head 的结果授给�
 [机器收据](STANDARD_CLIENT_UDP_ARTIFACTS_20261018.json)按 run/head 分开保存 ZIP bytes/SHA256、成员数、artifact ID 和到期时间。首轮产品/stock/candidate 分别 3/20/469 个文本文件；candidate 含完整 419 个 build-proof 成员。首轮没有海外官方 I artifact；修复后 candidate/官方海外各另有 438 个文本文件，分开绑定新 head，不构造空档案冒充旧执行。只上传通过严格 no-follow/UTF-8/允许列表/敏感值/总预算核验的文本，未上传 binary、配置、证书或私钥。
 
 离线核验必须 checkout 对应准确运行 head，使用该提交的 `diagnostic_evidence.py`；a37 的两个补测归档另加 `--idle-repair`。旧 1925 红档案必须由旧 verifier 重算，不能从新文档或修复提交放宽其 source identity。归档 verifier 返回 0 只表示该红/绿档案内部一致，仍须读取总门槛和各项原始结果。原 C/D/B 结果、首轮夹具失败和未执行叶均保留。
+
+## 后续国内精简进展
+
+本页 a37 的八补丁角色结果保持。另一个准确 head `93d29465` 的[国内-only 精简对照](DOMESTIC_UDP_REDUCTION_RESULTS_20261018.md)已完成：四原补丁加独立 Count 在同样 1200/六秒条件足够，设备和海外均 stock。它是较小充分集，仍非逐补丁最小性或产品 UDP 资格；没有改写本页首轮失败和旧 C/D/B 红灯。
