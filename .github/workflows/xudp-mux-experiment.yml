@@ -128,3 +128,72 @@ jobs:
           path: /tmp/vui-xudp-mux-runtime-upload
           retention-days: 7
           if-no-files-found: error
+  packet-experiment:
+    needs: mux-experiment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing-box
+          ref: af6e64c3b69e6132ebaee0e1a3d24e93903f6709
+          path: .experiment-source/sing-box
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing-vmess
+          ref: 31ec11e8790c48a4bf11711806a61e929ee6b89d
+          path: .experiment-source/sing-vmess
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing
+          ref: 87c33f17688fe3dd80eeabef7c3f7a69152ccd42
+          path: .experiment-source/sing
+          persist-credentials: false
+      - name: Use existing fixed runner Go compiler
+        run: |
+          set -euo pipefail
+          GO_BIN="$RUNNER_TOOL_CACHE/go/1.25.14/x64/bin"
+          test "$(GOTOOLCHAIN=local "$GO_BIN/go" version)" = 'go version go1.25.14 linux/amd64'
+          printf '%s\n' "$GO_BIN" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: vui-xudp-mux-evidence
+          path: /tmp/vui-packet-mechanism
+      - name: Verify packet evidence controls
+        run: |
+          python3 - <<'PY'
+          import unittest
+          suite = unittest.TestLoader().discover('experiments/xudp_packet', pattern='test_*.py')
+          assert suite.countTestCases() == 15
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          assert result.wasSuccessful() and not result.skipped
+          PY
+      - name: Build complete-packet candidate and run bounded receive race debug and cross-compiles
+        run: |
+          python3 experiments/xudp_packet/build_and_test.py \
+            --sing-box .experiment-source/sing-box \
+            --sing-vmess .experiment-source/sing-vmess \
+            --sing .experiment-source/sing \
+            --mechanism /tmp/vui-packet-mechanism \
+            --output /tmp/vui-packet-build
+      - name: Prepare packet text evidence without source trees or binaries
+        if: always()
+        id: evidence
+        run: |
+          python3 experiments/xudp_packet/prepare_evidence.py \
+            --build /tmp/vui-packet-build/evidence \
+            --output /tmp/vui-packet-upload
+      - name: Preserve packet experiment evidence
+        if: ${{ !cancelled() && steps.evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vui-complete-packet-evidence
+          path: /tmp/vui-packet-upload
+          retention-days: 7
+          if-no-files-found: error

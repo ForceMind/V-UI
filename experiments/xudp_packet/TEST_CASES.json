@@ -1,0 +1,112 @@
+{
+  "schema": 1,
+  "fixed_sing_commit": "87c33f17688fe3dd80eeabef7c3f7a69152ccd42",
+  "test_run_regex": "^TestVUICompletePacket",
+  "execution_status": "prepared_only_not_compiled_or_run",
+  "files": [
+    {
+      "source": "tests/common/bufio/packet_receive_batch_test.go",
+      "target": "common/bufio/vui_packet_receive_batch_test.go"
+    },
+    {
+      "source": "tests/common/bufio/packet_receive_test.go",
+      "target": "common/bufio/vui_packet_receive_test.go"
+    },
+    {
+      "source": "tests/common/network/packet_receive_options_test.go",
+      "target": "common/network/vui_packet_receive_options_test.go"
+    },
+    {
+      "source": "tests/protocol/socks/packet_receive_first_test.go",
+      "target": "protocol/socks/vui_packet_receive_first_test.go"
+    }
+  ],
+  "linux_required_leaf_tests": {
+    "github.com/sagernet/sing/common/network": [
+      "TestVUICompletePacketOptions/default",
+      "TestVUICompletePacketOptions/default_headroom",
+      "TestVUICompletePacketOptions/default_overhead_independent",
+      "TestVUICompletePacketOptions/explicit_overhead",
+      "TestVUICompletePacketOptions/explicit_limit",
+      "TestVUICompletePacketOptions/explicit_clamped_sum",
+      "TestVUICompletePacketOptions/maximum_headrooms",
+      "TestVUICompletePacketInvalidOptions/negative_mtu",
+      "TestVUICompletePacketInvalidOptions/oversize_mtu",
+      "TestVUICompletePacketInvalidOptions/negative_overhead",
+      "TestVUICompletePacketInvalidOptions/oversize_overhead",
+      "TestVUICompletePacketInvalidOptions/negative_front",
+      "TestVUICompletePacketInvalidOptions/oversize_front",
+      "TestVUICompletePacketInvalidOptions/negative_rear",
+      "TestVUICompletePacketInvalidOptions/oversize_rear",
+      "TestVUICompletePacketInvalidOptions/overflow_sum",
+      "TestVUICompletePacketPoolBudget"
+    ],
+    "github.com/sagernet/sing/common/bufio": [
+      "TestVUICompletePacketDatagram/direct",
+      "TestVUICompletePacketDatagram/fallback",
+      "TestVUICompletePacketDatagram/single_waiter",
+      "TestVUICompletePacketDatagram/connected_read_buffer",
+      "TestVUICompletePacketDatagram/connected_waiter",
+      "TestVUICompletePacketDefaultBudget/direct",
+      "TestVUICompletePacketDefaultBudget/fallback",
+      "TestVUICompletePacketDefaultBudget/single_waiter",
+      "TestVUICompletePacketDefaultBudget/connected_read_buffer",
+      "TestVUICompletePacketDefaultBudget/connected_waiter",
+      "TestVUICompletePacketCallerPrefix/direct",
+      "TestVUICompletePacketCallerPrefix/fallback",
+      "TestVUICompletePacketCallerPrefix/connected_read_buffer",
+      "TestVUICompletePacketParentClose/direct",
+      "TestVUICompletePacketParentClose/fallback",
+      "TestVUICompletePacketParentClose/single_waiter",
+      "TestVUICompletePacketParentClose/connected_read_buffer",
+      "TestVUICompletePacketParentClose/connected_waiter",
+      "TestVUICompletePacketProtocolLimit",
+      "TestVUICompletePacketPublicReadFrom/direct",
+      "TestVUICompletePacketPublicReadFrom/fallback",
+      "TestVUICompletePacketConnectedWriteBuffer",
+      "TestVUICompletePacketCopyNoPrefix/fallback",
+      "TestVUICompletePacketCopyNoPrefix/single_waiter",
+      "TestVUICompletePacketCopyNoPrefix/connected_waiter",
+      "TestVUICompletePacketBatchMixed/ordinary",
+      "TestVUICompletePacketBatchMixed/connected",
+      "TestVUICompletePacketBatchDefaultBudget/ordinary",
+      "TestVUICompletePacketBatchDefaultBudget/connected",
+      "TestVUICompletePacketBatchParentClose/ordinary",
+      "TestVUICompletePacketBatchParentClose/connected",
+      "TestVUICompletePacketBatchInvalidSize",
+      "TestVUICompletePacketSyscallParentClose",
+      "TestVUICompletePacketBatchAggregateBudget/ordinary",
+      "TestVUICompletePacketBatchAggregateBudget/connected"
+    ],
+    "github.com/sagernet/sing/protocol/socks": [
+      "TestVUICompletePacketSOCKSFirstPacket/large_payload",
+      "TestVUICompletePacketSOCKSFirstPacket/udp4_maximum",
+      "TestVUICompletePacketSOCKSFirstPacket/zero_payload",
+      "TestVUICompletePacketSOCKSFirstPacketError/short_header",
+      "TestVUICompletePacketSOCKSFirstPacketError/invalid_address",
+      "TestVUICompletePacketSOCKSFirstPacketError/parent_close"
+    ]
+  },
+  "cross_compile_only_targets": [
+    "darwin/amd64",
+    "windows/amd64"
+  ],
+  "cross_compile_command_contract": "CGO_ENABLED=0 GOOS=<os> GOARCH=amd64 go test -c -o <unique-output> <one exact package>",
+  "linux_runtime_modes": [
+    [
+      "-race"
+    ],
+    [
+      "-race",
+      "-tags=debug"
+    ]
+  ],
+  "notes": [
+    "No skips are allowed for required Linux leaves.",
+    "Batch and deterministic syscall-close test file has linux || netbsd || darwin build constraint.",
+    "Only TestVUICompletePacket* are selected; upstream tests compile but are not runtime evidence for this suite.",
+    "All test worker cleanup joins before restoring global DefaultAllocator.",
+    "65535/65536/65537 fake cases validate only logical protocol budget; actual UDP4 maximum 65507 and SOCKS IPv4-header payload 65497 are separate cases."
+  ],
+  "linux_required_leaf_count": 58
+}

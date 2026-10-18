@@ -1,0 +1,343 @@
+diff --git a/common/bufio/conn.go b/common/bufio/conn.go
+index c6132fa..ea52c09 100644
+--- a/common/bufio/conn.go
++++ b/common/bufio/conn.go
+@@ -67,12 +67,10 @@ func (w *ExtendedUDPConn) ReadMsgUDPAddrPort(b, oob []byte) (n, oobn, flags int,
+ }
+ 
+ func (w *ExtendedUDPConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
+-	n, addr, err := w.ReadFromUDPAddrPort(buffer.FreeBytes())
+-	if err != nil {
+-		return M.Socksaddr{}, err
+-	}
+-	buffer.Truncate(n)
+-	return M.SocksaddrFromNetIP(addr).Unwrap(), nil
++	return readPacketComplete(buffer, func(data []byte) (int, M.Socksaddr, error) {
++		n, addr, err := w.ReadFromUDPAddrPort(data)
++		return n, M.SocksaddrFromNetIP(addr).Unwrap(), err
++	})
+ }
+ 
+ func (w *ExtendedUDPConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
+@@ -80,6 +78,26 @@ func (w *ExtendedUDPConn) WritePacket(buffer *buf.Buffer, destination M.Socksadd
+ 	return common.Error(w.UDPConn.WriteToUDPAddrPort(buffer.Bytes(), destination.AddrPort()))
+ }
+ 
++// ReadBuffer is a packet read even when a connected UDP socket is exposed as
++// net.Conn. Do not route it through a stream read waiter (which loses MSG_TRUNC).
++func (w *ExtendedUDPConn) ReadBuffer(buffer *buf.Buffer) error {
++	_, err := w.ReadPacket(buffer)
++	return err
++}
++
++func (w *ExtendedUDPConn) WriteBuffer(buffer *buf.Buffer) error {
++	defer buffer.Release()
++	return common.Error(w.UDPConn.Write(buffer.Bytes()))
++}
++
++func (w *ExtendedUDPConn) CreateReadWaiter() (N.ReadWaiter, bool) {
++	waiter, ok := createSyscallPacketReadWaiter(w.UDPConn)
++	if !ok {
++		return nil, false
++	}
++	return &bindPacketReadWaiter{waiter}, true
++}
++
+ func (w *ExtendedUDPConn) Upstream() any {
+ 	return w.UDPConn
+ }
+@@ -97,11 +115,13 @@ func (w *ExtendedPacketConn) ReadFrom(b []byte) (n int, addr net.Addr, err error
+ }
+ 
+ func (w *ExtendedPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
+-	_, addr, err := buffer.ReadPacketFrom(w)
+-	if err != nil {
+-		return M.Socksaddr{}, err
+-	}
+-	return M.SocksaddrFromNet(addr).Unwrap(), err
++	return readPacketComplete(buffer, func(data []byte) (int, M.Socksaddr, error) {
++		n, addr, err := w.ReadFrom(data)
++		if err != nil {
++			return n, M.Socksaddr{}, err
++		}
++		return n, M.SocksaddrFromNet(addr).Unwrap(), nil
++	})
+ }
+ 
+ func (w *ExtendedPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
+@@ -228,6 +248,9 @@ func (c *ExtendedConnWrapper) Upstream() any {
+ }
+ 
+ func NewExtendedConn(conn net.Conn) N.ExtendedConn {
++	if udpConn, ok := conn.(*net.UDPConn); ok {
++		return &ExtendedUDPConn{udpConn}
++	}
+ 	if c, ok := conn.(N.ExtendedConn); ok {
+ 		return c
+ 	}
+diff --git a/common/bufio/copy_direct_posix.go b/common/bufio/copy_direct_posix.go
+index ff72bec..972c4c7 100644
+--- a/common/bufio/copy_direct_posix.go
++++ b/common/bufio/copy_direct_posix.go
+@@ -203,7 +203,11 @@ func (w *syscallPacketReadWaiter) InitializeReadWaiter(options N.ReadWaitOptions
+ 		buffer := w.options.NewPacketBuffer()
+ 		var readN int
+ 		var from unix.Sockaddr
+-		readN, _, _, from, w.readErr = unix.Recvmsg(int(fd), buffer.FreeBytes(), nil, 0)
++		var flags int
++		readN, _, flags, from, w.readErr = unix.Recvmsg(int(fd), buffer.FreeBytes(), nil, 0)
++		if w.readErr == nil && (flags&unix.MSG_TRUNC != 0 || readN > N.MaxPacketSize || readN > buffer.FreeLen()) {
++			w.readErr = N.ErrPacketTooLarge
++		}
+ 		//goland:noinspection GoDirectComparisonOfErrors
+ 		if w.readErr != nil {
+ 			buffer.Release()
+diff --git a/common/bufio/copy_direct_windows.go b/common/bufio/copy_direct_windows.go
+index d128924..f557efc 100644
+--- a/common/bufio/copy_direct_windows.go
++++ b/common/bufio/copy_direct_windows.go
+@@ -218,6 +218,12 @@ func (w *syscallPacketReadWaiter) InitializeReadWaiter(options N.ReadWaitOptions
+ 		var readN int
+ 		var from windows.Sockaddr
+ 		readN, from, w.readErr = windows.Recvfrom(windows.Handle(fd), buffer.FreeBytes(), 0)
++		if w.readErr != windows.WSAEWOULDBLOCK {
++			w.hasData = false
++		}
++		if w.readErr == windows.WSAEMSGSIZE || (w.readErr == nil && (readN > N.MaxPacketSize || readN > buffer.FreeLen())) {
++			w.readErr = N.ErrPacketTooLarge
++		}
+ 		//goland:noinspection GoDirectComparisonOfErrors
+ 		if w.readErr != nil {
+ 			buffer.Release()
+diff --git a/common/bufio/packet_batch_mmsg.go b/common/bufio/packet_batch_mmsg.go
+index 6b820af..1e81dc2 100644
+--- a/common/bufio/packet_batch_mmsg.go
++++ b/common/bufio/packet_batch_mmsg.go
+@@ -74,6 +74,9 @@ func (w *syscallPacketBatchReadWaiter) InitializeReadWaiter(options N.ReadWaitOp
+ 	if options.BatchSize <= 0 {
+ 		options.BatchSize = DefaultPacketReadBatchSize
+ 	}
++	if options.BatchSize > DefaultPacketReadBatchSize {
++		panic("packet read batch exceeds bounded capacity")
++	}
+ 	w.options = options
+ 	w.buffers = make([]*buf.Buffer, options.BatchSize)
+ 	if !w.connected {
+@@ -120,6 +123,12 @@ func (w *syscallPacketBatchReadWaiter) InitializeReadWaiter(options N.ReadWaitOp
+ 		if w.readN == 0 && w.readErr == nil {
+ 			w.readErr = io.EOF
+ 		}
++		for i := 0; i < w.readN; i++ {
++			if w.msgvec[i].msgHdr.Flags&unix.MSG_TRUNC != 0 || uint64(w.msgvec[i].msgLen) > uint64(N.MaxPacketSize) || uint64(w.msgvec[i].msgLen) > uint64(w.buffers[i].FreeLen()) {
++				w.readErr = N.ErrPacketTooLarge
++				return true
++			}
++		}
+ 		for i := 0; i < w.readN; i++ {
+ 			buffer := w.buffers[i]
+ 			buffer.Truncate(int(w.msgvec[i].msgLen))
+@@ -140,6 +149,17 @@ func (w *syscallPacketBatchReadWaiter) WaitReadPackets() (buffers []*buf.Buffer,
+ 	if w.readFunc == nil {
+ 		return nil, nil, os.ErrInvalid
+ 	}
++	// Return ownership only for the reported packets; release unused batch
++	// buffers too, since a writer error may prevent the next read entirely.
++	defer func() {
++		for i, buffer := range w.buffers {
++			if buffer != nil {
++				buffer.Release()
++				w.buffers[i] = nil
++			}
++		}
++		w.readN = 0
++	}()
+ 	err = w.rawConn.Read(w.readFunc)
+ 	if err != nil {
+ 		return
+@@ -168,6 +188,17 @@ func (w *syscallPacketBatchReadWaiter) WaitReadConnectedPackets() (buffers []*bu
+ 	if w.readFunc == nil {
+ 		return nil, M.Socksaddr{}, os.ErrInvalid
+ 	}
++	// Return ownership only for the reported packets; release unused batch
++	// buffers too, since a writer error may prevent the next read entirely.
++	defer func() {
++		for i, buffer := range w.buffers {
++			if buffer != nil {
++				buffer.Release()
++				w.buffers[i] = nil
++			}
++		}
++		w.readN = 0
++	}()
+ 	err = w.rawConn.Read(w.readFunc)
+ 	if err != nil {
+ 		return
+diff --git a/common/bufio/packet_batch_msgx_darwin.go b/common/bufio/packet_batch_msgx_darwin.go
+index 0fb23e8..8ab05d7 100644
+--- a/common/bufio/packet_batch_msgx_darwin.go
++++ b/common/bufio/packet_batch_msgx_darwin.go
+@@ -78,6 +78,9 @@ func (w *syscallPacketBatchReadWaiter) InitializeReadWaiter(options N.ReadWaitOp
+ 	if options.BatchSize <= 0 {
+ 		options.BatchSize = DefaultPacketReadBatchSize
+ 	}
++	if options.BatchSize > DefaultPacketReadBatchSize {
++		panic("packet read batch exceeds bounded capacity")
++	}
+ 	w.options = options
+ 	w.buffers = make([]*buf.Buffer, options.BatchSize)
+ 	if !w.connected {
+@@ -125,6 +128,12 @@ func (w *syscallPacketBatchReadWaiter) InitializeReadWaiter(options N.ReadWaitOp
+ 		if w.readN == 0 && w.readErr == nil {
+ 			w.readErr = io.EOF
+ 		}
++		for i := 0; i < w.readN; i++ {
++			if w.msgvec[i].flags&unix.MSG_TRUNC != 0 || uint64(w.msgvec[i].datalen) > uint64(N.MaxPacketSize) || uint64(w.msgvec[i].datalen) > uint64(w.buffers[i].FreeLen()) {
++				w.readErr = N.ErrPacketTooLarge
++				return true
++			}
++		}
+ 		for i := 0; i < w.readN; i++ {
+ 			buffer := w.buffers[i]
+ 			buffer.Truncate(int(w.msgvec[i].datalen))
+@@ -145,6 +154,17 @@ func (w *syscallPacketBatchReadWaiter) WaitReadPackets() (buffers []*buf.Buffer,
+ 	if w.readFunc == nil {
+ 		return nil, nil, os.ErrInvalid
+ 	}
++	// Return ownership only for the reported packets; release unused batch
++	// buffers too, since a writer error may prevent the next read entirely.
++	defer func() {
++		for i, buffer := range w.buffers {
++			if buffer != nil {
++				buffer.Release()
++				w.buffers[i] = nil
++			}
++		}
++		w.readN = 0
++	}()
+ 	err = w.rawConn.Read(w.readFunc)
+ 	if err != nil {
+ 		return
+@@ -173,6 +193,17 @@ func (w *syscallPacketBatchReadWaiter) WaitReadConnectedPackets() (buffers []*bu
+ 	if w.readFunc == nil {
+ 		return nil, M.Socksaddr{}, os.ErrInvalid
+ 	}
++	// Return ownership only for the reported packets; release unused batch
++	// buffers too, since a writer error may prevent the next read entirely.
++	defer func() {
++		for i, buffer := range w.buffers {
++			if buffer != nil {
++				buffer.Release()
++				w.buffers[i] = nil
++			}
++		}
++		w.readN = 0
++	}()
+ 	err = w.rawConn.Read(w.readFunc)
+ 	if err != nil {
+ 		return
+diff --git a/common/bufio/packet_complete.go b/common/bufio/packet_complete.go
+new file mode 100644
+index 0000000..934e2fe
+--- /dev/null
++++ b/common/bufio/packet_complete.go
+@@ -0,0 +1,24 @@
++package bufio
++
++import (
++	"github.com/sagernet/sing/common/buf"
++	M "github.com/sagernet/sing/common/metadata"
++	N "github.com/sagernet/sing/common/network"
++)
++
++// A generic PacketConn has no truncation flags. One bounded probe byte lets us
++// reject oversize reads without rejecting an exact-fit datagram or exposing a
++// successful prefix. A short caller buffer also never receives partial data.
++func readPacketComplete(buffer *buf.Buffer, read func([]byte) (int, M.Socksaddr, error)) (M.Socksaddr, error) {
++	scratch := buf.NewSize(N.MaxPacketSize + 1)
++	defer scratch.Release()
++	n, addr, err := read(scratch.FreeBytes())
++	if err != nil {
++		return M.Socksaddr{}, err
++	}
++	if n < 0 || n > N.MaxPacketSize || n > buffer.FreeLen() {
++		return M.Socksaddr{}, N.ErrPacketTooLarge
++	}
++	_, err = buffer.Write(scratch.FreeBytes()[:n])
++	return addr, err
++}
+diff --git a/common/network/direct.go b/common/network/direct.go
+index ccb10c3..43ee735 100644
+--- a/common/network/direct.go
++++ b/common/network/direct.go
+@@ -82,10 +82,21 @@ func (o ReadWaitOptions) NewBuffer() *buf.Buffer {
+ }
+ 
+ func (o ReadWaitOptions) NewPacketBuffer() *buf.Buffer {
+-	bufferSize := buf.UDPBufferSize
++	// Keep packet admission separate from destination headroom. A complete
++	// datagram must not lose bytes merely because its next writer needs headers.
++	for _, value := range []int{o.MTU, o.ReadOverhead, o.FrontHeadroom, o.RearHeadroom} {
++		if value < 0 || value > MaxPacketSize {
++			panic("invalid packet read buffer option")
++		}
++	}
++	readSize := MaxPacketSize
+ 	if o.MTU > 0 {
+-		bufferSize = o.MTU + o.ReadOverhead + o.FrontHeadroom + o.RearHeadroom
++		readSize = o.MTU + o.ReadOverhead
++		if readSize > MaxPacketSize {
++			readSize = MaxPacketSize
++		}
+ 	}
++	bufferSize := readSize + o.FrontHeadroom + o.RearHeadroom
+ 	minimumBufferSize := o.FrontHeadroom + o.RearHeadroom + 1
+ 	if bufferSize < minimumBufferSize {
+ 		bufferSize = minimumBufferSize
+diff --git a/common/network/packet.go b/common/network/packet.go
+index 5b85214..d127f32 100644
+--- a/common/network/packet.go
++++ b/common/network/packet.go
+@@ -2,11 +2,18 @@ package network
+ 
+ import (
+ 	"sync"
++	"errors"
+ 
+ 	"github.com/sagernet/sing/common/buf"
+ 	M "github.com/sagernet/sing/common/metadata"
+ )
+ 
++// MaxPacketSize excludes IPv6 jumbograms. IP and encapsulation-specific
++// limits can be smaller; this is not a promise that every size is sendable.
++const MaxPacketSize = 65535
++
++var ErrPacketTooLarge = errors.New("packet exceeds receive budget")
++
+ type PacketBuffer struct {
+ 	Buffer      *buf.Buffer
+ 	Destination M.Socksaddr
+diff --git a/protocol/socks/handshake.go b/protocol/socks/handshake.go
+index c6970ea..68f5023 100644
+--- a/protocol/socks/handshake.go
++++ b/protocol/socks/handshake.go
+@@ -11,7 +11,6 @@ import (
+ 
+ 	"github.com/sagernet/sing/common"
+ 	"github.com/sagernet/sing/common/auth"
+-	"github.com/sagernet/sing/common/buf"
+ 	"github.com/sagernet/sing/common/bufio"
+ 	"github.com/sagernet/sing/common/canceler"
+ 	E "github.com/sagernet/sing/common/exceptions"
+@@ -258,10 +257,11 @@ func HandleConnectionEx(
+ 			if udpTimeout > 0 {
+ 				udpConn.SetReadDeadline(time.Now().Add(udpTimeout))
+ 			}
+-			firstPacket := buf.NewPacket()
++			firstPacket := (N.ReadWaitOptions{}).NewPacketBuffer()
+ 			var destination M.Socksaddr
+ 			destination, err = socksPacketConn.ReadPacket(firstPacket)
+ 			if err != nil {
++				firstPacket.Release()
+ 				_ = socksPacketConn.Close()
+ 				return E.Cause(err, "socks5: read first packet")
+ 			}
