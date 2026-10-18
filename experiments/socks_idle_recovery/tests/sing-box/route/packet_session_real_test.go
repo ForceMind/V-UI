@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -19,6 +20,8 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/dialer"
+	boxtls "github.com/sagernet/sing-box/common/tls"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -221,3 +224,44 @@ func ownerRealJoinedCycles(t *testing.T, kind string) {
 func TestOwnerRealJoinedAES(t *testing.T) { ownerRealJoinedCycles(t, "aes-128-gcm") }
 func TestOwnerRealJoinedChaCha(t *testing.T) { ownerRealJoinedCycles(t, "chacha20-poly1305") }
 func TestOwnerRealJoinedVLESS(t *testing.T) { ownerRealJoinedCycles(t, "vless") }
+
+// Promoted methods must not turn a TLS wrapper into a supported concrete config.
+type ownerUnknownTLSConfig struct { boxtls.Config }
+
+func TestOwnerDirectTCPAndCanceledDial(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil { t.Fatal(err) }
+	defer listener.Close()
+	d, err := dialer.NewDefault(context.Background(), option.DialerOptions{})
+	if err != nil { t.Fatal(err) }
+	address := M.SocksaddrFromNet(listener.Addr())
+	if dialer.ValidatePacketSessionDialer((*dialer.DefaultDialer)(nil), address) == nil { t.Fatal("typed-nil direct dialer admitted") }
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	conn, err := d.DialContext(ctx, "tcp", address)
+	if err != nil { t.Fatal(err) }
+	if _, ok := conn.(*net.TCPConn); !ok { conn.Close(); t.Fatal("unexpected direct wrapper") }
+	conn.Close()
+	config, err := boxtls.NewSTDClient(context.Background(), log.NewNOPFactory().Logger(), "localhost", option.OutboundTLSOptions{Enabled: true})
+	if err != nil { t.Fatal(err) }
+	// The lower-level signature must not weaken the exact concrete TLS gate.
+	if err := dialer.ValidatePacketSessionTLS(config); err != nil { t.Fatal(err) }
+	for _, invalid := range []boxtls.Config{nil, (*boxtls.STDClientConfig)(nil), &ownerUnknownTLSConfig{Config: config}} {
+		if dialer.ValidatePacketSessionTLS(invalid) == nil { t.Fatal("unknown or nil TLS config admitted") }
+	}
+	inner, err := config.STDConfig()
+	if err != nil { t.Fatal(err) }
+	inner.InsecureSkipVerify = true
+	if dialer.ValidatePacketSessionTLS(config) == nil { t.Fatal("insecure actual TLS config admitted") }
+	inner.InsecureSkipVerify = false
+	inner.ServerName = ""
+	if dialer.ValidatePacketSessionTLS(config) == nil { t.Fatal("missing TLS server name admitted") }
+	inner.ServerName = "localhost"
+	inner.EncryptedClientHelloConfigList = []byte{1}
+	if dialer.ValidatePacketSessionTLS(config) == nil { t.Fatal("actual ECH TLS config admitted") }
+	inner.EncryptedClientHelloConfigList = nil
+	cancel()
+	attached := false
+	_, _, err = dialer.DialPacketSessionTLS(ctx, d, address, config, func(func() error) error { attached = true; return nil })
+	if !errors.Is(err, context.Canceled) || attached { t.Fatalf("cancelled raw dial attached: %v %v", attached, err) }
+}

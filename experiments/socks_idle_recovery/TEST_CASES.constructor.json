@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "kind": "vui-owner-constructor-cancellation-source-supplement",
+  "execution_status": "prepared_only_not_formatted_compiled_or_run",
+  "first_mechanism_included": false,
+  "required_modes": [
+    "race",
+    "race_debug"
+  ],
+  "expected_leaf_count": 30,
+  "expected_leaves": [
+    "TestOwnerActualTrackedPowerCounterComposition",
+    "TestOwnerConcreteAdmittedSurvivesOldDeadline/aes-128-gcm",
+    "TestOwnerConcreteAdmittedSurvivesOldDeadline/chacha20-poly1305",
+    "TestOwnerConcreteAdmittedSurvivesOldDeadline/vless",
+    "TestOwnerConcreteTLSConstructionCancellation/aes-128-gcm/control_close",
+    "TestOwnerConcreteTLSConstructionCancellation/aes-128-gcm/owner_deadline",
+    "TestOwnerConcreteTLSConstructionCancellation/chacha20-poly1305/control_close",
+    "TestOwnerConcreteTLSConstructionCancellation/chacha20-poly1305/owner_deadline",
+    "TestOwnerConcreteTLSConstructionCancellation/vless/control_close",
+    "TestOwnerConcreteTLSConstructionCancellation/vless/owner_deadline",
+    "TestOwnerLateLeaseCancellationPermutations/attach_after_close/late_success/control_close",
+    "TestOwnerLateLeaseCancellationPermutations/attach_after_close/late_success/owner_deadline",
+    "TestOwnerLateLeaseCancellationPermutations/attach_after_close/partial_error/control_close",
+    "TestOwnerLateLeaseCancellationPermutations/attach_after_close/partial_error/owner_deadline",
+    "TestOwnerLateLeaseCancellationPermutations/attached_before_close/late_success/control_close",
+    "TestOwnerLateLeaseCancellationPermutations/attached_before_close/late_success/owner_deadline",
+    "TestOwnerLateLeaseCancellationPermutations/attached_before_close/partial_error/control_close",
+    "TestOwnerLateLeaseCancellationPermutations/attached_before_close/partial_error/owner_deadline",
+    "TestOwnerRealConstructedLateLeaseCancellation/aes-128-gcm/control_close",
+    "TestOwnerRealConstructedLateLeaseCancellation/aes-128-gcm/owner_deadline",
+    "TestOwnerRealConstructedLateLeaseCancellation/chacha20-poly1305/control_close",
+    "TestOwnerRealConstructedLateLeaseCancellation/chacha20-poly1305/owner_deadline",
+    "TestOwnerRealConstructedLateLeaseCancellation/vless/control_close",
+    "TestOwnerRealConstructedLateLeaseCancellation/vless/owner_deadline",
+    "TestOwnerRealOuterConstructorPipeCancellation/aes-128-gcm/control_close",
+    "TestOwnerRealOuterConstructorPipeCancellation/aes-128-gcm/owner_deadline",
+    "TestOwnerRealOuterConstructorPipeCancellation/chacha20-poly1305/control_close",
+    "TestOwnerRealOuterConstructorPipeCancellation/chacha20-poly1305/owner_deadline",
+    "TestOwnerRealOuterConstructorPipeCancellation/vless/control_close",
+    "TestOwnerRealOuterConstructorPipeCancellation/vless/owner_deadline"
+  ],
+  "package": "github.com/sagernet/sing-box/route",
+  "files": [
+    {
+      "source": "tests/route/packet_session_admitted_deadline_test.go",
+      "target": "route/vui_packet_session_admitted_deadline_supplement_test.go",
+      "sha256": "6daf14aed888a49e99d03095cc4aba06d8f7b4838e42765fad750cecd4ef8242"
+    },
+    {
+      "source": "tests/route/packet_session_constructor_cancel_test.go",
+      "target": "route/vui_packet_session_constructor_cancel_supplement_test.go",
+      "sha256": "ff6554d7055d16b498742dd0a979de8a79f73b4f0448e27a271e383442dd0e63"
+    },
+    {
+      "source": "tests/route/packet_session_power_counter_test.go",
+      "target": "route/vui_packet_session_power_counter_supplement_test.go",
+      "sha256": "1b819547116f03ff89e029022652bd50e1e34946be83afc9b19ba7300c9b86cd"
+    },
+    {
+      "source": "tests/route/packet_session_real_late_lease_test.go",
+      "target": "route/vui_packet_session_real_late_lease_supplement_test.go",
+      "sha256": "4c14ef3e340cc705fc32f557d40cb08591bc02ff25463c5f422109621be58d6c"
+    }
+  ],
+  "reviewed_production_inputs": {
+    "box_owner_patch_sha256": "a8c5f5d567b31c7a05c198d77b537dc87ef11008dcad8581f273de895500415d",
+    "sing_owner_patch_sha256": "5a72546e4d2fa10083460f5b9ed946fa66222d6d950ecfde1f05446908e14479",
+    "vmess_session_patch_sha256": "b964ef4131db368bbe607bdb26f081b353b7a3d3b49b567b10c59cc0fc239dd9",
+    "design_sha256": "35b4a5b7fdfdfeb93d8ca2d4934f802acbc34eadf906a82d24c62b828691d3a4"
+  },
+  "fixed_sing_box_commit": "af6e64c3b69e6132ebaee0e1a3d24e93903f6709",
+  "groups": [
+    {
+      "name": "original_three_file_supplement",
+      "leaf_count": 24,
+      "top_tests": [
+        "TestOwnerConcreteTLSConstructionCancellation",
+        "TestOwnerRealOuterConstructorPipeCancellation",
+        "TestOwnerLateLeaseCancellationPermutations",
+        "TestOwnerConcreteAdmittedSurvivesOldDeadline",
+        "TestOwnerActualTrackedPowerCounterComposition"
+      ]
+    },
+    {
+      "name": "real_constructed_late_lease_addition",
+      "leaf_count": 6,
+      "top_tests": [
+        "TestOwnerRealConstructedLateLeaseCancellation"
+      ]
+    }
+  ],
+  "execution_budget": {
+    "measured_elapsed_seconds": null,
+    "intentional_timer_windows_seconds": 48.6,
+    "deadline_cases": 13,
+    "deadline_seconds_per_case": 3,
+    "admitted_cases": 3,
+    "post_admitted_seconds_per_case": 3.2,
+    "cleanup_timer_seconds": 8,
+    "per_mode_group_timeout_seconds": 180,
+    "timing_qualification": "Source-derived timer-window accounting only; excludes unmeasured handshake, I/O, scheduling, and reporting overhead; not an elapsed-time upper bound.",
+    "recommended_new_group_regex": "^(TestOwnerActualTrackedPowerCounterComposition|TestOwnerConcreteAdmittedSurvivesOldDeadline|TestOwnerConcreteTLSConstructionCancellation|TestOwnerLateLeaseCancellationPermutations|TestOwnerRealConstructedLateLeaseCancellation|TestOwnerRealOuterConstructorPipeCancellation)$",
+    "existing_631_leaf_group_regex": "^TestOwner(UploadGuardPinnedFinalRelease|CopyGuardsNoEscape|GuardErrorFencedBeforeReturn|PolicyRejectsBeforePacketAccess|ActualRouterLocalReject|ActualRouterUnsupportedActions|InvalidLeaseTerminal|RealJoinedAES|RealJoinedChaCha|RealJoinedVLESS|ActualRemoteRejectNewPacketOnlyAES|ActualRemoteRejectNewPacketOnlyChaCha|ActualRemoteRejectNewPacketOnlyVLESS)$",
+    "combined_group_180s_certified": false
+  },
+  "static_portability": "No syscall/unix or untagged Linux-only references in the four source files; Darwin/Windows compilation remains unexecuted."
+}

@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -238,5 +239,22 @@ class TestPathControls(unittest.TestCase):
         data = self.contract(); data['files'].append({**data['files'][0], 'target': 'protocol/socks/two_test.go'})
         with patch.object(h.c, 'read_json', return_value=data):
             with self.assertRaises(ValueError): h.read_contract()
+
+class IntegratedManifestControls(unittest.TestCase):
+    def test_exact_group_inventory(self):
+        contract = h.read_contract()
+        self.assertEqual(len(contract['files']), 16)
+        self.assertEqual({g['label']: len(g['leaves']) for g in contract['groups']}, {
+            'sing_socks_owner': 62, 'sing_chunk_owner': 1, 'box_owner_adapter': 2,
+            'box_owner_dialer': 13, 'box_owner_mixed': 1, 'box_owner_route': 632,
+            'owner-vmess': 92, 'owner-vless': 4, 'box_owner_constructor': 30})
+    def test_package_groups_select_disjoint_exact_tops(self):
+        groups = h.read_contract()['groups']
+        for group in groups:
+            for leaf in group['leaves']:
+                top = leaf.split('/')[0]
+                selected = [g['label'] for g in groups if g['go_package'] == group['go_package']
+                            and re.search(g['regex'], top)]
+                self.assertEqual(selected, [group['label']], (group['label'], leaf, selected))
 
 if __name__ == '__main__': unittest.main()

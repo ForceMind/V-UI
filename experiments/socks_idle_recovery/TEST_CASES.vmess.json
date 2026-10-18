@@ -128,7 +128,7 @@
   "overlay_sha256": {
     "vmess_session.patch": "b964ef4131db368bbe607bdb26f081b353b7a3d3b49b567b10c59cc0fc239dd9",
     "tests/vless/xudp_packet_session_test.go": "35260be762f974deabfd4aeb4840c53c08d44dbd27ed4147907249adde748155",
-    "tests/xudp_packet_session_encrypted_test.go": "0ac51dbf318ec41a0de3c0805090469f9da0c3aeef35aee78050966d38f8f8a2",
+    "tests/xudp_packet_session_encrypted_test.go": "86736e6ca56dbc49a237a747be567825ba33c50bbfb6591e103ad5782b660406",
     "tests/xudp_packet_session_test.go": "76bb0e7108629a4f91490404cffbf0b3dedead404b95364c5a95f825c4350eaa"
   },
   "limitations": [

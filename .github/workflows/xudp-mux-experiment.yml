@@ -260,7 +260,7 @@ jobs:
           python3 - <<'PYTHON'
           import unittest
           suite = unittest.TestLoader().discover('experiments/socks_idle_recovery', pattern='test_*.py')
-          assert suite.countTestCases() == 157
+          assert suite.countTestCases() == 159
           result = unittest.TextTestRunner(verbosity=2).run(suite)
           assert result.wasSuccessful() and not result.skipped
           PYTHON

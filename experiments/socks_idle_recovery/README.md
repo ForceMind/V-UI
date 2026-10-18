@@ -67,3 +67,26 @@ The subsequent candidate replaces those drafts with reviewed constructor, late
 lease, Admitted-deadline, power-counter and finite owner-off/on gates. See
 RUNTIME_PREP.md and the run ledger. Partial mechanism success never grants
 product or transparent-recovery qualification.
+
+## Next complete candidate
+
+The follow-on candidate removes the box import cycle without changing its exact
+ordinary-Go-TLS policy and moves one actual dial test to the route package.
+The VMess corruption negative now authenticates the original wire record, mutates
+one payload-ciphertext byte at offset 18, and requires the real client's precise
+AEAD authentication error. Random trailing padding is left unchanged. Neither
+fix revises the first-run failure ledger.
+
+The strict selection now has 16 injected test files and 837 unique Go leaves in
+nine groups. The original route group has 632 leaves after the one-test package
+move; its exact top-level regex is disjoint from the new 30-leaf constructor group.
+Each group retains its own 180-second timeout, race and race+debug runs. The new
+30 leaves include 48.6 seconds of deliberate timer windows before I/O overhead;
+this is a source budget, not an observed runtime bound.
+
+The final eight-patch mechanism must pass before the finite runtime starts.
+Owner-off runs the original six stages and preserves their exact success/RED
+classes with independent raw-evidence checkers. Owner-on runs the unchanged
+C 78-case/198-leaf matrix and D six-case same-association lifecycle plan. All
+new controls and selected evidence are strict; the 159 Python checks are harness
+results only. Original stock failures and product qualification remain separate.

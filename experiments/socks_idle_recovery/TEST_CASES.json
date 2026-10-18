@@ -65,6 +65,26 @@
       "family": "sing-vmess",
       "source": "tests/sing-vmess/vless/xudp_packet_session_test.go",
       "target": "vless/xudp_packet_session_test.go"
+    },
+    {
+      "family": "sing-box",
+      "source": "tests/sing-box/route/packet_session_admitted_deadline_test.go",
+      "target": "route/vui_packet_session_admitted_deadline_supplement_test.go"
+    },
+    {
+      "family": "sing-box",
+      "source": "tests/sing-box/route/packet_session_constructor_cancel_test.go",
+      "target": "route/vui_packet_session_constructor_cancel_supplement_test.go"
+    },
+    {
+      "family": "sing-box",
+      "source": "tests/sing-box/route/packet_session_power_counter_test.go",
+      "target": "route/vui_packet_session_power_counter_supplement_test.go"
+    },
+    {
+      "family": "sing-box",
+      "source": "tests/sing-box/route/packet_session_real_late_lease_test.go",
+      "target": "route/vui_packet_session_real_late_lease_supplement_test.go"
     }
   ],
   "groups": [
@@ -163,7 +183,6 @@
       "go_package": "github.com/sagernet/sing-box/common/dialer",
       "regex": "^TestOwner",
       "leaves": [
-        "TestOwnerDirectTCPAndCanceledDial",
         "TestOwnerEffectiveDialPolicy/default_strategy",
         "TestOwnerEffectiveDialPolicy/fallback_delay",
         "TestOwnerEffectiveDialPolicy/inherited_strategy",
@@ -192,7 +211,7 @@
       "label": "box_owner_route",
       "package": "github.com/sagernet/sing-box/route",
       "go_package": "github.com/sagernet/sing-box/route",
-      "regex": "^TestOwner",
+      "regex": "^TestOwner(ActualRemoteRejectNewPacketOnlyAES|ActualRemoteRejectNewPacketOnlyChaCha|ActualRemoteRejectNewPacketOnlyVLESS|ActualRouterLocalReject|ActualRouterUnsupportedActions|CopyGuardsNoEscape|DirectTCPAndCanceledDial|GuardErrorFencedBeforeReturn|InvalidLeaseTerminal|PolicyRejectsBeforePacketAccess|RealJoinedAES|RealJoinedChaCha|RealJoinedVLESS|UploadGuardPinnedFinalRelease)$",
       "leaves": [
         "TestOwnerActualRemoteRejectNewPacketOnlyAES",
         "TestOwnerActualRemoteRejectNewPacketOnlyChaCha",
@@ -205,6 +224,7 @@
         "TestOwnerActualRouterUnsupportedActions/target_rewrite",
         "TestOwnerActualRouterUnsupportedActions/udp_timeout",
         "TestOwnerCopyGuardsNoEscape",
+        "TestOwnerDirectTCPAndCanceledDial",
         "TestOwnerGuardErrorFencedBeforeReturn",
         "TestOwnerInvalidLeaseTerminal/nil_abort",
         "TestOwnerInvalidLeaseTerminal/nil_lease",
@@ -937,6 +957,44 @@
         "TestPacketSessionVLESS/explicit_error_end_terminal",
         "TestPacketSessionVLESS/handshake_failure_is_opaque_end",
         "TestPacketSessionVLESS/raw_transport_eof_terminal"
+      ]
+    },
+    {
+      "label": "box_owner_constructor",
+      "package": "github.com/sagernet/sing-box/route",
+      "go_package": "github.com/sagernet/sing-box/route",
+      "regex": "^TestOwner(ActualTrackedPowerCounterComposition|ConcreteAdmittedSurvivesOldDeadline|ConcreteTLSConstructionCancellation|LateLeaseCancellationPermutations|RealConstructedLateLeaseCancellation|RealOuterConstructorPipeCancellation)$",
+      "leaves": [
+        "TestOwnerActualTrackedPowerCounterComposition",
+        "TestOwnerConcreteAdmittedSurvivesOldDeadline/aes-128-gcm",
+        "TestOwnerConcreteAdmittedSurvivesOldDeadline/chacha20-poly1305",
+        "TestOwnerConcreteAdmittedSurvivesOldDeadline/vless",
+        "TestOwnerConcreteTLSConstructionCancellation/aes-128-gcm/control_close",
+        "TestOwnerConcreteTLSConstructionCancellation/aes-128-gcm/owner_deadline",
+        "TestOwnerConcreteTLSConstructionCancellation/chacha20-poly1305/control_close",
+        "TestOwnerConcreteTLSConstructionCancellation/chacha20-poly1305/owner_deadline",
+        "TestOwnerConcreteTLSConstructionCancellation/vless/control_close",
+        "TestOwnerConcreteTLSConstructionCancellation/vless/owner_deadline",
+        "TestOwnerLateLeaseCancellationPermutations/attach_after_close/late_success/control_close",
+        "TestOwnerLateLeaseCancellationPermutations/attach_after_close/late_success/owner_deadline",
+        "TestOwnerLateLeaseCancellationPermutations/attach_after_close/partial_error/control_close",
+        "TestOwnerLateLeaseCancellationPermutations/attach_after_close/partial_error/owner_deadline",
+        "TestOwnerLateLeaseCancellationPermutations/attached_before_close/late_success/control_close",
+        "TestOwnerLateLeaseCancellationPermutations/attached_before_close/late_success/owner_deadline",
+        "TestOwnerLateLeaseCancellationPermutations/attached_before_close/partial_error/control_close",
+        "TestOwnerLateLeaseCancellationPermutations/attached_before_close/partial_error/owner_deadline",
+        "TestOwnerRealConstructedLateLeaseCancellation/aes-128-gcm/control_close",
+        "TestOwnerRealConstructedLateLeaseCancellation/aes-128-gcm/owner_deadline",
+        "TestOwnerRealConstructedLateLeaseCancellation/chacha20-poly1305/control_close",
+        "TestOwnerRealConstructedLateLeaseCancellation/chacha20-poly1305/owner_deadline",
+        "TestOwnerRealConstructedLateLeaseCancellation/vless/control_close",
+        "TestOwnerRealConstructedLateLeaseCancellation/vless/owner_deadline",
+        "TestOwnerRealOuterConstructorPipeCancellation/aes-128-gcm/control_close",
+        "TestOwnerRealOuterConstructorPipeCancellation/aes-128-gcm/owner_deadline",
+        "TestOwnerRealOuterConstructorPipeCancellation/chacha20-poly1305/control_close",
+        "TestOwnerRealOuterConstructorPipeCancellation/chacha20-poly1305/owner_deadline",
+        "TestOwnerRealOuterConstructorPipeCancellation/vless/control_close",
+        "TestOwnerRealOuterConstructorPipeCancellation/vless/owner_deadline"
       ]
     }
   ],

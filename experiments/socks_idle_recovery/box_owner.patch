@@ -92,10 +92,10 @@ index 0000000..9966584
 +}
 diff --git a/common/dialer/packet_session.go b/common/dialer/packet_session.go
 new file mode 100644
-index 0000000..6c61190
+index 0000000..1b8fbb8
 --- /dev/null
 +++ b/common/dialer/packet_session.go
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,104 @@
 +package dialer
 +
 +import (
@@ -105,12 +105,12 @@ index 0000000..6c61190
 +	"reflect"
 +
 +	"github.com/sagernet/sing-box/adapter"
-+	"github.com/sagernet/sing-box/common/tls"
 +	"github.com/sagernet/sing-box/option"
 +	"github.com/sagernet/sing/common/bufio"
 +	E "github.com/sagernet/sing/common/exceptions"
 +	M "github.com/sagernet/sing/common/metadata"
 +	N "github.com/sagernet/sing/common/network"
++	"github.com/sagernet/sing/common/tls"
 +)
 +
 +func PacketSessionDialOptionsSupported(o option.DialerOptions) bool {
@@ -134,7 +134,7 @@ index 0000000..6c61190
 +
 +func ValidatePacketSessionDialer(value N.Dialer, address M.Socksaddr) error {
 +	d, ok := value.(*DefaultDialer)
-+	if !ok || !address.IsIPv4() || address.Port == 0 || address.IsDomain() {
++	if !ok || d == nil || !address.IsIPv4() || address.Port == 0 || address.IsDomain() {
 +		return E.New("packet session requires a direct literal IPv4 upstream")
 +	}
 +	if !d.dialer4.DisableTFO || d.dialer4.Dialer.MultipathTCP() || d.netns != "" ||
@@ -149,9 +149,15 @@ index 0000000..6c61190
 +}
 +
 +func ValidatePacketSessionTLS(config tls.Config) error {
-+	standard, ok := config.(*tls.STDClientConfig)
-+	if !ok { return E.New("packet session requires standard verified Go TLS") }
-+	inner, err := standard.STDConfig()
++	// common/tls depends on DNS and this package. Use its lower-level Config
++	// alias, but still require the exact concrete box standard client, not a
++	// wrapper or an arbitrary Config implementation with matching methods.
++	t := reflect.TypeOf(config)
++	if t == nil || t.Kind() != reflect.Pointer || t.Elem().PkgPath() != "github.com/sagernet/sing-box/common/tls" ||
++		t.Elem().Name() != "STDClientConfig" || reflect.ValueOf(config).IsNil() {
++		return E.New("packet session requires standard verified Go TLS")
++	}
++	inner, err := config.STDConfig()
 +	if err != nil { return err }
 +	if inner == nil || inner.InsecureSkipVerify || inner.ServerName == "" || len(inner.EncryptedClientHelloConfigList) != 0 {
 +		return E.New("packet session requires standard verified Go TLS")
@@ -184,12 +190,11 @@ index 0000000..6c61190
 +	private := &adapter.PacketSessionOnceConn{Conn: tracked}
 +	if err = attach(private.Close); err != nil { private.Close(); return nil, nil, err }
 +	if err = ctx.Err(); err != nil { private.Close(); return nil, nil, err }
-+	standard := config.(*tls.STDClientConfig)
-+	inner, _ := standard.STDConfig()
++	inner, _ := config.STDConfig()
 +	secure := stdtls.Client(private, inner)
 +	handshakeCtx := ctx
 +	cancel := func() {}
-+	if timeout := standard.HandshakeTimeout(); timeout > 0 { handshakeCtx, cancel = context.WithTimeout(ctx, timeout) }
++	if timeout := config.HandshakeTimeout(); timeout > 0 { handshakeCtx, cancel = context.WithTimeout(ctx, timeout) }
 +	err = secure.HandshakeContext(handshakeCtx)
 +	cancel()
 +	if err != nil { private.Close(); return nil, nil, err }

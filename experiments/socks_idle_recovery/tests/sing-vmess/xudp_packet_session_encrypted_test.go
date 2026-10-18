@@ -3,7 +3,11 @@ package vmess
 import (
 	"bytes"
 	"context"
+	"crypto/cipher"
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -30,14 +34,106 @@ func (h *packetSessionHandler) NewPacketConnectionEx(_ context.Context, conn N.P
 	h.udp <- packetSessionDispatch{conn, target, onClose}
 }
 
-type packetSessionFaultWire struct { net.Conn; corrupt atomic.Bool; writes atomic.Int32 }
+type packetSessionFaultWire struct {
+	net.Conn
+	fault atomic.Pointer[packetSessionCipherFault]
+	writes atomic.Int32
+	mutations atomic.Int32
+}
+
+// The fixed WriteBuffer wire layout is authenticated length (18 bytes),
+// authenticated payload, then unauthenticated random global padding. Flipping
+// the final wire byte only corrupts padding whenever that padding is nonempty.
+// Arm one complete post-handshake record, validate its actual crypto layout,
+// then flip the first payload-ciphertext byte instead of any padding byte.
 func (c *packetSessionFaultWire) Write(p []byte) (int, error) {
 	c.writes.Add(1)
-	if c.corrupt.Load() && len(p) > 0 {
-		p = append([]byte(nil), p...)
-		p[len(p)-1] ^= 0x80
+	if fault := c.fault.Swap(nil); fault != nil {
+		changed, observation := fault.mutate(p)
+		fault.observed <- observation
+		if observation.err != nil { return 0, observation.err }
+		c.mutations.Add(1)
+		p = changed
 	}
 	return c.Conn.Write(p)
+}
+
+type packetSessionCipherObservation struct {
+	offset, ciphertextBytes, paddingBytes int
+	authenticationError string
+	err error
+}
+
+type packetSessionCipherFault struct {
+	lengthCipher, payloadCipher cipher.AEAD
+	lengthNonce, payloadNonce []byte
+	plaintext []byte
+	observed chan packetSessionCipherObservation
+}
+
+func newPacketSessionCipherFault(protocol *clientConn, plaintext []byte) (*packetSessionCipherFault, error) {
+	responseKey := sha256.Sum256(protocol.requestKey[:])
+	responseNonce := sha256.Sum256(protocol.requestNonce[:])
+	fault := &packetSessionCipherFault{plaintext: plaintext, observed: make(chan packetSessionCipherObservation, 1)}
+	switch protocol.security {
+	case SecurityTypeAes128Gcm:
+		fault.lengthCipher = newAesGcm(KDF(protocol.requestKey[:], "auth_len")[:16])
+		fault.payloadCipher = newAesGcm(responseKey[:16])
+	case SecurityTypeChacha20Poly1305:
+		fault.lengthCipher = newChacha20Poly1305(GenerateChacha20Poly1305Key(KDF(protocol.requestKey[:], "auth_len")[:16]))
+		fault.payloadCipher = newChacha20Poly1305(GenerateChacha20Poly1305Key(responseKey[:16]))
+	default:
+		return nil, fmt.Errorf("unexpected cipher for authenticated fault: %d", protocol.security)
+	}
+	fault.lengthNonce = append([]byte(nil), protocol.requestNonce[:fault.lengthCipher.NonceSize()]...)
+	fault.payloadNonce = append([]byte(nil), responseNonce[:fault.payloadCipher.NonceSize()]...)
+	// Exactly one complete response packet was consumed before arming. The
+	// response header uses distinct keys and does not consume either counter.
+	binary.BigEndian.PutUint16(fault.lengthNonce, 1)
+	binary.BigEndian.PutUint16(fault.payloadNonce, 1)
+	return fault, nil
+}
+
+func (f *packetSessionCipherFault) mutate(wire []byte) ([]byte, packetSessionCipherObservation) {
+	observation := packetSessionCipherObservation{}
+	lengthBytes := 2 + f.lengthCipher.Overhead()
+	payloadBytes := len(f.plaintext) + f.payloadCipher.Overhead()
+	payloadEnd := lengthBytes + payloadBytes
+	if len(wire) < payloadEnd || len(wire)-payloadEnd >= MaxPaddingSize {
+		observation.err = fmt.Errorf("fault record shape: wire=%d authenticated_length=%d ciphertext=%d", len(wire), lengthBytes, payloadBytes)
+		return nil, observation
+	}
+	length, err := f.lengthCipher.Open(nil, f.lengthNonce, wire[:lengthBytes], nil)
+	if err != nil || len(length) != 2 {
+		observation.err = fmt.Errorf("original authenticated length invalid: %v", err)
+		return nil, observation
+	}
+	paddingBytes := len(wire) - payloadEnd
+	if int(binary.BigEndian.Uint16(length)) != len(f.plaintext)+paddingBytes {
+		observation.err = fmt.Errorf("authenticated length does not identify the expected complete record")
+		return nil, observation
+	}
+	plaintext, err := f.payloadCipher.Open(nil, f.payloadNonce, wire[lengthBytes:payloadEnd], nil)
+	if err != nil || !bytes.Equal(plaintext, f.plaintext) {
+		observation.err = fmt.Errorf("original payload authentication/content mismatch: %v", err)
+		return nil, observation
+	}
+	changed := append([]byte(nil), wire...)
+	changed[lengthBytes] ^= 0x80
+	if !bytes.Equal(changed[:lengthBytes], wire[:lengthBytes]) || !bytes.Equal(changed[payloadEnd:], wire[payloadEnd:]) {
+		observation.err = errors.New("fault changed length authentication or random padding")
+		return nil, observation
+	}
+	_, err = f.payloadCipher.Open(nil, f.payloadNonce, changed[lengthBytes:payloadEnd], nil)
+	if err == nil {
+		observation.err = errors.New("payload-ciphertext mutation did not fail authentication")
+		return nil, observation
+	}
+	observation.offset = lengthBytes
+	observation.ciphertextBytes = payloadBytes
+	observation.paddingBytes = paddingBytes
+	observation.authenticationError = err.Error()
+	return changed, observation
 }
 
 type packetSessionEncryptedFixture struct {
@@ -187,14 +283,28 @@ func testPacketSessionEncrypted(t *testing.T, security string) {
 		f := newPacketSessionEncryptedFixture(t, security, []byte("first"))
 		f.receiveServer([]byte("first"))
 		f.reply([]byte("first"))
-		f.serverWire.corrupt.Store(true)
-		write := f.async(func() error { _, err := f.server.WriteTo([]byte("corrupt"), f.target); return err })
-		_, err := f.client.ReadPacket(buf.With(make([]byte, 32)))
-		if err == nil || errors.Is(err, N.ErrPacketSessionEnded) { t.Fatalf("authenticated corruption became recoverable: %v", err) }
-		// Abort before waiting: rejecting an authenticated length may leave the
-		// synchronous writer blocked on the remaining ciphertext. Both must join.
+		payload := []byte("corrupt")
+		plainFrame := packetSessionFrame(0, StatusKeep, OptionData, packetSessionAddress(NetworkUDP, 1, f.target.Port), payload)
+		fault, err := newPacketSessionCipherFault(f.protocol, plainFrame)
+		if err != nil { t.Fatal(err) }
+		f.serverWire.fault.Store(fault)
+		write := f.async(func() error { _, err := f.server.WriteTo(payload, f.target); return err })
+		packet := buf.With(make([]byte, 32))
+		_, readErr := f.client.ReadPacket(packet)
+		var observation packetSessionCipherObservation
+		select { case observation = <-fault.observed: case <-f.ctx.Done(): t.Fatal("authenticated mutation was not reached") }
+		if observation.err != nil { t.Fatal(observation.err) }
+		if f.serverWire.mutations.Load() != 1 || observation.offset != 2+CipherOverhead || observation.authenticationError == "" {
+			t.Fatalf("authenticated mutation proof missing: count=%d observation=%+v", f.serverWire.mutations.Load(), observation)
+		}
+		if readErr == nil || errors.Is(readErr, N.ErrPacketSessionEnded) || readErr.Error() != observation.authenticationError || packet.Len() != 0 {
+			t.Fatalf("actual Client must return the exact payload AEAD failure without data: len=%d got=%v want=%s", packet.Len(), readErr, observation.authenticationError)
+		}
+		// Abort before waiting even on a failure path: the actual synchronous
+		// writer and Service invocation must join before cache finalization.
 		f.clientWire.Close()
 		select { case <-write: case <-f.ctx.Done(): t.Fatal("corrupt encrypted writer did not join after raw abort") }
+		t.Logf("authenticated_mutations=1 ciphertext_offset=%d ciphertext_bytes=%d unchanged_padding_bytes=%d original_authentication=pass mutated_authentication=fail actual_client_error=%s", observation.offset, observation.ciphertextBytes, observation.paddingBytes, readErr)
 	})
 }
 

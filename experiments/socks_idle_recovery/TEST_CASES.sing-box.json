@@ -16,7 +16,6 @@
       "go_package": "github.com/sagernet/sing-box/common/dialer",
       "regex": "^TestOwner",
       "leaves": [
-        "TestOwnerDirectTCPAndCanceledDial",
         "TestOwnerEffectiveDialPolicy/default_strategy",
         "TestOwnerEffectiveDialPolicy/fallback_delay",
         "TestOwnerEffectiveDialPolicy/inherited_strategy",
@@ -58,6 +57,7 @@
         "TestOwnerActualRouterUnsupportedActions/target_rewrite",
         "TestOwnerActualRouterUnsupportedActions/udp_timeout",
         "TestOwnerCopyGuardsNoEscape",
+        "TestOwnerDirectTCPAndCanceledDial",
         "TestOwnerGuardErrorFencedBeforeReturn",
         "TestOwnerInvalidLeaseTerminal/nil_abort",
         "TestOwnerInvalidLeaseTerminal/nil_lease",
@@ -692,7 +692,7 @@
       "package": "sing-box",
       "source": "tests/common/dialer/packet_session_owner_test.go",
       "target": "common/dialer/vui_packet_session_owner_test.go",
-      "sha256": "4b1c427d6d191e8367a7858c5e9d952b10042958b9ad26f24b43061d862cea3c"
+      "sha256": "4fff97ff96179dbad6a54c0aa139d2dd889ef93857d31c36f11f0e29ffd72a07"
     },
     {
       "package": "sing-box",
@@ -716,7 +716,7 @@
       "package": "sing-box",
       "source": "tests/route/packet_session_real_test.go",
       "target": "route/vui_packet_session_real_test.go",
-      "sha256": "e00ff806c413bb170662ba32ae89730309a6df66f6f52db67e0a5eda254312f2"
+      "sha256": "7fc97bda38b5c158a1e396cea71d5ddbb9307b06066a62039bf2bf38cf4fe399"
     },
     {
       "package": "sing-box",

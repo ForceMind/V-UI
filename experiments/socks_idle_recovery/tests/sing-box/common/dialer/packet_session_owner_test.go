@@ -2,14 +2,10 @@ package dialer
 
 import (
 	"context"
-	"errors"
-	"net"
 	"testing"
 	"time"
 
-	"github.com/sagernet/sing-box/common/tls"
 	C "github.com/sagernet/sing-box/constant"
-	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	M "github.com/sagernet/sing/common/metadata"
 )
@@ -48,25 +44,4 @@ func TestOwnerTLSOptionPredicate(t *testing.T) {
 		tc.mutate(&o)
 		if PacketSessionTLSOptionsSupported(&o) { t.Fatal("unsupported TLS admitted") }
 	}) }
-}
-
-func TestOwnerDirectTCPAndCanceledDial(t *testing.T) {
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil { t.Fatal(err) }
-	defer listener.Close()
-	d, err := NewDefault(context.Background(), option.DialerOptions{})
-	if err != nil { t.Fatal(err) }
-	address := M.SocksaddrFromNet(listener.Addr())
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	conn, err := d.DialContext(ctx, "tcp", address)
-	if err != nil { t.Fatal(err) }
-	if _, ok := conn.(*net.TCPConn); !ok { conn.Close(); t.Fatal("unexpected direct wrapper") }
-	conn.Close()
-	config, err := tls.NewSTDClient(context.Background(), log.NewNOPFactory().Logger(), "localhost", option.OutboundTLSOptions{Enabled: true})
-	if err != nil { t.Fatal(err) }
-	cancel()
-	attached := false
-	_, _, err = DialPacketSessionTLS(ctx, d, address, config, func(func() error) error { attached = true; return nil })
-	if !errors.Is(err, context.Canceled) || attached { t.Fatalf("cancelled raw dial attached: %v %v", attached, err) }
 }
