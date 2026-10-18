@@ -1,12 +1,12 @@
 # 当前开发与接手入口
 
-更新：2026-10-18。本文是项目计划和交接入口；“已记录计划”不表示功能已实现或验收通过。
+更新：2026-10-18。每入口 TCP 三态已完成 PR49 正常合并及准确主线验收，见[收口证据](PER_INBOUND_ROUTING_CLOSURE_20261018.md)。本文同时保留尚未完成的独立任务；计划记录不等于那些任务已通过。
 
 ## 先做什么
 
 1. 阅读 [开发约束](../AGENTS.md) 和 [每入口路由契约](PER_INBOUND_ROUTING_CONTRACT.md)。
-2. 本轮从准确产品主线 `a98da9afbbf58a54f4f102cccec2f26b6e07d2ee` 的独立 `feature/per-inbound-routing-20261018` 开发。接手先核 [PR49](https://github.com/ForceMind/V-UI/pull/49) 是否合并、远端默认分支 **master** 与工作树；未合并时续该分支，已合并时从准确 master 继续，不覆盖其他人的变更。
-3. 本轮目标：同一 V-UI 实例中，现成客户端导入不同普通 VLESS 节点；节点分别“跟随全局 / 指定直连 / 指定中转”。方案与实现已独审；按下表和准确 CI 继续验收，不以旧候选结果授予新提交资格。
+2. [PR49](https://github.com/ForceMind/V-UI/pull/49) 已正常合并至签名 `0962f0c4995b3b7606652027f2330285e4dea1f7`，tree `b12d1e40d16060d3adfa1c29fb380ae5949896f5`，准确主线八组与四目标已独立验收。接手先核远端默认分支 **master**、当前工作树及后续提交；从准确最新 master 新建独立任务分支，不回到旧 feature 分支覆盖变更。
+3. 已完成：同一 V-UI 实例中，现成客户端导入不同普通 VLESS 节点，分别“跟随全局 / 指定直连 / 指定中转”。下一独立计划是标准客户端 UDP 补验；先读下表及兼容计划，不能把 TCP 收口当作 UDP、手机或发布许可。新提交仍需自己的准确验收。
 4. 使用固定官方核心。不要从 UDP 实验分支整批移植补丁，也不要把手机客户端自研/重编译设为产品前提。
 5. 每阶段更新本文状态表与证据，提交可恢复的 WIP 文本备份。最终准确候选仍须完整审查及 CI；WIP 不是通过或可合并声明。
 
@@ -26,8 +26,8 @@
 | 正式 v0.4.8 | `a9f9b5d9c0dd2aada5e8f5f2270b2ce93440d5ff` | 已发布的安装器修复；后续主线功能不自动包含在旧发布中 |
 | M0–M4 双开关 | `9a97ad13aae2fabb5ed969fdc0f930c36fdc55b7`，[PR44](https://github.com/ForceMind/V-UI/pull/44) | 主线收口；[历史失败/四目标证据](DUAL_PROXY_RELAY_PROGRESS.md)保留 |
 | D0 UDP/DNS 能力门槛 | `13c884a0539cf9822fca2fe2db58325fa4644048`，[PR46](https://github.com/ForceMind/V-UI/pull/46) | 主线收口；不是开放 UDP 中转 |
-| D1 TCP 上游专用导出 | `a98da9afbbf58a54f4f102cccec2f26b6e07d2ee`，[PR47](https://github.com/ForceMind/V-UI/pull/47) | 当前产品基线；标准设备导出与“供另一 V-UI 导入的上游导出”用途不同 |
-| 每入口三态 TCP | `feature/per-inbound-routing-20261018`，基于 a98 | 当前优先工作。P0 已独审并公开备份为 `6a89a20652beffbfe32cf43deb2aa16cd20bf9ec`；P1–P4 已集成至 [PR49](https://github.com/ForceMind/V-UI/pull/49)，阶段通过与失败见下节；最新候选、合并和主线资格必须核该 PR 的准确 SHA / CI，尚未发布 |
+| D1 TCP 上游专用导出 | `a98da9afbbf58a54f4f102cccec2f26b6e07d2ee`，[PR47](https://github.com/ForceMind/V-UI/pull/47) | 本阶段之前的产品基线；标准设备导出与“供另一 V-UI 导入的上游导出”用途不同 |
+| 每入口三态 TCP | 签名 master `0962f0c4995b3b7606652027f2330285e4dea1f7`，[PR49](https://github.com/ForceMind/V-UI/pull/49) | P0–P5 已收口；准确候选及主线八组、四目标、真实标准客户端和浏览器均独立验收，见[完整记录](PER_INBOUND_ROUTING_CLOSURE_20261018.md)。尚未发布 |
 | D2 XUDP/大包/owner 实验 | `afbdba100c5f0e3dc6888684fdbab31980720df3`，tree `996d37d925be8edd18cbf921d3cc580f43c0730d` | 独立实验部分合同通过，整体仍失败；未并入产品，见下节 |
 | 标准客户端 UDP 补验 | [兼容边界及最小计划](STANDARD_CLIENT_COMPATIBILITY.md) | 尚未执行新的 stock Mihomo 大包/同应用关联恢复组；不阻塞本轮 TCP 产品功能 |
 | 手机、真实外部线路 | 实机与运营线路独立门槛 | 未验收；Linux core loopback 不代替手机导入/TUN/移动网络 |
@@ -64,14 +64,14 @@
 
 | 阶段 | 交付 | 当前状态 | 退出门槛 |
 | --- | --- | --- | --- |
-| P0 | 本入口、设计契约、精确调用点与兼容纠正 | 已独审并公开记录；不是功能通过 | 无未决的保护策略降级，独审可据文档接续 |
-| P1 | 严格三态字段、旧库迁移、统一有效策略、身份兼容 | 已集成首版，23 新增 + 26 原 compiler 控制通过；待跨层全量验收 | 旧全 inherit 配置/身份保持；非法/null 拒绝；省略更新保留 |
-| P2 | apply/rollback/启动/恢复/备份/删除保护 | 双向 fence 与离线依赖闭包修复已集成；宽 proxy 403 项中 353 通过/50 skip，完整集成本地运行通过；真实资格按下列准确 CI 分别记录，skip 不授对应运行资格 | 双全局 off + explicit relay 仍受保护；任何不一致不退普通直连 |
-| P3 | API/UI/导出三用途与 desired/applied 标识 | 准确 f2 首轮 proxy browser 20 方法及新增 3 控制 + 1 真实 API/core 浏览器流程通过；后续 D1 静态夹具失败另列 | 标准客户端只获入口信息；取消/刷新/失败无假生效/秘密泄露 |
-| P4 | stock Mihomo 同实例两个节点和 host 四组合 | 准确 8b 首轮 CI 的 7 项夹具控制 + 3 个真实方法全部通过；新修复 head 仍须重验 | 真实目标分别观察本机/海外出口；负向原因、零误送达、无回退；四状态/12 切换 |
-| P5 | 最终候选、独审、八组、四目标、正常合并后重验 | 按 PR49 逐准确 head 验收；历史失败保留，合并状态与最终主线复验见该 PR | 准确 SHA/tree、所有必需 job/step 终态，历史失败和 skip 单列 |
+| P0 | 本入口、设计契约、精确调用点与兼容纠正 | 已完成，设计和文档已独审 | 无未决的保护策略降级，独审可据文档接续 |
+| P1 | 严格三态字段、旧库迁移、统一有效策略、身份兼容 | 已完成，纳入准确候选/主线全套验收；线程迁移测试不扩称跨进程 | 旧全 inherit 配置/身份保持；非法/null 拒绝；省略更新保留 |
+| P2 | apply/rollback/启动/恢复/备份/删除保护 | 已完成，双向 fence、事务/恢复和四目标 installed smoke 通过；模拟与真实层次仍区分 | 双全局 off + explicit relay 仍受保护；任何不一致不退普通直连 |
+| P3 | API/UI/导出三用途与 desired/applied 标识 | 已完成，主线 proxy 20 方法、实际 API/core 浏览器 4 方法、D1 九方法及 managed editor 两方法全部通过 | 标准客户端只获入口信息；取消/刷新/失败无假生效/秘密泄露 |
+| P4 | stock Mihomo 同实例三个节点和 host 四组合 | 已完成，主线 7 控制 + 3 真实方法；61 次业务 HTTPS + 3 控制，各场景单客户端 PID | 真实目标分别观察本机/海外出口；负向原因、零误送达、无回退；四状态/12 切换 |
+| P5 | 最终候选、独审、八组、四目标、正常合并后重验 | 已完成，b5 候选八组 attempt 1；0962 主线七组 attempt 1、deployment attempt 2，所有最新 job/step 通过 | 精确 SHA/tree 与原包绑定，独立验收；历史失败和 skip 单列 |
 
-## 本阶段 WIP 与失败记录
+## 历史 WIP 与失败记录（不改判）
 
 - P1 保留旧全 inherit 编译身份；12 组旧实现逐值对照一致。迁移并发只做了线程/RLock 幂等测试，不能称跨进程迁移已验。
 - P1 独立旧 proxy 宽扫曾出现 112 errors、6 failures、50 skips，主要是旧瞬时 fixture 缺新字段和未整合跨层实现；保留原失败，随后必须在完整候选重新运行。
@@ -89,7 +89,7 @@
 
 ## PR49 首轮准确候选与后续修复
 
-- 准确公开候选 `8b01b4b085ff4520e72a105aac12a8e6a262d7e5`，tree `ed2cada9993f05025e895b7eba2108114ee77021`；PR49 保持 Draft。该 tree 与本地独审 `483d38c1bfff0b282f53cea23404196fa60d25e1` 相同。第三次完整本地运行共 1970 tests，1765 通过、205 skips（不授对应真实资格）、零失败，187.061 秒；skip 不授真实资格。日志 SHA256 `6baa06aab56b96b1ebb055ecef74d707665d44d45d1f7bc21cb78a61e774df4e`。
+- 准确公开候选 `8b01b4b085ff4520e72a105aac12a8e6a262d7e5`，tree `ed2cada9993f05025e895b7eba2108114ee77021`；当时 PR49 保持 Draft。该 tree 与本地独审 `483d38c1bfff0b282f53cea23404196fa60d25e1` 相同。第三次完整本地运行共 1970 tests，1765 通过、205 skips（不授对应真实资格）、零失败，187.061 秒；skip 不授真实资格。日志 SHA256 `6baa06aab56b96b1ebb055ecef74d707665d44d45d1f7bc21cb78a61e774df4e`。
 - [Test attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39153451801) 的 1970 项基础套件与固定核心配置检查通过；proxy browser 步骤 20 方法（13 个浏览器流程与 7 个静态/路由控制）为 18 通过、1 failure、1 error。两个新 mocked editor 场景只修改已挂载页面的 URL fragment，没有真实切换 Vue 入站菜单，因此找不到预期行。后面的新实际 API/core browser 尚未执行。原日志 SHA256 `338b5f02200a39a28d5eb2f287ea5162839d5f24617d8295cab0c76ffbd7d678`。
 - 后续修复仅改变测试导航：实际点击入站菜单并确认列表 GET 200，再执行原断言；不增加生产 hash 导航，不改变时间窗或资格断言。必须在后续准确 head 重跑真实浏览器，静态控制不能把本次失败改绿。修复后完整本地再次运行 1970 tests，1765 通过、205 skips、零失败，181.935 秒；日志 SHA256 `8c4a26493c56fa8fc6c957542574944023e6c1d9b2c6867acb72c25f5070861b`。
 - [Portable attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39153451913) 的 aarch64-glibc 在固定上游 commit API 遇到 GitHub HTTP 403 rate limit，尚未进入 bundle/stage smoke；x86_64-musl、aarch64-musl 与 distro probe jobs 成功。失败日志 SHA256 `2615a3068670d52d9d141897f04529a0347207314bf99c23ceb8bd261104c921`。这不授四目标完整通过；代码已有修复时不通过重复旧 head 掩盖缺口。
@@ -108,6 +108,15 @@
 - [真实链路 attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39154988764) 再次通过；新增组 7 控制 + 3 真实方法，56.091 秒。业务 2/14/45、12 转移、三单客户端 PID、拒绝/完整排空与原始计数均独立核验。归档 `12147166827` 为 20341 bytes，SHA256 `b9a3e4298e8969072701407466ee2a7f521f6154030659fd18a53659dd567736`，日志 SHA256 `88a950ae87967bea43fc4cb80f5284e3c1333bde7b5f7ce6cffb29c262d3e646`；不替代后续 head 验收。
 - [部署消费 attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39154988641) 成功，4 方法（3 夹具 + 1 实际）407.792 秒；512/384/320 MiB cgroup 均完成且无 OOM/kill，实际 source 为 f2。证据归档 `12146528099`：80045 bytes，SHA256 `cb6d0648b4d98ab94c059138dcf042866562c1ce38b29b0c0adff4780e2c7d8a`。本候选八组最终 7 success / 1 test failure，依然不可合并；不得拼接不同 head 的绿灯。
 - 用户按实际界面操作的[每入口使用说明](PER_INBOUND_ROUTING.md)与 D1 教程更正已独审；均保持未发布候选、保存与应用分离、标准客户端和已知能力边界。其余准确运行结果继续绑定 PR49，不继承旧候选成功。
+
+## 当前收口与下一步
+
+主线 0962 的准确结果、八组链接、四目标包摘要、首次 403 和单次重跑见[收口记录](PER_INBOUND_ROUTING_CLOSURE_20261018.md)。以上 WIP/8b/f2 段落是各次历史结果，不能当成当前尚待验收，也不能把旧失败擦除。
+
+1. 已完成的 TCP 三态保持固定官方核心和单 selected upstream；不再重新实现 P0–P5。
+2. 在独立实验分支按 [stock 客户端 UDP 最小计划](STANDARD_CLIENT_COMPATIBILITY.md)核普通标准配置、容量和同应用关联恢复。保留原 sing-device RED，不提前开放产品 relay UDP。
+3. 手机 VPN/TUN、公网线路、整机 24 小时低资源与正式发布分别待相应环境/授权，不能从 Linux loopback 或 cgroup 推断完成。
+4. 新功能/修复/最终文档继续准确提交独审与 CI；没有 Release、生产部署或敏感权限变更授权。
 
 ## 接手命令与环境
 
@@ -132,6 +141,6 @@ python -m unittest discover -s tests -p 'test_inbound*.py' -v
 python -m unittest discover -s tests -v
 ```
 
-真实核心/浏览器的可执行命令以 `.github/workflows/loopback.yml`、`test.yml` 和 [贡献指南](../CONTRIBUTING.md)为准：`scripts/fetch_test_cores.py` / `fetch_mihomo.py` 校验固定来源，`VUI_PROXY_LOOPBACK=1`、`VUI_TEST_CORES`、`VUI_TEST_MIHOMO` 激活真实 proxy 测试；`VUI_PROXY_BROWSER=1` 与固定前端资产激活浏览器。新增每入口真实步骤使用 `VUI_INBOUND_ROUTING_LOOPBACK=1` 执行 `test_inbound_routing_real.py`；配置解析用 `VUI_TEST_CORES` 执行 `test_inbound_routing_parser.py`。新增实际浏览器流程以 `VUI_INBOUND_ROUTING_BROWSER=1` 执行 `test_inbound_routing_browser.py`，已实现并接入 CI，3 项纯控制通过、1 个真实流程待 CI，不能仅因默认 discover skip 便计通过。
+真实核心/浏览器的可执行命令以 `.github/workflows/loopback.yml`、`test.yml` 和 [贡献指南](../CONTRIBUTING.md)为准：`scripts/fetch_test_cores.py` / `fetch_mihomo.py` 校验固定来源，`VUI_PROXY_LOOPBACK=1`、`VUI_TEST_CORES`、`VUI_TEST_MIHOMO` 激活真实 proxy 测试；`VUI_PROXY_BROWSER=1` 与固定前端资产激活浏览器。新增每入口真实步骤使用 `VUI_INBOUND_ROUTING_LOOPBACK=1` 执行 `test_inbound_routing_real.py`；配置解析用 `VUI_TEST_CORES` 执行 `test_inbound_routing_parser.py`。新增实际浏览器流程以 `VUI_INBOUND_ROUTING_BROWSER=1` 执行 `test_inbound_routing_browser.py`，准确 0962 已实际完成 3 项控制与 1 个真实流程；新提交仍须显式执行，不能仅因默认 discover skip 便计通过。
 
 没有 Python/核心/浏览器时记录精确未跑条件；不要把 mock、语法检查、skip 或旧 run 当成新功能绿灯。最终报告至少包含准确 head/tree、命令/run/attempt、实际通过/失败/skip、二进制来源、资源清理、独审结论与未完成项。新代码提交后及时更新本表，不抹去先前失败。
