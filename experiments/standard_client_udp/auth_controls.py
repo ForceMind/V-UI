@@ -6,6 +6,7 @@ from contextlib import redirect_stderr, redirect_stdout
 import importlib
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import threading
@@ -16,6 +17,18 @@ import runtime as r
 
 METHODS=('test_05_mihomo_upstream_uuid_ca_sni_stop_recovery','test_07_mihomo_device_uuid_ca_sni','test_tcp_https_mihomo_double_hop')
 LABELS=tuple(METHODS[0]+'-'+f for f in ('uuid','ca','sni','stopped'))+tuple(METHODS[1]+'-'+f for f in ('uuid','ca','sni'))+(METHODS[2],)
+
+def sanitize_auth(value, clean):
+    """Normalize only the already-redacted frozen UUID rejection wording.
+
+    The archive's credential-assignment guard remains unchanged. Unknown
+    UUID/token assignments must still fail that guard rather than be erased.
+    """
+    if isinstance(value,str):
+        return re.sub(r'(?i:\bunknown uuid): <fixture>(?=\s|$)', 'unknown uuid [fixture-redacted]', clean(value))
+    if isinstance(value,list):return [sanitize_auth(item,clean) for item in value]
+    if isinstance(value,dict):return {sanitize_auth(key,clean):sanitize_auth(item,clean) for key,item in value.items()}
+    return value
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -40,15 +53,18 @@ def main():
         base=r.role_fixture(c,module,args.output,known,case,records,r.ROOT)
         psutil=importlib.import_module('psutil')
         class Fixture(base):
+            def safe(self,text):
+                return sanitize_auth(super().safe(text),c.life.clean)
             def __init__(self,*a,**kw):
                 self.before_threads=set(threading.enumerate())
                 self.rejection_proofs=[]
                 super().__init__(*a,**kw)
             def reject(self,payload,process,reasons,**kwargs):
-                offset=len(process.log_path.read_text(errors='replace'));started=time.monotonic()
+                before=process.log_path.read_text(errors='replace');offset=len(before);started=time.monotonic()
                 value=super().reject(payload,process,reasons,**kwargs)
                 self.rejection_proofs.append({'payload':p.ident(payload),'reasons':list(reasons),
                     'started':started,'completed':time.monotonic(),'window':kwargs.get('window',2),
+                    'starts_at_record_boundary':not before or before.endswith('\n'),
                     'fresh_log':self.safe(process.log_path.read_text(errors='replace')[offset:])})
                 return value
             def __exit__(self,*a):
@@ -76,10 +92,11 @@ def main():
         passed=result['passed_methods']==3 and not result['nonpass'] and not result['failures']
         result.update(passed=passed,arm=args.arm,product_qualified=False,udp_capacity_qualified=False,
                       failed_prerequisite_does_not_qualify_following_rejections=True)
-        r.save(args.output/'RESULT.json',c.life.scrub(result))
+        result=sanitize_auth(result,c.life.clean)
+        r.save(args.output/'RESULT.json',result)
         for path in args.output.rglob('*'):
-            if path.is_file() and path.suffix=='.json':r.save(path,c.life.scrub(json.loads(path.read_text())))
-            elif path.is_file() and path.suffix=='.log':path.write_text(c.life.clean(path.read_text()))
+            if path.is_file() and path.suffix=='.json':r.save(path,sanitize_auth(json.loads(path.read_text()),c.life.clean))
+            elif path.is_file() and path.suffix=='.log':path.write_text(sanitize_auth(path.read_text(),c.life.clean))
     r.need(source=={'product':r.source(r.ROOT),'legacy':r.source(args.legacy_repository,legacy=True)},'Control source changed')
     r.save(args.output/'post-identity.json',{'source_identity':source,'binary_sha256':{k:r.sha(v['path']) for k,v in known.items()}})
     print(json.dumps(result),flush=True)

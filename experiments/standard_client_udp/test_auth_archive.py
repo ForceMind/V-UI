@@ -8,8 +8,31 @@ import unittest
 from unittest.mock import patch
 import prepare_controls as a
 import runtime as r
+from auth_controls import sanitize_auth
 
 class AuthArchiveTests(unittest.TestCase):
+    def test_exact_redacted_uuid_wording_preserves_strict_secret_guard(self):
+        safe,_=a.e.modules(Path(os.environ['VUI_STOCK_UDP_LEGACY']).resolve())
+        clean=safe.h.c.life.clean
+        actual='connection: unknown uuid: 33333333-3333-4333-8333-333333333333'
+        raw={'observations':[{'actual':actual}], 'fresh_log':'prefix\n'+actual+'\nsuffix\n'}
+        with self.assertRaisesRegex(ValueError,'Secret-bearing text'):
+            safe.check_clean(safe.h.c.life.scrub(raw))
+        value=sanitize_auth(raw,clean)
+        safe.check_clean(value)
+        self.assertEqual(value['observations'][0]['actual'],'connection: unknown uuid [fixture-redacted]')
+        self.assertIn(value['observations'][0]['actual'],value['fresh_log'])
+        self.assertEqual(sanitize_auth(value,clean),value)
+        safe.validate_bytes('cases/synthetic.log',value['fresh_log'].encode(),'text')
+        self.assertEqual(sanitize_auth('ERROR unknown UUID: 33333333-3333-4333-8333-333333333333',clean),
+                         'ERROR unknown uuid [fixture-redacted]')
+        for text in ('uuid: unexpected-value','unknown uuid: unexpected-value','token: unexpected-value',
+                     'unknown uuid: <fixture> token: unexpected-value','password=synthetic-control',
+                     'unknown uuid: <fixture>unexpected-value','unknown uuid: <fixture>:unexpected-value',
+                     'unknown uuid: 33333333-3333-4333-8333-333333333333unexpected-value'):
+            with self.subTest(text=text),self.assertRaisesRegex(ValueError,'Secret-bearing text'):
+                safe.check_clean(sanitize_auth(text,clean))
+
     def fixture(self):
         source={'commit':'a'*40,'tree':'b'*40,'files':{'synthetic.py':'c'*64}}
         identity={'product':source,'legacy':source}
@@ -50,7 +73,8 @@ class AuthArchiveTests(unittest.TestCase):
                     {'kind':'rejection','reason':reasons,'actual':actual},
                     {'kind':'echo','bytes':len(payloads[2]),'host':'127.0.0.3','peer':'127.0.0.4'}]
                 rejected=(b'must-not-deliver-' if upstream else b'bad-device-')+fault.encode()
-                cleanup['rejections']=[{'payload':ident(rejected),'reasons':reasons,'started':1,'completed':3,'window':2,'fresh_log':actual}]
+                cleanup['rejections']=[{'payload':ident(rejected),'reasons':reasons,'started':1,'completed':3,'window':2,
+                                       'starts_at_record_boundary':True,'fresh_log':actual+'\n'}]
             value['cleanup.json'].append(cleanup)
             value['cases/'+label+'.json']={'status':'passed','observations':observations,'deliveries':[{'host':'127.0.0.3','count':len(target['received'])}]}
             value['cases/'+label+'.log']='synthetic\n'
@@ -84,5 +108,28 @@ class AuthArchiveTests(unittest.TestCase):
                 if mutate:
                     with self.assertRaises(ValueError):a.verify(Path(tmp),Path(os.environ['VUI_STOCK_UDP_LEGACY']).resolve(),'stock')
                 else:self.assertTrue(a.verify(Path(tmp),Path(os.environ['VUI_STOCK_UDP_LEGACY']).resolve(),'stock')[1]['passed'])
+
+    def test_raw_log_case_matches_frozen_lowercase_observation_only(self):
+        source,value=self.fixture()
+        for case in value['cleanup.json']:
+            if not case['rejections']:continue
+            label=case['case'];obs=value['cases/'+label+'.json']['observations'][1]
+            obs['actual']='error '+obs['actual']
+            case['rejections'][0]['fresh_log']=obs['actual'].upper()+'\n'
+        with tempfile.TemporaryDirectory() as tmp,patch.object(r,'source',return_value=source):
+            self.write(Path(tmp),value)
+            self.assertTrue(a.verify(Path(tmp),Path(os.environ['VUI_STOCK_UDP_LEGACY']).resolve(),'stock')[1]['passed'])
+            proof=value['cleanup.json'][0]['rejections'][0]
+            actual=value['cases/'+a.LABELS[0]+'.json']['observations'][1]['actual'].upper()
+            for fresh,boundary in [('ERROR unrelated timeout\n',True),(actual,True),
+                                   ('prefix '+actual+' suffix\n',True),(actual+'\n',False)]:
+                with self.subTest(fresh=fresh,boundary=boundary):
+                    proof.update(fresh_log=fresh,starts_at_record_boundary=boundary)
+                    self.write(Path(tmp),value)
+                    with self.assertRaisesRegex(ValueError,'Fresh full rejection proof differs'):
+                        a.verify(Path(tmp),Path(os.environ['VUI_STOCK_UDP_LEGACY']).resolve(),'stock')
+            proof.update(fresh_log='pre-checkpoint partial\n'+actual+'\n',starts_at_record_boundary=False)
+            self.write(Path(tmp),value)
+            self.assertTrue(a.verify(Path(tmp),Path(os.environ['VUI_STOCK_UDP_LEGACY']).resolve(),'stock')[1]['passed'])
 
 if __name__=='__main__':unittest.main()

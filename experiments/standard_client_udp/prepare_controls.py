@@ -101,10 +101,16 @@ def verify(directory,legacy,arm,build_directory=None):
             r.need(rejection['reason']==reasons and all(x in rejection['actual'] for x in reasons), 'Actual rejection reason missing')
             r.need(len(case['rejections'])==1,'Fresh rejection window missing')
             proof=case['rejections'][0]
+            r.need(type(proof['starts_at_record_boundary']) is bool, 'Unknown fresh log record boundary')
+            fresh=proof['fresh_log']
+            if not proof['starts_at_record_boundary']:fresh=fresh.partition('\n')[2]
+            # Exactly the frozen fresh_lines() view: preserve raw text, exclude
+            # pre-checkpoint partial and final unterminated records, lowercase.
+            fresh_lines=fresh.lower().split('\n')[:-1]
             rejected=(b'must-not-deliver-' if upstream else b'bad-device-')+fault.encode()
             r.need(proof['payload']=={'bytes':len(rejected),'sha256':hashlib.sha256(rejected).hexdigest()}
                    and proof['reasons']==reasons and proof['window']==2 and proof['completed']>=proof['started']+2
-                   and rejection['actual'] in proof['fresh_log'], 'Fresh full rejection proof differs')
+                   and rejection['actual'] in fresh_lines, 'Fresh full rejection proof differs')
             r.need(len(case['targets'])==1,'Unexpected control target')
             target=case['targets'][0]
             expected=[{'peer':peer,'bytes':len(body),'sha256':hashlib.sha256(body).hexdigest()} for peer,body in
