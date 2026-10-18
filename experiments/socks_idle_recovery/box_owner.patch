@@ -1,9 +1,9 @@
 diff --git a/adapter/packet_session.go b/adapter/packet_session.go
 new file mode 100644
-index 0000000..4f6f8f1
+index 0000000..9966584
 --- /dev/null
 +++ b/adapter/packet_session.go
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,86 @@
 +package adapter
 +
 +import (
@@ -70,8 +70,13 @@ index 0000000..4f6f8f1
 +
 +func (l *PacketSessionLease) PacketConn() N.PacketConn { return l.packet }
 +
++func (l *PacketSessionLease) IsValid() bool { return l != nil && l.packet != nil && l.abort != nil }
++
 +func (l *PacketSessionLease) AbortTransport() error {
-+	l.abortOnce.Do(func() { l.abortErr = l.abort() })
++	l.abortOnce.Do(func() {
++		if l.abort == nil { l.abortErr = N.ErrPacketSessionLifecycle; return }
++		l.abortErr = l.abort()
++	})
 +	return l.abortErr
 +}
 +
@@ -79,7 +84,8 @@ index 0000000..4f6f8f1
 +func (l *PacketSessionLease) Finalize() error {
 +	l.finalizeOnce.Do(func() {
 +		l.AbortTransport()
-+		l.finalizeErr = l.packet.Close()
++		if l.packet == nil { l.finalizeErr = N.ErrPacketSessionLifecycle } else { l.finalizeErr = l.packet.Close() }
++		if l.abort == nil { l.finalizeErr = N.ErrPacketSessionLifecycle }
 +		if l.cacheAfterJoin != nil { l.cacheAfterJoin() }
 +	})
 +	return l.finalizeErr
@@ -467,7 +473,7 @@ index d77a407..6430424 100644
  		remotePacketConn   net.PacketConn
 diff --git a/route/packet_session.go b/route/packet_session.go
 new file mode 100644
-index 0000000..2408791
+index 0000000..597f497
 --- /dev/null
 +++ b/route/packet_session.go
 @@ -0,0 +1,172 @@
@@ -539,7 +545,7 @@ index 0000000..2408791
 +	if err := private.ValidatePacketSession(); err != nil { completeFailure(err); return }
 +	admissionCtx, cancelAdmission := context.WithTimeout(adapter.WithContext(ctx, &metadata), 3*time.Second)
 +	lease, err := private.OpenPacketSession(admissionCtx, policy.Target, policy.Lifecycle.AttachPacketSessionAbort)
-+	if err == nil && (lease == nil || lease.PacketConn() == nil) { err = N.ErrPacketSessionLifecycle }
++	if err == nil && !lease.IsValid() { err = N.ErrPacketSessionLifecycle }
 +	if err == nil { err = admissionCtx.Err() }
 +	if err == nil { err = policy.Lifecycle.PacketSessionAdmitted() }
 +	cancelAdmission()

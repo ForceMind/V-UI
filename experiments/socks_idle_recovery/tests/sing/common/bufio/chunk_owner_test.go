@@ -8,6 +8,7 @@ import (
 
 func TestChunkReaderPacketSessionFinalizer(t *testing.T) {
 	reader := NewChunkReader(bytes.NewReader([]byte("retained-cache")), 16384)
+	t.Cleanup(reader.ReleaseCacheAfterJoin)
 	if _, ok := any(reader).(io.Closer); ok { t.Fatal("ChunkReader must not become io.Closer") }
 	var first [1]byte
 	if _, err := reader.Read(first[:]); err != nil { t.Fatal(err) }
