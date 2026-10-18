@@ -1,0 +1,719 @@
+diff --git a/adapter/packet_session.go b/adapter/packet_session.go
+new file mode 100644
+index 0000000..4f6f8f1
+--- /dev/null
++++ b/adapter/packet_session.go
+@@ -0,0 +1,80 @@
++package adapter
++
++import (
++	"context"
++	"net"
++	"sync"
++
++	M "github.com/sagernet/sing/common/metadata"
++	N "github.com/sagernet/sing/common/network"
++)
++
++// PacketSessionPolicy is an experimental, per-generation value. It is never
++// inherited by unmarked routes, and does not authorize outbound substitution.
++type PacketSessionPolicy struct {
++	Outbound string
++	Target M.Socksaddr
++	Lifecycle N.PacketSessionLifecycle
++}
++
++type packetSessionPolicyKey struct{}
++
++func WithPacketSessionPolicy(ctx context.Context, policy PacketSessionPolicy) context.Context {
++	return context.WithValue(ctx, packetSessionPolicyKey{}, policy)
++}
++
++func PacketSessionPolicyFromContext(ctx context.Context) (PacketSessionPolicy, bool) {
++	policy, loaded := ctx.Value(packetSessionPolicyKey{}).(PacketSessionPolicy)
++	return policy, loaded
++}
++
++// OwnedPacketSessionDialer only admits private, abortable transports. Ordinary
++// ListenPacket implementations cannot satisfy this capability by delegation.
++type OwnedPacketSessionDialer interface {
++	ValidatePacketSession() error
++	OpenPacketSession(context.Context, M.Socksaddr, func(func() error) error) (*PacketSessionLease, error)
++}
++
++// PacketSessionOnceConn prevents a second tracked Close during protocol cleanup.
++// Its net.Conn embedding deliberately exposes no optional unwrap/fast-path API.
++type PacketSessionOnceConn struct {
++	net.Conn
++	once sync.Once
++	err error
++}
++
++func (c *PacketSessionOnceConn) Close() error {
++	c.once.Do(func() { c.err = c.Conn.Close() })
++	return c.err
++}
++
++type PacketSessionLease struct {
++	packet N.PacketConn
++	abort func() error
++	cacheAfterJoin func()
++	abortOnce sync.Once
++	finalizeOnce sync.Once
++	abortErr error
++	finalizeErr error
++}
++
++func NewPacketSessionLease(packet N.PacketConn, abort func() error, cacheAfterJoin func()) *PacketSessionLease {
++	return &PacketSessionLease{packet: packet, abort: abort, cacheAfterJoin: cacheAfterJoin}
++}
++
++func (l *PacketSessionLease) PacketConn() N.PacketConn { return l.packet }
++
++func (l *PacketSessionLease) AbortTransport() error {
++	l.abortOnce.Do(func() { l.abortErr = l.abort() })
++	return l.abortErr
++}
++
++// Finalize must be called only after all packet reads and writes have joined.
++func (l *PacketSessionLease) Finalize() error {
++	l.finalizeOnce.Do(func() {
++		l.AbortTransport()
++		l.finalizeErr = l.packet.Close()
++		if l.cacheAfterJoin != nil { l.cacheAfterJoin() }
++	})
++	return l.finalizeErr
++}
+diff --git a/common/dialer/packet_session.go b/common/dialer/packet_session.go
+new file mode 100644
+index 0000000..6c61190
+--- /dev/null
++++ b/common/dialer/packet_session.go
+@@ -0,0 +1,99 @@
++package dialer
++
++import (
++	"context"
++	stdtls "crypto/tls"
++	"net"
++	"reflect"
++
++	"github.com/sagernet/sing-box/adapter"
++	"github.com/sagernet/sing-box/common/tls"
++	"github.com/sagernet/sing-box/option"
++	"github.com/sagernet/sing/common/bufio"
++	E "github.com/sagernet/sing/common/exceptions"
++	M "github.com/sagernet/sing/common/metadata"
++	N "github.com/sagernet/sing/common/network"
++)
++
++func PacketSessionDialOptionsSupported(o option.DialerOptions) bool {
++	return o.Detour == "" && o.DomainResolver == nil && o.DomainStrategy == 0 &&
++		!o.TCPFastOpen && !o.TCPMultiPath && o.NetNs == "" &&
++		o.NetworkStrategy == nil && len(o.NetworkType) == 0 &&
++		len(o.FallbackNetworkType) == 0 && o.FallbackDelay == 0
++}
++
++func PacketSessionTLSOptionsSupported(o *option.OutboundTLSOptions) bool {
++	return o != nil && o.Enabled && !o.Insecure && !o.DisableSNI &&
++		(o.Engine == "" || o.Engine == "go") && o.UTLS == nil && o.Reality == nil && o.ECH == nil &&
++		!o.KernelTx && !o.KernelRx && !o.Fragment && !o.RecordFragment && o.FragmentFallbackDelay == 0 &&
++		o.Spoof == "" && o.SpoofMethod == "" && len(o.CertificatePublicKeySHA256) == 0
++}
++
++func packetSessionConcrete(value any, name string) bool {
++	t := reflect.TypeOf(value)
++	return t != nil && t.Kind() == reflect.Pointer && t.Elem().PkgPath() == "github.com/sagernet/sing-box/route" && t.Elem().Name() == name
++}
++
++func ValidatePacketSessionDialer(value N.Dialer, address M.Socksaddr) error {
++	d, ok := value.(*DefaultDialer)
++	if !ok || !address.IsIPv4() || address.Port == 0 || address.IsDomain() {
++		return E.New("packet session requires a direct literal IPv4 upstream")
++	}
++	if !d.dialer4.DisableTFO || d.dialer4.Dialer.MultipathTCP() || d.netns != "" ||
++		d.networkStrategy != nil || d.defaultNetworkStrategy || len(d.networkType) != 0 ||
++		len(d.fallbackNetworkType) != 0 || d.networkFallbackDelay != 0 {
++		return E.New("unsupported effective packet session dial policy")
++	}
++	if d.connectionManager != nil && !packetSessionConcrete(d.connectionManager, "ConnectionManager") {
++		return E.New("unknown packet session connection manager")
++	}
++	return nil
++}
++
++func ValidatePacketSessionTLS(config tls.Config) error {
++	standard, ok := config.(*tls.STDClientConfig)
++	if !ok { return E.New("packet session requires standard verified Go TLS") }
++	inner, err := standard.STDConfig()
++	if err != nil { return err }
++	if inner == nil || inner.InsecureSkipVerify || inner.ServerName == "" || len(inner.EncryptedClientHelloConfigList) != 0 {
++		return E.New("packet session requires standard verified Go TLS")
++	}
++	return nil
++}
++
++// DialPacketSessionTLS registers the actual private transport before TLS and
++// before any synchronous outer protocol constructor write. The owner supervisor
++// supplies a real abort timer; a context deadline alone cannot interrupt Write.
++func DialPacketSessionTLS(ctx context.Context, value N.Dialer, address M.Socksaddr, config tls.Config, attach func(func() error) error) (net.Conn, func() error, error) {
++	if err := ValidatePacketSessionDialer(value, address); err != nil { return nil, nil, err }
++	if err := ValidatePacketSessionTLS(config); err != nil { return nil, nil, err }
++	d := value.(*DefaultDialer)
++	raw, err := d.dialer4.Dialer.DialContext(ctx, "tcp4", address.String())
++	if err != nil { return nil, nil, err }
++	if _, ok := raw.(*net.TCPConn); !ok { raw.Close(); return nil, nil, E.New("non-TCP private transport") }
++	tracked, err := d.trackConn(ctx, address, raw, nil)
++	if err != nil { raw.Close(); return nil, nil, err }
++	// Prove only the exact wrappers made by trackConn, never arbitrary Upstream.
++	proof := tracked
++	if counter, ok := proof.(*bufio.CounterConn); ok {
++		wrapper, ok := counter.ExtendedConn.(*bufio.ExtendedConnWrapper)
++		if !ok { tracked.Close(); return nil, nil, E.New("unknown counter transport") }
++		proof = wrapper.Conn
++	}
++	if proof != raw && !packetSessionConcrete(proof, "trackedConn") {
++		tracked.Close(); return nil, nil, E.New("unknown tracked transport")
++	}
++	private := &adapter.PacketSessionOnceConn{Conn: tracked}
++	if err = attach(private.Close); err != nil { private.Close(); return nil, nil, err }
++	if err = ctx.Err(); err != nil { private.Close(); return nil, nil, err }
++	standard := config.(*tls.STDClientConfig)
++	inner, _ := standard.STDConfig()
++	secure := stdtls.Client(private, inner)
++	handshakeCtx := ctx
++	cancel := func() {}
++	if timeout := standard.HandshakeTimeout(); timeout > 0 { handshakeCtx, cancel = context.WithTimeout(ctx, timeout) }
++	err = secure.HandshakeContext(handshakeCtx)
++	cancel()
++	if err != nil { private.Close(); return nil, nil, err }
++	return secure, private.Close, nil
++}
+diff --git a/option/simple.go b/option/simple.go
+index 43cbb2c..15f60ce 100644
+--- a/option/simple.go
++++ b/option/simple.go
+@@ -11,7 +11,12 @@ type SocksInboundOptions struct {
+ 	DomainResolver *DomainResolveOptions `json:"domain_resolver,omitempty"`
+ }
+ 
++type ExperimentalSOCKSUDPIdleRecoveryOptions struct {
++	Outbound string `json:"outbound"`
++}
++
+ type HTTPMixedInboundOptions struct {
++	ExperimentalSOCKSUDPIdleRecovery *ExperimentalSOCKSUDPIdleRecoveryOptions `json:"experimental_socks_udp_idle_recovery,omitempty"`
+ 	ListenOptions
+ 	Users          []auth.User           `json:"users,omitempty"`
+ 	DomainResolver *DomainResolveOptions `json:"domain_resolver,omitempty"`
+diff --git a/protocol/mixed/inbound.go b/protocol/mixed/inbound.go
+index c6cd08c..2ff47b1 100644
+--- a/protocol/mixed/inbound.go
++++ b/protocol/mixed/inbound.go
+@@ -3,7 +3,12 @@ package mixed
+ import (
+ 	std_bufio "bufio"
+ 	"context"
++	"encoding/json"
+ 	"net"
++	"net/netip"
++	"os"
++	"sync"
++	"sync/atomic"
+ 	"time"
+ 
+ 	"github.com/sagernet/sing-box/adapter"
+@@ -39,9 +44,18 @@ type Inbound struct {
+ 	authenticator *auth.Authenticator
+ 	tlsConfig     tls.ServerConfig
+ 	udpTimeout    time.Duration
++	packetSessionOutbound string
++	packetSessionSlots chan struct{}
+ }
+ 
+ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.HTTPMixedInboundOptions) (adapter.Inbound, error) {
++	if recovery := options.ExperimentalSOCKSUDPIdleRecovery; recovery != nil {
++		if options.Listen == nil || !options.Listen.Build(netip.Addr{}).Is4() || !options.Listen.Build(netip.Addr{}).IsLoopback() ||
++			recovery.Outbound == "" || options.TLS != nil || options.Detour != "" || options.DomainResolver != nil ||
++			options.NetNs != "" || options.TCPFastOpen || options.TCPMultiPath {
++			return nil, E.New("experimental SOCKS UDP recovery requires plain loopback IPv4 and a fixed outbound")
++		}
++	}
+ 	var udpTimeout time.Duration
+ 	if options.UDPTimeout != 0 {
+ 		udpTimeout = time.Duration(options.UDPTimeout)
+@@ -55,6 +69,10 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
+ 		authenticator: auth.NewAuthenticator(options.Users),
+ 		udpTimeout:    udpTimeout,
+ 	}
++	if recovery := options.ExperimentalSOCKSUDPIdleRecovery; recovery != nil {
++		inbound.packetSessionOutbound = recovery.Outbound
++		inbound.packetSessionSlots = make(chan struct{}, 8)
++	}
+ 	if options.TLS != nil {
+ 		tlsConfig, err := tls.NewServerWithOptions(tls.ServerOptions{
+ 			Context:        ctx,
+@@ -126,6 +144,23 @@ func (h *Inbound) newConnection(ctx context.Context, conn net.Conn, metadata ada
+ 	}
+ 	switch headerBytes[0] {
+ 	case socks4.Version, socks5.Version:
++		if h.packetSessionOutbound != "" {
++			var ownerID uint64
++			options := &socks.UDPAssociationOptions{
++				Acquire: func() (func(), bool) {
++					// CONNECT/SOCKS4 keep their legacy path. Only owner admission
++					// requires a known nonblocking raw TCP control transport.
++					if _, ok := conn.(*net.TCPConn); !ok { return nil, false }
++					release, ok := h.acquirePacketSessionSlot()
++					if !ok { return nil, false }
++					ownerID, ok = nextPacketSessionOwnerID()
++					if !ok { release(); return nil, false }
++					return release, true
++				},
++				Observe: func(event socks.UDPAssociationEvent) { h.observePacketSession(ctx, ownerID, event) },
++			}
++			return socks.HandleConnectionExWithUDPAssociation(ctx, conn, reader, h.authenticator, adapter.NewUpstreamHandler(metadata, h.newUserConnection, h.streamUserPacketConnection), h.listener, h.udpTimeout, metadata.Source, onClose, options)
++		}
+ 		return socks.HandleConnectionEx(ctx, conn, reader, h.authenticator, adapter.NewUpstreamHandler(metadata, h.newUserConnection, h.streamUserPacketConnection), h.listener, h.udpTimeout, metadata.Source, onClose)
+ 	default:
+ 		return http.HandleConnectionEx(ctx, conn, reader, h.authenticator, adapter.NewUpstreamHandler(metadata, h.newUserConnection, h.streamUserPacketConnection), metadata.Source, onClose)
+@@ -147,6 +182,15 @@ func (h *Inbound) newUserConnection(ctx context.Context, conn net.Conn, metadata
+ }
+ 
+ func (h *Inbound) streamUserPacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
++	if lifecycle, owned := conn.(N.PacketSessionLifecycle); owned && h.packetSessionOutbound != "" {
++		// Reconstruct only immutable inbound facts on every new generation.
++		metadata = adapter.InboundContext{Source: metadata.Source, Destination: metadata.Destination,
++			Inbound: h.Tag(), InboundType: h.Type(), OriginDestination: M.SocksaddrFromNet(conn.LocalAddr()).Unwrap()}
++		metadata.User, _ = auth.UserFromContext[string](ctx)
++		ctx = adapter.WithPacketSessionPolicy(ctx, adapter.PacketSessionPolicy{Outbound: h.packetSessionOutbound, Target: metadata.Destination, Lifecycle: lifecycle})
++		h.router.RoutePacketConnectionEx(ctx, conn, metadata, onClose)
++		return
++	}
+ 	metadata.Inbound = h.Tag()
+ 	metadata.InboundType = h.Type()
+ 	metadata.OriginDestination = M.SocksaddrFromNet(conn.LocalAddr()).Unwrap()
+@@ -168,3 +212,46 @@ func (h *Inbound) streamUserPacketConnection(ctx context.Context, conn N.PacketC
+ 	}
+ 	h.router.RoutePacketConnectionEx(ctx, conn, metadata, onClose)
+ }
++
++var packetSessionOwnerID atomic.Uint64
++
++func nextPacketSessionOwnerID() (uint64, bool) {
++	for {
++		previous := packetSessionOwnerID.Load()
++		if previous == ^uint64(0) { return 0, false }
++		if packetSessionOwnerID.CompareAndSwap(previous, previous+1) { return previous+1, true }
++	}
++}
++
++func (h *Inbound) acquirePacketSessionSlot() (func(), bool) {
++	select {
++	case h.packetSessionSlots <- struct{}{}:
++		var once sync.Once
++		return func() { once.Do(func() { <-h.packetSessionSlots }) }, true
++	default:
++		return nil, false
++	}
++}
++
++func (h *Inbound) observePacketSession(ctx context.Context, ownerID uint64, event socks.UDPAssociationEvent) {
++	// No payload, arbitrary error text, event queue, or observer worker.
++	record := struct {
++		PID int `json:"pid"`
++		OwnerID uint64 `json:"owner_id"`
++		Sequence uint64 `json:"sequence"`
++		Transition string `json:"transition"`
++		Generation uint64 `json:"generation"`
++		PacketSequence uint64 `json:"packet_sequence"`
++		AcceptedPackets uint64 `json:"accepted_packets"`
++		RejectedSources uint64 `json:"rejected_sources"`
++		RemappedPackets uint64 `json:"remapped_packets"`
++		Cause string `json:"cause"`
++		Source string `json:"source"`
++		Relay string `json:"relay"`
++		Target string `json:"target"`
++	}{os.Getpid(), ownerID, event.Sequence, event.Transition, event.Generation, event.PacketSequence,
++		event.AcceptedPackets, event.RejectedSources, event.RemappedPackets, event.Cause,
++		event.Source.String(), event.Relay.String(), event.Target.String()}
++	encoded, err := json.Marshal(record)
++	if err == nil { h.logger.InfoContext(ctx, "socks_udp_owner ", string(encoded)) }
++}
+diff --git a/protocol/vless/outbound.go b/protocol/vless/outbound.go
+index 1356a58..f4c1101 100644
+--- a/protocol/vless/outbound.go
++++ b/protocol/vless/outbound.go
+@@ -13,6 +13,7 @@ import (
+ 	"github.com/sagernet/sing-box/log"
+ 	"github.com/sagernet/sing-box/option"
+ 	"github.com/sagernet/sing-box/transport/v2ray"
++	"github.com/sagernet/sing-vmess"
+ 	"github.com/sagernet/sing-vmess/packetaddr"
+ 	"github.com/sagernet/sing-vmess/vless"
+ 	"github.com/sagernet/sing/common"
+@@ -41,6 +42,7 @@ type Outbound struct {
+ 	transport       adapter.V2RayClientTransport
+ 	packetAddr      bool
+ 	xudp            bool
++	packetSessionSupported bool
+ }
+ 
+ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.VLESSOutboundOptions) (adapter.Outbound, error) {
+@@ -96,6 +98,8 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
+ 	if err != nil {
+ 		return nil, err
+ 	}
++	outbound.packetSessionSupported = options.Flow == "" && options.Transport == nil && outbound.multiplexDialer == nil && outbound.xudp &&
++		dialer.PacketSessionDialOptionsSupported(options.DialerOptions) && dialer.PacketSessionTLSOptionsSupported(options.TLS)
+ 	return outbound, nil
+ }
+ 
+@@ -222,3 +226,28 @@ func (h *vlessDialer) ListenPacket(ctx context.Context, destination M.Socksaddr)
+ 		return h.client.DialEarlyPacketConn(conn, destination)
+ 	}
+ }
++
++func (h *Outbound) ValidatePacketSession() error {
++	if !h.packetSessionSupported || !h.xudp || h.packetAddr || h.transport != nil || h.multiplexDialer != nil {
++		return E.New("unsupported private VLESS packet session")
++	}
++	if err := dialer.ValidatePacketSessionDialer(h.dialer, h.serverAddr); err != nil { return err }
++	return dialer.ValidatePacketSessionTLS(h.tlsConfig)
++}
++
++func (h *Outbound) OpenPacketSession(ctx context.Context, destination M.Socksaddr, attach func(func() error) error) (*adapter.PacketSessionLease, error) {
++	if err := h.ValidatePacketSession(); err != nil { return nil, err }
++	if !destination.IsIPv4() || destination.Port == 0 || destination.IsDomain() { return nil, E.New("unsupported packet session target") }
++	ctx, metadata := adapter.ExtendContext(ctx)
++	metadata.Outbound, metadata.Destination = h.Tag(), destination
++	conn, abort, err := dialer.DialPacketSessionTLS(ctx, h.dialer, h.serverAddr, h.tlsConfig, attach)
++	if err != nil { return nil, err }
++	// Fixed VLESS early XUDP synchronously writes CommandMux. DialXUDP uses
++	// CommandTCP in this upstream revision and is deliberately not used here.
++	packet, err := h.client.DialEarlyXUDPPacketConn(conn, destination)
++	if err != nil { abort(); if packet != nil { packet.Close() }; return nil, err }
++	xudp, ok := packet.(*vmess.XUDPConn)
++	if !ok { abort(); packet.Close(); return nil, E.New("unknown VLESS packet session wrapper") }
++	xudp.SetPacketSessionEndReporting()
++	return adapter.NewPacketSessionLease(xudp, abort, nil), nil
++}
+diff --git a/protocol/vmess/outbound.go b/protocol/vmess/outbound.go
+index 7b16fc9..236ff50 100644
+--- a/protocol/vmess/outbound.go
++++ b/protocol/vmess/outbound.go
+@@ -41,6 +41,7 @@ type Outbound struct {
+ 	transport       adapter.V2RayClientTransport
+ 	packetAddr      bool
+ 	xudp            bool
++	packetSessionSupported bool
+ }
+ 
+ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.VMessOutboundOptions) (adapter.Outbound, error) {
+@@ -104,6 +105,9 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
+ 		return nil, err
+ 	}
+ 	outbound.client = client
++	outbound.packetSessionSupported = options.AlterId == 0 && (options.Security == "aes-128-gcm" || options.Security == "chacha20-poly1305") &&
++		options.Transport == nil && outbound.multiplexDialer == nil && outbound.xudp &&
++		dialer.PacketSessionDialOptionsSupported(options.DialerOptions) && dialer.PacketSessionTLSOptionsSupported(options.TLS)
+ 	return outbound, nil
+ }
+ 
+@@ -210,3 +214,29 @@ func (h *vmessDialer) ListenPacket(ctx context.Context, destination M.Socksaddr)
+ 		return h.client.DialEarlyPacketConn(conn, destination), nil
+ 	}
+ }
++
++// ValidatePacketSession never enables this capability for legacy callers.
++func (h *Outbound) ValidatePacketSession() error {
++	if !h.packetSessionSupported || !h.xudp || h.packetAddr || h.transport != nil || h.multiplexDialer != nil {
++		return E.New("unsupported private VMess packet session")
++	}
++	if err := dialer.ValidatePacketSessionDialer(h.dialer, h.serverAddr); err != nil { return err }
++	return dialer.ValidatePacketSessionTLS(h.tlsConfig)
++}
++
++func (h *Outbound) OpenPacketSession(ctx context.Context, destination M.Socksaddr, attach func(func() error) error) (*adapter.PacketSessionLease, error) {
++	if err := h.ValidatePacketSession(); err != nil { return nil, err }
++	if !destination.IsIPv4() || destination.Port == 0 || destination.IsDomain() { return nil, E.New("unsupported packet session target") }
++	ctx, metadata := adapter.ExtendContext(ctx)
++	metadata.Outbound, metadata.Destination = h.Tag(), destination
++	conn, abort, err := dialer.DialPacketSessionTLS(ctx, h.dialer, h.serverAddr, h.tlsConfig, attach)
++	if err != nil { return nil, err }
++	packet, err := h.client.DialXUDPPacketConn(conn, destination)
++	if err != nil { abort(); return nil, err }
++	xudp, ok := packet.(*vmess.XUDPConn)
++	if !ok { abort(); packet.Close(); return nil, E.New("unknown VMess packet session wrapper") }
++	cache, ok := xudp.Conn.(interface { ReleasePacketSessionReadCacheAfterJoin() })
++	if !ok { abort(); packet.Close(); return nil, E.New("missing explicit VMess cache finalizer") }
++	xudp.SetPacketSessionEndReporting()
++	return adapter.NewPacketSessionLease(xudp, abort, cache.ReleasePacketSessionReadCacheAfterJoin), nil
++}
+diff --git a/route/conn.go b/route/conn.go
+index d77a407..6430424 100644
+--- a/route/conn.go
++++ b/route/conn.go
+@@ -154,6 +154,10 @@ func (m *ConnectionManager) NewConnection(ctx context.Context, this N.Dialer, co
+ }
+ 
+ func (m *ConnectionManager) NewPacketConnection(ctx context.Context, this N.Dialer, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
++	if policy, owned := adapter.PacketSessionPolicyFromContext(ctx); owned {
++		m.newOwnedPacketConnection(ctx, this, conn, metadata, policy, onClose)
++		return
++	}
+ 	ctx = adapter.WithContext(ctx, &metadata)
+ 	var (
+ 		remotePacketConn   net.PacketConn
+diff --git a/route/packet_session.go b/route/packet_session.go
+new file mode 100644
+index 0000000..2408791
+--- /dev/null
++++ b/route/packet_session.go
+@@ -0,0 +1,172 @@
++package route
++
++import (
++	"context"
++	"errors"
++	"net"
++	"sync"
++	"time"
++
++	"github.com/sagernet/sing-box/adapter"
++	C "github.com/sagernet/sing-box/constant"
++	R "github.com/sagernet/sing-box/route/rule"
++	"github.com/sagernet/sing/common/buf"
++	"github.com/sagernet/sing/common/bufio"
++	E "github.com/sagernet/sing/common/exceptions"
++	M "github.com/sagernet/sing/common/metadata"
++	N "github.com/sagernet/sing/common/network"
++)
++
++func validatePacketSessionMetadata(policy adapter.PacketSessionPolicy, metadata *adapter.InboundContext) error {
++	if policy.Lifecycle == nil || policy.Outbound == "" || !policy.Target.IsIPv4() || policy.Target.Port == 0 || policy.Target.IsDomain() ||
++		metadata.InboundType != C.TypeMixed || metadata.Destination != policy.Target || metadata.InboundDetour != "" || metadata.FakeIP || metadata.Domain != "" || metadata.Protocol != "" ||
++		metadata.RouteOriginalDestination.IsValid() || len(metadata.DestinationAddresses) != 0 || metadata.UDPConnect ||
++		metadata.UDPTimeout != 0 || metadata.UDPDisableDomainUnmapping || metadata.NetworkStrategy != nil ||
++		len(metadata.NetworkType) != 0 || len(metadata.FallbackNetworkType) != 0 || metadata.FallbackDelay != 0 ||
++		metadata.TLSFragment || metadata.TLSFragmentFallbackDelay != 0 || metadata.TLSRecordFragment || metadata.TLSSpoof != "" || metadata.TLSSpoofMethod != 0 {
++		return E.New("unsupported packet session route metadata")
++	}
++	return nil
++}
++
++func validatePacketSessionAction(action adapter.RuleAction) error {
++	var options *R.RuleActionRouteOptions
++	switch action := action.(type) {
++	case *R.RuleActionReject:
++		return nil
++	case *R.RuleActionRoute:
++		options = &action.RuleActionRouteOptions
++	case *R.RuleActionRouteOptions:
++		options = action
++	default:
++		return E.New("unsupported packet session route action")
++	}
++	if options.OverrideAddress.IsValid() || options.OverridePort != 0 || options.NetworkStrategy != nil ||
++		len(options.NetworkType) != 0 || len(options.FallbackNetworkType) != 0 || options.FallbackDelay != 0 ||
++		options.UDPConnect || options.UDPTimeout != 0 || options.UDPDisableDomainUnmapping || options.TLSFragment ||
++		options.TLSFragmentFallbackDelay != 0 || options.TLSRecordFragment || options.TLSSpoof != "" || options.TLSSpoofMethod != 0 {
++		return E.New("unsupported packet session route options")
++	}
++	return nil
++}
++
++// This method blocks until both copies, private abort, protocol cache finalizer
++// and callback have completed. The SOCKS owner separately joins its invocation.
++func (m *ConnectionManager) newOwnedPacketConnection(ctx context.Context, outbound N.Dialer, child N.PacketConn, metadata adapter.InboundContext, policy adapter.PacketSessionPolicy, onClose N.CloseHandlerFunc) {
++	completeFailure := func(err error) {
++		if policy.Lifecycle != nil { policy.Lifecycle.BeginPacketSessionRetire(err) }
++		child.Close()
++		if onClose != nil { onClose(err) }
++	}
++	if err := validatePacketSessionMetadata(policy, &metadata); err != nil { completeFailure(err); return }
++	selected, isOutbound := outbound.(adapter.Outbound)
++	if !isOutbound || selected.Tag() != policy.Outbound { completeFailure(E.New("packet session outbound substitution refused")); return }
++	private, ok := outbound.(adapter.OwnedPacketSessionDialer)
++	if !ok { completeFailure(E.New("missing private packet session capability")); return }
++	if err := private.ValidatePacketSession(); err != nil { completeFailure(err); return }
++	admissionCtx, cancelAdmission := context.WithTimeout(adapter.WithContext(ctx, &metadata), 3*time.Second)
++	lease, err := private.OpenPacketSession(admissionCtx, policy.Target, policy.Lifecycle.AttachPacketSessionAbort)
++	if err == nil && (lease == nil || lease.PacketConn() == nil) { err = N.ErrPacketSessionLifecycle }
++	if err == nil { err = admissionCtx.Err() }
++	if err == nil { err = policy.Lifecycle.PacketSessionAdmitted() }
++	cancelAdmission()
++	if err != nil {
++		policy.Lifecycle.BeginPacketSessionRetire(err)
++		if lease != nil { lease.AbortTransport(); lease.Finalize() }
++		child.Close()
++		if onClose != nil { onClose(err) }
++		return
++	}
++	remote := lease.PacketConn()
++	front, rear := N.CalculateFrontHeadroom(remote), N.CalculateRearHeadroom(remote)
++	if front < 0 || front > 286 || rear < 0 || rear > 96 || N.CalculateFrontHeadroom(child) > 286 || N.CalculateRearHeadroom(child) > 96 {
++		policy.Lifecycle.BeginPacketSessionRetire(N.ErrPacketSessionLifecycle)
++		lease.AbortTransport(); child.Close(); lease.Finalize()
++		if onClose != nil { onClose(N.ErrPacketSessionLifecycle) }
++		return
++	}
++	var once sync.Once
++	var cause error
++	retire := func(err error) {
++		if err == nil { err = N.ErrPacketSessionLifecycle }
++		once.Do(func() {
++			cause = err
++			policy.Lifecycle.BeginPacketSessionRetire(err)
++			lease.AbortTransport()
++			child.Close()
++		})
++	}
++	results := make(chan error, 2)
++	var joined sync.WaitGroup
++	joined.Add(2)
++	go func() {
++		defer joined.Done()
++		_, err := bufio.CopyPacket(&packetSessionWriter{writer: remote, target: policy.Target, front: front, rear: rear, lifecycle: policy.Lifecycle, retire: retire}, &packetSessionReader{reader: child, target: policy.Target, retire: retire})
++		retire(err)
++		results <- err
++	}()
++	go func() {
++		defer joined.Done()
++		_, err := bufio.CopyPacket(&packetSessionWriter{writer: child, target: policy.Target, front: N.CalculateFrontHeadroom(child), rear: N.CalculateRearHeadroom(child), retire: retire}, &packetSessionReader{reader: remote, target: policy.Target, retire: retire})
++		retire(err)
++		results <- err
++	}()
++	// The invocation itself waits on cancellation; no third per-child worker.
++	select {
++	case <-results:
++	case <-ctx.Done():
++		retire(ctx.Err())
++		<-results
++	}
++	<-results
++	joined.Wait()
++	if finalErr := lease.Finalize(); finalErr != nil && !errors.Is(finalErr, net.ErrClosed) && !errors.Is(finalErr, context.Canceled) {
++		cause = finalErr // An uncertain finalizer must never authorize recovery.
++	}
++	if onClose != nil { onClose(cause) }
++}
++
++// Opaque guards prevent CopyPacket from discovering cache, batch, waiter,
++// unwrap or direct-copy methods that could bypass the acknowledgement fence.
++type packetSessionReader struct {
++	reader N.PacketReader
++	target M.Socksaddr
++	retire func(error)
++}
++
++func (r *packetSessionReader) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
++	destination, err := r.reader.ReadPacket(buffer)
++	if err == nil && (destination != r.target || buffer.Len() > 65497) { err = N.ErrPacketSessionLifecycle }
++	if err != nil { r.retire(err) }
++	return destination, err
++}
++func (*packetSessionReader) ReaderMTU() int { return 65535 }
++func (*packetSessionReader) ReaderOverhead() int { return 0 }
++
++type packetSessionWriter struct {
++	writer N.PacketWriter
++	target M.Socksaddr
++	front int
++	rear int
++	lifecycle N.PacketSessionLifecycle
++	retire func(error)
++}
++
++func (w *packetSessionWriter) FrontHeadroom() int { return w.front }
++func (w *packetSessionWriter) RearHeadroom() int { return w.rear }
++func (w *packetSessionWriter) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
++	// Every successful child ReadPacket is acknowledged exactly once, after the
++	// synchronous write finishes. Pin storage even if the lower writer releases.
++	buffer.IncRef()
++	var err error
++	if destination != w.target || buffer.Len() > 65497 {
++		err = N.ErrPacketSessionLifecycle
++	} else {
++		err = w.writer.WritePacket(buffer, destination)
++	}
++	if err != nil { w.retire(err) }
++	buffer.DecRef()
++	buffer.Release()
++	if w.lifecycle != nil { w.lifecycle.PacketSessionWriteFinished(err) }
++	return err
++}
+diff --git a/route/route.go b/route/route.go
+index 62f1c86..7920632 100644
+--- a/route/route.go
++++ b/route/route.go
+@@ -201,6 +201,9 @@ func (r *Router) RoutePacketConnection(ctx context.Context, conn N.PacketConn, m
+ func (r *Router) RoutePacketConnectionEx(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+ 	err := r.routePacketConnection(ctx, conn, metadata, onClose)
+ 	if err != nil {
++		if policy, owned := adapter.PacketSessionPolicyFromContext(ctx); owned && policy.Lifecycle != nil {
++			policy.Lifecycle.BeginPacketSessionRetire(err)
++		}
+ 		N.CloseOnHandshakeFailure(conn, onClose, err)
+ 		if E.IsClosedOrCanceled(err) || R.IsRejected(err) {
+ 			r.logger.DebugContext(ctx, "connection closed: ", err)
+@@ -211,6 +214,10 @@ func (r *Router) RoutePacketConnectionEx(ctx context.Context, conn N.PacketConn,
+ }
+ 
+ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) error {
++	if policy, owned := adapter.PacketSessionPolicyFromContext(ctx); owned {
++		if err := validatePacketSessionMetadata(policy, &metadata); err != nil { return err }
++		if len(r.trackers) != 0 { return E.New("packet session route trackers are unsupported") }
++	}
+ 	//nolint:staticcheck
+ 	if metadata.InboundDetour != "" {
+ 		if metadata.LastInbound == metadata.InboundDetour {
+@@ -291,6 +298,18 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
+ 		}
+ 		selectedOutbound = defaultOutbound
+ 	}
++	if policy, owned := adapter.PacketSessionPolicyFromContext(ctx); owned {
++		if len(packetBuffers) != 0 { N.ReleaseMultiPacketBuffer(packetBuffers); return E.New("packet session cached route input is unsupported") }
++		if err := validatePacketSessionMetadata(policy, &metadata); err != nil { return err }
++		if selectedOutbound == nil || selectedOutbound.Tag() != policy.Outbound { return E.New("packet session outbound substitution refused") }
++		private, ok := selectedOutbound.(adapter.OwnedPacketSessionDialer)
++		if !ok { return E.New("outbound lacks private packet session capability") }
++		if err := private.ValidatePacketSession(); err != nil { return err }
++		metadata.RouteOutbound = selectedOutbound.Tag()
++		if selectedRule != nil { metadata.RouteRule = selectedRule.String() }
++		r.connection.NewPacketConnection(ctx, selectedOutbound, conn, metadata, onClose)
++		return nil
++	}
+ 	for _, buffer := range packetBuffers {
+ 		conn = bufio.NewCachedPacketConn(conn, buffer.Buffer, buffer.Destination)
+ 		N.PutPacketBuffer(buffer)
+@@ -562,6 +581,7 @@ func (r *Router) prepareMatchMetadata(ctx context.Context, metadata *adapter.Inb
+ 		}
+ 	}
+ 	if metadata.Destination.Addr.IsValid() && r.dnsTransport.FakeIP() != nil && r.dnsTransport.FakeIP().Store().Contains(metadata.Destination.Addr) {
++		if _, owned := adapter.PacketSessionPolicyFromContext(ctx); owned { return E.New("packet session fake-IP rewrite refused") }
+ 		domain, loaded := r.dnsTransport.FakeIP().Store().Lookup(metadata.Destination.Addr)
+ 		if !loaded {
+ 			return E.New("missing fakeip record, try enable `experimental.cache_file`")
+@@ -601,6 +621,10 @@ func (r *Router) matchRule(
+ 	if fatalErr != nil {
+ 		return
+ 	}
++	if policy, owned := adapter.PacketSessionPolicyFromContext(ctx); owned {
++		fatalErr = validatePacketSessionMetadata(policy, metadata)
++		if fatalErr != nil { return }
++	}
+ 
+ match:
+ 	for currentRuleIndex, currentRule := range r.rules {
+@@ -614,6 +638,10 @@ match:
+ 		} else {
+ 			r.logger.DebugContext(ctx, "match[", currentRuleIndex, "] => ", currentRule.Action())
+ 		}
++		if _, owned := adapter.PacketSessionPolicyFromContext(ctx); owned {
++			fatalErr = validatePacketSessionAction(currentRule.Action())
++			if fatalErr != nil { return }
++		}
+ 		var routeOptions *R.RuleActionRouteOptions
+ 		switch action := currentRule.Action().(type) {
+ 		case *R.RuleActionRoute:

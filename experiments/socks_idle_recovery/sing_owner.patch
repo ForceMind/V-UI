@@ -1,0 +1,795 @@
+diff --git a/common/bufio/chunk.go b/common/bufio/chunk.go
+index fbda922..7f366f0 100644
+--- a/common/bufio/chunk.go
++++ b/common/bufio/chunk.go
+@@ -136,3 +136,13 @@ func (w *ChunkWriter) Upstream() any {
+ func (w *ChunkWriter) MTU() int {
+ 	return w.maxChunkSize
+ }
++
++// ReleaseCacheAfterJoin releases the retained chunk only after all reads have
++// joined. It is intentionally not Close: legacy users may close concurrently
++// with Read, and ChunkReader must not become an io.Closer.
++func (c *ChunkReader) ReleaseCacheAfterJoin() {
++	if c.cache != nil {
++		c.cache.Release()
++		c.cache = nil
++	}
++}
+diff --git a/common/network/packet_session.go b/common/network/packet_session.go
+new file mode 100644
+index 0000000..7bd9303
+--- /dev/null
++++ b/common/network/packet_session.go
+@@ -0,0 +1,30 @@
++package network
++
++import "errors"
++
++// ErrPacketSessionEnded identifies only a complete canonical, no-error-bit
++// remote session terminator. It is not proof of delivery or an idle reason.
++var ErrPacketSessionEnded = errors.New("packet session ended")
++
++var (
++	ErrPacketOutcomeUnknown = errors.New("packet upload crossed session end")
++	ErrPendingAtSessionEnd = errors.New("pending packet crossed session end")
++	ErrPacketSessionLifecycle = errors.New("invalid packet session lifecycle")
++)
++
++// PacketSessionLifecycle is available only on an explicitly opted-in,
++// queue-backed association child. It never grants access to its relay/control.
++// All methods may race owner cancellation. Abort must close the exclusive raw
++// transport synchronously without waiting for protocol I/O to finish.
++//
++// The route must BeginRetire before cancellation, join its copies, finalize its
++// private lease, call its child onClose callback, and return its invocation.
++// Neither the callback nor Close alone is a generation-completion fence.
++type PacketSessionLifecycle interface {
++	AttachPacketSessionAbort(abort func() error) error
++	PacketSessionAdmitted() error
++	BeginPacketSessionRetire(cause error)
++	// Acknowledge exactly one successful ReadPacket only after the actual
++	// synchronous outbound write has returned, including on write failure.
++	PacketSessionWriteFinished(err error)
++}
+diff --git a/protocol/socks/association.go b/protocol/socks/association.go
+new file mode 100644
+index 0000000..7757aaa
+--- /dev/null
++++ b/protocol/socks/association.go
+@@ -0,0 +1,422 @@
++package socks
++
++import (
++	std_bufio "bufio"
++	"context"
++	"encoding/binary"
++	"errors"
++	"io"
++	"math"
++	"net"
++	"net/netip"
++	"os"
++	"sync"
++	"time"
++
++	"github.com/sagernet/sing/common/buf"
++	"github.com/sagernet/sing/common/bufio"
++	M "github.com/sagernet/sing/common/metadata"
++	N "github.com/sagernet/sing/common/network"
++	"github.com/sagernet/sing/protocol/socks/socks5"
++)
++
++const (
++	associationAdmissionTimeout = 3 * time.Second
++	associationReplyTimeout = time.Second
++	associationDefaultIdleTimeout = 5 * time.Minute
++	associationMaxPayload = 65497
++)
++
++var (
++	ErrUDPAssociationOverloaded = errors.New("socks UDP association pending slot exhausted")
++	ErrUDPAssociationAdmissionTimeout = errors.New("socks UDP association admission timeout")
++	ErrUDPAssociationIdleTimeout = errors.New("socks UDP association idle timeout")
++	ErrUDPAssociationMalformed = errors.New("socks UDP association malformed IPv4 packet")
++	ErrUDPAssociationUnsupported = errors.New("socks UDP association unsupported peer or request")
++	ErrUDPAssociationTarget = errors.New("socks UDP association unexpected reply target")
++)
++
++// UDPAssociationOptions opts in to the bounded, synchronous association owner.
++// Acquire must reserve one of the inbound's eight slots before relay allocation.
++// Its release is called only after every owner worker and the closed observer join.
++// Observe is optional and synchronous, outside the owner mutex. It must not block
++// indefinitely. Concurrent observations are ordered by Sequence, not delivery.
++type UDPAssociationOptions struct {
++	Acquire func() (release func(), ok bool)
++	Observe func(UDPAssociationEvent)
++}
++
++// UDPAssociationEvent contains only bounded lifecycle metadata, never payload.
++// Source binds on the first valid datagram when the request source port is zero.
++// Target is the first valid destination and remains fixed across generations.
++type UDPAssociationEvent struct {
++	Sequence uint64
++	Generation uint64
++	PacketSequence uint64
++	AcceptedPackets uint64
++	RejectedSources uint64
++	RemappedPackets uint64
++	Transition string
++	Cause string
++	Source M.Socksaddr
++	Relay M.Socksaddr
++	Target M.Socksaddr
++}
++
++type associationState uint8
++
++const (
++	associationAwaitFirst associationState = iota
++	associationAdmitting
++	associationActive
++	associationRetiring
++	associationDormant
++	associationClosing
++	associationClosed
++)
++
++type associationFrame struct {
++	buffer *buf.Buffer
++	sequence uint64
++	generation uint64
++	requested M.Socksaddr
++}
++
++type udpAssociation struct {
++	ctx context.Context
++	cancel context.CancelFunc
++	control net.Conn
++	controlReader *std_bufio.Reader
++	relay net.PacketConn
++	reader N.PacketConn
++	handler HandlerEx
++	timeout time.Duration
++	observe func(UDPAssociationEvent)
++	relayAddress M.Socksaddr
++	eventSequence uint64
++
++	mu sync.Mutex
++	changed chan struct{}
++	state associationState
++	cause error
++	peer M.Socksaddr
++	target M.Socksaddr
++	lastRequested M.Socksaddr
++	lastActivity time.Time
++	sequence uint64
++	generation uint64
++	pending *associationFrame
++	child *associationPacketConn
++	rejectedSource uint64
++	rejectedMalformed uint64
++	accepted uint64
++	remapped uint64
++	generations uint64
++
++	deadlineMu sync.Mutex
++	replyMu sync.Mutex
++	replyActive *associationPacketConn
++	replyLimit time.Time
++	closeOnce sync.Once
++	workers sync.WaitGroup
++}
++
++func handleUDPAssociation(ctx context.Context, conn net.Conn, reader *std_bufio.Reader, handler HandlerEx, packetListener PacketListener, timeout time.Duration, hint M.Socksaddr, options *UDPAssociationOptions) error {
++	peer := M.SocksaddrFromNet(conn.RemoteAddr()).Unwrap()
++	local := M.SocksaddrFromNet(conn.LocalAddr()).Unwrap()
++	hint = hint.Unwrap()
++	if !peer.Addr.Is4() || !local.Addr.Is4() || !hint.Addr.Is4() || hint.Fqdn != "" || (!hint.Addr.IsUnspecified() && hint.Addr != peer.Addr) || options.Acquire == nil {
++		_ = socks5.WriteResponse(conn, socks5.Response{ReplyCode: socks5.ReplyCodeFailure})
++		_ = conn.Close()
++		return ErrUDPAssociationUnsupported
++	}
++	release, ok := options.Acquire()
++	if !ok || release == nil {
++		_ = socks5.WriteResponse(conn, socks5.Response{ReplyCode: socks5.ReplyCodeFailure})
++		_ = conn.Close()
++		return ErrUDPAssociationOverloaded
++	}
++	defer release()
++	var listenConfig net.ListenConfig
++	var relay net.PacketConn
++	var err error
++	address := M.SocksaddrFrom(local.Addr, 0).String()
++	if packetListener != nil {
++		relay, err = packetListener.ListenPacket(listenConfig, ctx, "udp4", address)
++	} else {
++		relay, err = listenConfig.ListenPacket(ctx, "udp4", address)
++	}
++	if err != nil {
++		_ = socks5.WriteResponse(conn, socks5.Response{ReplyCode: socks5.ReplyCodeFailure})
++		_ = conn.Close()
++		return err
++	}
++	if err = socks5.WriteResponse(conn, socks5.Response{ReplyCode: socks5.ReplyCodeSuccess, Bind: M.SocksaddrFromNet(relay.LocalAddr()).Unwrap()}); err != nil {
++		_ = relay.Close()
++		_ = conn.Close()
++		return err
++	}
++	peer.Port = hint.Port
++	owner := newUDPAssociation(ctx, conn, reader, relay, handler, timeout, peer)
++	owner.observe = options.Observe
++	return owner.run()
++}
++
++func newUDPAssociation(ctx context.Context, control net.Conn, reader *std_bufio.Reader, relay net.PacketConn, handler HandlerEx, timeout time.Duration, peer M.Socksaddr) *udpAssociation {
++	if timeout <= 0 {
++		timeout = associationDefaultIdleTimeout
++	}
++	ctx, cancel := context.WithCancel(ctx)
++	return &udpAssociation{ctx: ctx, cancel: cancel, control: control, controlReader: reader, relay: relay, reader: bufio.NewPacketConn(relay), handler: handler, timeout: timeout, relayAddress: M.SocksaddrFromNet(relay.LocalAddr()).Unwrap(), changed: make(chan struct{}), state: associationAwaitFirst, peer: peer, lastActivity: time.Now()}
++}
++
++func associationCause(err error) string {
++	switch err {
++	case nil: return "none"
++	case N.ErrPacketSessionEnded: return "session_end"
++	case N.ErrPacketOutcomeUnknown: return "outcome_unknown"
++	case N.ErrPendingAtSessionEnd: return "pending_at_end"
++	case N.ErrPacketSessionLifecycle: return "lifecycle"
++	case N.ErrPacketTooLarge: return "oversize"
++	case ErrUDPAssociationOverloaded: return "overload"
++	case ErrUDPAssociationAdmissionTimeout: return "admission_timeout"
++	case ErrUDPAssociationIdleTimeout: return "idle_timeout"
++	case ErrUDPAssociationMalformed: return "malformed"
++	case ErrUDPAssociationUnsupported: return "unsupported"
++	case ErrUDPAssociationTarget: return "target"
++	}
++	switch {
++	case errors.Is(err, context.Canceled): return "canceled"
++	case errors.Is(err, io.EOF): return "eof"
++	case errors.Is(err, net.ErrClosed): return "closed"
++	case errors.Is(err, os.ErrDeadlineExceeded), errors.Is(err, context.DeadlineExceeded): return "deadline"
++	default: return "io_error"
++	}
++}
++
++func (o *udpAssociation) eventLocked(transition string, cause error) UDPAssociationEvent {
++	if o.observe == nil { return UDPAssociationEvent{} }
++	// run reserves the maximum five generation events plus closing/closed before
++	// starting another generation; packet counters never create events.
++	o.eventSequence++
++	return UDPAssociationEvent{Sequence: o.eventSequence, Generation: o.generation, PacketSequence: o.sequence, AcceptedPackets: o.accepted, RejectedSources: o.rejectedSource, RemappedPackets: o.remapped, Transition: transition, Cause: associationCause(cause), Source: o.peer, Relay: o.relayAddress, Target: o.target}
++}
++
++func (o *udpAssociation) emit(event UDPAssociationEvent) {
++	if o.observe != nil { o.observe(event) }
++}
++
++func (o *udpAssociation) signalLocked() {
++	close(o.changed)
++	o.changed = make(chan struct{})
++}
++
++func (o *udpAssociation) fail(cause error) {
++	if cause == nil { cause = net.ErrClosed }
++	o.mu.Lock()
++	if o.state >= associationClosing { o.mu.Unlock(); return }
++	o.state = associationClosing
++	o.cause = cause
++	pending := o.pending
++	o.pending = nil
++	child := o.child
++	if child != nil {
++		child.retiring = true
++		if child.cause == nil { child.cause = cause }
++		child.cancel()
++	}
++	o.cancel()
++	event := o.eventLocked("closing", cause)
++	o.signalLocked()
++	o.mu.Unlock()
++	if pending != nil { pending.buffer.Release() }
++	o.closeOnce.Do(func() { _ = o.control.Close(); _ = o.relay.Close() })
++	if child != nil { child.abortTransport() }
++	o.emit(event)
++}
++
++// run is the existing synchronous handler supervisor, not a detached owner.
++func (o *udpAssociation) run() error {
++	o.mu.Lock()
++	created := o.eventLocked("create", nil)
++	o.mu.Unlock()
++	o.emit(created)
++	o.workers.Add(2)
++	go o.readLoop()
++	go o.controlLoop()
++	timer := time.NewTimer(time.Hour)
++	defer timer.Stop()
++	for {
++		o.mu.Lock()
++		if o.state >= associationClosing { o.mu.Unlock(); break }
++		if err := o.ctx.Err(); err != nil { o.mu.Unlock(); o.fail(err); continue }
++		now := time.Now()
++		deadline := o.lastActivity.Add(o.timeout)
++		if !now.Before(deadline) { o.mu.Unlock(); o.fail(ErrUDPAssociationIdleTimeout); continue }
++		child := o.child
++		if child != nil && !child.admitted && !child.retiring {
++			if !now.Before(child.admissionDeadline) { o.mu.Unlock(); o.fail(ErrUDPAssociationAdmissionTimeout); continue }
++			if child.admissionDeadline.Before(deadline) { deadline = child.admissionDeadline }
++		}
++		if child != nil && child.returned {
++			valid := child.callback && child.retiring && child.admitted && child.attached && child.cause == N.ErrPacketSessionEnded && child.callbackCause == N.ErrPacketSessionEnded && child.inFlight == 0 && o.replyActive == nil
++			if !valid {
++				cause := child.cause
++				if cause == nil || cause == N.ErrPacketSessionEnded { cause = child.callbackCause }
++				if cause == nil || cause == N.ErrPacketSessionEnded { cause = N.ErrPacketSessionLifecycle }
++				o.mu.Unlock(); o.fail(cause); continue
++			}
++			o.mu.Unlock()
++			o.deadlineMu.Lock()
++			err := o.relay.SetWriteDeadline(time.Time{})
++			o.deadlineMu.Unlock()
++			if err != nil { o.fail(err); continue }
++			o.mu.Lock()
++			if o.state >= associationClosing || o.child != child { o.mu.Unlock(); continue }
++			joined := o.eventLocked("join", N.ErrPacketSessionEnded)
++			o.child = nil
++			o.state = associationDormant
++			dormant := o.eventLocked("dormant", N.ErrPacketSessionEnded)
++			o.signalLocked()
++			o.mu.Unlock()
++			o.emit(joined); o.emit(dormant)
++			continue
++		}
++		if child == nil && o.pending != nil {
++			if o.generation == math.MaxUint64 || (o.observe != nil && o.eventSequence > math.MaxUint64-7) { o.mu.Unlock(); o.fail(N.ErrPacketSessionLifecycle); continue }
++			o.generation++
++			o.generations++
++			ctx, cancel := context.WithCancel(o.ctx)
++			child = &associationPacketConn{owner: o, id: o.generation, ctx: ctx, cancel: cancel, admissionDeadline: now.Add(associationAdmissionTimeout)}
++			o.child = child
++			o.pending.generation = child.id
++			o.state = associationAdmitting
++			o.signalLocked()
++			o.workers.Add(1)
++			event := o.eventLocked("admitting", nil)
++			source, target := o.peer, o.target
++			o.mu.Unlock()
++			o.emit(event)
++			go o.invoke(child, source, target)
++			continue
++		}
++		changed := o.changed
++		o.mu.Unlock()
++		if !timer.Stop() { select { case <-timer.C: default: } }
++		timer.Reset(time.Until(deadline))
++		select {
++		case <-o.ctx.Done(): o.fail(o.ctx.Err())
++		case <-changed:
++		case <-timer.C:
++		}
++	}
++	o.workers.Wait()
++	o.mu.Lock()
++	o.state = associationClosed
++	cause := o.cause
++	closed := o.eventLocked("closed", cause)
++	o.signalLocked()
++	o.mu.Unlock()
++	o.emit(closed)
++	return cause
++}
++
++func (o *udpAssociation) invoke(child *associationPacketConn, source, target M.Socksaddr) {
++	o.handler.NewPacketConnectionEx(child.ctx, child, source, target, func(cause error) {
++		o.mu.Lock()
++		if o.child != child || child.callback { o.mu.Unlock(); return }
++		child.callback = true
++		child.callbackCause = cause
++		valid := child.retiring
++		o.signalLocked()
++		o.mu.Unlock()
++		if !valid { o.fail(N.ErrPacketSessionLifecycle) } else if cause != N.ErrPacketSessionEnded {
++			if cause == nil { cause = N.ErrPacketSessionLifecycle }
++			o.fail(cause)
++		}
++	})
++	child.cancel()
++	child.abortTransport()
++	o.mu.Lock()
++	missing := !child.callback
++	o.mu.Unlock()
++	if missing { o.fail(N.ErrPacketSessionLifecycle) }
++	o.mu.Lock()
++	// No owned work remains after this logical invocation join is published.
++	o.workers.Done()
++	child.returned = true
++	o.signalLocked()
++	o.mu.Unlock()
++}
++
++func (o *udpAssociation) controlLoop() {
++	defer o.workers.Done()
++	_, err := o.controlReader.ReadByte()
++	if err == nil { err = ErrUDPAssociationMalformed }
++	o.fail(err)
++}
++
++func (o *udpAssociation) readLoop() {
++	defer o.workers.Done()
++	for {
++		o.mu.Lock()
++		if o.state >= associationClosing { o.mu.Unlock(); return }
++		deadline := o.lastActivity.Add(o.timeout)
++		o.mu.Unlock()
++		if err := o.relay.SetReadDeadline(deadline); err != nil { o.fail(err); return }
++		buffer := buf.NewSize(N.MaxPacketSize)
++		source, err := o.reader.ReadPacket(buffer)
++		if err != nil {
++			buffer.Release()
++			if errors.Is(err, os.ErrDeadlineExceeded) {
++				o.mu.Lock()
++				refreshed := o.state < associationClosing && time.Now().Before(o.lastActivity.Add(o.timeout))
++				o.mu.Unlock()
++				if refreshed { continue }
++				err = ErrUDPAssociationIdleTimeout
++			}
++			o.fail(err); return
++		}
++		if err = o.ingest(buffer, source.Unwrap()); err != nil { o.fail(err); return }
++	}
++}
++
++// ingest consumes buffer on every path. One pending frame is a hard bound.
++func (o *udpAssociation) ingest(buffer *buf.Buffer, source M.Socksaddr) error {
++	o.mu.Lock()
++	if o.state >= associationClosing || o.ctx.Err() != nil { o.mu.Unlock(); buffer.Release(); return net.ErrClosed }
++	if source.Addr != o.peer.Addr || source.Port == 0 || (o.peer.Port != 0 && source.Port != o.peer.Port) {
++		if o.rejectedSource != math.MaxUint64 { o.rejectedSource++ }
++		o.mu.Unlock(); buffer.Release(); return nil
++	}
++	data := buffer.Bytes()
++	valid := len(data) >= 10 && len(data) <= 65507 && data[0] == 0 && data[1] == 0 && data[2] == 0 && data[3] == 1
++	var target M.Socksaddr
++	if valid {
++		target = M.SocksaddrFrom(netip.AddrFrom4([4]byte{data[4], data[5], data[6], data[7]}), binary.BigEndian.Uint16(data[8:10]))
++		valid = !target.Addr.IsUnspecified() && !target.Addr.IsMulticast() && target.Port != 0
++	}
++	if !valid {
++		unbound := o.peer.Port == 0
++		if o.rejectedMalformed != math.MaxUint64 { o.rejectedMalformed++ }
++		o.mu.Unlock(); buffer.Release()
++		if unbound { return nil }
++		return ErrUDPAssociationMalformed
++	}
++	if o.pending != nil { o.mu.Unlock(); buffer.Release(); return ErrUDPAssociationOverloaded }
++	if o.sequence == math.MaxUint64 { o.mu.Unlock(); buffer.Release(); return N.ErrPacketSessionLifecycle }
++	if o.peer.Port == 0 { o.peer.Port = source.Port }
++	if !o.target.IsValid() { o.target = target }
++	o.lastRequested = target
++	if target != o.target && o.remapped != math.MaxUint64 { o.remapped++ }
++	o.sequence++
++	if o.accepted != math.MaxUint64 { o.accepted++ }
++	buffer.Advance(10)
++	frame := &associationFrame{buffer: buffer, sequence: o.sequence, requested: target}
++	if o.child != nil && !o.child.retiring { frame.generation = o.child.id }
++	o.pending = frame
++	o.lastActivity = time.Now()
++	o.signalLocked()
++	o.mu.Unlock()
++	return nil
++}
+diff --git a/protocol/socks/association_packet.go b/protocol/socks/association_packet.go
+new file mode 100644
+index 0000000..f07ef5a
+--- /dev/null
++++ b/protocol/socks/association_packet.go
+@@ -0,0 +1,258 @@
++package socks
++
++import (
++	"context"
++	"encoding/binary"
++	"net"
++	"os"
++	"sync"
++	"time"
++
++	"github.com/sagernet/sing/common/buf"
++	M "github.com/sagernet/sing/common/metadata"
++	N "github.com/sagernet/sing/common/network"
++)
++
++// This facade deliberately has no Upstream, syscall, batching or read-wait
++// interface. The control and relay remain exclusively owned by udpAssociation.
++type associationPacketConn struct {
++	owner *udpAssociation
++	id uint64
++	ctx context.Context
++	cancel context.CancelFunc
++	admissionDeadline time.Time
++	admitted bool
++	attached bool
++	abort func() error
++	abortOnce sync.Once
++	retiring bool
++	cause error
++	callback bool
++	callbackCause error
++	returned bool
++	inFlight uint64
++	readDeadline time.Time
++	writeDeadline time.Time
++}
++
++var _ N.PacketConn = (*associationPacketConn)(nil)
++var _ N.PacketSessionLifecycle = (*associationPacketConn)(nil)
++
++func (c *associationPacketConn) AttachPacketSessionAbort(abort func() error) error {
++	if abort == nil { return N.ErrPacketSessionLifecycle }
++	o := c.owner
++	o.mu.Lock()
++	if o.child != c || o.state >= associationClosing || c.ctx.Err() != nil || c.retiring || c.attached || !time.Now().Before(c.admissionDeadline) {
++		o.mu.Unlock()
++		_ = abort()
++		return net.ErrClosed
++	}
++	c.abort = abort
++	c.attached = true
++	o.signalLocked()
++	o.mu.Unlock()
++	return nil
++}
++
++func (c *associationPacketConn) abortTransport() {
++	o := c.owner
++	o.mu.Lock()
++	abort := c.abort
++	o.mu.Unlock()
++	if abort != nil { c.abortOnce.Do(func() { _ = abort() }) }
++}
++
++func (c *associationPacketConn) PacketSessionAdmitted() error {
++	o := c.owner
++	o.mu.Lock()
++	if o.child != c || o.state >= associationClosing || c.ctx.Err() != nil || c.retiring || !c.attached || c.admitted {
++		o.mu.Unlock(); c.abortTransport(); return net.ErrClosed
++	}
++	if !time.Now().Before(c.admissionDeadline) {
++		o.mu.Unlock(); o.fail(ErrUDPAssociationAdmissionTimeout); return ErrUDPAssociationAdmissionTimeout
++	}
++	c.admitted = true
++	o.state = associationActive
++	event := o.eventLocked("admitted", nil)
++	o.signalLocked()
++	o.mu.Unlock()
++	o.emit(event)
++	return nil
++}
++
++func (c *associationPacketConn) BeginPacketSessionRetire(cause error) {
++	if cause == nil { cause = net.ErrClosed }
++	o := c.owner
++	o.mu.Lock()
++	if o.child != c || c.retiring || o.state >= associationClosing { o.mu.Unlock(); return }
++	c.retiring = true
++	c.cause = cause
++	o.state = associationRetiring
++	if cause == N.ErrPacketSessionEnded {
++		switch {
++		case !c.admitted || !c.attached: cause = N.ErrPacketSessionLifecycle
++		case c.inFlight != 0: cause = N.ErrPacketOutcomeUnknown
++		case o.pending != nil && o.pending.generation == c.id: cause = N.ErrPendingAtSessionEnd
++		}
++		c.cause = cause
++	}
++	c.cancel()
++	event := o.eventLocked("retire", cause)
++	o.signalLocked()
++	o.mu.Unlock()
++	// Interrupt a relay WriteTo already admitted before the retirement fence.
++	o.deadlineMu.Lock()
++	err := o.relay.SetWriteDeadline(time.Now())
++	o.deadlineMu.Unlock()
++	c.abortTransport()
++	o.emit(event)
++	if cause != N.ErrPacketSessionEnded { o.fail(cause) } else if err != nil { o.fail(err) }
++}
++
++// Invalid work from an old/retiring facade cannot terminate a new generation.
++func (c *associationPacketConn) failCurrent(cause error) {
++	o := c.owner
++	o.mu.Lock()
++	if o.child != c || c.retiring || o.state >= associationClosing { o.mu.Unlock(); return }
++	c.retiring = true
++	c.cause = cause
++	o.state = associationRetiring
++	c.cancel()
++	o.signalLocked()
++	o.mu.Unlock()
++	o.fail(cause)
++}
++
++func (c *associationPacketConn) PacketSessionWriteFinished(err error) {
++	o := c.owner
++	o.mu.Lock()
++	if o.child != c || c.retiring || o.state >= associationClosing { o.mu.Unlock(); return }
++	if c.inFlight == 0 { o.mu.Unlock(); c.failCurrent(N.ErrPacketSessionLifecycle); return }
++	// Preserve the uncertain lease on write error until the owner is terminal.
++	if err == nil { c.inFlight = 0 }
++	o.signalLocked()
++	o.mu.Unlock()
++	if err != nil { c.failCurrent(err) }
++}
++
++func (c *associationPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
++	o := c.owner
++	for {
++		o.mu.Lock()
++		if o.child != c || c.retiring || o.state >= associationClosing { o.mu.Unlock(); return M.Socksaddr{}, net.ErrClosed }
++		if !c.readDeadline.IsZero() && !time.Now().Before(c.readDeadline) { o.mu.Unlock(); return M.Socksaddr{}, os.ErrDeadlineExceeded }
++		if c.admitted && o.pending != nil {
++			frame := o.pending
++			if frame.generation != c.id || c.inFlight != 0 { o.mu.Unlock(); c.failCurrent(N.ErrPacketSessionLifecycle); return M.Socksaddr{}, N.ErrPacketSessionLifecycle }
++			if buffer.FreeLen() < frame.buffer.Len() { o.mu.Unlock(); c.failCurrent(N.ErrPacketTooLarge); return M.Socksaddr{}, N.ErrPacketTooLarge }
++			o.pending = nil
++			c.inFlight = frame.sequence
++			target := o.target
++			// A bounded memory copy is serialized with the retirement fence.
++			_, _ = buffer.Write(frame.buffer.Bytes())
++			o.signalLocked()
++			o.mu.Unlock()
++			frame.buffer.Release()
++			return target, nil
++		}
++		changed, deadline := o.changed, c.readDeadline
++		o.mu.Unlock()
++		if deadline.IsZero() {
++			select { case <-changed: case <-c.ctx.Done(): return M.Socksaddr{}, net.ErrClosed }
++		} else {
++			timer := time.NewTimer(time.Until(deadline))
++			select { case <-changed: case <-c.ctx.Done(): timer.Stop(); return M.Socksaddr{}, net.ErrClosed; case <-timer.C: }
++			timer.Stop()
++		}
++	}
++}
++
++// WritePacket consumes buffer even on errors; no prefix-success is possible.
++func (c *associationPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
++	defer buffer.Release()
++	o := c.owner
++	o.mu.Lock()
++	stale := o.child != c || c.retiring || o.state >= associationClosing
++	o.mu.Unlock()
++	if stale { return net.ErrClosed }
++	if buffer.Len() > associationMaxPayload || buffer.Start() < 10 { c.failCurrent(N.ErrPacketTooLarge); return N.ErrPacketTooLarge }
++	o.replyMu.Lock()
++	defer o.replyMu.Unlock()
++	o.deadlineMu.Lock()
++	o.mu.Lock()
++	if o.child != c || c.retiring || !c.admitted || o.state >= associationClosing { o.mu.Unlock(); o.deadlineMu.Unlock(); return net.ErrClosed }
++	if destination.Unwrap() != o.target { o.mu.Unlock(); o.deadlineMu.Unlock(); c.failCurrent(ErrUDPAssociationTarget); return ErrUDPAssociationTarget }
++	limit := time.Now().Add(associationReplyTimeout)
++	deadline := limit
++	if !c.writeDeadline.IsZero() && c.writeDeadline.Before(deadline) { deadline = c.writeDeadline }
++	peer, target := o.peer, o.target
++	o.replyActive = c
++	o.replyLimit = limit
++	o.mu.Unlock()
++	err := o.relay.SetWriteDeadline(deadline)
++	o.deadlineMu.Unlock()
++	if err == nil {
++		header := buffer.ExtendHeader(10)
++		header[0], header[1], header[2], header[3] = 0, 0, 0, 1
++		address := target.Addr.As4()
++		copy(header[4:8], address[:])
++		binary.BigEndian.PutUint16(header[8:10], target.Port)
++		var n int
++		n, err = o.relay.WriteTo(buffer.Bytes(), peer.UDPAddr())
++		if err == nil && n != buffer.Len() { err = N.ErrPacketTooLarge }
++	}
++	o.deadlineMu.Lock()
++	clearErr := o.relay.SetWriteDeadline(time.Time{})
++	o.mu.Lock()
++	o.replyActive = nil
++	retired := o.child != c || c.retiring || o.state >= associationClosing
++	if err == nil && clearErr == nil && o.child == c && o.state < associationClosing { o.lastActivity = time.Now() }
++	o.signalLocked()
++	o.mu.Unlock()
++	o.deadlineMu.Unlock()
++	if err == nil { err = clearErr }
++	if err != nil && !retired { c.failCurrent(err) }
++	return err
++}
++
++func (c *associationPacketConn) Close() error {
++	c.BeginPacketSessionRetire(net.ErrClosed)
++	return nil
++}
++
++func (c *associationPacketConn) LocalAddr() net.Addr { return c.owner.relay.LocalAddr() }
++
++func (c *associationPacketConn) SetReadDeadline(deadline time.Time) error {
++	o := c.owner
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.child != c || c.retiring || o.state >= associationClosing { return net.ErrClosed }
++	c.readDeadline = deadline
++	o.signalLocked()
++	return nil
++}
++
++func (c *associationPacketConn) SetWriteDeadline(deadline time.Time) error {
++	o := c.owner
++	o.deadlineMu.Lock()
++	defer o.deadlineMu.Unlock()
++	o.mu.Lock()
++	if o.child != c || c.retiring || o.state >= associationClosing { o.mu.Unlock(); return net.ErrClosed }
++	c.writeDeadline = deadline
++	active, limit := o.replyActive == c, o.replyLimit
++	o.signalLocked()
++	o.mu.Unlock()
++	if active {
++		if deadline.IsZero() || limit.Before(deadline) { deadline = limit }
++		return o.relay.SetWriteDeadline(deadline)
++	}
++	return nil
++}
++
++func (c *associationPacketConn) SetDeadline(deadline time.Time) error {
++	if err := c.SetReadDeadline(deadline); err != nil { return err }
++	return c.SetWriteDeadline(deadline)
++}
++
++func (c *associationPacketConn) FrontHeadroom() int { return 10 }
++func (c *associationPacketConn) ReaderOverhead() int { return 0 }
+diff --git a/protocol/socks/handshake.go b/protocol/socks/handshake.go
+index 68f5023..c253f6c 100644
+--- a/protocol/socks/handshake.go
++++ b/protocol/socks/handshake.go
+@@ -131,6 +131,34 @@ func HandleConnectionEx(
+ 	// resolver TorResolver,
+ 	source M.Socksaddr,
+ 	onClose N.CloseHandlerFunc,
++) error {
++	return handleConnectionEx(ctx, conn, reader, authenticator, handler, packetListener, udpTimeout, source, onClose, nil)
++}
++
++func HandleConnectionExWithUDPAssociation(
++	ctx context.Context, conn net.Conn, reader *std_bufio.Reader,
++	authenticator *auth.Authenticator,
++	handler HandlerEx,
++	packetListener PacketListener,
++	udpTimeout time.Duration,
++	// resolver TorResolver,
++	source M.Socksaddr,
++	onClose N.CloseHandlerFunc,
++	options *UDPAssociationOptions,
++) error {
++	return handleConnectionEx(ctx, conn, reader, authenticator, handler, packetListener, udpTimeout, source, onClose, options)
++}
++
++func handleConnectionEx(
++	ctx context.Context, conn net.Conn, reader *std_bufio.Reader,
++	authenticator *auth.Authenticator,
++	handler HandlerEx,
++	packetListener PacketListener,
++	udpTimeout time.Duration,
++	// resolver TorResolver,
++	source M.Socksaddr,
++	onClose N.CloseHandlerFunc,
++	options *UDPAssociationOptions,
+ ) error {
+ 	version, err := reader.ReadByte()
+ 	if err != nil {
+@@ -227,6 +255,9 @@ func HandleConnectionEx(
+ 			handler.NewConnectionEx(ctx, NewLazyConn(conn, version), source, request.Destination, onClose)
+ 			return nil
+ 		case socks5.CommandUDPAssociate:
++			if options != nil {
++				return handleUDPAssociation(ctx, conn, reader, handler, packetListener, udpTimeout, request.Destination, options)
++			}
+ 			var (
+ 				listenConfig net.ListenConfig
+ 				udpConn      net.PacketConn

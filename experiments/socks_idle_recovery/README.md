@@ -32,3 +32,12 @@ Recovery checkpoints use a separate WIP branch. Once the complete source,
 strict evidence verifier, tests and independent review are ready, an exact
 candidate will run the full mechanism and bounded runtime gates. Incomplete
 checkpoints are not acceptance results.
+
+## Recovery checkpoint 2
+
+All three source layers are present for WIP backup. The VMess patch and its
+three tests match their former hashes. The sing/box owner implementations and
+design are reconstructed new bytes; independent source review is in progress,
+including fail-closed metadata, outbound identity and nil-lease checks. No
+reconstructed owner test result is inherited. The complete test manifest,
+Python controls and workflow are not wired at this checkpoint.
