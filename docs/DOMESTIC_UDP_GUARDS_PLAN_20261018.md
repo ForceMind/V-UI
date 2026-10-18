@@ -21,9 +21,9 @@
 | DNS 全答案 | test09，1 | good 正向；private、mixed、reverse、IPv6 sibling、public IPv6 sibling、self、upstream 七类拒绝，另 literal private |
 | DNS family 失败 | test10，1 | 唯一适配为启动设备改成 Mihomo；raw 域名语义不变。A 成功/AAAA SERVFAIL 仍正确转发；两 family SERVFAIL 无回退 |
 | 裸 retarget 正控 | test11，1 | 普通导出 guarded 前置通过后，正常停止国内/device，再以裸研究配置重启；证明 raw 探针能实际命中不同目标。不能作为产品放行 |
-| guarded retarget | test12，1 | 同 raw association 先合法包，再原 9 次地址/端口变化；只能送达最初已检查目标，所有改变目标 trap 不得收到负包 |
+| guarded retarget | test12，1 | 同 raw association 先合法包，再原 9 次地址/端口变化；只能送达最初已检查目标，所有改变目标 trap 不得收到负包；这是 udp_connect 固定初始目标，不称每包重新授权 |
 | 同域名同端口重绑定 | 原 make_dns_tests，1 | 不重复较弱的 test13 不同端口向量；首次 checked answer 使用一次，原关联 DNS 改变仍绑定旧地址，新关联看到私网答案须拒绝 |
-| 新关联 literal / low port | test15 + 原产品 forbidden literal 集，1 | 先高端口成功；53/443/1023 拒绝；13 个固定私网/metadata/self/IPv6别名 literal 拒绝，见下节 |
+| 新关联 literal / low port | test15 + 原产品 TCP 测试 forbidden literal 向量移用，1 | 先高端口成功；53/443/1023 拒绝；13 个固定私网/metadata/self/IPv6别名 literal 拒绝，见下节 |
 
 合计 3 个认证/TCP 源方法 + 6 个护栏源方法；实现按 14 个独立有界 child fixture 执行，逐 child 原始安全重核后再继续，不把源方法分母混作实际 child 数。7 个认证 fixture + 1 个 TCP fixture + 6 个护栏 fixture。每个 fixture 的计划动作提前固定，实际执行必须是合法前缀；前置失败后的故障注入/负向/恢复明确列入未执行，不以方法失败代替阶段事实。
 
@@ -47,3 +47,7 @@ DNS 不只保存预设 records：旁录真实问题、源、答复 wire/rcode/�
 - 复用 no-follow 输出、严格 JSON/UTF-8、敏感信息检查、成员/总量预算与 manifest 摘要。上传前独立验证整份 text-only 归档；binary、配置、证书/私钥不上传。
 - 纯控制至少覆盖角色错换/旧 build/缺 post、失败前置伪装负控、缺 raw 或多 send、短拒绝窗、假 fresh 原因、目标错送/迟到、DNS 多答案遗漏/重查/普通回退、缺清理及归档成员。任何恢复仅限真正的 fixture/归档缺陷，保留原失败。
 - 原 domestic-reduction workflow 改为 manual，新的分支限定 workflow 经源码独审后再启用。一次有界矩阵终态、合法归档、独审和结果入仓后即停止；不无限扩矩阵。若精简代码存在真实缺陷，先记录实际边界并审最小修复，不扩回三角色候选或要求自研客户端。
+
+## 实现 WIP
+
+开始独立 14 child 的合同、真实发送/接收与 DNS wire 旁录及单 case 驱动。当前只做语法检查；独立 verifier、归档、纯负控与新 workflow 尚未完成，不得运行核心或授通过。旧 reduction workflow 已转 manual，避免新阶段意外重跑。

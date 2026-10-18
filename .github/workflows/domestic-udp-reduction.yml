@@ -1,11 +1,5 @@
 name: Domestic UDP patch reduction
 on:
-  push:
-    branches: [experiment/standard-client-udp-20261018]
-    paths:
-      - '.github/workflows/domestic-udp-reduction.yml'
-      - 'experiments/domestic_udp_reduction/**'
-      - 'experiments/standard_client_udp/**'
   workflow_dispatch:
 permissions:
   contents: read
