@@ -124,6 +124,7 @@ type encCancelHarness struct {
 	ends map[uint16]int
 	joined bool
 	verifiedParentErrorCallers int
+	parentErrorResults []map[string]any
 }
 
 func encCancelChunks(n int) int { return (n + WriteChunkSize - 1) / WriteChunkSize }
@@ -465,7 +466,18 @@ func (h *encCancelHarness) closeParent(realError bool, callers ...*encCancelCall
 	h.waitChannel(h.session.writerDone, "fixed parent writer")
 	if h.serviceErr == nil || h.ctx.Err() != nil { h.t.Fatalf("missing independent transport error: service=%v outer=%v", h.serviceErr, h.ctx.Err()) }
 	if realError && h.serverWire.failedWrites.Load() == 0 { h.t.Fatal("blocked real transport Write did not report an error") }
-	for _, caller := range callers { h.wait(caller, 0, true); h.verifiedParentErrorCallers++ }
+	for index, caller := range callers {
+        h.waitChannel(caller.done, "parent-error caller")
+        if caller.n != 0 { h.t.Fatalf("parent error returned successful bytes: %d", caller.n) }
+        var kind string
+        switch {
+        case errors.Is(caller.err, io.ErrClosedPipe): kind = "io.ErrClosedPipe"
+        case errors.Is(caller.err, net.ErrClosed): kind = "net.ErrClosed"
+        default: h.t.Fatalf("parent caller did not preserve an actual closed transport error: %v", caller.err)
+        }
+        h.parentErrorResults = append(h.parentErrorResults, map[string]any{"caller": index, "class": kind, "error": fmt.Sprint(caller.err), "bytes": caller.n})
+        h.verifiedParentErrorCallers++
+    }
 	h.joinAll()
 }
 func (h *encCancelHarness) joinAll() {
@@ -478,7 +490,7 @@ func (h *encCancelHarness) joinAll() {
 	h.session.streamAccess.Unlock()
 	if !clean || h.serverWire.active.Load() != 0 || h.serverWire.maximum.Load() != 1 || h.activeCallers.Load() != 0 || h.handler.active.Load() != 0 || int(h.handler.finished.Load()) != h.admitted { h.t.Fatal("unjoined encrypted parent ownership") }
 	h.joined = true
-	h.event("parent_joined", map[string]any{"parent_error_callers_closed": h.verifiedParentErrorCallers, "service_joined": true, "writer_joined": true, "watcher_joined": true, "all_test_workers_joined": true, "handler_callbacks_finished": h.handler.finished.Load(), "handler_callbacks_expected": h.admitted, "active_transport_writes": h.serverWire.active.Load(), "active_callers": h.activeCallers.Load(), "retained_streams": 0, "retained_queue": 0, "real_write_errors": h.serverWire.failedWrites.Load(), "service_error": fmt.Sprint(h.serviceErr), "outer_context_alive": h.ctx.Err() == nil})
+	h.event("parent_joined", map[string]any{"parent_error_callers_closed": h.verifiedParentErrorCallers, "parent_error_results": append([]map[string]any{}, h.parentErrorResults...), "service_joined": true, "writer_joined": true, "watcher_joined": true, "all_test_workers_joined": true, "handler_callbacks_finished": h.handler.finished.Load(), "handler_callbacks_expected": h.admitted, "active_transport_writes": h.serverWire.active.Load(), "active_callers": h.activeCallers.Load(), "retained_streams": 0, "retained_queue": 0, "real_write_errors": h.serverWire.failedWrites.Load(), "service_error": fmt.Sprint(h.serviceErr), "outer_context_alive": h.ctx.Err() == nil})
 }
 
 func encCancelRun(t *testing.T, security, scenario string) {

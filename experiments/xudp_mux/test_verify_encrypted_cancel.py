@@ -35,13 +35,14 @@ def synthetic_rows():
                     queued = leaf == 'QueuedCancel'
                     events.extend([('cancel_snapshot', dict(parent_deadline_changes=0, parent_close_calls=0, queued=queued, operation_done=queued, caller_closed=True, caller_joined=True, operation_canceled=True, parent_alive=True, caller_bytes=0, active_callers=int(queued), cancel_bound_ns=3_000_000_000, cancel_elapsed_ns=1000, parent_writers=1, blocked_pipe_writers=1, active_transport_writes=1, streams=3, owned_frames=2, owned_bytes=65557, handler_callbacks_finished=3, handler_callbacks_active=0)), restored])
                 events.extend([continuity(18, 11), ('siblings_recovered', dict(same_parent=True, tuple_payload_exact=True, parent_alive=True, udp_upload=60000, udp_reply=60000, tcp_upload=32768, tcp_reply=70007)), continuity(22, 13), ('fresh_session_recovered', dict(session_id=4, actual_encrypted_new=True, same_parent=True, tuple_payload_exact=True, parent_alive=True, udp_upload=4097, udp_reply=32768, end_count=1, handler_callbacks_finished=4)), continuity(24, 13), ('drained_before_parent_close', dict(parent_alive=True, each_end_once=True, end_count=4, active_transport_writes=0, active_callers=0, handler_callbacks_active=0))])
-            events.extend([('parent_close', dict(real_peer_close=True, outer_context_alive=True, while_write_blocked=real_error)), ('parent_joined', dict(service_joined=True, writer_joined=True, watcher_joined=True, all_test_workers_joined=True, outer_context_alive=True, handler_callbacks_finished=3 if real_error else 4, handler_callbacks_expected=3 if real_error else 4, active_transport_writes=0, active_callers=0, retained_streams=0, retained_queue=0, service_error='read frame header: EOF', real_write_errors=int(real_error), parent_error_callers_closed=3 if real_error else 0))])
+            events.extend([('parent_close', dict(real_peer_close=True, outer_context_alive=True, while_write_blocked=real_error)), ('parent_joined', dict(service_joined=True, writer_joined=True, watcher_joined=True, all_test_workers_joined=True, outer_context_alive=True, handler_callbacks_finished=3 if real_error else 4, handler_callbacks_expected=3 if real_error else 4, active_transport_writes=0, active_callers=0, retained_streams=0, retained_queue=0, service_error='read frame header: EOF', real_write_errors=int(real_error), parent_error_results=[dict(caller=i,bytes=0,**{'class':'net.ErrClosed','error':'use of closed network connection'}) for i in range(3)] if real_error else [], parent_error_callers_closed=3 if real_error else 0))])
             for seq, (event, fields) in enumerate(events, 1):
                 value = dict(fields, event=event, case=name, cipher=cipher, seq=seq, scope='encrypted-library-callers', product_qualified=False)
                 rows.append(dict(Action='output', Test=name, Output=PREFIX+json.dumps(value)+'\n'))
             rows.append(dict(Action='pass', Test=name))
         rows.append(dict(Action='pass', Test=top))
     rows.append(dict(Action='pass'))
+    for row in rows: row['Package'] = 'github.com/sagernet/sing-vmess'
     return rows
 
 
@@ -67,6 +68,8 @@ class VerifyEncryptedCancellation(unittest.TestCase):
     def test_complete_synthetic_fixture(self):
         # Passing this fixture validates verifier plumbing, not Go behavior.
         self.assertEqual(self.verify(synthetic_rows())['leaf_cases'], 10)
+        actual_pipe = [{'caller': i, 'bytes': 0, 'class': 'io.ErrClosedPipe', 'error': 'io: read/write on closed pipe'} for i in range(3)]
+        self.assertEqual(self.verify(self.mutate('parent_joined', 'parent_error_results', actual_pipe, 'ParentTransportError'))['leaf_cases'], 10)
 
     def test_default_and_debug_write_layouts(self):
         rows = self.mutate('wire_blocked', 'completed_write_bytes_since_capture', 18, 'PartialCiphertextPayload')
@@ -78,6 +81,35 @@ class VerifyEncryptedCancellation(unittest.TestCase):
                     row['Output'] = PREFIX+json.dumps(data)+'\n'
         self.assertEqual(self.verify(rows)['leaf_cases'], 10)
 
+    def test_split_actual_go_output_reassembled(self):
+        rows = synthetic_rows(); split = []
+        for row in rows:
+            if row.get('Action') == 'output':
+                data = row['Output']
+                split.extend([dict(row, Output=data[:41]), dict(row, Output=data[41:])])
+            else: split.append(row)
+        self.assertEqual(self.verify(split)['leaf_cases'], 10)
+
+    def test_wrong_package_rejected(self):
+        rows = synthetic_rows(); rows[0]['Package'] = 'different-package'
+        with self.assertRaises(ValueError): self.verify(rows)
+
+    def test_cross_leaf_fragment_rejected(self):
+        rows = synthetic_rows(); row = rows[0]; data = row['Output']
+        rows[:1] = [dict(row, Output=data[:60]), dict(row, Test='TestMuxEncryptedCancelChaCha/PartialAuthenticatedLength', Output=data[60:])]
+        with self.assertRaises(ValueError): self.verify(rows)
+
+    def test_missing_output_continuation_rejected(self):
+        rows = synthetic_rows()
+        row = next(r for r in rows if r.get('Action') == 'output')
+        row['Output'] = row['Output'][:60]
+        with self.assertRaises(ValueError): self.verify(rows)
+
+    def test_parent_error_detail_rejected(self):
+        for value in ([], [{'caller':0,'bytes':0,'class':'io.EOF','error':'EOF'}]*3):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.verify(self.mutate('parent_joined','parent_error_results',value,'ParentTransportError'))
+
     def test_missing_leaf(self):
         rows = [r for r in synthetic_rows() if not r.get('Test', '').endswith('/QueuedCancel')]
         with self.assertRaises(ValueError): self.verify(rows)
@@ -88,7 +120,7 @@ class VerifyEncryptedCancellation(unittest.TestCase):
         with self.assertRaises(ValueError): self.verify(rows)
 
     def test_duplicate_terminal(self):
-        rows = synthetic_rows(); rows.append(dict(Action='pass', Test='TestMuxEncryptedCancelAES'))
+        rows = synthetic_rows(); rows.append(dict(Action='pass', Test='TestMuxEncryptedCancelAES', Package='github.com/sagernet/sing-vmess'))
         with self.assertRaises(ValueError): self.verify(rows)
 
     def test_incomplete_package(self):

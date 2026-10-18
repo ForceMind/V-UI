@@ -36,7 +36,7 @@ jobs:
           python3 - <<'PY'
           import unittest
           suite = unittest.TestLoader().discover('experiments/xudp_mux', pattern='test_*.py')
-          assert suite.countTestCases() == 21, 'Missing or unexpected Python controls'
+          assert suite.countTestCases() == 26, 'Missing or unexpected Python controls'
           result = unittest.TextTestRunner(verbosity=2).run(suite)
           assert result.wasSuccessful() and not result.skipped, 'Controls failed or skipped'
           PY

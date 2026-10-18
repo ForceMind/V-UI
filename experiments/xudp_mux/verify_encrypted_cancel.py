@@ -25,21 +25,30 @@ def need(condition, message):
 def verify_encrypted_cancel(path):
     rows = [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
     need(rows and all(isinstance(row, dict) for row in rows), 'Empty/invalid encrypted cancellation evidence')
+    need(all(row.get('Package') == 'github.com/sagernet/sing-vmess' for row in rows), 'Wrong Go evidence package')
     expected = set(CIPHERS) | {top + '/' + leaf for top in CIPHERS for leaf in LEAVES}
     terminal = {}
     events = {name: [] for name in expected if '/' in name}
+    pending_output = {}
     for row in rows:
         if row.get('Action') in ('pass', 'skip', 'fail') and row.get('Test'):
             name = row['Test']
             need(name not in terminal, 'Duplicate cancellation test terminal: ' + name)
             terminal[name] = row['Action']
         output = row.get('Output', '')
-        if PREFIX in output:
+        if output:
             need(row.get('Action') == 'output', 'Event is not test output')
-            data = json.loads(output.split(PREFIX, 1)[1])
-            name = data.get('case')
-            need(name in events and row.get('Test') == name, 'Event has wrong leaf/source')
-            events[name].append(data)
+            source = (row['Package'], row.get('Test'))
+            pending_output[source] = pending_output.get(source, '') + output
+            while '\n' in pending_output[source]:
+                line, pending_output[source] = pending_output[source].split('\n', 1)
+                if PREFIX not in line:
+                    continue
+                data = json.loads(line.split(PREFIX, 1)[1])
+                name = data.get('case')
+                need(name in events and source[1] == name, 'Event has wrong leaf/source')
+                events[name].append(data)
+    need(not any(pending_output.values()), 'Unterminated split evidence output')
     need(set(terminal) == expected, 'Missing/unexpected encrypted cancellation top-level or leaf test')
     need(all(value == 'pass' for value in terminal.values()), 'Failed/skipped encrypted cancellation test')
     package_terminals = [row['Action'] for row in rows if row.get('Action') in ('pass', 'skip', 'fail') and 'Test' not in row]
@@ -88,6 +97,17 @@ def verify_encrypted_cancel(path):
             need(joined.get(key) == 0, 'Retained parent resource: ' + key)
         need(isinstance(joined.get('service_error'), str) and joined['service_error'] not in ('', '<nil>'), 'Real Service error absent')
         need('timeout' not in joined['service_error'].lower() and 'deadline' not in joined['service_error'].lower(), 'Timeout substituted for real parent error')
+        failures = joined.get('parent_error_results')
+        need(isinstance(failures, list), 'Missing parent caller transport results')
+        if leaf == 'ParentTransportError':
+            need(len(failures) == 3 and [r.get('caller') for r in failures] == [0, 1, 2], 'Missing/duplicate parent caller identity')
+            for failure in failures:
+                need(failure.get('bytes') == 0 and failure.get('class') in ('io.ErrClosedPipe', 'net.ErrClosed'), 'Wrong parent transport result')
+                message = failure.get('error', '')
+                expected = 'io: read/write on closed pipe' if failure['class'] == 'io.ErrClosedPipe' else 'use of closed network connection'
+                need(isinstance(message, str) and expected in message and 'timeout' not in message.lower(), 'Missing actual closed transport error')
+        else:
+            need(failures == [], 'Unexpected parent error callers in normal close')
         continuity = [e for e in event_list if e['event'] == 'cipher_continuity']
         counts = [(1, 3)] if leaf == 'ParentTransportError' else [(1, 3), (18, 11), (22, 13), (24, 13)]
         need(len(continuity) == len(counts), 'Missing nonce epochs')
