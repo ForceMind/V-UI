@@ -83,11 +83,11 @@
 
 C 保留零包、1/8192/32768/60000/65497、完整后短包/零包及本地超限；D 保留 60000 前置、国内 udp_timeout=2s、末完整业务回复后整个 6 秒释放窗与新 32768 恢复。idle 必须保留同一应用 SOCKS control、UDP socket 和 relay tuple，单次发送、不重放、不保活。close 才允许另建应用关联。
 
-本轮结果不修改原完整门槛，不把失败改成预期成功。后续若做小包生命周期诊断，必须另列为非资格观察，不能替代 D。具体 App/平台的实际普通节点导入保真、手机 TUN/VPN、公网网络、UDP/53/443、域名多答案/重绑定和移动网络恢复仍未验证。
+本轮结果不修改原完整门槛，不把失败改成预期成功。后续小包生命周期诊断已另列于[定点与普通包结果](STANDARD_CLIENT_UDP_DIAGNOSTIC_RESULTS_20261018.md)，不能替代 D。具体 App/平台的实际普通节点导入保真、手机 TUN/VPN、公网网络、UDP/53/443、域名多答案/重绑定和移动网络恢复仍未验证。
 
 下一步先确定产品真正需要的固定客户端入口与实际 MTU 内 UDP 负载测试点、方向和服务端最小改动；测试现成 App 导入普通节点及其实际 TUN 路径。不得只因 60000/65497 研究门槛失败就要求更换手机核心或自研 App，也不得反过来用较小测试点把本轮完整容量/生命周期红灯改绿。当前可用产品能力仍是固定官方核心的每入口 TCP direct/relay，以及既有普通 direct 能力；研究候选的有限小包成功尚不构成产品 relay UDP 支持。
 
-固定源码支持两个后续归因假设，均尚未通过边界定点或 syscall 动态观测：
+截至本 C/D/B 收集时，固定源码支持下列两个归因假设；后续[四点诊断](STANDARD_CLIENT_UDP_DIAGNOSTIC_RESULTS_20261018.md)已取得对应边界动态观察，仍没有 syscall 动态观测：
 
 - 上行：Mihomo v1.19.32 的 [SOCKS listener](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/listener/socks/udp.go)进入 [POSIX packet reader](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/common/net/packet/packet_posix.go)，使用[标准 16384 字节 buffer](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/common/pool/buffer_standard.go)，且丢弃 Recvmsg flags；[SOCKS 解码](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/transport/socks5/socks5.go)去掉此 IPv4 包的 10 字节头，16384−10=16374，与目标前缀一致。
 - 下行：[固定 go.mod](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/go.mod)选择 metacubex/sing-vmess v0.2.5 与 sing v0.5.8；[XUDP WaitReadPacket](https://github.com/MetaCubeX/sing-vmess/blob/v0.2.5/xudp.go)使用 [NewPacketBuffer](https://github.com/MetaCubeX/sing/blob/v0.5.8/common/network/direct.go)，[ReadFullFrom](https://github.com/MetaCubeX/sing/blob/v0.5.8/common/buf/buffer.go)在 length 超 capacity 时返回短缓冲区错误；[连接处理](https://github.com/MetaCubeX/mihomo/blob/v1.19.32/tunnel/connection.go)在读错时结束，符合本次大下行应用超时的观察。
@@ -96,16 +96,16 @@ C 保留零包、1/8192/32768/60000/65497、完整后短包/零包及本地超�
 
 已知工具后续改进：auth 归档目前在三方法整体通过时自动核全部 fixture 语义；本轮 stock 的单项 TCP 成功由独审直接核 raw observation/ledger。未来若以部分通过计数自动授单项资格，应改为逐方法独立核验并补 mutation 控制。
 
-有界接续顺序：
+接续计划与状态（2026-10-18 更新）：
 
-1. 先补上述逐方法 auth 语义重算，使用本轮真实红/绿档案与单字段 mutation；不由缓存 passed 字段授资格。
-2. 如需定位固定 Mihomo SOCKS 大包入口，另立有限边界组，保留本 C/D/B 红色原记录；上行 16374/16375、下行 16384/16385 可作为源码推断的待验证临界点。必须重新绑定应用实际发送/接收、目标 ledger 与进程来源，不把源码推断当 syscall 动态证明。
-3. 为实际产品需求单列 MTU 内小包与同应用关联 idle 诊断，仍核原 control/UDP/relay、2s 配置、完整 6s 窗、一次发送、零重放和清理。它只能说明该小包条件，不能补签本 D 的 60000 前置。
+1. 上述逐方法 auth 语义重算仍待独立工具改进，使用本轮真实红/绿档案与单字段 mutation；不由缓存 passed 字段授资格。有限诊断没有将旧 auth 资格授给新 head。
+2. 上行 16374/16375、下行 16384/16385 的有限边界组已在准确 1925 实跑；[新记录](STANDARD_CLIENT_UDP_DIAGNOSTIC_RESULTS_20261018.md)绑定原应用实际 I/O、目标 ledger 与进程来源。本 C/D/B 红色原记录保留，边界观察不称 syscall 动态证明。
+3. 1200 字节同应用关联 idle 已单列诊断，保留原 control/UDP/relay、2s 配置、完整 6s 窗、一次发送、零重放和清理。首轮夹具导入缓存失败及针对两个 I case 的补测单独记录，不补签本 D 的 60000 前置。
 4. 选择具体 stock App/平台和普通导入路径后，独立验证手机 TUN 与实际网络；先做服务端角色/路径最小改动对照，再决定是否有可进入产品的受限 UDP 能力。不得迁入完整八补丁或开放产品 UDP 来绕过未决门槛。
 
 ## 文本归档收据
 
-[机器可读收据](STANDARD_CLIENT_UDP_ARTIFACTS_20261018.json)保留两次 run 的 11 个 artifact ID、ZIP bytes/SHA256、文本文件数、准确 head/attempt、直接链接与到期时间。首轮依次为产品3、stock193、stock-auth26、candidate599、B436文件；第二轮相同五组另有candidate-auth445文件。所有 ZIP 摘要和严格 manifest 成员 size/hash 均独立核验；三个 candidate 类归档各含完整419个构建证明成员。收据不是原始证据替代品，不包含二进制。
+[机器可读收据](STANDARD_CLIENT_UDP_ARTIFACTS_20261018.json)保留本 C/D/B 两次 run 的 11 个 artifact ID，并另列后续有限诊断收据；各项包含 ZIP bytes/SHA256、文本文件数、准确 head/attempt、直接链接与到期时间。首轮依次为产品3、stock193、stock-auth26、candidate599、B436文件；第二轮相同五组另有candidate-auth445文件。所有 ZIP 摘要和严格 manifest 成员 size/hash 均独立核验；三个 candidate 类归档各含完整419个构建证明成员。收据不是原始证据替代品，不包含二进制。
 
 ## 复核方式和保留失败
 

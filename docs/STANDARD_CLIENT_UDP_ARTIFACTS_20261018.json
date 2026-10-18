@@ -123,6 +123,67 @@
           "expires_at": "2026-10-25T21:48:36Z"
         }
       ]
+    },
+    {
+      "run_id": 39171985702,
+      "run_attempt": 1,
+      "head_sha": "1925ddde9bd3d9ce1bee303288eca539843c89f3",
+      "conclusion": "failure",
+      "artifacts": [
+        {
+          "artifact_id": 12153565235,
+          "name": "standard-udp-diagnostic-candidate-text",
+          "zip_bytes": 989648,
+          "zip_sha256": "a50ab46648068fd06fe3ba1a097b72037f03200399286777cc12982949456f3e",
+          "text_files": 469,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39171985702/artifacts/12153565235",
+          "expires_at": "2026-10-25T22:31:33Z"
+        },
+        {
+          "artifact_id": 12152668685,
+          "name": "standard-udp-product-negative-control",
+          "zip_bytes": 4232,
+          "zip_sha256": "09f945e4a92d2b64b97dd7aede0c38612775a020a31c3e72bead7cfb6a4025b4",
+          "text_files": 3,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39171985702/artifacts/12152668685",
+          "expires_at": "2026-10-25T22:24:26Z"
+        },
+        {
+          "artifact_id": 12152388877,
+          "name": "standard-udp-diagnostic-stock-text",
+          "zip_bytes": 158765,
+          "zip_sha256": "ffbafbb4974393598082a3fceaaea1e8770a47093abca038aa6cd8bcc7414537",
+          "text_files": 20,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39171985702/artifacts/12152388877",
+          "expires_at": "2026-10-25T22:30:41Z"
+        }
+      ]
+    },
+    {
+      "run_id": 39173177705,
+      "run_attempt": 1,
+      "head_sha": "a37a3bf92d9fcb3f811febeb8d975efad4a88039",
+      "conclusion": "success",
+      "artifacts": [
+        {
+          "artifact_id": 12154000032,
+          "name": "standard-udp-idle-repair-overseas-stock-text",
+          "zip_bytes": 896127,
+          "zip_sha256": "6f773da3cca0875c44e0a85883c732f730452f91055fc4d67ca9a0fc740a8881",
+          "text_files": 438,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39173177705/artifacts/12154000032",
+          "expires_at": "2026-10-25T22:48:19Z"
+        },
+        {
+          "artifact_id": 12153970077,
+          "name": "standard-udp-idle-repair-candidate-text",
+          "zip_bytes": 896332,
+          "zip_sha256": "c6741a38dad19c8c3d42a9cd8795df44bccd9e9a24dc9946535d0a41a25bc147",
+          "text_files": 438,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39173177705/artifacts/12153970077",
+          "expires_at": "2026-10-25T22:47:45Z"
+        }
+      ]
     }
   ]
 }

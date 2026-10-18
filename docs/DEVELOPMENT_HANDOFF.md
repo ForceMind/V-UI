@@ -30,6 +30,7 @@
 | 每入口三态 TCP | 签名 master `0962f0c4995b3b7606652027f2330285e4dea1f7`，[PR49](https://github.com/ForceMind/V-UI/pull/49) | P0–P5 已收口；准确候选及主线八组、四目标、真实标准客户端和浏览器均独立验收，见[完整记录](PER_INBOUND_ROUTING_CLOSURE_20261018.md)。尚未发布 |
 | D2 XUDP/大包/owner 实验 | `afbdba100c5f0e3dc6888684fdbab31980720df3`，tree `996d37d925be8edd18cbf921d3cc580f43c0730d` | 独立实验部分合同通过，整体仍失败；未并入产品，见下节 |
 | 标准客户端 UDP 补验 | [兼容边界](STANDARD_CLIENT_COMPATIBILITY.md)、[实际研究与剩余计划](STANDARD_CLIENT_UDP_RESULTS_20261018.md) | 全 stock / 候选两服务器 / 官方海外 B 已分组实跑；小包部分完整，大包容量红，D前置失败使窗口/恢复未执行；产品relay UDP继续拒绝 |
+| 有限 UDP 边界 / 1200 同关联诊断 | [固定计划](STANDARD_CLIENT_UDP_DIAGNOSTIC_PLAN_20261018.md)、[独立结果](STANDARD_CLIENT_UDP_DIAGNOSTIC_RESULTS_20261018.md) | 四点已收集；准确 a37 两组 1200 同关联 I 通过，candidate 国内+官方海外已足够本有限条件；八补丁最小集未证，原 C/D 红及夹具失败保留，不授手机/产品 UDP 资格 |
 | 手机、真实外部线路 | 实机与运营线路独立门槛 | 未验收；Linux core loopback 不代替手机导入/TUN/移动网络 |
 | 低资源长期目标 | [资源合同](LOW_RESOURCE_TARGET.md)、[已有软件收口](LOW_RESOURCE_CLOSURE_20261011.md) | 既有软件优化证据保留；真实 1 vCPU/512 MiB 整机和 24 小时稳定性仍待专门环境 |
 | 新功能正式发布/部署 | [发布门槛](RELEASING.md) | 未执行；代码合并不等于发布，生产部署及新权限仍另行批准 |
