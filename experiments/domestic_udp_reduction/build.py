@@ -15,6 +15,8 @@ def command(args,cwd,env,path):
     row,out,err=run_matrix.run(args,timeout=1200,cwd=cwd,env=env)
     row.update(args=args,cwd=str(cwd),environment={k:env[k] for k in (*c.ENV,'GOMODCACHE','GOCACHE','VUI_LIFECYCLE_PHASE','VUI_MUX_ARM')})
     r.save(path.with_suffix('.exit.json'),row);path.with_suffix('.stdout').write_text(out);path.with_suffix('.stderr').write_text(err)
+    print(path.name+': returncode='+str(row['returncode']),flush=True)
+    if row['returncode']!=0:print(out+err,flush=True)
     c.need(not row['timeout'] and not row['signals'] and row['leader_joined'] and row['process_group_gone'],'Unsafe build command: '+path.name)
     return row['returncode'],out
 
@@ -98,4 +100,11 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     for key in ('legacy-repository','sing-box','sing-vmess','output','module-cache','build-cache'):
         parser.add_argument('--'+key,type=Path,required=True)
-    build(parser.parse_args())
+    args=parser.parse_args()
+    try:build(args)
+    except Exception as exc:
+        directory=args.output.resolve()/'evidence'
+        if directory.is_dir():
+            r.save(directory/'failure.json',{'kind':'vui-domestic-reduced-build-failure','failed':True,
+                'error_type':type(exc).__name__,'error':str(exc),'runtime_executed':False,'product_qualified':False})
+        raise

@@ -8,19 +8,28 @@ import contract as c
 r=c.r
 
 def strict_go(path,expected,package):
-    rows=[json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
+    rows=[c.strict_json(line) for line in Path(path).read_text().splitlines() if line.strip()]
     c.need(rows and all(isinstance(x,dict) and x.get('Package')==package for x in rows),'Wrong/empty Go package')
     runs=Counter();terminals=Counter();package_end=[];started=set();finished=set()
     for row in rows:
+        c.need(not package_end,'Go records after package terminal')
         action=row.get('Action');name=row.get('Test')
+        c.need(action in ('start','run','pause','cont','output','pass','skip','fail'),'Unknown Go action')
+        c.need(action!='start' or not name,'Test has package start action')
         c.need(action not in ('skip','fail'),'Go failure/skip')
         if name:
             c.need(name in expected,'Unexpected Go test')
             if action=='run':
-                c.need(name not in started,'Duplicate Go run');started.add(name);runs[name]+=1
+                c.need(name not in started,'Duplicate Go run')
+                parent=name.rpartition('/')[0]
+                c.need(not parent or parent in started-finished,'Go child outside parent lifetime')
+                started.add(name);runs[name]+=1
             if action=='pass':
-                c.need(name in started and name not in finished,'Missing run/duplicate terminal');finished.add(name);terminals[name]+=1
-        elif action=='pass':package_end.append(action)
+                c.need(name in started and name not in finished,'Missing run/duplicate terminal')
+                c.need(all(x in finished for x in expected if x.startswith(name+'/')),'Go parent passed before child')
+                finished.add(name);terminals[name]+=1
+        elif action=='pass':
+            c.need(finished==set(expected),'Go package ended before tests');package_end.append(action)
     c.need(runs==terminals==Counter(expected) and package_end==['pass'],'Incomplete exact Go coverage')
     return rows
 

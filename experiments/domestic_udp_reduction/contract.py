@@ -2,6 +2,7 @@
 from pathlib import Path
 import hashlib
 import json
+import math
 import sys
 
 HERE=Path(__file__).resolve().parent
@@ -45,7 +46,25 @@ GROUPS={
 CROSS={'vmess':'github.com/sagernet/sing-vmess','route':'./route'}
 
 def digest(value):return hashlib.sha256(r.canonical(value)).hexdigest()
-def read(path):return json.loads(Path(path).read_text())
+def strict_json(text):
+    def pairs(items):
+        result={}
+        for key,value in items:
+            need(key not in result,'Duplicate JSON key');result[key]=value
+        return result
+    def constant(value):raise ValueError('Nonfinite JSON value: '+value)
+    value=json.loads(text,object_pairs_hook=pairs,parse_constant=constant)
+    def finite(item):
+        if isinstance(item,float):need(math.isfinite(item),'Nonfinite JSON number')
+        elif isinstance(item,str):
+            item.encode('utf-8',errors='strict');need('\x00' not in item,'NUL in JSON')
+        elif isinstance(item,dict):
+            for key,child in item.items():finite(key);finite(child)
+        elif isinstance(item,list):
+            for child in item:finite(child)
+    finite(value)
+    return value
+def read(path):return strict_json(Path(path).read_text())
 def version(identity):return '1.14.2-vui-domestic-reduced-'+identity['product']['commit'][:12]
 def identity(legacy):return {'product':r.source(ROOT),'legacy':r.source(legacy,legacy=True)}
 def source_file(name,legacy):return (ROOT if name.startswith('experiments/domestic_udp_reduction/') else legacy)/name
@@ -87,6 +106,7 @@ def allowed_files():
     files={name+suffix:('json' if suffix=='.exit.json' else 'text') for name in labels() for suffix in ('.exit.json','.stdout','.stderr')}
     files.update({n:'json' for n in ('provenance.json','source-before.json','source-after.json','source-tested.json','source-post.json',
                                     'normalized-modules.json','VERIFICATION.json','RESULT.json')})
+    files.update({g+'-'+m+'.stdout':'jsonl' for g in GROUPS for m in MODES})
     files.update({'go.mod.before.txt':'text','go.mod.after.txt':'text'})
     return files
 

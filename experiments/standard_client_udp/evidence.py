@@ -61,6 +61,26 @@ def export_check(safe, value, port, row, roles):
         r.need(len(device)==1 and device[0]['config_sha256']==digest(config), 'Ordinary export does not match actual device configuration')
 
 
+def candidate_identity(known, legacy, arm):
+    if arm != 'stock':
+        r.need(known['candidate']['build_source_identity']['vui_commit'] == r.LEGACY
+               and known['candidate']['version'] == '1.14.2-vui-socks-owner-experiment-'+r.LEGACY[:12], 'Candidate identity differs')
+
+def build_files(legacy, arm):
+    safe,_=modules(legacy)
+    return {n:f for n,f in safe.allowed_files().items() if not n.startswith('runtime/')}
+
+def validate_build_bytes(safe,name,data,fmt,arm):
+    return safe.validate_bytes(name,data,fmt)
+
+def verify_build(directory, legacy, arm):
+    safe,_=modules(legacy)
+    verifier=safe.h.load('standard_archive_build_verifier',safe.h.HERE/'verify_evidence.py')
+    verifier.verify(Path(directory),safe.h.read_contract())
+    provenance=safe.strict_json((Path(directory)/'provenance.json').read_text())
+    r.need(provenance['source_identity'] == safe.h.identity(), 'Archived build source changed')
+    return provenance
+
 def verify_stage(directory, legacy, arm, stage, expected_source=None):
     safe, p = modules(legacy)
     files = stage_files(p, arm, stage); members = safe.collect(directory, files)
@@ -78,9 +98,7 @@ def verify_stage(directory, legacy, arm, stage, expected_source=None):
     r.need(set(known) == ({'official','mihomo'} if arm == 'stock' else {'official','mihomo','candidate'}), 'Unexpected binary inputs')
     for name, sha, version in [('official',r.STOCK,'1.14.2'),('mihomo',r.MIHOMO,'1.19.32')]:
         r.need(known[name]['sha256'] == sha and known[name]['version'] == version, 'Stock binary identity differs')
-    if arm != 'stock':
-        r.need(known['candidate']['build_source_identity']['vui_commit'] == r.LEGACY
-               and known['candidate']['version'] == '1.14.2-vui-socks-owner-experiment-'+r.LEGACY[:12], 'Candidate identity differs')
+    candidate_identity(known,legacy,arm)
     roles = get('process-binaries.json'); rows = report['cases']
     r.need([x['case'] for x in rows] == [c['id'] for c in cases[:len(rows)]], 'Case sequence missing/extra/reordered')
     r.need(all(x['case'] in {c['case'] for c in rows} for x in roles), 'Unstarted process role')
@@ -114,8 +132,7 @@ def matrix_files(p, arm, legacy):
         files.update({stage+'/'+n:f for n,f in stage_files(p,arm,stage).items()})
         files.update({stage+'.stdout':'text',stage+'.stderr':'text'})
     if arm != 'stock':
-        safe,_ = modules(legacy)
-        files.update({'build/'+n:f for n,f in safe.allowed_files().items() if not n.startswith('runtime/')})
+        files.update({'build/'+n:f for n,f in build_files(legacy,arm).items()})
     return files
 
 def verify_matrix(directory, legacy, arm):
@@ -172,10 +189,10 @@ def prepare(args):
     r.need(again==members,'Runtime changed during preparation')
     if args.arm != 'stock':
         r.need(args.build_evidence is not None, 'Candidate archive needs complete build evidence')
-        build_files={n:f for n,f in safe.allowed_files().items() if not n.startswith('runtime/')}
-        build=safe.collect(args.build_evidence,build_files,inodes=inodes,budget=budget)
+        allowed_build=build_files(args.legacy_repository,args.arm)
+        build=safe.collect(args.build_evidence,allowed_build,inodes=inodes,budget=budget)
         for n,d in build.items():
-            safe.validate_bytes(n,d,build_files[n]);members['build/'+n]=d
+            validate_build_bytes(safe,n,d,allowed_build[n],args.arm);members['build/'+n]=d
     manifest={'schema_version':1,'kind':KIND,'arm':args.arm,'product_qualified':False,
         'files':{n:{'bytes':len(d),'sha256':safe.digest(d)} for n,d in members.items()},'verdict':verdict,
         'run':{k:os.environ.get(k) for k in ('GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_SHA','GITHUB_WORKFLOW')}}
@@ -198,10 +215,7 @@ def verify(directory,legacy,arm):
             dest=Path(tmp)/n;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(d)
         _,verdict=verify_matrix(Path(tmp),legacy,arm)
     if arm != 'stock':
-        verifier=safe.h.load('standard_archive_build_verifier',safe.h.HERE/'verify_evidence.py')
-        verifier.verify(Path(directory)/'build',safe.h.read_contract())
-        provenance=read(safe,members['build/provenance.json'])
-        r.need(provenance['source_identity'] == safe.h.identity(), 'Archived build source changed')
+        provenance=verify_build(Path(directory)/'build',legacy,arm)
         hashes={n.removeprefix('build/'):safe.digest(d) for n,d in members.items() if n.startswith('build/')}
         for stage in r.ARMS[arm]:
             key=stage+'/input-identity.json'

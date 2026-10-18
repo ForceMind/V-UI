@@ -1,0 +1,150 @@
+name: Domestic UDP patch reduction
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  finite-domestic-reduction:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: product
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          path: product
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: afbdba100c5f0e3dc6888684fdbab31980720df3
+          path: legacy
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing-box
+          ref: af6e64c3b69e6132ebaee0e1a3d24e93903f6709
+          path: sing-box
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing-vmess
+          ref: 31ec11e8790c48a4bf11711806a61e929ee6b89d
+          path: sing-vmess
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing
+          ref: 87c33f17688fe3dd80eeabef7c3f7a69152ccd42
+          path: sing
+          persist-credentials: false
+      - name: Existing fixed Go compiler only
+        run: |
+          set -euo pipefail
+          GO_BIN="$RUNNER_TOOL_CACHE/go/1.25.14/x64/bin"
+          test "$(GOTOOLCHAIN=local "$GO_BIN/go" version)" = 'go version go1.25.14 linux/amd64'
+          printf '%s\n' "$GO_BIN" >> "$GITHUB_PATH"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: '12144080561'
+          run-id: '39146603341'
+          github-token: ${{ github.token }}
+          path: /tmp/vui-stock-mechanism
+          merge-multiple: true
+      - run: pip install -r requirements-test.txt
+      - name: Current adapter controls and unchanged frozen build controls
+        env:
+          VUI_STOCK_UDP_LEGACY: ${{ github.workspace }}/legacy
+          VUI_REDUCED_SING_BOX: ${{ github.workspace }}/sing-box
+          VUI_REDUCED_SING_VMESS: ${{ github.workspace }}/sing-vmess
+        run: |
+          python - <<'PYTEST'
+          import unittest
+          suite=unittest.TestLoader().discover('experiments/standard_client_udp',pattern='test_*.py')
+          assert suite.countTestCases()==39
+          result=unittest.TextTestRunner(verbosity=2).run(suite)
+          assert result.wasSuccessful() and not result.skipped
+          PYTEST
+          python - <<'PYREDUCED'
+          import unittest
+          suite=unittest.TestLoader().discover('experiments/domestic_udp_reduction',pattern='test_*.py')
+          assert suite.countTestCases()==12
+          result=unittest.TextTestRunner(verbosity=2).run(suite)
+          assert result.wasSuccessful() and not result.skipped
+          PYREDUCED
+          cd ../legacy
+          python - <<'PY'
+          import unittest
+          suite=unittest.TestLoader().discover('experiments/socks_idle_recovery',pattern='test_*.py')
+          assert suite.countTestCases()==159
+          result=unittest.TextTestRunner(verbosity=2).run(suite)
+          assert result.wasSuccessful() and not result.skipped
+          PY
+      - name: Rebuild exact eight-patch candidate with complete old verification
+        run: |
+          cd ../legacy
+          python experiments/socks_idle_recovery/build_and_test.py --sing-box ../sing-box \
+            --sing-vmess ../sing-vmess --sing ../sing --mechanism /tmp/vui-stock-mechanism \
+            --output /tmp/vui-standard-owner-build
+      - name: Build reduced domestic core and independently verify exact source/test proof
+        id: reduced_build
+        run: |
+          python experiments/domestic_udp_reduction/build.py --legacy-repository ../legacy --sing-box ../sing-box --sing-vmess ../sing-vmess --module-cache "$(go env GOMODCACHE)" --build-cache "$(go env GOCACHE)" --output /tmp/vui-domestic-reduced-build
+      - name: Preserve only validated partial text if reduced build fails
+        id: reduced_failure_evidence
+        if: ${{ !cancelled() && steps.reduced_build.outcome == 'failure' }}
+        run: |
+          python experiments/domestic_udp_reduction/build_failure.py --legacy-repository ../legacy --runtime /tmp/vui-domestic-reduced-build/evidence --output /tmp/vui-domestic-build-failure-upload
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ !cancelled() && steps.reduced_failure_evidence.outcome == 'success' }}
+        with:
+          name: domestic-udp-reduced-build-failure-text
+          path: /tmp/vui-domestic-build-failure-upload
+          retention-days: 7
+          if-no-files-found: error
+      - run: |
+          python scripts/fetch_test_cores.py /tmp/vui-candidate-cores
+          python scripts/fetch_mihomo.py /tmp/vui-candidate-client
+      - name: Fresh full-candidate domestic reference
+        id: reference
+        continue-on-error: true
+        run: |
+          python experiments/domestic_udp_reduction/run.py --legacy-repository ../legacy --official /tmp/vui-candidate-cores/sing-box --mihomo /tmp/vui-candidate-client/mihomo --candidate /tmp/vui-standard-owner-build/owner-sing-box --candidate-provenance /tmp/vui-standard-owner-build/provenance.json --build-evidence /tmp/vui-standard-owner-build/evidence --arm full-reference --output /tmp/vui-reduced-reference
+      - name: Independently validate reference text
+        id: reference_evidence
+        if: ${{ !cancelled() && steps.reference.outcome != 'skipped' }}
+        run: |
+          python experiments/domestic_udp_reduction/archive.py --legacy-repository ../legacy --runtime /tmp/vui-reduced-reference --arm full-reference --output /tmp/vui-reduced-reference-upload --build-evidence /tmp/vui-standard-owner-build/evidence
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ !cancelled() && steps.reference_evidence.outcome == 'success' }}
+        with:
+          name: domestic-udp-full-reference-text
+          path: /tmp/vui-reduced-reference-upload
+          retention-days: 7
+          if-no-files-found: error
+      - name: Reduced domestic with fixed official overseas
+        id: reduced
+        continue-on-error: true
+        run: |
+          python experiments/domestic_udp_reduction/archive.py --legacy-repository ../legacy --runtime /tmp/vui-reduced-reference --arm full-reference --require-safe
+          python experiments/domestic_udp_reduction/run.py --legacy-repository ../legacy --official /tmp/vui-candidate-cores/sing-box --mihomo /tmp/vui-candidate-client/mihomo --candidate /tmp/vui-domestic-reduced-build/reduced-sing-box --candidate-provenance /tmp/vui-domestic-reduced-build/provenance.json --build-evidence /tmp/vui-domestic-reduced-build/evidence --arm reduced --output /tmp/vui-reduced-runtime
+      - name: Independently validate reduced text
+        id: reduced_evidence
+        if: ${{ !cancelled() && steps.reduced.outcome != 'skipped' }}
+        run: |
+          python experiments/domestic_udp_reduction/archive.py --legacy-repository ../legacy --runtime /tmp/vui-reduced-runtime --arm reduced --output /tmp/vui-reduced-runtime-upload --build-evidence /tmp/vui-domestic-reduced-build/evidence
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ !cancelled() && steps.reduced_evidence.outcome == 'success' }}
+        with:
+          name: domestic-udp-reduced-text
+          path: /tmp/vui-reduced-runtime-upload
+          retention-days: 7
+          if-no-files-found: error
+      - name: Retain every capacity or release failure
+        if: always()
+        run: test '${{ steps.reference.outcome }}' = success && test '${{ steps.reduced.outcome }}' = success

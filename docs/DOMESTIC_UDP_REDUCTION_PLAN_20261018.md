@@ -52,3 +52,13 @@ Count() 保留 `m.access.Lock()` / `defer m.access.Unlock()`，与 TrackConn/Tra
 ## 停止条件与产品边界
 
 两个arm终态、合法文本证据和独审归档之后即收口。若reduced通过，结论是本有限能力可由国内较小维护面实现；若失败，报告实际失败边界，必要模块仍待进一步隔离，不恢复成“三端都得换”的结论。不改产品核心pin、不公开binary、不合入产品UDP、不发布部署。本次不选择或测试具体手机App/TUN，不扩大公网/MTU/并发/长期或包尺寸；这些仍是独立后续门槛。
+
+## 实现中的精确构建控制
+
+生产差异固定四个文件的 before/after 摘要，完整官方 baseline 共 1588 成员；测试注入的八个文件另列。go.mod 只允许官方原文追加唯一 sing-vmess replace，go.sum 不变；完整 411 模块图、固定 Go 1.25.14 实际摘要、编译 flags 与测试前后源码都独立重算。
+
+每个 race / race+debug 模式共有 44 个顶层测试、94 个实际 run/terminal、84 个真正 leaf；两个模式共 188 terminal / 168 leaf。逐项核唯一 run/pass、精确 package、零 skip/额外/重复，再核原 mux、zero、cancel、route 原始事件。
+
+lifecycle 只选原 12 个顶层 + 5 个 guard 子项，明确排除仅旧 lifecycle 阶段的 BlockedInboundWrite（它预期阻塞仍保留）与两个旧 RealMux 负控；不修改旧断言，不称这些三项通过。完整 bounded/route_cancel 语义另由原 TestMuxRouteReplyBackpressure / EndBackpressure 两项与取消/零包组证明。Count 单独抽取旧两 helper 和一个并发测试，不编译整份 owner fixture。
+
+本地 Python 结构/负控不授编译资格；本机没有所需 Go 工具链，实际编译/race/debug 留给固定 CI。完整构建与 runtime 失败均不得作为产品能力，旧证据原样保留。
