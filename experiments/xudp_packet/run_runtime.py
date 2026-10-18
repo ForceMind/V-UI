@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run fixed stages in order; incomplete diagnostics stop subsequent stages."""
+"""Run independent fixed diagnostics only after verified resource cleanup."""
 import argparse
 import json
 import os
@@ -10,8 +10,10 @@ import time
 from pathlib import Path
 import packet_boundary as p
 import build_and_test as b
+import verify_execution_safety as safety
+import verify_failed_observations as failures
 
-STAGES = ('A', 'B', 'C', 'D')
+STAGES = ('C', 'D', 'A', 'B', 'U', 'V')
 
 
 def group_exists(pgid):
@@ -79,11 +81,22 @@ def stage_passed(row, report):
         return False
     if row['stage'] in ('A', 'B'):
         return report.get('stage_capacity_passed') is False and bool(report.get('capacity_failed_leaves'))
+    if row['stage'] in ('U', 'V'):
+        red = report.get('capacity_failed_leaves')
+        return isinstance(red, list) and report.get('stage_capacity_passed') is (not red)
     return report.get('stage_capacity_passed') is True
 
 
-def run_stages(output, manifest_path, runner=run_stage):
+def check_failure_observations(directory, stage, report):
+    return failures.verify_stage(directory, p.plan(stage), report,
+                                 p.json_read(directory/'process-binaries.json'))
+
+
+def run_stages(output, manifest_path, runner=run_stage, safety_checker=safety.verify,
+               failure_checker=check_failure_observations):
     results = []
+    expected_input = p.json_read(manifest_path)
+    manifest_sha256 = p.sha(manifest_path)
     for stage in STAGES:
         command = [sys.executable, str(b.HERE/'packet_boundary.py'), '--repository', str(b.ROOT),
                    '--binary-manifest', str(manifest_path), '--stage', stage, '--output', str(output/stage)]
@@ -97,11 +110,30 @@ def run_stages(output, manifest_path, runner=run_stage):
         except (OSError, ValueError, KeyError) as exc:
             report_error = {'type': type(exc).__name__, 'message': str(exc)}
             row['stage_gate_passed'] = False
+        try:
+            row['execution_safety'] = safety_checker(output/stage, stage, row, expected_input, manifest_sha256)
+            row['stage_execution_safe'] = row['execution_safety']['stage_execution_safe'] is True
+        except (OSError, ValueError, KeyError, TypeError, IndexError) as exc:
+            row['stage_execution_safe'] = False
+            row['execution_safety_error'] = {'type': type(exc).__name__, 'message': str(exc)}
+        if row['stage_execution_safe']:
+            try:
+                observed = failure_checker(output/stage, stage, report)
+                row['failure_observations'] = observed
+                if observed['applicable'] and not observed['failed_observations_verified']:
+                    row['stage_gate_passed'] = False
+            except (OSError, ValueError, KeyError, TypeError, IndexError) as exc:
+                row['stage_gate_passed'] = False
+                row['failure_observation_error'] = {'type': type(exc).__name__, 'message': str(exc)}
         # Preserve a small already-sanitized diagnostic in job logs even if
         # artifact assembly subsequently fails. Do not print packet/config data.
         print(json.dumps(b.c.life.scrub({'stage': stage, 'returncode': row['returncode'],
               'timeout': row['timeout'], 'cleanup': row['cleanup'],
               'stage_gate_passed': row['stage_gate_passed'],
+              'stage_execution_safe': row['stage_execution_safe'],
+              'execution_safety_error': row.get('execution_safety_error'),
+              'failure_observations': row.get('failure_observations'),
+              'failure_observation_error': row.get('failure_observation_error'),
               'diagnostic_complete': report.get('diagnostic_complete'),
               'stage_capacity_passed': report.get('stage_capacity_passed'),
               'report_error': report_error,
@@ -111,7 +143,7 @@ def run_stages(output, manifest_path, runner=run_stage):
               'errors': report.get('errors', ['No readable stage result'])})), flush=True)
         results.append(row)
         p.save(output/'stages.json', results)
-        if not row['stage_gate_passed']:
+        if not row['stage_execution_safe']:
             break
     return results
 
@@ -135,8 +167,10 @@ def main():
     manifest_path = args.build/'runtime-input.json'
     p.save(manifest_path, manifest)
     results = run_stages(args.output, manifest_path)
-    passed = len(results) == len(STAGES) and all(row['stage_gate_passed'] for row in results)
-    p.save(args.output/'RUNTIME_RESULT.json', {'source_identity': source_id, 'all_stages_completed': passed,
+    executed = len(results) == len(STAGES)
+    passed = executed and all(row['stage_gate_passed'] and row['stage_execution_safe'] for row in results)
+    p.save(args.output/'RUNTIME_RESULT.json', {'source_identity': source_id, 'all_stages_executed': executed,
+           'all_gates_passed': passed,
            'unexecuted_stages': list(STAGES[len(results):]), 'official_original_gate_unchanged': True,
            'product_qualified': False, 'stages': results})
     return 0 if passed else 1

@@ -15,7 +15,7 @@ No Go compiler or real core runtime was available during preparation.
   under verified TLS are in this experiment. No product pin changes, UDP enabling,
   release, production deployment or upstream communication.
 
-## Four bounded stages (separate evidence, strict sequential gates)
+## Independent bounded stages (separate capacity and execution-safety gates)
 
 A. Locate the stock device ingress boundary, with patched overseas and patched
 mux domestic so an unrelated stock overseas downlink cap cannot hide the request.
@@ -24,11 +24,33 @@ then short recovery 7. VLESS analog: 1,16105/16106/16107,7. New first-packet
 associations individually send the three relevant boundary values, plus
 16373/16374/16375. Each has a 7-byte recovery packet. This is 21 cases and 51
 business packets, not a cross-product of every size and lifecycle action.
-The 15992 warmed VMess prefix is an observed baseline and must reproduce. The
-16106 VLESS limit and first-packet limits are predictions, not established facts;
-record actual source/target tuples and prefixes. Stage A remains capacity RED,
+The 15992 warmed VMess prefix is an observed baseline and must reproduce.
+At exact 011184d, warmed VLESS 16107 became a 16106-byte prefix; first 16373/16374
+reached the target completely, and 16375 became a 16374-byte prefix in all
+three protocols. All nine large first-packet echoes failed on return: stock
+device logged `packet download closed: short buffer`. Stage A remains RED.
+The original plan and strict full-reply/recovery assertions remain unchanged;
+the next runner records failure terminals and actually attempts the original
+same-association recovery rather than stopping after the first failed leaf.
+No timeout is rewritten as prefix delivery or explicit rejection. Stage A remains capacity RED,
 even when its diagnostic observations are complete. First-packet observations
 must not silently become accepted production limits.
+
+U. Separate stock-device first-packet **uplink** observations: 16373/16374/16375
+for each protocol, with an independent deterministic 32-byte ACK rather than
+echo, then a real 7-byte same-association recovery. Nine cases/eighteen leaves.
+The short ACK isolates input from the stock device's smaller download buffer;
+it does not replace or repair any failed A echo. Target request and ACK hashes
+are independently verified. Actual prefixes remain capacity failures.
+
+V. Separate stock-device **downlink** observations: for each protocol, fresh and
+warmed associations send a 32-byte request for a 16121/16122/16123-byte target
+response, then same-association recovery. Eighteen cases/forty-five leaves.
+16122 is a source-budget prediction, not a pre-accepted limit. Missing replies,
+explicit short-buffer failures and failed recoveries remain failures. A/U/V
+record each single send, separate four-second target and reply windows, new
+device-log intervals bound to the launched PID/birth, and real zero-delivery
+windows. They never synthesize an actual target row or an empty reply.
 
 B. Isolate stock overseas receive behavior with patched device and patched mux
 domestic. For each protocol, 32-byte non-echo requests ask the independent target
@@ -53,7 +75,9 @@ must return local EMSGSIZE, no target packet may arrive, and a subsequent
 7-byte packet must work. This proves local OS refusal only, not patched receive
 MSG_TRUNC/MTU rejection. Use one fresh attempt per leaf, no resend. This is 78
 cases, 195 business packets plus 3 failing local send attempts (198 fixed leaves).
-This stage runs only after A and B each produce strictly complete diagnostic evidence. The reviewed coordinator stops on any incomplete stage, timeout, or cleanup failure; A/B capacity failures remain explicit RED observations. All three roles use the fixed-sing
+This stage may run independently after earlier capacity failures only when the
+separate execution-safety verifier proves their complete resource cleanup and
+identity. Earlier failed gates stay failed. All three roles use the fixed-sing
 packet candidate, retaining the previously verified mux/route source bytes.
 
 D. Additional repaired endpoint lifecycle smoke. For each of the three
@@ -114,9 +138,10 @@ config files, certificates, private keys and caches from any evidence package.
 
 ## Runtime/API and preparation status
 
-The runner supplies A/B/C and the D endpoint smoke. It imports the original
+The runner supplies A/B/C, the D endpoint smoke, and separate U/V observations. It imports the original
 fixture without patching any test method or assertion. Preparation has run only
-29 matrix-only pure Python controls (29/29 passed during preparation) and syntax/dry-plan checks; no core or Go compilation.
+29 matrix-only pure Python controls at its initial preparation point. Actual
+later runs and their failures are recorded chronologically in RUN_LEDGER.md.
 
 Copy reviewed files to `experiments/xudp_packet/` in the isolated candidate.
 `source_identity()` deliberately refuses a standalone preparation path, dirty
@@ -136,7 +161,31 @@ Commands after review, commit and same-head mechanism/build gates:
       --repository "$PWD" --binary-manifest /tmp/packet-build/runtime-input.json \
       --output /tmp/packet-runtime-A-attempt1
 
-The reviewed run_runtime.py coordinator executes A/B/C/D in separate fresh output directories under one exact identity. Each stage must pass its strict diagnostic gate before the next starts; C/D also require capacity success. Every stage gets an owned process group, a 1250-second outer timeout, and bounded group cleanup. Timeout, any required cleanup signal, a remaining group, missing evidence, or nonzero exit fails and leaves later stages unexecuted. It does not retry. A/B diagnostic completeness permits progression while preserving their capacity RED; this is not product admission.
+The reviewed coordinator executes C/D/A/B/U/V in separate fresh directories
+under one exact identity. `stage_gate_passed` retains the original strict
+capacity/diagnostic result; it is never changed by safe continuation. A separate
+`stage_execution_safe` permits the next independent observation only after
+rechecking the exact plan, source commit/tree, actual binary hashes, build
+provenance, every raw evidence member/hash, complete case/role coverage, launched
+PID/birth/live/reaped correspondence, core exit codes zero, target socket/thread
+closure, complete target receive/send accounting, empty DNS/DIRECT traps, and
+fixture/application cleanup. Failed cases must list actual terminal errors and
+all unexecuted leaves. D must retain its terminal lifecycle observation even
+on failure. Each stage has an owned process group and a 1250-second outer bound.
+Timeout, cleanup signals, group remnants, startup uncertainty, changed source or
+binary, incomplete evidence, or a crashed core stop subsequent stages.
+An ordinary stage exit 1 caused by failed capacity may safely continue; it stays
+exit 1 and failed. `all_stages_executed` is separate from `all_gates_passed`, and
+the overall command returns 1 whenever any gate failed. No stage is retried.
+Candidate C/D run first to expose repaired-path blockers promptly; this does
+not skip any remaining stock diagnostic group or infer its outcome.
+The separate failed-observation verifier authenticates A/U/V error facts against
+raw target receive/send records, the same application/relay tuple, four-second
+observation windows, the exact official device PID/birth, and fresh intervals
+of the original frozen device log. Consistent repeated fixture log snapshots
+must be prefix-monotonic. Missing observations remain unverified; contradictory
+windows/logs are rejected. This verifier never changes an error to success and
+never substitutes for either the capacity gate or the resource-safety gate.
 A/B exit zero means diagnostic evidence complete while stage_capacity_passed
 remains false and concrete capacity_failed_leaves remain present. C/D exit zero
 requires their strictly complete cases and cleanup. original_suite_passed and

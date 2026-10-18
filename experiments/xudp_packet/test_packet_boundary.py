@@ -23,8 +23,7 @@ def records(stage):
         sent = 0
         for spec in case["packets"]:
             leaf = case["id"] + "/" + spec["id"]
-            request = b.payload(32 if spec["direction"] == "downlink" else spec["size"], leaf + "/request")
-            reply = b.payload(spec["size"], leaf + "/response") if spec["direction"] == "downlink" else request
+            request, reply = b.packet_bodies(leaf, spec)
             row = {"leaf": leaf, "direction": spec["direction"], "request": b.ident(request),
                    "expected_reply": b.ident(reply), "application_socket": ["127.0.0.1", 10000],
                    "socks_relay": ["127.0.0.1", 20000], "requested_target": ["127.0.0.3", 30000],
@@ -38,7 +37,9 @@ def records(stage):
                     n = m = spec["expected_prefix"]
                 if stage == "B" and spec["size"] > 8192:
                     m = 16000
-                outgoing = reply if spec["direction"] == "downlink" else request[:n]
+                if stage == "U" and spec["size"] == 16375:
+                    n = 16374
+                outgoing = reply if spec["direction"] in ("downlink", "uplink_ack") else request[:n]
                 target = {"leaf": leaf, "target": ["127.0.0.3", 30000], "source": ["127.0.0.4", 40000],
                           "request_expected": b.ident(request), "request_actual": b.ident(request[:n]),
                           "request_full": n == len(request), "request_exact_prefix": True,
@@ -52,7 +53,7 @@ def records(stage):
                 target_rows.append(target)
                 sent += 1
             packets.append(row)
-        rows.append({"case": case["id"], "status": "observed", "errors": [], "cleanup": {"joined": True},
+        rows.append({"case": case["id"], "status": "observed", "errors": [], "unexecuted_leaves": [], "cleanup": {"joined": True},
                      "packets": packets, "target_ledger": {"host":"127.0.0.3","port":30000,"closed": True, "thread_joined": True,
                          "socket_closed": True, "planned_count": len(target_rows), "received_count": len(target_rows),
                          "errors": [], "packets": target_rows,
@@ -101,7 +102,7 @@ def lifecycle(case,result,processes):
 class Plans(unittest.TestCase):
     def test_fixed_nonempty_counts_and_unique_leaves(self):
         self.assertEqual({s: (len(b.plan(s)), len(b.leaf_ids(b.plan(s)))) for s in b.ROLES},
-                         {"A": (21, 51), "B": (3, 12), "C": (78, 198), "D": (6, 12)})
+                         {"A": (21, 51), "B": (3, 12), "C": (78, 198), "D": (6, 12), "U": (9, 18), "V": (18, 45)})
         for stage in b.ROLES:
             ids = b.leaf_ids(b.plan(stage))
             self.assertEqual(len(ids), len(set(ids)))
@@ -150,7 +151,7 @@ class AntiFalseGreen(unittest.TestCase):
         for stage in b.ROLES:
             result = b.assess(*records(stage))
             self.assertTrue(result["diagnostic_complete"])
-            self.assertEqual(result["stage_capacity_passed"], stage in ("C", "D"))
+            self.assertEqual(result["stage_capacity_passed"], stage in ("C", "D", "V"))
             self.assertFalse(result["original_suite_passed"] or result["product_qualified"])
 
     def test_zero_cases_or_packets_rejected(self):

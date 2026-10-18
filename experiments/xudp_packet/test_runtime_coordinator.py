@@ -20,7 +20,7 @@ class CoordinatorTests(unittest.TestCase):
     def report(self, stage='A'):
         return {'stage':stage,'diagnostic_complete':True,'product_qualified':False,
                 'original_suite_passed':False,'stage_capacity_passed':stage in ('C','D'),
-                'capacity_failed_leaves':['observed-stock-prefix'] if stage in ('A','B') else [],
+                'capacity_failed_leaves':['observed-stock-prefix'] if stage in ('A','U','V','B') else [],
                 'cases':[{'case':'successful-probe','status':'observed','errors':[]}]}
     def test_stock_diagnostic_keeps_capacity_red(self):
         self.assertTrue(r.stage_passed(self.row(),self.report()))
@@ -30,6 +30,14 @@ class CoordinatorTests(unittest.TestCase):
     def test_stock_missing_red_observation_rejected(self):
         report=self.report();report['capacity_failed_leaves']=[]
         self.assertFalse(r.stage_passed(self.row(),report))
+    def test_new_directional_probes_accept_observed_full_or_prefix_outcomes(self):
+        for stage in ('U','V'):
+            report=self.report(stage)
+            self.assertTrue(r.stage_passed(self.row(stage),report))
+            report.update(stage_capacity_passed=True,capacity_failed_leaves=[])
+            self.assertTrue(r.stage_passed(self.row(stage),report))
+            report['capacity_failed_leaves']=['actual-prefix-failure']
+            self.assertFalse(r.stage_passed(self.row(stage),report))
     def test_repaired_capacity_red_fails(self):
         report=self.report('C');report['stage_capacity_passed']=False
         self.assertFalse(r.stage_passed(self.row('C'),report))
@@ -47,9 +55,10 @@ class CoordinatorTests(unittest.TestCase):
         for key,value in (('timeout',True),('returncode',1),('returncode',None)):
             row=self.row();row[key]=value
             self.assertFalse(r.stage_passed(row,self.report()))
-    def run_fake(self, bad=None, missing=False):
+    def run_fake(self, bad=None, missing=False, unsafe=None, unverified=None):
         with tempfile.TemporaryDirectory() as d:
             out=Path(d);seen=[]
+            (out/'input.json').write_text('{}')
             def runner(command):
                 stage=command[command.index('--stage')+1];seen.append(stage)
                 target=out/stage;target.mkdir()
@@ -58,23 +67,39 @@ class CoordinatorTests(unittest.TestCase):
                     if stage==bad:report['diagnostic_complete']=False
                     (target/'result.json').write_text(json.dumps(report))
                 return self.row(stage)
-            result=r.run_stages(out,out/'input.json',runner)
+            def safety_checker(directory, stage, execution, expected_input, digest):
+                if missing or stage==unsafe: raise ValueError('Incomplete resource proof')
+                return {'stage_execution_safe':True,'capacity_evaluated':False}
+            def failure_checker(directory, stage, report):
+                return {'applicable':stage in ('A','U','V'),
+                        'failed_observations_verified':stage!=unverified,'capacity_evaluated':False}
+            result=r.run_stages(out,out/'input.json',runner,safety_checker,failure_checker)
             self.assertEqual(json.loads((out/'stages.json').read_text()),result)
             return seen,result
-    def test_complete_four_stages(self):
+    def test_complete_six_stages(self):
+        self.assertEqual(r.STAGES,('C','D','A','B','U','V'))
         seen,rows=self.run_fake();self.assertEqual(seen,list(r.STAGES))
         self.assertTrue(all(x['stage_gate_passed'] for x in rows))
     def test_observed_cases_not_reported_as_failed(self):
         with patch('builtins.print') as printed:
             self.run_fake()
-        self.assertEqual(printed.call_count,4)
+        self.assertEqual(printed.call_count,6)
         for call in printed.call_args_list:
             self.assertEqual(json.loads(call.args[0])['failed_cases'],[])
-    def test_failure_stops_later_stages(self):
-        seen,rows=self.run_fake('B');self.assertEqual(seen,['A','B'])
-        self.assertFalse(rows[-1]['stage_gate_passed'])
+    def test_capacity_failure_continues_only_with_separate_safe_proof(self):
+        seen,rows=self.run_fake('B');self.assertEqual(seen,list(r.STAGES))
+        failed=next(row for row in rows if row['stage']=='B')
+        self.assertFalse(failed['stage_gate_passed']);self.assertTrue(failed['stage_execution_safe'])
+    def test_unknown_resource_state_stops_later_stages(self):
+        seen,rows=self.run_fake(unsafe='B');self.assertEqual(seen,['C','D','A','B'])
+        self.assertFalse(rows[-1]['stage_execution_safe'])
+    def test_unverified_failure_reason_cannot_pass_but_safe_group_can_continue(self):
+        seen,rows=self.run_fake(unverified='A');self.assertEqual(seen,list(r.STAGES))
+        row=next(row for row in rows if row['stage']=='A')
+        self.assertFalse(row['stage_gate_passed']);self.assertTrue(row['stage_execution_safe'])
+        self.assertFalse(row['failure_observations']['failed_observations_verified'])
     def test_missing_report_stops(self):
-        seen,rows=self.run_fake(missing=True);self.assertEqual(seen,['A'])
+        seen,rows=self.run_fake(missing=True);self.assertEqual(seen,['C'])
         self.assertFalse(rows[0]['stage_gate_passed'])
     def test_real_owned_process_success(self):
         result=r.run_stage([sys.executable,'-c','print("owned child")'],timeout=2)

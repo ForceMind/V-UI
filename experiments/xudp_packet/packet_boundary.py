@@ -39,7 +39,9 @@ FIXED = {"sing_box": "af6e64c3b69e6132ebaee0e1a3d24e93903f6709",
 ROLES = {"A": {"domestic": "candidate", "overseas": "candidate", "device-singbox": "official"},
          "B": {"domestic": "candidate", "overseas": "official", "device-singbox": "candidate"},
          "C": {"domestic": "candidate", "overseas": "candidate", "device-singbox": "candidate"},
-         "D": {"domestic": "candidate", "overseas": "candidate", "device-singbox": "candidate"}}
+         "D": {"domestic": "candidate", "overseas": "candidate", "device-singbox": "candidate"},
+         "U": {"domestic": "candidate", "overseas": "candidate", "device-singbox": "official"},
+         "V": {"domestic": "candidate", "overseas": "candidate", "device-singbox": "official"}}
 
 
 def need(value, message):
@@ -61,6 +63,15 @@ def payload(size, seed):
     prefix = seed.encode("ascii") + b"\0"
     return b"".join(hashlib.sha256(prefix + i.to_bytes(4, "big")).digest()
                     for i in range((size + 31) // 32))[:size]
+
+
+def packet_bodies(leaf, spec):
+    """One authoritative byte generator, including the independent short ACK."""
+    request = payload(32 if spec["direction"] == "downlink" else spec["size"], leaf + "/request")
+    if spec["direction"] == "uplink_ack":
+        return request, payload(32, leaf + "/response")
+    return request, (payload(spec["size"], leaf + "/response")
+                     if spec["direction"] == "downlink" else request)
 
 
 def socks_overhead(kind, domain_bytes=None):
@@ -94,6 +105,17 @@ def plan(stage):
                   for n in range(boundary - 1, boundary + 2)], packet("recover", 7)])
             for n in (boundary - 1, boundary, boundary + 1, 16373, 16374, 16375):
                 add(f"first_{n}", [packet("first", n, diagnostic=True), packet("recover", 7)])
+        elif stage == "U":
+            for n in (16373, 16374, 16375):
+                add(f"first_{n}", [packet("first", n, direction="uplink_ack", diagnostic=True),
+                                  packet("recover", 7)])
+        elif stage == "V":
+            # 16122 is a source-budget prediction, not an accepted runtime limit.
+            for mode in ("first", "warmed"):
+                for n in (16121, 16122, 16123):
+                    probes = [packet("warm", 1)] if mode == "warmed" else []
+                    add(f"{mode}_{n}", probes + [packet("probe", n, direction="downlink", diagnostic=True),
+                                                 packet("recover", 7)])
         elif stage == "B":
             add("response", [*[packet(f"response_{n}", n, direction="downlink", diagnostic=n > 8192)
                                for n in (8192, 32768, 60000)], packet("recover", 7)])
@@ -242,8 +264,9 @@ class Target:
     For diagnostic stages audit enforces source, order, count and prefix integrity;
     full delivery is an independently retained RED field, never rewritten PASS.
     """
-    def __init__(self, host, peer, diagnostic):
+    def __init__(self, host, peer, diagnostic, *, correlate=False):
         self.host, self.peer, self.diagnostic = host, peer, diagnostic
+        self.correlate, self.closed_windows = correlate, set()
         self.closed, self.received, self.expected, self.errors = False, [], Counter(), []
         self.plans, self.rows, self.receive_events = [], [], []
         self.lock, self.stop = threading.Lock(), threading.Event()
@@ -256,7 +279,9 @@ class Target:
 
     def announce(self, leaf, request, reply):
         with self.lock:
-            need(len(self.plans) == len(self.rows), "More than one target packet outstanding")
+            if not self.correlate:
+                need(len(self.plans) == len(self.rows), "More than one target packet outstanding")
+            need(leaf not in {p["leaf"] for p in self.plans}, "Duplicate target announcement")
             self.plans.append({"leaf": leaf, "request": request, "reply": reply})
             self.expected[(self.peer, request)] += 1
 
@@ -277,10 +302,20 @@ class Target:
                 need(not flags & (socket.MSG_TRUNC | socket.MSG_CTRUNC) and not ancillary,
                      "Independent target recorder truncated data/control")
                 with self.lock:
-                    index = len(self.rows)
-                    need(index < len(self.plans), "Unexpected/duplicate target datagram")
-                    planned = self.plans[index]
                     self.received.append((peer[0], body))
+                    if getattr(self, "correlate", False):
+                        matches = [p for p in self.plans if body and len(body) <= len(p["request"])
+                                   and body == p["request"][:len(body)]]
+                        need(len(matches) == 1, "Unmatched/ambiguous target datagram")
+                        planned = matches[0]
+                        need(planned["leaf"] not in self.closed_windows,
+                             "Late/duplicate datagram after the leaf observation window")
+                        need(not any(r["leaf"] == planned["leaf"] for r in self.rows),
+                             "Duplicate target datagram for leaf")
+                    else:
+                        index = len(self.rows)
+                        need(index < len(self.plans), "Unexpected/duplicate target datagram")
+                        planned = self.plans[index]
                 need(peer[0] == self.peer and peer[1] > 0, "Wrong target source tuple/direct bypass")
                 need(body == planned["request"][:len(body)] and len(body) <= len(planned["request"]),
                      "Target payload is neither complete nor exact original prefix")
@@ -297,6 +332,19 @@ class Target:
                 with self.lock:
                     self.errors.append(type(exc).__name__ + ": " + str(exc))
 
+    def finish_window(self, leaf):
+        with self.lock:
+            self.closed_windows.add(leaf)
+            return [r for r in self.rows if r["leaf"] == leaf]
+
+    def observed_rows(self, leaf):
+        with self.lock:
+            return [r for r in self.rows if r["leaf"] == leaf]
+
+    def receive_count(self):
+        with self.lock:
+            return len(self.receive_events)
+
     def wait_row(self, leaf, timeout=4):
         deadline = time.monotonic() + timeout
         while True:
@@ -306,7 +354,8 @@ class Target:
             need(len(rows) <= 1, "Duplicate target leaf")
             if rows:
                 return rows[0]
-            need(time.monotonic() < deadline, "No target delivery within bounded single-shot window")
+            if time.monotonic() >= deadline:
+                raise TimeoutError("No target delivery within bounded single-shot window")
             time.sleep(.005)
 
     def audit(self):
@@ -394,14 +443,15 @@ def configs(f, protocol):
     return domestic, client
 
 
-def exchange(association, target, case, p, helper, rows=None, persist=None):
+def _exchange(association, target, case, p, helper, rows=None, persist=None):
     leaf = case["id"] + "/" + p["id"]
-    request = payload(32 if p["direction"] == "downlink" else p["size"], leaf + "/request")
-    expected = payload(p["size"], leaf + "/response") if p["direction"] == "downlink" else request
+    request, expected = packet_bodies(leaf, p)
     row = {"leaf": leaf, "direction": p["direction"], "first_udp": not association.sent,
            "application_socket": list(association.stream.getsockname()), "socks_relay": list(association.relay),
            "requested_target": [target.host, target.port], "request": ident(request), "expected_reply": ident(expected),
-           "status": "running", "full_delivery_passed": False}
+           "status": "running", "full_delivery_passed": False,
+           "send_state": "not_attempted", "target_window": {"status": "not_started"},
+           "reply_window": {"status": "not_started"}}
     if rows is not None:
         rows.append(row)
     if persist is not None:
@@ -410,8 +460,11 @@ def exchange(association, target, case, p, helper, rows=None, persist=None):
     if p["direction"] == "local_emsgsize":
         need(len(request) + socks_overhead("ipv4") == 65508, "Wrong local oversize vector")
         try:
+            row["send_state"] = "attempting"
             association.send(target.host, target.port, request)
+            row["send_state"] = "sent"
         except OSError as exc:
+            row["send_state"] = "send_error"
             need(exc.errno == errno.EMSGSIZE, "Local send failed for a reason other than EMSGSIZE")
             row.update(errno=exc.errno, rejection_location="local_ipv4_udp_socket", socks_wire_bytes=65508)
         else:
@@ -429,12 +482,20 @@ def exchange(association, target, case, p, helper, rows=None, persist=None):
                 raise ValueError("Locally rejected packet returned unexpected data")
         row.update(status="local_emsgsize_verified", local_zero_delivery=True)
         return row
-    target.announce(leaf, request, expected if p["direction"] == "downlink" else None)
+    target.announce(leaf, request, expected if p["direction"] in ("downlink", "uplink_ack") else None)
+    row["send_state"] = "attempting"
     association.send(target.host, target.port, request)  # exactly once
+    row["send_state"] = "sent"
+    started = time.monotonic()
+    row["target_window"] = {"status": "observing", "started": started, "deadline": started + 4}
     actual_target = target.wait_row(leaf)
+    row["target_window"].update(status="received", completed=time.monotonic())
     row["target"] = {k: v for k, v in actual_target.items() if k != "reply_body"}
     association.stream.settimeout(4)
+    started = time.monotonic()
+    row["reply_window"] = {"status": "observing", "started": started, "deadline": started + 4}
     response, ancillary, flags, relay = association.stream.recvmsg(65535)
+    row["reply_window"].update(status="received", completed=time.monotonic())
     row["reply_monotonic"] = time.monotonic()
     need(not ancillary and not flags & (socket.MSG_TRUNC | socket.MSG_CTRUNC), "Application recorder truncated reply")
     need(relay == association.relay, "Reply came from a different SOCKS relay")
@@ -459,12 +520,192 @@ def exchange(association, target, case, p, helper, rows=None, persist=None):
     return row
 
 
-def lifecycle_exercise(f, target, case, helper, c, psutil, rows, persist):
-    watch = c.life.SocketWatch(f, psutil, c.life.Events(persist.parent / "lifecycle-observation.json", case["id"]))
-    before = watch.baseline()
-    baseline_index = watch.samples.index(before)
-    association = helper.SocksDatagrams(f.client_port)
+def terminal_error(row, exc):
+    """End a started leaf without manufacturing a target or reply observation."""
+    now = time.monotonic()
+    row.update(status="error", full_delivery_passed=False,
+               error={"type": type(exc).__name__, "message": str(exc)}, terminal_monotonic=now)
+    if row.get("send_state") == "attempting":
+        row["send_state"] = "send_error"
+    for key in ("target_window", "reply_window"):
+        window = row.get(key, {})
+        if window.get("status") == "observing":
+            bounded_timeout = isinstance(exc, TimeoutError) and now >= window["deadline"]
+            window.update(status=("zero_observed" if key == "target_window" else "timeout")
+                          if bounded_timeout else "observation_error", completed=now)
+    return row
+
+
+def exchange(association, target, case, p, helper, rows=None, persist=None):
+    # B/C/D keep fail-fast packet semantics. Only recording a failed terminal is
+    # shared; this wrapper does not retry, proceed to recovery, or waive a gate.
+    current = rows if rows is not None else []
+    before = len(current)
     try:
+        return _exchange(association, target, case, p, helper, current, persist)
+    except Exception as exc:
+        if len(current) > before:
+            terminal_error(current[-1], exc)
+            if persist is not None:
+                save(persist, current)
+        raise
+
+
+def device_log_start(f, c, psutil):
+    core = f.client
+    text = c.life.clean(f.safe(core.log_path.read_text(errors="replace")))
+    return {"role": "device-singbox", "file": core.log_path.name,
+            "pid": core.process.pid, "birth_time": psutil.Process(core.process.pid).create_time(),
+            "start_offset": len(text), "prefix_sha256": hashlib.sha256(text.encode()).hexdigest(),
+            "starts_at_line_boundary": not text or text.endswith("\n")}
+
+
+def device_log_finish(row, f, c, psutil):
+    record = row["device_log"]
+    text = c.life.clean(f.safe(f.client.log_path.read_text(errors="replace")))
+    start = record["start_offset"]
+    need(len(text) >= start and hashlib.sha256(text[:start].encode()).hexdigest() == record["prefix_sha256"],
+         "Device log prefix changed during packet observation")
+    interval = text[start:]
+    complete_lines = interval if record["starts_at_line_boundary"] else interval.partition("\n")[2]
+    # Ignore an incomplete trailing line; a bare timeout or an old line is not
+    # an explicit device rejection. The complete original log is also retained.
+    complete_lines = complete_lines.rsplit("\n", 1)[0] if "\n" in complete_lines else ""
+    birth = psutil.Process(f.client.process.pid).create_time()
+    need(f.client.process.pid == record["pid"] and birth == record["birth_time"],
+         "Device PID/birth changed during packet observation")
+    record.update(end_offset=len(text), text=interval,
+                  interval_sha256=hashlib.sha256(interval.encode()).hexdigest(), birth_time_after=birth,
+                  fresh_short_buffer_lines=[line for line in complete_lines.splitlines()
+                                            if "packet download closed: short buffer" in line])
+
+
+def observed_exchange(association, target, case, p, helper, rows, persist, f, c, psutil):
+    """A/U/V only: single send, real bounded observations, then same-association continuation.
+
+    Missing target or reply data remain errors. A short ACK is confined to U;
+    A still sends the original echo and V still sends its full requested reply.
+    """
+    need(case["stage"] in ("A", "U", "V"), "Observed continuation escaped its explicit stage scope")
+    leaf = case["id"] + "/" + p["id"]
+    request, expected = packet_bodies(leaf, p)
+    row = {"leaf": leaf, "direction": p["direction"], "first_udp": not association.sent,
+           "application_socket": list(association.stream.getsockname()), "socks_relay": list(association.relay),
+           "requested_target": [target.host, target.port], "request": ident(request), "expected_reply": ident(expected),
+           "status": "running", "full_delivery_passed": False, "send_state": "not_attempted",
+           "target_window": {"status": "not_started"}, "reply_window": {"status": "not_started"}}
+    rows.append(row)
+    announced = False
+    try:
+        row["device_log"] = device_log_start(f, c, psutil)
+        target_count_before = target.receive_count()
+        target.announce(leaf, request, expected if p["direction"] in ("uplink_ack", "downlink") else None)
+        announced = True
+        row.update(send_state="attempting", send_started=time.monotonic())
+        save(persist, rows)
+        association.send(target.host, target.port, request)  # Exactly once, including recovery.
+        started = time.monotonic()
+        row.update(send_state="sent", send_completed=started)
+        deadline = started + 4
+        row["target_window"] = {"status": "observing", "started": started, "deadline": deadline}
+        # Preserve A's original target window followed by its separate reply
+        # window. A missing target now also gets a real application observation;
+        # this never shortens the former four seconds available for a reply.
+        while not target.observed_rows(leaf) and time.monotonic() < deadline:
+            time.sleep(min(.005, max(0, deadline - time.monotonic())))
+        actual_rows = target.finish_window(leaf)
+        target_finished = time.monotonic()
+        actual_target = actual_rows[0] if len(actual_rows) == 1 else None
+        need(len(actual_rows) <= 1, "Duplicate target leaf")
+        actual_count = target.receive_count() - target_count_before
+        row["target_window"].update(completed=target_finished, observed_count=len(actual_rows),
+                                    actual_datagram_count=actual_count,
+                                    status="received" if actual_target else
+                                    ("zero_observed" if actual_count == 0 else "unaccounted_datagrams"))
+        if actual_target is not None:
+            row["target"] = {k: v for k, v in actual_target.items() if k != "reply_body"}
+        else:
+            need(target_finished >= deadline, "Target zero claim before complete observation window")
+        reply_started = time.monotonic()
+        reply_deadline = reply_started + 4
+        row["reply_window"] = {"status": "observing", "started": reply_started, "deadline": reply_deadline}
+        response = receive_error = None
+        while time.monotonic() < reply_deadline:
+            remaining = reply_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            association.stream.settimeout(min(.025, remaining))
+            try:
+                response = association.stream.recvmsg(65535)
+                row["reply_monotonic"] = time.monotonic()
+                break
+            except socket.timeout:
+                pass
+            except OSError as exc:
+                receive_error = exc
+                break
+        finished = time.monotonic()
+        row["reply_window"].update(completed=finished, observed_count=0 if response is None else 1,
+                                   status="received" if response is not None else
+                                   ("receive_error" if receive_error is not None else "timeout"))
+        if receive_error is not None:
+            row["reply_window"]["error"] = {"type": type(receive_error).__name__, "message": str(receive_error)}
+        if response is not None:
+            wire, ancillary, flags, relay = response
+            row["reply_receive"] = {"wire": ident(wire), "source": list(relay),
+                                    "flags": flags, "ancillary_count": len(ancillary)}
+        if response is None and receive_error is None:
+            need(finished >= reply_deadline, "Reply timeout before complete observation window")
+        device_log_finish(row, f, c, psutil)
+        if receive_error is not None:
+            row["failure_kind"] = "application_receive_error"
+            raise receive_error
+        if response is None:
+            explicit = actual_target is not None and row["device_log"]["fresh_short_buffer_lines"]
+            row["failure_kind"] = ("explicit_device_short_buffer" if explicit else
+                                   "target_received_reply_timeout" if actual_target else
+                                   "target_zero_reply_timeout" if actual_count == 0 else "target_recorder_error_reply_timeout")
+            raise TimeoutError("No application reply in complete four-second single-send window")
+        if actual_target is None:
+            row["failure_kind"] = "target_zero_unaccounted_reply"
+            raise ValueError("Application reply has no matching target delivery/send")
+        wire, ancillary, flags, relay = response
+        need(not ancillary and not flags & (socket.MSG_TRUNC | socket.MSG_CTRUNC), "Application recorder truncated reply")
+        need(relay == association.relay, "Reply came from a different SOCKS relay")
+        host, port, received = helper.decode_socks_datagram(wire)
+        need((host, port) == (target.host, target.port), "Reply target host/port changed")
+        need(received == expected[:len(received)] and len(received) <= len(expected),
+             "Reply changed payload or is not exact expected prefix")
+        row.update(socks_reply_wire=ident(wire), actual_reply=ident(received), reply_source=list(relay),
+                   reply_target=[host, port], reply_exact_prefix=True,
+                   full_delivery_passed=actual_target["request_full"] and received == expected)
+        row["status"] = "full_delivery_passed" if row["full_delivery_passed"] else "capacity_failed_exact_prefix"
+        verify_packet(case, p, row, row["target"], row["first_udp"])
+        target.audit()
+        row["terminal_monotonic"] = time.monotonic()
+    except Exception as exc:
+        terminal_error(row, exc)
+    finally:
+        if announced:
+            target.finish_window(leaf)
+        if "device_log" in row and "end_offset" not in row["device_log"]:
+            try:
+                device_log_finish(row, f, c, psutil)
+            except Exception as exc:
+                row["device_log_error"] = {"type": type(exc).__name__, "message": str(exc)}
+                terminal_error(row, exc)
+        save(persist, rows)
+    return row
+
+
+def lifecycle_exercise(f, target, case, helper, c, psutil, rows, persist):
+    events = c.life.Events(persist.parent / "lifecycle-observation.json", case["id"])
+    association = None
+    try:
+        watch = c.life.SocketWatch(f, psutil, events)
+        before = watch.baseline()
+        baseline_index = watch.samples.index(before)
+        association = helper.SocksDatagrams(f.client_port)
         exchange(association, target, case, case["packets"][0], helper, rows, persist)
         save(persist, rows)
         live = watch.snapshot("after_large_business")
@@ -501,9 +742,22 @@ def lifecycle_exercise(f, target, case, helper, c, psutil, rows, persist):
         watch.events.event("large_endpoint_proof", proof=proof)
         watch.events.data["status"] = "observed"
         watch.events.flush()
+    except Exception as exc:
+        events.data["status"] = "error"
+        events.data["error"] = {"type": type(exc).__name__, "message": c.life.clean(str(exc))}
+        events.flush()
+        raise
     finally:
-        association.close()
-        need(association.stream.fileno() == -1, "SOCKS application socket survived cleanup")
+        if association is not None:
+            try:
+                association.close()
+                need(association.stream.fileno() == -1, "SOCKS application socket survived cleanup")
+            except Exception as exc:
+                events.data["status"] = "error"
+                events.data["cleanup_error"] = {"type": type(exc).__name__, "message": c.life.clean(str(exc))}
+                events.data.setdefault("error", events.data["cleanup_error"])
+                events.flush()
+                raise
     return {"proof": proof, "observation_sha256": sha(persist.parent / "lifecycle-observation.json")}
 
 
@@ -539,7 +793,8 @@ def run_case(case, c, module, output, binaries, process_records, psutil):
            "original_suite_passed": False, "product_qualified": False}
     try:
         with fixture(unittest.TestCase(), case["id"]) as f:
-            target = Target(module.TARGET, module.UPSTREAM_EGRESS, case["stage"] in ("A", "B"))
+            target = Target(module.TARGET, module.UPSTREAM_EGRESS, case["stage"] in ("A", "B", "U", "V"),
+                            correlate=case["stage"] in ("A", "U", "V"))
             f.targets.append(target)
             f.target = target
             need(target.port != f.upstream_port, "Target/upstream port collision")
@@ -553,7 +808,14 @@ def run_case(case, c, module, output, binaries, process_records, psutil):
                 association = helper.SocksDatagrams(f.client_port)
                 try:
                     for p in case["packets"]:
-                        exchange(association, target, case, p, helper, row["packets"], directory / "packets.json")
+                        if case["stage"] in ("A", "U", "V"):
+                            observed_exchange(association, target, case, p, helper, row["packets"],
+                                              directory / "packets.json", f, c, psutil)
+                            if row["packets"][-1]["status"] == "error":
+                                row["errors"].append({"leaf": row["packets"][-1]["leaf"],
+                                                      **row["packets"][-1]["error"]})
+                        else:
+                            exchange(association, target, case, p, helper, row["packets"], directory / "packets.json")
                         save(directory / "packets.json", row["packets"])
                 finally:
                     association.close()
@@ -562,6 +824,7 @@ def run_case(case, c, module, output, binaries, process_records, psutil):
             f.observations.append({"kind": "separate-packet-boundary", "stage": case["stage"],
                 "full_delivery_passed": all(p["full_delivery_passed"] for p in row["packets"] if p["direction"] != "local_emsgsize"),
                 "original_gate_invoked": False, "product_qualified": False})
+            need(not row["errors"], "One or more actually attempted packet leaves failed; see packet terminals")
     except Exception as exc:
         row["errors"].append({"type": type(exc).__name__, "message": c.life.clean(str(exc))})
         (directory / "error.log").write_text(c.life.clean(traceback.format_exc()))
@@ -587,6 +850,9 @@ def run_case(case, c, module, output, binaries, process_records, psutil):
                           "expected": [[*key, n] for key, n in f.expected_dns.items()],
                           "ordinary": f.ordinary_answers.queries if f.ordinary_answers else []}
         save(directory / "packets.json", row["packets"])
+        started_leaves = [p["leaf"] for p in row["packets"]]
+        expected_leaves = [case["id"] + "/" + p["id"] for p in case["packets"]]
+        row["unexecuted_leaves"] = [leaf for leaf in expected_leaves if leaf not in started_leaves]
         row["status"] = "error" if row["errors"] else "observed"
         save(directory / "result.json", row)
     return row
@@ -595,8 +861,7 @@ def run_case(case, c, module, output, binaries, process_records, psutil):
 
 def verify_packet(case, spec, row, ledger_row, first):
     leaf = case["id"] + "/" + spec["id"]
-    request = payload(32 if spec["direction"] == "downlink" else spec["size"], leaf + "/request")
-    reply = payload(spec["size"], leaf + "/response") if spec["direction"] == "downlink" else request
+    request, reply = packet_bodies(leaf, spec)
     need(row["leaf"] == leaf and row["direction"] == spec["direction"] and row["first_udp"] is first,
          "Packet plan identity/direction/first-packet state differs")
     need(row["request"] == ident(request) and row["expected_reply"] == ident(reply), "Expected payload identity changed")
@@ -618,7 +883,7 @@ def verify_packet(case, spec, row, ledger_row, first):
     full = n == len(request) and m == len(reply)
     need(target["request_full"] is (n == len(request)) and row["full_delivery_passed"] is full,
          "Actual full-delivery classification contradicts bytes")
-    sent = reply if spec["direction"] == "downlink" else request[:n]
+    sent = reply if spec["direction"] in ("downlink", "uplink_ack") else request[:n]
     need(target["reply_sent"] == ident(sent) and target["sendto_return"] == len(sent), "Target did not send complete declared reply")
     wire = b"\0\0\0\x01" + socket.inet_aton(row["requested_target"][0]) + row["requested_target"][1].to_bytes(2, "big") + reply[:m]
     need(row["socks_reply_wire"] == ident(wire), "SOCKS wire hash/length differs from decoded tuple/payload")
@@ -626,8 +891,8 @@ def verify_packet(case, spec, row, ledger_row, first):
     need(target["request_exact_prefix"] is True and row["reply_exact_prefix"] is True, "Prefix integrity missing")
     if case["stage"] == "A":
         need(row["actual_reply"] == ident(sent), "A return path corrupted stock ingress observation")
-    if case["stage"] == "B":
-        need(target["request_full"] is True, "B did not isolate stock overseas downlink")
+    if case["stage"] in ("B", "V"):
+        need(target["request_full"] is True, "Downlink probe did not isolate its complete small request")
     if spec["expected_prefix"] is not None:
         need(n == spec["expected_prefix"] and not full, "Known warmed RED boundary changed")
     if not spec["diagnostic"]:
@@ -756,7 +1021,8 @@ def verify_lifecycle_files(output, cases, rows):
 def assess(cases, rows, processes, binaries):
     verify_leaf_set([case["id"] for case in cases], [row["case"] for row in rows], "case")
     verify_leaf_set(leaf_ids(cases), [p["leaf"] for row in rows for p in row["packets"]], "packet")
-    need(all(row["status"] == "observed" and not row["errors"] and row.get("cleanup") for row in rows),
+    need(all(row["status"] == "observed" and not row["errors"] and row.get("cleanup")
+             and row.get("unexecuted_leaves") == [] for row in rows),
          "One or more cases incomplete/failed cleanup")
     expected_roles = Counter((case["id"], role) for case in cases for role in case["roles"])
     need(Counter((p["case"], p["role"]) for p in processes) == expected_roles, "Process role leaf coverage mismatch")
@@ -812,7 +1078,7 @@ def assess(cases, rows, processes, binaries):
                      p.get("socks_wire_bytes") == 65508 and p.get("local_zero_delivery") is True,
                      "Missing local EMSGSIZE proof")
             elif not p["full_delivery_passed"]:
-                need(case["stage"] in ("A", "B") and p["status"] == "capacity_failed_exact_prefix", "Strict capacity failure")
+                need(case["stage"] in ("A", "B", "U", "V") and p["status"] == "capacity_failed_exact_prefix", "Strict capacity failure")
                 red.append(p["leaf"])
     stage = cases[0]["stage"]
     if stage == "A":
@@ -823,7 +1089,7 @@ def assess(cases, rows, processes, binaries):
              "Stock overseas large-response RED absent")
     if stage in ("C", "D"):
         need(not red, "Strict repaired capacity or lifecycle remains RED")
-    return {"diagnostic_complete": True, "stage_capacity_passed": stage in ("C", "D"),
+    return {"diagnostic_complete": True, "stage_capacity_passed": stage in ("C", "D") or (stage in ("U", "V") and not red),
             "capacity_failed_leaves": red, "original_suite_passed": False, "product_qualified": False,
             "lifecycle_scope": "large_endpoint_socket_smoke_only" if stage == "D" else "not_run"}
 

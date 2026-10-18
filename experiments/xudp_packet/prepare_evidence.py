@@ -81,7 +81,7 @@ def prepare(build,output,runtime=None):
     if runtime is not None and runtime.exists():
         import packet_boundary as boundary
         allowed_runtime={'stages.json','RUNTIME_RESULT.json'}
-        for stage in ('A','B','C','D'):
+        for stage in boundary.ROLES:
             allowed_runtime |= {stage+'/'+name for name in boundary.expected_artifacts(boundary.plan(stage))}
             allowed_runtime.add(stage+'/manifest.json')
         for p in sorted(runtime.rglob('*')):

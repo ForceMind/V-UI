@@ -101,3 +101,51 @@ parsed values, rejects duplicate keys, NUL and key/certificate material, and
 keeps the path allowlist and raw bytes unchanged. Stage failures will also emit
 a sanitized diagnostic summary to the job log. No core patch or runtime
 assertion changes. This is a repaired evidence path, not a waived runtime gate.
+
+## 2026-10-18 complete evidence, stock bidirectional boundary RED
+
+Exact `011184d224a20e64179d7b2c2a5c921f71e5879f`, tree
+`d63b218fc9d42546a1684d12638840a5c54d6c8b`,
+[run 39127642656 attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39127642656)
+finished **failure**: mux mechanism succeeded, packet runtime and unchanged
+official runtime failed. All five core patches stayed byte-identical.
+
+The packet archive contains all 21 successful build checks: 58 receive leaves
+each with race and race+debug, six Darwin/Windows package compile checks, build
+and module verification, plus seven shared-mux groups on the **patched sing**
+dependency. The latter include real encrypted cancellation (both ciphers,
+10 leaves each in race and race+debug), normal encrypted flow, bounded writer,
+and actual route copy cancellation. The exact same source/compiler/module
+identities are retained. This is encrypted-library caller qualification, not
+an actual ConnectionManager-plus-encrypted combination claim.
+
+Only runtime A executed. Warmed AES/ChaCha 15993 became 15992 at the target;
+warmed VLESS 16107 became 16106. Fresh 16373 and 16374 reached the target whole,
+and fresh 16375 became exactly 16374, for all three protocols. The target sent
+each observed body back in full. All nine high first-packet echoes then timed
+out at the application, with stock device `packet download closed: short buffer`.
+Their recovery leaves were not sent. Thus A's strict leaf/result gate correctly
+failed; B/C/D were unexecuted. This does not establish a C zero-packet result.
+
+The old official runtime preserves both original 19/20 results and four VMess
+32768-to-15992 prefix failures (60000 unexecuted), plus shared TCP success.
+This run has an additional **mux active-sibling observer failure**:
+`Duplicate controlled socket inode in /proc`; mux supplemental lifecycle is
+5/6, route-only is 6/6. The duplicate PID/table/rows were not retained, so its
+root cause is unknown, not established as either leakage or a sampling race.
+Eight target deliveries and all core exits zero were recorded, but the full
+activity window did not finish. The frozen observer and its assertion remain
+unchanged; no deduplication or retry is introduced to hide this result.
+
+| Artifact | Members | ZIP bytes | ZIP SHA-256 |
+|---|---:|---:|---|
+| 12136338236 mux | 48 | 112507 | 71de701f4e695640a9de30811af0133306bcd1fa704fb51ba14ca27dac942337 |
+| 12136423414 packet | 239 | 223710 | acc06b53480831ff3434e5fffb08db32da79307e0e3ae1eb5f99512165ba8bb5 |
+| 12137430398 original runtime | 277 | 389912 | 3f26b7d51485b5b44d3e44f3b979b4f1275fb45008c017ba03a7110aae59ade5 |
+
+The next diagnostic-only change keeps A's exact echo plan and failed gate,
+adds actual failure/recovery terminals and separate U/V directional probes,
+and permits independent B/C/D observations only after a new strict resource
+safety verifier. Every failed gate and overall failure remains explicit. Core
+source, original runtime assertions, payload limits and product state do not
+change in that diagnostic step.
