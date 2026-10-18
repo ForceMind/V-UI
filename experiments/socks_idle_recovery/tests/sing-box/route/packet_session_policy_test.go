@@ -58,7 +58,7 @@ func ownerRunActualPolicyReject(t *testing.T, action option.RuleAction) {
 	if child.cause == nil { t.Fatal("retirement cause missing") }
 }
 
-func TestOwnerActualRouterLocalReject(t *testing.T) { ownerRunActualPolicyReject(t, option.RuleAction{Action: C.RuleActionTypeReject}) }
+func TestOwnerActualRouterLocalReject(t *testing.T) { ownerRunActualPolicyReject(t, option.RuleAction{Action: C.RuleActionTypeReject, RejectOptions: option.RejectActionOptions{Method: C.RuleActionRejectMethodDefault}}) }
 func TestOwnerActualRouterUnsupportedActions(t *testing.T) {
 	cases := []struct { name string; action option.RuleAction }{
 		{"sniff", option.RuleAction{Action: C.RuleActionTypeSniff}}, {"resolve", option.RuleAction{Action: C.RuleActionTypeResolve}},

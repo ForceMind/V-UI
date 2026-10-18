@@ -710,7 +710,7 @@
       "package": "sing-box",
       "source": "tests/route/packet_session_policy_test.go",
       "target": "route/vui_packet_session_policy_test.go",
-      "sha256": "8334adfe5412b1d9d192da354942deb2e4f830b39aa176ff26dccda964d3e17a"
+      "sha256": "4b99c724d7a93cf7f2aedb227043c165ba906b8e03651f0b85f619a30518f8ca"
     },
     {
       "package": "sing-box",
@@ -722,7 +722,7 @@
       "package": "sing-box",
       "source": "tests/route/packet_session_remote_reject_test.go",
       "target": "route/vui_packet_session_remote_reject_test.go",
-      "sha256": "686fb31aef029c5675de4ae1e7a9e7c3a808087db29803fbd7d03ba2955ee4a4"
+      "sha256": "02faef1d66393df3d5efdb972b40d3a40af68e2afac02b300bf9ce16273fd533"
     }
   ]
 }

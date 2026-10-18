@@ -102,7 +102,7 @@ func ownerRemoteRejectNewPacketOnly(t *testing.T, kind string) {
 	defer func() { if closer, ok := outbound.(interface { Close() error }); ok { closer.Close() } }()
 	ack := make(chan error, 2)
 	downstreamOutbounds := &ownerPolicyOutbounds{}
-	downstream := ownerPolicyRouter(t, option.RuleAction{Action:C.RuleActionTypeReject}, downstreamOutbounds, nil)
+	downstream := ownerPolicyRouter(t, option.RuleAction{Action:C.RuleActionTypeReject, RejectOptions:option.RejectActionOptions{Method:C.RuleActionRejectMethodDefault}}, downstreamOutbounds, nil)
 	serverHandler := &ownerRejectRoutedHandler{router:downstream, ack:ack, ledger:make(chan ownerRemoteRejectLedger,2), returned:make(chan struct{},2)}
 	serve, closeService := ownerProtocolService(t, kind, serverHandler)
 	defer closeService()

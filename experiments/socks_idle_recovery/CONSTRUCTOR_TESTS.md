@@ -68,3 +68,10 @@ and exact concrete TLS policy. All source/test hashes and the full eight-patch
 chain must be verified again on the final committed dependency tree. The 632
 original route leaves and these 30 leaves use disjoint exact top-level regexes,
 each with an unchanged 180-second timeout and both race modes.
+
+At 99706f8, fixed sing ClientHandshake5 rewrote the fixture's unspecified
+IPv4 hint into IPv6. The next fixture uses the same SOCKS5 authentication/request
+codecs but explicitly checks and sends the ten-byte IPv4 wildcard association
+request. The strict owner IPv4 admission policy and all 30 leaves remain unchanged.
+The standalone manifest's constructor source digest records this corrected file;
+its production-input notes remain preparation provenance, not final qualification.

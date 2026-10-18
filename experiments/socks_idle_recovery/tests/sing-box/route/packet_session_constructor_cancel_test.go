@@ -2,6 +2,7 @@ package route
 
 import (
 	stdbufio "bufio"
+	"bytes"
 	"context"
 	stdtls "crypto/tls"
 	"crypto/x509"
@@ -176,8 +177,36 @@ func (f *cancelFixture) startOwner(outbound adapter.Outbound) {
 	if err != nil { f.t.Fatal(err) }
 	f.own(f.control)
 	_ = f.control.SetDeadline(time.Now().Add(8*time.Second))
-	response, err := socks.ClientHandshake5(f.control,socks5.CommandUDPAssociate,M.ParseSocksaddr("0.0.0.0:0"),"","")
-	if err != nil { f.t.Fatal(err) }
+	// ClientHandshake5 rewrites an unspecified UDP hint to IPv6 in this fixed
+	// sing revision. Encode the fixture's admitted IPv4 hint explicitly.
+	reader := stdbufio.NewReader(f.control)
+	if err = socks5.WriteAuthRequest(f.control, socks5.AuthRequest{Methods: []byte{socks5.AuthTypeNotRequired}}); err != nil {
+		f.t.Fatal(err)
+	}
+	authResponse, err := socks5.ReadAuthResponse(reader)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if authResponse.Method != socks5.AuthTypeNotRequired {
+		f.t.Fatalf("unexpected SOCKS auth method: %d", authResponse.Method)
+	}
+	var request bytes.Buffer
+	if err = socks5.WriteRequest(&request, socks5.Request{Command: socks5.CommandUDPAssociate, Destination: M.ParseSocksaddr("0.0.0.0:0")}); err != nil {
+		f.t.Fatal(err)
+	}
+	if !bytes.Equal(request.Bytes(), []byte{socks5.Version, socks5.CommandUDPAssociate, 0, 1, 0, 0, 0, 0, 0, 0}) {
+		f.t.Fatalf("SOCKS fixture did not encode the exact IPv4 wildcard hint: %x", request.Bytes())
+	}
+	if n, writeErr := f.control.Write(request.Bytes()); writeErr != nil || n != request.Len() {
+		f.t.Fatalf("SOCKS IPv4 request write: n=%d err=%v", n, writeErr)
+	}
+	response, err := socks5.ReadResponse(reader)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if response.ReplyCode != socks5.ReplyCodeSuccess {
+		f.t.Fatalf("SOCKS UDP association rejected: code=%d", response.ReplyCode)
+	}
 	_ = f.control.SetDeadline(time.Time{})
 	f.relay = response.Bind
 	f.udp, err = net.ListenUDP("udp4",&net.UDPAddr{IP:net.IPv4(127,0,0,1)})

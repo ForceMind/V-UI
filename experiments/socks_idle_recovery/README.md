@@ -90,3 +90,13 @@ classes with independent raw-evidence checkers. Owner-on runs the unchanged
 C 78-case/198-leaf matrix and D six-case same-association lifecycle plan. All
 new controls and selected evidence are strict; the 159 Python checks are harness
 results only. Original stock failures and product qualification remain separate.
+
+The second mechanism run at 99706f8 compiled the final candidate and passed all
+23 unchanged final regression commands, all 22 cross-compiles, and both complete
+VMess/VLESS parser groups. It still failed two fixture gates: missing normalized
+Router reject method, and a helper that rewrote the IPv4 SOCKS hint to IPv6.
+The original route group stopped after 16 passing leaves and a panic; the
+constructor group passed its power-counter leaf but stopped five owner cases
+at handshake setup, leaving 24 unexecuted. Owner runtime did not start. The next
+revision corrects only fixture inputs, preserving all core patches, leaves,
+timing windows and strict IPv4 admission policy.

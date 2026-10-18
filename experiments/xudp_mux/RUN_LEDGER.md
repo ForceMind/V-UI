@@ -87,3 +87,40 @@ encrypted cancellation and zero-datagram gates. Artifact `12141149246`: ZIP
 `6cfba6c773760199d5157bc1074b31b37aa818fada1851d417c4ac8e64c5db0c`;
 54 members independently verified. Original runtime and packet results are
 recorded separately when their complete accurate-head evidence is checked.
+
+## 2026-10-18 owner second mechanism run (99706f8)
+
+Exact commit `99706f82eb85099b1697cdf914eb7d97fe3b39e2`, tree
+`69420b32794ea0d54786ebc5d9910d7e4c0013bc`,
+[run 39142231773 attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39142231773).
+Owner job `117719171168` failed after 159 Python controls passed.
+
+The import-cycle repair compiled the complete candidate. Both the independently
+built five-patch base and final eight-patch tree completed all 23 unchanged
+regression commands. All 22 owner Darwin/Windows compile-only checks succeeded.
+The repaired VMess authenticated-ciphertext mutation passed in both ciphers and
+both modes; all 92 VMess and four VLESS leaves passed in each mode. Sing owner
+62, chunk finalizer one, adapter two, dialer 13 and mixed limiter one also passed
+in each mode. This establishes the recorded mechanism subsets, not whole-owner
+acceptance or non-Linux runtime qualification.
+
+The original route group ran 16 passing leaves before
+`TestOwnerActualRouterLocalReject` panicked with `unknown reject method:`.
+Its fixture directly constructed an empty reject method and bypassed the normal
+JSON default normalization. The failed leaf and 615 unexecuted leaves remain
+RED/incomplete in each mode.
+
+The constructor group passed the real power-counter leaf. Five first owner
+leaves failed during SOCKS setup with `request rejected, code=1`; fail-fast left
+24 leaves unexecuted in each mode. Fixed `ClientHandshake5` rewrites an
+unspecified IPv4 hint to `[::]:0`, which the intentionally IPv4-only owner rejects.
+A fixture correction must explicitly encode the supported IPv4 association
+request; it must not relax the source admission policy or skip any leaf.
+No timing or late-lease success is inferred from these setup failures.
+
+Owner artifact `12141967041`: ZIP 614860 bytes, SHA256
+`187809f13488e40a9c6104d054bd316af68fdec26bff00c5ad9a4debbb1a92cd`;
+418 unique members matched exact sizes and hashes. Strict owner verification
+failed and both owner-off and owner-on runtime stages were not started.
+The original stock runtime/packet jobs remain independent and retain their
+accurate-head failures. No product or same-association recovery qualification.
