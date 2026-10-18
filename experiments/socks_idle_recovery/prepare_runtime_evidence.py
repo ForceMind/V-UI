@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import math
 import os
@@ -23,16 +24,30 @@ boundary = h.load('owner_runtime_archive_packet_allowlist', h.HERE.parent / 'xud
 SCHEMA = 1
 KIND = h.KIND
 ARCHIVE_KIND = KIND + '-text-evidence-archive'
+INPUT_KIND = KIND + '-input'
 RUNTIME_KIND = KIND + '-runtime'
+PATCHES = (*h.packet.PATCHES, *(name for _, name in h.OVERLAYS))
 ARMS = {'off': ('C', 'D', 'A', 'B', 'U', 'V'), 'on': ('C', 'D')}
 MANIFEST = 'MANIFEST.json'
 SENSITIVE_KEYS = frozenset({'password', 'passwd', 'passphrase', 'secret', 'clientsecret',
     'token', 'accesstoken', 'refreshtoken', 'apikey', 'privatekey', 'authorization',
-    'credential', 'credentials', 'uuid', 'certificate', 'certificatepath', 'keypath'})
+    'credential', 'credentials', 'uuid', 'certificate', 'certificatepath', 'keypath',
+    'secrets', 'secretkey', 'bearertoken', 'idtoken', 'sessiontoken', 'passwordhash', 'privatekeypath'})
 SECRET_ASSIGNMENT = re.compile(
-    r'''(?ix)(?:["']?\b(?:password|passwd|passphrase|client[_-]?secret|secret|access[_-]?token|refresh[_-]?token|api[_-]?key|private[_-]?key|authorization|credentials?)["']?\s*[:=]\s*[^\s,}]+|\bBearer\s+[A-Za-z0-9._~+/-]+=*)''')
+    r'''(?ix)(?:["']?\b(?:password|passwd|passphrase|client[_-]?secret|secret|token|uuid|bearer[_-]?token|id[_-]?token|session[_-]?token|access[_-]?token|refresh[_-]?token|api[_-]?key|private[_-]?key|authorization|credentials?)["']?\s*[:=]\s*[^\s,}]+|\bBearer\s+[A-Za-z0-9._~+/-]+=*|https?://[^\s/@:]+:[^\s/@]+@)''')
+KNOWN_CREDENTIAL = re.compile(r'\b(?:gh[pousr]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|(?:AKIA|ASIA)[A-Z0-9]{16})\b')
 OWNER_MARKER = 'socks_udp_owner '
-
+OWNER_FIELDS = {'pid', 'owner_id', 'sequence', 'transition', 'generation', 'packet_sequence',
+                'accepted_packets', 'rejected_sources', 'remapped_packets', 'cause', 'source', 'relay', 'target'}
+OWNER_COUNTERS = {'pid', 'owner_id', 'sequence', 'generation', 'packet_sequence', 'accepted_packets',
+                  'rejected_sources', 'remapped_packets'}
+OWNER_TRANSITIONS = {'create', 'admitting', 'admitted', 'retire', 'join', 'dormant', 'closing', 'closed'}
+OWNER_CAUSES = {'none', 'session_end', 'outcome_unknown', 'pending_at_end', 'lifecycle', 'oversize', 'overload',
+                'admission_timeout', 'idle_timeout', 'malformed', 'unsupported', 'target', 'canceled',
+                'eof', 'closed', 'deadline', 'io_error'}
+MAX_FILE_BYTES = 64 * 1024 * 1024
+MAX_TOTAL_BYTES = 512 * 1024 * 1024
+MAX_OWNER_LINE_BYTES = 4096
 
 
 def need(condition, message):
@@ -105,6 +120,8 @@ def strict_json(text):
     def finite(item):
         if isinstance(item, float):
             need(math.isfinite(item), 'Nonfinite JSON number in evidence')
+        elif isinstance(item, str):
+            item.encode('utf-8', errors='strict')
         elif isinstance(item, dict):
             for key, child in item.items():
                 finite(key)
@@ -116,13 +133,37 @@ def strict_json(text):
     return value
 
 
+def owner_endpoint(value, *, unset=False):
+    need(isinstance(value, str), 'Nontext owner endpoint')
+    if unset and value == ':0':
+        return
+    host, separator, port = value.rpartition(':')
+    need(separator and port.isascii() and port.isdigit() and str(int(port)) == port and
+         0 <= int(port) <= 65535, 'Invalid owner endpoint port')
+    address = ipaddress.ip_address(host)
+    need(address.version == 4 and str(address) == host, 'Noncanonical owner IPv4 endpoint')
+
+
 def check_owner_logs(text):
-    for line in text.splitlines():
+    # Structural validation deliberately does not require a full lifecycle or
+    # PID/binary association: incomplete failed logs remain useful evidence.
+    for line in text.splitlines(keepends=True):
         if OWNER_MARKER not in line:
             continue
-        need(line.count(OWNER_MARKER) == 1, 'Ambiguous owner event log')
+        need(line.endswith('\n') and len(line.encode('utf-8')) <= MAX_OWNER_LINE_BYTES and
+             line.count(OWNER_MARKER) == 1, 'Truncated/unbounded/ambiguous owner event log')
         event = strict_json(line.split(OWNER_MARKER, 1)[1])
-        need(isinstance(event, dict), 'Nonobject owner event log')
+        need(isinstance(event, dict) and set(event) == OWNER_FIELDS, 'Wrong typed owner event fields')
+        need(all(type(event[key]) is int and 0 <= event[key] < 2**64 for key in OWNER_COUNTERS),
+             'Invalid typed owner event counter')
+        need(event['pid'] > 0 and event['owner_id'] > 0 and event['sequence'] > 0,
+             'Invalid typed owner PID/identity')
+        need(isinstance(event['transition'], str) and event['transition'] in OWNER_TRANSITIONS and
+             isinstance(event['cause'], str) and event['cause'] in OWNER_CAUSES,
+             'Unknown owner transition/cause')
+        owner_endpoint(event['source'])
+        owner_endpoint(event['relay'])
+        owner_endpoint(event['target'], unset=event['transition'] == 'create')
         check_clean(event)
 
 
@@ -132,7 +173,7 @@ def check_clean(value):
     if isinstance(value, str):
         need('-----BEGIN ' not in value and 'PRIVATE KEY-----' not in value and
              'BEGIN CERTIFICATE' not in value, 'PEM/key material in evidence')
-        need(SECRET_ASSIGNMENT.search(value) is None, 'Secret-bearing text in evidence')
+        need(SECRET_ASSIGNMENT.search(value) is None and KNOWN_CREDENTIAL.search(value) is None, 'Secret-bearing text in evidence')
         check_owner_logs(value)
     elif isinstance(value, list):
         for item in value:
@@ -146,6 +187,33 @@ def check_clean(value):
             check_clean(item)
 
 
+def source_shape(value):
+    need(isinstance(value, dict) and set(value) == {'vui_commit', 'vui_tree', 'files'},
+         'Wrong owner source identity fields')
+    for key in ('vui_commit', 'vui_tree'):
+        need(isinstance(value[key], str) and re.fullmatch('[0-9a-f]{40}', value[key]) is not None,
+             'Invalid source commit/tree identity')
+    files = value['files']
+    need(isinstance(files, dict) and files and
+         all(isinstance(name, str) and isinstance(hash, str) and re.fullmatch('[0-9a-f]{64}', hash)
+             for name, hash in files.items()), 'Invalid source file identities')
+    for name in files:
+        member_name(name)
+    need({name for name in files if name.endswith('.patch')} == set(PATCHES),
+         'Not the exact eight owner patch paths')
+    return value
+
+
+def provenance_shape(value):
+    need(isinstance(value, dict) and type(value.get('schema_version')) is int and
+         value['schema_version'] == SCHEMA and value.get('kind') == KIND,
+         'Not distinct eight-patch owner provenance')
+    source = source_shape(value.get('source_identity'))
+    need(value.get('patches') == [{'path': name, 'sha256': source['files'][name]} for name in PATCHES],
+         'Wrong ordered owner patch identities')
+    return source
+
+
 def input_shape(value, arm):
     """Archive metadata shape only; eight-patch provenance is assessed elsewhere.
 
@@ -156,7 +224,7 @@ def input_shape(value, arm):
         'schema_version', 'kind', 'source_identity', 'official', 'candidate', 'arm', 'build_evidence'},
         'Wrong owner runtime input fields')
     need(type(value['schema_version']) is int and value['schema_version'] == SCHEMA and
-         value['kind'] == KIND and value['arm'] == arm, 'Wrong owner runtime input schema/kind/arm')
+         value['kind'] == INPUT_KIND and value['arm'] == arm, 'Wrong owner runtime input schema/kind/arm')
     need(isinstance(value['source_identity'], dict) and isinstance(value['build_evidence'], dict),
          'Missing owner runtime source/build evidence metadata')
     for label, fields in (('official', {'path', 'sha256', 'version'}),
@@ -168,6 +236,9 @@ def input_shape(value, arm):
         for key in fields:
             if key.endswith('sha256'):
                 need(re.fullmatch('[0-9a-f]{64}', row[key]) is not None, 'Invalid recorded digest')
+    source = source_shape(value['source_identity'])
+    need(value['candidate']['version'] == '1.14.2-vui-socks-owner-experiment-' + source['vui_commit'][:12],
+         'Candidate version is not the exact owner source identity')
     build = value['build_evidence']
     need(set(build) == {'path', 'files'} and isinstance(build['path'], str) and build['path'] and
          isinstance(build['files'], dict), 'Wrong owner runtime build evidence descriptor')
@@ -180,13 +251,26 @@ def validate_bytes(name, data, format):
     if format == 'json':
         value = strict_json(text)
         check_clean(value)
-        if name in ('runtime/off-input.json', 'runtime/on-input.json'):
+        if name == 'provenance.json':
+            provenance_shape(value)
+        elif re.fullmatch(r'runtime/(?:off|on)/[CDABUV]/input-identity\.json', name):
+            need(isinstance(value, dict), 'Wrong runtime input identity object')
+            source = provenance_shape(value.get('build_provenance'))
+            need(value.get('source_identity') == source, 'Runtime input/provenance source identities differ')
+        elif name in ('runtime/off-input.json', 'runtime/on-input.json'):
             input_shape(value, name.split('/')[1].split('-')[0])
-        elif name == 'runtime/RUNTIME_RESULT.json':
+        elif name == 'runtime/RUNTIME_RESULT.json' or re.fullmatch(r'runtime/(?:off|on)/[CDABUV]/result\.json', name):
             need(isinstance(value, dict) and type(value.get('schema_version')) is int and
                  value['schema_version'] == SCHEMA and value.get('kind') == RUNTIME_KIND and
-                 value.get('product_qualified') is False and value.get('continuity_claim') is False,
-                 'Wrong owner runtime result scope')
+                 value.get('product_qualified') is False, 'Wrong owner runtime result scope')
+            if name == 'runtime/RUNTIME_RESULT.json':
+                need(value.get('device_whole_window_continuity_proven') is False,
+                     'Runtime summary cannot claim whole-window OS continuity')
+        elif re.fullmatch(r'runtime/(?:off|on)/[CDABUV]/manifest\.json', name):
+            need(isinstance(value, dict) and set(value) == {'schema_version', 'kind', 'files'} and
+                 type(value['schema_version']) is int and value['schema_version'] == SCHEMA and
+                 value['kind'] == RUNTIME_KIND + '-evidence' and isinstance(value['files'], dict),
+                 'Wrong owner stage evidence manifest scope')
     elif format == 'jsonl':
         for line in text.splitlines():
             if line.strip():
@@ -195,7 +279,7 @@ def validate_bytes(name, data, format):
                 check_clean(value)
     else:
         need(format == 'text' and h.c.life.clean(text) == text, 'Unsanitized text evidence: ' + name)
-        need(SECRET_ASSIGNMENT.search(text) is None, 'Secret-bearing text in evidence: ' + name)
+        need(SECRET_ASSIGNMENT.search(text) is None and KNOWN_CREDENTIAL.search(text) is None, 'Secret-bearing text in evidence: ' + name)
         check_owner_logs(text)
     return data
 
@@ -228,9 +312,10 @@ def open_directory(path, missing_ok=False):
         raise
 
 
-def collect(root, files, *, missing_ok=False, inodes=None):
+def collect(root, files, *, missing_ok=False, inodes=None, budget=None):
     """Read a fixed-name tree using no-follow file descriptors, not rglob."""
     inodes = set() if inodes is None else inodes
+    budget = {'bytes': 0} if budget is None else budget
     directories = allowed_directories(files)
     root_fd = open_directory(root, missing_ok)
     if root_fd is None:
@@ -267,12 +352,15 @@ def collect(root, files, *, missing_ok=False, inodes=None):
                      identity == (info.st_dev, info.st_ino) and identity not in inodes,
                      'Changed, aliased or nonregular evidence: ' + relative)
                 inodes.add(identity)
+                need(0 <= before.st_size <= MAX_FILE_BYTES and
+                     budget['bytes'] + before.st_size <= MAX_TOTAL_BYTES, 'Evidence resource ceiling exceeded')
                 with os.fdopen(child, 'rb', closefd=False) as stream:
-                    data = stream.read()
+                    data = stream.read(before.st_size + 1)
                 after = os.fstat(child)
                 need((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns, before.st_nlink) ==
                      (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns, after.st_nlink) and
                      len(data) == before.st_size, 'Evidence changed while reading: ' + relative)
+                budget['bytes'] += len(data)
                 found[relative] = data
             finally:
                 os.close(child)
@@ -325,19 +413,22 @@ def prepare(build, output, contract=None, runtime=None):
         need(root != output and root not in output.parents and output not in root.parents,
              'Archive and evidence roots overlap')
     need(len(roots) == len(set(roots)), 'Duplicate evidence roots')
-    inodes, members = set(), {}
+    inodes, members, budget = set(), {}, {'bytes': 0}
     if build is not None:
         build_files = {name: format for name, format in files.items() if not name.startswith('runtime/')}
-        members.update(collect(build, build_files, missing_ok=True, inodes=inodes))
+        members.update(collect(build, build_files, missing_ok=True, inodes=inodes, budget=budget))
     if runtime is not None:
         runtime_files = {name.removeprefix('runtime/'): format for name, format in files.items()
                          if name.startswith('runtime/')}
         members.update({'runtime/' + name: data for name, data in
-                        collect(runtime, runtime_files, missing_ok=True, inodes=inodes).items()})
+                        collect(runtime, runtime_files, missing_ok=True, inodes=inodes, budget=budget).items()})
     need(members, 'No evidence members to preserve')
     for name, data in members.items():
         validate_bytes(name, data, files[name])
     manifest = manifest_for(members, files)
+    manifest_bytes = canonical(manifest)
+    need(len(manifest_bytes) <= MAX_FILE_BYTES and budget['bytes'] + len(manifest_bytes) <= MAX_TOTAL_BYTES,
+         'Archive including manifest exceeds evidence resource ceiling')
     # All source checks finish before output creation. The output must be fresh;
     # its existing parent is opened without following any symlink component.
     parent = open_directory(output.parent)
@@ -347,7 +438,7 @@ def prepare(build, output, contract=None, runtime=None):
     finally:
         os.close(parent)
     try:
-        for name, data in sorted({**members, MANIFEST: canonical(manifest)}.items()):
+        for name, data in [*sorted(members.items()), (MANIFEST, manifest_bytes)]:
             fd = os.dup(out)
             try:
                 parts = PurePosixPath(name).parts

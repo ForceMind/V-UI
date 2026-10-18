@@ -1,7 +1,8 @@
 # Opt-in SOCKS owner mechanism candidate
 
-This is a source-only mechanism candidate awaiting exact-head validation. No owner Go compilation,
-race/debug test, runtime matrix, or qualification has completed. Do not deploy,
+This is an isolated source experiment. The first reconstructed owner mechanism
+run at 398ef8a failed; successful partial Go groups do not grant owner qualification.
+The next candidate requires fresh complete mechanism and finite runtime validation. Do not deploy,
 release, merge into product code, or infer product UDP support from this branch.
 
 The last verified public baseline is commit
@@ -61,7 +62,8 @@ SOCKS owner surviving 200 generations. Separate real-owner two-generation tests
 verify actual route metadata, server packet target and unique payloads before
 actual Router rejection. The initial target remap and no-replay boundary remain.
 
-The pending/ drafts are excluded from injection and execution. Constructor
-blocking/late cancellation, real power-counter composition, and the finite
-owner-off/on runtime gates remain mandatory subsequent work. A successful
-mechanism run would not grant product or transparent-recovery qualification.
+At that first candidate, pending drafts were excluded from injection and execution.
+The subsequent candidate replaces those drafts with reviewed constructor, late
+lease, Admitted-deadline, power-counter and finite owner-off/on gates. See
+RUNTIME_PREP.md and the run ledger. Partial mechanism success never grants
+product or transparent-recovery qualification.

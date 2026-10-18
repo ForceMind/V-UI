@@ -165,7 +165,9 @@ def install(rt, arm):
                 core = super().process(label,changed,mihomo=mihomo,env=env)
                 row = records[-1]
                 row.update(flags)
-                row['log_file'] = {'overseas':'001-overseas.log','domestic':'002-domestic.log','device-singbox':'003-device-singbox.log'}[label]
+                expected_log = {'overseas':'001-overseas.log','domestic':'002-domestic.log','device-singbox':'003-device-singbox.log'}[label]
+                need(core.log_path.name == expected_log, 'Actual role log filename changed')
+                row['log_file'] = core.log_path.name
                 p.save(output/'process-binaries.json',records)
                 return core
         return Fixture

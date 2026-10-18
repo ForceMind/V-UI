@@ -260,7 +260,7 @@ jobs:
           python3 - <<'PYTHON'
           import unittest
           suite = unittest.TestLoader().discover('experiments/socks_idle_recovery', pattern='test_*.py')
-          assert suite.countTestCases() == 47
+          assert suite.countTestCases() == 157
           result = unittest.TextTestRunner(verbosity=2).run(suite)
           assert result.wasSuccessful() and not result.skipped
           PYTHON
@@ -272,14 +272,24 @@ jobs:
             --sing .experiment-source/sing \
             --mechanism /tmp/vui-owner-mechanism \
             --output /tmp/vui-owner-build
-      - name: Prepare allowlisted owner mechanism evidence
+      - name: Fetch unchanged official control for owner off and on arms
+        run: python3 scripts/fetch_test_cores.py /tmp/vui-owner-official/cores
+      - name: Run frozen owner-off matrix and same-association owner-on C and D
+        run: |
+          python3 experiments/socks_idle_recovery/run_owner_runtime.py \
+            --repository "$PWD" \
+            --build /tmp/vui-owner-build \
+            --official /tmp/vui-owner-official/cores/sing-box \
+            --output /tmp/vui-owner-runtime
+      - name: Prepare allowlisted owner mechanism and runtime evidence
         if: always()
         id: evidence
         run: |
-          python3 experiments/socks_idle_recovery/prepare_evidence.py \
+          python3 experiments/socks_idle_recovery/prepare_runtime_evidence.py \
             --build /tmp/vui-owner-build/evidence \
+            --runtime /tmp/vui-owner-runtime \
             --output /tmp/vui-owner-upload
-      - name: Preserve owner mechanism text only
+      - name: Preserve owner mechanism and runtime text only
         if: ${{ !cancelled() && steps.evidence.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

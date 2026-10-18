@@ -151,7 +151,7 @@ def verify_private_transport_samples(rt,data,role,lifecycle):
 def verify_same_owner_samples(rt,data,case,result,roles,source,lifecycle):
     observed=rt.socks.verify_case(data,case,result,roles,source,lifecycle)
     need(observed['business_recovery_passed'] is True,'Original business recovery failed')
-    role=next(r for r in roles if r['role']=='device-singbox')
+    role=next(r for r in roles if r['role']=='device-singbox' and r['case']==case['id'])
     transport=verify_private_transport_samples(rt,data,role,lifecycle)
     if case['mode']=='close':
         initial,recovery=data['associations']

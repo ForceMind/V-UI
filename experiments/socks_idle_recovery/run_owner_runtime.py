@@ -56,17 +56,35 @@ def run_arm(rt,output,manifest_path,arm,*,runner=None,safety_checker=None,failur
     p.save(output/'stages.json',rows)
     return rows
 
+FROZEN_OFF_GATES = {'C':True, 'D':False, 'A':False, 'B':True, 'U':True, 'V':False}
+
+def original_diagnostics_verified(row):
+    # Outcome classes cannot replace the unchanged raw-evidence checkers.
+    if any(key in row for key in ('failure_observation_error','socks_association_observation_error','execution_safety_error')):
+        return False
+    failure=row.get('failure_observations')
+    applicable=row['stage'] in ('A','U','V')
+    if (not isinstance(failure,dict) or failure.get('applicable') is not applicable or
+            failure.get('failed_observations_verified') is not applicable):
+        return False
+    if row['stage']=='D' and row.get('socks_association_observations',{}).get('observations_verified') is not True:
+        return False
+    return True
+
 def summarize(arms,source):
     expected=[(arm,stage) for arm,stages in a.ARMS.items() for stage in stages]
     executed=[(arm,row['stage']) for arm,rows in arms.items() for row in rows]
     complete=executed==expected
     safe=all(row.get('stage_execution_safe') is True for rows in arms.values() for row in rows)
     additional=all(row.get('additional_verification_passed') is True for rows in arms.values() for row in rows)
-    baseline=len(arms.get('off',[]))==6 and all(r.get('baseline_classification_preserved') is True for r in arms['off'])
+    diagnostics=all(original_diagnostics_verified(row) for rows in arms.values() for row in rows)
+    baseline=len(arms.get('off',[]))==6 and all(r.get('baseline_classification_preserved') is True and
+             r.get('stage_gate_passed') is FROZEN_OFF_GATES[r['stage']] for r in arms['off'])
     on=len(arms.get('on',[]))==2 and all(r.get('stage_gate_passed') is True for r in arms['on'])
     return {'schema_version':1,'kind':a.RUNTIME_KIND,'source_identity':source,'runtime_executed':True,
             'all_stages_executed':complete,'all_executed_stages_resource_safe':safe,
-            'finite_experiment_contract_passed':complete and safe and additional and baseline and on,
+            'finite_experiment_contract_passed':complete and safe and additional and diagnostics and baseline and on,
+            'original_diagnostic_checkers_verified':diagnostics,
             'candidate_off_baseline_preserved':baseline,'owner_on_original_C_D_passed':on,
             'unexecuted_stages':[{'arm':arm,'stage':stage} for arm,stage in expected if (arm,stage) not in executed],
             'original_suite_passed':False,'product_qualified':False,'device_whole_window_continuity_proven':False,
