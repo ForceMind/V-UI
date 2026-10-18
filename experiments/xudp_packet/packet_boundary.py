@@ -698,25 +698,38 @@ def observed_exchange(association, target, case, p, helper, rows, persist, f, c,
     return row
 
 
-def lifecycle_exercise(f, target, case, helper, c, psutil, rows, persist):
+def lifecycle_exercise(f, target, case, helper, c, psutil, rows, persist, process_records):
     events = c.life.Events(persist.parent / "lifecycle-observation.json", case["id"])
+    from socks_observation import Observation, observable_socks_class, FILE
+    source = json_read(persist.parent.parent / "input-identity.json")["source_identity"]
+    device_roles = [r for r in process_records if r["case"] == case["id"] and r["role"] == "device-singbox"]
+    need(len(device_roles) == 1, "Missing exact device observation role")
+    observation = Observation(persist.parent / FILE, case, f.client, psutil, c.observer, source, device_roles[0])
+    SocksDatagrams = observable_socks_class(helper)
     association = None
     try:
         watch = c.life.SocketWatch(f, psutil, events)
         before = watch.baseline()
         baseline_index = watch.samples.index(before)
-        association = helper.SocksDatagrams(f.client_port)
+        association = SocksDatagrams(f.client_port)
+        observation.add(association, "initial")
         exchange(association, target, case, case["packets"][0], helper, rows, persist)
         save(persist, rows)
         live = watch.snapshot("after_large_business")
+        observation.capture("after_large_business", live, hash_executable=True)
         leg = c.life.paired_leg(before, live, f.upstream_port)
         c.life.verify_new_sockets(before, live, leg, ingress_port=f.ingress_port)
         last = rows[0]["reply_monotonic"]
+        observation.data.update(last_business_reply=last, deadline=last + 6)
         if case["mode"] == "close":
+            observation.data["explicit_close"] = {"started": time.monotonic()}
             association.close()
+            observation.data["explicit_close"]["completed"] = time.monotonic()
+            observation.capture("after_explicit_close")
         deadline, gone = last + 6, None
         while time.monotonic() < deadline:
             sample = watch.snapshot("large_then_" + case["mode"])
+            observation.capture("release_window", sample)
             if not c.life.leg_present(sample, leg):
                 if gone is None:
                     need(sample["sample_completed_monotonic"] <= deadline, "Closure crossing sample is inconclusive")
@@ -725,15 +738,19 @@ def lifecycle_exercise(f, target, case, helper, c, psutil, rows, persist):
                 raise ValueError("Released association inode reappeared before idle/close window ended")
             time.sleep(.03)
         final = watch.snapshot("large_then_" + case["mode"] + "_window_complete")
+        observation.capture("window_complete", final)
         need(gone is not None and not c.life.leg_present(final, leg), "Exact large-packet association sockets survived/reappeared within six seconds")
         # No raw session End is visible on a SOCKS interface. Report only the
         # endpoint socket/packet smoke, keeping the old raw-End suite separate.
         watch.events.event("large_endpoint_resources_released", leg=leg, deadline=deadline,
                            raw_session_end_observed=False, scope="additional_endpoint_smoke")
         if case["mode"] == "close":
-            association = helper.SocksDatagrams(f.client_port)
+            association = SocksDatagrams(f.client_port)
+            observation.add(association, "recovery")
+        observation.capture("before_recover")
         exchange(association, target, case, case["packets"][1], helper, rows, persist)
         save(persist, rows)
+        observation.capture("after_recover")
         proof = {"mode": case["mode"], "baseline": before, "live": live, "leg": leg,
                  "last_business_reply": last, "deadline": deadline, "first_absence": gone, "ingress_port": f.ingress_port,
                  "final": final, "samples": watch.samples[baseline_index:],
@@ -743,6 +760,7 @@ def lifecycle_exercise(f, target, case, helper, c, psutil, rows, persist):
         watch.events.data["status"] = "observed"
         watch.events.flush()
     except Exception as exc:
+        observation.capture("failure")
         events.data["status"] = "error"
         events.data["error"] = {"type": type(exc).__name__, "message": c.life.clean(str(exc))}
         events.flush()
@@ -752,12 +770,18 @@ def lifecycle_exercise(f, target, case, helper, c, psutil, rows, persist):
             try:
                 association.close()
                 need(association.stream.fileno() == -1, "SOCKS application socket survived cleanup")
+                need(association.control.fileno() == -1, "SOCKS control socket survived cleanup")
             except Exception as exc:
                 events.data["status"] = "error"
                 events.data["cleanup_error"] = {"type": type(exc).__name__, "message": c.life.clean(str(exc))}
                 events.data.setdefault("error", events.data["cleanup_error"])
                 events.flush()
                 raise
+            finally:
+                observation.capture("after_local_cleanup", hash_executable=True)
+                observation.finish()
+        else:
+            observation.finish()
     return {"proof": proof, "observation_sha256": sha(persist.parent / "lifecycle-observation.json")}
 
 
@@ -803,7 +827,7 @@ def run_case(case, c, module, output, binaries, process_records, psutil):
             row["process_identity"] = [{"pid": core.process.pid,
                 "birth_time": psutil.Process(core.process.pid).create_time()} for core in f.processes]
             if case["mode"] in ("close", "idle"):
-                row["lifecycle"] = lifecycle_exercise(f, target, case, helper, c, psutil, row["packets"], directory / "packets.json")
+                row["lifecycle"] = lifecycle_exercise(f, target, case, helper, c, psutil, row["packets"], directory / "packets.json", process_records)
             else:
                 association = helper.SocksDatagrams(f.client_port)
                 try:
@@ -1102,6 +1126,7 @@ def expected_artifacts(cases):
                        f"frozen-fixture/{name}.json", f"frozen-fixture/{name}.log"})
         if case["mode"] in ("idle", "close"):
             result.add(f"{name}/lifecycle-observation.json")
+            result.add(f"{name}/socks-association-observation.json")
     return result
 
 
@@ -1125,6 +1150,7 @@ def write_evidence_manifest(output, cases):
              "Missing fixed case evidence files")
         if case["mode"] in ("idle", "close"):
             need(case["id"] + "/lifecycle-observation.json" in files, "Missing fixed lifecycle observation file")
+            need(case["id"] + "/socks-association-observation.json" in files, "Missing passive SOCKS observation file")
     save(output / "manifest.json", {"schema_version": 1, "kind": KIND + "-evidence", "files": files})
 
 

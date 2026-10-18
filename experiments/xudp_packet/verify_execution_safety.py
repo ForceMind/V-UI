@@ -38,6 +38,7 @@ def verify(directory, stage, execution, expected_input, expected_manifest_sha256
                          'frozen-fixture/'+case['id']+'.json', 'frozen-fixture/'+case['id']+'.log'})
         if case['mode'] in ('close', 'idle'):
             required.add(case['id']+'/lifecycle-observation.json')
+            required.add(case['id']+'/socks-association-observation.json')
     p.need(required <= set(members), 'Missing raw case/fixture evidence')
     for name, digest in members.items():
         p.need(p.digest(digest) and p.sha(directory/name) == digest, 'Stage evidence hash mismatch')

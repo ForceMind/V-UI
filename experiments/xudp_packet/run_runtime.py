@@ -12,6 +12,7 @@ import packet_boundary as p
 import build_and_test as b
 import verify_execution_safety as safety
 import verify_failed_observations as failures
+import verify_socks_observation as socks
 
 STAGES = ('C', 'D', 'A', 'B', 'U', 'V')
 
@@ -93,7 +94,7 @@ def check_failure_observations(directory, stage, report):
 
 
 def run_stages(output, manifest_path, runner=run_stage, safety_checker=safety.verify,
-               failure_checker=check_failure_observations):
+               failure_checker=check_failure_observations, socks_checker=socks.verify_stage):
     results = []
     expected_input = p.json_read(manifest_path)
     manifest_sha256 = p.sha(manifest_path)
@@ -125,6 +126,14 @@ def run_stages(output, manifest_path, runner=run_stage, safety_checker=safety.ve
             except (OSError, ValueError, KeyError, TypeError, IndexError) as exc:
                 row['stage_gate_passed'] = False
                 row['failure_observation_error'] = {'type': type(exc).__name__, 'message': str(exc)}
+        if row['stage_execution_safe'] and stage == 'D':
+            try:
+                row['socks_association_observations'] = socks_checker(output/stage, stage, report)
+                if row['socks_association_observations'].get('observations_verified') is not True:
+                    row['stage_gate_passed'] = False
+            except (OSError, ValueError, KeyError, TypeError, IndexError) as exc:
+                row['stage_gate_passed'] = False
+                row['socks_association_observation_error'] = {'type': type(exc).__name__, 'message': str(exc)}
         # Preserve a small already-sanitized diagnostic in job logs even if
         # artifact assembly subsequently fails. Do not print packet/config data.
         print(json.dumps(b.c.life.scrub({'stage': stage, 'returncode': row['returncode'],
@@ -134,6 +143,8 @@ def run_stages(output, manifest_path, runner=run_stage, safety_checker=safety.ve
               'execution_safety_error': row.get('execution_safety_error'),
               'failure_observations': row.get('failure_observations'),
               'failure_observation_error': row.get('failure_observation_error'),
+              'socks_association_observations': row.get('socks_association_observations'),
+              'socks_association_observation_error': row.get('socks_association_observation_error'),
               'diagnostic_complete': report.get('diagnostic_complete'),
               'stage_capacity_passed': report.get('stage_capacity_passed'),
               'report_error': report_error,

@@ -194,3 +194,53 @@ the exact receive-patched dependency, with race/debug and source identity.
 No receive-buffer, writer-budget, timeout, product pin or original gate changes.
 The idle-association failure remains independently blocked pending its own
 source/semantic analysis; zero-packet success alone cannot qualify D.
+
+## 2026-10-18 exact zero-datagram repair: capacity passed, lifecycle remains RED
+
+Exact `6a829dc69317a26c6e924b9d05673838e0002bb1`, tree
+`5867e691f61364e9bebe1e7e18e489e0617000c2`,
+[run 39131317198 attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39131317198)
+finished **failure** overall. The mux mechanism passed; packet/original runtime
+jobs retained their failed gates. The [phase record](https://github.com/ForceMind/V-UI/pull/48#issuecomment-6250579779)
+was posted once and read back exactly.
+
+Independent verification checked all 23 receive/build/shared groups on the same
+receive-patched sing dependency, exact committed and formatted source hashes,
+compiler bytes, normalized module graph and patch chain. Receive remains 58
+leaves in each of race and race+debug; six Darwin/Windows package checks are
+compile-only. Raw/AES/ChaCha empty UDP tests now pass 24 leaves / 120 events in
+each required mode. Existing bounded writer, actual route and normal/encrypted
+partial-write cancellation checks pass; encrypted cancellation is still only
+library-caller qualification, not the joint actual ConnectionManager path.
+
+C's unchanged plan now passes **78 cases / 198 leaves**: 195 complete request-reply
+business checks and three local EMSGSIZE negative leaves. This includes all
+first/warmed zero packets and subsequent recovery, full-short-empty-recovery,
+and all nonempty 32768/60000/65497 boundaries in both directions. The previous
+nine zero-packet failures and nine unexecuted recoveries remain in a066's ledger.
+
+D remains **3 close observed / 3 idle failed**. All initial 60000 exchanges pass.
+Idle forwarding resources disappear at about 2.076/2.065/2.074 seconds and stay
+absent throughout the six-second window, but the original association's 32768
+recovery is not delivered. The exact device relay/control closure has not yet
+been observed directly. Fixed source suggests End-to-EOF closes the SOCKS side;
+this is not a measured control EOF or an RFC violation claim.
+
+All six stages executed with strict resource/identity proof, but A/V business
+gates fail, B/U provide complete stock capacity RED diagnostics, and D fails.
+Original runtime is still 19/20 in each arm; four VMess 32768 requests truncate
+to 15992 (60000 unexecuted). Both arms' six lifecycle and shared TCP checks pass
+in this exact run. Earlier observer/compile/parser failures are not erased.
+`all_gates_passed=false` and `product_qualified=false` remain.
+
+| Artifact | Members | ZIP bytes | ZIP SHA-256 |
+|---|---:|---:|---|
+| 12137692858 mux | 54 | 123975 | 1422ee0434db8b0c6674da50e29444e63117a3b80f54771b3452add5339d0e33 |
+| 12138750306 packet | 751 | 1061940 | c08c64411b2108b9f21bc9d0408060c8f212124fc48c6fc847a9acdf1355858d |
+| 12138058896 original runtime | 277 | 410975 | 4967e989a1e15844d047a109fb90089af3b5e8084ab59b9d58b89078a4f0dfee |
+
+The next D-only evidence step is passive: record the existing device relay,
+control EOF and descriptor ownership alongside the original six cases. Do not
+send probes, retry recovery, replace the idle association, change timeouts or
+edit the frozen observer. Any owner/route-child reconstruction is a separate
+reviewed design after these facts are observed; it is not part of the zero fix.

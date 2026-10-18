@@ -55,7 +55,7 @@ class CoordinatorTests(unittest.TestCase):
         for key,value in (('timeout',True),('returncode',1),('returncode',None)):
             row=self.row();row[key]=value
             self.assertFalse(r.stage_passed(row,self.report()))
-    def run_fake(self, bad=None, missing=False, unsafe=None, unverified=None):
+    def run_fake(self, bad=None, missing=False, unsafe=None, unverified=None, socks_unverified=False):
         with tempfile.TemporaryDirectory() as d:
             out=Path(d);seen=[]
             (out/'input.json').write_text('{}')
@@ -73,7 +73,11 @@ class CoordinatorTests(unittest.TestCase):
             def failure_checker(directory, stage, report):
                 return {'applicable':stage in ('A','U','V'),
                         'failed_observations_verified':stage!=unverified,'capacity_evaluated':False}
-            result=r.run_stages(out,out/'input.json',runner,safety_checker,failure_checker)
+            def socks_checker(directory, stage, report):
+                self.assertEqual(stage,'D')
+                if socks_unverified == 'error': raise ValueError('Inconclusive passive observation')
+                return {'applicable':True,'observations_verified':not socks_unverified,'capacity_evaluated':False}
+            result=r.run_stages(out,out/'input.json',runner,safety_checker,failure_checker,socks_checker)
             self.assertEqual(json.loads((out/'stages.json').read_text()),result)
             return seen,result
     def test_complete_six_stages(self):
@@ -101,6 +105,21 @@ class CoordinatorTests(unittest.TestCase):
     def test_missing_report_stops(self):
         seen,rows=self.run_fake(missing=True);self.assertEqual(seen,['C'])
         self.assertFalse(rows[0]['stage_gate_passed'])
+    def test_verified_passive_observation_cannot_promote_failed_D(self):
+        seen,rows=self.run_fake('D');self.assertEqual(seen,list(r.STAGES))
+        row=next(x for x in rows if x['stage']=='D')
+        self.assertTrue(row['socks_association_observations']['observations_verified'])
+        self.assertFalse(row['stage_gate_passed'])
+    def test_unverified_passive_observation_stays_distinct_and_safe_continues(self):
+        seen,rows=self.run_fake(socks_unverified=True);self.assertEqual(seen,list(r.STAGES))
+        row=next(x for x in rows if x['stage']=='D')
+        self.assertFalse(row['stage_gate_passed']);self.assertTrue(row['stage_execution_safe'])
+        self.assertFalse(row['socks_association_observations']['observations_verified'])
+    def test_passive_error_stays_distinct_and_safe_continues(self):
+        seen,rows=self.run_fake(socks_unverified='error');self.assertEqual(seen,list(r.STAGES))
+        row=next(x for x in rows if x['stage']=='D')
+        self.assertFalse(row['stage_gate_passed']);self.assertTrue(row['stage_execution_safe'])
+        self.assertEqual(row['socks_association_observation_error']['type'],'ValueError')
     def test_real_owned_process_success(self):
         result=r.run_stage([sys.executable,'-c','print("owned child")'],timeout=2)
         self.assertEqual(result['stdout'],'owned child\n')

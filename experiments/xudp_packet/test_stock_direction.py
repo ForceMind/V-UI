@@ -337,15 +337,23 @@ class LifecycleFailureTerminals(unittest.TestCase):
                 value={"baseline":True};self.samples.append(value);return value
         association=Mock()
         association.stream.fileno.return_value=-1
+        association.control.fileno.return_value=-1
         if cleanup_error:association.close.side_effect=OSError("close failed")
         helper=SimpleNamespace(SocksDatagrams=Mock(return_value=association))
         life=SimpleNamespace(Events=self.Events,SocketWatch=Watch,clean=lambda text:text)
-        c=SimpleNamespace(life=life);case=b.plan("D")[0]
-        with tempfile.TemporaryDirectory() as d, patch.object(b,"exchange",side_effect=TimeoutError("real exchange timeout")):
-            persist=Path(d)/"packets.json"
+        c=SimpleNamespace(life=life,observer=None);case=b.plan("D")[0]
+        with tempfile.TemporaryDirectory() as d, patch.object(b,"exchange",side_effect=TimeoutError("real exchange timeout")), \
+             patch("socks_observation.Observation") as observation, \
+             patch("socks_observation.observable_socks_class", return_value=helper.SocksDatagrams):
+            directory=Path(d)/case["id"];directory.mkdir()
+            persist=directory/"packets.json"
+            b.save(Path(d)/"input-identity.json", {"source_identity": {}})
             with self.assertRaises((ValueError,TimeoutError,OSError)):
-                b.lifecycle_exercise(SimpleNamespace(client_port=1234),None,case,helper,c,None,[],persist)
-            data=json.loads((Path(d)/"lifecycle-observation.json").read_text())
+                b.lifecycle_exercise(SimpleNamespace(client_port=1234,client=None),None,case,helper,c,None,[],persist,
+                                     [{"case":case["id"],"role":"device-singbox"}])
+            data=json.loads((directory/"lifecycle-observation.json").read_text())
+            observation.return_value.capture.assert_any_call("failure")
+            observation.return_value.finish.assert_called_once()
         self.assertEqual(data["status"],"error")
         self.assertTrue(data["error"]["message"])
         self.assertEqual(data["events"],[{"kind":"actual_baseline_started"}])
