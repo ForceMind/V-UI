@@ -1,0 +1,11 @@
+# Recovery checkpoint, 2026-10-18
+
+This branch is an unqualified work in progress based on product master 1489bf5218fced9b42c57e06715478dc323dc782. Design review approved only the bounded plan. No new UDP runtime gate has passed.
+
+The cloud executor disconnected while starting the first pure-control run at approximately 20:52 UTC. A subsequent recovery timed out. This commit preserves the adapter text reconstructed from the executed edits and immutable afbdba1 sources through the repository connector; it is not a byte-identity assertion about the unavailable local working tree. It requires syntax checks, complete control tests and independent source review before any research CI execution.
+
+Earlier local evidence: the first attempt refused a non-executable extracted Mihomo file whose bytes matched the pin. The second used the existing executable stock Mihomo; the first sing-box process failed with create netlink socket: operation not permitted. No business datagram was sent. Neither attempt is a UDP capability result. No security settings or core pins were changed.
+
+Review corrections included in this recovery: explicit stock Mihomo process identity; unchanged strict C/D packet expectations; B measured without a must-fail assertion; same application/relay and overseas source tuples; complete target counts; full local EMSGSIZE proof; passive actual send/recv wire hashes and single-send accounting; real application/control FD closure; source tree and untracked-import checks; separate resource disposal and preserved data-audit failures. The original 2-second configuration and complete six-second release window remain unchanged.
+
+Remaining before runtime: recover/verify the finite control tests and owned-stage coordinator; add strictly allowlisted text-only evidence preparation and independent verifier; add first-/second-hop auth/TLS/stopped-upstream controls plus TCP sanity; add current product API-export/relay-UDP-rejection control; wire isolated CI, rebuild the old candidate only on an empty runner if its temporary binary is unavailable; run C26/66, D2/4 for stock/candidate and B1/4 overseas-stock; retain actual failure/unexecuted statuses; independent exact-head review; update project handoff/compatibility results. No experimental binary upload, product pin/code change, release, merge or deployment is included in this checkpoint.

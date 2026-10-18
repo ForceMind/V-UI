@@ -144,3 +144,9 @@ python -m unittest discover -s tests -v
 真实核心/浏览器的可执行命令以 `.github/workflows/loopback.yml`、`test.yml` 和 [贡献指南](../CONTRIBUTING.md)为准：`scripts/fetch_test_cores.py` / `fetch_mihomo.py` 校验固定来源，`VUI_PROXY_LOOPBACK=1`、`VUI_TEST_CORES`、`VUI_TEST_MIHOMO` 激活真实 proxy 测试；`VUI_PROXY_BROWSER=1` 与固定前端资产激活浏览器。新增每入口真实步骤使用 `VUI_INBOUND_ROUTING_LOOPBACK=1` 执行 `test_inbound_routing_real.py`；配置解析用 `VUI_TEST_CORES` 执行 `test_inbound_routing_parser.py`。新增实际浏览器流程以 `VUI_INBOUND_ROUTING_BROWSER=1` 执行 `test_inbound_routing_browser.py`，准确 0962 已实际完成 3 项控制与 1 个真实流程；新提交仍须显式执行，不能仅因默认 discover skip 便计通过。
 
 没有 Python/核心/浏览器时记录精确未跑条件；不要把 mock、语法检查、skip 或旧 run 当成新功能绿灯。最终报告至少包含准确 head/tree、命令/run/attempt、实际通过/失败/skip、二进制来源、资源清理、独审结论与未完成项。新代码提交后及时更新本表，不抹去先前失败。
+
+## 标准客户端 UDP 研究恢复点（2026-10-18）
+
+已从准确 master 1489bf5218fced9b42c57e06715478dc323dc782 新建独立 experiment/standard-client-udp-20261018；[有界设计](../experiments/standard_client_udp/DESIGN.md)已独审，适配器仍是未验收 WIP。当前没有新增 UDP 通过结论。云执行器在首轮纯控制测试启动时断联；此前本地官方核心启动遭 netlink EPERM，零业务 UDP，不能解释为协议失败。恢复文本、未执行验证和下一步见[恢复记录](../experiments/standard_client_udp/RECOVERY.md)。
+
+继续顺序：先对恢复后的准确源码做语法/18项计划控制与独审，补严格证据归档和第一/第二跳负控；空白 CI runner 分开执行产品 relay UDP 拒绝、全 stock 两跳、候选服务器 owner-off C/D 和官方海外 B 组。C 为26 case/66 leaf，D为2/4，B为1/4；容量失败不改成预期通过，60000前置失败时释放窗/恢复未执行。保持2s配置及完整6s观察窗、原应用对象/tuple、一次发送无重放、清理与普通导出字段。实验仍不进入产品、不上传实验二进制、不要求自研手机 App、不发布或部署。
