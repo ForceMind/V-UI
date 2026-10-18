@@ -1,5 +1,10 @@
 name: Standard client UDP research
 on:
+  push:
+    branches: [experiment/standard-client-udp-20261018]
+    paths:
+      - experiments/standard_client_udp/**
+      - .github/workflows/standard-client-udp-experiment.yml
   workflow_dispatch:
 permissions:
   contents: read
