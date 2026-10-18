@@ -1,6 +1,6 @@
-# WIP: opt-in SOCKS owner recovery experiment
+# Opt-in SOCKS owner mechanism candidate
 
-This is an incomplete source-only recovery checkpoint. No owner Go compilation,
+This is a source-only mechanism candidate awaiting exact-head validation. No owner Go compilation,
 race/debug test, runtime matrix, or qualification has completed. Do not deploy,
 release, merge into product code, or infer product UDP support from this branch.
 
@@ -47,3 +47,21 @@ mux, packet and original runtime control suites separately pass 122, 38, 179
 and 26 tests. These are pure harness checks, not Go or core runtime results.
 The sing reconstruction restores strict IPv4 association hints and the original
 neutral dormant event cause. Its source remains a newly reviewed candidate.
+
+## First reconstructed mechanism candidate
+
+The strict manifest selects 807 Go leaves in eight groups, each in race and
+race+debug modes, plus 22 Darwin/Windows compile-only checks. It runs the
+unchanged 23 packet/mux checks both on the five-patch base and on the complete
+eight-patch dependency tree. Base and final source identities are distinct.
+
+Of the 648 box leaves, 600 use real TLS/concrete outbound/Service/ConnectionManager
+with a fresh mock lifecycle child for each cycle. They do not prove one real
+SOCKS owner surviving 200 generations. Separate real-owner two-generation tests
+verify actual route metadata, server packet target and unique payloads before
+actual Router rejection. The initial target remap and no-replay boundary remain.
+
+The pending/ drafts are excluded from injection and execution. Constructor
+blocking/late cancellation, real power-counter composition, and the finite
+owner-off/on runtime gates remain mandatory subsequent work. A successful
+mechanism run would not grant product or transparent-recovery qualification.
