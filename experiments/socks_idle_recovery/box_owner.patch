@@ -462,10 +462,19 @@ index 7b16fc9..236ff50 100644
 +	return adapter.NewPacketSessionLease(xudp, abort, cache.ReleasePacketSessionReadCacheAfterJoin), nil
 +}
 diff --git a/route/conn.go b/route/conn.go
-index d77a407..6430424 100644
+index d77a407..fb6b985 100644
 --- a/route/conn.go
 +++ b/route/conn.go
-@@ -154,6 +154,10 @@ func (m *ConnectionManager) NewConnection(ctx context.Context, this N.Dialer, co
+@@ -47,6 +47,8 @@ func (m *ConnectionManager) Start(stage adapter.StartStage) error {
+ }
+ 
+ func (m *ConnectionManager) Count() int {
++	m.access.Lock()
++	defer m.access.Unlock()
+ 	return m.connections.Len()
+ }
+ 
+@@ -154,6 +156,10 @@ func (m *ConnectionManager) NewConnection(ctx context.Context, this N.Dialer, co
  }
  
  func (m *ConnectionManager) NewPacketConnection(ctx context.Context, this N.Dialer, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {

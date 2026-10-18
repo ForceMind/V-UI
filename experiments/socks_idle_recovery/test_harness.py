@@ -246,7 +246,7 @@ class IntegratedManifestControls(unittest.TestCase):
         self.assertEqual(len(contract['files']), 16)
         self.assertEqual({g['label']: len(g['leaves']) for g in contract['groups']}, {
             'sing_socks_owner': 62, 'sing_chunk_owner': 1, 'box_owner_adapter': 2,
-            'box_owner_dialer': 13, 'box_owner_mixed': 1, 'box_owner_route': 632,
+            'box_owner_dialer': 13, 'box_owner_mixed': 1, 'box_owner_route': 633,
             'owner-vmess': 92, 'owner-vless': 4, 'box_owner_constructor': 30})
     def test_package_groups_select_disjoint_exact_tops(self):
         groups = h.read_contract()['groups']

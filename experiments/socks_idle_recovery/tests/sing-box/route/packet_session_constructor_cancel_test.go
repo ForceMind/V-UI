@@ -299,44 +299,46 @@ func cancelConcreteOutbound(t *testing.T,ctx context.Context,address M.Socksaddr
 
 func TestOwnerConcreteTLSConstructionCancellation(t *testing.T) {
 	for _, protocol := range []string{"aes-128-gcm","chacha20-poly1305","vless"} {
-		for _, ending := range []string{"owner_deadline","control_close"} {
-			if !t.Run(protocol+"/"+ending,func(t *testing.T) {
-				f := newCancelFixture(t)
-				_,trust := cancelCertificate(t)
-				listener,err := net.Listen("tcp4","127.0.0.1:0")
-				if err != nil { t.Fatal(err) }
-				f.own(listener)
-				clientHello := make(chan byte,1)
-				serverDone := make(chan error,1)
-				f.start(func() {
-					raw,e := listener.Accept()
-					if e != nil { serverDone <- e; return }
-					f.own(raw)
-					var first [1]byte
-					_,e = io.ReadFull(raw,first[:])
-					if e != nil { serverDone <- e; return }
-					clientHello <- first[0]
-					// Consume ClientHello but send no ServerHello. This is actual
-					// concrete Go TLS synchronous network I/O, not an outer write.
-					_,e = io.Copy(io.Discard,raw)
-					serverDone <- e
-				})
-				f.startOwner(cancelConcreteOutbound(t,f.ctx,M.SocksaddrFromNet(listener.Addr()),protocol,trust))
-				started := time.Now()
-				f.send([]byte("not yet admitted"))
-				if first := cancelAwait(t,clientHello,"real ClientHello"); first != 22 { t.Fatalf("not TLS handshake: %d",first) }
-				cancelAwait(t,f.handler.attached,"raw TCP abort attachment")
-				cancelAssertPending(t,f.handler.callbacks,"TLS constructor callback")
-				if ending == "control_close" { _ = f.control.Close() }
-				closing := f.event("closing")
-				if ending == "owner_deadline" && (time.Since(started) < 2900*time.Millisecond || (closing.Cause != "admission_timeout" && closing.Cause != "deadline")) {
-					t.Fatalf("not the admission deadline: elapsed=%s event=%+v",time.Since(started),closing)
-				}
-				f.joinedNoCopies()
-				if err := cancelAwait(t,serverDone,"actual TCP peer EOF"); err != nil { t.Fatalf("unexpected peer read error instead of EOF: %v",err) }
-				if f.handler.aborts.Load() != 1 { t.Fatalf("owner abort calls=%d",f.handler.aborts.Load()) }
-			}) { return }
-		}
+		if !t.Run(protocol,func(t *testing.T) {
+			for _, ending := range []string{"owner_deadline","control_close"} {
+				if !t.Run(ending,func(t *testing.T) {
+					f := newCancelFixture(t)
+					_,trust := cancelCertificate(t)
+					listener,err := net.Listen("tcp4","127.0.0.1:0")
+					if err != nil { t.Fatal(err) }
+					f.own(listener)
+					clientHello := make(chan byte,1)
+					serverDone := make(chan error,1)
+					f.start(func() {
+						raw,e := listener.Accept()
+						if e != nil { serverDone <- e; return }
+						f.own(raw)
+						var first [1]byte
+						_,e = io.ReadFull(raw,first[:])
+						if e != nil { serverDone <- e; return }
+						clientHello <- first[0]
+						// Consume ClientHello but send no ServerHello. This is actual
+						// concrete Go TLS synchronous network I/O, not an outer write.
+						_,e = io.Copy(io.Discard,raw)
+						serverDone <- e
+					})
+					f.startOwner(cancelConcreteOutbound(t,f.ctx,M.SocksaddrFromNet(listener.Addr()),protocol,trust))
+					started := time.Now()
+					f.send([]byte("not yet admitted"))
+					if first := cancelAwait(t,clientHello,"real ClientHello"); first != 22 { t.Fatalf("not TLS handshake: %d",first) }
+					cancelAwait(t,f.handler.attached,"raw TCP abort attachment")
+					cancelAssertPending(t,f.handler.callbacks,"TLS constructor callback")
+					if ending == "control_close" { _ = f.control.Close() }
+					closing := f.event("closing")
+					if ending == "owner_deadline" && (time.Since(started) < 2900*time.Millisecond || (closing.Cause != "admission_timeout" && closing.Cause != "deadline")) {
+						t.Fatalf("not the admission deadline: elapsed=%s event=%+v",time.Since(started),closing)
+					}
+					f.joinedNoCopies()
+					if err := cancelAwait(t,serverDone,"actual TCP peer EOF"); err != nil { t.Fatalf("unexpected peer read error instead of EOF: %v",err) }
+					if f.handler.aborts.Load() != 1 { t.Fatalf("owner abort calls=%d",f.handler.aborts.Load()) }
+				}) { return }
+			}
+		}) { return }
 	}
 }
 
@@ -378,69 +380,71 @@ func (p *cancelProvider) OpenPacketSession(ctx context.Context,target M.Socksadd
 
 func TestOwnerRealOuterConstructorPipeCancellation(t *testing.T) {
 	for _,protocol := range []string{"aes-128-gcm","chacha20-poly1305","vless"} {
-		for _,ending := range []string{"owner_deadline","control_close"} {
-			if !t.Run(protocol+"/"+ending,func(t *testing.T) {
-				f := newCancelFixture(t)
-				certificate,trust := cancelCertificate(t)
-				roots := x509.NewCertPool()
-				if !roots.AppendCertsFromPEM([]byte(trust)) { t.Fatal("fixture trust") }
-				client,server := net.Pipe()
-				f.own(server)
-				counted := &cancelCountConn{Conn:client,closed:make(chan struct{}),writeEntered:make(chan struct{})}
-				raw := &adapter.PacketSessionOnceConn{Conn:counted}
-				f.own(raw)
-				serverDone := make(chan error,1)
-				constructorDone := make(chan error,1)
-				var partial atomic.Bool
-				f.start(func() {
-					secure := stdtls.Server(server,&stdtls.Config{Certificates:[]stdtls.Certificate{certificate},SessionTicketsDisabled:true})
-					if err := secure.HandshakeContext(f.ctx); err != nil { serverDone <- err; return }
-					// No application reader exists. net.Pipe blocks the real TLS
-					// encrypted outer write until the owner closes the attached raw.
-					select { case <-counted.closed: case <-f.ctx.Done(): }
-					_ = secure.Close()
-					serverDone <- nil
-				})
-				provider := &cancelProvider{open:func(ctx context.Context,target M.Socksaddr,attach func(func()error)error)(*adapter.PacketSessionLease,error) {
-					if err := attach(raw.Close); err != nil { return nil,err }
-					secure := stdtls.Client(raw,&stdtls.Config{ServerName:"owner.test",RootCAs:roots})
-					if err := secure.HandshakeContext(ctx); err != nil { return nil,err }
-					counted.armed.Store(true)
-					var packet vmess.PacketConn
-					var err error
-					if protocol == "vless" {
-						client,e := vless.NewClient(cancelFixtureUser,"",boxlog.NewNOPFactory().Logger())
-						if e != nil { return nil,e }
-						packet,err = client.DialEarlyXUDPPacketConn(secure,target)
-					} else {
-						client,e := vmess.NewClient(cancelFixtureUser,protocol,0,vmess.ClientWithGlobalPadding(),vmess.ClientWithAuthenticatedLength())
-						if e != nil { return nil,e }
-						packet,err = client.DialXUDPPacketConn(secure,target)
+		if !t.Run(protocol,func(t *testing.T) {
+			for _,ending := range []string{"owner_deadline","control_close"} {
+				if !t.Run(ending,func(t *testing.T) {
+					f := newCancelFixture(t)
+					certificate,trust := cancelCertificate(t)
+					roots := x509.NewCertPool()
+					if !roots.AppendCertsFromPEM([]byte(trust)) { t.Fatal("fixture trust") }
+					client,server := net.Pipe()
+					f.own(server)
+					counted := &cancelCountConn{Conn:client,closed:make(chan struct{}),writeEntered:make(chan struct{})}
+					raw := &adapter.PacketSessionOnceConn{Conn:counted}
+					f.own(raw)
+					serverDone := make(chan error,1)
+					constructorDone := make(chan error,1)
+					var partial atomic.Bool
+					f.start(func() {
+						secure := stdtls.Server(server,&stdtls.Config{Certificates:[]stdtls.Certificate{certificate},SessionTicketsDisabled:true})
+						if err := secure.HandshakeContext(f.ctx); err != nil { serverDone <- err; return }
+						// No application reader exists. net.Pipe blocks the real TLS
+						// encrypted outer write until the owner closes the attached raw.
+						select { case <-counted.closed: case <-f.ctx.Done(): }
+						_ = secure.Close()
+						serverDone <- nil
+					})
+					provider := &cancelProvider{open:func(ctx context.Context,target M.Socksaddr,attach func(func()error)error)(*adapter.PacketSessionLease,error) {
+						if err := attach(raw.Close); err != nil { return nil,err }
+						secure := stdtls.Client(raw,&stdtls.Config{ServerName:"owner.test",RootCAs:roots})
+						if err := secure.HandshakeContext(ctx); err != nil { return nil,err }
+						counted.armed.Store(true)
+						var packet vmess.PacketConn
+						var err error
+						if protocol == "vless" {
+							client,e := vless.NewClient(cancelFixtureUser,"",boxlog.NewNOPFactory().Logger())
+							if e != nil { return nil,e }
+							packet,err = client.DialEarlyXUDPPacketConn(secure,target)
+						} else {
+							client,e := vmess.NewClient(cancelFixtureUser,protocol,0,vmess.ClientWithGlobalPadding(),vmess.ClientWithAuthenticatedLength())
+							if e != nil { return nil,e }
+							packet,err = client.DialXUDPPacketConn(secure,target)
+						}
+						constructorDone <- err
+						_ = raw.Close()
+						if packet != nil { partial.Store(true); _ = packet.Close() } else { _ = secure.Close() }
+						return nil,err
+					}}
+					f.startOwner(provider)
+					started := time.Now()
+					f.send([]byte("no copy before constructor"))
+					cancelAwait(t,counted.writeEntered,"actual constructor encrypted outer Write entry")
+					if counted.writeReturned.Load() { t.Fatal("outer write was not blocked") }
+					cancelAssertPending(t,constructorDone,"actual constructor")
+					if ending == "control_close" { _ = f.control.Close() }
+					closing := f.event("closing")
+					if ending == "owner_deadline" && (closing.Cause != "admission_timeout" || time.Since(started) < 2900*time.Millisecond) {
+						t.Fatalf("synchronous outer write was not released by owner deadline: %+v",closing)
 					}
-					constructorDone <- err
-					_ = raw.Close()
-					if packet != nil { partial.Store(true); _ = packet.Close() } else { _ = secure.Close() }
-					return nil,err
-				}}
-				f.startOwner(provider)
-				started := time.Now()
-				f.send([]byte("no copy before constructor"))
-				cancelAwait(t,counted.writeEntered,"actual constructor encrypted outer Write entry")
-				if counted.writeReturned.Load() { t.Fatal("outer write was not blocked") }
-				cancelAssertPending(t,constructorDone,"actual constructor")
-				if ending == "control_close" { _ = f.control.Close() }
-				closing := f.event("closing")
-				if ending == "owner_deadline" && (closing.Cause != "admission_timeout" || time.Since(started) < 2900*time.Millisecond) {
-					t.Fatalf("synchronous outer write was not released by owner deadline: %+v",closing)
-				}
-				if err := cancelAwait(t,constructorDone,"real constructor joined after raw abort"); err == nil { t.Fatal("blocked outer write succeeded after abort") }
-				f.joinedNoCopies()
-				if err := cancelAwait(t,serverDone,"TLS fixture peer join"); err != nil { t.Fatal(err) }
-				if counted.closes.Load() != 1 || !counted.writeReturned.Load() || partial.Load() != (protocol == "vless") {
-					t.Fatalf("constructor cleanup mismatch: closes=%d write-return=%v partial=%v",counted.closes.Load(),counted.writeReturned.Load(),partial.Load())
-				}
-			}) { return }
-		}
+					if err := cancelAwait(t,constructorDone,"real constructor joined after raw abort"); err == nil { t.Fatal("blocked outer write succeeded after abort") }
+					f.joinedNoCopies()
+					if err := cancelAwait(t,serverDone,"TLS fixture peer join"); err != nil { t.Fatal(err) }
+					if counted.closes.Load() != 1 || !counted.writeReturned.Load() || partial.Load() != (protocol == "vless") {
+						t.Fatalf("constructor cleanup mismatch: closes=%d write-return=%v partial=%v",counted.closes.Load(),counted.writeReturned.Load(),partial.Load())
+					}
+				}) { return }
+			}
+		}) { return }
 	}
 }
 
@@ -451,62 +455,66 @@ func (p *cancelLatePacket) Close()error { p.closes.Add(1); return nil }
 
 func TestOwnerLateLeaseCancellationPermutations(t *testing.T) {
 	for _,attachment := range []string{"attached_before_close","attach_after_close"} {
-		for _,returned := range []string{"late_success","partial_error"} {
-			for _,ending := range []string{"owner_deadline","control_close"} {
-				if !t.Run(attachment+"/"+returned+"/"+ending,func(t *testing.T) {
-					f := newCancelFixture(t)
-					left,right := net.Pipe()
-					f.own(right)
-					counted := &cancelCountConn{Conn:left,closed:make(chan struct{}),writeEntered:make(chan struct{})}
-					raw := &adapter.PacketSessionOnceConn{Conn:counted}
-					f.own(raw)
-					packet := new(cancelLatePacket)
-					entered,finalizing := make(chan struct{}),make(chan struct{})
-					releaseConstructor,releaseFinalizer := f.gate(),f.gate()
-					var constructorReturned atomic.Bool
-					var releases atomic.Int32
-					var orderFailure atomic.Bool
-					lease := adapter.NewPacketSessionLease(packet,raw.Close,func() {
-						if !constructorReturned.Load() || counted.closes.Load() != 1 { orderFailure.Store(true) }
-						releases.Add(1)
-						close(finalizing)
-						select { case <-releaseFinalizer.done: case <-f.ctx.Done(): }
-					})
-					provider := &cancelProvider{open:func(_ context.Context,_ M.Socksaddr,attach func(func()error)error)(*adapter.PacketSessionLease,error) {
-						if attachment == "attached_before_close" {
-							if err := attach(raw.Close); err != nil { return lease,err }
-						}
-						close(entered)
-						// Model a dial/constructor that ignores its own context.
-						// Fixture-wide cancellation remains a failure cleanup escape.
-						select { case <-releaseConstructor.done: case <-f.ctx.Done(): }
-						if attachment == "attach_after_close" { _ = attach(raw.Close) }
-						constructorReturned.Store(true)
-						if returned == "partial_error" { return lease,fmt.Errorf("fixture partial constructor error") }
-						return lease,nil
-					}}
-					f.startOwner(provider)
-					f.send([]byte("must remain pending"))
-					cancelAwait(t,entered,"constructor barrier")
-					if ending == "control_close" { _ = f.control.Close() }
-					closing := f.event("closing")
-					if ending == "owner_deadline" && closing.Cause != "admission_timeout" { t.Fatalf("wrong owner deadline: %+v",closing) }
-					if f.slots.Load() != 1 { t.Fatal("owner slot released before constructor return") }
-					cancelAssertPending(t,f.ownerDone,"owner")
-					cancelAssertPending(t,f.handler.returned,"route invocation")
-					_ = releaseConstructor.Close()
-					cancelAwait(t,finalizing,"late lease finalizer entry")
-					if f.slots.Load() != 1 || packet.accesses.Load() != 0 || packet.closes.Load() != 1 { t.Fatal("late lease published or joined before cache finalization") }
-					cancelAssertPending(t,f.handler.callbacks,"route callback")
-					cancelAssertPending(t,f.ownerDone,"owner")
-					_ = releaseFinalizer.Close()
-					f.joinedNoCopies()
-					if releases.Load() != 1 || packet.closes.Load() != 1 || counted.closes.Load() != 1 || orderFailure.Load() {
-						t.Fatalf("once-close/join order failed: releases=%d packet-close=%d raw-close=%d order-failure=%v",releases.Load(),packet.closes.Load(),counted.closes.Load(),orderFailure.Load())
+		if !t.Run(attachment,func(t *testing.T) {
+			for _,returned := range []string{"late_success","partial_error"} {
+				if !t.Run(returned,func(t *testing.T) {
+					for _,ending := range []string{"owner_deadline","control_close"} {
+						if !t.Run(ending,func(t *testing.T) {
+							f := newCancelFixture(t)
+							left,right := net.Pipe()
+							f.own(right)
+							counted := &cancelCountConn{Conn:left,closed:make(chan struct{}),writeEntered:make(chan struct{})}
+							raw := &adapter.PacketSessionOnceConn{Conn:counted}
+							f.own(raw)
+							packet := new(cancelLatePacket)
+							entered,finalizing := make(chan struct{}),make(chan struct{})
+							releaseConstructor,releaseFinalizer := f.gate(),f.gate()
+							var constructorReturned atomic.Bool
+							var releases atomic.Int32
+							var orderFailure atomic.Bool
+							lease := adapter.NewPacketSessionLease(packet,raw.Close,func() {
+								if !constructorReturned.Load() || counted.closes.Load() != 1 { orderFailure.Store(true) }
+								releases.Add(1)
+								close(finalizing)
+								select { case <-releaseFinalizer.done: case <-f.ctx.Done(): }
+							})
+							provider := &cancelProvider{open:func(_ context.Context,_ M.Socksaddr,attach func(func()error)error)(*adapter.PacketSessionLease,error) {
+								if attachment == "attached_before_close" {
+									if err := attach(raw.Close); err != nil { return lease,err }
+								}
+								close(entered)
+								// Model a dial/constructor that ignores its own context.
+								// Fixture-wide cancellation remains a failure cleanup escape.
+								select { case <-releaseConstructor.done: case <-f.ctx.Done(): }
+								if attachment == "attach_after_close" { _ = attach(raw.Close) }
+								constructorReturned.Store(true)
+								if returned == "partial_error" { return lease,fmt.Errorf("fixture partial constructor error") }
+								return lease,nil
+							}}
+							f.startOwner(provider)
+							f.send([]byte("must remain pending"))
+							cancelAwait(t,entered,"constructor barrier")
+							if ending == "control_close" { _ = f.control.Close() }
+							closing := f.event("closing")
+							if ending == "owner_deadline" && closing.Cause != "admission_timeout" { t.Fatalf("wrong owner deadline: %+v",closing) }
+							if f.slots.Load() != 1 { t.Fatal("owner slot released before constructor return") }
+							cancelAssertPending(t,f.ownerDone,"owner")
+							cancelAssertPending(t,f.handler.returned,"route invocation")
+							_ = releaseConstructor.Close()
+							cancelAwait(t,finalizing,"late lease finalizer entry")
+							if f.slots.Load() != 1 || packet.accesses.Load() != 0 || packet.closes.Load() != 1 { t.Fatal("late lease published or joined before cache finalization") }
+							cancelAssertPending(t,f.handler.callbacks,"route callback")
+							cancelAssertPending(t,f.ownerDone,"owner")
+							_ = releaseFinalizer.Close()
+							f.joinedNoCopies()
+							if releases.Load() != 1 || packet.closes.Load() != 1 || counted.closes.Load() != 1 || orderFailure.Load() {
+								t.Fatalf("once-close/join order failed: releases=%d packet-close=%d raw-close=%d order-failure=%v",releases.Load(),packet.closes.Load(),counted.closes.Load(),orderFailure.Load())
+							}
+						}) { return }
 					}
 				}) { return }
 			}
-		}
+		}) { return }
 	}
 }
 

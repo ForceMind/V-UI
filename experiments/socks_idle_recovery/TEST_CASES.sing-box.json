@@ -56,6 +56,7 @@
         "TestOwnerActualRouterUnsupportedActions/sniff",
         "TestOwnerActualRouterUnsupportedActions/target_rewrite",
         "TestOwnerActualRouterUnsupportedActions/udp_timeout",
+        "TestOwnerConnectionManagerConcurrentCount",
         "TestOwnerCopyGuardsNoEscape",
         "TestOwnerDirectTCPAndCanceledDial",
         "TestOwnerGuardErrorFencedBeforeReturn",
@@ -704,7 +705,7 @@
       "package": "sing-box",
       "source": "tests/route/packet_session_owner_test.go",
       "target": "route/vui_packet_session_owner_test.go",
-      "sha256": "f942291501e9d53b947cfb72bd66e94e90cffdf6fa509d1bb7ea8530f22343aa"
+      "sha256": "0c8453f71d0fc2cdb5372b3a46ad12c10f6776f67fc670f2aa186b183781f1e5"
     },
     {
       "package": "sing-box",

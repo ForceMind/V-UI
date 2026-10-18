@@ -124,3 +124,47 @@ Owner artifact `12141967041`: ZIP 614860 bytes, SHA256
 failed and both owner-off and owner-on runtime stages were not started.
 The original stock runtime/packet jobs remain independent and retain their
 accurate-head failures. No product or same-association recovery qualification.
+
+## 2026-10-18 owner complete leaf execution, Count race (2d2a80c)
+
+Exact commit `2d2a80c44cefbd4875b1d1d46c9b8b5193ba5438`, tree
+`e411d22892ca45027e34b1a254f210de84d3770d`,
+[run 39143550329 attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39143550329).
+Owner job `117723052015` failed. All 837 selected leaves executed in each mode:
+834 PASS, three FAIL, zero missing/skip. The only failures were the three real
+SOCKS-owner two-generation remote-rejection cases, in both race and race+debug.
+
+Each retained complete first/second generation original-target and unique-payload
+ledgers, but the race detector observed the test's public `ConnectionManager.Count()`
+read of `list.Len` racing with actual `TrackConn` insertion. Fixed upstream Count
+has no lock; daemon status and OOM reporting also call this API. This is a real
+unsynchronized observation API, not a packet-content assertion failure. Merely
+locking the test's read would conceal the API defect. The planned minimal fix
+uses the existing manager mutex around Len, without moving close callbacks into
+the lock, and adds a bounded concurrency regression. It affects the observation
+API for all protocols in the isolated candidate; it is not owner-only semantics.
+These original race failures remain RED.
+
+The constructor group completed all 30 leaves in both modes, including actual
+TCP/TLS stalled handshakes, encrypted outer-constructor pipe cancellation, late
+lease finalization, three Admitted-deadline survival cases and actual tracked
+power-counter composition. Its pipe and delayed-provider fixture limits remain
+as documented. The route group passed 629/632, including all 600 real TLS/route
+cycles; those use fresh mock lifecycle children and do not qualify a single
+real SOCKS owner across 200 generations. All other selected groups passed.
+
+Both base/final 23 regressions and all 22 cross-compiles passed. Owner artifact
+`12142359350`: ZIP 696182 bytes, SHA256
+`f9ae0ed6d8dd586a164b63667969380783ff7fb7599f87385328dc3eac5ef968`;
+418 complete members verified. Strict owner mechanism remained failed, so
+owner-off/on runtime did not run and same-association runtime recovery remains
+unqualified. No original failure or product gate is reclassified as expected
+success by these partial results.
+
+Independent strict replay also found that the constructor group's 30 passing
+leaves did not emit 15 required intermediate test terminals: four loops used
+slash-containing composite names rather than actual nested `t.Run` calls.
+Consequently that group has observed leaf PASS results but does not satisfy its
+unchanged strict terminal-topology contract. The follow-on test correction must
+use real nested subtests with the same 30 full leaf names, timing and fail-fast
+behavior; the verifier is not relaxed and this run is not retroactively passed.

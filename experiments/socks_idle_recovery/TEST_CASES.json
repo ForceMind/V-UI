@@ -211,7 +211,7 @@
       "label": "box_owner_route",
       "package": "github.com/sagernet/sing-box/route",
       "go_package": "github.com/sagernet/sing-box/route",
-      "regex": "^TestOwner(ActualRemoteRejectNewPacketOnlyAES|ActualRemoteRejectNewPacketOnlyChaCha|ActualRemoteRejectNewPacketOnlyVLESS|ActualRouterLocalReject|ActualRouterUnsupportedActions|CopyGuardsNoEscape|DirectTCPAndCanceledDial|GuardErrorFencedBeforeReturn|InvalidLeaseTerminal|PolicyRejectsBeforePacketAccess|RealJoinedAES|RealJoinedChaCha|RealJoinedVLESS|UploadGuardPinnedFinalRelease)$",
+      "regex": "^TestOwner(ActualRemoteRejectNewPacketOnlyAES|ActualRemoteRejectNewPacketOnlyChaCha|ActualRemoteRejectNewPacketOnlyVLESS|ActualRouterLocalReject|ActualRouterUnsupportedActions|ConnectionManagerConcurrentCount|CopyGuardsNoEscape|DirectTCPAndCanceledDial|GuardErrorFencedBeforeReturn|InvalidLeaseTerminal|PolicyRejectsBeforePacketAccess|RealJoinedAES|RealJoinedChaCha|RealJoinedVLESS|UploadGuardPinnedFinalRelease)$",
       "leaves": [
         "TestOwnerActualRemoteRejectNewPacketOnlyAES",
         "TestOwnerActualRemoteRejectNewPacketOnlyChaCha",
@@ -223,6 +223,7 @@
         "TestOwnerActualRouterUnsupportedActions/sniff",
         "TestOwnerActualRouterUnsupportedActions/target_rewrite",
         "TestOwnerActualRouterUnsupportedActions/udp_timeout",
+        "TestOwnerConnectionManagerConcurrentCount",
         "TestOwnerCopyGuardsNoEscape",
         "TestOwnerDirectTCPAndCanceledDial",
         "TestOwnerGuardErrorFencedBeforeReturn",

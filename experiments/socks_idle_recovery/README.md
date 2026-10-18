@@ -77,9 +77,9 @@ one payload-ciphertext byte at offset 18, and requires the real client's precise
 AEAD authentication error. Random trailing padding is left unchanged. Neither
 fix revises the first-run failure ledger.
 
-The strict selection now has 16 injected test files and 837 unique Go leaves in
-nine groups. The original route group has 632 leaves after the one-test package
-move; its exact top-level regex is disjoint from the new 30-leaf constructor group.
+The strict selection now has 16 injected test files and 838 unique Go leaves in
+nine groups. The route group has 633 leaves after the one-test package
+move and the bounded concurrent Count regression; its exact top-level regex is disjoint from the new 30-leaf constructor group.
 Each group retains its own 180-second timeout, race and race+debug runs. The new
 30 leaves include 48.6 seconds of deliberate timer windows before I/O overhead;
 this is a source budget, not an observed runtime bound.
@@ -100,3 +100,20 @@ constructor group passed its power-counter leaf but stopped five owner cases
 at handshake setup, leaving 24 unexecuted. Owner runtime did not start. The next
 revision corrects only fixture inputs, preserving all core patches, leaves,
 timing windows and strict IPv4 admission policy.
+
+## Count synchronization and strict test topology
+
+At 2d2a80c, all 837 selected leaves actually ran in each mode: 834 passed and
+three real-owner two-generation leaves failed with a data race. The race was
+ConnectionManager.Count reading the live list while TrackConn inserted into it.
+The next source patch uses the existing manager mutex only around Len. This is a
+global observation-API synchronization repair, not an owner-only behavior change.
+A new bounded Count/TrackConn/TrackPacketConn/CloseAll test also reenters Count
+from underlying Close callbacks, joins all workers, and requires final Count zero.
+The original three real-protocol tests and their Count reads stay unchanged.
+
+The thirty constructor leaves all returned PASS at 2d2a80c, but strict acceptance
+rejected fifteen absent intermediate test terminals. Four loops now use actual
+nested t.Run calls. Their thirty full leaf names, leaf bodies, order, deadlines
+and cleanup remain unchanged; the strict verifier is unchanged. New source and
+topology both require fresh exact-head Go and runtime validation.

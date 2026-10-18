@@ -50,7 +50,7 @@
     {
       "source": "tests/route/packet_session_constructor_cancel_test.go",
       "target": "route/vui_packet_session_constructor_cancel_supplement_test.go",
-      "sha256": "add1f49003be3f5f0339516ade90dc88d75aadffc59889bbebd364b0e1f6702a"
+      "sha256": "ad96cbdafa214872ac2104defab59b3acdc5580fd236047de2b4880f876e1a81"
     },
     {
       "source": "tests/route/packet_session_power_counter_test.go",
@@ -60,7 +60,7 @@
     {
       "source": "tests/route/packet_session_real_late_lease_test.go",
       "target": "route/vui_packet_session_real_late_lease_supplement_test.go",
-      "sha256": "4c14ef3e340cc705fc32f557d40cb08591bc02ff25463c5f422109621be58d6c"
+      "sha256": "d758b3797cb6d6ec84d280899d6dc24c4edce5b6c40035d8798d0eeaf38c8f5c"
     }
   ],
   "reviewed_production_inputs": {

@@ -62,11 +62,11 @@ A real Go compiler/gofmt is unavailable in this workspace. The system /usr/bin/g
 
 The standalone manifest preserves its preparation-time production inputs. The
 integrated candidate uses box_owner.patch SHA256
-`22862e45c16114491c0a7b82d0c717610bfa956e4ff138cf29bf4167691ed2bf`,
-which removes an import cycle while retaining the same low-level TLS Config alias
-and exact concrete TLS policy. All source/test hashes and the full eight-patch
-chain must be verified again on the final committed dependency tree. The 632
-original route leaves and these 30 leaves use disjoint exact top-level regexes,
+`f1eeff8483f01405528cc3a6a633027b3b3f65d77dae0a0381de04f61ab921b7`,
+which includes the import-cycle repair and existing-mutex Count synchronization,
+while retaining the same low-level TLS Config alias and exact concrete TLS policy. All source/test hashes and the full eight-patch
+chain must be verified again on the final committed dependency tree. The 633
+route leaves and these 30 leaves use disjoint exact top-level regexes,
 each with an unchanged 180-second timeout and both race modes.
 
 At 99706f8, fixed sing ClientHandshake5 rewrote the fixture's unspecified
@@ -75,3 +75,10 @@ codecs but explicitly checks and sends the ten-byte IPv4 wildcard association
 request. The strict owner IPv4 admission policy and all 30 leaves remain unchanged.
 The standalone manifest's constructor source digest records this corrected file;
 its production-input notes remain preparation provenance, not final qualification.
+
+At 2d2a80c, all thirty leaf bodies passed in each mode (observed package durations
+49.726 and 49.735 seconds), but the unchanged strict verifier rejected fifteen
+missing intermediate terminals. Four top-level loops now use real nested t.Run
+with fail-fast at every level. The full leaf names, order, bodies, timer windows
+and cleanup are preserved. This new topology has not yet run; prior leaf PASS
+results do not grant strict acceptance to either the old or new layout.
