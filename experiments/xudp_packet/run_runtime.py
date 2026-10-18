@@ -87,13 +87,28 @@ def run_stages(output, manifest_path, runner=run_stage):
     for stage in STAGES:
         command = [sys.executable, str(b.HERE/'packet_boundary.py'), '--repository', str(b.ROOT),
                    '--binary-manifest', str(manifest_path), '--stage', stage, '--output', str(output/stage)]
+        report = {}
+        report_error = None
         row = runner(command)
         row['stage'] = stage
         try:
             report = p.json_read(output/stage/'result.json')
             row['stage_gate_passed'] = stage_passed(row, report)
-        except (OSError, ValueError, KeyError):
+        except (OSError, ValueError, KeyError) as exc:
+            report_error = {'type': type(exc).__name__, 'message': str(exc)}
             row['stage_gate_passed'] = False
+        # Preserve a small already-sanitized diagnostic in job logs even if
+        # artifact assembly subsequently fails. Do not print packet/config data.
+        print(json.dumps(b.c.life.scrub({'stage': stage, 'returncode': row['returncode'],
+              'timeout': row['timeout'], 'cleanup': row['cleanup'],
+              'stage_gate_passed': row['stage_gate_passed'],
+              'diagnostic_complete': report.get('diagnostic_complete'),
+              'stage_capacity_passed': report.get('stage_capacity_passed'),
+              'report_error': report_error,
+              'failed_cases': [{'case': case.get('case'), 'status': case.get('status'), 'errors': case.get('errors')}
+                               for case in report.get('cases', []) if case.get('status') != 'observed' or case.get('errors')],
+              'capacity_failed_leaves': report.get('capacity_failed_leaves', []),
+              'errors': report.get('errors', ['No readable stage result'])})), flush=True)
         results.append(row)
         p.save(output/'stages.json', results)
         if not row['stage_gate_passed']:

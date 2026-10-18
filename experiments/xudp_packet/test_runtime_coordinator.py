@@ -20,7 +20,8 @@ class CoordinatorTests(unittest.TestCase):
     def report(self, stage='A'):
         return {'stage':stage,'diagnostic_complete':True,'product_qualified':False,
                 'original_suite_passed':False,'stage_capacity_passed':stage in ('C','D'),
-                'capacity_failed_leaves':['observed-stock-prefix'] if stage in ('A','B') else []}
+                'capacity_failed_leaves':['observed-stock-prefix'] if stage in ('A','B') else [],
+                'cases':[{'case':'successful-probe','status':'observed','errors':[]}]}
     def test_stock_diagnostic_keeps_capacity_red(self):
         self.assertTrue(r.stage_passed(self.row(),self.report()))
     def test_stock_false_green_rejected(self):
@@ -63,6 +64,12 @@ class CoordinatorTests(unittest.TestCase):
     def test_complete_four_stages(self):
         seen,rows=self.run_fake();self.assertEqual(seen,list(r.STAGES))
         self.assertTrue(all(x['stage_gate_passed'] for x in rows))
+    def test_observed_cases_not_reported_as_failed(self):
+        with patch('builtins.print') as printed:
+            self.run_fake()
+        self.assertEqual(printed.call_count,4)
+        for call in printed.call_args_list:
+            self.assertEqual(json.loads(call.args[0])['failed_cases'],[])
     def test_failure_stops_later_stages(self):
         seen,rows=self.run_fake('B');self.assertEqual(seen,['A','B'])
         self.assertFalse(rows[-1]['stage_gate_passed'])
@@ -98,6 +105,36 @@ class UploadTests(unittest.TestCase):
             manifest=json.loads((out/'MANIFEST.json').read_text())
             self.assertEqual(manifest['count'],1)
             self.assertEqual(set(manifest['files'][0]),{'path','bytes','sha256'})
+    def test_go_jsonl_test_name_not_python_bytes(self):
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'mux-unit-race.stdout'
+            text=json.dumps({'Test':'TestMuxBoundedPartialFrameCancel/b','Action':'pass'})+'\n'
+            path.write_text(text)
+            self.assertEqual(self.module().validate_text(path),text)
+    def test_nested_json_test_name_retained(self):
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'VERIFICATION.json';text=json.dumps({'tests':['TestMuxBoundedPartialFrameCancel/b']})
+            path.write_text(text);self.assertEqual(self.module().validate_text(path),text)
+    def test_jsonl_bytes_payload_still_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'mux-unit-race.stdout'
+            path.write_text(json.dumps({'Output': "packet=b'fixture-payload'"})+'\n')
+            with self.assertRaises(Exception):self.module().validate_text(path)
+    def test_jsonl_invalid_or_key_material_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'mux-unit-race.stdout'
+            for text in ('not json\n',json.dumps({'Output':'BEGIN CERTIFICATE'})+'\n'):
+                path.write_text(text)
+                with self.assertRaises(Exception):self.module().validate_text(path)
+    def test_duplicate_json_keys_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            for name in ('RESULT.json','mux-unit-race.stdout'):
+                path=Path(d)/name;path.write_text('{"Output":"first","Output":"last"}\n')
+                with self.assertRaises(Exception):self.module().validate_text(path)
+    def test_escaped_nul_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'RESULT.json';path.write_text(json.dumps({'value':'\x00'}))
+            with self.assertRaises(Exception):self.module().validate_text(path)
     def test_unknown_or_symlink_rejected(self):
         for mode in ('unknown','symlink'):
             with self.subTest(mode=mode),tempfile.TemporaryDirectory() as d:

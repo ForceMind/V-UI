@@ -71,3 +71,33 @@ output lines only within the same Go package/test identity. Missing fragments,
 wrong identities and incomplete terminals still fail. No core patch, payload,
 capacity, timing or original runtime assertion changes in this correction.
 A–D and patched-dependency combined checks have not yet run.
+
+## 2026-10-18 corrected encrypted mechanism, runtime evidence obstruction
+
+Exact commit `7d76372eb573fe4e1b0f2923801571f8aac4446a`, tree
+`11e4018a08ec142d14a4b8aa950424d670f228f7`.
+[Run 39126841416, attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39126841416)
+completed **failure**. The mux mechanism succeeded and its strict verifier and
+archive were independently checked: 2 top-level/10 encrypted-cancel leaves each
+in race and debug, plus all old unit/route/normal encrypted checks.
+Artifact `12136387209`: 48 members, ZIP 112479 bytes, SHA-256
+`d23eb7f635d1dd1fd22105a53a9f369f35db7d41ed300e4ef90150cd9eb9245a`.
+
+The packet build/strict combined-check step succeeded according to GitHub job
+117673905656, but the runtime command exited 1 and artifact preparation also
+failed. No packet archive was uploaded. Thus patched-dependency leaf-level
+qualification and the A–D failure cause cannot be independently established
+from that run. Do not call this a measured C/zero-packet failure. The old
+runtime job also failed; archive `12136332789` has 277 members, ZIP 400762
+bytes and SHA-256 `f97a48e300393c2b414943e2638046805faa777508721b0ae863a69fb1b2424f`.
+Member/size/hash checks match; both original 19/20 and the four official-device
+large-packet failures remain, with no new packet role qualification.
+
+The available job log shows the evidence-copy gate misclassified JSON syntax:
+its whole-text Python byte-literal regex treats a Go test name ending `/b`
+followed by a JSON quote as byte text. The problem reproduces on the retained
+mechanism JSONL. The next test-only change validates JSON/known Go JSONL by
+parsed values, rejects duplicate keys, NUL and key/certificate material, and
+keeps the path allowlist and raw bytes unchanged. Stage failures will also emit
+a sanitized diagnostic summary to the job log. No core patch or runtime
+assertion changes. This is a repaired evidence path, not a waived runtime gate.

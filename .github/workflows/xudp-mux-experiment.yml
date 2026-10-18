@@ -173,7 +173,7 @@ jobs:
           python3 - <<'PY'
           import unittest
           suite = unittest.TestLoader().discover('experiments/xudp_packet', pattern='test_*.py')
-          assert suite.countTestCases() == 59
+          assert suite.countTestCases() == 66
           result = unittest.TextTestRunner(verbosity=2).run(suite)
           assert result.wasSuccessful() and not result.skipped
           PY
