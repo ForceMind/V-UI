@@ -1,5 +1,11 @@
 name: Stock client idle fixture repair
 on:
+  push:
+    branches: [experiment/standard-client-udp-20261018]
+    paths:
+      - .github/workflows/standard-client-udp-idle-repair.yml
+      - experiments/standard_client_udp/diagnostic*.py
+      - experiments/standard_client_udp/test_diagnostic.py
   workflow_dispatch:
 permissions:
   contents: read
