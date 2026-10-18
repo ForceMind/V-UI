@@ -18,14 +18,14 @@ def allowed_build():
     labels |= {'gofmt-test-'+Path(item['source']).stem for item in contract['files']}
     for package in ('common-network','common-bufio','protocol-socks'):
         labels |= {package+'-'+mode for mode in ('race','debug','darwin-compile','windows-compile')}
-    labels |= {'gofmt-shared-'+name for name in ('mux_writer_test','mux_encrypted_test','mux_encrypted_cancel_test','route_mux_test','route_lifecycle_test')}
-    labels |= {kind+'-'+mode for kind in ('mux-unit','mux-encrypted','mux-encrypted-cancel') for mode in ('race','debug')} | {'mux-route-race'}
+    labels |= {'gofmt-shared-'+name for name in ('mux_writer_test','mux_encrypted_test','mux_encrypted_cancel_test','mux_empty_datagram_test','route_mux_test','route_lifecycle_test')}
+    labels |= {kind+'-'+mode for kind in ('mux-unit','mux-encrypted','mux-encrypted-cancel','mux-empty-datagram') for mode in ('race','debug')} | {'mux-route-race'}
     return {label+suffix for label in labels for suffix in ('.stdout','.stderr','.exit.json')} | {
         'normalized-modules.json','mechanism-identity.json','provenance.json','RESULT.json','VERIFICATION.json'}
 
 
 GO_JSONL = {label+'-'+mode+'.stdout' for label in
-            ('common-network', 'common-bufio', 'protocol-socks', 'mux-unit', 'mux-encrypted', 'mux-encrypted-cancel')
+            ('common-network', 'common-bufio', 'protocol-socks', 'mux-unit', 'mux-encrypted', 'mux-encrypted-cancel', 'mux-empty-datagram')
             for mode in ('race', 'debug')} | {'mux-route-race.stdout'}
 
 

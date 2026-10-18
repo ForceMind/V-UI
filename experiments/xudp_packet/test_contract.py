@@ -81,6 +81,7 @@ class TestPacketBuildVerifier(unittest.TestCase):
             (root/(label+'.exit.json')).write_text(json.dumps({'args':['go','build'] if label=='build' else ['go','mod','verify'],'returncode':0,'environment':env}))
             checks.append({'label':label,'returncode':0})
         checks += [{'label':name,'returncode':0} for name in sorted(v.EXTRA_CHECKS)]
+        self.assertEqual(len(checks),23)
         (root/'provenance.json').write_text(json.dumps({'checks':checks,'product_qualified':False}))
         return contract
     def test_full_build(self):

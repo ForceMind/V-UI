@@ -1,5 +1,5 @@
 diff --git a/mux.go b/mux.go
-index 6e72c20..6e355c6 100644
+index 6e72c20..ea6da0c 100644
 --- a/mux.go
 +++ b/mux.go
 @@ -1,59 +1,58 @@
@@ -113,7 +113,7 @@ index 6e72c20..6e355c6 100644
  	var length uint16
  	err := binary.Read(c.conn, binary.BigEndian, &length)
  	if err != nil {
-@@ -119,83 +116,52 @@ func (c *serverSession) recv() error {
+@@ -119,83 +116,59 @@ func (c *serverSession) recv() error {
  		}
  	}
  
@@ -222,11 +222,18 @@ index 6e72c20..6e355c6 100644
 -	if err != nil {
 -		return err
 -	}
-+    if data==nil || stream==nil {return nil}
++    if stream == nil { return nil }
++    if data == nil {
++        // OptionData distinguishes an empty UDP datagram from no data frame.
++        // Empty TCP input remains a byte-stream no-op.
++        if option&OptionData != OptionData || stream.network != NetworkUDP { return nil }
++        data = buf.NewSize(0)
++        defer data.Release()
++    }
  
  	if !destination.IsValid() {
  		destination = stream.destination
-@@ -203,7 +169,8 @@ func (c *serverSession) recv() error {
+@@ -203,7 +176,8 @@ func (c *serverSession) recv() error {
  
  	err = c.recvTo(stream, data, destination)
  	if err != nil {
@@ -236,7 +243,7 @@ index 6e72c20..6e355c6 100644
  	}
  
  	return nil
-@@ -229,159 +196,11 @@ func (c *serverSession) recvTo(stream *serverStream, data *buf.Buffer, destinati
+@@ -229,159 +203,11 @@ func (c *serverSession) recvTo(stream *serverStream, data *buf.Buffer, destinati
  	}
  }
  
@@ -397,7 +404,7 @@ index 6e72c20..6e355c6 100644
  }
  
  func (c *serverMuxConn) Read(b []byte) (n int, err error) {
-@@ -389,32 +208,22 @@ func (c *serverMuxConn) Read(b []byte) (n int, err error) {
+@@ -389,32 +215,22 @@ func (c *serverMuxConn) Read(b []byte) (n int, err error) {
  }
  
  func (c *serverMuxConn) Write(b []byte) (n int, err error) {
@@ -436,7 +443,7 @@ index 6e72c20..6e355c6 100644
  }
  
  func (c *serverMuxConn) LocalAddr() net.Addr {
-@@ -448,6 +257,7 @@ type serverMuxPacketConn struct {
+@@ -448,6 +264,7 @@ type serverMuxPacketConn struct {
  	pipe        *io.PipeReader
  	session     *serverSession
  	destination M.Socksaddr
@@ -444,7 +451,7 @@ index 6e72c20..6e355c6 100644
  }
  
  func (c *serverMuxPacketConn) Read(b []byte) (n int, err error) {
-@@ -499,37 +309,22 @@ func (c *serverMuxPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Sock
+@@ -499,37 +316,22 @@ func (c *serverMuxPacketConn) ReadPacket(buffer *buf.Buffer) (destination M.Sock
  }
  
  func (c *serverMuxPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {

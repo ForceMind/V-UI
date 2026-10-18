@@ -38,7 +38,7 @@ def verify_go(path, leaves, package):
     return {'leaves': len(leaves), 'terminals': len(names)}
 
 
-EXTRA_CHECKS = {kind+'-'+mode for kind in ('mux-unit','mux-encrypted','mux-encrypted-cancel')
+EXTRA_CHECKS = {kind+'-'+mode for kind in ('mux-unit','mux-encrypted','mux-encrypted-cancel','mux-empty-datagram')
                 for mode in ('race','debug')} | {'mux-route-race'}
 
 
@@ -64,6 +64,9 @@ def verify_shared(directory):
             if label.startswith('mux-unit-'):
                 need(args[args.index('-run')+1]=='^TestMuxBounded','Wrong unit selection')
                 result[label]=module.verify_tests(module.rows(path),['TestMuxBounded'+n for n in module.UNIT_CASES])
+            elif label.startswith('mux-empty-datagram-'):
+                need(args[args.index('-run')+1]=='^TestMuxEmptyDatagram(Raw|AES|ChaCha)$','Wrong empty-datagram selection')
+                result[label]=module.verify_empty_datagram(path)
             elif label.startswith('mux-encrypted-cancel-'):
                 need(args[args.index('-run')+1]=='^TestMuxEncryptedCancel(AES|ChaCha)$','Wrong cancel selection')
                 result[label]=module.verify_encrypted_cancel(path)

@@ -316,7 +316,8 @@ class RecorderAndArtifacts(unittest.TestCase):
 
     def test_build_checks_missing_duplicate_failure_or_bool_return_rejected(self):
         labels=[p+"-"+m for p in ("common-network","common-bufio","protocol-socks")
-                for m in ("race","debug","darwin-compile","windows-compile")]+["build","module-verify"]+[k+"-"+m for k in ("mux-unit","mux-encrypted","mux-encrypted-cancel") for m in ("race","debug")]+["mux-route-race"]
+                for m in ("race","debug","darwin-compile","windows-compile")]+["build","module-verify"]+[k+"-"+m for k in ("mux-unit","mux-encrypted","mux-encrypted-cancel","mux-empty-datagram") for m in ("race","debug")]+["mux-route-race"]
+        self.assertEqual(len(labels),23)
         valid={"checks":[{"label":n,"returncode":0} for n in labels]}
         b.verify_build_record(valid)
         for mutate in (lambda r:r["checks"].pop(),lambda r:r["checks"].append(r["checks"][0]),

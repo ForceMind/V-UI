@@ -194,7 +194,7 @@ def source_identity(repo, c):
 
 def verify_build_record(provenance):
     names = {package + "-" + mode for package in ("common-network", "common-bufio", "protocol-socks")
-             for mode in ("race", "debug", "darwin-compile", "windows-compile")} | {"build", "module-verify"} | {kind+"-"+mode for kind in ("mux-unit","mux-encrypted","mux-encrypted-cancel") for mode in ("race","debug")} | {"mux-route-race"}
+             for mode in ("race", "debug", "darwin-compile", "windows-compile")} | {"build", "module-verify"} | {kind+"-"+mode for kind in ("mux-unit","mux-encrypted","mux-encrypted-cancel","mux-empty-datagram") for mode in ("race","debug")} | {"mux-route-race"}
     checks = provenance.get("checks", [])
     need(Counter(row.get("label") for row in checks) == Counter(names) and
          all(type(row.get("returncode")) is int and row["returncode"] == 0 for row in checks),

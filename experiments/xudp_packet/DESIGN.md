@@ -14,7 +14,13 @@ overseas roles, always identified by its experimental version and hash. Root
 confirmed this isolated role extension on 2026-10-18. No existing user device
 or server is upgraded. Sing remains fixed at
 `87c33f17688fe3dd80eeabef7c3f7a69152ccd42`, sing-box and sing-vmess retain their
-previous fixed commits. The validated mux/route/address patches are not changed.
+previous fixed commits. The validated route/address patches remain unchanged. After the measured
+`a066c767` zero-datagram RED, mux receive adds only the distinction between
+OptionData with zero UDP bytes and an absent data frame. TCP empty input stays
+a no-op; the bounded writer is unchanged. Raw/AES/ChaCha tests traverse actual
+pipe delivery and real XUDP for New/Keep, empty/fallback destinations, all UDP
+write entries and subsequent short packets. The patched-sing candidate reruns
+the same 24 leaves in race and race+debug; runtime C keeps all original leaves.
 
 A: keep only the device stock, fix downstream packet-copy roles, and measure
 fresh/warmed SOCKS input boundaries with both explicit VMess ciphers and VLESS.

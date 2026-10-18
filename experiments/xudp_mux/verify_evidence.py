@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import re
 from verify_encrypted_cancel import verify_encrypted_cancel
+from verify_empty_datagram import verify_empty_datagram
 
 UNIT_CASES = (
  'InFlightCancelAndSibling','QueuedCancel','PartialFrameCancel','LargeTCP',
@@ -76,5 +77,6 @@ def verify_all(directory):
         for label in ('encrypted-race','encrypted-debug'):
             result['encrypted'][arm+'-'+label]=verify_tests(rows(directory/(arm+'-'+label+'.stdout')),ENCRYPTED_CASES)
     result['encrypted_cancel'] = {label: verify_encrypted_cancel(directory/('mux-'+label+'.stdout')) for label in ('encrypted-cancel-race', 'encrypted-cancel-debug')}
+    result['empty_datagram'] = {label: verify_empty_datagram(directory/('mux-'+label+'.stdout')) for label in ('empty-datagram-race', 'empty-datagram-debug')}
     (directory/'VERIFICATION.json').write_text(json.dumps(result,indent=2)+'\n')
     return result

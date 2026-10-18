@@ -149,3 +149,48 @@ and permits independent B/C/D observations only after a new strict resource
 safety verifier. Every failed gate and overall failure remains explicit. Core
 source, original runtime assertions, payload limits and product state do not
 change in that diagnostic step.
+
+
+## 2026-10-18 complete candidate-first observations and zero-datagram RED
+
+Exact `a066c767438cf68b3199a2d1806e8583300da038`, tree
+`535f281712a434a3a4a152ef1c2ac3e2aef0f35e`,
+[run 39130183473 attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39130183473)
+completed failure. Mux mechanism passed; packet and original runtime failed.
+The six stages C/D/A/B/U/V all executed with complete independent identity and
+resource-cleanup evidence. This does not turn their failed business gates green.
+
+C: 69/78 cases were observed complete. The exact nine errors are first/warmed
+uplink-zero and full→short→empty for AES, ChaCha and VLESS: the empty datagram
+was sent once but no target event appeared in its complete four-second window.
+Their nine recovery leaves were unexecuted. In total 177 business leaves were
+complete and three local EMSGSIZE leaves passed, including all original large
+32768/60000 and legal IPv4 SOCKS 65497 nonempty boundaries. C remains failed.
+
+D: all six initial 60000 exchanges passed; three explicit-close/fresh-association
+32768 recoveries passed. Three idle cases released their forwarding resources
+but the original SOCKS association's 32768 recovery did not reach the target.
+This same-association recovery RED is independent of the empty-datagram issue.
+No new association is substituted for the idle gate.
+
+A retains its original echo failure and now records all attempted recovery
+failures; U isolates first-uplink 16374 full / 16375→16374 prefix with short ACKs.
+V records first/warmed downlink 16121/16122 full, but 16123 causes stock-device
+short-buffer shutdown and fails the subsequent recovery. B retains stock
+overseas large-reply prefix RED. All of these are measured role limits, not
+capacity qualification. Original-device runtime stays a separate unchanged gate.
+
+| Artifact | Members | ZIP bytes | ZIP SHA-256 |
+|---|---:|---:|---|
+| 12137606590 mux | 48 | 112525 | b4a78d278af2849a5df861ff2a597abb6f789ceee9e7eda44ba7fe23a7acca04 |
+| 12137707116 packet | 752 | 1077851 | 3a7a8ce9ae875ee2536d6518c5540bce5e044b5673b582ce819856f52d21684f |
+| 12137922287 original runtime | 277 | 399769 | aee65912ddb94da9c6d082839762d83a17a9f836145a19b56c84998c35e6deb7 |
+
+The next bounded correction preserves this RED and all runtime plans: mux
+receive must deliver an OptionData zero-byte UDP frame exactly once. It must
+still ignore no-data control frames and empty TCP writes. Add raw and real
+AES/ChaCha 24-leaf/120-event regressions to both original-sing mechanisms and
+the exact receive-patched dependency, with race/debug and source identity.
+No receive-buffer, writer-budget, timeout, product pin or original gate changes.
+The idle-association failure remains independently blocked pending its own
+source/semantic analysis; zero-packet success alone cannot qualify D.

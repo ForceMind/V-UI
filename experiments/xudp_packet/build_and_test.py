@@ -31,10 +31,11 @@ EXTRA_TESTS = {
     'experiments/xudp_mux/mux_writer_test.go': 'sing-vmess/mux_writer_test.go',
     'experiments/xudp_mux/mux_encrypted_test.go': 'sing-vmess/mux_encrypted_test.go',
     'experiments/xudp_mux/mux_encrypted_cancel_test.go': 'sing-vmess/mux_encrypted_cancel_test.go',
+    'experiments/xudp_mux/mux_empty_datagram_test.go': 'sing-vmess/mux_empty_datagram_test.go',
     'experiments/xudp_mux/route_mux_test.go': 'sing-box/route/route_mux_test.go',
     'experiments/xudp_address/route_lifecycle_test.go': 'sing-box/route/route_lifecycle_test.go',
 }
-EXTRA_CHECKS = {kind+'-'+mode for kind in ('mux-unit','mux-encrypted','mux-encrypted-cancel')
+EXTRA_CHECKS = {kind+'-'+mode for kind in ('mux-unit','mux-encrypted','mux-encrypted-cancel','mux-empty-datagram')
                 for mode in ('race','debug')} | {'mux-route-race'}
 
 
@@ -194,10 +195,12 @@ def build(args):
             checks.append({'label': label, 'returncode': result.returncode})
     for kind, pattern in (('mux-unit','^TestMuxBounded'),
                           ('mux-encrypted','^TestMuxEncrypted(AES|ChaCha)$'),
-                          ('mux-encrypted-cancel','^TestMuxEncryptedCancel(AES|ChaCha)$')):
+                          ('mux-encrypted-cancel','^TestMuxEncryptedCancel(AES|ChaCha)$'),
+                          ('mux-empty-datagram','^TestMuxEmptyDatagram(Raw|AES|ChaCha)$')):
         for mode, extra in (('race',['-race']),('debug',['-race','-tags=debug'])):
             label=kind+'-'+mode
-            result=command([go,'test','-json','-count=1','-timeout=90s',*extra,'-run',pattern,
+            timeout_flag='-timeout=120s' if kind=='mux-empty-datagram' else '-timeout=90s'
+            result=command([go,'test','-json','-count=1',timeout_flag,*extra,'-run',pattern,
                             'github.com/sagernet/sing-vmess'],box,env,evidence/label)
             checks.append({'label':label,'returncode':result.returncode})
     result=command([go,'test','-json','-race','-count=1','-timeout=45s','-run','^TestMuxRoute','./route'],
