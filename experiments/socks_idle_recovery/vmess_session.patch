@@ -1,0 +1,145 @@
+diff --git a/client.go b/client.go
+--- a/client.go
++++ b/client.go
+@@ -408,6 +408,16 @@
+ 	return nil
+ }
+ 
++// ReleasePacketSessionReadCacheAfterJoin is the private session lease's explicit
++// post-join finalizer. The caller must abort the transport and join all I/O first.
++// Do not make ChunkReader an io.Closer: legacy Close can run concurrently with
++// response-reader construction or Read, and must retain its original behavior.
++func (c *rawClientConn) ReleasePacketSessionReadCacheAfterJoin() {
++	if reader, ok := c.reader.(*bufio.ChunkReader); ok {
++		reader.ReleaseCacheAfterJoin()
++	}
++}
++
+ func (c *rawClientConn) Close() error {
+ 	return common.Close(
+ 		c.Conn,
+diff --git a/xudp.go b/xudp.go
+--- a/xudp.go
++++ b/xudp.go
+@@ -4,6 +4,7 @@
+ 	"encoding/binary"
+ 	"io"
+ 	"net"
++	"net/netip"
+ 
+ 	"github.com/sagernet/sing/common"
+ 	"github.com/sagernet/sing/common/buf"
+@@ -20,6 +21,7 @@
+ 	writer         N.ExtendedWriter
+ 	destination    M.Socksaddr
+ 	requestWritten bool
++	packetSessionEndReporting bool
+ }
+ 
+ func NewXUDPConn(conn net.Conn, destination M.Socksaddr) *XUDPConn {
+@@ -64,7 +66,17 @@
+ 	return
+ }
+ 
++// SetPacketSessionEndReporting enables the private packet-session parser.
++// Call only before publishing this connection to readers. The default parser
++// and its historic EOF behavior are deliberately unchanged.
++func (c *XUDPConn) SetPacketSessionEndReporting() {
++	c.packetSessionEndReporting = true
++}
++
+ func (c *XUDPConn) ReadPacket(buffer *buf.Buffer) (destination M.Socksaddr, err error) {
++	if c.packetSessionEndReporting {
++		return c.readPacketSession(buffer)
++	}
+ 	start := buffer.Start()
+ 	_, err = buffer.ReadFullFrom(c.Conn, 6)
+ 	if err != nil {
+@@ -123,6 +135,87 @@
+ 		buffer.Resize(start, 0)
+ 		_, err = buffer.ReadFullFrom(c.Conn, int(length))
+ 		return
++	}
++}
++
++// readPacketSession accepts only the bounded single-session IPv4/UDP profile.
++// A canonical End says nothing about remote policy rejection or delivery.
++func (c *XUDPConn) readPacketSession(buffer *buf.Buffer) (M.Socksaddr, error) {
++	var size [2]byte
++	var header [12]byte
++	for {
++		if _, err := io.ReadFull(c.Conn, size[:]); err != nil {
++			return M.Socksaddr{}, err
++		}
++		length := int(binary.BigEndian.Uint16(size[:]))
++		// No allocation or read size derives from an unchecked wire length.
++		if length != 4 && length != len(header) {
++			return M.Socksaddr{}, E.New("invalid packet session header length: ", length)
++		}
++		if _, err := io.ReadFull(c.Conn, header[:length]); err != nil {
++			return M.Socksaddr{}, err
++		}
++		if binary.BigEndian.Uint16(header[:2]) != 0 {
++			return M.Socksaddr{}, E.New("invalid packet session ID")
++		}
++		flags := header[3]
++		// Error must win over End classification, including Error|Data.
++		if flags&OptionError != 0 {
++			return M.Socksaddr{}, E.Cause(net.ErrClosed, "remote packet session error")
++		}
++		if flags & ^byte(OptionData) != 0 {
++			return M.Socksaddr{}, E.New("invalid packet session flags: ", flags)
++		}
++		var destination M.Socksaddr
++		switch header[2] {
++		case StatusEnd:
++			if length != 4 || flags != 0 {
++				return M.Socksaddr{}, E.New("invalid packet session End")
++			}
++			return M.Socksaddr{}, N.ErrPacketSessionEnded
++		case StatusKeepAlive:
++			if length != 4 || flags != 0 {
++				return M.Socksaddr{}, E.New("invalid packet session KeepAlive")
++			}
++			continue
++		case StatusKeep:
++			if length == 4 {
++				destination = c.destination
++			} else {
++				// AddressSerializer uses port, family, then address. This exact
++				// length/family check excludes domains, IPv6 and trailing bytes.
++				if header[4] != NetworkUDP || header[7] != 0x01 {
++					return M.Socksaddr{}, E.New("invalid packet session UDP address")
++				}
++				destination = M.Socksaddr{
++					Addr: netip.AddrFrom4([4]byte{header[8], header[9], header[10], header[11]}),
++					Port: binary.BigEndian.Uint16(header[5:7]),
++				}
++			}
++			if !destination.IsIPv4() || destination.Fqdn != "" || destination.Port == 0 {
++				return M.Socksaddr{}, E.New("invalid packet session IPv4 destination")
++			}
++		default:
++			return M.Socksaddr{}, E.New("unexpected packet session status: ", header[2])
++		}
++		if flags&OptionData == 0 {
++			continue
++		}
++		if _, err := io.ReadFull(c.Conn, size[:]); err != nil {
++			return M.Socksaddr{}, err
++		}
++		payloadLength := int(binary.BigEndian.Uint16(size[:]))
++		if payloadLength > buffer.FreeLen() {
++			return M.Socksaddr{}, N.ErrPacketTooLarge
++		}
++		// Keep length zero distinct from a control frame, even with no free
++		// caller capacity. Never expose a successful prefix on truncation.
++		previousLength := buffer.Len()
++		if _, err := buffer.ReadFullFrom(c.Conn, payloadLength); err != nil {
++			buffer.Truncate(previousLength)
++			return M.Socksaddr{}, err
++		}
++		return destination, nil
+ 	}
+ }
+ 
