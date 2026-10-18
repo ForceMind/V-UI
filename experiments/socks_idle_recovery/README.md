@@ -41,3 +41,9 @@ design are reconstructed new bytes; independent source review is in progress,
 including fail-closed metadata, outbound identity and nil-lease checks. No
 reconstructed owner test result is inherited. The complete test manifest,
 Python controls and workflow are not wired at this checkpoint.
+
+Recovered checker controls now pass 47 Python tests. The unchanged address,
+mux, packet and original runtime control suites separately pass 122, 38, 179
+and 26 tests. These are pure harness checks, not Go or core runtime results.
+The sing reconstruction restores strict IPv4 association hints and the original
+neutral dormant event cause. Its source remains a newly reviewed candidate.

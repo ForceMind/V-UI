@@ -54,10 +54,10 @@ index 0000000..7bd9303
 +}
 diff --git a/protocol/socks/association.go b/protocol/socks/association.go
 new file mode 100644
-index 0000000..7757aaa
+index 0000000..f216ae2
 --- /dev/null
 +++ b/protocol/socks/association.go
-@@ -0,0 +1,422 @@
+@@ -0,0 +1,421 @@
 +package socks
 +
 +import (
@@ -184,7 +184,6 @@ index 0000000..7757aaa
 +func handleUDPAssociation(ctx context.Context, conn net.Conn, reader *std_bufio.Reader, handler HandlerEx, packetListener PacketListener, timeout time.Duration, hint M.Socksaddr, options *UDPAssociationOptions) error {
 +	peer := M.SocksaddrFromNet(conn.RemoteAddr()).Unwrap()
 +	local := M.SocksaddrFromNet(conn.LocalAddr()).Unwrap()
-+	hint = hint.Unwrap()
 +	if !peer.Addr.Is4() || !local.Addr.Is4() || !hint.Addr.Is4() || hint.Fqdn != "" || (!hint.Addr.IsUnspecified() && hint.Addr != peer.Addr) || options.Acquire == nil {
 +		_ = socks5.WriteResponse(conn, socks5.Response{ReplyCode: socks5.ReplyCodeFailure})
 +		_ = conn.Close()
@@ -336,7 +335,7 @@ index 0000000..7757aaa
 +			joined := o.eventLocked("join", N.ErrPacketSessionEnded)
 +			o.child = nil
 +			o.state = associationDormant
-+			dormant := o.eventLocked("dormant", N.ErrPacketSessionEnded)
++			dormant := o.eventLocked("dormant", nil)
 +			o.signalLocked()
 +			o.mu.Unlock()
 +			o.emit(joined); o.emit(dormant)
