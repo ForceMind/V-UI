@@ -1,5 +1,11 @@
 name: Stock client finite UDP diagnosis
 on:
+  push:
+    branches: [experiment/standard-client-udp-20261018]
+    paths:
+      - .github/workflows/standard-client-udp-diagnostic.yml
+      - experiments/standard_client_udp/diagnostic*.py
+      - experiments/standard_client_udp/test_diagnostic.py
   workflow_dispatch:
 permissions:
   contents: read
@@ -102,7 +108,13 @@ jobs:
         env:
           VUI_STOCK_UDP_LEGACY: ${{ github.workspace }}/legacy
         run: |
-          python -m unittest discover -s experiments/standard_client_udp -p 'test_*.py' -v
+          python - <<'PYTEST'
+          import unittest
+          suite=unittest.TestLoader().discover('experiments/standard_client_udp',pattern='test_*.py')
+          assert suite.countTestCases()==38
+          result=unittest.TextTestRunner(verbosity=2).run(suite)
+          assert result.wasSuccessful() and not result.skipped
+          PYTEST
           cd ../legacy
           python - <<'PY'
           import unittest

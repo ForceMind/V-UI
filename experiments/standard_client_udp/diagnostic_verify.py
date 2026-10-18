@@ -98,11 +98,14 @@ def passive_identity(observer,case,row,roles,identity):
          'Passive and actual original application objects differ')
     need(observer['cleanup']==[{'label':'initial','control_fd':-1,'application_fd':-1}],'Passive cleanup differs')
     previous=None; races=0
+    need(observer['samples'], 'Missing passive samples')
+    executable=observer['samples'][0]['device']['executable']
     for sample in observer['samples']:
         need('error' not in sample and sample['started']<=sample['completed'] and
              (previous is None or sample['started']>=previous),'Passive sample timing/error')
         previous=sample['completed']
         _,_,stable=device_rows(sample,device[0]);races+=not stable
+        need(sample['device']['executable']==executable,'Passive executable changed across samples')
         need(len(sample['associations'])==1,'Passive sampled association replaced')
         a=sample['associations'][0];closed=sample['phase']=='after_local_cleanup'
         descriptor(a['control_before'],closed=closed);descriptor(a['application'],closed=closed)
@@ -126,6 +129,7 @@ def verify(p,case,row,roles,output,identity):
     need(row['lifecycle_window_executed'] is bool(windows),'Window flag differs from raw samples')
     first_ok=bool(row['packets'] and row['packets'][0]['full_delivery_passed'])
     if not first_ok:
+        need('last_business_reply' not in observer and 'deadline' not in observer, 'Failed prerequisite claims reply deadline')
         need(not proofs and not windows and not row['recovery_attempted'] and len(row['packets'])<=1,
              'Failed 1200 prerequisite cannot claim window/recovery')
         need([s['phase'] for s in observer['samples']]==['failure','after_local_cleanup'],
@@ -140,6 +144,9 @@ def verify(p,case,row,roles,output,identity):
     first,recovery=row['packets']
     need(first['request']['bytes']==recovery['request']['bytes']==1200 and
          first['request']['sha256']!=recovery['request']['sha256'],'Next packet is not a distinct 1200-byte payload')
+    before=[s for s in observer['samples'] if s['phase']=='before_recover']
+    need(len(before)==1 and recovery['send_calls'][0]['started']>=before[0]['completed'],
+         'Recovery send precedes completed identity sample')
     need(recovery['send_calls'][0]['started']>=proof['final']['sample_completed_monotonic'] and
          first['send_calls'][0]['completed']<=proof['last_business_reply'], 'Send occurred inside quiet window')
     from verify_socks_observation import verify_case
