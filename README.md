@@ -241,7 +241,7 @@ OpenRC 使用 `sudo rc-service v-ui status` 与 `sudo rc-service v-ui-http01 sta
 | --- | --- |
 | 安装、端口、首次账号与证书 | [安装指南](docs/INSTALLATION.md) |
 | 申请/续期/绑定证书 | [证书指南](docs/CERTIFICATES.md) |
-| 节点参数、规则和订阅 | [配置指南](docs/CONFIGURATION.md) · [兼容矩阵](docs/COMPATIBILITY.md) |
+| 节点参数、规则和订阅 | [配置指南](docs/CONFIGURATION.md) · [每入口直连/中转使用说明（未发布候选）](docs/PER_INBOUND_ROUTING.md) · [兼容矩阵](docs/COMPATIBILITY.md) |
 | 菜单、升级、备份、恢复与回退 | [运维指南](docs/OPERATIONS.md) · [全局受管控制](docs/MANAGED_OPERATIONS.md) |
 | 故障、安全和 API | [排错](docs/TROUBLESHOOTING.md) · [安全](SECURITY.md) · [API](docs/API.md) |
 | 版本内容与正式资产 | [发布说明](docs/RELEASE_NOTES.md) · [变更日志](CHANGELOG.md) · [发布流程](docs/RELEASING.md) |

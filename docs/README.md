@@ -36,6 +36,7 @@
 
 | 阅读目标 | 文档 |
 | --- | --- |
+| 每入口三态、首次直连/中转与保存/应用状态（未发布候选） | [PER_INBOUND_ROUTING.md](PER_INBOUND_ROUTING.md) |
 | 专用 TCP 上游 URI/YAML 导出、另一实例导入与凭据处理 | [TCP_UPSTREAM_EXPORT.md](TCP_UPSTREAM_EXPORT.md) |
 | 双开关四状态、上游导入、失败关闭及分阶段门槛 | [DUAL_PROXY_RELAY_CONTRACT.md](DUAL_PROXY_RELAY_CONTRACT.md) |
 | 双开关 M0–M4 实际进度、准确提交与未验收边界 | [DUAL_PROXY_RELAY_PROGRESS.md](DUAL_PROXY_RELAY_PROGRESS.md) |
