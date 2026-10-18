@@ -42,7 +42,10 @@ def main():
     for name in ('candidate','candidate-provenance','build-evidence'):
         parser.add_argument('--'+name,type=Path)
     parser.add_argument('--arm',choices=r.ARMS,required=True)
-    args=parser.parse_args();args.output.mkdir(parents=True,exist_ok=False)
+    args=parser.parse_args()
+    for name,value in vars(args).items():
+        if isinstance(value,Path): setattr(args,name,value.resolve())
+    args.output.mkdir(parents=True,exist_ok=False)
     rows=[]
     for stage in r.ARMS[args.arm]:
         command=[sys.executable,str(r.HERE/'runtime.py'),'--arm',args.arm,'--stage',stage,'--output',str(args.output/stage)]

@@ -158,7 +158,7 @@ def configs(f, case, product, directory):
 def role_fixture(c, module, output, known, case, records, product):
     class Fixture(module.RestrictedUdpFixture):
         def process(self, label, config, *, mihomo=False, env=None):
-            need(label in case['roles'] and mihomo is (label == 'device-mihomo'), 'Unexpected process role/type')
+            need(label in case['roles'] and mihomo is (label in ('device-mihomo','device-reconfigured-mihomo')), 'Unexpected process role/type')
             owner_absent(config)
             origin = case['roles'][label]; binary = known[origin]
             row = {'case': self.label, 'role': label, 'origin': origin, 'binary': binary['path'],
@@ -186,6 +186,16 @@ def role_fixture(c, module, output, known, case, records, product):
                     launch['pid'] = core.process.pid if core.process else None
                     save(output / 'process-binaries.json', records)
             core.start = start
+            original_stop = core.stop
+            row['stops'] = []
+            def stop(*args, **kwargs):
+                value = original_stop(*args, **kwargs)
+                if core.process is not None and core.process.pid not in {s['pid'] for s in row['stops']}:
+                    row['stops'].append({'pid':core.process.pid,'returncode':core.process.poll(),
+                        'pid_absent':not importlib.import_module('psutil').pid_exists(core.process.pid)})
+                    save(output / 'process-binaries.json', records)
+                return value
+            core.stop = stop
             return core
     return Fixture
 
@@ -243,6 +253,16 @@ def verify_case(p, case, row, roles, known, output, identity):
     need(started == expected[:len(started)] and row['unexecuted_leaves'] == expected[len(started):],
          'Missing/extra/duplicate or out-of-order started leaves')
     need(row['cleanup'].get('execution_safe') is True, 'Unsafe cleanup prevents continuing')
+    need(row['recovery_attempted'] is any(x.endswith('/recover') for x in started), 'Recovery flag differs from started leaf')
+    if case['mode'] in ('idle','close'):
+        path = output/case['id']/'lifecycle-observation.json'
+        lifecycle = json.loads(path.read_text()) if path.is_file() else {'events': []}
+        windows = [e for e in lifecycle['events'] if e.get('phase') in ('large_then_idle','large_then_close')]
+        need(row['lifecycle_window_executed'] is bool(windows), 'Lifecycle window flag differs from raw events')
+        prerequisite = bool(row['packets'] and row['packets'][0]['full_delivery_passed'])
+        if not prerequisite:
+            need(not windows and not row['recovery_attempted'] and len(started) <= 1,
+                 'Failed 60000 prerequisite cannot qualify release window/recovery')
     p.verify_cleanup(row, roles)
     verify_associations(case, row)
     need(all(x['returncode'] == 0 for x in row['cleanup']['processes']), 'Core crashed or exited abnormally')
@@ -299,6 +319,12 @@ def verify_case(p, case, row, roles, known, output, identity):
         need(len(replies) <= 1, 'More than one application reply consumed')
         decoded = packet.get('decoded_reply_before_assertion')
         evidence_status = 'raw-and-decoded-reply-verified' if decoded else 'no-decoded-reply-no-explicit-reject-claim'
+        if packet['status'] in ('full_delivery_passed','capacity_failed_exact_prefix'):
+            need(decoded is not None and len(replies)==1, 'Successful/prefix terminal needs actual raw and decoded reply')
+            need([decoded['host'],decoded['port']] == packet['reply_target'] == packet['requested_target']
+                 and decoded['payload'] == packet['actual_reply'], 'Decoded reply differs from accepted reply')
+        if spec['direction'] == 'local_emsgsize':
+            need(not replies and decoded is None, 'Local EMSGSIZE has unexpected actual reply')
         if decoded:
             need(len(replies) == 1, 'Decoded reply lacks raw receive')
             n = decoded['payload']['bytes']

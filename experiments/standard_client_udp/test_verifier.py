@@ -3,6 +3,7 @@ from copy import deepcopy
 import os
 from pathlib import Path
 import socket
+import tempfile
 import sys
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parent))
@@ -13,8 +14,8 @@ class VerifierTests(unittest.TestCase):
     def setUpClass(cls):
         cls.p=r.load('packet_boundary',Path(os.environ['VUI_STOCK_UDP_LEGACY'])/'experiments/xudp_packet/packet_boundary.py')
 
-    def fixture(self, oversize=False):
-        p=self.p; case=r.plan(p,'stock','C')[-1 if oversize else 1]
+    def fixture(self, oversize=False, index=1, case_override=None):
+        p=self.p; case=case_override or r.plan(p,'stock','C')[-1 if oversize else index]
         known={'official':{'path':'/inert/sing-box','sha256':r.STOCK,'version':'1.14.2'},
                'mihomo':{'path':'/inert/mihomo','sha256':r.MIHOMO,'version':'1.19.32'}}
         roles=[]
@@ -85,6 +86,8 @@ class VerifierTests(unittest.TestCase):
             ('send-double',lambda c,v,rs,k:v['packets'][0]['send_calls'].append(deepcopy(v['packets'][0]['send_calls'][0]))),
             ('send-short',lambda c,v,rs,k:v['packets'][0]['send_calls'][0].update(returned=0, **{'return':0})),
             ('send-errno',lambda c,v,rs,k:v['packets'][0]['send_calls'][0].update(errno=90)),
+            ('reply-missing',lambda c,v,rs,k:v['packets'][0].pop('reply_calls')),
+            ('decoded-missing',lambda c,v,rs,k:v['packets'][0].pop('decoded_reply_before_assertion')),
             ('reply-double',lambda c,v,rs,k:v['packets'][0]['reply_calls'].append(deepcopy(v['packets'][0]['reply_calls'][0]))),
             ('reply-hash',lambda c,v,rs,k:v['packets'][0]['reply_calls'][0]['wire'].update(sha256='0'*64)),
             ('decoded-port',lambda c,v,rs,k:v['packets'][0]['decoded_reply_before_assertion'].update(port=3000)),
@@ -111,6 +114,27 @@ class VerifierTests(unittest.TestCase):
             with self.subTest(field=field):
                 items=self.fixture(True);items[1]['packets'][0][field]=value
                 with self.assertRaises(ValueError):self.check(items)
+
+    def test_failed_d_prerequisite_cannot_claim_window_or_recovery(self):
+        case=r.plan(self.p,'stock','D')[0]
+        items=self.fixture(case_override=case);row=items[1]
+        row['packets']=row['packets'][:1]
+        row['packets'][0].update(status='error',full_delivery_passed=False,error={'type':'ValueError','message':'prerequisite failed'})
+        row['unexecuted_leaves']=[case['id']+'/recover'];row['errors']=[{'type':'ValueError','message':'prerequisite failed'}]
+        row.update(recovery_attempted=False,lifecycle_window_executed=False)
+        ledger=row['target_ledger'];ledger['packets']=ledger['packets'][:1];ledger['actual_datagrams']=ledger['actual_datagrams'][:1]
+        ledger.update(planned_count=1,received_count=1)
+        with tempfile.TemporaryDirectory() as tmp:
+            output=Path(tmp)
+            checked=r.verify_case(self.p,*items,output,{})
+            self.assertTrue(checked['execution_safe']);self.assertFalse(checked['case_gate_passed'])
+            for field in ('recovery_attempted','lifecycle_window_executed'):
+                changed=deepcopy(items);changed[1][field]=True
+                with self.subTest(field=field),self.assertRaises(ValueError):r.verify_case(self.p,*changed,output,{})
+            (output/case['id']).mkdir()
+            r.save(output/case['id']/'lifecycle-observation.json',{'events':[{'phase':'large_then_close'}]})
+            changed=deepcopy(items);changed[1]['lifecycle_window_executed']=True
+            with self.assertRaisesRegex(ValueError,'60000'):r.verify_case(self.p,*changed,output,{})
 
     def test_capacity_failure_remains_safe_and_red(self):
         items=self.fixture();row=items[1]

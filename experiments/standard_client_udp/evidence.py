@@ -5,7 +5,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import subprocess
 import sys
 import tempfile
@@ -40,7 +40,7 @@ def validate(safe, name, data, fmt):
 def read(safe, data):
     return safe.strict_json(data.decode('utf-8'))
 
-def export_check(safe, value, port):
+def export_check(safe, value, port, row, roles):
     with tempfile.TemporaryDirectory(prefix='vui-export-verify-') as tmp:
         call = subprocess.run([sys.executable, str(r.HERE/'export_node.py'), '--port', str(port)],
             cwd=r.ROOT, env={**os.environ, 'VUI_DATA_DIR': tmp}, capture_output=True, text=True, timeout=20, check=True)
@@ -52,6 +52,14 @@ def export_check(safe, value, port):
            and value['consumer'] == 'ordinary-yaml-node-in-listener-shell'
            and value['hash_scope'] == 'raw-fake-fixture-export-before-redaction'
            and value['server_configuration'] == 'isolated-research-guarded-not-product-udp', 'Export identity mismatch')
+    if row.get('application_associations'):
+        port=row['application_associations'][0]['control']['peer'][1]
+        config={'mixed-port':port,'bind-address':'127.0.0.1','allow-lan':False,'mode':'rule','log-level':'debug','ipv6':False,
+            'find-process-mode':'off','geo-auto-update':False,'profile':{'store-selected':False,'store-fake-ip':False},
+            'proxies':[node],'rules':['MATCH,'+node['name']]}
+        device=[x for x in roles if x['role']=='device-mihomo']
+        r.need(len(device)==1 and device[0]['config_sha256']==digest(config), 'Ordinary export does not match actual device configuration')
+
 
 def verify_stage(directory, legacy, arm, stage, expected_source=None):
     safe, p = modules(legacy)
@@ -80,9 +88,12 @@ def verify_stage(directory, legacy, arm, stage, expected_source=None):
     for case,row in zip(cases,rows):
         base = case['id']+'/'
         r.need(get(base+'result.json') == row and get(base+'packets.json') == row['packets'], 'Case/raw packets differ')
+        owned=[x for x in roles if x['case']==case['id']]
+        if row['packets'] or owned:
+            r.need(base+'export-identity.json' in members, 'Started process/packet lacks ordinary export identity')
         if base+'export-identity.json' in members:
             value = get(base+'export-identity.json')
-            export_check(safe,value,value['artifact']['node']['port'])
+            export_check(safe,value,value['artifact']['node']['port'],row,owned)
         owned=[x for x in roles if x['case']==case['id']]
         try:
             verdict=r.verify_case(p,case,row,owned,known,Path(directory),source)
@@ -113,7 +124,8 @@ def verify_matrix(directory, legacy, arm):
     rows=read(safe,members['stages.json']); report=read(safe,members['MATRIX_RESULT.json'])
     r.need([x['stage'] for x in rows] == list(r.ARMS[arm][:len(rows)]), 'Matrix stage sequence differs')
     verdicts=[]
-    for row in rows:
+    for index,row in enumerate(rows):
+        r.need(index==0 or rows[index-1]['safe_to_continue'] is True, 'Stage launched after unsafe predecessor')
         verdict=verify_stage(Path(directory)/row['stage'],legacy,arm,row['stage'])
         owned=(not row['timeout'] and row['returncode'] in (0,1) and row['signals']==[] and row['leader_joined'] is True and row['process_group_gone'] is True)
         r.need(row['independent_verification'] == verdict, 'Recorded independent stage verdict differs')
@@ -123,27 +135,63 @@ def verify_matrix(directory, legacy, arm):
     r.need(report == {'arm':arm,'all_stages_executed':len(rows)==len(r.ARMS[arm]),'capacity_gate_passed':passed,'product_qualified':False,'stages':rows}, 'Matrix verdict differs')
     return members, {'arm':arm,'capacity_gate_passed':passed,'product_qualified':False,'stages':verdicts}
 
+def write_archive(safe, output, roots, members, manifest_name, manifest):
+    output=safe.absolute_path(output)
+    roots=[safe.absolute_path(p) for p in roots if p is not None]
+    r.need(len(roots)==len(set(roots)), 'Duplicate evidence roots')
+    for root in roots:
+        r.need(root!=output and root not in output.parents and output not in root.parents, 'Archive and evidence roots overlap')
+    raw=safe.canonical(manifest)
+    r.need(len(raw)<=safe.MAX_FILE_BYTES and sum(len(d) for d in members.values())+len(raw)<=safe.MAX_TOTAL_BYTES,
+           'Combined archive budget exceeded')
+    parent=safe.open_directory(output.parent)
+    try:
+        os.mkdir(output.name,mode=0o700,dir_fd=parent)
+        out=os.open(output.name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent)
+    finally: os.close(parent)
+    try:
+        for name,data in [*sorted(members.items()),(manifest_name,raw)]:
+            safe.member_name(name); fd=os.dup(out)
+            try:
+                parts=PurePosixPath(name).parts
+                for part in parts[:-1]:
+                    try:os.mkdir(part,mode=0o700,dir_fd=fd)
+                    except FileExistsError:pass
+                    child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd)
+                    os.close(fd);fd=child
+                child=os.open(parts[-1],os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=fd)
+                with os.fdopen(child,'wb') as stream:stream.write(data)
+            finally:os.close(fd)
+    finally:os.close(out)
+
 def prepare(args):
     safe,p=modules(args.legacy_repository)
     members, verdict=verify_matrix(args.runtime,args.legacy_repository,args.arm)
-    args.output.mkdir(parents=True,exist_ok=False)
+    inodes=set();budget={'bytes':0}
+    again=safe.collect(args.runtime,matrix_files(p,args.arm,args.legacy_repository),inodes=inodes,budget=budget)
+    r.need(again==members,'Runtime changed during preparation')
     if args.arm != 'stock':
         r.need(args.build_evidence is not None, 'Candidate archive needs complete build evidence')
         build_files={n:f for n,f in safe.allowed_files().items() if not n.startswith('runtime/')}
-        build=safe.collect(args.build_evidence,build_files)
+        build=safe.collect(args.build_evidence,build_files,inodes=inodes,budget=budget)
         for n,d in build.items():
             safe.validate_bytes(n,d,build_files[n]);members['build/'+n]=d
-    for name,data in members.items():
-        target=args.output/name; target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(data)
     manifest={'schema_version':1,'kind':KIND,'arm':args.arm,'product_qualified':False,
         'files':{n:{'bytes':len(d),'sha256':safe.digest(d)} for n,d in members.items()},'verdict':verdict,
         'run':{k:os.environ.get(k) for k in ('GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_SHA','GITHUB_WORKFLOW')}}
-    r.save(args.output/'ARCHIVE.json',manifest)
+    write_archive(safe,args.output,[args.runtime,args.build_evidence],members,'ARCHIVE.json',manifest)
     verify(args.output,args.legacy_repository,args.arm)
 
 def verify(directory,legacy,arm):
     safe,p=modules(legacy); files={**matrix_files(p,arm,legacy),'ARCHIVE.json':'json'}
-    members=safe.collect(directory,files); manifest=read(safe,members.pop('ARCHIVE.json'))
+    members=safe.collect(directory,files); raw=members.pop('ARCHIVE.json')
+    safe.validate_bytes('ARCHIVE.json',raw,'json'); manifest=read(safe,raw)
+    r.need(set(manifest)=={'schema_version','kind','arm','product_qualified','files','verdict','run'}
+           and type(manifest['schema_version']) is int and type(manifest['files']) is dict
+           and set(manifest['run'])=={'GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_SHA','GITHUB_WORKFLOW'}, 'Wrong archive schema fields/types')
+    for entry in manifest['files'].values():
+        r.need(set(entry)=={'bytes','sha256'} and type(entry['bytes']) is int and entry['bytes']>=0, 'Wrong member metadata')
+
     # Matrix verifier deliberately does not accept ARCHIVE.json in its input.
     with tempfile.TemporaryDirectory(prefix='vui-archive-check-') as tmp:
         for n,d in members.items():
@@ -177,5 +225,7 @@ if __name__=='__main__':
     parser.add_argument('--output',type=Path)
     parser.add_argument('--build-evidence',type=Path)
     args=parser.parse_args()
+    for name,value in vars(args).items():
+        if name=='legacy_repository': setattr(args,name,value.resolve())
     if args.output: prepare(args)
     else: print(json.dumps(verify(args.runtime,args.legacy_repository,args.arm),sort_keys=True))

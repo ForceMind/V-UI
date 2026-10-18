@@ -1,0 +1,271 @@
+name: Standard client UDP research
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  product-negative-control:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-test.txt
+      - run: |
+          python scripts/fetch_test_cores.py /tmp/vui-product-cores
+          python scripts/fetch_mihomo.py /tmp/vui-product-client
+      - name: Exact product HTTP API exports and relay UDP rejection
+        env:
+          VUI_TEST_CORES: /tmp/vui-product-cores
+          VUI_TEST_MIHOMO: /tmp/vui-product-client/mihomo
+          VUI_INBOUND_ROUTING_LOOPBACK: '1'
+        run: |
+          set -euo pipefail
+          export VUI_DATA_DIR="$(mktemp -d)"
+          python - <<'PY' 2>&1 | tee /tmp/vui-product-control.log
+          import unittest
+          suite=unittest.TestLoader().discover('tests',pattern='test_inbound_routing_real.py')
+          assert suite.countTestCases()==10
+          result=unittest.TextTestRunner(verbosity=2).run(suite)
+          assert result.wasSuccessful() and not result.skipped
+          PY
+      - name: Preserve only fixed product control log and official provenance
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: standard-udp-product-negative-control
+          path: |
+            /tmp/vui-product-control.log
+            /tmp/vui-product-cores/provenance.json
+            /tmp/vui-product-client/mihomo-provenance.json
+          retention-days: 7
+          if-no-files-found: error
+  stock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    defaults:
+      run:
+        working-directory: product
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          path: product
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: afbdba100c5f0e3dc6888684fdbab31980720df3
+          path: legacy
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-test.txt
+      - name: Finite plan and fail-closed verifier controls
+        env:
+          VUI_STOCK_UDP_LEGACY: ${{ github.workspace }}/legacy
+        run: python -m unittest discover -s experiments/standard_client_udp -p 'test_*.py' -v
+      - run: |
+          python scripts/fetch_test_cores.py /tmp/vui-stock-cores
+          python scripts/fetch_mihomo.py /tmp/vui-stock-client
+      - name: All-stock strict C and D, owner absent
+        id: matrix
+        continue-on-error: true
+        run: |
+          python experiments/standard_client_udp/run_matrix.py --legacy-repository ../legacy \
+            --official /tmp/vui-stock-cores/sing-box --mihomo /tmp/vui-stock-client/mihomo \
+            --arm stock --output /tmp/vui-stock-matrix
+      - name: Independently verify and prepare all-stock text
+        id: evidence
+        if: ${{ !cancelled() && steps.matrix.outcome != 'skipped' }}
+        run: |
+          python experiments/standard_client_udp/evidence.py --legacy-repository ../legacy \
+            --runtime /tmp/vui-stock-matrix --arm stock --output /tmp/vui-stock-upload
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ !cancelled() && steps.evidence.outcome == 'success' }}
+        with:
+          name: standard-udp-stock-text
+          path: /tmp/vui-stock-upload
+          retention-days: 7
+          if-no-files-found: error
+      - name: Separate fresh first and second hop controls plus TCP sanity
+        id: auth
+        continue-on-error: true
+        run: |
+          python experiments/standard_client_udp/run_auth.py --legacy-repository ../legacy \
+            --official /tmp/vui-stock-cores/sing-box --mihomo /tmp/vui-stock-client/mihomo \
+            --arm stock --prior stock=/tmp/vui-stock-matrix --output /tmp/vui-stock-auth
+      - name: Validate fixed authentication-control archive
+        id: auth_evidence
+        if: ${{ !cancelled() && steps.auth.outcome != 'skipped' }}
+        run: |
+          python experiments/standard_client_udp/prepare_controls.py --legacy-repository ../legacy \
+            --runtime /tmp/vui-stock-auth --arm stock --output /tmp/vui-stock-auth-upload
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ !cancelled() && steps.auth_evidence.outcome == 'success' }}
+        with:
+          name: standard-udp-stock-auth-text
+          path: /tmp/vui-stock-auth-upload
+          retention-days: 7
+          if-no-files-found: error
+      - name: Retain strict red status
+        if: always()
+        run: test '${{ steps.matrix.outcome }}' = success && test '${{ steps.auth.outcome }}' = success
+  candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: product
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          path: product
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: afbdba100c5f0e3dc6888684fdbab31980720df3
+          path: legacy
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing-box
+          ref: af6e64c3b69e6132ebaee0e1a3d24e93903f6709
+          path: sing-box
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing-vmess
+          ref: 31ec11e8790c48a4bf11711806a61e929ee6b89d
+          path: sing-vmess
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing
+          ref: 87c33f17688fe3dd80eeabef7c3f7a69152ccd42
+          path: sing
+          persist-credentials: false
+      - name: Existing fixed Go compiler only
+        run: |
+          set -euo pipefail
+          GO_BIN="$RUNNER_TOOL_CACHE/go/1.25.14/x64/bin"
+          test "$(GOTOOLCHAIN=local "$GO_BIN/go" version)" = 'go version go1.25.14 linux/amd64'
+          printf '%s\n' "$GO_BIN" >> "$GITHUB_PATH"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: '12144080561'
+          run-id: '39146603341'
+          github-token: ${{ github.token }}
+          path: /tmp/vui-stock-mechanism
+          merge-multiple: true
+      - run: pip install -r requirements-test.txt
+      - name: Current adapter controls and unchanged frozen build controls
+        env:
+          VUI_STOCK_UDP_LEGACY: ${{ github.workspace }}/legacy
+        run: |
+          python -m unittest discover -s experiments/standard_client_udp -p 'test_*.py' -v
+          cd ../legacy
+          python - <<'PY'
+          import unittest
+          suite=unittest.TestLoader().discover('experiments/socks_idle_recovery',pattern='test_*.py')
+          assert suite.countTestCases()==159
+          result=unittest.TextTestRunner(verbosity=2).run(suite)
+          assert result.wasSuccessful() and not result.skipped
+          PY
+      - name: Rebuild exact eight-patch candidate with complete old verification
+        run: |
+          cd ../legacy
+          python experiments/socks_idle_recovery/build_and_test.py --sing-box ../sing-box \
+            --sing-vmess ../sing-vmess --sing ../sing --mechanism /tmp/vui-stock-mechanism \
+            --output /tmp/vui-standard-owner-build
+      - run: |
+          python scripts/fetch_test_cores.py /tmp/vui-candidate-cores
+          python scripts/fetch_mihomo.py /tmp/vui-candidate-client
+      - name: Stock Mihomo with both candidate servers, all owners absent
+        id: matrix
+        continue-on-error: true
+        run: |
+          python experiments/standard_client_udp/run_matrix.py --legacy-repository ../legacy \
+            --official /tmp/vui-candidate-cores/sing-box --mihomo /tmp/vui-candidate-client/mihomo \
+            --candidate /tmp/vui-standard-owner-build/owner-sing-box \
+            --candidate-provenance /tmp/vui-standard-owner-build/provenance.json \
+            --build-evidence /tmp/vui-standard-owner-build/evidence --arm candidate --output /tmp/vui-candidate-matrix
+      - name: Independently prepare candidate text including complete build proof
+        id: evidence
+        if: ${{ !cancelled() && steps.matrix.outcome != 'skipped' }}
+        run: |
+          python experiments/standard_client_udp/evidence.py --legacy-repository ../legacy \
+            --runtime /tmp/vui-candidate-matrix --arm candidate --output /tmp/vui-candidate-upload \
+            --build-evidence /tmp/vui-standard-owner-build/evidence
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ !cancelled() && steps.evidence.outcome == 'success' }}
+        with:
+          name: standard-udp-candidate-text
+          path: /tmp/vui-candidate-upload
+          retention-days: 7
+          if-no-files-found: error
+      - name: Change only overseas to official for separate B downlink diagnosis
+        id: b
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0,'experiments/standard_client_udp')
+          from run_auth import safe_predecessor
+          safe_predecessor(Path('../legacy').resolve(),'candidate',Path('/tmp/vui-candidate-matrix'))
+          PY
+          python experiments/standard_client_udp/run_matrix.py --legacy-repository ../legacy \
+            --official /tmp/vui-candidate-cores/sing-box --mihomo /tmp/vui-candidate-client/mihomo \
+            --candidate /tmp/vui-standard-owner-build/owner-sing-box \
+            --candidate-provenance /tmp/vui-standard-owner-build/provenance.json \
+            --build-evidence /tmp/vui-standard-owner-build/evidence --arm overseas-stock --output /tmp/vui-b-matrix
+      - name: Independently prepare B text
+        id: b_evidence
+        if: ${{ !cancelled() && steps.b.outcome != 'skipped' }}
+        run: |
+          python experiments/standard_client_udp/evidence.py --legacy-repository ../legacy \
+            --runtime /tmp/vui-b-matrix --arm overseas-stock --output /tmp/vui-b-upload \
+            --build-evidence /tmp/vui-standard-owner-build/evidence
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ !cancelled() && steps.b_evidence.outcome == 'success' }}
+        with:
+          name: standard-udp-overseas-stock-text
+          path: /tmp/vui-b-upload
+          retention-days: 7
+          if-no-files-found: error
+      - name: Candidate first and second hop controls plus TCP sanity
+        id: auth
+        continue-on-error: true
+        run: |
+          python experiments/standard_client_udp/run_auth.py --legacy-repository ../legacy \
+            --official /tmp/vui-candidate-cores/sing-box --mihomo /tmp/vui-candidate-client/mihomo \
+            --candidate /tmp/vui-standard-owner-build/owner-sing-box \
+            --candidate-provenance /tmp/vui-standard-owner-build/provenance.json \
+            --build-evidence /tmp/vui-standard-owner-build/evidence --arm candidate --prior candidate=/tmp/vui-candidate-matrix --prior overseas-stock=/tmp/vui-b-matrix --output /tmp/vui-candidate-auth
+      - name: Validate fixed candidate authentication-control archive
+        id: auth_evidence
+        if: ${{ !cancelled() && steps.auth.outcome != 'skipped' }}
+        run: |
+          python experiments/standard_client_udp/prepare_controls.py --legacy-repository ../legacy \
+            --runtime /tmp/vui-candidate-auth --arm candidate --output /tmp/vui-candidate-auth-upload
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ !cancelled() && steps.auth_evidence.outcome == 'success' }}
+        with:
+          name: standard-udp-candidate-auth-text
+          path: /tmp/vui-candidate-auth-upload
+          retention-days: 7
+          if-no-files-found: error
+      - name: Retain every strict red capacity or authentication outcome
+        if: always()
+        run: test '${{ steps.matrix.outcome }}' = success && test '${{ steps.b.outcome }}' = success && test '${{ steps.auth.outcome }}' = success
