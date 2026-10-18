@@ -2,6 +2,8 @@
 
 ## 节点
 
+每入口三态为未发布候选功能；同一实例使用标准 VLESS 直连/中转节点、首次无上游直连与已保存/已应用状态，见[每入口使用说明](PER_INBOUND_ROUTING.md)。准确验收见[当前开发状态](DEVELOPMENT_HANDOFF.md)。
+
 从HTTPS面板登录，在“入站节点”创建节点。发布包默认新建 sing-box/VLESS/TLS、端口10443；Trojan/TCP/TLS 也已进入公开验证矩阵；先使用[兼容矩阵](COMPATIBILITY.md)列明的已验证组合；普通 TLS 组合 flow 保持空、证书校验保持开启，限定 REALITY 使用精确 Vision flow。
 
 sing-box 的 VLESS/TLS、Trojan/TLS、VMess/TLS，以及已验收 Hysteria2/TLS、TUIC/TLS 的证书来源都可以选择已申请成功的正式托管证书，自动填入服务端材料并建立续期绑定；也可以手动填写证书/私钥路径与SNI。测试证书不进入可上线选择。后台仍以`material`校验结果为准，不能通过前端选择绕过域名、期限和环境检查。

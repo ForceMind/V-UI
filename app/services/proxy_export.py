@@ -1,6 +1,6 @@
 """Explicit, credential-bearing strict relay exports, separate from subscriptions.
 
-Only a committed, running, all-ingress-consistent relay can be exported. The
+Only a committed, running, snapshot-consistent relay ingress can be exported. The
 administrator supplies one public IP literal for the domestic ingress; domains
 are rejected rather than resolved implicitly. TLS retains the ingress's stored
 identity. These files configure explicit loopback clients, not TUN/system DNS.
@@ -21,6 +21,7 @@ import re
 import yaml
 
 from app.services.core_runtime import revision
+from app.services.inbound_policy import policy_plan
 from app.services.proxy_policy import AddressPolicy, PolicyError, ingress_coverage
 from app.services.proxy_store import ProxyConflict, ProxyStorageError
 from app.services.validated_export import ExportError, _client_tls, validated_node
@@ -127,18 +128,21 @@ class StrictRelayExporter:
         with self.manager.lock:
             coordinator = self.manager.proxy_coordinator
             active = coordinator.store.load_active(reject_pending=True)
-            if active is None or active["settings"]["relay_enabled"] is not True:
+            if active is None:
                 raise StrictExportError("STRICT_EXPORT_RELAY_NOT_ACTIVE")
             if active["revision"] != base_revision:
                 raise ProxyConflict("Active revision differs")
             rows = self.manager._all_rows()
             try:
-                coverage = ingress_coverage(rows)
-                if not coverage or any(not item["qualified"] for item in coverage):
-                    raise StrictExportError("STRICT_EXPORT_UNQUALIFIED_INGRESS")
                 selected = [item for item in rows if item.id == inbound_id and item.enable is True]
                 if len(selected) != 1:
                     raise StrictExportError("STRICT_EXPORT_INGRESS_NOT_FOUND")
+                plan = policy_plan(rows, active["settings"])
+                if inbound_id not in plan.relay_ids:
+                    raise StrictExportError("STRICT_EXPORT_RELAY_NOT_ACTIVE")
+                coverage = ingress_coverage([item for item in rows if item.id in plan.relay_ids])
+                if not coverage or any(not item["qualified"] for item in coverage):
+                    raise StrictExportError("STRICT_EXPORT_UNQUALIFIED_INGRESS")
                 compiled = coordinator.compile_active(rows)
                 context = active.get("runtime_context")
                 if (compiled is None or revision(compiled.config) != active["core_revision"]
@@ -162,7 +166,8 @@ class StrictRelayExporter:
                 # outside the manager lock may save drafts, never substitute one.
                 latest = coordinator.store.load_active(reject_pending=True)
                 if (latest is None or latest["revision"] != base_revision
-                        or latest["core_revision"] != active["core_revision"]):
+                        or latest["core_revision"] != active["core_revision"]
+                        or latest.get("runtime_context") != context):
                     raise ProxyConflict("Active revision changed")
             except (StrictExportError, ProxyConflict, ProxyStorageError):
                 raise

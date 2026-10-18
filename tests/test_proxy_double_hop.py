@@ -164,9 +164,15 @@ class ProxyFixtureTests(unittest.TestCase):
                 case.rejection(request, case.ingress,
                                (f"dns: lookup failed for {name}:", "exchange4: servfail", "exchange6: servfail"),
                                timeout=1)
-                self.assertTrue(written.is_set(), "Returned before the fresh reason was written")
+                self.assertEqual(path.read_text(), line * 2,
+                                 "Returned before the complete fresh reason was visible")
             finally:
                 timer.join(timeout=2)
+            # The reader may see the flushed file before the writer gets its
+            # next timeslice to set this event. Join the actual writer first;
+            # rejection itself must still observe the complete fresh reason.
+            self.assertFalse(timer.is_alive(), "Fresh reason writer did not join")
+            self.assertTrue(written.is_set(), "Fresh reason writer did not complete")
             self.assertEqual(calls, [True])
             self.assertEqual(case.evidence.dns, Counter({(UPSTREAM_EGRESS, name, 1): 1,
                                                        (UPSTREAM_EGRESS, name, 28): 1}))
@@ -578,7 +584,7 @@ class DoubleHopFixture(unittest.TestCase):
         self.start_process(self.upstream, self.upstream_port, UPSTREAM)
 
     def compile_state(self, state, *, failure=None):
-        row = SimpleNamespace(id=1, core="sing-box", protocol="vless", port=self.ingress_port,
+        row = SimpleNamespace(id=1, routing_mode="inherit", core="sing-box", protocol="vless", port=self.ingress_port,
             remark="isolated-ingress", tag="fixture-ingress", enable=True, expiry_time=0,
             settings={"users": [{"uuid": INGRESS_UUID}]}, stream_settings={"tls": {
                 "enabled": True, "server_name": SNI,

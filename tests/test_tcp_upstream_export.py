@@ -34,7 +34,7 @@ SECRET = "fake-secret-that-must-not-be-echoed"
 
 
 def inbound(reality=False, **changes):
-    values = dict(id=1, core="sing-box", protocol="vless", port=10443,
+    values = dict(id=1, routing_mode="inherit", core="sing-box", protocol="vless", port=10443,
         remark="TCP upstream / 中文", enable=True, expiry_time=0, tag="source-inbound",
         settings={"users": [{"uuid": UUID, "name": "source user"}]},
         stream_settings={"tls": {"enabled": True, "server_name": SNI,

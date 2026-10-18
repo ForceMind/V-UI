@@ -36,6 +36,7 @@ class ProfilePayload(ImportPayload):
 
 class ApplyPayload(StrictPayload):
     base_revision: str = Field(pattern=r'^[0-9a-f]{64}$', min_length=64, max_length=64)
+    source_fingerprint: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$', min_length=64, max_length=64)
 
 
 class SettingsPayload(StrictPayload):
@@ -98,6 +99,7 @@ def capabilities():
         'diagnostics_available': True,
         'strict_exports_available': True,
         'full_system_proxy': False,
+        'inbound_routing_modes': ['inherit', 'direct', 'relay'],
         'local_listen': '127.0.0.1',
         'qualified_ingress': ['sing-box-vless-tcp-tls'],
         'formats': ['uri', 'v2ray-json', 'clash-yaml'],
@@ -196,7 +198,9 @@ def check_candidate(payload: ApplyPayload, response: Response):
     try:
         # A configuration check can bootstrap the upstream address. It is not
         # a successful TLS/authentication/HTTPS diagnostic or a live listener.
-        result = manager.check_proxy(payload.base_revision)
+        result = (manager.check_proxy(payload.base_revision) if payload.source_fingerprint is None
+                  else manager.check_proxy(payload.base_revision,
+                                           expected_source_fingerprint=payload.source_fingerprint))
         snapshot_response(result['snapshot'], response)
         return result
     except (CoreError, PolicyError, ResolutionError, ProxyConflict,
@@ -219,7 +223,10 @@ def apply_candidate(payload: ApplyPayload, response: Response, request: Request,
     try:
         # Manager additionally gates stale enabled runtimes from other cores;
         # directly calling the coordinator would omit that global ingress gate.
-        result = get_core_manager().apply_proxy(payload.base_revision, idempotency_key)
+        result = (get_core_manager().apply_proxy(payload.base_revision, idempotency_key)
+                  if payload.source_fingerprint is None else
+                  get_core_manager().apply_proxy(payload.base_revision, idempotency_key,
+                                                 expected_source_fingerprint=payload.source_fingerprint))
         if result.get('applied') is not True or result.get('phase') != 'committed':
             raise HTTPException(409, 'PROXY_TRANSACTION_NOT_ACTIVE')
         snapshot_response(result['snapshot'], response)

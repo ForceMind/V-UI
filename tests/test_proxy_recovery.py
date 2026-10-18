@@ -52,7 +52,7 @@ class ProxyRecoveryTests(unittest.TestCase):
         self.data = self.root / 'data'
         self.data.mkdir(mode=0o700)
         self.archive = self.root / 'backup.zip'
-        self.row = SimpleNamespace(id=1, user_id=1, core='sing-box', up=0, down=0,
+        self.row = SimpleNamespace(id=1, routing_mode='inherit', user_id=1, core='sing-box', up=0, down=0,
             total=0, remark='preserved fake inbound', enable=True, expiry_time=0,
             port=24443, protocol='vless', tag='fake-inbound',
             settings={'users': [{'uuid': FAKE_UUID}]},
@@ -486,27 +486,12 @@ class ProxyRecoveryTests(unittest.TestCase):
                     with self.assertRaises(recovery.ProxyRecoveryError): recovery._rows(self.data)
                 decode.assert_not_called()
 
-    def test_unselected_large_inbound_metadata_is_not_loaded_or_counted_as_policy(self):
+    def test_large_source_metadata_is_bounded_before_policy_materialization(self):
         with sqlite3.connect(self.data / 'v-ui.db') as db:
-            db.execute('UPDATE inbounds SET remark=?', ('unrelated-' + 'x' * (17 * 1024 * 1024),))
-        original_connect, original_loads = sqlite3.connect, json.loads
-        queries = []
-        def connect(*args, **kwargs):
-            connection = original_connect(*args, **kwargs)
-            connection.set_trace_callback(queries.append)
-            return connection
-        with patch.object(recovery.sqlite3, 'connect', side_effect=connect), \
-             patch.object(recovery.json, 'loads', wraps=original_loads) as decode:
-            rows = recovery._rows(self.data)
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(set(vars(rows[0])), {'id', 'core', 'enable', 'expiry_time', 'port',
-                                             'protocol', 'settings', 'stream_settings', 'tag'})
-        self.assertEqual(rows[0].settings, self.row.settings)
-        self.assertEqual(rows[0].stream_settings, self.row.stream_settings)
-        self.assertEqual(decode.call_count, 2)
-        self.assertTrue(all(len(call.args[0].encode('utf-8')) < 4096 for call in decode.call_args_list))
-        self.assertTrue(any(query.startswith('SELECT id,core,enable,') for query in queries))
-        self.assertFalse(any('SELECT * ' in query.upper() or 'remark' in query.lower() for query in queries))
+            db.execute('UPDATE inbounds SET remark=?', ('x' * (17 * 1024 * 1024),))
+        with patch.object(recovery.json, 'loads', side_effect=AssertionError('Oversized source was materialized')):
+            with self.assertRaises(recovery.ProxyRecoveryError):
+                recovery._rows(self.data)
 
     @staticmethod
     def staged_entries(work):

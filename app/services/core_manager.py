@@ -7,6 +7,7 @@ from typing import Iterable
 
 from app.models.database import Inbound
 from app.services.core_runtime import CoreRuntime, CoreError, revision
+from app.services.inbound_policy import policy_plan, row_mode
 
 DATA_DIR = Path(os.getenv("VUI_DATA_DIR", "data"))
 BIN_DIR = Path(os.getenv("VUI_BIN_DIR", "bin"))
@@ -177,7 +178,7 @@ class CoreManager:
         try:
             return self.proxy_coordinator.compile_active(rows)
         except CoreError as exc:
-            if getattr(exc, "code", None) in {"RECOVERY_REQUIRED", "RUNTIME_MISMATCH", "MISSING_ACTIVE_CONTEXT"}:
+            if getattr(exc, "code", None) in {"RECOVERY_REQUIRED", "RUNTIME_MISMATCH"}:
                 self._stop_untrusted("Proxy state is unavailable; core operations blocked")
             raise
         except (ProxyConflict, ProxyStorageError, ProxyValidationError, PolicyError, ResolutionError):
@@ -191,54 +192,103 @@ class CoreManager:
         Runtime failure after the later DB commit is reported as saved/not
         applied; it never permits a fallback to an ordinary sing-box config.
         """
+        from app.services.proxy_store import ProxyStorageError, ProxyValidationError, ProxyConflict
+        from app.services.proxy_policy import PolicyError
+        from app.services.proxy_resolution import ResolutionError
         with self.lock:
-            self._compiled_active(list(rows))
+            try:
+                coordinator = self.proxy_coordinator
+                plan = coordinator.validate_inbound_change(list(rows))
+                self._check_relay_runtime_gate(bool(plan.relay_ids))
+            except (ProxyStorageError, ProxyValidationError, ProxyConflict, PolicyError, ResolutionError):
+                raise CoreError("Active proxy policy is unavailable or rejects this ingress snapshot") from None
 
-    def _check_proxy_runtime_gate(self, coordinator, expected_revision: str) -> None:
-        from app.services.proxy_store import ProxyConflict
-        draft = coordinator.store.load_draft()
-        if draft["revision"] != expected_revision:
-            raise ProxyConflict("Proxy draft changed before apply")
-        if draft["settings"]["relay_enabled"]:
-            # A previous failed Xray delete/disable can leave an older direct
-            # runtime even though its DB rows are now disabled. That runtime
-            # must not survive an all-ingress relay claim.
+    def _check_relay_runtime_gate(self, relay: bool) -> None:
+        if relay:
+            # Mixed routing is qualified only within one sing-box instance.
+            # Never silently stop an unrelated surviving Xray process.
             xray = self.get("xray").runtime
             if xray.state()["enabled"] or xray.status()["running"]:
                 raise CoreError("Stop the remaining Xray runtime before enabling relay")
 
-    def check_proxy(self, expected_revision: str) -> dict:
+    def _check_proxy_runtime_gate(self, coordinator, expected_revision: str, rows) -> None:
+        from app.services.proxy_store import ProxyConflict
+        draft = coordinator.store.load_draft()
+        if draft["revision"] != expected_revision:
+            raise ProxyConflict("Proxy draft changed before apply")
+        plan = policy_plan(rows, draft["settings"])
+        self._check_relay_runtime_gate(draft["settings"]["relay_enabled"] or bool(plan.relay_ids))
+
+    def check_proxy(self, expected_revision: str, expected_source_fingerprint: str | None = None) -> dict:
         from app.services.proxy_store import ProxyStorageError
         with self.lock:
             try:
                 coordinator = self.proxy_coordinator
-                self._check_proxy_runtime_gate(coordinator, expected_revision)
-                return coordinator.check(expected_revision, self._all_rows())
+                rows = self._all_rows()
+                coordinator.validate_saved_source(rows)
+                self._check_proxy_runtime_gate(coordinator, expected_revision, rows)
+                return coordinator.check(expected_revision, rows,
+                                         expected_source_fingerprint=expected_source_fingerprint)
             except ProxyStorageError:
                 self._stop_untrusted("Proxy state is unavailable; core operations blocked")
                 raise
 
-    def apply_proxy(self, expected_revision: str, transaction_id: str) -> dict:
+    def apply_proxy(self, expected_revision: str, transaction_id: str, expected_source_fingerprint: str | None = None) -> dict:
         from app.services.proxy_store import ProxyStorageError
         with self.lock:
             try:
                 coordinator = self.proxy_coordinator
+                rows = self._all_rows()
+                coordinator.validate_saved_source(rows)
                 if coordinator.store.transaction(transaction_id) is None:
-                    self._check_proxy_runtime_gate(coordinator, expected_revision)
+                    self._check_proxy_runtime_gate(coordinator, expected_revision, rows)
                 # Existing IDs are resolved before draft inspection, preserving
                 # idempotent replay after a newer draft has been saved.
-                return coordinator.apply(expected_revision, transaction_id, self._all_rows())
+                return coordinator.apply(expected_revision, transaction_id, rows,
+                                         expected_source_fingerprint=expected_source_fingerprint)
             except ProxyStorageError:
                 self._stop_untrusted("Proxy state is unavailable; core operations blocked")
                 raise
 
-    def _apply_rows(self, core: str, rows: list[Inbound], *, activate: bool) -> dict:
+    def delete_proxy_upstream(self, upstream_id: str, expected_revision: str) -> dict:
+        from app.services.proxy_store import ProxyConflict
+        with self.lock:
+            store = self.proxy_coordinator.store
+            draft = store.load_draft()
+            if draft["revision"] != expected_revision:
+                raise ProxyConflict("Proxy draft changed before deletion")
+            if (draft["settings"]["selected_upstream_id"] == upstream_id
+                    and any(row_mode(row) == "relay" for row in self._all_rows())):
+                raise ProxyConflict("Replace or explicitly unselect the upstream before deleting a relay draft dependency")
+            return store.delete_upstream(upstream_id, expected_revision)
+
+    def _apply_rows(self, core: str, rows: list[Inbound], *, activate: bool,
+                    preserve_stopped: bool = False) -> dict:
         adapter = self.get(core)
-        compiled = self._compiled_active(rows)
-        if core == "sing-box" and compiled is not None:
-            return self.proxy_coordinator.reconcile(rows, activate=activate)
-        # Xray mutations cannot reset the independent sing-box policy. They
-        # still pass the complete all-core qualification gate when relay is ON.
+        coordinator = self.proxy_coordinator
+        # Prospective preparation also handles the one valid OFF -> first-pin
+        # transition. Only reconcile below is allowed to resolve that pin.
+        from app.services.proxy_store import ProxyConflict, ProxyStorageError, ProxyValidationError
+        from app.services.proxy_policy import PolicyError
+        from app.services.proxy_resolution import ResolutionError
+        try:
+            plan = coordinator.validate_inbound_change(rows, persist_fence=False)
+            active = coordinator.store.load_active()
+        except (ProxyConflict, ProxyStorageError, ProxyValidationError, PolicyError, ResolutionError):
+            raise CoreError("Active proxy policy is unavailable or rejects this ingress snapshot") from None
+        self._check_relay_runtime_gate(bool(plan.relay_ids) or bool(
+            active and active["settings"]["relay_enabled"]))
+        if preserve_stopped and (not plan.legacy or active and active.get("runtime_context")
+                                 and active["runtime_context"]["schema_version"] == 2):
+            state = adapter.runtime.state()
+            if state["revision"] is not None and not state["enabled"]:
+                # An empty never-running config is not a manual stop. The
+                # committed config is inspected, never dirty desired rows.
+                previous_config = adapter.runtime.active_config()
+                if previous_config and previous_config.get("inbounds"):
+                    activate = False
+        if core == "sing-box":
+            return coordinator.reconcile(rows, activate=activate)
         config = adapter.build_config(item for item in rows if item.core == core)
         return adapter.runtime.apply(config, activate=activate)
 
@@ -253,9 +303,9 @@ class CoreManager:
             rows = [item for item in self._all_rows() if item.core != core] + supplied
             return self._apply_rows(core, rows, activate=restart)
 
-    def apply_database(self, core: str, *, activate: bool = True) -> dict:
+    def apply_database(self, core: str, *, activate: bool = True, preserve_stopped: bool = True) -> dict:
         with self.lock:
-            return self._apply_rows(core, self._all_rows(), activate=activate)
+            return self._apply_rows(core, self._all_rows(), activate=activate, preserve_stopped=preserve_stopped)
 
     def status(self) -> dict:
         with self.lock:
@@ -274,8 +324,68 @@ class CoreManager:
                     config = (compiled.config if name == "sing-box" and compiled is not None
                               else adapter.build_config(item for item in rows if item.core == name))
                     desired = revision(config)
-                    status.update(desired_revision=desired, dirty=desired != status["applied_revision"])
+                    dirty = desired != status["applied_revision"]
+                    if name == "sing-box" and compiled is not None:
+                        active = self.proxy_coordinator.store.load_active()
+                        context = active.get("runtime_context") if active else None
+                        dirty = dirty or context is None or compiled.identity != context["policy_identity"]
+                    status.update(desired_revision=desired, dirty=dirty)
                 result[name] = status
+            return result
+
+    def inbound_routing_status(self, rows=None) -> dict:
+        """Public desired/applied labels from exact committed provenance only."""
+        from app.services.proxy_store import _defaults
+        with self.lock:
+            rows = self._all_rows() if rows is None else list(rows)
+            result = {row.id: {"desired_effective_mode": None, "applied_effective_mode": None,
+                              "state": "unknown", "policy_identity": None} for row in rows}
+            try:
+                coordinator = self.proxy_coordinator
+                active = coordinator.store.load_active(reject_pending=True)
+                settings = active["settings"] if active else _defaults()
+                desired = policy_plan(rows, settings)
+                for entry in desired.manifest:
+                    result[entry["id"]]["desired_effective_mode"] = entry["effective"]
+                if active is None:
+                    return result
+                context = active.get("runtime_context")
+                state = self.get("sing-box").runtime.state()
+                if (context is None or state["revision"] != active["core_revision"]
+                        or bool(self.get("sing-box").runtime.status()["running"]) != state["enabled"]):
+                    return result
+                if context["schema_version"] == 2:
+                    applied = coordinator.store.context_plan(context, settings)
+                    if desired.manifest != applied.manifest:
+                        for target in result.values(): target["state"] = "pending"
+                        return result
+                    compiled = coordinator.compile_active(rows)
+                    if (compiled.identity != context["policy_identity"]
+                            or revision(compiled.config) != active["core_revision"]):
+                        return result
+                    for entry in desired.manifest:
+                        if not entry["enable"]:
+                            result[entry["id"]]["state"] = "stopped"
+                        elif entry["core"] == "sing-box":
+                            result[entry["id"]].update(
+                                applied_effective_mode=entry["effective"] if state["enabled"] else None,
+                                state="applied" if state["enabled"] else "stopped",
+                                policy_identity=context["policy_identity"])
+                else:
+                    compiled = coordinator.compile_active(rows)
+                    if compiled is None or compiled.identity != context["policy_identity"]:
+                        for target in result.values(): target["state"] = "pending"
+                        return result
+                    for entry in desired.manifest:
+                        if not entry["enable"]:
+                            result[entry["id"]]["state"] = "stopped"
+                        elif entry["core"] == "sing-box":
+                            result[entry["id"]].update(
+                                applied_effective_mode=entry["effective"] if state["enabled"] else None,
+                                state="applied" if state["enabled"] else "stopped",
+                                policy_identity=context["policy_identity"])
+            except (ValueError, CoreError, OSError):
+                pass
             return result
 
     def recover_all(self):
@@ -284,13 +394,26 @@ class CoreManager:
                 # Resolve the proxy journal and committed strategy before ANY
                 # core may auto-start. Corruption never implies default OFF.
                 coordinator = self.proxy_coordinator
+                active = coordinator.store.load_active()
+                if active is not None:
+                    committed = coordinator.store.context_plan(active.get("runtime_context"), active["settings"])
+                    if active["settings"]["relay_enabled"] or committed and committed.relay_ids:
+                        try:
+                            self._check_relay_runtime_gate(True)
+                        except CoreError:
+                            coordinator._stop()
+                            self.get("sing-box").runtime.last_error = "Incompatible Xray runtime prevents proxy recovery"
+                            return
                 coordinator.recover()
                 active = coordinator.store.load_active()
-                if active is not None and active["settings"]["relay_enabled"]:
-                    # No old Xray commit is eligible for relay. Keep stopped
-                    # even when desired DB deletion had failed to apply earlier.
-                    self.get("xray").runtime.stop(persist=False)
-                    return
+                if active is not None:
+                    plan = coordinator.store.context_plan(active.get("runtime_context"), active["settings"])
+                    relay = active["settings"]["relay_enabled"] or bool(plan and plan.relay_ids)
+                    if relay:
+                        # Reject incompatible committed runtime explicitly;
+                        # do not silently erase or stop an unrelated node.
+                        self._check_relay_runtime_gate(True)
+                        return
             except (CoreError, ValueError, OSError):
                 self._stop_untrusted("Proxy recovery failed; automatic core startup blocked")
                 return

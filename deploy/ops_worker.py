@@ -185,7 +185,7 @@ def _load_release_tools():
     # parser, core binary, or service-owned installed code is imported here.
     directory = Path(__file__).resolve().parent
     names = ('app', 'app.services', 'app.data_owner', 'app.services.upstream_profile',
-             'app.services.proxy_store')
+             'app.services.proxy_store', 'app.services.inbound_policy')
     if any(name in sys.modules for name in names):
         raise WorkerError('Unexpected application modules in isolated worker')
     loaded = []
@@ -197,6 +197,7 @@ def _load_release_tools():
             loaded.append(name)
         for name, filename in (('app.data_owner', 'data_owner.py'),
                                ('app.services.upstream_profile', 'upstream_profile.py'),
+                               ('app.services.inbound_policy', 'inbound_policy.py'),
                                ('app.services.proxy_store', 'proxy_store.py'),
                                ('_vui_managed_release_tools', 'release_tools.py')):
             spec = importlib.util.spec_from_file_location(name, directory / filename)

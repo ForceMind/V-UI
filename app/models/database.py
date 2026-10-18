@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from sqlalchemy import Boolean, Column, Integer, JSON, String, create_engine, inspect, text
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker, validates
 from sqlalchemy.pool import NullPool
 
 from app.data_owner import data_owner
@@ -66,6 +66,7 @@ class Inbound(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, nullable=True)
     core = Column(String, nullable=False, default="xray", index=True)
+    routing_mode = Column(String, nullable=False, default="inherit", server_default="inherit")
     up = Column(Integer, default=0)
     down = Column(Integer, default=0)
     total = Column(Integer, default=0)
@@ -78,26 +79,69 @@ class Inbound(Base):
     stream_settings = Column(JSON, default=dict)
     tag = Column(String)
 
+    @validates("routing_mode")
+    def _validate_routing_mode(self, key, value):
+        from app.services.inbound_policy import normalize_mode
+        return normalize_mode(value)
+
+
+def _saved_policy_schema() -> int:
+    from app.services.proxy_store import ProxyStore
+    data = Path(engine.url.database).absolute().parent
+    names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
+    return (ProxyStore(data).policy_schema_version()
+            if any(os.path.lexists(data / name) for name in names) else 1)
+
+
+def _guard_policy_schema_before_create() -> None:
+    """Do not let create_all/ALTER disguise loss of a fenced policy column."""
+    from app.services.proxy_store import ProxyStorageError
+    if _saved_policy_schema() != 2:
+        return
+    path = Path(engine.url.database).absolute()
+    if not path.is_file():
+        raise ProxyStorageError("Per-inbound database is missing; offline recovery is required")
+    with engine.connect() as conn:
+        inspector = inspect(conn)
+        if ("inbounds" not in inspector.get_table_names()
+                or "routing_mode" not in {column["name"] for column in inspector.get_columns("inbounds")}):
+            raise ProxyStorageError("Per-inbound database column is missing; offline recovery is required")
+
 
 def _migrate_legacy_schema() -> None:
     """Keep existing installations working without introducing Alembic yet."""
-    inspector = inspect(engine)
-    if "inbounds" not in inspector.get_table_names():
-        return
-
-    columns = {column["name"] for column in inspector.get_columns("inbounds")}
-    if "core" not in columns:
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "ALTER TABLE inbounds "
-                    "ADD COLUMN core VARCHAR NOT NULL DEFAULT 'xray'"
-                )
-            )
+    # Serialize schema inspection and DDL across processes as well as the
+    # panel's operation lock. Only an actually missing column gets defaults.
+    from app.services.inbound_policy import normalize_mode
+    with engine.connect() as conn:
+        conn.execute(text("BEGIN IMMEDIATE"))
+        try:
+            inspector = inspect(conn)
+            if "inbounds" not in inspector.get_table_names():
+                conn.commit()
+                return
+            columns = {column["name"] for column in inspector.get_columns("inbounds")}
+            if "core" not in columns:
+                conn.execute(text("ALTER TABLE inbounds ADD COLUMN core VARCHAR NOT NULL DEFAULT 'xray'"))
+            if "routing_mode" not in columns:
+                conn.execute(text("ALTER TABLE inbounds ADD COLUMN routing_mode VARCHAR NOT NULL DEFAULT 'inherit'"))
+            modes = {normalize_mode(value) for value in conn.execute(
+                text("SELECT DISTINCT routing_mode FROM inbounds")).scalars()}
+            if modes - {"inherit"} and _saved_policy_schema() != 2:
+                from app.services.proxy_store import ProxyStorageError
+                raise ProxyStorageError("Inbound routing capability fence is missing; offline recovery is required")
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
 
 
 def init_db() -> None:
-    with data_owner(Path(engine.url.database).absolute().parent):
+    # A lazy import avoids making model import create runtime state; migration
+    # uses the same operation lock as every panel-mediated inbound mutation.
+    from app.services.core_manager import core_manager
+    with core_manager.lock, data_owner(Path(engine.url.database).absolute().parent):
+        _guard_policy_schema_before_create()
         Base.metadata.create_all(bind=engine)
         _migrate_legacy_schema()
 

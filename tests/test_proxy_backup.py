@@ -12,6 +12,34 @@ from app import release_tools as tools
 from app.services.proxy_store import ProxyStore, ProxyStorageError
 
 
+def seed_runtime(store, data, revision, transaction):
+    """A real immutable config/journal pair, without starting a core."""
+    from app.services.core_runtime import encode, revision as core_revision
+    settings = store.load_draft()['settings']
+    needed = settings['local_proxy_enabled'] or settings['relay_enabled']
+    config = {'inbounds': [{'tag': 'vui-relay-ingress-1' if settings['relay_enabled'] else 'direct-node',
+                           'type': 'vless', 'listen_port': 24443}],
+              'outbounds': [{'type': 'direct', 'tag': 'direct'}]}
+    raw, digest = encode(config), core_revision(config)
+    directory = data / 'runtime' / 'sing-box'
+    directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+    directory.parent.chmod(0o700)
+    (directory / (digest + '.json')).write_bytes(raw)
+    (directory / (digest + '.json')).chmod(0o600)
+    state_path = directory / 'state.json'
+    state_path.write_text(json.dumps({'revision': digest, 'enabled': True}))
+    state_path.chmod(0o600)
+    active = store.load_draft()
+    previous = store.load_active()
+    context = {'schema_version': 1, 'kind': 'apply', 'candidate_core_revision': digest,
+        'previous_core_revision': previous['core_revision'] if previous else None, 'previous_enabled': False, 'policy_identity': 'b' * 64,
+        'endpoint': {'profile_id': active['settings']['selected_upstream_id'], 'revision': revision,
+                     'host': 'upstream.example', 'addresses': ['8.8.4.4'], 'resolved_at': 1} if needed else None,
+        'self_addresses': ['127.0.0.1'] if needed else []}
+    store.begin_apply(revision, transaction, runtime_context=context)
+    store.commit_apply(transaction, digest)
+
+
 class ProxyBackupTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory(prefix="vui-proxy-backup-")
@@ -37,8 +65,7 @@ class ProxyBackupTests(unittest.TestCase):
         settings.update(relay_enabled=True, local_proxy_enabled=True, local_username="fake-user",
                         selected_upstream_id=saved["upstream_id"])
         draft = self.store.save_draft(settings, saved["snapshot"]["revision"], local_password="fake-password-for-tests")
-        self.store.begin_apply(draft["revision"], "test-apply")
-        self.store.commit_apply("test-apply", "test-core")
+        seed_runtime(self.store, self.data, draft["revision"], "test-apply")
         return self.store.read_snapshot()
 
     def assert_nodes_preserved_and_access_revoked(self):
@@ -124,7 +151,7 @@ class ProxyBackupTests(unittest.TestCase):
     def test_proxy_bearing_off_backup_cannot_turn_off_active_proxy(self):
         initial = self.store.read_snapshot()
         self.store.begin_apply(initial["revision"], "explicit-off")
-        self.store.commit_apply("explicit-off", "off-core")
+        self.store.commit_apply("explicit-off", "a" * 64)
         sha = tools.backup(self.root, self.archive)
         self.enabled()
         self.assert_rejected_restore_preserves_current(self.archive, sha)

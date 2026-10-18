@@ -57,6 +57,15 @@ jobs:
           set -euo pipefail
           export VUI_DATA_DIR="$(mktemp -d)"
           python -m unittest discover -s tests -p test_tcp_upstream_export_real.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
+      - name: Exercise standard-client per-inbound TCP routes and independent host switch
+        env:
+          VUI_TEST_CORES: /tmp/vui-rc1/cores
+          VUI_TEST_MIHOMO: /tmp/vui-rc1/client/mihomo
+          VUI_INBOUND_ROUTING_LOOPBACK: "1"
+        run: |
+          set -euo pipefail
+          export VUI_DATA_DIR="$(mktemp -d)"
+          python -m unittest discover -s tests -p test_inbound_routing_real.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
       - name: Preserve pin and test evidence only
         if: always()
         uses: actions/upload-artifact@v4

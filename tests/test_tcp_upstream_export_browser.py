@@ -123,11 +123,16 @@ class TCPUpstreamExportStaticTests(unittest.TestCase):
         # This is controller coverage, not a substitute for Chromium/API tests.
         code = r'''
 const vm = require('vm'), fs = require('fs'), assert = require('assert');
-const pending = [], events = {}, revoked = [], urls = [];
+const pending = [], events = new EventTarget(), listeners = {}, revoked = [], urls = [];
 let api, interceptor;
 const context = vm.createContext({ setTimeout, clearTimeout, AbortController, Blob, console,
     location: {hash:'', replace(){}}, navigator:{clipboard:{writeText:async () => {}}},
-    addEventListener(name,callback){events[name]=callback},
+    addEventListener(name,callback){
+        // Native dispatch retains independent listeners instead of overwriting
+        // the earlier export cleanup when the editor registers its cleanup.
+        (listeners[name]??=new Set()).add(callback);
+        events.addEventListener(name,callback);
+    },
     URL:{createObjectURL(){const u='blob:'+urls.length;urls.push(u);return u},revokeObjectURL(u){revoked.push(u)}},
     axios:{ defaults:{headers:{common:{}}}, interceptors:{response:{use(_,bad){interceptor=bad}}},
       post(url,data,options){return new Promise((resolve,reject)=>pending.push({url,data,options,resolve,reject}))},
@@ -152,11 +157,26 @@ const success=(content='synthetic-credential')=>({data:content,headers:{'x-vui-e
  api.openUpstreamExport({id:2});state.server='node.example';state.acknowledged=true;
  const failed=api.requestUpstreamExport();pending.shift().reject({response:{status:409,data:'never-show-this'}});await failed;
  assert(!state.busy);assert.equal(state.content,'');assert(state.error.includes('不具备'));assert(!state.error.includes('never-show-this'));
- const req=api.requestUpstreamExport();events.pagehide();pending.shift().resolve(success('pagehide-secret'));await req;assert.equal(state.content,'');assert(!state.open);
+ assert.equal(listeners.pagehide.size,2);assert.equal(listeners.popstate.size,2);
+ api.showAddInbound.value=true;api.editingInboundId.value=47;
+ api.newInbound.profile.reality_uuid='pagehide-editor-secret';
+ const req=api.requestUpstreamExport();events.dispatchEvent(new Event('pagehide'));
+ assert(pending[0].options.signal.aborted);
+ pending.shift().resolve(success('pagehide-secret'));await req;assert.equal(state.content,'');assert(!state.open);
+ assert(!api.showAddInbound.value);assert.equal(api.editingInboundId.value,null);
+ assert.equal(api.newInbound.profile.reality_uuid,'');
+ api.openUpstreamExport({id:4});state.server='node.example';state.acknowledged=true;
+ api.showAddInbound.value=true;api.editingInboundId.value=48;
+ api.newInbound.profile.reality_uuid='popstate-editor-secret';
+ const popped=api.requestUpstreamExport();events.dispatchEvent(new Event('popstate'));
+ assert(pending[0].options.signal.aborted);
+ pending.shift().resolve(success('popstate-secret'));await popped;assert.equal(state.content,'');assert(!state.open);
+ assert(!api.showAddInbound.value);assert.equal(api.editingInboundId.value,null);
+ assert.equal(api.newInbound.profile.reality_uuid,'');
  api.openUpstreamExport({id:3});state.server='node.example';state.acknowledged=true;
  const afterSession=api.requestUpstreamExport();vm.runInContext('endAdminSession()',context);pending.shift().resolve(success('session-secret'));await afterSession;
  assert.equal(state.content,'');assert(!state.open);
- console.log('Actual pinned Vue controller: confirmation, synchronous invalidation, late success, failure, Blob revocation, pagehide, session end passed');
+ console.log('Actual pinned Vue controller: confirmation, synchronous invalidation, late success, failure, Blob revocation, both pagehide/popstate listeners, session end passed');
 })().catch(error=>{console.error(error);process.exitCode=1});
 
 '''

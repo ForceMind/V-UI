@@ -3,7 +3,8 @@
     const $ = id => document.getElementById(id);
     const MAX_INPUT_BYTES = 1048576;
     const REVISION = /^[0-9a-f]{64}$/;
-    const modes = {'00':'普通模式', '10':'仅本机显式代理', '01':'仅设备接入中转', '11':'本机代理与接入中转'};
+    const modes = {'00':'主机代理关 / 默认入口直连', '10':'主机代理开 / 默认入口直连', '01':'主机代理关 / 默认入口中转', '11':'主机代理开 / 默认入口中转'};
+    const routingModes = {inherit:'跟随全局', direct:'指定直连', relay:'指定中转'};
     const importReasons = {
         UDP_CAPABILITY_NOT_QUALIFIED:'此节点声明了 UDP 或 packet encoding，目前尚未获得双开关上游导入资格。不会自动删除这些字段或降为 TCP-only；普通节点导出与中转上游的支持范围不同。'
     };
@@ -22,7 +23,7 @@
         INVALID_STRICT_EXPORT_REQUEST:'严格导出需要准确的活动修订、正整数节点 ID 和公网 IP。',
         STRICT_EXPORT_PUBLIC_IP_REQUIRED:'严格导出仅接受公网 IP 字面量，不接受域名、URL 或私网地址；不会自动解析域名。',
         STRICT_EXPORT_RELAY_NOT_ACTIVE:'设备中转尚未提交生效，无法下载严格中转配置。',
-        STRICT_EXPORT_UNQUALIFIED_INGRESS:'存在未获中转资格的启用节点，请先核对全部入口。',
+        STRICT_EXPORT_UNQUALIFIED_INGRESS:'所选入口未获中转资格，请核对该节点的已应用策略与配置。',
         STRICT_EXPORT_INGRESS_NOT_FOUND:'指定节点不是当前已启用的合格接入节点。',
         STRICT_EXPORT_STATE_MISMATCH:'活动配置、入口或运行状态已变化，严格导出已阻止；请重新核对并应用。',
         STRICT_EXPORT_RUNTIME_UNAVAILABLE:'无法确认已提交中转仍在运行，严格导出已阻止。',
@@ -36,7 +37,8 @@
         PROXY_RECOVERY_REQUIRED:'服务器需要完成恢复，当前状态未确认。请保留现场并检查受控服务日志。',
         INVALID_IDEMPOTENCY_KEY:'应用事务标识无效，请重新读取服务器状态。'
     };
-    let snapshot = null, capabilities = {}, busy = false, conflict = false, attempt = null, applyReview = null;
+    let pageActive = true;
+    let snapshot = null, inboundRows = null, capabilities = {}, busy = false, conflict = false, attempt = null, applyReview = null;
     let diagnostic = null, diagnosticBusy = false, diagnosticTimer = null, diagnosticExpiryTimer = null, diagnosticEpoch = 0, diagnosticDeadline = 0;
     let importEpoch = 0, importBusy = false, importSaving = false, importController = null, preview = null;
     let exportEpoch = 0, exportController = null;
@@ -81,13 +83,14 @@
         constructor(message,status,code='',coverage=[]) { super(message); this.status=status; this.code=code; this.coverage=coverage; }
     }
     async function api(path, method='GET', data, extra={}) {
-        const response=await fetch('/api/proxy'+path, {
+        const response=await fetch(path.startsWith('/api/')?path:'/api/proxy'+path, {
             method, credentials:'same-origin', cache:'no-store',
             headers:{'X-VUI-Request':'1',...(data===undefined?{}:{'Content-Type':'application/json'}),...(extra.headers||{})},
             body:data===undefined?undefined:JSON.stringify(data), signal:extra.signal
         });
+        if (!pageActive) throw new ApiError('页面已离开，旧响应已放弃。',499);
         if (response.status===401) {
-            closeImport(); clearCredentials(); location.replace('/login');
+            expireSession();
             throw new ApiError('登录已过期，请重新登录。',401);
         }
         let body;
@@ -98,6 +101,64 @@
             throw new ApiError(response.status===413?'输入超过服务端大小限制。':(errors[code]||'请求未完成，请检查输入或刷新服务器状态。'),response.status,code,coverage);
         }
         return body;
+    }
+    const routingLabel = value => Object.hasOwn(routingModes,value)?routingModes[value]:'策略未确认';
+    const effectiveLabel = value => value==='relay'?'中转（仅 TCP；UDP 拒绝）':value==='direct'?'普通直连':'出口未确认';
+    const appliedRelay = row => row?.routing_status?.state==='applied'&&
+        row.routing_status.applied_effective_mode==='relay'&&REVISION.test(row.routing_status.policy_identity||'');
+    function renderInboundPolicies() {
+        $('inbound-policy-list').replaceChildren();
+        if (!Array.isArray(inboundRows)) {
+            $('inbound-policy-summary').textContent='入口策略与已应用出口未确认，请刷新；两个全局开关不能代表全部入口。';
+            return;
+        }
+        const enabled=inboundRows.filter(row=>row.enable===true);
+        const known=enabled.every(row=>['direct','relay'].includes(row.routing_status?.desired_effective_mode));
+        const desired=enabled.filter(row=>row.routing_status?.desired_effective_mode==='relay').length;
+        const confirmed=enabled.filter(appliedRelay).length;
+        const reasons=[];
+        if (snapshot?.settings.local_proxy_enabled) reasons.push('主机代理');
+        if (snapshot?.settings.relay_enabled) reasons.push('默认入口中转');
+        if (enabled.some(row=>row.routing_mode==='relay')) reasons.push('指定中转入口');
+        $('inbound-policy-summary').textContent=(known?'已保存期望中转入口：'+desired:'已保存有效中转数量未确认')+
+            '；已确认运行中转入口：'+confirmed+'。'+(reasons.length?'需要唯一上游：'+reasons.join('、')+'。':'全局默认与主机代理均关闭；仍须逐个核对入口策略。');
+        inboundRows.forEach(row=>{
+            const status=row.routing_status;
+            const applied=appliedRelay(row)?'已应用 '+effectiveLabel('relay'):
+                status?.state==='applied'&&status.applied_effective_mode==='direct'&&REVISION.test(status.policy_identity||'')?'已应用普通直连':
+                status?.state==='pending'?'待应用；当前出口未确认':status?.state==='stopped'?'核心已停止':'已应用出口未确认';
+            $('inbound-policy-list').append(element('li','入口 '+String(row.id)+' · '+routingLabel(row.routing_mode)+
+                (row.enable===true?'':'（停用草稿）')+' · '+applied));
+        });
+    }
+    async function readInboundPolicies() {
+        try {
+            const rows=await api('/api/inbounds');
+            inboundRows=Array.isArray(rows)?rows:null;
+        } catch (error) {
+            inboundRows=null;
+            if (error.status===401||error.status===499) throw error;
+        }
+    }
+    function legacyPolicyCheck(coverage) {
+        // Only a successfully read legacy/all-inherit set may omit the token.
+        return Array.isArray(inboundRows)&&inboundRows.every(row=>row.routing_mode===undefined||row.routing_mode==='inherit')&&
+            coverage.every(row=>row.routing_mode===undefined||row.routing_mode==='inherit');
+    }
+    function selectedExportNode() {
+        return inboundRows?.find(row=>String(row.id)===$('export-inbound').value);
+    }
+    function exportNodeBlocked(row) {
+        // Unknown/legacy DTOs may ask the authoritative exporter; known direct,
+        // pending or stopped nodes must not be described as relay-capable.
+        return !!row?.routing_status&&(!appliedRelay(row));
+    }
+    function clearExport() {
+        exportEpoch++;
+        if (exportController) exportController.abort();
+        exportController=null;
+        downloadUrls.forEach(url=>URL.revokeObjectURL(url)); downloadUrls.clear();
+        $('export-notice').textContent='';
     }
     function formValues() {
         return {schema_version:1,local_proxy_enabled:$('local-enabled').checked,
@@ -116,7 +177,8 @@
         const values=formValues(), dirty=isDirty(), pending=!!snapshot.pending;
         $('draft-mode').textContent=mode(values);
         $('local-settings').hidden=!values.local_proxy_enabled;
-        $('upstream-area').hidden=!(values.local_proxy_enabled||values.relay_enabled);
+        // Selecting/applying an upstream with both flags off enables the first explicit relay node.
+        $('upstream-area').hidden=false;
         $('draft-fields').disabled=busy||pending;
         $('refresh').disabled=busy;
         $('save').disabled=busy||pending||conflict;
@@ -135,12 +197,13 @@
         $('diagnostics').disabled=busy||diagnosticBusy||diagnostic?.state==='running'||conflict||dirty||!diagnosticsAvailable||!snapshot.settings.selected_upstream_id||!$('diagnostic-consent').checked;
         $('cancel-diagnostics').hidden=diagnostic?.state!=='running';
         $('cancel-diagnostics').disabled=diagnosticBusy;
-        const activeRelay=!!snapshot.active&&REVISION.test(snapshot.active.revision)&&snapshot.active.settings?.relay_enabled===true;
+        const activeRelay=!!snapshot.active&&REVISION.test(snapshot.active.revision);
+        const blockedNode=exportNodeBlocked(selectedExportNode());
         const exportsAvailable=capabilities.strict_exports_available===true;
-        $('export-mihomo').disabled=$('export-singbox').disabled=busy||pending||!activeRelay||!exportsAvailable;
+        $('export-mihomo').disabled=$('export-singbox').disabled=busy||pending||!activeRelay||!exportsAvailable||blockedNode;
         $('export-inbound').disabled=$('export-server').disabled=busy;
         $('export-state').textContent=!exportsAvailable?'此服务器尚未开放严格中转导出。':!activeRelay?
-            '尚无已提交的设备中转活动配置，不能导出草稿。':pending?'存在未完成事务，暂时阻止导出。':
+            '尚无已提交活动配置，不能导出草稿。':pending?'存在未完成事务，暂时阻止导出。':blockedNode?'所选入口未确认已应用中转，不能严格导出；直连、待应用或停止的入口不符合条件。':
             '仅使用活动修订 '+snapshot.active.revision+'；页面编辑及较新的草稿不会进入下载。服务器仍会重新核验运行状态。';
         if (diagnostic) renderDiagnostic(diagnostic);
         $('rebase').disabled=busy||pending; $('discard').disabled=busy||pending;
@@ -179,11 +242,12 @@
         $('active-address').textContent=next.active?.pinned_address?'已提交固定地址：'+next.active.pinned_address+(next.active.resolved_at?'；解析时间：'+timestamp(next.active.resolved_at):'')+'。地址变化需明确重新应用。':'';
         $('pending-state').textContent=next.pending?'存在未结束应用事务；不表示已生效。':'没有未结束应用事务。';
         $('credential-state').textContent='用户名'+(next.settings.local_username?'已设置':'未设置')+'；密码'+(next.settings.local_password_set?'已设置':'未设置')+'。输入不回填，留空保留已保存值。';
+        renderInboundPolicies();
         updateControls();
     }
     async function reloadSnapshot(preserve=isDirty()) {
         const previous=snapshot?.revision;
-        const next=await api('/settings');
+        const [next]=await Promise.all([api('/settings'),readInboundPolicies()]);
         if (preserve&&previous!==next.revision) conflict=true;
         renderSnapshot(next,preserve);
         return next;
@@ -195,10 +259,11 @@
         notice('发生修订冲突。已读取服务器最新状态，页面编辑已保留；核对前不会再次保存或应用。',true);
     }
     async function action(fn) {
-        if (busy) return;
+        if (busy||!pageActive) return;
         busy=true; updateControls();
         try { await fn(); }
         catch(error) {
+            if (!pageActive) return;
             if (error.code==='PROXY_REVISION_CONFLICT') await handleConflict();
             else if (error.code==='PROXY_POLICY_REJECTED') { renderCheck({coverage:error.coverage},snapshot.revision); notice(error.message,true); }
             else if (error.status!==401) notice(error instanceof ApiError?error.message:'连接或响应异常，结果未确认。请刷新服务器状态。',true);
@@ -226,6 +291,7 @@
         });
     });
     $('refresh').addEventListener('click',()=>action(async()=>{
+        clearExport();
         await reloadSnapshot();
         notice(conflict?'服务器状态已刷新；请先处理修订冲突。':'已重新读取服务器草稿与活动快照。',conflict);
     }));
@@ -239,7 +305,7 @@
         try { return new URL('http://['+value+']/').hostname.startsWith('['); } catch (_) { return false; }
     }
     async function downloadExport(kind) {
-        if (busy||capabilities.strict_exports_available!==true||snapshot?.pending||snapshot?.active?.settings?.relay_enabled!==true) return;
+        if (busy||capabilities.strict_exports_available!==true||snapshot?.pending||!REVISION.test(snapshot?.active?.revision||'')||exportNodeBlocked(selectedExportNode())) return;
         const identifier=$('export-inbound').value, server=$('export-server').value;
         if (!/^[1-9][0-9]*$/.test(identifier)||!Number.isSafeInteger(Number(identifier))||!ipLiteral(server)) {
             $('export-notice').textContent='请明确填写正整数节点 ID 和公网 IP 字面量。此严格配置不接受域名、URL 或端口；公网地址由服务器再次检查。';
@@ -247,6 +313,7 @@
         }
         await action(async()=>{
             const revision=snapshot.active.revision, epoch=++exportEpoch;
+            const policyIdentity=selectedExportNode()?.routing_status?.policy_identity;
             exportController=new AbortController();
             $('export-notice').textContent='正在核验活动配置与运行状态；下载内容不会预览或保存到网页存储。';
             try {
@@ -254,7 +321,7 @@
                     headers:{'X-VUI-Request':'1','Content-Type':'application/json'},signal:exportController.signal,
                     body:JSON.stringify({base_revision:revision,inbound_id:Number(identifier),server})});
                 if (response.status===401) {
-                    closeImport(); clearCredentials(); location.replace('/login');
+                    expireSession();
                     throw new ApiError('登录已过期，请重新登录。',401);
                 }
                 if (!response.ok) {
@@ -268,7 +335,8 @@
                 if (epoch!==exportEpoch) return;
                 const latest=await reloadSnapshot();
                 if (epoch!==exportEpoch) return;
-                if (latest.pending||latest.active?.revision!==revision||latest.active?.settings?.relay_enabled!==true) {
+                if (latest.pending||latest.active?.revision!==revision||$('export-inbound').value!==identifier||$('export-server').value!==server||
+                    exportNodeBlocked(selectedExportNode())||(policyIdentity&&selectedExportNode()?.routing_status?.policy_identity!==policyIdentity)) {
                     throw new ApiError('下载前活动配置已变化，未交付旧配置；请核对后重新下载。',409);
                 }
                 const url=URL.createObjectURL(blob), anchor=element('a',null);
@@ -286,8 +354,14 @@
             } finally { if (epoch===exportEpoch) exportController=null; }
         });
     }
+    ['export-inbound','export-server'].forEach(id=>$(id).addEventListener('input',()=>{ clearExport(); updateControls(); }));
     $('export-mihomo').addEventListener('click',()=>downloadExport('mihomo.yaml'));
     $('export-singbox').addEventListener('click',()=>downloadExport('sing-box.json'));
+    function coverageLabel(item) {
+        return '入口 '+String(item.inbound_id??item.id??'未知')+' · '+String(item.core??'')+' / '+String(item.protocol??'')+' / '+String(item.transport??'')+' · '+
+            routingLabel(item.routing_mode)+' → '+effectiveLabel(item.effective_mode)+' · '+
+            (item.effective_mode==='direct'?'保留普通出口行为':item.qualified===true?'符合本期接入资格':('未获资格'+(item.reason?'：'+String(item.reason):'')));
+    }
     function renderCheck(result, revision) {
         $('check-result').hidden=false;
         $('check-summary').textContent=result.valid===true&&result.phase==='checked'?
@@ -297,9 +371,7 @@
             '本次检查固定地址：'+result.pinned_address+(result.resolved_at?'；解析时间：'+timestamp(result.resolved_at):'')+'。重新应用时将重新核对。':'';
         $('coverage').replaceChildren();
         const coverage=Array.isArray(result.coverage)?result.coverage:[];
-        coverage.forEach(item=>$('coverage').append(element('li',
-            '入口 '+String(item.inbound_id??item.id??'未知')+' · '+String(item.core??'')+' / '+String(item.protocol??'')+' / '+String(item.transport??'')+' · '+
-            (item.qualified===true?'符合本期接入资格':('未获资格'+(item.reason?'：'+String(item.reason):''))))));
+        coverage.forEach(item=>$('coverage').append(element('li',coverageLabel(item))));
     }
     $('check').addEventListener('click',()=>action(async()=>{
         if (isDirty()||conflict||snapshot.pending) return;
@@ -318,13 +390,15 @@
             if (!attempt||attempt.state!=='uncertain') return;
         } else {
             if (snapshot.pending||attempt?.state==='uncertain'||!applyReview||applyReview.revision!==snapshot.revision) return;
-            attempt={key:newKey(),revision:snapshot.revision,state:'sending'};
+            attempt={key:newKey(),revision:snapshot.revision,sourceFingerprint:applyReview.sourceFingerprint,state:'sending'};
         }
         invalidateReview();
         const current=attempt;
         current.state='sending'; updateControls();
         try {
-            const result=await api('/apply','POST',{base_revision:current.revision},{headers:{'Idempotency-Key':current.key}});
+            const body={base_revision:current.revision};
+            if (current.sourceFingerprint) body.source_fingerprint=current.sourceFingerprint;
+            const result=await api('/apply','POST',body,{headers:{'Idempotency-Key':current.key}});
             // A POST success is insufficient. Only a fresh GET can describe the current active state.
             const latest=await reloadSnapshot(false);
             const committed=result.applied===true&&result.phase==='committed'&&
@@ -357,20 +431,23 @@
             result.snapshot?.revision!==revision||!Array.isArray(result.coverage)||snapshot.revision!==revision) {
             throw new ApiError('无法确认同一修订的完整预检结果，未开放应用确认。请刷新后重新检查。',409);
         }
+        await readInboundPolicies();
+        if ((result.source_fingerprint!==undefined&&!REVISION.test(result.source_fingerprint))||
+            (result.source_fingerprint===undefined&&!legacyPolicyCheck(result.coverage))) {
+            throw new ApiError('入口策略检查指纹缺失或无效，无法确认本次节点策略；请刷新并重新检查，未开放应用。',409);
+        }
         renderSnapshot(result.snapshot,true);
         renderCheck(result,revision);
         if (snapshot.pending||isDirty()) return;
-        applyReview={revision};
-        $('review-revision').textContent='待确认修订 '+revision;
+        applyReview={revision,sourceFingerprint:result.source_fingerprint};
+        $('review-revision').textContent='待确认修订 '+revision+(result.source_fingerprint?'；入口指纹 '+result.source_fingerprint:'；旧版全继承兼容检查');
         $('review-mode').textContent='待应用组合：'+mode(snapshot.settings);
         const selected=snapshot.upstreams.find(value=>value.id===snapshot.settings.selected_upstream_id);
         $('review-upstream').textContent=selected?'所选上游：'+selected.name+' · '+selected.server+':'+selected.server_port+' · '+(selected.tls?.mode||''):'没有使用中的上游。';
         $('review-listener').textContent=snapshot.settings.local_proxy_enabled?
             '本机入口：127.0.0.1:'+snapshot.settings.local_port+'，使用独立鉴权；不改变系统代理。':'本机显式代理入口关闭，不监听本机代理端口。';
         $('review-disable-warning').hidden=!(snapshot.active?.settings?.relay_enabled===true&&snapshot.settings.relay_enabled===false);
-        result.coverage.forEach(item=>$('review-coverage').append(element('li',
-            '入口 '+String(item.inbound_id)+' · '+String(item.core)+' / '+String(item.protocol)+' / '+String(item.transport)+' · '+
-            (item.qualified===true?'符合本期中转资格':'未获本期中转资格')+(snapshot.settings.relay_enabled?'；将应用中转策略':'；保留普通出口行为'))));
+        result.coverage.forEach(item=>$('review-coverage').append(element('li',coverageLabel(item))));
         if (!result.coverage.length) $('review-coverage').append(element('li','没有启用的设备接入节点。'));
         $('apply-review').hidden=false;
         notice('同一保存修订的配置预检已返回。请核对影响，再点击独立确认按钮；尚未应用。');
@@ -560,7 +637,15 @@
             $('diagnostic-notice').textContent='取消结果未确认；任务仍受服务器时限约束。'; scheduleDiagnostic(epoch);
         } finally { if (epoch===diagnosticEpoch) { diagnosticBusy=false; updateControls(); } }
     });
+    function expireSession() {
+        leave(); snapshot=null; inboundRows=null; attempt=null;
+        $('proxy-workspace').hidden=true;
+        $('inbound-policy-list').replaceChildren();
+        $('export-inbound').value=''; $('export-server').value=''; $('export-notice').textContent='';
+        location.replace('/login');
+    }
     function leave() {
+        pageActive=false;
         invalidateReview();
         closeImport(); clearCredentials(); clearTimeout(diagnosticTimer); clearTimeout(diagnosticExpiryTimer); diagnosticEpoch++;
         exportEpoch++; if (exportController) exportController.abort(); exportController=null;
@@ -575,7 +660,7 @@
     action(async()=>{
         closeImport(); clearCredentials();
         capabilities=await api('/capabilities');
-        renderSnapshot(await api('/settings'));
+        await reloadSnapshot(false);
         $('diagnostic-state').textContent=capabilities.diagnostics_available===true?'服务器线路诊断：尚未执行':'服务器线路诊断：未开放，未测';
         $('diagnostic-notice').textContent=capabilities.diagnostics_available===true?'每次诊断绑定一个已保存上游与修订，最长 30 秒；每管理员一次，启动间隔至少 30 秒。':'线路诊断暂不可用。';
         $('stage').textContent=capabilities.apply_available===true?'草稿与事务应用':'仅草稿';

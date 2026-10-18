@@ -38,6 +38,7 @@ _TX = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 _SECRET = re.compile(r"sec_[0-9a-f]{32}\Z")
 _LOCKS: dict[str, threading.RLock] = {}
 _LOCKS_GUARD = threading.Lock()
+PROXY_STATE_SCHEMA_MAX = 2
 _FLAGS = ("local_proxy_enabled", "relay_enabled")
 _PUBLIC_SETTINGS = {
     "schema_version", *_FLAGS, "selected_upstream_id", "local_port",
@@ -352,7 +353,7 @@ class ProxyStore:
             "core_revision", "pending", "transactions"} or isinstance(state, dict) and set(state) == {
             "schema_version", "store_id", "draft_revision", "active_revision", "core_revision",
             "pending", "transactions", "active_transaction_id"})
-        _require(type(state["schema_version"]) is int and state["schema_version"] == 1 and state["store_id"] == store_id)
+        _require(type(state["schema_version"]) is int and state["schema_version"] in (1, 2) and state["store_id"] == store_id)
         _require(isinstance(state["draft_revision"], str) and _HEX.fullmatch(state["draft_revision"]) is not None)
         active = state["active_revision"]
         _require(active is None or isinstance(active, str) and _HEX.fullmatch(active) is not None)
@@ -368,6 +369,7 @@ class ProxyStore:
             _require(result["core_revision"] is None if result["phase"] == "aborted" else isinstance(result["core_revision"], str) and _TX.fullmatch(result["core_revision"]) is not None)
             if "runtime_context" in result:
                 ProxyStore._validate_runtime_context(result["runtime_context"], result["revision"])
+                _require(result["runtime_context"]["schema_version"] <= state["schema_version"])
                 if result["phase"] == "committed":
                     _require(result["runtime_context"]["candidate_core_revision"] == result["core_revision"])
         committed = [result for result in state["transactions"].values() if result["phase"] == "committed"]
@@ -389,6 +391,7 @@ class ProxyStore:
             context = pending.get("runtime_context")
             if "runtime_context" in pending:
                 ProxyStore._validate_runtime_context(context, pending["revision"])
+                _require(context["schema_version"] <= state["schema_version"])
                 if active is not None:
                     _require(context["previous_core_revision"] == core)
             target = active if context and context["kind"] == "reconcile" else state["draft_revision"]
@@ -397,10 +400,17 @@ class ProxyStore:
     @staticmethod
     def _validate_runtime_context(context, revision):
         """Private, bounded recovery metadata; never raw configs or paths."""
-        _require(isinstance(context, dict) and set(context) == {
-            "schema_version", "kind", "candidate_core_revision", "previous_core_revision",
-            "previous_enabled", "policy_identity", "endpoint", "self_addresses"})
-        _require(type(context["schema_version"]) is int and context["schema_version"] == 1)
+        common = {"schema_version", "kind", "candidate_core_revision", "previous_core_revision",
+                  "previous_enabled", "policy_identity", "endpoint", "self_addresses"}
+        extended = {"policy_version", "plan_manifest", "source_fingerprint", "requires_upstream"}
+        _require(isinstance(context, dict) and type(context.get("schema_version")) is int)
+        version = context["schema_version"]
+        _require(version in (1, 2) and set(context) == (common if version == 1 else common | extended))
+        if version == 2:
+            _require(type(context["policy_version"]) is int and context["policy_version"] == 2)
+            _require(type(context["plan_manifest"]) is list and len(context["plan_manifest"]) <= 32768)
+            _require(type(context["source_fingerprint"]) is str and _HEX.fullmatch(context["source_fingerprint"]))
+            _require(type(context["requires_upstream"]) is bool)
         _require(context["kind"] in ("apply", "reconcile"))
         for key in ("candidate_core_revision", "policy_identity"):
             _require(isinstance(context[key], str) and _HEX.fullmatch(context[key]) is not None)
@@ -432,6 +442,101 @@ class ProxyStore:
                 _require(str(ipaddress.ip_address(address)) == address)
             except ValueError:
                 _require(False)
+
+    @staticmethod
+    def context_plan(context, settings):
+        """Validate committed metadata against its exact immutable settings.
+
+        A v1 context is the legacy all-inherit identity domain. A v2 manifest is
+        validated independently of today's possibly dirty desired database.
+        """
+        if context is None or context["schema_version"] == 1:
+            return None
+        from app.services.inbound_policy import PolicyError, plan_from_manifest
+        try:
+            plan = plan_from_manifest(context["plan_manifest"], settings)
+        except (PolicyError, ValueError, TypeError, KeyError):
+            raise ProxyStorageError("Saved inbound policy is invalid; no defaults were applied.") from None
+        _require(not plan.legacy and plan.policy_version == context["policy_version"]
+                 and plan.source_fingerprint == context["source_fingerprint"]
+                 and plan.requires_upstream == context["requires_upstream"])
+        return plan
+
+    @staticmethod
+    def requires_upstream(settings, context=None):
+        plan = ProxyStore.context_plan(context, settings)
+        return plan.requires_upstream if plan is not None else any(settings[key] for key in _FLAGS)
+
+    @classmethod
+    def _validate_context_snapshot(cls, context, doc):
+        if context is None:
+            return
+        required = cls.requires_upstream(doc["settings"], context)
+        endpoint = context["endpoint"]
+        _require((endpoint is not None) == required)
+        if endpoint is not None:
+            selected = doc["settings"]["selected_upstream_id"]
+            _require(selected is not None and endpoint["profile_id"] == selected
+                     and selected in doc["upstreams"]
+                     and endpoint["host"] == doc["upstreams"][selected]["profile"]["server"])
+
+    def policy_rows(self):
+        import sqlite3
+        from types import SimpleNamespace
+        data = self.data_dir
+        with sqlite3.connect((data / 'v-ui.db').as_uri() + '?mode=ro', uri=True) as db:
+            db.row_factory = sqlite3.Row
+            schema = {row[1] for row in db.execute('PRAGMA table_info(inbounds)')}
+            columns = ('id', 'core', 'enable', 'expiry_time', 'port', 'protocol',
+                       'settings', 'stream_settings', 'tag', 'remark', 'user_id', 'total')
+            has_mode = 'routing_mode' in schema
+            if has_mode:
+                columns += ('routing_mode',)
+            _require(set(columns) <= schema)
+            # SQLite length(TEXT) counts characters and NULL propagates across +.
+            # Bound actual bytes of every selected field before materializing rows.
+            lengths = ' + '.join('coalesce(length(CAST(' + key + ' AS BLOB)), 0)' for key in columns)
+            sizes = db.execute('SELECT count(*), coalesce(sum(' + lengths + '),0) FROM inbounds').fetchone()
+            _require(sizes[0] <= 32768 and sizes[1] <= 16 * 1024 * 1024)
+            rows = []
+            for raw in db.execute('SELECT ' + ','.join(columns) + ' FROM inbounds ORDER BY id'):
+                item = dict(raw)
+                # Only a genuinely missing old column migrates to inherit. An
+                # existing NULL/unknown value is corrupt and must never downgrade.
+                if not has_mode:
+                    item['routing_mode'] = 'inherit'
+                from app.services.inbound_policy import normalize_mode
+                item['routing_mode'] = normalize_mode(item['routing_mode'])
+                _require(item.get('enable') in (0, 1))
+                item['enable'] = bool(item['enable'])
+                for key in ('settings', 'stream_settings'):
+                    value = item[key]
+                    _require(value is None or type(value) is str and len(value.encode('utf-8')) <= 16 * 1024 * 1024)
+                    item[key] = json.loads(value) if value is not None else {}
+                    _require(type(item[key]) is dict)
+                rows.append(SimpleNamespace(**item))
+                _require(len(rows) <= 32768)
+            if not has_mode and (Path(data) / '.proxy-state-initialized').exists():
+                _require(ProxyStore(data).policy_schema_version() == 1)
+            return rows
+
+    def policy_schema_version(self):
+        with self._locked(initialize=False) as (_, revisions, secrets, state, _):
+            self._snapshot(revisions, secrets, state)
+            return state["schema_version"]
+
+    def ensure_policy_v2(self):
+        """Durable monotonic downgrade fence, before committing any mode row.
+
+        No immutable revision, secret or historical context is rewritten. A
+        later SQL rollback intentionally does not roll this capability back.
+        """
+        with self._locked() as (root, revisions, secrets, state, _):
+            self._snapshot(revisions, secrets, state)
+            if state["pending"] is not None:
+                raise ProxyConflict("An apply is pending recovery; inbound modes cannot change")
+            if state["schema_version"] == 1:
+                self._commit_state(root, state, {**state, "schema_version": 2})
 
     @staticmethod
     def _public_pending(pending):
@@ -526,6 +631,16 @@ class ProxyStore:
 
     def _snapshot(self, revisions, secrets, state):
         doc, profiles, _ = self._revision(revisions, secrets, state["draft_revision"])
+        # New historical manifests are immutable but still strictly checked;
+        # their needs/source hash must bind their OWN settings, not the draft.
+        documents = {state["draft_revision"]: doc}
+        for transaction in state["transactions"].values():
+            context = transaction.get("runtime_context")
+            if context is not None and context["schema_version"] == 2:
+                target = transaction["revision"]
+                if target not in documents:
+                    documents[target] = self._revision(revisions, secrets, target)[0]
+                self._validate_context_snapshot(context, documents[target])
         upstreams = []
         for profile_id in sorted(profiles):
             summary = _model(profiles[profile_id]).redacted()
@@ -536,13 +651,18 @@ class ProxyStore:
         if state["active_revision"] is not None:
             active_doc, _, _ = self._revision(revisions, secrets, state["active_revision"])
             context = self._active_context(state)
-            endpoint = context.get("endpoint") if context and any(active_doc["settings"][key] for key in _FLAGS) else None
+            self._validate_context_snapshot(context, active_doc)
+            endpoint = context.get("endpoint") if context else None
             active = {"revision": state["active_revision"], "settings": self._public_settings(active_doc["settings"]),
                       "core_revision": state["core_revision"],
                       "pinned_address": endpoint["addresses"][0] if endpoint else None,
                       "resolved_at": endpoint["resolved_at"] if endpoint else None}
+        pending = state["pending"]
+        if pending and pending.get("runtime_context"):
+            pending_doc = self._revision(revisions, secrets, pending["revision"])[0]
+            self._validate_context_snapshot(pending["runtime_context"], pending_doc)
         return {"revision": state["draft_revision"], "settings": self._public_settings(doc["settings"]),
-                "upstreams": upstreams, "active": active, "pending": self._public_pending(state["pending"])}
+                "upstreams": upstreams, "active": active, "pending": self._public_pending(pending)}
 
     @staticmethod
     def _check_state_capacity(old, new):
@@ -578,6 +698,7 @@ class ProxyStore:
     def _commit_state(self, root, old, new):
         if old == new:
             return
+        _require(new["schema_version"] >= old["schema_version"])
         self._check_state_capacity(old, new)
         # A durable intent guards against an unconfirmed rename/fsync. If even
         # rollback fails, readers stop rather than infer an effective OFF mode.
@@ -630,6 +751,15 @@ class ProxyStore:
                     "core_revision": state["core_revision"] if active else None,
                     "pending": self._public_pending(state["pending"]),
                     "runtime_context": self._active_context(state) if active else None}
+
+    def load_revision_snapshot(self, revision: str) -> dict:
+        """Private immutable request source for idempotency validation."""
+        with self._locked() as (_, revisions, secrets, state, _):
+            self._snapshot(revisions, secrets, state)
+            _require(type(revision) is str and _HEX.fullmatch(revision))
+            doc, profiles, password = self._revision(revisions, secrets, revision)
+            return {"revision": revision, "settings": copy.deepcopy(doc["settings"]),
+                    "upstreams": profiles, "local_password": password}
 
     def load_draft(self) -> dict:
         return self._load(False)
@@ -706,8 +836,9 @@ class ProxyStore:
             if upstream_id not in profiles:
                 raise ProxyValidationError("Upstream does not exist")
             active = self._revision(revisions, secrets, state["active_revision"])[0] if state["active_revision"] else None
-            for snapshot in (doc, active):
-                if snapshot and snapshot["settings"]["selected_upstream_id"] == upstream_id and any(snapshot["settings"][key] for key in _FLAGS):
+            for snapshot, context in ((doc, None), (active, self._active_context(state))):
+                if (snapshot and snapshot["settings"]["selected_upstream_id"] == upstream_id
+                        and self.requires_upstream(snapshot["settings"], context)):
                     raise ProxyConflict("Disable or replace the upstream before deleting a profile in use")
             del doc["upstreams"][upstream_id]
             if doc["settings"]["selected_upstream_id"] == upstream_id:
@@ -759,6 +890,8 @@ class ProxyStore:
                 raise ProxyConflict("Proxy snapshot changed before apply")
             if runtime_context is not None:
                 self._validate_runtime_context(runtime_context, expected_revision)
+                _require(runtime_context["schema_version"] <= state["schema_version"])
+                self._validate_context_snapshot(runtime_context, self._revision(revisions, secrets, expected_revision)[0])
                 _require(runtime_context["kind"] == ("reconcile" if reconcile else "apply"))
                 if state["active_revision"] is not None:
                     _require(runtime_context["previous_core_revision"] == state["core_revision"])

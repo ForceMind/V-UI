@@ -20,6 +20,34 @@ PROFILE = {'name': 'Controller fixture', 'server': 'upstream.example', 'server_p
            'tls': {'mode': 'tls', 'server_name': 'upstream.example'}}
 
 
+def seed_runtime(store, data, revision, transaction):
+    """A real immutable config/journal pair, without starting a core."""
+    from app.services.core_runtime import encode, revision as core_revision
+    settings = store.load_draft()['settings']
+    needed = settings['local_proxy_enabled'] or settings['relay_enabled']
+    config = {'inbounds': [{'tag': 'vui-relay-ingress-1' if settings['relay_enabled'] else 'direct-node',
+                           'type': 'vless', 'listen_port': 24443}],
+              'outbounds': [{'type': 'direct', 'tag': 'direct'}]}
+    raw, digest = encode(config), core_revision(config)
+    directory = data / 'runtime' / 'sing-box'
+    directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+    directory.parent.chmod(0o700)
+    (directory / (digest + '.json')).write_bytes(raw)
+    (directory / (digest + '.json')).chmod(0o600)
+    state_path = directory / 'state.json'
+    state_path.write_text(json.dumps({'revision': digest, 'enabled': True}))
+    state_path.chmod(0o600)
+    active = store.load_draft()
+    previous = store.load_active()
+    context = {'schema_version': 1, 'kind': 'apply', 'candidate_core_revision': digest,
+        'previous_core_revision': previous['core_revision'] if previous else None, 'previous_enabled': False, 'policy_identity': 'b' * 64,
+        'endpoint': {'profile_id': active['settings']['selected_upstream_id'], 'revision': revision,
+                     'host': 'upstream.example', 'addresses': ['8.8.4.4'], 'resolved_at': 1} if needed else None,
+        'self_addresses': ['127.0.0.1'] if needed else []}
+    store.begin_apply(revision, transaction, runtime_context=context)
+    store.commit_apply(transaction, digest)
+
+
 def seed_proxy(data):
     store = ProxyStore(data)
     saved = store.save_upstream(PROFILE, store.read_snapshot()['revision'])
@@ -28,8 +56,7 @@ def seed_proxy(data):
     settings.update(local_proxy_enabled=True, relay_enabled=True, local_username='fixture',
                     selected_upstream_id=saved['upstream_id'])
     saved = store.save_draft(settings, saved['snapshot']['revision'], local_password='Fake-controller-password!')
-    store.begin_apply(saved['revision'], 'fixture-committed')
-    store.commit_apply('fixture-committed', 'fixture-core')
+    seed_runtime(store, data, saved['revision'], 'fixture-committed')
     return store
 
 
@@ -145,8 +172,9 @@ class IsolatedProxyControllerTests(unittest.TestCase):
         sources = {'ops_worker.py': 'deploy/ops_worker.py', 'release_tools.py': 'app/release_tools.py',
                    'data_owner.py': 'app/data_owner.py',
                    'proxy_store.py': 'app/services/proxy_store.py',
-                   'upstream_profile.py': 'app/services/upstream_profile.py'}
-        for missing in ('data_owner.py', 'proxy_store.py', 'upstream_profile.py'):
+                   'upstream_profile.py': 'app/services/upstream_profile.py',
+                   'inbound_policy.py': 'app/services/inbound_policy.py'}
+        for missing in ('data_owner.py', 'proxy_store.py', 'upstream_profile.py', 'inbound_policy.py'):
             with self.subTest(missing=missing):
                 for name, source in sources.items():
                     target = self.control / name
@@ -167,14 +195,15 @@ class IsolatedProxyControllerTests(unittest.TestCase):
         for name, source in {'ops_worker.py': 'deploy/ops_worker.py', 'release_tools.py': 'app/release_tools.py',
                              'data_owner.py': 'app/data_owner.py',
                              'proxy_store.py': 'app/services/proxy_store.py',
-                             'upstream_profile.py': 'app/services/upstream_profile.py'}.items():
+                             'upstream_profile.py': 'app/services/upstream_profile.py',
+                   'inbound_policy.py': 'app/services/inbound_policy.py'}.items():
             shutil.copyfile(REPO / source, self.control / name)
         code = '''import runpy,sys
 from pathlib import Path
 worker=runpy.run_path(sys.argv[1]); api=worker['_load_release_tools']()
 root=Path(sys.argv[2]); backup=Path(sys.argv[3])
 checksum=api.backup(root,backup); api.restore(root,backup,checksum)
-for name in ('app.data_owner','app.services.proxy_store','app.services.upstream_profile'):
+for name in ('app.data_owner','app.services.proxy_store','app.services.upstream_profile','app.services.inbound_policy'):
     assert Path(sys.modules[name].__file__).parent==Path(sys.argv[1]).parent
 assert sys.modules['app'].__path__==[]
 assert sys.modules['app.services'].__path__==[]

@@ -41,7 +41,8 @@ STREAM_CHUNK = 1024 * 1024
 # Every member must come from the same checksum-verified bundle, never the
 # mutable installed payload. Keep the public release-kit asset set unchanged.
 CONTROLLER_MEMBERS = ('scripts/deploy.py', 'app/release_tools.py', 'app/data_owner.py',
-                      'app/services/proxy_store.py', 'app/services/upstream_profile.py')
+                      'app/services/proxy_store.py', 'app/services/upstream_profile.py',
+                      'app/services/inbound_policy.py')
 # Compatibility names for older tooling/tests; new installs select a backend dynamically.
 MARKER=service_support.MARKER
 UNIT_DIR=service_support.SYSTEMD_DIR

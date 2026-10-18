@@ -363,6 +363,20 @@ class ProxyManagerIntegrationTests(unittest.TestCase):
             self.assertFalse(self.xray.running)
             self.assertEqual(state_file.read_text(), '{}')
 
+    def test_corrupt_storage_still_stops_other_core_when_sing_box_stop_fails(self):
+        initial = self.store.read_snapshot()
+        state_file = self.store.path / 'state.json'
+        state_file.write_text('{}')
+        for operation in (lambda: self.manager.check_proxy(initial['revision']),
+                          lambda: self.manager.apply_proxy(initial['revision'], 'corrupt-stop-failed')):
+            self.runtime.running = self.xray.running = True
+            self.xray.calls.clear()
+            with patch.object(self.runtime, 'stop', side_effect=CoreError('synthetic stop failure')):
+                with self.assertRaises(ProxyStorageError): operation()
+            self.assertIn(('stop', False), self.xray.calls)
+            self.assertFalse(self.xray.running)
+            self.assertEqual(state_file.read_text(), '{}')
+
     def test_first_apply_pending_blocks_ordinary_core_apply_and_mutation(self):
         draft = self.draft(relay=True)
         self.store.begin_apply(draft['revision'], 'pending-first')

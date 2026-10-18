@@ -3,32 +3,33 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>V-UI · 代理与中转</title><link rel="icon" type="image/svg+xml" href="/ui/brand/vui-icon.svg"><link rel="stylesheet" href="/ui/css/workspace.css"><link rel="stylesheet" href="/ui/css/proxy.css"><script src="/ui/js/proxy.js" defer></script></head>
 <body><header><a class="brand" href="/ui/"><img class="vui-brand-image" src="/ui/brand/vui-icon.svg" alt="V-UI" width="30" height="30"><span aria-hidden="true">V-UI</span></a><nav><a href="/workspace">分流与订阅</a><a href="/proxy" aria-current="page">代理与中转</a><a href="/certificates">证书管理</a><a href="/account">账户</a></nav></header>
-<main><div class="page-title"><div><h1>代理与中转</h1><p>两个独立开关，一个明确选择的上游。</p></div><span id="stage">正在读取</span></div>
+<main><div class="page-title"><div><h1>代理与中转</h1><p>主机代理与默认入口策略独立；每个节点可指定直连或中转，共用一个上游。</p></div><span id="stage">正在读取</span></div>
 <p id="notice" role="status" aria-live="polite">正在读取服务器草稿与活动配置…</p>
 <div id="proxy-workspace" hidden>
 <section aria-labelledby="status-heading"><div class="section-head"><h2 id="status-heading">当前状态</h2><button id="refresh" type="button">刷新服务器状态</button></div>
 <div class="status-grid"><div><h3>已保存草稿</h3><p id="draft-state"></p><p id="draft-revision" class="revision"></p></div><div><h3>已提交活动配置</h3><p id="active-state"></p><p id="active-revision" class="revision"></p><p id="active-address" class="hint"></p></div></div>
+<p id="inbound-policy-summary" class="hint"></p><ul id="inbound-policy-list"></ul>
 <p id="pending-state" class="hint"></p><p id="save-state" role="status"></p>
 <div id="conflict" role="alert" hidden><p>服务器草稿已变化。已重新读取最新状态，并保留你的页面编辑；请核对后再保存。</p><div class="actions"><button id="rebase" type="button">核对后保留页面编辑</button><button id="discard" type="button">放弃编辑，载入服务器草稿</button></div></div>
 </section>
 <form id="settings-form" autocomplete="off">
-<section aria-labelledby="mode-heading"><h2 id="mode-heading">01 · 编辑草稿</h2><p class="hint">开关只修改草稿。保存后还需检查并明确应用；关闭两个开关会保留上游与凭据。</p>
-<fieldset id="draft-fields"><legend id="draft-mode">00 · 普通模式</legend><div class="switch-grid">
+<section aria-labelledby="mode-heading"><h2 id="mode-heading">01 · 编辑草稿</h2><p class="hint">开关只修改草稿。保存后还需检查并明确应用；关闭两个开关会保留上游与凭据，指定中转节点仍可使用上游。</p>
+<fieldset id="draft-fields"><legend id="draft-mode">00 · 主机代理关 / 默认入口直连</legend><div class="switch-grid">
 <label class="switch"><input type="checkbox" id="local-enabled"><span><strong>服务器本机显式代理</strong><small>仅服务器上明确配置代理的 HTTP/SOCKS 程序，经鉴权 loopback 入口使用上游。</small></span></label>
-<label class="switch"><input type="checkbox" id="relay-enabled"><span><strong>设备接入中转</strong><small>设备经已有鉴权节点接入后使用上游；可单独开启，无需先开本机代理。</small></span></label></div>
+<label class="switch"><input type="checkbox" id="relay-enabled"><span><strong>默认入口中转</strong><small>仅影响“跟随全局”的入口；指定直连 / 指定中转不随此开关改变，与主机代理独立。</small></span></label></div>
 <div id="local-settings" hidden><div class="columns"><div><label for="local-port">本机端口（仅 127.0.0.1）</label><input id="local-port" type="number" min="1024" max="65535" step="1" value="7891" required></div><div><label for="local-username">独立代理用户名</label><input id="local-username" maxlength="64" pattern="[A-Za-z0-9._-]{0,64}" autocomplete="off" spellcheck="false" placeholder="首次启用需填写；留空保留已保存值"></div></div>
 <label for="local-password">设置或替换独立代理密码</label><input id="local-password" type="password" minlength="12" maxlength="255" autocomplete="new-password" placeholder="12–255 个非空格可打印 ASCII 字符；留空保留"><p id="credential-state" class="hint"></p></div>
-<div id="upstream-area" hidden><label for="upstream">唯一上游（必须明确选择）</label><select id="upstream"><option value="">请选择已保存上游</option></select><p class="hint">仅开启设备中转也可以导入。导入保存不会自动选中或应用。</p><button id="open-import" type="button">导入 URI / JSON / YAML</button></div>
+<div id="upstream-area" hidden><label for="upstream">唯一上游（必须明确选择）</label><select id="upstream"><option value="">请选择已保存上游</option></select><p class="hint">两个开关均关闭时也可导入、选择并应用上游，供指定中转节点使用。导入保存不会自动选中或应用。</p><button id="open-import" type="button">导入 URI / JSON / YAML</button></div>
 </fieldset>
 <div class="actions"><button id="save" type="submit" class="primary">保存草稿</button><button id="check" type="button">检查已保存草稿</button><button id="apply" type="button">应用已保存草稿</button><button id="retry-apply" type="button" hidden>重试同一次应用</button></div>
-<p id="apply-gate" class="hint"></p><p class="hint">应用可能短暂中断现有连接。未获资格的任一启用节点会阻止整体中转；应用失败不能自动回退为直出。</p>
+<p id="apply-gate" class="hint"></p><p class="hint">应用可能短暂中断现有连接。未获资格的有效中转入口会阻止候选应用；应用失败不能自动回退为直出。</p>
 <div id="check-result" hidden><h3>已保存草稿检查</h3><p id="check-summary"></p><p id="pinned-address" class="hint"></p><ul id="coverage"></ul></div>
-<div id="apply-review" hidden aria-labelledby="review-heading"><h3 id="review-heading">应用前核对</h3><p id="review-revision" class="revision"></p><p id="review-mode"></p><p id="review-upstream"></p><p id="review-listener"></p><p id="review-disable-warning" role="alert" hidden>你正在关闭设备接入中转。成功提交后，已有节点将恢复普通服务器出口行为，不再由此中转策略转交海外上游。</p><h3>全部启用入口及资格</h3><ul id="review-coverage"></ul><p>启用本机代理或设备中转时，受保护来源的业务 DNS 经唯一上游的验证 Cloudflare DoH，拒绝应用 UDP、私网及自身目标，无业务 DNS 直连兜底。中转关闭后的普通入口继续原有规则。</p><p class="hint">本次检查仅包含配置语法、入口资格与上游地址引导解析，未验证 TLS、代理认证或业务线路。最终应用仍会重新检查并可能短暂中断连接。</p><div class="actions"><button id="confirm-apply" type="button" class="primary">确认以上内容并应用此修订</button><button id="cancel-apply-review" type="button">取消本次核对</button></div></div>
+<div id="apply-review" hidden aria-labelledby="review-heading"><h3 id="review-heading">应用前核对</h3><p id="review-revision" class="revision"></p><p id="review-mode"></p><p id="review-upstream"></p><p id="review-listener"></p><p id="review-disable-warning" role="alert" hidden>你正在关闭默认入口中转。成功提交后，仅跟随全局的入口恢复普通服务器出口；指定中转节点仍通过唯一上游，指定直连节点保持原策略。</p><h3>全部启用入口及资格</h3><ul id="review-coverage"></ul><p>主机代理与有效中转入口的业务 DNS 经唯一上游的验证 Cloudflare DoH，拒绝应用 UDP、私网及自身目标，无业务 DNS 直连兜底。普通直连入口保留既有规则与能力。</p><p class="hint">本次检查仅包含配置语法、入口资格与上游地址引导解析，未验证 TLS、代理认证或业务线路。最终应用仍会重新检查并可能短暂中断连接。</p><div class="actions"><button id="confirm-apply" type="button" class="primary">确认以上内容并应用此修订</button><button id="cancel-apply-review" type="button">取消本次核对</button></div></div>
 </section></form>
 <section aria-labelledby="diagnostics-heading"><h2 id="diagnostics-heading">02 · 分层证据</h2><p>配置检查、服务器连接、设备端到端必须分别验证。</p><ul><li>导入预览：只校验格式，不连接上游</li><li>草稿检查：入口资格、地址与核心配置检查，不证明 TLS 或业务连接成功</li><li id="diagnostic-state">服务器线路诊断：未开放，未测</li><li id="external-state">外部设备端到端：未测，需要独立外部观察者</li></ul><label class="check"><input id="diagnostic-consent" type="checkbox">我了解本次检测会使用 Cloudflare DNS 与 ipify，向它们暴露相应域名查询或出口 IP / 请求元数据</label><div class="actions"><button id="diagnostics" type="button" disabled>检查已保存上游线路</button><button id="cancel-diagnostics" type="button" hidden>取消线路诊断</button></div><p id="diagnostic-notice" role="status" aria-live="polite">线路诊断暂不可用。</p><div id="diagnostic-result" hidden><p id="diagnostic-summary"></p><p id="diagnostic-endpoint" class="hint"></p><ul id="diagnostic-stages"></ul></div>
 <p class="hint">计划内诊断仅使用固定 ipify HTTPS 目标。ipify 会看到本次代理出口 IP 和请求元数据；不会发送节点凭据。未执行检测不显示通过。</p></section>
 <section aria-labelledby="export-heading"><h2 id="export-heading">03 · 严格中转配置下载</h2>
-<p>仅导出已提交且仍在运行的设备中转配置。下载包含所选国内接入节点的现有 UUID，不包含海外上游凭据，请妥善保管。</p>
+<p>仅导出所选入口已提交且仍在运行的中转配置；默认开关关闭时，指定中转仍可导出，直连入口拒绝。下载包含所选国内接入节点的现有 UUID，不包含海外上游凭据，请妥善保管。</p>
 <p id="export-state" class="hint">正在读取活动状态。</p>
 <div class="columns"><div><label for="export-inbound">国内接入节点 ID</label><input id="export-inbound" type="text" inputmode="numeric" pattern="[1-9][0-9]*" maxlength="16" autocomplete="off" placeholder="明确填写一个已启用节点 ID"><p class="hint"><a href="/ui/">在节点管理页查看 ID</a>；仅支持 sing-box / VLESS / TCP / TLS。</p></div><div><label for="export-server">国内接入公网 IP</label><input id="export-server" type="text" maxlength="45" autocomplete="off" spellcheck="false" placeholder="IPv4 或不带方括号的 IPv6"></div></div>
 <p class="hint">此严格配置只接受公网 IP，不接受域名或自动使用面板地址；保留节点的独立 TLS 名称与证书验证。普通导出仍在<a href="/workspace">分流与订阅</a>页面使用。</p>

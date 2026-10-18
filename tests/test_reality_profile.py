@@ -26,7 +26,7 @@ def form():
 
 def reality_node():
     private, public = reality.generate_keypair()
-    return SimpleNamespace(id=47, core='sing-box', protocol='vless', port=10447,
+    return SimpleNamespace(id=47, routing_mode="inherit", core='sing-box', protocol='vless', port=10447,
         remark='REALITY bounded', enable=True, expiry_time=0, tag='reality-in',
         user_id=None, up=0, down=0, total=0,
         settings={'users': [{'uuid': UUID, 'flow': reality.FLOW}]}, stream_settings={

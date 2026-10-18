@@ -1,5 +1,9 @@
 # V-UI 文档
 
+## 当前开发入口（2026-10-18）
+
+接手先读[开发状态与下一步](DEVELOPMENT_HANDOFF.md)，再读[每入口直连/中转 TCP 契约](PER_INBOUND_ROUTING_CONTRACT.md)和[标准客户端兼容边界](STANDARD_CLIENT_COMPATIBILITY.md)。用户已确认现成客户端导入不同标准 VLESS 节点，服务器分别直出/中转；本轮从准确产品主线 a98 独立实现，不依赖自研 App或实验核心发布。D1已在a98主线，三态实现已进入 [PR49](https://github.com/ForceMind/V-UI/pull/49) Draft，准确候选验收仍在进行；产品、实验、发布、实机资格分开记录。以下按日期保留历史入口。
+
 ## 当前入口（2026-10-16）
 
 正式版为 [v0.4.8](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8)，发布于 2026-10-15，来源 `a9f9b5d9` 的安装器修复；正式版用户使用[固定 v0.4.8 文档](https://github.com/ForceMind/V-UI/blob/v0.4.8/docs/README.md)。当前源码版本仍标 **v0.4.8**，其后新增功能尚未正式发布。
@@ -32,6 +36,7 @@
 
 | 阅读目标 | 文档 |
 | --- | --- |
+| 每入口三态、首次直连/中转与保存/应用状态（未发布候选） | [PER_INBOUND_ROUTING.md](PER_INBOUND_ROUTING.md) |
 | 专用 TCP 上游 URI/YAML 导出、另一实例导入与凭据处理 | [TCP_UPSTREAM_EXPORT.md](TCP_UPSTREAM_EXPORT.md) |
 | 双开关四状态、上游导入、失败关闭及分阶段门槛 | [DUAL_PROXY_RELAY_CONTRACT.md](DUAL_PROXY_RELAY_CONTRACT.md) |
 | 双开关 M0–M4 实际进度、准确提交与未验收边界 | [DUAL_PROXY_RELAY_PROGRESS.md](DUAL_PROXY_RELAY_PROGRESS.md) |

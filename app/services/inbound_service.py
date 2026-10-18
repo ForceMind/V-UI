@@ -28,6 +28,44 @@ SING_BOX_PROTOCOLS = {
 }
 
 
+def _routing_mode(value: Any) -> str:
+    from app.services.inbound_policy import normalize_mode
+    try:
+        return normalize_mode(value)
+    except ValueError:
+        raise HTTPException(422, "Invalid inbound routing mode") from None
+
+
+def routing_dicts(db: Session, core: str | None = None) -> list[dict]:
+    """Batch runtime read for API summaries, never used by pure exporters.
+
+    A failed or unavailable runtime observation cannot turn desired database
+    values into an applied-route claim. The manager returns an allowlisted
+    summary while holding the same operation lock as reconciliation.
+    """
+    from app.services.core_manager import core_manager
+    with core_manager.lock:
+        items = db.query(Inbound).populate_existing().order_by(Inbound.id.asc()).all()
+        values = [to_dict(item) for item in items if core is None or item.core == core]
+        try:
+            statuses = core_manager.inbound_routing_status(items)
+        except Exception:
+            statuses = {}
+        if type(statuses) is not dict:
+            statuses = {}
+        for value in values:
+            status = statuses.get(value["id"], {})
+            if type(status) is not dict:
+                status = {}
+            value["routing_status"] = {
+                "desired_effective_mode": status.get("desired_effective_mode") if type(status.get("desired_effective_mode")) is str and status["desired_effective_mode"] in {"direct", "relay"} else None,
+                "applied_effective_mode": status.get("applied_effective_mode") if type(status.get("applied_effective_mode")) is str and status["applied_effective_mode"] in {"direct", "relay"} else None,
+                "state": status.get("state") if type(status.get("state")) is str and status["state"] in {"applied", "pending", "stopped", "unknown"} else "unknown",
+                "policy_identity": status.get("policy_identity") if type(status.get("policy_identity")) is str and re.fullmatch(r"[0-9a-f]{64}", status["policy_identity"]) else None,
+            }
+        return values
+
+
 def normalize_mapping(value: Any) -> dict:
     if value is None:
         return {}
@@ -148,6 +186,7 @@ def to_dict(item: Inbound) -> dict:
         "expiry_time": item.expiry_time or 0,
         "port": item.port,
         "protocol": item.protocol,
+        "routing_mode": _routing_mode(item.routing_mode),
         "credentials": {
             "user_count": len(users),
             "has_uuid": any(bool(user.get("uuid") or user.get("id")) for user in user_maps),
@@ -181,6 +220,7 @@ def editor_dict(item: Inbound) -> dict:
         "id":item.id,
         "core":item.core or "xray",
         "protocol":item.protocol,
+        "routing_mode":_routing_mode(item.routing_mode),
         "remark":item.remark or "",
         "port":item.port,
         "enable":bool(item.enable),
@@ -333,6 +373,7 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
 
 
 def _create_inbound(db: Session, payload: dict) -> Inbound:
+    routing_mode = _routing_mode(payload.get("routing_mode", "inherit"))
     core, protocol, port, settings, stream_settings = _prepared_payload(payload)
 
     duplicate = (
@@ -354,6 +395,7 @@ def _create_inbound(db: Session, payload: dict) -> Inbound:
         expiry_time=int(payload.get("expiry_time") or 0),
         port=port,
         protocol=protocol,
+        routing_mode=routing_mode,
         settings=settings,
         stream_settings=stream_settings,
         tag=payload.get("tag") or f"{core}-{protocol}-{port}",
@@ -369,6 +411,7 @@ def _update_inbound(db: Session, inbound_id: int, payload: dict) -> Inbound:
     # API handlers may have loaded this identity before waiting for our lock.
     # Refresh so omitted fields do not overwrite a concurrent committed edit.
     db.refresh(item)
+    routing_mode = _routing_mode(payload["routing_mode"] if "routing_mode" in payload else item.routing_mode)
     core, protocol, port, settings, stream_settings = _prepared_payload(
         payload,
         existing=item,
@@ -391,6 +434,7 @@ def _update_inbound(db: Session, inbound_id: int, payload: dict) -> Inbound:
 
     item.core = core
     item.protocol = protocol
+    item.routing_mode = routing_mode
     item.port = port
     item.remark = payload.get("remark", item.remark) or ""
     item.enable = bool(payload.get("enable", item.enable))

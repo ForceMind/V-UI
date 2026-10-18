@@ -15,6 +15,7 @@ import json
 import re
 
 from app.services.upstream_profile import UpstreamProfile, UpstreamValidationError, server_host
+from app.services.inbound_policy import PolicyError, policy_plan, row_mode
 
 NAMESPACE = "vui-relay-"
 UPSTREAM_TAG = NAMESPACE + "upstream"
@@ -37,13 +38,6 @@ _REVISION = re.compile(r"[0-9a-f]{64}\Z")
 _SETTINGS = {"schema_version", "local_proxy_enabled", "relay_enabled", "selected_upstream_id",
              "local_port", "local_username", "local_password_ref", "dns_policy_version", "deny_policy_version"}
 
-
-class PolicyError(ValueError):
-    """Stable codes and allowlisted coverage only; never include rejected data."""
-    def __init__(self, code: str, coverage=()):
-        self.code = code
-        self.coverage = copy.deepcopy(list(coverage))
-        super().__init__("Proxy policy rejected: " + code)
 
 
 def _ip(value):
@@ -147,6 +141,9 @@ class CompiledPolicy:
     identity: str
     pinned_address: str | None = None
     resolved_at: int | None = None
+    plan_manifest: list[dict] | None = field(default=None, repr=False)
+    policy_version: int = 1
+    source_fingerprint: str | None = None
 
 
 def _digest(value):
@@ -259,28 +256,65 @@ def _check_tags(config):
     visit(config)
 
 
-def _bind_ingress(config, inbounds):
+def _ordinary_ingress(item, tag):
+    """Mirror the ordinary adapter without importing runtime/database modules."""
+    settings = {key: value for key, value in dict(item.settings or {}).items() if not key.startswith("_")}
+    stream = {key: value for key, value in dict(item.stream_settings or {}).items() if not key.startswith("_")}
+    expected = {"type": item.protocol, "tag": tag, "listen": "::", "listen_port": item.port}
+    if item.protocol in {"vless", "vmess", "trojan", "hysteria2", "tuic"}:
+        users = settings.pop("users", None)
+        if users:
+            expected["users"] = copy.deepcopy(users)
+    expected.update(copy.deepcopy(settings))
+    for key in ("tls", "transport", "multiplex"):
+        if key in stream:
+            expected[key] = copy.deepcopy(stream[key])
+    transport = expected.get("transport")
+    if item.protocol == "vless" and isinstance(transport, dict) and transport.get("type") == "ws":
+        if isinstance(transport.get("headers"), dict):
+            transport["headers"].pop("Host", None)
+            if not transport["headers"]:
+                transport.pop("headers")
+    return expected
+
+
+def _bind_ingress(config, inbounds, relay_ids=None):
+    """Bind every enabled sing-box row, retag only the protected subset.
+
+    ``None`` retains the exact legacy qualification/binding path. In mixed
+    policies ordinary rows keep their original tags, routing rules and adapter
+    transformations, while extra/missing core rows still fail closed.
+    """
     existing = config.get("inbounds", [])
     rows = [item for item in inbounds if item.enable and item.core == "sing-box"]
     if len(existing) != len(rows):
         raise PolicyError("INGRESS_SNAPSHOT_MISMATCH")
     by_tag = {value["tag"]: value for value in existing}
+    selected = {item.id for item in rows} if relay_ids is None else set(relay_ids)
     used = set()
     for item in rows:
         tag = getattr(item, "tag", None) or f"sing-box-{item.protocol}-{item.port}"
         if type(tag) is not str or tag in used:
             raise PolicyError("INGRESS_TAG_COLLISION")
         used.add(tag)
-        stream = item.stream_settings or {}
-        expected = {"type": item.protocol, "tag": tag, "listen": "::", "listen_port": item.port,
-                    **copy.deepcopy(item.settings)}
-        for key in ("tls", "transport", "multiplex"):
-            if key in stream:
-                expected[key] = copy.deepcopy(stream[key])
+        if relay_ids is None:
+            stream = item.stream_settings or {}
+            expected = {"type": item.protocol, "tag": tag, "listen": "::", "listen_port": item.port,
+                        **copy.deepcopy(item.settings)}
+            for key in ("tls", "transport", "multiplex"):
+                if key in stream:
+                    expected[key] = copy.deepcopy(stream[key])
+        else:
+            try:
+                expected = _ordinary_ingress(item, tag)
+            except (TypeError, ValueError, AttributeError):
+                raise PolicyError("INVALID_INGRESS_SNAPSHOT") from None
         if by_tag.get(tag) != expected:
             raise PolicyError("INGRESS_SNAPSHOT_MISMATCH")
-        by_tag[tag]["tag"] = f"{NAMESPACE}ingress-{item.id}"
-    return [f"{NAMESPACE}ingress-{item.id}" for item in sorted(rows, key=lambda row: row.id)]
+        if item.id in selected:
+            by_tag[tag]["tag"] = f"{NAMESPACE}ingress-{item.id}"
+    return [f"{NAMESPACE}ingress-{item.id}" for item in sorted(rows, key=lambda row: row.id)
+            if item.id in selected]
 
 
 def _settings(snapshot):
@@ -312,6 +346,62 @@ def _upstream(profile, pinned):
     return value
 
 
+def _prepare(config, rows, proxy_snapshot):
+    settings = _settings(proxy_snapshot)
+    plan = policy_plan(rows, settings)
+    coverage = ingress_coverage(rows)
+    relay_ids = set(plan.relay_ids)
+    if any(not item["qualified"] and item["inbound_id"] in relay_ids for item in coverage):
+        raise PolicyError("UNQUALIFIED_INGRESS", coverage)
+    if not plan.legacy:
+        explicit_ids = {item.id for item in rows if item.enable and row_mode(item) != "inherit"}
+        if any(not item["qualified"] and item["inbound_id"] in explicit_ids for item in coverage):
+            raise PolicyError("UNQUALIFIED_ROUTING_OVERRIDE", coverage)
+        if relay_ids and any(item.enable and item.core != "sing-box" for item in rows):
+            raise PolicyError("MIXED_CORE_RELAY_UNSUPPORTED", coverage)
+    selected_tags = []
+    if plan.requires_upstream or not plan.legacy:
+        _check_tags(config)
+        if not plan.legacy:
+            selected_tags = _bind_ingress(config, rows, plan.relay_ids)
+        elif settings["relay_enabled"]:
+            selected_tags = _bind_ingress(config, rows)
+    profile = None
+    if plan.requires_upstream:
+        profile_id, revision = settings["selected_upstream_id"], proxy_snapshot.get("revision")
+        if (type(profile_id) is not str or not _ID.fullmatch(profile_id)
+                or type(revision) is not str or not _REVISION.fullmatch(revision)):
+            raise PolicyError("INVALID_PROXY_SNAPSHOT")
+        try:
+            profile = UpstreamProfile.from_dict(proxy_snapshot["upstreams"][profile_id])
+        except (UpstreamValidationError, KeyError, TypeError):
+            raise PolicyError("INVALID_SELECTED_UPSTREAM") from None
+    if settings["local_proxy_enabled"]:
+        port, username, password = settings["local_port"], settings["local_username"], proxy_snapshot.get("local_password")
+        if (type(port) is not int or not 1024 <= port <= 65535
+                or type(username) is not str or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", username)
+                or type(password) is not str or not 12 <= len(password) <= 255
+                or any(not 33 <= ord(char) <= 126 for char in password)
+                or not settings["local_password_ref"]):
+            raise PolicyError("INVALID_LOCAL_AUTHENTICATION")
+        if any(item.enable and item.port == port for item in rows) or any(
+                value.get("listen_port") == port for value in config.get("inbounds", [])):
+            raise PolicyError("LOCAL_PORT_COLLISION")
+    return settings, plan, coverage, profile, selected_tags
+
+
+def prepare_policy(base_config, inbounds, proxy_snapshot):
+    """Pure prospective checks for a first protected transition, never a config.
+
+    This validates source binding, supported modes, selected upstream model and
+    local authentication. It neither resolves an endpoint nor grants runtime
+    acceptance; explicit reconcile must resolve, pin and fully compile later.
+    """
+    if type(base_config) is not dict:
+        raise PolicyError("INVALID_BASE_CONFIG")
+    return _prepare(copy.deepcopy(base_config), list(inbounds), proxy_snapshot)[1]
+
+
 def compile_proxy_policy(base_config, inbounds, proxy_snapshot, *, endpoint=None,
                          self_addresses=None, policy=None):
     """Compile a full config from one locked snapshot; do not execute or resolve.
@@ -321,17 +411,18 @@ def compile_proxy_policy(base_config, inbounds, proxy_snapshot, *, endpoint=None
     must explicitly contain the checked interface/panel/listener snapshot.
     ``policy`` is a Python-only fixture seam, never deserialized from an API.
     """
-    settings = _settings(proxy_snapshot)
     if type(base_config) is not dict:
         raise PolicyError("INVALID_BASE_CONFIG")
     config = copy.deepcopy(base_config)
     rows = list(inbounds)
-    coverage = ingress_coverage(rows)
+    settings, plan, coverage, profile, selected_tags = _prepare(config, rows, proxy_snapshot)
+    metadata = {"plan_manifest": plan.manifest, "policy_version": plan.policy_version,
+                "source_fingerprint": plan.source_fingerprint}
     local, relay = settings["local_proxy_enabled"], settings["relay_enabled"]
-    if not local and not relay:
-        return CompiledPolicy(config, coverage, _digest(config))
-    if relay and any(not row["qualified"] for row in coverage):
-        raise PolicyError("UNQUALIFIED_INGRESS", coverage)
+    if not plan.requires_upstream:
+        identity = _digest(config) if plan.legacy else _digest({"policy_version": 2,
+            "config": config, "plan_manifest": plan.manifest, "source_fingerprint": plan.source_fingerprint})
+        return CompiledPolicy(config, coverage, identity, **metadata)
     policy = AddressPolicy() if policy is None else policy
     if type(policy) is not AddressPolicy or self_addresses is None:
         raise PolicyError("MISSING_ADDRESS_SNAPSHOT")
@@ -339,13 +430,6 @@ def compile_proxy_policy(base_config, inbounds, proxy_snapshot, *, endpoint=None
     if not self_addresses:
         raise PolicyError("MISSING_ADDRESS_SNAPSHOT")
     profile_id, revision = settings["selected_upstream_id"], proxy_snapshot.get("revision")
-    if (type(profile_id) is not str or not _ID.fullmatch(profile_id)
-            or type(revision) is not str or not _REVISION.fullmatch(revision)):
-        raise PolicyError("INVALID_PROXY_SNAPSHOT")
-    try:
-        profile = UpstreamProfile.from_dict(proxy_snapshot["upstreams"][profile_id])
-    except (UpstreamValidationError, KeyError, TypeError):
-        raise PolicyError("INVALID_SELECTED_UPSTREAM") from None
     if (type(endpoint) is not VerifiedEndpoint or endpoint.profile_id != profile_id
             or endpoint.revision != revision or endpoint.host != profile.server
             or type(endpoint.addresses) is not tuple
@@ -359,21 +443,8 @@ def compile_proxy_policy(base_config, inbounds, proxy_snapshot, *, endpoint=None
     if literal is not None and checked != (str(literal),):
         raise PolicyError("ENDPOINT_LITERAL_MISMATCH")
     pinned = checked[0]
-    _check_tags(config)
-    selected_tags = _bind_ingress(config, rows) if relay else []
     if local:
-        port, username, password = settings["local_port"], settings["local_username"], proxy_snapshot.get("local_password")
-        if (type(port) is not int or not 1024 <= port <= 65535
-                or type(username) is not str or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", username)
-                or type(password) is not str or not 12 <= len(password) <= 255
-                or any(not 33 <= ord(char) <= 126 for char in password)
-                or not settings["local_password_ref"]):
-            raise PolicyError("INVALID_LOCAL_AUTHENTICATION")
-        # This is a snapshot collision guard, not the separate live TCP/UDP,
-        # IPv4/IPv6 ownership probes required before runtime activation.
-        if any(item.enable and item.port == port for item in rows) or any(
-                value.get("listen_port") == port for value in config.get("inbounds", [])):
-            raise PolicyError("LOCAL_PORT_COLLISION")
+        port, username, password = settings["local_port"], settings["local_username"], proxy_snapshot["local_password"]
         config.setdefault("inbounds", []).append({"type": "mixed", "tag": LOCAL_TAG,
             "listen": "127.0.0.1", "listen_port": port, "set_system_proxy": False,
             "users": [{"username": username, "password": password}]})
@@ -381,7 +452,9 @@ def compile_proxy_policy(base_config, inbounds, proxy_snapshot, *, endpoint=None
     config.setdefault("outbounds", []).append(_upstream(profile, pinned))
     dns = config.setdefault("dns", {})
     servers = dns.setdefault("servers", [])
-    if not servers and not relay:
+    ordinary_sources = not relay if plan.legacy else any(
+        item["enable"] and item["effective"] == "direct" for item in plan.manifest)
+    if not servers and ordinary_sources:
         # Existing direct-only configs implicitly use the local resolver. Keep
         # ordinary ingress behavior in state 10. Protected sources always use
         # the explicit business server below; this is never their fallback.
@@ -416,7 +489,10 @@ def compile_proxy_policy(base_config, inbounds, proxy_snapshot, *, endpoint=None
     # enabled nodes creates no rules until an ingress snapshot exists.
     if selected_tags:
         route["rules"] = rules + route.get("rules", [])
-    identity = _digest({"config": config, "revision": revision, "coverage": coverage,
-                        "self_addresses": self_addresses, "endpoint_addresses": checked,
-                        "resolved_at": endpoint.resolved_at, "deny_policy_version": 1, "dns_policy_version": 1})
-    return CompiledPolicy(config, coverage, identity, pinned, endpoint.resolved_at)
+    identity_source = {"config": config, "revision": revision, "coverage": coverage,
+                       "self_addresses": self_addresses, "endpoint_addresses": checked,
+                       "resolved_at": endpoint.resolved_at, "deny_policy_version": 1, "dns_policy_version": 1}
+    if not plan.legacy:
+        identity_source.update(policy_version=2, plan_manifest=plan.manifest,
+                               source_fingerprint=plan.source_fingerprint)
+    return CompiledPolicy(config, coverage, _digest(identity_source), pinned, endpoint.resolved_at, **metadata)

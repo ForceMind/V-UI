@@ -1,5 +1,9 @@
 # V-UI 开发约束
 
+## 2026-10-18 当前优先：标准客户端与每入口 TCP 路由
+
+先读[当前开发交接](docs/DEVELOPMENT_HANDOFF.md)与[每入口三态契约](docs/PER_INBOUND_ROUTING_CONTRACT.md)。用户已确认现成客户端导入不同 VLESS 节点，分别直连/中转；从准确产品 master `a98da9afbbf58a54f4f102cccec2f26b6e07d2ee` 独立开发 inherit/direct/relay，复用单 selected_upstream，host 代理开关独立。先设计独审，再做迁移/事务/API/UI/导出与 stock Mihomo TCP 同实例验收。有效中转 UDP 仍拒绝，普通直连既有能力保留；不迁入八个实验核心补丁、不改 pin/VERSION、不要求自研手机 App。所有尚未完成计划和准确证据必须更新项目文档并及时提交可恢复 WIP；WIP不代表验收，准确候选/主线/四目标及发布边界保持。下方旧阶段文字按日期保留。
+
 ## 2026-10-16 D1 显式 TCP-only 上游导出
 
 D0 已在准确 master `13c884a0539cf9822fca2fe2db58325fa4644048` 收口，见 PR #46；用户持续开发授权下，下一有界实际功能为 [D1 契约](docs/TCP_UPSTREAM_EXPORT_CONTRACT.md)。单独的管理员“导出为中转上游（仅 TCP）”用途 profile，URI 与单节点 Clash YAML，必须完成真实双实例 API 导出→导入及固定 TLS/REALITY 双跳。普通导出/订阅保持，导入仍严格拒绝 UDP 选项，默认双关和已验运行策略不变。D2 UDP 双跳暂不启动。只在准确候选/主线与四目标验收后正常合并，不发布或部署。

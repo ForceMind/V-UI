@@ -42,7 +42,7 @@ class ProxyApplyRealTests(DoubleHopFixture):
         self.runtime_root = self.root/"runtime"
         self.runtime = CoreRuntime("sing-box", Path(self.singbox), self.runtime_root)
         self.addCleanup(lambda: self.runtime.close())
-        self.rows = [SimpleNamespace(id=1, core="sing-box", protocol="vless", port=self.ingress_port,
+        self.rows = [SimpleNamespace(id=1, routing_mode="inherit", core="sing-box", protocol="vless", port=self.ingress_port,
             remark="isolated-ingress", tag="fixture-ingress", enable=True, expiry_time=0,
             settings={"users": [{"uuid": INGRESS_UUID}]}, stream_settings={"tls": {
                 "enabled": True, "server_name": SNI,

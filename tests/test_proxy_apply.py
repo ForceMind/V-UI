@@ -88,7 +88,7 @@ class FakeRuntime:
 
 
 def row(identifier=1, port=24443):
-    return SimpleNamespace(id=identifier, enable=True, core="sing-box", protocol="vless", tag=f"node-{identifier}",
+    return SimpleNamespace(id=identifier, routing_mode="inherit", enable=True, core="sing-box", protocol="vless", tag=f"node-{identifier}",
                            port=port, expiry_time=0, settings={"users": [{"uuid": FAKE_UUID}]},
                            stream_settings={"tls": {"enabled": True, "server_name": "node.example",
                                "certificate_path": "/test-only-fake-cert", "key_path": "/test-only-fake-key"}})

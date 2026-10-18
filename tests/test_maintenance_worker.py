@@ -71,7 +71,7 @@ class MaintenanceWorkerTests(unittest.TestCase):
         shutil.copyfile(REPO / 'deploy/ops_worker.py', self.control / 'ops_worker.py')
         shutil.copyfile(REPO / 'app/release_tools.py', self.control / 'release_tools.py')
         shutil.copyfile(REPO / 'app/data_owner.py', self.control / 'data_owner.py')
-        for name in ('proxy_store.py', 'upstream_profile.py'):
+        for name in ('proxy_store.py', 'upstream_profile.py', 'inbound_policy.py'):
             shutil.copyfile(REPO / 'app/services' / name, self.control / name)
 
     def prepared(self, identity, *, healthy=True):
@@ -703,7 +703,7 @@ class MaintenanceWorkerTests(unittest.TestCase):
         self.finish(process)
 
     def test_real_worker_protocol_proxy_backup_restore_preserves_all_four_states_and_secrets(self):
-        from tests.test_proxy_controller_dependencies import seed_proxy
+        from tests.test_proxy_controller_dependencies import seed_proxy, seed_runtime
         store = seed_proxy(self.data)
         for local, relay in ((False, False), (True, False), (False, True), (True, True)):
             with self.subTest(local=local, relay=relay):
@@ -713,8 +713,7 @@ class MaintenanceWorkerTests(unittest.TestCase):
                 settings.update(local_proxy_enabled=local, relay_enabled=relay)
                 draft = store.save_draft(settings, current['revision'])
                 transaction = 'fixture-state-' + str(int(local)) + str(int(relay))
-                store.begin_apply(draft['revision'], transaction)
-                store.commit_apply(transaction, transaction + '-core')
+                seed_runtime(store, self.data, draft['revision'], transaction)
                 before = store.load_active()
                 snapshot = store.read_snapshot()
                 process = self.start_worker()

@@ -336,6 +336,19 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         expect(page.locator('#refresh')).to_be_enabled()
         return page
 
+    def open_inbound_view(self, page=None):
+        """Navigate the mounted dashboard through its real menu and observe its GET.
+
+        Changing only /ui/#inbounds is same-document navigation after login;
+        it does not run Vue setup again or select a new dashboard view.
+        """
+        page = page or self.page
+        with page.expect_response(lambda response: urlparse(response.url).path == '/api/inbounds'
+                                  and response.request.method == 'GET') as loaded:
+            page.get_by_role('menuitem', name='入站节点', exact=True).click()
+        self.assertEqual(loaded.value.status, 200, loaded.value.text())
+        return page
+
     def draft_only(self):
         self.context.route('**/api/proxy/capabilities', lambda route: route.fulfill(
             json={'apply_available': False, 'diagnostics_available': False}))
@@ -378,7 +391,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         self.draft_only()
         page = self.open_page()
         expect(page.locator('#draft-mode')).to_contain_text('00')
-        expect(page.locator('#upstream-area')).not_to_be_visible()
+        expect(page.locator('#upstream-area')).to_be_visible()  # Selection is available before the first explicit relay.
         page.locator('#relay-enabled').check()
         expect(page.locator('#draft-mode')).to_contain_text('01')
         expect(page.locator('#local-settings')).not_to_be_visible()
@@ -412,7 +425,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         self.assertTrue(retained['settings']['local_password_set'])
         self.assertNotEqual(first['revision'], retained['revision'])
         page.locator('#local-enabled').uncheck()
-        expect(page.locator('#upstream-area')).not_to_be_visible()
+        expect(page.locator('#upstream-area')).to_be_visible()  # Selection is available before the first explicit relay.
         page.locator('#save').click()
         expect(page.locator('#draft-state')).to_contain_text('00')
         page.reload()
@@ -779,6 +792,9 @@ rules:
         expect(page.locator('#export-notice')).to_contain_text('严格导出已阻止')
         state['active']['settings']['relay_enabled'] = False
         page.locator('#refresh').click()
+        expect(page.locator('#export-mihomo')).to_be_enabled()  # Explicit relay can remain active with default off.
+        state['active'] = None
+        page.locator('#refresh').click()
         expect(page.locator('#export-mihomo')).to_be_disabled()
         self.assert_private()
 
@@ -832,6 +848,266 @@ rules:
         expect(page.locator('#diagnostic-summary')).to_contain_text('已取消')
         self.assertEqual(len(cancels), 1)
         expect(page.locator('#external-state')).to_contain_text('未测')
+        self.assert_private()
+
+    @staticmethod
+    def policy_row(identity, mode, effective=None, state='applied'):
+        effective = effective or ('relay' if mode == 'relay' else 'direct')
+        return {'id': identity, 'remark': 'policy-node-' + str(identity), 'core': 'sing-box',
+                'protocol': 'vless', 'port': 10400 + identity, 'enable': True,
+                'routing_mode': mode, 'certificate_id': None, 'credentials': {'has_uuid': True},
+                'profile': {'security': 'tls', 'transport': 'direct', 'flow': '',
+                            'server_name': 'entry.example.test', 'skip_cert_verify': False},
+                'routing_status': {'desired_effective_mode': effective,
+                                   'applied_effective_mode': effective if state == 'applied' else None,
+                                   'state': state, 'policy_identity': 'd' * 64 if state == 'applied' else None}}
+
+    def test_mocked_inbound_policy_editor_create_cancel_reopen_saved_only_and_failure(self):
+        from playwright.sync_api import expect
+        rows = [self.policy_row(1, 'direct'), self.policy_row(2, 'relay')]
+        writes, fault, held = [], {'save': None}, []
+        def inbound(route):
+            path, method = urlparse(route.request.url).path, route.request.method
+            if method == 'GET' and path.endswith('/editor'):
+                identity = int(path.split('/')[-2])
+                route.fulfill(json=next(row for row in rows if row['id'] == identity))
+            elif method == 'GET':
+                route.fulfill(json=rows)
+            else:
+                body = route.request.post_data_json
+                writes.append((method, body))
+                if fault['save'] == 'hold':
+                    held.append(route)
+                    return
+                if fault['save'] == 'invalid':
+                    route.fulfill(status=422, json={'detail': 'Explicit policy rejected by fixture'})
+                    return
+                if method == 'POST':
+                    row = self.policy_row(3, body['routing_mode'], state='pending')
+                    row['remark'] = body['remark']
+                    rows.append(row)
+                else:
+                    row = next(item for item in rows if item['id'] == int(path.split('/')[-1]))
+                    row.update(body)
+                    row['routing_status']['state'] = 'pending'
+                    row['routing_status']['applied_effective_mode'] = None
+                if fault['save'] == 'saved':
+                    route.fulfill(status=409, json={'detail': {'saved': True, 'applied': False, 'message': 'synthetic runtime unavailable'}})
+                else:
+                    route.fulfill(json=row)
+        self.context.route('**/api/inbounds**', inbound)
+        page = self.page
+        page.set_viewport_size({'width': 1440, 'height': 1000})
+        self.open_inbound_view(page)
+        expect(page.get_by_text('policy-node-1', exact=True)).to_be_visible()
+        page.get_by_role('button', name='添加节点', exact=True).click()
+        dialog = page.get_by_role('dialog', name='添加节点', exact=True)
+        expect(dialog.locator('#inbound-routing-mode')).to_have_value('inherit')
+        dialog.locator('#inbound-routing-mode').select_option('relay')
+        expect(dialog).to_contain_text('服务器严格核验')
+        dialog.get_by_role('button', name='取消', exact=True).click()
+        expect(dialog).not_to_be_visible()
+        self.assertEqual(writes, [])
+        page.get_by_role('button', name='添加节点', exact=True).click()
+        expect(dialog.locator('#inbound-routing-mode')).to_have_value('inherit')
+        dialog.get_by_placeholder('例如：US-01').fill('created-policy-node')
+        dialog.locator('#inbound-routing-mode').select_option('relay')
+        fault['save'] = 'saved'
+        dialog.get_by_role('button', name='创建并应用', exact=True).click()
+        expect(dialog).not_to_be_visible()
+        expect(page.locator('.el-message--warning')).to_contain_text('已保存为期望状态')
+        row = page.get_by_role('row').filter(has_text='created-policy-node')
+        expect(row).to_contain_text('指定中转')
+        expect(row).to_contain_text('待应用')
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0][1]['routing_mode'], 'relay')
+        self.assertNotIn('routing_mode', writes[0][1]['profile'])
+        row.get_by_role('button', name='编辑', exact=True).click()
+        editor = page.get_by_role('dialog', name='编辑节点', exact=True)
+        expect(editor.locator('#inbound-routing-mode')).to_have_value('relay')
+        editor.locator('#inbound-routing-mode').select_option('direct')
+        fault['save'] = 'invalid'
+        editor.get_by_role('button', name='保存并应用', exact=True).click()
+        expect(page.locator('.el-message--error')).to_contain_text('Explicit policy rejected')
+        expect(editor).to_be_visible()
+        expect(editor.locator('#inbound-routing-mode')).to_have_value('direct')
+        editor.get_by_role('button', name='取消', exact=True).click()
+        page.get_by_role('button', name='刷新节点', exact=True).click()
+        row.get_by_role('button', name='编辑', exact=True).click()
+        expect(editor.locator('#inbound-routing-mode')).to_have_value('relay')
+        editor.locator('#inbound-routing-mode').select_option('direct')
+        fault['save'] = 'hold'
+        editor.get_by_role('button', name='保存并应用', exact=True).evaluate('(button)=>{button.click();button.click();}')
+        expect(editor.get_by_role('button', name='保存并应用', exact=True)).to_be_disabled()
+        expect(editor.get_by_role('button', name='取消', exact=True)).to_be_disabled()
+        page.wait_for_timeout(100)
+        self.assertEqual(len(held), 1)
+        self.assertEqual(len(writes), 3)
+        held.pop().fulfill(json=rows[-1])
+        expect(editor).not_to_be_visible()
+        page.reload()
+        self.open_inbound_view(page)
+        row.get_by_role('button', name='编辑', exact=True).click()
+        expect(editor.locator('#inbound-routing-mode')).to_have_value('relay')
+        editor.get_by_role('button', name='取消', exact=True).click()
+        self.assert_private()
+
+    def test_mocked_inbound_policy_delayed_editor_cancellation_and_401_clear(self):
+        from playwright.sync_api import expect
+        rows = [self.policy_row(1, 'direct'), self.policy_row(2, 'relay')]
+        held = []
+        def inbound(route):
+            path = urlparse(route.request.url).path
+            if path.endswith('/1/editor'):
+                held.append(route)
+            elif path.endswith('/2/editor'):
+                route.fulfill(json=rows[1])
+            else:
+                route.fulfill(json=rows)
+        self.context.route('**/api/inbounds**', inbound)
+        page = self.page
+        page.set_viewport_size({'width': 1440, 'height': 1000})
+        self.open_inbound_view(page)
+        first = page.get_by_role('row').filter(has_text='policy-node-1')
+        second = page.get_by_role('row').filter(has_text='policy-node-2')
+        first.get_by_role('button', name='编辑', exact=True).click()
+        second.get_by_role('button', name='编辑', exact=True).click()
+        editor = page.get_by_role('dialog', name='编辑节点', exact=True)
+        expect(editor.locator('#inbound-routing-mode')).to_have_value('relay')
+        held.pop().fulfill(json=rows[0])
+        expect(editor.locator('#inbound-routing-mode')).to_have_value('relay')
+        editor.get_by_role('button', name='取消', exact=True).click()
+        first.get_by_role('button', name='编辑', exact=True).click()
+        page.get_by_role('button', name='添加节点', exact=True).click()
+        page.get_by_role('dialog', name='添加节点', exact=True).get_by_role('button', name='取消', exact=True).click()
+        held.pop().fulfill(json=rows[0])
+        page.wait_for_timeout(100)
+        expect(page.get_by_role('dialog')).not_to_be_visible()
+        second.get_by_role('button', name='编辑', exact=True).click()
+        expect(editor.locator('#inbound-routing-mode')).to_have_value('relay')
+        self.context.route('**/api/auth/me', lambda route: route.fulfill(status=401, json={'detail': 'expired'}))
+        self.context.route('**/api/inbounds/2', lambda route: route.fulfill(status=401, json={'detail': 'expired'}))
+        editor.get_by_role('button', name='保存并应用', exact=True).click()
+        page.wait_for_url('**/login')
+        expect(page.locator('#inbound-routing-mode')).to_have_count(0)
+        self.assert_private()
+
+    def test_mocked_policy_sources_fingerprint_retry_stale_conflict_and_missing_token(self):
+        from playwright.sync_api import expect
+        state = fixture_snapshot()
+        state['settings']['relay_enabled'] = False
+        rows = [self.policy_row(1, 'direct'), self.policy_row(2, 'relay')]
+        token = {'value': 'e' * 64, 'apply': 'abort'}
+        requests = []
+        self.context.route('**/api/inbounds', lambda route: route.fulfill(json=rows))
+        def runtime(route):
+            path = urlparse(route.request.url).path
+            if path.endswith('/capabilities'):
+                route.fulfill(json={'apply_available': True})
+            elif path.endswith('/settings'):
+                route.fulfill(json=state)
+            elif path.endswith('/check'):
+                checked = {'valid': True, 'phase': 'checked', 'applied': False, 'revision': state['revision'],
+                           'snapshot': state, 'coverage': [
+                    {'inbound_id': 1, 'core': 'sing-box', 'protocol': 'vless', 'transport': 'tcp',
+                     'qualified': False, 'routing_mode': 'direct', 'effective_mode': 'direct'},
+                    {'inbound_id': 2, 'core': 'sing-box', 'protocol': 'vless', 'transport': 'tcp',
+                     'qualified': True, 'routing_mode': 'relay', 'effective_mode': 'relay'}]}
+                if token['value'] is not None:
+                    checked['source_fingerprint'] = token['value']
+                route.fulfill(json=checked)
+            elif path.endswith('/apply'):
+                requests.append((route.request.headers['idempotency-key'], route.request.post_data_json))
+                if token['apply'] == 'abort':
+                    route.abort('failed')
+                else:
+                    route.fulfill(status=409, json={'detail': 'PROXY_REVISION_CONFLICT'})
+            else:
+                route.fulfill(status=404, json={'detail': 'not found'})
+        self.context.route('**/api/proxy/**', runtime)
+        page = self.open_page()
+        expect(page.locator('#upstream-area')).to_be_visible()
+        page.locator('#apply').click()
+        expect(page.locator('#review-coverage')).to_contain_text('指定直连 → 普通直连')
+        expect(page.locator('#review-coverage')).to_contain_text('指定中转 → 中转')
+        expect(page.locator('#review-revision')).to_contain_text('e' * 64)
+        page.locator('#confirm-apply').evaluate('(button)=>{button.click();button.click();}')
+        expect(page.locator('#retry-apply')).to_be_visible()
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(requests[0][1], {'base_revision': state['revision'], 'source_fingerprint': 'e' * 64})
+        token['value'], token['apply'] = 'f' * 64, 'conflict'
+        rows[1]['routing_mode'] = 'inherit'
+        page.locator('#retry-apply').click()
+        expect(page.locator('#conflict')).to_be_visible()
+        expect(page.locator('#apply-review')).not_to_be_visible()
+        self.assertEqual(requests[0], requests[1], 'Retry must retain the original exact token and key')
+        page.locator('#discard').click()
+        page.locator('#apply').click()
+        expect(page.locator('#review-revision')).to_contain_text('f' * 64)
+        page.locator('#cancel-apply-review').click()
+        expect(page.locator('#apply-review')).not_to_be_visible()
+        token['value'] = None
+        page.locator('#apply').click()
+        expect(page.locator('#notice')).to_contain_text('指纹缺失或无效')
+        expect(page.locator('#confirm-apply')).to_be_disabled()
+        self.assertEqual(len(requests), 2)
+        self.assert_private()
+
+    def test_mocked_policy_four_flags_and_selected_strict_export_global_off(self):
+        from playwright.sync_api import expect
+        state = fixture_snapshot()
+        rows = [self.policy_row(1, 'inherit'), self.policy_row(2, 'direct'), self.policy_row(3, 'relay')]
+        requests = []
+        self.context.route('**/api/inbounds', lambda route: route.fulfill(json=rows))
+        def runtime(route):
+            path = urlparse(route.request.url).path
+            if path.endswith('/capabilities'):
+                route.fulfill(json={'apply_available': True, 'strict_exports_available': True})
+            elif path.endswith('/settings'):
+                route.fulfill(json=state)
+            elif '/exports/' in path:
+                requests.append(route.request.post_data_json)
+                route.fulfill(body='synthetic selected-entry-only config', headers={
+                    'Content-Type': 'application/yaml', 'ETag': '"' + state['active']['revision'] + '"'})
+            else:
+                route.fulfill(status=404, json={'detail': 'not found'})
+        self.context.route('**/api/proxy/**', runtime)
+        state['active'] = {'revision': 'b' * 64, 'settings': deepcopy(state['settings'])}
+        page = self.open_page()
+        for local, relay in ((False, False), (True, False), (False, True), (True, True)):
+            state['settings']['local_proxy_enabled'] = local
+            state['settings']['relay_enabled'] = relay
+            state['active']['settings'] = deepcopy(state['settings'])
+            rows[0]['routing_status']['desired_effective_mode'] = 'relay' if relay else 'direct'
+            rows[0]['routing_status']['applied_effective_mode'] = 'relay' if relay else 'direct'
+            page.locator('#refresh').click()
+            expect(page.locator('#draft-state')).to_contain_text(('1' if local else '0') + ('1' if relay else '0'))
+            expect(page.locator('#inbound-policy-summary')).to_contain_text('已保存期望中转入口：' + ('2' if relay else '1'))
+            expect(page.locator('#inbound-policy-list')).to_contain_text('入口 2 · 指定直连 · 已应用普通直连')
+            expect(page.locator('#inbound-policy-list')).to_contain_text('入口 3 · 指定中转 · 已应用 中转')
+            expect(page.locator('#upstream-area')).to_be_visible()
+        state['settings']['local_proxy_enabled'] = state['settings']['relay_enabled'] = False
+        state['active']['settings'] = deepcopy(state['settings'])
+        page.locator('#refresh').click()
+        page.locator('#export-server').fill('8.8.8.8')
+        page.locator('#export-inbound').fill('2')
+        expect(page.locator('#export-mihomo')).to_be_disabled()
+        expect(page.locator('#export-state')).to_contain_text('所选入口未确认已应用中转')
+        page.locator('#export-inbound').fill('3')
+        expect(page.locator('#export-mihomo')).to_be_enabled()
+        with page.expect_download() as event:
+            page.locator('#export-mihomo').click()
+        self.assertEqual(Path(event.value.path()).read_text(), 'synthetic selected-entry-only config')
+        self.assertEqual(requests, [{'base_revision': 'b' * 64, 'inbound_id': 3, 'server': '8.8.8.8'}])
+        rows[2]['routing_status']['state'] = 'pending'
+        page.locator('#refresh').click()
+        expect(page.locator('#export-notice')).to_have_text('')
+        expect(page.locator('#export-mihomo')).to_be_disabled()
+        expect(page.locator('#inbound-policy-list')).to_contain_text('待应用')
+        rows[2].pop('routing_status')
+        page.locator('#refresh').click()
+        expect(page.locator('#inbound-policy-list')).to_contain_text('已应用出口未确认')
+        expect(page.locator('#inbound-policy-summary')).to_contain_text('数量未确认')
         self.assert_private()
 
 
