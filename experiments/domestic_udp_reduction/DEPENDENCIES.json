@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "kind": "vui-domestic-udp-reduction-static-plan",
+  "legacy_commit": "afbdba100c5f0e3dc6888684fdbab31980720df3",
+  "patches": [
+    {
+      "index": 0,
+      "path": "experiments/xudp_address/remoteaddr.patch",
+      "bytes": 398,
+      "sha256": "ee08c4049b05d0fd72b1609839af574fe9be59b5e6c1ed4a1da54f0ffcb3a8ae",
+      "reduced": "retain-exact"
+    },
+    {
+      "index": 1,
+      "path": "experiments/xudp_address/lifecycle.patch",
+      "bytes": 1203,
+      "sha256": "b1ddb2c13896d06cf86d401044cafc9cb8f15ebbe66664fbb443f8ad13847010",
+      "reduced": "retain-exact"
+    },
+    {
+      "index": 2,
+      "path": "experiments/xudp_mux/mux.patch",
+      "bytes": 23146,
+      "sha256": "d9e1684350aedc550f7fb1c38ab690e5b23eafc2e196eddcb6e34e3598f1261a",
+      "reduced": "retain-exact"
+    },
+    {
+      "index": 3,
+      "path": "experiments/xudp_mux/route_cancel.patch",
+      "bytes": 487,
+      "sha256": "6d7e88d65ec5d463974a03102aceae5ecd15ae1cd009b1abbc1b012e60926070",
+      "reduced": "retain-exact"
+    },
+    {
+      "index": 4,
+      "path": "experiments/xudp_packet/receive.patch",
+      "bytes": 12371,
+      "sha256": "8f0d6726bf96ae743087f23f9e285edf5e99a92d2f64873c3e9232d75774da6e",
+      "reduced": "omit"
+    },
+    {
+      "index": 5,
+      "path": "experiments/socks_idle_recovery/sing_owner.patch",
+      "bytes": 28289,
+      "sha256": "5a72546e4d2fa10083460f5b9ed946fa66222d6d950ecfde1f05446908e14479",
+      "reduced": "omit"
+    },
+    {
+      "index": 6,
+      "path": "experiments/socks_idle_recovery/vmess_session.patch",
+      "bytes": 4809,
+      "sha256": "b964ef4131db368bbe607bdb26f081b353b7a3d3b49b567b10c59cc0fc239dd9",
+      "reduced": "omit"
+    },
+    {
+      "index": 7,
+      "path": "experiments/socks_idle_recovery/box_owner.patch",
+      "bytes": 33402,
+      "sha256": "f1eeff8483f01405528cc3a6a633027b3b3f65d77dae0a0381de04f61ab921b7",
+      "reduced": "extract-count-only"
+    }
+  ],
+  "planned_runtime_cases": 2,
+  "planned_runtime_leaves": 4,
+  "runtime_executed": false,
+  "product_qualified": false
+}
