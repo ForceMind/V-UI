@@ -66,9 +66,9 @@
 | --- | --- | --- | --- |
 | P0 | 本入口、设计契约、精确调用点与兼容纠正 | 已独审并公开记录；不是功能通过 | 无未决的保护策略降级，独审可据文档接续 |
 | P1 | 严格三态字段、旧库迁移、统一有效策略、身份兼容 | 已集成首版，23 新增 + 26 原 compiler 控制通过；待跨层全量验收 | 旧全 inherit 配置/身份保持；非法/null 拒绝；省略更新保留 |
-| P2 | apply/rollback/启动/恢复/备份/删除保护 | 已有 132 项纯事务控制通过的 WIP；恢复/installed smoke 与全量回归进行中 | 双全局 off + explicit relay 仍受保护；任何不一致不退普通直连 |
-| P3 | API/UI/导出三用途与 desired/applied 标识 | 已集成首版；29 项 API/export、14 项 Node 控制通过；真实浏览器待 CI | 标准客户端只获入口信息；取消/刷新/失败无假生效/秘密泄露 |
-| P4 | stock Mihomo 同实例两个节点和 host 四组合 | 正在编写真实双面板/标准导出夹具，尚未运行 | 真实目标分别观察本机/海外出口；负向原因、零误送达、无回退；四状态/12 切换 |
+| P2 | apply/rollback/启动/恢复/备份/删除保护 | 双向 fence 与离线依赖闭包修复已集成；宽 proxy 403 项中 353 通过/50 skip，最终全量待验；installed policy/recovery 组件门槛通过 | 双全局 off + explicit relay 仍受保护；任何不一致不退普通直连 |
+| P3 | API/UI/导出三用途与 desired/applied 标识 | 已集成；29 项 API/export、8 项完整 coordinator API 控制、17 项前端控制通过；真实浏览器待 CI | 标准客户端只获入口信息；取消/刷新/失败无假生效/秘密泄露 |
+| P4 | stock Mihomo 同实例两个节点和 host 四组合 | 已实现 7 项夹具控制 + 3 个真实方法；7 项控制通过，本地真实首启受 netlink EPERM 阻断，待准确 CI | 真实目标分别观察本机/海外出口；负向原因、零误送达、无回退；四状态/12 切换 |
 | P5 | 最终候选、独审、八组、四目标、正常合并后重验 | 待执行 | 准确 SHA/tree、所有必需 job/step 终态，历史失败和 skip 单列 |
 
 ## 本阶段 WIP 与失败记录
@@ -76,7 +76,14 @@
 - P1 保留旧全 inherit 编译身份；12 组旧实现逐值对照一致。迁移并发只做了线程/RLock 幂等测试，不能称跨进程迁移已验。
 - P1 独立旧 proxy 宽扫曾出现 112 errors、6 failures、50 skips，主要是旧瞬时 fixture 缺新字段和未整合跨层实现；保留原失败，随后必须在完整候选重新运行。
 - 前端新增 4 组 Chromium 生命周期用例已接入原 browser gate；本地首次 13 项在 Chromium 启动时 socket EPERM，另一次启动工具遇只读 sandbox 错误。没有取得浏览器运行成功证据；不通过改变系统权限解决。
-- 当前 P2 首版独审仍有双向能力 fence 必修项：`state.schema_version=2` 却缺 DB mode 列必须拒绝；DB 已有非 inherit 行但缺完整 v2 状态（含整个 proxy store 缺失）也必须拒绝。不能 bootstrap 或补写标记把损坏备份当可信旧数据。132 项纯测试是局部结果，尚未覆盖并关闭该缺口。
+- P2 首版独审发现双向能力 fence 缺口：`state.schema_version=2` 却缺 DB mode 列、以及 DB 已有非 inherit 行但缺完整 v2 状态（含整个 proxy store 缺失）。已补 create_all 前的文件/表/列检查和持久行运行校验，拒绝 bootstrap 或补写标记掩盖损坏；合法 prospective 保存仍先写 fence 再提交 SQL。局部迁移/恢复控制通过，最终独审与全套结果继续单列。
+- 首次完整集成宽扫：1923 tests，6 failures / 28 errors / 200 skips。失败包含独立维护 controller 的 restore 依赖闭包缺失、旧极简备份/异常转换和旧协议 fixture 未显式填写新字段；正在按真实原因修复。该结果不能写成全套通过。
+- 第二次完整集成宽扫（`c4b2d367352501f14c84063f8d670ee8e5a69680`）：1965 tests，2 failures / 5 errors / 205 skips。4 个错误为新增导出夹具绕过首次 selected00/fence 流程，1 个错误为小型恢复夹具没有可验证的已选 release；两失败为新增进程尚未登记既有启动审计清单、日志 flush 与 writer Event 的调度竞争。已按真实契约修正：不减生产 fence，登记已审启动路径，拒绝函数返回当下核完整新日志，再有界 join writer。28 项聚焦控制通过，旧失败保留，最终全套仍需重跑。
+- 恢复收尾额外覆盖：持久损坏策略校验先于 manager/coordinator 早退，损坏 store 的 sing-box stop 失败也不遮住 Xray stop；首次无文件/无表 v2 数据拒绝后不创建/改写文件。组件 139 项纯模式/迁移/恢复/维护控制与 55 项小型归档/manager/事务控制通过，不能相加冒充不重复的全套计数。
+- 固定官方 sing-box 对复制 payload 的 installed policy smoke 完成 8 旧 + 8 混合配置检查及 4 组同配置/不同策略身份断言；这些不启动核心，也不是同提交四目标包或真实双跳资格。
+- P4 首次真实尝试暴露夹具错误预期：首次 direct 保存实际正确返回 saved=true/applied=false 的 409，已按契约修正；第二次 check 有效后 apply 返回 PROXY_APPLY_FAILED。独立固定官方 sing-box 空配置启动得到 `create netlink socket: operation not permitted`，不据此判产品转发通过，也不提高主机权限绕过。余下真实方法未跑。
+- 新增 8 项真实 HTTP/SQLite/private-store/完整 coordinator 控制通过，核心与 DNS 明确为 fake；覆盖首次 direct 无上游、首次 relay pin、真正 SQL commit 异常、两种过期 token、手动停止后保存和删除回滚。首稿夹具非法幂等键与清理顺序失败已修。删除测试曾错误要求可信完整旧配置也必须停机；按已冻结合同改为锁定旧 revision/config/context 逐值保留、dirty 与未应用响应，并验证下次启动因源不一致拒绝。界面明确提示旧入口可能仍可用，不把已保存删除称为已生效。
+- 固定官方 sing-box 1.14.2 对三模式 × 四开关组合 × TLS/REALITY 上游的 8 组配置解析通过，另原 Xray/sing-box 正负配置检查通过；解析不等于转发。
 - 当前纯测试分别只证明对应组件。全套、真实核心、浏览器、恢复/installed smoke 与同提交四目标未完成，不能合并或声明功能收口。
 - 首次指定直连可保持两个开关关闭、**不选择上游**，正常 check/apply 建立活动配置；保存期间没有活动配置时显示待应用/不可确认。指定中转才需要先应用合法的已选上游；不能把普通直连变成必须配置海外。
 
@@ -101,6 +108,6 @@ python -m unittest discover -s tests -p 'test_inbound*.py' -v
 python -m unittest discover -s tests -v
 ```
 
-真实核心/浏览器的可执行命令以 `.github/workflows/loopback.yml`、`test.yml` 和 [贡献指南](../CONTRIBUTING.md)为准：`scripts/fetch_test_cores.py` / `fetch_mihomo.py` 校验固定来源，`VUI_PROXY_LOOPBACK=1`、`VUI_TEST_CORES`、`VUI_TEST_MIHOMO` 激活真实 proxy 测试；`VUI_PROXY_BROWSER=1` 与固定前端资产激活浏览器。新增每入口测试必须接入相应真实步骤，而非仅被默认 discover 跳过。
+真实核心/浏览器的可执行命令以 `.github/workflows/loopback.yml`、`test.yml` 和 [贡献指南](../CONTRIBUTING.md)为准：`scripts/fetch_test_cores.py` / `fetch_mihomo.py` 校验固定来源，`VUI_PROXY_LOOPBACK=1`、`VUI_TEST_CORES`、`VUI_TEST_MIHOMO` 激活真实 proxy 测试；`VUI_PROXY_BROWSER=1` 与固定前端资产激活浏览器。新增每入口真实步骤使用 `VUI_INBOUND_ROUTING_LOOPBACK=1` 执行 `test_inbound_routing_real.py`；配置解析用 `VUI_TEST_CORES` 执行 `test_inbound_routing_parser.py`。新增实际浏览器流程以 `VUI_INBOUND_ROUTING_BROWSER=1` 执行 `test_inbound_routing_browser.py`，已实现并接入 CI，3 项纯控制通过、1 个真实流程待 CI，不能仅因默认 discover skip 便计通过。
 
 没有 Python/核心/浏览器时记录精确未跑条件；不要把 mock、语法检查、skip 或旧 run 当成新功能绿灯。最终报告至少包含准确 head/tree、命令/run/attempt、实际通过/失败/skip、二进制来源、资源清理、独审结论与未完成项。新代码提交后及时更新本表，不抹去先前失败。

@@ -14,23 +14,27 @@ const node=(id,mode='inherit')=>({id,core:'sing-box',protocol:'vless',remark:'no
  profile:{security:'tls',transport:'direct',flow:'',server_name:'entry.example.test',skip_cert_verify:false}});
 function harness(){
  let setup,interceptor,writeFailure=null,writeHold=null,readFailure=null;
- const editors=new Map(),held=new Map(),writes=[],messages=[],events={},redirects=[];
+ let confirmFailure=null,confirmHold=null,deleteFailure=null,deleteHold=null;
+ const editors=new Map(),held=new Map(),writes=[],messages=[],events={},redirects=[],reads=[],confirmations=[];
  let rows=[],authStatus=200;
  const app={component(){},use(){},mount(){}};
  const sandbox={console,addEventListener(name,fn){(events[name]??=[]).push(fn)},location:{hash:'',replace(v){redirects.push(v)}},
  Vue:{createApp(o){setup=o.setup;return app},ref:value=>({value}),reactive:v=>v,computed:f=>({get value(){return f()}}),watch(){},onMounted(){}},
- ElementPlus:{ElMessage:{success:m=>messages.push(['success',m]),error:m=>messages.push(['error',m]),warning:m=>messages.push(['warning',m])},ElMessageBox:{}},
+ ElementPlus:{ElMessage:{success:m=>messages.push(['success',m]),error:m=>messages.push(['error',m]),warning:m=>messages.push(['warning',m])},ElMessageBox:{async confirm(...args){confirmations.push(args);if(confirmHold)await confirmHold;if(confirmFailure)throw confirmFailure}}},
  ElementPlusIconsVue:{},axios:{defaults:{headers:{common:{}}},interceptors:{response:{use(ok,bad){interceptor=bad}}},
  async get(url){
+  reads.push(url);
   if(url==='/api/auth/me')return{status:authStatus,data:{username:'fixture'}};
   if(url==='/api/inbounds'){if(readFailure)throw readFailure;return{data:clone(rows)}};
   const match=url.match(/^\/api\/inbounds\/(\d+)\/editor$/);
   if(match){const id=Number(match[1]);if(held.has(id))return await held.get(id);return{data:clone(editors.get(id))}};
   return{data:[]};
  },async post(url,body){writes.push({method:'POST',url,body:clone(body)});if(writeHold)await writeHold;if(writeFailure)throw writeFailure;return{data:{}}},
- async put(url,body){writes.push({method:'PUT',url,body:clone(body)});if(writeHold)await writeHold;if(writeFailure)throw writeFailure;return{data:{}}}}};
+ async put(url,body){writes.push({method:'PUT',url,body:clone(body)});if(writeHold)await writeHold;if(writeFailure)throw writeFailure;return{data:{}}},
+ async delete(url){writes.push({method:'DELETE',url});if(deleteHold)await deleteHold;if(deleteFailure)throw deleteFailure;return{data:{}}}}};
  vm.runInNewContext(fs.readFileSync('web/js/app.js','utf8'),sandbox);
- return{state:setup(),editors,held,writes,messages,events,redirects,
+ return{state:setup(),editors,held,writes,messages,events,redirects,reads,confirmations,
+ failConfirm(value){confirmFailure=value},holdConfirm(value){confirmHold=value},failDelete(value){deleteFailure=value},holdDelete(value){deleteHold=value},
  rows(value){rows=value},failWrite(value){writeFailure=value},holdWrite(value){writeHold=value},failRead(value){readFailure=value},
  async expire(){authStatus=401;try{await interceptor({response:{status:401}})}catch(_){}},
  pagehide(){events.pagehide.forEach(fn=>fn())}};
@@ -126,6 +130,62 @@ h.failWrite(null);let exitRelease;h.holdWrite(new Promise(r=>exitRelease=r));con
 h.pagehide();exitRelease();await exiting;assert.equal(s.showAddInbound.value,false);
 assert.equal(h.messages.filter(v=>v[0]==='success').length,0);
 ''')
+
+
+    def test_delete_saved_only_refreshes_authoritative_rows_and_precommit_failure_retains_them(self):
+        self.run_js(r"""
+const h=harness(),s=h.state;
+const applied={...node(1,'relay'),routing_status:{state:'applied',applied_effective_mode:'relay',policy_identity:'a'.repeat(64)}};
+h.rows([applied,node(2,'direct')]);await s.fetchInbounds();
+const selected=s.inbounds.value[0];assert.match(s.inboundAppliedRouting(selected),/已应用中转/);
+h.rows([{...node(2,'direct'),routing_status:{state:'pending'}}]);
+h.failDelete({response:{status:409,data:{detail:{saved:true,applied:false,message:'runtime rejected'}}}});
+await s.deleteInbound(selected);
+assert.deepEqual(clone(s.inbounds.value).map(row=>row.id),[2]);
+assert.match(s.inboundAppliedRouting(s.inbounds.value[0]),/待应用/);
+assert.equal(h.writes.length,1);assert.deepEqual(h.writes[0],{method:'DELETE',url:'/api/inbounds/1'});
+assert.equal(h.reads.filter(url=>url==='/api/inbounds').length,2);
+assert.equal(h.reads.filter(url=>url==='/api/cores/status').length,1);
+assert.equal(h.messages.filter(v=>v[0]==='success').length,0);assert.match(h.messages.at(-1)[1],/节点删除已保存，但运行配置未更新，旧入口可能仍可用/);
+const before=clone(s.inbounds.value),reads=h.reads.length;
+h.failDelete({response:{status:409,data:{detail:{saved:false,message:'precommit rejected'}}}});
+await s.deleteInbound(s.inbounds.value[0]);
+assert.deepEqual(clone(s.inbounds.value),before);assert.equal(h.reads.length,reads);
+assert.equal(h.messages.at(-1)[0],'error');
+// Success also follows server state, rather than filtering by the requested ID.
+h.failDelete(null);await s.deleteInbound(s.inbounds.value[0]);
+assert.deepEqual(clone(s.inbounds.value),before);assert.equal(h.messages.at(-1)[0],'success');
+// If readback fails after a saved deletion, retain the row only as unconfirmed.
+h.failRead(Error('offline'));
+h.failDelete({response:{status:409,data:{detail:{saved:true,applied:false}}}});
+await s.deleteInbound(s.inbounds.value[0]);
+assert.equal(s.inbounds.value.length,1);assert.match(s.inboundAppliedRouting(s.inbounds.value[0]),/未确认/);
+""")
+
+    def test_delete_confirm_and_request_are_single_flight_cancel_and_401_are_quiet(self):
+        self.run_js(r"""
+const h=harness(),s=h.state;
+for(const reason of ['cancel','close']){
+ h.failConfirm(reason);await s.deleteInbound(node(1));
+ assert.equal(h.writes.length,0);assert.equal(h.messages.length,0);
+}
+h.failConfirm(null);let confirmRelease,deleteRelease;
+h.holdConfirm(new Promise(r=>confirmRelease=r));h.holdDelete(new Promise(r=>deleteRelease=r));
+const first=s.deleteInbound(node(1));await s.deleteInbound(node(2));
+assert.equal(h.confirmations.length,3);assert.equal(h.writes.length,0);
+confirmRelease();await new Promise(r=>setImmediate(r));
+await s.deleteInbound(node(2));assert.equal(h.confirmations.length,3);assert.equal(h.writes.length,1);
+h.failDelete({response:{status:401,data:{detail:'expired'}}});deleteRelease();await first;
+assert.equal(h.messages.length,0);assert.equal(h.reads.length,0);
+// A later retry is not blocked by a stale lock after the 401.
+h.holdConfirm(null);h.holdDelete(null);await s.deleteInbound(node(1));
+assert.equal(h.writes.length,2);assert.equal(h.messages.length,0);
+const expired=harness();let release;
+expired.holdConfirm(new Promise(r=>release=r));const pending=expired.state.deleteInbound(node(1));
+await expired.expire();release();await pending;
+assert.equal(expired.writes.length,0);assert.equal(expired.messages.length,0);
+assert.deepEqual(expired.redirects,['/login']);
+""")
 
 
 class InboundPolicyMarkupTests(unittest.TestCase):

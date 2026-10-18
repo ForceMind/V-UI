@@ -716,12 +716,160 @@ def activate(root: Path, identity: str):
         _activate_locked(guard, identity)
 
 
+def _database_mode_fence(data: Path):
+    """Minimal stdlib controller gate; never invent a missing proxy store."""
+    from app.services.proxy_store import ProxyStore
+    from app.services.inbound_policy import MODES
+    data = Path(data)
+    names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
+    schema = (ProxyStore(data).policy_schema_version()
+              if any(os.path.lexists(data / name) for name in names) else 1)
+    with sqlite3.connect((data / 'v-ui.db').as_uri() + '?mode=ro', uri=True) as db:
+        columns = {row[1] for row in db.execute('PRAGMA table_info(inbounds)')}
+        if 'routing_mode' not in columns:
+            if schema != 1:
+                raise ReleaseError('Per-inbound database column is missing; recovery is required')
+            return False
+        invalid, explicit = db.execute("SELECT count(CASE WHEN routing_mode IS NULL OR "
+            "typeof(routing_mode) != 'text' OR routing_mode NOT IN (?,?,?) THEN 1 END), "
+            "count(CASE WHEN routing_mode != 'inherit' THEN 1 END) FROM inbounds", sorted(MODES)).fetchone()
+        if invalid or explicit and schema != 2:
+            raise ReleaseError('Inbound routing and its capability fence disagree; recovery is required')
+        return bool(explicit)
+
+
+def _migrate_legacy_modes(data: Path):
+    """Upgrade only a verified legacy column absence in private staging."""
+    _database_mode_fence(data)
+    with sqlite3.connect(data / 'v-ui.db') as db:
+        columns = {row[1] for row in db.execute('PRAGMA table_info(inbounds)')}
+        if 'routing_mode' not in columns:
+            db.execute("ALTER TABLE inbounds ADD COLUMN routing_mode VARCHAR NOT NULL DEFAULT 'inherit'")
+            db.commit()
+    with (data / 'v-ui.db').open('rb') as handle: os.fsync(handle.fileno())
+
+
+def _policy_runtime(data: Path, core: str):
+    """Strict saved runtime bytes for an offline controller, without launch."""
+    directory = data / 'runtime' / core
+    if not os.path.lexists(directory) or not os.path.lexists(directory / 'state.json'):
+        return {'revision': None, 'enabled': False}, None
+    with _maintenance_directory(directory) as root:
+        def read(name, limit):
+            descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=root)
+            try:
+                info = os.fstat(descriptor)
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                        or info.st_nlink != 1 or info.st_mode & 0o077 or info.st_size > limit):
+                    raise ReleaseError('Committed proxy runtime file is unsafe')
+                with os.fdopen(os.dup(descriptor), 'rb') as handle: return handle.read(limit + 1)
+            finally: os.close(descriptor)
+        state = json.loads(read('state.json', 4096))
+        if (type(state) is not dict or set(state) != {'revision', 'enabled'}
+                or type(state['revision']) is not str or not re.fullmatch('[0-9a-f]{64}', state['revision'])
+                or type(state['enabled']) is not bool):
+            raise ReleaseError('Committed proxy runtime state is invalid')
+        raw = read(state['revision'] + '.json', 16 * 1024 * 1024)
+    if digest(raw) != state['revision']:
+        raise ReleaseError('Committed proxy runtime files disagree')
+    config = json.loads(raw)
+    if type(config) is not dict or type(config.get('inbounds', [])) is not list:
+        raise ReleaseError('Committed proxy runtime configuration is invalid')
+    return state, config
+
+
+def _committed_policy_protection(data: Path):
+    """Protected IDs and exact inbound bindings from immutable runtime bytes.
+
+    The controller deliberately does not import the ORM or compiler. Reading
+    current SQL here would let an unapplied edit erase committed protection.
+    """
+    from app.services.proxy_store import ProxyStore
+    store = ProxyStore(data)
+    active = store.load_active(reject_pending=True)
+    if active is None:
+        return {'local': False, 'global': False, 'bindings': []}
+    flags = active['settings']
+    context = active.get('runtime_context')
+    if context is None:
+        if flags['local_proxy_enabled'] or flags['relay_enabled']:
+            raise ReleaseError('Committed proxy provenance is missing; dedicated recovery is required')
+        return {'local': False, 'global': False, 'bindings': []}
+    revision = active['core_revision']
+    if context['candidate_core_revision'] != revision or not re.fullmatch('[0-9a-f]{64}', revision):
+        raise ReleaseError('Committed proxy runtime identity is invalid')
+    state, config = _policy_runtime(data, 'sing-box')
+    if state['revision'] != revision or config is None:
+        raise ReleaseError('Committed proxy runtime files disagree')
+    plan = store.context_plan(context, flags)
+    selected = ({entry['id']: entry for entry in plan.manifest
+                 if entry['enable'] and entry['effective'] == 'relay'} if plan else None)
+    bindings, seen = [], set()
+    for inbound in config.get('inbounds', []):
+        if type(inbound) is not dict: raise ReleaseError('Invalid committed inbound binding')
+        tag = inbound.get('tag')
+        # Frozen compiler namespace; no protocol/compiler import in controller.
+        prefix = 'vui-relay-ingress-'
+        if type(tag) is not str or not tag.startswith(prefix): continue
+        suffix = tag[len(prefix):]
+        if not suffix.isdigit() or str(int(suffix)) != suffix:
+            raise ReleaseError('Invalid committed inbound identity')
+        identifier = int(suffix)
+        if identifier < 1 or identifier in seen:
+            raise ReleaseError('Duplicate committed inbound identity')
+        seen.add(identifier)
+        if selected is not None:
+            entry = selected.get(identifier)
+            if (entry is None or entry['core'] != 'sing-box' or inbound.get('type') != entry['protocol']
+                    or inbound.get('listen_port') != entry['port']):
+                raise ReleaseError('Committed protected binding differs from its manifest')
+        elif not flags['relay_enabled']:
+            raise ReleaseError('Unexpected protected inbound in committed runtime')
+        bindings.append({'id': identifier, 'binding_sha256': digest(json.dumps(inbound,
+            ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode())})
+    if selected is not None and seen != set(selected):
+        raise ReleaseError('Committed protected inbound set is incomplete')
+    return {'local': flags['local_proxy_enabled'], 'global': flags['relay_enabled'],
+            'bindings': sorted(bindings, key=lambda item: item['id'])}
+
+
+def _validate_restore_policy(data: Path):
+    """Exact v2 source check without starting cores or importing runtime deps."""
+    from app.services.proxy_store import ProxyStore
+    explicit = _database_mode_fence(data)
+    store = ProxyStore(data)
+    active = store.load_active(reject_pending=True)
+    if active is None:
+        if explicit:
+            from app.services.inbound_policy import policy_plan
+            from app.services.proxy_store import _defaults
+            if policy_plan(store.policy_rows(), _defaults()).relay_ids:
+                raise ReleaseError('Enabled relay has no committed upstream selection')
+        return
+    context = active.get('runtime_context')
+    if context is not None and context['schema_version'] == 2:
+        from app.services.inbound_policy import policy_plan
+        plan = policy_plan(store.policy_rows(), active['settings'])
+        if (plan.manifest != context['plan_manifest']
+                or plan.source_fingerprint != context['source_fingerprint']):
+            raise ReleaseError('Backup rows differ from their committed inbound policy')
+    elif explicit:
+        raise ReleaseError('Backup contains unapplied inbound modes; dedicated recovery is required')
+    protection = _committed_policy_protection(data)
+    if protection['global'] or protection['bindings']:
+        xray, _ = _policy_runtime(data, 'xray')
+        if xray['enabled']:
+            raise ReleaseError('Backup has incompatible active Xray and relay runtimes')
+
+
 def _policy_release_compatible(data: Path, payload: Path):
     """Refuse a release lacking the explicit per-inbound reader capability.
 
     Read a literal from already verified package source; do not execute an old
     release against live data merely to discover that it ignores new metadata.
     """
+    if (data / 'v-ui.db').exists():
+        _database_mode_fence(data)
     if not (data / '.proxy-state-initialized').exists():
         return
     from app.services.proxy_store import ProxyStore, ProxyStorageError
@@ -866,8 +1014,11 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
                 # ZIP stores regular files only. A genuinely empty secrets
                 # directory has no member; rebuild that exact structural path
                 # in private staging, then validate every reference and object.
-                for name in ('proxy-state', 'proxy-state/revisions', 'proxy-state/secrets'):
+                for name in ('proxy-state', 'proxy-state/revisions', 'proxy-state/secrets',
+                             'runtime', 'runtime/sing-box', 'runtime/xray'):
                     directory = work / name
+                    if name.startswith('runtime') and not directory.exists():
+                        continue
                     if name == 'proxy-state/secrets' and not directory.exists():
                         directory.mkdir(mode=0o700)
                     # Recursive extraction mkdir may use the caller's umask for
@@ -898,25 +1049,23 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
                 raise ReleaseError('Current proxy policy is unknown; dedicated recovery is required') from None
             if current['pending'] is not None:
                 raise ReleaseError('Current proxy apply is unresolved; dedicated recovery is required')
-            active = current['active']
+            current_active = current['active']
             incoming_active = incoming_proxy['active'] if incoming_proxy is not None else None
-            if active and any(active['settings'][key] and (
+            if current_active and any(current_active['settings'][key] and (
                     incoming_active is None or not incoming_active['settings'][key])
                     for key in ('local_proxy_enabled', 'relay_enabled')):
                 raise ReleaseError('Backup would turn off an active proxy; explicitly disable and commit those settings before restoring it')
-            from app.services.proxy_recovery import committed_protection
-            protected = committed_protection(root / 'data')
-            incoming_protected = (committed_protection(work) if incoming_proxy is not None
+            protected = _committed_policy_protection(root / 'data')
+            incoming_protected = (_committed_policy_protection(work) if incoming_proxy is not None
                                   else {'local': False, 'global': False, 'bindings': []})
             if protected['bindings'] and protected['bindings'] != incoming_protected['bindings']:
                 raise ReleaseError('Backup changes committed protected inbound bindings; dedicated recovery is required')
+        _database_mode_fence(work)
         if incoming_proxy is not None:
-            from app.services.proxy_recovery import _validate
-            _validate(work)
+            _validate_restore_policy(work)
         if current_schema == 2:
             # Ordinary restore cannot undo an already durable capability fence.
-            from app.services.proxy_recovery import migrate_legacy_modes
-            migrate_legacy_modes(work)
+            _migrate_legacy_modes(work)
             ProxyStore(work).ensure_policy_v2()
         if (root / 'CURRENT.json').exists():
             _policy_release_compatible(work, active(root)[0] / 'payload')

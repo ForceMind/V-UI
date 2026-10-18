@@ -141,7 +141,24 @@ class LargeDataTests(unittest.TestCase):
         # Size is small only for this unit; the hosted profile contract stays256MiB.
         with tempfile.TemporaryDirectory() as directory,patch.object(data,'LOG_BYTES',1024*1024):
             root=Path(directory);root.chmod(0o700);folder=root/'data';folder.mkdir(mode=0o700)
-            (root/'CURRENT.json').write_text('{}')
+            # Ordinary restore verifies the selected release's policy reader.
+            # Build a synthetic, locally verified selection rather than a bare
+            # invalid CURRENT sentinel; no interpreter/core is executed here.
+            source=root/'selected-source';source.mkdir(mode=0o700)
+            (source/'main.py').write_text('# synthetic selected code\n')
+            selected=root/'releases'/'small-fixture';selected.mkdir(parents=True,mode=0o700)
+            selected_archive=root/'selected.zip'
+            selected_digest=release.create_archive(source,selected_archive,{
+                'kind':'release','platform':release.PLATFORM,'release_id':'small-fixture',
+                'targets':[release.target_key()]})
+            release.unpack_verified(selected_archive,selected_digest,selected/'payload')
+            runtime=selected/'runtime'/'python'/'bin';runtime.mkdir(parents=True)
+            python=runtime/'python3';python.write_text('#! /bin/sh\n');python.chmod(0o700)
+            release.atomic_json(selected/'READY.json',{
+                'manifest_sha256':release.digest((selected/'payload'/release.MANIFEST).read_bytes()),
+                'runtime_key':release.target_key(),
+                'runtime_tree_sha256':release.runtime_tree_digest(selected/'runtime')})
+            release.atomic_json(root/'CURRENT.json',{'release_id':'small-fixture'})
             (folder/'mihomo-routing.json').write_text(json.dumps(data.routing_fixture()))
             with sqlite3.connect(folder/'v-ui.db') as db:
                 db.executescript('CREATE TABLE users(username TEXT); INSERT INTO users VALUES ("resource-admin");'

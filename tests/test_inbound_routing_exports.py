@@ -18,6 +18,13 @@ DIRECT_UUID = '55555555-5555-4555-8555-555555555555'
 class InboundRoutingExportTests(ExportFixture, unittest.TestCase):
     def setUp(self):
         self.setup_export()
+        # Follow the supported first-activation path: commit the selected
+        # upstream at 00 before introducing an enabled explicit relay.
+        snapshot = self.store.read_snapshot()
+        settings = writable_settings(snapshot)
+        settings['relay_enabled'] = False
+        saved = self.store.save_draft(settings, snapshot['revision'])
+        self.coordinator.apply(saved['revision'], 'initial-selected-00')
         self.rows[0].routing_mode = 'relay'
         direct = row(2, 25444)
         direct.routing_mode = 'direct'
@@ -26,6 +33,9 @@ class InboundRoutingExportTests(ExportFixture, unittest.TestCase):
         self.rows.append(direct)
 
     def apply_modes(self, global_relay=False, label='mixed-export'):
+        # This is the real prospective mutation/fence entry point, not a
+        # hand-written state.json that bypasses saved-source validation.
+        self.coordinator.validate_inbound_change(self.rows)
         snapshot = self.store.read_snapshot()
         settings = writable_settings(snapshot)
         settings['relay_enabled'] = global_relay

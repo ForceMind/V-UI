@@ -177,8 +177,11 @@ class ProxyApplyCoordinator:
             raise ProxyConflict("An apply is pending recovery")
         return snapshot
 
-    def _compile(self, snapshot, rows, *, active=False, fresh_pin=False):
+    def _compile(self, snapshot, rows, *, active=False, fresh_pin=False, fence_required=True):
         plan = policy_plan(rows, snapshot["settings"])
+        if fence_required and not plan.legacy and self.store.policy_schema_version() != 2:
+            self._stop()
+            raise ProxyApplyError("RECOVERY_REQUIRED")
         addresses, endpoint = (), None
         if plan.requires_upstream:
             addresses = tuple(self.address_provider(self.panel_origin))
@@ -202,11 +205,42 @@ class ProxyApplyCoordinator:
                                  endpoint=endpoint, self_addresses=addresses)
         return compiled, endpoint, addresses
 
-    def validate_inbound_change(self, rows):
+    def _validate_saved_source(self, rows, active):
+        """Reject provably corrupt persisted rows before any early return.
+
+        Prospective CRUD must not call this: its first noninherit row has not
+        committed yet and is allowed to establish the durable fence.
+        """
+        from app.services.proxy_store import _defaults
+        plan = policy_plan(rows, active["settings"] if active else _defaults())
+        if ((not plan.legacy and self.store.policy_schema_version() != 2)
+                or active is None and plan.relay_ids):
+            self._stop()
+            raise ProxyApplyError("RECOVERY_REQUIRED")
+        return plan
+
+    def validate_saved_source(self, rows=None):
+        """Manager gates must not mask corrupt persisted policy provenance."""
+        with self.lock:
+            try:
+                active = self.store.load_active()
+            except ProxyStorageError:
+                try:
+                    self._stop()
+                except ProxyApplyError:
+                    pass
+                # Preserve the storage failure even if the affected core
+                # cannot stop, so the manager still attempts the other core.
+                raise
+            return self._validate_saved_source(self._rows(rows), active)
+
+    def validate_inbound_change(self, rows, *, persist_fence=True):
         """Pure prospective qualification; never resolve or activate a draft."""
         with self.lock:
             rows = self._rows(rows)
             snapshot = self._load_active()
+            if not persist_fence:
+                self._validate_saved_source(rows, snapshot)
             if snapshot is None:
                 # Read schema defaults, not unapplied switches or credentials.
                 from app.services.proxy_store import _defaults
@@ -225,9 +259,10 @@ class ProxyApplyCoordinator:
                     # Valid old OFF context: exact selected model/ingress was
                     # checked above. Explicit reconcile alone may do DNS later.
                 else:
-                    self._compile(snapshot, rows, active=True)
+                    self._compile(snapshot, rows, active=True, fence_required=False)
             if not plan.legacy:
-                self.store.ensure_policy_v2()
+                if persist_fence:
+                    self.store.ensure_policy_v2()
             return plan
 
     @staticmethod
@@ -387,9 +422,11 @@ class ProxyApplyCoordinator:
                        key=lambda value: (ipaddress.ip_address(value).version, int(ipaddress.ip_address(value))))},
                    "self_addresses": list(addresses)}
         if compiled.policy_version == 2:
-            # validate_inbound_change normally established this before SQL.
-            # Applying externally introduced rows also needs the durable fence.
-            self.store.ensure_policy_v2()
+            # A SQL mode without its precommit capability fence is corrupt,
+            # not a migration opportunity during runtime application.
+            if self.store.policy_schema_version() != 2:
+                self._stop()
+                raise ProxyApplyError("RECOVERY_REQUIRED")
             context.update(schema_version=2, policy_version=2,
                            plan_manifest=copy.deepcopy(compiled.plan_manifest),
                            source_fingerprint=compiled.source_fingerprint,
@@ -428,8 +465,9 @@ class ProxyApplyCoordinator:
 
     def check(self, expected_revision, rows=None, *, expected_source_fingerprint=None):
         with self.lock:
-            snapshot = self._load_draft(expected_revision)
             rows = self._rows(rows)
+            self._validate_saved_source(rows, self._load_active())
+            snapshot = self._load_draft(expected_revision)
             plan = policy_plan(rows, snapshot["settings"])
             self._bind_source(plan, expected_source_fingerprint)
             compiled, _, _ = self._compile(snapshot, rows)
@@ -441,13 +479,15 @@ class ProxyApplyCoordinator:
     def apply(self, expected_revision, transaction_id, rows=None, *, expected_source_fingerprint=None):
         with self.lock:
             rows = self._rows(rows)
+            active = self._load_active()
+            self._validate_saved_source(rows, active)
             existing = self._existing(transaction_id, expected_revision, kind="apply", rows=rows,
                                       expected_source_fingerprint=expected_source_fingerprint)
             if existing is not None:
                 return existing
             snapshot = self._load_draft(expected_revision)
-            self._bind_source(policy_plan(rows, snapshot["settings"]), expected_source_fingerprint, required=True)
-            active = self._load_active()
+            plan = policy_plan(rows, snapshot["settings"])
+            self._bind_source(plan, expected_source_fingerprint, required=True)
             compiled, endpoint, addresses = self._compile(snapshot, rows)
             return self._activate(snapshot, active, compiled, endpoint, addresses, transaction_id, kind="apply")
 
@@ -455,9 +495,9 @@ class ProxyApplyCoordinator:
         with self.lock:
             snapshot = self._load_active()
             rows = self._rows(rows)
+            plan = self._validate_saved_source(rows, snapshot)
             if snapshot is None:
-                from app.services.proxy_store import _defaults
-                if not policy_plan(rows, _defaults()).legacy:
+                if not plan.legacy:
                     raise ProxyApplyError("MISSING_ACTIVE_CONTEXT")
                 return self.runtime.apply(self.build_config(rows), activate=activate)
             transaction_id = transaction_id or "reconcile-" + uuid.uuid4().hex

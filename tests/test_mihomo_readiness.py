@@ -32,6 +32,7 @@ SITES = {
     ("test_hysteria2_managed_certificate.py", "Hysteria2ManagedRealCoreTests.forward_both"): "mixed",
     ("test_tuic_managed_certificate.py", "TUICManagedRealCoreTests.forward_both"): "mixed",
     ("test_proxy_double_hop.py", "DoubleHopFixture.process"): "bound-factory",
+    ("test_inbound_routing_real.py", "InboundRoutingRealTests.start_ordinary_client"): "direct",
     ("test_udp_dns_capability_loopback.py", "ShadowsocksFixture.core"): "udp-factory",
     ("test_udp_dns_capability_loopback.py", "MihomoStartupLoopbackTests.test_listener_and_socks_reply_precede_running_but_fresh_marker_gates_request"): "direct",
 }
@@ -54,6 +55,9 @@ OTHER_CONSTRUCTIONS = {
     ('test_hysteria2_preflight_loopback.py', 'Hysteria2PreflightLoopbackTests.verify_both_clients', 'CoreProcess'),
     ('test_inbound_editor_browser.py', 'InboundEditorBrowserTests.test_managed_security_transitions_refresh_export_and_restore.start', 'Popen'),
     ('test_inbound_editor_browser.py', 'SecurityCenterBrowserTests.test_scope_notice_navigation_without_security_requests', 'Popen'),
+    # Real panel API/browser activation; its official core is owned by
+    # production CoreRuntime, not an alternative Mihomo launch path.
+    ('test_inbound_routing_browser.py', 'InboundRoutingBrowserTests.test_first_direct_node_real_editor_check_review_apply_and_refresh', 'Popen'),
     ('test_loopback_chain.py', 'LoopbackChainTests.setUp', 'CoreProcess'),
     ('test_low_resource_accounting.py', 'AccountingTests.test_real_child_and_permission_failure_are_not_omitted', 'Popen'),
     ('test_low_resource_responder.py', 'start_responder', 'Popen'),

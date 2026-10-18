@@ -150,7 +150,7 @@ const app = createApp({
         const editingInboundId = ref(null);
         const inboundCredentials = ref({});
         const savingInbound = ref(false);
-        let inboundEditorGeneration = 0, inboundListGeneration = 0;
+        let inboundEditorGeneration = 0, inboundListGeneration = 0, deletingInbound = false;
         const routingModes = {inherit: '跟随全局', direct: '指定直连', relay: '指定中转'};
         const knownRoutingMode = value => Object.hasOwn(routingModes, value);
         const inboundSavedRouting = row => knownRoutingMode(row.routing_mode) ? routingModes[row.routing_mode] : '策略未确认';
@@ -791,6 +791,8 @@ const app = createApp({
         };
 
         const deleteInbound = async (row) => {
+            if (deletingInbound || adminSessionEnded) return;
+            deletingInbound = true;
             try {
                 await ElMessageBox.confirm(
                     `Delete ${row.remark || row.protocol}:${row.port}?`,
@@ -801,14 +803,24 @@ const app = createApp({
                         type: 'warning'
                     }
                 );
+                if (adminSessionEnded) return;
                 await axios.delete(`/api/inbounds/${row.id}`);
+                if (adminSessionEnded) return;
                 ElMessage.success('Deleted successfully');
                 await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
             } catch (error) {
-                if (error !== 'cancel') {
-                    ElMessage.error('Failed to delete inbound');
+                if (error === 'cancel' || error === 'close' || adminSessionEnded || error.response?.status === 401) return;
+                const detail = error.response?.data?.detail;
+                if (error.response?.status === 409 && detail?.saved === true) {
+                    ElMessage.warning('节点删除已保存，但运行配置未更新，旧入口可能仍可用：' + (detail.message || 'validation failed'));
+                    // The database and runtime have separate commit points. Read
+                    // authoritative rows/status; never remove a row locally or
+                    // carry its previous applied badge forward as confirmation.
+                    await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
+                    return;
                 }
-            }
+                ElMessage.error('Failed to delete inbound');
+            } finally { deletingInbound = false; }
         };
 
         const restartCore = async (core) => {

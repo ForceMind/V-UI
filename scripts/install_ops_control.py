@@ -61,6 +61,7 @@ SOURCE_DEPENDENCIES = {
     'data_owner.py': 'app/data_owner.py',
     'proxy_store.py': 'app/services/proxy_store.py',
     'upstream_profile.py': 'app/services/upstream_profile.py',
+    'inbound_policy.py': 'app/services/inbound_policy.py',
 }
 RECEIPT_KEYS = {'schema', 'service_manager', 'system_python', 'interpreter_resolved',
                 'interpreter_sha256', 'files'}

@@ -21,7 +21,7 @@ PASSWORD = 'HY2:p@ss/word?#%with space'
 
 
 def hy2_node():
-    return SimpleNamespace(id=45, core='sing-box', protocol='hysteria2', port=19445,
+    return SimpleNamespace(id=45, routing_mode="inherit", core='sing-box', protocol='hysteria2', port=19445,
         remark='HY2 bounded', enable=True, expiry_time=0, tag='hy2-in',
         settings={'users': [{'password': PASSWORD}]}, stream_settings={
             'tls': {'enabled': True, 'server_name': 'vpn.example.test',

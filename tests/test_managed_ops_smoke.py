@@ -384,7 +384,8 @@ class ManagedConsumerFixtureTests(unittest.TestCase):
             payload.mkdir(); control.mkdir(); (payload / 'app/services').mkdir(parents=True); (payload / 'deploy').mkdir()
             files = {}
             for name in ('deploy/system_ops.py', 'deploy/ops_worker.py', 'app/release_tools.py', 'deploy/v-ui',
-                         'app/data_owner.py', 'app/services/proxy_store.py', 'app/services/upstream_profile.py'):
+                         'app/data_owner.py', 'app/services/proxy_store.py', 'app/services/upstream_profile.py',
+                         'app/services/inbound_policy.py'):
                 raw = WRAPPER_BYTES if name.endswith('/v-ui') else b'# unit fixture, not product code\n'
                 (payload / name).write_bytes(raw)
                 files[name] = {'size': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}

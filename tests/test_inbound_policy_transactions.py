@@ -26,6 +26,18 @@ class InboundTransactionTests(unittest.TestCase):
     apply = apply_fixtures.ProxyApplyTests.apply
 
     def apply_modes(self, transaction='mode', local=False, relay=False):
+        # Product precommit requires an active selected upstream before the
+        # first enabled relay save; establish that old all-inherit OFF state.
+        if self.store.load_active() is None and any(
+                row.enable and row.routing_mode == 'relay' for row in self.rows):
+            modes = [row.routing_mode for row in self.rows]
+            try:
+                for row in self.rows: row.routing_mode = 'inherit'
+                self.apply(False, False, 'selected-before-' + transaction)
+            finally:
+                for row, mode in zip(self.rows, modes): row.routing_mode = mode
+        # Simulate the product's validated SQL save and its prior fence.
+        self.store.ensure_policy_v2()
         draft = self.draft(local, relay)
         checked = self.coordinator.check(draft['revision'])
         return self.coordinator.apply(draft['revision'], transaction,
@@ -72,6 +84,41 @@ class InboundTransactionTests(unittest.TestCase):
             with self.assertRaises(CoreError): self.manager().validate_inbound_change(self.rows)
         self.assertEqual(self.state()['schema_version'], 1)
         self.assertEqual(self.runtime.calls, [])
+
+    def test_runtime_check_and_apply_reject_unfenced_noninherit_sql_source(self):
+        self.rows[0].routing_mode = 'direct'
+        draft = self.store.load_draft()
+        fingerprint = policy_plan(self.rows, draft['settings']).source_fingerprint
+        with self.assertRaises(ProxyApplyError): self.coordinator.check(draft['revision'])
+        with self.assertRaises(ProxyApplyError):
+            self.coordinator.apply(draft['revision'], 'unfenced', expected_source_fingerprint=fingerprint)
+        self.assertEqual(self.state()['schema_version'], 1)
+        self.assertFalse(self.runtime.running)
+
+    def test_corrupt_saved_relay_stops_before_missing_active_or_idempotent_early_return(self):
+        for fenced in (False, True):
+            for operation in ('manager', 'reconcile', 'check', 'apply_existing',
+                              'manager_stale_check', 'manager_stale_apply'):
+                with self.subTest(fenced=fenced, operation=operation):
+                    self.rows[0].routing_mode = 'inherit'
+                    self.runtime.apply(self.coordinator.build_config(self.rows))
+                    if fenced: self.store.ensure_policy_v2()
+                    self.rows[0].routing_mode = 'relay'
+                    snapshot = self.store.load_draft()
+                    fingerprint = policy_plan(self.rows, snapshot['settings']).source_fingerprint
+                    with patch.object(self.coordinator, '_existing', side_effect=AssertionError('early return')):
+                        with self.assertRaises((CoreError, ProxyApplyError)):
+                            if operation == 'manager': self.manager().apply_database('sing-box')
+                            elif operation == 'reconcile': self.coordinator.reconcile()
+                            elif operation == 'check': self.coordinator.check(snapshot['revision'])
+                            elif operation == 'manager_stale_check': self.manager().check_proxy('0'*64)
+                            elif operation == 'manager_stale_apply': self.manager().apply_proxy('0'*64, 'stale')
+                            else: self.coordinator.apply(snapshot['revision'], 'old-aborted',
+                                expected_source_fingerprint=fingerprint)
+                    self.assertFalse(self.runtime.running)
+                    self.assertEqual(self.state()['schema_version'], 2 if fenced else 1)
+                    self.assertIsNone(self.store.load_active())
+        self.assertEqual(self.resolutions, [])
 
     def test_no_active_enabled_relay_rejected_disabled_draft_allowed_without_dns(self):
         self.rows[0].routing_mode = 'relay'
@@ -135,7 +182,10 @@ class InboundTransactionTests(unittest.TestCase):
         self.assertFalse(self.runtime.running)
 
     def test_check_fingerprint_required_and_invalidated_by_every_mode_change(self):
+        self.apply(False, False, 'selected-for-fingerprint')
+        active = self.store.load_active()
         self.rows[0].routing_mode = 'direct'
+        self.store.ensure_policy_v2()
         draft = self.draft(False, True)
         checked = self.coordinator.check(draft['revision'])
         with self.assertRaises(ProxyConflict): self.coordinator.apply(draft['revision'], 'missing')
@@ -143,7 +193,8 @@ class InboundTransactionTests(unittest.TestCase):
         with self.assertRaises(ProxyConflict):
             self.coordinator.apply(draft['revision'], 'stale',
                 expected_source_fingerprint=checked['source_fingerprint'])
-        self.assertIsNone(self.store.load_active())
+        self.assertEqual(self.store.load_active(), active)
+        self.assertTrue(self.runtime.running)
 
     def test_same_config_different_mode_changes_identity_and_dirty_status(self):
         self.apply(False, True, 'old-inherit')
@@ -279,7 +330,7 @@ class InboundTransactionTests(unittest.TestCase):
         self.apply_modes()
         manager = self.manager()
         status = manager.inbound_routing_status()
-        self.assertEqual(status[2]['state'], 'disabled')
+        self.assertEqual(status[2]['state'], 'stopped')
         self.assertIsNone(status[2]['applied_effective_mode'])
         self.assertEqual(status[3]['state'], 'unknown')
         self.runtime.running = False

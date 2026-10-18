@@ -19,7 +19,7 @@ PASSWORD = 'TUIC:p@ss/word?#%with space雪'
 
 
 def tuic_node():
-    return SimpleNamespace(id=46, core='sing-box', protocol='tuic', port=19446,
+    return SimpleNamespace(id=46, routing_mode="inherit", core='sing-box', protocol='tuic', port=19446,
         remark='TUIC bounded', enable=True, expiry_time=0, tag='tuic-in', user_id=None, up=0, down=0, total=0,
         settings={'users': [{'uuid': UUID, 'password': PASSWORD}]}, stream_settings={
             'tls': {'enabled': True, 'server_name': 'vpn.example.test', 'alpn': ['h3'],

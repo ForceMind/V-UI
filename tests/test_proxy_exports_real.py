@@ -136,7 +136,7 @@ class StrictExportParserTests(ExportFixture, unittest.TestCase):
 class StrictExportLoopbackTests(DoubleHopFixture):
     def committed_relay(self, mode="tls"):
         self.start_upstream(mode)
-        self.rows = [SimpleNamespace(id=1, core="sing-box", protocol="vless", port=self.ingress_port,
+        self.rows = [SimpleNamespace(id=1, routing_mode="inherit", core="sing-box", protocol="vless", port=self.ingress_port,
             remark="strict fixture ingress", tag="fixture-ingress", enable=True, expiry_time=0,
             settings={"users": [{"uuid": INGRESS_UUID}]}, stream_settings={"tls": {
                 "enabled": True, "server_name": SNI,

@@ -480,6 +480,46 @@ class ProxyStore:
                      and selected in doc["upstreams"]
                      and endpoint["host"] == doc["upstreams"][selected]["profile"]["server"])
 
+    def policy_rows(self):
+        import sqlite3
+        from types import SimpleNamespace
+        data = self.data_dir
+        with sqlite3.connect((data / 'v-ui.db').as_uri() + '?mode=ro', uri=True) as db:
+            db.row_factory = sqlite3.Row
+            schema = {row[1] for row in db.execute('PRAGMA table_info(inbounds)')}
+            columns = ('id', 'core', 'enable', 'expiry_time', 'port', 'protocol',
+                       'settings', 'stream_settings', 'tag', 'remark', 'user_id', 'total')
+            has_mode = 'routing_mode' in schema
+            if has_mode:
+                columns += ('routing_mode',)
+            _require(set(columns) <= schema)
+            # SQLite length(TEXT) counts characters and NULL propagates across +.
+            # Bound actual bytes of every selected field before materializing rows.
+            lengths = ' + '.join('coalesce(length(CAST(' + key + ' AS BLOB)), 0)' for key in columns)
+            sizes = db.execute('SELECT count(*), coalesce(sum(' + lengths + '),0) FROM inbounds').fetchone()
+            _require(sizes[0] <= 32768 and sizes[1] <= 16 * 1024 * 1024)
+            rows = []
+            for raw in db.execute('SELECT ' + ','.join(columns) + ' FROM inbounds ORDER BY id'):
+                item = dict(raw)
+                # Only a genuinely missing old column migrates to inherit. An
+                # existing NULL/unknown value is corrupt and must never downgrade.
+                if not has_mode:
+                    item['routing_mode'] = 'inherit'
+                from app.services.inbound_policy import normalize_mode
+                item['routing_mode'] = normalize_mode(item['routing_mode'])
+                _require(item.get('enable') in (0, 1))
+                item['enable'] = bool(item['enable'])
+                for key in ('settings', 'stream_settings'):
+                    value = item[key]
+                    _require(value is None or type(value) is str and len(value.encode('utf-8')) <= 16 * 1024 * 1024)
+                    item[key] = json.loads(value) if value is not None else {}
+                    _require(type(item[key]) is dict)
+                rows.append(SimpleNamespace(**item))
+                _require(len(rows) <= 32768)
+            if not has_mode and (Path(data) / '.proxy-state-initialized').exists():
+                _require(ProxyStore(data).policy_schema_version() == 1)
+            return rows
+
     def policy_schema_version(self):
         with self._locked(initialize=False) as (_, revisions, secrets, state, _):
             self._snapshot(revisions, secrets, state)
@@ -591,6 +631,16 @@ class ProxyStore:
 
     def _snapshot(self, revisions, secrets, state):
         doc, profiles, _ = self._revision(revisions, secrets, state["draft_revision"])
+        # New historical manifests are immutable but still strictly checked;
+        # their needs/source hash must bind their OWN settings, not the draft.
+        documents = {state["draft_revision"]: doc}
+        for transaction in state["transactions"].values():
+            context = transaction.get("runtime_context")
+            if context is not None and context["schema_version"] == 2:
+                target = transaction["revision"]
+                if target not in documents:
+                    documents[target] = self._revision(revisions, secrets, target)[0]
+                self._validate_context_snapshot(context, documents[target])
         upstreams = []
         for profile_id in sorted(profiles):
             summary = _model(profiles[profile_id]).redacted()

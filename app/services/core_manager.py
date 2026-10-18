@@ -211,12 +211,12 @@ class CoreManager:
             if xray.state()["enabled"] or xray.status()["running"]:
                 raise CoreError("Stop the remaining Xray runtime before enabling relay")
 
-    def _check_proxy_runtime_gate(self, coordinator, expected_revision: str) -> None:
+    def _check_proxy_runtime_gate(self, coordinator, expected_revision: str, rows) -> None:
         from app.services.proxy_store import ProxyConflict
         draft = coordinator.store.load_draft()
         if draft["revision"] != expected_revision:
             raise ProxyConflict("Proxy draft changed before apply")
-        plan = policy_plan(self._all_rows(), draft["settings"])
+        plan = policy_plan(rows, draft["settings"])
         self._check_relay_runtime_gate(draft["settings"]["relay_enabled"] or bool(plan.relay_ids))
 
     def check_proxy(self, expected_revision: str, expected_source_fingerprint: str | None = None) -> dict:
@@ -224,8 +224,10 @@ class CoreManager:
         with self.lock:
             try:
                 coordinator = self.proxy_coordinator
-                self._check_proxy_runtime_gate(coordinator, expected_revision)
-                return coordinator.check(expected_revision, self._all_rows(),
+                rows = self._all_rows()
+                coordinator.validate_saved_source(rows)
+                self._check_proxy_runtime_gate(coordinator, expected_revision, rows)
+                return coordinator.check(expected_revision, rows,
                                          expected_source_fingerprint=expected_source_fingerprint)
             except ProxyStorageError:
                 self._stop_untrusted("Proxy state is unavailable; core operations blocked")
@@ -236,11 +238,13 @@ class CoreManager:
         with self.lock:
             try:
                 coordinator = self.proxy_coordinator
+                rows = self._all_rows()
+                coordinator.validate_saved_source(rows)
                 if coordinator.store.transaction(transaction_id) is None:
-                    self._check_proxy_runtime_gate(coordinator, expected_revision)
+                    self._check_proxy_runtime_gate(coordinator, expected_revision, rows)
                 # Existing IDs are resolved before draft inspection, preserving
                 # idempotent replay after a newer draft has been saved.
-                return coordinator.apply(expected_revision, transaction_id, self._all_rows(),
+                return coordinator.apply(expected_revision, transaction_id, rows,
                                          expected_source_fingerprint=expected_source_fingerprint)
             except ProxyStorageError:
                 self._stop_untrusted("Proxy state is unavailable; core operations blocked")
@@ -264,8 +268,14 @@ class CoreManager:
         coordinator = self.proxy_coordinator
         # Prospective preparation also handles the one valid OFF -> first-pin
         # transition. Only reconcile below is allowed to resolve that pin.
-        plan = coordinator.validate_inbound_change(rows)
-        active = coordinator.store.load_active()
+        from app.services.proxy_store import ProxyConflict, ProxyStorageError, ProxyValidationError
+        from app.services.proxy_policy import PolicyError
+        from app.services.proxy_resolution import ResolutionError
+        try:
+            plan = coordinator.validate_inbound_change(rows, persist_fence=False)
+            active = coordinator.store.load_active()
+        except (ProxyConflict, ProxyStorageError, ProxyValidationError, PolicyError, ResolutionError):
+            raise CoreError("Active proxy policy is unavailable or rejects this ingress snapshot") from None
         self._check_relay_runtime_gate(bool(plan.relay_ids) or bool(
             active and active["settings"]["relay_enabled"]))
         if preserve_stopped and (not plan.legacy or active and active.get("runtime_context")
@@ -355,7 +365,7 @@ class CoreManager:
                         return result
                     for entry in desired.manifest:
                         if not entry["enable"]:
-                            result[entry["id"]]["state"] = "disabled"
+                            result[entry["id"]]["state"] = "stopped"
                         elif entry["core"] == "sing-box":
                             result[entry["id"]].update(
                                 applied_effective_mode=entry["effective"] if state["enabled"] else None,
@@ -368,7 +378,7 @@ class CoreManager:
                         return result
                     for entry in desired.manifest:
                         if not entry["enable"]:
-                            result[entry["id"]]["state"] = "disabled"
+                            result[entry["id"]]["state"] = "stopped"
                         elif entry["core"] == "sing-box":
                             result[entry["id"]].update(
                                 applied_effective_mode=entry["effective"] if state["enabled"] else None,

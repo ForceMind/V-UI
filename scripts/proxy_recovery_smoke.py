@@ -19,8 +19,12 @@ EXPECTED = {
     'proxy_recovery_states': ['00', '10', '01', '11'],
     'proxy_recovery_compiler_hashes': 4,
     'proxy_recovery_restores': 4,
-    'proxy_recovery_plan_refusals': 8,
-    'proxy_recovery_writer_refusals': 8,
+    'proxy_recovery_plan_refusals': 16,
+    'proxy_recovery_writer_refusals': 16,
+    'proxy_recovery_mixed_states': ['00', '10', '01', '11'],
+    'proxy_recovery_mixed_restores': 4,
+    'proxy_recovery_mixed_compiler_hashes': 2,
+    'proxy_recovery_legacy_reader_refusals': 4,
     'proxy_recovery_payload_verified': True,
     'proxy_recovery_network_used': False,
     'proxy_recovery_core_started': False,
@@ -28,7 +32,7 @@ EXPECTED = {
 
 
 PROBE = r'''
-import json, os, sqlite3, sys
+import copy, json, os, sqlite3, sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -51,7 +55,7 @@ from app.data_owner import data_owner
 from app.services.core_manager import SingBoxAdapter
 from app.services.core_runtime import CoreRuntime, encode, revision
 from app.services.proxy_policy import VerifiedEndpoint, compile_proxy_policy
-from app.services.proxy_store import ProxyStore
+from app.services.proxy_store import ProxyStore, ProxyStorageError, _require
 from app.services import proxy_recovery as recovery
 
 for method in ('__init__', 'check', 'apply', 'restore', 'recover', '_launch'):
@@ -69,8 +73,60 @@ uid = '11111111-1111-4111-8111-111111111111'
 password = 'synthetic-offline-local-password'
 flags = ('local_proxy_enabled', 'relay_enabled')
 top = Path(os.environ['VUI_DATA_DIR']).parent
-states = []
-hashes = set()
+states, mixed_states = [], []
+hashes, mixed_hashes = set(), set()
+legacy_reader_refusals = 0
+# Exact a98 _validate_state reader, retained solely for the downgrade gate.
+old_reader_namespace = {'_require': _require, 'ProxyStore': ProxyStore}
+exec(r"""def _validate_state(state: dict, store_id: str):
+    _require(isinstance(state, dict) and set(state) == {
+        "schema_version", "store_id", "draft_revision", "active_revision",
+        "core_revision", "pending", "transactions"} or isinstance(state, dict) and set(state) == {
+        "schema_version", "store_id", "draft_revision", "active_revision", "core_revision",
+        "pending", "transactions", "active_transaction_id"})
+    _require(type(state["schema_version"]) is int and state["schema_version"] == 1 and state["store_id"] == store_id)
+    _require(isinstance(state["draft_revision"], str) and _HEX.fullmatch(state["draft_revision"]) is not None)
+    active = state["active_revision"]
+    _require(active is None or isinstance(active, str) and _HEX.fullmatch(active) is not None)
+    core = state["core_revision"]
+    _require((active is None and core is None) or (active is not None and isinstance(core, str) and _TX.fullmatch(core) is not None))
+    _require(isinstance(state["transactions"], dict))
+    for transaction_id, result in state["transactions"].items():
+        _require(isinstance(transaction_id, str) and _TX.fullmatch(transaction_id) is not None)
+        _require(isinstance(result, dict) and set(result) in ({"transaction_id", "revision", "phase", "core_revision"},
+            {"transaction_id", "revision", "phase", "core_revision", "runtime_context"}))
+        _require(result["transaction_id"] == transaction_id and result["phase"] in ("committed", "aborted"))
+        _require(isinstance(result["revision"], str) and _HEX.fullmatch(result["revision"]) is not None)
+        _require(result["core_revision"] is None if result["phase"] == "aborted" else isinstance(result["core_revision"], str) and _TX.fullmatch(result["core_revision"]) is not None)
+        if "runtime_context" in result:
+            ProxyStore._validate_runtime_context(result["runtime_context"], result["revision"])
+            if result["phase"] == "committed":
+                _require(result["runtime_context"]["candidate_core_revision"] == result["core_revision"])
+    committed = [result for result in state["transactions"].values() if result["phase"] == "committed"]
+    # Absent active is valid only before the first successful apply. An
+    # erased active pointer must not turn a previously applied store OFF.
+    _require(not committed if active is None else any(
+        result["revision"] == active and result["core_revision"] == core for result in committed))
+    if "active_transaction_id" in state:
+        _require(isinstance(state["active_transaction_id"], str) and _TX.fullmatch(state["active_transaction_id"]) is not None)
+        transaction = state["transactions"].get(state["active_transaction_id"])
+        _require(transaction is not None and transaction["phase"] == "committed"
+                 and transaction["revision"] == active and transaction["core_revision"] == core)
+    pending = state["pending"]
+    if pending is not None:
+        _require(isinstance(pending, dict) and set(pending) in ({"transaction_id", "revision", "base_active_revision", "base_core_revision", "phase"},
+            {"transaction_id", "revision", "base_active_revision", "base_core_revision", "phase", "runtime_context"}))
+        _require(isinstance(pending["transaction_id"], str) and _TX.fullmatch(pending["transaction_id"]) is not None)
+        _require(pending["transaction_id"] not in state["transactions"] and pending["phase"] == "prepared")
+        context = pending.get("runtime_context")
+        if "runtime_context" in pending:
+            ProxyStore._validate_runtime_context(context, pending["revision"])
+            if active is not None:
+                _require(context["previous_core_revision"] == core)
+        target = active if context and context["kind"] == "reconcile" else state["draft_revision"]
+        _require(pending["revision"] == target and pending["base_active_revision"] == active and pending["base_core_revision"] == core)
+""", old_reader_namespace)
+old_validate_state = old_reader_namespace['_validate_state']
 restores = plan_refusals = writer_refusals = 0
 
 def settings(snapshot):
@@ -94,9 +150,10 @@ def refused(root, action):
     assert (root / 'data').stat().st_ino == inode
     assert not (root / 'RESTORE_PENDING.json').exists()
 
-for local, relay in ((False, False), (True, False), (False, True), (True, True)):
+for mixed, local, relay in ((mixed, local, relay) for mixed in (False, True)
+        for local, relay in ((False, False), (True, False), (False, True), (True, True))):
     state = str(int(local)) + str(int(relay))
-    root = top / ('state-' + state)
+    root = top / ('state-' + ('mixed-' if mixed else '') + state)
     root.mkdir(mode=0o700)
     data = root / 'data'
     data.mkdir(mode=0o700)
@@ -120,7 +177,21 @@ for local, relay in ((False, False), (True, False), (False, True), (True, True))
             (row.id, row.user_id, row.core, row.up, row.down, row.total, row.remark,
              int(row.enable), row.expiry_time, row.port, row.protocol,
              json.dumps(row.settings), json.dumps(row.stream_settings), row.tag))
+    rows = [row]
+    if mixed:
+        recovery.migrate_legacy_modes(data)
+        row.routing_mode = 'relay'
+        direct = SimpleNamespace(**copy.deepcopy(vars(row)))
+        direct.id, direct.port, direct.tag, direct.routing_mode = 2, 24444, 'synthetic-direct', 'direct'
+        rows.append(direct)
+        with sqlite3.connect(data / 'v-ui.db') as db:
+            db.execute("UPDATE inbounds SET routing_mode='relay' WHERE id=1")
+            db.execute('INSERT INTO inbounds VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                (direct.id, direct.user_id, direct.core, direct.up, direct.down, direct.total,
+                 direct.remark, int(direct.enable), direct.expiry_time, direct.port, direct.protocol,
+                 json.dumps(direct.settings), json.dumps(direct.stream_settings), direct.tag, direct.routing_mode))
     store = ProxyStore(data)
+    if mixed: store.ensure_policy_v2()
     created = store.save_upstream({'name': 'Synthetic upstream', 'server': 'upstream.example.test',
         'server_port': 443, 'uuid': uid, 'tls': {'mode': 'tls', 'server_name': 'upstream.example.test'}},
         store.read_snapshot()['revision'])
@@ -130,15 +201,25 @@ for local, relay in ((False, False), (True, False), (False, True), (True, True))
         created['snapshot']['revision'], local_password=password)
     snapshot = store.load_draft()
     endpoint = (VerifiedEndpoint(selected, snapshot['revision'], 'upstream.example.test',
-                ('8.8.4.4',), 1) if local or relay else None)
+                ('8.8.4.4',), 1) if local or relay or mixed else None)
     addresses = ['127.0.0.1', '192.168.8.2'] if endpoint else []
-    compiled = compile_proxy_policy(SingBoxAdapter().build_config([row]), [row],
+    compiled = compile_proxy_policy(SingBoxAdapter().build_config(rows), rows,
         snapshot, endpoint=endpoint, self_addresses=addresses)
     core_hash = revision(compiled.config)
     context = {'schema_version': 1, 'kind': 'apply', 'candidate_core_revision': core_hash,
         'previous_core_revision': None, 'previous_enabled': False,
         'policy_identity': compiled.identity, 'self_addresses': addresses,
         'endpoint': None if endpoint is None else {**vars(endpoint), 'addresses': list(endpoint.addresses)}}
+    if mixed:
+        context.update(schema_version=2, policy_version=2, plan_manifest=compiled.plan_manifest,
+                       source_fingerprint=compiled.source_fingerprint, requires_upstream=True)
+        private_state = json.loads((store.path / 'state.json').read_text())
+        try:
+            old_validate_state(private_state, private_state['store_id'])
+        except ProxyStorageError:
+            legacy_reader_refusals += 1
+        else:
+            raise AssertionError('Exact old reader accepted per-inbound capability state')
     store.begin_apply(snapshot['revision'], 'synthetic-committed', runtime_context=context)
     runtime = data / 'runtime' / 'sing-box'
     runtime.mkdir(parents=True, mode=0o700)
@@ -164,6 +245,9 @@ for local, relay in ((False, False), (True, False), (False, True), (True, True))
     assert plan['policy']['active_switches'] == dict(zip(flags, (local, relay)))
     assert plan['policy']['draft_switches'] == dict(zip(flags, (not local, not relay)))
     assert plan['policy']['core_revision'] == core_hash
+    if mixed:
+        assert plan['policy']['protected_inbound_ids'] == [1]
+        assert [item['effective_mode'] for item in plan['policy']['applied_inbound_policy']] == ['relay', 'direct']
     assert plan['starts_core'] is False and plan['revokes_restored_access'] is True
     for secret in (uid, password, selected, '8.8.4.4', '192.168.8.2', 'upstream.example.test'):
         assert secret not in json.dumps(plan)
@@ -191,8 +275,8 @@ for local, relay in ((False, False), (True, False), (False, True), (True, True))
         assert db.execute('SELECT remark FROM inbounds').fetchone()[0] == row.remark
         assert db.execute('SELECT username FROM users').fetchone()[0] == 'synthetic-admin'
     assert not (root / 'RESTORE_PENDING.json').exists()
-    states.append(state)
-    hashes.add(core_hash)
+    (mixed_states if mixed else states).append(state)
+    (mixed_hashes if mixed else hashes).add(core_hash)
     restores += 1
 
 verify_payload_imports()
@@ -200,7 +284,10 @@ assert not attempts
 print(json.dumps({'proxy_recovery_schema': 1,
     'proxy_recovery': 'installed-runtime offline backup/restore',
     'proxy_recovery_states': states, 'proxy_recovery_compiler_hashes': len(hashes),
-    'proxy_recovery_restores': restores, 'proxy_recovery_plan_refusals': plan_refusals,
+    'proxy_recovery_restores': restores - len(mixed_states), 'proxy_recovery_plan_refusals': plan_refusals,
+    'proxy_recovery_mixed_states': mixed_states, 'proxy_recovery_mixed_restores': len(mixed_states),
+    'proxy_recovery_mixed_compiler_hashes': len(mixed_hashes),
+    'proxy_recovery_legacy_reader_refusals': legacy_reader_refusals,
     'proxy_recovery_writer_refusals': writer_refusals, 'proxy_recovery_payload_verified': True,
     'proxy_recovery_network_used': False, 'proxy_recovery_core_started': False}))
 '''

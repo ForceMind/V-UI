@@ -57,10 +57,43 @@ class InboundPolicyMigrationTests(unittest.TestCase):
 
     def test_existing_valid_values_survive_repeated_and_concurrent_initialization(self):
         self.legacy(mode_column=True, modes=("inherit", "direct", "relay"))
+        from app.services.proxy_store import ProxyStore
+        ProxyStore(self.root).ensure_policy_v2()
         before = self.data()
         with ThreadPoolExecutor(max_workers=3) as executor:
             list(executor.map(lambda _: database.init_db(), range(6)))
         self.assertEqual(before, self.data())
+
+    def test_v2_fence_rejects_lost_column_before_create_or_migration(self):
+        from app.services.proxy_store import ProxyStore, ProxyStorageError
+        self.legacy()
+        before = self.path.read_bytes()
+        ProxyStore(self.root).ensure_policy_v2()
+        with self.assertRaises(ProxyStorageError): database.init_db()
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertNotIn("routing_mode", self.data()[0])
+
+    def test_v2_fence_missing_database_or_table_never_creates_or_alters_them(self):
+        from app.services.proxy_store import ProxyStore, ProxyStorageError
+        ProxyStore(self.root).ensure_policy_v2()
+        self.assertFalse(self.path.exists())
+        with self.assertRaises(ProxyStorageError): database.init_db()
+        self.assertFalse(self.path.exists())
+        with sqlite3.connect(self.path) as conn:
+            conn.execute('CREATE TABLE retained (id INTEGER PRIMARY KEY, note TEXT)')
+            conn.execute('INSERT INTO retained VALUES (1, "untouched")')
+        before = self.path.read_bytes()
+        with self.assertRaises(ProxyStorageError): database.init_db()
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertNotIn('inbounds', inspect(self.engine).get_table_names())
+
+    def test_noninherit_existing_database_without_fence_is_not_repaired(self):
+        from app.services.proxy_store import ProxyStorageError
+        self.legacy(mode_column=True, modes=("direct", "relay"))
+        before = self.data()
+        with self.assertRaises(ProxyStorageError): database.init_db()
+        self.assertEqual(self.data(), before)
+        self.assertFalse((self.root / '.proxy-state-initialized').exists())
 
     def test_existing_null_empty_case_unknown_and_non_string_fail_without_repair(self):
         for value in (None, "", "DIRECT", " relay", "relay ", "unknown", 1):
