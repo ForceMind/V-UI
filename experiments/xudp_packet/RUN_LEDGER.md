@@ -244,3 +244,26 @@ control EOF and descriptor ownership alongside the original six cases. Do not
 send probes, retry recovery, replace the idle association, change timeouts or
 edit the frozen observer. Any owner/route-child reconstruction is a separate
 reviewed design after these facts are observed; it is not part of the zero fix.
+
+
+## 2026-10-18 passive D first run: missing early test dependency
+
+Exact `3fa636a0d77954e81a57226dddb26b953b62d144`, tree
+`866112e8f93f9b1c9da48d8505db4ae8d37b88a9`,
+[run 39133478399 attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39133478399).
+Packet job `117693483095` failed before build or runtime: 179 Python tests
+executed, 178 passed and the new real-process sampler errored importing psutil.
+The workflow installed the existing pinned test requirements only after this
+controls step. The local environment already had psutil, masking the order defect.
+Packet build and all six packet runtime stages were skipped, so there is no new
+control EOF/relay observation. Evidence preparation also correctly refused the
+absent build directory; no packet archive exists for this run. Mux succeeded;
+the independent unchanged official runtime was still running when this failure
+entry was prepared and receives its own terminal result.
+
+Retained job log SHA-256:
+`5e1df6b33e4f87b31cb6ef32934b4a5b53b772725e7c1c78d05c7c76294d9ad4`.
+The correction moves the existing `requirements-test.txt` installation before
+packet controls; dependency versions, all 179 assertions, core patches, samplers
+and business gates stay unchanged. This is a new exact-head run, not a waived
+test, skipped import, inherited green result or unchanged-code retry.

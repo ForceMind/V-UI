@@ -168,6 +168,8 @@ jobs:
         with:
           name: vui-xudp-mux-evidence
           path: /tmp/vui-packet-mechanism
+      - name: Install existing pinned test dependencies before socket controls
+        run: pip install -r requirements-test.txt
       - name: Verify packet evidence controls
         run: |
           python3 - <<'PY'
@@ -185,9 +187,8 @@ jobs:
             --sing .experiment-source/sing \
             --mechanism /tmp/vui-packet-mechanism \
             --output /tmp/vui-packet-build
-      - name: Install frozen runtime dependencies and fetch unchanged official control
+      - name: Fetch unchanged official control
         run: |
-          pip install -r requirements-test.txt
           python3 scripts/fetch_test_cores.py /tmp/vui-packet-official/cores
       - name: Run stock-role diagnostic and complete experimental-role capacity stages
         run: |
