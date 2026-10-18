@@ -1,5 +1,7 @@
 """Exact test-name coverage; zero tests/skips/extra tests never mean success."""
 import json
+import importlib.util
+import sys
 from pathlib import Path
 
 
@@ -36,6 +38,41 @@ def verify_go(path, leaves, package):
     return {'leaves': len(leaves), 'terminals': len(names)}
 
 
+EXTRA_CHECKS = {kind+'-'+mode for kind in ('mux-unit','mux-encrypted','mux-encrypted-cancel')
+                for mode in ('race','debug')} | {'mux-route-race'}
+
+
+def verify_shared(directory):
+    mux = Path(__file__).resolve().parent.parent/'xudp_mux'
+    sys.path.insert(0,str(mux))
+    spec=importlib.util.spec_from_file_location('packet_mux_verifier',mux/'verify_evidence.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    result={}
+    for label in sorted(EXTRA_CHECKS):
+        exit_row=json.loads((directory/(label+'.exit.json')).read_text())
+        need(exit_row['returncode']==0 and exit_row.get('environment')==
+             {'GOOS':'linux','GOARCH':'amd64','CGO_ENABLED':'1','GOTOOLCHAIN':'local','GOWORK':'off'},
+             'Patched dependency shared check environment/failure')
+        args=exit_row['args'];need('-race' in args,'Missing patched dependency race detection')
+        need(('-tags=debug' in args)==label.endswith('-debug'),'Wrong shared debug flags')
+        path=directory/(label+'.stdout')
+        if label=='mux-route-race':
+            need(args[-1]=='./route' and args[args.index('-run')+1]=='^TestMuxRoute','Wrong route selection')
+            result[label]=module.verify_route(path,'mux')
+        else:
+            need(args[-1]=='github.com/sagernet/sing-vmess','Wrong shared package')
+            if label.startswith('mux-unit-'):
+                need(args[args.index('-run')+1]=='^TestMuxBounded','Wrong unit selection')
+                result[label]=module.verify_tests(module.rows(path),['TestMuxBounded'+n for n in module.UNIT_CASES])
+            elif label.startswith('mux-encrypted-cancel-'):
+                need(args[args.index('-run')+1]=='^TestMuxEncryptedCancel(AES|ChaCha)$','Wrong cancel selection')
+                result[label]=module.verify_encrypted_cancel(path)
+            else:
+                need(args[args.index('-run')+1]=='^TestMuxEncrypted(AES|ChaCha)$','Wrong encrypted selection')
+                result[label]=module.verify_tests(module.rows(path),module.ENCRYPTED_CASES)
+    return result
+
+
 def verify_build(directory, contract):
     directory = Path(directory)
     need(contract['test_run_regex'] == '^TestVUICompletePacket', 'Changed test selection')
@@ -67,7 +104,7 @@ def verify_build(directory, contract):
             need(exit_row.get('environment') == {'GOOS':goos,'GOARCH':'amd64','CGO_ENABLED':'0','GOTOOLCHAIN':'local','GOWORK':'off'}, 'Incorrect cross-compile environment')
     provenance = json.loads((directory / 'provenance.json').read_text())
     expected_checks = {p.replace('github.com/sagernet/sing/','').replace('/','-')+'-'+mode
-                       for p in required for mode in ('race','debug','darwin-compile','windows-compile')} | {'build','module-verify'}
+                       for p in required for mode in ('race','debug','darwin-compile','windows-compile')} | {'build','module-verify'} | EXTRA_CHECKS
     checks = provenance['checks']
     need(len(checks) == len(expected_checks) and {row['label'] for row in checks} == expected_checks,
          'Missing, duplicate or unexpected build check')
@@ -79,7 +116,7 @@ def verify_build(directory, contract):
         need(('build' in exit_row['args']) if label=='build' else exit_row['args'][-2:] == ['mod','verify'], 'Wrong build/verify command')
     need(provenance['product_qualified'] is False and
          all(row['returncode'] == 0 for row in provenance['checks']), 'Incomplete build checks')
-    report = {'linux': results, 'cross_compile_only': ['darwin/amd64', 'windows/amd64'],
+    report = {'linux': results, 'patched_dependency_shared': verify_shared(directory), 'cross_compile_only': ['darwin/amd64', 'windows/amd64'],
               'product_qualified': False}
     (directory / 'VERIFICATION.json').write_text(json.dumps(report, indent=2) + '\n')
     return report

@@ -45,7 +45,7 @@ are not rewritten as a passing original compatibility gate.
   Any truncated batch is rejected as a whole with an explicit error; its already
   consumed packets are not claimed as delivered. All retained buffers are
   released on truncation, transport error and parent close. Windows keeps its
-  explicit message-too-large handling and resets readiness state on all errors.
+  explicit message-too-large handling and resets readiness state on terminal errors; WSAEWOULDBLOCK retries retain readiness.
 - SOCKS first-packet allocation uses the same full-wire budget and releases on
   error. Connected UDP packet-copy must not fall back to stream `unix.Read`;
   bare *net.UDPConn extended read/wait adapters preserve packet boundaries and

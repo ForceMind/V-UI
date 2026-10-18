@@ -27,6 +27,15 @@ SING_FILES = (
 )
 PATCHES = (*c.PATCHES, 'experiments/xudp_packet/receive.patch')
 PACKAGES = ('common/network', 'common/bufio', 'protocol/socks')
+EXTRA_TESTS = {
+    'experiments/xudp_mux/mux_writer_test.go': 'sing-vmess/mux_writer_test.go',
+    'experiments/xudp_mux/mux_encrypted_test.go': 'sing-vmess/mux_encrypted_test.go',
+    'experiments/xudp_mux/mux_encrypted_cancel_test.go': 'sing-vmess/mux_encrypted_cancel_test.go',
+    'experiments/xudp_mux/route_mux_test.go': 'sing-box/route/route_mux_test.go',
+    'experiments/xudp_address/route_lifecycle_test.go': 'sing-box/route/route_lifecycle_test.go',
+}
+EXTRA_CHECKS = {kind+'-'+mode for kind in ('mux-unit','mux-encrypted','mux-encrypted-cancel')
+                for mode in ('race','debug')} | {'mux-route-race'}
 
 
 def save(path, data):
@@ -35,7 +44,8 @@ def save(path, data):
 
 def identity():
     result = c.source_identity()
-    for path in sorted(HERE.rglob('*')):
+    paths = set(HERE.rglob('*')) | set((ROOT/'experiments/xudp_mux').glob('*'))
+    for path in sorted(paths):
         if path.is_file() and path.suffix in ('.py', '.go', '.patch', '.md', '.json'):
             name = str(path.relative_to(ROOT))
             c.need(not path.is_symlink() and c.git('show', 'HEAD:' + name) == path.read_bytes(),
@@ -155,6 +165,14 @@ def build(args):
         result = command([Path(go).with_name('gofmt'), '-w', target], ROOT, env,
                          evidence / ('gofmt-test-' + Path(item['source']).stem))
         c.need(result.returncode == 0, 'Test gofmt failed')
+    for name, target_name in EXTRA_TESTS.items():
+        family, relative = target_name.split('/', 1)
+        target = trees[family] / relative
+        c.need(not target.exists() and c.git('show','HEAD:'+name) == (ROOT/name).read_bytes(), 'Uncommitted/overwriting shared test')
+        shutil.copyfile(ROOT/name,target)
+        result = command([Path(go).with_name('gofmt'),'-w',target],ROOT,env,
+                         evidence/('gofmt-shared-'+Path(name).stem))
+        c.need(result.returncode == 0,'Shared test gofmt failed')
     box, sing, vmess = trees['sing-box'], trees['sing'], trees['sing-vmess']
     result = command([go, 'mod', 'edit', '-replace=github.com/sagernet/sing=' + str(sing),
                       '-replace=github.com/sagernet/sing-vmess=' + str(vmess)], box, env, evidence / 'replace')
@@ -174,6 +192,17 @@ def build(args):
                               '-run', '^TestVUICompletePacket', 'github.com/sagernet/sing/' + package],
                              box, env, evidence / label)
             checks.append({'label': label, 'returncode': result.returncode})
+    for kind, pattern in (('mux-unit','^TestMuxBounded'),
+                          ('mux-encrypted','^TestMuxEncrypted(AES|ChaCha)$'),
+                          ('mux-encrypted-cancel','^TestMuxEncryptedCancel(AES|ChaCha)$')):
+        for mode, extra in (('race',['-race']),('debug',['-race','-tags=debug'])):
+            label=kind+'-'+mode
+            result=command([go,'test','-json','-count=1','-timeout=90s',*extra,'-run',pattern,
+                            'github.com/sagernet/sing-vmess'],box,env,evidence/label)
+            checks.append({'label':label,'returncode':result.returncode})
+    result=command([go,'test','-json','-race','-count=1','-timeout=45s','-run','^TestMuxRoute','./route'],
+                   box,{**env,'VUI_LIFECYCLE_PHASE':'lifecycle','VUI_MUX_ARM':'mux'},evidence/'mux-route-race')
+    checks.append({'label':'mux-route-race','returncode':result.returncode})
     for goos in ('darwin', 'windows'):
         for package in PACKAGES:
             label = package.replace('/', '-') + '-' + goos + '-compile'
@@ -193,7 +222,7 @@ def build(args):
              for name, value in manifest(tree).items()}
     expected_test = {'sing/' + item['target'] for item in tests['files']}
     c.need({p for p in after.keys() | final.keys() if after.get(p) != final.get(p)} ==
-           {'sing-box/go.mod'} | expected_test, 'Build changed upstream source/go.sum')
+           {'sing-box/go.mod'} | expected_test | set(EXTRA_TESTS.values()), 'Build changed upstream source/go.sum')
     c.need(identity() == source_id, 'Repository changed during build')
     data = {'schema_version': 1, 'kind': KIND, 'source_identity': source_id,
             'fixed_sources': {'sing_box': c.builder.SING_BOX, 'sing_vmess': c.builder.SING_VMESS, 'sing': SING},
@@ -203,7 +232,8 @@ def build(args):
                       'goos': 'linux', 'goarch': 'amd64', 'cgo_enabled': '0',
                       'trimpath': True, 'buildvcs': False, 'tags': [], 'gotoolchain': 'local', 'gowork': 'off'},
             'module_graph_sha256': c.graph_digest(normalized), 'source_files': source_files,
-            'tests': {item['source']: c.sha256(HERE / item['source']) for item in tests['files']},
+            'tests': {**{item['source']: c.sha256(HERE / item['source']) for item in tests['files']},
+                      **{name:c.sha256(ROOT/name) for name in EXTRA_TESTS}},
             'checks': checks, 'product_qualified': False}
     save(out / 'provenance.json', data)
     save(evidence / 'provenance.json', data)

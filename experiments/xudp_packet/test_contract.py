@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('packet_verifier', HERE/'verify_evidence.py')
@@ -56,6 +57,10 @@ class TestPacketVerifier(unittest.TestCase):
             'common/bufio/packet_batch_mmsg.go','common/bufio/packet_batch_msgx_darwin.go','protocol/socks/handshake.go'})
 
 class TestPacketBuildVerifier(unittest.TestCase):
+    def setUp(self):
+        # These tests mutate the build-check contract, not Go runtime evidence.
+        self.shared=patch.object(v,'verify_shared',return_value={'synthetic_fixture':True})
+        self.shared.start();self.addCleanup(self.shared.stop)
     def fixture(self, root):
         contract=json.loads((HERE/'TEST_CASES.json').read_text())
         checks=[]
@@ -75,6 +80,7 @@ class TestPacketBuildVerifier(unittest.TestCase):
             env={'GOOS':'linux','GOARCH':'amd64','CGO_ENABLED':'0' if label=='build' else '1','GOTOOLCHAIN':'local','GOWORK':'off'}
             (root/(label+'.exit.json')).write_text(json.dumps({'args':['go','build'] if label=='build' else ['go','mod','verify'],'returncode':0,'environment':env}))
             checks.append({'label':label,'returncode':0})
+        checks += [{'label':name,'returncode':0} for name in sorted(v.EXTRA_CHECKS)]
         (root/'provenance.json').write_text(json.dumps({'checks':checks,'product_qualified':False}))
         return contract
     def test_full_build(self):
