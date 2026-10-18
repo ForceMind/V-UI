@@ -29,7 +29,6 @@ def lifecycle_exercise(f, target, case, helper, c, psutil, rows, persist, proces
             observation.data["explicit_close"] = {"started": time.monotonic()}
             association.close()
             observation.data["explicit_close"]["completed"] = time.monotonic()
-            f.application_close_proofs.append({"control_fd": association.control.fileno(), "application_fd": association.stream.fileno()})
             observation.capture("after_explicit_close")
         deadline, gone = last + 6, None
         while time.monotonic() < deadline:
@@ -76,7 +75,6 @@ def lifecycle_exercise(f, target, case, helper, c, psutil, rows, persist, proces
                 association.close()
                 need(association.stream.fileno() == -1, "SOCKS application socket survived cleanup")
                 need(association.control.fileno() == -1, "SOCKS control socket survived cleanup")
-                f.application_close_proofs.append({"control_fd": association.control.fileno(), "application_fd": association.stream.fileno()})
             except Exception as exc:
                 events.data["status"] = "error"
                 events.data["cleanup_error"] = {"type": type(exc).__name__, "message": c.life.clean(str(exc))}

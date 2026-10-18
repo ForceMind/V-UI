@@ -203,7 +203,7 @@ def cleanup(f, before_threads, psutil):
         stream = target.stream if hasattr(target, 'stream') else target.server.socket
         need(stream.fileno() == -1, 'Target socket survived cleanup')
     need(not f.root.exists(), 'Temporary fixture material survived')
-    need(getattr(f, 'application_close_proofs', None) and all(x == {'control_fd': -1, 'application_fd': -1} for x in f.application_close_proofs),
+    need(getattr(f, 'application_close_proofs', None) and all(x['control_fd'] == x['application_fd'] == -1 for x in f.application_close_proofs),
          'Application/control descriptors not explicitly closed')
     need(not [t for t in threading.enumerate() if t not in before_threads], 'Unjoined fixture worker')
     need(f.answers is not None and f.answers.pending() == 0, 'DNS worker retained work')
@@ -213,12 +213,38 @@ def cleanup(f, before_threads, psutil):
             'execution_safe': True, 'data_audit_errors': audit_errors,
             'original_cleanup_gate_passed': not audit_errors}
 
+def tuple_ok(value, host):
+    return isinstance(value, list) and len(value) == 2 and value[0] == host and type(value[1]) is int and 0 < value[1] <= 65535
+
+def verify_associations(case, row):
+    associations = row.get('application_associations', [])
+    proofs = row['cleanup'].get('application_close_proofs', [])
+    expected = 2 if case['mode'] == 'close' and row['recovery_attempted'] else 1
+    need(len(associations) == expected and [a['id'] for a in associations] == list(range(expected)),
+         'Wrong created application association identities')
+    need(Counter(p['id'] for p in proofs) == Counter(range(expected)) and
+         all(p['control_fd'] == p['application_fd'] == -1 for p in proofs), 'Application close proof missing/duplicated/open')
+    for a in associations:
+        for name in ('control', 'application'):
+            item = a[name]
+            need(type(item['fd']) is int and item['fd'] >= 0 and type(item['inode']) is int and item['inode'] > 0
+                 and tuple_ok(item['local'], '127.0.0.1'), 'Invalid created application descriptor identity')
+        need(a['control']['inode'] != a['application']['inode'] and tuple_ok(a['relay'], '127.0.0.1'), 'Ambiguous association sockets')
+        need(tuple_ok(a['control']['peer'], '127.0.0.1') and a['application']['peer'] is None, 'Wrong control/application socket kinds')
+    for packet in row['packets']:
+        wanted = 1 if expected == 2 and packet['leaf'].endswith('/recover') else 0
+        need(packet.get('association_id') == wanted, 'Packet replaced original application object')
+        a = associations[wanted]
+        need(packet['application_socket'] == a['application']['local'] and packet['socks_relay'] == a['relay'],
+             'Packet tuple differs from actual created association')
+
 def verify_case(p, case, row, roles, known, output, identity):
     expected = p.leaf_ids([case]); started = [x['leaf'] for x in row['packets']]
     need(started == expected[:len(started)] and row['unexecuted_leaves'] == expected[len(started):],
          'Missing/extra/duplicate or out-of-order started leaves')
     need(row['cleanup'].get('execution_safe') is True, 'Unsafe cleanup prevents continuing')
     p.verify_cleanup(row, roles)
+    verify_associations(case, row)
     need(all(x['returncode'] == 0 for x in row['cleanup']['processes']), 'Core crashed or exited abnormally')
     need(Counter(r['role'] for r in roles) == Counter(case['roles'].keys()), 'Wrong runtime role set')
     for r in roles:
@@ -253,6 +279,11 @@ def verify_case(p, case, row, roles, known, output, identity):
     sent = 0
     for spec, packet in zip(case['packets'], row['packets']):
         first = sent == 0 or (case['mode'] == 'close' and spec['id'] == 'recover')
+        need(packet['leaf'] == case['id']+'/'+spec['id'] and packet['direction'] == spec['direction'] and packet['first_udp'] is first,
+             'Packet plan identity/direction/first-packet state differs')
+        need(tuple_ok(packet['application_socket'], '127.0.0.1') and tuple_ok(packet['socks_relay'], '127.0.0.1') and
+             tuple_ok(packet['requested_target'], '127.0.0.3') and packet['requested_target'] == [ledger['host'], ledger['port']],
+             'Missing or wrong complete application/relay/target tuple')
         request, reply = p.packet_bodies(packet['leaf'], spec)
         need(packet['request'] == p.ident(request) and packet['expected_reply'] == p.ident(reply), 'Input bytes changed')
         calls = packet.get('send_calls', [])
@@ -267,6 +298,7 @@ def verify_case(p, case, row, roles, known, output, identity):
         replies = packet.get('reply_calls', [])
         need(len(replies) <= 1, 'More than one application reply consumed')
         decoded = packet.get('decoded_reply_before_assertion')
+        evidence_status = 'raw-and-decoded-reply-verified' if decoded else 'no-decoded-reply-no-explicit-reject-claim'
         if decoded:
             need(len(replies) == 1, 'Decoded reply lacks raw receive')
             n = decoded['payload']['bytes']
@@ -288,8 +320,13 @@ def verify_case(p, case, row, roles, known, output, identity):
                 n = item['request_actual']['bytes']
                 need(0 <= n <= len(request) and item['request_actual'] == p.ident(request[:n])
                      and item['request_expected'] == p.ident(request) and item['source'][0] == '127.0.0.4'
-                     and item['target'] == packet['requested_target'], 'Failed prefix/target/source unaccounted')
+                     and item['target'] == packet['requested_target'] and tuple_ok(item['source'], '127.0.0.4')
+                     and item['request_exact_prefix'] is True and item['request_full'] is (n == len(request)),
+                     'Failed prefix/target/source unaccounted')
+                sent_reply = reply if spec['direction'] in ('downlink', 'uplink_ack') else request[:n]
+                need(item['reply_sent'] == p.ident(sent_reply) and item['sendto_return'] == len(sent_reply), 'Failed target reply incomplete')
             full = False
+        packet['io_verification'] = evidence_status
         if packet['direction'] != 'local_emsgsize':
             sent += 1
             full = full and packet['full_delivery_passed']
@@ -313,11 +350,11 @@ def execute(args):
         identities = {'product': source(ROOT), 'legacy': source(args.legacy_repository, legacy=True)}
         known = binaries(args, identities['legacy'])
         save(args.output/'input-identity.json', {'source_identity': identities, 'binaries': known})
-        p, c, runner = load_framework(args.legacy_repository)
-        cases = plan(p, args.arm, args.stage); save(args.output/'plan.json', cases)
-        records = []; save(args.output/'process-binaries.json', records)
         with tempfile.TemporaryDirectory(prefix='vui-stock-client-data-') as data:
             os.environ.update(VUI_DATA_DIR=data, VUI_TEST_CORES=str(args.official.parent), VUI_TEST_MIHOMO=str(args.mihomo))
+            p, c, runner = load_framework(args.legacy_repository)
+            cases = plan(p, args.arm, args.stage); save(args.output/'plan.json', cases)
+            records = []; save(args.output/'process-binaries.json', records)
             with c.base.experiment_environment(args.output/'frozen-fixture'), (args.output/'suite.log').open('w') as log:
                 with redirect_stdout(log), redirect_stderr(log):
                     module, _ = c.base.runtime_modules(); psutil = importlib.import_module('psutil')

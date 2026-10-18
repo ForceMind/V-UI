@@ -7,7 +7,7 @@ import traceback
 import unittest
 from packet_boundary import Target, need, save, json_read, ident, exchange, observed_exchange
 from lifecycle import lifecycle_exercise
-from socks_observation import observable_socks_class
+from socks_observation import observable_socks_class, local_socket
 
 def run_case(case, c, module, output, binaries, process_records, psutil, product):
     directory = output / case["id"]
@@ -24,10 +24,25 @@ def run_case(case, c, module, output, binaries, process_records, psutil, product
             return getattr(base_helper, name)
         def record_association(self, association):
             original = association.stream
+            identity = {'id': len(f.application_associations),
+                'control': local_socket(association.control), 'application': local_socket(original),
+                'relay': list(association.relay)}
+            f.application_associations.append(identity)
+            original_close = association.close
+            closed = False
+            def close():
+                nonlocal closed
+                original_close()
+                if not closed:
+                    f.application_close_proofs.append({'id': identity['id'],
+                        'control_fd': association.control.fileno(), 'application_fd': original.fileno()})
+                    closed = True
+            association.close = close
             class SocketRecorder:
                 def __getattr__(self, name): return getattr(original, name)
                 def sendto(self, wire, relay):
                     packet = row["packets"][-1]
+                    packet["association_id"] = identity["id"]
                     sent = {"wire": ident(wire), "relay": list(relay), "started": time.monotonic()}
                     packet.setdefault("send_calls", []).append(sent)
                     try:
@@ -63,6 +78,7 @@ def run_case(case, c, module, output, binaries, process_records, psutil, product
             target = Target(module.TARGET, module.UPSTREAM_EGRESS, case["stage"] in ("A", "B", "U", "V"),
                             correlate=case["stage"] in ("A", "U", "V"))
             f.application_close_proofs = []
+            f.application_associations = []
             f.targets.append(target)
             f.target = target
             need(target.port != f.upstream_port, "Target/upstream port collision")
@@ -88,7 +104,6 @@ def run_case(case, c, module, output, binaries, process_records, psutil, product
                 finally:
                     association.close()
                     need(association.stream.fileno() == -1 and association.control.fileno() == -1, "SOCKS application/control socket survived cleanup")
-                    f.application_close_proofs.append({"control_fd": association.control.fileno(), "application_fd": association.stream.fileno()})
             f.audit()
             f.observations.append({"kind": "separate-packet-boundary", "stage": case["stage"],
                 "full_delivery_passed": all(p["full_delivery_passed"] for p in row["packets"] if p["direction"] != "local_emsgsize"),
@@ -99,6 +114,7 @@ def run_case(case, c, module, output, binaries, process_records, psutil, product
         (directory / "error.log").write_text(c.life.clean(traceback.format_exc()))
     finally:
         if f is not None:
+            row["application_associations"] = getattr(f, "application_associations", [])
             try:
                 row["cleanup"] = cleanup(f, before_threads, psutil)
             except Exception as exc:

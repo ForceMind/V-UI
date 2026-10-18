@@ -33,3 +33,13 @@ Reuse local fixed binaries and downloaded evidence. Experimental binaries were d
 ## Review and closure
 
 Design review precedes implementation. Commit recoverable WIP before running long experiments. Final review binds exact new head/tree, run/attempt, immutable old-source identity, stock and candidate binary identities, actual leaf status/counts, cleanup and artifact hashes. Update DEVELOPMENT_HANDOFF.md and STANDARD_CLIENT_COMPATIBILITY.md with evidence and remaining work; no merge or product qualification is inferred from research completion.
+
+## Finite authenticated controls on each new head
+
+Run the frozen `test_05_mihomo_upstream_uuid_ca_sni_stop_recovery`,
+`test_07_mihomo_device_uuid_ca_sni`, and `test_tcp_https_mihomo_double_hop`
+with accurately selected stock/candidate server origins and all owner options absent.
+These cover independent first/second-hop failures and TCP sanity, not UDP capacity.
+A failed prerequisite leaves its following negative assertions unexecuted; no old
+19/20 result is inherited. Production exporter-function output is distinguished
+from actual HTTP API export, whose qualification belongs to the independent P4 group.
