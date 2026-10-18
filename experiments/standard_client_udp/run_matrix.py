@@ -17,8 +17,8 @@ def group_exists(pgid):
     try: os.killpg(pgid,0);return True
     except ProcessLookupError:return False
 
-def run(command, timeout=1250):
-    proc=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True)
+def run(command, timeout=1250, *, cwd=None, env=None):
+    proc=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True,cwd=cwd,env=env)
     row={'pid':proc.pid,'process_group':proc.pid,'timeout':False,'signals':[]}
     out = err = ''
     try:

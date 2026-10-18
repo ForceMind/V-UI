@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "kind": "vui-domestic-reduced-source-identities",
+  "fixed_sources": {
+    "sing_box": "af6e64c3b69e6132ebaee0e1a3d24e93903f6709",
+    "sing_vmess": "31ec11e8790c48a4bf11711806a61e929ee6b89d"
+  },
+  "baseline_manifest_sha256": "9849f2d3dc666ddc3cf3ec22c6d4d9a725d7899b72ead486dec6ef9e22228803",
+  "baseline_manifest_members": 1588,
+  "source_files": {
+    "sing-box/route/conn.go": {
+      "before": "af68e556e07dfa861f1dc46c2f7232595c7912acb491b6077e555c61dda8b78c",
+      "after": "0d6d6e6ef299f408dc866d3891015a3e7fbb75fbd55f95464ad5e5b29094196d"
+    },
+    "sing-vmess/xudp.go": {
+      "before": "11497d190defff25ed8fcc8a5d8123cd9fcb1cfbce07d068664164468d118cfa",
+      "after": "16f74a540504d2ecfad28633f6b766b7755ca773ea59e1f21c6bcc5f2ba0241f"
+    },
+    "sing-vmess/mux.go": {
+      "before": "7061ce5af54ea04c212fb9184733a0f80d7bbcd541d25d097df2611bd02d4e9c",
+      "after": "7a591a4bb3d5b3bb9369103bfad0a2d0f54818ea16d6848aac51549fbf8f9623"
+    },
+    "sing-vmess/mux_writer.go": {
+      "before": null,
+      "after": "6dba00980da15cd6d1b4f5cc0dc107de5a7220a3a9146fc2de20b8986f3d8a48"
+    }
+  },
+  "upstream_go_mod_sha256": "4f06c36333154e114f458de7328cf794e5ceb72f2399a565f88ab936882369aa",
+  "upstream_go_sum_sha256": "16ec5012bb9a05d6090ef720fcc2b893d7664e4632dca100f67368cd1a6ed0da",
+  "count_patch_sha256": "b817f0ff06e4365a63609a238fd689ba03950d3ac308d6fc3f1b7386a95e0e39",
+  "unmodified_sing_version": "v0.9.6-0.20260922013354-87c33f17688f",
+  "go_binary_sha256": "9347e73e5188af1ef4c2046cbc9c985473f0155c187d4005ae44c21b300062eb",
+  "normalized_module_graph_sha256": "299ceeafc91ca400d48a1a4e6e6f59b31e536f37392d2c05ecebf7971a6a5d85",
+  "normalized_module_graph_members": 411
+}
