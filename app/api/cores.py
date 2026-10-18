@@ -9,9 +9,11 @@ def status():
     return core_manager.status()
 
 
-def apply_checked(core: str, activate=True):
+def apply_checked(core: str, activate=True, *, preserve_stopped=True):
     try:
-        return core_manager.apply_database(core, activate=activate)
+        if preserve_stopped:
+            return core_manager.apply_database(core, activate=activate)
+        return core_manager.apply_database(core, activate=activate, preserve_stopped=False)
     except ProxyCapacityError:
         raise HTTPException(409, {"saved": True, "applied": False,
             "code": "PROXY_CAPACITY_EXHAUSTED",
@@ -27,7 +29,7 @@ def validate(core: str):
 
 @router.post("/{core}/restart")
 def restart(core: str):
-    return apply_checked(core)
+    return apply_checked(core, preserve_stopped=False)
 
 
 @router.post("/{core}/stop")

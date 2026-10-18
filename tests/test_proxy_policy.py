@@ -20,7 +20,7 @@ PASSWORD = "fixture-password-only"
 
 def inbound(identifier=1, **changes):
     item = SimpleNamespace(id=identifier, core="sing-box", protocol="vless", port=11000 + identifier,
-        remark="fixture", tag="user-provided-tag-" + str(identifier), enable=True, expiry_time=0,
+        routing_mode="inherit", remark="fixture", tag="user-provided-tag-" + str(identifier), enable=True, expiry_time=0,
         settings={"users": [{"uuid": UUID}]}, stream_settings={"tls": {
             "enabled": True, "server_name": "vpn.example.test",
             "certificate_path": "/test/cert.pem", "key_path": "/test/key.pem"}})
@@ -55,7 +55,8 @@ def compile_fixture(value=None, rows=None, config=None, **kwargs):
     value = value or snapshot(True, True)
     rows = rows if rows is not None else [inbound()]
     config = config if config is not None else SingBoxAdapter().build_config([r for r in rows if r.core == "sing-box"])
-    kwargs.setdefault("endpoint", endpoint(value))
+    if "endpoint" not in kwargs:
+        kwargs["endpoint"] = endpoint(value)
     kwargs.setdefault("self_addresses", ("127.0.0.1", "9.9.9.9"))
     return compile_proxy_policy(config, rows, value, **kwargs)
 

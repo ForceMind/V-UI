@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 from app.models.database import get_db
 from app.api.cores import apply_checked
@@ -13,6 +13,7 @@ from app.services.inbound_service import (
     get_inbound,
     list_inbounds,
     normalize_mapping,
+    routing_dicts,
     to_dict,
     update_inbound,
 )
@@ -28,6 +29,7 @@ class InboundPayload(BaseModel):
     remark: str = ""
     port: int = Field(ge=1, le=65535)
     protocol: str
+    routing_mode: Literal["inherit", "direct", "relay"] = "inherit"
     settings: dict[str, Any] | str | None = None
     stream_settings: dict[str, Any] | str | None = None
     profile: dict[str, Any] | None = None
@@ -47,6 +49,14 @@ class InboundUpdatePayload(BaseModel):
     expiry_time: int | None = None
     tag: str | None = None
     certificate_id: str | None = None
+    routing_mode: Literal["inherit", "direct", "relay"] | None = None
+
+    @field_validator("routing_mode", mode="before")
+    @classmethod
+    def routing_mode_not_null(cls, value):
+        if value is None:
+            raise ValueError("routing_mode cannot be null")
+        return value
 
 
 def _managed_certificate(profile: dict | None, certificate_id: str, core: str, protocol: str):
@@ -74,7 +84,7 @@ def get_protocol_profiles():
 @router.get("")
 @router.get("/")
 def get_all_inbounds(core: str | None = None, db: Session = Depends(get_db)):
-    return [to_dict(item) for item in list_inbounds(db, core=core)]
+    return routing_dicts(db, core=core)
 
 
 @router.get("/{inbound_id}/editor")

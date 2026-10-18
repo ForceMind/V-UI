@@ -149,6 +149,19 @@ const app = createApp({
         const showAddInbound = ref(false);
         const editingInboundId = ref(null);
         const inboundCredentials = ref({});
+        const savingInbound = ref(false);
+        let inboundEditorGeneration = 0, inboundListGeneration = 0;
+        const routingModes = {inherit: '跟随全局', direct: '指定直连', relay: '指定中转'};
+        const knownRoutingMode = value => Object.hasOwn(routingModes, value);
+        const inboundSavedRouting = row => knownRoutingMode(row.routing_mode) ? routingModes[row.routing_mode] : '策略未确认';
+        const inboundAppliedRouting = row => {
+            const state = row.routing_status;
+            if (state?.state === 'stopped') return '核心已停止；出口未运行';
+            if (state?.state === 'pending') return '待应用；当前出口未确认';
+            if (state?.state !== 'applied' || !/^[0-9a-f]{64}$/.test(state.policy_identity || '') ||
+                !['direct', 'relay'].includes(state.applied_effective_mode)) return '已应用出口未确认';
+            return state.applied_effective_mode === 'relay' ? '已应用中转（仅 TCP；UDP 拒绝）' : '已应用普通直连';
+        };
         const restartingCore = ref('');
         const showQrDialog = ref(false);
         const qrLink = ref('');
@@ -289,6 +302,7 @@ const app = createApp({
             stream_settings: {},
             certificate_id: null,
             enable: true,
+            routing_mode: 'inherit',
             profile: {
                 security: 'none',
                 transport: 'raw',
@@ -316,6 +330,31 @@ const app = createApp({
                 zero_rtt_handshake: false
             }
         });
+
+        const inboundRoutingHint = computed(() => {
+            if (!knownRoutingMode(newInbound.routing_mode)) return '服务器未返回可确认的已保存策略；保持不改，或明确选择策略后保存。';
+            if (newInbound.routing_mode === 'inherit') return '只有“跟随全局”受默认入口中转开关影响。主机代理开关不改变此节点策略。';
+            const p = newInbound.profile;
+            if (newInbound.core !== 'sing-box' || newInbound.protocol !== 'vless' ||
+                p.transport !== 'direct' || p.security !== 'tls' || p.flow || p.skip_cert_verify) {
+                return '本期显式策略仅支持 sing-box / VLESS / 直接 TCP / 验证 TLS / 空 flow。当前配置可能不获资格，保存时由服务器严格核验，不会忽略策略。';
+            }
+            return newInbound.routing_mode === 'relay' ?
+                '指定中转共用唯一已选上游，不受默认开关影响；有效中转仅 TCP，服务器拒绝应用 UDP。先在代理与中转页选择并应用上游；禁用节点可保存为草稿。' :
+                '指定直连无需海外上游，排除此中转策略，保留普通入口既有路由、拒绝规则与能力。首次尚无活动配置时，可在代理与中转页保持两个开关关闭、不选上游，检查并应用建立活动配置。';
+        });
+        const closeInboundEditor = () => {
+            inboundEditorGeneration++;
+            showAddInbound.value = false;
+            editingInboundId.value = null;
+            inboundCredentials.value = {};
+            newInbound.routing_mode = 'inherit';
+            resetInboundProfile();
+        };
+        watch(currentView, closeInboundEditor, { flush: 'sync' });
+        clearAdminSecrets.push(() => { closeInboundEditor(); inboundListGeneration++; inbounds.value = []; });
+        addEventListener('pagehide', closeInboundEditor);
+        addEventListener('popstate', closeInboundEditor);
 
         const protocolOptions = computed(() => {
             if (newInbound.core === 'sing-box') {
@@ -414,10 +453,15 @@ const app = createApp({
 
         const fetchInbounds = async () => {
             closeUpstreamExport();
+            const generation = ++inboundListGeneration;
             try {
                 const res = await axios.get('/api/inbounds');
+                if (generation !== inboundListGeneration || adminSessionEnded) return;
                 inbounds.value = res.data;
             } catch (error) {
+                if (generation !== inboundListGeneration || adminSessionEnded || error.response?.status === 401) return;
+                // A failed refresh cannot confirm previously shown applied state.
+                inbounds.value = inbounds.value.map(row => ({...row, routing_status: null}));
                 ElMessage.error('Failed to load inbounds');
             }
         };
@@ -546,6 +590,8 @@ const app = createApp({
         };
 
         const openAddInbound = async () => {
+            if (savingInbound.value || adminSessionEnded) return;
+            const generation = ++inboundEditorGeneration;
             editingInboundId.value = null;
             inboundCredentials.value = {};
             newInbound.core = 'xray';
@@ -553,19 +599,24 @@ const app = createApp({
             newInbound.remark = '';
             newInbound.port = 443;
             newInbound.enable = true;
+            newInbound.routing_mode = 'inherit';
             newInbound.settings = {};
             newInbound.stream_settings = {};
             resetInboundProfile();
             await loadManagedCertificates();
+            if (generation !== inboundEditorGeneration || adminSessionEnded) return;
             showAddInbound.value = true;
         };
 
         const openEditInbound = async (row) => {
+            if (savingInbound.value || adminSessionEnded) return;
+            const generation = ++inboundEditorGeneration;
             try {
                 const [state] = await Promise.all([
                     axios.get(`/api/inbounds/${row.id}/editor`),
                     loadManagedCertificates()
                 ]);
+                if (generation !== inboundEditorGeneration || adminSessionEnded) return;
                 const value = state.data;
                 editingInboundId.value = row.id;
                 newInbound.core = value.core;
@@ -573,6 +624,9 @@ const app = createApp({
                 newInbound.remark = value.remark || '';
                 newInbound.port = value.port;
                 newInbound.enable = Boolean(value.enable);
+                // Absence in an older response must not turn an update into a reset.
+                const savedMode = value.routing_mode;
+                newInbound.routing_mode = knownRoutingMode(savedMode) ? savedMode : null;
                 newInbound.settings = {};
                 newInbound.stream_settings = {};
                 resetInboundProfile();
@@ -581,6 +635,7 @@ const app = createApp({
                 inboundCredentials.value = value.credentials || {};
                 showAddInbound.value = true;
             } catch (error) {
+                if (generation !== inboundEditorGeneration || adminSessionEnded || error.response?.status === 401) return;
                 ElMessage.error(error.response?.data?.detail || 'Failed to load inbound editor');
             }
         };
@@ -673,6 +728,10 @@ const app = createApp({
         };
 
         const saveInbound = async () => {
+            if (savingInbound.value || !showAddInbound.value || adminSessionEnded) return;
+            savingInbound.value = true;
+            const generation = inboundEditorGeneration, editingId = editingInboundId.value;
+            const routing = knownRoutingMode(newInbound.routing_mode) ? {routing_mode: newInbound.routing_mode} : {};
             try {
                 let profile = { ...newInbound.profile };
                 if (newInbound.core === 'sing-box' && newInbound.protocol === 'vless' && profile.security === 'reality' && profile.transport === 'direct') {
@@ -689,17 +748,19 @@ const app = createApp({
                 }
                 const certificateId = profile.security === 'tls' ? newInbound.certificate_id || null : null;
                 let res;
-                if (editingInboundId.value) {
-                    res = await axios.put(`/api/inbounds/${editingInboundId.value}`, {
+                if (editingId) {
+                    res = await axios.put(`/api/inbounds/${editingId}`, {
+                        ...routing,
                         remark: newInbound.remark,
                         port: newInbound.port,
                         profile,
                         certificate_id: certificateId,
                         enable: newInbound.enable
                     });
-                    ElMessage.success('Inbound updated successfully');
+                    if (generation === inboundEditorGeneration && !adminSessionEnded) ElMessage.success('Inbound updated successfully');
                 } else {
                     res = await axios.post('/api/inbounds', {
+                        ...routing,
                         core: newInbound.core,
                         remark: newInbound.remark,
                         protocol: newInbound.protocol,
@@ -708,23 +769,25 @@ const app = createApp({
                         certificate_id: certificateId,
                         enable: newInbound.enable
                     });
-                    ElMessage.success('Inbound added successfully');
+                    if (generation === inboundEditorGeneration && !adminSessionEnded) ElMessage.success('Inbound added successfully');
                 }
-                showAddInbound.value = false;
-                editingInboundId.value = null;
+                if (generation !== inboundEditorGeneration || adminSessionEnded) return;
+                closeInboundEditor();
                 await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
             } catch (error) {
+                if (generation !== inboundEditorGeneration || adminSessionEnded || error.response?.status === 401) return;
                 const detail = error.response?.data?.detail;
-                if (error.response?.status === 409 && detail?.saved) {
+                if (error.response?.status === 409 && detail?.saved === true) {
+                    closeInboundEditor();
                     ElMessage.warning('设置已保存为期望状态，但核心未应用：' + (detail.message || 'validation failed'));
                     await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
                     return;
                 }
                 ElMessage.error(
-                    (editingInboundId.value ? 'Failed to update inbound: ' : 'Failed to add inbound: ') +
+                    (editingId ? 'Failed to update inbound: ' : 'Failed to add inbound: ') +
                     (typeof detail === 'string' ? detail : detail?.message || error.message)
                 );
-            }
+            } finally { savingInbound.value = false; }
         };
 
         const deleteInbound = async (row) => {
@@ -869,6 +932,11 @@ const app = createApp({
             showAddInbound,
             editingInboundId,
             inboundCredentials,
+            savingInbound,
+            inboundSavedRouting,
+            inboundAppliedRouting,
+            inboundRoutingHint,
+            closeInboundEditor,
             newInbound,
             protocolOptions,
             colors,

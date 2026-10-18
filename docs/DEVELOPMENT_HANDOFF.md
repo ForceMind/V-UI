@@ -27,7 +27,7 @@
 | M0–M4 双开关 | `9a97ad13aae2fabb5ed969fdc0f930c36fdc55b7`，[PR44](https://github.com/ForceMind/V-UI/pull/44) | 主线收口；[历史失败/四目标证据](DUAL_PROXY_RELAY_PROGRESS.md)保留 |
 | D0 UDP/DNS 能力门槛 | `13c884a0539cf9822fca2fe2db58325fa4644048`，[PR46](https://github.com/ForceMind/V-UI/pull/46) | 主线收口；不是开放 UDP 中转 |
 | D1 TCP 上游专用导出 | `a98da9afbbf58a54f4f102cccec2f26b6e07d2ee`，[PR47](https://github.com/ForceMind/V-UI/pull/47) | 当前产品基线；标准设备导出与“供另一 V-UI 导入的上游导出”用途不同 |
-| 每入口三态 TCP | `feature/per-inbound-routing-20261018`，基于 a98 | 当前优先工作。设计审查中；数据/API/UI/事务/真实链路尚未实现或验收 |
+| 每入口三态 TCP | `feature/per-inbound-routing-20261018`，基于 a98 | 当前优先工作。P0 已独审并公开备份为 `6a89a20652beffbfe32cf43deb2aa16cd20bf9ec`；P1–P3 已有集成 WIP，真实链路和完整验收仍待完成 |
 | D2 XUDP/大包/owner 实验 | `afbdba100c5f0e3dc6888684fdbab31980720df3`，tree `996d37d925be8edd18cbf921d3cc580f43c0730d` | 独立实验部分合同通过，整体仍失败；未并入产品，见下节 |
 | 标准客户端 UDP 补验 | [兼容边界及最小计划](STANDARD_CLIENT_COMPATIBILITY.md) | 尚未执行新的 stock Mihomo 大包/同应用关联恢复组；不阻塞本轮 TCP 产品功能 |
 | 手机、真实外部线路 | 实机与运营线路独立门槛 | 未验收；Linux core loopback 不代替手机导入/TUN/移动网络 |
@@ -64,12 +64,21 @@
 
 | 阶段 | 交付 | 当前状态 | 退出门槛 |
 | --- | --- | --- | --- |
-| P0 | 本入口、设计契约、精确调用点与兼容纠正 | 文档编写/独审中 | 无未决的保护策略降级，独审可据文档接续 |
-| P1 | 严格三态字段、旧库迁移、统一有效策略、身份兼容 | 待实现 | 旧全 inherit 配置/身份保持；非法/null 拒绝；省略更新保留 |
-| P2 | apply/rollback/启动/恢复/备份/删除保护 | 待实现 | 双全局 off + explicit relay 仍受保护；任何不一致不退普通直连 |
-| P3 | API/UI/导出三用途与 desired/applied 标识 | 待实现 | 标准客户端只获入口信息；取消/刷新/失败无假生效/秘密泄露 |
-| P4 | stock Mihomo 同实例两个节点和 host 四组合 | 待实现 | 真实目标分别观察本机/海外出口；负向原因、零误送达、无回退；四状态/12 切换 |
+| P0 | 本入口、设计契约、精确调用点与兼容纠正 | 已独审并公开记录；不是功能通过 | 无未决的保护策略降级，独审可据文档接续 |
+| P1 | 严格三态字段、旧库迁移、统一有效策略、身份兼容 | 已集成首版，23 新增 + 26 原 compiler 控制通过；待跨层全量验收 | 旧全 inherit 配置/身份保持；非法/null 拒绝；省略更新保留 |
+| P2 | apply/rollback/启动/恢复/备份/删除保护 | 已有 132 项纯事务控制通过的 WIP；恢复/installed smoke 与全量回归进行中 | 双全局 off + explicit relay 仍受保护；任何不一致不退普通直连 |
+| P3 | API/UI/导出三用途与 desired/applied 标识 | 已集成首版；29 项 API/export、14 项 Node 控制通过；真实浏览器待 CI | 标准客户端只获入口信息；取消/刷新/失败无假生效/秘密泄露 |
+| P4 | stock Mihomo 同实例两个节点和 host 四组合 | 正在编写真实双面板/标准导出夹具，尚未运行 | 真实目标分别观察本机/海外出口；负向原因、零误送达、无回退；四状态/12 切换 |
 | P5 | 最终候选、独审、八组、四目标、正常合并后重验 | 待执行 | 准确 SHA/tree、所有必需 job/step 终态，历史失败和 skip 单列 |
+
+## 本阶段 WIP 与失败记录
+
+- P1 保留旧全 inherit 编译身份；12 组旧实现逐值对照一致。迁移并发只做了线程/RLock 幂等测试，不能称跨进程迁移已验。
+- P1 独立旧 proxy 宽扫曾出现 112 errors、6 failures、50 skips，主要是旧瞬时 fixture 缺新字段和未整合跨层实现；保留原失败，随后必须在完整候选重新运行。
+- 前端新增 4 组 Chromium 生命周期用例已接入原 browser gate；本地首次 13 项在 Chromium 启动时 socket EPERM，另一次启动工具遇只读 sandbox 错误。没有取得浏览器运行成功证据；不通过改变系统权限解决。
+- 当前 P2 首版独审仍有双向能力 fence 必修项：`state.schema_version=2` 却缺 DB mode 列必须拒绝；DB 已有非 inherit 行但缺完整 v2 状态（含整个 proxy store 缺失）也必须拒绝。不能 bootstrap 或补写标记把损坏备份当可信旧数据。132 项纯测试是局部结果，尚未覆盖并关闭该缺口。
+- 当前纯测试分别只证明对应组件。全套、真实核心、浏览器、恢复/installed smoke 与同提交四目标未完成，不能合并或声明功能收口。
+- 首次指定直连可保持两个开关关闭、**不选择上游**，正常 check/apply 建立活动配置；保存期间没有活动配置时显示待应用/不可确认。指定中转才需要先应用合法的已选上游；不能把普通直连变成必须配置海外。
 
 ## 接手命令与环境
 

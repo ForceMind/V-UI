@@ -29,7 +29,8 @@
 - API 新建省略字段默认 inherit；更新省略严格保留。显式 null、非字符串及未知值 422，失败不持久化。包括 legacy sing-box CRUD，不能让完整 model_dump 的默认覆盖省略字段。
 - 字段是独立路由元数据，不藏入协议 settings/stream_settings、备注或导出 URI。普通 allowlist 响应允许展示非秘密的 mode，不扩大凭据可见性。
 - 禁用的 relay 节点可保存为草稿，不发起网络、不宣称可用。启用或切换为有效 relay 前必须校验所需上游、入口资格、全量快照与地址策略；无可应用上游时返回明确拒绝，不以 direct 运行。
-- 首次流程可完成而无需临时打开全局：先导入/选择上游，在双开关均 off 时正常 check/apply 该选择；保存禁用 relay 节点；启用时使用该已提交选择做 preparation/reconcile。active=None 时不启用 relay，UI 明确指引先应用已选上游。不能把未应用 draft 凭据当成 active。
+- 首次指定 direct 不需要海外上游：双开关 off、selected_upstream 为空时可正常 check/apply 建立 active。保存时尚无 active 则显示未应用，不走普通 base 配置假称成功。
+- 首次指定 relay 流程可完成而无需临时打开全局：先导入/选择上游，在双开关均 off 时正常 check/apply 该选择；保存禁用 relay 节点；启用时使用该已提交选择做 preparation/reconcile。active=None 时不启用 relay，UI 明确指引先应用已选上游。不能把未应用 draft 凭据当成 active。
 - active 双开关 off/endpoint=None 的首次启用，由节点的纯 precommit 检查确认已选模型/模式/入口资格；后续显式 reconcile 在共同锁内有界解析、验证和固定该 active 上游，生成完整候选，再按原 commit-last 事务应用。fresh pin 仅限旧 committed snapshot 确实不需上游、其合法 context.endpoint=None，而新候选首次需要的转换；若旧 committed 已需上游却缺 endpoint，视为损坏并停住，绝不重新解析补救。判断旧状态不读取已修改的 desired DB 来猜测。status、startup recovery 不进行这次隐式解析；失败可重试显式应用，不必先开 global。
 - 第一次保存任一非 inherit 模式前，先在 proxy 顶层私有 `state.schema_version` 升为 2 作为能力标记，使 a98 的旧 reader 本身拒绝；仅加 SQLite 列不够。marker 写入在行提交之前，失败不改行；若行提交失败，保留较新 marker 是安全的单调结果。全 inherit 旧安装不无故升级身份。仅升级 draft settings 不足，因为旧 load_active 未必读取 draft；顶层 state 则由旧 `_validate_state` 固定拒绝非1。settings/revision/secret 原结构不为此任意升级；新 runtime_context 另用 v2 保存模式快照。新程序同时严格读旧 v1 和新 v2；需要精确旧 reader 降级拒绝测试。
 
@@ -65,7 +66,7 @@
 2. 首次启用显式 relay 所需 pin 按第3节在有界 preparation 中建立，绑定既有已应用选择与完整 prospective rows，不能暗中应用更新的 proxy 草稿。check/apply 除 proxy revision 外还要绑定入口策略 fingerprint；节点变更后旧审阅令牌/候选摘要失效。
 3. SQLite desired 行提交与私有 runtime 事务是两个提交域，不声称跨库全原子回滚。保存成功/apply 失败沿用明确 `saved:true, applied:false`；旧已提交 runtime 仅在可完整证明其原策略身份时恢复。新 desired 标为待应用，不能标新策略生效。恢复不能确认则停受影响核心，保留 journal；不转普通直连。
 4. direct→relay、relay→direct、禁用/删除、全局开关、上游更换均是完整策略事务。失败/进程中断/磁盘满不得只切换一部分入口或保留未知 runtime。
-5. 模式改变可能不改变核心配置 bytes，例如 global on 时 inherit→relay；仍须改变已应用策略身份，status/启动不能只比较 core_revision。启动同时核已保存 policy_identity 与明确版本的入口策略快照，保留旧 v1 全 inherit 身份。启动先恢复 proxy journal，再普通 core auto-start。损坏/null/未知 mode、缺上游、旧身份或 rows 不一致均 fail closed。用户手动停止的核心不因模式保存/证书续期自动开启。
+5. 模式改变可能不改变核心配置 bytes，例如 global on 时 inherit→relay；仍须改变已应用策略身份，status/启动不能只比较 core_revision。启动同时核已保存 policy_identity 与明确版本的入口策略快照，保留旧 v1 全 inherit 身份。启动先恢复 proxy journal，再普通 core auto-start。损坏/null/未知 mode、缺上游、旧身份或 rows 不一致均 fail closed。新非 inherit / v2 已应用策略下，用户手动停止的核心不因模式保存/证书续期自动开启；旧全 inherit 普通 CRUD 的既有启动语义保持，显式 restart 仍可开启。
 6. 当前或 pending 活跃中转所引用上游不得删除，即使双 flag 都 off；disabled draft 引用如何清理必须明确报错或解绑，不能偷偷改 direct。
 7. 普通 restore 对照 committed 上下文的保护入口精确 ID/绑定集合，而不是 dirty DB、两个 flags 或数量；relay(A)→direct(A)+relay(B) 也拒绝。手动 stop 不清除保护意图。备份保留 mode 与所有关联元数据；旧无列备份仅通过明确旧 schema 迁移为 inherit。新格式恢复/回滚到不懂 mode 的旧程序须拒绝或提供明确兼容门槛，不能悄悄丢列并直出。专用 offline recovery 继续通过显式精确计划处理；installed smoke 增加混合模式及旧 reader 拒绝。
 

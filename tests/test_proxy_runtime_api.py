@@ -56,6 +56,27 @@ class ProxyRuntimeApiTests(unittest.TestCase):
             self.assertNotIn('secret', result.text)
         self.manager.apply_proxy.assert_not_called()
 
+    def test_source_fingerprint_is_strict_and_forwarded_to_the_manager(self):
+        fingerprint = 'a' * 64
+        self.manager.apply_proxy.return_value = {'snapshot': self.snapshot,
+            'phase': 'committed', 'applied': True}
+        response = self.post(payload={'base_revision': self.snapshot['revision'],
+                                      'source_fingerprint': fingerprint})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.manager.apply_proxy.assert_called_once_with(self.snapshot['revision'], KEY,
+                                                        expected_source_fingerprint=fingerprint)
+        self.manager.check_proxy.return_value = {'snapshot': self.snapshot,
+            'phase': 'checked', 'applied': False, 'source_fingerprint': fingerprint}
+        response = self.post('/check', payload={'base_revision': self.snapshot['revision']})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['source_fingerprint'], fingerprint)
+        for value in ('', 'a' * 63, 'A' * 64, True, 1, {}, fingerprint + '\n'):
+            before = self.manager.apply_proxy.call_count
+            response = self.post(payload={'base_revision': self.snapshot['revision'],
+                                          'source_fingerprint': value})
+            self.assertEqual(response.status_code, 422, response.text)
+            self.assertEqual(self.manager.apply_proxy.call_count, before)
+
     def test_duplicate_physical_idempotency_keys_are_rejected(self):
         for second in (KEY, '2' * 64):
             headers = [*HEADERS.items(), ('Idempotency-Key', KEY), ('idempotency-key', second)]

@@ -304,6 +304,7 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
 (async () => {
   for (const editing of [null, 7]) for (const security of ['none', 'reality']) {
     const state = setup();
+    state.showAddInbound.value = true;
     state.editingInboundId.value = editing;
     state.newInbound.certificate_id = 'a'.repeat(32);
     state.newInbound.profile.security = security;

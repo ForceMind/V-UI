@@ -73,8 +73,13 @@ def _database(data, *, revoke=False):
 def _rows(data):
     with sqlite3.connect((data / 'v-ui.db').as_uri() + '?mode=ro', uri=True) as db:
         db.row_factory = sqlite3.Row
+        schema = {row[1] for row in db.execute('PRAGMA table_info(inbounds)')}
         columns = ('id', 'core', 'enable', 'expiry_time', 'port', 'protocol',
-                   'settings', 'stream_settings', 'tag')
+                   'settings', 'stream_settings', 'tag', 'remark', 'user_id', 'total')
+        has_mode = 'routing_mode' in schema
+        if has_mode:
+            columns += ('routing_mode',)
+        _require(set(columns) <= schema)
         # SQLite length(TEXT) counts characters and NULL propagates across +.
         # Bound actual bytes of every selected field before materializing rows.
         lengths = ' + '.join('coalesce(length(CAST(' + key + ' AS BLOB)), 0)' for key in columns)
@@ -83,6 +88,12 @@ def _rows(data):
         rows = []
         for raw in db.execute('SELECT ' + ','.join(columns) + ' FROM inbounds ORDER BY id'):
             item = dict(raw)
+            # Only a genuinely missing old column migrates to inherit. An
+            # existing NULL/unknown value is corrupt and must never downgrade.
+            if not has_mode:
+                item['routing_mode'] = 'inherit'
+            from app.services.inbound_policy import normalize_mode
+            item['routing_mode'] = normalize_mode(item['routing_mode'])
             _require(item.get('enable') in (0, 1))
             item['enable'] = bool(item['enable'])
             for key in ('settings', 'stream_settings'):
@@ -92,6 +103,8 @@ def _rows(data):
                 _require(type(item[key]) is dict)
             rows.append(SimpleNamespace(**item))
             _require(len(rows) <= 32768)
+        if not has_mode and (Path(data) / '.proxy-state-initialized').exists():
+            _require(ProxyStore(data).policy_schema_version() == 1)
         return rows
 
 
@@ -142,14 +155,84 @@ def _validate(data):
         # A manually stopped core keeps its committed proxy policy. Preserve
         # that false intent, but an empty configuration cannot be enabled.
         _require(not runtime['enabled'] or bool(compiled.config.get('inbounds')))
-        if active['settings']['relay_enabled']:
+        from app.services.inbound_policy import policy_plan
+        plan = policy_plan(rows, active['settings'])
+        if context['schema_version'] == 2:
+            _require(context['plan_manifest'] == plan.manifest
+                     and context['source_fingerprint'] == plan.source_fingerprint)
+        else:
+            _require(plan.legacy)
+        if active['settings']['relay_enabled'] or plan.relay_ids:
             _require(not xray['enabled'])
+    else:
+        from app.services.inbound_policy import policy_plan
+        from app.services.proxy_store import _defaults
+        # An unapplied direct or disabled-relay draft is preservable. It has
+        # no applied mode claim; startup's active-none guard still blocks new
+        # modes from the ordinary auto-start path. Enabled relay needs active.
+        _require(not policy_plan(_rows(data), _defaults()).relay_ids)
     return {'draft_revision': snapshot['revision'],
             'draft_switches': {key: snapshot['settings'][key] for key in _FLAGS},
             'active_revision': None if active is None else active['revision'],
             'active_switches': None if active is None else {key: active['settings'][key] for key in _FLAGS},
             'core_revision': None if active is None else active['core_revision'],
             'core_enabled': runtime['enabled']}
+
+
+def migrate_legacy_modes(data):
+    """Explicit old-backup migration, used only in private restore staging."""
+    data = Path(data)
+    with sqlite3.connect(data / 'v-ui.db') as db:
+        schema = {row[1] for row in db.execute('PRAGMA table_info(inbounds)')}
+        if 'routing_mode' not in schema:
+            if (data / '.proxy-state-initialized').exists():
+                _require(ProxyStore(data).policy_schema_version() == 1)
+            db.execute("ALTER TABLE inbounds ADD COLUMN routing_mode VARCHAR NOT NULL DEFAULT 'inherit'")
+            db.commit()
+    with (data / 'v-ui.db').open('rb') as handle: os.fsync(handle.fileno())
+
+
+def committed_protection(data):
+    """Exact protected bindings from committed files, never dirty SQLite rows."""
+    data = Path(data)
+    store = ProxyStore(data)
+    active = store.load_active(reject_pending=True)
+    if active is None:
+        return {'local': False, 'global': False, 'bindings': []}
+    state = _runtime(data, 'sing-box')
+    _require(state['revision'] == active['core_revision'])
+    context = active.get('runtime_context')
+    _require(context is not None and context['candidate_core_revision'] == active['core_revision'])
+    config = _json(data / 'runtime' / 'sing-box' / (active['core_revision'] + '.json'), 16 * 1024 * 1024)
+    from app.services.proxy_policy import NAMESPACE
+    plan = store.context_plan(context, active['settings'])
+    protected = {entry['id']: entry for entry in plan.manifest
+                 if entry['enable'] and entry['effective'] == 'relay'} if plan is not None else None
+    bindings = []
+    seen = set()
+    for inbound in config.get('inbounds', []):
+        tag = inbound.get('tag')
+        if not isinstance(tag, str) or not tag.startswith(NAMESPACE + 'ingress-'):
+            continue
+        suffix = tag[len(NAMESPACE + 'ingress-'):]
+        _require(suffix.isdigit() and str(int(suffix)) == suffix)
+        identifier = int(suffix)
+        _require(identifier > 0 and identifier not in seen)
+        seen.add(identifier)
+        _require(protected is not None or active['settings']['relay_enabled'])
+        if protected is not None:
+            entry = protected.get(identifier)
+            _require(entry is not None and entry['core'] == 'sing-box'
+                     and inbound.get('type') == entry['protocol']
+                     and inbound.get('listen_port') == entry['port'])
+        # The complete committed inbound binding includes its credentials and
+        # TLS source but exposes only its digest to the internal comparison.
+        bindings.append({'id': identifier, 'binding_sha256': _hash(inbound)})
+    if protected is not None:
+        _require(seen == set(protected))
+    return {'local': active['settings']['local_proxy_enabled'],
+            'global': active['settings']['relay_enabled'],
+            'bindings': sorted(bindings, key=lambda entry: entry['id'])}
 
 
 def _normalize_extracted(work):

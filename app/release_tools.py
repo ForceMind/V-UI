@@ -716,6 +716,36 @@ def activate(root: Path, identity: str):
         _activate_locked(guard, identity)
 
 
+def _policy_release_compatible(data: Path, payload: Path):
+    """Refuse a release lacking the explicit per-inbound reader capability.
+
+    Read a literal from already verified package source; do not execute an old
+    release against live data merely to discover that it ignores new metadata.
+    """
+    if not (data / '.proxy-state-initialized').exists():
+        return
+    from app.services.proxy_store import ProxyStore, ProxyStorageError
+    try:
+        required = ProxyStore(data).policy_schema_version()
+    except ProxyStorageError:
+        raise ReleaseError('Proxy compatibility cannot be established; dedicated recovery is required') from None
+    if required == 1:
+        return
+    import ast
+    source = payload / 'app' / 'services' / 'proxy_store.py'
+    try:
+        raw = source.read_bytes()
+        if len(raw) > 512 * 1024: raise ValueError()
+        module = ast.parse(raw)
+        values = [node.value.value for node in module.body if isinstance(node, ast.Assign)
+                  and any(isinstance(target, ast.Name) and target.id == 'PROXY_STATE_SCHEMA_MAX'
+                          for target in node.targets) and isinstance(node.value, ast.Constant)]
+        if len(values) != 1 or type(values[0]) is not int or values[0] < required:
+            raise ValueError()
+    except (OSError, ValueError, SyntaxError):
+        raise ReleaseError('Selected release cannot read per-inbound routing; downgrade refused') from None
+
+
 def _activate_locked(guard: _StoppedGuard, identity: str):
     guard._check(); root=guard.root; identity=release_id(identity)
     release=root/'releases'/identity
@@ -724,6 +754,7 @@ def _activate_locked(guard: _StoppedGuard, identity: str):
     ready=verify_runtime(release)
     if digest((release/'payload'/MANIFEST).read_bytes()) != ready['manifest_sha256'] or meta['release_id'] != identity:
         raise ReleaseError('Release not prepared')
+    _policy_release_compatible(root / 'data', release / 'payload')
     health_check(release)
     previous=active(root)[1]['release_id'] if (root/'CURRENT.json').exists() else None
     (root/'data').mkdir(mode=0o700,exist_ok=True)
@@ -826,6 +857,7 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
         (work/MANIFEST).unlink()
         proxy_names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
         incoming_proxy = None
+        current_schema = 1
         if any(os.path.lexists(work / name) for name in proxy_names):
             from app.services.proxy_store import ProxyStore, ProxyStorageError
             try:
@@ -859,7 +891,9 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
             # proxy-bearing backups may silently replace an ON policy with OFF.
             from app.services.proxy_store import ProxyStore, ProxyStorageError
             try:
-                current = ProxyStore(root / 'data').read_snapshot(initialize=False)
+                current_store = ProxyStore(root / 'data')
+                current = current_store.read_snapshot(initialize=False)
+                current_schema = current_store.policy_schema_version()
             except ProxyStorageError:
                 raise ReleaseError('Current proxy policy is unknown; dedicated recovery is required') from None
             if current['pending'] is not None:
@@ -870,6 +904,22 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
                     incoming_active is None or not incoming_active['settings'][key])
                     for key in ('local_proxy_enabled', 'relay_enabled')):
                 raise ReleaseError('Backup would turn off an active proxy; explicitly disable and commit those settings before restoring it')
+            from app.services.proxy_recovery import committed_protection
+            protected = committed_protection(root / 'data')
+            incoming_protected = (committed_protection(work) if incoming_proxy is not None
+                                  else {'local': False, 'global': False, 'bindings': []})
+            if protected['bindings'] and protected['bindings'] != incoming_protected['bindings']:
+                raise ReleaseError('Backup changes committed protected inbound bindings; dedicated recovery is required')
+        if incoming_proxy is not None:
+            from app.services.proxy_recovery import _validate
+            _validate(work)
+        if current_schema == 2:
+            # Ordinary restore cannot undo an already durable capability fence.
+            from app.services.proxy_recovery import migrate_legacy_modes
+            migrate_legacy_modes(work)
+            ProxyStore(work).ensure_policy_v2()
+        if (root / 'CURRENT.json').exists():
+            _policy_release_compatible(work, active(root)[0] / 'payload')
         db_path=work/'v-ui.db'
         if not db_path.is_file(): raise ReleaseError('Backup has no database')
         with sqlite3.connect(db_path) as db:

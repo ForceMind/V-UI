@@ -100,7 +100,7 @@ for local, relay in ((False, False), (True, False), (False, True), (True, True))
     root.mkdir(mode=0o700)
     data = root / 'data'
     data.mkdir(mode=0o700)
-    row = SimpleNamespace(id=1, user_id=1, core='sing-box', up=0, down=0, total=0,
+    row = SimpleNamespace(id=1, routing_mode='inherit', user_id=1, core='sing-box', up=0, down=0, total=0,
         remark='synthetic preserved inbound', enable=True, expiry_time=0, port=24443,
         protocol='vless', tag='synthetic-inbound', settings={'users': [{'uuid': uid}]},
         stream_settings={'tls': {'enabled': True, 'server_name': 'node.example.test',

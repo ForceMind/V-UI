@@ -1,12 +1,12 @@
 """Legacy Xray routes retain authentication and are scoped to Xray rows."""
 from __future__ import annotations
-from typing import Any
+from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from app.api.cores import apply_checked
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from app.models.database import get_db
-from app.services.inbound_service import create_inbound, delete_inbound, get_inbound, list_inbounds, to_dict, update_inbound
+from app.services.inbound_service import create_inbound, delete_inbound, get_inbound, list_inbounds, routing_dicts, to_dict, update_inbound
 
 router = APIRouter()
 
@@ -15,6 +15,7 @@ class LegacyInboundPayload(BaseModel):
     remark: str = ""
     port: int = Field(ge=1, le=65535)
     protocol: str
+    routing_mode: Literal["inherit", "direct", "relay"] = "inherit"
     settings: dict[str, Any] | str | None = None
     stream_settings: dict[str, Any] | str | None = None
     enable: bool = True
@@ -29,7 +30,7 @@ def _check_scope(db, inbound_id):
 
 @router.get("/inbounds")
 def get_inbounds(db: Session = Depends(get_db)):
-    return [to_dict(item) for item in list_inbounds(db, core="xray")]
+    return routing_dicts(db, core="xray")
 
 @router.post("/inbounds")
 def add_inbound(payload: LegacyInboundPayload, db: Session = Depends(get_db)):
@@ -42,6 +43,8 @@ def add_inbound(payload: LegacyInboundPayload, db: Session = Depends(get_db)):
 def edit_inbound(inbound_id: int, payload: LegacyInboundPayload, db: Session = Depends(get_db)):
     _check_scope(db, inbound_id)
     data = payload.model_dump(exclude={"id", "total_traffic"})
+    if "routing_mode" not in payload.model_fields_set:
+        data.pop("routing_mode", None)
     data["core"] = "xray"
     item = update_inbound(db, inbound_id, data)
     return {"message": "Inbound updated", "inbound": to_dict(item), "core": apply_checked("xray")}
@@ -54,4 +57,4 @@ def remove_inbound(inbound_id: int, db: Session = Depends(get_db)):
 
 @router.post("/restart")
 def restart_xray():
-    return apply_checked("xray")
+    return apply_checked("xray", preserve_stopped=False)

@@ -175,6 +175,12 @@
                         </el-table-column>
                         <el-table-column prop="protocol" label="协议" width="120"></el-table-column>
                         <el-table-column prop="port" label="端口" width="100"></el-table-column>
+                        <el-table-column label="已保存策略" min-width="130">
+                            <template #default="scope">{{ inboundSavedRouting(scope.row) }}</template>
+                        </el-table-column>
+                        <el-table-column label="已应用出口 / 状态" min-width="240">
+                            <template #default="scope">{{ inboundAppliedRouting(scope.row) }}</template>
+                        </el-table-column>
                         <el-table-column label="操作" width="450">
                             <template #default="scope">
                                 <el-button size="small" type="primary" plain @click="openEditInbound(scope.row)">
@@ -423,6 +429,7 @@
 
                 <div v-if="currentView === 'subscriptions'">
                     <h3>订阅输出</h3>
+                    <p id="subscription-routing-capability" role="note">普通配置描述入口协议，不证明已应用出口；已应用中转入口本轮仅 TCP，服务器拒绝 UDP，具体以节点的已应用状态为准。普通直连既有能力不变。</p>
                     <el-alert
                         title="Mihomo / Clash Meta YAML 会自动使用 Mihomo 分流页保存的 ToClash 规则；Base64 与 sing-box JSON 仅输出节点连接信息。"
                         type="info"
@@ -521,8 +528,9 @@
         </el-container>
     </el-container>
 
-    <el-dialog v-model="showAddInbound" :title="editingInboundId ? '编辑节点' : '添加节点'" width="720px">
-        <el-form :model="newInbound" label-width="130px">
+    <el-dialog v-model="showAddInbound" :title="editingInboundId ? '编辑节点' : '添加节点'" width="720px"
+        @close="closeInboundEditor" :close-on-click-modal="!savingInbound" :close-on-press-escape="!savingInbound" :show-close="!savingInbound">
+        <el-form :model="newInbound" label-width="130px" :disabled="savingInbound">
             <el-form-item label="核心">
                 <el-radio-group v-model="newInbound.core" @change="onCoreChanged" :disabled="Boolean(editingInboundId)">
                     <el-radio-button label="xray">Xray</el-radio-button>
@@ -585,6 +593,17 @@
                     inactive-text="停用">
                 </el-switch>
             </el-form-item>
+
+            <el-form-item label="已保存路由策略">
+                <select id="inbound-routing-mode" v-model="newInbound.routing_mode" aria-label="已保存路由策略" :disabled="savingInbound">
+                    <option v-if="newInbound.routing_mode === null" :value="null">策略未确认（保持不改）</option>
+                    <option value="inherit">跟随全局（默认）</option>
+                    <option value="direct">指定直连</option>
+                    <option value="relay">指定中转</option>
+                </select>
+            </el-form-item>
+            <el-alert :title="inboundRoutingHint" type="info" :closable="false"></el-alert>
+            <p>此处编辑期望策略；保存后请以列表中的已应用出口 / 状态为准。普通分享只包含此入口信息。</p>
 
             <template v-if="!['shadowsocks','hysteria2','tuic'].includes(newInbound.protocol)">
                 <el-form-item label="传输方式">
@@ -877,8 +896,8 @@
         </el-form>
 
         <template #footer>
-            <el-button @click="showAddInbound = false">取消</el-button>
-            <el-button type="primary" @click="saveInbound">{{ editingInboundId ? '保存并应用' : '创建并应用' }}</el-button>
+            <el-button @click="closeInboundEditor" :disabled="savingInbound">取消</el-button>
+            <el-button type="primary" @click="saveInbound" :loading="savingInbound" :disabled="savingInbound">{{ editingInboundId ? '保存并应用' : '创建并应用' }}</el-button>
         </template>
     </el-dialog>
 
@@ -924,6 +943,7 @@
     </el-dialog>
 
     <el-dialog v-model="showQrDialog" title="分享节点" width="320px">
+        <p id="share-routing-capability" role="note" style="font-size: 13px; line-height: 1.6">普通配置描述入口协议，不证明已应用出口；已应用中转入口本轮仅 TCP，服务器拒绝 UDP，具体以节点的已应用状态为准。普通直连既有能力不变。</p>
         <div style="text-align: center">
             <div id="qrcode"></div>
             <p style="margin-top: 10px; word-break: break-all; font-size: 12px; color: #999">
