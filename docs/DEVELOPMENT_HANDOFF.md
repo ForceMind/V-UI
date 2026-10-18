@@ -6,7 +6,7 @@
 
 1. 阅读 [开发约束](../AGENTS.md) 和 [每入口路由契约](PER_INBOUND_ROUTING_CONTRACT.md)。
 2. [PR49](https://github.com/ForceMind/V-UI/pull/49) 已正常合并至签名 `0962f0c4995b3b7606652027f2330285e4dea1f7`，tree `b12d1e40d16060d3adfa1c29fb380ae5949896f5`，准确主线八组与四目标已独立验收。接手先核远端默认分支 **master**、当前工作树及后续提交；从准确最新 master 新建独立任务分支，不回到旧 feature 分支覆盖变更。
-3. 已完成：同一 V-UI 实例中，现成客户端导入不同普通 VLESS 节点，分别“跟随全局 / 指定直连 / 指定中转”。下一独立计划是标准客户端 UDP 补验；先读下表及兼容计划，不能把 TCP 收口当作 UDP、手机或发布许可。新提交仍需自己的准确验收。
+3. 已完成：同一 V-UI 实例中，现成客户端导入不同普通 VLESS 节点，分别“跟随全局 / 指定直连 / 指定中转”。标准客户端 UDP 独立研究已实际执行，完整容量与同关联 idle 门槛仍红；先读下表及研究记录，不能把 TCP 收口当作 UDP、手机或发布许可。新提交仍需自己的准确验收。
 4. 使用固定官方核心。不要从 UDP 实验分支整批移植补丁，也不要把手机客户端自研/重编译设为产品前提。
 5. 每阶段更新本文状态表与证据，提交可恢复的 WIP 文本备份。最终准确候选仍须完整审查及 CI；WIP 不是通过或可合并声明。
 
@@ -29,7 +29,7 @@
 | D1 TCP 上游专用导出 | `a98da9afbbf58a54f4f102cccec2f26b6e07d2ee`，[PR47](https://github.com/ForceMind/V-UI/pull/47) | 本阶段之前的产品基线；标准设备导出与“供另一 V-UI 导入的上游导出”用途不同 |
 | 每入口三态 TCP | 签名 master `0962f0c4995b3b7606652027f2330285e4dea1f7`，[PR49](https://github.com/ForceMind/V-UI/pull/49) | P0–P5 已收口；准确候选及主线八组、四目标、真实标准客户端和浏览器均独立验收，见[完整记录](PER_INBOUND_ROUTING_CLOSURE_20261018.md)。尚未发布 |
 | D2 XUDP/大包/owner 实验 | `afbdba100c5f0e3dc6888684fdbab31980720df3`，tree `996d37d925be8edd18cbf921d3cc580f43c0730d` | 独立实验部分合同通过，整体仍失败；未并入产品，见下节 |
-| 标准客户端 UDP 补验 | [兼容边界及最小计划](STANDARD_CLIENT_COMPATIBILITY.md) | 尚未执行新的 stock Mihomo 大包/同应用关联恢复组；不阻塞本轮 TCP 产品功能 |
+| 标准客户端 UDP 补验 | [兼容边界](STANDARD_CLIENT_COMPATIBILITY.md)、[实际研究与剩余计划](STANDARD_CLIENT_UDP_RESULTS_20261018.md) | 全 stock / 候选两服务器 / 官方海外 B 已分组实跑；小包部分完整，大包容量红，D前置失败使窗口/恢复未执行；产品relay UDP继续拒绝 |
 | 手机、真实外部线路 | 实机与运营线路独立门槛 | 未验收；Linux core loopback 不代替手机导入/TUN/移动网络 |
 | 低资源长期目标 | [资源合同](LOW_RESOURCE_TARGET.md)、[已有软件收口](LOW_RESOURCE_CLOSURE_20261011.md) | 既有软件优化证据保留；真实 1 vCPU/512 MiB 整机和 24 小时稳定性仍待专门环境 |
 | 新功能正式发布/部署 | [发布门槛](RELEASING.md) | 未执行；代码合并不等于发布，生产部署及新权限仍另行批准 |
@@ -145,8 +145,16 @@ python -m unittest discover -s tests -v
 
 没有 Python/核心/浏览器时记录精确未跑条件；不要把 mock、语法检查、skip 或旧 run 当成新功能绿灯。最终报告至少包含准确 head/tree、命令/run/attempt、实际通过/失败/skip、二进制来源、资源清理、独审结论与未完成项。新代码提交后及时更新本表，不抹去先前失败。
 
-## 标准客户端 UDP 研究恢复点（2026-10-18）
+## 标准客户端 UDP 历史恢复点（2026-10-18）
 
 已从准确 master 1489bf5218fced9b42c57e06715478dc323dc782 新建独立 experiment/standard-client-udp-20261018；[有界设计](../experiments/standard_client_udp/DESIGN.md)已独审，适配器仍是未验收 WIP。当前没有新增 UDP 通过结论。云执行器在首轮纯控制测试启动时断联；此前本地官方核心启动遭 netlink EPERM，零业务 UDP，不能解释为协议失败。恢复文本、未执行验证和下一步见[恢复记录](../experiments/standard_client_udp/RECOVERY.md)。
 
 继续顺序：先对恢复后的准确源码做语法/18项计划控制与独审，补严格证据归档和第一/第二跳负控；空白 CI runner 分开执行产品 relay UDP 拒绝、全 stock 两跳、候选服务器 owner-off C/D 和官方海外 B 组。C 为26 case/66 leaf，D为2/4，B为1/4；容量失败不改成预期通过，60000前置失败时释放窗/恢复未执行。保持2s配置及完整6s观察窗、原应用对象/tuple、一次发送无重放、清理与普通导出字段。实验仍不进入产品、不上传实验二进制、不要求自研手机 App、不发布或部署。
+
+## 标准客户端 UDP 当前结果与接续
+
+上段为云断联时的历史 WIP，不再是当前执行进度。研究源码、严格文本归档、单次发送与原始 tuple/payload 验证、source/binary 身份、完整 FD/进程清理及有界 coordinator 已实现并独审。准确 `8089b3f94e5fa599943bd9d9456b0c92cf28ddfe` 的 [run39167829699 attempt1](https://github.com/ForceMind/V-UI/actions/runs/39167829699)已实跑产品负控、全 stock C/D、候选服务器 C/D、官方海外 B；详细计数、原始证据摘要与未执行叶见[研究记录](STANDARD_CLIENT_UDP_RESULTS_20261018.md)。
+
+首轮产品 10/10通过；stock C/D红；candidate C有37次完整往返、1次本地EMSGSIZE及13叶容量失败；B两大下行各16114前缀。所有 D 的60000前置失败，生命周期窗/恢复均未执行。candidate-auth 子进程退出0但敏感文本归档拒绝，未上传材料，不授负控资格。后续准确 `fa96996b8fa1f92819c4fb0fd97ce047e8a8521d` 仅修研究日志脱敏/完整行绑定，31项控制独审通过，并以[run39169374994 attempt1](https://github.com/ForceMind/V-UI/actions/runs/39169374994)重新运行并已终态：产品10/10通过，stock/candidate/B容量仍红；candidate-auth新归档完整可核，3方法/7故障子场景全部通过，22.055秒。六个新文本归档均已保存，旧失败保留，结果分提交核验。
+
+接续仍在隔离实验分支：先明确普通现成客户端实际入口、MTU内负载和服务端最小必要改动，再独立验证手机导入/TUN/公网与生命周期。不能把固定 Linux Mihomo SOCKS 入口的大包失败外推所有手机，不能为了极大包门槛直接要求自研 App，也不能以小包替代原完整容量/2s释放门槛。当前产品每入口 TCP 与既有普通 direct 能力保持；relay UDP继续拒绝，八补丁仍不进产品，暂无发布/部署或二进制分发。

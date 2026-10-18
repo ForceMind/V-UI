@@ -4,6 +4,8 @@
 
 接手先读[开发状态与下一步](DEVELOPMENT_HANDOFF.md)，再读[每入口直连/中转 TCP 契约](PER_INBOUND_ROUTING_CONTRACT.md)和[标准客户端兼容边界](STANDARD_CLIENT_COMPATIBILITY.md)。用户已确认现成客户端导入不同标准 VLESS 节点，服务器分别直出/中转；本轮从准确产品主线 a98 独立实现，不依赖自研 App或实验核心发布。D1已在a98主线，三态实现已通过 [PR49](https://github.com/ForceMind/V-UI/pull/49) 正常合并，准确0962主线及四目标已独立验收，见[收口记录](PER_INBOUND_ROUTING_CLOSURE_20261018.md)；产品、实验、发布、实机资格分开记录。以下按日期保留历史入口。
 
+标准客户端 UDP 的全 stock、候选服务器与官方海外对照已实际运行，完整容量和同关联 idle 门槛仍红；[研究结果与接续计划](STANDARD_CLIENT_UDP_RESULTS_20261018.md)记录准确源码/归档、未执行叶、产品拒绝控制与手机/MTU后续边界。所有核心补丁仍留研究分支，不要求自研手机 App。
+
 ## 当前入口（2026-10-16）
 
 正式版为 [v0.4.8](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8)，发布于 2026-10-15，来源 `a9f9b5d9` 的安装器修复；正式版用户使用[固定 v0.4.8 文档](https://github.com/ForceMind/V-UI/blob/v0.4.8/docs/README.md)。当前源码版本仍标 **v0.4.8**，其后新增功能尚未正式发布。

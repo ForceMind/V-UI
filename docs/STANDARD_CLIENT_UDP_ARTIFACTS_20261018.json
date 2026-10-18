@@ -1,0 +1,128 @@
+{
+  "kind": "standard-client-udp-artifact-receipts",
+  "schema_version": 1,
+  "product_qualified": false,
+  "raw_evidence_embedded": false,
+  "notes": [
+    "ZIP digests and every text manifest member were independently verified. Receipts are not a substitute for raw evidence.",
+    "Each archive must be verified from its exact source commit, not the later documentation commit.",
+    "GitHub artifacts have seven-day retention. Experimental binaries were never uploaded."
+  ],
+  "runs": [
+    {
+      "run_id": 39167829699,
+      "run_attempt": 1,
+      "head_sha": "8089b3f94e5fa599943bd9d9456b0c92cf28ddfe",
+      "conclusion": "failure",
+      "artifacts": [
+        {
+          "artifact_id": 12151691505,
+          "name": "standard-udp-candidate-text",
+          "zip_bytes": 1240375,
+          "zip_sha256": "3b1dee56f54929ab355dc10b7ee4030212ce4f65c01778ac3520334982d00d31",
+          "text_files": 599,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39167829699/artifacts/12151691505",
+          "expires_at": "2026-10-25T21:36:42Z"
+        },
+        {
+          "artifact_id": 12151531347,
+          "name": "standard-udp-stock-auth-text",
+          "zip_bytes": 117288,
+          "zip_sha256": "76b3ef7234e53b0414699c9f8e5e3a4bc189c479e1543a867d7d7a30999a64ca",
+          "text_files": 26,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39167829699/artifacts/12151531347",
+          "expires_at": "2026-10-25T21:28:53Z"
+        },
+        {
+          "artifact_id": 12151432635,
+          "name": "standard-udp-product-negative-control",
+          "zip_bytes": 4230,
+          "zip_sha256": "2f820af135e97d85403d2bc027b13c65259f1305d724a8cbf2ef403a685bf524",
+          "text_files": 3,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39167829699/artifacts/12151432635",
+          "expires_at": "2026-10-25T21:27:32Z"
+        },
+        {
+          "artifact_id": 12151113668,
+          "name": "standard-udp-stock-text",
+          "zip_bytes": 509605,
+          "zip_sha256": "64671dd47e6628045ef7f1be35740e21a1648f7e000710dff109155d4f982d9c",
+          "text_files": 193,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39167829699/artifacts/12151113668",
+          "expires_at": "2026-10-25T21:28:26Z"
+        },
+        {
+          "artifact_id": 12150564692,
+          "name": "standard-udp-overseas-stock-text",
+          "zip_bytes": 824028,
+          "zip_sha256": "d61a93d73ea945085f71d6146df2ba29ffa661ddee1eed8eedc700bedcaee933",
+          "text_files": 436,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39167829699/artifacts/12150564692",
+          "expires_at": "2026-10-25T21:37:26Z"
+        }
+      ]
+    },
+    {
+      "run_id": 39169374994,
+      "run_attempt": 1,
+      "head_sha": "fa96996b8fa1f92819c4fb0fd97ce047e8a8521d",
+      "conclusion": "failure",
+      "artifacts": [
+        {
+          "artifact_id": 12152545803,
+          "name": "standard-udp-overseas-stock-text",
+          "zip_bytes": 822834,
+          "zip_sha256": "72aca108daaa6018095a8fb4074ad3743ccbbde3cb3f589c4b84801800f0bbaa",
+          "text_files": 436,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39169374994/artifacts/12152545803",
+          "expires_at": "2026-10-25T21:57:21Z"
+        },
+        {
+          "artifact_id": 12152446344,
+          "name": "standard-udp-candidate-text",
+          "zip_bytes": 1239157,
+          "zip_sha256": "15097ac874ac9e5b0a3dc6deecbd53020e8a8292b986ebc117bcbd6ffff1747d",
+          "text_files": 599,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39169374994/artifacts/12152446344",
+          "expires_at": "2026-10-25T21:56:45Z"
+        },
+        {
+          "artifact_id": 12152041944,
+          "name": "standard-udp-stock-text",
+          "zip_bytes": 509560,
+          "zip_sha256": "0113f01c38f5795676d142b69f49b0eaa3d008973e510d7776d357d49a440c74",
+          "text_files": 193,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39169374994/artifacts/12152041944",
+          "expires_at": "2026-10-25T21:50:23Z"
+        },
+        {
+          "artifact_id": 12151952377,
+          "name": "standard-udp-stock-auth-text",
+          "zip_bytes": 117396,
+          "zip_sha256": "d71fbf4bb03d3246a3575c114d5319867e24b162ef6dceb5288ebd677c4d0eb2",
+          "text_files": 26,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39169374994/artifacts/12151952377",
+          "expires_at": "2026-10-25T21:51:02Z"
+        },
+        {
+          "artifact_id": 12151868474,
+          "name": "standard-udp-candidate-auth-text",
+          "zip_bytes": 835723,
+          "zip_sha256": "82d6f6ce25d0c542b5aabf249fc3f4f699e360f74a42b2568bc3dcc69fa013b3",
+          "text_files": 445,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39169374994/artifacts/12151868474",
+          "expires_at": "2026-10-25T21:58:17Z"
+        },
+        {
+          "artifact_id": 12151782543,
+          "name": "standard-udp-product-negative-control",
+          "zip_bytes": 4204,
+          "zip_sha256": "9b01c6d45e58df7ae415483c2d5412b486202163b73a7a1fa0fd470944a4f3c9",
+          "text_files": 3,
+          "url": "https://github.com/ForceMind/V-UI/actions/runs/39169374994/artifacts/12151782543",
+          "expires_at": "2026-10-25T21:48:36Z"
+        }
+      ]
+    }
+  ]
+}
