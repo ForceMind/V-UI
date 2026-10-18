@@ -97,3 +97,5 @@
 - [双开关 M3：面板、分层诊断与严格导出](DUAL_PROXY_RELAY_M3.md)：候选交互、固定诊断目录、证据语义与独立导出边界。
 
 - [国内 UDP 候选精简结果](DOMESTIC_UDP_REDUCTION_RESULTS_20261018.md)：四原补丁 + Count 的国内-only 有限对照、准确构建/1200字节证据与维护边界。
+
+- [精简国内 UDP 认证与目的地址/DNS 守卫计划](DOMESTIC_UDP_GUARDS_PLAN_20261018.md)：固定角色、原护栏有限回归；设计阶段。
