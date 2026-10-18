@@ -1,5 +1,9 @@
 # V-UI 开发约束
 
+## 2026-10-18 显式实验设备 SOCKS owner / route-child
+
+准确 `6e73827` 已直接实测设备在上游 End 后关闭原 SOCKS control/relay，原 D 同关联恢复仍为 RED。用户持续开发授权下，按 [owner 合同](experiments/socks_idle_recovery/DESIGN.md) 追加三份隔离源码补丁，仅显式 opt-in 实验设备保留 SOCKS owner。每个新报文最多一次尝试；私有 transport/copy/finalizer 全部 join 后才下一代。原目标重映射、逐代策略校验保持，匿名正常 End 不证明 idle/成功，不重放、不保活、不关闭共享兄弟 parent。2026-10-18 云快照回退后，未公开源码重建为新候选并逐层 WIP 文本备份；非同字节内容必须重新审查、完整测试，不继承丢失前静态结果。旧官方 RED、产品 UDP 关闭、固定 pin、禁止未资格化合并/发布/部署/上传二进制保持。
+
 ## 2026-10-18 完整 UDP 收包与加密背压补充实验
 
 从已验实验 `95aef379` 继续剩余门槛，先审 [收包合同](experiments/xudp_packet/DESIGN.md)。保留旧官方设备/海外矩阵与全部 RED；新增固定 sing 源码收包补丁允许仅在 CI 隔离测试的设备、国内、海外角色运行，每个角色明确实验版本/hash，不代表现有官方客户端已修复。实验二进制只在 runner 临时使用，不上传或发布。既有固定产品 pin、产品 UDP 关闭、不得合并未资格化代码及不得部署边界不变。公开内容限计划内源码补丁、测试和文档。新增加密部分写取消测试须真实固定 Client/Service、精确帧恢复与全部 join；库级调用者结果不冒充实际 ConnectionManager 加密组合已验。

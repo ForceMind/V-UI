@@ -267,3 +267,48 @@ The correction moves the existing `requirements-test.txt` installation before
 packet controls; dependency versions, all 179 assertions, core patches, samplers
 and business gates stay unchanged. This is a new exact-head run, not a waived
 test, skipped import, inherited green result or unchanged-code retry.
+
+## 2026-10-18 accurate 6e passive owner observation
+
+Public commit `6e73827babcab15356e2b13f48b0eb3111bb2774`, tree
+`a53e0fc95bef8f5087cb274d1e7c85da11b839c1`,
+[run 39134100708 attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39134100708)
+completed failure. The mux mechanism succeeded; packet and original official
+runtime jobs retain their business RED gates. The only change from 3fa moved
+existing pinned Python dependency installation before the socket controls.
+
+- All 23 packet mechanism checks passed: 58 receive leaves in each native mode,
+  complete patched-dependency shared mux/encrypted/empty-datagram groups, six
+  Darwin/Windows compile-only checks, build and module verification. Compiler,
+  normalized graph, actual formatted source and same-head mechanism match.
+- C remains strictly complete: 78 cases / 198 leaves, consisting of 195 complete
+  request/reply checks and three actual local EMSGSIZE rejections.
+- D remains three idle failures and three explicit-close passes. Device control
+  PEEK initially returns EAGAIN. For AES, ChaCha and VLESS, a stable observation
+  first verifies EOF and absence of the original device control/relay inodes
+  after 2.129449176, 2.124861106 and 2.114730999 seconds. Before the unchanged
+  recovery send after the six-second observation window, the same local control
+  descriptor/tuple still reports EOF. The original single 32768-byte recovery
+  request observes zero target packets for four seconds. This is direct point
+  evidence, not proof of continuous absence throughout every sampling gap.
+- All six stages C/D/A/B/U/V executed with verified cleanup. Original gates are
+  true/false/false/true/true/false. B/U are complete diagnostics with capacity
+  RED. A18/V12 failed observations remain independently verifiable from raw logs.
+- Original runtime: both arms retain 19/20, six lifecycle passes and shared TCP
+  passes. Four VMess large-packet cases still yield the exact 15992-byte prefix
+  of 32768; 60000 is unexecuted. Nonfatal FD sampling races are retained; no
+  duplicate-inode fatal error occurred in this run. Earlier failures remain.
+
+Independent review verified the archives, complete manifests, exact source
+hashes and strict verifiers. Following a cloud snapshot rollback, the three
+archives were downloaded again and their bytes and all members reverified;
+this was evidence recovery, not another runtime execution.
+
+| Artifact | Members | ZIP bytes | ZIP SHA-256 |
+|---|---:|---:|---|
+| 12139541014 mux | 54 | 123961 | b22571ad46a74a26ca90f4a03729d6bceddff6a7037751c511021a60286cec69 |
+| 12139387656 packet | 757 | 1107783 | 6c1b707baeb1d7c1aae8ddcc7a5b6e9dadbb87ceabcc1b195f9bea5cc4f243c4 |
+| 12139088326 original runtime | 277 | 399542 | 2a1f7cb626893ef29303122f0afc266f6bcff7d686d1f27640171eae08c215ae |
+
+Product qualification remains false. The next owner overlay is a separately
+identified, opt-in experimental-device candidate; it cannot change these results.

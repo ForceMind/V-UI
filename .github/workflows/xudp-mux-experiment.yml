@@ -212,3 +212,78 @@ jobs:
           path: /tmp/vui-packet-upload
           retention-days: 7
           if-no-files-found: error
+
+  socks-owner-experiment:
+    needs: mux-experiment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing-box
+          ref: af6e64c3b69e6132ebaee0e1a3d24e93903f6709
+          path: .experiment-source/sing-box
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing-vmess
+          ref: 31ec11e8790c48a4bf11711806a61e929ee6b89d
+          path: .experiment-source/sing-vmess
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: SagerNet/sing
+          ref: 87c33f17688fe3dd80eeabef7c3f7a69152ccd42
+          path: .experiment-source/sing
+          persist-credentials: false
+      - name: Use existing fixed runner Go compiler
+        run: |
+          set -euo pipefail
+          GO_BIN="$RUNNER_TOOL_CACHE/go/1.25.14/x64/bin"
+          test "$(GOTOOLCHAIN=local "$GO_BIN/go" version)" = 'go version go1.25.14 linux/amd64'
+          printf '%s\n' "$GO_BIN" >> "$GITHUB_PATH"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: vui-xudp-mux-evidence
+          path: /tmp/vui-owner-mechanism
+      - name: Install existing pinned test dependencies before socket controls
+        run: pip install -r requirements-test.txt
+      - name: Verify opt-in owner source and evidence controls
+        run: |
+          python3 - <<'PYTHON'
+          import unittest
+          suite = unittest.TestLoader().discover('experiments/socks_idle_recovery', pattern='test_*.py')
+          assert suite.countTestCases() == 47
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          assert result.wasSuccessful() and not result.skipped
+          PYTHON
+      - name: Build independently identified base and complete owner candidate
+        run: |
+          python3 experiments/socks_idle_recovery/build_and_test.py \
+            --sing-box .experiment-source/sing-box \
+            --sing-vmess .experiment-source/sing-vmess \
+            --sing .experiment-source/sing \
+            --mechanism /tmp/vui-owner-mechanism \
+            --output /tmp/vui-owner-build
+      - name: Prepare allowlisted owner mechanism evidence
+        if: always()
+        id: evidence
+        run: |
+          python3 experiments/socks_idle_recovery/prepare_evidence.py \
+            --build /tmp/vui-owner-build/evidence \
+            --output /tmp/vui-owner-upload
+      - name: Preserve owner mechanism text only
+        if: ${{ !cancelled() && steps.evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vui-socks-owner-evidence
+          path: /tmp/vui-owner-upload
+          retention-days: 7
+          if-no-files-found: error

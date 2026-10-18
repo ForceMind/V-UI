@@ -1,0 +1,2740 @@
+{
+  "baseline_commit": "6e73827babcab15356e2b13f48b0eb3111bb2774",
+  "kind": "vui-socks-owner-frozen-off-outcomes",
+  "product_qualified": false,
+  "schema_version": 1,
+  "stages": {
+    "A": {
+      "evidence_manifest_sha256": "adbcfdc456ac014be74d242ccc0c87bb2697a2109cfacbee1172684acf7c38d4",
+      "outcomes": {
+        "capacity_failed_leaves": [],
+        "cases": [
+          {
+            "case": "A_aes_warmed",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_aes_warmed/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_aes_warmed/boundary_15991",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_aes_warmed/boundary_15992",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": false,
+                "leaf": "A_aes_warmed/boundary_15993",
+                "status": "capacity_failed_exact_prefix"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_aes_warmed/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_aes_first_15991",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_aes_first_15991/first",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_aes_first_15991/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_aes_first_15992",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_aes_first_15992/first",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_aes_first_15992/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_aes_first_15993",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_aes_first_15993/first",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_aes_first_15993/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_aes_first_16373",
+            "packets": [
+              {
+                "failure_kind": "explicit_device_short_buffer",
+                "full_delivery_passed": false,
+                "leaf": "A_aes_first_16373/first",
+                "status": "error"
+              },
+              {
+                "failure_kind": "target_zero_reply_timeout",
+                "full_delivery_passed": false,
+                "leaf": "A_aes_first_16373/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_aes_first_16374",
+            "packets": [
+              {
+                "failure_kind": "explicit_device_short_buffer",
+                "full_delivery_passed": false,
+                "leaf": "A_aes_first_16374/first",
+                "status": "error"
+              },
+              {
+                "failure_kind": "target_zero_reply_timeout",
+                "full_delivery_passed": false,
+                "leaf": "A_aes_first_16374/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_aes_first_16375",
+            "packets": [
+              {
+                "failure_kind": "explicit_device_short_buffer",
+                "full_delivery_passed": false,
+                "leaf": "A_aes_first_16375/first",
+                "status": "error"
+              },
+              {
+                "failure_kind": "target_zero_reply_timeout",
+                "full_delivery_passed": false,
+                "leaf": "A_aes_first_16375/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_chacha_warmed",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_chacha_warmed/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_chacha_warmed/boundary_15991",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_chacha_warmed/boundary_15992",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": false,
+                "leaf": "A_chacha_warmed/boundary_15993",
+                "status": "capacity_failed_exact_prefix"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_chacha_warmed/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_chacha_first_15991",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_chacha_first_15991/first",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_chacha_first_15991/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_chacha_first_15992",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_chacha_first_15992/first",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_chacha_first_15992/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_chacha_first_15993",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_chacha_first_15993/first",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_chacha_first_15993/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_chacha_first_16373",
+            "packets": [
+              {
+                "failure_kind": "explicit_device_short_buffer",
+                "full_delivery_passed": false,
+                "leaf": "A_chacha_first_16373/first",
+                "status": "error"
+              },
+              {
+                "failure_kind": "target_zero_reply_timeout",
+                "full_delivery_passed": false,
+                "leaf": "A_chacha_first_16373/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_chacha_first_16374",
+            "packets": [
+              {
+                "failure_kind": "explicit_device_short_buffer",
+                "full_delivery_passed": false,
+                "leaf": "A_chacha_first_16374/first",
+                "status": "error"
+              },
+              {
+                "failure_kind": "target_zero_reply_timeout",
+                "full_delivery_passed": false,
+                "leaf": "A_chacha_first_16374/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_chacha_first_16375",
+            "packets": [
+              {
+                "failure_kind": "explicit_device_short_buffer",
+                "full_delivery_passed": false,
+                "leaf": "A_chacha_first_16375/first",
+                "status": "error"
+              },
+              {
+                "failure_kind": "target_zero_reply_timeout",
+                "full_delivery_passed": false,
+                "leaf": "A_chacha_first_16375/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_vless_warmed",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_vless_warmed/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_vless_warmed/boundary_16105",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_vless_warmed/boundary_16106",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": false,
+                "leaf": "A_vless_warmed/boundary_16107",
+                "status": "capacity_failed_exact_prefix"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_vless_warmed/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_vless_first_16105",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_vless_first_16105/first",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_vless_first_16105/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_vless_first_16106",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_vless_first_16106/first",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_vless_first_16106/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_vless_first_16107",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_vless_first_16107/first",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "A_vless_first_16107/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_vless_first_16373",
+            "packets": [
+              {
+                "failure_kind": "explicit_device_short_buffer",
+                "full_delivery_passed": false,
+                "leaf": "A_vless_first_16373/first",
+                "status": "error"
+              },
+              {
+                "failure_kind": "target_zero_reply_timeout",
+                "full_delivery_passed": false,
+                "leaf": "A_vless_first_16373/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_vless_first_16374",
+            "packets": [
+              {
+                "failure_kind": "explicit_device_short_buffer",
+                "full_delivery_passed": false,
+                "leaf": "A_vless_first_16374/first",
+                "status": "error"
+              },
+              {
+                "failure_kind": "target_zero_reply_timeout",
+                "full_delivery_passed": false,
+                "leaf": "A_vless_first_16374/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "A_vless_first_16375",
+            "packets": [
+              {
+                "failure_kind": "explicit_device_short_buffer",
+                "full_delivery_passed": false,
+                "leaf": "A_vless_first_16375/first",
+                "status": "error"
+              },
+              {
+                "failure_kind": "target_zero_reply_timeout",
+                "full_delivery_passed": false,
+                "leaf": "A_vless_first_16375/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          }
+        ],
+        "diagnostic_complete": false,
+        "stage_capacity_passed": false
+      },
+      "result_sha256": "594b88168d6a464bb9540590f57e3ec1f2c08795a4bc04ba172400fbcb5c18d5"
+    },
+    "B": {
+      "evidence_manifest_sha256": "4d3fe3901b0f09ca1fb0d33e128c6600d4684516ec9a0b18bd778bfd6829488a",
+      "outcomes": {
+        "capacity_failed_leaves": [
+          "B_aes_response/response_32768",
+          "B_aes_response/response_60000",
+          "B_chacha_response/response_32768",
+          "B_chacha_response/response_60000",
+          "B_vless_response/response_32768",
+          "B_vless_response/response_60000"
+        ],
+        "cases": [
+          {
+            "case": "B_aes_response",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "B_aes_response/response_8192",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": false,
+                "leaf": "B_aes_response/response_32768",
+                "status": "capacity_failed_exact_prefix"
+              },
+              {
+                "full_delivery_passed": false,
+                "leaf": "B_aes_response/response_60000",
+                "status": "capacity_failed_exact_prefix"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "B_aes_response/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "B_chacha_response",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "B_chacha_response/response_8192",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": false,
+                "leaf": "B_chacha_response/response_32768",
+                "status": "capacity_failed_exact_prefix"
+              },
+              {
+                "full_delivery_passed": false,
+                "leaf": "B_chacha_response/response_60000",
+                "status": "capacity_failed_exact_prefix"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "B_chacha_response/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "B_vless_response",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "B_vless_response/response_8192",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": false,
+                "leaf": "B_vless_response/response_32768",
+                "status": "capacity_failed_exact_prefix"
+              },
+              {
+                "full_delivery_passed": false,
+                "leaf": "B_vless_response/response_60000",
+                "status": "capacity_failed_exact_prefix"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "B_vless_response/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          }
+        ],
+        "diagnostic_complete": true,
+        "stage_capacity_passed": false
+      },
+      "result_sha256": "b5c69cb4305f67a37ab55622b78203435bb053c26b2aca3c81fa4cc10db62c12"
+    },
+    "C": {
+      "evidence_manifest_sha256": "7c9303ccfd4a76c842d11fbdcea3e9943614ec3d101d99e9acef36863d4f5965",
+      "outcomes": {
+        "capacity_failed_leaves": [],
+        "cases": [
+          {
+            "case": "C_aes_first_uplink_0",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_uplink_0/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_uplink_0/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_first_uplink_1",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_uplink_1/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_uplink_1/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_first_uplink_8192",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_uplink_8192/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_uplink_8192/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_first_uplink_32768",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_uplink_32768/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_uplink_32768/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_first_uplink_60000",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_uplink_60000/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_uplink_60000/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_first_uplink_65497",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_uplink_65497/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_uplink_65497/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_first_downlink_0",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_downlink_0/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_downlink_0/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_first_downlink_1",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_downlink_1/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_downlink_1/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_first_downlink_8192",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_downlink_8192/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_downlink_8192/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_first_downlink_32768",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_downlink_32768/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_downlink_32768/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_first_downlink_60000",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_downlink_60000/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_downlink_60000/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_first_downlink_65497",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_downlink_65497/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_first_downlink_65497/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_warmed_uplink_0",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_0/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_0/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_0/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_warmed_uplink_1",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_1/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_1/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_1/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_warmed_uplink_8192",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_8192/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_8192/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_8192/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_warmed_uplink_32768",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_32768/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_32768/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_32768/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_warmed_uplink_60000",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_60000/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_60000/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_60000/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_warmed_uplink_65497",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_65497/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_65497/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_uplink_65497/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_warmed_downlink_0",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_0/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_0/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_0/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_warmed_downlink_1",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_1/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_1/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_1/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_warmed_downlink_8192",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_8192/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_8192/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_8192/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_warmed_downlink_32768",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_32768/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_32768/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_32768/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_warmed_downlink_60000",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_60000/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_60000/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_60000/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_warmed_downlink_65497",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_65497/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_65497/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_warmed_downlink_65497/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_full_short_zero_recovery",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_full_short_zero_recovery/full",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_full_short_zero_recovery/short",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_full_short_zero_recovery/empty",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_full_short_zero_recovery/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_aes_local_emsgsize",
+            "packets": [
+              {
+                "full_delivery_passed": false,
+                "leaf": "C_aes_local_emsgsize/oversize",
+                "status": "local_emsgsize_verified"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_aes_local_emsgsize/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_first_uplink_0",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_uplink_0/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_uplink_0/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_first_uplink_1",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_uplink_1/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_uplink_1/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_first_uplink_8192",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_uplink_8192/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_uplink_8192/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_first_uplink_32768",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_uplink_32768/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_uplink_32768/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_first_uplink_60000",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_uplink_60000/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_uplink_60000/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_first_uplink_65497",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_uplink_65497/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_uplink_65497/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_first_downlink_0",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_downlink_0/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_downlink_0/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_first_downlink_1",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_downlink_1/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_downlink_1/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_first_downlink_8192",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_downlink_8192/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_downlink_8192/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_first_downlink_32768",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_downlink_32768/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_downlink_32768/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_first_downlink_60000",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_downlink_60000/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_downlink_60000/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_first_downlink_65497",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_downlink_65497/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_first_downlink_65497/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_warmed_uplink_0",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_0/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_0/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_0/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_warmed_uplink_1",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_1/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_1/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_1/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_warmed_uplink_8192",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_8192/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_8192/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_8192/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_warmed_uplink_32768",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_32768/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_32768/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_32768/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_warmed_uplink_60000",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_60000/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_60000/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_60000/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_warmed_uplink_65497",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_65497/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_65497/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_uplink_65497/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_warmed_downlink_0",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_0/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_0/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_0/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_warmed_downlink_1",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_1/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_1/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_1/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_warmed_downlink_8192",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_8192/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_8192/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_8192/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_warmed_downlink_32768",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_32768/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_32768/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_32768/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_warmed_downlink_60000",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_60000/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_60000/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_60000/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_warmed_downlink_65497",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_65497/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_65497/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_warmed_downlink_65497/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_full_short_zero_recovery",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_full_short_zero_recovery/full",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_full_short_zero_recovery/short",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_full_short_zero_recovery/empty",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_full_short_zero_recovery/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_chacha_local_emsgsize",
+            "packets": [
+              {
+                "full_delivery_passed": false,
+                "leaf": "C_chacha_local_emsgsize/oversize",
+                "status": "local_emsgsize_verified"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_chacha_local_emsgsize/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_first_uplink_0",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_uplink_0/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_uplink_0/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_first_uplink_1",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_uplink_1/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_uplink_1/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_first_uplink_8192",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_uplink_8192/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_uplink_8192/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_first_uplink_32768",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_uplink_32768/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_uplink_32768/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_first_uplink_60000",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_uplink_60000/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_uplink_60000/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_first_uplink_65497",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_uplink_65497/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_uplink_65497/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_first_downlink_0",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_downlink_0/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_downlink_0/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_first_downlink_1",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_downlink_1/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_downlink_1/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_first_downlink_8192",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_downlink_8192/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_downlink_8192/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_first_downlink_32768",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_downlink_32768/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_downlink_32768/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_first_downlink_60000",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_downlink_60000/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_downlink_60000/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_first_downlink_65497",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_downlink_65497/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_first_downlink_65497/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_warmed_uplink_0",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_0/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_0/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_0/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_warmed_uplink_1",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_1/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_1/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_1/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_warmed_uplink_8192",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_8192/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_8192/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_8192/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_warmed_uplink_32768",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_32768/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_32768/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_32768/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_warmed_uplink_60000",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_60000/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_60000/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_60000/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_warmed_uplink_65497",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_65497/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_65497/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_uplink_65497/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_warmed_downlink_0",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_0/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_0/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_0/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_warmed_downlink_1",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_1/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_1/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_1/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_warmed_downlink_8192",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_8192/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_8192/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_8192/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_warmed_downlink_32768",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_32768/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_32768/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_32768/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_warmed_downlink_60000",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_60000/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_60000/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_60000/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_warmed_downlink_65497",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_65497/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_65497/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_warmed_downlink_65497/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_full_short_zero_recovery",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_full_short_zero_recovery/full",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_full_short_zero_recovery/short",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_full_short_zero_recovery/empty",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_full_short_zero_recovery/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "C_vless_local_emsgsize",
+            "packets": [
+              {
+                "full_delivery_passed": false,
+                "leaf": "C_vless_local_emsgsize/oversize",
+                "status": "local_emsgsize_verified"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "C_vless_local_emsgsize/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          }
+        ],
+        "diagnostic_complete": true,
+        "stage_capacity_passed": true
+      },
+      "result_sha256": "16de293f9d2959d9c6f83507b3a1308863af8e72c9db13ab420ff48a290ec348"
+    },
+    "D": {
+      "evidence_manifest_sha256": "b0febd32142cb780784eadb384d8ea4f40d965b7983a55885b855b9006aef9a7",
+      "outcomes": {
+        "capacity_failed_leaves": [],
+        "cases": [
+          {
+            "case": "D_aes_large_close",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "D_aes_large_close/large",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "D_aes_large_close/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "D_aes_large_idle",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "D_aes_large_idle/large",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": false,
+                "leaf": "D_aes_large_idle/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "D_chacha_large_close",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "D_chacha_large_close/large",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "D_chacha_large_close/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "D_chacha_large_idle",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "D_chacha_large_idle/large",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": false,
+                "leaf": "D_chacha_large_idle/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "D_vless_large_close",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "D_vless_large_close/large",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "D_vless_large_close/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "D_vless_large_idle",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "D_vless_large_idle/large",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": false,
+                "leaf": "D_vless_large_idle/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          }
+        ],
+        "diagnostic_complete": false,
+        "stage_capacity_passed": false
+      },
+      "result_sha256": "895a7b87ec07485a5bbf9d1827fe2f5c8bba4082f9f9559e076bfa557b416317"
+    },
+    "U": {
+      "evidence_manifest_sha256": "a83d507f6fefcbdbb46ba63c66b36b6c0257b35c126497dd70968ede7b02323f",
+      "outcomes": {
+        "capacity_failed_leaves": [
+          "U_aes_first_16375/first",
+          "U_chacha_first_16375/first",
+          "U_vless_first_16375/first"
+        ],
+        "cases": [
+          {
+            "case": "U_aes_first_16373",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "U_aes_first_16373/first",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "U_aes_first_16373/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "U_aes_first_16374",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "U_aes_first_16374/first",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "U_aes_first_16374/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "U_aes_first_16375",
+            "packets": [
+              {
+                "full_delivery_passed": false,
+                "leaf": "U_aes_first_16375/first",
+                "status": "capacity_failed_exact_prefix"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "U_aes_first_16375/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "U_chacha_first_16373",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "U_chacha_first_16373/first",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "U_chacha_first_16373/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "U_chacha_first_16374",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "U_chacha_first_16374/first",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "U_chacha_first_16374/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "U_chacha_first_16375",
+            "packets": [
+              {
+                "full_delivery_passed": false,
+                "leaf": "U_chacha_first_16375/first",
+                "status": "capacity_failed_exact_prefix"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "U_chacha_first_16375/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "U_vless_first_16373",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "U_vless_first_16373/first",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "U_vless_first_16373/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "U_vless_first_16374",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "U_vless_first_16374/first",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "U_vless_first_16374/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "U_vless_first_16375",
+            "packets": [
+              {
+                "full_delivery_passed": false,
+                "leaf": "U_vless_first_16375/first",
+                "status": "capacity_failed_exact_prefix"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "U_vless_first_16375/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          }
+        ],
+        "diagnostic_complete": true,
+        "stage_capacity_passed": false
+      },
+      "result_sha256": "fe97c9d08e1c353a79212e8ddc844d4da3222fcb5cc33f34b9fe9c1b9d98cbea"
+    },
+    "V": {
+      "evidence_manifest_sha256": "2aa89bf454eb6f9f663b0987bb38ae6c313ea86eccd83df7110e40062dc7fdb1",
+      "outcomes": {
+        "capacity_failed_leaves": [],
+        "cases": [
+          {
+            "case": "V_aes_first_16121",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_aes_first_16121/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_aes_first_16121/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_aes_first_16122",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_aes_first_16122/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_aes_first_16122/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_aes_first_16123",
+            "packets": [
+              {
+                "failure_kind": "explicit_device_short_buffer",
+                "full_delivery_passed": false,
+                "leaf": "V_aes_first_16123/probe",
+                "status": "error"
+              },
+              {
+                "failure_kind": "target_zero_reply_timeout",
+                "full_delivery_passed": false,
+                "leaf": "V_aes_first_16123/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_aes_warmed_16121",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_aes_warmed_16121/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_aes_warmed_16121/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_aes_warmed_16121/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_aes_warmed_16122",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_aes_warmed_16122/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_aes_warmed_16122/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_aes_warmed_16122/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_aes_warmed_16123",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_aes_warmed_16123/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "failure_kind": "explicit_device_short_buffer",
+                "full_delivery_passed": false,
+                "leaf": "V_aes_warmed_16123/probe",
+                "status": "error"
+              },
+              {
+                "failure_kind": "target_zero_reply_timeout",
+                "full_delivery_passed": false,
+                "leaf": "V_aes_warmed_16123/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_chacha_first_16121",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_chacha_first_16121/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_chacha_first_16121/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_chacha_first_16122",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_chacha_first_16122/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_chacha_first_16122/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_chacha_first_16123",
+            "packets": [
+              {
+                "failure_kind": "explicit_device_short_buffer",
+                "full_delivery_passed": false,
+                "leaf": "V_chacha_first_16123/probe",
+                "status": "error"
+              },
+              {
+                "failure_kind": "target_zero_reply_timeout",
+                "full_delivery_passed": false,
+                "leaf": "V_chacha_first_16123/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_chacha_warmed_16121",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_chacha_warmed_16121/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_chacha_warmed_16121/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_chacha_warmed_16121/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_chacha_warmed_16122",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_chacha_warmed_16122/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_chacha_warmed_16122/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_chacha_warmed_16122/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_chacha_warmed_16123",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_chacha_warmed_16123/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "failure_kind": "explicit_device_short_buffer",
+                "full_delivery_passed": false,
+                "leaf": "V_chacha_warmed_16123/probe",
+                "status": "error"
+              },
+              {
+                "failure_kind": "target_zero_reply_timeout",
+                "full_delivery_passed": false,
+                "leaf": "V_chacha_warmed_16123/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_vless_first_16121",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_vless_first_16121/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_vless_first_16121/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_vless_first_16122",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_vless_first_16122/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_vless_first_16122/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_vless_first_16123",
+            "packets": [
+              {
+                "failure_kind": "explicit_device_short_buffer",
+                "full_delivery_passed": false,
+                "leaf": "V_vless_first_16123/probe",
+                "status": "error"
+              },
+              {
+                "failure_kind": "target_zero_reply_timeout",
+                "full_delivery_passed": false,
+                "leaf": "V_vless_first_16123/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_vless_warmed_16121",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_vless_warmed_16121/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_vless_warmed_16121/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_vless_warmed_16121/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_vless_warmed_16122",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_vless_warmed_16122/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_vless_warmed_16122/probe",
+                "status": "full_delivery_passed"
+              },
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_vless_warmed_16122/recover",
+                "status": "full_delivery_passed"
+              }
+            ],
+            "status": "observed",
+            "unexecuted_leaves": []
+          },
+          {
+            "case": "V_vless_warmed_16123",
+            "packets": [
+              {
+                "full_delivery_passed": true,
+                "leaf": "V_vless_warmed_16123/warm",
+                "status": "full_delivery_passed"
+              },
+              {
+                "failure_kind": "explicit_device_short_buffer",
+                "full_delivery_passed": false,
+                "leaf": "V_vless_warmed_16123/probe",
+                "status": "error"
+              },
+              {
+                "failure_kind": "target_zero_reply_timeout",
+                "full_delivery_passed": false,
+                "leaf": "V_vless_warmed_16123/recover",
+                "status": "error"
+              }
+            ],
+            "status": "error",
+            "unexecuted_leaves": []
+          }
+        ],
+        "diagnostic_complete": false,
+        "stage_capacity_passed": false
+      },
+      "result_sha256": "c3bb03b8e7486f59925820207917ee80dd4631547cb51c42888cebc176568117"
+    }
+  }
+}

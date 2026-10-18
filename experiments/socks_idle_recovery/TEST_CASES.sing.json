@@ -1,0 +1,95 @@
+{
+  "groups": [
+    {
+      "label": "sing_socks_owner",
+      "package": "sing",
+      "go_package": "github.com/sagernet/sing/protocol/socks",
+      "regex": "^TestSOCKSOwner",
+      "leaves": [
+        "TestSOCKSOwnerAdmissionAbort",
+        "TestSOCKSOwnerAttachAndAdmission/attach_before_close",
+        "TestSOCKSOwnerAttachAndAdmission/close_before_attach",
+        "TestSOCKSOwnerAttachAndAdmission/duplicate_attach",
+        "TestSOCKSOwnerAttachAndAdmission/expired_admission",
+        "TestSOCKSOwnerCallbackReturnFence",
+        "TestSOCKSOwnerChildReadDeadline",
+        "TestSOCKSOwnerCloseRaces/admitted",
+        "TestSOCKSOwnerCloseRaces/first_packet",
+        "TestSOCKSOwnerCloseRaces/raw_attach",
+        "TestSOCKSOwnerCompletePacket/0",
+        "TestSOCKSOwnerCompletePacket/1",
+        "TestSOCKSOwnerCompletePacket/32768",
+        "TestSOCKSOwnerCompletePacket/60000",
+        "TestSOCKSOwnerCompletePacket/65497",
+        "TestSOCKSOwnerConcurrentIngress",
+        "TestSOCKSOwnerControlBufferedByte",
+        "TestSOCKSOwnerEndFences/completed",
+        "TestSOCKSOwnerEndFences/inflight",
+        "TestSOCKSOwnerEndFences/pending",
+        "TestSOCKSOwnerEndFences/raw_eof",
+        "TestSOCKSOwnerErrorCallbackBeforeReturn",
+        "TestSOCKSOwnerEventSequenceCannotWrap",
+        "TestSOCKSOwnerEventSequenceLastGeneration",
+        "TestSOCKSOwnerFinalizeFailure",
+        "TestSOCKSOwnerGenerationWrap",
+        "TestSOCKSOwnerIdleStates/active",
+        "TestSOCKSOwnerIdleStates/admitting",
+        "TestSOCKSOwnerIdleStates/await_first",
+        "TestSOCKSOwnerIdleStates/dormant",
+        "TestSOCKSOwnerLegacyOff/legacy_entrypoint",
+        "TestSOCKSOwnerLegacyOff/nil_options",
+        "TestSOCKSOwnerLifecycleEvents",
+        "TestSOCKSOwnerLimiterBeforeAllocation",
+        "TestSOCKSOwnerMalformed/domain",
+        "TestSOCKSOwnerMalformed/fragment",
+        "TestSOCKSOwnerMalformed/ipv6",
+        "TestSOCKSOwnerMalformed/oversize",
+        "TestSOCKSOwnerMalformed/rsv",
+        "TestSOCKSOwnerMalformed/short",
+        "TestSOCKSOwnerMalformed/zero_port",
+        "TestSOCKSOwnerMissingCallback",
+        "TestSOCKSOwnerNoEscapeInterfaces",
+        "TestSOCKSOwnerRepeatedRecovery",
+        "TestSOCKSOwnerReplyCancellation/control_close",
+        "TestSOCKSOwnerReplyCancellation/deadline",
+        "TestSOCKSOwnerReplyCancellation/end",
+        "TestSOCKSOwnerReplyDeadlineCannotExtend",
+        "TestSOCKSOwnerReplyGuards/headroom",
+        "TestSOCKSOwnerReplyGuards/oversize",
+        "TestSOCKSOwnerReplyGuards/stale",
+        "TestSOCKSOwnerReplyGuards/target",
+        "TestSOCKSOwnerResponseFailureReleases",
+        "TestSOCKSOwnerShortBuffer",
+        "TestSOCKSOwnerSinglePendingOverflow",
+        "TestSOCKSOwnerSlotReleasedAfterClosedObserver",
+        "TestSOCKSOwnerSourceAndTarget/bind_and_remap",
+        "TestSOCKSOwnerSourceAndTarget/hint_rejects_other_port",
+        "TestSOCKSOwnerSourceAndTarget/wrong_ip",
+        "TestSOCKSOwnerStorageBudget",
+        "TestSOCKSOwnerUnboundMalformed",
+        "TestSOCKSOwnerUnjoinedInvocation"
+      ]
+    },
+    {
+      "label": "sing_chunk_owner",
+      "package": "sing",
+      "go_package": "github.com/sagernet/sing/common/bufio",
+      "regex": "^TestChunkReaderPacketSessionFinalizer$",
+      "leaves": [
+        "TestChunkReaderPacketSessionFinalizer"
+      ]
+    }
+  ],
+  "test_files": [
+    {
+      "package": "sing",
+      "source": "tests/protocol/socks/association_owner_test.go",
+      "target": "protocol/socks/vui_association_owner_test.go"
+    },
+    {
+      "package": "sing",
+      "source": "tests/common/bufio/chunk_owner_test.go",
+      "target": "common/bufio/vui_chunk_owner_test.go"
+    }
+  ]
+}
