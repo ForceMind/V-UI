@@ -62,3 +62,7 @@ Count() 保留 `m.access.Lock()` / `defer m.access.Unlock()`，与 TrackConn/Tra
 lifecycle 只选原 12 个顶层 + 5 个 guard 子项，明确排除仅旧 lifecycle 阶段的 BlockedInboundWrite（它预期阻塞仍保留）与两个旧 RealMux 负控；不修改旧断言，不称这些三项通过。完整 bounded/route_cancel 语义另由原 TestMuxRouteReplyBackpressure / EndBackpressure 两项与取消/零包组证明。Count 单独抽取旧两 helper 和一个并发测试，不编译整份 owner fixture。
 
 本地 Python 结构/负控不授编译资格；本机没有所需 Go 工具链，实际编译/race/debug 留给固定 CI。完整构建与 runtime 失败均不得作为产品能力，旧证据原样保留。
+
+实现源码独审记录：准确 `6c6fba5`（公开同 tree `32a1a485`）的新增 Python 控制 12/12、零 skip；本地 10.987 秒，独立隔离复核 12.673 秒。既有适配控制 39/39、本地 16.408 秒，属于原控制回归，不代表 Go/core/runtime 已跑。
+
+差异检查口径：从完整设计 checkpoint `23993e1` 起，`git diff --check` 会报告 `count.patch` 原样冻结 hunk 的空 context 行、context 空格+tab 与末尾空行；这是保留源补丁字节带来的已知 patch 文件 whitespace，不改写原始来源来消除提示。排除该一个 `.patch` 后其余完整差异检查通过；`check_docs.py` 通过。Go 与两组真实运行仍须等待准确 CI 及文本归档独核。
