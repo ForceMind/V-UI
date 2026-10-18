@@ -28,9 +28,13 @@ def verify(p, case, row, roles, known, output, identity, base_verify):
     verdict['case_gate_passed']=bool(verdict['case_gate_passed'] and diagnostic['release_passed'] and diagnostic['next_packet_passed'])
     return verdict
 
-def install():
+def install(*, idle_repair=False):
     """Each diagnostic CLI explicitly installs this fixed contract in its own process."""
+    global ARMS, KIND
     import evidence as e
+    if idle_repair:
+        ARMS={'candidate':('I',),'overseas-stock':('I',)}
+        KIND='vui-stock-client-udp-finite-idle-fixture-repair'
     r.need(r.KIND != KIND, 'Diagnostic contract installed twice')
     original=r.verify_case
     r.ARMS=ARMS; r.KIND=KIND; r.plan=plan

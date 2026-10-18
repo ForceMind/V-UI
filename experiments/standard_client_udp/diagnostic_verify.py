@@ -2,6 +2,7 @@
 from collections import Counter
 import json
 from copy import deepcopy
+from pathlib import Path
 from packet_boundary import need
 
 def verify_window(case, result, process_rows, proof):
@@ -77,9 +78,21 @@ def verify_window(case, result, process_rows, proof):
          "Forged or hidden measured release result")
     return released
 
+def passive_verifier():
+    import runtime as r
+    # Candidate provenance deliberately loads the frozen sing-device verifier.
+    # Never reuse that global name for the stock-Mihomo observation contract.
+    observer=r.load('socks_observation',r.HERE/'socks_observation.py')
+    verifier=r.load('standard_diagnostic_passive_verifier',r.HERE/'verify_socks_observation.py')
+    need(Path(observer.__file__).resolve()==r.HERE/'socks_observation.py' and
+         Path(verifier.__file__).resolve()==r.HERE/'verify_socks_observation.py' and
+         observer.ROLE==verifier.ROLE=='device-mihomo','Passive modules are not exact same-source Mihomo adapters')
+    return observer,verifier
+
 def passive_identity(observer,case,row,roles,identity):
-    from verify_socks_observation import descriptor, device_rows, peek_state
-    from socks_observation import KIND
+    module,verifier=passive_verifier()
+    descriptor,device_rows,peek_state=verifier.descriptor,verifier.device_rows,verifier.peek_state
+    KIND=module.KIND
     need(type(observer['schema_version']) is int and observer['schema_version']==1 and observer['kind']==KIND and
          observer['case']==case['id'] and observer['mode']==case['mode'] and observer['source_identity']==identity and
          observer['product_qualified'] is False and observer['capacity_evaluated'] is False and not observer['errors'],
@@ -149,8 +162,8 @@ def verify(p,case,row,roles,output,identity):
          'Recovery send precedes completed identity sample')
     need(recovery['send_calls'][0]['started']>=proof['final']['sample_completed_monotonic'] and
          first['send_calls'][0]['completed']<=proof['last_business_reply'], 'Send occurred inside quiet window')
-    from verify_socks_observation import verify_case
-    passive=verify_case(observer,case,row,passive_roles,identity,data)
+    _,verifier=passive_verifier()
+    passive=verifier.verify_case(observer,case,row,passive_roles,identity,data)
     need(passive['business_recovery_passed'] is recovery['full_delivery_passed'],'Passive/raw recovery differs')
     if row.get('lifecycle'):
         need(row['lifecycle']=={'proof':proof,'observation_sha256':p.sha(path)},'Lifecycle return/raw digest differs')

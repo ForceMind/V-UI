@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Run one finite diagnostic stage; never launches strict C/D/B."""
 import argparse
+import sys
 from pathlib import Path
 import diagnostic as d
 import runtime as r
 
 def main():
-    d.install()
+    idle_repair='--idle-repair' in sys.argv
+    if idle_repair:sys.argv.remove('--idle-repair')
+    d.install(idle_repair=idle_repair)
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ('legacy-repository','official','mihomo','output'):
         parser.add_argument('--'+name,type=Path,required=True)

@@ -161,6 +161,43 @@ class DiagnosticTests(unittest.TestCase):
     def test_complete_archive_and_missing_raw_members_refused(self):
         subprocess.run([sys.executable,'-c','from test_diagnostic import archive_control; archive_control()'],cwd=r.HERE,check=True)
 
+    def test_actual_candidate_import_order_keeps_frozen_verifier_isolated(self):
+        script="""
+import sys
+from pathlib import Path
+import runtime as r, diagnostic as d
+from test_diagnostic import DiagnosticTests, LEGACY
+# Make synthetic raw proof before contamination, never pre-fix the later cache.
+DiagnosticTests.setUpClass();test=DiagnosticTests();items=test.fixture()
+owner=r.load('standard_owner_adapter',LEGACY/'experiments/socks_idle_recovery/runtime_adapter.py')
+frozen=owner.load_runtime(LEGACY)
+old=sys.modules['verify_socks_observation']
+assert old is frozen.socks and old.ROLE=='device-singbox'
+r.load_framework(LEGACY)
+assert sys.modules['verify_socks_observation'] is old
+assert sys.modules['socks_observation'].ROLE=='device-mihomo'
+# Real verification must select its own exact files despite the old cached name.
+result=test.check(items)
+assert result['case_gate_passed'] and result['diagnostic']['release_passed']
+assert result['diagnostic']['next_packet_passed']
+observer,verifier=test.v.passive_verifier()
+assert Path(observer.__file__).resolve()==r.HERE/'socks_observation.py'
+assert Path(verifier.__file__).resolve()==r.HERE/'verify_socks_observation.py'
+assert observer.ROLE==verifier.ROLE=='device-mihomo'
+assert sys.modules['verify_socks_observation'] is old and old.ROLE=='device-singbox'
+# The repair opts into only two idle cases; it cannot repeat E or stock I.
+d.install(idle_repair=True)
+assert d.KIND=='vui-stock-client-udp-finite-idle-fixture-repair'
+assert d.ARMS=={'candidate':('I',),'overseas-stock':('I',)}
+cases=[c for arm,stages in d.ARMS.items() for stage in stages for c in d.plan(test.p,arm,stage)]
+assert len(cases)==2 and sum(len(c['packets']) for c in cases)==4
+for arm,stage in [('stock','I'),('candidate','E')]:
+    try:d.plan(test.p,arm,stage)
+    except ValueError:pass
+    else:raise AssertionError('Repair exceeded exact two-case plan')
+"""
+        subprocess.run([sys.executable,'-c',script],cwd=r.HERE,check=True)
+
     def test_independent_install_and_archive_fixed_allowlist(self):
         script="""
 import diagnostic as d, evidence as e, runtime as r
