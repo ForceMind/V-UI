@@ -276,7 +276,7 @@ def verify_case(p, case, row, roles, known, output, identity):
         target_leaves = [case['id']+'/'+x['id'] for x in case['packets'] if x['direction'] != 'local_emsgsize']
         need(Counter(by_leaf.keys()) == Counter(target_leaves) and ledger['planned_count'] == ledger['received_count'] == len(target_leaves),
              'Complete target leaf/count mismatch')
-    sent = 0
+    sent = 0; io_verifications = []
     for spec, packet in zip(case['packets'], row['packets']):
         first = sent == 0 or (case['mode'] == 'close' and spec['id'] == 'recover')
         need(packet['leaf'] == case['id']+'/'+spec['id'] and packet['direction'] == spec['direction'] and packet['first_udp'] is first,
@@ -326,7 +326,7 @@ def verify_case(p, case, row, roles, known, output, identity):
                 sent_reply = reply if spec['direction'] in ('downlink', 'uplink_ack') else request[:n]
                 need(item['reply_sent'] == p.ident(sent_reply) and item['sendto_return'] == len(sent_reply), 'Failed target reply incomplete')
             full = False
-        packet['io_verification'] = evidence_status
+        io_verifications.append({'leaf': packet['leaf'], 'status': evidence_status})
         if packet['direction'] != 'local_emsgsize':
             sent += 1
             full = full and packet['full_delivery_passed']
@@ -339,7 +339,7 @@ def verify_case(p, case, row, roles, known, output, identity):
         observer.verify_case(json.loads((output/case['id']/'socks-association-observation.json').read_text()),
             case, row, roles, identity, json.loads((output/case['id']/'lifecycle-observation.json').read_text()))
     return {'execution_safe': True, 'case_gate_passed': bool(full), 'started': len(started),
-        'planned': len(expected), 'unexecuted': row['unexecuted_leaves']}
+        'planned': len(expected), 'unexecuted': row['unexecuted_leaves'], 'io': io_verifications}
 
 def execute(args):
     args.output.mkdir(parents=True, exist_ok=False)
@@ -372,8 +372,11 @@ def execute(args):
                         save(args.output/case['id']/'result.json', row)
             report['observations_complete'] = len(report['cases']) == len(cases)
             report['capacity_gate_passed'] = report['observations_complete'] and all(r['verification']['case_gate_passed'] for r in report['cases'])
-        need(source(ROOT) == identities['product'] and source(args.legacy_repository,legacy=True) == identities['legacy'], 'Source changed during run')
-        for b in known.values(): need(sha(b['path']) == b['sha256'], 'Binary changed during run')
+        after = {'source_identity': {'product': source(ROOT), 'legacy': source(args.legacy_repository, legacy=True)},
+                 'binary_sha256': {k: sha(b['path']) for k,b in known.items()}}
+        save(args.output/'post-identity.json', after)
+        need(after['source_identity'] == identities, 'Source changed during run')
+        need(after['binary_sha256'] == {k:b['sha256'] for k,b in known.items()}, 'Binary changed during run')
     except Exception as exc:
         report['errors'].append({'type':type(exc).__name__,'message':str(exc)})
         (args.output/'runner-error.log').write_text(traceback.format_exc())

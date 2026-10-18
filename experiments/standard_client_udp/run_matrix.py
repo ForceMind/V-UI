@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 import runtime as r
+import evidence
 
 def group_exists(pgid):
     try: os.killpg(pgid,0);return True
@@ -25,7 +26,8 @@ def run(command, timeout=1250):
     finally:
         for sig in (signal.SIGTERM,signal.SIGKILL):
             if not group_exists(proc.pid):break
-            os.killpg(proc.pid,sig);row['signals'].append(sig.name)
+            try: os.killpg(proc.pid,sig);row['signals'].append(sig.name)
+            except ProcessLookupError: break
             deadline=time.monotonic()+3
             while group_exists(proc.pid) and time.monotonic()<deadline:
                 proc.poll();time.sleep(.025)
@@ -51,11 +53,14 @@ def main():
         (args.output/(stage+'.stdout')).write_text(out);(args.output/(stage+'.stderr')).write_text(err)
         path=args.output/stage/'result.json'
         report=json.loads(path.read_text()) if path.is_file() else {}
-        row['capacity_gate_passed']=report.get('capacity_gate_passed') is True
+        try:
+            checked=evidence.verify_stage(args.output/stage,args.legacy_repository,args.arm,stage)
+        except (ValueError,KeyError,TypeError,FileNotFoundError) as exc:
+            checked={'execution_safe':False,'capacity_gate_passed':False,'error':str(exc)}
+        row['independent_verification']=checked
+        row['capacity_gate_passed']=checked.get('capacity_gate_passed') is True
         row['safe_to_continue']=(not row['timeout'] and row['returncode'] in (0,1) and not row['signals'] and
-            row['leader_joined'] and row['process_group_gone'] and report.get('observations_complete') is True and
-            not report.get('errors') and bool(report.get('cases')) and
-            all(c.get('verification',{}).get('execution_safe') is True for c in report['cases']))
+            row['leader_joined'] and row['process_group_gone'] and checked.get('execution_safe') is True)
         rows.append(row);r.save(args.output/'stages.json',rows)
         print(json.dumps(row),flush=True)
         if not row['safe_to_continue']:break
