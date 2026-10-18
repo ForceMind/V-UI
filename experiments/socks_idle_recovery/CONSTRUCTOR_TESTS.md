@@ -82,3 +82,11 @@ missing intermediate terminals. Four top-level loops now use real nested t.Run
 with fail-fast at every level. The full leaf names, order, bodies, timer windows
 and cleanup are preserved. This new topology has not yet run; prior leaf PASS
 results do not grant strict acceptance to either the old or new layout.
+
+At d32e1c7, the new synchronized Count API exposed two existing test-only outer
+manager locks in the Admitted and power-counter probes. The first probe deadlocked
+on reentry and each constructor package hit its original 180-second watchdog.
+The next revision removes only these four redundant test lock/unlock lines and
+uses the public synchronized Count API. Count assertions, protocol flows, leaf
+names, timer windows, strict verifier and all production patches stay unchanged.
+The prior caller audit missed these test-only sites; the d32 run remains failed.

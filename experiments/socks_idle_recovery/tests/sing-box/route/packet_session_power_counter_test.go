@@ -107,9 +107,7 @@ func TestOwnerActualTrackedPowerCounterComposition(t *testing.T){
 	tracked,ok:=extended.Conn.(*trackedConn)
 	if !ok{t.Fatalf("actual ConnectionManager tracker absent: %T",extended.Conn)}
 	if _,ok:=tracked.Conn.(*net.TCPConn);!ok{t.Fatalf("actual leaf is not TCP: %T",tracked.Conn)}
-	f.manager.access.Lock()
 	trackedCount:=f.manager.Count()
-	f.manager.access.Unlock()
 	if trackedCount!=1||attachedAbort==nil||abort==nil{t.Fatal("track/attach did not occur exactly once")}
 	_,readCounters:=counter.UnwrapReader()
 	_,writeCounters:=counter.UnwrapWriter()

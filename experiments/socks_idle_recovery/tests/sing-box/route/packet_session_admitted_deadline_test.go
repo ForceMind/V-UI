@@ -135,9 +135,7 @@ func TestOwnerConcreteAdmittedSurvivesOldDeadline(t *testing.T) {
 			<-pastOldDeadline.C
 			cancelAssertPending(t,f.handler.callbacks,"active route callback")
 			cancelAssertPending(t,f.ownerDone,"active SOCKS owner")
-			f.manager.access.Lock()
 			tracked := f.manager.Count()
-			f.manager.access.Unlock()
 			if tracked != 1 || f.slots.Load() != 1 || f.handler.admissions.Load() != 1 || f.handler.calls.Load() != 1 {
 				t.Fatal("the expired admission timer retired an already admitted generation")
 			}

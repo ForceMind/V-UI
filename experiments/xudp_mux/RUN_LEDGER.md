@@ -168,3 +168,35 @@ Consequently that group has observed leaf PASS results but does not satisfy its
 unchanged strict terminal-topology contract. The follow-on test correction must
 use real nested subtests with the same 30 full leaf names, timing and fail-fast
 behavior; the verifier is not relaxed and this run is not retroactively passed.
+
+## 2026-10-18 Count race repaired, fixture reentry timeout (d32e1c7)
+
+Exact commit `d32e1c750443930a71b47947938fe4396bf4800d`, tree
+`dd6f7e67147bcce5d840d9908eae6bccd48cedd1`,
+[run 39145136143 attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39145136143).
+The complete 633-leaf route group passed in both race modes, including all three
+original real-owner two-generation cases and the new concurrent manager gate.
+The other seven non-constructor groups also passed their selected leaves.
+Both base/final 23 regressions and all 22 cross-compiles passed.
+
+The constructor package failed in both modes at the first AES Admitted-deadline
+leaf: its existing test held `manager.access` before calling the newly synchronized
+Count API. This test-only reentry blocked the call, and the original 180-second
+package watchdog terminated it. No constructor leaf completed; the other 29
+leaves did not execute. The original per-command process group was reaped, but
+this timeout is not a passing in-test resource-join observation. The new nested
+subtest topology has still not received actual strict acceptance.
+
+An audit found a second identical outer-lock pair in the power-counter test,
+which this run never reached. The prior audit checked production callers but
+missed these two test-only callers. The next minimal correction removes those
+four lock/unlock lines, retaining all Count assertions, leaf bodies, protocol
+operations, timing windows and watchdogs. All eight production patches stay
+byte-identical to d32. No failure is converted to expected success.
+
+Owner artifact `12143701618`: ZIP 700955 bytes, SHA256
+`44911877a3fc15d26d79d907892b6d72192232edb687d55e7412b073cc62bd98`;
+418 complete members verified. Mechanism failure prevented owner-off/on runtime.
+The independent original mux mechanism passed, while original stock runtime and
+packet matrices retain their separate gates and failures. Product qualification
+and same-association runtime recovery remain ungranted.
