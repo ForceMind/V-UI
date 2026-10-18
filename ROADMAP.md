@@ -1,5 +1,9 @@
 # V-UI 开发路线
 
+## 2026-10-18 当前执行顺序
+
+[开发与接手入口](docs/DEVELOPMENT_HANDOFF.md)汇总已完成产品、未合并实验、所有剩余计划和运行命令。当前优先从 `a98da9af` 独立实现[每入口 inherit/direct/relay](docs/PER_INBOUND_ROUTING_CONTRACT.md)：现成客户端、标准 VLESS、单一上游与 host 独立，先 TCP。D1 已进入该产品主线；下方 D1“正在实现”是旧快照。D2实验有阶段成果与原失败，不能替代产品资格或推出所有客户端需定制；[兼容审查与后续 UDP 最小门槛](docs/STANDARD_CLIENT_COMPATIBILITY.md)另列。新功能尚未实现/验收/发布。
+
 ## 2026-10-16 D1 当前开发目标
 
 D0 已由 [PR #45/#46](https://github.com/ForceMind/V-UI/pull/46)在准确 master `13c884a0539cf9822fca2fe2db58325fa4644048` 完成八工作流 / 11 jobs / 122 steps 全部 attempt 1 成功与同提交四目标 19 项资产核验；原失败保留在 PR，旧候选成功不替代主线结果。新有界功能为 [D1：显式 TCP-only 中转上游导出](docs/TCP_UPSTREAM_EXPORT_CONTRACT.md)，让本项目节点通过专用 URI / 单节点 Clash YAML 直接进入另一实例的既有上游导入，须经真实双实例 API、浏览器及 TLS/REALITY 双跳验收。普通导出和严格导入保持；UDP 双跳尚未开放。本期仍在实现，准确资格以其承载 PR 为准。

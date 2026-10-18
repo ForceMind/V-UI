@@ -1,0 +1,50 @@
+# 标准客户端、两跳与实验边界
+
+2026-10-18 只读复核。产品当前优先 [每入口 TCP](PER_INBOUND_ROUTING_CONTRACT.md)；以下 UDP 内容是独立后续计划，不阻塞普通节点功能，不授手机真机资格。
+
+## 已有事实
+
+标准客户端只需连接一个入口。手机→国内 inbound 与国内 outbound→海外是两段独立的认证、TLS 和协议会话；服务器路由决定第二跳，手机不需要知道海外凭据。直连/中转可使用相同标准 VLESS 协议，以不同入口 ID/端口/UUID 区分。
+
+准确实验 `afbdba100c5f0e3dc6888684fdbab31980720df3` 的原 runtime 有直接反例，证明“三角色必须全部自编”不能推广成产品前提：
+
+- 官方 Mihomo 1.19.32 作 device，官方 sing-box 1.14.2 作 overseas，仅国内为候选。
+- `test_03_guarded_mihomo_exact_payload_address_and_port` 的 1/1200 字节 UDP 完整 payload/address/port 往返；`test_tcp_https_mihomo_double_hop` 的验证 TLS HTTPS 200、精确正文与海外目标来源通过。
+- 第一跳与上游 UUID/CA/SNI/停机负向和恢复分别留有真实证据。
+- device SHA-256 `3122d100e8177501776109f1a6253a694611627cf4d7c7ec82705855cf8626a8`；overseas SHA-256 `07d2866a6c908281a56053f0e7d454918501592f2f258526f2ebe826dab58793`。
+- [准确 run](https://github.com/ForceMind/V-UI/actions/runs/39146603341) 原 runtime artifact `12143836674`，包含两 arm 的 `process-binaries.json` 与上述 `cases/`。这不是全矩阵成功：原矩阵各19/20及其他大包失败保留。
+
+旧 `test_14_guarded_udp_idle_drains_and_new_association_recovers` 和 `lifecycle_idle_mihomo` 的 idle 主体是 raw XUDP probe，恢复时**新建** Mihomo SOCKS 关联。不能称已验证同一 Mihomo 应用关联跨 idle，更不能称手机 VPN/TUN 已验收。
+
+## 固定实验 oracle 的范围
+
+原 A/U/V 大包组 device 是 Linux sing-box mixed/SOCKS；它们的16 KiB相关截断与 End 后原 SOCKS control/relay 被关闭，不能概括成所有 App。B 组独立证明固定海外 sing-box 接收回包也有截断。owner-on 三角色成功是特定组合资格，不证明每角色最小补丁集合，更不要求分发自定义手机 App。
+
+固定 Mihomo 的 SOCKS control TCP 与 NAT sender 独立，End/EOF 后 NAT 项删除，新应用报文有机会新建上游；这是源码推断，删除窗口/首包恢复待实测。其标准 SOCKS UDP buffer 同样约16 KiB、POSIX读路径忽略截断flags，因此不能先声称换 Mihomo 就解决所有大包。手机 TUN/VPN 是另一入口。固定来源：[标准池容量](https://github.com/MetaCubeX/mihomo/blob/88dcbf7f1614a67c3b36b848ee3592dfa92ada36/common/pool/buffer_standard.go)、[POSIX datagram 读路径](https://github.com/MetaCubeX/mihomo/blob/88dcbf7f1614a67c3b36b848ee3592dfa92ada36/common/net/packet/packet_posix.go)、[SOCKS control](https://github.com/MetaCubeX/mihomo/blob/88dcbf7f1614a67c3b36b848ee3592dfa92ada36/listener/socks/tcp.go)、[NAT sender 清理](https://github.com/MetaCubeX/mihomo/blob/88dcbf7f1614a67c3b36b848ee3592dfa92ada36/tunnel/connection.go)。
+
+## 配置替代路径：仅源码结论
+
+| 角色/路径 | 已核事实 | 尚不能声称 |
+| --- | --- | --- |
+| sing-box VLESS | `packet_encoding` 缺省/null 是 XUDP，显式空串才 native UDP | 删除字段即可避开 mux |
+| Mihomo 1.19.32 VLESS | 非 packetaddr 配置强制 XUDP，`xudp:false`/空字段无效 | 任意标准 YAML 可选 native |
+| Xray 26.3.27 | 默认 cone 可把非53/443的 UDP 转 XUDP；仅关 multiplex 不够 | 普通手机 App JSON 全端口 native 可用 |
+| 国内 native VLESS + udp_connect | native PacketConn 同样继承外层 RemoteAddr | native 自动修复原代理端口回映问题 |
+| 国内 native + 不开 udp_connect | 源码返回初始逻辑目标，值得独立测试 | DNS/改目标/拒绝/生命周期已安全 |
+| packetaddr | 编码/路由metadata不同，入站清空初始目标 | 无损继承原初始目标守卫 |
+
+固定来源：[sing-box VLESS outbound](https://github.com/SagerNet/sing-box/blob/af6e64c3b69e6132ebaee0e1a3d24e93903f6709/protocol/vless/outbound.go)、[sing-vmess native VLESS](https://github.com/SagerNet/sing-vmess/blob/31ec11e8790c48a4bf11711806a61e929ee6b89d/vless/client.go)、[Mihomo VLESS](https://github.com/MetaCubeX/mihomo/blob/88dcbf7f1614a67c3b36b848ee3592dfa92ada36/adapter/outbound/vless.go)、[Xray VLESS](https://github.com/XTLS/Xray-core/blob/d2758a023cd7f4174a5a5fa4ff66e487d4342ba0/proxy/vless/outbound/outbound.go)。
+
+关闭 sing-mux 不会禁止 VLESS 自身 CommandMux；普通客户端选 native 并不证明认证用户无法进入服务端 XUDP路径。不得用配置绕过替代服务端安全验收。
+
+## 后续最小 UDP 验证方案（未执行）
+
+优先只替换原 sing device 为 stock Mihomo，保留两跳 VLESS/TCP/验证 TLS/XUDP，避免同时改多个协议。独立新计划、角色与 leaf 集合，不改原 sing 矩阵或失败判定：
+
+1. 服务端候选组：复用原 C 的 VLESS 子集 26 case/66 leaf，与 D 的 2 case/4 leaf；所有角色 owner 关闭。保留原零包/大包/超大本地拒绝、精确地址与 payload、短包恢复、资源清理门槛。
+2. 官方海外诊断组：原 B 的 VLESS 下行 1 case/4 leaf，8192/32768/60000与短包恢复。按实测分类，不预设必须失败。
+3. 同应用关联 idle：保留原 SOCKS control、UDP source socket与relay tuple，60000→完整空闲释放窗→新的32768。允许 Mihomo内部新 XUDP session，但必须证明没有替换应用关联、没有重放/保活，完整 target ledger 与最终进程/线程/FD清理。
+4. 优先用实际普通 VLESS 导出产生设备配置并核只有入口凭据。严格中转 exporter 当前仍TCP-only；若该组只能使用研究 fixture，应如实标注，不能称产品 UDP 导出已支持。
+5. 当前产品每入口TCP独立完成。后续 UDP 出现具体固定客户端入口限制时，按版本/入口/方向记录实际能力与拒绝；不得泛化所有手机，亦不得将原完整门槛缩小后改称全通过。
+
+手机端实际导入是否保真、具体 App/平台/TUN、UDP/53/443、域名全答案与重绑定、长时间/移动网络恢复均未在本轮获得新证据。native/packetaddr是后续选项，不与上述最小归因组混跑。
