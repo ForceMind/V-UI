@@ -336,6 +336,19 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         expect(page.locator('#refresh')).to_be_enabled()
         return page
 
+    def open_inbound_view(self, page=None):
+        """Navigate the mounted dashboard through its real menu and observe its GET.
+
+        Changing only /ui/#inbounds is same-document navigation after login;
+        it does not run Vue setup again or select a new dashboard view.
+        """
+        page = page or self.page
+        with page.expect_response(lambda response: urlparse(response.url).path == '/api/inbounds'
+                                  and response.request.method == 'GET') as loaded:
+            page.get_by_role('menuitem', name='入站节点', exact=True).click()
+        self.assertEqual(loaded.value.status, 200, loaded.value.text())
+        return page
+
     def draft_only(self):
         self.context.route('**/api/proxy/capabilities', lambda route: route.fulfill(
             json={'apply_available': False, 'diagnostics_available': False}))
@@ -885,7 +898,7 @@ rules:
         self.context.route('**/api/inbounds**', inbound)
         page = self.page
         page.set_viewport_size({'width': 1440, 'height': 1000})
-        page.goto(self.base + '/ui/#inbounds')
+        self.open_inbound_view(page)
         expect(page.get_by_text('policy-node-1', exact=True)).to_be_visible()
         page.get_by_role('button', name='添加节点', exact=True).click()
         dialog = page.get_by_role('dialog', name='添加节点', exact=True)
@@ -933,6 +946,7 @@ rules:
         held.pop().fulfill(json=rows[-1])
         expect(editor).not_to_be_visible()
         page.reload()
+        self.open_inbound_view(page)
         row.get_by_role('button', name='编辑', exact=True).click()
         expect(editor.locator('#inbound-routing-mode')).to_have_value('relay')
         editor.get_by_role('button', name='取消', exact=True).click()
@@ -953,7 +967,7 @@ rules:
         self.context.route('**/api/inbounds**', inbound)
         page = self.page
         page.set_viewport_size({'width': 1440, 'height': 1000})
-        page.goto(self.base + '/ui/#inbounds')
+        self.open_inbound_view(page)
         first = page.get_by_role('row').filter(has_text='policy-node-1')
         second = page.get_by_role('row').filter(has_text='policy-node-2')
         first.get_by_role('button', name='编辑', exact=True).click()

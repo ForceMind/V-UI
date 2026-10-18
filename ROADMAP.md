@@ -2,7 +2,7 @@
 
 ## 2026-10-18 当前执行顺序
 
-[开发与接手入口](docs/DEVELOPMENT_HANDOFF.md)汇总已完成产品、未合并实验、所有剩余计划和运行命令。当前优先从 `a98da9af` 独立实现[每入口 inherit/direct/relay](docs/PER_INBOUND_ROUTING_CONTRACT.md)：现成客户端、标准 VLESS、单一上游与 host 独立，先 TCP。D1 已进入该产品主线；下方 D1“正在实现”是旧快照。D2实验有阶段成果与原失败，不能替代产品资格或推出所有客户端需定制；[兼容审查与后续 UDP 最小门槛](docs/STANDARD_CLIENT_COMPATIBILITY.md)另列。新功能尚未实现/验收/发布。
+[开发与接手入口](docs/DEVELOPMENT_HANDOFF.md)汇总已完成产品、未合并实验、所有剩余计划和运行命令。当前优先从 `a98da9af` 独立实现[每入口 inherit/direct/relay](docs/PER_INBOUND_ROUTING_CONTRACT.md)：现成客户端、标准 VLESS、单一上游与 host 独立，先 TCP。D1 已进入该产品主线；下方 D1“正在实现”是旧快照。D2实验有阶段成果与原失败，不能替代产品资格或推出所有客户端需定制；[兼容审查与后续 UDP 最小门槛](docs/STANDARD_CLIENT_COMPATIBILITY.md)另列。三态实现已进入 [PR49](https://github.com/ForceMind/V-UI/pull/49) Draft，首轮准确候选仍有失败，尚未验收、合并或发布。
 
 ## 2026-10-16 D1 当前开发目标
 

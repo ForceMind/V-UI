@@ -27,7 +27,7 @@
 | M0–M4 双开关 | `9a97ad13aae2fabb5ed969fdc0f930c36fdc55b7`，[PR44](https://github.com/ForceMind/V-UI/pull/44) | 主线收口；[历史失败/四目标证据](DUAL_PROXY_RELAY_PROGRESS.md)保留 |
 | D0 UDP/DNS 能力门槛 | `13c884a0539cf9822fca2fe2db58325fa4644048`，[PR46](https://github.com/ForceMind/V-UI/pull/46) | 主线收口；不是开放 UDP 中转 |
 | D1 TCP 上游专用导出 | `a98da9afbbf58a54f4f102cccec2f26b6e07d2ee`，[PR47](https://github.com/ForceMind/V-UI/pull/47) | 当前产品基线；标准设备导出与“供另一 V-UI 导入的上游导出”用途不同 |
-| 每入口三态 TCP | `feature/per-inbound-routing-20261018`，基于 a98 | 当前优先工作。P0 已独审并公开备份为 `6a89a20652beffbfe32cf43deb2aa16cd20bf9ec`；P1–P3 已有集成 WIP，真实链路和完整验收仍待完成 |
+| 每入口三态 TCP | `feature/per-inbound-routing-20261018`，基于 a98 | 当前优先工作。P0 已独审并公开备份为 `6a89a20652beffbfe32cf43deb2aa16cd20bf9ec`；P1–P4 已集成至 [PR49](https://github.com/ForceMind/V-UI/pull/49) Draft；首轮准确候选仍失败，真实新增门槛和完整验收待完成 |
 | D2 XUDP/大包/owner 实验 | `afbdba100c5f0e3dc6888684fdbab31980720df3`，tree `996d37d925be8edd18cbf921d3cc580f43c0730d` | 独立实验部分合同通过，整体仍失败；未并入产品，见下节 |
 | 标准客户端 UDP 补验 | [兼容边界及最小计划](STANDARD_CLIENT_COMPATIBILITY.md) | 尚未执行新的 stock Mihomo 大包/同应用关联恢复组；不阻塞本轮 TCP 产品功能 |
 | 手机、真实外部线路 | 实机与运营线路独立门槛 | 未验收；Linux core loopback 不代替手机导入/TUN/移动网络 |
@@ -66,10 +66,10 @@
 | --- | --- | --- | --- |
 | P0 | 本入口、设计契约、精确调用点与兼容纠正 | 已独审并公开记录；不是功能通过 | 无未决的保护策略降级，独审可据文档接续 |
 | P1 | 严格三态字段、旧库迁移、统一有效策略、身份兼容 | 已集成首版，23 新增 + 26 原 compiler 控制通过；待跨层全量验收 | 旧全 inherit 配置/身份保持；非法/null 拒绝；省略更新保留 |
-| P2 | apply/rollback/启动/恢复/备份/删除保护 | 双向 fence 与离线依赖闭包修复已集成；宽 proxy 403 项中 353 通过/50 skip，最终全量待验；installed policy/recovery 组件门槛通过 | 双全局 off + explicit relay 仍受保护；任何不一致不退普通直连 |
+| P2 | apply/rollback/启动/恢复/备份/删除保护 | 双向 fence 与离线依赖闭包修复已集成；宽 proxy 403 项中 353 通过/50 skip，完整集成本地 1970 项运行通过（205 项明确 skip）；真实 CI 仍待闭合 | 双全局 off + explicit relay 仍受保护；任何不一致不退普通直连 |
 | P3 | API/UI/导出三用途与 desired/applied 标识 | 已集成；29 项 API/export、8 项完整 coordinator API 控制、17 项前端控制通过；真实浏览器待 CI | 标准客户端只获入口信息；取消/刷新/失败无假生效/秘密泄露 |
-| P4 | stock Mihomo 同实例两个节点和 host 四组合 | 已实现 7 项夹具控制 + 3 个真实方法；7 项控制通过，本地真实首启受 netlink EPERM 阻断，待准确 CI | 真实目标分别观察本机/海外出口；负向原因、零误送达、无回退；四状态/12 切换 |
-| P5 | 最终候选、独审、八组、四目标、正常合并后重验 | 待执行 | 准确 SHA/tree、所有必需 job/step 终态，历史失败和 skip 单列 |
+| P4 | stock Mihomo 同实例两个节点和 host 四组合 | 准确 8b 首轮 CI 的 7 项夹具控制 + 3 个真实方法全部通过；新修复 head 仍须重验 | 真实目标分别观察本机/海外出口；负向原因、零误送达、无回退；四状态/12 切换 |
+| P5 | 最终候选、独审、八组、四目标、正常合并后重验 | PR49 首轮准确候选验收中；下列原失败保留，尚不可合并 | 准确 SHA/tree、所有必需 job/step 终态，历史失败和 skip 单列 |
 
 ## 本阶段 WIP 与失败记录
 
@@ -84,8 +84,19 @@
 - P4 首次真实尝试暴露夹具错误预期：首次 direct 保存实际正确返回 saved=true/applied=false 的 409，已按契约修正；第二次 check 有效后 apply 返回 PROXY_APPLY_FAILED。独立固定官方 sing-box 空配置启动得到 `create netlink socket: operation not permitted`，不据此判产品转发通过，也不提高主机权限绕过。余下真实方法未跑。
 - 新增 8 项真实 HTTP/SQLite/private-store/完整 coordinator 控制通过，核心与 DNS 明确为 fake；覆盖首次 direct 无上游、首次 relay pin、真正 SQL commit 异常、两种过期 token、手动停止后保存和删除回滚。首稿夹具非法幂等键与清理顺序失败已修。删除测试曾错误要求可信完整旧配置也必须停机；按已冻结合同改为锁定旧 revision/config/context 逐值保留、dirty 与未应用响应，并验证下次启动因源不一致拒绝。界面明确提示旧入口可能仍可用，不把已保存删除称为已生效。
 - 固定官方 sing-box 1.14.2 对三模式 × 四开关组合 × TLS/REALITY 上游的 8 组配置解析通过，另原 Xray/sing-box 正负配置检查通过；解析不等于转发。
-- 当前纯测试分别只证明对应组件。全套、真实核心、浏览器、恢复/installed smoke 与同提交四目标未完成，不能合并或声明功能收口。
+- 当前纯测试分别只证明对应组件。第三次完整集成本地运行已通过；真实新增核心/浏览器与同提交四目标尚未全部完成，不能合并或声明功能收口。
 - 首次指定直连可保持两个开关关闭、**不选择上游**，正常 check/apply 建立活动配置；保存期间没有活动配置时显示待应用/不可确认。指定中转才需要先应用合法的已选上游；不能把普通直连变成必须配置海外。
+
+## PR49 首轮准确候选与后续修复
+
+- 准确公开候选 `8b01b4b085ff4520e72a105aac12a8e6a262d7e5`，tree `ed2cada9993f05025e895b7eba2108114ee77021`；PR49 保持 Draft。该 tree 与本地独审 `483d38c1bfff0b282f53cea23404196fa60d25e1` 相同。第三次完整本地运行共 1970 tests，1765 通过、205 skips（不授对应真实资格）、零失败，187.061 秒；skip 不授真实资格。日志 SHA256 `6baa06aab56b96b1ebb055ecef74d707665d44d45d1f7bc21cb78a61e774df4e`。
+- [Test attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39153451801) 的 1970 项基础套件与固定核心配置检查通过；proxy browser 步骤 20 方法（13 个浏览器流程与 7 个静态/路由控制）为 18 通过、1 failure、1 error。两个新 mocked editor 场景只修改已挂载页面的 URL fragment，没有真实切换 Vue 入站菜单，因此找不到预期行。后面的新实际 API/core browser 尚未执行。原日志 SHA256 `338b5f02200a39a28d5eb2f287ea5162839d5f24617d8295cab0c76ffbd7d678`。
+- 后续修复仅改变测试导航：实际点击入站菜单并确认列表 GET 200，再执行原断言；不增加生产 hash 导航，不改变时间窗或资格断言。必须在后续准确 head 重跑真实浏览器，静态控制不能把本次失败改绿。修复后完整本地再次运行 1970 tests，1765 通过、205 skips、零失败，181.935 秒；日志 SHA256 `8c4a26493c56fa8fc6c957542574944023e6c1d9b2c6867acb72c25f5070861b`。
+- [Portable attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39153451913) 的 aarch64-glibc 在固定上游 commit API 遇到 GitHub HTTP 403 rate limit，尚未进入 bundle/stage smoke；x86_64-musl、aarch64-musl 与 distro probe jobs 成功。失败日志 SHA256 `2615a3068670d52d9d141897f04529a0347207314bf99c23ceb8bd261104c921`。这不授四目标完整通过；代码已有修复时不通过重复旧 head 掩盖缺口。
+- 同 head 的 [ACME](https://github.com/ForceMind/V-UI/actions/runs/39153451847) 实际 4 个证书测试与 1 个浏览器测试通过；[one-click](https://github.com/ForceMind/V-UI/actions/runs/39153451776) 实际非 root/systemd 流程通过。属于旧回归，不代替新增三态转发或实际浏览器资格。
+- [真实链路 attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39153451708) 成功。新增每入口组 10 方法（7 控制 + 3 真实）全部通过，53.497 秒。固定官方 sing-box 1.14.2 与 stock Mihomo 1.19.32 消费实际普通 VLESS YAML/URI；三个场景分别完成 2 / 14 / 45 次业务 HTTPS，共 61 次，另各有一次独立目标可达性控制。三模式 × host/global 四态的 12 条有向切换完整，每场景保留同一客户端 PID。错误 UUID/SNI/CA/上游停止均有实际拒绝原因、目标零误送达和直连保持；普通 direct 小 UDP 成功、relay UDP 实际 reject。每场景最终停止/排空核验通过。这是 Linux loopback，不能扩称手机真机/TUN或中转 UDP 能力。
+- 该真实链路归档 `12146705982`：20290 bytes，SHA256 `e3b9f058b5b113d99cc9d6a3553dccb1ac188e645b9b61093ea4fe6ef0045643`；`result.log` SHA256 `b121a4f0707a08e4d58801f0ac635b7c0242474ae1002e7af6d7f5ee1b26168f`。固定 provenance 和完整旧链路组保留，独立复核已确认该有限合同，不能继承到下个 head。
+- [部署消费 attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39153451878) 成功：4 方法通过，512.597 秒；实际非 root 安装、HTTPS/原浏览器入口、停止后恢复及代码回滚通过。包内新增混合策略 smoke 为 8 配置检查 / 4 同配置异身份，恢复 smoke 为 4 混合恢复 / 4 旧 reader 拒绝；这些明确不启动代理核心、不代替三态转发。512/384/320 MiB cgroup 与单 CPU quota 回归通过，不代表同容量整机。证据归档 `12146577044`：80207 bytes，SHA256 `eebd88b7c254af3e9e738da6d1b76e9eb37264f2299a38af4585787353f81d54`。首轮八组最终 6 success / 2 failure；下一准确候选不能继承旧 head 结果，须重新核八组、真实新增步骤、四目标及最终独审。
 
 ## 接手命令与环境
 
