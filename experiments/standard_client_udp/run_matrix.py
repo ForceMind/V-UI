@@ -11,6 +11,8 @@ import time
 import runtime as r
 import evidence
 
+RUNTIME = r.HERE / 'runtime.py'
+
 def group_exists(pgid):
     try: os.killpg(pgid,0);return True
     except ProcessLookupError:return False
@@ -48,7 +50,7 @@ def main():
     args.output.mkdir(parents=True,exist_ok=False)
     rows=[]
     for stage in r.ARMS[args.arm]:
-        command=[sys.executable,str(r.HERE/'runtime.py'),'--arm',args.arm,'--stage',stage,'--output',str(args.output/stage)]
+        command=[sys.executable,str(RUNTIME),'--arm',args.arm,'--stage',stage,'--output',str(args.output/stage)]
         for name in ('legacy_repository','official','mihomo','candidate','candidate_provenance','build_evidence'):
             value=getattr(args,name)
             if value is not None:command+=['--'+name.replace('_','-'),str(value.resolve())]

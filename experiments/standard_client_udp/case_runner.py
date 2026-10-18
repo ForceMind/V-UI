@@ -86,8 +86,11 @@ def run_case(case, c, module, output, binaries, process_records, psutil, product
             f.start("mihomo", domestic=domestic, client=client)
             row["process_identity"] = [{"pid": core.process.pid,
                 "birth_time": psutil.Process(core.process.pid).create_time()} for core in f.processes]
-            if case["mode"] in ("close", "idle"):
-                row["lifecycle"] = lifecycle_exercise(f, target, case, helper, c, psutil, row["packets"], directory / "packets.json", process_records)
+            if case["mode"] in ("close", "idle", "idle_diagnostic"):
+                exercise = lifecycle_exercise
+                if case["mode"] == "idle_diagnostic":
+                    from diagnostic_lifecycle import exercise
+                row["lifecycle"] = exercise(f, target, case, helper, c, psutil, row["packets"], directory / "packets.json", process_records)
             else:
                 association = helper.record_association(observable_socks_class(helper)(f.client_port))
                 try:
@@ -139,7 +142,7 @@ def run_case(case, c, module, output, binaries, process_records, psutil, product
         expected_leaves = [case["id"] + "/" + p["id"] for p in case["packets"]]
         row["unexecuted_leaves"] = [leaf for leaf in expected_leaves if leaf not in started_leaves]
         row["lifecycle_window_executed"] = bool((directory / "lifecycle-observation.json").exists() and
-            any(e.get("phase") in ("large_then_idle", "large_then_close") for e in
+            any(e.get("phase") in ("large_then_idle", "large_then_close", "large_then_idle_diagnostic") for e in
                 json_read(directory / "lifecycle-observation.json").get("events", [])))
         row["recovery_attempted"] = any(p["leaf"].endswith("/recover") for p in row["packets"])
         row["status"] = "error" if row["errors"] else "observed"
