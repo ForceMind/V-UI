@@ -1,6 +1,12 @@
 # V-UI 开发路线
 
-## 2026-10-18 当前执行顺序
+## 2026-10-19 当前状态：每入口 TCP 已收口
+
+[PR49](https://github.com/ForceMind/V-UI/pull/49) 已正常合并至 `0962f0c4995b3b7606652027f2330285e4dea1f7`，每入口 inherit/direct/relay 的 P0–P5、准确候选/主线八组及四目标验收已完成，见[收口记录](docs/PER_INBOUND_ROUTING_CLOSURE_20261018.md)。[PR50](https://github.com/ForceMind/V-UI/pull/50) 随后将交接及使用文档合并至 `1489bf5218fced9b42c57e06715478dc323dc782`。无需从旧 a98 基线重新实现本轮 TCP 功能；接手先读[开发交接](docs/DEVELOPMENT_HANDOFF.md)，并核对远端 master 与后续提交。
+
+上述主线功能**已合并、尚未正式发布**；正式 v0.4.8 仍仅包含 `a9f9b5d9` 安装器修复。TCP 收口不授予中转 UDP、手机真机、公网线路或低资源整机长期运行资格，也不授权发布或部署。下方带日期的实施状态保留为历史快照，不覆盖本段，旧失败不改判。
+
+## 2026-10-18 执行顺序（历史快照）
 
 [开发与接手入口](docs/DEVELOPMENT_HANDOFF.md)汇总已完成产品、未合并实验、所有剩余计划和运行命令。当前优先从 `a98da9af` 独立实现[每入口 inherit/direct/relay](docs/PER_INBOUND_ROUTING_CONTRACT.md)：现成客户端、标准 VLESS、单一上游与 host 独立，先 TCP。D1 已进入该产品主线；下方 D1“正在实现”是旧快照。D2实验有阶段成果与原失败，不能替代产品资格或推出所有客户端需定制；[兼容审查与后续 UDP 最小门槛](docs/STANDARD_CLIENT_COMPATIBILITY.md)另列。三态实现已进入 [PR49](https://github.com/ForceMind/V-UI/pull/49) Draft，首轮准确候选仍有失败，尚未验收、合并或发布。
 

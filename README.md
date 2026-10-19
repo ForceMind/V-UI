@@ -11,6 +11,8 @@
 
 当前正式版 [v0.4.8](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8) 于 2026-10-15 从 `a9f9b5d9c0dd2aada5e8f5f2270b2ce93440d5ff` 发布，仅修复安装入口的退出码、临时目录生命周期和引导失败拦截；见[安装器修复边界](docs/INSTALLER_EXIT_STATUS_048.md)。其后双开关“代理与中转”已在准确主线 `9a97ad13` 完成[独立验收](https://github.com/ForceMind/V-UI/pull/44)，但不包含在该已发布版本中。[UDP / DNS 与导入保真门槛](docs/UDP_DNS_CAPABILITY_GATES.md)已在 `13c884a` 完成[独立验收](https://github.com/ForceMind/V-UI/pull/46)。当前新增独立“[导出为中转上游（仅 TCP）](docs/TCP_UPSTREAM_EXPORT.md)”功能并按 [D1 契约](docs/TCP_UPSTREAM_EXPORT_CONTRACT.md)验收，不覆盖旧版本或预称新增 UDP 资格。
 
+每入口“跟随全局 / 指定直连 / 指定中转”的 TCP 功能已由 [PR49](https://github.com/ForceMind/V-UI/pull/49) 合并至 `0962f0c4995b3b7606652027f2330285e4dea1f7` 并完成准确主线验收；[PR50](https://github.com/ForceMind/V-UI/pull/50) 随后完成交接文档收口。该功能**已合并、尚未正式发布**，不在上述 v0.4.8 安装包中。现成客户端导入所选入口的标准 VLESS 配置，第二跳由服务端决定；有效中转入口的 UDP 仍拒绝，TCP 验收不代表手机真机或公网线路验收。详见[使用说明](docs/PER_INBOUND_ROUTING.md)与[收口证据](docs/PER_INBOUND_ROUTING_CLOSURE_20261018.md)。
+
 [下载与发布](https://github.com/ForceMind/V-UI/releases) · [快速安装](#快速安装) · [协议范围](#协议与客户端支持) · [终端菜单](#终端运维菜单) · [完整文档](docs/README.md) · [报告问题](https://github.com/ForceMind/V-UI/issues)
 
 V-UI 不依赖 Redis、常驻 Node.js 或在线订阅转换服务。运行包包含固定版本的便携 Python、离线 wheels、官方核心和本地前端资源；安装按明确版本选择，不追随 `latest`。
@@ -241,7 +243,7 @@ OpenRC 使用 `sudo rc-service v-ui status` 与 `sudo rc-service v-ui-http01 sta
 | --- | --- |
 | 安装、端口、首次账号与证书 | [安装指南](docs/INSTALLATION.md) |
 | 申请/续期/绑定证书 | [证书指南](docs/CERTIFICATES.md) |
-| 节点参数、规则和订阅 | [配置指南](docs/CONFIGURATION.md) · [每入口直连/中转使用说明（未发布候选）](docs/PER_INBOUND_ROUTING.md) · [兼容矩阵](docs/COMPATIBILITY.md) |
+| 节点参数、规则和订阅 | [配置指南](docs/CONFIGURATION.md) · [每入口直连/中转使用说明（已合并，未发布）](docs/PER_INBOUND_ROUTING.md) · [兼容矩阵](docs/COMPATIBILITY.md) |
 | 菜单、升级、备份、恢复与回退 | [运维指南](docs/OPERATIONS.md) · [全局受管控制](docs/MANAGED_OPERATIONS.md) |
 | 故障、安全和 API | [排错](docs/TROUBLESHOOTING.md) · [安全](SECURITY.md) · [API](docs/API.md) |
 | 版本内容与正式资产 | [发布说明](docs/RELEASE_NOTES.md) · [变更日志](CHANGELOG.md) · [发布流程](docs/RELEASING.md) |
