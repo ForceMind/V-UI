@@ -32,7 +32,7 @@
 | 标准客户端 UDP 补验 | [兼容边界](STANDARD_CLIENT_COMPATIBILITY.md)、[实际研究与剩余计划](STANDARD_CLIENT_UDP_RESULTS_20261018.md) | 全 stock / 候选两服务器 / 官方海外 B 已分组实跑；小包部分完整，大包容量红，D前置失败使窗口/恢复未执行；产品relay UDP继续拒绝 |
 | 有限 UDP 边界 / 1200 同关联诊断 | [固定计划](STANDARD_CLIENT_UDP_DIAGNOSTIC_PLAN_20261018.md)、[独立结果](STANDARD_CLIENT_UDP_DIAGNOSTIC_RESULTS_20261018.md) | 四点已收集；准确 a37 两组 1200 同关联 I 通过，candidate 国内+官方海外已足够本有限条件；八补丁最小集未证，原 C/D 红及夹具失败保留，不授手机/产品 UDP 资格 |
 | 国内 UDP 候选精简 | [有限依赖与对照计划](DOMESTIC_UDP_REDUCTION_PLAN_20261018.md) | [准确93d结果](DOMESTIC_UDP_REDUCTION_RESULTS_20261018.md)：四原补丁+独立Count、仅国内精简；2case/4leaf 与完整构建原档独核通过；本1200/6秒条件足够，下一步为精简head认证/目的地址/DNS守卫资格；不授产品或逐补丁最小性 |
-| 精简国内认证/地址/DNS 守卫 | [有限计划](DOMESTIC_UDP_GUARDS_PLAN_20261018.md) | 从公开 4224dce 接续；设计阶段，9 源方法/14 fixture child，旧八补丁 auth 不继承；准确源码与 CI 结果待补 |
+| 精简国内认证/地址/DNS 守卫 | [有限计划](DOMESTIC_UDP_GUARDS_PLAN_20261018.md) | 公开 fd852 为无触发 WIP；2026-10-19 安全中止，见[阻断交接](DOMESTIC_UDP_GUARDS_BLOCKED_20261019.md)。9 源方法/14 child 尚未实跑，旧八补丁 auth 不继承；不得把合成控制当作门槛通过 |
 | 手机、真实外部线路 | 实机与运营线路独立门槛 | 未验收；Linux core loopback 不代替手机导入/TUN/移动网络 |
 | 低资源长期目标 | [资源合同](LOW_RESOURCE_TARGET.md)、[已有软件收口](LOW_RESOURCE_CLOSURE_20261011.md) | 既有软件优化证据保留；真实 1 vCPU/512 MiB 整机和 24 小时稳定性仍待专门环境 |
 | 新功能正式发布/部署 | [发布门槛](RELEASING.md) | 未执行；代码合并不等于发布，生产部署及新权限仍另行批准 |
