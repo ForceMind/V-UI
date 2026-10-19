@@ -47,6 +47,16 @@ def execute(args):
             def client_config(self,kind):
                 r.need(kind=='mihomo','No device role expansion')
                 return deepcopy(self.ordinary_config)
+            def process(self,label,config,**kw):
+                core=super().process(label,config,**kw)
+                path=Path(core.command[-1])
+                import yaml
+                actual=yaml.safe_load(path.read_text()) if kw.get('mihomo') else json.loads(path.read_text())
+                r.need(actual==config,'Actual consumed config differs')
+                records[-1]['route_shape']=deepcopy(actual.get('route'))
+                records[-1]['route_sha256']=hashlib.sha256(r.canonical(actual.get('route'))).hexdigest()
+                r.save(args.output/'process-binaries.json',records)
+                return core
             def logs(self):
                 value=super().logs();self.final_logs=value
                 self.final_process_logs={core.log_path.name:core.log_path.read_text(errors='strict') for core in self.processes}
@@ -181,8 +191,7 @@ def execute(args):
             if f is not None:
                 import psutil
                 row['process_logs']=getattr(f,'final_process_logs',{})
-                row['observations']=f.observations
-                row['target_ledgers']=[{'name':f.target_names.get(id(t),'unknown'),'host':t.host,'port':t.port,'closed':t.closed,'joined':not t.thread.is_alive(),'socket_fd':t.server.socket.fileno(),'errors':t.errors,
+                row['target_ledgers']=[{'name':getattr(f,'target_names',{}).get(id(t),'unknown'),'host':t.host,'port':t.port,'closed':t.closed,'joined':not t.thread.is_alive(),'socket_fd':t.server.socket.fileno(),'errors':t.errors,
                     'received':[{'peer':peer,**g.ident(body)} for peer,body in t.received],
                     'expected':[{'peer':peer,**g.ident(body),'count':count} for (peer,body),count in t.expected.items()]} for t in f.targets]
                 row['cleanup']={'processes':[{'pid':x.process.pid,'returncode':x.process.poll(),'pid_absent':not psutil.pid_exists(x.process.pid)} for x in f.processes if x.process],
@@ -190,11 +199,18 @@ def execute(args):
                     'dns_pending':f.answers.pending() if f.answers else None,'https_pending':f.https_traffic.pending() if hasattr(f,'https_traffic') else 0}
                 if hasattr(f,'https_traffic'):row['https_after_cleanup']=f.https_traffic.snapshot()
                 row['dns']={'queries':f.answers.snapshot() if f.answers else [],'ordinary':f.ordinary_answers.queries if f.ordinary_answers else [],'wire':obs.dns if obs else []}
-                row['associations']=obs.associations if obs else [];row['closed_associations']=obs.closed if obs else []
+                row['associations']=obs.associations if obs else [];row['closed_associations']=obs.closed if obs else [];row['failed_constructions']=obs.failed_constructions if obs else []
                 (args.output/'fixture.log').write_text(f.safe(getattr(f,'final_logs','')))
             row['unexecuted']=[name for name,_ in g.plan(args.case) if name not in [s['id'] for s in row['steps']]]
             row['post_identity']={'source':g.build.identity(args.legacy_repository),'binary_sha256':{k:r.sha(v['path']) for k,v in known.items()}}
-            row=sanitize_auth(row,c.life.clean);r.save(args.output/'result.json',row)
+            row=sanitize_auth(row,c.life.clean)
+            for entry in row['steps']:
+                for sent in entry.get('sends',[]):
+                    sent['raw_log_offsets']={role:old['offset'] for role,old in sent['log_checkpoint'].items()}
+                    for role,old in sent['log_checkpoint'].items():
+                        old['offset']=len(old['text']);sent['fresh_logs'][role]['offset']=old['offset']
+            if 'process_logs' in row:(args.output/'fixture.log').write_text('\n'.join(name+':\n'+text for name,text in sorted(row['process_logs'].items())))
+            r.save(args.output/'result.json',row)
             for path in args.output.glob('*.json'):r.save(path,sanitize_auth(json.loads(path.read_text()),c.life.clean))
     return row
 

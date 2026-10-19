@@ -11,7 +11,7 @@
 
 ## 唯一矩阵：9 源方法 / 14 fixture child
 
-原来源为冻结 `afbdba100c5f0e3dc6888684fdbab31980720df3` 的 `tests/test_restricted_udp_preflight.py`、`restricted_udp_preflight_helpers.py` 与 `experiments/xudp_address/run_experiment.py`。原文件不修改。
+原来源为冻结 `afbdba100c5f0e3dc6888684fdbab31980720df3` 的 `tests/test_restricted_udp_preflight.py`、`restricted_udp_preflight_helpers.py` 与 `experiments/xudp_address/run_experiment.py`。原文件不修改；调度器复用这些源方法语义拆成 14 child，使用固定 guard-* 小负载与统一 1200 前置，并非逐字节调用原方法。
 
 | 组 | 精确来源 / fixture 数 | 本轮语义 |
 | --- | --- | --- |
@@ -19,7 +19,7 @@
 | 第一跳认证 | test07，3 | 错 UUID / 错 CA / 错 SNI；相同前置、坏包与恢复要求 |
 | TCP sanity | 原 make_tcp_tests 的 Mihomo 方法，1 | 前置 UDP 后独立验证 TLS、HTTP 200、固定正文及唯一海外来源；不称 UDP 容量资格 |
 | DNS 全答案 | test09，1 | good 正向；private、mixed、reverse、IPv6 sibling、public IPv6 sibling、self、upstream 七类拒绝，另 literal private |
-| DNS family 失败 | test10，1 | 唯一适配为启动设备改成 Mihomo；raw 域名语义不变。A 成功/AAAA SERVFAIL 仍正确转发；两 family SERVFAIL 无回退 |
+| DNS family 失败 | test10，1 | 设备启动使用 Mihomo；除本节统一前置/负载/调度适配外，raw 域名语义不变。A 成功/AAAA SERVFAIL 仍正确转发；两 family SERVFAIL 无回退 |
 | 裸 retarget 正控 | test11，1 | 普通导出 guarded 前置通过后，正常停止国内/device，再以裸研究配置重启；证明 raw 探针能实际命中不同目标。不能作为产品放行 |
 | guarded retarget | test12，1 | 同 raw association 先合法包，再原 9 次地址/端口变化；只能送达最初已检查目标，所有改变目标 trap 不得收到负包；这是 udp_connect 固定初始目标，不称每包重新授权 |
 | 同域名同端口重绑定 | 原 make_dns_tests，1 | 不重复较弱的 test13 不同端口向量；首次 checked answer 使用一次，原关联 DNS 改变仍绑定旧地址，新关联看到私网答案须拒绝 |
@@ -50,4 +50,6 @@ DNS 不只保存预设 records：旁录真实问题、源、答复 wire/rcode/�
 
 ## 实现 WIP
 
-开始独立 14 child 的合同、真实发送/接收与 DNS wire 旁录及单 case 驱动。当前只做语法检查；独立 verifier、归档、纯负控与新 workflow 尚未完成，不得运行核心或授通过。旧 reduction workflow 已转 manual，避免新阶段意外重跑。
+已保存独立 14 child 合同、真实发送/接收及 DNS wire 旁录、逐 case 驱动、独立 verifier、单快照 text-only 归档和协调器 WIP。16 个合成控制通过（57.895 秒、0 skip），覆盖完整 14 种产出形状及日志/原始包/DNS/身份/清理变异；它们不代表核心运行。完整归档控制和新 workflow 尚未完成，仍不得启动核心或授运行资格。旧 reduction workflow 已转 manual。
+
+静态计划共 117 步：21 direct 可达性控制、47 正向代理业务包（31 SOCKS + 16 raw）、33 负包（17 SOCKS + 16 raw）、7 fault、7 restore、1 naked restart、1 HTTPS。完整执行应为 80 次代理应用发送、68 次目标 UDP 交付（21 direct + 47 海外来源）、24 DNS 查询、1 HTTPS；最终必须按真实 started/unexecuted 另算。

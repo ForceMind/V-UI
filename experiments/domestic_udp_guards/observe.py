@@ -37,7 +37,7 @@ def dns_wire(wire):
 class Observe:
     def __init__(self,f,row,module,helper,support):
         self.f,self.row,self.module,self.helper,self.support=f,row,module,helper,support
-        self.active=None;self.associations=[];self.closed=[];self.dns=[]
+        self.active=None;self.associations=[];self.closed=[];self.dns=[];self.failed_constructions=[]
     def checkpoint(self):
         result={}
         for role in ('domestic','upstream','client'):
@@ -109,15 +109,21 @@ class Observe:
         class Socks(old_socks):
             def __enter__(self):
                 value=super().__enter__();self.observed_stream=self.stream
-                self.observation=owner.register('socks',self.stream,self.control,self.relay)
-                self.stream=owner.socket(self.stream,self.observation);return value
+                try:
+                    self.observation=owner.register('socks',self.stream,self.control,self.relay)
+                    self.stream=owner.socket(self.stream,self.observation);return value
+                except BaseException:
+                    self.stack.close();owner.failed_constructions.append({'kind':'socks','stream_fd':self.observed_stream.fileno(),'control_fd':self.control.fileno()});raise
             def __exit__(self,*args):
                 try:return super().__exit__(*args)
                 finally:owner.closed.append({'id':self.observation['id'],'stream_fd':self.observed_stream.fileno(),'control_fd':self.control.fileno()})
         class Raw(old_raw):
             def __init__(self,*args):
                 super().__init__(*args);self.observed_stream=self.stream
-                self.observation=owner.register('raw',self.stream,initial=self.initial);self.stream=owner.socket(self.stream,self.observation)
+                try:
+                    self.observation=owner.register('raw',self.stream,initial=self.initial);self.stream=owner.socket(self.stream,self.observation)
+                except BaseException:
+                    self.stack.close();owner.failed_constructions.append({'kind':'raw','stream_fd':self.observed_stream.fileno()});raise
             def __exit__(self,*args):
                 try:return super().__exit__(*args)
                 finally:owner.closed.append({'id':self.observation['id'],'stream_fd':self.observed_stream.fileno()})
