@@ -1,6 +1,12 @@
 # V-UI 开发约束
 
-## 2026-10-18 当前优先：标准客户端与每入口 TCP 路由
+## 2026-10-19 当前接手：每入口 TCP 已收口
+
+[PR49](https://github.com/ForceMind/V-UI/pull/49) 已正常合并至 `0962f0c4995b3b7606652027f2330285e4dea1f7`，P0–P5 及准确候选/主线八组、四目标验收已完成，见[收口记录](docs/PER_INBOUND_ROUTING_CLOSURE_20261018.md)。[PR50](https://github.com/ForceMind/V-UI/pull/50) 的交接文档已合并至 `1489bf5218fced9b42c57e06715478dc323dc782`。接手先读[开发交接](docs/DEVELOPMENT_HANDOFF.md)，核对远端 master 与后续提交；不要从旧 a98 基线重新实现已完成的 inherit/direct/relay。
+
+每入口 TCP 功能已合并、尚未正式发布；正式 v0.4.8 仍是安装器修复基线。固定核心、单 selected_upstream、host 开关独立及有效中转 UDP 拒绝等边界不变，不扩大手机/公网/低资源整机资格。后续计划内修改仍须自己的独立审查与准确提交验收，发布、部署和敏感权限另行批准。下方旧阶段文字保留历史，不覆盖本段。
+
+## 2026-10-18 标准客户端与每入口 TCP 路由（历史快照）
 
 先读[当前开发交接](docs/DEVELOPMENT_HANDOFF.md)与[每入口三态契约](docs/PER_INBOUND_ROUTING_CONTRACT.md)。用户已确认现成客户端导入不同 VLESS 节点，分别直连/中转；从准确产品 master `a98da9afbbf58a54f4f102cccec2f26b6e07d2ee` 独立开发 inherit/direct/relay，复用单 selected_upstream，host 代理开关独立。先设计独审，再做迁移/事务/API/UI/导出与 stock Mihomo TCP 同实例验收。有效中转 UDP 仍拒绝，普通直连既有能力保留；不迁入八个实验核心补丁、不改 pin/VERSION、不要求自研手机 App。所有尚未完成计划和准确证据必须更新项目文档并及时提交可恢复 WIP；WIP不代表验收，准确候选/主线/四目标及发布边界保持。下方旧阶段文字按日期保留。
 
