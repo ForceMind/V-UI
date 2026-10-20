@@ -1,5 +1,11 @@
 # 当前开发与接手入口
 
+## 2026-10-20 独立文档任务：Tailscale 管理通道
+
+[PR52](https://github.com/ForceMind/V-UI/pull/52) / [Issue53](https://github.com/ForceMind/V-UI/issues/53) 仅推进[可选管理通道方案](TAILSCALE_MANAGEMENT_OVERLAY.md)和[共存/回滚验收计划](TAILSCALE_MANAGEMENT_ACCEPTANCE.md)。最低共存和恢复门槛前移到安装建议之前；原 HTTPS 域名、端口、证书与 Host/Origin 的管理端定向解析路径尚待独立环境验证。`tailscale0` 地址变化可能影响策略恢复的结论为源码推导，未实测，不能排除接口或自动重新应用来绕过。尚未安装、实现、改网络/权限或获得新资源资格，不发布、不部署。
+
+此前 `implement-vui-restricted-udp-d2` 已被平台中止；本次不恢复、复制、重新审查或执行该工作。下方历史 UDP“下一步”不是恢复授权；本轮不手动启动/修改该专项 CI。PR52 原 Portable distro-probe 的源超时/python3 缺失/exit 127 仍保留 failure，详见验收计划账本，不称产品逻辑失败或全绿。下方历史状态与原失败不覆盖本段范围。
+
 更新：2026-10-18。每入口 TCP 三态已完成 PR49 正常合并及准确主线验收，见[收口证据](PER_INBOUND_ROUTING_CLOSURE_20261018.md)。本文同时保留尚未完成的独立任务；计划记录不等于那些任务已通过。
 
 ## 先做什么
