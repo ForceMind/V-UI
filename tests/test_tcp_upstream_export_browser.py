@@ -7,6 +7,7 @@ they do not establish runtime forwarding (covered by the double-hop gate).
 VUI_TCP_UPSTREAM_BROWSER=1 requires all dependencies; it never skips on failure.
 """
 from copy import deepcopy
+import faulthandler
 import json
 import os
 from pathlib import Path
@@ -208,6 +209,10 @@ const success=(content='synthetic-credential')=>({data:content,headers:{'x-vui-e
 @unittest.skipUnless(os.getenv('VUI_TCP_UPSTREAM_BROWSER') == '1', 'explicit TCP upstream browser gate')
 class TCPUpstreamExportBrowserTests(unittest.TestCase):
     def setUp(self):
+        # Diagnostic only: preserve the exact blocked Python call in CI logs.
+        # The workflow step has a hard timeout; no assertion is bypassed.
+        faulthandler.dump_traceback_later(90, repeat=True)
+        self.addCleanup(faulthandler.cancel_dump_traceback_later)
         from playwright.sync_api import sync_playwright
         self.tmp = tempfile.TemporaryDirectory(prefix='vui-tcp-upstream-browser-')
         self.addCleanup(self.tmp.cleanup)
@@ -380,9 +385,22 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         expect(self.page.locator('#qrcode')).to_have_attribute('title', expected)
         return expected
 
-    def assert_share_cleared(self):
+    def assert_share_cleared(self, during_navigation=False):
         from playwright.sync_api import expect
-        expect(self.page.locator('#share-panel')).not_to_be_visible()
+        if during_navigation:
+            # Locator assertions auto-wait for pending navigation in Playwright
+            # 1.57. The login route is intentionally held until these old-DOM
+            # checks finish, so inspect synchronously without that circular wait.
+            controller = self.page.evaluate('''() => {
+                const root = document.querySelector('#app')._vnode.component.proxy;
+                return {mounted: document.querySelector('#share-panel') !== null,
+                    open: root.showQrDialog, link: root.qrLink,
+                    busy: root.qrBusy, notice: root.qrNotice};
+            }''')
+            self.assertEqual(controller, {'mounted': True, 'open': False, 'link': '',
+                                          'busy': False, 'notice': ''})
+        else:
+            expect(self.page.locator('#share-panel')).not_to_be_visible()
         state = self.page.evaluate('''() => {
             const qr = document.querySelector('#qrcode');
             return {value: document.querySelector('#share-link')?.value || '',
@@ -582,7 +600,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     navigation = self.end_session_before_redirect()
                 else:
                     self.page.evaluate('event => dispatchEvent(new Event(event))', action)
-                self.assert_share_cleared()
+                self.assert_share_cleared(during_navigation=action == 'session')
                 if action == 'navigation':
                     self.open_nodes()
                 if action == 'session':
@@ -673,13 +691,13 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         # Hold only the destination document so the old, invalidated document
         # can be inspected. Session rejection and redirect remain real.
         navigation = self.end_session_before_redirect()
-        self.assert_share_cleared()
+        self.assert_share_cleared(during_navigation=True)
         self.assertTrue(self.page.evaluate('shareResponseAudit[0].aborted'))
         self.page.evaluate("document.querySelector('#app')._vnode.component.proxy.copyLink()")
         self.assertEqual(self.page.evaluate('shareCopyAudit.writes.length'), 1)
         self.page.evaluate('shareCopyAudit.resolve()')
         self.release_share_completion(0)
-        self.assert_share_cleared()
+        self.assert_share_cleared(during_navigation=True)
         self.assertEqual(len(navigation), 1)
         navigation.pop().continue_()
         self.page.wait_for_url('**/login')
