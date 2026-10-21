@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>V-UI · 代理与中转</title><link rel="icon" type="image/svg+xml" href="/ui/brand/vui-icon.svg"><link rel="stylesheet" href="/ui/css/workspace.css"><link rel="stylesheet" href="/ui/css/proxy.css"><script src="/ui/js/proxy.js" defer></script></head>
+<title>V-UI · 代理与中转</title><link rel="icon" type="image/svg+xml" href="/ui/brand/vui-icon.svg"><link rel="stylesheet" href="/ui/css/workspace.css"><link rel="stylesheet" href="/ui/css/proxy.css"><script src="/ui/js/proxy.js" defer></script><script src="/ui/js/tailscale-status.js" defer></script></head>
 <body><header><a class="brand" href="/ui/"><img class="vui-brand-image" src="/ui/brand/vui-icon.svg" alt="V-UI" width="30" height="30"><span aria-hidden="true">V-UI</span></a><nav><a href="/workspace">分流与订阅</a><a href="/proxy" aria-current="page">代理与中转</a><a href="/certificates">证书管理</a><a href="/account">账户</a></nav></header>
 <main><div class="page-title"><div><h1>代理与中转</h1><p>主机代理与默认入口策略独立；每个节点可指定直连或中转，共用一个上游。</p></div><span id="stage">正在读取</span></div>
 <p id="notice" role="status" aria-live="polite">正在读取服务器草稿与活动配置…</p>
@@ -11,6 +11,11 @@
 <p id="inbound-policy-summary" class="hint"></p><ul id="inbound-policy-list"></ul>
 <p id="pending-state" class="hint"></p><p id="save-state" role="status"></p>
 <div id="conflict" role="alert" hidden><p>服务器草稿已变化。已重新读取最新状态，并保留你的页面编辑；请核对后再保存。</p><div class="actions"><button id="rebase" type="button">核对后保留页面编辑</button><button id="discard" type="button">放弃编辑，载入服务器草稿</button></div></div>
+</section>
+<section id="tailscale-card" aria-labelledby="tailscale-heading" hidden>
+<div class="section-head"><h2 id="tailscale-heading">可选管理通道 · 只读观察</h2><button id="tailscale-refresh" type="button">刷新管理通道状态</button></div>
+<p id="tailscale-state" role="status" aria-live="polite">未知：请手动刷新</p><p id="tailscale-time" class="hint"></p>
+<p class="hint">仅反映本机 Tailscale 控制平面状态，不证明此浏览器经过私有网络、面板可达或业务共存通过。每 30 秒最多采样一次；无自动刷新、安装、登录或配置操作。</p>
 </section>
 <form id="settings-form" autocomplete="off">
 <section aria-labelledby="mode-heading"><h2 id="mode-heading">01 · 编辑草稿</h2><p class="hint">开关只修改草稿。保存后还需检查并明确应用；关闭两个开关会保留上游与凭据，指定中转节点仍可使用上游。</p>

@@ -1,6 +1,7 @@
 # V-UI：可选 Tailscale 私有管理通道方案
 
-> 状态：**仅文档设计与待执行验收计划；未实现、未安装、未做网络实测。**
+> 状态：**管理网络仍仅设计与待执行验收计划；未安装、未做网络实测。**
+> 2026-10-21：V-TS-02 另开[默认关闭只读状态候选](TAILSCALE_STATUS_CONTRACT.md)，不改变此文 2026-10-20 的安装/共存/恢复边界；下文“本轮”保留原文档阶段范围。
 > 更新：2026-10-20。核对主线 `c66af7c55e6e9e334262f7e1f098778cb129e795`、[PR52](https://github.com/ForceMind/V-UI/pull/52) 原 head `32ec01341ca9cde8bc6b22c0f8882845eabf88af` 和 [Issue53](https://github.com/ForceMind/V-UI/issues/53)。
 > 最低共存、URL 与回滚门槛见[验收计划](TAILSCALE_MANAGEMENT_ACCEPTANCE.md)。**这些门槛尚未通过，因此目前不建议在现有业务主机上安装。**
 

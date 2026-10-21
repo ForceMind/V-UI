@@ -386,6 +386,40 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         self.assertEqual(self.external, [])
         self.assertEqual(self.errors, [])
 
+    def test_mocked_tailscale_readonly_card_disabled_stale_failure_and_history(self):
+        from playwright.sync_api import expect
+        page = self.open_page()
+        expect(page.locator('#tailscale-card')).to_be_hidden()
+        self.assertEqual(self.context.request.get(self.base + '/api/management/tailscale').json(), {'enabled': False})
+        calls = []
+        payload = {'enabled': True, 'state': 'online', 'reason': 'control_connected',
+                   'observed_at': 1234, 'stale': False, 'valid_for_seconds': 2,
+                   'ignored_secret': '<img src=x>100.64.0.7 private@example.test'}
+        def reply(route):
+            calls.append(route.request.method)
+            route.fulfill(status=200, content_type='application/json', body=json.dumps(payload))
+        page.route('**/api/management/tailscale', reply)
+        page.reload()
+        expect(page.locator('#tailscale-card')).to_be_visible()
+        expect(page.locator('#tailscale-state')).to_have_text('控制平面在线')
+        self.assertNotIn('100.64.0.7', page.locator('#tailscale-card').inner_text())
+        self.assertEqual(page.locator('#tailscale-card img').count(), 0)
+        expect(page.locator('#tailscale-state')).to_have_text('未知：请手动刷新', timeout=4000)
+        self.assertEqual(calls, ['GET'])
+        payload['valid_for_seconds'] = 30
+        page.locator('#tailscale-refresh').click()
+        expect(page.locator('#tailscale-state')).to_have_text('控制平面在线')
+        page.unroute('**/api/management/tailscale', reply)
+        page.route('**/api/management/tailscale', lambda route: route.fulfill(status=503))
+        page.locator('#tailscale-refresh').click()
+        expect(page.locator('#tailscale-state')).to_have_text('未知：请手动刷新')
+        page.goto(self.base + '/account')
+        page.go_back()
+        expect(page.locator('#tailscale-state')).not_to_have_text('控制平面在线')
+        self.assertEqual(self.external, [])
+        self.assertEqual(self.errors, [])
+        self.assertFalse(page.evaluate('document.documentElement.scrollWidth > innerWidth'))
+
     def test_actual_import_four_states_and_write_only_credentials(self):
         from playwright.sync_api import expect
         self.draft_only()
