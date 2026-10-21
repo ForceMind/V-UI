@@ -54,7 +54,14 @@ def local_proxy_port():
     lower, upper = map(int, raw.split())
     if not 0 <= lower <= upper <= 65535:
         raise AssertionError('Invalid Linux automatic port range')
-    candidates = [port for port in range(1024, 65536) if not lower <= port <= upper]
+    try:
+        raw_floor = Path('/proc/sys/net/ipv4/ip_unprivileged_port_start').read_text(encoding='ascii')
+    except (OSError, UnicodeError):
+        raise AssertionError('Cannot read Linux unprivileged port floor') from None
+    if re.fullmatch(r'[ \t]*[0-9]{1,5}[ \t]*\n?', raw_floor) is None or not 0 <= int(raw_floor) <= 65535:
+        raise AssertionError('Invalid Linux unprivileged port floor')
+    floor = max(1024, int(raw_floor))
+    candidates = [port for port in range(floor, 65536) if not lower <= port <= upper]
     if not candidates:
         raise AssertionError('No unprivileged port outside Linux automatic range')
     for port in random.SystemRandom().sample(candidates, min(128, len(candidates))):

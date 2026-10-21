@@ -17,11 +17,23 @@ def config(port):
                           'listen': '127.0.0.1', 'listen_port': port}]}
 
 
+def kernel_values(raw='32768 60999', floor='1024'):
+    def read(path, *, encoding):
+        assert encoding == 'ascii'
+        if path == Path('/proc/sys/net/ipv4/ip_local_port_range'):
+            return raw
+        assert path == Path('/proc/sys/net/ipv4/ip_unprivileged_port_start')
+        if isinstance(floor, Exception):
+            raise floor
+        return floor
+    return patch.object(Path, 'read_text', autospec=True, side_effect=read)
+
+
 class FixturePortTests(unittest.TestCase):
     def test_candidates_are_distinct_unprivileged_and_outside_inclusive_range(self):
         for raw, expected in (('32768\t60999\n', {1024, 32767, 61000, 65535}),
                               ('0 65534', {65535}), ('1025 65535', {1024})):
-            with self.subTest(raw=raw), patch.object(Path, 'read_text', return_value=raw), \
+            with self.subTest(raw=raw), kernel_values(raw), \
                     patch.object(helper.random, 'SystemRandom') as rng, \
                     patch.object(proxy_apply, 'preflight_local_listener') as guard:
                 def sample(population, count):
@@ -42,7 +54,7 @@ class FixturePortTests(unittest.TestCase):
     def test_invalid_missing_and_full_ranges_never_probe_or_fallback(self):
         for raw in ('', '32768', '1 2 3', '65000 1000', '-1 65000', '0 65536',
                     '0x400 60000', '１ ６５５３５', '1\n65535', '1024 65535', '0 65535'):
-            with self.subTest(raw=raw), patch.object(Path, 'read_text', return_value=raw), \
+            with self.subTest(raw=raw), kernel_values(raw), \
                     patch.object(proxy_apply, 'preflight_local_listener') as guard:
                 with self.assertRaises(AssertionError): helper.local_proxy_port()
                 guard.assert_not_called()
@@ -53,9 +65,36 @@ class FixturePortTests(unittest.TestCase):
                     helper.local_proxy_port()
                 guard.assert_not_called()
 
+    def test_configured_privileged_floor_is_respected_without_changing_kernel(self):
+        for floor in ('0', '1024', '20000', ' \t30000\n', '65535'):
+            with self.subTest(floor=floor), kernel_values(floor=floor), \
+                    patch.object(helper.random, 'SystemRandom') as rng, \
+                    patch.object(proxy_apply, 'preflight_local_listener') as guard:
+                def sample(population, count):
+                    self.assertEqual(min(population), max(1024, int(floor)))
+                    self.assertTrue(all(port >= int(floor) for port in population))
+                    return population[:count]
+                rng.return_value.sample.side_effect = sample
+                self.assertEqual(helper.local_proxy_port(), max(1024, int(floor)))
+                guard.assert_called_once()
+        with kernel_values('32768 65535', floor='32768'), \
+                patch.object(proxy_apply, 'preflight_local_listener') as guard:
+            with self.assertRaisesRegex(AssertionError, 'No unprivileged port'):
+                helper.local_proxy_port()
+            guard.assert_not_called()
+
+    def test_invalid_or_unreadable_privileged_floor_never_probes_or_falls_back(self):
+        for floor in ('', '-1', '+1024', '65536', '100000', '1024 2048', '0x400',
+                      '１０２４', '10\n24', '1024\n\n', FileNotFoundError(), PermissionError(), UnicodeError()):
+            with self.subTest(floor=floor), kernel_values(floor=floor), \
+                    patch.object(proxy_apply, 'preflight_local_listener') as guard:
+                with self.assertRaisesRegex(AssertionError, 'Linux unprivileged port floor'):
+                    helper.local_proxy_port()
+                guard.assert_not_called()
+
     def test_occupied_retries_are_bounded_and_other_failures_propagate(self):
         candidates = list(range(1024, 1152))
-        with patch.object(Path, 'read_text', return_value='32768 60999'), \
+        with kernel_values(), \
                 patch.object(helper.random, 'SystemRandom') as rng:
             rng.return_value.sample.return_value = candidates
             for successes in (126, 127):
@@ -78,7 +117,7 @@ class FixturePortTests(unittest.TestCase):
                     guard.assert_called_once()
 
     def test_small_candidate_set_is_exhausted_without_repeating(self):
-        with patch.object(Path, 'read_text', return_value='1025 65535'), \
+        with kernel_values('1025 65535'), \
                 patch.object(proxy_apply, 'preflight_local_listener',
                              side_effect=proxy_apply.ProxyApplyError('LOCAL_PORT_OCCUPIED')) as guard:
             with self.assertRaises(AssertionError): helper.local_proxy_port()
@@ -111,7 +150,7 @@ class FixturePortTests(unittest.TestCase):
                                    family=socket.AF_INET, status='ESTABLISHED', pid=100)
         with patch.object(socket, 'socket', FakeSocket), \
                 patch.object(proxy_apply.psutil, 'net_connections', return_value=[existing]), \
-                patch.object(Path, 'read_text', return_value='32768 60999'), \
+                kernel_values(), \
                 patch.object(helper.random, 'SystemRandom') as rng:
             old = proxy_loopback_support.listen_port()
             self.assertEqual(old, 40000)
@@ -135,6 +174,8 @@ class FixturePortTests(unittest.TestCase):
         low, high = map(int, Path('/proc/sys/net/ipv4/ip_local_port_range').read_text().split())
         port = helper.local_proxy_port()
         self.assertFalse(low <= port <= high)
+        floor = int(Path('/proc/sys/net/ipv4/ip_unprivileged_port_start').read_text())
+        self.assertGreaterEqual(port, max(1024, floor))
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as competitor:
             competitor.bind(('127.0.0.1', port))
             with self.assertRaises(proxy_apply.ProxyApplyError) as caught:
