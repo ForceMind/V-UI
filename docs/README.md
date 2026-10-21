@@ -36,6 +36,7 @@
 
 | 阅读目标 | 文档 |
 | --- | --- |
+| 可选 Tailscale 管理通道、HTTPS 兼容与安装前共存门槛（仅研究，未实测） | [方案](TAILSCALE_MANAGEMENT_OVERLAY.md) / [最低共存与回滚验收计划](TAILSCALE_MANAGEMENT_ACCEPTANCE.md) |
 | 每入口三态、首次直连/中转与保存/应用状态（主线已验、尚未发布） | [PER_INBOUND_ROUTING.md](PER_INBOUND_ROUTING.md) |
 | 每入口 TCP 准确候选/主线收口与保留失败 | [PER_INBOUND_ROUTING_CLOSURE_20261018.md](PER_INBOUND_ROUTING_CLOSURE_20261018.md) |
 | 专用 TCP 上游 URI/YAML 导出、另一实例导入与凭据处理 | [TCP_UPSTREAM_EXPORT.md](TCP_UPSTREAM_EXPORT.md) |
