@@ -1,5 +1,9 @@
 # 当前开发与接手入口
 
+## 2026-10-21 独立候选：可选只读管理状态
+
+基于 PR52 正常合并的准确 master `66f7ff74247741b1fe3e5f1610e1d33d52d42f58`，按 Issue53 V-TS-02 实现[默认关闭的状态观察卡片](TAILSCALE_STATUS_CONTRACT.md)。固定本机命令、限时限长、白名单与缓存，无安装/登录/网络/权限/核心动作；真实 Tailscale、共存/回滚及 URL/身份恢复尚未验收。新候选准确审查/CI 见独立 PR，不继承旧提交资格。受限 UDP D2 不恢复，不发布或部署。
+
 ## 2026-10-20 独立文档任务：Tailscale 管理通道
 
 [PR52](https://github.com/ForceMind/V-UI/pull/52) / [Issue53](https://github.com/ForceMind/V-UI/issues/53) 仅推进[可选管理通道方案](TAILSCALE_MANAGEMENT_OVERLAY.md)和[共存/回滚验收计划](TAILSCALE_MANAGEMENT_ACCEPTANCE.md)。最低共存和恢复门槛前移到安装建议之前；原 HTTPS 域名、端口、证书与 Host/Origin 的管理端定向解析路径尚待独立环境验证。`tailscale0` 地址变化可能影响策略恢复的结论为源码推导，未实测，不能排除接口或自动重新应用来绕过。尚未安装、实现、改网络/权限或获得新资源资格，不发布、不部署。

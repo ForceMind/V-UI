@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.staticfiles import StaticFiles
-from app.api import auth, certificates, cores, files, inbounds, proxy, proxy_diagnostics, proxy_exports, routing, security, singbox, subscription, subscriptions, system, xray
+from app.api import auth, certificates, cores, files, inbounds, management, proxy, proxy_diagnostics, proxy_exports, routing, security, singbox, subscription, subscriptions, system, xray
 from app.data_owner import data_owner
 from app.models.database import DB_PATH, init_db
 from app.middleware.auth import AdminAuthMiddleware, configured_origin
@@ -20,6 +20,7 @@ app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management pan
 app.add_middleware(AdminAuthMiddleware)
 app.include_router(certificates.router,prefix='/api/certificates',tags=['Certificates'])
 app.include_router(system.router,prefix='/api/system',tags=['System'])
+app.include_router(management.router,prefix='/api/management',tags=['Management observations'])
 app.include_router(inbounds.router,prefix='/api/inbounds',tags=['Inbounds'])
 app.include_router(cores.router,prefix='/api/cores',tags=['Cores'])
 app.include_router(routing.router,prefix='/api/routing',tags=['Routing'])
