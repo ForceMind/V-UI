@@ -25,6 +25,7 @@ from test_proxy_double_hop import (
     DoubleHopFixture, INGRESS_UUID, PASSWORD, PROFILE_ID, STATE_WALK, USERNAME,
 )
 from proxy_loopback_support import DIRECT_EGRESS, INGRESS, SNI, UPSTREAM
+from tcp_upstream_export_helpers import local_proxy_port as allocate_proxy_fixture_port
 
 
 class SimulatedInterruption(BaseException):
@@ -36,6 +37,10 @@ class SimulatedInterruption(BaseException):
 class ProxyApplyRealTests(DoubleHopFixture):
     def setUp(self):
         super().setUp()
+        # The inherited bind(0) choice is released and can become a client
+        # source port. Select once outside automatic ports, before any draft;
+        # retain this port through both upstream walks, failures and restarts.
+        self.local_port = allocate_proxy_fixture_port()
         self.lock = threading.RLock()
         self.store = ProxyStore(self.root/"store")
         self.store.read_snapshot()

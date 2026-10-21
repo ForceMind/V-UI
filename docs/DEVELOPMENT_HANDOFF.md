@@ -14,7 +14,21 @@ PR57 首个候选 `cdf128f` 的浏览器组出现异常长等待，检查时仍�
 
 PR57 新候选 `3f1af02` 的 [Test run](https://github.com/ForceMind/V-UI/actions/runs/39658712928) 在 10 分钟上限处明确失败：真实取消和剪贴板拒绝/迟到反馈方法先通过，会话子场景约 30 秒时报 ERROR 后未结束；后续 editor 步骤未执行。调用栈仅显示 Playwright 调度 greenlet，不能据此断言具体调用。源码与确定性控制进一步证明测试夹具的两处问题：登录观察器晚于 logout，可能漏掉并发轮询触发的早到跳转；subTest 捕获错误后继续隐私检查，而被挂起的导航到最终 cleanup 才释放。修正将观察器前置，导航作用域在成功或异常时立即退出，原异常立即打印，并补充被挂起测试调用者的栈；会话条件和全部 DOM 秘密检查保留。早到跳转是已证明的竞态机制，不冒称已还原该次 CI 的具体事件顺序。旧 `cdf128f` run 检查时仍运行，不记为已取消或成功。
 
-本任务仍为独立草稿 PR，已从原 PR56 候选分支改基线至准确 master `0de276f`。改基线后的准确 diff、独审、完整八组 / 四目标与 Chromium 均须重新核验，不能继承原头的通过项或绕过失败，再允许正常合并并复核新主线。无发布部署、真实 Tailscale、网络安全设置、凭据或受限 UDP D2 动作；原失败和下方历史阶段均保留。
+后续 `ce3f945` 的 [Test run](https://github.com/ForceMind/V-UI/actions/runs/39662133610) 仍在 10 分钟上限失败，但新诊断明确定位到会话旧 DOM 检查的 `page.evaluate`（browser test 第 482 行）：Playwright 在导航时可无超时地等待替换执行上下文，而夹具又挂起了登录文档，不能依此读取旧页面。这次失败不归因于分享 HTTP 或生产剪贴板逻辑。下一测试修正不再挂起网络导航：真实 Share 点击提供 sticky activation，测试添加 beforeunload 确认并取消原跳转，在同一已失效但仍存活的文档中验证真实 logout、`/auth/me` 401、原控制器/DOM 身份、URI/二维码属性清空、迟到响应和复制守卫；随后移除测试监听器，由夹具明确导航到登录页，不称原跳转已完成。同步 DOM 读取使用有界检查，假值仍只返回一次而不是重试断言；全部秘密断言与真实会话拒绝保留。异常清理、原错误保留和固定版本控制需通过，最终 Chromium 仍须新准确提交 CI，不能由这些源码推导代替。
+
+本任务仍为独立草稿 PR，已从原 PR56 候选分支改基线至 `0de276f`；PR58 正常合并后再以保留历史的双亲提交纳入 `2ce795ddfb1d40520a029e40f518881a39a9a161`，两项既有端口测试修正原样保留。PR58 新主线资格另验，不因本任务的旧结果而提前通过。改基线后的准确 diff、独审、完整八组 / 四目标与 Chromium 均须重新核验，不能继承原头的通过项或绕过失败，再允许正常合并并复核新主线。无发布部署、真实 Tailscale、网络安全设置、凭据或受限 UDP D2 动作；原失败和下方历史阶段均保留。
+
+## 2026-10-21 已合并待主线验收：真实 apply 切换夹具端口
+
+[PR58](https://github.com/ForceMind/V-UI/pull/58) 准确候选 `65ad9bb891623a5e0e26999c017e87351aa126bc` / tree `6e1d3b60d208ee2a8effb84b6ecc8be89460e477` 已完成独审、八组 / 11 jobs / 126 steps 首次通过与同源四目标，正常合并至相同 tree 的 `2ce795ddfb1d40520a029e40f518881a39a9a161`。新主线须独立 CI，不能继承候选结果；该状态也不授予尚失败的 PR57 浏览器资格。
+
+从 [PR56](https://github.com/ForceMind/V-UI/pull/56) 合并后的准确 master `0de276fd93344bbeaee03cb2c146347c0a4f8af4` 独立修改测试。该主线的 [loopback attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39657832360/attempts/1) 在真实 apply 切换组出现 `LOCAL_PORT_OCCUPIED`；日志未识别占用 socket，不能断言具体历史根因。一次失败后，后续 subTest 的计划切换标签不一定等于实际已运行的前态，不能仅凭标签归因。
+
+`ProxyApplyRealTests.setUp` 在父夹具完成后、构造 store/runtime 或首个 draft 之前，仅调用一次已有 D1 端口分配器，替换父夹具释放的 `bind(0)` 结果。相同端口贯穿 TLS/REALITY 两套 12 条切换、失败回滚及两种重启；不在 check/apply 失败后重选或重试，不修改共享父夹具、分配器、生产代码、内核设置、固定核心或工作流。分配仍非原子预留；原真实 TCP/UDP × IPv4/IPv6 竞争绑定拒绝、旧 PID/活动 revision 保留、core SHA 和回滚断言保持不变。
+
+新增 `test_proxy_apply_fixture_ports.py` 直接执行实际 setup、draft、编译器、私有 store、coordinator 和切换/回滚/重启测试方法；仅核心与网络拓扑为 fake，覆盖一次分配的顺序、全程固定端口、分配失败、preflight 错误原样传播，以及 core apply 失败正常回滚后返回错误且无重试。它不是实际二进制、TLS/REALITY 转发或真实重启资格。开发环境已有 netlink EPERM 限制，本次未重试真实核心或 Chromium；准确候选与合并主线的完整 CI、独立审查及原实际链路门槛仍须另验。本地控制不代替新准确提交验收；不发布或部署。
+
+本地聚焦验证共 135 项：131 通过、4 个真实 apply 方法因未启用而明确 skip；Python 编译与文档检查通过。六项新增控制之外，另以仅内存 AST 变异确认：移除首次分配、在 draft 中重选、错误后重试 apply 均被控制捕获；不改变磁盘上的测试或生产代码。完整套件及真实 CI 尚未据此判定通过。
 
 ## 2026-10-21 当前目标：D1 TCP 验收端口分配修正
 

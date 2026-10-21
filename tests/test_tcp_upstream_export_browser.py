@@ -77,53 +77,141 @@ def export_fixture_nodes():
 
 
 class TCPUpstreamExportStaticTests(unittest.TestCase):
-    def test_session_hold_captures_early_redirect_and_always_releases(self):
-        # A real browser poll can see logout before request.post returns. Model
-        # that exact ordering, plus setup/body failures, without browser access.
+    def test_session_cancel_observes_real_rejection_and_always_removes_listeners(self):
+        # Model early dashboard rejection during logout and explicit later
+        # revalidation, plus setup/body/cleanup failures, without a browser.
         from unittest.mock import patch
-        for failure in (None, 'logout', 'request-wait', 'body'):
-            with self.subTest(failure=failure):
-                events = []
-                page = SimpleNamespace(watching=False)
-                context = SimpleNamespace(handler=None)
-                route = SimpleNamespace(
-                    continue_=lambda: events.append('continue'),
-                    abort=lambda: events.append('abort'))
-                @contextmanager
-                def expect_request(url):
-                    page.watching = True
-                    events.append('watch')
-                    yield
-                    if failure == 'request-wait':
-                        raise TimeoutError('synthetic first request timeout')
-                def post(url, **kwargs):
-                    self.assertTrue(page.watching, 'Login observer must precede logout')
-                    events.append('logout')
-                    context.handler(route)
-                    return SimpleNamespace(status=500 if failure == 'logout' else 200)
-                def register(url, handler):
-                    context.handler = handler
-                context.route = register
-                context.unroute = lambda url, handler: events.append('unroute')
-                context.request = SimpleNamespace(post=post)
-                page.expect_request = expect_request
-                page.evaluate = lambda expression: self.fail('Do not evaluate after an early redirect')
-                case = TCPUpstreamExportBrowserTests('test_ordinary_share_real_session_end_blocks_late_link_and_copy')
-                case.page = page
-                case.source = {'base': 'http://127.0.0.1:1', 'context': context}
-                output = io.StringIO()
-                with patch('sys.stderr', output):
-                    if failure:
-                        with self.assertRaises(TimeoutError if failure == 'request-wait' else AssertionError):
-                            with case.end_session_before_redirect():
-                                if failure == 'body':
-                                    raise AssertionError('synthetic original body failure')
-                        self.assertIn('Traceback', output.getvalue())
-                    else:
-                        with case.end_session_before_redirect():
-                            events.append('body')
-                self.assertEqual(events[:2], ['watch', 'logout'])
-                self.assertEqual(events[-2:], ['abort' if failure else 'continue', 'unroute'])
+        for timing in ('early', 'explicit', 'delayed-dismiss'):
+            failures = ((None,) if timing == 'delayed-dismiss' else
+                        (None, 'logout', 'response-wait', 'dialog-wait', 'body',
+                         'cleanup', 'body-and-cleanup', 'wrong-dialog'))
+            for failure in failures:
+                with self.subTest(timing=timing, failure=failure):
+                    events, observers, pending_callbacks = [], set(), []
+                    page = SimpleNamespace(url='http://127.0.0.1:1/')
+                    def register(event, handler):
+                        self.assertEqual(event, 'dialog')
+                        page.handler = handler
+                        events.append('listen')
+                    def remove(event, handler):
+                        self.assertIs(handler, page.handler)
+                        events.append('remove-dialog')
+                    page.on, page.remove_listener = register, remove
+                    @contextmanager
+                    def expect_response(predicate, timeout):
+                        self.assertEqual(timeout, 10000)
+                        response = SimpleNamespace(url='http://127.0.0.1:1/api/auth/me', status=401)
+                        self.assertTrue(predicate(response))
+                        self.assertFalse(predicate(SimpleNamespace(url=response.url, status=200)))
+                        observers.add('response')
+                        yield SimpleNamespace(value=response)
+                        if failure == 'response-wait':
+                            raise TimeoutError('synthetic response timeout')
+                    @contextmanager
+                    def expect_event(event, timeout):
+                        self.assertEqual((event, timeout), ('dialog', 10000))
+                        observers.add('dialog')
+                        yield
+                        if failure == 'dialog-wait':
+                            raise TimeoutError('synthetic dialog timeout')
+                    page.expect_response, page.expect_event = expect_response, expect_event
+                    def reject_and_navigate():
+                        events.append('me401')
+                        def dismiss():
+                            if timing == 'delayed-dismiss':
+                                from greenlet import getcurrent
+                                events.append('dismiss-request')
+                                getcurrent().parent.switch()
+                            events.append('dismiss')
+                        dialog = SimpleNamespace(
+                            type='alert' if failure == 'wrong-dialog' else 'beforeunload', dismiss=dismiss)
+                        if timing == 'delayed-dismiss':
+                            from greenlet import greenlet
+                            callback = greenlet(lambda: page.handler(dialog))
+                            pending_callbacks.append(callback)
+                            callback.switch()
+                        else:
+                            page.handler(dialog)
+                    def wait_for_timeout(timeout):
+                        self.assertEqual(timeout, 20)
+                        events.append('pump-dismiss')
+                        pending_callbacks.pop().switch()
+                    page.wait_for_timeout = wait_for_timeout
+                    def post(url, **kwargs):
+                        self.assertEqual(observers, {'response', 'dialog'})
+                        self.assertEqual(kwargs['timeout'], 10000)
+                        events.append('logout')
+                        if timing != 'explicit':
+                            reject_and_navigate()
+                        return SimpleNamespace(status=500 if failure == 'logout' else 200)
+                    def browser_value(expression, arg=None):
+                        if 'addEventListener' in expression:
+                            events.append('install-beforeunload')
+                            return True
+                        if 'checkAdminSession' in expression:
+                            self.assertEqual(timing, 'explicit')
+                            reject_and_navigate()
+                        elif 'removeEventListener' in expression:
+                            events.append('remove-beforeunload')
+                            if failure in ('cleanup', 'body-and-cleanup'):
+                                raise RuntimeError('synthetic cleanup failure')
+                    def goto(url, **kwargs):
+                        self.assertEqual(url, 'http://127.0.0.1:1/login')
+                        self.assertEqual(kwargs, {'wait_until': 'domcontentloaded', 'timeout': 10000})
+                        events.append('fixture-login')
+                    page.goto = goto
+                    case = TCPUpstreamExportBrowserTests('test_ordinary_share_real_session_end_blocks_late_link_and_copy')
+                    case.page, case.browser_value = page, browser_value
+                    case.source = {'base': 'http://127.0.0.1:1',
+                                   'context': SimpleNamespace(request=SimpleNamespace(post=post))}
+                    output = io.StringIO()
+                    with patch('sys.stderr', output):
+                        if failure:
+                            error = (TimeoutError if failure.endswith('-wait') else
+                                     RuntimeError if failure == 'cleanup' else AssertionError)
+                            with self.assertRaises(error):
+                                with case.end_session_with_canceled_navigation():
+                                    if failure in ('body', 'body-and-cleanup'):
+                                        raise AssertionError('synthetic original body failure')
+                            if failure != 'cleanup':
+                                self.assertIn('Traceback', output.getvalue())
+                            self.assertNotIn('fixture-login', events)
+                        else:
+                            with case.end_session_with_canceled_navigation():
+                                self.assertIn('dismiss', events)
+                                events.append('body')
+                    if timing == 'delayed-dismiss':
+                        self.assertLess(events.index('pump-dismiss'), events.index('body'))
+                        self.assertEqual(pending_callbacks, [])
+                    self.assertEqual(events[:3], ['listen', 'install-beforeunload', 'logout'])
+                    self.assertEqual(events[-3:] if not failure else events[-2:],
+                        ['remove-beforeunload', 'remove-dialog', 'fixture-login'] if not failure else
+                        ['remove-beforeunload', 'remove-dialog'])
+
+    def test_bounded_browser_value_keeps_falsy_results_and_rejects_promises(self):
+        # Execute the exact generated wrapper with Node, not a DOM stand-in.
+        # False/empty values must return once, never become an assertion retry.
+        node = shutil.which('node')
+        self.assertIsNotNone(node)
+        calls, disposed = [], []
+        def wait_for_function(expression, *, arg, timeout, polling):
+            self.assertEqual((timeout, polling), (5000, 50))
+            calls.append(expression)
+            result = subprocess.run([node, '-e',
+                'const [source,arg]=JSON.parse(process.argv[1]); process.stdout.write(eval(source)(arg));',
+                json.dumps([expression, arg])], text=True, capture_output=True, timeout=10)
+            if result.returncode:
+                raise RuntimeError(result.stderr)
+            return SimpleNamespace(json_value=lambda: result.stdout,
+                                   dispose=lambda: disposed.append(True))
+        case = TCPUpstreamExportBrowserTests('test_ordinary_share_real_session_end_blocks_late_link_and_copy')
+        case.page = SimpleNamespace(wait_for_function=wait_for_function)
+        for value in (False, '', 0, None, {'cleared': False}):
+            self.assertEqual(case.browser_value('arg => arg', value), value)
+        with self.assertRaisesRegex(RuntimeError, 'requires a synchronous result'):
+            case.browser_value('() => Promise.resolve(true)')
+        self.assertEqual(len(calls), 6)
+        self.assertEqual(len(disposed), 5)
 
     def test_browser_diagnostic_includes_suspended_sync_caller(self):
         from greenlet import getcurrent, greenlet
@@ -473,36 +561,55 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         expect(self.page.locator('#qrcode')).to_have_attribute('title', expected)
         return expected
 
-    def assert_share_cleared(self, during_navigation=False):
+    def browser_value(self, expression, arg=None):
+        """Bound a synchronous DOM operation, including context acquisition.
+
+        page.evaluate/content have no timeout in Playwright 1.57. An always-
+        truthy JSON wrapper uses wait_for_function's timeout without retrying
+        false assertion results; primitive json_value needs no DOM evaluation.
+        """
+        handle = self.page.wait_for_function("""arg => {
+            const value = (""" + expression + """)(arg);
+            if (value && typeof value.then === 'function')
+                throw new Error('browser_value requires a synchronous result');
+            return JSON.stringify({value: value === undefined ? null : value});
+        }""", arg=arg, timeout=5000, polling=50)
+        try:
+            return json.loads(handle.json_value())['value']
+        finally:
+            handle.dispose()
+
+    def assert_share_cleared(self, session_ended=False):
         from playwright.sync_api import expect
-        if during_navigation:
-            # Locator assertions auto-wait for pending navigation in Playwright
-            # 1.57. The login route is intentionally held until these old-DOM
-            # checks finish, so inspect synchronously without that circular wait.
-            controller = self.page.evaluate('''() => {
+        expect(self.page.locator('#share-panel')).not_to_be_visible()
+        snapshot = self.browser_value('''sessionEnded => {
+            const qr = document.querySelector('#qrcode');
+            let controller = null;
+            if (sessionEnded) {
                 const root = document.querySelector('#app')._vnode.component.proxy;
-                return {mounted: document.querySelector('#share-panel') !== null,
-                    sessionEnded: adminSessionEnded,
+                const navigation = window.shareSessionNavigation;
+                controller = {mounted: document.querySelector('#share-panel') !== null,
+                    sameDocument: navigation?.document === document && navigation?.root === root,
+                    beforeunload: navigation?.attempts, sessionEnded: adminSessionEnded,
                     open: root.showQrDialog, link: root.qrLink,
                     busy: root.qrBusy, notice: root.qrNotice};
-            }''')
-            self.assertEqual(controller, {'mounted': True, 'sessionEnded': True, 'open': False, 'link': '',
-                                          'busy': False, 'notice': ''})
-        else:
-            expect(self.page.locator('#share-panel')).not_to_be_visible()
-        state = self.page.evaluate('''() => {
-            const qr = document.querySelector('#qrcode');
-            return {value: document.querySelector('#share-link')?.value || '',
+            }
+            return {controller, state: {
+                value: document.querySelector('#share-link')?.value || '',
                 notice: document.querySelector('#share-notice')?.textContent || '',
                 title: qr?.getAttribute('title') || '', text: qr?.textContent || '',
-                children: qr?.childElementCount || 0};
-        }''')
-        self.assertEqual(state, {'value': '', 'notice': '', 'title': '', 'text': '', 'children': 0})
+                children: qr?.childElementCount || 0}, html: document.documentElement.outerHTML};
+        }''', session_ended)
+        if session_ended:
+            self.assertEqual(snapshot['controller'], {'mounted': True, 'sameDocument': True,
+                'beforeunload': 1, 'sessionEnded': True, 'open': False, 'link': '',
+                'busy': False, 'notice': ''})
+        self.assertEqual(snapshot['state'],
+                         {'value': '', 'notice': '', 'title': '', 'text': '', 'children': 0})
         # Hidden Element Plus contents still belong to the DOM. Do not merely
         # assert invisibility, which would miss attributes, images and text.
-        html = self.page.content()
         for secret in (UUID, SHORT_ID, self.nodes[1]['stream_settings']['tls']['reality']['private_key']):
-            self.assertNotIn(secret, html)
+            self.assertNotIn(secret, snapshot['html'])
 
     def defer_share_completions(self):
         # Only defer delivery *after* real authenticated HTTP/Axios completes.
@@ -537,51 +644,85 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         return entry['content']
 
     def release_share_completion(self, index):
-        self.page.evaluate('index => shareResponseAudit[index].release()', index)
+        self.browser_value('index => { shareResponseAudit[index].release(); }', index)
         # Cover queued QR rendering as well as Vue's immediate text update.
         # Also exceed the legacy 100 ms delay so a stale timer cannot pass.
         self.page.wait_for_timeout(200)
 
     @contextmanager
-    def end_session_before_redirect(self):
-        """End a real session but hold login's document for old-DOM assertions."""
-        navigation = []
-        succeeded = False
-        def hold_login(route):
-            navigation.append(route)
-        self.source['context'].route(self.source['base'] + '/login', hold_login)
+    def end_session_with_canceled_navigation(self):
+        """Inspect a live logged-out document after canceling its real redirect.
+
+        The actual Share click supplies sticky activation. A test-only
+        beforeunload listener asks Chromium to confirm the app's real
+        location.replace; dismissing that dialog cancels navigation. Unlike
+        holding /login's response, this retains the original execution context.
+        Logout and /auth/me 401 remain real. Final /login navigation below is
+        fixture-controlled, not evidence the canceled redirect completed.
+        """
+        dialogs, dismissed = [], []
+        def dismiss_navigation(dialog):
+            dialogs.append(dialog.type)
+            # Never leave a JS dialog open, even if its type is unexpected.
+            dialog.dismiss()
+            dismissed.append(dialog.type)
+        self.page.on('dialog', dismiss_navigation)
         try:
-            # Register before revocation: the dashboard's existing status poll
-            # may initiate login while the synchronous logout call is pending.
-            with self.page.expect_request(self.source['base'] + '/login'):
-                logout = self.source['context'].request.post(self.source['base'] + '/api/auth/logout',
-                    headers={'Origin': self.source['base'], 'X-VUI-Request': '1'})
-                self.assertEqual(logout.status, 200)
-                if not navigation:
-                    self.page.evaluate('void checkAdminSession(true, true)')
+            activated = self.browser_value('''() => {
+                const state = window.shareSessionNavigation = {document,
+                    root: document.querySelector('#app')._vnode.component.proxy,
+                    attempts: 0};
+                state.listener = event => {
+                    state.attempts++;
+                    event.preventDefault();
+                    event.returnValue = '';
+                };
+                window.addEventListener('beforeunload', state.listener);
+                return navigator.userActivation.hasBeenActive;
+            }''')
+            self.assertTrue(activated, 'The real Share click must provide sticky activation')
+            # Both observers precede revocation. Existing dashboard polling can
+            # observe logout while the synchronous request.post is still pending.
+            with self.page.expect_response(lambda response:
+                    response.url == self.source['base'] + '/api/auth/me' and response.status == 401,
+                    timeout=10000) as rejected:
+                with self.page.expect_event('dialog', timeout=10000):
+                    logout = self.source['context'].request.post(self.source['base'] + '/api/auth/logout',
+                        headers={'Origin': self.source['base'], 'X-VUI-Request': '1'}, timeout=10000)
+                    self.assertEqual(logout.status, 200)
+                    if not dialogs:
+                        self.browser_value('() => { void checkAdminSession(true, true); }')
+            self.assertEqual(rejected.value.status, 401)
+            self.assertEqual(dialogs, ['beforeunload'])
+            # Event callbacks use separate greenlets: observing the dialog does
+            # not itself prove its dismiss call has received Chromium's reply.
             deadline = time.monotonic() + 10
-            while not navigation and time.monotonic() < deadline:
+            while not dismissed and time.monotonic() < deadline:
                 self.page.wait_for_timeout(20)
-            self.assertEqual(len(navigation), 1)
-            # The caller directly asserts adminSessionEnded and controller/DOM
-            # clearing while this route is held; no navigation-dependent polling.
+            self.assertEqual(dismissed, ['beforeunload'])
+            self.assertNotEqual(self.page.url, self.source['base'] + '/login')
             yield
-            succeeded = True
         except BaseException:
             # unittest otherwise defers this traceback until the whole suite
-            # finishes. Preserve it before cleanup can encounter another error.
+            # finishes. Preserve the original failure before fixture cleanup.
             traceback.print_exc(file=sys.stderr)
             raise
         finally:
+            original_error = sys.exc_info()[0] is not None
             try:
-                while navigation:
-                    route = navigation.pop()
-                    if succeeded:
-                        route.continue_()
-                    else:
-                        route.abort()
+                self.browser_value('''() => {
+                    const state = window.shareSessionNavigation;
+                    if (state) window.removeEventListener('beforeunload', state.listener);
+                    delete window.shareSessionNavigation;
+                }''')
+            except Exception:
+                if not original_error:
+                    raise
+                # A cleanup error must not replace the product/setup assertion.
+                traceback.print_exc(file=sys.stderr)
             finally:
-                self.source['context'].unroute(self.source['base'] + '/login', hold_login)
+                self.page.remove_listener('dialog', dismiss_navigation)
+        self.page.goto(self.source['base'] + '/login', wait_until='domcontentloaded', timeout=10000)
 
     def test_ordinary_share_real_tls_reality_uri_copy_and_elementplus_dismissal(self):
         from playwright.sync_api import expect
@@ -709,11 +850,11 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 if action == 'navigation':
                     self.open_nodes()
                 expect(self.page.get_by_role('button', name='分享', exact=True)).to_have_count(4)
-        # Keep this outside subTest: a session/setup error must unwind its held
-        # route immediately, not proceed into privacy evaluation on a stuck page.
+        # Keep session errors outside subTest so failure exits immediately;
+        # do not continue into privacy checks after an incomplete fixture.
         self.open_share(2)
-        with self.end_session_before_redirect():
-            self.assert_share_cleared(during_navigation=True)
+        with self.end_session_with_canceled_navigation():
+            self.assert_share_cleared(session_ended=True)
         self.page.wait_for_url('**/login')
         self.assert_share_cleared()
         self.assert_private()
@@ -795,16 +936,16 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         self.defer_share_completions()
         self.page.get_by_role('button', name='分享', exact=True).nth(0).evaluate('(button) => button.click()')
         self.wait_share_completion(1)
-        # Hold only the destination document so the old, invalidated document
-        # can be inspected. Session rejection and redirect remain real.
-        with self.end_session_before_redirect():
-            self.assert_share_cleared(during_navigation=True)
-            self.assertTrue(self.page.evaluate('shareResponseAudit[0].aborted'))
-            self.page.evaluate("document.querySelector('#app')._vnode.component.proxy.copyLink()")
-            self.assertEqual(self.page.evaluate('shareCopyAudit.writes.length'), 1)
-            self.page.evaluate('shareCopyAudit.resolve()')
+        # Cancel the real beforeunload confirmation, keeping the original
+        # invalidated document live for cleanup and late-completion assertions.
+        with self.end_session_with_canceled_navigation():
+            self.assert_share_cleared(session_ended=True)
+            self.assertTrue(self.browser_value('() => shareResponseAudit[0].aborted'))
+            self.browser_value("() => { document.querySelector('#app')._vnode.component.proxy.copyLink(); }")
+            self.assertEqual(self.browser_value('() => shareCopyAudit.writes.length'), 1)
+            self.browser_value('() => { shareCopyAudit.resolve(); }')
             self.release_share_completion(0)
-            self.assert_share_cleared(during_navigation=True)
+            self.assert_share_cleared(session_ended=True)
         self.page.wait_for_url('**/login')
         self.assert_share_cleared()
         self.assert_private()
