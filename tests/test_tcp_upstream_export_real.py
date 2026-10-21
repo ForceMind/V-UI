@@ -25,7 +25,7 @@ from proxy_loopback_support import (
     INGRESS, SNI, TARGET, UPSTREAM, UPSTREAM_EGRESS, ReadyMihomoProcess,
     udp_target, udp_through,
 )
-from tcp_upstream_export_helpers import HTTPPanel, PanelCore
+from tcp_upstream_export_helpers import HTTPPanel, PanelCore, local_proxy_port
 from test_proxy_double_hop import (
     AUTH, FLOW, INGRESS_UUID, PASSWORD, REALITY_SNI, SHORT_ID, UPSTREAM_UUID,
     USERNAME, WRONG_SNI, WRONG_UUID, DoubleHopFixture,
@@ -37,6 +37,9 @@ from test_proxy_double_hop import (
 class TCPUpstreamExportRealTests(DoubleHopFixture):
     def setUp(self):
         super().setUp()
+        # The inherited bind(0) result is not reserved. Choose only when first
+        # enabling the local listener, outside automatic panel/client ports.
+        self.local_port = None
         self.panels = {}
         for role in ("source", "target"):
             self.panels[role] = HTTPPanel(self.stack, self.root / role, role, self.env,
@@ -184,6 +187,10 @@ class TCPUpstreamExportRealTests(DoubleHopFixture):
 
     def select_apply(self, profile_id):
         before = self.destination.request("GET", "/api/proxy/settings")
+        if self.local_port is None:
+            self.local_port = local_proxy_port()
+            self.destination.events.append({'event': 'local-proxy-port-selected',
+                                            'port': self.local_port})
         settings = {key: value for key, value in before.json()["settings"].items() if key != "local_password_set"}
         settings.update(local_proxy_enabled=True, relay_enabled=True, selected_upstream_id=profile_id,
                         local_port=self.local_port, local_username=USERNAME, local_password=PASSWORD)

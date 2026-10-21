@@ -1,5 +1,13 @@
 # 当前开发与接手入口
 
+## 2026-10-21 当前目标：D1 TCP 验收端口分配修正
+
+主线已推进至 [PR55](https://github.com/ForceMind/V-UI/pull/55) 的 `41503cb6190a88bf330f5d5f997065b7682b7f97`，tree `88c81bc1a64067d66d3c1bfa268e6a7fcbb5094b`；准确候选与该主线均八组 / 11 jobs / 126 steps 首次成功。默认关闭的状态卡片和托管 launcher 修正已合并，真实 Tailscale 与共存/恢复仍未验；下方旧候选文字按历史解释。
+
+下一实际交付修复 D1 双实例 TCP 验收夹具的自动端口竞争。旧 master `7512051` 的 [loopback attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39638041254/attempts/1) 曾在 TLS-YAML 导入后的 check 返回 `PROXY_LOCAL_PORT_OCCUPIED`；原样 attempt 2 通过不等于根因永久消除。确定性 socket 模型已证明提前 `bind(0)` 取号并释放后，HTTP 客户端可占用该自动端口；历史日志没有占用者，不能断言那次失败的具体 socket 身份。
+
+本修正仅在 D1 测试首次启用本机代理之前，从只读 Linux 自动端口范围之外选取最多 128 个不重复候选，复用未修改的生产占用检查；选定后所有负向/恢复场景固定同一端口。PR56 独审提出的加固命名空间边界也纳入：只读 `ip_unprivileged_port_start`，候选不低于该有效阈值且至少 1024；缺失或非法内核值拒绝，不修改任何 sysctl。无 HTTP 409 重试，无 bind(0) 回退，不改变产品代码、协议、TLS/认证断言、网络设置或工作流。显式竞争绑定仍须拒绝，不声称原子预留。确定性控制、原双实例实测与独立准确候选/主线 CI 均为门槛；受限 UDP D2 不恢复，不发布部署。
+
 ## 2026-10-21 独立修正：托管启动器状态选项
 
 [PR54](https://github.com/ForceMind/V-UI/pull/54) 已正常合并至 `7512051dfa192a8f623a3cebe3cb43d37f7f42e0`；候选八组 / 11 jobs / 126 steps attempt 1 成功，但合并后发现新 inline P1：托管 launcher 未转交状态 opt-in。合并前漏读 inline 的门禁缺口及证据保留在[状态合同](TAILSCALE_STATUS_CONTRACT.md#pr54-后的-launcher-集成修正)，不能将原绿灯当成完整功能资格。独立修正仅在 panel 模式白名单转交字面 `0` / `1`，默认不设置；不改变服务配置、socket 权限、认证或实际启用状态。准确修正候选/主线验收另记，合并前必须读最新 review 与 inline 内容。
