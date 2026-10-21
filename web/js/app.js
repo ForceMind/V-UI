@@ -126,7 +126,7 @@ axios.interceptors.response.use(response => response, error => {
     return Promise.reject(error);
 });
 
-const { createApp, ref, onMounted, reactive, computed, watch } = Vue;
+const { createApp, ref, onMounted, reactive, computed, watch, nextTick } = Vue;
 const { ElMessage, ElMessageBox } = ElementPlus;
 const {
     Odometer,
@@ -165,6 +165,34 @@ const app = createApp({
         const restartingCore = ref('');
         const showQrDialog = ref(false);
         const qrLink = ref('');
+        const qrBusy = ref(false);
+        const qrNotice = ref('');
+        let qrGeneration = 0, qrController = null, qrRenderTimer = null;
+        const clearQrCode = () => {
+            qrGeneration++;
+            if (qrController) qrController.abort();
+            qrController = null;
+            if (qrRenderTimer !== null) clearTimeout(qrRenderTimer);
+            qrRenderTimer = null;
+            qrLink.value = '';
+            qrBusy.value = false;
+            qrNotice.value = '';
+            const container = document.getElementById('qrcode');
+            if (container) { container.textContent = ''; container.title = ''; }
+            const output = document.getElementById('share-link');
+            if (output) output.value = '';
+        };
+        const closeQrDialog = () => {
+            clearQrCode();
+            showQrDialog.value = false;
+        };
+        // Element Plus keeps closed dialog contents mounted. Clear both the
+        // credential text and generated image synchronously, including Escape.
+        watch(showQrDialog, (open) => { if (!open) clearQrCode(); }, { flush: 'sync' });
+        watch(currentView, closeQrDialog, { flush: 'sync' });
+        clearAdminSecrets.push(closeQrDialog);
+        addEventListener('pagehide', closeQrDialog);
+        addEventListener('popstate', closeQrDialog);
         const upstreamExport = reactive({
             open: false, inboundId: null, name: '', server: '', format: 'uri',
             acknowledged: false, busy: false, content: '', error: '', notice: ''
@@ -411,6 +439,7 @@ const app = createApp({
         };
 
         const handleSelect = (key) => {
+            closeQrDialog();
             if (key === 'proxy') { location.assign('/proxy'); return; }
             if (key === 'certificates') { location.assign('/certificates'); return; }
             if (['routing', 'subscriptions'].includes(key)) { location.assign('/workspace'); return; }
@@ -452,6 +481,7 @@ const app = createApp({
         });
 
         const fetchInbounds = async () => {
+            closeQrDialog();
             closeUpstreamExport();
             const generation = ++inboundListGeneration;
             try {
@@ -848,38 +878,67 @@ const app = createApp({
             }
         };
 
-        const updateProfile = () => { location.assign('/account'); };
+        const updateProfile = () => { closeQrDialog(); location.assign('/account'); };
 
         const showQrCode = async (row) => {
+            if (adminSessionEnded) return;
+            clearQrCode();
+            const generation = qrGeneration;
+            qrController = new AbortController();
+            showQrDialog.value = true;
+            qrBusy.value = true;
+            const current = () => generation === qrGeneration && showQrDialog.value && !adminSessionEnded;
             try {
                 const res = await axios.get(
                     `/api/subscription/link/${row.id}`,
-                    { responseType: 'text' }
+                    { responseType: 'text', signal: qrController.signal, timeout: 15000 }
                 );
+                if (!current()) return;
                 const link = res.data;
-                if (!link) {
-                    ElMessage.warning('This node does not have enough share-link data yet');
+                if (typeof link !== 'string' || !link.length) {
+                    qrNotice.value = '此节点暂时没有可分享的链接。';
                     return;
                 }
                 qrLink.value = link;
-                showQrDialog.value = true;
-                setTimeout(() => {
+                await nextTick(); // The dialog is lazily mounted by Vue.
+                if (!current()) return;
+                qrRenderTimer = setTimeout(() => {
+                    if (!current()) return;
+                    qrRenderTimer = null;
                     const container = document.getElementById('qrcode');
-                    container.innerHTML = '';
-                    new QRCode(container, {
-                        text: link,
-                        width: 200,
-                        height: 200
-                    });
-                }, 100);
-            } catch (error) {
-                ElMessage.error('Failed to generate share link');
+                    if (!container) return;
+                    container.textContent = '';
+                    container.title = '';
+                    try {
+                        new QRCode(container, { text: link, width: 200, height: 200 });
+                    } catch (_) {
+                        container.textContent = '';
+                        container.title = '';
+                        qrNotice.value = '二维码生成失败，请复制下方链接。';
+                    }
+                }, 0);
+            } catch (_) {
+                if (current()) qrNotice.value = '获取分享链接失败，请重试。';
+            } finally {
+                if (current()) { qrBusy.value = false; qrController = null; }
             }
         };
 
         const copyLink = async () => {
-            await navigator.clipboard.writeText(qrLink.value);
-            ElMessage.success('Link copied');
+            if (!showQrDialog.value || !qrLink.value || qrBusy.value || adminSessionEnded) return;
+            const generation = qrGeneration;
+            const current = () => generation === qrGeneration && showQrDialog.value && !adminSessionEnded;
+            try {
+                // A write already handed to the browser cannot be recalled.
+                // Closing prevents new writes and invalidates later UI feedback.
+                await navigator.clipboard.writeText(qrLink.value);
+                if (current()) qrNotice.value = '已复制含连接凭据的链接。';
+            } catch (_) {
+                if (!current()) return;
+                qrNotice.value = '复制失败，请手动选择下方链接；内容含连接凭据。';
+                const output = document.getElementById('share-link');
+                if (output) { output.focus(); output.select(); }
+            }
         };
 
         const subscriptionUrl = (format) => {
@@ -959,6 +1018,9 @@ const app = createApp({
             managedCertificates,
             showQrDialog,
             qrLink,
+            qrBusy,
+            qrNotice,
+            closeQrDialog,
             upstreamExport,
             openUpstreamExport,
             closeUpstreamExport,

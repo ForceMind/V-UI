@@ -18,7 +18,7 @@ function harness(){
  const editors=new Map(),held=new Map(),writes=[],messages=[],events={},redirects=[],reads=[],confirmations=[];
  let rows=[],authStatus=200;
  const app={component(){},use(){},mount(){}};
- const sandbox={console,addEventListener(name,fn){(events[name]??=[]).push(fn)},location:{hash:'',replace(v){redirects.push(v)}},
+ const sandbox={document:{getElementById(){return null}},console,addEventListener(name,fn){(events[name]??=[]).push(fn)},location:{hash:'',replace(v){redirects.push(v)}},
  Vue:{createApp(o){setup=o.setup;return app},ref:value=>({value}),reactive:v=>v,computed:f=>({get value(){return f()}}),watch(){},onMounted(){}},
  ElementPlus:{ElMessage:{success:m=>messages.push(['success',m]),error:m=>messages.push(['error',m]),warning:m=>messages.push(['warning',m])},ElMessageBox:{async confirm(...args){confirmations.push(args);if(confirmHold)await confirmHold;if(confirmFailure)throw confirmFailure}}},
  ElementPlusIconsVue:{},axios:{defaults:{headers:{common:{}}},interceptors:{response:{use(ok,bad){interceptor=bad}}},
@@ -228,7 +228,7 @@ class InboundPolicyMarkupTests(unittest.TestCase):
                      html.index('</el-dialog>', html.index('<el-dialog v-model="showQrDialog"'))]
         self.assertIn('id="subscription-routing-capability"', subscriptions)
         self.assertIn('id="share-routing-capability"', share)
-        self.assertIn('{{ qrLink }}', share)
+        self.assertIn(':value="qrLink" readonly', share)
 
 
 if __name__ == '__main__':

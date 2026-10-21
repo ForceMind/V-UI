@@ -157,7 +157,7 @@ const success=(content='synthetic-credential')=>({data:content,headers:{'x-vui-e
  api.openUpstreamExport({id:2});state.server='node.example';state.acknowledged=true;
  const failed=api.requestUpstreamExport();pending.shift().reject({response:{status:409,data:'never-show-this'}});await failed;
  assert(!state.busy);assert.equal(state.content,'');assert(state.error.includes('不具备'));assert(!state.error.includes('never-show-this'));
- assert.equal(listeners.pagehide.size,2);assert.equal(listeners.popstate.size,2);
+ assert.equal(listeners.pagehide.size,3);assert.equal(listeners.popstate.size,3);
  api.showAddInbound.value=true;api.editingInboundId.value=47;
  api.newInbound.profile.reality_uuid='pagehide-editor-secret';
  const req=api.requestUpstreamExport();events.dispatchEvent(new Event('pagehide'));
@@ -193,6 +193,16 @@ const success=(content='synthetic-credential')=>({data:content,headers:{'x-vui-e
         self.assertIn('reality', nodes[1]['stream_settings']['tls'])
         self.assertIn('transport', nodes[2]['stream_settings'])
         self.assertIn('unqualified_option', nodes[3]['stream_settings'])
+
+    def test_ordinary_share_actual_pinned_vue_controller_lifecycle(self):
+        assets = os.getenv('VUI_FRONTEND_ASSETS')
+        if not assets and os.getenv('VUI_TCP_UPSTREAM_BROWSER') != '1':
+            self.skipTest('checksum-pinned Vue assets are prepared by the browser gate')
+        self.assertTrue(assets, 'Explicit browser gate requires VUI_FRONTEND_ASSETS')
+        vue = Path(assets) / 'vue.js'
+        self.assertTrue(vue.is_file(), 'Missing checksum-pinned Vue asset')
+        from test_share_dialog import run_pinned_vue
+        run_pinned_vue(self, vue)
 
 
 @unittest.skipUnless(os.getenv('VUI_TCP_UPSTREAM_BROWSER') == '1', 'explicit TCP upstream browser gate')
@@ -345,6 +355,336 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 self.assertFalse(any(secret in message for message in self.console))
         self.assertEqual(self.errors, [])
         self.assertEqual(self.external, [])
+
+    def open_share(self, node=1):
+        """Use the ordinary endpoint, not the explicit TCP-upstream profile."""
+        from playwright.sync_api import expect
+        from app.models.database import Inbound
+        from app.services.validated_export import share_link
+        with self.page.expect_response(lambda response:
+                response.url == self.source['base'] + f'/api/subscription/link/{node}') as result:
+            self.page.get_by_role('button', name='分享', exact=True).nth(node - 1).click()
+        response = result.value
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.request.method, 'GET')
+        self.assertIsNone(response.request.post_data)
+        expected = share_link(Inbound(**self.nodes[node - 1]), '127.0.0.1')
+        self.assertEqual(response.text(), expected)
+        expect(self.page.locator('#share-panel')).to_be_visible()
+        expect(self.page.locator('#share-panel')).to_have_attribute('aria-busy', 'false')
+        expect(self.page.locator('#share-link')).to_have_value(expected)
+        expect(self.page.locator('#share-link')).to_have_js_property('readOnly', True)
+        expect(self.page.locator('#share-copy')).to_be_enabled()
+        self.page.wait_for_function("document.querySelector('#qrcode')?.childElementCount > 0")
+        # qrcodejs also writes the credential-bearing URI into this attribute.
+        expect(self.page.locator('#qrcode')).to_have_attribute('title', expected)
+        return expected
+
+    def assert_share_cleared(self):
+        from playwright.sync_api import expect
+        expect(self.page.locator('#share-panel')).not_to_be_visible()
+        state = self.page.evaluate('''() => {
+            const qr = document.querySelector('#qrcode');
+            return {value: document.querySelector('#share-link')?.value || '',
+                notice: document.querySelector('#share-notice')?.textContent || '',
+                title: qr?.getAttribute('title') || '', text: qr?.textContent || '',
+                children: qr?.childElementCount || 0};
+        }''')
+        self.assertEqual(state, {'value': '', 'notice': '', 'title': '', 'text': '', 'children': 0})
+        # Hidden Element Plus contents still belong to the DOM. Do not merely
+        # assert invisibility, which would miss attributes, images and text.
+        html = self.page.content()
+        for secret in (UUID, SHORT_ID, self.nodes[1]['stream_settings']['tls']['reality']['private_key']):
+            self.assertNotIn(secret, html)
+
+    def defer_share_completions(self):
+        # Only defer delivery *after* real authenticated HTTP/Axios completes.
+        # Aborting an already-completed transport cannot recall these promises,
+        # so stale-result guards must work independently of network cancellation.
+        self.page.evaluate('''() => {
+            const get = axios.get.bind(axios);
+            window.shareResponseAudit = [];
+            axios.get = (url, options) => {
+                if (!url.startsWith('/api/subscription/link/')) return get(url, options);
+                const entry = {url, aborted: false, ready: false, released: false};
+                shareResponseAudit.push(entry);
+                options?.signal?.addEventListener('abort', () => { entry.aborted = true; });
+                return get(url, options).then(response => new Promise(resolve => {
+                    entry.status = response.status;
+                    entry.content = response.data;
+                    entry.ready = true;
+                    entry.release = () => { entry.released = true; resolve(response); };
+                }));
+            };
+        }''')
+
+    def wait_share_completion(self, count):
+        self.page.wait_for_function('''count => shareResponseAudit.length === count
+            && shareResponseAudit[count - 1].ready''', arg=count)
+        entry = self.page.evaluate('''index => {
+            const entry = shareResponseAudit[index];
+            return {status: entry.status, content: entry.content, url: entry.url};
+        }''', count - 1)
+        self.assertEqual(entry['status'], 200)
+        self.assertIn(UUID, entry['content'])
+        return entry['content']
+
+    def release_share_completion(self, index):
+        self.page.evaluate('index => shareResponseAudit[index].release()', index)
+        # Cover queued QR rendering as well as Vue's immediate text update.
+        # Also exceed the legacy 100 ms delay so a stale timer cannot pass.
+        self.page.wait_for_timeout(200)
+
+    def end_session_before_redirect(self):
+        """End a real session but hold login's document for old-DOM assertions."""
+        navigation = []
+        def hold_login(route):
+            navigation.append(route)
+        self.source['context'].route(self.source['base'] + '/login', hold_login)
+        def cleanup_navigation():
+            self.source['context'].unroute(self.source['base'] + '/login', hold_login)
+            while navigation:
+                navigation.pop().abort()
+        self.addCleanup(cleanup_navigation)
+        logout = self.source['context'].request.post(self.source['base'] + '/api/auth/logout',
+            headers={'Origin': self.source['base'], 'X-VUI-Request': '1'})
+        self.assertEqual(logout.status, 200)
+        with self.page.expect_request(self.source['base'] + '/login'):
+            self.page.evaluate('void checkAdminSession(true, true)')
+        self.page.wait_for_function('adminSessionEnded')
+        deadline = time.monotonic() + 10
+        while not navigation and time.monotonic() < deadline:
+            self.page.wait_for_timeout(20)
+        self.assertEqual(len(navigation), 1)
+        return navigation
+
+    def test_ordinary_share_real_tls_reality_uri_copy_and_elementplus_dismissal(self):
+        from playwright.sync_api import expect
+        before = self.source['context'].request.get(self.source['base'] + '/api/inbounds').json()
+        # An isolated clipboard boundary records the actual handler's bytes;
+        # this does not claim OS clipboard permission or persistence coverage.
+        self.page.evaluate('''() => {
+            window.shareCopies = [];
+            Object.defineProperty(navigator, 'clipboard', {configurable: true,
+                value: {writeText: async text => { shareCopies.push(text); }}});
+        }''')
+        for node in (1, 2):
+            with self.subTest(node=node):
+                link = self.open_share(node)
+                self.assertIn('security=' + ('tls' if node == 1 else 'reality'), link)
+                if node == 1:
+                    self.assertIn('packetEncoding=xudp', link)
+                else:
+                    self.assertIn('flow=xtls-rprx-vision', link)
+                    self.assertIn(SHORT_ID, link)
+                self.assertNotIn('/private/', link)
+                self.assertNotIn(self.nodes[1]['stream_settings']['tls']['reality']['private_key'], link)
+                self.page.locator('#share-copy').click()
+                expect(self.page.locator('#share-notice')).to_contain_text('已复制')
+                self.assertEqual(self.page.evaluate('shareCopies.at(-1)'), link)
+                if node == 1:
+                    self.page.get_by_role('dialog', name='分享节点', exact=True).locator('.el-dialog__headerbtn').click()
+                else:
+                    self.page.keyboard.press('Escape')
+                self.assert_share_cleared()
+        self.open_share(1)
+        # A physical click in the backdrop, outside the centered dialog, must
+        # use Element Plus's own modal dismissal and synchronous state watcher.
+        self.page.locator('.el-overlay-dialog').filter(has=self.page.locator('#share-panel')).click(
+            position={'x': 5, 'y': 5})
+        self.assert_share_cleared()
+        self.assertEqual(self.source['context'].request.get(self.source['base'] + '/api/inbounds').json(), before)
+        self.assertEqual(self.export_requests, [])
+        self.assert_private()
+
+    def test_ordinary_share_reverse_real_completions_cannot_replace_newer_node(self):
+        from playwright.sync_api import expect
+        self.defer_share_completions()
+        self.page.get_by_role('button', name='分享', exact=True).nth(0).click()
+        first = self.wait_share_completion(1)
+        expect(self.page.locator('#share-panel')).to_be_visible()
+        expect(self.page.locator('#share-panel')).to_have_attribute('aria-busy', 'true')
+        expect(self.page.locator('#share-link')).to_have_value('')
+        expect(self.page.locator('#share-copy')).to_be_disabled()
+        # Dispatch the real second button handler to model an already-queued
+        # selection while the modal masks the table. No Vue state is fabricated.
+        self.page.get_by_role('button', name='分享', exact=True).nth(1).evaluate('(button) => button.click()')
+        second = self.wait_share_completion(2)
+        self.assertNotEqual(first, second)
+        self.assertTrue(self.page.evaluate('shareResponseAudit[0].aborted'))
+        self.release_share_completion(1)
+        expect(self.page.locator('#share-link')).to_have_value(second)
+        expect(self.page.locator('#qrcode')).to_have_attribute('title', second)
+        self.release_share_completion(0)
+        expect(self.page.locator('#share-link')).to_have_value(second)
+        expect(self.page.locator('#qrcode')).to_have_attribute('title', second)
+        self.assertNotIn(first, self.page.content())
+        self.page.locator('#share-close').click()
+        self.assert_share_cleared()
+        self.assert_private()
+
+    def test_ordinary_share_close_aborts_pending_transport_without_late_reopen(self):
+        from playwright.sync_api import expect
+        pending = []
+        def delay(route):
+            pending.append((route, None))
+        def cleanup_pending():
+            self.source['context'].unroute('**/api/subscription/link/*', delay)
+            while pending:
+                route, response = pending.pop()
+                try:
+                    route.abort()
+                finally:
+                    if response is not None:
+                        response.dispose()
+        self.source['context'].route('**/api/subscription/link/*', delay)
+        self.addCleanup(cleanup_pending)
+        self.page.get_by_role('button', name='分享', exact=True).nth(0).click()
+        expect(self.page.locator('#share-panel')).to_be_visible()
+        expect(self.page.locator('#share-panel')).to_have_attribute('aria-busy', 'true')
+        expect(self.page.locator('#share-link')).to_have_value('')
+        expect(self.page.locator('#share-copy')).to_be_disabled()
+        deadline = time.monotonic() + 10
+        while not pending and time.monotonic() < deadline:
+            self.page.wait_for_timeout(20)
+        self.assertEqual(len(pending), 1)
+        route, _ = pending[0]
+        response = route.fetch(timeout=10000)
+        pending[0] = (route, response)
+        self.assertEqual(response.status, 200)
+        self.assertIn(UUID, response.text())
+        with self.page.expect_event('requestfailed', predicate=lambda request:
+                request.url == self.source['base'] + '/api/subscription/link/1') as aborted:
+            self.page.locator('#share-close').click()
+        self.assertEqual(aborted.value.failure, 'net::ERR_ABORTED')
+        self.assert_share_cleared()
+        route, response = pending.pop()
+        try:
+            route.fulfill(response=response)
+        finally:
+            response.dispose()
+        self.page.wait_for_timeout(200)
+        self.assert_share_cleared()
+        self.assert_private()
+
+    def test_ordinary_share_displayed_secrets_clear_on_refresh_navigation_and_history(self):
+        from playwright.sync_api import expect
+        for action in ('refresh', 'navigation', 'popstate', 'pagehide', 'session'):
+            with self.subTest(action=action):
+                self.open_share(2)
+                if action == 'refresh':
+                    with self.page.expect_response(lambda response: response.url.endswith('/api/inbounds')) as result:
+                        self.page.get_by_role('button', name='刷新节点', exact=True).evaluate('(button) => button.click()')
+                    self.assertEqual(result.value.status, 200)
+                elif action == 'navigation':
+                    self.page.get_by_role('menuitem', name='系统状态', exact=True).evaluate('(item) => item.click()')
+                elif action == 'session':
+                    navigation = self.end_session_before_redirect()
+                else:
+                    self.page.evaluate('event => dispatchEvent(new Event(event))', action)
+                self.assert_share_cleared()
+                if action == 'navigation':
+                    self.open_nodes()
+                if action == 'session':
+                    navigation.pop().continue_()
+                    self.page.wait_for_url('**/login')
+                    self.assert_share_cleared()
+                    continue
+                expect(self.page.get_by_role('button', name='分享', exact=True)).to_have_count(4)
+        self.assert_private()
+
+    def test_ordinary_share_late_real_completion_after_close_refresh_and_history(self):
+        self.defer_share_completions()
+        for index, action in enumerate(('close', 'escape', 'refresh', 'navigation', 'popstate', 'pagehide')):
+            with self.subTest(action=action):
+                self.page.get_by_role('button', name='分享', exact=True).nth(index % 2).click()
+                self.wait_share_completion(index + 1)
+                if action == 'close':
+                    self.page.locator('#share-close').click()
+                elif action == 'escape':
+                    self.page.keyboard.press('Escape')
+                elif action == 'refresh':
+                    with self.page.expect_response(lambda response: response.url.endswith('/api/inbounds')):
+                        self.page.get_by_role('button', name='刷新节点', exact=True).evaluate('(button) => button.click()')
+                elif action == 'navigation':
+                    self.page.get_by_role('menuitem', name='系统状态', exact=True).evaluate('(item) => item.click()')
+                else:
+                    self.page.evaluate('event => dispatchEvent(new Event(event))', action)
+                self.assertTrue(self.page.evaluate('index => shareResponseAudit[index].aborted', index))
+                self.assert_share_cleared()
+                self.release_share_completion(index)
+                self.assert_share_cleared()
+                if action == 'navigation':
+                    self.open_nodes()
+        self.assert_private()
+
+    def test_ordinary_share_copy_denial_and_late_copy_feedback_are_private(self):
+        from playwright.sync_api import expect
+        self.open_share()
+        self.page.evaluate('''secret => Object.defineProperty(navigator, 'clipboard', {
+            configurable: true, value: {writeText: async () => { throw new Error(secret); }}
+        })''', 'synthetic-clipboard-denial-' + UUID)
+        self.page.locator('#share-copy').click()
+        expect(self.page.locator('#share-notice')).to_contain_text('复制失败')
+        self.assertNotIn(UUID, self.page.locator('#share-notice').inner_text())
+        self.assertEqual(self.page.locator('#share-link').evaluate('(e) => e.selectionEnd - e.selectionStart'),
+                         len(self.page.locator('#share-link').input_value()))
+        self.page.locator('#share-close').click()
+        self.assert_share_cleared()
+        for succeed in (True, False):
+            with self.subTest(succeed=succeed):
+                self.open_share()
+                self.page.evaluate('''() => {
+                    window.shareCopyAudit = {writes: []};
+                    Object.defineProperty(navigator, 'clipboard', {configurable: true,
+                        value: {writeText: text => {
+                            shareCopyAudit.writes.push(text);
+                            return new Promise((resolve, reject) => {
+                                shareCopyAudit.resolve = resolve; shareCopyAudit.reject = reject;
+                            });
+                        }}});
+                }''')
+                self.page.locator('#share-copy').click()
+                self.assertEqual(self.page.evaluate('shareCopyAudit.writes.length'), 1)
+                self.page.locator('#share-close').click()
+                # Invoke the exposed method as well as checking the disabled UI:
+                # guarding only the button must not permit a stale programmatic copy.
+                self.page.evaluate("document.querySelector('#app')._vnode.component.proxy.copyLink()")
+                self.assertEqual(self.page.evaluate('shareCopyAudit.writes.length'), 1)
+                self.page.evaluate('''succeed => succeed ? shareCopyAudit.resolve()
+                    : shareCopyAudit.reject(new Error('synthetic late denial'))''', succeed)
+                self.assert_share_cleared()
+        self.assert_private()
+
+    def test_ordinary_share_real_session_end_blocks_late_link_and_copy(self):
+        self.open_share(2)
+        self.page.evaluate('''() => {
+            window.shareCopyAudit = {writes: []};
+            Object.defineProperty(navigator, 'clipboard', {configurable: true,
+                value: {writeText: text => {
+                    shareCopyAudit.writes.push(text);
+                    return new Promise(resolve => { shareCopyAudit.resolve = resolve; });
+                }}});
+        }''')
+        self.page.locator('#share-copy').click()
+        self.defer_share_completions()
+        self.page.get_by_role('button', name='分享', exact=True).nth(0).evaluate('(button) => button.click()')
+        self.wait_share_completion(1)
+        # Hold only the destination document so the old, invalidated document
+        # can be inspected. Session rejection and redirect remain real.
+        navigation = self.end_session_before_redirect()
+        self.assert_share_cleared()
+        self.assertTrue(self.page.evaluate('shareResponseAudit[0].aborted'))
+        self.page.evaluate("document.querySelector('#app')._vnode.component.proxy.copyLink()")
+        self.assertEqual(self.page.evaluate('shareCopyAudit.writes.length'), 1)
+        self.page.evaluate('shareCopyAudit.resolve()')
+        self.release_share_completion(0)
+        self.assert_share_cleared()
+        self.assertEqual(len(navigation), 1)
+        navigation.pop().continue_()
+        self.page.wait_for_url('**/login')
+        self.assert_share_cleared()
+        self.assert_private()
 
     def test_real_tls_reality_uri_yaml_copy_download_and_target_import(self):
         from playwright.sync_api import expect

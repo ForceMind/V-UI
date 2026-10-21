@@ -15,7 +15,7 @@ let setup;
 const requests = [], messages = [];
 const app = {component() {}, use() {}, mount() {}};
 const request = async (url) => {requests.push(url); return {data: []};};
-const sandbox = {
+const sandbox = {document: {getElementById() {return null;}},
   addEventListener() {}, location: {hash: ''},
   Vue: {createApp(options) {setup = options.setup; return app;}, ref: value => ({value}),
     reactive: value => value, computed: fn => ({get value() {return fn();}}), watch(){},onMounted() {}},

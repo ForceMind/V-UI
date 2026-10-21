@@ -17,7 +17,7 @@ const stored={id:47,core:'sing-box',protocol:'vless',remark:'reality',port:10447
  reality_target:'127.0.0.1:19445',reality_server_name:'reference.example.test',client_fingerprint:'chrome',
  skip_cert_verify:false,reality_uuid:'',reality_short_id:'',reality_uuid_set:true,reality_short_id_set:true,reality_private_key_set:true}};
 const app={component(){},use(){},mount(){}};
-const sandbox={addEventListener(){},location:{hash:''},
+const sandbox={document:{getElementById(){return null}},addEventListener(){},location:{hash:''},
  Vue:{createApp(o){setup=o.setup;return app},ref:v=>({value:v}),reactive:v=>v,computed:f=>({get value(){return f()}}),watch(){},onMounted(){}},
  ElementPlus:{ElMessage:{success(){},error(m){throw Error(m)}},ElMessageBox:{}},ElementPlusIconsVue:{},
  axios:{defaults:{headers:{common:{}}},interceptors:{response:{use(){}}},
@@ -70,7 +70,7 @@ const stored = {
 };
 const clone = value => JSON.parse(JSON.stringify(value));
 const app = {component() {}, use() {}, mount() {}};
-const sandbox = {
+const sandbox = {document: {getElementById() {return null;}},
   addEventListener() {}, location: {hash: ''},
   Vue: {createApp(options) {setup = options.setup; return app;}, ref: value => ({value}),
     reactive: value => value, computed: fn => ({get value() {return fn();}}), watch(){},onMounted() {}},
@@ -182,7 +182,7 @@ const stored = {
 };
 const clone = value => JSON.parse(JSON.stringify(value));
 const app = {component() {}, use() {}, mount() {}};
-const sandbox = {
+const sandbox = {document: {getElementById() {return null;}},
   addEventListener() {}, location: {hash: ''},
   Vue: {createApp(options) {setup = options.setup; return app;}, ref: value => ({value}),
     reactive: value => value, computed: fn => ({get value() {return fn();}}), watch(){},onMounted() {}},
@@ -289,7 +289,7 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
 const vm = require('node:vm'), fs = require('node:fs'), assert = require('node:assert/strict');
 let setup, submitted;
 const app = {component() {}, use() {}, mount() {}};
-const sandbox = {
+const sandbox = {document: {getElementById() {return null;}},
   addEventListener() {}, location: {hash: ''},
   Vue: {createApp(options) {setup = options.setup; return app;}, ref: value => ({value}),
     reactive: value => value, computed: fn => ({get value() {return fn();}}), watch(){},onMounted() {}},
@@ -342,7 +342,7 @@ const stored={id:45,core:'sing-box',protocol:'hysteria2',port:10445,remark:'hy2'
  skip_cert_verify:false,up_mbps:null,down_mbps:null,obfs_type:'',obfs_password:'',
  hysteria2_password:'',hysteria2_password_set:true}};
 const app={component(){},use(){},mount(){}};
-const sandbox={addEventListener(){},location:{hash:''},
+const sandbox={document:{getElementById(){return null}},addEventListener(){},location:{hash:''},
  Vue:{createApp(o){setup=o.setup;return app;},ref:v=>({value:v}),reactive:v=>v,
  computed:fn=>({get value(){return fn();}}),watch(){},onMounted(){}},
  ElementPlus:{ElMessage:{success(){},error(m){throw Error(m);}},ElMessageBox:{}},ElementPlusIconsVue:{},
@@ -390,7 +390,7 @@ const stored={id:45,core:'sing-box',protocol:'tuic',port:10445,remark:'tuic',ena
  skip_cert_verify:false,up_mbps:null,down_mbps:null,obfs_type:'',obfs_password:'',
  tuic_password:'',tuic_password_set:true,tuic_uuid:'',tuic_uuid_set:true,congestion_control:'cubic',udp_relay_mode:'native',zero_rtt_handshake:false}};
 const app={component(){},use(){},mount(){}};
-const sandbox={addEventListener(){},location:{hash:''},
+const sandbox={document:{getElementById(){return null}},addEventListener(){},location:{hash:''},
  Vue:{createApp(o){setup=o.setup;return app;},ref:v=>({value:v}),reactive:v=>v,
  computed:fn=>({get value(){return fn();}}),watch(){},onMounted(){}},
  ElementPlus:{ElMessage:{success(){},error(m){throw Error(m);}},ElMessageBox:{}},ElementPlusIconsVue:{},
