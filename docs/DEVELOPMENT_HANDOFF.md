@@ -1,5 +1,15 @@
 # 当前开发与接手入口
 
+## 2026-10-21 独立候选：真实 apply 切换夹具端口
+
+从 [PR56](https://github.com/ForceMind/V-UI/pull/56) 合并后的准确 master `0de276fd93344bbeaee03cb2c146347c0a4f8af4` 独立修改测试。该主线的 [loopback attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39657832360/attempts/1) 在真实 apply 切换组出现 `LOCAL_PORT_OCCUPIED`；日志未识别占用 socket，不能断言具体历史根因。一次失败后，后续 subTest 的计划切换标签不一定等于实际已运行的前态，不能仅凭标签归因。
+
+`ProxyApplyRealTests.setUp` 在父夹具完成后、构造 store/runtime 或首个 draft 之前，仅调用一次已有 D1 端口分配器，替换父夹具释放的 `bind(0)` 结果。相同端口贯穿 TLS/REALITY 两套 12 条切换、失败回滚及两种重启；不在 check/apply 失败后重选或重试，不修改共享父夹具、分配器、生产代码、内核设置、固定核心或工作流。分配仍非原子预留；原真实 TCP/UDP × IPv4/IPv6 竞争绑定拒绝、旧 PID/活动 revision 保留、core SHA 和回滚断言保持不变。
+
+新增 `test_proxy_apply_fixture_ports.py` 直接执行实际 setup、draft、编译器、私有 store、coordinator 和切换/回滚/重启测试方法；仅核心与网络拓扑为 fake，覆盖一次分配的顺序、全程固定端口、分配失败、preflight 错误原样传播，以及 core apply 失败正常回滚后返回错误且无重试。它不是实际二进制、TLS/REALITY 转发或真实重启资格。开发环境已有 netlink EPERM 限制，本次未重试真实核心或 Chromium；准确候选与合并主线的完整 CI、独立审查及原实际链路门槛仍须另验。本地控制不代替新准确提交验收；不发布或部署。
+
+本地聚焦验证共 135 项：131 通过、4 个真实 apply 方法因未启用而明确 skip；Python 编译与文档检查通过。六项新增控制之外，另以仅内存 AST 变异确认：移除首次分配、在 draft 中重选、错误后重试 apply 均被控制捕获；不改变磁盘上的测试或生产代码。完整套件及真实 CI 尚未据此判定通过。
+
 ## 2026-10-21 当前目标：D1 TCP 验收端口分配修正
 
 主线已推进至 [PR55](https://github.com/ForceMind/V-UI/pull/55) 的 `41503cb6190a88bf330f5d5f997065b7682b7f97`，tree `88c81bc1a64067d66d3c1bfa268e6a7fcbb5094b`；准确候选与该主线均八组 / 11 jobs / 126 steps 首次成功。默认关闭的状态卡片和托管 launcher 修正已合并，真实 Tailscale 与共存/恢复仍未验；下方旧候选文字按历史解释。
