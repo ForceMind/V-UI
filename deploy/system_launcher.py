@@ -35,9 +35,14 @@ def panel_environment(environment, runtime_key):
 
 
 def system_panel_environment(environment, runtime_key, inherited):
-    # Keep the existing strict filter. Only this allocator input is added;
-    # arbitrary loader/GLIBC_TUNABLES overrides remain excluded here.
+    # Keep the strict filter: only these explicit panel inputs may cross it.
+    # No daemon credentials, socket overrides, or loader settings are forwarded.
     result = dict(environment)
+    if 'VUI_TAILSCALE_STATUS_ENABLED' in inherited:
+        value = inherited['VUI_TAILSCALE_STATUS_ENABLED']
+        if value not in ('0', '1'):
+            raise RuntimeError('VUI_TAILSCALE_STATUS_ENABLED must be 0 or 1')
+        result['VUI_TAILSCALE_STATUS_ENABLED'] = value
     if runtime_key.endswith('-gnu') and 'MALLOC_MMAP_THRESHOLD_' in inherited:
         value = inherited['MALLOC_MMAP_THRESHOLD_']
         if not re.fullmatch(r'[0-9]{1,20}', value) or int(value) > 2**64 - 1:

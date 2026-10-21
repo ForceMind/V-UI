@@ -5,6 +5,7 @@
 ## 固定读取边界
 
 - 默认关闭。仅已有部署由管理员另行设置 `VUI_TAILSCALE_STATUS_ENABLED=1` 才允许读取；安装器不设置它。关闭时 API 返回 `enabled=false`、页面卡片隐藏、不查找或执行程序。
+- 托管 systemd/OpenRC launcher 只向 panel 模式转交此单一显式环境项，且只接受字面 `0` / `1`；省略保持关闭，非法值在 exec 前拒绝且不回显输入。HTTP-01 两种模式不继承该项；认证材料、程序/socket 覆盖、loader/Python 注入仍被过滤。不增加 service.json 字段或安装器设置，不写真实服务环境、不启用读取。
 - 独立管理员 GET `/api/management/tailscale` 继承现有会话和 Host 检查；不接受查询参数、请求体、目标、命令或刷新绕过。普通系统状态、节点和订阅不含此数据。
 - 固定 argv：`/usr/bin/tailscale --socket=/var/run/tailscale/tailscaled.sock status --json --peers=false`。无 shell、无 PATH 搜索、无调用方/环境 socket 覆盖；最小固定环境，stdin/stderr 为 DEVNULL。不使用 sudo，不申请 socket/组权限，不安装、登录、重启、修改或重试命令。
 - 单进程、单次采样全局上限：2 秒执行预算，最多 65536 stdout bytes，JSON 最多 1024 节点及 16 层。错误、截断、超限、无权限或未知模式都只输出固定未知原因，不保留或记录原始 bytes/异常。
@@ -33,3 +34,11 @@ API 只提供 `enabled`、`state`（online/offline/unknown）、固定 `reason`�
 - 首次本地宽扫：1994 tests，1788 passed、206 explicit skips、零失败，181.394 秒；后续最终代码另行重验。skip 不授真实资格。
 - 本地真实 Chromium 尝试：1 test / 1 error，浏览器启动发生 `socket() failed: Operation not permitted` / SIGABRT，场景尚未执行。保留失败，不改系统权限；正常候选 CI 中的实际 browser 结果另记，不以 DOM 控制冒充通过。
 - Tailscale 未安装、未执行；真实共存、URL/身份恢复、四目标上运行 Tailscale、1 vCPU/512 MiB 整机与 24h 均未测，不继承基线资格。
+
+## PR54 后的 launcher 集成修正
+
+[PR54](https://github.com/ForceMind/V-UI/pull/54) 候选 `cd2025f8136f5af711397fe8b750491a29f16761`、tree `6b8943907811b7edbf1f12eca98b6c24f6962f5b` 的八组 CI / 11 jobs / 126 steps attempt 1 成功后，正常合并至 `7512051dfa192a8f623a3cebe3cb43d37f7f42e0`。候选 Test 中真实 Chromium proxy gate 21/21 通过（含合成状态场景），不替代真实 Tailscale。准确候选本地宽扫 2000 tests / 1794 passed / 206 explicit skips；上面的本地浏览器启动失败仍保留。
+
+合并后读到[晚到的 P1 审查](https://github.com/ForceMind/V-UI/pull/54#discussion_r4339410372)：托管 launcher 原严格过滤器遗漏可选状态环境项，导致标准安装即使外部显式设置也仍关闭。合并前只检查 review 状态、未读取新 inline 内容，是门禁检查遗漏；原绿灯没有覆盖这一集成缺口，不能称其完整可用。独立修正只增加上面的 panel 白名单，覆盖四目标、三种启动模式、默认/开/关/非法值、敏感项过滤，以及 fake exec → 真实观察器 + fake collector 的状态控制。没有执行 Tailscale 或修改真实服务设置。
+
+修正必须独立审查、准确 head 全套 CI，并在合并前重新读取最新 review 和 inline 内容；合并后准确 master 单列核验。既有安装器正常从已验证包提取 launcher，源码修正不自动更新旧安装，也不授权现在部署或打开选项。

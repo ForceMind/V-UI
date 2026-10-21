@@ -1,5 +1,9 @@
 # 当前开发与接手入口
 
+## 2026-10-21 独立修正：托管启动器状态选项
+
+[PR54](https://github.com/ForceMind/V-UI/pull/54) 已正常合并至 `7512051dfa192a8f623a3cebe3cb43d37f7f42e0`；候选八组 / 11 jobs / 126 steps attempt 1 成功，但合并后发现新 inline P1：托管 launcher 未转交状态 opt-in。合并前漏读 inline 的门禁缺口及证据保留在[状态合同](TAILSCALE_STATUS_CONTRACT.md#pr54-后的-launcher-集成修正)，不能将原绿灯当成完整功能资格。独立修正仅在 panel 模式白名单转交字面 `0` / `1`，默认不设置；不改变服务配置、socket 权限、认证或实际启用状态。准确修正候选/主线验收另记，合并前必须读最新 review 与 inline 内容。
+
 ## 2026-10-21 独立候选：可选只读管理状态
 
 基于 PR52 正常合并的准确 master `66f7ff74247741b1fe3e5f1610e1d33d52d42f58`，按 Issue53 V-TS-02 实现[默认关闭的状态观察卡片](TAILSCALE_STATUS_CONTRACT.md)。固定本机命令、限时限长、白名单与缓存，无安装/登录/网络/权限/核心动作；真实 Tailscale、共存/回滚及 URL/身份恢复尚未验收。新候选准确审查/CI 见独立 PR，不继承旧提交资格。受限 UDP D2 不恢复，不发布或部署。
