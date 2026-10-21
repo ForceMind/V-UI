@@ -7,7 +7,9 @@ they do not establish runtime forwarding (covered by the double-hop gate).
 VUI_TCP_UPSTREAM_BROWSER=1 requires all dependencies; it never skips on failure.
 """
 from copy import deepcopy
+from contextlib import contextmanager
 import faulthandler
+import io
 import json
 import os
 from pathlib import Path
@@ -17,7 +19,9 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import traceback
 from types import SimpleNamespace
 import unittest
 
@@ -26,6 +30,17 @@ from test_upstream_import_capabilities import inbound, UUID, SHORT_ID, HOST
 
 ROOT = Path(__file__).resolve().parents[1]
 PASSWORD = 'Synthetic-tcp-upstream-browser-password!'
+
+
+def report_suspended_test_stack(test_greenlet, stream):
+    """faulthandler sees Playwright's dispatcher, not its suspended sync caller."""
+    frame = test_greenlet.gr_frame
+    print('Suspended browser-test caller:', file=stream, flush=True)
+    if frame is not None:
+        traceback.print_stack(frame, file=stream)
+    else:
+        print('Test greenlet is not suspended.', file=stream)
+    stream.flush()
 
 
 def isolated_panel_route_guard(base, external):
@@ -62,6 +77,71 @@ def export_fixture_nodes():
 
 
 class TCPUpstreamExportStaticTests(unittest.TestCase):
+    def test_session_hold_captures_early_redirect_and_always_releases(self):
+        # A real browser poll can see logout before request.post returns. Model
+        # that exact ordering, plus setup/body failures, without browser access.
+        from unittest.mock import patch
+        for failure in (None, 'logout', 'request-wait', 'body'):
+            with self.subTest(failure=failure):
+                events = []
+                page = SimpleNamespace(watching=False)
+                context = SimpleNamespace(handler=None)
+                route = SimpleNamespace(
+                    continue_=lambda: events.append('continue'),
+                    abort=lambda: events.append('abort'))
+                @contextmanager
+                def expect_request(url):
+                    page.watching = True
+                    events.append('watch')
+                    yield
+                    if failure == 'request-wait':
+                        raise TimeoutError('synthetic first request timeout')
+                def post(url, **kwargs):
+                    self.assertTrue(page.watching, 'Login observer must precede logout')
+                    events.append('logout')
+                    context.handler(route)
+                    return SimpleNamespace(status=500 if failure == 'logout' else 200)
+                def register(url, handler):
+                    context.handler = handler
+                context.route = register
+                context.unroute = lambda url, handler: events.append('unroute')
+                context.request = SimpleNamespace(post=post)
+                page.expect_request = expect_request
+                page.evaluate = lambda expression: self.fail('Do not evaluate after an early redirect')
+                case = TCPUpstreamExportBrowserTests('test_ordinary_share_real_session_end_blocks_late_link_and_copy')
+                case.page = page
+                case.source = {'base': 'http://127.0.0.1:1', 'context': context}
+                output = io.StringIO()
+                with patch('sys.stderr', output):
+                    if failure:
+                        with self.assertRaises(TimeoutError if failure == 'request-wait' else AssertionError):
+                            with case.end_session_before_redirect():
+                                if failure == 'body':
+                                    raise AssertionError('synthetic original body failure')
+                        self.assertIn('Traceback', output.getvalue())
+                    else:
+                        with case.end_session_before_redirect():
+                            events.append('body')
+                self.assertEqual(events[:2], ['watch', 'logout'])
+                self.assertEqual(events[-2:], ['abort' if failure else 'continue', 'unroute'])
+
+    def test_browser_diagnostic_includes_suspended_sync_caller(self):
+        from greenlet import getcurrent, greenlet
+        parent = getcurrent()
+        def suspended_browser_test_marker():
+            parent.switch()
+        child = greenlet(suspended_browser_test_marker)
+        child.switch()
+        output = io.StringIO()
+        try:
+            reporter = threading.Thread(target=report_suspended_test_stack, args=(child, output))
+            reporter.start()
+            reporter.join(timeout=2)
+            self.assertFalse(reporter.is_alive())
+            self.assertIn('suspended_browser_test_marker', output.getvalue())
+        finally:
+            child.switch()
+
     def test_playwright_callback_dispatch_preserves_each_panel_origin_guard(self):
         from playwright._impl._impl_to_api_mapping import ImplToApiMapping
         mapping = ImplToApiMapping()
@@ -209,10 +289,18 @@ const success=(content='synthetic-credential')=>({data:content,headers:{'x-vui-e
 @unittest.skipUnless(os.getenv('VUI_TCP_UPSTREAM_BROWSER') == '1', 'explicit TCP upstream browser gate')
 class TCPUpstreamExportBrowserTests(unittest.TestCase):
     def setUp(self):
-        # Diagnostic only: preserve the exact blocked Python call in CI logs.
-        # The workflow step has a hard timeout; no assertion is bypassed.
+        # Diagnostic only: include the suspended sync caller, not merely the
+        # dispatcher greenlet's asyncio loop. Never call Playwright off-thread.
         faulthandler.dump_traceback_later(90, repeat=True)
         self.addCleanup(faulthandler.cancel_dump_traceback_later)
+        from greenlet import getcurrent
+        test_greenlet, stop_diagnostic = getcurrent(), threading.Event()
+        def report_caller():
+            while not stop_diagnostic.wait(90):
+                print(self.id(), file=sys.stderr, flush=True)
+                report_suspended_test_stack(test_greenlet, sys.stderr)
+        threading.Thread(target=report_caller, daemon=True).start()
+        self.addCleanup(stop_diagnostic.set)
         from playwright.sync_api import sync_playwright
         self.tmp = tempfile.TemporaryDirectory(prefix='vui-tcp-upstream-browser-')
         self.addCleanup(self.tmp.cleanup)
@@ -394,10 +482,11 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
             controller = self.page.evaluate('''() => {
                 const root = document.querySelector('#app')._vnode.component.proxy;
                 return {mounted: document.querySelector('#share-panel') !== null,
+                    sessionEnded: adminSessionEnded,
                     open: root.showQrDialog, link: root.qrLink,
                     busy: root.qrBusy, notice: root.qrNotice};
             }''')
-            self.assertEqual(controller, {'mounted': True, 'open': False, 'link': '',
+            self.assertEqual(controller, {'mounted': True, 'sessionEnded': True, 'open': False, 'link': '',
                                           'busy': False, 'notice': ''})
         else:
             expect(self.page.locator('#share-panel')).not_to_be_visible()
@@ -453,28 +542,46 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         # Also exceed the legacy 100 ms delay so a stale timer cannot pass.
         self.page.wait_for_timeout(200)
 
+    @contextmanager
     def end_session_before_redirect(self):
         """End a real session but hold login's document for old-DOM assertions."""
         navigation = []
+        succeeded = False
         def hold_login(route):
             navigation.append(route)
         self.source['context'].route(self.source['base'] + '/login', hold_login)
-        def cleanup_navigation():
-            self.source['context'].unroute(self.source['base'] + '/login', hold_login)
-            while navigation:
-                navigation.pop().abort()
-        self.addCleanup(cleanup_navigation)
-        logout = self.source['context'].request.post(self.source['base'] + '/api/auth/logout',
-            headers={'Origin': self.source['base'], 'X-VUI-Request': '1'})
-        self.assertEqual(logout.status, 200)
-        with self.page.expect_request(self.source['base'] + '/login'):
-            self.page.evaluate('void checkAdminSession(true, true)')
-        self.page.wait_for_function('adminSessionEnded')
-        deadline = time.monotonic() + 10
-        while not navigation and time.monotonic() < deadline:
-            self.page.wait_for_timeout(20)
-        self.assertEqual(len(navigation), 1)
-        return navigation
+        try:
+            # Register before revocation: the dashboard's existing status poll
+            # may initiate login while the synchronous logout call is pending.
+            with self.page.expect_request(self.source['base'] + '/login'):
+                logout = self.source['context'].request.post(self.source['base'] + '/api/auth/logout',
+                    headers={'Origin': self.source['base'], 'X-VUI-Request': '1'})
+                self.assertEqual(logout.status, 200)
+                if not navigation:
+                    self.page.evaluate('void checkAdminSession(true, true)')
+            deadline = time.monotonic() + 10
+            while not navigation and time.monotonic() < deadline:
+                self.page.wait_for_timeout(20)
+            self.assertEqual(len(navigation), 1)
+            # The caller directly asserts adminSessionEnded and controller/DOM
+            # clearing while this route is held; no navigation-dependent polling.
+            yield
+            succeeded = True
+        except BaseException:
+            # unittest otherwise defers this traceback until the whole suite
+            # finishes. Preserve it before cleanup can encounter another error.
+            traceback.print_exc(file=sys.stderr)
+            raise
+        finally:
+            try:
+                while navigation:
+                    route = navigation.pop()
+                    if succeeded:
+                        route.continue_()
+                    else:
+                        route.abort()
+            finally:
+                self.source['context'].unroute(self.source['base'] + '/login', hold_login)
 
     def test_ordinary_share_real_tls_reality_uri_copy_and_elementplus_dismissal(self):
         from playwright.sync_api import expect
@@ -587,7 +694,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
 
     def test_ordinary_share_displayed_secrets_clear_on_refresh_navigation_and_history(self):
         from playwright.sync_api import expect
-        for action in ('refresh', 'navigation', 'popstate', 'pagehide', 'session'):
+        for action in ('refresh', 'navigation', 'popstate', 'pagehide'):
             with self.subTest(action=action):
                 self.open_share(2)
                 if action == 'refresh':
@@ -596,19 +703,19 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     self.assertEqual(result.value.status, 200)
                 elif action == 'navigation':
                     self.page.get_by_role('menuitem', name='系统状态', exact=True).evaluate('(item) => item.click()')
-                elif action == 'session':
-                    navigation = self.end_session_before_redirect()
                 else:
                     self.page.evaluate('event => dispatchEvent(new Event(event))', action)
-                self.assert_share_cleared(during_navigation=action == 'session')
+                self.assert_share_cleared()
                 if action == 'navigation':
                     self.open_nodes()
-                if action == 'session':
-                    navigation.pop().continue_()
-                    self.page.wait_for_url('**/login')
-                    self.assert_share_cleared()
-                    continue
                 expect(self.page.get_by_role('button', name='分享', exact=True)).to_have_count(4)
+        # Keep this outside subTest: a session/setup error must unwind its held
+        # route immediately, not proceed into privacy evaluation on a stuck page.
+        self.open_share(2)
+        with self.end_session_before_redirect():
+            self.assert_share_cleared(during_navigation=True)
+        self.page.wait_for_url('**/login')
+        self.assert_share_cleared()
         self.assert_private()
 
     def test_ordinary_share_late_real_completion_after_close_refresh_and_history(self):
@@ -690,16 +797,14 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         self.wait_share_completion(1)
         # Hold only the destination document so the old, invalidated document
         # can be inspected. Session rejection and redirect remain real.
-        navigation = self.end_session_before_redirect()
-        self.assert_share_cleared(during_navigation=True)
-        self.assertTrue(self.page.evaluate('shareResponseAudit[0].aborted'))
-        self.page.evaluate("document.querySelector('#app')._vnode.component.proxy.copyLink()")
-        self.assertEqual(self.page.evaluate('shareCopyAudit.writes.length'), 1)
-        self.page.evaluate('shareCopyAudit.resolve()')
-        self.release_share_completion(0)
-        self.assert_share_cleared(during_navigation=True)
-        self.assertEqual(len(navigation), 1)
-        navigation.pop().continue_()
+        with self.end_session_before_redirect():
+            self.assert_share_cleared(during_navigation=True)
+            self.assertTrue(self.page.evaluate('shareResponseAudit[0].aborted'))
+            self.page.evaluate("document.querySelector('#app')._vnode.component.proxy.copyLink()")
+            self.assertEqual(self.page.evaluate('shareCopyAudit.writes.length'), 1)
+            self.page.evaluate('shareCopyAudit.resolve()')
+            self.release_share_completion(0)
+            self.assert_share_cleared(during_navigation=True)
         self.page.wait_for_url('**/login')
         self.assert_share_cleared()
         self.assert_private()
