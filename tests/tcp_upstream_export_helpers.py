@@ -14,12 +14,14 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import random
 import re
 import socket
 import sqlite3
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 import httpx
 import psutil
@@ -31,6 +33,41 @@ from proxy_loopback_support import (
 ROOT = Path(__file__).resolve().parents[1]
 ADMIN = "tcp-upstream-fixture"
 PASSWORD = "fake-tcp-upstream-admin-only-2026"
+
+
+def local_proxy_port():
+    """D1-only choice outside Linux automatic ports, not an atomic reservation.
+
+    A released bind(0) port can become a later panel/client source port before
+    the real check. Read the kernel range, never change it or retry an API call.
+    Explicit competing binds must still fail the unchanged production guard.
+    """
+    from app.services.proxy_apply import ProxyApplyError, preflight_local_listener
+    from app.services.proxy_policy import LOCAL_TAG
+
+    try:
+        raw = Path('/proc/sys/net/ipv4/ip_local_port_range').read_text(encoding='ascii')
+    except (OSError, UnicodeError):
+        raise AssertionError('Cannot read Linux automatic port range') from None
+    if re.fullmatch(r'[ \t]*[0-9]{1,5}[ \t]+[0-9]{1,5}[ \t]*\n?', raw) is None:
+        raise AssertionError('Invalid Linux automatic port range')
+    lower, upper = map(int, raw.split())
+    if not 0 <= lower <= upper <= 65535:
+        raise AssertionError('Invalid Linux automatic port range')
+    candidates = [port for port in range(1024, 65536) if not lower <= port <= upper]
+    if not candidates:
+        raise AssertionError('No unprivileged port outside Linux automatic range')
+    for port in random.SystemRandom().sample(candidates, min(128, len(candidates))):
+        config = {'inbounds': [{'tag': LOCAL_TAG, 'type': 'mixed',
+                               'listen': INGRESS, 'listen_port': port}]}
+        try:
+            preflight_local_listener(config, SimpleNamespace(process=None))
+        except ProxyApplyError as exc:
+            if exc.code == 'LOCAL_PORT_OCCUPIED':
+                continue
+            raise
+        return port
+    raise AssertionError('No available local proxy port within 128 candidate limit')
 
 
 def install_loopback_topology(options):
