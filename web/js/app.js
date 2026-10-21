@@ -186,8 +186,14 @@ const app = createApp({
             clearQrCode();
             showQrDialog.value = false;
         };
-        // Element Plus keeps closed dialog contents mounted. Clear both the
-        // credential text and generated image synchronously, including Escape.
+        // Element Plus emits v-model=false only after its leave transition.
+        // Invalidate before Escape/header/backdrop dismissal starts, not after
+        // a late response can repopulate the closing dialog.
+        const beforeQrDialogClose = (done) => {
+            closeQrDialog();
+            done();
+        };
+        // Keep the synchronous watcher for direct model changes too.
         watch(showQrDialog, (open) => { if (!open) clearQrCode(); }, { flush: 'sync' });
         watch(currentView, closeQrDialog, { flush: 'sync' });
         clearAdminSecrets.push(closeQrDialog);
@@ -1021,6 +1027,7 @@ const app = createApp({
             qrBusy,
             qrNotice,
             closeQrDialog,
+            beforeQrDialogClose,
             upstreamExport,
             openUpstreamExport,
             closeUpstreamExport,

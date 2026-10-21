@@ -75,6 +75,22 @@ const b=h.start();await h.finish(b,'before-render');const stale=h.allTimers.at(-
 const c=h.start(2);await h.finish(c,'fresh');stale();assert.equal(h.container.title,'');assert.equal(h.timers.size,1);h.render();assert.equal(h.container.title,'fresh');
 h.output.value='simulated Vue textarea';h.api.closeQrDialog();h.clear();
 ''',
+'elementplus_before_close_invalidates_before_done': r'''
+for(const phase of ['pending', 'render-queued', 'displayed']){
+ const h=boot(),op=h.start();
+ if(phase!=='pending'){await h.finish(op,'closing-secret');if(phase==='displayed'){h.render();h.output.value=h.api.qrLink.value}}
+ const oldRender=h.allTimers.at(-1);let done=0;
+ h.api.beforeQrDialogClose(()=>{
+  done++;h.clear();assert(!h.api.showQrDialog.value);
+  if(phase==='pending')assert(op.request.options.signal.aborted);
+ });
+ assert.equal(done,1);await h.api.copyLink();assert.equal(h.copies.length,0);
+ // No afterLeave/model-update callback is simulated: invalidation must happen
+ // at the request to close, including an already-finished HTTP completion.
+ if(phase==='pending')await h.finish(op,'late-during-leave');
+ if(oldRender)oldRender();h.render();h.clear();assert(!h.api.showQrDialog.value);
+}
+''',
 'each_navigation_refresh_and_session_boundary': r'''
 for(const action of ['pagehide','popstate','view','list','failed-list','menu','profile','session','401']){
  const h=boot(),a=h.start();await h.finish(a,'secret-'+action);h.render();h.output.value=h.api.qrLink.value;
@@ -115,6 +131,63 @@ const broken=boot();broken.throwRender();await broken.finish(broken.start(),'ren
 }
 
 
+PINNED_DIALOG_SCENARIO = r'''
+// Full pinned useDialog + Vue reactivity; DOM, transport, clipboard and lifecycle
+// scheduling stay synthetic. This is not keyboard/physical clipboard coverage.
+const path=require('node:path');
+const elementPlus=path.join(path.dirname(process.argv[1]),'element-plus.js');
+const template=fs.readFileSync('web/index.html','utf8');
+const dialogTag=template.match(/<el-dialog\b[^>]*v-model="showQrDialog"[^>]*>/)?.[0];
+const hook=dialogTag?.match(/:before-close="([A-Za-z_$][\w$]*)"/)?.[1];
+assert(hook,'Share dialog must invalidate through Element Plus before-close');
+for(const route of ['onCloseRequested','onModalClick','handleClose']){
+ for(const phase of ['pending','render-queued','displayed','late-copy']){
+  const h=boot(),events=[];
+  h.c.Vue={...h.c.Vue,inject:(_,fallback)=>fallback,
+   getCurrentInstance:()=>({emit:(name,value)=>{
+    events.push([name,value]);
+    if(name==='update:modelValue')h.api.showQrDialog.value=value;
+   }})};
+  vm.runInContext(fs.readFileSync(elementPlus,'utf8'),h.c);
+  const props=h.c.Vue.reactive({modelValue:true,closeOnPressEscape:true,
+   closeOnClickModal:true,lockScroll:false,beforeClose:h.api[hook]});
+  assert.equal(typeof props.beforeClose,'function');
+  const dialog=h.c.ElementPlus.useDialog(props,h.c.Vue.ref(null));
+  const op=h.start();let staleTimer,pendingCopy,copyResult;
+  if(phase!=='pending'){
+   await h.finish(op,'synthetic-transition-secret');staleTimer=h.allTimers.at(-1);
+   if(phase!=='render-queued')h.render();
+   if(phase==='late-copy'){
+    copyResult=deferred();h.copyWith(()=>copyResult.promise);pendingCopy=h.api.copyLink();
+   }
+  }
+  // Explicitly model an already-open component without pretending to mount DOM.
+  dialog.visible.value=true;
+  dialog[route]();
+  assert.equal(dialog.visible.value,false);assert.equal(h.api.showQrDialog.value,false);
+  if(phase==='pending')assert(op.request.options.signal.aborted);
+  h.clear();
+  // The library has not emitted its delayed model update. Product invalidation
+  // must already have happened before even its beforeLeave hook runs.
+  assert.equal(events.length,0);
+  dialog.beforeLeave();
+  assert.deepEqual(events,[['close',undefined]]);
+  if(phase==='pending')await h.finish(op,'late-transition-secret');
+  if(staleTimer)staleTimer(); // Even a previously queued callback must reject.
+  h.render();
+  if(pendingCopy){copyResult.resolve();await pendingCopy;}
+  const copyCount=h.copies.length;await h.api.copyLink();
+  assert.equal(h.copies.length,copyCount);
+  assert.equal(copyCount,phase==='late-copy'?1:0); // An issued write is not undone.
+  h.clear();assert.equal(h.api.showQrDialog.value,false);
+  dialog.afterLeave();h.clear();
+  assert.equal(h.api.showQrDialog.value,false);
+  assert.deepEqual(events,[['close',undefined],['closed',undefined],['update:modelValue',false]]);
+ }
+}
+'''
+
+
 def run_node(testcase, body, vue=None):
     code = HARNESS + '\n(async()=>{\n' + body + '\n})().catch(error=>{console.error(error);process.exitCode=1});'
     result = subprocess.run(['node', '-e', code] + ([str(vue)] if vue else []),
@@ -128,6 +201,10 @@ def run_pinned_vue(testcase, vue):
     for name, body in SCENARIOS.items():
         with testcase.subTest(share_lifecycle=name):
             run_node(testcase, body, vue)
+    with testcase.subTest(share_lifecycle='actual_elementplus_before_close'):
+        testcase.assertTrue(Path(vue).with_name('element-plus.js').is_file(),
+                            'Missing checksum-pinned Element Plus asset')
+        run_node(testcase, PINNED_DIALOG_SCENARIO, vue)
 
 
 @unittest.skipUnless(shutil.which('node'), 'Node required for share controller contracts')
@@ -140,6 +217,11 @@ class ShareDialogControllerTests(unittest.TestCase):
 
     def test_close_before_response_render_and_reopen(self):
         run_node(self, SCENARIOS['close_before_response_render_and_reopen'])
+
+    def test_elementplus_before_close_invalidates_before_done(self):
+        html = (ROOT / 'web/index.html').read_text()
+        self.assertRegex(html, r'<el-dialog\b[^>]*v-model="showQrDialog"[^>]*:before-close="beforeQrDialogClose"')
+        run_node(self, SCENARIOS['elementplus_before_close_invalidates_before_done'])
 
     def test_each_navigation_refresh_and_session_boundary(self):
         run_node(self, SCENARIOS['each_navigation_refresh_and_session_boundary'])
