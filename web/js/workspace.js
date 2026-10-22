@@ -1,7 +1,7 @@
 'use strict';
 (() => {
     const $ = id => document.getElementById(id);
-    let savedRevision = '', savedForm = '', editNumber = 0, catalog = null, issued = null, busy = false;
+    let savedRevision = '', savedForm = '', editNumber = 0, catalog = null, issued = null, issuedNumber = 0, busy = false;
     const notice = (text, error = false) => { $('notice').textContent = text; $('notice').className = error ? 'error' : ''; };
     const element = (tag, text, attrs = {}) => {
         const node = document.createElement(tag);
@@ -82,10 +82,11 @@
         showPlan(plan, '已保存规则预览');
         updateState(); notice('已读取保存版本。编辑表单不会立即改变订阅。');
     }
-    function hideIssued() { issued = null; $('issued-urls').value = ''; $('issued').hidden = true; }
+    // Invalidate local continuations, not the already-authorized server operation.
+    function hideIssued() { issuedNumber++; issued = null; $('issued-urls').value = ''; $('issued').hidden = true; $('download').disabled = true; }
     function showIssued(value) {
         issued = value; $('issued-urls').value = Object.values(value.paths).map(p => location.origin + p).join('\n');
-        $('issued').hidden = false; $('download').disabled = !value.paths['mihomo.yaml'];
+        $('issued').hidden = false; $('download').disabled = busy || !value.paths['mihomo.yaml'];
     }
     async function refreshGrants() {
         const values = await json('/api/subscriptions'); $('grants').replaceChildren();
@@ -105,8 +106,11 @@
             rotate.addEventListener('click', () => operation(async () => {
                 if (!confirm('轮换后旧地址失效，需更新客户端。继续？')) return;
                 const days = Number($('days').value); if (!Number.isInteger(days) || days < 1 || days > 3650) throw new Error('有效天数须为 1–3650');
-                hideIssued(); showIssued(await json(`/api/subscriptions/${value.id}/rotate`, {method:'POST', body:JSON.stringify({expires_days:days})}));
-                await refreshGrants(); notice('已轮换，旧地址失效。新地址仅本次显示。');
+                hideIssued(); const number = issuedNumber;
+                const result = await json(`/api/subscriptions/${value.id}/rotate`, {method:'POST', body:JSON.stringify({expires_days:days})});
+                if (number === issuedNumber) showIssued(result);
+                await refreshGrants();
+                if (number === issuedNumber) notice('已轮换，旧地址失效。新地址仅本次显示。');
             }));
             const revoke = element('button', '撤销', {type:'button', 'data-revoke':String(value.id)}); revoke.disabled = value.revoked;
             revoke.addEventListener('click', () => operation(async () => {
@@ -123,7 +127,7 @@
     }
     async function operation(fn) {
         if (busy) return; busy = true;
-        document.querySelectorAll('button').forEach(n => { n.dataset.disabled = String(n.disabled); n.disabled = true; });
+        document.querySelectorAll('button').forEach(n => { if (n !== $('forget')) { n.dataset.disabled = String(n.disabled); n.disabled = true; } });
         try { await fn(); }
         catch (error) { notice(error.status === 409 ? '保存版本冲突或配置尚未就绪：' + error.message : error.message, true); }
         finally {
@@ -158,20 +162,28 @@
         const ids = [...document.querySelectorAll('[data-node]:checked')].map(n => Number(n.dataset.node));
         const formats = [...document.querySelectorAll('input[name="format"]:checked')].map(n => n.value);
         if (!ids.length || !formats.length) throw new Error('请选择至少一个已验证节点和输出格式');
-        hideIssued();
-        showIssued(await json('/api/subscriptions', {method:'POST', body:JSON.stringify({label:$('label').value.trim(), server:$('server').value.trim(),
-            inbound_ids:ids, formats, expires_days:Number($('days').value)})}));
-        await refreshGrants(); notice('订阅已创建。请保存新地址，不要分享给他人。');
+        hideIssued(); const number = issuedNumber;
+        const result = await json('/api/subscriptions', {method:'POST', body:JSON.stringify({label:$('label').value.trim(), server:$('server').value.trim(),
+            inbound_ids:ids, formats, expires_days:Number($('days').value)})});
+        if (number === issuedNumber) showIssued(result);
+        await refreshGrants();
+        if (number === issuedNumber) notice('订阅已创建。请保存新地址，不要分享给他人。');
     }); });
     $('forget').addEventListener('click', hideIssued);
     $('copy').addEventListener('click', () => operation(async () => {
         if (!issued) return;
-        try { await navigator.clipboard.writeText($('issued-urls').value); notice('地址已复制。'); }
-        catch { $('issued-urls').focus(); $('issued-urls').select(); notice('无法自动复制，请复制已选中的地址。'); }
+        const number = issuedNumber;
+        try { await navigator.clipboard.writeText($('issued-urls').value); if (number === issuedNumber) notice('地址已复制。'); }
+        catch { if (number === issuedNumber) { $('issued-urls').focus(); $('issued-urls').select(); notice('无法自动复制，请复制已选中的地址。'); } }
     }));
     $('download').addEventListener('click', () => operation(async () => {
         if (!issued?.paths['mihomo.yaml']) return;
-        const response = await request(issued.paths['mihomo.yaml']); const objectUrl = URL.createObjectURL(await response.blob());
+        const number = issuedNumber;
+        const response = await request(issued.paths['mihomo.yaml']);
+        if (number !== issuedNumber) return;
+        const blob = await response.blob();
+        if (number !== issuedNumber) return;
+        const objectUrl = URL.createObjectURL(blob);
         const a = element('a', null, {href:objectUrl, download:'vui-mihomo.yaml'}); document.body.append(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
     }));

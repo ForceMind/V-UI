@@ -5,6 +5,16 @@ import unittest
 
 
 class WorkspaceControllerTests(unittest.TestCase):
+    def test_issued_content_generation_and_local_hide_lifecycle(self):
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            ["node", "--test-reporter=tap", "tests/workspace_issued_dom.js"], cwd=root,
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for expected in ("tests 40", "pass 40", "fail 0", "cancelled 0", "skipped 0", "todo 0"):
+            self.assertRegex(result.stdout, r"(?m)^# " + expected + r"$", result.stdout)
+
     def test_reload_draft_revision_and_failure_lifecycle(self):
         root = Path(__file__).resolve().parents[1]
         result = subprocess.run(
