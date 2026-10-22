@@ -29,7 +29,7 @@ function context(ChannelType){
 }
 function environment(hidden=false){
  let next=0;const timers=new Map(),listeners=new Set();
- const document={hidden,addEventListener(name,fn){assert.equal(name,'visibilitychange');listeners.add(fn)},removeEventListener(name,fn){listeners.delete(fn)}};
+ const document={hidden,getElementById(){return null},addEventListener(name,fn){assert.equal(name,'visibilitychange');listeners.add(fn)},removeEventListener(name,fn){listeners.delete(fn)}};
  return {document,timers,listeners,setTimeout(fn,delay){const id=next++;timers.set(id,{fn,delay});return id},clearTimeout(id){timers.delete(id)},
   onError(error){throw error},show(hidden){document.hidden=hidden;for(const fn of listeners)fn()},
   fire(){const [id,t]=timers.entries().next().value;timers.delete(id);return t.fn()}};
