@@ -39,6 +39,9 @@ POST `/api/subscriptions`：label、server（节点公开地址）、inbound_ids
 
 匿名客户端唯一授权入口为 `GET/HEAD /sub/{token}/{format}`，format为`mihomo.yaml`、`raw`或`sing-box.json`且必须属于该令牌授权范围。无效令牌/格式404，配置未准备好409。订阅token不授予管理权限；不接受额外query参数绕过作用域。
 
+节点实例绑定候选增加列表字段 `invalidation_reason`（正常时 null）：`node_identity_missing` 表示旧授权缺少可证明绑定，`node_identity_changed` 表示节点被删除/重建或绑定异常，二者必须重新选择节点并创建订阅；轮换返回 409，不修改 token 或撤销状态。`nodes_unavailable` 表示原节点停用，`credentials_changed` 表示管理员密码变化，`invalid_configuration` 表示授权格式损坏。`invalidated` 为这些原因的汇总布尔值，不再只表示改密。列表、创建结果和节点摘要不回显内部实例身份/绑定。普通创建/编辑 API 拒绝顶层身份字段；节点 ID 严格限定为正的 SQLite 64-bit 整数，选择/格式不得重复。旧链接升级后需要重建，详细[迁移与恢复契约](SUBSCRIPTION_IDENTITY.md)。公开 token 错误仍保持上述通用提示。
+
+
 ## 证书
 
 | 方法/路径（前缀/api/certificates） | 请求/结果 |

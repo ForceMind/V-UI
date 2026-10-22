@@ -4,7 +4,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from app.api.cores import apply_checked
 from app.services.reality_profile import has_reality
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 from app.models.database import get_db
 from app.services.inbound_service import create_inbound, delete_inbound, get_inbound, list_inbounds, routing_dicts, to_dict, update_inbound
@@ -12,6 +12,13 @@ from app.services.inbound_service import create_inbound, delete_inbound, get_inb
 router = APIRouter()
 
 class SingBoxInboundPayload(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def reject_instance_identity(cls, value):
+        if isinstance(value, dict) and {"instance_id", "inbound_bindings"} & value.keys():
+            raise ValueError("Inbound instance identity is server-managed")
+        return value
+
     id: int | None = None
     remark: str = ""
     port: int = Field(ge=1, le=65535)

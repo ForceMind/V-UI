@@ -48,6 +48,7 @@ class InboundPolicyMigrationTests(unittest.TestCase):
                 database.init_db(); database.init_db()
                 after = self.data()
                 for old, new in zip(before, after):
+                    self.assertRegex(new.pop("instance_id"), r"^[0-9a-f]{32}$")
                     self.assertEqual(new.pop("routing_mode"), "inherit")
                     if not with_core: self.assertEqual(new.pop("core"), "xray")
                     self.assertEqual(old, new)
@@ -62,7 +63,13 @@ class InboundPolicyMigrationTests(unittest.TestCase):
         before = self.data()
         with ThreadPoolExecutor(max_workers=3) as executor:
             list(executor.map(lambda _: database.init_db(), range(6)))
-        self.assertEqual(before, self.data())
+        after = self.data()
+        for old, new in zip(before, after):
+            self.assertRegex(new.pop("instance_id"), r"^[0-9a-f]{32}$")
+            self.assertEqual(old, new)
+        identities = self.data()
+        database.init_db()
+        self.assertEqual(identities, self.data())
 
     def test_v2_fence_rejects_lost_column_before_create_or_migration(self):
         from app.services.proxy_store import ProxyStore, ProxyStorageError
@@ -127,6 +134,9 @@ class InboundPolicyMigrationTests(unittest.TestCase):
 
     def test_raw_corrupt_persisted_row_not_healed_by_model_or_plan(self):
         self.legacy(mode_column=True, modes=(None,))
+        # Supply the unrelated new private column without repairing routing.
+        with self.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE inbounds ADD COLUMN instance_id VARCHAR(32)"))
         with Session(self.engine) as session:
             row = session.query(database.Inbound).one()
             self.assertIsNone(row.routing_mode)

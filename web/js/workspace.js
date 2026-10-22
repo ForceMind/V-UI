@@ -92,9 +92,16 @@
         values.forEach(value => {
             const row = element('tr', null); const name = element('td', value.label);
             name.append(element('small', value.server));
-            const status = value.revoked ? '已撤销' : value.expired ? '已过期' : value.invalidated ? '密码变更后失效' : '有效';
+            const identityInvalid = ['node_identity_missing', 'node_identity_changed'].includes(value.invalidation_reason);
+            const reasons = {node_identity_missing:'旧授权缺少节点身份，请重新选择节点并创建订阅',
+                node_identity_changed:'节点已删除、重建或身份异常，请重新创建订阅',
+                nodes_unavailable:'原节点已停用，恢复后可用', credentials_changed:'密码变更后失效'};
+            const status = identityInvalid ? reasons[value.invalidation_reason] : value.revoked ? '已撤销' : value.expired ? '已过期'
+                : value.invalidated ? (Object.hasOwn(reasons, value.invalidation_reason) ? reasons[value.invalidation_reason] : '授权失效，请重新创建订阅') : '有效';
             const actions = element('td', null);
             const rotate = element('button', '轮换', {type:'button', 'data-rotate':String(value.id)});
+            rotate.disabled = identityInvalid || value.invalidation_reason === 'nodes_unavailable';
+            if (identityInvalid) rotate.title = '轮换不能恢复旧节点授权，请重新选择节点并创建订阅';
             rotate.addEventListener('click', () => operation(async () => {
                 if (!confirm('轮换后旧地址失效，需更新客户端。继续？')) return;
                 const days = Number($('days').value); if (!Number.isInteger(days) || days < 1 || days > 3650) throw new Error('有效天数须为 1–3650');
