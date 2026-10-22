@@ -1,6 +1,7 @@
 # V-UI：可选 Tailscale 私有管理通道方案
 
 > 状态：**管理网络仍仅设计与待执行验收计划；未安装、未做网络实测。**
+> 2026-10-22：V-TS-02 软件已由 [PR54](https://github.com/ForceMind/V-UI/pull/54) / [PR55](https://github.com/ForceMind/V-UI/pull/55) 收口，真实运行资格仍未授予；V-TS-03 新增[私有管理设计与源码阻断](TAILSCALE_PRIVATE_MANAGEMENT_DESIGN.md)，仅设计、未实现。第 4 节状态按此更新，其余“本轮”保留原阶段含义。
 > 2026-10-21：V-TS-02 另开[默认关闭只读状态候选](TAILSCALE_STATUS_CONTRACT.md)，不改变此文 2026-10-20 的安装/共存/恢复边界；下文“本轮”保留原文档阶段范围。
 > 更新：2026-10-20。核对主线 `c66af7c55e6e9e334262f7e1f098778cb129e795`、[PR52](https://github.com/ForceMind/V-UI/pull/52) 原 head `32ec01341ca9cde8bc6b22c0f8882845eabf88af` 和 [Issue53](https://github.com/ForceMind/V-UI/issues/53)。
 > 最低共存、URL 与回滚门槛见[验收计划](TAILSCALE_MANAGEMENT_ACCEPTANCE.md)。**这些门槛尚未通过，因此目前不建议在现有业务主机上安装。**
@@ -14,7 +15,7 @@ Tailscale 只研究为可选的私有管理通道，保留 V-UI 登录、会话�
 | 管理员访问既有 HTTPS 面板 | 研究保持原 URL 的 tailnet 路径；首轮使用独立电脑 |
 | 标准 VLESS 客户端 → 入口 → 既有直连/选定上游 | 产品路径保持；必须另行验证与 overlay 共存 |
 | Tailscale Exit Node / Subnet Router / Tailscale SSH / Funnel | 本计划不启用、不发布路由、不增加此类资格 |
-| tailnet-only 面板、公网收口 | 后续独立设计；仅增加管理通道不会关闭公网面板 |
+| tailnet-only 面板、公网收口 | [V-TS-03 设计](TAILSCALE_PRIVATE_MANAGEMENT_DESIGN.md)独立说明整个 HTTPS 监听含订阅的取舍；未实现，仅增加管理通道不会关闭公网面板 |
 | 状态展示 | 后续默认关闭的只读候选，见第 5 节；本轮不实现 |
 
 本轮不安装/启动 Tailscale、不认证绑定账号、不读取或生成 auth key/设备密钥、不修改权限、SSH、证书、DNS、防火墙、路由、监听或 systemd，不应用/重新应用代理策略，不改代码、依赖、固定核心、VERSION、工作流，不发布或部署。`disabled`、`external-tailnet` 等名称仅是设计概念，当前没有对应产品设置。
@@ -89,8 +90,8 @@ Tailscale 安装不是“系统网络完全不受影响”的操作。Linux 默�
 | 阶段 | 交付和退出门槛 | 当前状态 |
 | --- | --- | --- |
 | V-TS-01 | 本方案、最低共存及恢复矩阵、候选 A 的 TLS/登录/路径验证；通过隔离环境验收后才考虑人工安装建议 | 仅文档修订，矩阵未执行 |
-| V-TS-02 | 默认关闭的只读状态适配器；独立设计/实现/审查与异常输出测试 | 未实现 |
-| V-TS-03 | 明确 TLS、监听、fail closed、公网不可达和带外恢复的 tailnet-only 方案 | 未设计完成，不随一期安装收口 |
+| V-TS-02 | 默认关闭的只读状态适配器；独立设计/实现/审查与异常输出测试 | PR54/55 软件已收口；真实运行、共存与恢复未测 |
+| V-TS-03 | 明确 TLS、监听、fail closed、公网不可达和带外恢复的 tailnet-only 方案 | [设计与源码阻断](TAILSCALE_PRIVATE_MANAGEMENT_DESIGN.md)已形成待审；实现、P0–P9 实测及部署均未完成，不随一期安装收口 |
 | V-TS-04 | 更完整系统/VPN 共存和准确目标资格；最低共存部分已前移为 V-TS-01 前置门槛 | 未执行，不启 Exit Node/Subnet Router，不恢复 UDP 专项 |
 
 首轮建议独立电脑管理。手机 iOS/Android 通常仅允许同时启用一个 VPN，不能保证与 VLESS/TUN 客户端并开；需要独立真机资格，见官方 [VPN 限制](https://tailscale.com/docs/reference/faq/other-vpns)。管理链路可能从 P2P 退回 DERP/Peer Relay，不能保证直连、时延或吞吐；这些连接类型不代表 VLESS 的出口选择，见[连接类型](https://tailscale.com/docs/reference/connection-types)。

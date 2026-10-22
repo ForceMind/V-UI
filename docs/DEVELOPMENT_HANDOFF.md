@@ -1,5 +1,13 @@
 # 当前开发与接手入口
 
+## 2026-10-22 当前有界目标：V-TS-03 私有管理设计，不实施
+
+[PR62](https://github.com/ForceMind/V-UI/pull/62) 的五类 SAVE 回归已正常合并至准确 master `6b22fb7687b1c26b2af8cf166812aba8786dfd33` / tree `1d76efb8643f2c3864bfa6fa4154571099340994`。候选与新主线各自八组 / 11 jobs / 126 steps 和同源四目标均首次通过，主线于 05:44:18 UTC 独立收口；[Test](https://github.com/ForceMind/V-UI/actions/runs/39727941401)、[loopback](https://github.com/ForceMind/V-UI/actions/runs/39727941337)、[deployment](https://github.com/ForceMind/V-UI/actions/runs/39727941355)、[portable](https://github.com/ForceMind/V-UI/actions/runs/39727941391)。下方待验文字保留历史，不继续扩大测试。
+
+下一阶段仅交付 [V-TS-03 私有管理入口设计](TAILSCALE_PRIVATE_MANAGEMENT_DESIGN.md)，补整 HTTPS 监听包含订阅的取舍、现有回环健康/安装升级/服务就绪缺口、面板与核心停启耦合、故障不回公网和带外恢复验收；不虚构已存在的 private-mode 开关。V-TS-02 软件已由 PR54/55 完成，但真实 Tailscale、C0–C8/R0–R4 与新增 P0–P9 均不因此获资格。
+
+本轮只改设计及最小交叉引用/状态，不改源代码、测试、工作流、固定核心、VERSION、监听或系统配置，不安装/运行 Tailscale，不创建凭据或授予权限，不执行网络实验、真实数据迁移、发布部署或受限 UDP D2。文档须独审及准确提交 CI / review 门槛；设计交付后明确尚待范围/目标/维护与权限决定，不自动展开实现。
+
 ## 2026-10-22 当前有界目标：保存确认与恢复的五项回归覆盖
 
 [PR61](https://github.com/ForceMind/V-UI/pull/61) 准确候选 `eb0712a49bedebb4c4964db3a726a1bb8018a774` 经独审与候选验收后，于 04:30:35 UTC 正常合并至 `76b0f5ca4459dcfef96cd521f3e6e57063a05983` / tree `b612bb44e5c8556e3edf8aece82a37430680ec04`。该准确主线已于 04:51:04 UTC 独立完成八组 / 11 jobs / 126 steps，全部 attempt 1 success，以及同源四目标；不是沿用候选绿灯。公开记录见 [Test](https://github.com/ForceMind/V-UI/actions/runs/39722773294)、[loopback](https://github.com/ForceMind/V-UI/actions/runs/39722773352)、[deployment](https://github.com/ForceMind/V-UI/actions/runs/39722773274)、[portable](https://github.com/ForceMind/V-UI/actions/runs/39722773328)。下方候选、待验和全部失败记录保留为历史，不覆盖本次主线收口。

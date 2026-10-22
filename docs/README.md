@@ -1,4 +1,4 @@
-> 2026-10-21 新候选：[V-TS-02 默认关闭的只读状态契约](TAILSCALE_STATUS_CONTRACT.md)。仅本地观察适配器，不授予 Tailscale 安装、共存或 URL/恢复资格；准确候选证据见独立 PR。
+> 2026-10-22：[V-TS-03 私有管理入口设计](TAILSCALE_PRIVATE_MANAGEMENT_DESIGN.md)仅设计与源码阻断，未实施或授予部署资格；V-TS-02 [只读状态软件](TAILSCALE_STATUS_CONTRACT.md)已由 PR54/55 收口，真实 Tailscale 共存/恢复仍未测。
 
 # V-UI 文档
 
@@ -38,7 +38,7 @@
 
 | 阅读目标 | 文档 |
 | --- | --- |
-| 可选 Tailscale 管理通道、HTTPS 兼容与安装前共存门槛（仅研究，未实测） | [方案](TAILSCALE_MANAGEMENT_OVERLAY.md) / [最低共存与回滚验收计划](TAILSCALE_MANAGEMENT_ACCEPTANCE.md) |
+| 可选 Tailscale 管理通道、HTTPS 兼容与安装前共存门槛（仅研究，未实测） | [方案](TAILSCALE_MANAGEMENT_OVERLAY.md) / [最低共存与回滚验收计划](TAILSCALE_MANAGEMENT_ACCEPTANCE.md) / [私有管理入口设计](TAILSCALE_PRIVATE_MANAGEMENT_DESIGN.md) |
 | 每入口三态、首次直连/中转与保存/应用状态（主线已验、尚未发布） | [PER_INBOUND_ROUTING.md](PER_INBOUND_ROUTING.md) |
 | 每入口 TCP 准确候选/主线收口与保留失败 | [PER_INBOUND_ROUTING_CLOSURE_20261018.md](PER_INBOUND_ROUTING_CLOSURE_20261018.md) |
 | 专用 TCP 上游 URI/YAML 导出、另一实例导入与凭据处理 | [TCP_UPSTREAM_EXPORT.md](TCP_UPSTREAM_EXPORT.md) |
