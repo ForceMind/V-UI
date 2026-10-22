@@ -1,5 +1,13 @@
 # 当前开发与接手入口
 
+## 2026-10-22 当前有界目标：保存确认与恢复的五项回归覆盖
+
+[PR61](https://github.com/ForceMind/V-UI/pull/61) 准确候选 `eb0712a49bedebb4c4964db3a726a1bb8018a774` 经独审与候选验收后，于 04:30:35 UTC 正常合并至 `76b0f5ca4459dcfef96cd521f3e6e57063a05983` / tree `b612bb44e5c8556e3edf8aece82a37430680ec04`。该准确主线已于 04:51:04 UTC 独立完成八组 / 11 jobs / 126 steps，全部 attempt 1 success，以及同源四目标；不是沿用候选绿灯。公开记录见 [Test](https://github.com/ForceMind/V-UI/actions/runs/39722773294)、[loopback](https://github.com/ForceMind/V-UI/actions/runs/39722773352)、[deployment](https://github.com/ForceMind/V-UI/actions/runs/39722773274)、[portable](https://github.com/ForceMind/V-UI/actions/runs/39722773328)。下方候选、待验和全部失败记录保留为历史，不覆盖本次主线收口。
+
+本次从该准确主线独立增加五项保存确认/恢复回归，不修产品行为：真实 422 后纠正保存、第二写入者 409 后显式重载、已落盘但确认不可解析、确认后预览失败、保存后预览等待中的新编辑。直接运行未改动的 `workspace.js`，通过每场景一个有界 Python 进程调用实际模型、路由函数、验证器与临时磁盘存储；复用既有小型 DOM 夹具，原 24 个重载用例正文及 40/35 个新地址/实例状态控制不变。详见[测试边界](WORKSPACE_ALPHA6.md#2026-10-22-保存确认与恢复回归覆盖)。这不是实际 HTTP、认证、浏览器、导航或核心资格。
+
+本轮仅测试/夹具和最小合同/交接文档，仍须冻结树独审、完整普通套件、准确候选 CI / 四目标、正常合并及准确主线独立验收，不预填未来通过结果。完成这五项后停止扩大测试，交付剩余计划清单；不继续滚动新增低价值测试 PR。未发布、部署、修改 VERSION/固定核心/工作流或依赖，不操作实际用户数据、Mac、Tailscale/VPN、凭据、网络安全权限或受限 UDP D2。
+
 ## 2026-10-22 当前独立候选：工作区新地址生命周期，基线已纳入 PR57
 
 本次准确基线为 `9e439d3b3872a52e1177390e470f8101984be01c` / tree `c605063d936edb0801b005d62f345360fbee9b58`。[PR57](https://github.com/ForceMind/V-UI/pull/57) 的准确候选 `f44258f54a4c2c915a1ff7f49d80f06d525cb20c` 已完成独立审查、完整本地套件、八组 / 11 jobs / 126 steps、同源四目标和真实浏览器验收，最新完整复审无发现，于 04:01:43 UTC 正常合并至该主线；新主线自己的完整 CI / 四目标仍独立进行，不能继承同树候选资格。[PR60](https://github.com/ForceMind/V-UI/pull/60) 的准确主线 `9e77ed0137c9b6a2864b74048c28af349aafc6e1` 已于 03:49:56 UTC 独立完成八组 / 11 jobs / 126 steps 及同源四目标。下方“主线待验”“未合并”等文字保留为各阶段历史，不覆盖本节更新。
