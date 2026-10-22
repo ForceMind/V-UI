@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import sqlite3
 from pathlib import Path
 
@@ -64,6 +65,9 @@ class Inbound(Base):
     __tablename__ = "inbounds"
 
     id = Column(Integer, primary_key=True, index=True)
+    # Private authorization identity, not a protocol credential or runtime
+    # source field. NULL/corrupt imported values must fail closed, not heal.
+    instance_id = Column(String(32), nullable=True, default=lambda: secrets.token_hex(16))
     user_id = Column(Integer, nullable=True)
     core = Column(String, nullable=False, default="xray", index=True)
     routing_mode = Column(String, nullable=False, default="inherit", server_default="inherit")
@@ -108,32 +112,74 @@ def _guard_policy_schema_before_create() -> None:
             raise ProxyStorageError("Per-inbound database column is missing; offline recovery is required")
 
 
-def _migrate_legacy_schema() -> None:
-    """Keep existing installations working without introducing Alembic yet."""
-    # Serialize schema inspection and DDL across processes as well as the
-    # panel's operation lock. Only an actually missing column gets defaults.
+class SubscriptionIdentitySchemaError(RuntimeError):
+    pass
+
+
+def _guard_subscription_identity_schema(conn) -> None:
+    """A marked database cannot become legacy by losing an identity column."""
+    inspector = inspect(conn)
+    tables = set(inspector.get_table_names())
+    if "subscription_identity_schema" not in tables:
+        return
+    columns = {column["name"] for column in inspector.get_columns("subscription_identity_schema")}
+    valid = columns == {"version"}
+    if valid:
+        valid = conn.execute(text("SELECT typeof(version), version FROM subscription_identity_schema")).all() == [("integer", 1)]
+    for table, column in (("inbounds", "instance_id"), ("subscription_grants", "inbound_bindings")):
+        valid = valid and table in tables and column in {
+            item["name"] for item in inspector.get_columns(table)}
+    if not valid:
+        raise SubscriptionIdentitySchemaError(
+            "Subscription identity schema is incomplete or unsupported; restore a verified full database")
+
+
+def _migrate_subscription_identity(conn) -> None:
+    """Called inside the same serialized transaction as legacy SQL migration.
+
+    No existing identity is repaired and no grant is inferred from numeric IDs.
+    The marker guards subsequent partial restores/column loss independently of
+    the unrelated per-inbound routing capability fence.
+    """
+    _guard_subscription_identity_schema(conn)
+    inspector = inspect(conn)
+    tables = set(inspector.get_table_names())
+    if "subscription_grants" not in tables:
+        # init_db imports its model before create_all; this supports the narrow
+        # legacy helper without pretending an incomplete schema was migrated.
+        raise SubscriptionIdentitySchemaError("Subscription grant schema is missing")
+    inbound_columns = {column["name"] for column in inspector.get_columns("inbounds")}
+    grant_columns = {column["name"] for column in inspector.get_columns("subscription_grants")}
+    if "instance_id" not in inbound_columns:
+        if ("inbound_bindings" in grant_columns and conn.execute(text(
+                "SELECT 1 FROM subscription_grants WHERE inbound_bindings IS NOT NULL LIMIT 1")).first()):
+            raise SubscriptionIdentitySchemaError("Bound subscription identities are missing; restore a verified full database")
+        conn.execute(text("ALTER TABLE inbounds ADD COLUMN instance_id VARCHAR(32)"))
+        for identifier in conn.execute(text("SELECT id FROM inbounds ORDER BY id")).scalars().all():
+            conn.execute(text("UPDATE inbounds SET instance_id=:identity WHERE id=:id"),
+                         {"identity": secrets.token_hex(16), "id": identifier})
+    if "inbound_bindings" not in grant_columns:
+        conn.execute(text("ALTER TABLE subscription_grants ADD COLUMN inbound_bindings TEXT"))
+    if "subscription_identity_schema" not in tables:
+        conn.execute(text("CREATE TABLE subscription_identity_schema (version INTEGER NOT NULL)"))
+        conn.execute(text("INSERT INTO subscription_identity_schema (version) VALUES (1)"))
+
+
+def _migrate_legacy_schema(conn) -> None:
+    """Migrate under init_db's serialized, atomic create/migrate transaction."""
     from app.services.inbound_policy import normalize_mode
-    with engine.connect() as conn:
-        conn.execute(text("BEGIN IMMEDIATE"))
-        try:
-            inspector = inspect(conn)
-            if "inbounds" not in inspector.get_table_names():
-                conn.commit()
-                return
-            columns = {column["name"] for column in inspector.get_columns("inbounds")}
-            if "core" not in columns:
-                conn.execute(text("ALTER TABLE inbounds ADD COLUMN core VARCHAR NOT NULL DEFAULT 'xray'"))
-            if "routing_mode" not in columns:
-                conn.execute(text("ALTER TABLE inbounds ADD COLUMN routing_mode VARCHAR NOT NULL DEFAULT 'inherit'"))
-            modes = {normalize_mode(value) for value in conn.execute(
-                text("SELECT DISTINCT routing_mode FROM inbounds")).scalars()}
-            if modes - {"inherit"} and _saved_policy_schema() != 2:
-                from app.services.proxy_store import ProxyStorageError
-                raise ProxyStorageError("Inbound routing capability fence is missing; offline recovery is required")
-            conn.commit()
-        except BaseException:
-            conn.rollback()
-            raise
+    inspector = inspect(conn)
+    columns = {column["name"] for column in inspector.get_columns("inbounds")}
+    if "core" not in columns:
+        conn.execute(text("ALTER TABLE inbounds ADD COLUMN core VARCHAR NOT NULL DEFAULT 'xray'"))
+    if "routing_mode" not in columns:
+        conn.execute(text("ALTER TABLE inbounds ADD COLUMN routing_mode VARCHAR NOT NULL DEFAULT 'inherit'"))
+    modes = {normalize_mode(value) for value in conn.execute(
+        text("SELECT DISTINCT routing_mode FROM inbounds")).scalars()}
+    if modes - {"inherit"} and _saved_policy_schema() != 2:
+        from app.services.proxy_store import ProxyStorageError
+        raise ProxyStorageError("Inbound routing capability fence is missing; offline recovery is required")
+    _migrate_subscription_identity(conn)
 
 
 def init_db() -> None:
@@ -142,8 +188,20 @@ def init_db() -> None:
     from app.services.core_manager import core_manager
     with core_manager.lock, data_owner(Path(engine.url.database).absolute().parent):
         _guard_policy_schema_before_create()
-        Base.metadata.create_all(bind=engine)
-        _migrate_legacy_schema()
+        # Register grants even when init_db is called from the standalone CLI.
+        from app.services import subscription_tokens  # noqa: F401
+        with engine.connect() as conn:
+            conn.execute(text("BEGIN IMMEDIATE"))
+            try:
+                # Recheck under the cross-process write lock before any DDL.
+                _guard_policy_schema_before_create()
+                _guard_subscription_identity_schema(conn)
+                Base.metadata.create_all(bind=conn)
+                _migrate_legacy_schema(conn)
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
 
 
 def get_db():

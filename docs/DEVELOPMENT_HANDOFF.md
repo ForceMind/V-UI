@@ -1,5 +1,11 @@
 # 当前开发与接手入口
 
+## 2026-10-22 独立开发候选：订阅节点实例绑定
+
+从 [PR59](https://github.com/ForceMind/V-UI/pull/59) 已验准确 master `fc9796523c0ed30f47b0fe14ba4b319bbdda74d7` 独立实现[订阅节点实例绑定](SUBSCRIPTION_IDENTITY.md)。整数 ID 被自然复用时旧令牌不得读取新节点；新增私有稳定实例身份和完整授权绑定，读取/轮换均严格验证，不禁止 SQLite 复用整数 ID。旧授权无法证明原实例，迁移后必须明确重建，UI/管理 API 提供对应指引。完整恢复保留记录但沿用撤销全部旧会话/订阅访问；旧 reader 无新身份保护，不能声称安全降级。
+
+`init_db` 将预检查、建表和迁移合为原锁内一个 SQLite 事务，独立订阅 schema 标记检测当前库缺表/缺列，原代理 policy schema / RECOVERY_REQUIRED / 备份恢复约束不变。临时 DB 的复用、坏数据、轮换回滚、并发初始化、崩溃、备份恢复与 35 个实际控制器 Node 场景另验；既有 Chromium gate 追加实际 API→UI 的旧授权缺绑定及自然删除/重建两场景，本地未启动，准确提交 CI 仍须实际通过；完整本地结果和准确树以承载 PR 为准。尚未完成独立安全复审、新准确候选/主线 CI、实际浏览器或新发行门槛，未迁移用户库、发布或部署。基线八组 / 11 jobs / 126 steps 均 attempt 1 success，四目标同 head 已验，不能代替本候选资格。不混入 PR57，不恢复受限 UDP D2，Tailscale 边界保持。
+
 ## 2026-10-22 独立候选：工作区重载保护新草稿
 
 本候选独立基于 [PR58](https://github.com/ForceMind/V-UI/pull/58) 已验 master `2ce795ddfb1d40520a029e40f518881a39a9a161`，tree `6e1d3b60d208ee2a8effb84b6ecc8be89460e477`。该主线八组 / 11 jobs / 126 steps 已通过；one-click 首次 GitHub 403 后原样 attempt 2 成功，其余七组首次成功，原失败不改判。基线结果不授本候选资格。
