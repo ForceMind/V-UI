@@ -171,6 +171,86 @@ class WorkspaceBrowserTests(unittest.TestCase):
         for token in tokens: self.assertNotIn(token, (work / 'server.log').read_text())
         self.assertFalse((work / 'bin').exists() and any((work / 'bin').iterdir()))
 
+    def assert_issued_hide_during_list_refresh(self, page, context, base, work, expect):
+        """Real Chromium activation while only a genuine list GET is held.
+
+        No document navigation or synthetic pagehide is used here. Controller
+        pagehide/fetch/JSON/blob races have separate deterministic controls.
+        """
+        writes, tokens = [], []
+        previous, identifier = None, None
+        def record_write(request):
+            if request.url.startswith(base + '/api/subscriptions') and request.method != 'GET':
+                writes.append(request)
+        page.on('request', record_write)
+        try:
+            page.locator('#label').fill('synthetic Hide lifecycle')
+            page.locator('#server').fill('vpn.example.test')
+            for checkbox in page.locator('[data-node]').all(): checkbox.uncheck()
+            page.locator('[data-node="1"]').check()
+            for checkbox in page.locator('input[name="format"]').all(): checkbox.uncheck()
+            page.locator('input[name="format"][value="mihomo.yaml"]').check()
+            for kind in ('create', 'rotate'):
+                with self.subTest(issued_action=kind, boundary='real post-issue list GET'):
+                    pending, actual = [], None
+                    pattern = '**/api/subscriptions'
+                    def hold(route):
+                        if route.request.method == 'GET': pending.append(route)
+                        else: route.fallback()
+                    page.route(pattern, hold)
+                    before_writes = len(writes)
+                    old_notice = page.locator('#notice').text_content()
+                    endpoint = base + '/api/subscriptions' + ('' if kind == 'create' else f'/{identifier}/rotate')
+                    try:
+                        with page.expect_response(lambda response: response.url == endpoint
+                                                  and response.request.method == 'POST') as request:
+                            page.locator('#create-grant' if kind == 'create' else f'[data-rotate="{identifier}"]').click()
+                        issued = request.value
+                        self.assertEqual(issued.status, 201 if kind == 'create' else 200)
+                        value = issued.json(); identifier = value['id']; tokens.append(value['token'])
+                        current = base + value['paths']['mihomo.yaml']
+                        deadline = time.monotonic() + 10
+                        while not pending and time.monotonic() < deadline:
+                            page.wait_for_timeout(20)
+                        self.assertEqual(len(pending), 1)
+                        actual = pending[0].fetch(timeout=10000)
+                        self.assertEqual(actual.status, 200)
+                        self.assertIn(identifier, [grant['id'] for grant in actual.json()])
+                        for token in tokens: self.assertNotIn(token, actual.text())
+                        expect(page.locator('#issued')).to_be_visible()
+                        expect(page.locator('#issued-urls')).to_have_value(current)
+                        for button in ('create-grant', 'copy', 'download', 'refresh-grants'):
+                            expect(page.locator('#' + button)).to_be_disabled()
+                        expect(page.locator('#forget')).to_be_enabled()
+                        # A normal click, never force/evaluate/dispatch_event. On
+                        # the baseline disabled button this must fail, not wait
+                        # for the held list response to release itself.
+                        page.locator('#forget').click(timeout=3000)
+                        expect(page.locator('#issued')).to_be_hidden()
+                        expect(page.locator('#issued-urls')).to_have_value('')
+                        self.assertEqual(context.request.get(current).status, 200, 'Hide does not revoke the issued grant')
+                        if previous is not None:
+                            self.assertNotEqual(current, previous)
+                            self.assertEqual(context.request.get(previous).status, 404, 'normal rotation still invalidates the old token')
+                        pending[0].fulfill(response=actual); pending.clear()
+                        expect(page.locator('#create-grant')).to_be_enabled()
+                        expect(page.locator('#issued')).to_be_hidden()
+                        expect(page.locator('#issued-urls')).to_have_value('')
+                        expect(page.locator('#download')).to_be_disabled()
+                        self.assertEqual(page.locator('#notice').text_content(), old_notice)
+                        self.assertEqual(len(writes), before_writes + 1, 'no retry or automatic revoke')
+                        self.assertEqual(writes[-1].url, endpoint)
+                        self.assertEqual(writes[-1].method, 'POST')
+                        previous = current
+                    finally:
+                        page.unroute(pattern, hold)
+                        for route in pending: route.abort()
+                        if actual is not None: actual.dispose()
+            self.assertEqual(page.evaluate('Object.keys(localStorage).length+Object.keys(sessionStorage).length'), 0)
+            for token in tokens: self.assertNotIn(token, (work / 'server.log').read_text())
+        finally:
+            page.remove_listener('request', record_write)
+
     def assert_reload_preserves_inflight_drafts(self, page, context, base, dialogs, expect):
         """Delay genuine local API responses, never replace them with synthetic success."""
         writes = []
@@ -316,8 +396,9 @@ with database.SessionLocal() as db:
                             self.assertEqual(page.evaluate('Object.keys(localStorage).length+Object.keys(sessionStorage).length'),0)
                             self.assertNotIn(first.split('/sub/')[1].split('/')[0],(work/'server.log').read_text())
                             self.assertNotIn(second.split('/sub/')[1].split('/')[0],(work/'server.log').read_text())
+                            self.assert_issued_hide_during_list_refresh(page,context,base,work,expect)
                             self.assert_identity_reauthorization_workflow(page,context,base,work,expect)
-                            print('Workspace browser: draft/save/reload races/stable URL/rotate/revoke/legacy reauthorization/natural node ID reuse/all-format denial/XSS/no-storage/mobile OK')
+                            print('Workspace browser: draft/save/reload races/stable URL/rotate/revoke/Hide during real list GET/legacy reauthorization/natural node ID reuse/all-format denial/XSS/no-storage/mobile OK')
                         finally: browser.close()
                 finally:
                     server.terminate()
