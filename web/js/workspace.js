@@ -67,11 +67,19 @@
     }
     async function reload() {
         if (savedRevision && dirty() && !confirm('放弃未保存草稿，重新载入已保存版本？')) return;
-        const value = await json('/api/routing/mihomo/snapshot');
-        savedRevision = value.revision; fill(value.settings); savedForm = fingerprint(collect()); editNumber++;
         const current = editNumber;
+        const superseded = () => {
+            if (current === editNumber) return false;
+            notice('载入期间表单已修改，已保留当前草稿。若要放弃草稿，请再次重新载入。');
+            return true;
+        };
+        const value = await json('/api/routing/mihomo/snapshot');
+        if (superseded()) return;
         const plan = await json('/api/routing/mihomo/preview');
-        if (current === editNumber) showPlan(plan, '已保存规则预览');
+        if (superseded()) return;
+        // Commit the read only after both requests succeed without newer form input.
+        savedRevision = value.revision; fill(value.settings); savedForm = fingerprint(collect()); editNumber++;
+        showPlan(plan, '已保存规则预览');
         updateState(); notice('已读取保存版本。编辑表单不会立即改变订阅。');
     }
     function hideIssued() { issued = null; $('issued-urls').value = ''; $('issued').hidden = true; }

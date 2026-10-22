@@ -1,5 +1,15 @@
 # 当前开发与接手入口
 
+## 2026-10-22 独立候选：工作区重载保护新草稿
+
+本候选独立基于 [PR58](https://github.com/ForceMind/V-UI/pull/58) 已验 master `2ce795ddfb1d40520a029e40f518881a39a9a161`，tree `6e1d3b60d208ee2a8effb84b6ecc8be89460e477`。该主线八组 / 11 jobs / 126 steps 已通过；one-click 首次 GitHub 403 后原样 attempt 2 成功，其余七组首次成功，原失败不改判。基线结果不授本候选资格。
+
+实际缺陷是“重新载入”期间仍可编辑的工作区表单被迟到 snapshot 覆盖，随后被误标为已保存。现以编辑代次保护 snapshot 与已保存 preview 两个 await 边界，仅在两次读取成功且无新编辑时一起提交页面状态。确认放弃仅针对点击时已有草稿；请求后新输入与原保存修订保留，用户须再次明确载入或保存。无自动 PUT、无冲突重试，不改变 If-Match、订阅或后端 API。详见[工作区合同及验收边界](WORKSPACE_ALPHA6.md#重新载入时保留新输入2026-10-21-独立修正)。
+
+24 项 Node 控制直接执行产品脚本，基线 13 项失败、修复后全通过；完整本地套件在五文件原树 `42d14e0dbf16530e336a955a36b5bb7e8247f45d` 为 2022 tests / 1817 passed / 205 skips，日志 SHA-256 `022c2357ba657236b8cc09906eccf8d6f6e606a39c16fa1bff5080883a8a49e0`。独立审查和五种变异控制已完成；本节追加后最终准确树仍重新验证。实际浏览器新增四组延迟真实 API 响应场景，尚待本候选 CI，不能以本地 Node 控制或 skip 代替 Chromium。开发云端既有 Chromium/netlink EPERM 限制未通过改权限绕过。
+
+本修复只改独立的 `workspace.js` 与对应测试/文档，不含 [PR57](https://github.com/ForceMind/V-UI/pull/57) 分享对话框代码。PR57 的准确 head `0649a14b0bb5d7d38a47b5f8488b3ed4c910ce8f` 候选 CI 通过，但 Ready 后复审仍缺终态，保持未合并；本 PR 不代其通过或跳过门禁。PR57 旧 [cdf run](https://github.com/ForceMind/V-UI/actions/runs/39655236236) 于 2026-10-22 00:43:56 UTC 结束为 cancelled，浏览器 session 子场景已有 ERROR，后续编辑器 skipped；日志只确认取消，原因未能证实，我方未发取消。两候选仅交接文档有重叠，若主线推进须重新协调文档并在合并前验证准确差异、独审及全 CI，不能借旧绿。未发布、未部署，Tailscale 与受限 UDP D2 边界保持。
+
 ## 2026-10-21 独立候选：真实 apply 切换夹具端口
 
 从 [PR56](https://github.com/ForceMind/V-UI/pull/56) 合并后的准确 master `0de276fd93344bbeaee03cb2c146347c0a4f8af4` 独立修改测试。该主线的 [loopback attempt 1](https://github.com/ForceMind/V-UI/actions/runs/39657832360/attempts/1) 在真实 apply 切换组出现 `LOCAL_PORT_OCCUPIED`；日志未识别占用 socket，不能断言具体历史根因。一次失败后，后续 subTest 的计划切换标签不一定等于实际已运行的前态，不能仅凭标签归因。
