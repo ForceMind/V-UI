@@ -1,6 +1,20 @@
 # 当前开发与接手入口
 
-## 2026-10-22 当前目标：PR57 纳入已推进主线并重新验收
+## 2026-10-22 当前目标：PR57 纳入订阅隔离修复主线后独立重验
+
+[PR60](https://github.com/ForceMind/V-UI/pull/60) 的安全修复已正常合并至 `9e77ed0137c9b6a2864b74048c28af349aafc6e1`，tree `f8747314f0dc190bc72ab5bfda630065834bdb79`。PR57 从 `a1d633be036cfa578907ada966deacf0cd018274` 正常合入该真实新主线，保留双亲历史，不强推；仅本交接文档冲突，分享代码及测试保持 a1d 原字节，订阅绑定、工作区和迁移等内容保持 PR60 主线原字节。新组合树须独立审查、完整本地套件、准确新 head 的八组 CI / 四目标、真实浏览器与最新完整复审后才允许正常合并；9e77ed0 自身主线 CI 另行验收，不借同树候选绿灯。
+
+a1d 候选 clean HEAD 本地 2041 项（1829 通过、212 显式跳过）、八组 / 11 jobs / 126 steps 与四目标均首次成功；真实分享 / D1 Chromium 20 项（含即时 Escape 取消及会话失效）全部通过。该 head 在 02:47 UTC 因真实 PR59 基线变化请求的新复审，截至 03:25 UTC 摘要仍为 running，尚无终态，不能称通过或取消。本次因 PR60 主线再推进而重验，不是重复空触发；旧 0649 Ready 复审与 a1d 复审的未完成记录保留，不能借 earlier completed review 绕过最新门禁。旧 cdf 已 cancelled 的确切终态及历史失败继续保留在下文。
+
+## 2026-10-22 已合并、准确主线独立待验：订阅节点实例绑定
+
+[PR60](https://github.com/ForceMind/V-UI/pull/60) 候选 `60d599fa3dcbe1c0fe0d652e11b68e9ce8fb7caf` / tree `f8747314f0dc190bc72ab5bfda630065834bdb79` 已完成重点独立安全审查、clean HEAD 本地 2062 项（1857 通过、205 显式跳过）、八组 / 11 jobs / 126 steps 全部首次成功及同源四目标。Ready 触发的准确 head 复审于 03:19 UTC 完成，无发现和未解决项；合并前最新 comments / reviews / inline / threads 全量核验无阻断，于 03:31 UTC 正常合并至上述 9e77ed0，同树但主线资格仍单独进行。
+
+[订阅节点实例绑定契约](SUBSCRIPTION_IDENTITY.md)修复整数 ID 自然复用后旧令牌读取新节点的授权缺陷：私有稳定实例身份与完整授权集合共同验证，读取和轮换均失败关闭，不禁止 SQLite 复用 ID。旧授权缺少历史实例证明，升级后必须明确重新创建并更新客户端 URL，管理 API / UI 有对应原因，不自动补绑定。完整恢复保留身份记录但继续撤销会话 / 订阅访问；旧 reader 不读取新增字段，不能声称安全降级。修复不能撤回已下载配置或自动轮换节点协议凭据；本轮只有合成复现，没有实际用户泄露证据。
+
+初始化预检查、建表和迁移在一个 SQLite 事务内，独立订阅 schema 标记保护当前库缺表 / 缺列，原 policy schema、RECOVERY_REQUIRED 和恢复防线不变。独审 38 项安全 / 迁移控制和 7 种安全变异通过；准确候选真实 workspace Chromium 追加的旧授权无绑定及自然 API 删除 / 重建两场景通过，验证三格式 GET/HEAD 拒绝、轮换 409 且授权不变、正确禁用状态、新明确授权和无关授权正常。缺失核心的合成 CRUD 仍准确报告 saved:true / applied:false，不伪称应用成功。原真实核心、loopback 220 项、D1 四严格组合和非 root HTTPS / 恢复门槛均通过。未迁移实际用户库、发布或部署；Tailscale、受限 UDP D2 和真实环境资格边界保持。
+
+## 2026-10-22 前次组合记录：PR57 纳入 PR59 主线（历史）
 
 [PR59](https://github.com/ForceMind/V-UI/pull/59) 的独立工作区修正已正常合并，故 PR57 在原 head `0649a14b0bb5d7d38a47b5f8488b3ed4c910ce8f` 上正常合入 `fc9796523c0ed30f47b0fe14ba4b319bbdda74d7`，保留双亲历史，不强推。实际合并仅本交接文档冲突；分享产品代码与工作区产品代码及测试彼此独立，分别保留原内容。新组合树、准确新 head、完整本地/真实 CI/四目标与最新独审重新验收，不拼接两个旧 head 的绿灯；不是空触发旧复审。fc979652 自身主线验收仍单独进行。
 
@@ -8,13 +22,13 @@
 
 旧 cdf [run 39655236236](https://github.com/ForceMind/V-UI/actions/runs/39655236236) 已于 2026-10-22 00:43:56 UTC 结束为 cancelled，浏览器步骤 cancelled、后续 editor skipped。最后测试信号是 18:49:48 的 session 子场景 ERROR，直到取消仍无 traceback；日志仅称操作取消，不能仅凭约六小时推断具体原因，我方未发取消。终态片段 SHA-256 `906d4e8c77e0543c320035cff5966f6cb704144ee4c02499d9b5174988734906`。下方“检查时仍运行”保留当时观察，不再是当前状态。
 
-## 2026-10-22 已合并、准确主线待验：工作区重载保护新草稿
+## 2026-10-22 已合并并完成主线验收：工作区重载保护新草稿
 
 本候选独立基于 [PR58](https://github.com/ForceMind/V-UI/pull/58) 已验 master `2ce795ddfb1d40520a029e40f518881a39a9a161`，tree `6e1d3b60d208ee2a8effb84b6ecc8be89460e477`。该主线八组 / 11 jobs / 126 steps 已通过；one-click 首次 GitHub 403 后原样 attempt 2 成功，其余七组首次成功，原失败不改判。基线结果不授本候选资格。
 
 实际缺陷是“重新载入”期间仍可编辑的工作区表单被迟到 snapshot 覆盖，随后被误标为已保存。现以编辑代次保护 snapshot 与已保存 preview 两个 await 边界，仅在两次读取成功且无新编辑时一起提交页面状态。确认放弃仅针对点击时已有草稿；请求后新输入与原保存修订保留，用户须再次明确载入或保存。无自动 PUT、无冲突重试，不改变 If-Match、订阅或后端 API。详见[工作区合同及验收边界](WORKSPACE_ALPHA6.md#重新载入时保留新输入2026-10-21-独立修正)。
 
-24 项 Node 控制直接执行产品脚本，基线 13 项失败、修复后全通过；完整本地套件在五文件原树 `42d14e0dbf16530e336a955a36b5bb7e8247f45d` 为 2022 tests / 1817 passed / 205 skips，日志 SHA-256 `022c2357ba657236b8cc09906eccf8d6f6e606a39c16fa1bff5080883a8a49e0`。独立审查和五种变异控制已完成。最终准确候选 `2c0113250829110071672d715dd269ac80328c03` / tree `88e020540208c3fddcd85079e1f52ea0af1d990e` 在 clean HEAD 完整运行 2022 项，1817 通过、205 显式跳过，179.533 秒，日志 SHA-256 `16af1f0e33c5a08a24009e0c4378eef0898b6a01c2d96a748490b42932c10bb0`。候选八组 / 11 jobs / 126 steps 和同源四目标首次成功，真实 Chromium 的四组延迟真实 API 响应场景全部通过；Ready 复审完成无 findings，合并前完整 review/inline/threads 再核为空。PR59 已正常合并至相同 tree 的 `fc9796523c0ed30f47b0fe14ba4b319bbdda74d7`，该准确主线 CI 正在独立进行，尚不宣布其通过。不能以本地 Node 控制或 skip 代替 Chromium。开发云端既有 Chromium/netlink EPERM 限制未通过改权限绕过。
+24 项 Node 控制直接执行产品脚本，基线 13 项失败、修复后全通过；完整本地套件在五文件原树 `42d14e0dbf16530e336a955a36b5bb7e8247f45d` 为 2022 tests / 1817 passed / 205 skips，日志 SHA-256 `022c2357ba657236b8cc09906eccf8d6f6e606a39c16fa1bff5080883a8a49e0`。独立审查和五种变异控制已完成。最终准确候选 `2c0113250829110071672d715dd269ac80328c03` / tree `88e020540208c3fddcd85079e1f52ea0af1d990e` 在 clean HEAD 完整运行 2022 项，1817 通过、205 显式跳过，179.533 秒，日志 SHA-256 `16af1f0e33c5a08a24009e0c4378eef0898b6a01c2d96a748490b42932c10bb0`。候选八组 / 11 jobs / 126 steps 和同源四目标首次成功，真实 Chromium 的四组延迟真实 API 响应场景全部通过；Ready 复审完成无 findings，合并前完整 review/inline/threads 再核为空。PR59 已正常合并至相同 tree 的 `fc9796523c0ed30f47b0fe14ba4b319bbdda74d7`，该准确主线已独立完成八组 / 11 jobs / 126 steps 全部首次成功及同源四目标；真实工作区四场景、loopback 220 项与非 root HTTPS / 恢复均通过，完整记录在 PR59。不能以本地 Node 控制或 skip 代替 Chromium。开发云端既有 Chromium/netlink EPERM 限制未通过改权限绕过。
 
 本修复只改独立的 `workspace.js` 与对应测试/文档，不含 [PR57](https://github.com/ForceMind/V-UI/pull/57) 分享对话框代码。PR57 的准确 head `0649a14b0bb5d7d38a47b5f8488b3ed4c910ce8f` 候选 CI 通过，但 Ready 后复审仍缺终态，保持未合并；本 PR 不代其通过或跳过门禁。PR57 旧 [cdf run](https://github.com/ForceMind/V-UI/actions/runs/39655236236) 于 2026-10-22 00:43:56 UTC 结束为 cancelled，浏览器 session 子场景已有 ERROR，后续编辑器 skipped；日志只确认取消，原因未能证实，我方未发取消。两候选仅交接文档有重叠，若主线推进须重新协调文档并在合并前验证准确差异、独审及全 CI，不能借旧绿。未发布、未部署，Tailscale 与受限 UDP D2 边界保持。
 

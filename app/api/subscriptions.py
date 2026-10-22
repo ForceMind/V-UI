@@ -4,6 +4,8 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from app.middleware.auth import expected_origin
 from app.models import database
 from app.services.subscription_tokens import authorized_nodes, change_grant, create_grant, list_grants
@@ -14,7 +16,7 @@ from app.services.routing_store import load_routing
 router = APIRouter()
 public_router = APIRouter()
 OutputFormat = Literal['mihomo.yaml','raw','sing-box.json']
-NodeId = Annotated[int, Field(strict=True, gt=0)]
+NodeId = Annotated[int, Field(strict=True, gt=0, le=9223372036854775807)]
 
 class GrantPayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -54,16 +56,19 @@ def revoke_subscription(grant_id: int,request: Request):
 def read_subscription(token: str,output_format: str,request: Request):
     if expected_origin(request) is None or request.url.query:
         raise HTTPException(404,'Subscription not found')
-    with database.SessionLocal() as db:
-        items,server=authorized_nodes(db,token,output_format)
-        try:
+    try:
+        with database.SessionLocal() as db:
+            # One SQLite snapshot binds the grant, current identities and exported
+            # credentials even while another process creates/deletes/edits nodes.
+            db.execute(text("BEGIN"))
+            items,server=authorized_nodes(db,token,output_format)
             if output_format=='mihomo.yaml':
                 content,media=mihomo_config(items,server,load_routing()),'application/yaml'
             elif output_format=='raw':
                 content,media=base64_subscription(items,server),'text/plain'
             else:
                 content,media=json.dumps(singbox_client_config(items,server),ensure_ascii=False),'application/json'
-        except (ValueError,OSError,TypeError,KeyError):
-            raise HTTPException(409,'Subscription configuration is not ready') from None
+    except (SQLAlchemyError,ValueError,OSError,TypeError,KeyError):
+        raise HTTPException(409,'Subscription configuration is not ready') from None
     return Response(content='' if request.method=='HEAD' else content,media_type=media,
         headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})

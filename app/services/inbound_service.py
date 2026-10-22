@@ -251,6 +251,8 @@ def get_inbound(db: Session, inbound_id: int) -> Inbound:
 
 
 def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[str, str, int, dict, dict]:
+    if "instance_id" in payload or "inbound_bindings" in payload:
+        raise HTTPException(422, "Inbound instance identity is server-managed")
     core = str(
         payload.get("core")
         or (existing.core if existing else "xray")

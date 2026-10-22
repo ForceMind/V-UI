@@ -19,6 +19,14 @@
 
 `node tests/workspace_reload_dom.js` 直接执行产品脚本，以 24 项确定性 DOM/fetch 控制覆盖两阶段竞态、确认/取消、HTTP/JSON/network 失败、保存修订与原预览保护。独立审查追加的 6 项分别在 snapshot / preview 阶段验证 JSON 解析期间编辑、编辑后改回原值、以及新编辑后请求失败；由 `test_workspace_controller.py` 接入普通 unittest 并严格核对 24 项全通过、零 skip。它不等于实际浏览器验收。既有 `VUI_WORKSPACE_BROWSER=1` 工作流另加入延迟真实本机 API 响应的四组场景（snapshot / preview × 初始干净 / 已确认放弃旧草稿），核新输入、未保存状态、原 If-Match 和显式保存结果，不伪造成功响应。当前开发云端已有 Chromium EPERM 限制，本次未重新启动浏览器；新候选与合并后准确提交的实际 Chromium、完整 CI 和独立审查仍须各自验证，不能继承下方旧 alpha.6 结果。未发布或部署。
 
+## 2026-10-22 订阅节点实例绑定候选
+
+专用订阅不再仅信任整数节点 ID，而绑定创建时的准确节点实例。删除后即使新节点复用同一 ID，旧 URL 仍拒绝；同实例合法编辑保持绑定。升级前的授权无法证明历史实例，必须重新选择节点并创建订阅，不能用轮换恢复。列表显示“旧授权缺少节点身份”或“节点已删除、重建或身份异常”，不再统一标成密码变更。
+
+既有真实 `VUI_WORKSPACE_BROWSER=1` gate 增加 legacy-unbound 与自然删除/重建节点的实际 API→UI 场景，验证状态、禁用轮换、管理轮换 409 不改授权、旧 GET/HEAD 三格式拒绝及显式新授权正常。仅追加隔离 synthetic 夹具；开发云端未重试 Chromium，准确候选 CI 的实际浏览器仍为必需验收，普通套件的 skip 不是通过。
+
+完整备份保留身份/绑定，但恢复仍撤销会话和全部旧订阅访问；不自动复活 URL。迁移、损坏拒绝、旧 reader 回退风险和隔离测试边界见[节点实例绑定契约](SUBSCRIPTION_IDENTITY.md)。此为独立开发候选，尚未迁移实际用户数据库、发布或部署，不能继承旧 alpha.6 或其他 PR 的验收。
+
 ## 持久化
 
 使用既有 `mihomo-routing.json`，不改变 ToClash 规则规划器。加载经过 alpha.5 严格校验；文件损坏返回明确错误，不能静默回到默认分流。

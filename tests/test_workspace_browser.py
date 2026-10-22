@@ -1,7 +1,10 @@
 """Real browser API workflow; no third-party assets, actual temporary Uvicorn server."""
 import os
+import base64
+import json
 from pathlib import Path
 import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -10,6 +13,164 @@ import unittest
 
 @unittest.skipUnless(os.getenv('VUI_WORKSPACE_BROWSER')=='1', 'explicit browser check')
 class WorkspaceBrowserTests(unittest.TestCase):
+    def assert_identity_reauthorization_workflow(self, page, context, base, work, expect):
+        """Actual local API responses drive the UI, without a proxy binary.
+
+        Only the legacy-unbound fixture edits SQLite directly; creation,
+        deletion, replacement and all grant operations use the real API.
+        """
+        headers = {'Origin':base, 'X-VUI-Request':'1'}
+        formats = ('mihomo.yaml', 'raw', 'sing-box.json')
+        uuids = ('11111111-1111-1111-1111-111111111111',
+                 '22222222-2222-2222-2222-222222222222',
+                 '33333333-3333-3333-3333-333333333333')
+        path = work / 'data' / 'v-ui.db'
+        tokens, identities = [], []
+
+        def sql_row(table, identifier):
+            self.assertIn(table, ('inbounds', 'subscription_grants'))
+            with sqlite3.connect(path) as db:
+                db.row_factory = sqlite3.Row
+                value = db.execute('SELECT * FROM ' + table + ' WHERE id=?', (identifier,)).fetchone()
+                self.assertIsNotNone(value)
+                return dict(value)
+
+        def listed():
+            response = context.request.get(base + '/api/subscriptions')
+            self.assertEqual(response.status, 200)
+            values = response.json()
+            for value in values:
+                self.assertFalse({'instance_id', 'inbound_bindings', 'token', 'token_hash'} & value.keys())
+            raw = response.text()
+            for secret in tokens + identities:
+                self.assertNotIn(secret, raw)
+            return {value['id']:value for value in values}
+
+        def create_from_form(identifier, label):
+            page.goto(base + '/workspace')
+            expect(page.locator('#workspace')).to_be_visible()
+            expect(page.locator('#create-grant')).to_be_enabled()
+            page.locator('#label').fill(label)
+            page.locator('#server').fill('vpn.example.test')
+            for checkbox in page.locator('[data-node]').all(): checkbox.uncheck()
+            page.locator(f'[data-node="{identifier}"]').check()
+            for output_format in formats:
+                page.locator(f'input[name="format"][value="{output_format}"]').check()
+            with page.expect_response(lambda response: response.url == base + '/api/subscriptions'
+                                      and response.request.method == 'POST') as pending:
+                page.locator('#create-grant').click()
+            response = pending.value
+            self.assertEqual(response.status, 201)
+            grant = response.json()
+            self.assertEqual(set(grant['paths']), set(formats))
+            tokens.append(grant['token'])
+            self.assertFalse({'instance_id', 'inbound_bindings', 'token_hash'} & grant.keys())
+            expect(page.locator('#issued')).to_be_visible()
+            expect(page.locator('#create-grant')).to_be_enabled()
+            self.assertEqual(set(page.locator('#issued-urls').input_value().splitlines()),
+                             {base + value for value in grant['paths'].values()})
+            return grant
+
+        def exports(grant, uuid, port):
+            for output_format, relative in grant['paths'].items():
+                response = context.request.get(base + relative)
+                self.assertEqual(response.status, 200)
+                body = (base64.b64decode(response.text(), validate=True).decode()
+                        if output_format == 'raw' else response.text())
+                self.assertIn(uuid, body); self.assertIn(str(port), body)
+                for secret in identities + tokens:
+                    self.assertNotIn(secret, body)
+                self.assertEqual(context.request.head(base + relative).status, 200)
+
+        def public_denied(grant):
+            for relative in grant['paths'].values():
+                for method in ('get', 'head'):
+                    response = getattr(context.request, method)(base + relative)
+                    self.assertEqual(response.status, 409)
+                    if method == 'get':
+                        self.assertEqual(response.json(), {'detail':'Subscription configuration is not ready'})
+                    for secret in tokens + identities + list(uuids) + ['10443', '10444', '10445']:
+                        self.assertNotIn(secret, response.text())
+
+        def invalid(grant, reason, label):
+            value = listed()[grant['id']]
+            self.assertTrue(value['invalidated']); self.assertFalse(value['revoked'])
+            self.assertEqual(value['invalidation_reason'], reason)
+            with page.expect_response(lambda response: response.url == base + '/api/subscriptions'
+                                      and response.request.method == 'GET') as pending:
+                page.locator('#refresh-grants').click()
+            self.assertEqual(pending.value.status, 200)
+            expect(page.locator('#refresh-grants')).to_be_enabled()
+            row = page.locator(f'#grants tr:has(button[data-rotate="{grant["id"]}"])')
+            expect(row).to_contain_text(label)
+            expect(row).not_to_contain_text('密码变更')
+            expect(row.locator('[data-rotate]')).to_be_disabled()
+            before = sql_row('subscription_grants', grant['id'])
+            response = context.request.post(base + f'/api/subscriptions/{grant["id"]}/rotate',
+                                            headers=headers, data={'expires_days':31})
+            self.assertEqual(response.status, 409)
+            self.assertIn('create a new subscription', response.json()['detail'])
+            self.assertEqual(sql_row('subscription_grants', grant['id']), before)
+            for secret in tokens + identities + list(uuids): self.assertNotIn(secret, response.text())
+            public_denied(grant)
+
+        # Legacy grants cannot prove a historical instance. This deliberately
+        # prepares the nullable migrated field, not a fake successful response.
+        identities.append(sql_row('inbounds', 1)['instance_id'])
+        legacy = create_from_form(1, 'synthetic legacy-unbound authorization')
+        exports(legacy, uuids[0], 10443)
+        with sqlite3.connect(path) as db:
+            db.execute('UPDATE subscription_grants SET inbound_bindings=NULL WHERE id=?', (legacy['id'],))
+        invalid(legacy, 'node_identity_missing', '旧授权缺少节点身份，请重新选择节点并创建订阅')
+        sibling = create_from_form(1, 'explicit replacement for legacy authorization')
+        self.assertNotEqual(sibling['id'], legacy['id']); exports(sibling, uuids[0], 10443)
+        public_denied(legacy)
+
+        def saved_not_applied(response):
+            # No fixture core is installed. The real API saves desired rows,
+            # reports apply failure, and must not pretend to have applied them.
+            self.assertEqual(response.status, 409)
+            detail = response.json()['detail']
+            self.assertIs(detail['saved'], True); self.assertIs(detail['applied'], False)
+            self.assertEqual(detail['message'], 'Pinned core binary is missing or not executable')
+
+        def create_node(label, port, uuid):
+            response = context.request.post(base + '/api/inbounds', headers=headers, data={
+                'core':'sing-box', 'protocol':'vless', 'remark':label, 'port':port, 'enable':True,
+                'settings':{'users':[{'uuid':uuid}]},
+                'stream_settings':{'tls':{'enabled':True, 'server_name':'vpn.example.test'}},
+            })
+            saved_not_applied(response)
+            response = context.request.get(base + '/api/inbounds')
+            self.assertEqual(response.status, 200)
+            matches = [value for value in response.json() if value['remark'] == label]
+            self.assertEqual(len(matches), 1)
+            self.assertNotIn('instance_id', response.text())
+            self.assertNotIn(uuid, response.text())
+            return matches[0]['id']
+
+        original_id = create_node('synthetic highest node', 10444, uuids[1])
+        self.assertEqual(original_id, 2)
+        original_identity = sql_row('inbounds', original_id)['instance_id']; identities.append(original_identity)
+        original = create_from_form(original_id, 'authorization before natural ID reuse')
+        exports(original, uuids[1], 10444)
+        saved_not_applied(context.request.delete(base + f'/api/inbounds/{original_id}', headers=headers))
+        self.assertNotIn(original_id, [value['id'] for value in context.request.get(base + '/api/inbounds').json()])
+        public_denied(original)
+        replacement_id = create_node('synthetic new incarnation', 10445, uuids[2])
+        self.assertEqual(replacement_id, original_id)
+        replacement_identity = sql_row('inbounds', replacement_id)['instance_id']; identities.append(replacement_identity)
+        self.assertNotEqual(replacement_identity, original_identity)
+        invalid(original, 'node_identity_changed', '节点已删除、重建或身份异常，请重新创建订阅')
+        exports(sibling, uuids[0], 10443)
+        replacement = create_from_form(replacement_id, 'explicit new incarnation authorization')
+        self.assertNotEqual(replacement['id'], original['id']); exports(replacement, uuids[2], 10445)
+        public_denied(original); public_denied(legacy)
+        listed()
+        self.assertEqual(page.evaluate('Object.keys(localStorage).length+Object.keys(sessionStorage).length'), 0)
+        for token in tokens: self.assertNotIn(token, (work / 'server.log').read_text())
+        self.assertFalse((work / 'bin').exists() and any((work / 'bin').iterdir()))
+
     def assert_reload_preserves_inflight_drafts(self, page, context, base, dialogs, expect):
         """Delay genuine local API responses, never replace them with synthetic success."""
         writes = []
@@ -155,7 +316,8 @@ with database.SessionLocal() as db:
                             self.assertEqual(page.evaluate('Object.keys(localStorage).length+Object.keys(sessionStorage).length'),0)
                             self.assertNotIn(first.split('/sub/')[1].split('/')[0],(work/'server.log').read_text())
                             self.assertNotIn(second.split('/sub/')[1].split('/')[0],(work/'server.log').read_text())
-                            print('Workspace browser: draft/save/reload races at snapshot and preview/stable URL/rotate/revoke/XSS/no-storage/mobile OK')
+                            self.assert_identity_reauthorization_workflow(page,context,base,work,expect)
+                            print('Workspace browser: draft/save/reload races/stable URL/rotate/revoke/legacy reauthorization/natural node ID reuse/all-format denial/XSS/no-storage/mobile OK')
                         finally: browser.close()
                 finally:
                     server.terminate()
