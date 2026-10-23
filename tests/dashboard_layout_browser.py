@@ -42,7 +42,17 @@ MEASURE_BOX = """element => {
         bottom: rect.bottom - number('borderBottomWidth') - number('paddingBottom')},
         clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
         clientHeight: element.clientHeight, scrollHeight: element.scrollHeight,
-        text: text};
+        text: text,
+        diagnostic: {id: element.id, tag: element.tagName, classes: element.className,
+            transform: style.transform, transformOrigin: style.transformOrigin,
+            opacity: style.opacity, lineHeight: style.lineHeight,
+            transitionDuration: style.transitionDuration,
+            borderLeft: number('borderLeftWidth'), borderRight: number('borderRightWidth'),
+            paddingLeft: number('paddingLeft'), paddingRight: number('paddingRight'),
+            offsetWidth: element.offsetWidth, offsetHeight: element.offsetHeight,
+            animations: element.getAnimations().map(animation => ({
+                playState: animation.playState, currentTime: animation.currentTime,
+                duration: animation.effect ? animation.effect.getTiming().duration : null}))}};
 }"""
 
 
@@ -78,6 +88,7 @@ def assert_dashboard_responsive_layout(case):
     writes, real_reads, old_css_reads = [], set(), []
     status_paths = ('/api/auth/me', '/api/system/status', '/api/cores/status')
     document_headers = None
+    phase = 'actual'
 
     def observe(request):
         path = urlparse(request.url).path
@@ -135,7 +146,8 @@ def assert_dashboard_responsive_layout(case):
             case.assertTrue(measurement['text'], label + ' has no rendered text')
             for fragment in measurement['text']:
                 case.assertLessEqual(horizontal_excess(fragment, measurement['content']),
-                                     TOLERANCE, label + ' clips text')
+                                     TOLERANCE, label + ' clips text: ' + json.dumps({
+                                         'measurement': measurement, 'fragment': fragment}, sort_keys=True))
 
     def in_viewport(locator, label):
         expect(locator).to_be_visible()
@@ -179,10 +191,14 @@ def assert_dashboard_responsive_layout(case):
         controls = page.locator('.header .el-tag, .header button, .header .el-dropdown-link')
         case.assertEqual(controls.count(), 6)
         rectangles = []
-        for control in controls.all():
-            in_viewport(control, 'header control')
+        for index, control in enumerate(controls.all()):
+            label = f'phase={phase} viewport={width}x{height} columns={columns} header control[{index}]'
+            in_viewport(control, label)
             measurement = control.evaluate(MEASURE_BOX)
-            no_horizontal_clip(measurement, 'header control')
+            if measurement['diagnostic']['transform'] != 'none':
+                print('Dashboard layout transformed control observation: ' + json.dumps({
+                    'label': label, 'measurement': measurement}, sort_keys=True))
+            no_horizontal_clip(measurement, label)
             rect = measurement['rect']
             case.assertLessEqual(horizontal_excess(rect, measured_header['content']), TOLERANCE)
             case.assertGreaterEqual(rect['top'], measured_header['content']['top'] - TOLERANCE)
@@ -293,7 +309,7 @@ def assert_dashboard_responsive_layout(case):
         # Stress only otherwise-unavailable long/Unknown GET presentation.
         # Fetch real authenticated replies first, preserving status and headers.
         page.goto('about:blank')
-        mode = 'long'
+        mode = phase = 'long'
         long_username = 'layout_' + 'x' * 57  # Existing account contract allows 64 characters.
         long_os = 'SyntheticOS-' + 'LongRelease' * 12
 
@@ -321,7 +337,7 @@ def assert_dashboard_responsive_layout(case):
             for viewport in VIEWPORTS:
                 layout(*viewport)
             page.goto('about:blank')
-            mode = 'unknown'
+            mode = phase = 'unknown'
             with page.expect_response(case.base + '/api/system/status') as system_reply, \
                     page.expect_response(case.base + '/api/cores/status') as core_reply:
                 visit()
