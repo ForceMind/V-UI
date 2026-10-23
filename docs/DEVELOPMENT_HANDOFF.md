@@ -2,6 +2,8 @@
 
 ## 2026-10-23 当前独立产品目标：现有仪表盘窄屏可用
 
+诊断 head `7623294ddf3dcc72a31c237b58b92930497c9a2a` 的原生失败现已取得同次测量证据：真实 API 的 390px / `system-status-tag` 正在 `scaleX(0.707287)` 入场，文字相对标签边缘内缩约 7.07287px，恰是 `(1px border + 9px padding) × scale`；helper 却使用 10px，产生约 2.92715px 假超界，`scrollWidth = clientWidth = 213`。这只解释此 head 的具体快照，不能回填为旧 a031 Unknown 失败的已知原因。两次失败及后续 skipped 均保留，不重跑或改判。最小跟进不改生产 CSS，而在任何页头几何前，以单次总上限 5000ms 观察三个标签自然结束原生入场：无变换、完全不透明、无 enter/leave 类和 pending/running 动画；然后全部原几何断言及 1px 界限照常执行。没有关闭动画、固定 sleep、轮询失败断言或异常放行；八项有限普通控制仅验观察谓词、超时传播与坐标代数，新准确原生 CI 仍待通过。
+
 PR70 首次候选 `a031b5342fd639a51b1f3b57ff4d22a0b3f0a30d` 的原生 Test [run40031119855](https://github.com/ForceMind/V-UI/actions/runs/40031119855) 失败并完整保留，不重跑或改判。旧 CSS 对照已实测 CPU / Memory 卡体各横向溢出 106px、仪表超出内容区 126px；候选在合成 Unknown 展示阶段的页头文字检查超出约 2.936px，大于不变的 1px 界限。原日志没有具体视口/控件/transform，因此尚不能判定历史根因；后续门禁因该失败被跳过，不算通过。固定库 ElTag 的挂载缩放动画与 helper 的变换后矩形 / 未缩放内边距混算存在具体时序隐患，但仅凭这个机制不能解释为已证明原因。当前跟进只增添同次测量的阶段、视口、控件、矩形、transform / 动画诊断，保持原断言、阈值、顺序和生产 CSS，不以等待或重跑掩盖；新的准确 head 仍需完整独审和 CI。PR69 新主线 `6a6d3e46` 已于 22:09 UTC 独立完成八组 / 11 jobs / 126 steps 和四目标首次验收。
 
 [PR69](https://github.com/ForceMind/V-UI/pull/69) 状态 Unknown 修复经独审、本地组合完整 2133 项（1918 通过 / 215 明确 skip）、准确候选 `8ed33ec446c4b03bf3a76ae7847957c7da58fa07` 的八组 / 11 jobs / 126 steps、四目标首次通过、最新完整 review 与 fresh 门禁后，于 21:52 UTC 正常合并至签名 master `6a6d3e46ebf7d64620b2842bd4dc560529f37c6f` / tree `2f76fcb18385631cd3410904b27e6a99ce5d43b7`。其自己的主线 CI 仍独立进行；准确候选的 Chromium 新场景是合成状态 GET 的真实组件验证，不等于真实宿主/核心资格。此前 PR68 主线 `52629539` 已于 21:51 UTC 完成自己的八组 / 四目标首次验收，历史 PR66 首次端口失败仍保留。

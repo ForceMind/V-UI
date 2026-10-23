@@ -19,6 +19,27 @@ BASELINE_CSS = Path(__file__).parent / 'fixtures/dashboard_pre_responsive.css'
 CARD_IDS = ('cpu-status', 'memory-status', 'xray-core-status', 'singbox-core-status')
 VIEWPORTS = ((390, 844, 1), (768, 1024, 2), (1440, 1000, 4))
 TOLERANCE = 1.0
+HEADER_READY_TIMEOUT_MS = 5000
+
+# Observe natural completion only. Transformed DOM/Range rectangles cannot be
+# combined with untransformed CSS padding while ElTag's appear transition runs.
+HEADER_LAYOUT_READY = """() => {
+    const tags = Array.from(document.querySelectorAll('.header .el-tag'));
+    return tags.length === 3 && tags.every(tag => {
+        const style = getComputedStyle(tag);
+        return style.transform === 'none' && style.opacity === '1' &&
+            !Array.from(tag.classList).some(name =>
+                /^el-zoom-in-center-(enter|leave)-/.test(name)) &&
+            !tag.getAnimations().some(animation =>
+                animation.pending || animation.playState === 'running');
+    });
+}"""
+
+
+def wait_for_header_layout(page):
+    # One prerequisite poll with one total deadline, not a geometry retry.
+    page.wait_for_function(HEADER_LAYOUT_READY, timeout=HEADER_READY_TIMEOUT_MS)
+
 
 # DOM geometry observation only: no state/controller/timer or style injection.
 MEASURE_BOX = """element => {
@@ -185,6 +206,9 @@ def assert_dashboard_responsive_layout(case):
 
         header = page.locator('.header')
         header.scroll_into_view_if_needed()
+        wait_for_header_layout(page)
+        print(f'Dashboard natural header transition settled: phase={phase} '
+              f'viewport={width}x{height} tags=3')
         in_viewport(header, 'header')
         measured_header = box('.header')
         no_horizontal_clip(measured_header, 'header')
