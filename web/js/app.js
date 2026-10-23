@@ -145,6 +145,19 @@ const app = createApp({
         const currentView = ref(location.hash === '#inbounds' ? 'inbounds' : 'dashboard');
         const systemStatus = ref({});
         const coreStatus = ref({});
+        // Pending polls retain the last confirmed display; rejected reads hide
+        // only that endpoint. Missing/malformed fields never imply false or zero.
+        const systemStatusKnown = ref(false);
+        const coreStatusKnown = ref(false);
+        const statusObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+        const systemOsKnown = computed(() => systemStatusKnown.value &&
+            typeof systemStatus.value.os === 'string' && systemStatus.value.os.trim().length > 0);
+        const systemMetricKnown = name => {
+            const percent = systemStatus.value[name]?.percent;
+            return systemStatusKnown.value && Number.isFinite(percent) && percent >= 0 && percent <= 100;
+        };
+        const coreFieldKnown = (core, field) => coreStatusKnown.value &&
+            typeof coreStatus.value[core]?.[field] === 'boolean';
         const inbounds = ref([]);
         const showAddInbound = ref(false);
         const editingInboundId = ref(null);
@@ -475,8 +488,10 @@ const app = createApp({
             if (adminSessionEnded) return;
             try {
                 const res = await axios.get('/api/system/status', { timeout: 5000 });
-                systemStatus.value = res.data;
+                systemStatusKnown.value = statusObject(res.data);
+                systemStatus.value = systemStatusKnown.value ? res.data : {};
             } catch (error) {
+                systemStatusKnown.value = false;
                 console.error('Failed to fetch status', error);
             }
         });
@@ -485,8 +500,10 @@ const app = createApp({
             if (adminSessionEnded) return;
             try {
                 const res = await axios.get('/api/cores/status', { timeout: 5000 });
-                coreStatus.value = res.data;
+                coreStatusKnown.value = statusObject(res.data);
+                coreStatus.value = coreStatusKnown.value ? res.data : {};
             } catch (error) {
+                coreStatusKnown.value = false;
                 console.error('Failed to fetch core status', error);
             }
         });
@@ -1042,6 +1059,9 @@ const app = createApp({
             currentView,
             systemStatus,
             coreStatus,
+            systemOsKnown,
+            systemMetricKnown,
+            coreFieldKnown,
             inbounds,
             showAddInbound,
             editingInboundId,

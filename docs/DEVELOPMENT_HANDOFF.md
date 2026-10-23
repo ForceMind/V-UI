@@ -1,5 +1,15 @@
 # 当前开发与接手入口
 
+## 2026-10-23 当前独立产品纠错：仪表盘未知状态不显示旧绿灯
+
+[PR67](https://github.com/ForceMind/V-UI/pull/67) 已正常合并至签名 master `b3ef9efe5d4079e67c8263a219a291fdce088ac8` / tree `f2b88e8c07351543746918e492eec40a8da6f5af`。准确候选和自己的主线各八组 / 11 jobs / 126 steps、四目标全部首次通过，主线于 21:05 UTC 独立收口；真实登录/API/临时 SQLite 的实例冲突浏览器通过，隔离缺核心环境仍诚实区分保存与应用。PR66 主线已独立收口，其 loopback 首次 DNS 端口占用失败与唯一 attempt 2 成功分别保留；不将历史占用者或时序当作已知。
+
+本次是[既有可见状态轮询](LOW_RESOURCE_TARGET.md#69983e9-可见状态轮询实际结果)上的实际显示纠错，不是继续增加无产品变更的测试。未改控制器/模板与固定 Vue 已复现：首次未获回复也显示 Stopped/Missing/0%，成功后读取失败仍保留绿色 Running 和旧指标。最小修复独立记录系统/核心读取是否已确认；首次或失败显示 Unknown，隐藏旧指标，成功 false/0 仍如实显示，缺失或畸形字段不猜测。普通在途刷新保留上次已确认显示，不新增轮询、不改变 3秒/10秒、5000ms、单飞/显隐和会话规则，不改 API 或操作行为。
+
+八项真实 Vue/模板与实际控制器的确定性控制取得原代码全红、新实现全绿；HTTP/时钟/renderer host 是双件，四个有限破坏对照均失败。既有 Chromium gate 新增真实组件加合成 GET 回复的场景，要求初始未知、两个端点独立失败/恢复、零值/false 和无写操作；不称真实宿主指标或核心运行资格。本地已知原生浏览器限制不重试，完整普通套件、独审、准确候选与新主线 CI / 四目标、最新 review 都须分别通过；尚未通过的门禁不提前登记。
+
+[PR68](https://github.com/ForceMind/V-UI/pull/68) 仅修 strict-export DNS 测试端口预检、零生产行为变更，其准确候选 `d31786e77d4a78208a938b222f8a06594651982a` 已完成八组 / 11 jobs / 126 steps、四目标首次通过与最新 review，无重跑后于 21:21 UTC 正常合并至签名 master `52629539edd2b11d10274fa3cd68ca64945b088d` / tree `48716726e9e19a75e27d3a29858df931941049c7`。该新主线自己的 CI 仍独立待验；本产品候选已保留自有 stash、快进到实际新主线并重新应用，仅交接冲突且保留两侧，六份产品/测试文件逐字节保持。审后旧基线完整 2128 项（1913 通过 / 215 skip，187.957 秒）仅是旧树证据；组合新树须独审和重跑完整套件，不借旧绿。不改 VERSION、固定资产或工作流，不触碰真实数据/凭据、Mac、Tailscale/私有监听、网络安全设置、受限 UDP D2、发布或部署。下方历史状态按日期保留，不表示持续开发暂停。
+
 ## 2026-10-23 独立测试修正：严格导出客户端的 DNS 端口选择
 
 [PR66](https://github.com/ForceMind/V-UI/pull/66) 已经准确候选验收并正常合并至 `0f4c9bb714dfb9c04ef4c70b80ff4752925c9beb`。该主线的 [loopback attempt 1](https://github.com/ForceMind/V-UI/actions/runs/40017305506/attempts/1) 在既有 strict-export 夹具启动 sing-box 时失败：DNS TCP `127.0.0.1:56973` 已绑定，随后同端口 UDP 返回 `EADDRINUSE`，尚未进入上游失败 / 无 fallback 断言。历史占用者及发生时序未知；原失败保留，唯一相同 SHA 的 loopback attempt 2 完整 220 项成功，其余七组首次成功，主线于 20:41 UTC 独立完成八组 / 11 jobs / 126 steps 和四目标。不把重跑成功解释为永久修复。随后 [PR67](https://github.com/ForceMind/V-UI/pull/67) 节点实例条件候选 `4e7803f49d52888d7d92ecfc99d37ef0a4b8de1c` 经独审、完整本地 2126 项、准确八组 / 四目标 / 最新 review 首次通过后，正常合并至 `b3ef9efe5d4079e67c8263a219a291fdce088ac8` / tree `f2b88e8c07351543746918e492eec40a8da6f5af`；其新主线仍独立待验。本测试修正从该实际新主线继续，不借同树或旧候选资格。

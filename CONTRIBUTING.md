@@ -178,6 +178,12 @@ HTTPUpgrade 原样 URI 的晚期 VLESS read 错误不会可靠出现在固定 Mi
 
 2026-10-12 的 [abbe489 链路首轮](https://github.com/ForceMind/V-UI/actions/runs/38207674929/attempts/1)在第二次 recorder 调用未观察到协议 bytes；同代码重跑成功分别保留。上述确定性负例证明旧观察/清理边界的不足，不证明那次 CI 网络时序的唯一原因，也不把重跑成功当永久修复。
 
+### 仪表盘状态读取失败与恢复
+
+`tests/dashboard_status_dom.js` 使用固定 Vue 的真实响应式/模板编译与未替换的 app.js，覆盖首次待读/失败、独立端点失败、合成超时、缺失/畸形成功数据、正常 false/0 和恢复；HTTP、时钟与 renderer host 是确定性双件，不称原生浏览器证据。`test_dashboard_status.py` 无固定资产时明确跳过，提供资产后严格要求全部控制通过，禁止下载或回退。
+
+既有代理 Chromium gate 的 `test_mocked_dashboard_status_unavailable_and_recovery` 也调用严格 wrapper，再使用真实组件、合成 GET 回复和原有 3秒/10秒轮询验证首次 Unknown、失败后隐藏旧指标、两个端点独立恢复及有效 false/0。它不触发重启或其他写 API，不通过注入控制器/定时器绕过页面；合成状态不表示真实宿主指标、核心运行或用户环境已验。本地已知受限浏览器不重试，准确 CI 独立验收。
+
 ### 节点编辑器保存控件回归
 
 `tests/editor_saving_controls_dom.js` 使用现有 checksum-pinned Vue / Element Plus 的真实禁用计算、产品模板和控制器，区分继承禁用与显式 false 覆盖，并覆盖六处控件及 create/edit 保存成功/拒绝。`tests/test_editor_saving_controls.py` 仅在未提供 `VUI_FRONTEND_ASSETS` 时明确跳过；提供资产后必须完整通过，不下载回退资源。既有代理 Chromium gate 的对应控件场景也调用此严格 wrapper，确保 CI 下载固定资产之后实际执行这些控制。Chromium 使用明确模拟的保存响应验证组件锁定，不替代实际 API/核心应用或用户环境验收。

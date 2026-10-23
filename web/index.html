@@ -64,18 +64,21 @@
         <el-container>
             <el-header class="header">
                 <div class="header-left">
-                    <el-tag type="success" v-if="systemStatus.os">
-                        Running on {{ systemStatus.os }}
+                    <el-tag id="system-status-tag" :data-status="systemOsKnown ? 'known' : 'unknown'"
+                        :type="systemOsKnown ? 'success' : 'warning'">
+                        {{ systemOsKnown ? 'Running on ' + systemStatus.os : 'System Unknown' }}
                     </el-tag>
-                    <el-tag
+                    <el-tag id="xray-status-tag"
                         style="margin-left: 8px"
-                        :type="coreStatus.xray?.running ? 'success' : 'info'">
-                        Xray {{ coreStatus.xray?.running ? 'Running' : 'Stopped' }}
+                        :data-status="coreFieldKnown('xray', 'running') ? 'known' : 'unknown'"
+                        :type="!coreFieldKnown('xray', 'running') ? 'warning' : coreStatus.xray.running ? 'success' : 'info'">
+                        Xray {{ !coreFieldKnown('xray', 'running') ? 'Unknown' : coreStatus.xray.running ? 'Running' : 'Stopped' }}
                     </el-tag>
-                    <el-tag
+                    <el-tag id="singbox-status-tag"
                         style="margin-left: 8px"
-                        :type="coreStatus['sing-box']?.running ? 'success' : 'info'">
-                        sing-box {{ coreStatus['sing-box']?.running ? 'Running' : 'Stopped' }}
+                        :data-status="coreFieldKnown('sing-box', 'running') ? 'known' : 'unknown'"
+                        :type="!coreFieldKnown('sing-box', 'running') ? 'warning' : coreStatus['sing-box'].running ? 'success' : 'info'">
+                        sing-box {{ !coreFieldKnown('sing-box', 'running') ? 'Unknown' : coreStatus['sing-box'].running ? 'Running' : 'Stopped' }}
                     </el-tag>
                 </div>
                 <div class="header-right">
@@ -104,47 +107,53 @@
                 <div v-if="currentView === 'dashboard'" class="dashboard-view">
                     <el-row :gutter="20">
                         <el-col :span="6">
-                            <el-card shadow="hover">
+                            <el-card id="cpu-status" shadow="hover" :data-status="systemMetricKnown('cpu') ? 'known' : 'unknown'">
                                 <template #header>CPU</template>
-                                <el-progress
+                                <el-progress v-if="systemMetricKnown('cpu')"
                                     type="dashboard"
-                                    :percentage="systemStatus.cpu?.percent || 0"
+                                    :percentage="systemStatus.cpu.percent"
                                     :color="colors">
                                 </el-progress>
-                                <div class="stat-text">
+                                <p v-else role="status">Unknown · 状态未确认</p>
+                                <div v-if="systemMetricKnown('cpu')" class="stat-text">
                                     {{ systemStatus.cpu?.cores }} Cores
                                 </div>
                             </el-card>
                         </el-col>
                         <el-col :span="6">
-                            <el-card shadow="hover">
+                            <el-card id="memory-status" shadow="hover" :data-status="systemMetricKnown('memory') ? 'known' : 'unknown'">
                                 <template #header>Memory</template>
-                                <el-progress
+                                <el-progress v-if="systemMetricKnown('memory')"
                                     type="dashboard"
-                                    :percentage="systemStatus.memory?.percent || 0"
+                                    :percentage="systemStatus.memory.percent"
                                     :color="colors">
                                 </el-progress>
-                                <div class="stat-text">
+                                <p v-else role="status">Unknown · 状态未确认</p>
+                                <div v-if="systemMetricKnown('memory')" class="stat-text">
                                     {{ systemStatus.memory?.used }} / {{ systemStatus.memory?.total }}
                                 </div>
                             </el-card>
                         </el-col>
                         <el-col :span="6">
-                            <el-card shadow="hover">
+                            <el-card id="xray-core-status" shadow="hover"
+                                :data-status="coreFieldKnown('xray', 'binary_exists') && coreFieldKnown('xray', 'running') ? 'known' : 'unknown'">
                                 <template #header>Xray Core</template>
-                                <el-tag :type="coreStatus.xray?.binary_exists ? 'success' : 'danger'">
-                                    {{ coreStatus.xray?.binary_exists ? 'Installed' : 'Missing' }}
+                                <el-tag :type="!coreFieldKnown('xray', 'binary_exists') ? 'warning' : coreStatus.xray.binary_exists ? 'success' : 'danger'">
+                                    {{ !coreFieldKnown('xray', 'binary_exists') ? 'Unknown' : coreStatus.xray.binary_exists ? 'Installed' : 'Missing' }}
                                 </el-tag>
-                                <p>{{ coreStatus.xray?.running ? 'Running' : 'Stopped' }}</p>
+                                <p>{{ !coreFieldKnown('xray', 'running') ? 'Unknown' : coreStatus.xray.running ? 'Running' : 'Stopped' }}</p>
+                                <p v-if="!coreFieldKnown('xray', 'binary_exists') || !coreFieldKnown('xray', 'running')" role="status" class="stat-text">状态未确认</p>
                             </el-card>
                         </el-col>
                         <el-col :span="6">
-                            <el-card shadow="hover">
+                            <el-card id="singbox-core-status" shadow="hover"
+                                :data-status="coreFieldKnown('sing-box', 'binary_exists') && coreFieldKnown('sing-box', 'running') ? 'known' : 'unknown'">
                                 <template #header>sing-box Core</template>
-                                <el-tag :type="coreStatus['sing-box']?.binary_exists ? 'success' : 'danger'">
-                                    {{ coreStatus['sing-box']?.binary_exists ? 'Installed' : 'Missing' }}
+                                <el-tag :type="!coreFieldKnown('sing-box', 'binary_exists') ? 'warning' : coreStatus['sing-box'].binary_exists ? 'success' : 'danger'">
+                                    {{ !coreFieldKnown('sing-box', 'binary_exists') ? 'Unknown' : coreStatus['sing-box'].binary_exists ? 'Installed' : 'Missing' }}
                                 </el-tag>
-                                <p>{{ coreStatus['sing-box']?.running ? 'Running' : 'Stopped' }}</p>
+                                <p>{{ !coreFieldKnown('sing-box', 'running') ? 'Unknown' : coreStatus['sing-box'].running ? 'Running' : 'Stopped' }}</p>
+                                <p v-if="!coreFieldKnown('sing-box', 'binary_exists') || !coreFieldKnown('sing-box', 'running')" role="status" class="stat-text">状态未确认</p>
                             </el-card>
                         </el-col>
                     </el-row>
