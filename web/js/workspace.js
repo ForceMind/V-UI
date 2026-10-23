@@ -2,6 +2,10 @@
 (() => {
     const $ = id => document.getElementById(id);
     let savedRevision = '', savedForm = '', editNumber = 0, catalog = null, issued = null, issuedNumber = 0, busy = false;
+    let nodeRevision = '', nodeReadNumber = 0;
+    const validNodeRevision = value => typeof value === 'string' && value.length === 64 && /^[0-9a-f]{64}$/.test(value);
+    const nodeRefreshGuidance = '请点击“刷新节点和订阅”，重新选择节点后创建订阅。';
+    const nodeSelectionConflict = 'Subscription node selection changed; refresh nodes and select them again';
     const notice = (text, error = false) => { $('notice').textContent = text; $('notice').className = error ? 'error' : ''; };
     const element = (tag, text, attrs = {}) => {
         const node = document.createElement(tag);
@@ -12,7 +16,7 @@
     const request = async (url, options = {}) => {
         const response = await fetch(url, {credentials:'same-origin', cache:'no-store', ...options,
             headers:{'X-VUI-Request':'1', ...(options.body ? {'Content-Type':'application/json'} : {}), ...(options.headers || {})}});
-        if (response.status === 401) { hideIssued(); location.replace('/login'); throw new Error('登录已过期'); }
+        if (response.status === 401) { hideIssued(); invalidateNodes(); location.replace('/login'); throw new Error('登录已过期'); }
         if (!response.ok) {
             let text = '请求未完成';
             try { const value = await response.json(); text = typeof value.detail === 'string' ? value.detail : '输入格式不正确，未保存'; } catch {}
@@ -88,6 +92,41 @@
         issued = value; $('issued-urls').value = Object.values(value.paths).map(p => location.origin + p).join('\n');
         $('issued').hidden = false; $('download').disabled = busy || !value.paths['mihomo.yaml'];
     }
+    function updateGrantState() { $('create-grant').disabled = busy || !validNodeRevision(nodeRevision); }
+    function invalidateNodes() {
+        nodeReadNumber++; nodeRevision = '';
+        document.querySelectorAll('[data-node]').forEach(input => { input.checked = false; input.disabled = true; });
+        updateGrantState();
+    }
+    async function refreshNodes() {
+        // A numeric ID is not an instance identity. Never carry selections across a read.
+        invalidateNodes(); const number = nodeReadNumber;
+        notice('正在刷新节点，旧选择已清除。');
+        const [response, warnings] = await Promise.all([request('/api/inbounds'), json('/api/subscription/mihomo-warnings')]);
+        const revision = response.headers.get('X-VUI-Node-Revision');
+        if (!validNodeRevision(revision)) throw new Error('节点版本读取失败。' + nodeRefreshGuidance);
+        const nodes = await response.json();
+        if (!Array.isArray(nodes) || !Array.isArray(warnings)) throw new Error('节点列表读取失败。' + nodeRefreshGuidance);
+        if (number !== nodeReadNumber) return false;
+        const invalid = new Set(warnings.map(w => w.inbound_id));
+        const labels = nodes.map(node => {
+            const input = element('input', null, {type:'checkbox', 'data-node':String(node.id)});
+            input.disabled = !node.enable || invalid.has(node.id);
+            const label = element('label', null, {class:'check'});
+            label.append(input, document.createTextNode(`${node.remark || '节点 ' + node.id} · ${node.core}/${node.protocol}` + (input.disabled ? '（未验证或已禁用）' : '')));
+            return label;
+        });
+        // Commit labels and revision only after this node body and warnings succeed.
+        $('nodes').replaceChildren(...labels);
+        if (!nodes.length) $('nodes').textContent = '暂无节点，请先到节点管理创建。';
+        nodeRevision = revision; updateGrantState(); return true;
+    }
+    async function refreshNodesAndGrants() {
+        if (!await refreshNodes()) return;
+        const number = nodeReadNumber;
+        await refreshGrants();
+        if (number === nodeReadNumber) notice('节点和订阅已刷新，请重新选择节点。');
+    }
     async function refreshGrants() {
         const values = await json('/api/subscriptions'); $('grants').replaceChildren();
         values.forEach(value => {
@@ -134,6 +173,7 @@
             busy = false;
             document.querySelectorAll('button').forEach(n => { if (n.dataset.disabled !== undefined) { n.disabled = n.dataset.disabled === 'true'; delete n.dataset.disabled; } });
             if (savedRevision) updateState();
+            updateGrantState();
             $('download').disabled = !issued?.paths['mihomo.yaml'];
         }
     }
@@ -157,14 +197,23 @@
         if (number === editNumber) showPlan(plan, '已保存规则预览');
         notice('设置已保存。请在客户端刷新原订阅地址；无需重新创建令牌。');
     }));
-    $('refresh-grants').addEventListener('click', () => operation(refreshGrants));
+    $('refresh-grants').addEventListener('click', () => operation(refreshNodesAndGrants));
     $('grant-form').addEventListener('submit', event => { event.preventDefault(); operation(async () => {
-        const ids = [...document.querySelectorAll('[data-node]:checked')].map(n => Number(n.dataset.node));
+        if (!validNodeRevision(nodeRevision)) throw new Error('节点版本尚未就绪。' + nodeRefreshGuidance);
+        const ids = [...document.querySelectorAll('[data-node]:checked')].filter(n => !n.disabled).map(n => Number(n.dataset.node));
         const formats = [...document.querySelectorAll('input[name="format"]:checked')].map(n => n.value);
         if (!ids.length || !formats.length) throw new Error('请选择至少一个已验证节点和输出格式');
         hideIssued(); const number = issuedNumber;
-        const result = await json('/api/subscriptions', {method:'POST', body:JSON.stringify({label:$('label').value.trim(), server:$('server').value.trim(),
-            inbound_ids:ids, formats, expires_days:Number($('days').value)})});
+        let result;
+        try {
+            result = await json('/api/subscriptions', {method:'POST', body:JSON.stringify({label:$('label').value.trim(), server:$('server').value.trim(),
+                inbound_ids:ids, formats, expires_days:Number($('days').value), expected_node_revision:nodeRevision})});
+        } catch (error) {
+            if (error.status === 409 && error.message === nodeSelectionConflict) {
+                invalidateNodes(); throw new Error('节点列表已变化。' + nodeRefreshGuidance);
+            }
+            throw error;
+        }
         if (number === issuedNumber) showIssued(result);
         await refreshGrants();
         if (number === issuedNumber) notice('订阅已创建。请保存新地址，不要分享给他人。');
@@ -188,7 +237,7 @@
         setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
     }));
     addEventListener('beforeunload', event => { if (savedRevision && dirty()) { event.preventDefault(); event.returnValue = ''; } });
-    addEventListener('pagehide', hideIssued);
+    addEventListener('pagehide', () => { hideIssued(); invalidateNodes(); });
     addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
     operation(async () => {
         await json('/api/auth/me'); catalog = await json('/api/routing/mihomo/catalog');
@@ -199,15 +248,7 @@
             }); $('presets').append(group);
         });
         await reload();
-        const [nodes, warnings] = await Promise.all([json('/api/inbounds'), json('/api/subscription/mihomo-warnings')]);
-        const invalid = new Set(warnings.map(w => w.inbound_id));
-        nodes.forEach(node => {
-            const input = element('input', null, {type:'checkbox', 'data-node':String(node.id)});
-            input.disabled = !node.enable || invalid.has(node.id);
-            const label = element('label', null, {class:'check'});
-            label.append(input, document.createTextNode(`${node.remark || '节点 ' + node.id} · ${node.core}/${node.protocol}` + (input.disabled ? '（未验证或已禁用）' : ''))); $('nodes').append(label);
-        });
-        if (!nodes.length) $('nodes').textContent = '暂无节点，请先到节点管理创建。';
-        await refreshGrants(); $('workspace').hidden = false;
+        $('workspace').hidden = false;
+        await refreshNodesAndGrants();
     });
 })();

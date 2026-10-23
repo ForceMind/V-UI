@@ -14,10 +14,12 @@ from sqlalchemy import Boolean, Column, Integer, String, Text, text
 from sqlalchemy.types import TypeDecorator
 
 from app.models import database
+from app.services.node_selection_revision import (
+    INSTANCE_RE, NODE_SELECTION_CHANGED, REVISION_RE, node_selection_revision,
+)
 
 TOKEN_RE = re.compile(r"^vui_s_[A-Za-z0-9_-]{43}$")
 FORMATS = {"mihomo.yaml", "raw", "sing-box.json"}
-INSTANCE_RE = re.compile(r"[0-9a-f]{32}\Z")
 
 
 class _GrantJSON(TypeDecorator):
@@ -160,7 +162,7 @@ def _owner(db, owner_id: int):
 
 
 def create_grant(owner_id: int, label: str, server: str, inbound_ids: list[int],
-                 formats: list[str], days: int) -> tuple[dict, str]:
+                 formats: list[str], days: int, *, expected_node_revision: str | None = None) -> tuple[dict, str]:
     try:
         server = normalize_server(server)
     except ValueError as exc:
@@ -171,10 +173,17 @@ def create_grant(owner_id: int, label: str, server: str, inbound_ids: list[int],
     if not _valid_formats(formats):
         raise HTTPException(422, "Select nodes and supported output formats")
     formats = sorted(formats)
+    if expected_node_revision is not None and (type(expected_node_revision) is not str
+            or not REVISION_RE.fullmatch(expected_node_revision)):
+        raise HTTPException(422, "Invalid node selection revision")
     now = int(time.time())
     with database.SessionLocal() as db:
         db.execute(text("BEGIN IMMEDIATE"))
         user = _owner(db, owner_id)
+        if expected_node_revision is not None:
+            inventory = db.query(database.Inbound).populate_existing().all()
+            if not hmac.compare_digest(expected_node_revision, node_selection_revision(inventory)):
+                raise HTTPException(409, NODE_SELECTION_CHANGED)
         rows = db.query(database.Inbound).filter(database.Inbound.id.in_(ids)).all()
         if len(rows) != len(ids) or any(not row.enable for row in rows):
             raise HTTPException(422, "Selected nodes are missing or disabled")

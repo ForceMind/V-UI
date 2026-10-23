@@ -1,5 +1,19 @@
 # 当前开发与接手入口
 
+## 2026-10-23 当前组合候选：节点选择条件纳入证书修复主线
+
+[PR64](https://github.com/ForceMind/V-UI/pull/64) 准确候选 `4bc6febedc5e2f99dcaafed1bece4fce474c767c` / tree `2d15b38b32152b4308d1013b659ab42edc5fdcff` 经冻结本地 2084 项（1872 通过 / 212 skip）、独审、准确八组 / 11 jobs / 126 steps 与四目标全部首次通过、最新完整 review 无发现及合并前 fresh 门禁后，已正常合并至 `efbbdbe5fe7ba338eaa70083c8844605c53cc50f`。真实 ACME 和编辑器的两处 CSP 等待器故障已在新 head 转绿；初始 `96de501` 两项失败及全部终态仍保留，未改判或取消。准确新 master 的 CI 正独立进行，不能继承同树候选资格。
+
+[PR65](https://github.com/ForceMind/V-UI/pull/65) 原独立节点条件候选 `1b615767e3db39db2d8716da005bb5f0ab268eb7` / tree `d5908d27d72c51cc45ca8f701dd9b1031fbf2c9b` 已完成本地 2099 项（1887 通过 / 212 skip）、独立安全审查及该 head 的完整 review 无发现；其原 CI 尚待终态，完整留存，不用新头掩盖。现在正常合入上述真实主线，保留双亲历史，仅本交接文档冲突。节点功能各文件保持原候选字节，证书各文件保持主线字节；组合树须重新独审、本地全套、准确候选 CI / 四目标及最新完整 review，通过后才可正常合并。两项独立功能不混写资格，后续新主线还须另验。
+
+## 2026-10-23 独立产品候选：陈旧页面创建订阅的节点实例条件
+
+从准确已验主线 `d4bf74c80c56450777d3c6649593bc5ef2b96758` 独立修复新授权的陈旧 UI 选择，不与 [PR64 证书刷新](https://github.com/ForceMind/V-UI/pull/64) 混提交。PR63 只完成私有管理设计，不代表其他批准产品开发暂停；真实 Tailnet、监听与权限决定保持独立。
+
+已隔离复现旧页面显示旧节点、另一页自然删除重建同整数 ID 后，新创建却绑定替代实例。PR60 旧令牌防线仍有效，不称实际泄露。最小修复为同批节点读取的全库存实例修订，以及现有创建 JSON 的严格可选条件，在 SQLite 创建事务内、token 生成前核验；新版工作区必传，冲突后明确刷新和重选，不自动重试。普通 API 省略条件仍为旧当前-ID 语义，升级前已打开页面需重载，不能泛称所有客户端均强制条件。详见[安全与兼容契约](SUBSCRIPTION_IDENTITY.md#2026-10-23-新授权的陈旧页面选择保护候选)。
+
+本次正常代码、隔离测试及最小文档须独立安全复审、完整普通套件、准确候选 CI / 四目标和最新 review，再按届时主线正常合入与重新验收；PR64 或其他提交的绿灯不可继承。没有数据库迁移、新凭据、权限、真实网络、私有监听、Tailscale、Mac、受限 UDP D2、发布或部署操作。下方设计阶段文字保留历史，不覆盖持续开发范围。
+
 ## 2026-10-23 当前有界目标：证书页面刷新不丢选择、不回写旧状态
 
 [PR63](https://github.com/ForceMind/V-UI/pull/63) 的 V-TS-03 设计已正常合并至 `d4bf74c80c56450777d3c6649593bc5ef2b96758` / tree `c34e8f0f1b9478b77af66c22be71e8944bc7d421`，候选与主线各自八组 / 11 jobs / 126 steps 和同源四目标全部首次通过；主线于 2026-10-22 06:40:04 UTC 独立收口，见 [Test](https://github.com/ForceMind/V-UI/actions/runs/39733219344)、[ACME](https://github.com/ForceMind/V-UI/actions/runs/39733219512)、[loopback](https://github.com/ForceMind/V-UI/actions/runs/39733219321)、[deployment](https://github.com/ForceMind/V-UI/actions/runs/39733219304) 与 [portable](https://github.com/ForceMind/V-UI/actions/runs/39733219299)。这只是设计交付，不授权私有监听实现，也不表示整个批准开发计划暂停。

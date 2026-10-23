@@ -13,6 +13,116 @@ import unittest
 
 @unittest.skipUnless(os.getenv('VUI_WORKSPACE_BROWSER')=='1', 'explicit browser check')
 class WorkspaceBrowserTests(unittest.TestCase):
+    def assert_stale_node_selection_requires_explicit_refresh(self, page, context, base, work, expect):
+        """Keep the real old document open across natural integer-ID reuse."""
+        headers = {'Origin':base, 'X-VUI-Request':'1'}
+        old_uuid = '44444444-4444-4444-8444-444444444444'
+        new_uuid = '55555555-5555-4555-8555-555555555555'
+        mismatch = 'Subscription node selection changed; refresh nodes and select them again'
+
+        def saved_not_applied(response):
+            self.assertEqual(response.status, 409, response.text())
+            detail = response.json()['detail']
+            self.assertIs(detail['saved'], True); self.assertIs(detail['applied'], False)
+            self.assertEqual(detail['message'], 'Pinned core binary is missing or not executable')
+
+        def create_node(label, port, uuid):
+            response = context.request.post(base+'/api/inbounds', headers=headers, data={
+                'core':'sing-box', 'protocol':'vless', 'remark':label, 'port':port, 'enable':True,
+                'settings':{'users':[{'uuid':uuid}]},
+                'stream_settings':{'tls':{'enabled':True, 'server_name':'vpn.example.test'}}})
+            saved_not_applied(response)
+            response = context.request.get(base+'/api/inbounds')
+            self.assertEqual(response.status, 200)
+            rows = [row for row in response.json() if row['remark'] == label]
+            self.assertEqual(len(rows), 1)
+            self.assertNotIn('instance_id', response.text()); self.assertNotIn(uuid, response.text())
+            return rows[0]['id']
+
+        def instance(identifier):
+            with sqlite3.connect(work/'data/v-ui.db') as db:
+                return db.execute('SELECT instance_id FROM inbounds WHERE id=?', (identifier,)).fetchone()[0]
+
+        original = create_node('selection-original', 10446, old_uuid)
+        original_instance = instance(original)
+        with page.expect_response(lambda response: response.url == base+'/api/inbounds'
+                                  and response.request.method == 'GET') as displayed:
+            page.goto(base+'/workspace')
+        revision = displayed.value.headers.get('x-vui-node-revision')
+        self.assertRegex(revision or '', r'^[0-9a-f]{64}$')
+        expect(page.locator('#workspace')).to_be_visible()
+        expect(page.locator('#create-grant')).to_be_enabled()
+        page.locator('#label').fill('stale-page-new-authorization')
+        page.locator('#server').fill('vpn.example.test')
+        page.locator('#proxy').fill('keep-draft-during-node-refresh.example.test')
+        selected = page.locator(f'[data-node="{original}"]')
+        selected.check()
+        for output_format in ('mihomo.yaml', 'raw', 'sing-box.json'):
+            page.locator(f'input[name="format"][value="{output_format}"]').check()
+        # Only another authenticated API caller changes inventory. No page
+        # navigation or list refresh may conceal the stale selection window.
+        saved_not_applied(context.request.delete(base+f'/api/inbounds/{original}', headers=headers))
+        replacement = create_node('selection-replacement', 10447, new_uuid)
+        self.assertEqual(replacement, original)
+        self.assertNotEqual(instance(replacement), original_instance)
+        current = context.request.get(base+'/api/inbounds')
+        self.assertNotEqual(current.headers.get('x-vui-node-revision'), revision)
+        expect(page.locator('#nodes')).to_contain_text('selection-original')
+        expect(page.locator('#nodes')).not_to_contain_text('selection-replacement')
+        expect(selected).to_be_checked()
+        before = context.request.get(base+'/api/subscriptions').json()
+        writes = []
+        def record(request):
+            if request.url == base+'/api/subscriptions' and request.method == 'POST': writes.append(request)
+        page.on('request', record)
+        try:
+            with page.expect_response(lambda response: response.url == base+'/api/subscriptions'
+                                      and response.request.method == 'POST') as rejected:
+                page.locator('#create-grant').click()
+            self.assertEqual(rejected.value.status, 409)
+            self.assertEqual(rejected.value.json(), {'detail':mismatch})
+            expect(page.locator('#create-grant')).to_be_disabled()
+            expect(selected).not_to_be_checked()
+            expect(page.locator('#issued')).to_be_hidden()
+            expect(page.locator('#notice')).to_contain_text('重新选择')
+            self.assertEqual(context.request.get(base+'/api/subscriptions').json(), before)
+            self.assertEqual(len(writes), 1, 'a conflict never automatically creates another grant')
+            self.assertEqual(writes[0].post_data_json['expected_node_revision'], revision)
+            with page.expect_response(lambda response: response.url == base+'/api/inbounds'
+                                      and response.request.method == 'GET') as refreshed:
+                page.locator('#refresh-grants').click()
+            next_revision = refreshed.value.headers.get('x-vui-node-revision')
+            self.assertRegex(next_revision or '', r'^[0-9a-f]{64}$')
+            self.assertNotEqual(next_revision, revision)
+            expect(page.locator('#create-grant')).to_be_enabled()
+            expect(page.locator('#nodes')).to_contain_text('selection-replacement')
+            expect(page.locator('#nodes')).not_to_contain_text('selection-original')
+            expect(selected).not_to_be_checked()
+            expect(page.locator('#proxy')).to_have_value('keep-draft-during-node-refresh.example.test')
+            expect(page.locator('#save-state')).to_contain_text('未保存草稿')
+            self.assertEqual(len(writes), 1)
+            selected.check()
+            with page.expect_response(lambda response: response.url == base+'/api/subscriptions'
+                                      and response.request.method == 'POST') as accepted:
+                page.locator('#create-grant').click()
+            self.assertEqual(accepted.value.status, 201)
+            grant = accepted.value.json()
+            expect(page.locator('#issued')).to_be_visible()
+            expect(page.locator('#create-grant')).to_be_enabled()
+            self.assertEqual(len(writes), 2)
+            self.assertEqual(writes[-1].post_data_json['expected_node_revision'], next_revision)
+            self.assertEqual(grant['inbound_ids'], [replacement])
+            self.assertEqual(set(grant['paths']), {'mihomo.yaml', 'raw', 'sing-box.json'})
+            for output_format, path in grant['paths'].items():
+                response = context.request.get(base+path)
+                self.assertEqual(response.status, 200)
+                body = base64.b64decode(response.text(), validate=True).decode() if output_format == 'raw' else response.text()
+                self.assertIn(new_uuid, body); self.assertNotIn(old_uuid, body)
+            self.assertNotIn(grant['token'], (work/'server.log').read_text())
+            self.assertEqual(page.evaluate('Object.keys(localStorage).length+Object.keys(sessionStorage).length'), 0)
+        finally:
+            page.remove_listener('request', record)
+
     def assert_identity_reauthorization_workflow(self, page, context, base, work, expect):
         """Actual local API responses drive the UI, without a proxy binary.
 
@@ -398,7 +508,8 @@ with database.SessionLocal() as db:
                             self.assertNotIn(second.split('/sub/')[1].split('/')[0],(work/'server.log').read_text())
                             self.assert_issued_hide_during_list_refresh(page,context,base,work,expect)
                             self.assert_identity_reauthorization_workflow(page,context,base,work,expect)
-                            print('Workspace browser: draft/save/reload races/stable URL/rotate/revoke/Hide during real list GET/legacy reauthorization/natural node ID reuse/all-format denial/XSS/no-storage/mobile OK')
+                            self.assert_stale_node_selection_requires_explicit_refresh(page,context,base,work,expect)
+                            print('Workspace browser: draft/save/reload races/stable URL/rotate/revoke/Hide during real list GET/legacy reauthorization/natural node ID reuse/stale-view create conflict and explicit reselect/all-format denial/XSS/no-storage/mobile OK')
                         finally: browser.close()
                 finally:
                     server.terminate()

@@ -25,6 +25,10 @@ class GrantPayload(BaseModel):
     inbound_ids: list[NodeId] = Field(min_length=1,max_length=256)
     formats: list[OutputFormat] = Field(default_factory=lambda:['mihomo.yaml'],min_length=1,max_length=3)
     expires_days: int = Field(default=90,ge=1,le=3650,strict=True)
+    # Omission alone uses the legacy API contract. Defaults are not validated;
+    # a provided JSON null (or any non-string/malformed value) is rejected.
+    expected_node_revision: str = Field(default=None,strict=True,min_length=64,max_length=64,
+        pattern=r'^[0-9a-f]{64}$',description='Optional full node inventory revision; explicit null is invalid')
 
 class RotatePayload(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -40,7 +44,8 @@ def list_subscriptions(request: Request):
 
 @router.post('',status_code=201)
 def create_subscription(payload: GrantPayload, request: Request):
-    record,token=create_grant(request.state.admin['id'],payload.label,payload.server,payload.inbound_ids,payload.formats,payload.expires_days)
+    record,token=create_grant(request.state.admin['id'],payload.label,payload.server,payload.inbound_ids,payload.formats,payload.expires_days,
+        expected_node_revision=payload.expected_node_revision)
     return issued_response(record,token)
 
 @router.post('/{grant_id}/rotate')

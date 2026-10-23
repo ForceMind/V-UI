@@ -15,7 +15,7 @@ const original = {mode:'direct', direct_domains:['direct.example.test'], proxy_d
 const replacement = {...original, mode:'standard', proxy_domains:['server.example.test'], presets:{openai:false}};
 const plan = name => ({sections:[{comment:name, rules:['DOMAIN-SUFFIX,' + name + ',DIRECT']}], warnings:[]});
 const response = (value, status = 200, etag = 'r3') => ({ok:status >= 200 && status < 300, status,
-    json:async()=>structuredClone(value), headers:{get:key=>key === 'ETag' ? '"' + etag + '"' : null}});
+    json:async()=>structuredClone(value), headers:{get:key=>key === 'X-VUI-Node-Revision' ? 'a'.repeat(64) : key === 'ETag' ? '"' + etag + '"' : null}});
 const deferred = () => {
     let resolve, reject;
     const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
