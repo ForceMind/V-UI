@@ -1,7 +1,7 @@
 'use strict';
 (() => {
     const $ = id => document.getElementById(id);
-    let busy = false, timer, nodes = [], capabilities = {};
+    let busy = false, polling = false, active = true, refreshGeneration = 0, timer, nodes = [], capabilities = {};
     const messages = {
         INVALID_DOMAIN:'域名格式错误，请不要填写协议、端口、路径或通配符。',
         INVALID_EMAIL:'邮箱格式错误。', CERTIFICATE_ALREADY_EXISTS:'已有同域名、同环境证书，请在列表中检查续期。',
@@ -20,18 +20,19 @@
     };
     const text = value => messages[value] || value || '无';
     const time = stamp => stamp ? new Date(stamp * 1000).toLocaleString() : '—';
-    const notice = (message, error=false) => { $('notice').textContent=message; $('notice').className=error?'error':''; };
+    const notice = (message, error=false) => { if(!active)return; $('notice').textContent=message; $('notice').className=error?'error':''; };
     const element=(tag,content,attrs={}) => { const node=document.createElement(tag); if(content!==null)node.textContent=content; Object.entries(attrs).forEach(([k,v])=>node.setAttribute(k,v));return node; };
     async function api(path, method='GET', data) {
         const response=await fetch('/api/certificates'+path,{method,credentials:'same-origin',cache:'no-store',
             headers:{'X-VUI-Request':'1',...(data===undefined?{}:{'Content-Type':'application/json'})},body:data===undefined?undefined:JSON.stringify(data)});
-        if(response.status===401){location.replace('/login');throw new Error('登录已过期');}
+        if(response.status===401){if(active)location.replace('/login');throw new Error('登录已过期');}
         const payload=await response.json();
         if(!response.ok)throw new Error(text(typeof payload.detail==='string'?payload.detail:'输入格式不正确'));
         return payload;
     }
     async function action(fn){
-        if(busy)return;busy=true;
+        // A started action supersedes reads already in flight, even before its write returns.
+        if(busy||!active)return;busy=true;refreshGeneration++;
         document.querySelectorAll('button').forEach(b=>{b.dataset.wasDisabled=String(b.disabled);b.disabled=true;});
         try{await fn();await refresh();}
         catch(error){notice(error.message,true);}
@@ -39,7 +40,15 @@
     }
     function button(label,handler,disabled=false,attrs={}){const b=element('button',label,{type:'button',...attrs});b.disabled=disabled;b.addEventListener('click',()=>action(handler));return b;}
     async function refresh(){
-        const certs=await api('');$('certificate-list').replaceChildren();
+        if(!active)return;
+        const generation=++refreshGeneration;
+        let certs;
+        try{certs=await api('');}
+        catch(error){if(active&&generation===refreshGeneration)throw error;return;}
+        if(!active||generation!==refreshGeneration)return;
+        // Read choices at commit time, not request time: selects remain editable during I/O.
+        const choices=new Map(Array.from($('certificate-list').querySelectorAll('[data-bind-select]'),select=>[select.dataset.bindSelect,select.value]));
+        $('certificate-list').replaceChildren();
         for(const cert of certs){
             const card=element('fieldset',null,{'data-certificate':cert.id});card.append(element('legend',cert.domain+' · '+(cert.environment==='production'?'正式':'测试')));
             const status={pending:'正在申请',expired:'已过期',renewal_failed:'续期失败，旧证书仍保留',failed:'申请失败',staging_only:'测试签发成功（不能上线）',valid:'有效',not_issued:'尚未签发'}[cert.status];
@@ -56,6 +65,8 @@
             const select=element('select',null,{'aria-label':'选择绑定节点','data-bind-select':cert.id});
             select.append(element('option','选择 TLS 节点',{value:''}));
             nodes.filter(n=>n.managed_certificate_eligible===true).forEach(n=>select.append(element('option',n.remark||'节点 '+n.id,{value:String(n.id)})));
+            const choice=choices.get(String(cert.id));
+            if(Array.from(select.options).some(option=>option.value===choice))select.value=choice;
             actions.append(select);
             actions.append(button('绑定节点',async()=>{if(!select.value)throw new Error('请先选择 TLS 节点');await api('/'+cert.id+'/bind-inbound','POST',{inbound_id:Number(select.value)});notice('证书已绑定节点。未运行的核心不会被自动启动。');},!deployable));
             actions.append(button('重试应用',async()=>{const results=await api('/'+cert.id+'/apply','POST');if(results.some(r=>!r.applied))throw new Error('仍有绑定未应用，请查看卡片状态');notice('已检查所有绑定。');},!deployable||!cert.bindings.length));
@@ -68,15 +79,21 @@
         await api('','POST',{domain:$('domain').value.trim(),email:$('email').value.trim(),environment:$('environment').value,auto_renew:$('auto-renew').checked,accept_terms:$('terms').checked});
         notice('申请已排队。测试证书不会替换正式证书。');
     });});
-    $('refresh').addEventListener('click',()=>action(refresh));
-    addEventListener('pagehide',()=>clearInterval(timer));
+    $('refresh').addEventListener('click',()=>action(async()=>{}));
+    addEventListener('pagehide',()=>{active=false;refreshGeneration++;clearInterval(timer);});
     addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
     action(async()=>{
         capabilities=await api('/capabilities');
+        if(!active)return;
         const response=await fetch('/api/inbounds',{credentials:'same-origin',cache:'no-store'});
         if(!response.ok)throw new Error('无法读取节点列表');nodes=await response.json();
+        if(!active)return;
         $('cert-workspace').hidden=false;
         notice(capabilities.worker_running?'证书服务运行中。':'证书自动处理器未启动：队列会保留，但需使用受管服务启动。',!capabilities.worker_running);
-        timer=setInterval(()=>{if(!busy&&!document.hidden)refresh().catch(error=>notice(error.message,true));},5000);
+        timer=setInterval(()=>{
+            if(!active||busy||polling||document.hidden)return;
+            polling=true;
+            refresh().catch(error=>notice(error.message,true)).finally(()=>{polling=false;});
+        },5000);
     });
 })();

@@ -10,6 +10,8 @@ import tempfile
 import time
 import unittest
 from acme_helpers import PebbleFixture
+from certificate_browser_helpers import (hold_next_certificate_read, wait_certificate_read,
+    release_certificate_read, restore_certificate_reads)
 
 @unittest.skipUnless(os.getenv('VUI_CERT_BROWSER')=='1' and os.getenv('VUI_TEST_PEBBLE'),'explicit ACME browser gate')
 class CertificateBrowserTests(unittest.TestCase):
@@ -69,8 +71,55 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     card=page.locator('[data-certificate]').first
                     expect(card.locator('[data-job-state="succeeded"]')).to_be_visible(timeout=30000)
                     expect(card).to_contain_text('有效')
-                    card.get_by_role('button',name='暂停自动续期',exact=True).click()
-                    expect(card.get_by_role('button',name='启用自动续期',exact=True)).to_be_visible()
+                    expect(page.locator('#refresh')).to_be_enabled()
+                    # The next real five-second poll reads auto_renew=True.
+                    # Delay only delivery, then pause through the normal UI.
+                    hold_next_certificate_read(page)
+                    try:
+                        older = wait_certificate_read(page)
+                        self.assertEqual(older['status'], 200)
+                        self.assertEqual(older['intercepted'], 1)
+                        self.assertEqual(len(older['body']), 1)
+                        self.assertIs(older['body'][0]['auto_renew'], True)
+                        card.get_by_role('button',name='暂停自动续期',exact=True).click()
+                        expect(card.get_by_role('button',name='启用自动续期',exact=True)).to_be_visible()
+                        expect(page.locator('#refresh')).to_be_enabled()
+                        current = context.request.get(base+'/api/certificates').json()
+                        self.assertIs(current[0]['auto_renew'], False)
+                        notice = page.locator('#notice').text_content()
+                        page.evaluate('''() => {
+                            const audit = certificateReadAudit;
+                            audit.staleRepaint = false;
+                            const inspect = records => {
+                                for (const record of records) for (const node of record.addedNodes) {
+                                    if (node.querySelectorAll && Array.from(node.querySelectorAll('button'))
+                                        .some(button => button.textContent === '暂停自动续期')) audit.staleRepaint = true;
+                                }
+                            };
+                            audit.observer = new MutationObserver(inspect);
+                            audit.observer.observe(document.getElementById('certificate-list'), {childList:true});
+                            audit.finishRepaintAudit = () => {
+                                inspect(audit.observer.takeRecords()); audit.observer.disconnect();
+                                return audit.staleRepaint;
+                            };
+                        }''')
+                        release_certificate_read(page)
+                        # Do not auto-retry this assertion: the next normal
+                        # poll could repair a stale repaint and hide the bug.
+                        # The observer also catches a transient repaint if CI
+                        # pauses between delivery and this one-shot snapshot.
+                        rendered = page.evaluate('''() => ({
+                            buttons:Array.from(document.querySelector('[data-certificate]').querySelectorAll('button'),
+                                button => button.textContent),
+                            notice:document.getElementById('notice').textContent,
+                            staleRepaint:certificateReadAudit.finishRepaintAudit()
+                        })''')
+                        self.assertFalse(rendered['staleRepaint'])
+                        self.assertEqual(rendered['buttons'].count('启用自动续期'), 1)
+                        self.assertNotIn('暂停自动续期', rendered['buttons'])
+                        self.assertEqual(rendered['notice'], notice)
+                    finally:
+                        restore_certificate_reads(page)
                     page.reload();expect(page.locator('[data-certificate]').first).to_contain_text('启用自动续期')
                     cards=context.request.get(base+'/api/certificates').json();self.assertEqual(len(cards),1)
                     chain=context.request.get(base+'/api/certificates/'+cards[0]['id']+'/fullchain.pem').body()
@@ -86,7 +135,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     self.assertFalse(page.evaluate('document.documentElement.scrollWidth>innerWidth'))
                     self.assertEqual(page.evaluate('Object.keys(localStorage).length+Object.keys(sessionStorage).length'),0)
                     self.assertNotIn(password,logpath.read_text())
-                    print('Certificate browser: real HTTP-01 issuance / status / pause-reload / staging isolation / public chain / no storage / mobile OK')
+                    print('Certificate browser: real HTTP-01 issuance / status / stale real poll after pause rejected / pause-reload / staging isolation / public chain / no storage / mobile OK')
                 finally:browser.close()
 
 if __name__=='__main__':unittest.main()
