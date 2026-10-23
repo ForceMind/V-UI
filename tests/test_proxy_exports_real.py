@@ -36,6 +36,7 @@ from proxy_loopback_support import (DENIED, DOH, INGRESS, SNI, TARGET, UPSTREAM,
                                     BusinessAnswers, doh_target, listen_port, udp_target, udp_through)
 from test_proxy_double_hop import DoubleHopFixture, INGRESS_UUID, UPSTREAM_UUID, FLOW, SHORT_ID, REALITY_SNI
 from test_proxy_exports import ExportFixture
+from tcp_upstream_export_helpers import local_proxy_port as allocate_dns_fixture_port
 from tests.test_proxy_store import profile, writable_settings
 
 
@@ -196,7 +197,7 @@ class StrictExportLoopbackTests(DoubleHopFixture):
         self.assertNotIn(UPSTREAM_UUID, artifact.content)
         config = yaml.safe_load(artifact.content)
         port = listen_port()
-        dns_port = listen_port()
+        dns_port = allocate_dns_fixture_port()
         if kind == "sing-box":
             config["inbounds"][0]["listen_port"] = port
             config["inbounds"][1]["listen_port"] = dns_port
