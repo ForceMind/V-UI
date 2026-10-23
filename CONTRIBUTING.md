@@ -184,6 +184,14 @@ HTTPUpgrade 原样 URI 的晚期 VLESS read 错误不会可靠出现在固定 Mi
 
 既有代理 Chromium gate 的 `test_mocked_dashboard_status_unavailable_and_recovery` 也调用严格 wrapper，再使用真实组件、合成 GET 回复和原有 3秒/10秒轮询验证首次 Unknown、失败后隐藏旧指标、两个端点独立恢复及有效 false/0。它不触发重启或其他写 API，不通过注入控制器/定时器绕过页面；合成状态不表示真实宿主指标、核心运行或用户环境已验。本地已知受限浏览器不重试，准确 CI 独立验收。
 
+### 仪表盘窄屏布局与原生旧样式对照
+
+固定 Element Plus 的 ElTag 挂载有 300ms `scaleX` 入场动画；变换后的 DOM / Range 矩形不可直接混用未缩放 CSS 内边距。页头几何前仅用一个总上限 5000ms 的只读 predicate 等待恰好三个标签全部恢复 `transform:none` / `opacity:1`、移除 enter/leave 类且无 pending/running 动画，然后原样执行一次几何断言。超时仍失败，不关闭动画、不固定 sleep、不重试失败几何、不放宽 1px 容差。普通控制验证这个 prerequisite 的各条件和一次超时传播，纯代数对照不当作原生证据。
+
+`tests/dashboard_layout_browser.py` 在既有代理 Chromium 门禁内检查真正挂载的 `/ui/`，而不是离开仪表盘后的独立代理页。390 / 768 / 1440px 分别检查页面、页头、四张卡片及 CPU/Memory 仪表的实际几何；卡片内部被裁切或横向滚动也算失败，不能仅凭元素 visible 或页面没有横向滚动通过。正常场景使用真实只读状态 API，保留现有导航，测试不触发核心重启或其他写操作。另将经过真实鉴权的 GET 回复明确替换为长 OS/用户名及 Unknown，专门检查这些展示状态，不称真实账户或宿主数据。
+
+`tests/fixtures/dashboard_pre_responsive.css` 保存准确旧样式 bytes，来源提交与摘要由 helper 和普通完整性控制核验。原生场景先仅替换这个同源 CSS 回复、保持同一模板/控制器/固定组件，取得明确的旧布局几何反例，再移除替换并重新加载候选样式验证正向。替换保持安全响应头，不增减策略；现有 `/ui/` 由 StaticFiles 提供且没有 CSP 头，这一事实不得改称 CSP 保护，导航后的 `/proxy` 仍核其既有 same-source CSP。缺库、HTTP/页面错误、超时和任意异常都不是旧布局失败证据。没有运行前只能称静态约束与待验修复，不能提前声称已在浏览器复现；本地受限浏览器不重试，准确 CI 的几何验收也不代表手机实机、触控或移动网络资格。
+
 ### 节点编辑器保存控件回归
 
 `tests/editor_saving_controls_dom.js` 使用现有 checksum-pinned Vue / Element Plus 的真实禁用计算、产品模板和控制器，区分继承禁用与显式 false 覆盖，并覆盖六处控件及 create/edit 保存成功/拒绝。`tests/test_editor_saving_controls.py` 仅在未提供 `VUI_FRONTEND_ASSETS` 时明确跳过；提供资产后必须完整通过，不下载回退资源。既有代理 Chromium gate 的对应控件场景也调用此严格 wrapper，确保 CI 下载固定资产之后实际执行这些控制。Chromium 使用明确模拟的保存响应验证组件锁定，不替代实际 API/核心应用或用户环境验收。
