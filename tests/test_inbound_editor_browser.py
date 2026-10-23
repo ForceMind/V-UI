@@ -21,6 +21,8 @@ from app import release_tools
 from loopback_helpers import unused_port
 from scripts.prepare_frontend import prepare
 from brand_helpers import check_page_brand, observe_image_csp
+from certificate_browser_helpers import (hold_next_certificate_read, wait_certificate_read,
+    release_certificate_read, restore_certificate_reads)
 
 
 @unittest.skipUnless(os.getenv('VUI_NODE_BROWSER') == '1', 'explicit panel browser gate')
@@ -844,6 +846,25 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 expect(choices.locator(f'option[value="{hy2_id}"]')).to_have_text('managed-hysteria2-edited')
                 expect(choices.locator(f'option[value="{tuic_id}"]')).to_have_text('managed-tuic-edited')
                 expect(choices.locator(f'option[value="{reality_id}"]')).to_have_count(0)
+                choices.select_option(str(vmess_id))
+                # Preserve both an existing selection and a newer choice made
+                # while a genuine periodic list response is held. No mock
+                # certificate/node body, forced click or synthetic timer.
+                for next_choice in (None, ws_id):
+                    hold_next_certificate_read(page)
+                    try:
+                        older = wait_certificate_read(page)
+                        self.assertEqual(older['status'], 200)
+                        self.assertEqual(older['intercepted'], 1)
+                        self.assertIn(certificate_id, [value['id'] for value in older['body']])
+                        if next_choice is not None:
+                            choices.select_option(str(next_choice))
+                        selected = str(vmess_id if next_choice is None else next_choice)
+                        release_certificate_read(page)
+                        expect(choices).to_have_value(selected)
+                        expect(card.get_by_role('button', name='绑定节点', exact=True)).to_be_enabled()
+                    finally:
+                        restore_certificate_reads(page)
                 choices.select_option(str(vmess_id))
                 with page.expect_response(lambda reply: reply.url.endswith(f'/api/certificates/{certificate_id}/bind-inbound') and reply.request.method == 'POST') as bound:
                     card.get_by_role('button', name='绑定节点', exact=True).click()
