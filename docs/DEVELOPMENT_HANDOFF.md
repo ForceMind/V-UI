@@ -1,5 +1,17 @@
 # 当前开发与接手入口
 
+## 2026-10-23 独立测试修正：严格导出客户端的 DNS 端口选择
+
+[PR66](https://github.com/ForceMind/V-UI/pull/66) 已经准确候选验收并正常合并至 `0f4c9bb714dfb9c04ef4c70b80ff4752925c9beb`。该主线的 [loopback attempt 1](https://github.com/ForceMind/V-UI/actions/runs/40017305506/attempts/1) 在既有 strict-export 夹具启动 sing-box 时失败：DNS TCP `127.0.0.1:56973` 已绑定，随后同端口 UDP 返回 `EADDRINUSE`，尚未进入上游失败 / 无 fallback 断言。历史占用者及发生时序未知；原失败保留，唯一相同 SHA 的 loopback attempt 2 完整 220 项成功，其余七组首次成功，主线于 20:41 UTC 独立完成八组 / 11 jobs / 126 steps 和四目标。不把重跑成功解释为永久修复。随后 [PR67](https://github.com/ForceMind/V-UI/pull/67) 节点实例条件候选 `4e7803f49d52888d7d92ecfc99d37ef0a4b8de1c` 经独审、完整本地 2126 项、准确八组 / 四目标 / 最新 review 首次通过后，正常合并至 `b3ef9efe5d4079e67c8263a219a291fdce088ac8` / tree `f2b88e8c07351543746918e492eec40a8da6f5af`；其新主线仍独立待验。本测试修正从该实际新主线继续，不借同树或旧候选资格。
+
+源码和确定性 socket 模型证实原 `exported_client` 用已释放的 TCP-only `bind(0)` 结果为双协议 DNS 取号，无法检查 UDP 占用，且该号码仍在 Linux 自动分配区间内。本候选仅将这一个 DNS 取号点替换为 PR56 / PR58 已有的 `local_proxy_port`，普通 mixed 端口和所有启动、TLS、DNS、无 DIRECT / fallback 及精确 listener 断言原样保留；不修改共享分配器、产品、内核参数、核心 pin 或工作流。
+
+分配器只读自动端口区间和非特权下限，在区间之外以原有最多 128 个不重复候选调用未改动的 TCP / UDP × IPv4 / IPv6 占用检查，且没有已有进程所有权豁免。取号发生在生成子进程配置 / parser 检查与启动之前，错误继续原样传播；不在启动失败后重选或重试。它不是原子预留：显式竞争者可在探测结束后占用，两个并行分配者也可能同时选中，固定端口恢复仍可能失败。这些失败必须保持可见，普通 mixed 端口自己的既有竞争亦不在本次范围。
+
+最初 `0f4c9bb` 基线的冻结 tree `5cb7fd142665dcf76a6b806f97ed98328d5924db` 已完成独审和完整本地 2107 项（1894 通过 / 213 skip，203.077 秒），日志 SHA-256 `b94e9a625cf0806d6befa7ff97b5742aefcc91a8953c8c12fe90b94ca17c5b53`。纳入真实 PR67 主线时保留自己的 stash，仅两份文档冲突并完整保留两侧内容；两份测试文件逐字节保持。新的组合树须重新独审、完整普通套件和准确 CI，旧树通过不代替新树。
+
+新增有限控制直接执行实际 `exported_client`，仅替换进程、socket 与系统观察边界，验证两种格式和错误 DNS 身份、配置落点与一次分配顺序、已占 UDP / 前一个客户端、不相交的自动端口区间、分配 / parser / 启动失败无重试，以及缺少任一 DNS 协议或错误监听地址必须失败。这些是确定性夹具控制，不是固定核心或网络验收；真实 strict-export、完整八组 / 四目标及准确合并主线仍须各自通过。开发云端既有 Chromium / netlink 权限限制不重试、不绕过；不恢复受限 UDP D2，不发布、部署或改变真实网络。
+
 ## 2026-10-23 当前独立纠错：陈旧编辑/删除的实例意图
 
 [PR65](https://github.com/ForceMind/V-UI/pull/65) 已正常合并至 `b6a4ed5cc8d8b8dce771cbdb59e134d48b7c3855` / tree `7eecd1d6305f6d5a5a2c75c54fe5899653cc6c51`，准确候选与自己的主线各八组 / 11 jobs / 126 steps、四目标全部首次通过，主线于 20:06 UTC 独立收口。此前 [PR64](https://github.com/ForceMind/V-UI/pull/64) 的 `efbbdbe5` 主线也已独立通过；历史初始失败与旧候选终态仍保留，不继承绿灯。

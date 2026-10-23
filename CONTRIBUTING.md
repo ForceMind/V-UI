@@ -187,3 +187,9 @@ HTTPUpgrade 原样 URI 的晚期 VLESS read 错误不会可靠出现在固定 Mi
 `test_inbound_instance_preconditions.py` 使用真实模型/API 函数、临时磁盘 SQLite 与独立写连接，覆盖自然 ID 重用、同实例凭据保持、严格条件、事务锁和副作用前拒绝；没有 HTTP/鉴权/浏览器/核心资格。`test_inbound_instance_frontend.py` 执行未替换的 app.js 与确定性 API/确认框 doubles，检查快照捕获、失败关闭、草稿和生命周期；不把双件当真实网络。
 
 既有 `VUI_PROXY_BROWSER=1` 门禁中的 `test_actual_inbound_instance_conflicts_preserve_target_and_draft` 调用 `inbound_instance_browser.py`，以固定前端资产、真实登录/API/临时 SQLite 和 Chromium 验证旧编辑器/确认框跨自然删建冲突，以及明确刷新后重试。该隔离浏览器服务故意没有核心，成功 DB 写入明确核对 `saved:true/applied:false`，不能称核心应用或用户实机已验。原完整门禁、CSP、断言和工作流不削弱，本地受限浏览器不重试绕过，准确 CI 独立验收。
+
+### 严格导出 DNS 夹具端口回归
+
+`tests/test_strict_export_fixture_ports.py` 直接执行现有 strict-export 客户端构造方法，以假进程 / socket / 系统观察验证 DNS 端口使用既有自动区间外双协议分配器，普通 mixed 端口仍沿用原分配。两格式、错误 DNS 身份、已占 UDP、前一个客户端、错误传播及原精确 TCP+UDP / loopback listener 断言均须保留。运行 `PYTHONPATH=.:tests python -m unittest test_strict_export_fixture_ports -v` 不启动核心或真实监听，不替代准确提交的原 strict-export loopback CI。
+
+这里只读内核区间和非特权下限，分配后不预留、启动失败后不重选；显式竞争和固定端口重启冲突仍应失败。PR66 主线首次 DNS UDP bind 失败的历史占用者未知，确定性模型证明的是旧分配机制缺口，不是已还原该次事件，也不证明消除了全部端口竞争。共享分配器与生产导出协议均不变，受限 UDP D2 不在此范围。
