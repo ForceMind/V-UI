@@ -8,6 +8,8 @@
 
 不改 VERSION、固定核心或工作流门槛；不操作真实 CA、用户数据库、Mac、Tailscale/VPN、私有监听、安全设置、受限 UDP D2、发布或部署。私有管理的订阅可达性、目标环境、维护与权限决定继续独立保留，不妨碍本次无关产品纠错。下方阶段文字保留历史。
 
+首候选 `96de5010cd0e1bf5c57952b11f3c9f39bfbf2e95` 的 [ACME 首次运行](https://github.com/ForceMind/V-UI/actions/runs/40005990827) 失败：新浏览器夹具的 `wait_for_function` 在严格 `script-src 'self'` 页面内部使用 eval，尚未进入旧响应断言。核对固定 Playwright 1.57 源码后，改为测试专用 DOM 完成标记及有界 locator 等待，保留真实响应、瞬时回写观察及全部断言；不放松 CSP、不改安全选项。原失败不改判，后续准确提交仍须重新完成全部门槛。
+
 ## 2026-10-22 当前有界目标：V-TS-03 私有管理设计，不实施
 
 [PR62](https://github.com/ForceMind/V-UI/pull/62) 的五类 SAVE 回归已正常合并至准确 master `6b22fb7687b1c26b2af8cf166812aba8786dfd33` / tree `1d76efb8643f2c3864bfa6fa4154571099340994`。候选与新主线各自八组 / 11 jobs / 126 steps 和同源四目标均首次通过，主线于 05:44:18 UTC 独立收口；[Test](https://github.com/ForceMind/V-UI/actions/runs/39727941401)、[loopback](https://github.com/ForceMind/V-UI/actions/runs/39727941337)、[deployment](https://github.com/ForceMind/V-UI/actions/runs/39727941355)、[portable](https://github.com/ForceMind/V-UI/actions/runs/39727941391)。下方待验文字保留历史，不继续扩大测试。
