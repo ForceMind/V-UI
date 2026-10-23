@@ -177,3 +177,7 @@ HTTPUpgrade 原样 URI 的晚期 VLESS read 错误不会可靠出现在固定 Mi
 记录器在启动线程前登记连接，最多接受十六个；TLS 握手与后续分片读取共用四秒绝对预算。先停止客户端，再释放已完成观察、停止接受并最多五秒等待全部 handler 收尾；线程启动、异常退出、关闭失败、溢出和排空超时都保留为失败。最终快照和固定应用计数必须在收尾后校验；异常路径同样检查送达，并保留原失败及嵌套清理原因。此处仍不转发、不生成协议响应，也不替代实际 sing-box HTTP400/正文、原样 URI 零送达、canonical 转发及普通 TCP 对照。
 
 2026-10-12 的 [abbe489 链路首轮](https://github.com/ForceMind/V-UI/actions/runs/38207674929/attempts/1)在第二次 recorder 调用未观察到协议 bytes；同代码重跑成功分别保留。上述确定性负例证明旧观察/清理边界的不足，不证明那次 CI 网络时序的唯一原因，也不把重跑成功当永久修复。
+
+### 节点编辑器保存控件回归
+
+`tests/editor_saving_controls_dom.js` 使用现有 checksum-pinned Vue / Element Plus 的真实禁用计算、产品模板和控制器，区分继承禁用与显式 false 覆盖，并覆盖六处控件及 create/edit 保存成功/拒绝。`tests/test_editor_saving_controls.py` 仅在未提供 `VUI_FRONTEND_ASSETS` 时明确跳过；提供资产后必须完整通过，不下载回退资源。既有代理 Chromium gate 的对应控件场景也调用此严格 wrapper，确保 CI 下载固定资产之后实际执行这些控制。Chromium 使用明确模拟的保存响应验证组件锁定，不替代实际 API/核心应用或用户环境验收。
