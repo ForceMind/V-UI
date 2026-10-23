@@ -901,6 +901,10 @@ rules:
         from inbound_instance_browser import assert_inbound_instance_conflicts
         assert_inbound_instance_conflicts(self)
 
+    def test_mocked_dashboard_status_unavailable_and_recovery(self):
+        from dashboard_status_browser import assert_dashboard_status_recovery
+        assert_dashboard_status_recovery(self)
+
     def test_mocked_inbound_policy_editor_create_cancel_reopen_saved_only_and_failure(self):
         from playwright.sync_api import expect
         rows = [self.policy_row(1, 'direct'), self.policy_row(2, 'relay')]
