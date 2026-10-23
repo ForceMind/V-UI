@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 HARNESS = r'''
 const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
 const clone=v=>JSON.parse(JSON.stringify(v));
-const node=(id,mode='inherit')=>({id,core:'sing-box',protocol:'vless',remark:'node-'+id,port:10400+id,
+const node=(id,mode='inherit')=>({id,mutation_revision:'a'.repeat(64),core:'sing-box',protocol:'vless',remark:'node-'+id,port:10400+id,
  enable:true,routing_mode:mode,certificate_id:null,credentials:{has_uuid:true},
  profile:{security:'tls',transport:'direct',flow:'',server_name:'entry.example.test',skip_cert_verify:false}});
 function harness(){
@@ -29,7 +29,7 @@ function harness(){
   const match=url.match(/^\/api\/inbounds\/(\d+)\/editor$/);
   if(match){const id=Number(match[1]);if(held.has(id))return await held.get(id);return{data:clone(editors.get(id))}};
   return{data:[]};
- },async post(url,body){writes.push({method:'POST',url,body:clone(body)});if(writeHold)await writeHold;if(writeFailure)throw writeFailure;return{data:{}}},
+ },async post(url,body){writes.push({method:'POST',url,body:clone(body)});if(url.endsWith('/delete')){if(deleteHold)await deleteHold;if(deleteFailure)throw deleteFailure}else{if(writeHold)await writeHold;if(writeFailure)throw writeFailure}return{data:{}}},
  async put(url,body){writes.push({method:'PUT',url,body:clone(body)});if(writeHold)await writeHold;if(writeFailure)throw writeFailure;return{data:{}}},
  async delete(url){writes.push({method:'DELETE',url});if(deleteHold)await deleteHold;if(deleteFailure)throw deleteFailure;return{data:{}}}}};
  vm.runInNewContext(fs.readFileSync('web/js/app.js','utf8'),sandbox);
@@ -58,20 +58,20 @@ s.newInbound.routing_mode='relay';s.closeInboundEditor();assert.equal(h.writes.l
 await s.openAddInbound();assert.equal(s.newInbound.routing_mode,'inherit');await s.saveInbound();
 assert.equal(h.writes[0].body.routing_mode,'inherit');
 for(const mode of ['inherit','direct','relay']){
- h.editors.set(7,node(7,mode));await s.openEditInbound({id:7});assert.equal(s.newInbound.routing_mode,mode);
+ h.editors.set(7,node(7,mode));await s.openEditInbound({mutation_revision:'a'.repeat(64),id:7});assert.equal(s.newInbound.routing_mode,mode);
  await s.saveInbound();assert.equal(h.writes.at(-1).body.routing_mode,mode);
  assert.equal(h.writes.at(-1).method,'PUT');assert.equal(h.writes.at(-1).url,'/api/inbounds/7');
  assert.equal('routing_mode' in h.writes.at(-1).body.profile,false);
- await s.openEditInbound({id:7});assert.equal(s.newInbound.routing_mode,mode);s.closeInboundEditor();
+ await s.openEditInbound({mutation_revision:'a'.repeat(64),id:7});assert.equal(s.newInbound.routing_mode,mode);s.closeInboundEditor();
 }
 const old=node(8);delete old.routing_mode;h.editors.set(8,old);
-await s.openEditInbound({id:8});assert.equal(s.newInbound.routing_mode,null);await s.saveInbound();
+await s.openEditInbound({mutation_revision:'a'.repeat(64),id:8});assert.equal(s.newInbound.routing_mode,null);await s.saveInbound();
 assert.equal('routing_mode' in h.writes.at(-1).body,false);
-await s.openEditInbound({id:8,routing_mode:'relay'});assert.equal(s.newInbound.routing_mode,null);
+await s.openEditInbound({mutation_revision:'a'.repeat(64),id:8,routing_mode:'relay'});assert.equal(s.newInbound.routing_mode,null);
 await s.saveInbound();assert.equal('routing_mode' in h.writes.at(-1).body,false);
-await s.openEditInbound({id:8,routing_mode:'relay'});s.newInbound.routing_mode='direct';
+await s.openEditInbound({mutation_revision:'a'.repeat(64),id:8,routing_mode:'relay'});s.newInbound.routing_mode='direct';
 await s.saveInbound();assert.equal(h.writes.at(-1).body.routing_mode,'direct');
-h.editors.set(8,{...old,routing_mode:null});await s.openEditInbound({id:8,routing_mode:'relay'});
+h.editors.set(8,{...old,routing_mode:null});await s.openEditInbound({mutation_revision:'a'.repeat(64),id:8,routing_mode:'relay'});
 assert.equal(s.newInbound.routing_mode,null);await s.saveInbound();assert.equal('routing_mode' in h.writes.at(-1).body,false);
 ''')
 
@@ -99,18 +99,18 @@ assert.match(s.inboundRoutingHint.value,/UDP/);s.newInbound.routing_mode='direct
         self.run_js(r'''
 const h=harness(),s=h.state;let resolveFirst,resolveSecond;
 h.held.set(1,new Promise(r=>resolveFirst=r));h.held.set(2,new Promise(r=>resolveSecond=r));
-const first=s.openEditInbound({id:1}),second=s.openEditInbound({id:2});
+const first=s.openEditInbound({mutation_revision:'a'.repeat(64),id:1}),second=s.openEditInbound({mutation_revision:'a'.repeat(64),id:2});
 resolveSecond({data:node(2,'relay')});await second;assert.equal(s.editingInboundId.value,2);
 resolveFirst({data:node(1,'direct')});await first;assert.equal(s.editingInboundId.value,2);assert.equal(s.newInbound.routing_mode,'relay');
-let resolveLate;h.held.set(3,new Promise(r=>resolveLate=r));const late=s.openEditInbound({id:3});
+let resolveLate;h.held.set(3,new Promise(r=>resolveLate=r));const late=s.openEditInbound({mutation_revision:'a'.repeat(64),id:3});
 s.closeInboundEditor();resolveLate({data:node(3,'direct')});await late;assert.equal(s.showAddInbound.value,false);
 h.rows([{...node(4,'relay'),routing_status:{state:'applied',applied_effective_mode:'relay',policy_identity:'b'.repeat(64)}}]);
 await s.fetchInbounds();assert.match(s.inboundAppliedRouting(s.inbounds.value[0]),/已应用中转/);
 h.failRead(Error('offline'));await s.fetchInbounds();assert.match(s.inboundAppliedRouting(s.inbounds.value[0]),/未确认/);
-h.editors.set(5,node(5,'relay'));await s.openEditInbound({id:5});s.newInbound.profile.reality_uuid='synthetic-secret';
+h.editors.set(5,node(5,'relay'));await s.openEditInbound({mutation_revision:'a'.repeat(64),id:5});s.newInbound.profile.reality_uuid='synthetic-secret';
 await h.expire();assert.equal(s.showAddInbound.value,false);assert.equal(s.newInbound.profile.reality_uuid,'');
 assert.equal(s.inbounds.value.length,0);assert.deepEqual(h.redirects,['/login']);
-await s.openEditInbound({id:5});assert.equal(s.showAddInbound.value,false);
+await s.openEditInbound({mutation_revision:'a'.repeat(64),id:5});assert.equal(s.showAddInbound.value,false);
 ''')
 
     def test_duplicate_save_saved_only_failure_and_page_exit_do_not_claim_applied(self):
@@ -143,7 +143,7 @@ h.failDelete({response:{status:409,data:{detail:{saved:true,applied:false,messag
 await s.deleteInbound(selected);
 assert.deepEqual(clone(s.inbounds.value).map(row=>row.id),[2]);
 assert.match(s.inboundAppliedRouting(s.inbounds.value[0]),/待应用/);
-assert.equal(h.writes.length,1);assert.deepEqual(h.writes[0],{method:'DELETE',url:'/api/inbounds/1'});
+assert.equal(h.writes.length,1);assert.deepEqual(h.writes[0],{method:'POST',url:'/api/inbounds/1/delete',body:{expected_instance_revision:'a'.repeat(64)}});
 assert.equal(h.reads.filter(url=>url==='/api/inbounds').length,2);
 assert.equal(h.reads.filter(url=>url==='/api/cores/status').length,1);
 assert.equal(h.messages.filter(v=>v[0]==='success').length,0);assert.match(h.messages.at(-1)[1],/节点删除已保存，但运行配置未更新，旧入口可能仍可用/);

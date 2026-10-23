@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from dataclasses import dataclass
+import hmac
 import re
 import secrets
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import HTTPException
+from sqlalchemy import text
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from app.models.database import Inbound
@@ -16,6 +20,7 @@ from app.services.grpc_profile import is_grpc_transport
 from app.services.hysteria2_profile import password_value
 from app.services import tuic_profile, reality_profile
 from app.services.node_selection_revision import node_selection_revision
+from app.services.inbound_instance_revision import INSTANCE_CHANGED, REVISION_RE, mutation_revision
 
 SUPPORTED_CORES = {"xray", "sing-box"}
 XRAY_PROTOCOLS = {"vless", "vmess", "trojan", "shadowsocks"}
@@ -185,6 +190,7 @@ def to_dict(item: Inbound) -> dict:
     tls = stream.get("tls")
     return {
         "id": item.id,
+        "mutation_revision": mutation_revision(item),
         "user_id": item.user_id,
         "core": item.core or "xray",
         "up": item.up or 0,
@@ -227,6 +233,7 @@ def editor_dict(item: Inbound) -> dict:
     first=users[0] if users else {}
     result={
         "id":item.id,
+        "mutation_revision":mutation_revision(item),
         "core":item.core or "xray",
         "protocol":item.protocol,
         "routing_mode":_routing_mode(item.routing_mode),
@@ -422,6 +429,14 @@ def _update_inbound(db: Session, inbound_id: int, payload: dict) -> Inbound:
     # API handlers may have loaded this identity before waiting for our lock.
     # Refresh so omitted fields do not overwrite a concurrent committed edit.
     db.refresh(item)
+    _stage_inbound_update(db, item, payload)
+    _commit_inbound_change(db)
+    db.refresh(item)
+    return item
+
+
+def _stage_inbound_update(db: Session, item: Inbound, payload: dict) -> None:
+    """Validate and stage only; callers own the read/commit/refresh boundary."""
     routing_mode = _routing_mode(payload["routing_mode"] if "routing_mode" in payload else item.routing_mode)
     core, protocol, port, settings, stream_settings = _prepared_payload(
         payload,
@@ -431,7 +446,7 @@ def _update_inbound(db: Session, inbound_id: int, payload: dict) -> Inbound:
     duplicate = (
         db.query(Inbound)
         .filter(
-            Inbound.id != inbound_id,
+            Inbound.id != item.id,
             Inbound.port == port,
             Inbound.enable.is_(True),
         )
@@ -453,10 +468,6 @@ def _update_inbound(db: Session, inbound_id: int, payload: dict) -> Inbound:
     item.settings = settings
     item.stream_settings = stream_settings
     item.tag = payload.get("tag", item.tag) or f"{core}-{protocol}-{port}"
-
-    _commit_inbound_change(db)
-    db.refresh(item)
-    return item
 
 
 def _delete_inbound(db: Session, inbound_id: int) -> str:
@@ -504,3 +515,57 @@ def update_inbound(db: Session, inbound_id: int, payload: dict) -> Inbound:
 
 def delete_inbound(db: Session, inbound_id: int) -> str:
     return _mutate_inbound(db, _delete_inbound, inbound_id)
+
+
+@dataclass(frozen=True)
+class GuardedInboundUpdate:
+    """Detached values captured before commit, never a post-commit ORM read."""
+    core: str
+    inbound_json: str
+    certificate_plan: tuple[bool, str | None, str | None]
+
+
+def _guarded_inbound_change(db: Session, inbound_id: int, expected: str, operation):
+    from app.services.core_manager import core_manager
+    if type(expected) is not str or not REVISION_RE.fullmatch(expected):
+        raise HTTPException(422, "Invalid inbound instance revision")
+    with core_manager.lock:
+        # This path must own its transaction. In particular, do not roll back
+        # pending caller work or a transaction owned by a bound Connection.
+        bind = db.get_bind()
+        if (db.in_transaction() or db.new or db.dirty or db.deleted
+                or isinstance(bind, Connection) and bind.in_transaction()):
+            raise RuntimeError("Guarded inbound mutation requires a pristine database session")
+        try:
+            db.execute(text("BEGIN IMMEDIATE"))
+            item = db.query(Inbound).populate_existing().filter(Inbound.id == inbound_id).first()
+            current = mutation_revision(item)
+            if current is None or not hmac.compare_digest(expected, current):
+                raise HTTPException(409, INSTANCE_CHANGED)
+            result = operation(item)
+            _commit_inbound_change(db)
+            # No refresh or expired ORM field access after commit: another
+            # process may already have replaced the row using the same ID.
+            return result
+        except Exception:
+            db.rollback()
+            raise
+
+
+def update_inbound_if_instance(db: Session, inbound_id: int, expected: str,
+                              prepare: Callable[[Inbound], tuple[dict, tuple]]) -> GuardedInboundUpdate:
+    def stage(item):
+        # Certificate/profile preparation is read-only and uses this checked
+        # model. Certificate writes and runtime apply belong after we return.
+        payload, certificate_plan = prepare(item)
+        _stage_inbound_update(db, item, payload)
+        return GuardedInboundUpdate(item.core or "xray", json.dumps(to_dict(item)), certificate_plan)
+    return _guarded_inbound_change(db, inbound_id, expected, stage)
+
+
+def delete_inbound_if_instance(db: Session, inbound_id: int, expected: str) -> str:
+    def stage(item):
+        core = item.core or "xray"
+        db.delete(item)
+        return core
+    return _guarded_inbound_change(db, inbound_id, expected, stage)

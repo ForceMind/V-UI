@@ -1,5 +1,15 @@
 # 当前开发与接手入口
 
+## 2026-10-23 当前独立纠错：陈旧编辑/删除的实例意图
+
+[PR65](https://github.com/ForceMind/V-UI/pull/65) 已正常合并至 `b6a4ed5cc8d8b8dce771cbdb59e134d48b7c3855` / tree `7eecd1d6305f6d5a5a2c75c54fe5899653cc6c51`，准确候选与自己的主线各八组 / 11 jobs / 126 steps、四目标全部首次通过，主线于 20:06 UTC 独立收口。此前 [PR64](https://github.com/ForceMind/V-UI/pull/64) 的 `efbbdbe5` 主线也已独立通过；历史初始失败与旧候选终态仍保留，不继承绿灯。
+
+[PR66](https://github.com/ForceMind/V-UI/pull/66) 六处保存禁用修复经独审、本地 2102 项（1889 通过 / 213 skip）、准确候选 `6b8e9437ce8911610edc89c9eb2750bf672152e5` 的八组 / 11 jobs / 126 steps、四目标、最新完整 review 和 fresh 合并门禁，于 20:11 UTC 正常合并至 `0f4c9bb714dfb9c04ef4c70b80ff4752925c9beb` / tree `e792cdad6c0f29859055eb7bd3ce25baacc6a1eb`。自己的主线 CI 尚独立进行；实际 Chromium 控件场景通过，但其延迟 422/200 回复是合成的，不称新增 API/核心应用资格。
+
+本次从该实际新主线独立修复旧编辑器/删除确认仅凭整数 ID 作用于自然删建替代实例的问题。未改原控制器 + 真实 API 函数/临时 SQLite 已复现错误修改和删除，未使用真实数据，不称发生实际泄露。新增同一行/编辑快照的非秘密实例摘要、严格条件 PUT 和不回退的专用 guarded-delete POST；比较、校验和 DB 写入同一 `BEGIN IMMEDIATE`，拒绝早于证书准备和核心应用。旧 API 省略条件仍兼容且明确不受保护，新 UI 对旧后端失败关闭。详见[实例条件 API 与兼容边界](API.md#已有节点的实例条件2026-10-23-修正候选)。
+
+独审要求保留调用者未提交事务、提交前冻结结果，不以提交后的 ORM 刷新读取替代节点。既有证书/runtime 提交后边界不变，不声称整个流程跨进程原子化；失败保留草稿，明确刷新重开/重新确认，不能自动采用替代实例。本候选须组合树完整普通套件、独立实现审查、准确候选八组/四目标/最新 review 和正常合并后的独立主线验收。PR66 新主线也须先单独收口。没有 DB 迁移、真实数据/凭据、权限、私有监听、Tailscale、Mac、UDP D2、发布或部署操作。下方按日期保留历史，不表示持续开发暂停。
+
 ## 2026-10-23 当前独立候选：节点编辑器保存期间锁定所有已有控件
 
 [PR64](https://github.com/ForceMind/V-UI/pull/64) 的准确 master `efbbdbe5fe7ba338eaa70083c8844605c53cc50f` 已于 19:38:49 UTC 独立完成八组 / 11 jobs / 126 steps 及四目标，全部首次成功。随后 [PR65](https://github.com/ForceMind/V-UI/pull/65) 组合候选 `8cfe202b04b4403bb143b10231ce593beab19aa9` / tree `7eecd1d6305f6d5a5a2c75c54fe5899653cc6c51` 经独审、冻结本地 2100 项、准确八组 / 11 jobs / 126 steps 与四目标、真实陈旧页面条件创建浏览器及最新完整 review 无发现后，正常合并至 `b6a4ed5cc8d8b8dce771cbdb59e134d48b7c3855`。该新主线 CI 仍独立进行，不能借候选同树资格；旧 `1b615767` 已全终态通过并独立留存，不替代组合验收。

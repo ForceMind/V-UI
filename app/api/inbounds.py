@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -9,6 +10,7 @@ from app.api.cores import apply_checked
 from app.services.inbound_service import (
     create_inbound,
     delete_inbound,
+    delete_inbound_if_instance,
     editor_dict,
     get_inbound,
     list_inbounds,
@@ -16,6 +18,7 @@ from app.services.inbound_service import (
     routing_snapshot,
     to_dict,
     update_inbound,
+    update_inbound_if_instance,
 )
 from app.services.protocol_profiles import profile_catalog
 from app.services.reality_profile import has_reality
@@ -51,6 +54,11 @@ class InboundUpdatePayload(BaseModel):
     tag: str | None = None
     certificate_id: str | None = None
     routing_mode: Literal["inherit", "direct", "relay"] | None = None
+    # Only omission selects legacy current-ID behavior. An explicit null is
+    # invalid, and old servers' extra=forbid rejects this new JSON condition.
+    expected_instance_revision: str = Field(default=None, strict=True, min_length=64,
+        max_length=64, pattern=r"^[0-9a-f]{64}$",
+        description="Optional displayed node-instance revision; explicit null is invalid")
 
     @field_validator("routing_mode", mode="before")
     @classmethod
@@ -58,6 +66,12 @@ class InboundUpdatePayload(BaseModel):
         if value is None:
             raise ValueError("routing_mode cannot be null")
         return value
+
+
+class InboundDeletePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_instance_revision: str = Field(strict=True, min_length=64, max_length=64,
+        pattern=r"^[0-9a-f]{64}$")
 
 
 def _managed_certificate(profile: dict | None, certificate_id: str, core: str, protocol: str):
@@ -123,14 +137,9 @@ def add_inbound(payload: InboundPayload, db: Session = Depends(get_db)):
     return {"message": "Inbound added", "inbound": to_dict(item), "core": core_status}
 
 
-@router.put("/{inbound_id}")
-def edit_inbound(
-    inbound_id: int,
-    payload: InboundUpdatePayload,
-    db: Session = Depends(get_db),
-):
-    item = get_inbound(db, inbound_id)
-    data = payload.model_dump(exclude_unset=True)
+def _prepare_inbound_edit(item, data: dict) -> tuple[dict, tuple[bool, str | None, str | None]]:
+    """Read-only preparation; guarded callers already checked this model."""
+    data = dict(data)
     profile = data.get("profile")
     if (data.get("certificate_id") and has_reality(item.stream_settings)
             and (not isinstance(profile, dict) or profile.get("security") != "tls")):
@@ -150,7 +159,7 @@ def edit_inbound(
         from app.certificates.manager import get_manager
         from app.api.certificates import perform
         certificate_manager = get_manager()
-        target = "inbound:" + str(inbound_id)
+        target = "inbound:" + str(item.id)
         previous_certificate = certificate_manager.binding(target)
         if certificate_id:
             data["profile"] = _managed_certificate(
@@ -180,23 +189,55 @@ def edit_inbound(
                     "otherwise the node would lose automatic renewal while still using old material",
                 )
 
-    updated = update_inbound(db, inbound_id, data)
+    return data, (certificate_changed, certificate_id, previous_certificate)
+
+
+def _finish_inbound_edit(inbound_id: int, core: str, certificate_plan: tuple):
+    # Keep the established post-commit boundary. Certificate methods have
+    # their own write transactions and acquire binding_lock before core.lock;
+    # neither the guarded SQLite transaction nor core.lock may span this work.
+    certificate_changed, certificate_id, previous_certificate = certificate_plan
     # The desired profile is now saved. Remove renewal before applying so a
     # failed core apply cannot leave this saved non-TLS/manual node bound.
     if certificate_changed and not certificate_id and previous_certificate:
+        from app.certificates.manager import get_manager
         from app.api.certificates import perform
-        perform(lambda: certificate_manager.unbind("inbound:" + str(inbound_id)))
-    result = apply_checked(updated.core)
+        perform(lambda: get_manager().unbind("inbound:" + str(inbound_id)))
+    result = apply_checked(core)
 
-    if certificate_changed:
+    if certificate_changed and certificate_id:
+        from app.certificates.manager import get_manager
         from app.api.certificates import perform
         target = "inbound:" + str(inbound_id)
-        if certificate_id:
-            perform(lambda: certificate_manager.bind(certificate_id, target))
+        perform(lambda: get_manager().bind(certificate_id, target))
+    return result
+
+
+@router.put("/{inbound_id}")
+def edit_inbound(
+    inbound_id: int,
+    payload: InboundUpdatePayload,
+    db: Session = Depends(get_db),
+):
+    data = payload.model_dump(exclude_unset=True)
+    guarded = "expected_instance_revision" in data
+    expected = data.pop("expected_instance_revision", None)
+    if guarded:
+        updated = update_inbound_if_instance(db, inbound_id, expected,
+            lambda item: _prepare_inbound_edit(item, data))
+        result = _finish_inbound_edit(inbound_id, updated.core, updated.certificate_plan)
+        value = json.loads(updated.inbound_json)
+    else:
+        # Preserve legacy callers' current-ID behavior and transaction shape.
+        item = get_inbound(db, inbound_id)
+        data, certificate_plan = _prepare_inbound_edit(item, data)
+        updated = update_inbound(db, inbound_id, data)
+        result = _finish_inbound_edit(inbound_id, updated.core, certificate_plan)
+        value = to_dict(updated)
 
     return {
         "message": "Inbound updated",
-        "inbound": to_dict(updated),
+        "inbound": value,
         "core": result,
     }
 
@@ -204,6 +245,20 @@ def edit_inbound(
 @router.delete("/{inbound_id}")
 def remove_inbound(inbound_id: int, db: Session = Depends(get_db)):
     core = delete_inbound(db, inbound_id)
+    try:
+        from app.certificates.manager import get_manager
+        get_manager().unbind("inbound:" + str(inbound_id))
+    except Exception:
+        pass
+    return {"message": "Inbound deleted", "core": apply_checked(core)}
+
+
+@router.post("/{inbound_id}/delete")
+def remove_inbound_guarded(inbound_id: int, payload: InboundDeletePayload,
+                           db: Session = Depends(get_db)):
+    # A dedicated route fails closed on older servers; an optional DELETE
+    # header/body could be silently ignored there. Never fall back to DELETE.
+    core = delete_inbound_if_instance(db, inbound_id, payload.expected_instance_revision)
     try:
         from app.certificates.manager import get_manager
         get_manager().unbind("inbound:" + str(inbound_id))

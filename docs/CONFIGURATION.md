@@ -194,3 +194,9 @@ URI/Base64 的 `type=ws`、path、可选 Host、TLS/SNI、ALPN 和 fingerprint�
 刻画夹具仅使用 Xray 26.3.27 服务端与 Mihomo 1.19.32 原生 YAML/真实 URI provider、假 UUID、空 flow、普通验证 TLS、显式 `stream-one`/h2/Chrome/SNI/Host/path、HTTP/TCP。sing-box 1.14.2 无 XHTTP transport；不要配置成 sing-box JSON 后将 parser 拒绝当作环境故障。Mihomo URI importer 硬编码 `udp=true`，也不能声称 URI 禁用应用 UDP。
 
 HTTPUpgrade 的原生 Mihomo 表达必须是 `network:ws` 与 `ws-opts.v2ray-http-upgrade:true`；固定 URI `type=httpupgrade` 缺少此转换，可能被当作普通 TCP/TLS。它与普通 WebSocket、XHTTP 均是不同协议，不能用改名或 provider override 声称原 URI 无损。此处是限制说明，不是上线配置教程；完整来源和待验收项目见[XHTTP 刻画边界](XHTTP_CHARACTERIZATION_048.md)。
+
+## 节点编辑与删除的陈旧页面保护（2026-10-23 修正候选）
+
+新版节点页面保存和删除会核对正在操作的实例，而不只看整数 ID。若另一页面已删建替代节点，旧编辑器/旧删除确认会被拒绝；编辑草稿保留，不会自动应用到替代对象。请先保留需要的草稿内容，再明确取消、刷新节点并重新打开，或重新确认当前节点。只有普通备注/端口/UUID/密码编辑不会变成另一实例；本保护不是所有字段的冲突合并。
+
+升级后请重载已经打开的页面。缺少实例信息或新 UI 连接旧服务时会停止写入，不会退回不带条件的旧接口；旧管理客户端仍需自行采用[实例条件 API](API.md#已有节点的实例条件2026-10-23-修正候选)。没有部署、迁移用户数据或启用新网络权限操作。保存配置和核心应用仍是两个结果，不以保存成功证明节点连通。

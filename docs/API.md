@@ -15,7 +15,8 @@ HTTP接口以`/api`开头。`/docs`和`/openapi.json`也要求管理员登录，
 | GET/POST `/api/inbounds` | 列出/创建；可传certificate_id选择正式托管证书 |
 | GET `/api/inbounds/{id}/editor` | 返回可视化编辑 profile、绑定状态和“是否已有凭据”；不返回 UUID/密码/Reality 私钥/Obfs 密码本体 |
 | PUT `/api/inbounds/{id}` | 只在原 core/protocol 内更新备注、端口、启停、profile、证书绑定；不做隐式协议迁移 |
-| DELETE `/api/inbounds/{id}` | 删除节点并清理其托管证书绑定 |
+| POST `/api/inbounds/{id}/delete` | 严格必填实例条件的删除入口；新版 UI 使用，不回退旧 DELETE |
+| DELETE `/api/inbounds/{id}` | 兼容旧当前-ID 删除语义，不具备陈旧实例意图保护 |
 | GET `/api/inbounds/profiles` | 草稿表单能力目录，不是端到端验收证明 |
 | GET `/api/cores/status` | 查询运行状态和期望/生效差异 |
 | POST `/api/cores/{core}/apply` | 生成并检查候选，具体生效语义依schema |
@@ -24,6 +25,19 @@ HTTP接口以`/api`开头。`/docs`和`/openapi.json`也要求管理员登录，
 旧 Xray/sing-box 接口仍经过同一个鉴权边界。普通 GET 列表、POST 创建和 PUT 更新响应现在采用允许列表摘要：节点 id/core/protocol/remark/port/enable、流量/到期/tag/user_id 等元数据，`credentials`（user_count/has_uuid/has_password/has_obfs_password）和 `managed_certificate_eligible` 布尔值。**响应不再包含 `settings` / `stream_settings`，也不返回 UUID、认证/obfs 密码、REALITY 私钥、未知配置秘密或服务器证书/密钥路径。** 这同时适用于 `/api/inbounds`、`/api/xray/inbounds` 和 `/api/singbox/inbounds` 的正常列表/创建/更新响应，是对依赖旧原始响应的管理客户端的有意破坏性收窄；原始创建/旧接口更新的请求结构未因该响应修复改变；v0.4.7 REALITY 原始输入另受下述严格校验。
 
 视觉编辑继续使用鉴权后的 `/api/inbounds/{id}/editor` 专用模型。它不回传 UUID/密码/REALITY 私钥/obfs 密码本体；为保留既有手工证书编辑能力，可回传特权管理员需要的证书/密钥路径字符串，但从不返回密钥文件内容。证书卡只使用 `managed_certificate_eligible`，不再读取原始 TLS 配置。该标志是保守的界面筛选提示，不替代绑定接口授权；含 `reality` 键的导入配置（即使为空对象）不进入证书选项，v0.4.7 绑定接口在写入 binding 前亦拒绝 REALITY。内部数据库、核心应用、受授权的客户端导出与停机备份独立于普通响应，不做脱敏写回；客户端导出仍包含必要客户端凭据，但永不包含服务器私钥或材料路径。保存配置后核心应用失败会返回“已保存但未应用”的冲突状态，不能把数据库写入当作连通成功。
+
+## 已有节点的实例条件（2026-10-23 修正候选）
+
+普通节点摘要及 `/editor` 增加允许列表字段 `mutation_revision`：同一模型的正整数 ID 与合法私有实例身份经域隔离 SHA-256 得到的 64 位小写 hex。它不是秘密、授权令牌、协议凭据、完整内容 ETag 或单调版本号；不返回原始 `instance_id`。损坏或缺失私有身份返回 null，不能产生可用条件。同实例 UUID/密码、端口、备注等编辑，以及其他节点增删都不改变它；相同 ID 的不同实例会改变。完整一致恢复可恢复相同摘要，原恢复会话/订阅撤销规则不变。
+
+- `PUT /api/inbounds/{id}` 接受严格可选 JSON 字段 `expected_instance_revision`。只有省略保持旧当前-ID 语义；显式 null、空值、错误类型/格式为 422。新版 UI 编辑必传，不剥掉字段重试。
+- `POST /api/inbounds/{id}/delete` 的 JSON 必须恰含 `expected_instance_revision`，缺失/额外字段/坏类型或格式为 422。新版 UI 只用这个入口，不在 404/405/422 或其他错误后回退旧 DELETE。
+- 新版 UI 从实际显示行和编辑响应核对同一实例，编辑条件只随该编辑快照保存；删除在确认前捕获 ID 和条件。节点刷新不替换已打开草稿的条件。缺少合法元数据时停止操作，要求刷新或重载。
+- 服务端在独立 SQLite `BEGIN IMMEDIATE` 写事务中先新鲜读取并比较，再执行既有校验和写入。目标已消失、身份不合法或不相符时为 409，`detail` 为 `Inbound instance changed; refresh nodes and reopen or confirm again`。这是未保存冲突，早于配置校验、证书准备/绑定及核心应用；不含 `saved:true`。UI 保留编辑草稿，必须明确刷新并重开/重新确认，不自动采用替代实例或重试。
+
+兼容范围必须明确：旧 DELETE、未带条件的 PUT、旧 core 专用接口及升级前已打开的旧页面仍保留原语义，重载新版 UI 后才获得此保护。新 UI 对旧后端失败关闭：旧 PUT 的禁止额外字段规则拒绝新 JSON 条件，而旧后端没有新的 POST 删除路由；已有全库存 `X-VUI-Node-Revision` 不能当作新删除语义的能力声明。
+
+本修正限定陈旧意图的数据库修改，不是所有配置字段的并发合并，也不把数据库提交、后续证书操作与核心应用变成一个跨进程原子事务。原有成功提交后的证书/runtime 边界保留，仍可能返回真正的 `saved:true/applied:false`；不声称后提交阶段的所有并发替代竞争均被此条件解决。不改数据库结构、普通导出/订阅绑定、空凭据保留、鉴权、Host/Origin、版本或固定核心。
 
 ## 分流
 
