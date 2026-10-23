@@ -12,7 +12,7 @@ class InboundEditorFrontendTests(unittest.TestCase):
         script = r'''
 const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
 let setup; const writes=[]; const clone=v=>JSON.parse(JSON.stringify(v));
-const stored={id:47,core:'sing-box',protocol:'vless',remark:'reality',port:10447,enable:true,certificate_id:null,
+const stored={mutation_revision:'a'.repeat(64),id:47,core:'sing-box',protocol:'vless',remark:'reality',port:10447,enable:true,certificate_id:null,
  credentials:{has_uuid:true},profile:{security:'reality',transport:'direct',flow:'xtls-rprx-vision',
  reality_target:'127.0.0.1:19445',reality_server_name:'reference.example.test',client_fingerprint:'chrome',
  skip_cert_verify:false,reality_uuid:'',reality_short_id:'',reality_uuid_set:true,reality_short_id_set:true,reality_private_key_set:true}};
@@ -34,16 +34,16 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js','utf8'),sandbox);
  p.reality_target='127.0.0.1:19445';p.reality_server_name='reference.example.test';await state.saveInbound();
  assert.deepEqual(Object.keys(writes[0].body.profile).sort(),['security','transport','flow','reality_target','reality_server_name','reality_uuid','reality_short_id','client_fingerprint','skip_cert_verify'].sort());
  assert.equal(writes[0].body.profile.reality_uuid,'');assert.equal(writes[0].body.profile.reality_short_id,'');
- await state.openEditInbound({id:47});assert.equal(p.reality_uuid,'');assert.equal(p.reality_short_id,'');
+ await state.openEditInbound({id:47,mutation_revision:stored.mutation_revision});assert.equal(p.reality_uuid,'');assert.equal(p.reality_short_id,'');
  assert.equal(p.reality_private_key_set,true);assert.equal(p.reality_short_id_set,true);
- p.reality_short_id='cancelled';state.showAddInbound.value=false;await state.openEditInbound({id:47});
+ p.reality_short_id='cancelled';state.showAddInbound.value=false;await state.openEditInbound({id:47,mutation_revision:stored.mutation_revision});
  assert.equal(p.reality_short_id,'');assert.equal(writes.length,1);
  await state.saveInbound();assert.equal(writes[1].body.profile.reality_uuid,'');assert.equal(writes[1].body.profile.reality_short_id,'');
- await state.openEditInbound({id:47});p.reality_uuid='22222222-2222-4222-8222-222222222222';await state.saveInbound();
+ await state.openEditInbound({id:47,mutation_revision:stored.mutation_revision});p.reality_uuid='22222222-2222-4222-8222-222222222222';await state.saveInbound();
  assert.equal(writes[2].body.profile.reality_short_id,'');
- await state.openEditInbound({id:47});p.reality_short_id='fedcba9876543210';await state.saveInbound();
+ await state.openEditInbound({id:47,mutation_revision:stored.mutation_revision});p.reality_short_id='fedcba9876543210';await state.saveInbound();
  assert.equal(writes[3].body.profile.reality_uuid,'');
- await state.openEditInbound({id:47});p.security='tls';state.onSecurityChanged();assert.equal(p.flow,'');
+ await state.openEditInbound({id:47,mutation_revision:stored.mutation_revision});p.security='tls';state.onSecurityChanged();assert.equal(p.flow,'');
  await state.saveInbound();assert.equal('reality_uuid' in writes[4].body.profile,false);
  for(const w of writes){assert.equal('reality_private_key' in w.body.profile,false);assert.equal('settings' in w.body,false)}
  const html=fs.readFileSync('web/index.html','utf8');
@@ -61,7 +61,7 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js','utf8'),sandbox);
 const vm = require('node:vm'), fs = require('node:fs'), assert = require('node:assert/strict');
 let setup;
 const submitted = [], certificate = 'a'.repeat(32);
-const stored = {
+const stored = {mutation_revision:'a'.repeat(64),
   id: 7, core: 'sing-box', protocol: 'vless', remark: 'ws-node', port: 10443, enable: true,
   certificate_id: certificate, credentials: {has_uuid: true, has_password: false},
   profile: {security: 'tls', transport: 'ws', path: '/vless-ws', host: 'cdn.example.test',
@@ -104,7 +104,7 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
   assert.equal(submitted[0].body.certificate_id, certificate);
   assert.equal(state.showAddInbound.value, false);
 
-  await state.openEditInbound({id: 7});
+  await state.openEditInbound({id:7,mutation_revision:stored.mutation_revision});
   assert.equal(state.newInbound.profile.transport, 'ws');
   assert.equal(state.newInbound.profile.path, '/vless-ws');
   assert.equal(state.newInbound.profile.host, 'cdn.example.test');
@@ -118,7 +118,7 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
   state.newInbound.profile.path = '/discarded';
   state.newInbound.profile.host = 'discarded.example.test';
   state.showAddInbound.value = false;
-  await state.openEditInbound({id: 7});
+  await state.openEditInbound({id:7,mutation_revision:stored.mutation_revision});
   assert.equal(submitted.length, 1);
   assert.equal(state.newInbound.profile.path, '/vless-ws');
   assert.equal(state.newInbound.profile.host, 'cdn.example.test');
@@ -173,7 +173,7 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
 const vm = require('node:vm'), fs = require('node:fs'), assert = require('node:assert/strict');
 let setup;
 const submitted = [], certificate = 'a'.repeat(32);
-const stored = {
+const stored = {mutation_revision:'a'.repeat(64),
   id: 7, core: 'sing-box', protocol: 'vless', remark: 'grpc-node', port: 10443, enable: true,
   certificate_id: certificate, credentials: {has_uuid: true, has_password: false},
   profile: {security: 'tls', transport: 'grpc', service_name: 'VUI.Service_1',
@@ -215,7 +215,7 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
   assert.equal(submitted[0].body.certificate_id, certificate);
   assert.equal(state.showAddInbound.value, false);
 
-  await state.openEditInbound({id: 7});
+  await state.openEditInbound({id:7,mutation_revision:stored.mutation_revision});
   assert.equal(state.newInbound.profile.transport, 'grpc');
   assert.equal(state.newInbound.profile.service_name, 'VUI.Service_1');
   assert.equal(state.newInbound.profile.server_name, 'vpn.example.test');
@@ -227,7 +227,7 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
   // Reopening a dismissed draft must reload persisted values, without a write.
   state.newInbound.profile.service_name = 'Discarded.Service';
   state.showAddInbound.value = false;
-  await state.openEditInbound({id: 7});
+  await state.openEditInbound({id:7,mutation_revision:stored.mutation_revision});
   assert.equal(submitted.length, 1);
   assert.equal(state.newInbound.profile.service_name, 'VUI.Service_1');
   state.newInbound.profile.service_name = 'VUI.Edited-2';
@@ -251,7 +251,7 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
   for (const value of [null, false, 0, [], {}, ' ', ' leading', 'trailing ']) {
     stored.profile.service_name = value;
     stored.profile.flow = value;
-    await state.openEditInbound({id: 7});
+    await state.openEditInbound({id:7,mutation_revision:stored.mutation_revision});
     await state.saveInbound();
     const body = submitted[submitted.length - 1].body;
     assert.deepEqual(body.profile.service_name, value);
@@ -288,6 +288,7 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
         script = r'''
 const vm = require('node:vm'), fs = require('node:fs'), assert = require('node:assert/strict');
 let setup, submitted;
+const stored = {id:7,mutation_revision:'a'.repeat(64),core:'xray',protocol:'vless',port:10443,enable:true,profile:{}};
 const app = {component() {}, use() {}, mount() {}};
 const sandbox = {document: {getElementById() {return null;}},
   addEventListener() {}, location: {hash: ''},
@@ -296,7 +297,7 @@ const sandbox = {document: {getElementById() {return null;}},
   ElementPlus: {ElMessage: {success() {}, error(message) {throw Error(message);}}, ElMessageBox: {}},
   ElementPlusIconsVue: {},
   axios: {defaults: {headers: {common: {}}}, interceptors: {response: {use() {}}},
-    async get() {return {data: []};},
+    async get(url) {return {data: url.endsWith('/editor') ? stored : []};},
     async put(url, body) {submitted = body; return {data: {}};},
     async post(url, body) {submitted = body; return {data: {}};}}
 };
@@ -304,8 +305,8 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
 (async () => {
   for (const editing of [null, 7]) for (const security of ['none', 'reality']) {
     const state = setup();
-    state.showAddInbound.value = true;
-    state.editingInboundId.value = editing;
+    if (editing) await state.openEditInbound(stored);
+    else await state.openAddInbound();
     state.newInbound.certificate_id = 'a'.repeat(32);
     state.newInbound.profile.security = security;
     await state.saveInbound();
@@ -313,7 +314,7 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
     assert.equal(submitted.certificate_id, null, `hidden certificate submitted for ${security}`);
   }
   const state = setup();
-  state.editingInboundId.value = 7;
+  await state.openEditInbound(stored);
   state.newInbound.certificate_id = 'a'.repeat(32);
   state.newInbound.profile.security = 'none';
   state.newInbound.profile.certificate_path = '/managed/cert.pem';
@@ -336,7 +337,7 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
 const vm = require('node:vm'), fs = require('node:fs'), assert = require('node:assert/strict');
 let setup;
 const writes=[], clone=value=>JSON.parse(JSON.stringify(value));
-const stored={id:45,core:'sing-box',protocol:'hysteria2',port:10445,remark:'hy2',enable:true,
+const stored={mutation_revision:'a'.repeat(64),id:45,core:'sing-box',protocol:'hysteria2',port:10445,remark:'hy2',enable:true,
  certificate_id:'a'.repeat(32),credentials:{has_password:true},profile:{security:'tls',transport:'quic',
  server_name:'vpn.example.test',certificate_path:'/cert',key_path:'/key',client_fingerprint:'',
  skip_cert_verify:false,up_mbps:null,down_mbps:null,obfs_type:'',obfs_password:'',
@@ -360,14 +361,14 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js','utf8'),sandbox);
  assert.equal(p.hysteria2_password,'');assert.equal(p.hysteria2_password_set,false);
  p.server_name='vpn.example.test';state.newInbound.certificate_id=stored.certificate_id;
  await state.saveInbound();assert.equal(writes[0].body.profile.hysteria2_password,'');
- await state.openEditInbound({id:45});assert.equal(p.hysteria2_password,'');assert.equal(p.hysteria2_password_set,true);
+ await state.openEditInbound({id:45,mutation_revision:stored.mutation_revision});assert.equal(p.hysteria2_password,'');assert.equal(p.hysteria2_password_set,true);
  p.hysteria2_password='discarded';p.up_mbps=100;state.showAddInbound.value=false;
- await state.openEditInbound({id:45});assert.equal(writes.length,1);assert.equal(p.hysteria2_password,'');
+ await state.openEditInbound({id:45,mutation_revision:stored.mutation_revision});assert.equal(writes.length,1);assert.equal(p.hysteria2_password,'');
  assert.equal(p.up_mbps,null);assert.equal(p.client_fingerprint,'');
  await state.saveInbound();assert.equal(writes[1].url,'/api/inbounds/45');
  assert.equal(writes[1].body.profile.hysteria2_password,'');assert.equal(writes[1].body.certificate_id,stored.certificate_id);
  assert.equal('settings' in writes[1].body,false);assert.equal('stream_settings' in writes[1].body,false);
- await state.openEditInbound({id:45});p.hysteria2_password='explicit-replacement';await state.saveInbound();
+ await state.openEditInbound({id:45,mutation_revision:stored.mutation_revision});p.hysteria2_password='explicit-replacement';await state.saveInbound();
  assert.equal(writes[2].body.profile.hysteria2_password,'explicit-replacement');
  const html=fs.readFileSync('web/index.html','utf8');
  assert.ok(html.includes('v-model="newInbound.profile.hysteria2_password"'));
@@ -384,7 +385,7 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js','utf8'),sandbox);
 const vm = require('node:vm'), fs = require('node:fs'), assert = require('node:assert/strict');
 let setup;
 const writes=[], clone=value=>JSON.parse(JSON.stringify(value));
-const stored={id:45,core:'sing-box',protocol:'tuic',port:10445,remark:'tuic',enable:true,
+const stored={mutation_revision:'a'.repeat(64),id:45,core:'sing-box',protocol:'tuic',port:10445,remark:'tuic',enable:true,
  certificate_id:'a'.repeat(32),credentials:{has_password:true},profile:{security:'tls',transport:'quic',
  server_name:'vpn.example.test',certificate_path:'/cert',key_path:'/key',client_fingerprint:'',
  skip_cert_verify:false,up_mbps:null,down_mbps:null,obfs_type:'',obfs_password:'',
@@ -410,20 +411,20 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js','utf8'),sandbox);
  assert.equal(p.congestion_control,'cubic');assert.equal(p.udp_relay_mode,'native');assert.equal(p.zero_rtt_handshake,false);
  p.server_name='vpn.example.test';state.newInbound.certificate_id=stored.certificate_id;
  await state.saveInbound();assert.equal(writes[0].body.profile.tuic_password,'');
- await state.openEditInbound({id:45});assert.equal(p.tuic_password,'');assert.equal(p.tuic_password_set,true);
+ await state.openEditInbound({id:45,mutation_revision:stored.mutation_revision});assert.equal(p.tuic_password,'');assert.equal(p.tuic_password_set,true);
  p.tuic_uuid='discarded-uuid';p.tuic_password='discarded';p.up_mbps=100;state.showAddInbound.value=false;
- await state.openEditInbound({id:45});assert.equal(writes.length,1);assert.equal(p.tuic_password,'');
+ await state.openEditInbound({id:45,mutation_revision:stored.mutation_revision});assert.equal(writes.length,1);assert.equal(p.tuic_password,'');
  assert.equal(p.up_mbps,null);assert.equal(p.client_fingerprint,'');assert.equal(p.tuic_uuid,'');assert.equal(p.tuic_uuid_set,true);
  await state.saveInbound();assert.equal(writes[1].url,'/api/inbounds/45');
  assert.equal(writes[1].body.profile.tuic_password,'');assert.equal(writes[1].body.certificate_id,stored.certificate_id);
  assert.equal('settings' in writes[1].body,false);assert.equal('stream_settings' in writes[1].body,false);
- await state.openEditInbound({id:45});p.tuic_password='explicit-replacement';await state.saveInbound();
+ await state.openEditInbound({id:45,mutation_revision:stored.mutation_revision});p.tuic_password='explicit-replacement';await state.saveInbound();
  assert.equal(writes[2].body.profile.tuic_password,'explicit-replacement');
  const html=fs.readFileSync('web/index.html','utf8');
  assert.ok(html.includes('v-model="newInbound.profile.tuic_password"'));
  assert.ok(html.includes('留空保持当前 TUIC 密码'));assert.ok(html.includes('Mihomo 的 TUIC UDP 能力不能靠 udp:false 关闭'));
  assert.ok(html.includes('v-model="newInbound.profile.tuic_uuid"'));
- await state.openEditInbound({id:45});p.tuic_uuid='explicit-uuid';await state.saveInbound();
+ await state.openEditInbound({id:45,mutation_revision:stored.mutation_revision});p.tuic_uuid='explicit-uuid';await state.saveInbound();
  assert.equal(writes[3].body.profile.tuic_uuid,'explicit-uuid');assert.equal(writes[3].body.profile.tuic_password,'');
 })().catch(e=>{console.error(e);process.exitCode=1;});
 '''

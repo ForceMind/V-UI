@@ -887,7 +887,8 @@ rules:
     @staticmethod
     def policy_row(identity, mode, effective=None, state='applied'):
         effective = effective or ('relay' if mode == 'relay' else 'direct')
-        return {'id': identity, 'remark': 'policy-node-' + str(identity), 'core': 'sing-box',
+        return {'id': identity, 'mutation_revision': format(identity, '064x'),
+                'remark': 'policy-node-' + str(identity), 'core': 'sing-box',
                 'protocol': 'vless', 'port': 10400 + identity, 'enable': True,
                 'routing_mode': mode, 'certificate_id': None, 'credentials': {'has_uuid': True},
                 'profile': {'security': 'tls', 'transport': 'direct', 'flow': '',
@@ -895,6 +896,10 @@ rules:
                 'routing_status': {'desired_effective_mode': effective,
                                    'applied_effective_mode': effective if state == 'applied' else None,
                                    'state': state, 'policy_identity': 'd' * 64 if state == 'applied' else None}}
+
+    def test_actual_inbound_instance_conflicts_preserve_target_and_draft(self):
+        from inbound_instance_browser import assert_inbound_instance_conflicts
+        assert_inbound_instance_conflicts(self)
 
     def test_mocked_inbound_policy_editor_create_cancel_reopen_saved_only_and_failure(self):
         from playwright.sync_api import expect

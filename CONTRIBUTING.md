@@ -181,3 +181,9 @@ HTTPUpgrade 原样 URI 的晚期 VLESS read 错误不会可靠出现在固定 Mi
 ### 节点编辑器保存控件回归
 
 `tests/editor_saving_controls_dom.js` 使用现有 checksum-pinned Vue / Element Plus 的真实禁用计算、产品模板和控制器，区分继承禁用与显式 false 覆盖，并覆盖六处控件及 create/edit 保存成功/拒绝。`tests/test_editor_saving_controls.py` 仅在未提供 `VUI_FRONTEND_ASSETS` 时明确跳过；提供资产后必须完整通过，不下载回退资源。既有代理 Chromium gate 的对应控件场景也调用此严格 wrapper，确保 CI 下载固定资产之后实际执行这些控制。Chromium 使用明确模拟的保存响应验证组件锁定，不替代实际 API/核心应用或用户环境验收。
+
+## 陈旧节点编辑/删除意图回归（2026-10-23 候选）
+
+`test_inbound_instance_preconditions.py` 使用真实模型/API 函数、临时磁盘 SQLite 与独立写连接，覆盖自然 ID 重用、同实例凭据保持、严格条件、事务锁和副作用前拒绝；没有 HTTP/鉴权/浏览器/核心资格。`test_inbound_instance_frontend.py` 执行未替换的 app.js 与确定性 API/确认框 doubles，检查快照捕获、失败关闭、草稿和生命周期；不把双件当真实网络。
+
+既有 `VUI_PROXY_BROWSER=1` 门禁中的 `test_actual_inbound_instance_conflicts_preserve_target_and_draft` 调用 `inbound_instance_browser.py`，以固定前端资产、真实登录/API/临时 SQLite 和 Chromium 验证旧编辑器/确认框跨自然删建冲突，以及明确刷新后重试。该隔离浏览器服务故意没有核心，成功 DB 写入明确核对 `saved:true/applied:false`，不能称核心应用或用户实机已验。原完整门禁、CSP、断言和工作流不削弱，本地受限浏览器不重试绕过，准确 CI 独立验收。

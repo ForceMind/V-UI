@@ -98,7 +98,7 @@ function probeControl(records) {
 function fixture(t) {
     let options, state;
     const records = new Map(), requests = [], messages = [], errors = [], gate = deferred();
-    const stored = {id: 7, core: 'xray', protocol: 'vless', remark: 'synthetic-editor',
+    const stored = {id: 7, mutation_revision: 'a'.repeat(64), core: 'xray', protocol: 'vless', remark: 'synthetic-editor',
         port: 10443, enable: false, routing_mode: 'inherit', certificate_id: null,
         credentials: {has_uuid: true}, profile: {security: 'reality', transport: 'raw',
             flow: '', client_fingerprint: 'chrome', reality_target: 'reference.example.test:443',
@@ -183,7 +183,7 @@ test('all six shipped bindings preserve idle eligibility and lock only while sav
 for (const editing of [false, true]) for (const outcome of ['success', 'rejection']) {
     test(`${editing ? 'edit PUT' : 'create POST'} blocks new choices until ${outcome} settles`, {timeout: 5000}, async t => {
         const f = fixture(t), s = f.state;
-        if (editing) await s.openEditInbound({id: 7});
+        if (editing) await s.openEditInbound({id: 7, mutation_revision: 'a'.repeat(64)});
         else {
             await s.openAddInbound();
             s.newInbound.profile.security = 'reality'; s.onSecurityChanged();

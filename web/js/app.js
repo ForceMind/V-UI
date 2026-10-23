@@ -151,6 +151,10 @@ const app = createApp({
         const inboundCredentials = ref({});
         const savingInbound = ref(false);
         let inboundEditorGeneration = 0, inboundListGeneration = 0, deletingInbound = false;
+        let editingInboundRevision = null;
+        const validInboundRevision = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+        const inboundInstanceChanged = 'Inbound instance changed; refresh nodes and reopen or confirm again';
+        const inboundInstanceUnknown = 'Cannot verify inbound instance; refresh nodes or reload the page';
         const routingModes = {inherit: '跟随全局', direct: '指定直连', relay: '指定中转'};
         const knownRoutingMode = value => Object.hasOwn(routingModes, value);
         const inboundSavedRouting = row => knownRoutingMode(row.routing_mode) ? routingModes[row.routing_mode] : '策略未确认';
@@ -381,6 +385,7 @@ const app = createApp({
             inboundEditorGeneration++;
             showAddInbound.value = false;
             editingInboundId.value = null;
+            editingInboundRevision = null;
             inboundCredentials.value = {};
             newInbound.routing_mode = 'inherit';
             resetInboundProfile();
@@ -629,6 +634,7 @@ const app = createApp({
             if (savingInbound.value || adminSessionEnded) return;
             const generation = ++inboundEditorGeneration;
             editingInboundId.value = null;
+            editingInboundRevision = null;
             inboundCredentials.value = {};
             newInbound.core = 'xray';
             newInbound.protocol = 'vless';
@@ -647,14 +653,31 @@ const app = createApp({
         const openEditInbound = async (row) => {
             if (savingInbound.value || adminSessionEnded) return;
             const generation = ++inboundEditorGeneration;
+            // Capture the displayed instance before any asynchronous read. A
+            // refreshed row (or recycled integer ID) cannot redefine this intent.
+            const editingId = row.id, revision = row.mutation_revision;
+            if (!validInboundRevision(revision)) {
+                ElMessage.error('Failed to load inbound editor: ' + inboundInstanceUnknown);
+                return;
+            }
             try {
                 const [state] = await Promise.all([
-                    axios.get(`/api/inbounds/${row.id}/editor`),
+                    axios.get(`/api/inbounds/${editingId}/editor`),
                     loadManagedCertificates()
                 ]);
                 if (generation !== inboundEditorGeneration || adminSessionEnded) return;
                 const value = state.data;
-                editingInboundId.value = row.id;
+                if (!validInboundRevision(value?.mutation_revision)) {
+                    ElMessage.error('Failed to load inbound editor: ' + inboundInstanceUnknown);
+                    return;
+                }
+                if (value.id !== editingId || value.mutation_revision !== revision) {
+                    ElMessage.error('Failed to load inbound editor: ' + inboundInstanceChanged);
+                    return;
+                }
+                editingInboundId.value = editingId;
+                // Bound only to this verified editor snapshot, never list refresh.
+                editingInboundRevision = value.mutation_revision;
                 newInbound.core = value.core;
                 newInbound.protocol = value.protocol;
                 newInbound.remark = value.remark || '';
@@ -767,8 +790,13 @@ const app = createApp({
             if (savingInbound.value || !showAddInbound.value || adminSessionEnded) return;
             savingInbound.value = true;
             const generation = inboundEditorGeneration, editingId = editingInboundId.value;
+            const revision = editingInboundRevision;
             const routing = knownRoutingMode(newInbound.routing_mode) ? {routing_mode: newInbound.routing_mode} : {};
             try {
+                if (editingId && !validInboundRevision(revision)) {
+                    ElMessage.error('Failed to update inbound: ' + inboundInstanceUnknown);
+                    return;
+                }
                 let profile = { ...newInbound.profile };
                 if (newInbound.core === 'sing-box' && newInbound.protocol === 'vless' && profile.security === 'reality' && profile.transport === 'direct') {
                     // Send only this dedicated profile's visible fields. The
@@ -786,6 +814,7 @@ const app = createApp({
                 let res;
                 if (editingId) {
                     res = await axios.put(`/api/inbounds/${editingId}`, {
+                        expected_instance_revision: revision,
                         ...routing,
                         remark: newInbound.remark,
                         port: newInbound.port,
@@ -828,6 +857,11 @@ const app = createApp({
 
         const deleteInbound = async (row) => {
             if (deletingInbound || adminSessionEnded) return;
+            const deletingId = row.id, revision = row.mutation_revision;
+            if (!validInboundRevision(revision)) {
+                ElMessage.error('Failed to delete inbound: ' + inboundInstanceUnknown);
+                return;
+            }
             deletingInbound = true;
             try {
                 await ElMessageBox.confirm(
@@ -840,7 +874,9 @@ const app = createApp({
                     }
                 );
                 if (adminSessionEnded) return;
-                await axios.delete(`/api/inbounds/${row.id}`);
+                // The guarded action deliberately has no legacy DELETE fallback:
+                // a downlevel backend must reject, not ignore the condition.
+                await axios.post(`/api/inbounds/${deletingId}/delete`, {expected_instance_revision: revision});
                 if (adminSessionEnded) return;
                 ElMessage.success('Deleted successfully');
                 await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
@@ -855,7 +891,8 @@ const app = createApp({
                     await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
                     return;
                 }
-                ElMessage.error('Failed to delete inbound');
+                ElMessage.error('Failed to delete inbound: ' +
+                    (typeof detail === 'string' ? detail : detail?.message || error.message));
             } finally { deletingInbound = false; }
         };
 
