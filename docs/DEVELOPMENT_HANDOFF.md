@@ -1,5 +1,13 @@
 # 当前开发与接手入口
 
+## 2026-10-23 当前有界目标：证书页面刷新不丢选择、不回写旧状态
+
+[PR63](https://github.com/ForceMind/V-UI/pull/63) 的 V-TS-03 设计已正常合并至 `d4bf74c80c56450777d3c6649593bc5ef2b96758` / tree `c34e8f0f1b9478b77af66c22be71e8944bc7d421`，候选与主线各自八组 / 11 jobs / 126 steps 和同源四目标全部首次通过；主线于 2026-10-22 06:40:04 UTC 独立收口，见 [Test](https://github.com/ForceMind/V-UI/actions/runs/39733219344)、[ACME](https://github.com/ForceMind/V-UI/actions/runs/39733219512)、[loopback](https://github.com/ForceMind/V-UI/actions/runs/39733219321)、[deployment](https://github.com/ForceMind/V-UI/actions/runs/39733219304) 与 [portable](https://github.com/ForceMind/V-UI/actions/runs/39733219299)。这只是设计交付，不授权私有监听实现，也不表示整个批准开发计划暂停。
+
+本次从该主线独立修复既有图形化证书管理：自动刷新清空绑定节点选择，后台旧结果可覆盖较新操作状态。保留明确操作及当前选择、后台轮询单飞、旧结果失效，不改变任何后端 API、CA、凭据、信任、绑定或续期策略。复现、预期行为与分层验收见[证书页面刷新](CERTIFICATES.md#证书页面刷新与待选节点2026-10-23-修正候选)。新候选须独审、完整普通套件、准确 CI / 四目标及 review 后正常合并，再核准确主线，不能借用 PR63 绿灯。
+
+不改 VERSION、固定核心或工作流门槛；不操作真实 CA、用户数据库、Mac、Tailscale/VPN、私有监听、安全设置、受限 UDP D2、发布或部署。私有管理的订阅可达性、目标环境、维护与权限决定继续独立保留，不妨碍本次无关产品纠错。下方阶段文字保留历史。
+
 ## 2026-10-22 当前有界目标：V-TS-03 私有管理设计，不实施
 
 [PR62](https://github.com/ForceMind/V-UI/pull/62) 的五类 SAVE 回归已正常合并至准确 master `6b22fb7687b1c26b2af8cf166812aba8786dfd33` / tree `1d76efb8643f2c3864bfa6fa4154571099340994`。候选与新主线各自八组 / 11 jobs / 126 steps 和同源四目标均首次通过，主线于 05:44:18 UTC 独立收口；[Test](https://github.com/ForceMind/V-UI/actions/runs/39727941401)、[loopback](https://github.com/ForceMind/V-UI/actions/runs/39727941337)、[deployment](https://github.com/ForceMind/V-UI/actions/runs/39727941355)、[portable](https://github.com/ForceMind/V-UI/actions/runs/39727941391)。下方待验文字保留历史，不继续扩大测试。
