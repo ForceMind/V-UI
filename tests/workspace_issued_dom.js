@@ -17,7 +17,7 @@ const grant = (id = 1, changes = {}) => ({id, label:'synthetic grant ' + id, ser
     inbound_ids:[7], formats:['mihomo.yaml'], expires_at:2000000000,
     revoked:false, expired:false, invalidated:false, invalidation_reason:null, ...changes});
 const response = (value, status = 200) => ({ok:status >= 200 && status < 300, status,
-    json:async()=>structuredClone(value), headers:{get:key=>key === 'ETag' ? '"r1"' : null}});
+    json:async()=>structuredClone(value), headers:{get:key=>key === 'X-VUI-Node-Revision' ? 'a'.repeat(64) : key === 'ETag' ? '"r1"' : null}});
 const deferred = () => {
     let resolve, reject;
     const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -70,7 +70,6 @@ async function fixture(initialGrants = [grant()], clipboard = async()=>{}) {
         return nodes.get(id);
     };
     buttons.forEach(get); get('workspace').hidden = true; get('issued').hidden = true; get('days').value = '30';
-    get('synthetic-node').dataset.node = '7'; get('synthetic-node').checked = true;
     get('synthetic-format').name = 'format'; get('synthetic-format').value = 'mihomo.yaml'; get('synthetic-format').checked = true;
     get('label').value = 'synthetic grant'; get('server').value = 'node.example.test';
     get('issued-urls').focus = () => focuses.push('focus'); get('issued-urls').select = () => focuses.push('select');
@@ -87,7 +86,8 @@ async function fixture(initialGrants = [grant()], clipboard = async()=>{}) {
         if (method === 'GET' && url === '/api/routing/mihomo/catalog') return response({categories:[], presets:[]});
         if (method === 'GET' && url === SNAPSHOT) return response({revision:'r1', settings});
         if (method === 'GET' && url === PREVIEW) return response(plan);
-        if (method === 'GET' && ['/api/inbounds','/api/subscription/mihomo-warnings'].includes(url)) return response([]);
+        if (method === 'GET' && url === '/api/inbounds') return response([{id:7,remark:'synthetic node',core:'sing-box',protocol:'vless',enable:true}]);
+        if (method === 'GET' && url === '/api/subscription/mihomo-warnings') return response([]);
         if (method === 'GET' && url === GRANTS) return response(initialGrants);
         if (method === 'POST' && url === GRANTS) return response({id:1, paths:{'mihomo.yaml':'/sub/synthetic-token/mihomo.yaml'}},201);
         const rotate = /^\/api\/subscriptions\/(\d+)\/rotate$/.exec(url);
@@ -104,6 +104,7 @@ async function fixture(initialGrants = [grant()], clipboard = async()=>{}) {
     await new Promise(resolve=>setImmediate(resolve));
     assert.equal(get('workspace').hidden, false, 'controller bootstrap completes');
     assert.equal(get('notice').className, '', 'bootstrap has no hidden controller error');
+    document.querySelectorAll('[data-node]').forEach(input=>{input.checked=true;});
     const row = id => {
         const found = get('grants').children.find(item=>item.querySelector(`[data-rotate="${id}"]`));
         assert(found, 'grant row exists: ' + id); return found;
@@ -207,6 +208,11 @@ for (const kind of ['create', 'rotate']) {
         const f = await fixture(), gate = f.hold(url, 'POST');
         const pending = beginIssue(f, kind); await gate.started; f.pagehide();
         gate.resolve(response(tokenReply())); await pending; await flush(); assertHidden(f);
+        if (kind === 'create') {
+            // pagehide also invalidates node selection; a new create needs an explicit fresh choice.
+            await f.click('refresh-grants');
+            f.document.querySelectorAll('[data-node]').forEach(input=>{input.checked=true;});
+        }
         f.queue(url, async()=>response({id:1, paths:{'mihomo.yaml':'/sub/new-generation/mihomo.yaml'}}), 'POST');
         await beginIssue(f, kind); await flush();
         assert.equal(f.get('issued-urls').value, 'http://example.test/sub/new-generation/mihomo.yaml');

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 from app.models.database import get_db
@@ -13,12 +13,13 @@ from app.services.inbound_service import (
     get_inbound,
     list_inbounds,
     normalize_mapping,
-    routing_dicts,
+    routing_snapshot,
     to_dict,
     update_inbound,
 )
 from app.services.protocol_profiles import profile_catalog
 from app.services.reality_profile import has_reality
+from app.services.node_selection_revision import NODE_REVISION_HEADER
 
 router = APIRouter()
 
@@ -83,8 +84,10 @@ def get_protocol_profiles():
 
 @router.get("")
 @router.get("/")
-def get_all_inbounds(core: str | None = None, db: Session = Depends(get_db)):
-    return routing_dicts(db, core=core)
+def get_all_inbounds(response: Response, core: str | None = None, db: Session = Depends(get_db)):
+    values, revision = routing_snapshot(db, core=core)
+    response.headers[NODE_REVISION_HEADER] = revision
+    return values
 
 
 @router.get("/{inbound_id}/editor")

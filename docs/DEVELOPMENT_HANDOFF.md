@@ -1,5 +1,13 @@
 # 当前开发与接手入口
 
+## 2026-10-23 独立产品候选：陈旧页面创建订阅的节点实例条件
+
+从准确已验主线 `d4bf74c80c56450777d3c6649593bc5ef2b96758` 独立修复新授权的陈旧 UI 选择，不与 [PR64 证书刷新](https://github.com/ForceMind/V-UI/pull/64) 混提交。PR63 只完成私有管理设计，不代表其他批准产品开发暂停；真实 Tailnet、监听与权限决定保持独立。
+
+已隔离复现旧页面显示旧节点、另一页自然删除重建同整数 ID 后，新创建却绑定替代实例。PR60 旧令牌防线仍有效，不称实际泄露。最小修复为同批节点读取的全库存实例修订，以及现有创建 JSON 的严格可选条件，在 SQLite 创建事务内、token 生成前核验；新版工作区必传，冲突后明确刷新和重选，不自动重试。普通 API 省略条件仍为旧当前-ID 语义，升级前已打开页面需重载，不能泛称所有客户端均强制条件。详见[安全与兼容契约](SUBSCRIPTION_IDENTITY.md#2026-10-23-新授权的陈旧页面选择保护候选)。
+
+本次正常代码、隔离测试及最小文档须独立安全复审、完整普通套件、准确候选 CI / 四目标和最新 review，再按届时主线正常合入与重新验收；PR64 或其他提交的绿灯不可继承。没有数据库迁移、新凭据、权限、真实网络、私有监听、Tailscale、Mac、受限 UDP D2、发布或部署操作。下方设计阶段文字保留历史，不覆盖持续开发范围。
+
 ## 2026-10-22 当前有界目标：V-TS-03 私有管理设计，不实施
 
 [PR62](https://github.com/ForceMind/V-UI/pull/62) 的五类 SAVE 回归已正常合并至准确 master `6b22fb7687b1c26b2af8cf166812aba8786dfd33` / tree `1d76efb8643f2c3864bfa6fa4154571099340994`。候选与新主线各自八组 / 11 jobs / 126 steps 和同源四目标均首次通过，主线于 05:44:18 UTC 独立收口；[Test](https://github.com/ForceMind/V-UI/actions/runs/39727941401)、[loopback](https://github.com/ForceMind/V-UI/actions/runs/39727941337)、[deployment](https://github.com/ForceMind/V-UI/actions/runs/39727941355)、[portable](https://github.com/ForceMind/V-UI/actions/runs/39727941391)。下方待验文字保留历史，不继续扩大测试。

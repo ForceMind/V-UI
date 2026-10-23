@@ -37,6 +37,8 @@ GET `/api/routing/mihomo/preview`预览保存版本，POST同路径预览请求�
 
 POST `/api/subscriptions`：label、server（节点公开地址）、inbound_ids、formats、expires_days。返回只显示一次的token与paths。GET列表不回显token。POST `/{id}/rotate`产生新令牌；DELETE `/{id}`撤销。
 
+条件创建另接受 `expected_node_revision`：取自同一显示节点列表的 `GET /api/inbounds` 响应头 `X-VUI-Node-Revision`，严格为 64 位小写 hex。仅省略字段保留原 API 当前-ID 语义，显式 null/空串/坏类型或格式为 422；实例集合变化则在创建事务内、token 生成前返回 409 和重新选择指引，不自动采用新修订。新版工作区必传，读取缺头时失败关闭。该头只代表全库存实例集合，不是完整响应的 ETag；包括 core 过滤列表也使用全库存，普通同实例编辑不改变它。详细[兼容与安全边界](SUBSCRIPTION_IDENTITY.md#2026-10-23-新授权的陈旧页面选择保护候选)。
+
 匿名客户端唯一授权入口为 `GET/HEAD /sub/{token}/{format}`，format为`mihomo.yaml`、`raw`或`sing-box.json`且必须属于该令牌授权范围。无效令牌/格式404，配置未准备好409。订阅token不授予管理权限；不接受额外query参数绕过作用域。
 
 节点实例绑定候选增加列表字段 `invalidation_reason`（正常时 null）：`node_identity_missing` 表示旧授权缺少可证明绑定，`node_identity_changed` 表示节点被删除/重建或绑定异常，二者必须重新选择节点并创建订阅；轮换返回 409，不修改 token 或撤销状态。`nodes_unavailable` 表示原节点停用，`credentials_changed` 表示管理员密码变化，`invalid_configuration` 表示授权格式损坏。`invalidated` 为这些原因的汇总布尔值，不再只表示改密。列表、创建结果和节点摘要不回显内部实例身份/绑定。普通创建/编辑 API 拒绝顶层身份字段；节点 ID 严格限定为正的 SQLite 64-bit 整数，选择/格式不得重复。旧链接升级后需要重建，详细[迁移与恢复契约](SUBSCRIPTION_IDENTITY.md)。公开 token 错误仍保持上述通用提示。

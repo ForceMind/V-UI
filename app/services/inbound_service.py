@@ -15,6 +15,7 @@ from app.services.protocol_profiles import compile_profile, decompile_profile
 from app.services.grpc_profile import is_grpc_transport
 from app.services.hysteria2_profile import password_value
 from app.services import tuic_profile, reality_profile
+from app.services.node_selection_revision import node_selection_revision
 
 SUPPORTED_CORES = {"xray", "sing-box"}
 XRAY_PROTOCOLS = {"vless", "vmess", "trojan", "shadowsocks"}
@@ -37,15 +38,23 @@ def _routing_mode(value: Any) -> str:
 
 
 def routing_dicts(db: Session, core: str | None = None) -> list[dict]:
+    """Keep existing callers' array-only contract."""
+    return routing_snapshot(db, core=core)[0]
+
+
+def routing_snapshot(db: Session, core: str | None = None) -> tuple[list[dict], str]:
     """Batch runtime read for API summaries, never used by pure exporters.
 
     A failed or unavailable runtime observation cannot turn desired database
     values into an applied-route claim. The manager returns an allowlisted
-    summary while holding the same operation lock as reconciliation.
+    summary while holding the same operation lock as reconciliation. The node
+    revision uses these same model rows, never a second query. A core filter
+    limits only the body; the revision always describes the full inventory.
     """
     from app.services.core_manager import core_manager
     with core_manager.lock:
         items = db.query(Inbound).populate_existing().order_by(Inbound.id.asc()).all()
+        revision = node_selection_revision(items)
         values = [to_dict(item) for item in items if core is None or item.core == core]
         try:
             statuses = core_manager.inbound_routing_status(items)
@@ -63,7 +72,7 @@ def routing_dicts(db: Session, core: str | None = None) -> list[dict]:
                 "state": status.get("state") if type(status.get("state")) is str and status["state"] in {"applied", "pending", "stopped", "unknown"} else "unknown",
                 "policy_identity": status.get("policy_identity") if type(status.get("policy_identity")) is str and re.fullmatch(r"[0-9a-f]{64}", status["policy_identity"]) else None,
             }
-        return values
+        return values, revision
 
 
 def normalize_mapping(value: Any) -> dict:

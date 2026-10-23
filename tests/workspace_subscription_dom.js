@@ -31,7 +31,7 @@ const grant = (id = 1, changes = {}) => ({id, label:'synthetic grant ' + id, ser
     revoked:false, expired:false, invalidated:false, invalidation_reason:null, ...changes});
 const invalidGrant = (reason, changes = {}) => grant(1, {invalidated:true, invalidation_reason:reason, ...changes});
 const response = (value, status = 200) => ({ok:status >= 200 && status < 300, status,
-    json:async()=>structuredClone(value), headers:{get:key=>key === 'ETag' ? '"r1"' : null}});
+    json:async()=>structuredClone(value), headers:{get:key=>key === 'X-VUI-Node-Revision' ? 'a'.repeat(64) : key === 'ETag' ? '"r1"' : null}});
 const deferred = () => {
     let resolve, reject;
     const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
