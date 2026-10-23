@@ -172,7 +172,16 @@
                             <el-button type="primary" @click="openAddInbound">添加节点</el-button>
                         </div>
                     </div>
-                    <el-table :data="inbounds" style="width: 100%" border>
+                    <div class="inbound-search-toolbar" role="search" aria-label="筛选入站节点">
+                        <label for="inbound-search">搜索节点</label>
+                        <el-input id="inbound-search" class="inbound-search-input" v-model="inboundSearch"
+                            type="search" autocomplete="off" placeholder="备注、ID、端口、核心或协议" aria-describedby="inbound-search-count"></el-input>
+                        <el-button :disabled="!inboundSearch" @click="inboundSearch = ''" aria-label="清除节点搜索">清除</el-button>
+                        <span id="inbound-search-count" role="status" aria-live="polite" aria-atomic="true">
+                            显示 {{ filteredInbounds.length }} / {{ inbounds.length }} 个节点
+                        </span>
+                    </div>
+                    <el-table :data="filteredInbounds" style="width: 100%" border>
                         <el-table-column prop="id" label="ID" width="70"></el-table-column>
                         <el-table-column prop="remark" label="备注"></el-table-column>
                         <el-table-column prop="core" label="核心" width="110">

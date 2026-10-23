@@ -287,3 +287,22 @@ body {
         max-width: 100%;
     }
 }
+
+.inbound-search-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin-bottom: 16px;
+    font-size: 14px;
+}
+
+.inbound-search-toolbar .inbound-search-input {
+    flex: 1 1 240px;
+    min-width: 0;
+    max-width: 400px;
+}
+
+.inbound-search-toolbar #inbound-search-count {
+    color: #606266;
+}
