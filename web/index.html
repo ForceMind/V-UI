@@ -532,7 +532,7 @@
         @close="closeInboundEditor" :close-on-click-modal="!savingInbound" :close-on-press-escape="!savingInbound" :show-close="!savingInbound">
         <el-form :model="newInbound" label-width="130px" :disabled="savingInbound">
             <el-form-item label="核心">
-                <el-radio-group v-model="newInbound.core" @change="onCoreChanged" :disabled="Boolean(editingInboundId)">
+                <el-radio-group v-model="newInbound.core" @change="onCoreChanged" :disabled="savingInbound || (Boolean(editingInboundId))">
                     <el-radio-button label="xray">Xray</el-radio-button>
                     <el-radio-button label="sing-box">sing-box</el-radio-button>
                 </el-radio-group>
@@ -556,7 +556,7 @@
                 <el-select
                     v-model="newInbound.protocol"
                     @change="onProtocolChanged"
-                    :disabled="Boolean(editingInboundId)"
+                    :disabled="savingInbound || (Boolean(editingInboundId))"
                     style="width: 100%">
                     <el-option
                         v-for="item in protocolOptions"
@@ -607,7 +607,7 @@
 
             <template v-if="!['shadowsocks','hysteria2','tuic'].includes(newInbound.protocol)">
                 <el-form-item label="传输方式">
-                    <el-select v-model="newInbound.profile.transport" :disabled="newInbound.core === 'sing-box' && newInbound.profile.security === 'reality' && newInbound.profile.transport === 'direct'" style="width: 100%">
+                    <el-select v-model="newInbound.profile.transport" :disabled="savingInbound || (newInbound.core === 'sing-box' && newInbound.profile.security === 'reality' && newInbound.profile.transport === 'direct')" style="width: 100%">
                         <template v-if="newInbound.core === 'xray'">
                             <el-option label="RAW / TCP" value="raw"></el-option>
                             <el-option label="WebSocket" value="websocket"></el-option>
@@ -702,7 +702,7 @@
                 <el-select
                     v-model="newInbound.profile.security"
                     @change="onSecurityChanged"
-                    :disabled="['trojan','hysteria2','tuic'].includes(newInbound.protocol)"
+                    :disabled="savingInbound || (['trojan','hysteria2','tuic'].includes(newInbound.protocol))"
                     style="width: 100%">
                     <el-option
                         v-if="!['trojan','hysteria2','tuic'].includes(newInbound.protocol)"
@@ -721,7 +721,7 @@
             <el-form-item
                 v-if="newInbound.protocol === 'vless'"
                 label="Flow">
-                <el-select v-model="newInbound.profile.flow" :disabled="newInbound.core === 'sing-box' && newInbound.profile.security === 'reality' && newInbound.profile.transport === 'direct'" style="width: 100%">
+                <el-select v-model="newInbound.profile.flow" :disabled="savingInbound || (newInbound.core === 'sing-box' && newInbound.profile.security === 'reality' && newInbound.profile.transport === 'direct')" style="width: 100%">
                     <el-option label="None" value=""></el-option>
                     <el-option label="XTLS Vision" value="xtls-rprx-vision"></el-option>
                 </el-select>
@@ -788,7 +788,7 @@
                 <el-form-item label="浏览器指纹">
                     <el-select
                         v-model="newInbound.profile.client_fingerprint"
-                        :disabled="newInbound.core === 'sing-box' && newInbound.profile.transport === 'direct'"
+                        :disabled="savingInbound || (newInbound.core === 'sing-box' && newInbound.profile.transport === 'direct')"
                         style="width: 100%">
                         <el-option label="Chrome" value="chrome"></el-option>
                         <el-option v-if="newInbound.core !== 'sing-box' || newInbound.profile.transport !== 'direct'" label="Firefox" value="firefox"></el-option>

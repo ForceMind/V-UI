@@ -986,6 +986,92 @@ rules:
         editor.get_by_role('button', name='取消', exact=True).click()
         self.assert_private()
 
+    def test_mocked_inbound_saving_lock_preserves_all_six_control_guards(self):
+        """Real pinned components, synthetic save replies; not runtime qualification."""
+        from playwright.sync_api import expect
+        from test_editor_saving_controls import assert_editor_saving_controls
+        assert_editor_saving_controls(self)
+        row = self.policy_row(7, 'direct')
+        row.update(core='xray', remark='saving-lock-fixture')
+        row['profile'].update(security='reality', transport='raw', client_fingerprint='chrome')
+        held, writes = [], []
+        def inbound(route):
+            path, method = urlparse(route.request.url).path, route.request.method
+            if method == 'GET':
+                route.fulfill(json=row if path.endswith('/editor') else [row])
+            else:
+                writes.append((method, route.request.post_data_json))
+                held.append(route)
+        self.context.route('**/api/inbounds**', inbound)
+        page = self.page
+        page.set_viewport_size({'width': 1440, 'height': 1000})
+        self.open_inbound_view(page)
+        def control(dialog, label):
+            return dialog.locator('.el-form-item').filter(has_text=re.compile('^' + label)).locator('.el-select')
+        def check_controls(dialog, pending, editing):
+            for label in ('Xray', 'sing-box'):
+                target = expect(dialog.get_by_role('radio', name=label, exact=True))
+                target.to_be_disabled() if pending or editing else target.to_be_enabled()
+            for label in ('协议', '传输方式', '传输安全', 'Flow', '浏览器指纹'):
+                target = control(dialog, label)
+                disabled = pending or (editing and label == '协议')
+                if disabled:
+                    expect(target.locator('.el-select__wrapper')).to_have_class(re.compile('is-disabled'))
+                    expect(target.get_by_role('combobox')).to_be_disabled()
+                else:
+                    expect(target.locator('.el-select__wrapper')).not_to_have_class(re.compile('is-disabled'))
+                    expect(target.get_by_role('combobox')).to_be_enabled()
+        try:
+            for editing in (False, True):
+                if editing:
+                    page.get_by_role('row').filter(has_text='saving-lock-fixture').get_by_role('button', name='编辑', exact=True).click()
+                else:
+                    page.get_by_role('button', name='添加节点', exact=True).click()
+                dialog = page.get_by_role('dialog', name='编辑节点' if editing else '添加节点', exact=True)
+                if not editing:
+                    dialog.get_by_text('Xray', exact=True).click()
+                    control(dialog, '传输安全').click()
+                    page.get_by_role('option', name='REALITY', exact=True).click()
+                remark = 'keep-until-reply-' + ('edit' if editing else 'create')
+                dialog.get_by_placeholder('例如：US-01').fill(remark)
+                for status in (422, 200):
+                    check_controls(dialog, False, editing)
+                    before = len(writes)
+                    dialog.get_by_role('button', name='保存并应用' if editing else '创建并应用', exact=True).click()
+                    expect(dialog.get_by_role('button', name='取消', exact=True)).to_be_disabled()
+                    check_controls(dialog, True, editing)
+                    deadline = time.monotonic() + 5
+                    while not held and time.monotonic() < deadline:
+                        page.wait_for_timeout(20)
+                    self.assertEqual(len(held), 1)
+                    self.assertEqual(len(writes), before + 1)
+                    method, body = writes[-1]
+                    self.assertEqual(method, 'PUT' if editing else 'POST')
+                    self.assertEqual(body['remark'], remark)
+                    self.assertEqual(body['profile']['security'], 'reality')
+                    self.assertEqual(body['profile']['transport'], 'raw')
+                    expect(dialog.get_by_placeholder('例如：US-01')).to_have_value(remark)
+                    if status == 422:
+                        detail = 'Synthetic saving-lock rejection: ' + ('edit' if editing else 'create')
+                        held.pop().fulfill(status=422, json={'detail': detail})
+                        expect(page.locator('.el-message--error').filter(has_text=detail)).to_contain_text(detail)
+                        expect(dialog).to_be_visible()
+                        expect(dialog.get_by_role('button', name='取消', exact=True)).to_be_enabled()
+                        check_controls(dialog, False, editing)
+                        expect(dialog.get_by_placeholder('例如：US-01')).to_have_value(remark)
+                    else:
+                        held.pop().fulfill(json=row)
+                        expect(dialog).not_to_be_visible()
+                        # The dialog hides before list/status refresh finishes.
+                        # Its retained native select reflects savingInbound until finally.
+                        expect(page.locator('#inbound-routing-mode')).to_be_enabled()
+                self.assertEqual(len(writes), 4 if editing else 2)
+            self.assert_private()
+            print('Node editor saving lock: all six real component guards / create and edit / held synthetic replies / 422 unlock with draft preserved / success close OK')
+        finally:
+            for route in held:
+                route.abort()
+
     def test_mocked_inbound_policy_delayed_editor_cancellation_and_401_clear(self):
         from playwright.sync_api import expect
         rows = [self.policy_row(1, 'direct'), self.policy_row(2, 'relay')]

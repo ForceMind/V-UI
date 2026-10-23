@@ -1,5 +1,17 @@
 # 当前开发与接手入口
 
+## 2026-10-23 当前独立候选：节点编辑器保存期间锁定所有已有控件
+
+[PR64](https://github.com/ForceMind/V-UI/pull/64) 的准确 master `efbbdbe5fe7ba338eaa70083c8844605c53cc50f` 已于 19:38:49 UTC 独立完成八组 / 11 jobs / 126 steps 及四目标，全部首次成功。随后 [PR65](https://github.com/ForceMind/V-UI/pull/65) 组合候选 `8cfe202b04b4403bb143b10231ce593beab19aa9` / tree `7eecd1d6305f6d5a5a2c75c54fe5899653cc6c51` 经独审、冻结本地 2100 项、准确八组 / 11 jobs / 126 steps 与四目标、真实陈旧页面条件创建浏览器及最新完整 review 无发现后，正常合并至 `b6a4ed5cc8d8b8dce771cbdb59e134d48b7c3855`。该新主线 CI 仍独立进行，不能借候选同树资格；旧 `1b615767` 已全终态通过并独立留存，不替代组合验收。
+
+本候选从真实新 master `b6a4ed5cc8d8b8dce771cbdb59e134d48b7c3855` 独立修复六个节点控件。固定 Element Plus 2.14.6 的 `useFormDisabled` 将子控件显式 `false` 置于父表单 disabled 之前；原核心、协议、传输、安全、Flow 与指纹控件在保存等待时仍可改选，迟到成功会关闭表单，丢掉请求后未提交的选择。真实固定库 helper 与未改 `app.js` 的合成延迟 PUT 已复现，不称用户数据丢失或真实浏览器证据。
+
+最小产品修复仅在六处原 disabled 资格表达式前加入 `savingInbound ||`，完整保留编辑身份锁、REALITY 与强制 TLS 限制，不改控制器/API/秘密/库版本。等待时不可改选，拒绝后保留原草稿并恢复原资格，成功关闭行为不变。有限 Node 控制使用真实固定 Vue/Element Plus helper、当前模板与实际控制器；既有 Chromium gate 以明确模拟的保存回复检验真实组件 create/edit、422/成功等待与解锁，不把模拟回复称运行应用证据。
+
+最初 d4bf 基线的冻结 tree `04b76f4ef00d26f66dbb03107f975ea6365874cd` 本地 2085 项为 1872 通过 / 213 skip（190.616 秒），仅是该旧树结果。独审发现浏览器错误提示重名与对话框隐藏早于保存 finally 两项夹具时序，已改为按 create/edit 唯一定位错误，以及等待保留原生控件恢复 enabled；不改产品行为或降低断言。后续已审补丁在新基线的五个非交接文件逐字节保持，仅交接协调；新组合树仍须自己的独审、全套与准确 CI / 四目标 / 最新 review。候选 CI 可与 b6a4ed5 主线 CI 并行，但正常合并须两者各自通过，合并后的 master 再另验。
+
+不新增测试范围或私有监听实现，不改 VERSION、固定核心或工作流，不触碰实际数据库、凭据、Mac、Tailscale/VPN、网络安全设置、受限 UDP D2、发布部署或费用。下方历史状态与失败记录全部保留。
+
 ## 2026-10-23 当前组合候选：节点选择条件纳入证书修复主线
 
 [PR64](https://github.com/ForceMind/V-UI/pull/64) 准确候选 `4bc6febedc5e2f99dcaafed1bece4fce474c767c` / tree `2d15b38b32152b4308d1013b659ab42edc5fdcff` 经冻结本地 2084 项（1872 通过 / 212 skip）、独审、准确八组 / 11 jobs / 126 steps 与四目标全部首次通过、最新完整 review 无发现及合并前 fresh 门禁后，已正常合并至 `efbbdbe5fe7ba338eaa70083c8844605c53cc50f`。真实 ACME 和编辑器的两处 CSP 等待器故障已在新 head 转绿；初始 `96de501` 两项失败及全部终态仍保留，未改判或取消。准确新 master 的 CI 正独立进行，不能继承同树候选资格。
