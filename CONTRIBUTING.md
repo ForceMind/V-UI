@@ -184,6 +184,12 @@ HTTPUpgrade 原样 URI 的晚期 VLESS read 错误不会可靠出现在固定 Mi
 
 既有代理 Chromium gate 的 `test_mocked_dashboard_status_unavailable_and_recovery` 也调用严格 wrapper，再使用真实组件、合成 GET 回复和原有 3秒/10秒轮询验证首次 Unknown、失败后隐藏旧指标、两个端点独立恢复及有效 false/0。它不触发重启或其他写 API，不通过注入控制器/定时器绕过页面；合成状态不表示真实宿主指标、核心运行或用户环境已验。本地已知受限浏览器不重试，准确 CI 独立验收。
 
+### 入站节点只读本地搜索
+
+节点搜索仅匹配列表中用户可见的备注、ID、端口、核心和协议，使用字面子串而不是正则，不读取 UUID、密码、原始配置或修订身份。它只是同一源列表的 computed 视图，空白查询保持全部原始行及顺序；刷新后保留当前查询、重新计算数量，不改变编辑/删除/分享/导出的行对象和原处理器，也不新增请求、持久化或导航模式。
+
+`tests/inbound_search_dom.js` 与 `tests/test_inbound_search.py` 使用固定 Vue 和实际控制器检查有限匹配/原行身份/刷新契约，HTTP 与元数据双件不称原生验收。既有代理 Chromium 的 `tests/inbound_search_browser.py` 使用真实临时 DB/API 的测试节点验证输入、清空、数量、刷新和既有行操作；任何另行合成的只读回复必须单独标明。搜索交互不发写 API，不接触实际用户数据；本地受限浏览器不重试，准确候选与合并主线仍各自需要完整原生门禁。
+
 ### 仪表盘窄屏布局与原生旧样式对照
 
 固定 Element Plus 的 ElTag 挂载有 300ms `scaleX` 入场动画；变换后的 DOM / Range 矩形不可直接混用未缩放 CSS 内边距。页头几何前仅用一个总上限 5000ms 的只读 predicate 等待恰好三个标签全部恢复 `transform:none` / `opacity:1`、移除 enter/leave 类且无 pending/running 动画，然后原样执行一次几何断言。超时仍失败，不关闭动画、不固定 sleep、不重试失败几何、不放宽 1px 容差。普通控制验证这个 prerequisite 的各条件和一次超时传播，纯代数对照不当作原生证据。

@@ -159,6 +159,17 @@ const app = createApp({
         const coreFieldKnown = (core, field) => coreStatusKnown.value &&
             typeof coreStatus.value[core]?.[field] === 'boolean';
         const inbounds = ref([]);
+        const inboundSearch = ref('');
+        const filteredInbounds = computed(() => {
+            const query = inboundSearch.value.trim().toLowerCase();
+            if (!query) return inbounds.value;
+            // Search only displayed metadata, keeping the original row objects.
+            return inbounds.value.filter(row => ['remark', 'id', 'port', 'core', 'protocol'].some(field => {
+                const value = row[field];
+                return (typeof value === 'string' || typeof value === 'number') &&
+                    String(value).toLowerCase().includes(query);
+            }));
+        });
         const showAddInbound = ref(false);
         const editingInboundId = ref(null);
         const inboundCredentials = ref({});
@@ -1063,6 +1074,8 @@ const app = createApp({
             systemMetricKnown,
             coreFieldKnown,
             inbounds,
+            inboundSearch,
+            filteredInbounds,
             showAddInbound,
             editingInboundId,
             inboundCredentials,

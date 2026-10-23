@@ -909,6 +909,10 @@ rules:
         from dashboard_layout_browser import assert_dashboard_responsive_layout
         assert_dashboard_responsive_layout(self)
 
+    def test_actual_inbound_local_search_and_row_identity(self):
+        from inbound_search_browser import assert_inbound_local_search
+        assert_inbound_local_search(self)
+
     def test_mocked_inbound_policy_editor_create_cancel_reopen_saved_only_and_failure(self):
         from playwright.sync_api import expect
         rows = [self.policy_row(1, 'direct'), self.policy_row(2, 'relay')]
