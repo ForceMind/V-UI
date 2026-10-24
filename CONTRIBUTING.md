@@ -184,6 +184,12 @@ HTTPUpgrade 原样 URI 的晚期 VLESS read 错误不会可靠出现在固定 Mi
 
 既有代理 Chromium gate 的 `test_mocked_dashboard_status_unavailable_and_recovery` 也调用严格 wrapper，再使用真实组件、合成 GET 回复和原有 3秒/10秒轮询验证首次 Unknown、失败后隐藏旧指标、两个端点独立恢复及有效 false/0。它不触发重启或其他写 API，不通过注入控制器/定时器绕过页面；合成状态不表示真实宿主指标、核心运行或用户环境已验。本地已知受限浏览器不重试，准确 CI 独立验收。
 
+### 核心重启按钮单飞
+
+仪表盘的两枚核心重启按钮共享一次在途操作。实际控制器先检查已有 `restartingCore`，两按钮同时禁用而只保留被选核心的原 loading；锁覆盖原 POST 和其后的 fresh 状态读取。额外调用不排队、不重试、不发送 POST；原验证失败、成功与错误提示及 finally 恢复行为不变。后端锁只能串行化，不能将重复请求自动去重，不能用它代替 UI admission 保护。
+
+`tests/test_core_restart.py` 严格调用 `tests/core_restart_dom.js` 的有限固定 Vue / Element Plus / 实际模板控制，renderer host、原生 disabled 点击边界与延迟 HTTP 均明确是双件。`tests/core_restart_browser.py` 另由既有 proxy Chromium gate 调用同一严格 wrapper，再检查真正组件；其中所有 restart POST 和相关延迟状态回复均为明确合成路由，不实际重启核心、不授予 API 应用或 runtime 资格。不得用 force click 绕开 disabled 来证明正常交互，也不得把普通 skip 当原生通过。
+
 ### 入站节点只读本地搜索
 
 节点搜索仅匹配列表中用户可见的备注、ID、端口、核心和协议，使用字面子串而不是正则，不读取 UUID、密码、原始配置或修订身份。它只是同一源列表的 computed 视图，空白查询保持全部原始行及顺序；刷新后保留当前查询、重新计算数量，不改变编辑/删除/分享/导出的行对象和原处理器，也不新增请求、持久化或导航模式。
