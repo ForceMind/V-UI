@@ -909,6 +909,10 @@ rules:
         from dashboard_layout_browser import assert_dashboard_responsive_layout
         assert_dashboard_responsive_layout(self)
 
+    def test_actual_core_restart_single_flight_and_recovery(self):
+        from core_restart_browser import assert_core_restart_single_flight
+        assert_core_restart_single_flight(self)
+
     def test_actual_inbound_local_search_and_row_identity(self):
         from inbound_search_browser import assert_inbound_local_search
         assert_inbound_local_search(self)

@@ -85,12 +85,14 @@
                     <el-button
                         size="small"
                         @click="restartCore('xray')"
+                        :disabled="!!restartingCore"
                         :loading="restartingCore === 'xray'">
                         <el-icon><Refresh /></el-icon> Xray
                     </el-button>
                     <el-button
                         size="small"
                         @click="restartCore('sing-box')"
+                        :disabled="!!restartingCore"
                         :loading="restartingCore === 'sing-box'">
                         <el-icon><Refresh /></el-icon> sing-box
                     </el-button>

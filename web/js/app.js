@@ -925,6 +925,7 @@ const app = createApp({
         };
 
         const restartCore = async (core) => {
+            if (restartingCore.value) return;
             restartingCore.value = core;
             try {
                 const res = await axios.post(
