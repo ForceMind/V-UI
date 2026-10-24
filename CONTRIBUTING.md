@@ -241,3 +241,12 @@ HTTPUpgrade 原样 URI 的晚期 VLESS read 错误不会可靠出现在固定 Mi
 `python -m unittest discover -s tests -p 'test_workspace_preview_revision.py' -v` 严格核对 `workspace_preview_revision_dom.js` 的 17 项控制、全部通过且零失败 / 取消 / skip / todo，子进程 90 秒有界。它使用真实 Python 路由 / ETag / 临时落盘与受控 DOM / fetch；原 SAVE recovery 五项的桥接 harness 仅提取复用，既有用例断言保留。重载 / 已确认 SAVE 遇到真实第二写入者、缺失或畸形修订、初次载入、期间新编辑、同版正向与显式恢复分别检查；模拟元数据错误不称真实 HTTP 资格。
 
 既有 `VUI_WORKSPACE_BROWSER=1` gate 另调用 `workspace_preview_browser.py`，仅在原一次性认证服务中以真实 API 第二写入者与正常按钮检验三组跨版本场景、原始预览响应、实际 If-Match 409、赢家保持及明确重载 / 保存恢复。无伪造成功回复、控制器调用或时钟替换；本地未重试既知原生执行限制，必须取得准确候选及主线的实际 CI 结果。它不是后端跨请求事务、真实用户设置或网络部署验收。
+
+
+## 工作区初次载入失败后的显式重试
+
+初始 auth / catalog / snapshot / saved-preview 读取失败后，页面只展示“重试初次载入”；编辑、保存和订阅控件保持隐藏且不可达，不声称每个隐藏控件都 disabled。重试复用原 GET 顺序和同步 busy，等待期间该重试按钮确实 disabled，无自动重试或写请求。只有有效且同修订的设置 / 预览被实际采用，才打开工作区并继续原节点 / 订阅读取；多次失败不会复制目录。已初始化页面不再使用此入口，后续节点 / 订阅失败仍用原刷新路径，活跃草稿不被重新初始化。401 保持原跳登录和敏感显示清理，并阻止当前页面重试。
+
+`test_workspace_initial_retry.py` 严格复用 `assert_workspace_initial_retry_controls`，运行实际控制器 / 模板和明确合成 DOM / fetch 的 24 项有界控制，要求精确总数及零失败 / skip / cancel / todo。命名旧源反例保留；新按钮缺失导致的多项失败不等于多个独立产品缺陷。原 reload / save / preview / node / subscription / issued 控制不弱化。
+
+既有 workspace Chromium gate 调用 `workspace_initial_retry_browser.py`：在同一次性认证上下文的独立页面上，分别合成 snapshot 两次传输 abort、saved-preview 一次 abort，再正常点击并使用真实 API 回复恢复。只允许准确故障 Request 对象及对应控制台记录，不能宽泛吞错误；检查可见初始重试、在途 disabled、原 GET 序列、完整回复、同版本、40 项目录无重复、零写入 / 存储、原配置与页面保持。真实认证 API 恢复不把合成故障变成真实后端故障记录。helper 源码 / 静态检查不替代准确候选和随后主线的原生执行，本地受限 Chromium / 核心不重试或绕过。
