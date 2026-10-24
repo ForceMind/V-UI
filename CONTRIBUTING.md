@@ -184,6 +184,12 @@ HTTPUpgrade 原样 URI 的晚期 VLESS read 错误不会可靠出现在固定 Mi
 
 既有代理 Chromium gate 的 `test_mocked_dashboard_status_unavailable_and_recovery` 也调用严格 wrapper，再使用真实组件、合成 GET 回复和原有 3秒/10秒轮询验证首次 Unknown、失败后隐藏旧指标、两个端点独立恢复及有效 false/0。它不触发重启或其他写 API，不通过注入控制器/定时器绕过页面；合成状态不表示真实宿主指标、核心运行或用户环境已验。本地已知受限浏览器不重试，准确 CI 独立验收。
 
+### 仪表盘手动只读刷新
+
+仪表盘内的“刷新状态”只调用既有系统/核心状态 GET 的 `fresh()`，不会调用重启、应用或其他写 API。新增操作自己的同步 busy/readiness 只控制此按钮：当前初始认证成功前和确认会话结束后禁止启动，两个 fresh 读取都完成前保持 loading，重复调用不额外排队。原轮询、每端点单飞、5000ms 超时、显隐行为及 Unknown/独立失败语义不变；按钮完成不弹出笼统成功提示，不把仍为 Unknown 的端点称为已确认。
+
+`tests/status_refresh_dom.js` / `tests/test_status_refresh.py` 使用固定前端组件和实际控制器，以明确标注的 HTTP/时钟/renderer host 双件验证准入、重复、fresh 顺序、部分失败恢复及会话边界。严格 wrapper 不接受缺项、skip、cancel 或 todo。`tests/status_refresh_browser.py` 由既有代理 Chromium gate 调用，使用真实认证的临时服务、原始只读回复和正常启用按钮交互，要求无写 API、无浏览器错误/外部请求、实际 disabled/loading 与布局可用。原生资格须由准确候选和合并主线分别给出，本地已知受限浏览器不重试或绕过，不扩大宿主运行或手机实机资格。
+
 ### 状态轮询启动与辅助读取隔离
 
 初次 system/core 读取共同完成后，即安装既有 3秒/10秒可见轮询器，不等待节点列表、旧分流目录/设置/预览或兼容警告。外层初始化仍等待全部原请求；认证前置、会话结束检查、5000ms 状态超时、单飞/fresh 和显隐规则均不改变。辅助 GET 挂起不能让已经显示的状态永久不再刷新，初次状态自身在途则仍须等待。

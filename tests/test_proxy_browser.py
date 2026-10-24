@@ -921,6 +921,10 @@ rules:
         from polling_startup_browser import assert_polling_startup
         assert_polling_startup(self)
 
+    def test_actual_dashboard_readonly_status_refresh(self):
+        from status_refresh_browser import assert_status_refresh
+        assert_status_refresh(self)
+
     def test_mocked_inbound_policy_editor_create_cancel_reopen_saved_only_and_failure(self):
         from playwright.sync_api import expect
         rows = [self.policy_row(1, 'direct'), self.policy_row(2, 'relay')]
