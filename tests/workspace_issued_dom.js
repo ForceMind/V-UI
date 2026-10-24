@@ -12,12 +12,12 @@ const GRANTS = '/api/subscriptions';
 const SNAPSHOT = '/api/routing/mihomo/snapshot';
 const PREVIEW = '/api/routing/mihomo/preview';
 const settings = {mode:'direct', direct_domains:[], proxy_domains:[], presets:{}, bypass_cgnat:false, intranet:[]};
-const plan = {sections:[], warnings:[]};
+const plan = {revision:'1'.repeat(64), sections:[], warnings:[]};
 const grant = (id = 1, changes = {}) => ({id, label:'synthetic grant ' + id, server:'node.example.test',
     inbound_ids:[7], formats:['mihomo.yaml'], expires_at:2000000000,
     revoked:false, expired:false, invalidated:false, invalidation_reason:null, ...changes});
 const response = (value, status = 200) => ({ok:status >= 200 && status < 300, status,
-    json:async()=>structuredClone(value), headers:{get:key=>key === 'X-VUI-Node-Revision' ? 'a'.repeat(64) : key === 'ETag' ? '"r1"' : null}});
+    json:async()=>structuredClone(value), headers:{get:key=>key === 'X-VUI-Node-Revision' ? 'a'.repeat(64) : key === 'ETag' ? '"' + '1'.repeat(64) + '"' : null}});
 const deferred = () => {
     let resolve, reject;
     const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -84,7 +84,7 @@ async function fixture(initialGrants = [grant()], clipboard = async()=>{}) {
         if (index >= 0) return queued.splice(index, 1)[0].reply(options);
         if (method === 'GET' && url === '/api/auth/me') return response({username:'synthetic'});
         if (method === 'GET' && url === '/api/routing/mihomo/catalog') return response({categories:[], presets:[]});
-        if (method === 'GET' && url === SNAPSHOT) return response({revision:'r1', settings});
+        if (method === 'GET' && url === SNAPSHOT) return response({revision:'1'.repeat(64), settings});
         if (method === 'GET' && url === PREVIEW) return response(plan);
         if (method === 'GET' && url === '/api/inbounds') return response([{id:7,remark:'synthetic node',core:'sing-box',protocol:'vless',enable:true}]);
         if (method === 'GET' && url === '/api/subscription/mihomo-warnings') return response([]);

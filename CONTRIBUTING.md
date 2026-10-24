@@ -235,3 +235,9 @@ HTTPUpgrade 原样 URI 的晚期 VLESS read 错误不会可靠出现在固定 Mi
 `tests/test_strict_export_fixture_ports.py` 直接执行现有 strict-export 客户端构造方法，以假进程 / socket / 系统观察验证 DNS 端口使用既有自动区间外双协议分配器，普通 mixed 端口仍沿用原分配。两格式、错误 DNS 身份、已占 UDP、前一个客户端、错误传播及原精确 TCP+UDP / loopback listener 断言均须保留。运行 `PYTHONPATH=.:tests python -m unittest test_strict_export_fixture_ports -v` 不启动核心或真实监听，不替代准确提交的原 strict-export loopback CI。
 
 这里只读内核区间和非特权下限，分配后不预留、启动失败后不重选；显式竞争和固定端口重启冲突仍应失败。PR66 主线首次 DNS UDP bind 失败的历史占用者未知，确定性模型证明的是旧分配机制缺口，不是已还原该次事件，也不证明消除了全部端口竞争。共享分配器与生产导出协议均不变，受限 UDP D2 不在此范围。
+
+## 已保存预览版本一致性（2026-10-24 独立候选）
+
+`python -m unittest discover -s tests -p 'test_workspace_preview_revision.py' -v` 严格核对 `workspace_preview_revision_dom.js` 的 17 项控制、全部通过且零失败 / 取消 / skip / todo，子进程 90 秒有界。它使用真实 Python 路由 / ETag / 临时落盘与受控 DOM / fetch；原 SAVE recovery 五项的桥接 harness 仅提取复用，既有用例断言保留。重载 / 已确认 SAVE 遇到真实第二写入者、缺失或畸形修订、初次载入、期间新编辑、同版正向与显式恢复分别检查；模拟元数据错误不称真实 HTTP 资格。
+
+既有 `VUI_WORKSPACE_BROWSER=1` gate 另调用 `workspace_preview_browser.py`，仅在原一次性认证服务中以真实 API 第二写入者与正常按钮检验三组跨版本场景、原始预览响应、实际 If-Match 409、赢家保持及明确重载 / 保存恢复。无伪造成功回复、控制器调用或时钟替换；本地未重试既知原生执行限制，必须取得准确候选及主线的实际 CI 结果。它不是后端跨请求事务、真实用户设置或网络部署验收。
