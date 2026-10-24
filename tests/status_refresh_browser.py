@@ -11,16 +11,23 @@ import sys
 import time
 from urllib.parse import urlparse
 
+from status_refresh_completion import collect_completion
+
 
 SYSTEM = '/api/system/status'
 CORE = '/api/cores/status'
 STATUS_PATHS = (SYSTEM, CORE)
 HOLD_LIMIT_SECONDS = 4
-COMPLETED_READS = '''targets => {
-    const entries = performance.getEntriesByType('resource');
-    return Object.entries(targets).every(([path, count]) => entries.filter(entry =>
-        new URL(entry.name).pathname === path && entry.initiatorType === 'xmlhttprequest' &&
-        entry.responseEnd > 0).length >= count);
+RESOURCE_TIMINGS = '''paths => {
+    const entries = performance.getEntriesByType('resource')
+        // Keep every expected-path entry, including wrong URL/type entries.
+        // Do not hide malformed/duplicate entries with a completion filter.
+        .filter(entry => paths.includes(new URL(entry.name).pathname))
+        .map(entry => ({name: entry.name, entryType: entry.entryType,
+            initiatorType: entry.initiatorType, startTime: entry.startTime,
+            responseStart: entry.responseStart, responseEnd: entry.responseEnd}));
+    return {document_url: location.href, time_origin: performance.timeOrigin,
+        observed_at: performance.now(), entries};
 }'''
 BUTTON_GEOMETRY = '''button => {
     const box = element => {
@@ -51,9 +58,9 @@ def assert_status_refresh(case):
     active = {path: set() for path in STATUS_PATHS}
     maximum_active = {path: 0 for path in STATUS_PATHS}
     held = {path: [] for path in STATUS_PATHS}
-    originals, responses, started = {}, {}, {}
+    originals, responses, started, ledger = {}, {}, {}, {}
     writes, failures, console_errors, timeline = [], [], [], []
-    phase = {'width': None, 'hold': True, 'closing': False}
+    phase = {'width': None, 'hold': True, 'qualified': None}
     origin = time.monotonic()
 
     def record(event, request):
@@ -68,33 +75,58 @@ def assert_status_refresh(case):
             writes.append((request.method, path))
         if path in requests:
             case.assertEqual(request.method, 'GET')
+            case.assertEqual(request.url, base + path)
+            case.assertIsNone(request.service_worker)
+            case.assertEqual(request.frame, page.main_frame)
+            case.assertEqual(request.resource_type, 'xhr')
+            case.assertIsNone(request.redirected_from)
+            case.assertNotIn(request, ledger)
+            ledger[request] = {'identity': len(ledger) + 1, 'path': path, 'url': request.url,
+                'method': request.method, 'main_frame': request.frame == page.main_frame,
+                'resource_type': request.resource_type, 'redirected_from': False,
+                'redirected_to': False, 'service_worker': False, 'from_service_worker': False,
+                'status': None, 'failure': None,
+                'finished': False, 'body_size': None, 'held': False}
             requests[path].append(request)
             started[request] = time.monotonic()
             active[path].add(request)
             maximum_active[path] = max(maximum_active[path], len(active[path]))
             record('request', request)
+            if phase['qualified'] is not None:
+                # Callback arrival after the seal does not prove browser start
+                # after it. Never silently omit a post-seal observed request.
+                record('unqualified-post-seal-request', request)
+                failures.append((path, 'unqualified post-seal status request'))
 
     def received(response):
         if response.request in started:
+            case.assertEqual(response.url, base + urlparse(response.request.url).path)
+            case.assertEqual(response.status, 200)
+            case.assertFalse(response.from_service_worker)
+            case.assertNotIn(response.request, responses)
             responses[response.request] = response
+            ledger[response.request]['status'] = response.status
             record('response', response.request)
 
     def complete(request):
         if request in started:
             path = urlparse(request.url).path
+            case.assertIsNone(request.redirected_to)
+            case.assertNotIn(request, finished[path])
+            ledger[request]['finished'] = True
+            ledger[request]['redirected_to'] = request.redirected_to is not None
             active[path].discard(request)
             finished[path].append(request)
             record('finished', request)
 
     def failed(request):
         if request in started:
-            # Destroying a finished scenario's page can cancel a natural poll.
-            # Only that explicit teardown's exact Chromium cancellation is exempt.
-            if phase['closing'] and request not in originals and request.failure == 'net::ERR_ABORTED':
-                record('navigation-cancelled-natural-poll', request)
-            else:
-                failures.append((urlparse(request.url).path, request.failure))
-                record('failed', request)
+            # ResourceTiming cannot identify an aborted exact Request. Even a
+            # later callback cannot prove later browser start, so unqualified
+            # teardown cancellations fail conservatively, never an exemption.
+            ledger[request]['failure'] = request.failure
+            failures.append((urlparse(request.url).path, request.failure))
+            record('failed', request)
             active[urlparse(request.url).path].discard(request)
 
     def console(message):
@@ -122,6 +154,7 @@ def assert_status_refresh(case):
         entry = {'route': route, 'request': request, 'response': response,
                  'body': response.body(), 'headers': response.headers}
         originals[request] = entry
+        ledger[request]['held'] = True
         held[path].append(entry)
         record('held-genuine-response', request)
         # The original Axios 5000ms deadline remains active. Only delivery is held.
@@ -185,22 +218,49 @@ def assert_status_refresh(case):
         case.assertLess(time.monotonic() - started[entry['request']], HOLD_LIMIT_SECONDS,
                         'release must not be timeout-based recovery')
 
-    def completed(targets):
-        page.wait_for_function(COMPLETED_READS, arg=targets, timeout=4000)
-        required = {request for path, count in targets.items() for request in requests[path][:count]}
-        known = lambda: {request for values in finished.values() for request in values}
-        if not required <= known():
-            page.wait_for_event('requestfinished',
-                                predicate=lambda request: required <= known() | {request}, timeout=4000)
-        case.assertTrue(required <= known())
-        for request in required:
-            case.assertIn(request, originals)
-            case.assertIn(request, responses)
-            original, actual = originals[request], responses[request]
-            case.assertEqual(actual.status, original['response'].status)
-            case.assertEqual(actual.body(), original['body'])
-            for name, value in original['headers'].items():
-                case.assertEqual(actual.headers.get(name), value, name)
+    def completed():
+        def cohort():
+            # Exact Request objects own these records; generated identities are
+            # diagnostic only and are never joined to native resource ordinals.
+            return [dict(entry) for entry in ledger.values()]
+
+        def snapshot():
+            for request in tuple(ledger):
+                entry = ledger[request]
+                if not entry['finished'] or entry['body_size'] is not None:
+                    continue
+                case.assertIn(request, responses)
+                actual = responses[request]
+                case.assertIsNone(request.failure)
+                case.assertEqual(actual.status, 200)
+                # Read only AFTER this exact Request's requestfinished event.
+                # No unbounded Response.finished() or response-header decrement.
+                body = actual.body()
+                case.assertIsInstance(body, bytes)
+                entry['body_size'] = len(body)
+                if request in originals:
+                    original = originals[request]
+                    case.assertEqual(actual.status, original['response'].status)
+                    case.assertEqual(body, original['body'])
+                    for name, value in original['headers'].items():
+                        case.assertEqual(actual.headers.get(name), value, name)
+            native = page.evaluate(RESOURCE_TIMINGS, list(STATUS_PATHS))
+            # Preserve actual values even if qualification immediately fails.
+            print('Status refresh native completion observation (unqualified): ' + json.dumps({
+                'width': phase['width'], **native,
+                'cohort_counts': {path: len(requests[path]) for path in STATUS_PATHS},
+                'callback_maximum_active': dict(maximum_active)}, sort_keys=True))
+            return native
+
+        proof = collect_completion(cohort, snapshot, page.wait_for_timeout, time.monotonic,
+                                   base, STATUS_PATHS)
+        # Freeze BEFORE deliberate teardown. Newly observed requests must not
+        # retroactively enter this proof or silently obtain abort exemptions.
+        phase['qualified'] = frozenset(ledger)
+        marker = json.dumps({'width': phase['width'], **proof,
+                             'callback_maximum_active': dict(maximum_active)},
+                            sort_keys=True, allow_nan=False)
+        print('Status refresh native completion qualification: ' + marker)
 
     def geometry():
         control().scroll_into_view_if_needed()
@@ -250,23 +310,31 @@ def assert_status_refresh(case):
             pending()  # The other own fresh read still owns the spinner/admission.
             release(CORE if first == SYSTEM else SYSTEM)
             idle()
-            completed({SYSTEM: 2, CORE: 2})
             for identifier in ('system-status-tag', 'cpu-status', 'memory-status',
                                'xray-status-tag', 'singbox-status-tag'):
                 expect(page.locator('#' + identifier)).to_have_attribute('data-status', 'known')
             phase['hold'] = False
             print('Status refresh native geometry: ' + json.dumps({'width': width, **geometry()}))
             expect(page.locator('.el-message--success')).to_have_count(0)
-            case.assertEqual(maximum_active, {SYSTEM: 1, CORE: 1})
             case.assertEqual(writes, [])
             case.assertEqual(failures, [])
             case.assertEqual(console_errors, [])
             case.assertEqual(case.external, [])
             case.assertEqual(case.errors, [])
             case.assert_private()
-            phase['closing'] = True
+            completed()  # One bounded, stable all-request snapshot after geometry.
+            case.assertEqual(writes, [])
+            case.assertEqual(failures, [])
+            case.assertEqual(console_errors, [])
+            case.assertEqual(case.external, [])
+            case.assertEqual(case.errors, [])
             page.goto('about:blank')
             case.assertEqual(failures, [])
+            case.assertEqual(frozenset(ledger), phase['qualified'], 'unqualified post-seal status request')
+            case.assertEqual(writes, [])
+            case.assertEqual(console_errors, [])
+            case.assertEqual(case.external, [])
+            case.assertEqual(case.errors, [])
             # Preserve global error/write audit and timeline; only the new page's
             # native resource-count observations restart for the next viewport.
             for path in STATUS_PATHS:
@@ -278,12 +346,14 @@ def assert_status_refresh(case):
             originals.clear()
             responses.clear()
             started.clear()
+            ledger.clear()
+            phase['qualified'] = None
             phase['hold'] = True
-            phase['closing'] = False
         print('Status refresh: real Chromium / genuine authenticated read-only API replies; '
               'desktop and phone-width normal clicks; native disabled/loading/focus/layout; '
               'one normal click per viewport, queued fresh reads and both completion orders; '
-              'later natural polls stay unchanged; unchanged response bytes; '
+              'later natural polls stay unchanged and join completion qualification; '
+              'exact-count native full-response intervals; unchanged response bytes; '
               'zero writes, no controller/clock changes; no core or device qualification')
     finally:
         original_error = sys.exc_info()[1]
@@ -305,6 +375,8 @@ def assert_status_refresh(case):
         for event, handler in (('request', observe), ('response', received),
                                ('requestfinished', complete), ('requestfailed', failed), ('console', console)):
             cleanup(lambda event=event, handler=handler: page.remove_listener(event, handler))
+        print('Status refresh callback maximum (diagnostic only): ' + json.dumps(
+            {'width': phase['width'], 'maximum_active': maximum_active}))
         print('Status refresh native request timeline: ' + json.dumps(timeline))
         if cleanup_errors:
             target = original_error or cleanup_errors[0]
