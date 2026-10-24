@@ -11,6 +11,7 @@ import tempfile
 import time
 import unittest
 from workspace_preview_browser import assert_workspace_preview_revision_races
+from workspace_initial_retry_browser import assert_workspace_initial_read_retry
 
 @unittest.skipUnless(os.getenv('VUI_WORKSPACE_BROWSER')=='1', 'explicit browser check')
 class WorkspaceBrowserTests(unittest.TestCase):
@@ -488,6 +489,7 @@ with database.SessionLocal() as db:
                             expect(page.locator('#reload')).to_be_enabled()
                             self.assert_reload_preserves_inflight_drafts(page,context,base,dialogs,expect)
                             assert_workspace_preview_revision_races(self,page,context,base,work,dialogs,expect)
+                            assert_workspace_initial_read_retry(self,context,base,work,expect)
                             page.locator('#label').fill('<img src=x onerror=alert(1)>')
                             page.locator('#server').fill('vpn.example.test');page.locator('[data-node="1"]').check()
                             page.locator('#create-grant').click();expect(page.locator('#issued')).to_be_visible()

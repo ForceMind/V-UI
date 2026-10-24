@@ -3,6 +3,7 @@
     const $ = id => document.getElementById(id);
     let savedRevision = '', savedForm = '', editNumber = 0, catalog = null, issued = null, issuedNumber = 0, busy = false;
     let nodeRevision = '', nodeReadNumber = 0;
+    let initialized = false, initialAuthExpired = false;
     const validNodeRevision = value => typeof value === 'string' && value.length === 64 && /^[0-9a-f]{64}$/.test(value);
     const sameSavedRevision = (revision, plan) => typeof revision === 'string' && revision.length === 64 && /^[0-9a-f]{64}$/.test(revision) && plan?.revision === revision;
     const nodeRefreshGuidance = '请点击“刷新节点和订阅”，重新选择节点后创建订阅。';
@@ -17,7 +18,7 @@
     const request = async (url, options = {}) => {
         const response = await fetch(url, {credentials:'same-origin', cache:'no-store', ...options,
             headers:{'X-VUI-Request':'1', ...(options.body ? {'Content-Type':'application/json'} : {}), ...(options.headers || {})}});
-        if (response.status === 401) { hideIssued(); invalidateNodes(); location.replace('/login'); throw new Error('登录已过期'); }
+        if (response.status === 401) { initialAuthExpired = true; $('initial-retry').hidden = true; hideIssued(); invalidateNodes(); location.replace('/login'); throw new Error('登录已过期'); }
         if (!response.ok) {
             let text = '请求未完成';
             try { const value = await response.json(); text = typeof value.detail === 'string' ? value.detail : '输入格式不正确，未保存'; } catch {}
@@ -87,6 +88,7 @@
         savedRevision = value.revision; fill(value.settings); savedForm = fingerprint(collect()); editNumber++;
         showPlan(plan, '已保存规则预览');
         updateState(); notice('已读取保存版本。编辑表单不会立即改变订阅。');
+        return true;
     }
     // Invalidate local continuations, not the already-authorized server operation.
     function hideIssued() { issuedNumber++; issued = null; $('issued-urls').value = ''; $('issued').hidden = true; $('download').disabled = true; }
@@ -245,16 +247,29 @@
     addEventListener('beforeunload', event => { if (savedRevision && dirty()) { event.preventDefault(); event.returnValue = ''; } });
     addEventListener('pagehide', () => { hideIssued(); invalidateNodes(); });
     addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
-    operation(async () => {
-        await json('/api/auth/me'); catalog = await json('/api/routing/mihomo/catalog');
-        catalog.categories.forEach(category => {
-            const group = element('fieldset', null); group.append(element('legend', category.name_zh));
-            catalog.presets.filter(p => p.category === category.id).forEach(preset => {
-                const label = element('label', null, {class:'check'}); label.append(element('input', null, {type:'checkbox', 'data-preset':preset.id}), document.createTextNode(preset.name_zh)); group.append(label);
-            }); $('presets').append(group);
+    function initialize() {
+        if (initialized || initialAuthExpired || busy) return;
+        return operation(async () => {
+            notice('正在初次载入已保存的设置…');
+            try {
+                await json('/api/auth/me'); catalog = await json('/api/routing/mihomo/catalog');
+                $('presets').replaceChildren();
+                catalog.categories.forEach(category => {
+                    const group = element('fieldset', null); group.append(element('legend', category.name_zh));
+                    catalog.presets.filter(p => p.category === category.id).forEach(preset => {
+                        const label = element('label', null, {class:'check'}); label.append(element('input', null, {type:'checkbox', 'data-preset':preset.id}), document.createTextNode(preset.name_zh)); group.append(label);
+                    }); $('presets').append(group);
+                });
+                if (!await reload()) { $('initial-retry').hidden = false; return; }
+                initialized = true; $('initial-retry').hidden = true;
+                $('workspace').hidden = false;
+            } catch (error) {
+                $('initial-retry').hidden = initialAuthExpired;
+                throw error;
+            }
+            await refreshNodesAndGrants();
         });
-        await reload();
-        $('workspace').hidden = false;
-        await refreshNodesAndGrants();
-    });
+    }
+    $('initial-retry').addEventListener('click', initialize);
+    initialize();
 })();
