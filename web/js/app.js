@@ -149,6 +149,12 @@ const app = createApp({
         // only that endpoint. Missing/malformed fields never imply false or zero.
         const systemStatusKnown = ref(false);
         const coreStatusKnown = ref(false);
+        const statusRefreshReady = ref(false);
+        const refreshingStatus = ref(false);
+        clearAdminSecrets.push(() => {
+            // A stale 401 alone does not end a currently valid session.
+            if (adminSessionEnded) statusRefreshReady.value = false;
+        });
         const statusObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
         const systemOsKnown = computed(() => systemStatusKnown.value &&
             typeof systemStatus.value.os === 'string' && systemStatus.value.os.trim().length > 0);
@@ -518,6 +524,18 @@ const app = createApp({
                 console.error('Failed to fetch core status', error);
             }
         });
+
+        const refreshStatus = async () => {
+            if (!statusRefreshReady.value || adminSessionEnded || refreshingStatus.value) return;
+            refreshingStatus.value = true;
+            try {
+                // Own both new reads, including any wait behind existing polls.
+                // Each reader keeps its independent Unknown/error semantics.
+                await Promise.all([fetchSystemStatus.fresh(), fetchCoreStatus.fresh()]);
+            } finally {
+                refreshingStatus.value = false;
+            }
+        };
 
         const fetchInbounds = async () => {
             closeQrDialog();
@@ -1055,6 +1073,7 @@ const app = createApp({
                 currentUser.value = verified;
             }
             if (adminSessionEnded) return;
+            statusRefreshReady.value = true;
             await Promise.all([
                 Promise.all([fetchSystemStatus.fresh(), fetchCoreStatus.fresh()]).then(() => {
                     if (adminSessionEnded) return;
@@ -1074,6 +1093,9 @@ const app = createApp({
             systemOsKnown,
             systemMetricKnown,
             coreFieldKnown,
+            statusRefreshReady,
+            refreshingStatus,
+            refreshStatus,
             inbounds,
             inboundSearch,
             filteredInbounds,

@@ -107,6 +107,15 @@
 
             <el-main>
                 <div v-if="currentView === 'dashboard'" class="dashboard-view">
+                    <div class="view-header">
+                        <div>
+                            <h3>系统状态</h3>
+                            <div id="status-refresh-help" class="stat-text">只读取最新状态，不会重启核心。</div>
+                        </div>
+                        <el-button id="refresh-status" @click="refreshStatus"
+                            :disabled="!statusRefreshReady || refreshingStatus" :loading="refreshingStatus"
+                            aria-describedby="status-refresh-help">刷新状态</el-button>
+                    </div>
                     <el-row :gutter="20">
                         <el-col :span="6">
                             <el-card id="cpu-status" shadow="hover" :data-status="systemMetricKnown('cpu') ? 'known' : 'unknown'">
