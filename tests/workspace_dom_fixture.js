@@ -13,8 +13,9 @@ const ROUTING = '/api/routing/mihomo';
 const original = {mode:'direct', direct_domains:['direct.example.test'], proxy_domains:['saved.example.test'],
     presets:{openai:true}, bypass_cgnat:false, intranet:[{suffix:'corp.example.test', nameservers:['system']}]};
 const replacement = {...original, mode:'standard', proxy_domains:['server.example.test'], presets:{openai:false}};
-const plan = name => ({sections:[{comment:name, rules:['DOMAIN-SUFFIX,' + name + ',DIRECT']}], warnings:[]});
-const response = (value, status = 200, etag = 'r3') => ({ok:status >= 200 && status < 300, status,
+const R1 = '1'.repeat(64), R2 = '2'.repeat(64), R3 = '3'.repeat(64);
+const plan = (name, revision) => ({...(revision === undefined ? {} : {revision}), sections:[{comment:name, rules:['DOMAIN-SUFFIX,' + name + ',DIRECT']}], warnings:[]});
+const response = (value, status = 200, etag = R3) => ({ok:status >= 200 && status < 300, status,
     json:async()=>structuredClone(value), headers:{get:key=>key === 'X-VUI-Node-Revision' ? 'a'.repeat(64) : key === 'ETag' ? '"' + etag + '"' : null}});
 const deferred = () => {
     let resolve, reject;
@@ -44,12 +45,12 @@ function matches(node, selector) {
     if (/^\[data-[a-z]+\]$/.test(selector)) return selector.slice(6, -1) in node.dataset;
     return false;
 }
-async function fixture({routingFetch} = {}) {
+async function fixture({routingFetch, bootstrapFailure = false} = {}) {
     const nodes = new Map(), globalEvents = new Map(), requests = [], confirms = [], queued = [];
     const buttons = ['reload','preview','save','add-zone','refresh-grants','create-grant','forget','copy','download'];
     const get = id => { if (!nodes.has(id)) nodes.set(id, new Element(buttons.includes(id) ? 'button' : 'div')); return nodes.get(id); };
     buttons.forEach(get);
-    const ready = deferred(); let hidden = true;
+    const ready = deferred(); let hidden = true, savedPreviewRevision = R1;
     Object.defineProperty(get('workspace'), 'hidden', {get:()=>hidden, set:value=>{hidden = value;if (!value) ready.resolve();}});
     const document = {getElementById:get, createElement:tag=>new Element(tag), createTextNode:text=>Object.assign(new Element('#text'), {textContent:text}),
         querySelectorAll:selector=>[...nodes.values()].flatMap(node => [node, ...descendants(node)]).filter(node => matches(node, selector))};
@@ -61,14 +62,20 @@ async function fixture({routingFetch} = {}) {
         const index = queued.findIndex(item => item.url === url && item.method === (options.method || 'GET'));
         if (index >= 0) return queued.splice(index, 1)[0].reply(options);
         if (routingFetch && url.startsWith(ROUTING)) return routingFetch(url, options);
-        if (url === SNAPSHOT) return response({revision:'r1', settings:original});
-        if (url === PREVIEW) return response(plan(options.method === 'POST' ? 'draft' : 'saved'));
-        if (url === ROUTING && options.method === 'PUT') return response(JSON.parse(options.body));
+        if (url === SNAPSHOT) return response({revision:R1, settings:original});
+        if (url === PREVIEW) return response(options.method === 'POST' ? plan('draft') : plan('saved', savedPreviewRevision));
+        if (url === ROUTING && options.method === 'PUT') { savedPreviewRevision = R3; return response(JSON.parse(options.body)); }
         if (url === '/api/auth/me') return response({username:'synthetic'});
         if (url === '/api/routing/mihomo/catalog') return response({categories:[{id:'service', name_zh:'服务'}], presets:[{id:'openai', category:'service', name_zh:'OpenAI'}]});
         if (['/api/inbounds','/api/subscription/mihomo-warnings','/api/subscriptions'].includes(url)) return response([]);
         assert.fail('Unexpected request: ' + url);
     };
+    if (bootstrapFailure) {
+        let className = '';
+        Object.defineProperty(get('notice'), 'className', {get:()=>className, set:value=>{
+            className = value; if (value === 'error') ready.resolve();
+        }});
+    }
     vm.runInNewContext(script, {document, fetch, location:{origin:'http://example.test'},
         addEventListener:(type, fn)=>globalEvents.set(type, [...(globalEvents.get(type) || []), fn]),
         confirm:text=>{confirms.push(text);return confirmed;}, setTimeout, clearTimeout}, {filename});
@@ -76,8 +83,8 @@ async function fixture({routingFetch} = {}) {
     try { await Promise.race([ready.promise, new Promise((_, reject)=>{timer = setTimeout(()=>reject(new Error('controller bootstrap timeout')), 5000);})]); }
     finally { clearTimeout(timer); }
     await new Promise(resolve => setImmediate(resolve));
-    assert.equal(get('workspace').hidden, false, 'controller bootstrap completes');
-    assert.equal(get('save').disabled, true);
+    assert.equal(get('workspace').hidden, bootstrapFailure, 'controller bootstrap state');
+    if (!bootstrapFailure) assert.equal(get('save').disabled, true);
     const queue = (url, reply, method = 'GET') => queued.push({url, reply, method});
     const hold = (url, method = 'GET') => {
         const gate = deferred(), started = deferred();
@@ -99,8 +106,8 @@ async function fixture({routingFetch} = {}) {
         const put = requests.filter(r=>r.method === 'PUT').at(-1);
         assert.equal(put.options.headers['If-Match'], '"' + expected + '"');
     };
-    return {get, document, requests, confirms, queue, hold, edit, ui, assertDirty, assertRevision,
+    return {get, document, globalEvents, requests, confirms, queue, hold, edit, ui, assertDirty, assertRevision,
         confirm:value=>{confirmed = value;}, click:id=>get(id).emit('click')};
 }
 
-module.exports = {fixture, SNAPSHOT, PREVIEW, ROUTING, original, replacement, plan, response, deferred};
+module.exports = {fixture, SNAPSHOT, PREVIEW, ROUTING, original, replacement, plan, response, deferred, R1, R2, R3};

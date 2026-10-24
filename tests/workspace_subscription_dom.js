@@ -12,7 +12,7 @@ const GRANTS = '/api/subscriptions';
 const SNAPSHOT = '/api/routing/mihomo/snapshot';
 const PREVIEW = '/api/routing/mihomo/preview';
 const settings = {mode:'direct', direct_domains:[], proxy_domains:[], presets:{}, bypass_cgnat:false, intranet:[]};
-const plan = {sections:[], warnings:[]};
+const plan = {revision:'1'.repeat(64), sections:[], warnings:[]};
 const labels = {
     node_identity_missing:'旧授权缺少节点身份，请重新选择节点并创建订阅',
     node_identity_changed:'节点已删除、重建或身份异常，请重新创建订阅',
@@ -31,7 +31,7 @@ const grant = (id = 1, changes = {}) => ({id, label:'synthetic grant ' + id, ser
     revoked:false, expired:false, invalidated:false, invalidation_reason:null, ...changes});
 const invalidGrant = (reason, changes = {}) => grant(1, {invalidated:true, invalidation_reason:reason, ...changes});
 const response = (value, status = 200) => ({ok:status >= 200 && status < 300, status,
-    json:async()=>structuredClone(value), headers:{get:key=>key === 'X-VUI-Node-Revision' ? 'a'.repeat(64) : key === 'ETag' ? '"r1"' : null}});
+    json:async()=>structuredClone(value), headers:{get:key=>key === 'X-VUI-Node-Revision' ? 'a'.repeat(64) : key === 'ETag' ? '"' + '1'.repeat(64) + '"' : null}});
 const deferred = () => {
     let resolve, reject;
     const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -92,7 +92,7 @@ async function fixture(initialGrants) {
         if (index >= 0) return queued.splice(index, 1)[0].reply(options);
         if (method === 'GET' && url === '/api/auth/me') return response({username:'synthetic'});
         if (method === 'GET' && url === '/api/routing/mihomo/catalog') return response({categories:[], presets:[]});
-        if (method === 'GET' && url === SNAPSHOT) return response({revision:'r1', settings});
+        if (method === 'GET' && url === SNAPSHOT) return response({revision:'1'.repeat(64), settings});
         if (method === 'GET' && url === PREVIEW) return response(plan);
         if (method === 'GET' && ['/api/inbounds','/api/subscription/mihomo-warnings'].includes(url)) return response([]);
         if (method === 'GET' && url === GRANTS) return response(initialGrants);
@@ -203,7 +203,10 @@ for (const outcome of ['success', 'http error', 'network error']) {
         const f = await fixture(values), originalButtons = values.map(value=>f.rotate(value.id));
         const gate = f.hold(SNAPSHOT), pending = f.click('reload'); await gate.started;
         for (const value of values) await f.assertDisabledClick(value.id);
-        if (outcome === 'success') gate.resolve(response({revision:'r2', settings}));
+        if (outcome === 'success') {
+            f.queue(PREVIEW, async()=>response({...plan, revision:'2'.repeat(64)}));
+            gate.resolve(response({revision:'2'.repeat(64), settings}));
+        }
         else if (outcome === 'http error') gate.resolve(response({detail:'synthetic read failure'}, 503));
         else gate.reject(new Error('synthetic read failure'));
         await pending;

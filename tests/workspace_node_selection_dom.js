@@ -17,7 +17,7 @@ const grant = () => ({id:1, label:'synthetic grant', server:'node.example.test',
     revoked:false, expired:false, invalidated:false, invalidation_reason:null});
 const token = () => ({id:1, paths:{'mihomo.yaml':'/sub/synthetic-token/mihomo.yaml'}});
 const response = (value, status = 200, revision = REVISION) => ({ok:status >= 200 && status < 300, status,
-    json:async()=>structuredClone(value), headers:{get:key=>key === 'X-VUI-Node-Revision' ? revision : key === 'ETag' ? '"r1"' : null}});
+    json:async()=>structuredClone(value), headers:{get:key=>key === 'X-VUI-Node-Revision' ? revision : key === 'ETag' ? '"' + '1'.repeat(64) + '"' : null}});
 const deferred = () => {let resolve, reject; const promise = new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 const flush = () => new Promise(resolve=>setImmediate(resolve));
 async function bounded(promise, label) {
@@ -63,8 +63,8 @@ async function fixture({revision = REVISION, nodeValues = [node()], warningValue
         if(index>=0)return queued.splice(index,1)[0].reply(options);
         if(url==='/api/auth/me')return response({username:'synthetic'});
         if(url==='/api/routing/mihomo/catalog')return response({categories:[],presets:[]});
-        if(url==='/api/routing/mihomo/snapshot')return response({revision:'r1',settings});
-        if(url==='/api/routing/mihomo/preview')return response({sections:[],warnings:[]});
+        if(url==='/api/routing/mihomo/snapshot')return response({revision:'1'.repeat(64),settings});
+        if(url==='/api/routing/mihomo/preview')return response({revision:'1'.repeat(64),sections:[],warnings:[]});
         if(url===NODES)return response(nodeValues,200,revision);
         if(url===WARNINGS)return response(warningValues);
         if(url===GRANTS && method==='GET')return response([grant()]);
@@ -178,7 +178,7 @@ test('fresh warnings and disabled-node eligibility apply without auto selection'
 test('node refresh preserves an edited routing draft and its original If-Match revision',async()=>{
     const f=await fixture();f.get('proxy').value='draft.example.test';await f.get('routing-form').emit('input');
     await f.click('refresh-grants');assert.equal(f.get('proxy').value,'draft.example.test');assert.match(f.get('save-state').textContent,/未保存草稿/);
-    f.queue('/api/routing/mihomo',async options=>{assert.equal(options.headers['If-Match'],'"r1"');return response({...settings,proxy_domains:['draft.example.test']});},'PUT');
+    f.queue('/api/routing/mihomo',async options=>{assert.equal(options.headers['If-Match'],'"' + '1'.repeat(64) + '"');return response({...settings,proxy_domains:['draft.example.test']});},'PUT');
     await f.click('save');assert.equal(f.requests.filter(item=>item.method==='PUT').length,1);
 });
 

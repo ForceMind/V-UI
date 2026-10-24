@@ -4,6 +4,7 @@
     let savedRevision = '', savedForm = '', editNumber = 0, catalog = null, issued = null, issuedNumber = 0, busy = false;
     let nodeRevision = '', nodeReadNumber = 0;
     const validNodeRevision = value => typeof value === 'string' && value.length === 64 && /^[0-9a-f]{64}$/.test(value);
+    const sameSavedRevision = (revision, plan) => typeof revision === 'string' && revision.length === 64 && /^[0-9a-f]{64}$/.test(revision) && plan?.revision === revision;
     const nodeRefreshGuidance = '请点击“刷新节点和订阅”，重新选择节点后创建订阅。';
     const nodeSelectionConflict = 'Subscription node selection changed; refresh nodes and select them again';
     const notice = (text, error = false) => { $('notice').textContent = text; $('notice').className = error ? 'error' : ''; };
@@ -81,6 +82,7 @@
         if (superseded()) return;
         const plan = await json('/api/routing/mihomo/preview');
         if (superseded()) return;
+        if (!sameSavedRevision(value.revision, plan)) throw new Error('已保存设置与预览的版本不一致或无法确认，未载入新版本。已保留当前表单和预览；请重新载入或刷新页面后重试。');
         // Commit the read only after both requests succeed without newer form input.
         savedRevision = value.revision; fill(value.settings); savedForm = fingerprint(collect()); editNumber++;
         showPlan(plan, '已保存规则预览');
@@ -194,6 +196,10 @@
         if (number === editNumber) { fill(settings); savedForm = fingerprint(collect()); }
         else { savedForm = fingerprint(settings); } // Preserve edits made while the save was in flight.
         const plan = await json('/api/routing/mihomo/preview');
+        if (!sameSavedRevision(savedRevision, plan)) {
+            if (number === editNumber) $('preview-label').textContent = '设置已保存 · 预览未更新，请重新载入';
+            throw new Error('设置已保存，但预览版本已变化或无法确认。未显示该预览，当前表单已保留；请重新载入或刷新页面后核对。');
+        }
         if (number === editNumber) showPlan(plan, '已保存规则预览');
         notice('设置已保存。请在客户端刷新原订阅地址；无需重新创建令牌。');
     }));
