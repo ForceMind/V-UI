@@ -1056,15 +1056,15 @@ const app = createApp({
             }
             if (adminSessionEnded) return;
             await Promise.all([
-                fetchSystemStatus.fresh(),
-                fetchCoreStatus.fresh(),
+                Promise.all([fetchSystemStatus.fresh(), fetchCoreStatus.fresh()]).then(() => {
+                    if (adminSessionEnded) return;
+                    statusPollers.push(visibleStatusPoller(fetchSystemStatus, 3000));
+                    statusPollers.push(visibleStatusPoller(fetchCoreStatus, 10000));
+                }),
                 fetchInbounds(),
                 fetchRouting(),
                 fetchMihomoWarnings()
             ]);
-            if (adminSessionEnded) return;
-            statusPollers.push(visibleStatusPoller(fetchSystemStatus, 3000));
-            statusPollers.push(visibleStatusPoller(fetchCoreStatus, 10000));
         });
 
         return {

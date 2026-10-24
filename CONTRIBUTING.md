@@ -184,6 +184,12 @@ HTTPUpgrade 原样 URI 的晚期 VLESS read 错误不会可靠出现在固定 Mi
 
 既有代理 Chromium gate 的 `test_mocked_dashboard_status_unavailable_and_recovery` 也调用严格 wrapper，再使用真实组件、合成 GET 回复和原有 3秒/10秒轮询验证首次 Unknown、失败后隐藏旧指标、两个端点独立恢复及有效 false/0。它不触发重启或其他写 API，不通过注入控制器/定时器绕过页面；合成状态不表示真实宿主指标、核心运行或用户环境已验。本地已知受限浏览器不重试，准确 CI 独立验收。
 
+### 状态轮询启动与辅助读取隔离
+
+初次 system/core 读取共同完成后，即安装既有 3秒/10秒可见轮询器，不等待节点列表、旧分流目录/设置/预览或兼容警告。外层初始化仍等待全部原请求；认证前置、会话结束检查、5000ms 状态超时、单飞/fresh 和显隐规则均不改变。辅助 GET 挂起不能让已经显示的状态永久不再刷新，初次状态自身在途则仍须等待。
+
+`tests/test_polling_startup.py` 严格调用 `tests/polling_startup_dom.js`，使用固定 Vue / Axios 与实际控制器/模板，以合成 adapter、时钟及 renderer host 覆盖五类辅助读取、认证/会话、初始状态等待、失败恢复和单飞。它不是原生浏览器证据。`tests/polling_startup_browser.py` 由既有 proxy Chromium gate 调用：只挂起真实已认证辅助 GET 的原回复，观察真正 system/core GET 在原间隔继续完成，释放后核无重复轮询与写操作。没有通过注入调用控制器或伪造时钟取得原生资格，不把受控显隐测试称为浏览器原生标签隐藏；本地受限浏览器不重试，准确候选及合并主线分别验收。
+
 ### 核心重启按钮单飞
 
 仪表盘的两枚核心重启按钮共享一次在途操作。实际控制器先检查已有 `restartingCore`，两按钮同时禁用而只保留被选核心的原 loading；锁覆盖原 POST 和其后的 fresh 状态读取。额外调用不排队、不重试、不发送 POST；原验证失败、成功与错误提示及 finally 恢复行为不变。后端锁只能串行化，不能将重复请求自动去重，不能用它代替 UI admission 保护。
