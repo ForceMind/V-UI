@@ -190,6 +190,10 @@ HTTPUpgrade 原样 URI 的晚期 VLESS read 错误不会可靠出现在固定 Mi
 
 `tests/status_refresh_dom.js` / `tests/test_status_refresh.py` 使用固定前端组件和实际控制器，以明确标注的 HTTP/时钟/renderer host 双件验证准入、重复、fresh 顺序、部分失败恢复及会话边界。严格 wrapper 不接受缺项、skip、cancel 或 todo。`tests/status_refresh_browser.py` 由既有代理 Chromium gate 调用，使用真实认证的临时服务、原始只读回复和正常启用按钮交互，要求无写 API、无浏览器错误/外部请求、实际 disabled/loading 与布局可用。原生资格须由准确候选和合并主线分别给出，本地已知受限浏览器不重试或绕过，不扩大宿主运行或手机实机资格。
 
+`tests/status_refresh_completion.py` 将同端点完整响应的串行性与 Python 回调投递顺序分开：保留逐 Request 成功完成、200 状态、完整正文和原回复头 / bytes 检查，回调最大计数只作诊断；同一文档的原生 ResourceTiming 要求准确 URL / XHR 的全集合数量一致，并逐区间严格检查上一 `responseEnd <= 下一 startTime`。后续自然轮询也必须进入集合，不取前两个、不增加浮点容差、不把响应头当成响应结束；原生条目没有 Request ID，因此仅称集合对应，不声称逐对象时间映射。缺项、失败、重叠、worker / redirect、文档时钟变更及封存后的未资格请求均保守失败，不给取消豁免。
+
+`tests/test_status_refresh_completion.py` 的 13 个有限纯函数方法覆盖旧回调判据反例、真实区间重叠、严格数量 / 元数据、完整响应与第三次自然轮询、集合增长和共享截止。合成区间只验证观察器，不补造历史 CI 时间。收集仅在请求尚未完成或集合增长时继续，使用单个四秒观察预算，失败断言不重试；同步 Playwright RPC 本身不能被该 Python 预算抢占，外层 CI 超时仍是挂起上限。准确候选及主线原生运行须另验，原始失败永久保留，不以同 SHA 重跑替代修正。
+
 ### 状态轮询启动与辅助读取隔离
 
 初次 system/core 读取共同完成后，即安装既有 3秒/10秒可见轮询器，不等待节点列表、旧分流目录/设置/预览或兼容警告。外层初始化仍等待全部原请求；认证前置、会话结束检查、5000ms 状态超时、单飞/fresh 和显隐规则均不改变。辅助 GET 挂起不能让已经显示的状态永久不再刷新，初次状态自身在途则仍须等待。
