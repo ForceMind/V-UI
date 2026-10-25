@@ -1,5 +1,9 @@
 # 开发与验证
 
+## 本地 Mihomo YAML 只读预览
+
+`PYTHONPATH=.:tests .venv/bin/python -m unittest test_mihomo_preview -v` 覆盖[离线预览库和 CLI](docs/OFFLINE_MIHOMO_PREVIEW.md)的合成解析、差异、隐私与有界资源合同。它不接线上 API、不应用配置、不启动核心或浏览器；退出成功不代表任意 YAML 合并或实际 Mihomo 兼容。只使用已有依赖，不为本地验证下载新工具。
+
 ## 2026-10-16 UDP / DNS 与上游导入门槛
 
 下一有界阶段按 [D0 合同](docs/UDP_DNS_CAPABILITY_GATES.md)实施，不改普通节点默认或放开双跳 UDP。`test_upstream_import_capabilities.py` 用真实导出函数验证可保真输入与明确拒绝；`test_proxy_browser.py` 新增真实 UI 能力提示、禁选/重复激活、取消和刷新后状态不变。`test_udp_dns_capability_loopback.py` 通过既有 loopback glob 运行固定核心 Shadowsocks UDP/DNS 与双开关拒绝测试；helper 单元、真实子例数和 skip 分开记录。没有真实核心开关时明确 skip，打开开关后缺核心/权限或失败原因不足均 fail。
