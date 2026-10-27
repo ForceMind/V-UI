@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import stat
 import subprocess
 import urllib.error
@@ -29,6 +30,50 @@ KIT_ASSETS=COMMON_ASSETS|{'vui-linux-x86_64-gnu.zip','SHA256SUMS'}
 
 class ReleaseGateError(RuntimeError):
     pass
+
+
+def installation_command(files, version, *, installer_args=(), interactive=True):
+    """One physical line: root-private bootstrap and independently pinned kit.
+
+    Extra arguments are for existing installer options, such as the temporary
+    provided-certificate fixture used by the published Linux acceptance gate.
+    No credential is generated or passed by this formatter.
+    """
+    if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
+        raise ReleaseGateError('Stable installation version required')
+    if '--dry-run' in installer_args:
+        raise ReleaseGateError('The managed installation command cannot be a dry run')
+    script_sha = hashlib.sha256(files['install.sh']).hexdigest()
+    kit_sha = hashlib.sha256(files['SHA256SUMS']).hexdigest()
+    url = 'https://github.com/' + REPO + '/releases/download/v' + version + '/install.sh'
+    prerequisites = (
+        'if ! command -v curl >/dev/null 2>&1 || ! command -v bash >/dev/null 2>&1 || ! command -v sha256sum >/dev/null 2>&1; then '
+        'if command -v apt-get >/dev/null 2>&1; then apt-get update; DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl bash coreutils; '
+        'elif command -v apk >/dev/null 2>&1; then apk add --no-cache ca-certificates curl bash coreutils; '
+        'elif command -v dnf >/dev/null 2>&1; then dnf install -y ca-certificates curl bash coreutils; '
+        'elif command -v yum >/dev/null 2>&1; then yum install -y ca-certificates curl bash coreutils; '
+        'elif command -v zypper >/dev/null 2>&1; then zypper --non-interactive install ca-certificates curl bash coreutils; '
+        'elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm --needed ca-certificates curl bash coreutils; '
+        'elif command -v xbps-install >/dev/null 2>&1; then xbps-install -Sy ca-certificates curl bash coreutils; '
+        'else printf "%s\\n" "Install curl, Bash and sha256sum, then rerun this command." >&2; exit 1; fi; fi'
+    )
+    options = ['--version', 'v' + version, '--with-global-cli', '--kit-sha256', kit_sha]
+    if interactive:
+        options.append('--interactive')
+    arguments = shlex.join([*options, *installer_args])
+    script = '; '.join([
+        'set -eu', 'umask 077', prerequisites,
+        'setup_dir=$(mktemp -d /root/vui-bootstrap.XXXXXXXX)',
+        'curl --proto =https --proto-redir =https --tlsv1.2 --fail --location --retry 2 --connect-timeout 15 --max-time 300 '
+        + shlex.quote(url) + ' -o "$setup_dir/install.sh"',
+        'printf "%s  %s\\n" ' + script_sha + ' "$setup_dir/install.sh" | sha256sum -c -',
+        'exec /bin/bash "$setup_dir/install.sh" ' + arguments,
+    ])
+    dispatch = ('PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH; '
+                'if [ "$(id -u)" -eq 0 ]; then exec "$@"; else exec sudo -- "$@"; fi')
+    return shlex.join(['/bin/sh', '-c', dispatch, 'v-ui-setup', '/usr/bin/env', '-i',
+                       'PATH=/usr/sbin:/usr/bin:/sbin:/bin', 'HOME=/root', 'LANG=C.UTF-8',
+                       'PYTHONDONTWRITEBYTECODE=1', '/bin/sh', '-c', script])
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -224,6 +269,8 @@ def main():
 
     evidence='\n'.join('- '+path+': '+str(run['html_url']) for path,run in sorted(checks.items()))
     body=files['RELEASE_NOTES.md'].decode()+'\n\nVerified commit: `'+args.commit+'`\n\n'+evidence
+    body+='\n\n## 一行交互安装并注册 v-ui\n\n```sh\n'+installation_command(files,args.version)+'\n```\n'
+    body+='\n安装成功后输入 `v-ui`。普通管理员按已有 sudo 策略认证；不增加免密 sudoers。\n'
     release=request('releases','POST',{'tag_name':tag,'target_commitish':args.commit,'name':'V-UI '+tag,
                                       'body':body,'draft':True,'prerelease':False})
     upload=release['upload_url'].split('{')[0]

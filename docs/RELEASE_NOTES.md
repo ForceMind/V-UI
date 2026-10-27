@@ -1,64 +1,29 @@
-# V-UI 0.4.8
+# V-UI 0.4.9
 
-## 2026-10-22 后续独立候选：订阅身份修复
+本版提供在线一行交互安装及持久全局 `v-ui` 终端菜单，并包含此前主线已完成的代理与中转、每入口 TCP、工作区恢复和 YAML 只读预览。
 
-尚未发布或部署。专用订阅绑定节点实例而非仅整数 ID，防止删除后 ID 复用使旧链接导出另一节点。此为有意的兼容性变化：升级前的订阅都需管理员重新选择节点、创建新授权并更新客户端 URL，轮换不能补出旧授权的历史身份。完整恢复仍撤销旧访问，不因保留身份记录而复活链接；旧二进制不识别新绑定，不能作为在线安全回退。详见[迁移、恢复和验收边界](SUBSCRIPTION_IDENTITY.md)。不改变 `VERSION`、核心 pin 或既有发布门槛；下方发行说明按各自历史日期解释。
+## 安装与日常使用
 
-## UNRELEASED：安装入口修复
+复制本 Release 下方“**一行交互安装并注册 v-ui**”中的完整命令，在自己的 Linux 终端执行。
+该命令包含本次安装脚本和完整 kit 的摘要，自动按 CPU/libc 选择面板包、交互读取配置，并安装全局命令。
+root 直接运行；普通管理员按已有 sudo 策略认证，不新增免密授权。成功后输入 `v-ui` 打开菜单。
 
-0.4.8 是未发布的安装器修复版本。shell 入口保留安装控制器的退出状态，跟踪并清理自己创建的临时目录；便携 Python 下载、固定摘要校验和解压失败均须在执行前明确拒绝。清理/信号处理提前注册，本地入口不再以 `exec` 绕过所需清理。具体实现契约和测试边界见[安装器修复说明](INSTALLER_EXIT_STATUS_048.md)。
+受管控制层使用固定 OS `/usr/bin/python3` 和既有能力检查；不支持的环境在应用安装前明确拒绝。
+HTTP-01 签发需要操作者的域名、网络和 CA 条款确认；密码只从控制终端读取两次。
 
-新增回归通过真实 Bash 进程和假工具检查 shell 行为，不能替代真实 root/systemd、四平台制品或生产部署验收。准确候选/主线测试结果在承载 PR 记录，本文不预先声明通过。协议、HTTPS/TLS 校验、核心和 Python pin、安装/运行时权限边界均不扩展；XHTTP/HTTPUpgrade 公开导出继续阻断。
+## 变化
 
-当前正式版下载入口仍为下面的 v0.4.7 Release 及固定 tag 文档，注意其[安装器已知问题](INSTALLER_EXIT_STATUS_048.md)。本分支 0.4.8 安装示例仅供未来正式公开且完整 19 项资产验收后使用，现在不要执行。本次不创建 0.4.8 tag/Draft Release/公开 Release，不替换旧资产或部署；源码版本号不代表可下载发行版。
+- 在线受管安装认证完整发行材料，先预检 OS 与命令占用，应用成功后再安装/刷新全局控制层。
+- 缺失的管理员名和端口可交互配置；显式参数保持有效，EOF 和非法输入拒绝。
+- `v-ui` 进入现有状态、启停、备份恢复和版本管理菜单；OpenRC 的既有操作边界保持。
+- 受管 `--dry-run` 组合明确拒绝，控制层失败不报告全流程成功，保留可信 kit 供恢复。
 
-## 已发布基线：V-UI 0.4.7
+## 验收与边界
 
-0.4.7 是累计版本：中文网页后台、固定官方核心、图形化证书、严格订阅导出和受管终端维护。[官方 v0.4.7 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.7) 于 2026-10-13 01:26:40 UTC 公开，tag 指向 `c5d50ee14b08da57bdc13c150b4ed501e9484023`，19 项资产元数据已于 2026-10-15 只读复核。下方累计功能及验收来源属于 0.4.7，文档链接固定到该 tag，不将旧结果移植给 0.4.8。
+升级已有实例前保全离机备份。本版的订阅授权绑定节点实例身份；未绑定实例的旧授权需要管理员重新选择节点、创建授权并更新客户端 URL，轮换不会补出旧身份。
+完整恢复会撤销旧会话和授权；代码回退不等于数据回滚，也不提供旧二进制的在线安全降级。详见[订阅身份边界](SUBSCRIPTION_IDENTITY.md)与[运维指南](OPERATIONS.md)。
 
-### 0.4.7 累计内容
-
-- 管理员认证、会话撤销、专用订阅令牌、节点/格式授权、有效期、轮换及撤销；无默认密码
-- sing-box 公开基线：VLESS TCP/WS/gRPC TLS、VLESS direct TCP REALITY/Vision、Trojan TCP/TLS、VMess TCP/TLS、三种Shadowsocks AEAD、Hysteria2、TUIC v5，严格范围见[兼容矩阵](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/COMPATIBILITY.md)
-- ToClash两种模式、40项预设、规则预览和完整Mihomo YAML；URI/Base64与sing-box连接JSON不承载同等完整规则
-- Certbot HTTP-01单域名、测试/正式隔离、自动续期、面板热更新和TLS节点绑定；失败保留旧材料，不延长旧证书有效期
-- 非root包内菜单：状态、安装/活动版本、显式完整校验、可信本地候选准备
-- 可选全局受管菜单：固定root-owned入口与降权worker、systemd启停/重启、停机备份、恢复、激活/代码回退及中断恢复；需要显式安装完整可信kit
-- 流式完整校验、私有缓存生命周期、GNU allocator和状态轮询等低资源软件修复，保留完整路径/成员/摘要/权限与恢复检查
-- VMess TLS负向及HTTPUpgrade记录器的有界证据/清理回归；真实原因、零送达和无DIRECT断言不降级
-- 面向用户重整README、安装、菜单和发布文档；历史失败、未验场景与旧记录保留
-- 已确认的蓝青 V 标识接入 README、登录/后台导航与 favicon；本地轻量 SVG，无新增字体或运行依赖
-
-### 0.4.7 下载与安装
-
-发布资产共19项：四个CPU/libc目标ZIP，固定安装/控制helper、源码ZIP、RELEASE.json、RELEASE_NOTES.md和SHA256SUMS。具体清单见[发布流程](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/RELEASING.md#发布资产)。选定完整同版本资产，核来源与摘要；不使用latest，不混用旧包。
-
-推荐从[README固定版本安装](https://github.com/ForceMind/V-UI/blob/v0.4.7/README.md#快速安装)开始。系统安装使用管理员权限，应用/核心/证书任务使用专用服务用户；默认TCP80、8443和10443会预检，节点UDP需独立声明。安装器不接管原站点，不修改SSH，不自动启用防火墙。
-
-默认安装**不提供全局v-ui命令**。包内菜单使用服务用户调用；全局入口须按[独立可信kit安装合同](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/MANAGED_OPERATIONS.md#安装消费点与信任)显式安装。不要以root运行服务用户可写的portable Python或payload脚本。
-
-### 0.4.7 升级和数据
-
-1. 保留受限访问的离机备份，并核对当前target、活动release ID及启动锚点。
-2. 使用同版本完整可信安装器/包按[受管升级](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/OPERATIONS.md#受管升级)操作；CPU/libc/init迁移不属于普通升级。
-3. 菜单stage只准备，不切CURRENT；activate先备份再选择已准备版本。单独切换不会更新root-owned控制层、launcher或服务模板。
-4. 备份含未加密秘密。恢复撤销旧会话/订阅授权；失败或RESTORE_PENDING时保持停机，按recover-restore处理，不删journal或空建数据库。
-
-代码回退不恢复旧数据。保留旧bootstrap runtime；不要用删除目录掩盖升级问题。不同版本/schema迁移与真实断电恢复没有被同代码合成A→B→A测试代替。
-
-### 0.4.7 已知限制
-
-- XHTTP/HTTPUpgrade公开导出仍阻断；真实能力刻画不代表完整产品支持。Xray组合不自动继承sing-box公开矩阵。
-- 除三种Shadowsocks AEAD已有UDP基线，其他协议的通用应用UDP/DNS扩围未完成。HY2/TUIC节点QUIC需要UDP端口，但本版只验HTTP/TCP应用负载。
-- OpenRC支持既有安装、状态查询与纯候选准备；全局菜单依赖停启的写动作拒绝。受管systemd写事务需要可验证的cgroup v2与固定服务来源。
-- DNS-01/通配符、核心自动升级、任意YAML导入合并、容器/NixOS等不在本版范围；后台不提供网站托管、SSH或主机封禁能力。
-- 真实1vCPU/512MiB整机及24小时完整负载未获资格。大数据归档场景达到512MiB峰值/零余量；160/320MiB仍是未证工程预算，不能当最低配置保证。
-- 固定gRPC Lite错误CA/SNI可能让调用者超时；TLS拒绝由真实诊断确认，不能关闭验证规避。
-
-### 0.4.7 验收与来源
-
-产品代码基线、主线与候选来源、普通CI、真实root/systemd、包消费和公开发布分别记录。准确最终提交必须有自己的八组CI及同提交四目标资产，发布不重新构建另一套包。真实受管root资格仍仅属于[f509历史run](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/MANAGED_OPERATIONS_CLOSURE_20261012.md)，没有移植为每个后续head的root重验。
-
-[主线产品收口](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/MAINLINE_OPERATIONS_CLOSURE_20261012.md) · [PR #36准确文档主线验收](https://github.com/ForceMind/V-UI/pull/36) · [低资源证据](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/LOW_RESOURCE_CLOSURE_20261011.md) · [原发布准备历史](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/RELEASE_PREPARATION_HISTORY_20261012.md)
-
-V-UI使用[MIT License](https://github.com/ForceMind/V-UI/blob/v0.4.7/LICENSE)。第三方核心、Certbot、ToClash及依赖遵循各自许可；来源与许可见[NOTICE](https://github.com/ForceMind/V-UI/blob/v0.4.7/third_party/NOTICE.md)及包内provenance/license文件。
+准确提交、既定八组 CI、四目标包和独审结果由本 Release 的发布记录关联；公网安装另有临时 Linux 验收。
+YAML 仅做有限只读报告，有效中转 UDP 仍拒绝。用户手机、公网线路及低资源整机连续 24 小时资格另行取得。
+历史 PTY Ctrl-C 偶发超时根因未定位，后次通过不构成修复声明。
+旧 v0.4.8 为历史安装器基线，标签与资产保留。

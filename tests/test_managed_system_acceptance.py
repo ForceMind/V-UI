@@ -124,6 +124,16 @@ class QualificationContracts(unittest.TestCase):
         with patch.object(self.qual,'capture_owned') as capture,patch.object(self.qual,'root') as root:
             self.qual.cleanup();capture.assert_not_called();root.assert_not_called()
 
+    def test_cleanup_only_accepts_the_exact_owned_command_alias(self):
+        path='/usr/local/bin/v-ui'
+        record={'device':1,'inode':2,'uid':0,'gid':0,'type':stat.S_IFLNK,
+                'mode':0o777,'links':0,'target':'/usr/local/sbin/v-ui'}
+        gate.validate_cleanup_ledger({path:record},{path:record})
+        for changes in ({'uid':123},{'target':'/etc/passwd'},{'type':stat.S_IFREG}):
+            changed={**record,**changes}
+            with self.subTest(changes=changes),self.assertRaises(RuntimeError):
+                gate.validate_cleanup_ledger({path:changed},{path:changed})
+
     def test_expired_work_has_separate_bounded_cleanup_budget(self):
         self.qual.creation_started=True;self.qual.deadline=0
         self.qual.account={'uid':123,'gid':123,'home':'/var/lib/v-ui'}

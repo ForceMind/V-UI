@@ -33,6 +33,7 @@ class ControlInstallTests(unittest.TestCase):
         self.kit.mkdir()
         self.control = self.base / 'usr/local/lib/v-ui'
         self.entry = self.base / 'usr/local/sbin/v-ui'
+        self.command_alias = self.base / 'usr/local/bin/v-ui'
         self.config = self.base / 'etc/v-ui/service.json'
         self.units = self.base / 'etc/systemd/system'
         self.openrc = self.base / 'etc/init.d'
@@ -40,7 +41,7 @@ class ControlInstallTests(unittest.TestCase):
         self.python = self.base / 'usr/bin/python3'
         self.real_python = self.python.with_name('python3.12')
         self.lock = self.base / 'run/lock/v-ui-install.lock'
-        for path in (self.control, self.entry.parent, self.config.parent, self.units,
+        for path in (self.control, self.entry.parent, self.command_alias.parent, self.config.parent, self.units,
                      self.openrc, self.root, self.python.parent, self.lock.parent):
             path.mkdir(parents=True, exist_ok=True)
             path.chmod(0o755)
@@ -52,7 +53,7 @@ class ControlInstallTests(unittest.TestCase):
         if not self.account.pw_uid or not self.account.pw_gid:
             self.skipTest('Temporary non-root fixture required; never exercise root installation')
         self.stack.enter_context(patch.multiple(installer, ROOT=self.root, CONFIG=self.config,
-            CONTROL=self.control, ENTRY=self.entry, RECEIPT=self.control / 'ops-control.json',
+            CONTROL=self.control, ENTRY=self.entry, COMMAND_ALIAS=self.command_alias, RECEIPT=self.control / 'ops-control.json',
             LAUNCHER=self.control / 'launcher.py', SYSTEM_PYTHON=self.python,
             SYSTEMD_DIR=self.units, OPENRC_DIR=self.openrc, LOCK=self.lock))
         self.stack.enter_context(patch.object(installer, 'owned_by_root', return_value=True))
@@ -108,6 +109,60 @@ class ControlInstallTests(unittest.TestCase):
     def install(self, **kwargs):
         return installer.install(self.kit, self.sha, **kwargs)
 
+    def test_preflight_authenticates_without_publishing_or_requiring_a_new_instance(self):
+        with patch.object(installer, 'inspect_instance', side_effect=AssertionError('no instance access')), \
+                patch.object(installer, 'publish', side_effect=AssertionError('no publication')):
+            verified, record, interpreter = installer.preflight(self.kit, self.sha)
+        self.assertEqual(record['source_commit'], 'a' * 40)
+        self.assertIn('v-ui', verified)
+        self.assertEqual(interpreter['system_python'], str(self.python))
+        self.assert_not_published()
+        self.assertFalse(os.path.lexists(self.command_alias))
+
+    def test_preflight_refuses_unknown_command_or_control_bytes_before_installation(self):
+        for path in (self.command_alias, self.entry, self.control / 'system_ops.py'):
+            with self.subTest(path=path):
+                path.write_bytes(b'unrelated command, must remain unchanged')
+                path.chmod(0o755 if path in (self.command_alias, self.entry) else 0o644)
+                before = path.read_bytes()
+                with self.assertRaises(installer.InstallError):
+                    installer.preflight(self.kit, self.sha)
+                self.assertEqual(path.read_bytes(), before)
+                path.unlink()
+
+    def test_absent_command_directory_is_searchable_despite_private_umask(self):
+        self.command_alias.parent.rmdir()
+        previous = os.umask(0o077)
+        try:
+            self.install()
+        finally:
+            os.umask(previous)
+        self.assertEqual(stat.S_IMODE(self.command_alias.parent.stat().st_mode), 0o755)
+        self.assertEqual(os.readlink(self.command_alias), str(self.entry))
+
+    def test_unknown_entry_is_explained_even_before_control_directory_exists(self):
+        self.entry.write_bytes(b'foreign program')
+        self.entry.chmod(0o755)
+        missing=self.base/'uncreated-control'
+        with patch.multiple(installer,CONTROL=missing,RECEIPT=missing/'ops-control.json'):
+            with self.assertRaisesRegex(installer.InstallError,'differs from this trusted kit'):
+                installer.preflight(self.kit,self.sha)
+        self.assertFalse(missing.exists())
+        self.assertEqual(self.entry.read_bytes(),b'foreign program')
+
+    def test_alias_publication_failure_disables_the_new_controller(self):
+        real_replace = os.replace
+        def replace(source, destination):
+            if Path(destination) == self.command_alias:
+                raise OSError('simulated alias publication failure')
+            return real_replace(source, destination)
+        with patch.object(installer.os, 'replace', side_effect=replace):
+            with self.assertRaises(OSError):
+                self.install()
+        self.assert_not_published()
+        self.assertFalse(os.path.lexists(self.command_alias))
+        self.assertEqual(list(self.command_alias.parent.glob('.vui-command-*')), [])
+
     def assert_not_published(self):
         self.assertFalse(self.entry.exists())
         self.assertFalse(installer.RECEIPT.exists())
@@ -131,6 +186,8 @@ class ControlInstallTests(unittest.TestCase):
                               if name in installer.SOURCE_DEPENDENCIES else (self.kit / name).read_bytes())
             self.assertEqual(path.read_bytes(), expected_bytes)
         self.assertIn(b'/usr/bin/python3 -B -I -S /usr/local/lib/v-ui/system_ops.py', self.entry.read_bytes())
+        self.assertTrue(self.command_alias.is_symlink())
+        self.assertEqual(os.readlink(self.command_alias), str(self.entry))
         self.assertIn(b'def operate(', (self.control / 'system_ops.py').read_bytes())
         self.assertIn(b'class _MaintenanceSession(', (self.control / 'release_tools.py').read_bytes())
         self.assertEqual(len(self.run.call_args_list), 1)
@@ -608,9 +665,12 @@ class ControlInstallTests(unittest.TestCase):
             with self.assertRaises(controller.Refused):
                 controller.verify_installation()
 
-    def test_default_installer_and_online_script_do_not_call_control_installation(self):
+    def test_legacy_panel_installer_keeps_control_installation_explicit(self):
         self.assertNotIn('install_ops_control', (REPO / 'scripts/install_system.py').read_text())
-        self.assertNotIn('install_ops_control', (REPO / 'install.sh').read_text())
+        # The online shell now has an explicit authenticated managed mode.
+        # Legacy default dispatch is covered by test_installer_shell's actual
+        # subprocess controls; the panel installer never installs root helpers.
+        self.assertIn('--with-global-cli', (REPO / 'install.sh').read_text())
         self.assertNotIn('install_ops_control', (REPO / '.github/workflows/oneclick.yml').read_text())
 
 

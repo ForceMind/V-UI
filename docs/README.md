@@ -1,5 +1,10 @@
 > 2026-10-22：[V-TS-03 私有管理入口设计](TAILSCALE_PRIVATE_MANAGEMENT_DESIGN.md)仅设计与源码阻断，未实施或授予部署资格；V-TS-02 [只读状态软件](TAILSCALE_STATUS_CONTRACT.md)已由 PR54/55 收口，真实 Tailscale 共存/恢复仍未测。
 
+## 2026-10-27 v0.4.9 一键安装批次
+
+本批目标版本为 **v0.4.9**。用户已批准在线一行安装、交互配置、全局 `v-ui`、独审、正常合并和公开发布；当前执行状态与准确证据集中在[一键安装计划](ONE_LINE_INSTALL_049.md)。发布时的真实一行命令由受验资产生成并写入 [v0.4.9 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.9)。下方旧日期状态保留历史。
+
+
 # V-UI 文档
 
 先确认[冻结版本与自行部署验收清单](FROZEN_VERSION_TEST_HANDOFF.md)：旧正式版、已验主线与本地可选功能不是同一套安装材料。

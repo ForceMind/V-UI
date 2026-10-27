@@ -7,9 +7,9 @@
 
 **面向个人自托管的代理管理面板：管理节点与证书，生成完整 Mihomo 分流订阅，用受管流程维护服务和数据。**
 
-**正式版 v0.4.8；主线含后续未发布功能** · FastAPI + SQLite · 中文网页后台 · Linux x86_64 / ARM64
+**安装目标 v0.4.9：在线一行交互安装与全局 v-ui** · FastAPI + SQLite · 中文网页后台 · Linux x86_64 / ARM64
 
-当前正式版 [v0.4.8](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8) 于 2026-10-15 从 `a9f9b5d9c0dd2aada5e8f5f2270b2ce93440d5ff` 发布，仅修复安装入口的退出码、临时目录生命周期和引导失败拦截；见[安装器修复边界](docs/INSTALLER_EXIT_STATUS_048.md)。其后双开关“代理与中转”已在准确主线 `9a97ad13` 完成[独立验收](https://github.com/ForceMind/V-UI/pull/44)，但不包含在该已发布版本中。[UDP / DNS 与导入保真门槛](docs/UDP_DNS_CAPABILITY_GATES.md)已在 `13c884a` 完成[独立验收](https://github.com/ForceMind/V-UI/pull/46)。当前新增独立“[导出为中转上游（仅 TCP）](docs/TCP_UPSTREAM_EXPORT.md)”功能并按 [D1 契约](docs/TCP_UPSTREAM_EXPORT_CONTRACT.md)验收，不覆盖旧版本或预称新增 UDP 资格。
+历史正式基线 [v0.4.8](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8) 于 2026-10-15 从 `a9f9b5d9c0dd2aada5e8f5f2270b2ce93440d5ff` 发布，仅修复安装入口的退出码、临时目录生命周期和引导失败拦截；见[安装器修复边界](docs/INSTALLER_EXIT_STATUS_048.md)。其后双开关“代理与中转”已在准确主线 `9a97ad13` 完成[独立验收](https://github.com/ForceMind/V-UI/pull/44)，但不包含在该已发布版本中。[UDP / DNS 与导入保真门槛](docs/UDP_DNS_CAPABILITY_GATES.md)已在 `13c884a` 完成[独立验收](https://github.com/ForceMind/V-UI/pull/46)。当前新增独立“[导出为中转上游（仅 TCP）](docs/TCP_UPSTREAM_EXPORT.md)”功能并按 [D1 契约](docs/TCP_UPSTREAM_EXPORT_CONTRACT.md)验收，不覆盖旧版本或预称新增 UDP 资格。
 
 每入口“跟随全局 / 指定直连 / 指定中转”的 TCP 功能已由 [PR49](https://github.com/ForceMind/V-UI/pull/49) 合并至 `0962f0c4995b3b7606652027f2330285e4dea1f7` 并完成准确主线验收；[PR50](https://github.com/ForceMind/V-UI/pull/50) 随后完成交接文档收口。该功能**已合并、尚未正式发布**，不在上述 v0.4.8 安装包中。现成客户端导入所选入口的标准 VLESS 配置，第二跳由服务端决定；有效中转入口的 UDP 仍拒绝，TCP 验收不代表手机真机或公网线路验收。详见[使用说明](docs/PER_INBOUND_ROUTING.md)与[收口证据](docs/PER_INBOUND_ROUTING_CLOSURE_20261018.md)。
 
@@ -29,7 +29,7 @@ V-UI 不依赖 Redis、常驻 Node.js 或在线订阅转换服务。运行包包
 | 分流与订阅 | ToClash 两种模式、40 项服务预设、自定义内网 DNS、CGNAT、规则预览、完整 Mihomo YAML |
 | 订阅授权 | 按节点和格式授权的独立令牌，支持到期、轮换和撤销；令牌仅创建时显示 |
 | 安装与运行 | 四个 Linux 目标、固定离线运行时、专用非 root 服务账号、systemd / OpenRC 安装检测 |
-| 终端运维 | 包内服务用户菜单；另可显式安装全局受管菜单，执行 systemd 启停、候选切换、停机备份与恢复 |
+| 终端运维 | 推荐一行安装自动注册全局 `v-ui`；管理 systemd 启停、候选切换、停机备份与恢复，保留包内服务用户菜单 |
 | 数据保护 | 完整包校验、操作锁、恢复日志、代码回退与数据恢复分离；失败不会被写成“升级成功” |
 
 ### 协议与客户端支持
@@ -73,6 +73,20 @@ V-UI 不依赖 Redis、常驻 Node.js 或在线订阅转换服务。运行包包
 若 TCP 80 已被 Nginx、Apache、Caddy 或其他服务占用，请先自行规划；安装器不会停止原站点、接管反代或修改 SSH。它会逐项提示防火墙和云安全组条件，不自动启用防火墙。不要为省略人工核对而使用 `--assume-external-ports-open`。
 
 ## 快速安装
+
+### 推荐：一行交互安装
+
+打开固定 [v0.4.9 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.9)，复制“一行交互安装并注册 v-ui”中的完整命令。
+发布器根据受验资产生成脚本与 kit 摘要；命令会自动下载、校验、询问域名/邮箱/管理员/端口和密码，并安装全局入口。
+root 可直接运行，普通管理员按已有 sudo 策略认证。成功后在新终端输入：
+
+```sh
+v-ui
+```
+
+发行是否公开以 Release 页面为准；该命令使用固定版本、root 私有引导文件和完整 kit 校验。
+全局控制层先检查 OS Python 与占用路径，不添加免密 sudoers。详细边界见[一键安装计划](docs/ONE_LINE_INSTALL_049.md)。
+下方是同版本手工审阅/离线安装入口，保留给需要自行核材料的操作者。
 
 ### 1. 固定版本，先核来源
 
@@ -120,7 +134,7 @@ run_vui_installer() {
       exec /bin/bash ./install.sh "$@"
     ' -- "$ROOT_BOOTSTRAP" "$INSTALL_SHA" "$@"
 }
-run_vui_installer --version v0.4.8
+run_vui_installer --version v0.4.9
 ```
 
 入口自动选择对应平台包，并校验固定安装 helper 与 ZIP 的摘要。按提示填写面板域名、联系邮箱，确认你控制域名、阅读并同意 CA 条款，再在终端设置管理员密码。默认管理员名称为 `admin`，可用 `--admin` 更改；密码为15–128字符。**没有预置密码，也不要把密码放进命令行或公开日志**。
@@ -131,7 +145,7 @@ run_vui_installer --version v0.4.8
 
 ```sh
 # 首次执行上方安装命令时，根据计划追加；无需先装一次再重复安装。
-run_vui_installer --version v0.4.8 --node-udp-port 10443
+run_vui_installer --version v0.4.9 --node-udp-port 10443
 ```
 
 UDP 声明可以重复，不会自动创建节点，也不持久保存为后续升级参数。TCP 与 UDP 同号仍是不同规则。新增规则会有独立确认；不要把端口预检当作公网连通保证。
@@ -156,7 +170,7 @@ UDP 声明可以重复，不会自动创建节点，也不持久保存为后续�
 
 ## 终端运维菜单
 
-**有两种入口，权限和用途不同。默认安装只提供包内服务用户菜单，不会自动生成全局 `v-ui` 命令。**
+**推荐一行安装会显式安装全局 `v-ui`。传统本地/旧式调用保留包内菜单，单独控制组件仍可按完整 kit 手工安装。**
 
 | 入口 | 调用身份 | 能做什么 |
 | --- | --- | --- |
@@ -182,17 +196,17 @@ sudo -u v-ui "$PY" -B "$APP/scripts/deploy.py" --root "$ROOT" menu
 
 **不要以 root 执行 `$PY` 或 payload 中的脚本。** 自定义非 root 安装由目录所有者直接运行，不使用 `sudo`。更多状态含义和600秒准备期限见[包内菜单合同](docs/OPERATIONS.md#终端运维菜单)。
 
-### 可选的全局 `v-ui`
+### 全局 `v-ui`
 
-管理员须先从完整、独立可信的同版本 kit 显式安装控制组件，核对整个 `SHA256SUMS` 文件的可信摘要及 OS Python/受管安装边界。请按[全局菜单安装指南](docs/MANAGED_OPERATIONS.md#安装消费点与信任)操作，不能从服务用户可写的 payload 复制一个脚本就以 root 执行。
+推荐一行命令会从完整、独立可信的同版本 kit 安装控制组件，并核对整个 `SHA256SUMS` 文件的可信摘要及 OS Python/受管安装边界。手工安装时，管理员仍须先接受材料来源。请按[全局菜单安装指南](docs/MANAGED_OPERATIONS.md#安装消费点与信任)操作，不能从服务用户可写的 payload 复制一个脚本就以 root 执行。
 
 安装完成后：
 
 ```sh
-sudo /usr/local/sbin/v-ui
+v-ui
 ```
 
-菜单内依次提供 `1 状态 / 2 启动 / 3 停止 / 4 重启 / 5 备份 / 6 恢复 / 7 激活或代码回退 / 8 准备候选 / 9 中断恢复`；写操作逐次确认。这些是交互选项，不是 `v-ui backup` 这样的命令行子命令。它不新增 sudoers 权限、账号或常驻控制代理。systemd 的 HTTP-01 socket 正在监听而 responder 未运行时，可以是正常的按需激活；状态快照不能证明 HTTPS 或代理链路健康。
+标准 PATH 入口位于 `/usr/local/bin/v-ui`，只指向固定 root-owned `/usr/local/sbin/v-ui`；普通管理员由现有 sudo 策略认证。菜单内依次提供 `1 状态 / 2 启动 / 3 停止 / 4 重启 / 5 备份 / 6 恢复 / 7 激活或代码回退 / 8 准备候选 / 9 中断恢复`；写操作逐次确认。这些是交互选项，不是 `v-ui backup` 这样的命令行子命令。它不新增 sudoers 权限、账号或常驻控制代理。systemd 的 HTTP-01 socket 正在监听而 responder 未运行时，可以是正常的按需激活；状态快照不能证明 HTTPS 或代理链路健康。
 
 全局菜单的候选包/恢复归档必须由已有 `v-ui` 用户拥有、权限仅限属主、为普通单链接文件且祖先路径无符号链接；root 下载目录中的文件不能直接交给 worker。真实新控制层 root/systemd 资格来自记录中的 f509 临时 Ubuntu 测试；普通四平台包消费不等于四平台真实 root/init 全覆盖。相关限制见[受管控制合同](docs/MANAGED_OPERATIONS.md)。
 

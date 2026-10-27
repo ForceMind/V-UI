@@ -30,10 +30,8 @@ PROMPT = '请选择: '
 CONFIRM = '操作可能中断面板和证书响应；失败后不自动恢复启动，停止未确认时需检查状态。确认 [yes/N]: '
 SUCCESS = '操作完成；服务状态已核验。'
 FAILURE = '操作未完成或状态无法确认。'
-WRAPPER_BYTES = (b'#!/bin/sh\n'
-    b'# Fixed root-owned entry point. No escalation, bootstrap runtime or user imports.\n'
-    b'exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/ LANG=C LC_ALL=C '
-    b'/usr/bin/python3 -B -I -S /usr/local/lib/v-ui/system_ops.py "$@"\n')
+WRAPPER_BYTES = b'#!/bin/sh\n# Fixed root-owned entry point. Existing administrator sudo policy only.\nPATH=/usr/sbin:/usr/bin:/sbin:/bin\nexport PATH\nif [ "$(id -u)" -ne 0 ]; then\n    exec sudo -- /usr/local/sbin/v-ui "$@"\nfi\nexec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/ LANG=C LC_ALL=C /usr/bin/python3 -B -I -S /usr/local/lib/v-ui/system_ops.py "$@"\n'
+
 UNITS = ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')
 WRITER_LOCKS = ('runtime/xray/owner.lock', 'runtime/sing-box/owner.lock',
                 'certificates/.worker.lock')
