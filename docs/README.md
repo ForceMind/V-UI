@@ -2,6 +2,8 @@
 
 # V-UI 文档
 
+先确认[冻结版本与自行部署验收清单](FROZEN_VERSION_TEST_HANDOFF.md)：旧正式版、已验主线与本地可选功能不是同一套安装材料。
+
 ## 离线 YAML 预览（开发中，未发布）
 
 [只读预览库与 CLI](OFFLINE_MIHOMO_PREVIEW.md)支持默认 JSON 和 `--format text` 中文摘要，包括结构差异、诊断解释及列表位置。CLI 仅本地检查；[只读面板入口](MIHOMO_PANEL_PREVIEW_CONTRACT.md)由用户显式提交给面板服务器。两者都不是任意 YAML 导入 / 合并器，不应用配置或验证真实核心兼容性。
