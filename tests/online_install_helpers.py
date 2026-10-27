@@ -8,14 +8,81 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import platform
 from pathlib import Path
 import re
+import stat
 import subprocess
+from contextlib import contextmanager
 from urllib.request import ProxyHandler, Request, build_opener
 from urllib.parse import urlsplit
 
 from scripts.publish_release import ASSETS, installation_command
 from scripts.ops_menu_smoke import MenuSession
+
+COMMAND_DIRECTORY = Path('/usr/local/bin')
+
+
+@contextmanager
+def hosted_command_directory():
+    """Temporary hosted-CI fixture preparation, never production installer policy.
+
+    Hosted images may make /usr/local/bin runner-owned/writable for tool setup.
+    Keep the application's root-path rejection intact, prepare a trusted empty-
+    product fixture, and restore only this exact directory's recorded metadata.
+    """
+    if (platform.system() != 'Linux' or os.environ.get('GITHUB_ACTIONS') != 'true'
+            or os.environ.get('GITHUB_REPOSITORY') != 'ForceMind/V-UI'
+            or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted'
+            or os.environ.get('VUI_SYSTEM_INSTALL_TEST') != '1'):
+        raise AssertionError('Hosted empty-runner command-directory fixture required')
+    path = COMMAND_DIRECTORY
+    before = path.lstat()
+    if not stat.S_ISDIR(before.st_mode):
+        raise AssertionError('Hosted command directory must be a real directory')
+    identity = (before.st_dev, before.st_ino)
+    original = (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode))
+    expected = original
+    failure = None
+    def current():
+        value = path.lstat()
+        if not stat.S_ISDIR(value.st_mode) or (value.st_dev, value.st_ino) != identity:
+            raise AssertionError('Hosted command-directory identity changed; do not restore')
+        return value.st_uid, value.st_gid, stat.S_IMODE(value.st_mode)
+    def run(program, value):
+        subprocess.run(['/usr/bin/sudo', '-n', program, value, str(path)],
+                       check=True, capture_output=True, timeout=10)
+    try:
+        print('Hosted command-directory fixture before: ' + json.dumps({'uid':original[0],'gid':original[1],'mode':oct(original[2])}))
+        if original[:2] != (0, 0):
+            run('/usr/bin/chown', '0:0')
+            expected = (0, 0, original[2])
+            if current() != expected:
+                raise AssertionError('Hosted command-directory ownership preparation failed')
+        if expected[2] != 0o755:
+            run('/usr/bin/chmod', '0755')
+            expected = (0, 0, 0o755)
+            if current() != expected:
+                raise AssertionError('Hosted command-directory mode preparation failed')
+        yield
+    except BaseException as error:
+        failure = error
+        raise
+    finally:
+        try:
+            if current() != expected:
+                raise AssertionError('Hosted command-directory metadata changed; do not restore')
+            if expected[:2] != original[:2]:
+                run('/usr/bin/chown', str(original[0])+':'+str(original[1]))
+            if expected[2] != original[2]:
+                run('/usr/bin/chmod', format(original[2], '04o'))
+            if current() != original:
+                raise AssertionError('Hosted command-directory restoration failed')
+        except BaseException as cleanup_error:
+            if failure is None:
+                raise
+            failure.add_note('Hosted command-directory cleanup was not confirmed: '+type(cleanup_error).__name__)
 
 
 def fixture_commands(source, work, kit, certificate_args, configured_args):

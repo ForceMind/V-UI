@@ -21,7 +21,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from loopback_helpers import certificate_files, unused_port
 from scripts.ops_menu_smoke import MenuSession
-from online_install_helpers import fixture_commands, published_commands, global_menu_check
+from online_install_helpers import fixture_commands, published_commands, global_menu_check, hosted_command_directory
 
 
 @unittest.skipUnless(os.getenv('VUI_SYSTEM_INSTALL_TEST') == '1', 'explicit ephemeral systemd installer gate')
@@ -58,6 +58,8 @@ class OneClickSystemTests(unittest.TestCase):
             elif os.getenv('VUI_RELEASE_KIT') and gate is None:
                 online = fixture_commands(source,work,Path(os.environ['VUI_RELEASE_KIT']),
                                           certificate_args,configured_args)
+            if online:
+                stack.enter_context(hosted_command_directory())
             cmd = (online['initial'] if online else
                    ['sudo','bash',str(source/'install.sh'),'--bundle',str(bundle),'--sha256',sha,
                     *configured_args,*certificate_args])
