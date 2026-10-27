@@ -386,6 +386,54 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         self.assertEqual(self.external, [])
         self.assertEqual(self.errors, [])
 
+    def test_actual_yaml_readonly_preview_report_file_and_clear(self):
+        """Opt-in native gate, not exercised by ordinary local synthetic controls."""
+        from playwright.sync_api import expect
+        self.draft_only()
+        page = self.open_page()
+        before = self.context.request.get(self.base + '/api/proxy/settings').json()
+        submissions = []
+        self.context.on('request', lambda request: submissions.append(request)
+                        if request.method == 'POST' and request.url.endswith('/api/proxy/yaml/preview') else None)
+        secret = 'synthetic-yaml-preview-private-marker'
+        source = 'rules: ["DOMAIN,private.example.test,DIRECT", "DOMAIN,private.example.test,REJECT"]\nsecret: ' + secret
+        page.locator('#open-yaml-preview').click()
+        expect(page.locator('#yaml-preview-dialog')).to_be_visible()
+        self.assertEqual(submissions, [])
+        page.locator('#yaml-candidate').fill(source)
+        page.locator('#yaml-baseline').fill('{}')
+        with page.expect_response(lambda response: response.url.endswith('/api/proxy/yaml/preview')
+                                  and response.request.method == 'POST') as completed:
+            page.locator('#yaml-preview-submit').click()
+        self.assertEqual(completed.value.status, 200, completed.value.text())
+        expect(page.locator('#yaml-preview-result')).to_contain_text('RULE_TARGET_CONFLICT')
+        expect(page.locator('#yaml-preview-result')).to_contain_text('不可应用')
+        self.assertNotIn(secret, page.locator('#yaml-preview-result').inner_text())
+        self.assertNotIn('private.example.test', page.locator('#yaml-preview-result').inner_text())
+        self.assertEqual(len(submissions), 1)
+        page.locator('#yaml-candidate-file').set_input_files(
+            {'name': 'invalid.yaml', 'mimeType': 'text/yaml', 'buffer': b'\xff\xfe'})
+        expect(page.locator('#yaml-preview-notice')).to_contain_text('有效 UTF-8')
+        expect(page.locator('#yaml-preview-submit')).to_be_disabled()
+        expect(page.locator('#yaml-preview-result')).not_to_be_visible()
+        page.locator('#yaml-candidate-file').set_input_files(
+            {'name': 'synthetic.yaml', 'mimeType': 'text/yaml', 'buffer': b'mode: rule'})
+        expect(page.locator('#yaml-candidate')).to_have_value('mode: rule')
+        expect(page.locator('#yaml-preview-submit')).to_be_enabled()
+        self.assertEqual(len(submissions), 1)
+        page.locator('#close-yaml-preview').click()
+        expect(page.locator('#yaml-preview-dialog')).not_to_be_visible()
+        for control in ('yaml-candidate', 'yaml-baseline', 'yaml-candidate-file', 'yaml-baseline-file'):
+            expect(page.locator('#' + control)).to_have_value('')
+        page.locator('#open-yaml-preview').click()
+        expect(page.locator('#yaml-candidate')).to_have_value('')
+        page.keyboard.press('Escape')
+        expect(page.locator('#yaml-preview-dialog')).not_to_be_visible()
+        self.assertEqual(self.context.request.get(self.base + '/api/proxy/settings').json(), before)
+        self.assertNotIn(secret, self.logpath.read_text())
+        self.assertFalse(any(secret in message for message in self.console))
+        self.assert_private()
+
     def test_mocked_tailscale_readonly_card_disabled_stale_failure_and_history(self):
         from playwright.sync_api import expect
         page = self.open_page()
