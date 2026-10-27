@@ -21,7 +21,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from loopback_helpers import certificate_files, unused_port
 from scripts.ops_menu_smoke import MenuSession
-from online_install_helpers import fixture_commands, published_commands, global_menu_check, hosted_command_directory
+from online_install_helpers import fixture_commands, published_commands, global_menu_check, hosted_command_directory, sudo_policy_snapshot
 
 
 @unittest.skipUnless(os.getenv('VUI_SYSTEM_INSTALL_TEST') == '1', 'explicit ephemeral systemd installer gate')
@@ -66,7 +66,9 @@ class OneClickSystemTests(unittest.TestCase):
                     *configured_args,*certificate_args])
             repeat_cmd = online['repeat'] if online else cmd
             upgrade_cmd = online['upgrade'] if online else [*cmd,'--upgrade']
-            sudoers_before = hashlib.sha256(subprocess.check_output(['sudo','cat','/etc/sudoers'])).hexdigest()
+            sudoers_before = sudo_policy_snapshot() if online else None
+            if online:
+                self.assertNotIn('/etc/sudoers.d/v-ui',sudoers_before)
             def cleanup():
                 subprocess.run(['sudo','systemctl','disable','--now','v-ui.service','v-ui-http01.socket'],capture_output=True)
                 subprocess.run(['sudo','systemctl','stop','v-ui-http01.service'],capture_output=True)
@@ -133,8 +135,7 @@ class OneClickSystemTests(unittest.TestCase):
             self.assertNotIn(password,output.decode(errors='replace'))
             if online:
                 self.assertIn('一键安装完成',clean)
-                self.assertEqual(hashlib.sha256(subprocess.check_output(['sudo','cat','/etc/sudoers'])).hexdigest(),sudoers_before)
-                self.assertFalse(Path('/etc/sudoers.d/v-ui').exists())
+                self.assertEqual(sudo_policy_snapshot(),sudoers_before)
                 global_menu_check(self,{**os.environ,'PYTHONDONTWRITEBYTECODE':'1'},exercise_start_stop=True)
             if gate:
                 gate.installer_receipt('initial_install', output.decode(errors='replace'))

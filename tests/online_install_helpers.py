@@ -24,6 +24,30 @@ from scripts.ops_menu_smoke import MenuSession
 COMMAND_DIRECTORY = Path('/usr/local/bin')
 
 
+def sudo_policy_snapshot():
+    """Read-only hashes, not rule contents; inaccessible is an error, not absence."""
+    program = '''import hashlib,json,os,stat
+from pathlib import Path
+records={}
+for path in [Path('/etc/sudoers'),*sorted(Path('/etc/sudoers.d').iterdir())]:
+    info=path.lstat()
+    record={'type':stat.S_IFMT(info.st_mode),'uid':info.st_uid,'gid':info.st_gid,'mode':stat.S_IMODE(info.st_mode)}
+    if stat.S_ISREG(info.st_mode):
+        with path.open('rb') as stream:raw=stream.read(1000001)
+        if len(raw)>1000000:raise RuntimeError('sudo policy snapshot exceeds bound')
+        record['sha256']=hashlib.sha256(raw).hexdigest()
+    elif stat.S_ISLNK(info.st_mode):record['target']=os.readlink(path)
+    records[str(path)]=record
+print(json.dumps(records,sort_keys=True))
+'''
+    result = subprocess.run(['/usr/bin/sudo', '-n', '/usr/bin/python3', '-B', '-I', '-S', '-c', program],
+                            check=True, capture_output=True, text=True, timeout=10)
+    snapshot = json.loads(result.stdout)
+    if not isinstance(snapshot, dict) or '/etc/sudoers' not in snapshot:
+        raise AssertionError('Complete sudo policy snapshot required')
+    return snapshot
+
+
 @contextmanager
 def hosted_command_directory():
     """Temporary hosted-CI fixture preparation, never production installer policy.

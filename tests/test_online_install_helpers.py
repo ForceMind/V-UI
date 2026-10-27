@@ -1,6 +1,7 @@
 """No sudo or host writes: test only the hosted-fixture gate and metadata model."""
 import os
 import stat
+import subprocess
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -11,6 +12,17 @@ import online_install_helpers as helpers
 class HostedCommandDirectoryTests(unittest.TestCase):
     environment = {'GITHUB_ACTIONS':'true','GITHUB_REPOSITORY':'ForceMind/V-UI',
                    'RUNNER_ENVIRONMENT':'github-hosted','VUI_SYSTEM_INSTALL_TEST':'1'}
+
+    def test_sudo_policy_read_uses_fixed_isolated_privilege_and_propagates_denial(self):
+        result=SimpleNamespace(stdout='{"/etc/sudoers":{"sha256":"fixture"}}')
+        with patch.object(helpers.subprocess,'run',return_value=result) as run:
+            self.assertIn('/etc/sudoers',helpers.sudo_policy_snapshot())
+        self.assertEqual(run.call_args.args[0][:7],['/usr/bin/sudo','-n','/usr/bin/python3','-B','-I','-S','-c'])
+        program=run.call_args.args[0][-1]
+        compile(program,'sudo-policy-read','exec')
+        self.assertIn('hashlib.sha256',program)
+        with patch.object(helpers.subprocess,'run',side_effect=subprocess.CalledProcessError(1,['fixture'])):
+            with self.assertRaises(subprocess.CalledProcessError):helpers.sudo_policy_snapshot()
 
     def test_fixture_refuses_outside_explicit_hosted_gate_before_any_command(self):
         with patch.dict(os.environ,{},clear=True),patch.object(helpers.subprocess,'run') as run:
