@@ -1,0 +1,898 @@
+{
+  "schema": 1,
+  "snapshot_date": "2026-10-27",
+  "master": "f01dbd824ba1c0dcf07ff818103cdb98fbd7c460",
+  "initial_dev": "7b6fb40b1c47a8ed20ad6342d94b55d27ebbeaf2",
+  "remote_branches_before_dev": [
+    {
+      "name": "docs/integrated-mainline-closure-20261012",
+      "sha": "4fc927a7db9b56596dbccf92cec5db905215fef0",
+      "protected": false,
+      "behind_master": 107,
+      "ahead_master": 0,
+      "tree": "2b2f800829bd5b2fe463cd73f6ee173ea41390ea",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "docs/per-inbound-routing-closure-20261018",
+      "sha": "c9cbdd78da4fc6b7feca805fe47e17b79463ee52",
+      "protected": false,
+      "behind_master": 67,
+      "ahead_master": 0,
+      "tree": "c1c22ed849941ede85e265aeda386eae379ab387",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "docs/private-management-design-20261022",
+      "sha": "db88fb836e0724a9707aaa47549a8e14242b7eff",
+      "protected": false,
+      "behind_master": 34,
+      "ahead_master": 0,
+      "tree": "c34e8f0f1b9478b77af66c22be71e8944bc7d421",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "docs/product-readme-release-20261012",
+      "sha": "bf35c33a9973dd0c5e1c639c78bc25c48b85f58f",
+      "protected": false,
+      "behind_master": 105,
+      "ahead_master": 0,
+      "tree": "5b0db1333ae22e81aa6f23950c53f9ad99e6eec0",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "docs/service-rule-packs",
+      "sha": "7e2d589079753e890eb46acad6c2b2d4c706701c",
+      "protected": false,
+      "behind_master": 314,
+      "ahead_master": 2,
+      "tree": "09686d0d14bcba75eafa77f07d3d1b0e6ded63bb",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "docs/tailscale-management-overlay-20261020",
+      "sha": "803dff0fad03f99e6fa2c1d9689a132363470308",
+      "protected": false,
+      "behind_master": 61,
+      "ahead_master": 0,
+      "tree": "ba6beac736192617570c9b6e225b06c062695a2f",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "docs/tcp-entry-status-20261019",
+      "sha": "7919a0514fe84663f1f3380e36bb3ae8d727e9b0",
+      "protected": false,
+      "behind_master": 65,
+      "ahead_master": 0,
+      "tree": "8871001ecacf9941b9002a534c27bd19d2534f1a",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "experiment/socks-owner-recovery-20261018",
+      "sha": "afbdba100c5f0e3dc6888684fdbab31980720df3",
+      "protected": false,
+      "behind_master": 74,
+      "ahead_master": 34,
+      "tree": "996d37d925be8edd18cbf921d3cc580f43c0730d",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "experiment/standard-client-udp-20261018",
+      "sha": "a1283e720f70c12c18b6c1af633f5f583ab3cec0",
+      "protected": false,
+      "behind_master": 66,
+      "ahead_master": 25,
+      "tree": "2220522b755a42b0f86086de7fe89bc6df5d4ec3",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "experiment/xudp-mux-lifecycle-20261017",
+      "sha": "afbdba100c5f0e3dc6888684fdbab31980720df3",
+      "protected": false,
+      "behind_master": 74,
+      "ahead_master": 34,
+      "tree": "996d37d925be8edd18cbf921d3cc580f43c0730d",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "experiment/xudp-remoteaddr-20261016",
+      "sha": "160cfdcadeb2e512ef08b7700950f1e06b40d77d",
+      "protected": false,
+      "behind_master": 74,
+      "ahead_master": 9,
+      "tree": "de40d73a67e50db89f8dc9a6c0d1c5355e1bb09d",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "feat/approved-logo-integration-20261012",
+      "sha": "b534354ec703ee5b92e84070ef2a14b6ca125c2e",
+      "protected": false,
+      "behind_master": 103,
+      "ahead_master": 0,
+      "tree": "783d1476725136e20eea294213ac154d879e6026",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feat/dashboard-status-refresh-20261024",
+      "sha": "ff48d9d9b39742199e7c241bc4f073079d2615f3",
+      "protected": false,
+      "behind_master": 8,
+      "ahead_master": 0,
+      "tree": "4c480ca2a0f54b89f6aa59231c6e7d533a7b3f80",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feat/dual-proxy-relay-m0-20261015",
+      "sha": "2165eb71ae3de95ad177ba759c77cbe9095dfca4",
+      "protected": false,
+      "behind_master": 99,
+      "ahead_master": 0,
+      "tree": "0b4592a188cf6d8dc761782065c22e026ec71aab",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feat/dual-proxy-relay-m1-20261015",
+      "sha": "419727aeb1684e156fc474e6c0e9425a9bdc92b9",
+      "protected": false,
+      "behind_master": 96,
+      "ahead_master": 0,
+      "tree": "df71c2247fbaad208ae80a5ab54e4b3cca21a96f",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feat/dual-proxy-relay-m2-20261015",
+      "sha": "02c6436d2e2bb097045543b37bfe42f43b13cb49",
+      "protected": false,
+      "behind_master": 94,
+      "ahead_master": 0,
+      "tree": "e4689751700e125454eed4fd466b28f8aff4c7ef",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feat/dual-proxy-relay-m3-20261015",
+      "sha": "9ed53006c0f1c41a7be57b03284e62210752c7ad",
+      "protected": false,
+      "behind_master": 90,
+      "ahead_master": 0,
+      "tree": "57822ce48f3aa3e1e920366dd61841d398d093f0",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feat/dual-proxy-relay-m4-20261015",
+      "sha": "6b1765310757fc3b24caa7ccf80fa912d1e9e7e7",
+      "protected": false,
+      "behind_master": 88,
+      "ahead_master": 0,
+      "tree": "841ef19bf2ebc1e85f32758a3773b22c9b1f7c05",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feat/inbound-list-search-20261023",
+      "sha": "ef79557783651ba8dca919368592ae58b64f4a6c",
+      "protected": false,
+      "behind_master": 14,
+      "ahead_master": 0,
+      "tree": "7145e1ac4ebc9bbdedc2eedc63be9575e60d0db5",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feat/integrated-ops-candidate-20261011",
+      "sha": "09f2cf4ec39adfbb345d8aa40b94558c64c93936",
+      "protected": false,
+      "behind_master": 111,
+      "ahead_master": 0,
+      "tree": "7d3b10acb44d203635bf93cab1138e3c9b415b5e",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feat/managed-system-menu-20261011",
+      "sha": "fd32a995afe236aa90d07be0b753ad4ad0b6ad5b",
+      "protected": false,
+      "behind_master": 154,
+      "ahead_master": 0,
+      "tree": "03345f3a6c6773e9d9c628628ae173459b8ac801",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feat/menu-stage-candidate-20261011",
+      "sha": "1739583bcb739464a6890f11c7de41dbc4e54d02",
+      "protected": false,
+      "behind_master": 155,
+      "ahead_master": 0,
+      "tree": "0e5e823648a8eb1571339eae49e72537dcb8fd50",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feat/offline-mihomo-preview-20261025",
+      "sha": "3281b356d0bb8a6db16f000795ee6dbadc2a8925",
+      "protected": false,
+      "behind_master": 0,
+      "ahead_master": 1,
+      "tree": "091fc71a49e8fbe4729749c2a11bc2a3983613db",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "feat/read-only-ops-menu-20261011",
+      "sha": "9f8e0f3d9d4b399fa72662c17c77b90257d72580",
+      "protected": false,
+      "behind_master": 156,
+      "ahead_master": 0,
+      "tree": "e54d1945f35a7e7906c0fccf2b7035ee909c3ff5",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feat/restricted-udp-relay-20261016",
+      "sha": "49ec3f8269e0b250a50fe9f9a1d0d56f0e560441",
+      "protected": false,
+      "behind_master": 74,
+      "ahead_master": 1,
+      "tree": "f8c2aff21f5b21bc5108c77a5852ff10634c233e",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "feat/tcp-upstream-export-20261016",
+      "sha": "3435ba58038a5a552013b05f2fcce81c2aa1165f",
+      "protected": false,
+      "behind_master": 75,
+      "ahead_master": 0,
+      "tree": "913f3e784d78861c703fb6a4b94195b9d0f90c3b",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feat/udp-dns-capability-gates-20261016",
+      "sha": "b50c0754adec1331f8d020cf44ccdff41afd928f",
+      "protected": false,
+      "behind_master": 82,
+      "ahead_master": 0,
+      "tree": "7a269e140af2889c9c38fcb7f087ee55b416a077",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feat/workspace-initial-read-retry-20261024",
+      "sha": "8bc7d833eac3ae718b3edfdc50cd5c8ef87ae87f",
+      "protected": false,
+      "behind_master": 1,
+      "ahead_master": 0,
+      "tree": "790b49d7b88eecf5971272e0516f92bac61ad72f",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feature/dual-core-foundation",
+      "sha": "bd8c8433810e40b3575fd45ec0611269e5ab75ef",
+      "protected": false,
+      "behind_master": 377,
+      "ahead_master": 0,
+      "tree": "765121bda23e2699c27811d4eeae564c6a2b3d6d",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feature/per-inbound-routing-20261018",
+      "sha": "b5a8e1ae000f2fe88b8e577378e76c073ebcb193",
+      "protected": false,
+      "behind_master": 69,
+      "ahead_master": 0,
+      "tree": "b12d1e40d16060d3adfa1c29fb380ae5949896f5",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "feature/tailscale-readonly-status-20261021",
+      "sha": "cd2025f8136f5af711397fe8b750491a29f16761",
+      "protected": false,
+      "behind_master": 59,
+      "ahead_master": 0,
+      "tree": "6b8943907811b7edbf1f12eca98b6c24f6962f5b",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/certificate-refresh-state-20261023",
+      "sha": "4bc6febedc5e2f99dcaafed1bece4fce474c767c",
+      "protected": false,
+      "behind_master": 31,
+      "ahead_master": 0,
+      "tree": "2d15b38b32152b4308d1013b659ab42edc5fdcff",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/core-restart-single-flight-20261023",
+      "sha": "f1d2103801edfe4dbebbe7392c652b44dcd84b6d",
+      "protected": false,
+      "behind_master": 12,
+      "ahead_master": 0,
+      "tree": "2b70b703c3440df52cc2b6eddb5bd736763d3b91",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/dashboard-polling-startup-20261024",
+      "sha": "17e116376502bceb32c09022e83d5f99df86d7cf",
+      "protected": false,
+      "behind_master": 10,
+      "ahead_master": 0,
+      "tree": "e28774e27bb2485a4040b1ac75d0daed9d38c118",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/dashboard-responsive-layout-20261023",
+      "sha": "71ec4690b5ccd079b83e017a7c47316252d35ac2",
+      "protected": false,
+      "behind_master": 16,
+      "ahead_master": 0,
+      "tree": "c182f364d6363beae8d38cbac2f9926f91f829df",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/dashboard-status-freshness-20261023",
+      "sha": "8ed33ec446c4b03bf3a76ae7847957c7da58fa07",
+      "protected": false,
+      "behind_master": 20,
+      "ahead_master": 0,
+      "tree": "2f76fcb18385631cd3410904b27e6a99ce5d43b7",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/hy2-mainline-negative-evidence",
+      "sha": "5ee7e35664750f2a5c3bc464be6f0fb7ea905bee",
+      "protected": false,
+      "behind_master": 176,
+      "ahead_master": 0,
+      "tree": "e12287d8ebbea233142d58191ee5141a0a49a17a",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/inbound-editor-saving-lock-20261023",
+      "sha": "6b8e9437ce8911610edc89c9eb2750bf672152e5",
+      "protected": false,
+      "behind_master": 26,
+      "ahead_master": 0,
+      "tree": "e792cdad6c0f29859055eb7bd3ce25baacc6a1eb",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/inbound-instance-preconditions-20261023",
+      "sha": "4e7803f49d52888d7d92ecfc99d37ef0a4b8de1c",
+      "protected": false,
+      "behind_master": 24,
+      "ahead_master": 0,
+      "tree": "f2b88e8c07351543746918e492eec40a8da6f5af",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/inbound-response-redaction",
+      "sha": "ae415ea5ce4879a2e8a9cf52e8a933136087e1cd",
+      "protected": false,
+      "behind_master": 174,
+      "ahead_master": 0,
+      "tree": "fda9f9d8a26dd21bdf0e441ab5d9bbc7ec0dbdd8",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/installer-exit-status-048-20261013",
+      "sha": "8121e008f616edef8dffbb470988f91c29ab8a54",
+      "protected": false,
+      "behind_master": 101,
+      "ahead_master": 0,
+      "tree": "b533ddae0365c445398c0d7f4e065a0b9a885467",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/security-center-unavailable-20261011",
+      "sha": "97ad6f77caeff16d8b233daa988d5f8d1662a02f",
+      "protected": false,
+      "behind_master": 155,
+      "ahead_master": 0,
+      "tree": "8e622bf768dc0da97a2bd0fb66e181adcd10ffb4",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/share-dialog-lifecycle-20261021",
+      "sha": "f44258f54a4c2c915a1ff7f49d80f06d525cb20c",
+      "protected": false,
+      "behind_master": 40,
+      "ahead_master": 0,
+      "tree": "c605063d936edb0801b005d62f345360fbee9b58",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/subscription-node-identity-20261022",
+      "sha": "60d599fa3dcbe1c0fe0d652e11b68e9ce8fb7caf",
+      "protected": false,
+      "behind_master": 48,
+      "ahead_master": 0,
+      "tree": "f8747314f0dc190bc72ab5bfda630065834bdb79",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/subscription-selection-revision-20261023",
+      "sha": "8cfe202b04b4403bb143b10231ce593beab19aa9",
+      "protected": false,
+      "behind_master": 28,
+      "ahead_master": 0,
+      "tree": "7eecd1d6305f6d5a5a2c75c54fe5899653cc6c51",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/tailscale-managed-opt-in-20261021",
+      "sha": "6aae542e938e62e02835129ba73b2359e63edeed",
+      "protected": false,
+      "behind_master": 57,
+      "ahead_master": 0,
+      "tree": "88c81bc1a64067d66d3c1bfa268e6a7fcbb5094b",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/udp-dns-fixture-lifecycle-20261016",
+      "sha": "9f184f5854da445309e87b7ad1ad8a5ee5e86898",
+      "protected": false,
+      "behind_master": 78,
+      "ahead_master": 0,
+      "tree": "ede0dd0626fb34b06e0a5f7dbbae6c46d98384d5",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/workspace-issued-lifecycle-final-20261022",
+      "sha": "eb0712a49bedebb4c4964db3a726a1bb8018a774",
+      "protected": false,
+      "behind_master": 38,
+      "ahead_master": 0,
+      "tree": "b612bb44e5c8556e3edf8aece82a37430680ec04",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/workspace-preview-revision-20261024",
+      "sha": "19a83fbf8fe4766f083cda29db247a240831ecd1",
+      "protected": false,
+      "behind_master": 3,
+      "ahead_master": 0,
+      "tree": "e210377559d5bb200f24ac12bb98e00546b36a4d",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "fix/workspace-reload-drafts-20261021",
+      "sha": "2c0113250829110071672d715dd269ac80328c03",
+      "protected": false,
+      "behind_master": 50,
+      "ahead_master": 0,
+      "tree": "88e020540208c3fddcd85079e1f52ea0af1d990e",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.3.0-alpha.1-startup",
+      "sha": "1963969b781cd6d8b84db2e1ff3da5f0da5499e0",
+      "protected": false,
+      "behind_master": 374,
+      "ahead_master": 0,
+      "tree": "0a0bc7c281b0beb9e0fdae14cb14a925cde25356",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.3.0-alpha.2-auth",
+      "sha": "7118bd6ca67b8f996f2359db7921b95ca560cd89",
+      "protected": false,
+      "behind_master": 372,
+      "ahead_master": 0,
+      "tree": "a27674813bb90da6b6548d163c1b54f7aebb7d30",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.3.0-alpha.3-subscriptions",
+      "sha": "1c4724eaf4a01488be0e3dc3a4912fcfa07c60bb",
+      "protected": false,
+      "behind_master": 370,
+      "ahead_master": 0,
+      "tree": "7914054d1f774d49d678212b667abea820d4c757",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.3.0-alpha.4-safe-apply",
+      "sha": "1d4fc3e661b3457a9305ebb43a1752a36a5a12ba",
+      "protected": false,
+      "behind_master": 368,
+      "ahead_master": 0,
+      "tree": "7ea71a8920b6092efde15c5ab8488be66b04d6d0",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.3.0-alpha.5-toclash",
+      "sha": "698d098302c714a7e9a2fac423fa696f6cf47f09",
+      "protected": false,
+      "behind_master": 366,
+      "ahead_master": 0,
+      "tree": "9cd6b0e6cf33d7f6d98a09784a21c4ab31e1e8b9",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.3.0-alpha.6-workspace",
+      "sha": "ab641a26f53425c7b28275ccb938c4a2dd890269",
+      "protected": false,
+      "behind_master": 365,
+      "ahead_master": 0,
+      "tree": "d2b57d76e24fbb32ba8694a6eee6db8efc82f806",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.3.0-rc.1-loopback",
+      "sha": "8e577dc2ca4a77d1713131c9180e440ed3b5eb18",
+      "protected": false,
+      "behind_master": 364,
+      "ahead_master": 0,
+      "tree": "c7d0bc2665d0c88fda8888980389bc3311b8da5e",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.3.0-rc.2-release-gates",
+      "sha": "3158e5b66ccaeca1e48d7581a097a0a739be048e",
+      "protected": false,
+      "behind_master": 361,
+      "ahead_master": 0,
+      "tree": "ddd44f90bb45d4e9fdbdd12b67d07155813131df",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.3.0-rc.3-certificates",
+      "sha": "2b24e7fe382d6529b6223d02f67fbdda72e5832a",
+      "protected": false,
+      "behind_master": 359,
+      "ahead_master": 0,
+      "tree": "f3e37faf9c7cea73648a76dc104ed7b25717b2a0",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.3.0-rc.4-one-click-release",
+      "sha": "2c5923a58f259f752882d378ed090847deaa94ba",
+      "protected": false,
+      "behind_master": 357,
+      "ahead_master": 0,
+      "tree": "7900a4f117dd7dbd8217bac762eb79800702c7f2",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.3.1-linux-portability",
+      "sha": "719b2b138d681e1b08370c4c769d7d73d47be43f",
+      "protected": false,
+      "behind_master": 299,
+      "ahead_master": 0,
+      "tree": "6ca30ae9ef7977e689b667235982e241302892e8",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.3.2-inbound-editor",
+      "sha": "055c3b3f19d65930d219457b6ec742c6df28e904",
+      "protected": false,
+      "behind_master": 272,
+      "ahead_master": 0,
+      "tree": "7c354bb7b733c8ad587865f2330e4d271c09a2f9",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.4.0-trojan-tls",
+      "sha": "31aecad9b885b4b649bc4fba741719b975e40f1a",
+      "protected": false,
+      "behind_master": 235,
+      "ahead_master": 0,
+      "tree": "0fff8d723f746749114a4e417207c65799d0e738",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.4.1-shadowsocks",
+      "sha": "009413d468d641db689655cdecbc2c956c475e4c",
+      "protected": false,
+      "behind_master": 219,
+      "ahead_master": 0,
+      "tree": "abb3fa3ddfd1ab21c44cfc4a162f5bd6f9858329",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.4.2-vmess-tls",
+      "sha": "9a64c8d958b24e91472ee0cc68445f53a0cb22e3",
+      "protected": false,
+      "behind_master": 203,
+      "ahead_master": 0,
+      "tree": "1a642d38bbd55d8cd12ebfabdbd421624a7a08f3",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.4.3-vless-websocket",
+      "sha": "f9dfa611edcf5946bb4c8ae3cee59118d36930e9",
+      "protected": false,
+      "behind_master": 186,
+      "ahead_master": 0,
+      "tree": "7f7e2df30774f614ecfe6989f22fbf8447d842e5",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.4.4-vless-grpc",
+      "sha": "240edf23af8a12b2cbd71114fe65c693290e39f2",
+      "protected": false,
+      "behind_master": 182,
+      "ahead_master": 0,
+      "tree": "200f8b61ac6decc4fb11384c5d8d162f1f1bdcdc",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.4.5-hysteria2-tls",
+      "sha": "c9d45aac7b8e6951e231d3ca41a9eb8507638510",
+      "protected": false,
+      "behind_master": 178,
+      "ahead_master": 0,
+      "tree": "30a850391d11e72d9fa42cc1bec4db2b859bcda2",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.4.6-tuic",
+      "sha": "14f570e8406098aa7570f2daaf24bdbe550a1858",
+      "protected": false,
+      "behind_master": 170,
+      "ahead_master": 0,
+      "tree": "f68098e398cb7ac29e2e1e809b8f741bb3c30533",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.4.7-packaging-scope",
+      "sha": "93fe91ad441c9f33a12f92ff4ac7e2359ceb2284",
+      "protected": false,
+      "behind_master": 158,
+      "ahead_master": 0,
+      "tree": "a6c6c0caeed2a33d9070b5ba5f781c1ad5ea1b5b",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.4.7-reality-vision",
+      "sha": "70cc2f4f7dc4349c7ecffbc33fc088f51b8651fa",
+      "protected": false,
+      "behind_master": 165,
+      "ahead_master": 0,
+      "tree": "316f0159e3ae3d7362022d9c9ac61bc0afa867c1",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.4.7-release-readiness",
+      "sha": "0171f1f010f63bf73fde54c330309274e3d40f2b",
+      "protected": false,
+      "behind_master": 160,
+      "ahead_master": 0,
+      "tree": "a272e02ee0b9f300e1f2fb7973f95f62ee129e44",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "iteration/v0.4.8-xhttp-preflight",
+      "sha": "f7996c579418d1ffe5df06fc12677cf22a42e034",
+      "protected": false,
+      "behind_master": 162,
+      "ahead_master": 0,
+      "tree": "80ad474cfdd159dcc603a14b4a1c9d24427494e7",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "master",
+      "sha": "f01dbd824ba1c0dcf07ff818103cdb98fbd7c460",
+      "protected": false,
+      "behind_master": 0,
+      "ahead_master": 0,
+      "tree": "790b49d7b88eecf5971272e0516f92bac61ad72f",
+      "classification": "master"
+    },
+    {
+      "name": "perf/low-memory-install",
+      "sha": "d5786a5d274fd3a509c8d843b642d7bbdeeb15df",
+      "protected": false,
+      "behind_master": 119,
+      "ahead_master": 0,
+      "tree": "8c5725091a9e6a432fe2bce97d74d9da810abe49",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "test/httpupgrade-recorder-evidence-20261012",
+      "sha": "bd0a122685113dc6f35dd32e5c773e957d8740e2",
+      "protected": false,
+      "behind_master": 109,
+      "ahead_master": 0,
+      "tree": "4f0d20027bdbda02c73f03c4d76d7425a7c650ea",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "test/status-refresh-native-completion-20261024",
+      "sha": "a4ecd48d7c1b55e1d44880d9ea318b5aa7477558",
+      "protected": false,
+      "behind_master": 6,
+      "ahead_master": 0,
+      "tree": "f0f1c84ef805b81b0d223a0a97f15c302f918099",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "test/strict-export-dns-port-20261023",
+      "sha": "d31786e77d4a78208a938b222f8a06594651982a",
+      "protected": false,
+      "behind_master": 22,
+      "ahead_master": 0,
+      "tree": "48716726e9e19a75e27d3a29858df931941049c7",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "test/tcp-export-port-allocation-20261021",
+      "sha": "a1a2024ff5773be4192e685b0a60839c68185533",
+      "protected": false,
+      "behind_master": 54,
+      "ahead_master": 0,
+      "tree": "e383d7b3c6b1de8120bb458bb6e840323526e064",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "test/transition-port-allocation-20261021",
+      "sha": "65ad9bb891623a5e0e26999c017e87351aa126bc",
+      "protected": false,
+      "behind_master": 52,
+      "ahead_master": 0,
+      "tree": "6e1d3b60d208ee2a8effb84b6ecc8be89460e477",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "test/vmess-tls-evidence-20261012",
+      "sha": "abbe489bf1acd42b4ecfce2bde0820cc43999481",
+      "protected": false,
+      "behind_master": 110,
+      "ahead_master": 0,
+      "tree": "afe53c873729dcb8a47f875e2b25cbbac88751c5",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "test/workspace-save-recovery-20261022",
+      "sha": "f40af874ed2be2a9b6a2612fb27af0f5d91e1d29",
+      "protected": false,
+      "behind_master": 36,
+      "ahead_master": 0,
+      "tree": "1d76efb8643f2c3864bfa6fa4154571099340994",
+      "classification": "already-in-master"
+    },
+    {
+      "name": "wip/backup-private-cache-20261009",
+      "sha": "ee86a105171107028c9b5fbc6c0154d88fe2ad5d",
+      "protected": false,
+      "behind_master": 135,
+      "ahead_master": 5,
+      "tree": "3ce9a614cfe7706ca90e472ac101369a416197cb",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "wip/core-residency-20261009",
+      "sha": "67797df0fd6a09e61d021584bddac730656cc43f",
+      "protected": false,
+      "behind_master": 131,
+      "ahead_master": 1,
+      "tree": "e005b1a5d2dfd312cc7bac1eda237623a6078ecb",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "wip/core-writeback-20261009",
+      "sha": "281bed11c173b95077e36afe617c7416640cd565",
+      "protected": false,
+      "behind_master": 130,
+      "ahead_master": 1,
+      "tree": "699026c7fcc1396443c7700d2a028c94fab639af",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "wip/cpu-quota-recovery-20261009",
+      "sha": "2ffd1a14977d1b773f0d6c69f66c3d2cf8848bb5",
+      "protected": false,
+      "behind_master": 128,
+      "ahead_master": 3,
+      "tree": "7357e1c96c4201092c4e027f338966acdf98f830",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "wip/dual-core-20261009",
+      "sha": "5bf8702248e4f8db2dd752d51343ffe3db1bb219",
+      "protected": false,
+      "behind_master": 129,
+      "ahead_master": 1,
+      "tree": "6b7646ef427324d8f67720f4cbf63e3b5c2c248e",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "wip/install-stage-trace-20261009",
+      "sha": "b687570ec84a04e1734125135c2ad29f2cb1cee5",
+      "protected": false,
+      "behind_master": 133,
+      "ahead_master": 1,
+      "tree": "90ceca985971e2c881bf5161e7a68513b62c7e38",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "wip/large-export-profile-20261009",
+      "sha": "04f04043b4f13d5db72191a5133f1ed62f74ae7e",
+      "protected": false,
+      "behind_master": 136,
+      "ahead_master": 1,
+      "tree": "034b526fe99ca847da2fcb3be97c260a0a872979",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "wip/musl-resource-backend-20261009",
+      "sha": "084dbc324b109c38d84e181505d674cf512bdd6c",
+      "protected": false,
+      "behind_master": 138,
+      "ahead_master": 2,
+      "tree": "ef73d841c42c6a6e89f253d2b535f6973382ddc6",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "wip/resource-service-tree-recovery-20261009",
+      "sha": "6c22e77294a735d4e0bf753a429f1f6fde16fbd0",
+      "protected": false,
+      "behind_master": 140,
+      "ahead_master": 4,
+      "tree": "7741e157ef4ead3a7b9011c937c19638a20c571e",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "wip/root-resource-20261009",
+      "sha": "39f5e96c9c24e8ba6ea0afdfc293e367c2addcc6",
+      "protected": false,
+      "behind_master": 127,
+      "ahead_master": 3,
+      "tree": "7d4efe682f5785c77e5a07980406796d9d8be5fe",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "wip/rule-coverage-index-20261009",
+      "sha": "c280021597e0ca89a4d6c23436d2d79454d16644",
+      "protected": false,
+      "behind_master": 136,
+      "ahead_master": 2,
+      "tree": "7aaa6bee83017673a0ac022af5859829e57f226b",
+      "classification": "preserve-unmerged"
+    },
+    {
+      "name": "wip/runtime-writeback-20261009",
+      "sha": "a8d9bc6c399d5571a78ae6e10b7a23a6e38218ee",
+      "protected": false,
+      "behind_master": 132,
+      "ahead_master": 1,
+      "tree": "fa02f1ff8c0b353294ac5a0d63065b1307c8078f",
+      "classification": "preserve-unmerged"
+    }
+  ],
+  "open_prs": [
+    {
+      "number": 78,
+      "head": "feat/offline-mihomo-preview-20261025",
+      "sha": "3281b356d0bb8a6db16f000795ee6dbadc2a8925",
+      "base": "master",
+      "draft": true
+    },
+    {
+      "number": 48,
+      "head": "feat/restricted-udp-relay-20261016",
+      "sha": "49ec3f8269e0b250a50fe9f9a1d0d56f0e560441",
+      "base": "master",
+      "draft": true
+    },
+    {
+      "number": 33,
+      "head": "feat/integrated-ops-candidate-20261011",
+      "sha": "09f2cf4ec39adfbb345d8aa40b94558c64c93936",
+      "base": "feat/managed-system-menu-20261011",
+      "draft": true
+    },
+    {
+      "number": 32,
+      "head": "feat/managed-system-menu-20261011",
+      "sha": "fd32a995afe236aa90d07be0b753ad4ad0b6ad5b",
+      "base": "feat/menu-stage-candidate-20261011",
+      "draft": true
+    },
+    {
+      "number": 31,
+      "head": "feat/menu-stage-candidate-20261011",
+      "sha": "1739583bcb739464a6890f11c7de41dbc4e54d02",
+      "base": "feat/read-only-ops-menu-20261011",
+      "draft": true
+    },
+    {
+      "number": 14,
+      "head": "docs/service-rule-packs",
+      "sha": "7e2d589079753e890eb46acad6c2b2d4c706701c",
+      "base": "iteration/v0.3.2-inbound-editor",
+      "draft": true
+    }
+  ]
+}

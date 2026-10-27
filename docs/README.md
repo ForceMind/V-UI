@@ -2,6 +2,12 @@
 
 # V-UI 文档
 
+先确认[冻结版本与自行部署验收清单](FROZEN_VERSION_TEST_HANDOFF.md)：旧正式版、已验主线与本地可选功能不是同一套安装材料。
+
+## 离线 YAML 预览（开发中，未发布）
+
+[只读预览库与 CLI](OFFLINE_MIHOMO_PREVIEW.md)支持默认 JSON 和 `--format text` 中文摘要，包括结构差异、诊断解释及列表位置。CLI 仅本地检查；[只读面板入口](MIHOMO_PANEL_PREVIEW_CONTRACT.md)由用户显式提交给面板服务器。两者都不是任意 YAML 导入 / 合并器，不应用配置或验证真实核心兼容性。
+
 ## 当前开发入口（2026-10-18）
 
 接手先读[开发状态与下一步](DEVELOPMENT_HANDOFF.md)，再读[每入口直连/中转 TCP 契约](PER_INBOUND_ROUTING_CONTRACT.md)和[标准客户端兼容边界](STANDARD_CLIENT_COMPATIBILITY.md)。用户已确认现成客户端导入不同标准 VLESS 节点，服务器分别直出/中转；本轮从准确产品主线 a98 独立实现，不依赖自研 App或实验核心发布。D1已在a98主线，三态实现已通过 [PR49](https://github.com/ForceMind/V-UI/pull/49) 正常合并，准确0962主线及四目标已独立验收，见[收口记录](PER_INBOUND_ROUTING_CLOSURE_20261018.md)；产品、实验、发布、实机资格分开记录。以下按日期保留历史入口。

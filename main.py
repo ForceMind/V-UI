@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.staticfiles import StaticFiles
-from app.api import auth, certificates, cores, files, inbounds, management, proxy, proxy_diagnostics, proxy_exports, routing, security, singbox, subscription, subscriptions, system, xray
+from app.api import auth, certificates, cores, files, inbounds, management, mihomo_preview, proxy, proxy_diagnostics, proxy_exports, routing, security, singbox, subscription, subscriptions, system, xray
 from app.data_owner import data_owner
 from app.models.database import DB_PATH, init_db
 from app.middleware.auth import AdminAuthMiddleware, configured_origin
@@ -25,6 +25,7 @@ app.include_router(inbounds.router,prefix='/api/inbounds',tags=['Inbounds'])
 app.include_router(cores.router,prefix='/api/cores',tags=['Cores'])
 app.include_router(routing.router,prefix='/api/routing',tags=['Routing'])
 app.include_router(proxy.router,prefix='/api/proxy',tags=['Server egress'])
+app.include_router(mihomo_preview.router,prefix='/api/proxy',tags=['Read-only YAML preview'])
 app.include_router(proxy_diagnostics.router,prefix='/api/proxy',tags=['Server egress diagnostics'])
 app.include_router(proxy_exports.router,prefix='/api/proxy',tags=['Strict relay exports'])
 app.include_router(subscription.router,prefix='/api/subscription',tags=['Subscription'])

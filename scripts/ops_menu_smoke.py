@@ -96,11 +96,54 @@ class MenuSession:
     def send(self, value):
         os.write(self.fd, value.encode() if isinstance(value, str) else value)
 
+    def failure_diagnostics(self):
+        """Best-effort, non-atomic snapshot of this fixture's PTY/child only.
+
+        Never read command lines, environment, input paths or unrelated processes.
+        Missing observations do not suppress the original assertion or retry it.
+        """
+        result = {'pid': self.process.pid}
+        for name, read in (
+                ('foreground_pgid', lambda: os.tcgetpgrp(self.fd)),
+                ('child_pgid', lambda: os.getpgid(self.process.pid)),
+                ('child_sid', lambda: os.getsid(self.process.pid))):
+            try:
+                result[name] = read()
+            except (OSError, ValueError):
+                result[name] = 'unavailable'
+        try:
+            attrs = termios.tcgetattr(self.fd)
+            intr = attrs[6][termios.VINTR]
+            result['terminal'] = {
+                'isig': bool(attrs[3] & termios.ISIG),
+                'icanon': bool(attrs[3] & termios.ICANON),
+                'echo': bool(attrs[3] & termios.ECHO),
+                'vintr': intr if isinstance(intr, int) else ord(intr),
+            }
+        except (OSError, ValueError, TypeError, IndexError, termios.error):
+            result['terminal'] = 'unavailable'
+        try:
+            # Only the child created by this MenuSession; no /proc scan.
+            status = Path(f'/proc/{self.process.pid}/status').read_text()
+            selected = {}
+            for line in status.splitlines():
+                key, sep, value = line.partition(':')
+                value = value.strip()
+                if sep and key in ('SigPnd', 'ShdPnd', 'SigBlk', 'SigIgn', 'SigCgt'):
+                    if 1 <= len(value) <= 16 and all(c in '0123456789abcdefABCDEF' for c in value):
+                        selected[key] = value.lower()
+                elif sep and key == 'State' and value and value[0] in 'RSDZTWtXxIKP':
+                    selected[key] = value[0]
+            result['child_status'] = selected
+        except (OSError, UnicodeError, ValueError):
+            result['child_status'] = 'unavailable'
+        return '\nPTY failure diagnostics (non-atomic): ' + json.dumps(result, sort_keys=True)
+
     def finish(self, code=0):
         deadline = time.monotonic() + self.timeout
         while self.process.poll() is None:
             if time.monotonic() >= deadline:
-                raise AssertionError('Menu did not exit\n' + self.text())
+                raise AssertionError('Menu did not exit\n' + self.text() + self.failure_diagnostics())
             self._read(.1)
         while self._read(.02) and select.select([self.fd], [], [], 0)[0]:
             pass

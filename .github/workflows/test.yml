@@ -41,6 +41,7 @@ jobs:
           node --check web/js/workspace.js
           node --check web/js/certificates.js
           node --check web/js/proxy.js
+          node --check web/js/mihomo-preview.js
       - name: Run tests
         run: python -m unittest discover -s tests -v
       - name: Fetch checksum-pinned real cores

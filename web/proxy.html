@@ -1,10 +1,11 @@
 <!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>V-UI · 代理与中转</title><link rel="icon" type="image/svg+xml" href="/ui/brand/vui-icon.svg"><link rel="stylesheet" href="/ui/css/workspace.css"><link rel="stylesheet" href="/ui/css/proxy.css"><script src="/ui/js/proxy.js" defer></script><script src="/ui/js/tailscale-status.js" defer></script></head>
+<title>V-UI · 代理与中转</title><link rel="icon" type="image/svg+xml" href="/ui/brand/vui-icon.svg"><link rel="stylesheet" href="/ui/css/workspace.css"><link rel="stylesheet" href="/ui/css/proxy.css"><script src="/ui/js/proxy.js" defer></script><script src="/ui/js/tailscale-status.js" defer></script><script src="/ui/js/mihomo-preview.js" defer></script></head>
 <body><header><a class="brand" href="/ui/"><img class="vui-brand-image" src="/ui/brand/vui-icon.svg" alt="V-UI" width="30" height="30"><span aria-hidden="true">V-UI</span></a><nav><a href="/workspace">分流与订阅</a><a href="/proxy" aria-current="page">代理与中转</a><a href="/certificates">证书管理</a><a href="/account">账户</a></nav></header>
 <main><div class="page-title"><div><h1>代理与中转</h1><p>主机代理与默认入口策略独立；每个节点可指定直连或中转，共用一个上游。</p></div><span id="stage">正在读取</span></div>
 <p id="notice" role="status" aria-live="polite">正在读取服务器草稿与活动配置…</p>
+<section aria-labelledby="yaml-preview-heading"><div class="section-head"><div><h2 id="yaml-preview-heading">YAML 只读预览</h2><p class="hint">检查候选配置的有限结构、引用冲突和可选基线差异；与“导入上游”独立，不保存、合并或应用。</p></div><button id="open-yaml-preview" type="button">打开只读预览</button></div></section>
 <div id="proxy-workspace" hidden>
 <section aria-labelledby="status-heading"><div class="section-head"><h2 id="status-heading">当前状态</h2><button id="refresh" type="button">刷新服务器状态</button></div>
 <div class="status-grid"><div><h3>已保存草稿</h3><p id="draft-state"></p><p id="draft-revision" class="revision"></p></div><div><h3>已提交活动配置</h3><p id="active-state"></p><p id="active-revision" class="revision"></p><p id="active-address" class="hint"></p></div></div>
@@ -54,4 +55,14 @@ curl --noproxy "" --proxy socks5h://127.0.0.1:7891 --proxy-user example-user 'ht
 <dialog id="import-dialog" aria-labelledby="import-heading"><form id="import-form" autocomplete="off"><div class="section-head"><div><h2 id="import-heading">导入上游</h2><p class="hint">仅导入明确支持的 VLESS / TCP / TLS 或 REALITY Vision 节点；不读取远程订阅。普通节点导出不保证可作中转上游导入；UDP / packet encoding 字段不会被静默删除。</p></div><button id="close-import" type="button" aria-label="取消导入">取消</button></div>
 <fieldset id="import-fields"><legend>仅暂存本次输入</legend><label for="import-format">格式</label><select id="import-format"><option value="uri">VLESS URI</option><option value="v2ray-json">V2Ray / Xray JSON</option><option value="clash-yaml">Clash / Mihomo YAML</option></select><label for="import-file">从 UTF-8 文件读取（最多 1 MiB）</label><input id="import-file" type="file" accept=".txt,.json,.yaml,.yml"><label for="import-content">或粘贴配置（最多 1 MiB）</label><textarea id="import-content" rows="6" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="原文不会写入浏览器存储；取消、完成或离开页面即清空"></textarea><button id="preview-import" type="button">预览可导入节点</button>
 <div id="import-preview" hidden><h3>明确选择一个节点</h3><div id="candidates"></div><div id="ignored-sections"></div><p id="import-notices" class="hint"></p><label for="import-name">显示名称（可留空保留原名称）</label><input id="import-name" maxlength="128" autocomplete="off"><button id="save-import" type="submit" class="primary" disabled>保存所选上游</button></div></fieldset><p id="import-notice" role="status" aria-live="polite"></p><p class="hint">候选预览不会回显 UUID、REALITY 连接材料或密码。保存时服务端重新解析；只有全部未导入区块逐项确认后才能保存。</p></form></dialog>
+<dialog id="yaml-preview-dialog" aria-labelledby="yaml-dialog-heading"><form id="yaml-preview-form" autocomplete="off">
+<div class="section-head"><h2 id="yaml-dialog-heading">YAML 只读结构与差异预览</h2><button id="close-yaml-preview" type="button" aria-label="关闭并清空只读预览">关闭并清空</button></div>
+<p class="hint">点击“生成只读报告”会将候选与可选基线发送给当前面板服务器解析，不是浏览器内离线解析。不会自动读取服务器配置或下载远程 provider。</p>
+<p class="hint">输入只留本次页面及请求内存，不写入浏览器存储或服务端配置；关闭、清空或离页会清除控件，不能保证浏览器或操作系统内存擦除。</p>
+<label for="yaml-candidate">候选 YAML（必填，最多 1 MiB UTF-8）</label><textarea id="yaml-candidate" rows="6" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea><label for="yaml-candidate-file">或从本地 UTF-8 文件读入候选</label><input id="yaml-candidate-file" type="file" accept=".yaml,.yml,.txt">
+<label for="yaml-baseline">基线 YAML（可选，留空不比较，最多 1 MiB UTF-8）</label><textarea id="yaml-baseline" rows="4" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea><label for="yaml-baseline-file">或从本地 UTF-8 文件读入基线</label><input id="yaml-baseline-file" type="file" accept=".yaml,.yml,.txt">
+<p class="hint">包含 JSON 转义和语法的总请求最多 2 MiB。只识别有限语法，真实核心兼容性与合并等价均未验证；即使零诊断也不可应用。</p>
+<div class="actions"><button id="yaml-preview-submit" type="submit">生成只读报告</button><button id="clear-yaml-preview" type="button">清空输入与报告</button></div>
+<p id="yaml-preview-notice" role="status" aria-live="polite"></p><pre id="yaml-preview-result" aria-label="只读预览报告" tabindex="0" hidden></pre>
+</form></dialog>
 </body></html>
