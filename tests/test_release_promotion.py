@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import stat
 import shutil
+import shlex
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -19,6 +21,7 @@ from scripts.publish_release import (
     TARGETS,
     ReleaseGateError,
     finalize_assets,
+    installation_command,
     select_runs,
     validate_kit,
     validate_target_artifact,
@@ -42,6 +45,36 @@ def bundle(target,commit=SHA,version='0.3.1'):
 
 
 class ReleasePromotionTests(unittest.TestCase):
+    def test_one_line_command_pins_bootstrap_and_kit_before_managed_installation(self):
+        files={'install.sh':b'accepted installer','SHA256SUMS':b'accepted complete checksums'}
+        command=installation_command(files,'0.4.9')
+        self.assertEqual(len(command.splitlines()),1)
+        arguments=shlex.split(command)
+        self.assertEqual(arguments[:2],['/bin/sh','-c'])
+        script=arguments[-1]
+        self.assertIn('https://github.com/ForceMind/V-UI/releases/download/v0.4.9/install.sh',script)
+        self.assertIn(hashlib.sha256(files['install.sh']).hexdigest(),script)
+        self.assertIn(hashlib.sha256(files['SHA256SUMS']).hexdigest(),script)
+        self.assertLess(script.index('sha256sum -c -'),script.index('exec /bin/bash'))
+        self.assertIn('--with-global-cli',script)
+        self.assertIn('--interactive',script)
+        self.assertIn('mktemp -d /root/vui-bootstrap.',script)
+        for fragment in (arguments[2],script):
+            subprocess.run(['/bin/sh','-n','-c',fragment],check=True)
+
+    def test_one_line_command_quotes_existing_optional_arguments_and_rejects_bad_version(self):
+        files={'install.sh':b'installer','SHA256SUMS':b'checksums'}
+        value='/tmp/certificate with spaces;$(false).pem'
+        command=installation_command(files,'0.4.9',installer_args=('--cert',value))
+        body=shlex.split(command)[-1]
+        final=shlex.split(body.rsplit('exec /bin/bash ',1)[1])
+        self.assertEqual(final[-2:],['--cert',value])
+        for version in ('latest','0.4.9;false','v0.4.9','0.4.9-rc.1'):
+            with self.subTest(version=version),self.assertRaises(ReleaseGateError):
+                installation_command(files,version)
+        with self.assertRaises(ReleaseGateError):
+            installation_command(files,'0.4.9',installer_args=('--dry-run',))
+
     def runs(self):
         return [
             {'id':i,'path':'.github/workflows/'+path,'head_sha':SHA,

@@ -158,7 +158,7 @@ class InstallerShellTests(unittest.TestCase):
         self.source = SOURCE.read_text()
         self.script.write_text(self.source)
         startup = self.root / "bash-env"
-        startup.write_text('export TEST_INSTALL_SH_PID="$BASHPID"\n')
+        startup.write_text('export TEST_INSTALL_SH_PID="${BASHPID:-$$}"\n')
         self.env = {
             "PATH": str(self.bin),
             "HOME": str(self.root),
@@ -226,6 +226,7 @@ class InstallerShellTests(unittest.TestCase):
         result = self.run_script("--version", "v0.4.7")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(self.records("installer")), 1)
+        self.assertEqual(self.records("control"), [])
         self.assert_clean()
 
     def test_online_failure_preserves_installer_status(self):
@@ -558,6 +559,111 @@ class InstallerShellTests(unittest.TestCase):
                 self.assertEqual(self.records("curl"), [])
                 self.assertTrue(any("created" in record for record in self.records("mktemp")))
                 self.assert_clean()
+
+
+@unittest.skipUnless(BASH, 'Bash is required for managed installer shell controls')
+class ManagedInstallerShellTests(unittest.TestCase):
+    """Real hashing/dispatch, with explicit non-root fake installer/controllers."""
+    setUp = InstallerShellTests.setUp
+    write_checksums = InstallerShellTests.write_checksums
+    run_script = InstallerShellTests.run_script
+    records = InstallerShellTests.records
+    assert_clean = InstallerShellTests.assert_clean
+
+    def managed_kit(self):
+        names = ('install.sh', 'install_system.py', 'platform_support.py', 'firewall_support.py',
+                 'service_support.py', 'install_ops_control.py', 'system_launcher.py', 'system_ops.py',
+                 'ops_worker.py', 'release_tools.py', 'v-ui', 'vui-source.zip', 'RELEASE.json', 'RELEASE_NOTES.md')
+        for name in names:
+            if not (self.release / name).exists():
+                (self.release / name).write_bytes(b'explicit synthetic unused kit member\n')
+        control = '''import json,os,pathlib,sys
+phase='preflight' if '--preflight' in sys.argv else 'install'
+with pathlib.Path(os.environ['TEST_LOG']).open('a') as log:
+    log.write(json.dumps({'tool':'control','phase':phase,'args':sys.argv[1:]})+'\\n')
+raise SystemExit(int(os.environ.get('TEST_PREFLIGHT_STATUS' if phase=='preflight' else 'TEST_CONTROL_STATUS','0')))
+'''
+        (self.release / 'install_ops_control.py').write_text(control)
+        self.write_checksums()
+        return hashlib.sha256((self.release / 'SHA256SUMS').read_bytes()).hexdigest()
+
+    def managed(self, digest, *args, **environment):
+        return self.run_script('--version', 'v0.4.9', '--with-global-cli',
+                               '--kit-sha256', digest, *args, **environment)
+
+    def test_authenticated_complete_kit_runs_preflight_panel_and_control_in_order(self):
+        result = self.managed(self.managed_kit(), '--interactive')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [row for row in self.records() if row['tool'] in ('installer', 'control')]
+        self.assertEqual([row['tool'] for row in calls], ['control', 'installer', 'control'])
+        self.assertEqual([row['phase'] for row in self.records('control')], ['preflight', 'install'])
+        self.assertIn('--interactive', self.records('installer')[0]['args'])
+        self.assertNotIn('--with-global-cli', self.records('installer')[0]['args'])
+        self.assertIn('一键安装完成', result.stdout)
+        self.assert_clean()
+
+    def test_missing_or_incorrect_trust_pin_never_runs_downloaded_code(self):
+        self.managed_kit()
+        for digest in ('', '0' * 64):
+            with self.subTest(digest=digest):
+                self.log_path.unlink(missing_ok=True)
+                result = self.managed(digest)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.records('installer'), [])
+                self.assertEqual(self.records('control'), [])
+                self.assert_clean()
+
+    def test_unknown_authenticated_kit_member_is_rejected_before_helpers(self):
+        self.managed_kit()
+        (self.release / 'unknown.py').write_text('must not execute')
+        self.write_checksums()
+        digest = hashlib.sha256((self.release / 'SHA256SUMS').read_bytes()).hexdigest()
+        result = self.managed(digest)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.records('installer'), [])
+        self.assertEqual(self.records('control'), [])
+        self.assertEqual(len(self.records('curl')), 1)
+        self.assert_clean()
+
+    def test_control_asset_change_cannot_reach_preflight(self):
+        digest = self.managed_kit()
+        (self.release / 'install_ops_control.py').write_text('raise SystemExit(97)')
+        result = self.managed(digest)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.records('installer'), [])
+        self.assertEqual(self.records('control'), [])
+        self.assert_clean()
+
+    def test_failed_os_or_path_preflight_does_not_install_panel(self):
+        result = self.managed(self.managed_kit(), TEST_PREFLIGHT_STATUS='23')
+        self.assertEqual(result.returncode, 23, result.stderr)
+        self.assertEqual(self.records('installer'), [])
+        self.assertEqual([row['phase'] for row in self.records('control')], ['preflight'])
+        self.assertNotIn('一键安装完成', result.stdout)
+        self.assert_clean()
+
+    def test_panel_failure_does_not_publish_control(self):
+        result = self.managed(self.managed_kit(), status=7)
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertEqual([row['phase'] for row in self.records('control')], ['preflight'])
+        self.assertNotIn('一键安装完成', result.stdout)
+        self.assert_clean()
+
+    def test_control_failure_preserves_kit_and_reports_partial_result(self):
+        result = self.managed(self.managed_kit(), TEST_CONTROL_STATUS='19')
+        self.assertEqual(result.returncode, 19, result.stderr)
+        self.assertEqual([row['phase'] for row in self.records('control')], ['preflight', 'install'])
+        self.assertNotIn('一键安装完成', result.stdout)
+        self.assertIn('本次安装未全部成功', result.stderr)
+        retained = list((self.root / 'temporary').iterdir())
+        self.assertEqual(len(retained), 1)
+        self.assertTrue((retained[0] / 'kit/SHA256SUMS').is_file())
+
+    def test_managed_dry_run_is_rejected_before_any_bootstrap_or_download(self):
+        result = self.managed('0' * 64, '--dry-run')
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(self.records(), [])
+        self.assert_clean()
 
 
 if __name__ == "__main__":

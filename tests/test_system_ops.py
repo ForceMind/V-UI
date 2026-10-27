@@ -1002,11 +1002,15 @@ with patch.object(m.os,'getuid',return_value=0), patch.object(m.os,'geteuid',ret
                 self.assertNotIn('never-echo-this', text)
                 self.assertEqual(ops.termios.tcgetattr(terminal.fd)[3], before[3])
 
-    def test_shell_entry_is_fixed_isolated_os_python_without_escalation(self):
+    def test_shell_entry_keeps_fixed_os_python_and_only_existing_sudo_policy(self):
         script = (SOURCE / 'deploy/v-ui').read_text()
         self.assertIn('/usr/bin/env -i ', script)
         self.assertIn('/usr/bin/python3 -B -I -S /usr/local/lib/v-ui/system_ops.py "$@"', script)
-        for forbidden in ('sudo', 'su ', 'bootstrap_python', '/var/lib/v-ui', 'PYTHONPATH', 'eval ', 'source '):
+        delegation='exec sudo -- /usr/local/sbin/v-ui "$@"'
+        self.assertEqual(script.count(delegation),1)
+        self.assertLess(script.index('id -u'),script.index(delegation))
+        self.assertLess(script.index(delegation),script.index('/usr/bin/env -i'))
+        for forbidden in ('su ', 'bootstrap_python', '/var/lib/v-ui', 'PYTHONPATH', 'eval ', 'source ', 'sudoers', 'chmod +s'):
             self.assertNotIn(forbidden, script)
 
 

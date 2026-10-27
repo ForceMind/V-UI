@@ -256,7 +256,7 @@ class LinuxInstallationRegressions(unittest.TestCase):
             terminal.__enter__ = Mock(return_value=terminal)
             terminal.__exit__ = Mock(return_value=False)
             terminal.readline.return_value = answer
-            with self.subTest(answer=answer), patch('builtins.open', return_value=terminal):
+            with self.subTest(answer=answer), patch.object(installer,'controlling_terminal', return_value=terminal):
                 self.assertEqual(installer.tty_confirm('Open ports?'), accepted)
 
 

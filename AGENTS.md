@@ -1,5 +1,14 @@
 # V-UI 开发约束
 
+## 2026-10-27 v0.4.9 在线一键安装（已批准）
+
+用户已明确批准本批开发、1 个 gpt-6.1-sol / medium 只读独审、正常合并及公开发布新 v0.4.9。
+交付按 [一键安装计划与证据](docs/ONE_LINE_INSTALL_049.md)执行：一行公网命令自动下载并校验、控制终端交互配置、自动安装全局 `v-ui`，随后可随时输入该命令打开菜单。
+正常管理员沿用既有 sudo 策略，不添加免密 sudoers/SUID； root 控制代码仍来自精确受验 kit 和固定 OS Python。
+本批获准更新 VERSION 至 0.4.9，不换固定核心或扩大协议/UDP、用户 VPS、真实 CA 同意及生产部署范围。
+准确候选、正常主线和最终公网安装分别验收；旧 v0.4.8 标签/资产、历史 PTY 首败及其他实验保持。
+下方按日期保留此前范围与状态，不覆盖本次明确批准。
+
 ## 2026-10-19 当前接手：每入口 TCP 已收口
 
 [PR49](https://github.com/ForceMind/V-UI/pull/49) 已正常合并至 `0962f0c4995b3b7606652027f2330285e4dea1f7`，P0–P5 及准确候选/主线八组、四目标验收已完成，见[收口记录](docs/PER_INBOUND_ROUTING_CLOSURE_20261018.md)。[PR50](https://github.com/ForceMind/V-UI/pull/50) 的交接文档已合并至 `1489bf5218fced9b42c57e06715478dc323dc782`。接手先读[开发交接](docs/DEVELOPMENT_HANDOFF.md)，核对远端 master 与后续提交；不要从旧 a98 基线重新实现已完成的 inherit/direct/relay。

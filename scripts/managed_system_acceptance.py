@@ -41,10 +41,11 @@ ROOT = Path('/var/lib/v-ui')
 CONFIG_DIR = Path('/etc/v-ui')
 CONTROL = Path('/usr/local/lib/v-ui')
 ENTRY = Path('/usr/local/sbin/v-ui')
+COMMAND_ALIAS = Path('/usr/local/bin/v-ui')
 LOCK = Path('/run/lock/v-ui-install.lock')
 UNITS = ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')
 UNIT_DIR = Path('/etc/systemd/system')
-RESERVED = (ROOT, CONFIG_DIR, CONTROL, ENTRY, LOCK)
+RESERVED = (ROOT, CONFIG_DIR, CONTROL, ENTRY, COMMAND_ALIAS, LOCK)
 AUTH_PREFIX = 'ROOT-SYSTEMD:'
 ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8',
        'HOME': '/tmp', 'PYTHONDONTWRITEBYTECODE': '1'}
@@ -54,6 +55,7 @@ DEPENDENCIES = ('scripts/managed_system_acceptance.py', 'scripts/install_ops_con
                 'scripts/service_support.py', 'tests/test_oneclick_system.py',
                 'tests/loopback_helpers.py', 'deploy/system_ops.py',
                 'scripts/fetch_managed_ops_kit.py', 'scripts/publish_release.py',
+                'tests/online_install_helpers.py',
                 '.github/workflows/managed-system-control.yml', 'requirements-test.txt')
 REQUIRED_PHASES = ('baseline', 'control_installed', 'menu_cancel', 'stop_start', 'restart',
                    'backup_restore', 'stage_activate_rollback', 'post_stop_failure',
@@ -235,9 +237,12 @@ def empty_host():
 
 def fingerprint(path):
     info = Path(path).lstat()
-    return {'device': info.st_dev, 'inode': info.st_ino, 'uid': info.st_uid,
+    result = {'device': info.st_dev, 'inode': info.st_ino, 'uid': info.st_uid,
             'gid': info.st_gid, 'type': stat.S_IFMT(info.st_mode),
             'mode': stat.S_IMODE(info.st_mode), 'links': info.st_nlink if stat.S_ISREG(info.st_mode) else 0}
+    if stat.S_ISLNK(info.st_mode):
+        result['target'] = os.readlink(path)
+    return result
 
 
 def cleanup_paths():
@@ -246,13 +251,18 @@ def cleanup_paths():
 
 def validate_cleanup_ledger(ledger, current):
     """A pure identity check, shared with the isolated root cleanup program."""
-    allowed = {'/var/lib/v-ui', '/etc/v-ui', '/usr/local/lib/v-ui', '/usr/local/sbin/v-ui',
+    allowed = {'/var/lib/v-ui', '/etc/v-ui', '/usr/local/lib/v-ui', '/usr/local/sbin/v-ui', '/usr/local/bin/v-ui',
                '/run/lock/v-ui-install.lock', '/etc/systemd/system/v-ui.service',
                '/etc/systemd/system/v-ui-http01.service', '/etc/systemd/system/v-ui-http01.socket'}
     if not isinstance(ledger, dict) or not ledger or not set(ledger) <= allowed or set(current) != set(ledger):
         raise RuntimeError('cleanup_not_owned')
     for path, recorded in ledger.items():
         actual = current[path]
+        if path == '/usr/local/bin/v-ui':
+            if (actual != recorded or actual['type'] != 0o120000 or actual['uid'] != 0
+                    or actual.get('target') != '/usr/local/sbin/v-ui'):
+                raise RuntimeError('cleanup_identity_changed')
+            continue
         if actual != recorded or actual['type'] not in (0o040000, 0o100000):
             raise RuntimeError('cleanup_identity_changed')
         if actual['type'] == 0o100000 and actual['links'] != 1:
@@ -640,13 +650,15 @@ class Qualification:
         for path in (*RESERVED,*(UNIT_DIR/name for name in UNITS)):
             if not os.path.lexists(path):continue
             row=fingerprint(path)
-            mode=0o700 if path==ROOT else 0o755 if path in (CONFIG_DIR,CONTROL,ENTRY) else 0o600 if path==LOCK else 0o644
-            kind=stat.S_IFDIR if path in (ROOT,CONFIG_DIR,CONTROL) else stat.S_IFREG
+            mode=0o777 if path==COMMAND_ALIAS else 0o700 if path==ROOT else 0o755 if path in (CONFIG_DIR,CONTROL,ENTRY) else 0o600 if path==LOCK else 0o644
+            kind=stat.S_IFLNK if path==COMMAND_ALIAS else stat.S_IFDIR if path in (ROOT,CONFIG_DIR,CONTROL) else stat.S_IFREG
             owner=account.pw_uid if path==ROOT else 0
             if row['type']!=kind or row['mode']!=mode or row['uid']!=owner or (kind==stat.S_IFREG and row['links']!=1):
                 raise QualificationError('unclaimable_resource')
+            if path==COMMAND_ALIAS and row.get('target')!=str(ENTRY):
+                raise QualificationError('unclaimable_resource')
             old=self.ledger.get(str(path))
-            if old is not None and row!=old and not (baseline_replacement and path.parent==UNIT_DIR) and not (entry_replacement and path==ENTRY):
+            if old is not None and row!=old and not (baseline_replacement and path.parent==UNIT_DIR) and not (entry_replacement and path in (ENTRY,COMMAND_ALIAS)):
                 raise QualificationError('owned_resource_replaced')
             if path.parent==UNIT_DIR:
                 text,_=expected_units[path]

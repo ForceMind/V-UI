@@ -170,8 +170,8 @@ class ArchiveStreamingTests(unittest.TestCase):
     def test_online_bootstrap_checksum_snippet_streams_and_rejects_tampering(self):
         import sys
         script = (Path(__file__).resolve().parents[1] / 'install.sh').read_text()
-        marker = '''"$PYTHON" - "$WORK" "$BUNDLE" <<'PY'\n'''
-        snippet = script.split(marker, 1)[1].split('\nPY\n', 1)[0]
+        marker = '''"$PYTHON" - "$ASSET_DIR" "$BUNDLE" "$WORK" "$KIT_SHA" <<'PYVERIFY'\n'''
+        snippet = script.split(marker, 1)[1].split('\nPYVERIFY\n', 1)[0]
         folder = self.root / 'online'; folder.mkdir()
         names = ('install_system.py', 'platform_support.py', 'firewall_support.py',
                  'service_support.py', 'vui-linux-x86_64-gnu.zip')
@@ -180,7 +180,7 @@ class ArchiveStreamingTests(unittest.TestCase):
             path = folder / name; path.write_bytes(b'asset' * 300000)
             checksums.append(tools.file_digest(path) + '  ' + name)
         (folder / 'SHA256SUMS').write_text('\n'.join(checksums))
-        with patch.object(sys, 'argv', ['-', str(folder), names[-1]]), \
+        with patch.object(sys, 'argv', ['-', str(folder), names[-1],str(folder),'']), \
              patch.object(Path, 'read_bytes', side_effect=AssertionError('Whole-file read')):
             exec(compile(snippet, 'install.sh checksum', 'exec'), {})
             self.assertEqual((folder / 'bundle.sha').read_text(), checksums[-1].split()[0])

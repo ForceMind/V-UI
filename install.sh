@@ -1,11 +1,24 @@
 #!/usr/bin/env bash
 # Trusted local kit: sudo bash install.sh --bundle ... --sha256 ...
-# After the candidate is published: sudo bash install.sh --version v0.4.8 [installer arguments]
+# After the candidate is published: sudo bash install.sh --version v0.4.9 [installer arguments]
 set -euo pipefail
 umask 077
 
 BOOTSTRAP_RUNTIME_DIR=''
 WORK=''
+KEEP_WORK=0
+REQUEST_GLOBAL=0
+REQUEST_DRY_RUN=0
+for argument in "$@"; do
+  case "$argument" in
+    --with-global-cli) REQUEST_GLOBAL=1 ;;
+    --dry-run) REQUEST_DRY_RUN=1 ;;
+  esac
+done
+if [[ "$REQUEST_GLOBAL" -eq 1 && "$REQUEST_DRY_RUN" -eq 1 ]]; then
+  printf '%s\n' '--with-global-cli cannot be combined with --dry-run; nothing was installed.' >&2
+  exit 2
+fi
 TEMP_ALLOCATING=0
 TEMP_SIGNAL_STATUS=0
 
@@ -16,6 +29,10 @@ cleanup_all() {
   # the other directory's cleanup. SIGKILL/power loss cannot be handled here.
   trap '' INT TERM
   for directory in "$WORK" "$BOOTSTRAP_RUNTIME_DIR"; do
+    if [[ -n "$directory" && "$directory" == "$WORK" && "$KEEP_WORK" -eq 1 ]]; then
+      printf 'Verified installer kit retained for recovery: %s\n' "$directory" >&2 || :
+      continue
+    fi
     if [[ -n "$directory" ]]; then
       if ! rm -rf -- "$directory"; then
         printf 'Warning: could not remove installer temporary directory: %s\n' "$directory" >&2 || :
@@ -157,34 +174,120 @@ fi
 VERSION="${2:-}"
 [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'An explicit stable vX.Y.Z version is required' >&2; exit 1; }
 shift 2
+WITH_GLOBAL_CLI=0
+KIT_SHA=''
+INSTALL_ARGS=()
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --with-global-cli) WITH_GLOBAL_CLI=1; shift ;;
+    --kit-sha256)
+      [[ "$#" -ge 2 ]] || { echo '--kit-sha256 requires a value' >&2; exit 2; }
+      KIT_SHA="$2"; shift 2 ;;
+    *) INSTALL_ARGS+=("$1"); shift ;;
+  esac
+done
+if [[ "${#INSTALL_ARGS[@]}" -gt 0 ]]; then
+  set -- "${INSTALL_ARGS[@]}"
+else
+  set --
+fi
+if [[ "$WITH_GLOBAL_CLI" -eq 1 ]]; then
+  [[ "$KIT_SHA" =~ ^[0-9a-f]{64}$ ]] || { echo 'Global v-ui installation requires the independently trusted SHA256SUMS digest' >&2; exit 2; }
+elif [[ -n "$KIT_SHA" ]]; then
+  echo '--kit-sha256 requires --with-global-cli' >&2; exit 2
+fi
 command -v curl >/dev/null || { echo 'Install curl first' >&2; exit 1; }
 allocate_temp_dir WORK
 BASE="https://github.com/ForceMind/V-UI/releases/download/$VERSION"
 TARGET="$(detect_target)"
 BUNDLE="vui-linux-$TARGET.zip"
+ASSET_DIR="$WORK"
 echo "Detected release target: $TARGET"
-for FILE in SHA256SUMS install_system.py platform_support.py firewall_support.py service_support.py "$BUNDLE"; do
+if [[ "$WITH_GLOBAL_CLI" -eq 1 ]]; then
   curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --location --retry 2 --connect-timeout 15 --max-time 300 \
-    "$BASE/$FILE" -o "$WORK/$FILE"
-done
-# Only fixed names are accepted. Never execute paths named by a downloaded list.
-"$PYTHON" - "$WORK" "$BUNDLE" <<'PY'
+    "$BASE/SHA256SUMS" -o "$WORK/SHA256SUMS"
+  "$PYTHON" - "$WORK" "$BUNDLE" "$KIT_SHA" <<'PYKIT'
 import hashlib,pathlib,re,sys
-root=pathlib.Path(sys.argv[1]);bundle=sys.argv[2];entries={}
-if not re.fullmatch(r'vui-linux-(?:x86_64|aarch64)-(?:gnu|musl)\.zip',bundle):
-    raise SystemExit('Invalid target bundle name')
-for line in (root/'SHA256SUMS').read_text().splitlines():
+root=pathlib.Path(sys.argv[1]);bundle=sys.argv[2];trusted=sys.argv[3]
+with (root/'SHA256SUMS').open('rb') as source:raw=source.read(64001)
+if len(raw)>64000:raise SystemExit('Checksum list exceeds size limit')
+if hashlib.sha256(raw).hexdigest()!=trusted:
+    raise SystemExit('Trusted release checksum list mismatch')
+entries={}
+for line in raw.decode('ascii').splitlines():
     match=re.fullmatch(r'([a-f0-9]{64})  ([A-Za-z0-9._-]+)',line)
     if not match or match[2] in entries:raise SystemExit('Invalid checksum list')
     entries[match[2]]=match[1]
-for name in ('install_system.py','platform_support.py','firewall_support.py','service_support.py',bundle):
+common={'install.sh','install_system.py','platform_support.py','firewall_support.py',
+        'service_support.py','install_ops_control.py','system_launcher.py','system_ops.py',
+        'ops_worker.py','release_tools.py','v-ui','vui-source.zip','RELEASE.json','RELEASE_NOTES.md'}
+bundles={'vui-linux-'+target+'.zip' for target in ('x86_64-gnu','aarch64-gnu','x86_64-musl','aarch64-musl')}
+if bundle not in bundles or set(entries) not in (common|{bundle},common|bundles):
+    raise SystemExit('Complete fixed release kit is required')
+kit=root/'kit';kit.mkdir(mode=0o700)
+(root/'SHA256SUMS').rename(kit/'SHA256SUMS')
+# This plan contains only the fixed names authenticated above, not arbitrary paths.
+(root/'download.list').write_text('\n'.join(sorted(entries))+'\n')
+PYKIT
+  ASSET_DIR="$WORK/kit"
+  while IFS= read -r FILE; do
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --location --retry 2 --connect-timeout 15 --max-time 300 \
+      "$BASE/$FILE" -o "$ASSET_DIR/$FILE"
+  done < "$WORK/download.list"
+else
+  for FILE in SHA256SUMS install_system.py platform_support.py firewall_support.py service_support.py "$BUNDLE"; do
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --location --retry 2 --connect-timeout 15 --max-time 300 \
+      "$BASE/$FILE" -o "$WORK/$FILE"
+  done
+fi
+"$PYTHON" - "$ASSET_DIR" "$BUNDLE" "$WORK" "$KIT_SHA" <<'PYVERIFY'
+import hashlib,pathlib,re,sys
+root=pathlib.Path(sys.argv[1]);bundle=sys.argv[2];work=pathlib.Path(sys.argv[3]);trusted=sys.argv[4];entries={}
+if not re.fullmatch(r'vui-linux-(?:x86_64|aarch64)-(?:gnu|musl)\.zip',bundle):
+    raise SystemExit('Invalid target bundle name')
+with (root/'SHA256SUMS').open('rb') as source:raw=source.read(64001)
+if len(raw)>64000:raise SystemExit('Checksum list exceeds size limit')
+if trusted and hashlib.sha256(raw).hexdigest()!=trusted:
+    raise SystemExit('Trusted release checksum list changed')
+for line in raw.decode('ascii').splitlines():
+    match=re.fullmatch(r'([a-f0-9]{64})  ([A-Za-z0-9._-]+)',line)
+    if not match or match[2] in entries:raise SystemExit('Invalid checksum list')
+    entries[match[2]]=match[1]
+names=sorted(entries) if trusted else ('install_system.py','platform_support.py','firewall_support.py','service_support.py',bundle)
+for name in names:
     checksum=hashlib.sha256()
     with (root/name).open('rb') as source:
         for chunk in iter(lambda:source.read(1024*1024),b''):checksum.update(chunk)
-    if checksum.hexdigest()!=entries.get(name):
-        raise SystemExit('Release asset checksum mismatch: '+name)
-(root/'bundle.sha').write_text(entries[bundle])
-PY
-# This checksum is from the explicitly selected official release, not a signature.
-# Audit install.sh itself and the repository/release source before executing as root.
-PYTHONPATH="$WORK" "$PYTHON" "$WORK/install_system.py" --bundle "$WORK/$BUNDLE" --sha256 "$(cat "$WORK/bundle.sha")" "$@"
+    if checksum.hexdigest()!=entries.get(name):raise SystemExit('Release asset checksum mismatch: '+name)
+(work/'bundle.sha').write_text(entries[bundle])
+PYVERIFY
+if [[ "$WITH_GLOBAL_CLI" -eq 1 ]]; then
+  [[ -x /usr/bin/python3 ]] || { echo 'Global v-ui requires a capable fixed /usr/bin/python3' >&2; exit 1; }
+  /usr/bin/python3 -B -I -S "$ASSET_DIR/install_ops_control.py" --kit "$ASSET_DIR" --sha256 "$KIT_SHA" --preflight
+fi
+# A legacy online call retains its explicit-release trust model. The complete
+# managed flow additionally authenticates the entire kit against the caller pin.
+if PYTHONPATH="$ASSET_DIR" "$PYTHON" "$ASSET_DIR/install_system.py" --bundle "$ASSET_DIR/$BUNDLE" --sha256 "$(cat "$WORK/bundle.sha")" "$@"; then
+  :
+else
+  exit "$?"
+fi
+if [[ "$WITH_GLOBAL_CLI" -eq 1 ]]; then
+  KEEP_WORK=1
+  CONTROL_REFRESH=''
+  for FILE in /usr/local/lib/v-ui/ops-control.json /usr/local/sbin/v-ui \
+      /usr/local/lib/v-ui/system_ops.py /usr/local/lib/v-ui/ops_worker.py \
+      /usr/local/lib/v-ui/release_tools.py /usr/local/lib/v-ui/data_owner.py \
+      /usr/local/lib/v-ui/proxy_store.py /usr/local/lib/v-ui/upstream_profile.py \
+      /usr/local/lib/v-ui/inbound_policy.py; do
+    if [[ -e "$FILE" || -L "$FILE" ]]; then CONTROL_REFRESH=--refresh; break; fi
+  done
+  if /usr/bin/python3 -B -I -S "$ASSET_DIR/install_ops_control.py" --kit "$ASSET_DIR" --sha256 "$KIT_SHA" ${CONTROL_REFRESH:+"$CONTROL_REFRESH"}; then
+    KEEP_WORK=0
+    printf '%s\n' '一键安装完成。以后输入 v-ui 打开终端管理菜单。'
+  else
+    status="$?"
+    printf '%s\n' '面板安装已完成，但全局 v-ui 入口未完成；本次安装未全部成功。请使用保留的可信套件检查和恢复。' >&2
+    exit "$status"
+  fi
+fi

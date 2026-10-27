@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import fcntl
 import hashlib
 import http.client
+import io
 import ipaddress
 import json
 import os
@@ -410,9 +411,18 @@ def create_service_user():
     return pwd.getpwnam('v-ui')
 
 
+@contextmanager
+def controlling_terminal():
+    # BufferedRandom (open with text r+) requires a seekable stream. A terminal
+    # is not seekable; wrap unbuffered FileIO as getpass does instead.
+    with open('/dev/tty', 'rb+', buffering=0) as raw:
+        with io.TextIOWrapper(raw, encoding='utf-8', write_through=True) as terminal:
+            yield terminal
+
+
 def tty_confirm(message):
     try:
-        with open('/dev/tty','r+') as terminal:
+        with controlling_terminal() as terminal:
             terminal.write(message+' [yes/NO]: ');terminal.flush()
             return terminal.readline().strip().lower()=='yes'
     except OSError:
@@ -643,13 +653,52 @@ def install_verified(args, snapshot, archive, meta):
     print('SSH and unrelated website services were not changed. Firewall changes occur only after explicit confirmation.')
 
 
+def read_configuration(args):
+    """Read missing first-install choices from the controlling terminal only."""
+    interactive = getattr(args, 'interactive', False)
+    if interactive or not args.domain or not args.email:
+        with controlling_terminal() as terminal:
+            def ask(prompt, default=None):
+                terminal.write(prompt)
+                terminal.flush()
+                value = terminal.readline(1025)
+                if not value:
+                    raise InstallError('Installation cancelled before configuration completed')
+                if len(value) > 1024:
+                    raise InstallError('Configuration input is too long')
+                value = value.strip()
+                return value if value else default
+
+            if not args.domain:
+                args.domain = ask('面板域名 / Panel domain: ')
+            if not args.email:
+                args.email = ask('联系邮箱 / Contact email: ')
+            if interactive:
+                if args.admin is None:
+                    args.admin = ask('管理员用户名 [admin]: ', 'admin')
+                for attr, prompt, default in (
+                        ('port', '面板 HTTPS 端口 [8443]: ', 8443),
+                        ('node_port', '默认节点 TCP 端口 [10443]: ', 10443)):
+                    if getattr(args, attr) is None:
+                        value = ask(prompt, str(default))
+                        if not value.isascii() or not value.isdecimal() or not 1024 <= int(value) <= 65535:
+                            raise InstallError('Use an unprivileged port in 1024–65535')
+                        setattr(args, attr, int(value))
+            if not args.cert and not args.accept_terms:
+                args.accept_terms = ask('我控制该域名，并同意 https://letsencrypt.org/repository/ 的条款及公开证书记录 [yes/NO]: ') == 'yes'
+    for attr, default in (('admin', 'admin'), ('port', 8443), ('node_port', 10443)):
+        if getattr(args, attr) is None:
+            setattr(args, attr, default)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--bundle', required=True, type=Path); p.add_argument('--sha256', required=True)
     p.add_argument('--archive-temp-dir', type=Path, help='Existing disk-backed directory for the private verification snapshot (default: /var/tmp; avoid tmpfs on low-memory hosts)')
-    p.add_argument('--domain'); p.add_argument('--email'); p.add_argument('--admin', default='admin')
-    p.add_argument('--port',type=int,default=8443);p.add_argument('--bind',default='0.0.0.0')
-    p.add_argument('--node-port',type=int,default=10443,help='Default node TCP port to preflight/open')
+    p.add_argument('--domain'); p.add_argument('--email'); p.add_argument('--admin')
+    p.add_argument('--port',type=int);p.add_argument('--bind',default='0.0.0.0')
+    p.add_argument('--node-port',type=int,help='Default node TCP port to preflight/open')
+    p.add_argument('--interactive',action='store_true',help='Prompt for missing administrator and port choices as well as domain/email')
     p.add_argument('--node-udp-port',type=int,action='append',default=[],metavar='PORT',
                    help='Explicit node UDP/QUIC port to preflight/open; repeat for each port; does not create a node')
     p.add_argument('--open-firewall',choices=['ask','yes','no'],default='ask')
@@ -659,14 +708,7 @@ def main():
     p.add_argument('--health-ca', help='Optional private-CA trust file for provided-certificate HTTPS health verification')
     p.add_argument('--dry-run',action='store_true')
     args = p.parse_args()
-    if not args.domain or not args.email:
-        with open('/dev/tty', 'r+') as terminal:
-            for attr, prompt in (('domain', 'Panel domain: '), ('email', 'Contact email: ')):
-                if not getattr(args, attr):
-                    terminal.write(prompt); terminal.flush(); setattr(args, attr, terminal.readline().strip())
-            if not args.cert and not args.accept_terms:
-                terminal.write('I control this domain and agree to https://letsencrypt.org/repository/ and public certificate records [yes/NO]: ')
-                terminal.flush(); args.accept_terms = terminal.readline().strip() == 'yes'
+    read_configuration(args)
     if args.health_ca and not args.cert:
         raise InstallError('--health-ca is only for an explicitly provided certificate, not ACME verification')
     if args.dry_run:

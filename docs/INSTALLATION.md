@@ -1,14 +1,23 @@
 # 安装与首次运行
 
-想测试双开关 / 每入口 TCP 或本地 YAML 候选，请先看[版本选择与验收交接](FROZEN_VERSION_TEST_HANDOFF.md)。下方固定 Release 命令不会安装这些后续功能。
+v0.4.9 纳入双开关、每入口 TCP 和 YAML 只读预览；历史版本与候选身份见[版本选择与验收交接](FROZEN_VERSION_TEST_HANDOFF.md)，本批准确状态见[一行安装计划](ONE_LINE_INSTALL_049.md)。
 
-本页的固定安装命令指向已发布的 [v0.4.8](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8)：2026-10-15 发布，来源 `a9f9b5d9c0dd2aada5e8f5f2270b2ce93440d5ff`，修复安装 shell 的退出码、临时目录生命周期和引导失败拦截。主线后续双开关功能不在该版本内。只有确认固定版本公开且完整 19 项资产可用并核验后才可安装；不要混用分支入口与 Release 资产，或因为源码版本号相同而认为内容相同。
+本批固定安装目标为 [v0.4.9](https://github.com/ForceMind/V-UI/releases/tag/v0.4.9)。复制 Release 中发布器生成的一行命令，即可自动下载并校验、在控制终端配置并安装全局 `v-ui`。公开状态和准确 source_commit 以 Release 实际记录为准。历史正式基线 v0.4.8 于 2026-10-15 从 a9f9b5d9 发布；其旧资产保持。
 
 **v0.4.7 安装器注意事项：** 在线路径的清理可能将成功或原失败状态改写为 1；便携 Python 引导还有临时目录归属与失败门禁缺口。若退出非零，保留输出并先核对控制器日志、活动版本和服务健康，不能一律视为成功，也不要盲目重跑。0.4.8 的修复和 shell 回归边界见[安装器修复说明](INSTALLER_EXIT_STATUS_048.md)，已发布资产不会原地替换。
 
+## 一行安装与全局菜单
+
+推荐从固定 Release 复制完整一行命令。命令包含安装脚本和整个 SHA256SUMS 的摘要，先在 root 私有目录核验引导文件，再调用在线 `--with-global-cli --kit-sha256 ... --interactive` 流程。
+它会询问缺失的域名、邮箱、管理员名、面板和默认节点端口，密码仍通过控制终端读取两次；CA 条款和网络/防火墙确认由操作者完成。
+应用与核心以专用非 root 用户运行；菜单使用固定 OS `/usr/bin/python3 -B -I -S`，预检现有能力，不替换系统解释器。
+不支持的 OS 能力或未知 `v-ui` 占用会拒绝；受管 `--dry-run` 组合不执行。应用成功而菜单失败时会返回非零并保留可信 kit 供修复。
+安装成功后在终端输入 `v-ui`。普通管理员使用已有 sudo 认证，不增加 sudoers 或 SUID；Root 控制层与服务用户 payload 保持既有边界。
+
+
 ## 1. 环境检测
 
-0.4.8 一键安装器沿用 0.4.7 的能力检测模型，不按 Ubuntu 名称做白名单。启动后先读取系统信息并检测：
+本版一键安装器沿用已有能力检测模型，不按 Ubuntu 名称做白名单。启动后先读取系统信息并检测：
 
 - 发行版 / `/etc/os-release`；
 - CPU：x86_64 或 ARM64；
@@ -68,12 +77,12 @@ UDP 安装行为和 HY2 集成仍需最终准确候选/主线门槛；固定二�
 
 ## 3. 本地完整套件
 
-以下使用已发布的固定 v0.4.8，先在[官方 Releases](https://github.com/ForceMind/V-UI/releases)确认版本公开、19项固定资产齐全，并接受该软件来源。以下使用Bash、curl、sha256sum和已有管理员sudo权限；不会让服务用户可写的下载目录成为root执行源码目录。`KIT_SHA` 是**整个SHA256SUMS文件的可信SHA-256**，应从已接受的发布记录/独立核验结果取得；摘要不是签名，不能以未知下载的自算值认证来源。请把示例target换为当前机器实际目标。
+以下为固定 v0.4.9 的手工完整套件入口，使用前先在[官方 Releases](https://github.com/ForceMind/V-UI/releases)确认版本公开、19项固定资产齐全，并接受该软件来源。以下使用Bash、curl、sha256sum和已有管理员sudo权限；不会让服务用户可写的下载目录成为root执行源码目录。`KIT_SHA` 是**整个SHA256SUMS文件的可信SHA-256**，应从已接受的发布记录/独立核验结果取得；摘要不是签名，不能以未知下载的自算值认证来源。请把示例target换为当前机器实际目标。
 
 ```sh
 set -euo pipefail
 umask 077
-VERSION=v0.4.8
+VERSION=v0.4.9
 TARGET=x86_64-gnu
 KIT_SHA='<填写已接受的 SHA256SUMS 整文件 SHA-256>'
 case "$TARGET" in x86_64-gnu|aarch64-gnu|x86_64-musl|aarch64-musl) ;; *) exit 1;; esac
@@ -182,11 +191,11 @@ root 只负责系统初始化和受管服务文件；应用、核心与 Certbot 
 
 ## 7. 官方 Release 一键安装
 
-**本节仅安装已发布 v0.4.8，不安装后续未发布主线功能。** 只有在[官方 Releases](https://github.com/ForceMind/V-UI/releases)确认该版本正式公开且完整 19 项资产可用并核验后才可安装；未公开、缺文件、404或摘要不符时停止。不要混用 `latest`、分支文件与其他版本。安装入口的固定版本下载/校验步骤见[README快速安装](../README.md#快速安装)，入口本身也必须来自独立接受的可信来源：
+**本节为传统固定版本调用；推荐的一行命令还会显式安装全局 `v-ui`。** 只有在[官方 Releases](https://github.com/ForceMind/V-UI/releases)确认该版本正式公开且完整 19 项资产可用并核验后才可安装；未公开、缺文件、404或摘要不符时停止。不要混用 `latest`、分支文件与其他版本。安装入口的固定版本下载/校验步骤见[README快速安装](../README.md#快速安装)，入口本身也必须来自独立接受的可信来源：
 
 ```sh
 # 按README完成固定入口校验/root私有副本及函数定义后：
-run_vui_installer --version v0.4.8
+run_vui_installer --version v0.4.9
 ```
 
 脚本先检测 `x86_64/aarch64 + gnu/musl`，再从该明确版本下载对应目标包、安装控制器和 `SHA256SUMS`，逐个验证摘要后执行。不会下载 `latest`，也不会在发布时重新构建包。
@@ -195,6 +204,6 @@ HTTP-01 条件见 [CERTIFICATES.md](CERTIFICATES.md)，升级/备份见 [OPERATI
 
 ## 8. 菜单与首次维护
 
-默认安装不会创建全局 `v-ui`。包内服务用户菜单和全局受管菜单是不同入口，见[运维指南](OPERATIONS.md#终端运维菜单)与[显式全局组件安装](MANAGED_OPERATIONS.md#安装消费点与信任)。不要用 root 运行服务用户拥有的 portable Python/payload。
+推荐一行受管安装会创建全局 `v-ui`；传统本地或未选受管模式的调用仍保留独立组件安装方式。包内服务用户菜单和全局受管菜单是不同入口，见[运维指南](OPERATIONS.md#终端运维菜单)与[显式全局组件安装](MANAGED_OPERATIONS.md#安装消费点与信任)。不要用 root 运行服务用户拥有的 portable Python/payload。
 
 升级前保留离机备份和原启动锚点 runtime。正式 Release、源码验收、受管 root/init 资格与用户主机部署分别判断；安装或发布成功不产生整机/24小时稳定性保证。

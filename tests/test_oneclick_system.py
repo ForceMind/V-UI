@@ -21,6 +21,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from loopback_helpers import certificate_files, unused_port
 from scripts.ops_menu_smoke import MenuSession
+from online_install_helpers import fixture_commands, published_commands, global_menu_check, hosted_command_directory, sudo_policy_snapshot
 
 
 @unittest.skipUnless(os.getenv('VUI_SYSTEM_INSTALL_TEST') == '1', 'explicit ephemeral systemd installer gate')
@@ -28,12 +29,16 @@ class OneClickSystemTests(unittest.TestCase):
     def test_actual_offline_installer_permissions_socket_and_autostart(self):
         self.assertNotEqual(os.geteuid(), 0)
         source = Path(__file__).resolve().parents[1]
-        bundle = Path(os.environ['VUI_RELEASE_BUNDLE'])
-        sha = bundle.with_suffix(bundle.suffix+'.sha256').read_text().split()[0]
+        published_version = os.getenv('VUI_PUBLISHED_INSTALL_VERSION')
+        bundle = Path(os.environ['VUI_RELEASE_BUNDLE']) if not published_version else None
+        sha = bundle.with_suffix(bundle.suffix+'.sha256').read_text().split()[0] if bundle else None
         root = Path('/var/lib/v-ui')
         # Never clean up or overwrite a pre-existing installation on a test host.
-        self.assertFalse(root.exists())
-        self.assertFalse(Path('/etc/v-ui').exists())
+        for path in (root,Path('/etc/v-ui'),Path('/usr/local/lib/v-ui'),
+                     Path('/usr/local/sbin/v-ui'),Path('/usr/local/bin/v-ui'),
+                     *(Path('/etc/systemd/system')/name for name in
+                       ('v-ui.service','v-ui-http01.service','v-ui-http01.socket'))):
+            self.assertFalse(os.path.lexists(path),'Empty installer runner required: '+str(path))
         from scripts.low_resource_root import optional_gate
         gate = optional_gate()
         with ExitStack() as stack:
@@ -41,10 +46,29 @@ class OneClickSystemTests(unittest.TestCase):
             ca, cert, key = certificate_files(work, 'installer')
             port = unused_port(); domain='vpn.example.test'; origin=f'https://{domain}:{port}'
             password = 'Synthetic-systemd-install-password!'
-            cmd = ['sudo','bash',str(source/'install.sh'),'--bundle',str(bundle),'--sha256',sha,
-                   '--domain',domain,'--email','admin@example.test','--admin','installer-admin',
-                   '--cert',str(cert),'--key',str(key),'--health-ca',str(ca),
-                   '--bind','127.0.0.1','--port',str(port),'--open-firewall','no','--assume-external-ports-open']
+            node_port = unused_port()
+            certificate_args = ['--cert',str(cert),'--key',str(key),'--health-ca',str(ca),
+                                '--bind','127.0.0.1','--open-firewall','no','--assume-external-ports-open']
+            configured_args = ['--domain',domain,'--email','admin@example.test','--admin','installer-admin',
+                               '--port',str(port),'--node-port',str(node_port)]
+            online = None
+            if published_version:
+                self.assertIsNone(gate, 'Published online acceptance is separate from the resource fixture')
+                online = published_commands(source,published_version,os.environ['VUI_RELEASE_COMMIT'],
+                                            certificate_args,configured_args)
+            elif os.getenv('VUI_RELEASE_KIT') and gate is None:
+                online = fixture_commands(source,work,Path(os.environ['VUI_RELEASE_KIT']),
+                                          certificate_args,configured_args)
+            if online:
+                stack.enter_context(hosted_command_directory())
+            cmd = (online['initial'] if online else
+                   ['sudo','bash',str(source/'install.sh'),'--bundle',str(bundle),'--sha256',sha,
+                    *configured_args,*certificate_args])
+            repeat_cmd = online['repeat'] if online else cmd
+            upgrade_cmd = online['upgrade'] if online else [*cmd,'--upgrade']
+            sudoers_before = sudo_policy_snapshot() if online else None
+            if online:
+                self.assertNotIn('/etc/sudoers.d/v-ui',sudoers_before)
             def cleanup():
                 subprocess.run(['sudo','systemctl','disable','--now','v-ui.service','v-ui-http01.socket'],capture_output=True)
                 subprocess.run(['sudo','systemctl','stop','v-ui-http01.service'],capture_output=True)
@@ -52,15 +76,22 @@ class OneClickSystemTests(unittest.TestCase):
                     subprocess.run(['sudo','rm','-f','/etc/systemd/system/'+name],check=True)
                 subprocess.run(['sudo','systemctl','daemon-reload'],check=True)
                 subprocess.run(['sudo','rm','-rf','/etc/v-ui','/usr/local/lib/v-ui','/var/lib/v-ui'],check=True)
+                subprocess.run(['sudo','rm','-f','/usr/local/bin/v-ui','/usr/local/sbin/v-ui'],check=True)
                 subprocess.run(['sudo','userdel','v-ui'],capture_output=True)
             if gate is None:
                 stack.callback(cleanup)
             else:
                 cmd = gate.command(cmd)
+                repeat_cmd = cmd
+                upgrade_cmd = [*cmd,'--upgrade']
             child, fd = pty.fork()
             if child == 0:
                 os.execvp(cmd[0], cmd)
             output = b''; sent_first=False; sent_second=False; status=None
+            choices = [('Panel domain: ',domain),('Contact email: ','admin@example.test'),
+                       ('管理员用户名 [admin]: ','installer-admin'),('面板 HTTPS 端口 [8443]: ',str(port)),
+                       ('默认节点 TCP 端口 [10443]: ',str(node_port))] if online else []
+            sent_choices = set()
             deadline=time.monotonic()+300
             try:
                 while time.monotonic()<deadline:
@@ -70,6 +101,9 @@ class OneClickSystemTests(unittest.TestCase):
                         except OSError: chunk=b''
                         output+=chunk
                         decoded=output.decode(errors='replace')
+                        for prompt,value in choices:
+                            if prompt in decoded and prompt not in sent_choices:
+                                os.write(fd,(value+'\n').encode());sent_choices.add(prompt)
                         if 'Password (15' in decoded and not sent_first:
                             os.write(fd,(password+'\n').encode());sent_first=True
                         if 'Confirm password:' in decoded and not sent_second:
@@ -92,11 +126,17 @@ class OneClickSystemTests(unittest.TestCase):
             finally: os.close(fd)
             clean=output.decode(errors='replace').replace(password,'[REDACTED]')
             self.assertTrue(sent_second,clean[-8000:])
+            if online:
+                self.assertEqual(len(sent_choices),len(choices),clean[-8000:])
             if os.waitstatus_to_exitcode(status) != 0:
                 journal=subprocess.run(['sudo','journalctl','-u','v-ui.service','-u','v-ui-http01.service','-n','60','--no-pager'],capture_output=True,text=True)
                 clean += '\n' + journal.stdout.replace(password,'[REDACTED]')
             self.assertEqual(os.waitstatus_to_exitcode(status),0,clean[-20000:])
             self.assertNotIn(password,output.decode(errors='replace'))
+            if online:
+                self.assertIn('一键安装完成',clean)
+                self.assertEqual(sudo_policy_snapshot(),sudoers_before)
+                global_menu_check(self,{**os.environ,'PYTHONDONTWRITEBYTECODE':'1'},exercise_start_stop=True)
             if gate:
                 gate.installer_receipt('initial_install', output.decode(errors='replace'))
             uid=pwd.getpwnam('v-ui').pw_uid;self.assertGreater(uid,0)
@@ -166,7 +206,7 @@ class OneClickSystemTests(unittest.TestCase):
             if gate:
                 gate.installed()
             # A repeated install without explicit upgrade must not touch the running instance.
-            repeat=subprocess.run(cmd,capture_output=True,text=True,timeout=30)
+            repeat=subprocess.run(repeat_cmd,capture_output=True,text=True,timeout=300 if published_version else 30)
             if gate:
                 gate.installer_receipt('implicit_repeat', repeat.stdout)
             self.assertNotEqual(repeat.returncode,0)
@@ -197,10 +237,12 @@ class OneClickSystemTests(unittest.TestCase):
             self.assertTrue(saved_proxy['settings']['local_password_set'])
             self.assertNotIn(b'Fake-upgrade-password!', raw)
             # Rerunning with --upgrade checks/stages and makes a stopped backup.
-            upgraded=subprocess.run(cmd+['--upgrade'],capture_output=True,text=True,timeout=120)
+            upgraded=subprocess.run(upgrade_cmd,capture_output=True,text=True,timeout=300 if published_version else 120)
             if gate:
                 gate.installer_receipt('same_bundle_upgrade', upgraded.stdout)
             self.assertEqual(upgraded.returncode,0,(upgraded.stdout+upgraded.stderr)[-15000:])
+            if online:
+                global_menu_check(self,{**os.environ,'PYTHONDONTWRITEBYTECODE':'1'},exercise_start_stop=False)
             self.assertEqual(api('/api/auth/me')[0],200)
             self.assertEqual(json.loads(api('/api/proxy/settings')[1]), saved_proxy)
             subprocess.run(['sudo','systemctl','restart','v-ui.service'],check=True)
@@ -216,6 +258,8 @@ class OneClickSystemTests(unittest.TestCase):
                 def login_again():
                     self.assertEqual(api('/api/auth/login', {'username': 'installer-admin', 'password': password})[0], 200)
                 gate.finish(self, cmd, api, login_again)
+            if online:
+                print('Online managed installer transport: '+online['transport']+'; interactive domain/email/admin/ports, real global v-ui menu and stop/start passed')
             print('One-command systemd: real sudo setup / non-root workers / private state / HTTPS / fd-passed HTTP-01 port80 / auth / repeat refusal / upgrade backup / restart OK')
 
 if __name__=='__main__':unittest.main()

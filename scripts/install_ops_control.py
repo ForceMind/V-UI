@@ -3,7 +3,8 @@
 
 Run this separately with the OS Python's -B -I -S flags. --sha256 authenticates the
 entire SHA256SUMS file using an independently trusted digest, not a digest copied
-from the same untrusted download. The default installer never calls this tool.
+from the same untrusted download. The online --with-global-cli flow explicitly
+calls this tool after the panel installer succeeds.
 No account, service, sudoers, SUID, package runtime or firewall is changed here.
 """
 from __future__ import annotations
@@ -30,6 +31,7 @@ ROOT = Path('/var/lib/v-ui')
 CONFIG = Path('/etc/v-ui/service.json')
 CONTROL = Path('/usr/local/lib/v-ui')
 ENTRY = Path('/usr/local/sbin/v-ui')
+COMMAND_ALIAS = Path('/usr/local/bin/v-ui')
 RECEIPT = CONTROL / 'ops-control.json'
 LAUNCHER = CONTROL / 'launcher.py'
 SYSTEM_PYTHON = Path('/usr/bin/python3')
@@ -360,6 +362,53 @@ def destinations():
         ENTRY: ('v-ui', 0o755)}
 
 
+def check_command_alias():
+    """Never adopt an unrelated PATH entry; an absent bin directory is creatable."""
+    trusted_parents(COMMAND_ALIAS if COMMAND_ALIAS.parent.exists() else COMMAND_ALIAS.parent)
+    if os.path.lexists(COMMAND_ALIAS):
+        info = COMMAND_ALIAS.lstat()
+        if (not stat.S_ISLNK(info.st_mode) or not owned_by_root(info)
+                or os.readlink(COMMAND_ALIAS) != str(ENTRY)):
+            raise InstallError('Unrelated v-ui command already exists; inspect manually')
+
+
+def check_partial_control(verified):
+    for path, (name, mode) in destinations().items():
+        if os.path.lexists(path):
+            raw, _ = read_file(path, root=True, mode=mode)
+            if raw != verified[name]:
+                raise InstallError('Partial control installation differs from this trusted kit; inspect manually')
+
+
+def preflight(directory, sha256):
+    """Authenticate the kit and OS interpreter before the online panel install."""
+    if os.geteuid() != 0:
+        raise InstallError('Explicit root invocation is required')
+    if platform.system() != 'Linux':
+        raise InstallError('Linux only; nothing was installed')
+    verified, record = verify_kit(directory, sha256)
+    check_command_alias()
+    interpreter = verify_system_python()
+    paths = destinations()
+    if any(os.path.lexists(path) for path in (*paths, RECEIPT)):
+        if not os.path.lexists(RECEIPT):
+            # A known partial copy is repairable; unrelated bytes are not.
+            check_partial_control(verified)
+        else:
+            previous = load_json(read_file(RECEIPT, root=True, mode=0o644, limit=MAX_JSON)[0])
+            manager = previous.get('service_manager') if isinstance(previous, dict) else None
+            if manager not in ('systemd', 'openrc'):
+                raise InstallError('Existing control receipt is unrelated or incompatible')
+            units = ({SYSTEMD_DIR / name: 0o644 for name in ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')}
+                     if manager == 'systemd' else {OPENRC_DIR / name: 0o755 for name in ('v-ui', 'v-ui-http01')})
+            current = {CONFIG: 0o644, LAUNCHER: 0o644, **units}
+            hashes = {str(path): read_file(path, root=True, mode=mode)[1] for path, mode in current.items()}
+            # These are pre-upgrade service bytes. Their canonical replacement
+            # is checked by the panel installer, then inspect_instance below.
+            validate_existing(hashes, interpreter, manager, True, verified)
+    return verified, record, interpreter
+
+
 def validate_existing(hashes, interpreter, manager, refresh, verified):
     paths = destinations()
     for path in (*paths, RECEIPT):
@@ -373,11 +422,7 @@ def validate_existing(hashes, interpreter, manager, refresh, verified):
             # wrapper. Only an explicit retry of this exact accepted kit may
             # fill missing files, and every surviving byte must already match.
             # Never adopt an unknown, linked, wrong-mode or mixed-version file.
-            for path in present:
-                name, mode = paths[path]
-                raw, _ = read_file(path, root=True, mode=mode)
-                if raw != verified[name]:
-                    raise InstallError('Partial control installation differs from this trusted kit; inspect manually')
+            check_partial_control(verified)
             return
         if refresh:
             raise InstallError('--refresh requires a complete matching managed receipt')
@@ -465,8 +510,19 @@ def stage_file(path, raw, mode):
 def publish(verified, receipt):
     """Prepare all bytes, then enable the wrapper last; interruptions fail closed."""
     staged = {}
+    staged_alias = None
     changed = False
     try:
+        check_command_alias()
+        if not COMMAND_ALIAS.parent.exists():
+            COMMAND_ALIAS.parent.mkdir(mode=0o755)
+            COMMAND_ALIAS.parent.chmod(0o755)
+        trusted_parents(COMMAND_ALIAS)
+        fd, name = tempfile.mkstemp(prefix='.vui-command-', dir=COMMAND_ALIAS.parent)
+        os.close(fd)
+        Path(name).unlink()
+        staged_alias = Path(name)
+        os.symlink(str(ENTRY), staged_alias)
         for path, (name, mode) in destinations().items():
             staged[path] = stage_file(path, verified[name], mode)
         staged[RECEIPT] = stage_file(RECEIPT, (json.dumps(receipt, sort_keys=True, indent=2) + '\n').encode(), 0o644)
@@ -480,7 +536,8 @@ def publish(verified, receipt):
                 os.replace(staged[path], path)
         os.replace(staged[RECEIPT], RECEIPT)
         os.replace(staged[ENTRY], ENTRY)
-        for parent in {ENTRY.parent, CONTROL}:
+        os.replace(staged_alias, COMMAND_ALIAS)
+        for parent in {ENTRY.parent, COMMAND_ALIAS.parent, CONTROL}:
             fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
             try:
                 os.fsync(fd)
@@ -494,15 +551,12 @@ def publish(verified, receipt):
     finally:
         for path in staged.values():
             path.unlink(missing_ok=True)
+        if staged_alias is not None:
+            staged_alias.unlink(missing_ok=True)
 
 
 def install(directory, sha256, *, refresh=False):
-    if os.geteuid() != 0:
-        raise InstallError('Explicit root invocation is required')
-    if platform.system() != 'Linux':
-        raise InstallError('Linux only; nothing was installed')
-    verified, record = verify_kit(directory, sha256)
-    interpreter = verify_system_python()
+    verified, record, interpreter = preflight(directory, sha256)
     with installation_lock():
         config, hashes = inspect_instance(verified, record)
         validate_existing(hashes, interpreter, config['service_manager'], refresh, verified)
@@ -521,10 +575,18 @@ def main(argv=None):
     parser.add_argument('--sha256', required=True, help='Independently trusted SHA-256 of its entire SHA256SUMS')
     parser.add_argument('--refresh', action='store_true',
                         help='Refresh an intact controller or complete a receipt-free partial copy of this exact kit')
+    parser.add_argument('--preflight', action='store_true',
+                        help='Only authenticate the kit, command path and fixed OS interpreter; do not install')
     args = parser.parse_args(argv)
     if (not sys.dont_write_bytecode or not sys.flags.isolated or not sys.flags.no_site
             or Path(sys.executable).resolve() != SYSTEM_PYTHON.resolve()):
         raise InstallError('Invoke with the fixed OS /usr/bin/python3 -B -I -S; no portable runtime')
+    if args.preflight:
+        if args.refresh:
+            raise InstallError('--preflight does not refresh an installation')
+        preflight(args.kit, args.sha256)
+        print('Trusted global v-ui preflight passed; no installation was changed.')
+        return
     install(args.kit, args.sha256, refresh=args.refresh)
     print('Trusted system control installed. No services, accounts, sudoers or SUID settings were changed.')
 
