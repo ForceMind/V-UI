@@ -1,6 +1,6 @@
 # 安装与首次运行
 
-想测试双开关 / 每入口 TCP 或本地 YAML 候选，请先看[版本选择与验收交接](FROZEN_VERSION_TEST_HANDOFF.md)。下方固定 Release 命令不会安装这些后续功能。
+v0.4.9 纳入双开关、每入口 TCP 和 YAML 只读预览；历史版本与候选身份见[版本选择与验收交接](FROZEN_VERSION_TEST_HANDOFF.md)，本批准确状态见[一行安装计划](ONE_LINE_INSTALL_049.md)。
 
 本批固定安装目标为 [v0.4.9](https://github.com/ForceMind/V-UI/releases/tag/v0.4.9)。复制 Release 中发布器生成的一行命令，即可自动下载并校验、在控制终端配置并安装全局 `v-ui`。公开状态和准确 source_commit 以 Release 实际记录为准。历史正式基线 v0.4.8 于 2026-10-15 从 a9f9b5d9 发布；其旧资产保持。
 
@@ -204,6 +204,6 @@ HTTP-01 条件见 [CERTIFICATES.md](CERTIFICATES.md)，升级/备份见 [OPERATI
 
 ## 8. 菜单与首次维护
 
-默认安装不会创建全局 `v-ui`。包内服务用户菜单和全局受管菜单是不同入口，见[运维指南](OPERATIONS.md#终端运维菜单)与[显式全局组件安装](MANAGED_OPERATIONS.md#安装消费点与信任)。不要用 root 运行服务用户拥有的 portable Python/payload。
+推荐一行受管安装会创建全局 `v-ui`；传统本地或未选受管模式的调用仍保留独立组件安装方式。包内服务用户菜单和全局受管菜单是不同入口，见[运维指南](OPERATIONS.md#终端运维菜单)与[显式全局组件安装](MANAGED_OPERATIONS.md#安装消费点与信任)。不要用 root 运行服务用户拥有的 portable Python/payload。
 
 升级前保留离机备份和原启动锚点 runtime。正式 Release、源码验收、受管 root/init 资格与用户主机部署分别判断；安装或发布成功不产生整机/24小时稳定性保证。

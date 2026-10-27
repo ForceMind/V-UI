@@ -11,7 +11,7 @@
 
 历史正式基线 [v0.4.8](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8) 于 2026-10-15 从 `a9f9b5d9c0dd2aada5e8f5f2270b2ce93440d5ff` 发布，仅修复安装入口的退出码、临时目录生命周期和引导失败拦截；见[安装器修复边界](docs/INSTALLER_EXIT_STATUS_048.md)。其后双开关“代理与中转”已在准确主线 `9a97ad13` 完成[独立验收](https://github.com/ForceMind/V-UI/pull/44)，但不包含在该已发布版本中。[UDP / DNS 与导入保真门槛](docs/UDP_DNS_CAPABILITY_GATES.md)已在 `13c884a` 完成[独立验收](https://github.com/ForceMind/V-UI/pull/46)。当前新增独立“[导出为中转上游（仅 TCP）](docs/TCP_UPSTREAM_EXPORT.md)”功能并按 [D1 契约](docs/TCP_UPSTREAM_EXPORT_CONTRACT.md)验收，不覆盖旧版本或预称新增 UDP 资格。
 
-每入口“跟随全局 / 指定直连 / 指定中转”的 TCP 功能已由 [PR49](https://github.com/ForceMind/V-UI/pull/49) 合并至 `0962f0c4995b3b7606652027f2330285e4dea1f7` 并完成准确主线验收；[PR50](https://github.com/ForceMind/V-UI/pull/50) 随后完成交接文档收口。该功能**已合并、尚未正式发布**，不在上述 v0.4.8 安装包中。现成客户端导入所选入口的标准 VLESS 配置，第二跳由服务端决定；有效中转入口的 UDP 仍拒绝，TCP 验收不代表手机真机或公网线路验收。详见[使用说明](docs/PER_INBOUND_ROUTING.md)与[收口证据](docs/PER_INBOUND_ROUTING_CLOSURE_20261018.md)。
+每入口“跟随全局 / 指定直连 / 指定中转”的 TCP 功能已由 [PR49](https://github.com/ForceMind/V-UI/pull/49) 合并至 `0962f0c4995b3b7606652027f2330285e4dea1f7` 并完成准确主线验收；[PR50](https://github.com/ForceMind/V-UI/pull/50) 随后完成交接文档收口。该功能**已合并，本批 v0.4.9 包含该功能**，它不在上述历史 v0.4.8 安装包中。现成客户端导入所选入口的标准 VLESS 配置，第二跳由服务端决定；有效中转入口的 UDP 仍拒绝，TCP 验收不代表手机真机或公网线路验收。详见[使用说明](docs/PER_INBOUND_ROUTING.md)与[收口证据](docs/PER_INBOUND_ROUTING_CLOSURE_20261018.md)。
 
 [下载与发布](https://github.com/ForceMind/V-UI/releases) · [快速安装](#快速安装) · [协议范围](#协议与客户端支持) · [终端菜单](#终端运维菜单) · [完整文档](docs/README.md) · [报告问题](https://github.com/ForceMind/V-UI/issues)
 
@@ -90,9 +90,9 @@ v-ui
 
 ### 1. 固定版本，先核来源
 
-**本节安装已发布的 v0.4.8 安装器修复基线，不包含主线后续双开关功能。** 每次安装仍须确认该固定版本正式公开且完整 19 项资产可用并核验；404、缺文件或摘要不符时停止，不换成 `latest`、不混用分支文件或旧资产，也不改摘要跳过检查。
+**本节为 v0.4.9 的传统手工入口；推荐的一行命令还会自动安装全局菜单。** 每次安装仍须确认该固定版本正式公开且完整 19 项资产可用并核验；404、缺文件或摘要不符时停止，不换成 `latest`、不混用分支文件或旧资产，也不改摘要跳过检查。
 
-正式版资产见 [v0.4.8 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8)。旧 v0.4.7 用户仍须注意下面的历史安装入口问题；旧资产不会原地替换。
+版本资产见 [v0.4.9 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.9)。旧 v0.4.7 用户仍须注意下面的历史安装入口问题；旧资产不会原地替换。
 
 **已知安装入口问题：** v0.4.7 在线路径可能在安装控制器成功后仍返回非零，或掩盖原失败码；便携 Python 引导还有临时目录清理与失败拦截缺口。非零不能直接判定安装未发生，也不能一律忽略。请保留完整输出，核对安装日志、活动版本和服务健康后处理；不要盲目重复安装。源码中的 0.4.8 修复不会改变已发布的 v0.4.7 资产，详见[安装器说明](docs/INSTALLER_EXIT_STATUS_048.md)。
 
@@ -102,9 +102,9 @@ v-ui
 # 在一个新的空目录中执行；已存在同名目录时停止，避免混入旧文件。
 set -eu
 umask 077
-mkdir vui-v0.4.8-install
-cd vui-v0.4.8-install
-BASE='https://github.com/ForceMind/V-UI/releases/download/v0.4.8'
+mkdir vui-v0.4.9-install
+cd vui-v0.4.9-install
+BASE='https://github.com/ForceMind/V-UI/releases/download/v0.4.9'
 curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fL \
   "$BASE/SHA256SUMS" -o SHA256SUMS
 curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fL \
@@ -120,7 +120,7 @@ sudo install -o root -g root -m 0600 ./install.sh "$ROOT_BOOTSTRAP/install.sh"
 
 ### 2. 交互式安装
 
-仅在上一步完成固定 v0.4.8 来源及完整性核验后执行；公开版本存在不代替本机安装权限和网络设置确认。
+仅在上一步完成固定 v0.4.9 来源及完整性核验后执行；公开版本存在不代替本机安装权限和网络设置确认。
 
 ```sh
 # 沿用上一步同一终端中的ROOT_BOOTSTRAP和INSTALL_SHA。
