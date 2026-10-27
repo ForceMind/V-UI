@@ -102,11 +102,7 @@ def preview_mihomo(candidate: str | bytes, baseline: str | bytes | None = None) 
         if not response["ok"]:
             raise MihomoPreviewError(response.get("code"), response.get("source"))
         report = response.get("report")
-        if (type(report) is not dict or set(report) != _REPORT_KEYS
-                or type(report.get("schema_version")) is not int or report["schema_version"] != 1
-                or report.get("can_apply") is not False):
-            raise MihomoPreviewError("PARSER_FAILED")
-        _validate_public_value(report)
+        validate_preview_report(report)
         return report
     finally:
         _SLOTS.release()
@@ -131,6 +127,113 @@ def _validate_public_value(value, depth=0):
             _validate_public_value(child, depth + 1)
         return
     raise MihomoPreviewError("PARSER_FAILED")
+
+
+
+def validate_preview_report(report: dict) -> None:
+    """Validate the complete value-free v1 contract before any consumer renders it.
+
+    This validates a report, not the source configuration or runtime behavior.
+    Neither allowlisted words in the wrong positions nor bool-as-int are valid.
+    """
+    def require(condition):
+        if not condition:
+            raise MihomoPreviewError("PARSER_FAILED")
+
+    def count(value, maximum=bounded.MAX_TOKENS):
+        require(type(value) is int and 0 <= value <= maximum)
+
+    require(type(report) is dict and set(report) == _REPORT_KEYS)
+    _validate_public_value(report)
+    require(type(report["schema_version"]) is int and report["schema_version"] == 1)
+    for key, value in {
+        "scope": "offline_structural_preview", "runtime_compatibility": "not_tested",
+        "merge_equivalence": "not_proven",
+        "comparison_scope": "listed_sections_only_opaque_values_not_compared",
+    }.items():
+        require(report[key] == value)
+    require(report["can_apply"] is False)
+
+    all_sections = []
+    for key, allowed in (("sections", _INSPECTED), ("uninterpreted_sections", _OTHER_SECTIONS)):
+        rows = report[key]
+        require(type(rows) is list)
+        labels = []
+        for row in rows:
+            require(type(row) is dict and set(row) == {"section", "present", "change"})
+            require(type(row["section"]) is str and row["section"] in allowed)
+            require(type(row["present"]) is bool)
+            changes = {"not_compared", "added", "same", "changed"} if row["present"] else {"not_compared", "removed", "absent"}
+            require(type(row["change"]) is str and row["change"] in changes)
+            if key == "uninterpreted_sections" and not row["present"]:
+                require(row["change"] == "removed")
+            labels.append(row["section"])
+        require(labels == [name for name in allowed if name in labels])
+        if key == "sections":
+            require(labels == list(_INSPECTED))
+        all_sections.extend(rows)
+    compared = [row["change"] != "not_compared" for row in all_sections]
+    require(all(compared) or not any(compared))
+    present = {row["section"]: row["present"] for row in all_sections}
+    sizes = {}
+    for key, section, recognized, limit in (
+        ("nodes", "proxies", "existing_upstream_profile_expressible", 128),
+        ("groups", "proxy-groups", "recognized_select_shapes", MAX_GROUPS),
+        ("rules", "rules", "recognized_syntax", MAX_RULES),
+    ):
+        row = report[key]
+        keys = {"count", recognized}
+        if key == "rules":
+            keys.add("ordering_and_overlapping_predicates")
+        require(type(row) is dict and set(row) == keys)
+        count(row["count"], limit)
+        count(row[recognized], row["count"])
+        require(present[section] or row["count"] == 0)
+        sizes[section] = row["count"]
+    require(report["rules"]["ordering_and_overlapping_predicates"] == "not_equivalence_checked")
+    count(report["withheld_section_count"])
+    count(report["diagnostics_omitted"])
+    totals = report["diagnostic_counts"]
+    require(type(totals) is dict and set(totals) <= _DIAGNOSTIC_CODES)
+    for value in totals.values():
+        count(value)
+        require(value > 0)
+    diagnostics = report["diagnostics"]
+    require(type(diagnostics) is list)
+    total = sum(totals.values())
+    require(total <= bounded.MAX_TOKENS)
+    require(len(diagnostics) == min(total, MAX_ISSUES))
+    require(report["diagnostics_omitted"] == total - len(diagnostics))
+    indexed = {
+        "NAME_REQUIRED": {"proxies", "proxy-groups"},
+        "NAME_COLLISION": {"proxies", "proxy-groups"},
+        "NODE_PROFILE_NOT_EXPRESSIBLE": {"proxies"},
+        "GROUP_SHAPE_NOT_SUPPORTED": {"proxy-groups"},
+        "GROUP_MEMBERS_INVALID": {"proxy-groups"},
+        "DUPLICATE_GROUP_MEMBER": {"proxy-groups"},
+        "REFERENCE_UNRESOLVED": {"proxy-groups", "rules"},
+        "GROUP_REFERENCE_CYCLE": {"proxy-groups"},
+        "RULE_AFTER_MATCH": {"rules"}, "RULE_SHAPE_NOT_SUPPORTED": {"rules"},
+        "DUPLICATE_RULE": {"rules"}, "RULE_TARGET_CONFLICT": {"rules"},
+    }
+    observed = Counter()
+    for row in diagnostics:
+        require(type(row) is dict and type(row.get("code")) is str and row["code"] in _DIAGNOSTIC_CODES)
+        code = row["code"]
+        require(set(row) == ({"code", "section", "index"} if code in indexed else {"code", "section"}))
+        section = row["section"]
+        require(type(section) is str)
+        if code in indexed:
+            require(section in indexed[code])
+            count(row["index"], sizes[section] - 1)
+        elif code == "MODE_NOT_RECOGNIZED":
+            require(section == "mode" and present["mode"])
+        elif code == "SECTION_NOT_INTERPRETED":
+            require(section in _OTHER_SECTIONS and present.get(section) is True)
+        else:
+            require(section == "opaque" and report["withheld_section_count"] > 0)
+        observed[code] += 1
+    require(all(value <= totals.get(code, 0) for code, value in observed.items()))
 
 
 def _load_document(raw: bytes, source: str):

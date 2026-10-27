@@ -248,6 +248,7 @@ OpenRC 使用 `sudo rc-service v-ui status` 与 `sudo rc-service v-ui-http01 sta
 | 故障、安全和 API | [排错](docs/TROUBLESHOOTING.md) · [安全](SECURITY.md) · [API](docs/API.md) |
 | 版本内容与正式资产 | [发布说明](docs/RELEASE_NOTES.md) · [变更日志](CHANGELOG.md) · [发布流程](docs/RELEASING.md) |
 | 已发布 0.4.8 安装器退出码与清理修复 | [修复范围和历史验收边界](docs/INSTALLER_EXIT_STATUS_048.md) |
+| 离线 YAML 结构与差异预览（开发中，未发布） | [本地 CLI、中文报告与限制](docs/OFFLINE_MIHOMO_PREVIEW.md)；只读，不导入或应用 |
 | 开发、完整路线与验收历史 | [贡献指南](CONTRIBUTING.md) · [路线图](ROADMAP.md) · [文档索引](docs/README.md) |
 | Logo 资源、浅/深色用法与归属 | [视觉标识](docs/BRAND.md) |
 

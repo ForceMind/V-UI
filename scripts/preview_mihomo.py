@@ -11,6 +11,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.services.mihomo_preview import MAX_INPUT_BYTES, MihomoPreviewError, preview_mihomo
+from app.services.mihomo_preview_report import render_preview_text
 
 
 class InputError(ValueError):
@@ -54,6 +55,8 @@ def main(argv=None):
     parser = Arguments(description=__doc__, allow_abbrev=False)
     parser.add_argument("input", help="Bounded regular YAML file; source values are never printed")
     parser.add_argument("--baseline", help="Optional regular YAML file for structural section comparison")
+    parser.add_argument("--format", choices=("json", "text"), default="json",
+                        help="Output format: json (default) or fixed-vocabulary Chinese text; errors remain JSON")
     source = "pair"
     try:
         args = parser.parse_args(argv)
@@ -62,13 +65,21 @@ def main(argv=None):
         source = "baseline"
         baseline = None if args.baseline is None else _read_file(args.baseline)
         report = preview_mihomo(candidate, baseline)
+        output = (render_preview_text(report) if args.format == "text" else
+                  json.dumps({"ok": True, "report": report}, ensure_ascii=True, allow_nan=False, sort_keys=True, indent=2) + "\n")
     except MihomoPreviewError as error:
         print(json.dumps({"ok": False, "error": {"code": error.code, "source": error.source}}))
         return 2
     except InputError as error:
         print(json.dumps({"ok": False, "error": {"code": str(error), "source": source}}))
         return 2
-    print(json.dumps({"ok": True, "report": report}, ensure_ascii=True, allow_nan=False, sort_keys=True, indent=2))
+    if args.format == "text" and hasattr(sys.stdout, "buffer"):
+        # The text report is UTF-8 even in a C locale / ASCII pipe. Do not alter
+        # global stream configuration or the original ASCII-safe JSON output.
+        sys.stdout.buffer.write(output.encode("utf-8"))
+    else:
+        # StringIO-style in-process consumers already accept Unicode.
+        sys.stdout.write(output)
     return 0
 
 

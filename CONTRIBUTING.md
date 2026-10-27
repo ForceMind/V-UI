@@ -2,7 +2,7 @@
 
 ## 本地 Mihomo YAML 只读预览
 
-`PYTHONPATH=.:tests .venv/bin/python -m unittest test_mihomo_preview -v` 覆盖[离线预览库和 CLI](docs/OFFLINE_MIHOMO_PREVIEW.md)的合成解析、差异、隐私与有界资源合同。它不接线上 API、不应用配置、不启动核心或浏览器；退出成功不代表任意 YAML 合并或实际 Mihomo 兼容。只使用已有依赖，不为本地验证下载新工具。
+`PYTHONPATH=.:tests .venv/bin/python -m unittest test_mihomo_preview test_mihomo_preview_report -v` 覆盖中文可读报告、报告结构契约和[离线预览库和 CLI](docs/OFFLINE_MIHOMO_PREVIEW.md)的合成解析、差异、隐私与有界资源合同。它不接线上 API、不应用配置、不启动核心或浏览器；退出成功不代表任意 YAML 合并或实际 Mihomo 兼容。只使用已有依赖，不为本地验证下载新工具。
 
 ## 2026-10-16 UDP / DNS 与上游导入门槛
 
