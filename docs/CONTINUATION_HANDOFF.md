@@ -1,13 +1,13 @@
-# Claude 接手入口（2026-10-27）
+# 通用开发接手入口（2026-10-27）
 
-## 先拉这个分支，不要只拉 master
+## 先拉 dev，不要只拉 master
 
 ```sh
 git fetch origin
-git switch --track origin/handoff/claude-continuation-20261027
+git switch --track origin/dev
 ```
 
-这是未合并的继续开发 / 交接分支，不是正式发布。用户要求同步已完成但尚未上传的代码、测试、文档供 Claude 接手；本次不增加产品功能，不直接合并。先阅读根目录 AGENTS.md、[开发交接](DEVELOPMENT_HANDOFF.md)与[冻结验收清单](FROZEN_VERSION_TEST_HANDOFF.md)。
+这是统一的未合并开发分支 dev，不是正式发布。用户要求同步已完成但尚未上传的代码、测试、文档供下一位开发者或工具接手；本次不增加产品功能，不直接合并。先阅读根目录 AGENTS.md、[开发交接](DEVELOPMENT_HANDOFF.md)与[冻结验收清单](FROZEN_VERSION_TEST_HANDOFF.md)。
 
 ## 包含哪些工作
 
@@ -35,7 +35,7 @@ node --check web/js/mihomo-preview.js
 git diff --check
 ```
 
-本次发布分支的准确新 CI 以 PR 当前状态为准，创建时尚待运行；不能继承 f01 或 PR78 资格。面板真实浏览器专项此前未取得运行结果，已经加入原有门槛；Node 合成 DOM 不替代 Chromium。不得重试 / 绕过本地既知 Chromium/netlink 拒绝。没有用户手机 / 线路或真实 1 vCPU / 512 MiB 整机连续 24 小时资格。
+dev 的准确新 CI 尚未取得，没有对应的新 PR 验收资格；不能继承 f01 或 PR78 结果。面板真实浏览器专项此前未取得运行结果，已经加入原有门槛；Node 合成 DOM 不替代 Chromium。不得重试 / 绕过本地既知 Chromium/netlink 拒绝。没有用户手机 / 线路或真实 1 vCPU / 512 MiB 整机连续 24 小时资格。
 
 ## 下一步与冻结边界
 
@@ -54,3 +54,9 @@ f01 的已核原始 Actions 附件：[x86 GNU kit](https://github.com/ForceMind/
 - ARM bundle：`bb559000fd475a9e2dd3b0d8b1af46b03ab8a2d62c3a94d5c5f660424542e33a`
 
 不要仅凭摘要信任未知来源；下载失效或校验不符时停止，不改摘要或换不明镜像。
+
+## 两分支收敛（2026-10-27 最新状态）
+
+用户明确选择仅保留 master（已验主干）和 dev（累计开发）。dev 已建立，master 未改；此前拟建独立 handoff 远端分支没有成功创建，不再使用。三阶段远端映射为 cdfab647 → 30cbac70、e17330b2 → 24b63ad1、10f8c965 → 699ba16b；各完整 tree 与原本地阶段一致。接手页初版 7a915079 → 7b6fb40b 同树；之后仅更新本节和迁移文档。旧日期文档的“仅本地”是上传前历史，不覆盖这些新映射。
+
+[迁移状态与恢复](BRANCH_MIGRATION_20261027.md)记录全部旧分支。旧分支尚未删除，不能称远端已只剩两个；不要把18个旧实验/WIP分支内容盲目合进 dev。原有工作流的 push 只触发 master，本次新 dev 未自动取得准确 CI；最新状态以 GitHub 为准，不借 PR78 CI。下一位开发者或工具开始写入后，先确认远端 head 与协作所有权，后续不由旧执行者并发更新。
