@@ -209,7 +209,8 @@ if [[ "$WITH_GLOBAL_CLI" -eq 1 ]]; then
   "$PYTHON" - "$WORK" "$BUNDLE" "$KIT_SHA" <<'PYKIT'
 import hashlib,pathlib,re,sys
 root=pathlib.Path(sys.argv[1]);bundle=sys.argv[2];trusted=sys.argv[3]
-raw=(root/'SHA256SUMS').read_bytes()
+with (root/'SHA256SUMS').open('rb') as source:raw=source.read(64001)
+if len(raw)>64000:raise SystemExit('Checksum list exceeds size limit')
 if hashlib.sha256(raw).hexdigest()!=trusted:
     raise SystemExit('Trusted release checksum list mismatch')
 entries={}
@@ -244,7 +245,8 @@ import hashlib,pathlib,re,sys
 root=pathlib.Path(sys.argv[1]);bundle=sys.argv[2];work=pathlib.Path(sys.argv[3]);trusted=sys.argv[4];entries={}
 if not re.fullmatch(r'vui-linux-(?:x86_64|aarch64)-(?:gnu|musl)\.zip',bundle):
     raise SystemExit('Invalid target bundle name')
-raw=(root/'SHA256SUMS').read_bytes()
+with (root/'SHA256SUMS').open('rb') as source:raw=source.read(64001)
+if len(raw)>64000:raise SystemExit('Checksum list exceeds size limit')
 if trusted and hashlib.sha256(raw).hexdigest()!=trusted:
     raise SystemExit('Trusted release checksum list changed')
 for line in raw.decode('ascii').splitlines():

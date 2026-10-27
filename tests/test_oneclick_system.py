@@ -34,10 +34,11 @@ class OneClickSystemTests(unittest.TestCase):
         sha = bundle.with_suffix(bundle.suffix+'.sha256').read_text().split()[0] if bundle else None
         root = Path('/var/lib/v-ui')
         # Never clean up or overwrite a pre-existing installation on a test host.
-        self.assertFalse(root.exists())
-        self.assertFalse(Path('/etc/v-ui').exists())
-        self.assertFalse(os.path.lexists('/usr/local/sbin/v-ui'))
-        self.assertFalse(os.path.lexists('/usr/local/bin/v-ui'))
+        for path in (root,Path('/etc/v-ui'),Path('/usr/local/lib/v-ui'),
+                     Path('/usr/local/sbin/v-ui'),Path('/usr/local/bin/v-ui'),
+                     *(Path('/etc/systemd/system')/name for name in
+                       ('v-ui.service','v-ui-http01.service','v-ui-http01.socket'))):
+            self.assertFalse(os.path.lexists(path),'Empty installer runner required: '+str(path))
         from scripts.low_resource_root import optional_gate
         gate = optional_gate()
         with ExitStack() as stack:

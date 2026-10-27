@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import fcntl
 import hashlib
 import http.client
+import io
 import ipaddress
 import json
 import os
@@ -410,9 +411,18 @@ def create_service_user():
     return pwd.getpwnam('v-ui')
 
 
+@contextmanager
+def controlling_terminal():
+    # BufferedRandom (open with text r+) requires a seekable stream. A terminal
+    # is not seekable; wrap unbuffered FileIO as getpass does instead.
+    with open('/dev/tty', 'rb+', buffering=0) as raw:
+        with io.TextIOWrapper(raw, encoding='utf-8', write_through=True) as terminal:
+            yield terminal
+
+
 def tty_confirm(message):
     try:
-        with open('/dev/tty','r+') as terminal:
+        with controlling_terminal() as terminal:
             terminal.write(message+' [yes/NO]: ');terminal.flush()
             return terminal.readline().strip().lower()=='yes'
     except OSError:
@@ -647,7 +657,7 @@ def read_configuration(args):
     """Read missing first-install choices from the controlling terminal only."""
     interactive = getattr(args, 'interactive', False)
     if interactive or not args.domain or not args.email:
-        with open('/dev/tty', 'r+', encoding='utf-8') as terminal:
+        with controlling_terminal() as terminal:
             def ask(prompt, default=None):
                 terminal.write(prompt)
                 terminal.flush()
