@@ -18,16 +18,60 @@ from scripts.publish_release import (
     COMMON_ASSETS,
     KIT_ASSETS,
     REQUIRED,
+    REQUIRED_ACCEPTANCE_STEPS,
     TARGETS,
     ReleaseGateError,
     finalize_assets,
     installation_command,
     select_runs,
+    validate_run_jobs,
     validate_kit,
     validate_target_artifact,
 )
 
 SHA='a'*40
+
+
+class ExactJobQualificationTests(unittest.TestCase):
+    def fixtures(self):
+        run={'id':42,'run_attempt':2,'head_sha':SHA,'status':'completed','conclusion':'success'}
+        job={'id':7,'run_id':42,'head_sha':SHA,'status':'completed','conclusion':'success',
+             'steps':[{'name':name,'status':'completed','conclusion':'success'}
+                      for name in sorted(REQUIRED_ACCEPTANCE_STEPS['test.yml'])]}
+        return run,job
+
+    def verify(self,run,job,current=None):
+        with patch('scripts.publish_release.request',side_effect=[{'jobs':[job]},current or run]) as request:
+            validate_run_jobs({'test.yml':run},SHA)
+        self.assertIn('/attempts/2/jobs?',request.call_args_list[0].args[0])
+
+    def test_exact_latest_attempt_success_is_accepted(self):
+        self.verify(*self.fixtures())
+
+    def test_green_workflow_cannot_hide_skipped_missing_or_failed_steps(self):
+        for state in ('skipped','failure','cancelled','in_progress','missing','missing_one'):
+            run,job=self.fixtures()
+            if state=='missing':job['steps']=[]
+            elif state=='missing_one':job['steps'].pop()
+            elif state=='in_progress':job['steps'][0]['status']=state
+            else:job['steps'][0]['conclusion']=state
+            with self.subTest(state=state),self.assertRaises(ReleaseGateError):self.verify(run,job)
+
+    def test_foreign_revision_or_job_run_is_rejected(self):
+        for key,value in (('head_sha','b'*40),('run_id',43),('conclusion','skipped')):
+            run,job=self.fixtures();job[key]=value
+            with self.subTest(key=key),self.assertRaises(ReleaseGateError):self.verify(run,job)
+
+    def test_new_attempt_started_during_read_is_rejected(self):
+        run,job=self.fixtures()
+        with self.assertRaisesRegex(ReleaseGateError,'changed during'):
+            self.verify(run,job,{**run,'run_attempt':3,'status':'in_progress','conclusion':None})
+
+    def test_missing_jobs_and_duplicate_jobs_are_rejected(self):
+        run,job=self.fixtures()
+        for jobs in ([],[job,job]):
+            with self.subTest(count=len(jobs)),patch('scripts.publish_release.request',return_value={'jobs':jobs}),self.assertRaises(ReleaseGateError):
+                validate_run_jobs({'test.yml':run},SHA)
 
 
 def bundle(target,commit=SHA,version='0.3.1'):

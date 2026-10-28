@@ -4,7 +4,7 @@ import re
 import subprocess
 
 ROOT=Path(__file__).resolve().parents[1]
-REQUIRED=['README.md','CHANGELOG.md','SECURITY.md','CONTRIBUTING.md','LICENSE','VERSION',
+REQUIRED=['README.md','CHANGELOG.md','SECURITY.md','CONTRIBUTING.md','LICENSE','VERSION','setup.sh',
           *['docs/'+name+'.md' for name in ('README','INSTALLATION','CERTIFICATES','CONFIGURATION',
                     'OPERATIONS','TROUBLESHOOTING','COMPATIBILITY','API','RELEASING','RELEASE_NOTES')]]
 
@@ -39,6 +39,7 @@ def check():
             if location and not (path.parent/location).exists():raise ValueError(f'Broken local link: {path.name} -> {target}')
     subprocess.run(['bash','-n',str(ROOT/'install.sh')],check=True)
     subprocess.run(['bash','-n',str(ROOT/'install-bin.sh')],check=True)
+    subprocess.run(['bash','-n',str(ROOT/'setup.sh')],check=True)
     print('Documentation: required guides, local links, version and installer shell syntax OK')
 
 if __name__=='__main__':check()

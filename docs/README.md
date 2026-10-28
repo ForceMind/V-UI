@@ -1,3 +1,7 @@
+## 当前入口（2026-10-28）
+
+稳定版为 **v0.4.9**。从项目 [README](../README.md) 的短命令开始安装，参数、域名和已有证书见[安装指南](INSTALLATION.md)，日常管理输入 `v-ui`。main/dev 分支、旧工作归档及本批验收见[维护账本](REPOSITORY_MAINTENANCE_20261028.md)。下面按日期保留历史状态。
+
 > 2026-10-22：[V-TS-03 私有管理入口设计](TAILSCALE_PRIVATE_MANAGEMENT_DESIGN.md)仅设计与源码阻断，未实施或授予部署资格；V-TS-02 [只读状态软件](TAILSCALE_STATUS_CONTRACT.md)已由 PR54/55 收口，真实 Tailscale 共存/恢复仍未测。
 
 ## 2026-10-27 v0.4.9 一键安装批次

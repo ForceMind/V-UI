@@ -1,8 +1,14 @@
 name: Selected release deployment gates
 on:
+  workflow_dispatch:
+    inputs:
+      run_browser:
+        description: Explicitly authorized browser acceptance
+        type: boolean
+        default: false
   pull_request:
   push:
-    branches: [master]
+    branches: [main, dev]
 permissions:
   contents: read
 jobs:
@@ -58,8 +64,10 @@ jobs:
             --memory-mib 320 \
             --output /tmp/vui-release/low-resource-320.json
       - name: Install explicit test browser
+        if: github.event_name == 'workflow_dispatch' && inputs.run_browser == true
         run: python -m playwright install --with-deps chromium
       - name: Verify non-root install HTTPS browser and recovery
+        if: github.event_name == 'workflow_dispatch' && inputs.run_browser == true
         env:
           VUI_RELEASE_BUNDLE: /tmp/vui-release/vui-linux.zip
           VUI_RELEASE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}

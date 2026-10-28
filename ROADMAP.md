@@ -1,5 +1,11 @@
 # V-UI 开发路线
 
+## 2026-10-28 当前状态：main/dev 与短安装入口维护
+
+已发布稳定版为 [v0.4.9](https://github.com/ForceMind/V-UI/releases/tag/v0.4.9)，来自 `a39b6e009829dd7f1be772fd3454474903b9858a`。用户批准先归档后清理，18 个未合并分支已保存到归档标签，93 个旧分支已清理，五个旧 Draft PR 归档关闭；长期分支为 `main` / `dev`。恢复索引与本批入口、独审和验收记录见[维护账本](docs/REPOSITORY_MAINTENANCE_20261028.md)。
+
+每个版本从 dev 创建 `release/vX.Y.Z`，按[贡献流程](CONTRIBUTING.md)审查后依次合入 dev/main，再以 tag/Release 发布。当前维护重写 README、增加安装冻结 v0.4.9 的 `setup.sh`，不创建新应用版本或覆盖旧资产。构建和真实安装在 Actions，不做浏览器测试。Go 迁移仍仅保留备选计划，等待用户测试当前版本；下方带日期记录为对应阶段历史。
+
 ## 2026-10-19 当前状态：每入口 TCP 已收口
 
 [PR49](https://github.com/ForceMind/V-UI/pull/49) 已正常合并至 `0962f0c4995b3b7606652027f2330285e4dea1f7`，每入口 inherit/direct/relay 的 P0–P5、准确候选/主线八组及四目标验收已完成，见[收口记录](docs/PER_INBOUND_ROUTING_CLOSURE_20261018.md)。[PR50](https://github.com/ForceMind/V-UI/pull/50) 随后将交接及使用文档合并至 `1489bf5218fced9b42c57e06715478dc323dc782`。无需从旧 a98 基线重新实现本轮 TCP 功能；接手先读[开发交接](docs/DEVELOPMENT_HANDOFF.md)，并核对远端 master 与后续提交。
@@ -170,6 +176,16 @@ PR #13。
 - HTTPUpgrade 的 sing-box JSON/Mihomo 原生 `ws`+upgrade 可表达；固定 Mihomo URI `type=httpupgrade` 缺少 normalization/upgrade flag 而落入普通 TCP，独立缺口不绕过，详见[刻画契约](docs/XHTTP_CHARACTERIZATION_048.md)
 
 ## 后续
+
+### 2026-10-28 Go 后端迁移备选（暂缓，待用户测试当前版本）
+
+用户先测试已发布的 [v0.4.9](https://github.com/ForceMind/V-UI/releases/tag/v0.4.9)。当前仅保留迁移计划，不启动 Go/Rust 实现、原型、基准测试或新发布；后续根据用户反馈另行决定。
+
+- 目标：评估 Go 后端能否降低常驻内存、安装峰值和包体，并简化安装及升级。
+- 如获批准，先做有界同功能对照，在相同环境、数据、代理核心及负载下比较压缩包/安装后体积、面板与完整服务组内存、安装峰值和恢复行为；未测量前不承诺节省比例。
+- 先梳理 Python 的完整依赖边界，包括 Certbot、安装器和终端管理工具；仅替换 API 不等于可以移除 Python。
+- 迁移需保留数据库及用户数据兼容、鉴权、密码哈希安全参数、证书管理、配置校验、失败保护、备份恢复与 `v-ui` 菜单；现有固定核心和协议范围保持。
+- 确认收益及兼容方案后再决定是否分阶段迁移。构建及制品处理优先在 GitHub Actions，浏览器验证另按用户明确授权执行。
 
 DNS-01/通配符、核心自动升级/回滚、任意 YAML 导入合并、容器专用部署、NixOS/其他声明式系统专用模块继续作为独立版本。
 

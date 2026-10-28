@@ -21,7 +21,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from loopback_helpers import certificate_files, unused_port
 from scripts.ops_menu_smoke import MenuSession
-from online_install_helpers import fixture_commands, published_commands, global_menu_check, hosted_command_directory, sudo_policy_snapshot
+from online_install_helpers import fixture_commands, published_commands, setup_commands, configured_setup_with_tty, global_menu_check, hosted_command_directory, sudo_policy_snapshot
 
 
 @unittest.skipUnless(os.getenv('VUI_SYSTEM_INSTALL_TEST') == '1', 'explicit ephemeral systemd installer gate')
@@ -54,8 +54,13 @@ class OneClickSystemTests(unittest.TestCase):
             online = None
             if published_version:
                 self.assertIsNone(gate, 'Published online acceptance is separate from the resource fixture')
-                online = published_commands(source,published_version,os.environ['VUI_RELEASE_COMMIT'],
+                if os.getenv('VUI_SETUP_INSTALL') == '1':
+                    online = setup_commands(source,published_version,os.environ['VUI_RELEASE_COMMIT'],
+                                            os.environ['VUI_SETUP_CHECKOUT'],os.environ['VUI_SETUP_REF'],
                                             certificate_args,configured_args)
+                else:
+                    online = published_commands(source,published_version,os.environ['VUI_RELEASE_COMMIT'],
+                                                certificate_args,configured_args)
             elif os.getenv('VUI_RELEASE_KIT') and gate is None:
                 online = fixture_commands(source,work,Path(os.environ['VUI_RELEASE_KIT']),
                                           certificate_args,configured_args)
@@ -206,11 +211,12 @@ class OneClickSystemTests(unittest.TestCase):
             if gate:
                 gate.installed()
             # A repeated install without explicit upgrade must not touch the running instance.
-            repeat=subprocess.run(repeat_cmd,capture_output=True,text=True,timeout=300 if published_version else 30)
+            repeat=(configured_setup_with_tty(repeat_cmd) if os.getenv('VUI_SETUP_INSTALL') == '1' else
+                    subprocess.run(repeat_cmd,capture_output=True,text=True,timeout=300 if published_version else 30))
             if gate:
                 gate.installer_receipt('implicit_repeat', repeat.stdout)
             self.assertNotEqual(repeat.returncode,0)
-            self.assertIn('already exists',repeat.stderr)
+            self.assertIn('already exists',repeat.stdout+repeat.stderr)
             check_uid('v-ui.service')
             # Existing fake M1 proxy drafts must survive the actual installer
             # controller's stopped backup. No apply or network change is made.
@@ -237,7 +243,8 @@ class OneClickSystemTests(unittest.TestCase):
             self.assertTrue(saved_proxy['settings']['local_password_set'])
             self.assertNotIn(b'Fake-upgrade-password!', raw)
             # Rerunning with --upgrade checks/stages and makes a stopped backup.
-            upgraded=subprocess.run(upgrade_cmd,capture_output=True,text=True,timeout=300 if published_version else 120)
+            upgraded=(configured_setup_with_tty(upgrade_cmd) if os.getenv('VUI_SETUP_INSTALL') == '1' else
+                      subprocess.run(upgrade_cmd,capture_output=True,text=True,timeout=300 if published_version else 120))
             if gate:
                 gate.installer_receipt('same_bundle_upgrade', upgraded.stdout)
             self.assertEqual(upgraded.returncode,0,(upgraded.stdout+upgraded.stderr)[-15000:])

@@ -1,8 +1,14 @@
 name: ACME certificate acceptance
 on:
+  workflow_dispatch:
+    inputs:
+      run_browser:
+        description: Explicitly authorized browser acceptance
+        type: boolean
+        default: false
   pull_request:
   push:
-    branches: [master]
+    branches: [main, dev]
 permissions:
   contents: read
 jobs:
@@ -29,8 +35,10 @@ jobs:
           export VUI_DATA_DIR="$(mktemp -d)"
           python -m unittest discover -s tests -p test_acme_real.py -v 2>&1 | tee /tmp/vui-pebble/acme.log
       - name: Install explicit test browser
+        if: github.event_name == 'workflow_dispatch' && inputs.run_browser == true
         run: python -m playwright install --with-deps chromium
       - name: Test graphical certificate lifecycle against Pebble
+        if: github.event_name == 'workflow_dispatch' && inputs.run_browser == true
         env:
           VUI_TEST_PEBBLE: /tmp/vui-pebble/pebble
           VUI_CERT_BROWSER: '1'
