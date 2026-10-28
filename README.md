@@ -9,7 +9,7 @@
 
 [下载稳定版](https://github.com/ForceMind/V-UI/releases/latest) · [使用文档](docs/README.md) · [协议兼容性](docs/COMPATIBILITY.md) · [报告问题](https://github.com/ForceMind/V-UI/issues)
 
-**稳定版：[v0.4.9](https://github.com/ForceMind/V-UI/releases/tag/v0.4.9) · v0.4.10 安装交互修复准备中**
+**V-UI v0.4.10 · 安装交互修复** · [正式版本](https://github.com/ForceMind/V-UI/releases)
 
 ## 功能
 
@@ -42,7 +42,7 @@
 bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh)
 ```
 
-入口当前固定安装已公开的 v0.4.9，完成下载与完整性校验，并交互询问域名、邮箱、管理员、端口和密码；需要时通过现有 sudo 策略取得管理员权限。自动证书的 CA 条款由使用者本人确认。不要将密码写入命令行。
+入口仅安装已公开且内置信任摘要的稳定版；v0.4.10 正式公开并更新摘要后才切换，具体版本可查 `setup.sh --help`。入口完成下载与完整性校验，并交互询问域名、邮箱、管理员、端口和密码；需要时通过现有 sudo 策略取得管理员权限。自动证书的 CA 条款由使用者本人确认。不要将密码写入命令行。
 
 域名为空或格式无效时，会当场提示重新输入，合法后才继续邮箱等配置。v0.4.10 还提供中文安装提示及 `y/n/yes/no` 确认（回车默认否、非法回答重问）；旧 v0.4.9 安装器不包含后两项改动。请填写 DNS 域名，不能带 `https://`、路径、端口、IP 或通配符；国际化域名会按 IDNA 规范化。
 
