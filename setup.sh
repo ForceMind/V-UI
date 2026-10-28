@@ -8,7 +8,7 @@ export PATH
 setup_main() {
   set -euo pipefail
   umask 077
-  local version=v0.4.9 version_seen=0 argument
+  local version=v0.4.9 version_seen=0 argument domain=
   local installer_sha=5aecc3bc2c3ade67946c334091c20ade1e577c7b00c8cadcbe18edf05827312f
   local kit_sha=bae439c5db3586a04406ac5f0455938ed88c4019602c162af89535f1c6c7bde9
   local -a installer_args=()
@@ -24,7 +24,10 @@ Uses root or the existing sudo policy; does not install a sudoers exemption.
 Supported installer options: --domain, --email, --admin, --port, --bind,
 --node-port, --node-udp-port, --open-firewall, --archive-temp-dir, --cert,
 --key, --health-ca, --assume-external-ports-open, --accept-terms, --upgrade.
-Values are forwarded unchanged. Administrator passwords are prompted securely.
+Domain values are normalized and validated before continuing; invalid input is
+prompted again immediately. Domain input lines are limited to 4096 UTF-8 bytes
+including the newline. Other values are forwarded unchanged. Administrator
+passwords are prompted securely.
 The version, interactive mode, global command and trusted kit cannot be overridden.
 Only v0.4.9 has trusted hashes in this entry point. The mutable raw setup.sh URL
 must itself be trusted; downloaded release assets are checked against fixed hashes.
@@ -36,10 +39,14 @@ HELP
       --version=*)
         [[ "$version_seen" -eq 0 ]] || { printf '%s\n' '--version cannot be repeated.' >&2; return 2; }
         version="${argument#*=}"; version_seen=1; shift ;;
-      --domain|--email|--admin|--port|--bind|--node-port|--node-udp-port|--open-firewall|--archive-temp-dir|--cert|--key|--health-ca)
+      --domain)
+        [[ "$#" -ge 2 && "$2" != --* ]] || { printf 'Missing value for %s\n' "$argument" >&2; return 2; }
+        domain="$2"; shift 2 ;;
+      --domain=*) domain="${argument#*=}"; shift ;;
+      --email|--admin|--port|--bind|--node-port|--node-udp-port|--open-firewall|--archive-temp-dir|--cert|--key|--health-ca)
         [[ "$#" -ge 2 && "$2" != --* ]] || { printf 'Missing value for %s\n' "$argument" >&2; return 2; }
         installer_args+=("$argument" "$2"); shift 2 ;;
-      --domain=*|--email=*|--admin=*|--port=*|--bind=*|--node-port=*|--node-udp-port=*|--open-firewall=*|--archive-temp-dir=*|--cert=*|--key=*|--health-ca=*)
+      --email=*|--admin=*|--port=*|--bind=*|--node-port=*|--node-udp-port=*|--open-firewall=*|--archive-temp-dir=*|--cert=*|--key=*|--health-ca=*)
         installer_args+=("$argument"); shift ;;
       --assume-external-ports-open|--accept-terms|--upgrade)
         installer_args+=("$argument"); shift ;;
@@ -55,7 +62,7 @@ HELP
   if [[ "$EUID" -ne 0 ]]; then
     command -v sudo >/dev/null 2>&1 || { printf '%s\n' 'Run as root or install sudo and rerun setup.' >&2; return 1; }
     exec sudo -- /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8 \
-      PYTHONDONTWRITEBYTECODE=1 /bin/bash -c "$(declare -f setup_main); setup_main \"\$@\"" v-ui-setup --version "$version" ${installer_args[@]+"${installer_args[@]}"}
+      PYTHONDONTWRITEBYTECODE=1 /bin/bash -c "$(declare -f setup_main); setup_main \"\$@\"" v-ui-setup --version "$version" "--domain=$domain" ${installer_args[@]+"${installer_args[@]}"}
   fi
 
   # EXIT traps run after a function's local variables have left scope.
@@ -81,17 +88,77 @@ HELP
   trap 'setup_signal 130' INT
   trap 'setup_signal 143' TERM
 
-  if ! command -v curl >/dev/null 2>&1 || ! command -v sha256sum >/dev/null 2>&1; then
-    if command -v apt-get >/dev/null 2>&1; then apt-get update; DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl bash coreutils
-    elif command -v apk >/dev/null 2>&1; then apk add --no-cache ca-certificates curl bash coreutils
-    elif command -v dnf >/dev/null 2>&1; then dnf install -y ca-certificates curl bash coreutils
-    elif command -v yum >/dev/null 2>&1; then yum install -y ca-certificates curl bash coreutils
-    elif command -v zypper >/dev/null 2>&1; then zypper --non-interactive install ca-certificates curl bash coreutils
-    elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm --needed ca-certificates curl bash coreutils
-    elif command -v xbps-install >/dev/null 2>&1; then xbps-install -Sy ca-certificates curl bash coreutils
-    else printf '%s\n' 'Install curl and sha256sum, then rerun setup.' >&2; exit 1
+  setup_python_ready() {
+    [[ -x /usr/bin/python3 ]] && /usr/bin/python3 -B -I -S -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)'
+  }
+  if ! command -v curl >/dev/null 2>&1 || ! command -v sha256sum >/dev/null 2>&1 || ! setup_python_ready; then
+    if command -v apt-get >/dev/null 2>&1; then apt-get update; DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl bash coreutils python3
+    elif command -v apk >/dev/null 2>&1; then apk add --no-cache ca-certificates curl bash coreutils python3
+    elif command -v dnf >/dev/null 2>&1; then dnf install -y ca-certificates curl bash coreutils python3
+    elif command -v yum >/dev/null 2>&1; then yum install -y ca-certificates curl bash coreutils python3
+    elif command -v zypper >/dev/null 2>&1; then zypper --non-interactive install ca-certificates curl bash coreutils python3
+    elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm --needed ca-certificates curl bash coreutils python
+    elif command -v xbps-install >/dev/null 2>&1; then xbps-install -Sy ca-certificates curl bash coreutils python3
+    else printf '%s\n' 'Install curl, sha256sum and system /usr/bin/python3 3.9+, then rerun setup.' >&2; exit 1
     fi
   fi
+  setup_python_ready || { printf '%s\n' 'Global v-ui requires system /usr/bin/python3 3.9+; setup cannot continue.' >&2; exit 1; }
+  # Use the fixed OS interpreter, with isolated imports and a separate terminal.
+  # stdin remains available for the frozen installer's password input channel.
+  domain="$(/usr/bin/python3 -B -I -S - "$domain" <<'PYDOMAIN'
+import re
+import sys
+
+
+def fqdn(value):
+    try:
+        name = value.strip().rstrip('.').encode('idna').decode('ascii').lower()
+    except (AttributeError, UnicodeError):
+        raise ValueError('Invalid domain') from None
+    if (len(name) > 253 or '.' not in name or name.split('.')[-1].isdigit()
+            or not all(re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', p) for p in name.split('.'))):
+        raise ValueError('Use a DNS domain without URL, path, port, IP or wildcard')
+    return name
+
+
+invalid = '域名无效，请重新输入 DNS 域名（不含 URL、路径、端口、IP 或通配符）。\n'
+value = sys.argv[1]
+try:
+    name = fqdn(value)
+except ValueError:
+    try:
+        with open('/dev/tty', 'rb+', buffering=0) as terminal:
+            if value:
+                terminal.write(invalid.encode('utf-8'))
+            while True:
+                terminal.write('面板域名 / Panel domain: '.encode('utf-8'))
+                # Limit each physical input line to 4096 bytes, including LF.
+                # Read one extra byte to detect overflow, then discard the rest
+                # in bounded chunks so a valid-looking suffix cannot become input.
+                raw = terminal.readline(4097)
+                if not raw:
+                    raise SystemExit('Domain input ended; setup cancelled.')
+                if len(raw) > 4096:
+                    while not raw.endswith(b'\n'):
+                        raw = terminal.readline(4097)
+                        if not raw:
+                            raise SystemExit('Domain input ended; setup cancelled.')
+                    terminal.write(invalid.encode('utf-8'))
+                    continue
+                try:
+                    name = fqdn(raw.decode('utf-8'))
+                except (ValueError, UnicodeError):
+                    terminal.write(invalid.encode('utf-8'))
+                    continue
+                break
+    except OSError as error:
+        raise SystemExit('A controlling terminal is required for domain input: ' + str(error)) from None
+    except KeyboardInterrupt:
+        print('\nDomain input interrupted; setup cancelled.', file=sys.stderr)
+        raise SystemExit(130) from None
+print(name)
+PYDOMAIN
+)"
   # Own even a path printed by a failing/interrupted mktemp before handling signals.
   allocating=1
   if setup_dir="$(mktemp -d /root/vui-bootstrap.XXXXXXXX)"; then :; else allocation_status=$?; fi
@@ -103,7 +170,7 @@ HELP
     "https://github.com/ForceMind/V-UI/releases/download/$version/install.sh" -o "$setup_dir/install.sh"
   printf '%s  %s\n' "$installer_sha" "$setup_dir/install.sh" | sha256sum -c -
   local status=0
-  if /bin/bash "$setup_dir/install.sh" --version "$version" --with-global-cli --kit-sha256 "$kit_sha" --interactive ${installer_args[@]+"${installer_args[@]}"}; then
+  if /bin/bash "$setup_dir/install.sh" --version "$version" --with-global-cli --kit-sha256 "$kit_sha" --interactive --domain "$domain" ${installer_args[@]+"${installer_args[@]}"}; then
     :
   else
     status=$?

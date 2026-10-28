@@ -96,6 +96,13 @@ class OneClickSystemTests(unittest.TestCase):
             choices = [('Panel domain: ',domain),('Contact email: ','admin@example.test'),
                        ('管理员用户名 [admin]: ','installer-admin'),('面板 HTTPS 端口 [8443]: ',str(port)),
                        ('默认节点 TCP 端口 [10443]: ',str(node_port))] if online else []
+            domain_retry = os.getenv('VUI_SETUP_INSTALL') == '1'
+            domain_values = ['', 'https://vpn.example.test:3215/path', 'bad..example.test', domain.upper()+'.'] if domain_retry else []
+            if domain_retry:
+                choices = choices[1:]
+            sent_domains = 0
+            advanced_before_valid_domain = False
+            product_changed_before_valid_domain = False
             sent_choices = set()
             deadline=time.monotonic()+300
             try:
@@ -106,6 +113,16 @@ class OneClickSystemTests(unittest.TestCase):
                         except OSError: chunk=b''
                         output+=chunk
                         decoded=output.decode(errors='replace')
+                        if domain_retry:
+                            if 'Contact email: ' in decoded and sent_domains < len(domain_values):
+                                advanced_before_valid_domain = True
+                            if decoded.count('Panel domain: ') > sent_domains and sent_domains < len(domain_values):
+                                product_changed_before_valid_domain |= any(os.path.lexists(path) for path in (
+                                    root, Path('/etc/v-ui'), Path('/usr/local/lib/v-ui'),
+                                    Path('/usr/local/sbin/v-ui'), Path('/usr/local/bin/v-ui'),
+                                    Path('/etc/systemd/system/v-ui.service')))
+                                os.write(fd,(domain_values[sent_domains]+'\n').encode())
+                                sent_domains += 1
                         for prompt,value in choices:
                             if prompt in decoded and prompt not in sent_choices:
                                 os.write(fd,(value+'\n').encode());sent_choices.add(prompt)
@@ -130,6 +147,11 @@ class OneClickSystemTests(unittest.TestCase):
                     self.fail('Installer timed out: '+output.decode(errors='replace').replace(password,'[REDACTED]')[-12000:])
             finally: os.close(fd)
             clean=output.decode(errors='replace').replace(password,'[REDACTED]')
+            if domain_retry:
+                self.assertEqual(sent_domains,len(domain_values),clean[-8000:])
+                self.assertFalse(advanced_before_valid_domain,clean[-8000:])
+                self.assertFalse(product_changed_before_valid_domain,clean[-8000:])
+                self.assertGreaterEqual(clean.count('域名无效，请重新输入'),3,clean[-8000:])
             self.assertTrue(sent_second,clean[-8000:])
             if online:
                 self.assertEqual(len(sent_choices),len(choices),clean[-8000:])
@@ -267,6 +289,8 @@ class OneClickSystemTests(unittest.TestCase):
                 gate.finish(self, cmd, api, login_again)
             if online:
                 print('Online managed installer transport: '+online['transport']+'; interactive domain/email/admin/ports, real global v-ui menu and stop/start passed')
+            if domain_retry:
+                print('Domain input retry: blank / URL-with-port-and-path / invalid label rejected before email and product installation; uppercase trailing-dot domain accepted and canonicalized; real installed service, global v-ui and upgrade verified')
             print('One-command systemd: real sudo setup / non-root workers / private state / HTTPS / fd-passed HTTP-01 port80 / auth / repeat refusal / upgrade backup / restart OK')
 
 if __name__=='__main__':unittest.main()
