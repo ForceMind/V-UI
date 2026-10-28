@@ -2,7 +2,7 @@ name: Portable Linux runtime matrix
 on:
   pull_request:
   push:
-    branches: [master]
+    branches: [main, dev]
 permissions:
   contents: read
 jobs:

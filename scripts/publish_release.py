@@ -19,6 +19,15 @@ REPO='ForceMind/V-UI'
 TARGETS=('x86_64-gnu','aarch64-gnu','x86_64-musl','aarch64-musl')
 REQUIRED={'test.yml','toclash.yml','loopback.yml','release.yml','acme.yml',
           'oneclick.yml','portable.yml','docs.yml'}
+REQUIRED_ACCEPTANCE_STEPS = {
+    'test.yml': {'Browser authentication smoke', 'Browser routing and subscription workflow',
+                 'Browser proxy import, drafts and runtime UI lifecycle',
+                 'Browser per-inbound direct activation through actual API and core',
+                 'Browser two-instance TCP upstream export and import',
+                 'Browser managed-certificate editor transitions and restore'},
+    'release.yml': {'Verify non-root install HTTPS browser and recovery'},
+    'acme.yml': {'Test graphical certificate lifecycle against Pebble'},
+}
 COMMON_ASSETS={'install.sh','install_system.py','platform_support.py','firewall_support.py',
                'service_support.py','install_ops_control.py','system_launcher.py',
                'system_ops.py','ops_worker.py','release_tools.py','v-ui',
@@ -107,6 +116,41 @@ def select_runs(runs,commit):
         if not run or run.get('status')!='completed' or run.get('conclusion')!='success':
             raise ReleaseGateError('Latest exact-commit check is not successful: '+path)
     return latest
+
+
+def validate_run_jobs(checks, commit):
+    """A green workflow with skipped acceptance is not release qualification."""
+    for path, run in sorted(checks.items()):
+        attempt = run.get('run_attempt')
+        if type(attempt) is not int or attempt < 1:
+            raise ReleaseGateError('Exact workflow attempt required: '+path)
+        jobs=[]
+        for page in range(1,11):
+            batch=request('actions/runs/'+str(run['id'])+'/attempts/'+str(attempt)+
+                          '/jobs?per_page=100&page='+str(page))['jobs']
+            jobs.extend(batch)
+            if len(batch)<100:
+                break
+        else:
+            raise ReleaseGateError('Workflow job pagination exceeds bound: '+path)
+        if not jobs or len({job['id'] for job in jobs}) != len(jobs):
+            raise ReleaseGateError('Missing or duplicated exact-attempt jobs: '+path)
+        names={step.get('name') for job in jobs for step in job.get('steps', [])}
+        if not REQUIRED_ACCEPTANCE_STEPS.get(path,set()) <= names:
+            raise ReleaseGateError('Missing required acceptance steps: '+path)
+        for job in jobs:
+            if (job.get('run_id') != run['id'] or job.get('head_sha') != commit
+                    or job.get('status') != 'completed' or job.get('conclusion') != 'success'):
+                raise ReleaseGateError('Exact workflow job is not successful: '+path)
+            steps=job.get('steps', [])
+            if not steps or any(step.get('status') != 'completed' or step.get('conclusion') != 'success'
+                                for step in steps):
+                raise ReleaseGateError('Workflow has unverified, skipped or failed steps: '+path)
+        # Refuse a retry or state transition that started while evidence was read.
+        current=request('actions/runs/'+str(run['id']))
+        if (current.get('head_sha') != commit or current.get('run_attempt') != attempt
+                or current.get('status') != 'completed' or current.get('conclusion') != 'success'):
+            raise ReleaseGateError('Workflow changed during qualification: '+path)
 
 
 def _archive_files(raw: bytes, expected: set[str], limit: int) -> dict[str,bytes]:
@@ -242,6 +286,7 @@ def main():
         if len(batch)<100:
             break
     checks=select_runs(runs,args.commit)
+    validate_run_jobs(checks,args.commit)
 
     tag='v'+args.version
     for path in ('git/ref/tags/'+tag,'releases/tags/'+tag):

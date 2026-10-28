@@ -2,7 +2,7 @@ name: One-command installation acceptance
 on:
   pull_request:
   push:
-    branches: [master]
+    branches: [main, dev]
 permissions:
   contents: read
 jobs:

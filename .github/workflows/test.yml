@@ -1,11 +1,17 @@
 name: Test V-UI
 
 on:
+  workflow_dispatch:
+    inputs:
+      run_browser:
+        description: Explicitly authorized browser acceptance
+        type: boolean
+        default: false
   pull_request:
   push:
     branches:
-      - master
-      - feature/dual-core-foundation
+      - main
+      - dev
 
 permissions:
   contents: read
@@ -59,29 +65,36 @@ jobs:
           path: /tmp/vui-test-cores
           retention-days: 1
       - name: Install test browser
+        if: github.event_name == 'workflow_dispatch' && inputs.run_browser == true
         run: python -m playwright install --with-deps chromium
       - name: Browser authentication smoke
+        if: github.event_name == 'workflow_dispatch' && inputs.run_browser == true
         env:
           VUI_BROWSER_CHECK: "1"
         run: python -m unittest discover -s tests -p test_startup.py -v
       - name: Browser routing and subscription workflow
+        if: github.event_name == 'workflow_dispatch' && inputs.run_browser == true
         env:
           VUI_WORKSPACE_BROWSER: "1"
         run: python -m unittest discover -s tests -p test_workspace_browser.py -v
       - name: Prepare checksum-pinned browser frontend
+        if: github.event_name == 'workflow_dispatch' && inputs.run_browser == true
         run: python scripts/vendor_frontend.py /tmp/vui-editor-web
       - name: Browser proxy import, drafts and runtime UI lifecycle
+        if: github.event_name == 'workflow_dispatch' && inputs.run_browser == true
         env:
           VUI_PROXY_BROWSER: "1"
           VUI_FRONTEND_ASSETS: /tmp/vui-editor-web
         run: python -m unittest discover -s tests -p test_proxy_browser.py -v
       - name: Browser per-inbound direct activation through actual API and core
+        if: github.event_name == 'workflow_dispatch' && inputs.run_browser == true
         env:
           VUI_INBOUND_ROUTING_BROWSER: "1"
           VUI_TEST_CORES: /tmp/vui-test-cores
           VUI_FRONTEND_ASSETS: /tmp/vui-editor-web
         run: python -m unittest discover -s tests -p test_inbound_routing_browser.py -v
       - name: Browser two-instance TCP upstream export and import
+        if: github.event_name == 'workflow_dispatch' && inputs.run_browser == true
         timeout-minutes: 10
         env:
           VUI_TCP_UPSTREAM_BROWSER: "1"
@@ -89,6 +102,7 @@ jobs:
           VUI_FRONTEND_ASSETS: /tmp/vui-editor-web
         run: python -m unittest discover -s tests -p test_tcp_upstream_export_browser.py -v
       - name: Browser managed-certificate editor transitions and restore
+        if: github.event_name == 'workflow_dispatch' && inputs.run_browser == true
         env:
           VUI_NODE_BROWSER: "1"
           VUI_TEST_CORES: /tmp/vui-test-cores
