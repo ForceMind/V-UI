@@ -8,17 +8,17 @@ export PATH
 setup_main() {
   set -euo pipefail
   umask 077
-  local version=v0.4.9 version_seen=0 argument domain=
-  local installer_sha=5aecc3bc2c3ade67946c334091c20ade1e577c7b00c8cadcbe18edf05827312f
-  local kit_sha=bae439c5db3586a04406ac5f0455938ed88c4019602c162af89535f1c6c7bde9
+  local version=v0.4.10 version_seen=0 argument domain=
+  local installer_sha=6d4bb349232e5fd1fa2271ab2dd66901a0243c36c04046619bed6bd65ae6987c
+  local kit_sha=fda8ee6e84a3e742f865858c0ec80fac452f7e208bb37d7edb07ca2523250fc8
   local -a installer_args=()
   while [[ "$#" -gt 0 ]]; do
     argument="$1"
     case "$argument" in
       --help|-h)
         cat <<'HELP'
-V-UI v0.4.9 交互安装与全局 v-ui 命令（仅支持 Linux）。
-用法：bash setup.sh [--version v0.4.9] [安装器选项]
+V-UI v0.4.10 交互安装与全局 v-ui 命令（仅支持 Linux）。
+用法：bash setup.sh [--version v0.4.10] [安装器选项]
 
 使用 root 或已有 sudo 授权；不新增免密 sudo 规则。
 支持的安装器选项：--domain、--email、--admin、--port、--bind、
@@ -28,7 +28,7 @@ V-UI v0.4.9 交互安装与全局 v-ui 命令（仅支持 Linux）。
 域名每行最多 4096 个 UTF-8 字节（含换行）。其他参数值原样转发。
 管理员密码通过安全提示输入。
 版本、交互模式、全局命令和可信套件设置不能覆盖。
-此入口仅内置 v0.4.9 的可信摘要。你仍须信任可变的原始 setup.sh URL；
+此入口仅内置 v0.4.10 的可信摘要。你仍须信任可变的原始 setup.sh URL；
 下载的发布资产会按固定摘要校验。
 HELP
         return 0 ;;
@@ -54,7 +54,7 @@ HELP
         return 2 ;;
     esac
   done
-  [[ "$version" == v0.4.9 ]] || { printf '版本 %s 没有内置的可信发布摘要\n' "$version" >&2; return 2; }
+  [[ "$version" == v0.4.10 ]] || { printf '版本 %s 没有内置的可信发布摘要\n' "$version" >&2; return 2; }
   [[ "$(uname -s)" == Linux ]] || { printf '%s\n' 'V-UI 安装入口仅支持 Linux。' >&2; return 1; }
   # Re-enter the already loaded function as a command string, never through the
   # original file descriptor: sudo commonly closes process-substitution /dev/fd.
