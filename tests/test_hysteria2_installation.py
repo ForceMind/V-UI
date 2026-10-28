@@ -39,7 +39,7 @@ class Hysteria2InstallationTests(unittest.TestCase):
 
     def test_udp_ports_reject_privileged_out_of_range_and_coerced_values(self):
         for values in ([0], [1023], [65536], [-1], [True], ['10443'], [10443.0], None, (10443,)):
-            with self.subTest(values=values), self.assertRaisesRegex(installer.InstallError, 'UDP ports'):
+            with self.subTest(values=values), self.assertRaisesRegex(installer.InstallError, '节点 UDP'):
                 installer.validate_options(self.args(node_udp_port=values))
 
     def test_cli_exposes_repeatable_udp_ports_without_changing_tcp_default(self):
@@ -70,7 +70,7 @@ class Hysteria2InstallationTests(unittest.TestCase):
         with patch.object(installer.socket, 'socket') as create, \
              patch.object(installer.service_support, 'stop') as stop:
             create.return_value.__enter__.return_value.bind.side_effect = OSError('in use')
-            with self.assertRaisesRegex(installer.InstallError, r'10443.*udp.*no existing service was stopped'):
+            with self.assertRaisesRegex(installer.InstallError, r'10443.*udp.*未停止任何现有服务'):
                 installer.check_port(10443, protocol='udp')
             create.return_value.__exit__.assert_called_once()
             stop.assert_not_called()
@@ -155,8 +155,8 @@ class Hysteria2InstallationTests(unittest.TestCase):
         checked, preflight, output = self.install_preflight(args)
         self.assertEqual(checked, [])
         self.assertEqual(preflight, call(args, [80, 8443, 10443], [10443]))
-        self.assertIn('node UDP bind probes are skipped', output)
-        self.assertIn('verify node port ownership manually', output)
+        self.assertIn('已跳过节点 UDP 绑定探测', output)
+        self.assertIn('手动核对节点端口归属', output)
 
     def test_firewall_dry_run_discloses_protocols_and_never_changes_or_confirms(self):
         info = {'backend': 'ufw', 'managed': True, 'detail': 'fixture'}
@@ -175,7 +175,7 @@ class Hysteria2InstallationTests(unittest.TestCase):
         self.assertEqual(result['unknown_udp'], [20443])
         self.assertEqual(query.call_count, 4)
         self.assertIn('8443/tcp, 10443/tcp, 10443/udp, 20443/udp', output.getvalue())
-        self.assertIn('does not create a node or enable application UDP forwarding', output.getvalue())
+        self.assertIn('不会创建节点，也不会启用应用 UDP 转发', output.getvalue())
         write.assert_not_called()
         confirm.assert_not_called()
 
@@ -201,7 +201,7 @@ class Hysteria2InstallationTests(unittest.TestCase):
                 self.assertEqual(confirm.called, choice == 'ask')
                 if confirm.called:
                     self.assertIn('10443/tcp, 10443/udp', confirm.call_args.args[0])
-                self.assertIn('Local firewall changes requested: 10443/tcp, 10443/udp', output.getvalue())
+                self.assertIn('申请修改本机防火墙，放行： 10443/tcp, 10443/udp', output.getvalue())
 
     def test_udp_only_change_does_not_reopen_tcp_and_must_verify_udp(self):
         info = {'backend': 'ufw', 'managed': True, 'detail': 'fixture'}
@@ -213,7 +213,7 @@ class Hysteria2InstallationTests(unittest.TestCase):
                 if final is True:
                     installer.firewall_preflight(args, [10443], [10443])
                 else:
-                    with self.assertRaisesRegex(installer.InstallError, 'could not be verified'):
+                    with self.assertRaisesRegex(installer.InstallError, '无法验证防火墙修改结果'):
                         installer.firewall_preflight(args, [10443], [10443])
                 write.assert_called_once_with(info, [10443], protocol='udp')
                 self.assertEqual(query.call_args, call(info, 10443, protocol='udp'))
@@ -225,10 +225,10 @@ class Hysteria2InstallationTests(unittest.TestCase):
                  patch.object(firewall, 'open_ports') as write, patch.object(firewall, 'run') as query, \
                  patch.object(installer, 'tty_confirm', return_value=False) as confirm, \
                  patch('sys.stdout', io.StringIO()):
-                with self.assertRaisesRegex(installer.InstallError, 'manual firewall configuration'):
+                with self.assertRaisesRegex(installer.InstallError, '等待手动配置本机防火墙'):
                     installer.firewall_preflight(self.args(dry_run=False, open_firewall='yes'), [8443], [10443])
                 self.assertIn('8443/tcp, 10443/udp', confirm.call_args.args[0])
-                self.assertIn('actual ingress', confirm.call_args.args[0])
+                self.assertIn('实际入站', confirm.call_args.args[0])
                 write.assert_not_called()
                 query.assert_not_called()
 
@@ -238,10 +238,10 @@ class Hysteria2InstallationTests(unittest.TestCase):
              patch.object(firewall, 'open_ports') as write, \
              patch.object(installer, 'tty_confirm', return_value=False) as confirm, \
              patch('sys.stdout', io.StringIO()):
-            with self.assertRaisesRegex(installer.InstallError, 'cloud/upstream'):
+            with self.assertRaisesRegex(installer.InstallError, '云安全组或上游防火墙'):
                 installer.firewall_preflight(self.args(dry_run=False, open_firewall='yes'), [80, 8443], [10443])
             self.assertIn('80/tcp, 8443/tcp, 10443/udp', confirm.call_args.args[0])
-            self.assertIn('cloud/upstream', confirm.call_args.args[0])
+            self.assertIn('云安全组或上游防火墙', confirm.call_args.args[0])
             write.assert_not_called()
 
 

@@ -36,6 +36,8 @@ jobs:
       - name: Install from anonymous public HTTPS and reopen the global menu
         env:
           VUI_SYSTEM_INSTALL_TEST: '1'
+          VUI_INSTALLER_YN_TEST: '1'
+          VUI_DOMAIN_RETRY_TEST: '1'
           VUI_PUBLISHED_INSTALL_VERSION: ${{ inputs.version }}
           VUI_RELEASE_COMMIT: ${{ inputs.commit }}
         run: |

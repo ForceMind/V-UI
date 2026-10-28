@@ -242,18 +242,21 @@ class SetupShellTests(unittest.TestCase):
             with self.subTest(args=args):
                 result=self.run_setup(*args)
                 self.assertEqual(result.returncode,2,result.stderr)
+                self.assertTrue(any(word in result.stderr for word in ('版本','选项')),result.stderr)
                 self.assertFalse(self.logs())
 
     def test_help_and_os_refusal_never_download_or_elevate(self):
         result=self.run_setup('--help')
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertIn('v0.4.9',result.stdout)
+        self.assertIn('用法：bash setup.sh',result.stdout)
+        self.assertIn('域名每行最多 4096 个 UTF-8 字节',result.stdout)
         self.assertEqual([line['tool'] for line in self.logs()],['cat'])
         (self.root/'commands.jsonl').unlink()
         self.config['os']='Darwin'
         result=self.run_setup()
         self.assertEqual(result.returncode,1,result.stderr)
-        self.assertIn('Linux only',result.stderr)
+        self.assertIn('仅支持 Linux',result.stderr)
         self.assertEqual([line['tool'] for line in self.logs()],['uname'])
 
     def test_download_or_checksum_failure_never_runs_installer(self):
@@ -329,9 +332,9 @@ class SetupShellTests(unittest.TestCase):
                 self.assertEqual(output,'')
                 if interruption:
                     self.assertEqual(status,130)
-                    self.assertIn('interrupted',stderr)
+                    self.assertIn('输入已中断；安装已取消',stderr)
                 else:
-                    self.assertIn('input ended',status)
+                    self.assertIn('输入已结束；安装已取消',status)
                 self.assertTrue(all(size == 4097 for size in terminal.sizes))
 
     def test_domain_physical_line_byte_boundary(self):
@@ -388,7 +391,7 @@ class SetupShellTests(unittest.TestCase):
             with self.subTest(value=value):
                 result=self.run_setup('--domain',value)
                 self.assertNotEqual(result.returncode,0)
-                self.assertIn('controlling terminal is required',result.stderr)
+                self.assertIn('域名输入需要可用的控制终端',result.stderr)
                 self.assertFalse(self.logs('curl'))
                 self.assertFalse(self.logs('installer'))
                 self.assertFalse((self.root/'must-not-exist').exists())
@@ -454,7 +457,7 @@ class SetupShellTests(unittest.TestCase):
         self.config={'installer_status':37,'rm_status':19}
         result=self.run_setup()
         self.assertEqual(result.returncode,37,result.stderr)
-        self.assertIn('could not remove setup directory',result.stderr)
+        self.assertIn('无法删除安装入口的临时目录',result.stderr)
         self.assertEqual(len(list((self.root/'temporary').iterdir())),1)
 
     def test_mktemp_failure_or_signal_owns_and_removes_printed_path(self):

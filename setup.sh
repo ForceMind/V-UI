@@ -17,50 +17,49 @@ setup_main() {
     case "$argument" in
       --help|-h)
         cat <<'HELP'
-V-UI v0.4.9 interactive installation and global v-ui command (Linux only).
-Usage: bash setup.sh [--version v0.4.9] [installer options]
+V-UI v0.4.9 交互安装与全局 v-ui 命令（仅支持 Linux）。
+用法：bash setup.sh [--version v0.4.9] [安装器选项]
 
-Uses root or the existing sudo policy; does not install a sudoers exemption.
-Supported installer options: --domain, --email, --admin, --port, --bind,
---node-port, --node-udp-port, --open-firewall, --archive-temp-dir, --cert,
---key, --health-ca, --assume-external-ports-open, --accept-terms, --upgrade.
-Domain values are normalized and validated before continuing; invalid input is
-prompted again immediately. Domain input lines are limited to 4096 UTF-8 bytes
-including the newline. Other values are forwarded unchanged. Administrator
-passwords are prompted securely.
-The version, interactive mode, global command and trusted kit cannot be overridden.
-Only v0.4.9 has trusted hashes in this entry point. The mutable raw setup.sh URL
-must itself be trusted; downloaded release assets are checked against fixed hashes.
+使用 root 或已有 sudo 授权；不新增免密 sudo 规则。
+支持的安装器选项：--domain、--email、--admin、--port、--bind、
+--node-port、--node-udp-port、--open-firewall、--archive-temp-dir、--cert、
+--key、--health-ca、--assume-external-ports-open、--accept-terms、--upgrade。
+域名规范化并校验通过后才继续；无效输入会立即提示重新输入。
+域名每行最多 4096 个 UTF-8 字节（含换行）。其他参数值原样转发。
+管理员密码通过安全提示输入。
+版本、交互模式、全局命令和可信套件设置不能覆盖。
+此入口仅内置 v0.4.9 的可信摘要。你仍须信任可变的原始 setup.sh URL；
+下载的发布资产会按固定摘要校验。
 HELP
         return 0 ;;
       --version)
-        [[ "$version_seen" -eq 0 && "$#" -ge 2 ]] || { printf '%s\n' '--version requires one trusted version and cannot be repeated.' >&2; return 2; }
+        [[ "$version_seen" -eq 0 && "$#" -ge 2 ]] || { printf '%s\n' '--version 必须指定一个受信任的版本，且不能重复。' >&2; return 2; }
         version="$2"; version_seen=1; shift 2 ;;
       --version=*)
-        [[ "$version_seen" -eq 0 ]] || { printf '%s\n' '--version cannot be repeated.' >&2; return 2; }
+        [[ "$version_seen" -eq 0 ]] || { printf '%s\n' '--version 不能重复。' >&2; return 2; }
         version="${argument#*=}"; version_seen=1; shift ;;
       --domain)
-        [[ "$#" -ge 2 && "$2" != --* ]] || { printf 'Missing value for %s\n' "$argument" >&2; return 2; }
+        [[ "$#" -ge 2 && "$2" != --* ]] || { printf '选项 %s 缺少参数值\n' "$argument" >&2; return 2; }
         domain="$2"; shift 2 ;;
       --domain=*) domain="${argument#*=}"; shift ;;
       --email|--admin|--port|--bind|--node-port|--node-udp-port|--open-firewall|--archive-temp-dir|--cert|--key|--health-ca)
-        [[ "$#" -ge 2 && "$2" != --* ]] || { printf 'Missing value for %s\n' "$argument" >&2; return 2; }
+        [[ "$#" -ge 2 && "$2" != --* ]] || { printf '选项 %s 缺少参数值\n' "$argument" >&2; return 2; }
         installer_args+=("$argument" "$2"); shift 2 ;;
       --email=*|--admin=*|--port=*|--bind=*|--node-port=*|--node-udp-port=*|--open-firewall=*|--archive-temp-dir=*|--cert=*|--key=*|--health-ca=*)
         installer_args+=("$argument"); shift ;;
       --assume-external-ports-open|--accept-terms|--upgrade)
         installer_args+=("$argument"); shift ;;
       *)
-        printf 'Unsupported or managed setup option: %s\n' "$argument" >&2
+        printf '选项 %s 不受支持或由安装入口固定管理\n' "$argument" >&2
         return 2 ;;
     esac
   done
-  [[ "$version" == v0.4.9 ]] || { printf 'No trusted release hashes for version: %s\n' "$version" >&2; return 2; }
-  [[ "$(uname -s)" == Linux ]] || { printf '%s\n' 'V-UI setup supports Linux only.' >&2; return 1; }
+  [[ "$version" == v0.4.9 ]] || { printf '版本 %s 没有内置的可信发布摘要\n' "$version" >&2; return 2; }
+  [[ "$(uname -s)" == Linux ]] || { printf '%s\n' 'V-UI 安装入口仅支持 Linux。' >&2; return 1; }
   # Re-enter the already loaded function as a command string, never through the
   # original file descriptor: sudo commonly closes process-substitution /dev/fd.
   if [[ "$EUID" -ne 0 ]]; then
-    command -v sudo >/dev/null 2>&1 || { printf '%s\n' 'Run as root or install sudo and rerun setup.' >&2; return 1; }
+    command -v sudo >/dev/null 2>&1 || { printf '%s\n' '请以 root 运行，或安装 sudo 后重新运行安装入口。' >&2; return 1; }
     exec sudo -- /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8 \
       PYTHONDONTWRITEBYTECODE=1 /bin/bash -c "$(declare -f setup_main); setup_main \"\$@\"" v-ui-setup --version "$version" "--domain=$domain" ${installer_args[@]+"${installer_args[@]}"}
   fi
@@ -73,7 +72,7 @@ HELP
     trap - EXIT
     trap '' INT TERM
     if [[ -n "$setup_dir" ]]; then
-      rm -rf -- "$setup_dir" || printf 'Warning: could not remove setup directory: %s\n' "$setup_dir" >&2 || :
+      rm -rf -- "$setup_dir" || printf '警告：无法删除安装入口的临时目录：%s\n' "$setup_dir" >&2 || :
     fi
     exit "$status"
   }
@@ -99,10 +98,10 @@ HELP
     elif command -v zypper >/dev/null 2>&1; then zypper --non-interactive install ca-certificates curl bash coreutils python3
     elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm --needed ca-certificates curl bash coreutils python
     elif command -v xbps-install >/dev/null 2>&1; then xbps-install -Sy ca-certificates curl bash coreutils python3
-    else printf '%s\n' 'Install curl, sha256sum and system /usr/bin/python3 3.9+, then rerun setup.' >&2; exit 1
+    else printf '%s\n' '请安装 curl、sha256sum 和系统 /usr/bin/python3（3.9 或更高版本），然后重新运行安装入口。' >&2; exit 1
     fi
   fi
-  setup_python_ready || { printf '%s\n' 'Global v-ui requires system /usr/bin/python3 3.9+; setup cannot continue.' >&2; exit 1; }
+  setup_python_ready || { printf '%s\n' '全局 v-ui 需要系统 /usr/bin/python3（3.9 或更高版本）；安装无法继续。' >&2; exit 1; }
   # Use the fixed OS interpreter, with isolated imports and a separate terminal.
   # stdin remains available for the frozen installer's password input channel.
   domain="$(/usr/bin/python3 -B -I -S - "$domain" <<'PYDOMAIN'
@@ -114,10 +113,10 @@ def fqdn(value):
     try:
         name = value.strip().rstrip('.').encode('idna').decode('ascii').lower()
     except (AttributeError, UnicodeError):
-        raise ValueError('Invalid domain') from None
+        raise ValueError('域名无效') from None
     if (len(name) > 253 or '.' not in name or name.split('.')[-1].isdigit()
             or not all(re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', p) for p in name.split('.'))):
-        raise ValueError('Use a DNS domain without URL, path, port, IP or wildcard')
+        raise ValueError('请使用 DNS 域名，不含 URL、路径、端口、IP 或通配符')
     return name
 
 
@@ -137,12 +136,12 @@ except ValueError:
                 # in bounded chunks so a valid-looking suffix cannot become input.
                 raw = terminal.readline(4097)
                 if not raw:
-                    raise SystemExit('Domain input ended; setup cancelled.')
+                    raise SystemExit('域名输入已结束；安装已取消。')
                 if len(raw) > 4096:
                     while not raw.endswith(b'\n'):
                         raw = terminal.readline(4097)
                         if not raw:
-                            raise SystemExit('Domain input ended; setup cancelled.')
+                            raise SystemExit('域名输入已结束；安装已取消。')
                     terminal.write(invalid.encode('utf-8'))
                     continue
                 try:
@@ -152,9 +151,9 @@ except ValueError:
                     continue
                 break
     except OSError as error:
-        raise SystemExit('A controlling terminal is required for domain input: ' + str(error)) from None
+        raise SystemExit('域名输入需要可用的控制终端：' + str(error)) from None
     except KeyboardInterrupt:
-        print('\nDomain input interrupted; setup cancelled.', file=sys.stderr)
+        print('\n域名输入已中断；安装已取消。', file=sys.stderr)
         raise SystemExit(130) from None
 print(name)
 PYDOMAIN
@@ -165,7 +164,7 @@ PYDOMAIN
   allocating=0
   if [[ "$pending_signal" -ne 0 ]]; then exit "$pending_signal"; fi
   [[ "$allocation_status" -eq 0 ]] || exit "$allocation_status"
-  [[ -n "$setup_dir" ]] || { printf '%s\n' 'Could not allocate private setup directory.' >&2; exit 1; }
+  [[ -n "$setup_dir" ]] || { printf '%s\n' '无法创建安装入口的私有临时目录。' >&2; exit 1; }
   curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --location --retry 2 --connect-timeout 15 --max-time 300 \
     "https://github.com/ForceMind/V-UI/releases/download/$version/install.sh" -o "$setup_dir/install.sh"
   printf '%s  %s\n' "$installer_sha" "$setup_dir/install.sh" | sha256sum -c -

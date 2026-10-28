@@ -24,12 +24,20 @@ from scripts.ops_menu_smoke import MenuSession
 from online_install_helpers import fixture_commands, published_commands, setup_commands, configured_setup_with_tty, global_menu_check, hosted_command_directory, sudo_policy_snapshot
 
 
+def installer_has_chinese_prompts(version):
+    if not re.fullmatch(r'\d+\.\d+\.\d+', version):
+        raise AssertionError('Exact stable installer version required')
+    return tuple(map(int, version.split('.'))) >= (0, 4, 10)
+
+
 @unittest.skipUnless(os.getenv('VUI_SYSTEM_INSTALL_TEST') == '1', 'explicit ephemeral systemd installer gate')
 class OneClickSystemTests(unittest.TestCase):
     def test_actual_offline_installer_permissions_socket_and_autostart(self):
         self.assertNotEqual(os.geteuid(), 0)
         source = Path(__file__).resolve().parents[1]
         published_version = os.getenv('VUI_PUBLISHED_INSTALL_VERSION')
+        new_installer = installer_has_chinese_prompts(published_version or (source/'VERSION').read_text().strip())
+        exercise_confirmations = new_installer and os.getenv('VUI_INSTALLER_YN_TEST') == '1'
         bundle = Path(os.environ['VUI_RELEASE_BUNDLE']) if not published_version else None
         sha = bundle.with_suffix(bundle.suffix+'.sha256').read_text().split()[0] if bundle else None
         root = Path('/var/lib/v-ui')
@@ -48,16 +56,24 @@ class OneClickSystemTests(unittest.TestCase):
             password = 'Synthetic-systemd-install-password!'
             node_port = unused_port()
             certificate_args = ['--cert',str(cert),'--key',str(key),'--health-ca',str(ca),
-                                '--bind','127.0.0.1','--open-firewall','no','--assume-external-ports-open']
+                                '--bind','127.0.0.1','--open-firewall','no']
+            if not exercise_confirmations:
+                certificate_args.append('--assume-external-ports-open')
             configured_args = ['--domain',domain,'--email','admin@example.test','--admin','installer-admin',
                                '--port',str(port),'--node-port',str(node_port)]
+            if exercise_confirmations:
+                # Initial installation exercises actual y/n consent below.
+                # Same unchanged loopback fixture is explicitly acknowledged on
+                # configured repeat/upgrade; no real cloud ingress is claimed.
+                configured_args.append('--assume-external-ports-open')
             online = None
             if published_version:
                 self.assertIsNone(gate, 'Published online acceptance is separate from the resource fixture')
                 if os.getenv('VUI_SETUP_INSTALL') == '1':
                     online = setup_commands(source,published_version,os.environ['VUI_RELEASE_COMMIT'],
                                             os.environ['VUI_SETUP_CHECKOUT'],os.environ['VUI_SETUP_REF'],
-                                            certificate_args,configured_args)
+                                            certificate_args,configured_args,
+                                            release_source=Path(os.environ['VUI_SETUP_RELEASE_SOURCE']))
                 else:
                     online = published_commands(source,published_version,os.environ['VUI_RELEASE_COMMIT'],
                                                 certificate_args,configured_args)
@@ -93,16 +109,20 @@ class OneClickSystemTests(unittest.TestCase):
             if child == 0:
                 os.execvp(cmd[0], cmd)
             output = b''; sent_first=False; sent_second=False; status=None
-            choices = [('Panel domain: ',domain),('Contact email: ','admin@example.test'),
+            domain_prompt = '面板域名（例如 panel.example.com）: ' if new_installer and os.getenv('VUI_SETUP_INSTALL') != '1' else 'Panel domain: '
+            email_prompt = '联系邮箱: ' if new_installer else 'Contact email: '
+            choices = [(domain_prompt,domain),(email_prompt,'admin@example.test'),
                        ('管理员用户名 [admin]: ','installer-admin'),('面板 HTTPS 端口 [8443]: ',str(port)),
                        ('默认节点 TCP 端口 [10443]: ',str(node_port))] if online else []
-            domain_retry = os.getenv('VUI_SETUP_INSTALL') == '1'
+            domain_retry = os.getenv('VUI_SETUP_INSTALL') == '1' or os.getenv('VUI_DOMAIN_RETRY_TEST') == '1'
             domain_values = ['', 'https://vpn.example.test:3215/path', 'bad..example.test', domain.upper()+'.'] if domain_retry else []
             if domain_retry:
                 choices = choices[1:]
             sent_domains = 0
             advanced_before_valid_domain = False
             product_changed_before_valid_domain = False
+            confirmations = {prefix:0 for prefix in ('你是否已在实际入站防火墙区域中手动核对并放行 ',
+                                                       '你是否已在云安全组或上游防火墙中放行 ')} if exercise_confirmations else {}
             sent_choices = set()
             deadline=time.monotonic()+300
             try:
@@ -114,15 +134,19 @@ class OneClickSystemTests(unittest.TestCase):
                         output+=chunk
                         decoded=output.decode(errors='replace')
                         if domain_retry:
-                            if 'Contact email: ' in decoded and sent_domains < len(domain_values):
+                            if email_prompt in decoded and sent_domains < len(domain_values):
                                 advanced_before_valid_domain = True
-                            if decoded.count('Panel domain: ') > sent_domains and sent_domains < len(domain_values):
+                            if decoded.count(domain_prompt) > sent_domains and sent_domains < len(domain_values):
                                 product_changed_before_valid_domain |= any(os.path.lexists(path) for path in (
                                     root, Path('/etc/v-ui'), Path('/usr/local/lib/v-ui'),
                                     Path('/usr/local/sbin/v-ui'), Path('/usr/local/bin/v-ui'),
                                     Path('/etc/systemd/system/v-ui.service')))
                                 os.write(fd,(domain_values[sent_domains]+'\n').encode())
                                 sent_domains += 1
+                        for prefix,count in tuple(confirmations.items()):
+                            if decoded.count(prefix) > count:
+                                os.write(fd,('maybe\n' if count == 0 else 'y\n').encode())
+                                confirmations[prefix] += 1
                         for prompt,value in choices:
                             if prompt in decoded and prompt not in sent_choices:
                                 os.write(fd,(value+'\n').encode());sent_choices.add(prompt)
@@ -151,7 +175,10 @@ class OneClickSystemTests(unittest.TestCase):
                 self.assertEqual(sent_domains,len(domain_values),clean[-8000:])
                 self.assertFalse(advanced_before_valid_domain,clean[-8000:])
                 self.assertFalse(product_changed_before_valid_domain,clean[-8000:])
-                self.assertGreaterEqual(clean.count('域名无效，请重新输入'),3,clean[-8000:])
+                self.assertGreaterEqual(clean.count('请重新输入'),3,clean[-8000:])
+            if exercise_confirmations:
+                self.assertGreaterEqual(confirmations['你是否已在云安全组或上游防火墙中放行 '],2,clean[-8000:])
+                self.assertIn('请输入 y/yes 或 n/no',clean)
             self.assertTrue(sent_second,clean[-8000:])
             if online:
                 self.assertEqual(len(sent_choices),len(choices),clean[-8000:])
@@ -238,7 +265,7 @@ class OneClickSystemTests(unittest.TestCase):
             if gate:
                 gate.installer_receipt('implicit_repeat', repeat.stdout)
             self.assertNotEqual(repeat.returncode,0)
-            self.assertIn('already exists',repeat.stdout+repeat.stderr)
+            self.assertIn('安装已存在' if new_installer else 'already exists',repeat.stdout+repeat.stderr)
             check_uid('v-ui.service')
             # Existing fake M1 proxy drafts must survive the actual installer
             # controller's stopped backup. No apply or network change is made.
@@ -291,6 +318,8 @@ class OneClickSystemTests(unittest.TestCase):
                 print('Online managed installer transport: '+online['transport']+'; interactive domain/email/admin/ports, real global v-ui menu and stop/start passed')
             if domain_retry:
                 print('Domain input retry: blank / URL-with-port-and-path / invalid label rejected before email and product installation; uppercase trailing-dot domain accepted and canonicalized; real installed service, global v-ui and upgrade verified')
+            if exercise_confirmations:
+                print('Chinese installer confirmation: invalid reply re-prompted, short y accepted for cloud/upstream confirmation; temporary loopback fixture only, not proof of real cloud ingress')
             print('One-command systemd: real sudo setup / non-root workers / private state / HTTPS / fd-passed HTTP-01 port80 / auth / repeat refusal / upgrade backup / restart OK')
 
 if __name__=='__main__':unittest.main()
