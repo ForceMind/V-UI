@@ -19,6 +19,11 @@ on:
         required: true
         type: boolean
         default: false
+      installer_only_no_browser:
+        description: Approved 0.4.10 installer-only scope, browsers explicitly unverified
+        required: true
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -34,6 +39,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Promote previously accepted artifact without rebuilding
         env:
           GH_TOKEN: ${{ github.token }}
@@ -41,8 +47,10 @@ jobs:
           VERSION: ${{ inputs.version }}
           CONFIRM: ${{ inputs.confirm }}
           PUBLISH: ${{ inputs.publish }}
+          INSTALLER_ONLY_NO_BROWSER: ${{ inputs.installer_only_no_browser }}
         run: |
           set -euo pipefail
           args=(--commit "$COMMIT" --version "$VERSION" --confirm "$CONFIRM")
           if [[ "$PUBLISH" == 'true' ]]; then args+=(--publish); fi
+          if [[ "$INSTALLER_ONLY_NO_BROWSER" == 'true' ]]; then args+=(--installer-only-no-browser); fi
           python3 scripts/publish_release.py "${args[@]}"

@@ -74,7 +74,7 @@ class InstallerLockTests(unittest.TestCase):
             self.path.unlink()
             self.path.touch(mode=0o600)
         with patch.object(installer.fcntl, 'flock', side_effect=replace_then_hold):
-            with self.assertRaisesRegex(installer.InstallError, 'identity'):
+            with self.assertRaisesRegex(installer.InstallError, '安装锁文件已发生变化'):
                 with self.hold(): pass
         # The abandoned original fd was closed; no automatic deletion of the
         # unknown replacement or claim that the old lock still serializes it.

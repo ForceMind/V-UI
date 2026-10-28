@@ -25,11 +25,66 @@ from scripts.publish_release import (
     installation_command,
     select_runs,
     validate_run_jobs,
+    validate_installer_only_scope,
+    INSTALLER_ONLY_BASELINE,
     validate_kit,
     validate_target_artifact,
 )
 
 SHA='a'*40
+
+
+class InstallerOnlyReleaseTests(unittest.TestCase):
+    def scope(self, changes='M\tVERSION\nM\tmain.py\nM\tscripts/install_system.py\n',
+              mode='100644', application_extra=b''):
+        old=b"app = FastAPI(version='0.4.9')\n"
+        def git(args,**kwargs):
+            if args[1:3]==['diff','--name-status']:return changes
+            if args[1]=='ls-tree':return mode+' blob '+'f'*40+'\t'+args[-1]+'\n'
+            if args[1]=='show':
+                if args[2]==INSTALLER_ONLY_BASELINE+':main.py':return old
+                if args[2]==SHA+':main.py':return old.replace(b'0.4.9',b'0.4.10')+application_extra
+                if args[2]==SHA+':VERSION':return b'0.4.10\n'
+            raise AssertionError(args)
+        with patch('scripts.publish_release.subprocess.run') as ancestry, \
+                patch('scripts.publish_release.subprocess.check_output',side_effect=git):
+            validate_installer_only_scope(SHA,'0.4.10')
+            self.assertEqual(ancestry.call_args.args[0],['git','merge-base','--is-ancestor',INSTALLER_ONLY_BASELINE,SHA])
+
+    def test_regular_installer_source_and_version_only_app_change_allowed(self):
+        self.scope()
+
+    def test_exception_cannot_be_reused_for_another_release(self):
+        for version in ('0.4.9','0.4.11','0.5.0'):
+            with self.subTest(version=version),patch('scripts.publish_release.subprocess.run') as git,self.assertRaises(ReleaseGateError):
+                validate_installer_only_scope(SHA,version)
+            git.assert_not_called()
+
+    def test_web_app_dependency_and_core_changes_still_require_full_acceptance(self):
+        for path in ('web/js/app.js','app/api/auth.py','requirements-runtime.txt','scripts/fetch_test_cores.py','deploy/system_ops.py'):
+            with self.subTest(path=path),self.assertRaises(ReleaseGateError):self.scope(changes='M\t'+path+'\n')
+
+    def test_additional_application_logic_is_rejected(self):
+        with self.assertRaisesRegex(ReleaseGateError,'Application changes exceed'):
+            self.scope(application_extra=b'new_application_logic()\n')
+
+    def test_deleted_renamed_or_linked_files_are_rejected(self):
+        for change,mode in (('D\tsetup.sh\n','100644'),('R100\tsetup.sh\tother.sh\n','100644'),('M\tsetup.sh\n','120000')):
+            with self.subTest(change=change,mode=mode),self.assertRaises(ReleaseGateError):self.scope(changes=change,mode=mode)
+
+    def test_browser_exception_never_waives_other_skips_failure_or_missing_steps(self):
+        run,base=ExactJobQualificationTests().fixtures()
+        for state in ('only_browser_skipped','nonbrowser_skipped','browser_failed','browser_missing'):
+            job={**base,'steps':[dict(s,conclusion='skipped') for s in base['steps']]}
+            if state=='nonbrowser_skipped':job['steps'].append({'name':'Run tests','status':'completed','conclusion':'skipped'})
+            if state=='browser_failed':job['steps'][0]['conclusion']='failure'
+            if state=='browser_missing':job['steps'].pop()
+            with self.subTest(state=state),patch('scripts.publish_release.request',side_effect=[{'jobs':[job]},run]):
+                if state=='only_browser_skipped':validate_run_jobs({'test.yml':run},SHA,installer_only_no_browser=True)
+                else:
+                    with self.assertRaises(ReleaseGateError):validate_run_jobs({'test.yml':run},SHA,installer_only_no_browser=True)
+        with patch('scripts.publish_release.request',return_value={'jobs':[job]}),self.assertRaises(ReleaseGateError):
+            validate_run_jobs({'test.yml':run},SHA)
 
 
 class ExactJobQualificationTests(unittest.TestCase):
