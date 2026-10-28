@@ -152,10 +152,10 @@ with pathlib.Path(LOG).open('a') as stream:
             'download_log': log}
 
 
-def published_commands(source, version, commit, certificate_args, configured_args, *, checkout_commit=None):
+def published_commands(source, version, commit, certificate_args, configured_args):
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version) or (source / 'VERSION').read_text().strip() != version:
         raise AssertionError('Published version differs from checked out source')
-    if subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip() != (checkout_commit or commit):
+    if subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip() != commit:
         raise AssertionError('Published acceptance checkout is not exact')
     opener = build_opener(ProxyHandler({}))
     def read(url, limit):
@@ -200,14 +200,16 @@ def published_commands(source, version, commit, certificate_args, configured_arg
             'transport': 'anonymous public HTTPS release assets', 'canonical': canonical}
 
 
-def setup_commands(source, version, release_commit, checkout_commit, ref, certificate_args, configured_args):
+def setup_commands(source, version, release_commit, checkout_commit, ref, certificate_args, configured_args, *, release_source):
     """Exercise the actual short bootstrap, independently of the frozen app release."""
     if ref != 'main' and not re.fullmatch(r'[a-f0-9]{40}', ref):
         raise AssertionError('Short bootstrap requires main or an exact source commit')
-    # Keep the original public suite/source/digest checks. The bootstrap is a
-    # new repository entry; the immutable application suite remains v0.4.9.
-    published = published_commands(source, version, release_commit, certificate_args,
-                                   configured_args, checkout_commit=checkout_commit)
+    if subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip() != checkout_commit:
+        raise AssertionError('Short bootstrap checkout is not exact')
+    # The new bootstrap may have a newer VERSION and installer. Authenticate the
+    # immutable public suite against its own independently checked out source.
+    published = published_commands(Path(release_source), version, release_commit,
+                                   certificate_args, configured_args)
     url = 'https://raw.githubusercontent.com/ForceMind/V-UI/' + ref + '/setup.sh'
     opener = build_opener(ProxyHandler({}))
     with opener.open(Request(url, headers={'User-Agent':'V-UI-short-install-acceptance'}), timeout=60) as response:

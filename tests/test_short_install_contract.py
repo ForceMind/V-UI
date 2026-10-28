@@ -16,6 +16,19 @@ class ShortInstallContractTests(unittest.TestCase):
     stable = 'a' * 40
     checkout = 'b' * 40
 
+    def test_installer_language_identity_does_not_depend_on_consent_test_opt_in(self):
+        from test_oneclick_system import installer_has_chinese_prompts
+        self.assertFalse(installer_has_chinese_prompts('0.4.9'))
+        self.assertTrue(installer_has_chinese_prompts('0.4.10'))
+        self.assertTrue(installer_has_chinese_prompts('0.4.11'))
+        root=Path(__file__).resolve().parents[1]
+        for name in ('oneclick.yml','short-install.yml','online-release-acceptance.yml'):
+            workflow=yaml.load((root/'.github/workflows'/name).read_text(),Loader=yaml.BaseLoader)
+            envs=[step.get('env',{}) for job in workflow['jobs'].values() for step in job['steps']]
+            selected=[env for env in envs if env.get('VUI_SYSTEM_INSTALL_TEST')=='1']
+            self.assertEqual(len(selected),1)
+            self.assertEqual(selected[0].get('VUI_INSTALLER_YN_TEST'),'1')
+
     def test_existing_browser_steps_remain_explicit_manual_opt_in(self):
         root=Path(__file__).resolve().parents[1]
         for name in ('test.yml','release.yml','acme.yml'):
@@ -33,12 +46,32 @@ class ShortInstallContractTests(unittest.TestCase):
         self.assertEqual(result.returncode,7)
         self.assertIn('controlling-terminal=True',result.stdout)
 
+    def test_workflow_checks_out_frozen_release_source_separately(self):
+        root=Path(__file__).resolve().parents[1]
+        workflow=yaml.load((root/'.github/workflows/short-install.yml').read_text(),Loader=yaml.BaseLoader)
+        steps=workflow['jobs']['short-install']['steps']
+        checkouts=[step for step in steps if step.get('uses','').startswith('actions/checkout@')]
+        self.assertEqual(len(checkouts),2)
+        self.assertEqual(checkouts[0]['with']['persist-credentials'],'false')
+        self.assertEqual(checkouts[1]['with'],{'persist-credentials':'false',
+                                             'ref':'a39b6e009829dd7f1be772fd3454474903b9858a',
+                                             'path':'.published-suite'})
+        acceptance=next(step for step in steps if 'VUI_SETUP_INSTALL' in step.get('env',{}))
+        self.assertEqual(acceptance['env']['VUI_SETUP_RELEASE_SOURCE'],'${{ github.workspace }}/.published-suite')
+        self.assertEqual(acceptance['env']['VUI_PUBLISHED_INSTALL_VERSION'],'0.4.9')
+        self.assertEqual(acceptance['env']['VUI_RELEASE_COMMIT'],checkouts[1]['with']['ref'])
+
     def fixture(self, folder, *, release_commit=None, raw=None):
-        source = Path(folder)
-        (source / 'VERSION').write_text('0.4.9')
-        (source / 'install.sh').write_bytes(b'fixed published installer\n')
+        source = Path(folder)/'new-bootstrap'
+        release_source = Path(folder)/'frozen-release'
+        source.mkdir()
+        release_source.mkdir()
+        (source / 'VERSION').write_text('0.4.10')
+        (source / 'install.sh').write_bytes(b'new installer differs from the frozen release\n')
         (source / 'setup.sh').write_bytes(b'new repository bootstrap\n')
-        files = {'install.sh':(source / 'install.sh').read_bytes(), 'SHA256SUMS':b'fixed complete checksum list\n',
+        (release_source / 'VERSION').write_text('0.4.9')
+        (release_source / 'install.sh').write_bytes(b'fixed published installer\n')
+        files = {'install.sh':(release_source / 'install.sh').read_bytes(), 'SHA256SUMS':b'fixed complete checksum list\n',
                  'RELEASE.json':json.dumps({'version':'0.4.9','source_commit':release_commit or self.stable}).encode()}
         prefix = 'https://github.com/ForceMind/V-UI/releases/download/v0.4.9/'
         assets = [{'name':name, 'browser_download_url':prefix+name,
@@ -50,61 +83,113 @@ class ShortInstallContractTests(unittest.TestCase):
         mapping['https://api.github.com/repos/ForceMind/V-UI/releases/tags/v0.4.9'] = json.dumps(release).encode()
         mapping['https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh'] = (source/'setup.sh').read_bytes() if raw is None else raw
         class Response:
-            def __init__(self,url):self.url=url
+            def __init__(self,url,mapping):self.url=url;self.mapping=mapping
             def __enter__(self):return self
             def __exit__(self,*args):pass
             def geturl(self):return self.url
-            def read(self,limit):return mapping[self.url][:limit]
+            def read(self,limit):return self.mapping[self.url][:limit]
         class Opener:
-            def open(self,request,timeout):return Response(request.full_url)
-        return source, Opener()
+            def __init__(self,mapping):self.mapping=mapping
+            def open(self,request,timeout):return Response(request.full_url,self.mapping)
+        return source, release_source, Opener(mapping)
 
-    def invoke(self, source):
+    def exact_heads(self,source,release_source,*,bootstrap=None,published=None):
+        def read(command,*,cwd,text):
+            self.assertEqual(command,['git','rev-parse','HEAD'])
+            self.assertTrue(text)
+            if Path(cwd)==source:return (bootstrap or self.checkout)+'\n'
+            self.assertEqual(Path(cwd),release_source)
+            return (published or self.stable)+'\n'
+        return read
+
+    def invoke(self, source, release_source):
         return helpers.setup_commands(source,'0.4.9',self.stable,self.checkout,'main',
-                                      ['--cert','/fixture/cert with spaces.pem'],['--domain','literal.example.test'])
+                                      ['--cert','/fixture/cert with spaces.pem'],['--domain','literal.example.test'],
+                                      release_source=release_source)
 
     def test_new_checkout_and_frozen_release_have_separate_identities(self):
         with tempfile.TemporaryDirectory() as folder:
-            source,opener=self.fixture(folder)
+            source,release_source,opener=self.fixture(folder)
+            self.assertEqual((source/'VERSION').read_text(),'0.4.10')
+            self.assertNotEqual((source/'install.sh').read_bytes(),(release_source/'install.sh').read_bytes())
             with patch.object(helpers,'build_opener',return_value=opener), \
-                    patch.object(helpers.subprocess,'check_output',return_value=self.checkout+'\n'):
-                result=self.invoke(source)
+                    patch.object(helpers.subprocess,'check_output',side_effect=self.exact_heads(source,release_source)):
+                result=self.invoke(source,release_source)
             self.assertEqual(result['canonical'],'bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh)')
             self.assertIn(shlex.quote('/fixture/cert with spaces.pem'),result['initial'][2])
+            self.assertIn('--version v0.4.9',result['initial'][2])
             self.assertIn('--upgrade',result['upgrade'][2])
             self.assertIn('release_canonical',result)
 
     def test_main_advance_or_tamper_is_rejected_before_installation(self):
         with tempfile.TemporaryDirectory() as folder:
-            source,opener=self.fixture(folder,raw=b'different public bootstrap')
+            source,release_source,opener=self.fixture(folder,raw=b'different public bootstrap')
             with patch.object(helpers,'build_opener',return_value=opener), \
-                    patch.object(helpers.subprocess,'check_output',return_value=self.checkout+'\n'):
-                with self.assertRaisesRegex(AssertionError,'differs from exact checkout'):self.invoke(source)
+                    patch.object(helpers.subprocess,'check_output',side_effect=self.exact_heads(source,release_source)):
+                with self.assertRaisesRegex(AssertionError,'differs from exact checkout'):self.invoke(source,release_source)
 
     def test_new_checkout_does_not_relabel_the_frozen_release(self):
         with tempfile.TemporaryDirectory() as folder:
-            source,opener=self.fixture(folder,release_commit=self.checkout)
+            source,release_source,opener=self.fixture(folder,release_commit=self.checkout)
             with patch.object(helpers,'build_opener',return_value=opener), \
-                    patch.object(helpers.subprocess,'check_output',return_value=self.checkout+'\n'):
-                with self.assertRaisesRegex(AssertionError,'Published source identity mismatch'):self.invoke(source)
+                    patch.object(helpers.subprocess,'check_output',side_effect=self.exact_heads(source,release_source)):
+                with self.assertRaisesRegex(AssertionError,'Published source identity mismatch'):self.invoke(source,release_source)
 
-    def test_wrong_checkout_is_rejected_before_network(self):
+    def test_wrong_bootstrap_or_release_checkout_is_rejected_before_network(self):
+        for wrong in ('bootstrap','published'):
+            with self.subTest(checkout=wrong),tempfile.TemporaryDirectory() as folder:
+                source,release_source,_=self.fixture(folder)
+                with patch.object(helpers,'build_opener') as network, \
+                        patch.object(helpers.subprocess,'check_output',side_effect=self.exact_heads(source,release_source,**{wrong:'c'*40})):
+                    with self.assertRaisesRegex(AssertionError,'checkout is not exact'):self.invoke(source,release_source)
+                    network.assert_not_called()
+
+    def test_wrong_release_source_version_is_rejected_before_network(self):
         with tempfile.TemporaryDirectory() as folder:
-            source,_=self.fixture(folder)
+            source,release_source,_=self.fixture(folder)
+            (release_source/'VERSION').write_text('0.4.10')
             with patch.object(helpers,'build_opener') as network, \
-                    patch.object(helpers.subprocess,'check_output',return_value=self.stable+'\n'):
-                with self.assertRaisesRegex(AssertionError,'checkout is not exact'):self.invoke(source)
+                    patch.object(helpers.subprocess,'check_output',side_effect=self.exact_heads(source,release_source)):
+                with self.assertRaisesRegex(AssertionError,'Published version differs'):self.invoke(source,release_source)
                 network.assert_not_called()
+
+    def test_changed_frozen_installer_bytes_are_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source,release_source,opener=self.fixture(folder)
+            (release_source/'install.sh').write_bytes(b'changed release source installer\n')
+            with patch.object(helpers,'build_opener',return_value=opener), \
+                    patch.object(helpers.subprocess,'check_output',side_effect=self.exact_heads(source,release_source)):
+                with self.assertRaisesRegex(AssertionError,'Published installer differs'):self.invoke(source,release_source)
+
+    def test_complete_assets_digest_and_long_command_remain_required(self):
+        for corruption,reason in [('assets','complete fixed asset set'),('digest','metadata/digest mismatch'),
+                                  ('body','installation command differs')]:
+            with self.subTest(corruption=corruption),tempfile.TemporaryDirectory() as folder:
+                source,release_source,opener=self.fixture(folder)
+                url='https://api.github.com/repos/ForceMind/V-UI/releases/tags/v0.4.9'
+                release=json.loads(opener.mapping[url])
+                self.assertEqual(len(release['assets']),19)
+                if corruption=='assets':release['assets'].pop()
+                elif corruption=='digest':
+                    next(item for item in release['assets'] if item['name']=='install.sh')['digest']='sha256:'+'0'*64
+                else:release['body']='unverified replacement command'
+                opener.mapping[url]=json.dumps(release).encode()
+                with patch.object(helpers,'build_opener',return_value=opener), \
+                        patch.object(helpers.subprocess,'check_output',side_effect=self.exact_heads(source,release_source)):
+                    with self.assertRaisesRegex(AssertionError,reason):self.invoke(source,release_source)
 
     def test_unapproved_branch_is_rejected_without_network(self):
         with patch.object(helpers,'build_opener') as network:
             with self.assertRaisesRegex(AssertionError,'main or an exact'):
-                helpers.setup_commands(Path('/unused'),'0.4.9',self.stable,self.checkout,'dev',[],[])
+                helpers.setup_commands(Path('/unused'),'0.4.9',self.stable,self.checkout,'dev',[],[],
+                                       release_source=Path('/unused-release'))
             network.assert_not_called()
 
     def test_legacy_published_path_still_requires_its_own_commit(self):
         with tempfile.TemporaryDirectory() as folder:
-            source,_=self.fixture(folder)
-            with patch.object(helpers.subprocess,'check_output',return_value=self.checkout+'\n'):
+            source,release_source,_=self.fixture(folder)
+            with patch.object(helpers.subprocess,'check_output',return_value=self.checkout+'\n'), \
+                    patch.object(helpers,'build_opener') as network:
                 with self.assertRaisesRegex(AssertionError,'checkout is not exact'):
-                    helpers.published_commands(source,'0.4.9',self.stable,[],[])
+                    helpers.published_commands(release_source,'0.4.9',self.stable,[],[])
+                network.assert_not_called()

@@ -92,6 +92,10 @@ OTHER_CONSTRUCTIONS = {
     ('tcp_upstream_export_helpers.py', 'HTTPPanel.start', 'Popen'),
     ('test_tcp_upstream_export_browser.py', 'TCPUpstreamExportBrowserTests.start_panel', 'Popen'),
     ('test_workspace_browser.py', 'WorkspaceBrowserTests.test_drafts_persistence_grants_rotation_and_revocation', 'Popen'),
+    # Synthetic CLI only: dedicated controlling PTY, separate password stdin,
+    # fake OS/download/installer tools, 15s deadline and finally kill/reap.
+    # No proxy core is launched and no Mihomo readiness qualification is granted.
+    ('test_setup_shell.py', 'SetupShellTests.run_setup_pty', 'Popen'),
     ('test_xhttp_preflight_loopback.py', 'XHTTPPreflightLoopbackTests.test_httpupgrade_actual_uri_wrong_transport_control', 'CoreProcess'),
     ('test_xhttp_preflight_loopback.py', 'XHTTPPreflightLoopbackTests.verify_clients', 'CoreProcess'),
 }

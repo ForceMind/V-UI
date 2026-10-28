@@ -156,7 +156,7 @@ class LinuxInstallationRegressions(unittest.TestCase):
              patch.object(installer, 'write_root_file', blocked), \
              patch.object(installer.service_support, 'stop', blocked), \
              patch.object(installer.service_support, 'enable_start', blocked):
-            with self.assertRaisesRegex(installer.InstallError, f'Port {port} is already in use'):
+            with self.assertRaisesRegex(installer.InstallError, f'端口 {port}/tcp 已被占用'):
                 installer.install(args)
         blocked.assert_not_called()
         self.assertFalse((self.root / 'service.json').exists())
@@ -207,11 +207,11 @@ class LinuxInstallationRegressions(unittest.TestCase):
              patch.object(firewall, 'open_ports') as change, \
              patch.object(installer, 'tty_confirm', return_value=False) as confirm, \
              patch('sys.stdout', new=io.StringIO()):
-            with self.assertRaisesRegex(installer.InstallError, 'manual firewall configuration'):
+            with self.assertRaisesRegex(installer.InstallError, '等待手动配置本机防火墙'):
                 installer.firewall_preflight(args, [80, 8443, 10443])
             query.assert_not_called()
             change.assert_not_called()
-            self.assertIn('actual ingress', confirm.call_args.args[0])
+            self.assertIn('实际入站', confirm.call_args.args[0])
 
     def test_firewall_dry_run_never_writes_or_confirms(self):
         args = argparse.Namespace(open_firewall='yes', dry_run=True,
@@ -250,8 +250,8 @@ class LinuxInstallationRegressions(unittest.TestCase):
                          [(80,), (8443, '0.0.0.0'), (10443, '0.0.0.0')])
         create.assert_not_called()
 
-    def test_confirmation_requires_word_yes(self):
-        for answer, accepted in (('yes\n', True), (' YES \n', True), ('y\n', False), ('\n', False), ('no\n', False)):
+    def test_confirmation_accepts_short_or_full_yes(self):
+        for answer, accepted in (('yes\n', True), (' YES \n', True), ('y\n', True), ('\n', False), ('no\n', False)):
             terminal = Mock()
             terminal.__enter__ = Mock(return_value=terminal)
             terminal.__exit__ = Mock(return_value=False)

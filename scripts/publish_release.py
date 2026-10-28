@@ -28,6 +28,21 @@ REQUIRED_ACCEPTANCE_STEPS = {
     'release.yml': {'Verify non-root install HTTPS browser and recovery'},
     'acme.yml': {'Test graphical certificate lifecycle against Pebble'},
 }
+INSTALLER_ONLY_BASELINE = 'c138d0062619d498d711e17f86a58a5e8f61a1cf'
+INSTALLER_ONLY_VERSION = '0.4.10'
+INSTALLER_ONLY_FILES = {
+    'VERSION', 'main.py', 'setup.sh', 'install.sh',
+    'scripts/install_system.py', 'scripts/install_ops_control.py', 'scripts/publish_release.py',
+    'README.md', 'CHANGELOG.md', 'AGENTS.md', 'ROADMAP.md', 'CONTRIBUTING.md',
+    '.github/workflows/publish.yml', '.github/workflows/short-install.yml',
+    '.github/workflows/oneclick.yml',
+    '.github/workflows/online-release-acceptance.yml',
+}
+BROWSER_SKIP_STEPS = {
+    name: steps | {'Install explicit test browser'} for name, steps in REQUIRED_ACCEPTANCE_STEPS.items()
+}
+BROWSER_SKIP_STEPS['test.yml'] = REQUIRED_ACCEPTANCE_STEPS['test.yml'] | {
+    'Install test browser', 'Prepare checksum-pinned browser frontend'}
 COMMON_ASSETS={'install.sh','install_system.py','platform_support.py','firewall_support.py',
                'service_support.py','install_ops_control.py','system_launcher.py',
                'system_ops.py','ops_worker.py','release_tools.py','v-ui',
@@ -118,7 +133,38 @@ def select_runs(runs,commit):
     return latest
 
 
-def validate_run_jobs(checks, commit):
+def validate_installer_only_scope(commit, version):
+    """One explicitly approved patch; no web/app/dependency/core changes allowed."""
+    if version != INSTALLER_ONLY_VERSION:
+        raise ReleaseGateError('Non-browser installer exception is only approved for 0.4.10')
+    try:
+        subprocess.run(['git','merge-base','--is-ancestor',INSTALLER_ONLY_BASELINE,commit],check=True,
+                       stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        changes=subprocess.check_output(['git','diff','--name-status',INSTALLER_ONLY_BASELINE,commit],text=True)
+        for line in changes.splitlines():
+            fields=line.split('\t')
+            if len(fields)!=2 or fields[0] not in ('A','M'):
+                raise ReleaseGateError('Installer-only scope refuses deletion, rename or type change')
+            name=fields[1]
+            allowed=(name in INSTALLER_ONLY_FILES or
+                     (name.startswith('tests/') and name.endswith('.py')) or
+                     (name.startswith('docs/') and name.endswith('.md')))
+            if not allowed:
+                raise ReleaseGateError('Non-installer change requires full acceptance: '+name)
+            mode=subprocess.check_output(['git','ls-tree',commit,'--',name],text=True).split()[0]
+            if mode not in ('100644','100755'):
+                raise ReleaseGateError('Installer-only exception requires regular source files')
+        previous=subprocess.check_output(['git','show',INSTALLER_ONLY_BASELINE+':main.py'])
+        current=subprocess.check_output(['git','show',commit+':main.py'])
+        if previous.count(b"version='0.4.9'") != 1 or current != previous.replace(b"version='0.4.9'",b"version='0.4.10'",1):
+            raise ReleaseGateError('Application changes exceed the installer-only version bump')
+        if subprocess.check_output(['git','show',commit+':VERSION']).strip()!=b'0.4.10':
+            raise ReleaseGateError('Installer-only version identity differs')
+    except subprocess.CalledProcessError as exc:
+        raise ReleaseGateError('Cannot prove installer-only source ancestry/scope') from exc
+
+
+def validate_run_jobs(checks, commit, *, installer_only_no_browser=False):
     """A green workflow with skipped acceptance is not release qualification."""
     for path, run in sorted(checks.items()):
         attempt = run.get('run_attempt')
@@ -143,8 +189,12 @@ def validate_run_jobs(checks, commit):
                     or job.get('status') != 'completed' or job.get('conclusion') != 'success'):
                 raise ReleaseGateError('Exact workflow job is not successful: '+path)
             steps=job.get('steps', [])
-            if not steps or any(step.get('status') != 'completed' or step.get('conclusion') != 'success'
-                                for step in steps):
+            def accepted(step):
+                return (step.get('status') == 'completed' and
+                        (step.get('conclusion') == 'success' or
+                         (installer_only_no_browser and step.get('conclusion') == 'skipped'
+                          and step.get('name') in BROWSER_SKIP_STEPS.get(path,set()))))
+            if not steps or not all(accepted(step) for step in steps):
                 raise ReleaseGateError('Workflow has unverified, skipped or failed steps: '+path)
         # Refuse a retry or state transition that started while evidence was read.
         current=request('actions/runs/'+str(run['id']))
@@ -263,6 +313,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--commit',required=True);p.add_argument('--version',required=True)
     p.add_argument('--confirm',required=True);p.add_argument('--publish',action='store_true')
+    p.add_argument('--installer-only-no-browser',action='store_true',
+                   help='Explicitly approved 0.4.10 installer-only exception; browser evidence stays unverified')
     args=p.parse_args()
     if not re.fullmatch(r'[a-f0-9]{40}',args.commit) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',args.version):
         raise ReleaseGateError('Exact commit and stable version required')
@@ -286,7 +338,9 @@ def main():
         if len(batch)<100:
             break
     checks=select_runs(runs,args.commit)
-    validate_run_jobs(checks,args.commit)
+    if args.installer_only_no_browser:
+        validate_installer_only_scope(args.commit,args.version)
+    validate_run_jobs(checks,args.commit,installer_only_no_browser=args.installer_only_no_browser)
 
     tag='v'+args.version
     for path in ('git/ref/tags/'+tag,'releases/tags/'+tag):
@@ -314,6 +368,10 @@ def main():
 
     evidence='\n'.join('- '+path+': '+str(run['html_url']) for path,run in sorted(checks.items()))
     body=files['RELEASE_NOTES.md'].decode()+'\n\nVerified commit: `'+args.commit+'`\n\n'+evidence
+    if args.installer_only_no_browser:
+        body+='\n\n验收范围：用户明确批准本次 0.4.10 纯安装交互修复采用非浏览器验收。浏览器未验证；'+\
+              '仅跳过明列的浏览器步骤，其余 jobs/steps、四目标制品及实际安装门禁保持。'+\
+              '已检查相对 `'+INSTALLER_ONLY_BASELINE+'` 无前端、应用逻辑、运行依赖或固定核心变更；此例外不适用于其他版本。\n'
     body+='\n\n## 一行交互安装并注册 v-ui\n\n```sh\n'+installation_command(files,args.version)+'\n```\n'
     body+='\n安装成功后输入 `v-ui`。普通管理员按已有 sudo 策略认证；不增加免密 sudoers。\n'
     release=request('releases','POST',{'tag_name':tag,'target_commitish':args.commit,'name':'V-UI '+tag,

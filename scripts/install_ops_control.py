@@ -585,15 +585,15 @@ def main(argv=None):
         if args.refresh:
             raise InstallError('--preflight does not refresh an installation')
         preflight(args.kit, args.sha256)
-        print('Trusted global v-ui preflight passed; no installation was changed.')
+        print('可信全局 v-ui 预检通过；尚未更改任何安装。')
         return
     install(args.kit, args.sha256, refresh=args.refresh)
-    print('Trusted system control installed. No services, accounts, sudoers or SUID settings were changed.')
+    print('可信系统控制组件已安装；未更改服务、账户、sudoers 或 SUID 设置。')
 
 
 if __name__ == '__main__':
     try:
         main()
     except (InstallError, OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
-        print('V-UI control installation refused: ' + str(exc), file=sys.stderr)
+        print('V-UI 控制组件安装已拒绝：' + str(exc), file=sys.stderr)
         raise SystemExit(1)
