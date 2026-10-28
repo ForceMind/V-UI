@@ -1,5 +1,13 @@
 # 开发与验证
 
+## 分支与验证流程
+
+长期分支为 `main`（稳定与正式发布）和 `dev`（开发集成）。每个版本从 `dev` 创建 `release/vX.Y.Z`，完成审查和测试后通过 PR 合入 `dev`，再通过 PR 合入 `main`。发布使用 `vX.Y.Z` tag 和 Release；已完成的临时版本分支删除，未合并工作先归档。分支按任务命名，提交不添加代理署名或生成标记。
+
+构建、制品处理和真实系统安装测试在 GitHub Actions 的空白临时 Linux 主机执行，不在本机下载发行 ZIP，不在生产主机运行安装测试。`setup.sh` 是仓库中的便利引导入口，默认安装已公开的 v0.4.9；源码 HEAD 与该冻结应用套件的 source_commit 分别核对，不将新构建包冒充原正式包。
+
+浏览器测试默认不运行。`test.yml`、`acme.yml`、`release.yml` 保留原浏览器步骤，仅在得到具体授权后手动派发并设置 `run_browser=true`；低资源交互诊断也需单独授权才能添加对应标签。非浏览器检查成功与浏览器未验证分别记录。正式发布门禁仍要求完整既定资格；未运行步骤不能借常规绿色 workflow 冒充已验收。
+
 ## 本地 Mihomo YAML 只读预览
 
 `PYTHONPATH=.:tests .venv/bin/python -m unittest test_mihomo_preview test_mihomo_preview_report -v` 覆盖中文可读报告、报告结构契约和[离线预览库和 CLI](docs/OFFLINE_MIHOMO_PREVIEW.md)的合成解析、差异、隐私与有界资源合同。它不接线上 API、不应用配置、不启动核心或浏览器；退出成功不代表任意 YAML 合并或实际 Mihomo 兼容。只使用已有依赖，不为本地验证下载新工具。
@@ -14,7 +22,7 @@
 
 固定版本、唯一假数据、可达控制、fresh 实际拒绝原因、全窗口目标账本和最终清理 drain 是硬门槛；不得把 timeout、parser 成功、DNS listener 或 QUIC socket 记成应用 UDP 成功。准确候选/主线和四平台实际包继续验收；本阶段不发布或部署。
 
-先读[主计划](ROADMAP.md)和[开发约束](AGENTS.md)。保持一个版本一个目标、独立PR、保留用户数据；不要把临时实验直接放进master或把未验证协议标成可用。
+先读[主计划](ROADMAP.md)和[开发约束](AGENTS.md)。保持一个版本一个目标、独立PR、保留用户数据；不要把临时实验直接放进 main 或把未验证协议标成可用。
 
 ## 环境
 

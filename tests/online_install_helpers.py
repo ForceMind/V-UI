@@ -12,8 +12,11 @@ import os
 import platform
 from pathlib import Path
 import re
+import select
+import shlex
 import stat
 import subprocess
+import time
 from contextlib import contextmanager
 from urllib.request import ProxyHandler, Request, build_opener
 from urllib.parse import urlsplit
@@ -149,10 +152,10 @@ with pathlib.Path(LOG).open('a') as stream:
             'download_log': log}
 
 
-def published_commands(source, version, commit, certificate_args, configured_args):
+def published_commands(source, version, commit, certificate_args, configured_args, *, checkout_commit=None):
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version) or (source / 'VERSION').read_text().strip() != version:
         raise AssertionError('Published version differs from checked out source')
-    if subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip() != commit:
+    if subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip() != (checkout_commit or commit):
         raise AssertionError('Published acceptance checkout is not exact')
     opener = build_opener(ProxyHandler({}))
     def read(url, limit):
@@ -197,6 +200,32 @@ def published_commands(source, version, commit, certificate_args, configured_arg
             'transport': 'anonymous public HTTPS release assets', 'canonical': canonical}
 
 
+def setup_commands(source, version, release_commit, checkout_commit, ref, certificate_args, configured_args):
+    """Exercise the actual short bootstrap, independently of the frozen app release."""
+    if ref != 'main' and not re.fullmatch(r'[a-f0-9]{40}', ref):
+        raise AssertionError('Short bootstrap requires main or an exact source commit')
+    # Keep the original public suite/source/digest checks. The bootstrap is a
+    # new repository entry; the immutable application suite remains v0.4.9.
+    published = published_commands(source, version, release_commit, certificate_args,
+                                   configured_args, checkout_commit=checkout_commit)
+    url = 'https://raw.githubusercontent.com/ForceMind/V-UI/' + ref + '/setup.sh'
+    opener = build_opener(ProxyHandler({}))
+    with opener.open(Request(url, headers={'User-Agent':'V-UI-short-install-acceptance'}), timeout=60) as response:
+        if urlsplit(response.geturl()).scheme != 'https':
+            raise AssertionError('Short bootstrap must retain HTTPS')
+        data = response.read(100_001)
+    if len(data) > 100_000 or data != (source / 'setup.sh').read_bytes():
+        raise AssertionError('Public short bootstrap differs from exact checkout')
+    canonical = 'bash <(curl -fsSL ' + url + ')'
+    def command(extra):
+        return ['/bin/bash', '-c', canonical + ' ' + shlex.join(['--version', 'v'+version,
+                                                              *certificate_args, *extra])]
+    return {'initial':command(()), 'repeat':command(configured_args),
+            'upgrade':command((*configured_args, '--upgrade')),
+            'transport':'anonymous public HTTPS short bootstrap and frozen release assets',
+            'canonical':canonical, 'release_canonical':published['canonical']}
+
+
 def global_menu_check(test, env, *, exercise_start_stop):
     entry = Path('/usr/local/sbin/v-ui')
     alias = Path('/usr/local/bin/v-ui')
@@ -218,3 +247,16 @@ def global_menu_check(test, env, *, exercise_start_stop):
                 test.assertIn('操作完成；服务状态已核验。', result)
         session.send('0\n')
         session.finish()
+
+
+def configured_setup_with_tty(command, *, timeout=300):
+    """Configured repeat/upgrade still need the interactive entry's real /dev/tty."""
+    with MenuSession(command, cwd='/tmp', env=dict(os.environ), timeout=timeout) as session:
+        deadline=time.monotonic()+timeout
+        while session.process.poll() is None:
+            if time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(command,timeout,output=session.text())
+            session._read(.1)
+        while session._read(.02) and select.select([session.fd],[],[],0)[0]:
+            pass
+        return subprocess.CompletedProcess(command,session.process.returncode,session.text(),'')

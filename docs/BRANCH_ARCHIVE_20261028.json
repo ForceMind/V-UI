@@ -1,0 +1,518 @@
+{
+  "repository": "ForceMind/V-UI",
+  "stable_commit": "a39b6e009829dd7f1be772fd3454474903b9858a",
+  "date": "2026-10-28",
+  "branches": [
+    {
+      "name": "dev",
+      "sha": "36475d8bce065605a89b394b8bd1d8ff7c338006",
+      "merged": true
+    },
+    {
+      "name": "docs/integrated-mainline-closure-20261012",
+      "sha": "4fc927a7db9b56596dbccf92cec5db905215fef0",
+      "merged": true
+    },
+    {
+      "name": "docs/per-inbound-routing-closure-20261018",
+      "sha": "c9cbdd78da4fc6b7feca805fe47e17b79463ee52",
+      "merged": true
+    },
+    {
+      "name": "docs/private-management-design-20261022",
+      "sha": "db88fb836e0724a9707aaa47549a8e14242b7eff",
+      "merged": true
+    },
+    {
+      "name": "docs/product-readme-release-20261012",
+      "sha": "bf35c33a9973dd0c5e1c639c78bc25c48b85f58f",
+      "merged": true
+    },
+    {
+      "name": "docs/service-rule-packs",
+      "sha": "7e2d589079753e890eb46acad6c2b2d4c706701c",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/docs/service-rule-packs"
+    },
+    {
+      "name": "docs/tailscale-management-overlay-20261020",
+      "sha": "803dff0fad03f99e6fa2c1d9689a132363470308",
+      "merged": true
+    },
+    {
+      "name": "docs/tcp-entry-status-20261019",
+      "sha": "7919a0514fe84663f1f3380e36bb3ae8d727e9b0",
+      "merged": true
+    },
+    {
+      "name": "experiment/socks-owner-recovery-20261018",
+      "sha": "afbdba100c5f0e3dc6888684fdbab31980720df3",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/experiment/socks-owner-recovery-20261018"
+    },
+    {
+      "name": "experiment/standard-client-udp-20261018",
+      "sha": "a1283e720f70c12c18b6c1af633f5f583ab3cec0",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/experiment/standard-client-udp-20261018"
+    },
+    {
+      "name": "experiment/xudp-mux-lifecycle-20261017",
+      "sha": "afbdba100c5f0e3dc6888684fdbab31980720df3",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/experiment/xudp-mux-lifecycle-20261017"
+    },
+    {
+      "name": "experiment/xudp-remoteaddr-20261016",
+      "sha": "160cfdcadeb2e512ef08b7700950f1e06b40d77d",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/experiment/xudp-remoteaddr-20261016"
+    },
+    {
+      "name": "feat/approved-logo-integration-20261012",
+      "sha": "b534354ec703ee5b92e84070ef2a14b6ca125c2e",
+      "merged": true
+    },
+    {
+      "name": "feat/dashboard-status-refresh-20261024",
+      "sha": "ff48d9d9b39742199e7c241bc4f073079d2615f3",
+      "merged": true
+    },
+    {
+      "name": "feat/dual-proxy-relay-m0-20261015",
+      "sha": "2165eb71ae3de95ad177ba759c77cbe9095dfca4",
+      "merged": true
+    },
+    {
+      "name": "feat/dual-proxy-relay-m1-20261015",
+      "sha": "419727aeb1684e156fc474e6c0e9425a9bdc92b9",
+      "merged": true
+    },
+    {
+      "name": "feat/dual-proxy-relay-m2-20261015",
+      "sha": "02c6436d2e2bb097045543b37bfe42f43b13cb49",
+      "merged": true
+    },
+    {
+      "name": "feat/dual-proxy-relay-m3-20261015",
+      "sha": "9ed53006c0f1c41a7be57b03284e62210752c7ad",
+      "merged": true
+    },
+    {
+      "name": "feat/dual-proxy-relay-m4-20261015",
+      "sha": "6b1765310757fc3b24caa7ccf80fa912d1e9e7e7",
+      "merged": true
+    },
+    {
+      "name": "feat/inbound-list-search-20261023",
+      "sha": "ef79557783651ba8dca919368592ae58b64f4a6c",
+      "merged": true
+    },
+    {
+      "name": "feat/integrated-ops-candidate-20261011",
+      "sha": "09f2cf4ec39adfbb345d8aa40b94558c64c93936",
+      "merged": true
+    },
+    {
+      "name": "feat/managed-system-menu-20261011",
+      "sha": "fd32a995afe236aa90d07be0b753ad4ad0b6ad5b",
+      "merged": true
+    },
+    {
+      "name": "feat/menu-stage-candidate-20261011",
+      "sha": "1739583bcb739464a6890f11c7de41dbc4e54d02",
+      "merged": true
+    },
+    {
+      "name": "feat/offline-mihomo-preview-20261025",
+      "sha": "3281b356d0bb8a6db16f000795ee6dbadc2a8925",
+      "merged": true
+    },
+    {
+      "name": "feat/read-only-ops-menu-20261011",
+      "sha": "9f8e0f3d9d4b399fa72662c17c77b90257d72580",
+      "merged": true
+    },
+    {
+      "name": "feat/restricted-udp-relay-20261016",
+      "sha": "49ec3f8269e0b250a50fe9f9a1d0d56f0e560441",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/feat/restricted-udp-relay-20261016"
+    },
+    {
+      "name": "feat/tcp-upstream-export-20261016",
+      "sha": "3435ba58038a5a552013b05f2fcce81c2aa1165f",
+      "merged": true
+    },
+    {
+      "name": "feat/udp-dns-capability-gates-20261016",
+      "sha": "b50c0754adec1331f8d020cf44ccdff41afd928f",
+      "merged": true
+    },
+    {
+      "name": "feat/workspace-initial-read-retry-20261024",
+      "sha": "8bc7d833eac3ae718b3edfdc50cd5c8ef87ae87f",
+      "merged": true
+    },
+    {
+      "name": "feature/dual-core-foundation",
+      "sha": "bd8c8433810e40b3575fd45ec0611269e5ab75ef",
+      "merged": true
+    },
+    {
+      "name": "feature/per-inbound-routing-20261018",
+      "sha": "b5a8e1ae000f2fe88b8e577378e76c073ebcb193",
+      "merged": true
+    },
+    {
+      "name": "feature/tailscale-readonly-status-20261021",
+      "sha": "cd2025f8136f5af711397fe8b750491a29f16761",
+      "merged": true
+    },
+    {
+      "name": "fix/certificate-refresh-state-20261023",
+      "sha": "4bc6febedc5e2f99dcaafed1bece4fce474c767c",
+      "merged": true
+    },
+    {
+      "name": "fix/core-restart-single-flight-20261023",
+      "sha": "f1d2103801edfe4dbebbe7392c652b44dcd84b6d",
+      "merged": true
+    },
+    {
+      "name": "fix/dashboard-polling-startup-20261024",
+      "sha": "17e116376502bceb32c09022e83d5f99df86d7cf",
+      "merged": true
+    },
+    {
+      "name": "fix/dashboard-responsive-layout-20261023",
+      "sha": "71ec4690b5ccd079b83e017a7c47316252d35ac2",
+      "merged": true
+    },
+    {
+      "name": "fix/dashboard-status-freshness-20261023",
+      "sha": "8ed33ec446c4b03bf3a76ae7847957c7da58fa07",
+      "merged": true
+    },
+    {
+      "name": "fix/hy2-mainline-negative-evidence",
+      "sha": "5ee7e35664750f2a5c3bc464be6f0fb7ea905bee",
+      "merged": true
+    },
+    {
+      "name": "fix/inbound-editor-saving-lock-20261023",
+      "sha": "6b8e9437ce8911610edc89c9eb2750bf672152e5",
+      "merged": true
+    },
+    {
+      "name": "fix/inbound-instance-preconditions-20261023",
+      "sha": "4e7803f49d52888d7d92ecfc99d37ef0a4b8de1c",
+      "merged": true
+    },
+    {
+      "name": "fix/inbound-response-redaction",
+      "sha": "ae415ea5ce4879a2e8a9cf52e8a933136087e1cd",
+      "merged": true
+    },
+    {
+      "name": "fix/installer-exit-status-048-20261013",
+      "sha": "8121e008f616edef8dffbb470988f91c29ab8a54",
+      "merged": true
+    },
+    {
+      "name": "fix/security-center-unavailable-20261011",
+      "sha": "97ad6f77caeff16d8b233daa988d5f8d1662a02f",
+      "merged": true
+    },
+    {
+      "name": "fix/share-dialog-lifecycle-20261021",
+      "sha": "f44258f54a4c2c915a1ff7f49d80f06d525cb20c",
+      "merged": true
+    },
+    {
+      "name": "fix/subscription-node-identity-20261022",
+      "sha": "60d599fa3dcbe1c0fe0d652e11b68e9ce8fb7caf",
+      "merged": true
+    },
+    {
+      "name": "fix/subscription-selection-revision-20261023",
+      "sha": "8cfe202b04b4403bb143b10231ce593beab19aa9",
+      "merged": true
+    },
+    {
+      "name": "fix/tailscale-managed-opt-in-20261021",
+      "sha": "6aae542e938e62e02835129ba73b2359e63edeed",
+      "merged": true
+    },
+    {
+      "name": "fix/udp-dns-fixture-lifecycle-20261016",
+      "sha": "9f184f5854da445309e87b7ad1ad8a5ee5e86898",
+      "merged": true
+    },
+    {
+      "name": "fix/workspace-issued-lifecycle-final-20261022",
+      "sha": "eb0712a49bedebb4c4964db3a726a1bb8018a774",
+      "merged": true
+    },
+    {
+      "name": "fix/workspace-preview-revision-20261024",
+      "sha": "19a83fbf8fe4766f083cda29db247a240831ecd1",
+      "merged": true
+    },
+    {
+      "name": "fix/workspace-reload-drafts-20261021",
+      "sha": "2c0113250829110071672d715dd269ac80328c03",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.3.0-alpha.1-startup",
+      "sha": "1963969b781cd6d8b84db2e1ff3da5f0da5499e0",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.3.0-alpha.2-auth",
+      "sha": "7118bd6ca67b8f996f2359db7921b95ca560cd89",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.3.0-alpha.3-subscriptions",
+      "sha": "1c4724eaf4a01488be0e3dc3a4912fcfa07c60bb",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.3.0-alpha.4-safe-apply",
+      "sha": "1d4fc3e661b3457a9305ebb43a1752a36a5a12ba",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.3.0-alpha.5-toclash",
+      "sha": "698d098302c714a7e9a2fac423fa696f6cf47f09",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.3.0-alpha.6-workspace",
+      "sha": "ab641a26f53425c7b28275ccb938c4a2dd890269",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.3.0-rc.1-loopback",
+      "sha": "8e577dc2ca4a77d1713131c9180e440ed3b5eb18",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.3.0-rc.2-release-gates",
+      "sha": "3158e5b66ccaeca1e48d7581a097a0a739be048e",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.3.0-rc.3-certificates",
+      "sha": "2b24e7fe382d6529b6223d02f67fbdda72e5832a",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.3.0-rc.4-one-click-release",
+      "sha": "2c5923a58f259f752882d378ed090847deaa94ba",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.3.1-linux-portability",
+      "sha": "719b2b138d681e1b08370c4c769d7d73d47be43f",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.3.2-inbound-editor",
+      "sha": "055c3b3f19d65930d219457b6ec742c6df28e904",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.4.0-trojan-tls",
+      "sha": "31aecad9b885b4b649bc4fba741719b975e40f1a",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.4.1-shadowsocks",
+      "sha": "009413d468d641db689655cdecbc2c956c475e4c",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.4.2-vmess-tls",
+      "sha": "9a64c8d958b24e91472ee0cc68445f53a0cb22e3",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.4.3-vless-websocket",
+      "sha": "f9dfa611edcf5946bb4c8ae3cee59118d36930e9",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.4.4-vless-grpc",
+      "sha": "240edf23af8a12b2cbd71114fe65c693290e39f2",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.4.5-hysteria2-tls",
+      "sha": "c9d45aac7b8e6951e231d3ca41a9eb8507638510",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.4.6-tuic",
+      "sha": "14f570e8406098aa7570f2daaf24bdbe550a1858",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.4.7-packaging-scope",
+      "sha": "93fe91ad441c9f33a12f92ff4ac7e2359ceb2284",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.4.7-reality-vision",
+      "sha": "70cc2f4f7dc4349c7ecffbc33fc088f51b8651fa",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.4.7-release-readiness",
+      "sha": "0171f1f010f63bf73fde54c330309274e3d40f2b",
+      "merged": true
+    },
+    {
+      "name": "iteration/v0.4.8-xhttp-preflight",
+      "sha": "f7996c579418d1ffe5df06fc12677cf22a42e034",
+      "merged": true
+    },
+    {
+      "name": "master",
+      "sha": "a39b6e009829dd7f1be772fd3454474903b9858a",
+      "merged": true
+    },
+    {
+      "name": "perf/low-memory-install",
+      "sha": "d5786a5d274fd3a509c8d843b642d7bbdeeb15df",
+      "merged": true
+    },
+    {
+      "name": "test/httpupgrade-recorder-evidence-20261012",
+      "sha": "bd0a122685113dc6f35dd32e5c773e957d8740e2",
+      "merged": true
+    },
+    {
+      "name": "test/status-refresh-native-completion-20261024",
+      "sha": "a4ecd48d7c1b55e1d44880d9ea318b5aa7477558",
+      "merged": true
+    },
+    {
+      "name": "test/strict-export-dns-port-20261023",
+      "sha": "d31786e77d4a78208a938b222f8a06594651982a",
+      "merged": true
+    },
+    {
+      "name": "test/tcp-export-port-allocation-20261021",
+      "sha": "a1a2024ff5773be4192e685b0a60839c68185533",
+      "merged": true
+    },
+    {
+      "name": "test/transition-port-allocation-20261021",
+      "sha": "65ad9bb891623a5e0e26999c017e87351aa126bc",
+      "merged": true
+    },
+    {
+      "name": "test/vmess-tls-evidence-20261012",
+      "sha": "abbe489bf1acd42b4ecfce2bde0820cc43999481",
+      "merged": true
+    },
+    {
+      "name": "test/workspace-save-recovery-20261022",
+      "sha": "f40af874ed2be2a9b6a2612fb27af0f5d91e1d29",
+      "merged": true
+    },
+    {
+      "name": "wip/backup-private-cache-20261009",
+      "sha": "ee86a105171107028c9b5fbc6c0154d88fe2ad5d",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/wip/backup-private-cache-20261009"
+    },
+    {
+      "name": "wip/core-residency-20261009",
+      "sha": "67797df0fd6a09e61d021584bddac730656cc43f",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/wip/core-residency-20261009"
+    },
+    {
+      "name": "wip/core-writeback-20261009",
+      "sha": "281bed11c173b95077e36afe617c7416640cd565",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/wip/core-writeback-20261009"
+    },
+    {
+      "name": "wip/cpu-quota-recovery-20261009",
+      "sha": "2ffd1a14977d1b773f0d6c69f66c3d2cf8848bb5",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/wip/cpu-quota-recovery-20261009"
+    },
+    {
+      "name": "wip/dual-core-20261009",
+      "sha": "5bf8702248e4f8db2dd752d51343ffe3db1bb219",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/wip/dual-core-20261009"
+    },
+    {
+      "name": "wip/install-stage-trace-20261009",
+      "sha": "b687570ec84a04e1734125135c2ad29f2cb1cee5",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/wip/install-stage-trace-20261009"
+    },
+    {
+      "name": "wip/large-export-profile-20261009",
+      "sha": "04f04043b4f13d5db72191a5133f1ed62f74ae7e",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/wip/large-export-profile-20261009"
+    },
+    {
+      "name": "wip/musl-resource-backend-20261009",
+      "sha": "084dbc324b109c38d84e181505d674cf512bdd6c",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/wip/musl-resource-backend-20261009"
+    },
+    {
+      "name": "wip/resource-service-tree-recovery-20261009",
+      "sha": "6c22e77294a735d4e0bf753a429f1f6fde16fbd0",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/wip/resource-service-tree-recovery-20261009"
+    },
+    {
+      "name": "wip/root-resource-20261009",
+      "sha": "39f5e96c9c24e8ba6ea0afdfc293e367c2addcc6",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/wip/root-resource-20261009"
+    },
+    {
+      "name": "wip/rule-coverage-index-20261009",
+      "sha": "c280021597e0ca89a4d6c23436d2d79454d16644",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/wip/rule-coverage-index-20261009"
+    },
+    {
+      "name": "wip/runtime-writeback-20261009",
+      "sha": "a8d9bc6c399d5571a78ae6e10b7a23a6e38218ee",
+      "merged": false,
+      "compare_status": "diverged",
+      "archive_ref": "refs/tags/archive/branches/2026-10-28/wip/runtime-writeback-20261009"
+    }
+  ]
+}
