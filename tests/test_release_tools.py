@@ -242,6 +242,7 @@ class ReleaseToolsTests(unittest.TestCase):
 
     def test_generated_bundle_manifest_describes_bounded_cumulative_exports(self):
         source=Path(__file__).resolve().parents[1]
+        from scripts.install_system import CONTROLLER_MEMBERS
         # Run the real builder/prepare/archive path with temporary source and
         # mocked downloads. This fixture is never installed or executed.
         with patch.object(sys,'path',[str(source/'scripts'),*sys.path]),patch.object(sys,'dont_write_bytecode',True):
@@ -250,7 +251,7 @@ class ReleaseToolsTests(unittest.TestCase):
                  'web/account.html','web/workspace.html','web/certificates.html',
                  'web/js/app.js','web/proxy.html','web/js/tailscale-status.js',
                  'app/api/management.py','app/services/tailscale_status.py',
-                 'docs/COMPATIBILITY.md',*BRAND_MEMBERS)
+                 'docs/COMPATIBILITY.md',*BRAND_MEMBERS,*CONTROLLER_MEMBERS)
         for name in tracked:
             destination=self.source/name;destination.parent.mkdir(parents=True,exist_ok=True)
             shutil.copyfile(source/name,destination)
@@ -273,6 +274,9 @@ class ReleaseToolsTests(unittest.TestCase):
         self.assertEqual(manifest['version'],(source/'VERSION').read_text().strip())
         self.assertEqual(manifest['targets'],[target])
         self.assertIn('docs/COMPATIBILITY.md',manifest['files'])
+        for name in CONTROLLER_MEMBERS:
+            self.assertIn(name, manifest['files'], 'Installer recovery closure must be packaged: '+name)
+            self.assertEqual((self.root/'generated-payload'/name).read_bytes(),(source/name).read_bytes())
         self.assertEqual(tools.verify_payload(self.root/'generated-payload'),manifest)
         packed = self.root/'generated-payload'
         with zipfile.ZipFile(bundle) as archive:

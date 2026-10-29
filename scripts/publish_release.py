@@ -28,11 +28,12 @@ REQUIRED_ACCEPTANCE_STEPS = {
     'release.yml': {'Verify non-root install HTTPS browser and recovery'},
     'acme.yml': {'Test graphical certificate lifecycle against Pebble'},
 }
-INSTALLER_ONLY_BASELINE = 'c138d0062619d498d711e17f86a58a5e8f61a1cf'
-INSTALLER_ONLY_VERSION = '0.4.10'
+INSTALLER_ONLY_BASELINE = '586d8a2dbd0be6d7ba8d5c5823df8fe9a1f73c95'
+INSTALLER_ONLY_VERSION = '0.4.11'
 INSTALLER_ONLY_FILES = {
     'VERSION', 'main.py', 'setup.sh', 'install.sh',
     'scripts/install_system.py', 'scripts/install_ops_control.py', 'scripts/publish_release.py',
+    'scripts/installer_certificate_state.py', 'scripts/build_bundle.py',
     'README.md', 'CHANGELOG.md', 'AGENTS.md', 'ROADMAP.md', 'CONTRIBUTING.md',
     '.github/workflows/publish.yml', '.github/workflows/short-install.yml',
     '.github/workflows/oneclick.yml',
@@ -136,7 +137,7 @@ def select_runs(runs,commit):
 def validate_installer_only_scope(commit, version):
     """One explicitly approved patch; no web/app/dependency/core changes allowed."""
     if version != INSTALLER_ONLY_VERSION:
-        raise ReleaseGateError('Non-browser installer exception is only approved for 0.4.10')
+        raise ReleaseGateError('Non-browser installer exception is only approved for 0.4.11')
     try:
         subprocess.run(['git','merge-base','--is-ancestor',INSTALLER_ONLY_BASELINE,commit],check=True,
                        stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
@@ -156,10 +157,18 @@ def validate_installer_only_scope(commit, version):
                 raise ReleaseGateError('Installer-only exception requires regular source files')
         previous=subprocess.check_output(['git','show',INSTALLER_ONLY_BASELINE+':main.py'])
         current=subprocess.check_output(['git','show',commit+':main.py'])
-        if previous.count(b"version='0.4.9'") != 1 or current != previous.replace(b"version='0.4.9'",b"version='0.4.10'",1):
+        if previous.count(b"version='0.4.10'") != 1 or current != previous.replace(b"version='0.4.10'",b"version='0.4.11'",1):
             raise ReleaseGateError('Application changes exceed the installer-only version bump')
-        if subprocess.check_output(['git','show',commit+':VERSION']).strip()!=b'0.4.10':
+        if subprocess.check_output(['git','show',commit+':VERSION']).strip()!=b'0.4.11':
             raise ReleaseGateError('Installer-only version identity differs')
+        # Packaging may add this one installer helper, but must not change
+        # application/dependency/core selection or rewrite any payload bytes.
+        old_builder=subprocess.check_output(['git','show',INSTALLER_ONLY_BASELINE+':scripts/build_bundle.py'])
+        new_builder=subprocess.check_output(['git','show',commit+':scripts/build_bundle.py'])
+        old_line=b"'scripts/deploy.py','scripts/install_system.py'}"
+        new_line=b"'scripts/deploy.py','scripts/install_system.py',\n            'scripts/installer_certificate_state.py'}"
+        if old_builder.count(old_line)!=1 or new_builder!=old_builder.replace(old_line,new_line,1):
+            raise ReleaseGateError('Builder changes exceed the single installer helper addition')
     except subprocess.CalledProcessError as exc:
         raise ReleaseGateError('Cannot prove installer-only source ancestry/scope') from exc
 
@@ -314,7 +323,7 @@ def main():
     p.add_argument('--commit',required=True);p.add_argument('--version',required=True)
     p.add_argument('--confirm',required=True);p.add_argument('--publish',action='store_true')
     p.add_argument('--installer-only-no-browser',action='store_true',
-                   help='Explicitly approved 0.4.10 installer-only exception; browser evidence stays unverified')
+                   help='Explicitly approved 0.4.11 installer-only exception; browser evidence stays unverified')
     args=p.parse_args()
     if not re.fullmatch(r'[a-f0-9]{40}',args.commit) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',args.version):
         raise ReleaseGateError('Exact commit and stable version required')
@@ -369,7 +378,7 @@ def main():
     evidence='\n'.join('- '+path+': '+str(run['html_url']) for path,run in sorted(checks.items()))
     body=files['RELEASE_NOTES.md'].decode()+'\n\nVerified commit: `'+args.commit+'`\n\n'+evidence
     if args.installer_only_no_browser:
-        body+='\n\n验收范围：用户明确批准本次 0.4.10 纯安装交互修复采用非浏览器验收。浏览器未验证；'+\
+        body+='\n\n验收范围：用户明确批准本次 0.4.11 纯安装交互修复采用非浏览器验收。浏览器未验证；'+\
               '仅跳过明列的浏览器步骤，其余 jobs/steps、四目标制品及实际安装门禁保持。'+\
               '已检查相对 `'+INSTALLER_ONLY_BASELINE+'` 无前端、应用逻辑、运行依赖或固定核心变更；此例外不适用于其他版本。\n'
     body+='\n\n## 一行交互安装并注册 v-ui\n\n```sh\n'+installation_command(files,args.version)+'\n```\n'

@@ -20,7 +20,7 @@ on:
         type: boolean
         default: false
       installer_only_no_browser:
-        description: Approved 0.4.10 installer-only scope, browsers explicitly unverified
+        description: Approved 0.4.11 installer-only scope, browsers explicitly unverified
         required: true
         type: boolean
         default: false

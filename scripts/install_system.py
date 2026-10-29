@@ -2,6 +2,7 @@
 """受保护的 Linux 安装器：修改主机前检测发行版、libc、服务管理器和防火墙。"""
 from __future__ import annotations
 import argparse
+import base64
 from contextlib import contextmanager
 import fcntl
 import hashlib
@@ -15,6 +16,7 @@ import platform
 import pwd
 import re
 import shutil
+import signal
 import socket
 import ssl
 import stat
@@ -37,13 +39,14 @@ UNIT_DIR = Path('/etc/systemd/system')
 UNITS = ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')
 MAX_ARCHIVE = 850_000_000
 INSTALL_LOCK = Path('/run/lock/v-ui-install.lock')
+TRANSACTION_NAME = '.install-transaction.json'
 STREAM_CHUNK = 1024 * 1024
 # Complete stdlib-only dependency closure of the offline backup/restore controller.
 # Every member must come from the same checksum-verified bundle, never the
 # mutable installed payload. Keep the public release-kit asset set unchanged.
 CONTROLLER_MEMBERS = ('scripts/deploy.py', 'app/release_tools.py', 'app/data_owner.py',
                       'app/services/proxy_store.py', 'app/services/upstream_profile.py',
-                      'app/services/inbound_policy.py')
+                      'app/services/inbound_policy.py', 'scripts/installer_certificate_state.py')
 # Compatibility names for older tooling/tests; new installs select a backend dynamically.
 MARKER=service_support.MARKER
 UNIT_DIR=service_support.SYSTEMD_DIR
@@ -382,6 +385,9 @@ def write_root_file(path, raw, mode=0o644):
                 handle.write(raw)
             handle.flush(); os.fsync(handle.fileno())
         os.chmod(name, mode); os.replace(name, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try: os.fsync(directory)
+        finally: os.close(directory)
     finally:
         if os.path.exists(name): os.unlink(name)
 
@@ -395,6 +401,157 @@ def as_service(args, *, capture=False, tty=None, cwd=ROOT):
         os.setgid(account.pw_gid);os.setuid(account.pw_uid);os.umask(0o077)
     return command(args,cwd=cwd,env=env,capture_output=capture,text=capture,stdin=tty,
                    timeout=360,preexec_fn=demote)
+
+
+def saved_configuration():
+    """Adopt only the installer's root-controlled metadata, never shell input."""
+    if not os.path.lexists(CONFIG):
+        return None
+    no_symlink_ancestors(CONFIG)
+    if not own_file(CONFIG) or CONFIG.stat().st_size > 32_768:
+        raise InstallError('现有安装配置不是受 root 保护的普通文件，拒绝读取')
+    try:
+        saved = json.loads(CONFIG.read_text())
+        if (type(saved) is not dict or saved.get('installer') != 1
+                or type(saved.get('ready')) is not bool
+                or any(type(saved.get(key)) is not str for key in ('domain', 'email', 'admin', 'bind'))
+                or type(saved.get('port')) is not int
+                or type(saved.get('node_port', 10443)) is not int
+                or saved.get('certificate_mode') not in ('managed', 'provided')):
+            raise ValueError('shape')
+        sample = argparse.Namespace(domain=saved['domain'], email=saved['email'], admin=saved['admin'],
+            port=saved['port'], bind=saved['bind'], node_port=saved.get('node_port', 10443),
+            cert='saved' if saved['certificate_mode'] == 'provided' else None,
+            key='saved' if saved['certificate_mode'] == 'provided' else None, accept_terms=True)
+        validate_options(sample)
+        if sample.domain != saved['domain'] or sample.email != saved['email']:
+            raise ValueError('canonical')
+    except (ValueError, TypeError, KeyError, InstallError):
+        raise InstallError('现有安装配置不完整或无效；已保留原文件，请先修复配置') from None
+    return saved
+
+
+def certificate_state(work, action, *values):
+    # Source and its complete stdlib closure came from this verified archive.
+    # Run it only after dropping root, never import service-writable code as root.
+    code = 'import sys; sys.path.insert(0, ' + repr(str(work)) + ')\n'
+    code += (work/'scripts/installer_certificate_state.py').read_text()
+    try:
+        result = as_service([sys.executable, '-B', '-I', '-S', '-c', code, action, str(ROOT), *values], capture=True)
+    except (subprocess.SubprocessError, UnicodeError):
+        raise InstallError('证书配置状态操作失败（'+action+'）；原恢复记录已保留，请勿删除') from None
+    if len(result.stdout) > 65_536:
+        raise InstallError('证书配置快照超出大小限制')
+    return result.stdout.strip()
+
+
+def transaction_paths(manager):
+    return (CONFIG, CONTROL/'launcher.py', *service_support.service_paths(manager).values(),
+            ROOT/'data/certs/provided-fullchain.pem', ROOT/'data/certs/provided-privkey.pem')
+
+
+def begin_transaction(work, manager, was_running, *, stopped=False):
+    files = []
+    for path in transaction_paths(manager):
+        no_symlink_ancestors(path)
+        if not path.exists():
+            files.append(None)
+            continue
+        info = path.stat()
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 2_000_000:
+            raise InstallError('配置事务遇到无效文件，未修改原配置')
+        files.append([base64.b64encode(path.read_bytes()).decode('ascii'),
+                      stat.S_IMODE(info.st_mode), info.st_uid, info.st_gid])
+    state = certificate_state(work, 'snapshot') if stopped else None
+    journal = {'schema': 1, 'manager': manager, 'was_running': was_running,
+               'files': files, 'certificate_state': state}
+    write_root_file(CONFIG_DIR/TRANSACTION_NAME, json.dumps(journal).encode(), 0o600)
+
+
+def finish_transaction():
+    path = CONFIG_DIR/TRANSACTION_NAME
+    if path.exists():
+        path.unlink()
+        descriptor = os.open(CONFIG_DIR, os.O_RDONLY | os.O_DIRECTORY)
+        try: os.fsync(descriptor)
+        finally: os.close(descriptor)
+
+
+@contextmanager
+def installation_signals(*, recovering=False):
+    previous = {}
+    def interrupted(number, frame):
+        raise InstallError('安装收到中止信号；正在恢复原配置')
+    try:
+        for number in (signal.SIGINT, signal.SIGTERM):
+            previous[number] = signal.signal(number, signal.SIG_IGN if recovering else interrupted)
+        yield
+    finally:
+        for number, handler in previous.items(): signal.signal(number, handler)
+
+
+def recover_transaction(work):
+    with installation_signals(recovering=True):
+        _recover_transaction(work)
+
+
+def _recover_transaction(work):
+    path = CONFIG_DIR/TRANSACTION_NAME
+    if not os.path.lexists(path):
+        return
+    no_symlink_ancestors(path)
+    if (not own_file(path) or stat.S_IMODE(path.stat().st_mode) != 0o600
+            or path.stat().st_size > 12_000_000):
+        raise InstallError('安装恢复记录不可信；已保留现场，拒绝启动服务')
+    try:
+        journal = json.loads(path.read_text())
+        manager = journal['manager']
+        if (journal['schema'] != 1 or manager not in ('systemd', 'openrc')
+                or type(journal['was_running']) is not bool
+                or len(journal['files']) != len(transaction_paths(manager))
+                or journal['certificate_state'] is not None and type(journal['certificate_state']) is not str):
+            raise ValueError('shape')
+        files = []
+        for entry in journal['files']:
+            if entry is None:
+                files.append(None)
+            elif (type(entry) is list and len(entry) == 4 and type(entry[0]) is str
+                    and all(type(value) is int and value >= 0 for value in entry[1:])
+                    and entry[1] <= 0o777):
+                files.append((base64.b64decode(entry[0], validate=True), *entry[1:]))
+            else:
+                raise ValueError('entry')
+    except (ValueError, TypeError, KeyError):
+        raise InstallError('安装恢复记录无效；已保留现场') from None
+    panel = 'v-ui.service' if manager == 'systemd' else 'v-ui'
+    names = [name for name, target in service_support.service_paths(manager).items() if target.exists()]
+    service_support.stop(manager, [name for name in names if name == panel])
+    service_support.stop(manager, [name for name in names if name != panel])
+    if journal['certificate_state'] is not None:
+        certificate_state(work, 'restore', journal['certificate_state'])
+    for target, entry in zip(transaction_paths(manager), files):
+        if entry is not None:
+            content, mode, uid, gid = entry
+            write_root_file(target, content, mode)
+            os.chown(target, uid, gid)
+        elif os.path.lexists(target):
+            no_symlink_ancestors(target)
+            target.unlink()
+    service_support.reload(manager)
+    if journal['was_running']:
+        http = 'v-ui-http01.socket' if manager == 'systemd' else 'v-ui-http01'
+        service_support.start(manager, [http, panel])
+        restored = saved_configuration()
+        # A provided chain can be private/self-signed. Add the exact saved
+        # chain to default trust for this recovery check; retain hostname checks.
+        ca = str(ROOT/'data/certs/provided-fullchain.pem') if restored['certificate_mode'] == 'provided' else None
+        try:
+            https_health(restored, ca, trust_saved_chain=ca is not None)
+        except BaseException:
+            service_support.stop(manager, [http, panel])
+            raise
+    finish_transaction()
+    print('已恢复上次操作前的安装配置、证书绑定和运行版本；用户、节点及订阅数据保持。')
 
 
 def create_service_user():
@@ -547,10 +704,24 @@ def copy_private(source, target, uid, gid):
         if os.path.exists(name): os.unlink(name)
 
 
-def https_health(config, cafile=None):
+def https_health(config, cafile=None, *, trust_saved_chain=False):
     # Connect locally, verify the real hostname and chain; never use -k.
-    context = ssl.create_default_context(cafile=cafile)
-    address = '::1' if ':' in config['bind'] else '127.0.0.1'
+    context = ssl.create_default_context()
+    if cafile:
+        context.load_verify_locations(cafile=cafile)
+    if trust_saved_chain:
+        # Root-controlled journal restores the exact previously used chain.
+        # OpenSSL may anchor that saved chain without requiring a bundled root;
+        # normal hostname, signature and validity checks remain enabled.
+        flag = getattr(ssl, 'VERIFY_X509_PARTIAL_CHAIN', None)
+        if flag is None:
+            # Python 3.9 does not expose this enum; OpenSSL 1.0.2+ defines the
+            # same stable X509_V_FLAG_PARTIAL_CHAIN bit in x509_vfy.h.
+            if not (ssl.OPENSSL_VERSION.startswith('OpenSSL ') and ssl.OPENSSL_VERSION_INFO >= (1,0,2)):
+                raise InstallError('当前 TLS 库不支持验证原证书链；恢复记录已保留，请使用受支持的系统 Python/OpenSSL 重试')
+            flag = 0x80000
+        context.verify_flags |= flag
+    address = {'0.0.0.0': '127.0.0.1', '::': '::1'}.get(config['bind'], config['bind'])
     last = None
     for _ in range(40):
         try:
@@ -586,13 +757,19 @@ def install_verified(args, snapshot, archive, meta):
               'bootstrap_python':str(Path(sys.executable).resolve()),'node_port':args.node_port}
     if existing:
         saved = json.loads(CONFIG.read_text())
+        if hasattr(args, '_existing_config') and saved != args._existing_config:
+            raise InstallError('安装配置在确认后发生变化，请重新运行；未覆盖其他修改')
         if saved.get('service_manager','systemd') != manager:
             raise InstallError('升级时不支持自动更换服务管理器')
-        if any(saved.get(k) != config[k] for k in ('domain','email','admin','port','bind','certificate_mode')):
+        fields = ('admin', 'certificate_mode') if getattr(args, '_reconfigure', False) else (
+            'domain','email','admin','port','bind','certificate_mode')
+        if any(saved.get(k) != config[k] for k in fields):
             raise InstallError('现有实例配置与参数不一致，拒绝静默修改')
         config['ipv6']=saved.get('ipv6',ipv6)
         if not args.upgrade and saved.get('ready'):
             raise InstallError('安装已存在，请使用校验通过的安装包和 --upgrade 升级')
+        if saved['port'] != args.port:
+            check_port(args.port, args.bind)
         if args.node_udp_port:
             print('现有安装：已跳过节点 UDP 绑定探测，避免与运行中节点冲突；请手动核对节点端口归属。')
     else:
@@ -630,10 +807,6 @@ def install_verified(args, snapshot, archive, meta):
     uid, gid = account.pw_uid, account.pw_gid
     previous = json.loads((ROOT/'CURRENT.json').read_text())['release_id'] if (ROOT/'CURRENT.json').exists() else None
     managed_paths=list(service_support.service_paths(manager).values())
-    previous_files={path:(path.read_bytes(),stat.S_IMODE(path.stat().st_mode),path.stat().st_uid,path.stat().st_gid)
-        for path in (CONFIG,CONTROL/'launcher.py',*managed_paths,
-                     ROOT/'data/certs/provided-fullchain.pem',ROOT/'data/certs/provided-privkey.pem')
-        if existing and path.is_file() and not path.is_symlink()}
     panel_name='v-ui.service' if manager=='systemd' else 'v-ui'
     http_name='v-ui-http01.socket' if manager=='systemd' else 'v-ui-http01'
     was_running=service_support.is_active(manager,panel_name)
@@ -658,13 +831,21 @@ def install_verified(args, snapshot, archive, meta):
         stopped = False
         try:
             if existing:
-                service_support.stop(manager,[panel_name])
-                service_support.stop(manager,[name for name in service_support.service_paths(manager) if name!=panel_name])
+                begin_transaction(work, manager, was_running)
+                stopped = True
+                present = [name for name, path in service_support.service_paths(manager).items() if path.exists()]
+                if panel_name in present: service_support.stop(manager,[panel_name])
+                others = [name for name in present if name != panel_name]
+                if others: service_support.stop(manager, others)
             stopped = True
             if existing and (ROOT/'data/v-ui.db').exists():
                 target = ROOT/('before-upgrade-'+str(time.time_ns())+'.zip')
                 as_service([sys.executable,'-B','-I','-S',str(controller),'--root',str(ROOT),'backup',str(target)])
                 print('升级前私有备份：', target)
+            if existing:
+                begin_transaction(work, manager, was_running, stopped=True)
+                if saved['bind'] != args.bind and saved['port'] == args.port:
+                    check_port(args.port, args.bind)
             as_service([sys.executable,'-B','-I','-S',str(controller),'--root',str(ROOT),'activate',meta['release_id']])
             release=ROOT/'releases'/meta['release_id']
             runtime_python=release/'runtime/python/bin/python3'
@@ -681,8 +862,12 @@ def install_verified(args, snapshot, archive, meta):
                 copy_private(args.cert, ROOT/'data/certs/provided-fullchain.pem', uid, gid)
                 copy_private(args.key, ROOT/'data/certs/provided-privkey.pem', uid, gid)
             else:
+                if existing:
+                    certificate_state(work, 'contact', args.domain, args.email)
                 as_service([str(python),'-B','-m','app.certificates.cli','bootstrap','--root',str(ROOT),
                             '--domain',args.domain,'--email',args.email,'--accept-terms'], cwd=payload)
+                if existing:
+                    certificate_state(work, 'contact', args.domain, args.email)
             check = as_service([str(python),'-B','-c',
                 'from app.models.database import init_db,SessionLocal,User; init_db(); s=SessionLocal(); print(s.query(User).count()); s.close()'], capture=True,cwd=payload)
             if check.stdout.strip() == '0':
@@ -692,18 +877,18 @@ def install_verified(args, snapshot, archive, meta):
             service_support.enable_start(manager,[panel_name])
             https_health(config, args.health_ca)
             write_root_file(CONFIG, json.dumps({**config, 'ready': True, 'release_id': meta['release_id']}, indent=2).encode())
-        except Exception:
+            if existing: finish_transaction()
+        except BaseException:
             if stopped:
-                try:service_support.stop(manager,[panel_name])
-                except Exception:pass
-                if existing:
-                    for path, (content, mode, owner, group) in previous_files.items():
-                        write_root_file(path, content, mode); os.chown(path, owner, group)
-                    service_support.reload(manager)
-                if previous and previous != meta['release_id']:
-                    as_service([sys.executable,'-B','-I','-S',str(controller),'--root',str(ROOT),'activate',previous])
-                if was_running:
-                    service_support.start(manager,[http_name,panel_name])
+                if existing and os.path.lexists(CONFIG_DIR/TRANSACTION_NAME):
+                    # Keep the durable journal if any recovery step fails. A
+                    # later run recovers it before showing configuration choices.
+                    recover_transaction(work)
+                else:
+                    present = service_support.service_paths(manager)
+                    service_support.stop(manager, [name for name, path in present.items() if path.exists()])
+                    if was_running:
+                        service_support.start(manager,[http_name,panel_name])
             raise
     print('检测到 Linux：',info['name'],'|',info['arch'],info['libc'],'|',manager)
     print('安装完成，面板登录及证书管理地址如下：')
@@ -716,6 +901,12 @@ def install_verified(args, snapshot, archive, meta):
 def read_configuration(args):
     """Read missing first-install choices from the controlling terminal only."""
     interactive = getattr(args, 'interactive', False)
+    saved = saved_configuration()
+    if saved is not None:
+        read_existing_configuration(args, saved)
+        return
+    if args.bind is None:
+        args.bind = '0.0.0.0'
     # Explicit values are authoritative and still fail strictly. Validate before
     # asking for an email or CA consent, including in an interactive invocation.
     if args.domain:
@@ -757,12 +948,110 @@ def read_configuration(args):
             setattr(args, attr, default)
 
 
+def read_existing_configuration(args, saved):
+    """Choose intent before collecting values; an upgrade never reinitializes data."""
+    args._existing_config = saved
+    if args.admin is not None and args.admin != saved['admin']:
+        raise InstallError('已有管理员账户会保留；账户改名请在面板中操作，不通过安装器改写')
+    mode = saved['certificate_mode']
+    if bool(args.cert) != bool(args.key):
+        raise InstallError('请同时提供 --cert 和 --key；原证书和配置未更改')
+    if mode == 'managed' and (args.cert or args.key):
+        raise InstallError('本次操作保留原证书模式，不支持从托管证书切换到自带证书')
+    if mode == 'provided':
+        args.cert = args.cert or str(ROOT/'data/certs/provided-fullchain.pem')
+        args.key = args.key or str(ROOT/'data/certs/provided-privkey.pem')
+    fields = ('domain', 'email', 'port', 'bind', 'node_port')
+    original = {key: saved.get(key, 10443) for key in fields}
+    supplied = {key: getattr(args, key) for key in fields if getattr(args, key) is not None
+                and getattr(args, key) != ''}
+    if 'domain' in supplied:
+        supplied['domain'] = fqdn(supplied['domain'])
+    requested = {key: value for key, value in supplied.items() if value != original[key]}
+    if not getattr(args, 'interactive', False):
+        if requested:
+            raise InstallError('参数与已有配置不一致：'+', '.join(requested)+'；请使用短命令交互选择“修改配置”')
+        for key, value in original.items(): setattr(args, key, value)
+        args.admin = saved['admin']
+        return
+    # --upgrade is already an explicit choice, but cannot silently change values.
+    edit = False
+    with controlling_terminal() as terminal:
+        terminal.write('检测到已有安装（'+('已完成' if saved['ready'] else '尚未完成，可继续安装')+'）。\n')
+        terminal.write(f"原面板：https://{saved['domain']}:{saved['port']}\n"
+                       f"原联系邮箱：{saved['email']}\n原管理员：{saved['admin']}（保留现有账户）\n"
+                       f"监听地址：{saved['bind']}；节点 TCP 预检端口：{original['node_port']}\n")
+        terminal.flush()
+        if not args.upgrade or requested:
+            while True:
+                answer = read_terminal_line(terminal,
+                    '1) 沿用原配置'+('升级' if saved['ready'] else '继续安装')+
+                    '  2) 修改配置后继续  0) 取消\n请选择 [1/2/0，回车取消]: ')
+                if answer in ('', '0'):
+                    raise InstallError('已取消，原配置和数据未更改')
+                if answer == '1' and requested:
+                    terminal.write('命令参数与原配置不一致：'+', '.join(requested)+'；请选择 2 修改，或取消后不带这些参数重试。\n')
+                    terminal.flush()
+                elif answer in ('1', '2'):
+                    edit = answer == '2'
+                    break
+                else:
+                    terminal.write('请输入 1、2 或 0。\n'); terminal.flush()
+        for key, value in original.items(): setattr(args, key, value)
+        args.admin = saved['admin']
+        if mode == 'provided' and not all(Path(value).is_file() for value in (args.cert, args.key)):
+            terminal.write('上次自带证书尚未保存完成，请提供原证书及私钥文件路径；不会改为自动签发。\n')
+            for key, label in (('cert', '证书链文件路径'), ('key', '私钥文件路径')):
+                while True:
+                    value = read_terminal_line(terminal, label+': ')
+                    if value and Path(value).is_file() and not Path(value).is_symlink():
+                        setattr(args, key, value)
+                        break
+                    terminal.write('请输入现有普通文件的路径，请重新输入。\n'); terminal.flush()
+        if edit:
+            terminal.write('回车保留显示值。管理员账户、证书模式和已有节点均保留；节点端口只用于预检和防火墙提示，不改写已有节点。\n')
+            for key, label in (('domain', '面板域名'), ('email', '联系邮箱'), ('port', '面板 HTTPS 端口'),
+                               ('bind', '监听 IP'), ('node_port', '节点 TCP 预检端口')):
+                default = supplied.get(key, original[key])
+                while True:
+                    value = read_terminal_line(terminal, f'{label} [{default}]: ', retry_overlong=key == 'domain')
+                    value = value or str(default)
+                    try:
+                        if key == 'domain': value = fqdn(value)
+                        elif key == 'email':
+                            if not re.fullmatch(r'[A-Za-z0-9._%+\-]+@[^@]+', value) or len(value) > 254:
+                                raise InstallError('联系邮箱无效')
+                            local, host = value.rsplit('@', 1)
+                            value = local+'@'+fqdn(host)
+                        elif key in ('port', 'node_port'):
+                            if not value.isascii() or not value.isdecimal() or not 1024 <= int(value) <= 65535:
+                                raise InstallError('请使用 1024–65535 范围内的非特权端口')
+                            value = int(value)
+                        else: value = str(ipaddress.ip_address(value))
+                    except (InstallError, ValueError) as exc:
+                        terminal.write(str(exc)+'，请重新输入。\n'); terminal.flush()
+                    else:
+                        setattr(args, key, value)
+                        break
+            changes = [f'{key}: {original[key]} → {getattr(args, key)}' for key in fields
+                       if getattr(args, key) != original[key]]
+            terminal.write('变更内容：\n'+('\n'.join(changes) if changes else '无配置变化')+'\n')
+            terminal.flush()
+            if not terminal_confirm(terminal, '确认保留数据，按上述配置继续安装'):
+                raise InstallError('已取消，原配置和数据未更改')
+        if not args.cert and not args.accept_terms:
+            args.accept_terms = terminal_confirm(terminal,
+                '我控制该域名，并同意 https://letsencrypt.org/repository/ 的 CA 条款及公开证书记录')
+    args.upgrade = True
+    args._reconfigure = edit
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--bundle', required=True, type=Path); p.add_argument('--sha256', required=True)
     p.add_argument('--archive-temp-dir', type=Path, help='私有校验快照使用的现有磁盘目录（默认 /var/tmp；低内存主机请避免 tmpfs）')
     p.add_argument('--domain'); p.add_argument('--email'); p.add_argument('--admin')
-    p.add_argument('--port',type=int);p.add_argument('--bind',default='0.0.0.0')
+    p.add_argument('--port',type=int);p.add_argument('--bind')
     p.add_argument('--node-port',type=int,help='需要预检或放行的默认节点 TCP 端口')
     p.add_argument('--interactive',action='store_true',help='交互填写缺失的域名、邮箱、管理员用户名和端口')
     p.add_argument('--node-udp-port',type=int,action='append',default=[],metavar='PORT',
@@ -774,19 +1063,36 @@ def main():
     p.add_argument('--health-ca', help='可选的私有 CA 信任文件，仅用于自带证书的 HTTPS 健康验证')
     p.add_argument('--dry-run',action='store_true')
     args = p.parse_args()
-    read_configuration(args)
-    if args.health_ca and not args.cert:
-        raise InstallError('--health-ca 仅用于显式提供的证书，不用于 ACME 验证')
+    if os.geteuid() != 0 and not args.dry_run:
+        raise InstallError('请使用 sudo 运行此受保护安装器')
+    os.umask(0o077)
     if args.dry_run:
+        if os.path.lexists(CONFIG_DIR/TRANSACTION_NAME):
+            raise InstallError('检测到未完成的配置事务；只读预检不会恢复或修改安装，请正常运行安装器恢复')
+        read_configuration(args)
+        if args.health_ca and not args.cert:
+            raise InstallError('--health-ca 仅用于显式提供的证书，不用于 ACME 验证')
         install(args)
         return
-    if os.geteuid() == 0:
-        os.umask(0o077)
-        with _installation_lock(INSTALL_LOCK):
-            install(args)
-    else:
-        if not args.dry_run: raise InstallError('请使用 sudo 运行此受保护安装器')
-        install(args)
+    # Config selection and application share the same lease. Never accept a
+    # stale menu choice from another concurrent installer.
+    with installation_signals(), _installation_lock(INSTALL_LOCK):
+        snapshot, archive, meta = verify_archive(args.bundle, args.sha256,
+            temp_dir=getattr(args, 'archive_temp_dir', None))
+        with snapshot, archive:
+            if os.path.lexists(CONFIG_DIR/TRANSACTION_NAME):
+                info = check_platform()
+                check_reserved(True, info['init'])
+                account = pwd.getpwnam('v-ui')
+                with tempfile.TemporaryDirectory(prefix='.recovery-', dir=ROOT) as temporary:
+                    work = Path(temporary); os.chown(work, account.pw_uid, account.pw_gid)
+                    extract_controller(archive, work, account.pw_uid, account.pw_gid)
+                    recover_transaction(work)
+            read_configuration(args)
+            if args.health_ca and not args.cert:
+                raise InstallError('--health-ca 仅用于显式提供的证书，不用于 ACME 验证')
+            validate_options(args)
+            install_verified(args, snapshot, archive, meta)
 
 
 if __name__ == '__main__':

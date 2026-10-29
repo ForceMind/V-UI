@@ -124,8 +124,19 @@ class SetupShellTests(unittest.TestCase):
         fixture_sha=hashlib.sha256(fixture.encode()).hexdigest()
         text=self.source.replace(PATH_VALUE,str(self.bin)).replace('/bin/bash',BASH)
         text=text.replace(INSTALLER_SHA,fixture_sha).replace('/usr/bin/python3',sys.executable)
+        text=text.replace('/etc/v-ui/service.json',str(self.root/'existing-service.json'))
         text=text.replace('[[ "$EUID" -ne 0 ]]','[[ -f '+shlex.quote(str(self.root/'nonroot'))+' ]]')
         self.script.write_text(text)
+
+    def test_existing_install_defers_configuration_to_verified_installer_without_domain_prompt(self):
+        # Presence alone defers questions; mutable metadata is never executed or
+        # parsed by Bash. The authenticated installer owns all trust checks.
+        existing=self.root/'existing-service.json'
+        existing.write_text('$(exit 99)\nnot JSON, must not be sourced\n')
+        result=self.run_setup(default_domain=False)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(self.logs('installer')[0]['args'][-2:],['--domain',''])
+        self.assertNotIn('Panel domain',result.stdout+result.stderr)
 
     def run_setup(self,*args,stdin='fixture-password\n',process_substitution=False,default_domain=True):
         if default_domain and not any(value == '--domain' or value.startswith('--domain=') for value in args):

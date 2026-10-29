@@ -34,6 +34,7 @@ jobs:
           VUI_SYSTEM_INSTALL_TEST: '1'
           VUI_DOMAIN_RETRY_TEST: '1'
           VUI_INSTALLER_YN_TEST: '1'
+          VUI_EXISTING_INSTALL_TEST: '1'
           VUI_RELEASE_BUNDLE: /tmp/vui-oneclick/vui-linux.zip
           VUI_RELEASE_KIT: /tmp/vui-oneclick/kit
         run: |
