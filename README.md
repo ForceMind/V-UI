@@ -52,11 +52,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh
 v-ui
 ```
 
-需要固定安装 v0.4.10 时使用：
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh) --version v0.4.10
-```
+当前代码分支正在验证 **v0.4.11 候选，尚未发布**：新增已有安装自动读配置、选择升级/续装/修改与保留数据的恢复流程，见[验收记录](docs/INSTALLER_EXISTING_0411.md)。该候选正式发布并更新可信摘要后，完整套件的固定版本参数为 `--version v0.4.11`；当前短入口仍固定公开 v0.4.10，不安装未发布候选。
 
 短入口会执行来自本项目仓库的脚本，请确认仓库和地址属于你信任的来源。完整包、安装 helper 和资产摘要仍需校验。离线安装、已有证书、自定义路径及端口参数见[安装指南](docs/INSTALLATION.md)；固定摘要入口见相应 [Release](https://github.com/ForceMind/V-UI/releases)。
 

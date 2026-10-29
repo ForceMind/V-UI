@@ -314,6 +314,85 @@ class OneClickSystemTests(unittest.TestCase):
                 def login_again():
                     self.assertEqual(api('/api/auth/login', {'username': 'installer-admin', 'password': password})[0], 200)
                 gate.finish(self, cmd, api, login_again)
+            if os.getenv('VUI_EXISTING_INSTALL_TEST') == '1':
+                self.assertIsNone(published_version, 'Exercise the exact new candidate, not the frozen public suite')
+                self.assertIsNone(gate, 'Existing-configuration acceptance requires its own empty systemd runner')
+                existing_cmd = [*(online['initial'] if online else [*cmd,'--interactive']),
+                                '--assume-external-ports-open']
+                def interaction(answers, expected=0):
+                    with MenuSession(existing_cmd,cwd='/tmp',env=dict(os.environ),timeout=300) as session:
+                        session.expect('请选择 [1/2/0，回车取消]: ')
+                        prefix=session.text()
+                        self.assertNotIn('联系邮箱:',prefix)
+                        self.assertNotIn('管理员用户名 [admin]',prefix)
+                        self.assertNotIn('面板域名（例如',prefix)
+                        for prompt,answer in answers:
+                            if prompt: session.expect(prompt)
+                            session.send(answer+'\n')
+                        text=session.finish(expected)
+                        self.assertNotIn('Password (15',text)
+                        print(text)
+                        return text
+                # Cancellation preserves config bytes and the live authenticated service.
+                before=Path('/etc/v-ui/service.json').read_bytes()
+                interaction([(None,'0')],1)
+                self.assertEqual(Path('/etc/v-ui/service.json').read_bytes(),before)
+                self.assertEqual(api('/api/auth/me')[0],200)
+                interaction([(None,'1')])
+                self.assertEqual(json.loads(api('/api/proxy/settings')[1]),saved_proxy)
+                # Real ready:false recovery with existing data and missing unit files.
+                subprocess.run(['sudo','systemctl','stop','v-ui.service','v-ui-http01.socket','v-ui-http01.service'],check=True)
+                subprocess.run(['sudo','/usr/bin/python3','-B','-I','-S','-c',
+                    "import json;from pathlib import Path;p=Path('/etc/v-ui/service.json');c=json.loads(p.read_text());c['ready']=False;p.write_text(json.dumps(c))"],check=True)
+                subprocess.run(['sudo','rm','-f',*(str(Path('/etc/systemd/system')/name) for name in
+                    ('v-ui.service','v-ui-http01.service','v-ui-http01.socket'))],check=True)
+                subprocess.run(['sudo','systemctl','daemon-reload'],check=True)
+                resumed=interaction([(None,'1')])
+                self.assertIn('尚未完成，可继续安装',resumed)
+                self.assertEqual(api('/api/auth/me')[0],200)
+                self.assertEqual(json.loads(api('/api/proxy/settings')[1]),saved_proxy)
+                old_port=port
+                changed_port=unused_port()
+                edits=[(None,'2'),('面板域名 [',''),('联系邮箱 [','new-contact@example.test'),
+                       ('面板 HTTPS 端口 [',str(changed_port)),('监听 IP [',''),
+                       ('节点 TCP 预检端口 [',''),('确认保留数据，按上述配置继续安装','y')]
+                changed=interaction(edits)
+                self.assertIn('升级前私有备份',changed)
+                port=changed_port;origin=f'https://{domain}:{port}'
+                config=json.loads(Path('/etc/v-ui/service.json').read_text())
+                self.assertEqual(config['email'],'new-contact@example.test')
+                self.assertEqual(config['port'],port)
+                self.assertEqual(config['admin'],'installer-admin')
+                self.assertEqual(api('/api/auth/me')[0],200)
+                self.assertEqual(json.loads(api('/api/proxy/settings')[1]),saved_proxy)
+                # A real unrelated occupied port is rejected before stopping the panel.
+                with socket.socket() as occupied:
+                    occupied.bind(('127.0.0.1',0));occupied.listen()
+                    busy=occupied.getsockname()[1]
+                    bad=[(prompt,str(busy) if prompt=='面板 HTTPS 端口 [' else answer) for prompt,answer in edits]
+                    blocked=interaction(bad,1)
+                    self.assertIn('已被占用',blocked)
+                    self.assertEqual(json.loads(Path('/etc/v-ui/service.json').read_text()),config)
+                    self.assertEqual(api('/api/auth/me')[0],200)
+                # A syntactically valid but wrong certificate hostname causes real
+                # TLS health failure, and then restores the old binding/config/service.
+                # Keep only the saved leaf: real fullchain files often omit the
+                # root. Recovery must still verify that exact saved certificate,
+                # without disabling hostname, signature or expiration checks.
+                subprocess.run(['sudo','-u','v-ui',str(release/'runtime/python/bin/python3'),'-B','-I','-S','-c',
+                    "from pathlib import Path;p=Path('/var/lib/v-ui/data/certs/provided-fullchain.pem');p.write_bytes(p.read_bytes().split(b'-----END CERTIFICATE-----')[0]+b'-----END CERTIFICATE-----\\n')"],check=True)
+                bad=[(prompt,'wrong.example.test' if prompt=='面板域名 [' else
+                      str(unused_port()) if prompt=='面板 HTTPS 端口 [' else answer) for prompt,answer in edits]
+                failed=interaction(bad,1)
+                self.assertIn('HTTPS 健康验证失败',failed)
+                self.assertIn('已恢复上次操作前',failed)
+                self.assertEqual(json.loads(Path('/etc/v-ui/service.json').read_text()),config)
+                self.assertEqual(api('/api/auth/me')[0],200)
+                self.assertEqual(json.loads(api('/api/proxy/settings')[1]),saved_proxy)
+                self.assertFalse(Path('/etc/v-ui/.install-transaction.json').exists())
+                check_uid('v-ui.service')
+                global_menu_check(self,{**os.environ,'PYTHONDONTWRITEBYTECODE':'1'},exercise_start_stop=True)
+                print('Existing installation: automatic saved configuration / cancel / upgrade / ready:false with absent units / email+HTTPS-port reconfigure / occupied port refusal / real TLS failure recovery / existing authenticated session and proxy state retained OK')
             if online:
                 print('Online managed installer transport: '+online['transport']+'; interactive domain/email/admin/ports, real global v-ui menu and stop/start passed')
             if domain_retry:

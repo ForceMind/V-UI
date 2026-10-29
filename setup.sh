@@ -104,6 +104,9 @@ HELP
   setup_python_ready || { printf '%s\n' '全局 v-ui 需要系统 /usr/bin/python3（3.9 或更高版本）；安装无法继续。' >&2; exit 1; }
   # Use the fixed OS interpreter, with isolated imports and a separate terminal.
   # stdin remains available for the frozen installer's password input channel.
+  # Existing installations choose upgrade/resume/edit in the verified installer,
+  # before any first-install questions. Never parse or source this file in Bash.
+  if [[ ! -e /etc/v-ui/service.json && ! -L /etc/v-ui/service.json ]]; then
   domain="$(/usr/bin/python3 -B -I -S - "$domain" <<'PYDOMAIN'
 import re
 import sys
@@ -158,6 +161,7 @@ except ValueError:
 print(name)
 PYDOMAIN
 )"
+  fi
   # Own even a path printed by a failing/interrupted mktemp before handling signals.
   allocating=1
   if setup_dir="$(mktemp -d /root/vui-bootstrap.XXXXXXXX)"; then :; else allocation_status=$?; fi

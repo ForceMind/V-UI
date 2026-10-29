@@ -167,7 +167,10 @@ class InstallerTests(unittest.TestCase):
         self.assertIn('os.setuid(account.pw_uid)',source)
         self.assertIn("with open('/dev/tty'",source)
         self.assertNotIn('shell=True',source)
-        self.assertEqual(source.count("[sys.executable,'-B','-I','-S',str(controller)"), 4)
+        # Rollback now restores the saved CURRENT pointer through the verified
+        # narrow helper, without invoking whole-data restore or a new activate.
+        self.assertEqual(source.count("[sys.executable,'-B','-I','-S',str(controller)"), 3)
+        self.assertIn("certificate_state(work, 'restore'", source)
         self.assertNotIn("[sys.executable,'-B',str(controller)", source)
 
 if __name__=='__main__':unittest.main()

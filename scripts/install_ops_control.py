@@ -402,15 +402,33 @@ def preflight(directory, sha256):
             units = ({SYSTEMD_DIR / name: 0o644 for name in ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')}
                      if manager == 'systemd' else {OPENRC_DIR / name: 0o755 for name in ('v-ui', 'v-ui-http01')})
             current = {CONFIG: 0o644, LAUNCHER: 0o644, **units}
-            hashes = {str(path): read_file(path, root=True, mode=mode)[1] for path, mode in current.items()}
+            raw, config_hash = read_file(CONFIG, root=True, mode=0o644, limit=MAX_JSON)
+            config = load_json(raw)
+            incomplete = (isinstance(config, dict) and type(config.get('installer')) is int
+                          and config['installer'] == 1 and config.get('ready') is False
+                          and config.get('service_manager', 'systemd') == manager)
+            hashes = {str(CONFIG): config_hash}
+            missing_instance = set()
+            for path, mode in current.items():
+                if path == CONFIG: continue
+                if incomplete and not os.path.lexists(path):
+                    missing_instance.add(str(path))
+                    continue
+                hashes[str(path)] = read_file(path, root=True, mode=mode)[1]
             # These are pre-upgrade service bytes. Their canonical replacement
             # is checked by the panel installer, then inspect_instance below.
-            validate_existing(hashes, interpreter, manager, True, verified)
+            validate_existing(hashes, interpreter, manager, True, verified,
+                              missing_instance=missing_instance)
     return verified, record, interpreter
 
 
-def validate_existing(hashes, interpreter, manager, refresh, verified):
+def validate_existing(hashes, interpreter, manager, refresh, verified, *, missing_instance=()):
     paths = destinations()
+    unit_dir = SYSTEMD_DIR if manager == 'systemd' else OPENRC_DIR
+    unit_names = ('v-ui.service','v-ui-http01.service','v-ui-http01.socket') if manager == 'systemd' else ('v-ui','v-ui-http01')
+    allowed_missing = {str(LAUNCHER)} | {str(unit_dir/name) for name in unit_names}
+    if missing_instance and (not refresh or not set(missing_instance) <= allowed_missing):
+        raise InstallError('Only guarded incomplete-instance preflight may defer missing service files')
     for path in (*paths, RECEIPT):
         trusted_parents(path)
     if not RECEIPT.exists() and not RECEIPT.is_symlink():
@@ -428,7 +446,7 @@ def validate_existing(hashes, interpreter, manager, refresh, verified):
             raise InstallError('--refresh requires a complete matching managed receipt')
         return
     receipt = load_json(read_file(RECEIPT, root=True, mode=0o644, limit=MAX_JSON)[0])
-    expected = set(hashes) | {str(path) for path in paths}
+    expected = set(hashes) | {str(path) for path in paths} | set(missing_instance)
     dependencies = {str(CONTROL / name) for name in SOURCE_DEPENDENCIES}
     # Explicit refresh may migrate either exact earlier closure: the original
     # controller without proxy dependencies, or M1 without the data-owner helper.
