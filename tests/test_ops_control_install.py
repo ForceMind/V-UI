@@ -119,6 +119,25 @@ class ControlInstallTests(unittest.TestCase):
         self.assert_not_published()
         self.assertFalse(os.path.lexists(self.command_alias))
 
+    def test_incomplete_instance_may_repair_missing_units_but_not_changed_control(self):
+        self.install()
+        self.config_value['ready'] = False
+        self.config.write_text(json.dumps(self.config_value))
+        for path in self.units.iterdir(): path.unlink()
+        installer.preflight(self.kit, self.sha)
+        # Publishing a global menu still requires the completed canonical instance.
+        with self.assertRaises(installer.InstallError): self.install(refresh=True)
+        helper = self.control/'system_ops.py'
+        helper.write_bytes(helper.read_bytes()+b'\n# untrusted drift\n')
+        with self.assertRaisesRegex(installer.InstallError,'control code drift'):
+            installer.preflight(self.kit,self.sha)
+
+    def test_complete_instance_cannot_hide_missing_units_as_incomplete_repair(self):
+        self.install()
+        next(self.units.iterdir()).unlink()
+        with self.assertRaises((installer.InstallError,OSError)):
+            installer.preflight(self.kit,self.sha)
+
     def test_preflight_refuses_unknown_command_or_control_bytes_before_installation(self):
         for path in (self.command_alias, self.entry, self.control / 'system_ops.py'):
             with self.subTest(path=path):
