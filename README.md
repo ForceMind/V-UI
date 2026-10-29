@@ -9,7 +9,7 @@
 
 [下载稳定版](https://github.com/ForceMind/V-UI/releases/latest) · [使用文档](docs/README.md) · [协议兼容性](docs/COMPATIBILITY.md) · [报告问题](https://github.com/ForceMind/V-UI/issues)
 
-**当前稳定版：[v0.4.10](https://github.com/ForceMind/V-UI/releases/tag/v0.4.10)**
+**当前稳定版：[v0.4.11](https://github.com/ForceMind/V-UI/releases/tag/v0.4.11)**
 
 ## 功能
 
@@ -42,7 +42,7 @@
 bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh)
 ```
 
-入口当前固定安装已公开的 v0.4.10，并使用已核验的安装器与完整套件摘要；具体版本可查 `setup.sh --help`。入口完成下载与完整性校验，并交互询问域名、邮箱、管理员、端口和密码；需要时通过现有 sudo 策略取得管理员权限。自动证书的 CA 条款由使用者本人确认。不要将密码写入命令行。
+入口固定安装已公开的 v0.4.11，并使用已核验的安装器与完整套件摘要；具体版本可查 `setup.sh --help`。新安装会交互询问域名、邮箱、管理员、端口和密码；已有安装会先显示原配置，选择沿用升级、继续未完成安装、修改或取消，不用重新填写整套参数。需要时通过现有 sudo 策略取得管理员权限。自动证书的 CA 条款由使用者本人确认。不要将密码写入命令行。
 
 域名为空或格式无效时，会当场提示重新输入，合法后才继续邮箱等配置。v0.4.10 还提供中文安装提示及 `y/n/yes/no` 确认（回车默认否、非法回答重问）；旧 v0.4.9 安装器不包含后两项改动。请填写 DNS 域名，不能带 `https://`、路径、端口、IP 或通配符；国际化域名会按 IDNA 规范化。
 
@@ -52,7 +52,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh
 v-ui
 ```
 
-当前代码分支正在验证 **v0.4.11 候选，尚未发布**：新增已有安装自动读配置、选择升级/续装/修改与保留数据的恢复流程，见[验收记录](docs/INSTALLER_EXISTING_0411.md)。该候选正式发布并更新可信摘要后，完整套件的固定版本参数为 `--version v0.4.11`；当前短入口仍固定公开 v0.4.10，不安装未发布候选。
+已有安装选择 `1` 沿用原配置升级或续装，选择 `2` 修改配置；修改时回车保留原值，最后再次确认。管理员账户、密码、已有节点和订阅保留；升级前备份，失败恢复配置与服务。固定版本参数为 `--version v0.4.11`，详细边界及验收见[记录](docs/INSTALLER_EXISTING_0411.md)。
 
 短入口会执行来自本项目仓库的脚本，请确认仓库和地址属于你信任的来源。完整包、安装 helper 和资产摘要仍需校验。离线安装、已有证书、自定义路径及端口参数见[安装指南](docs/INSTALLATION.md)；固定摘要入口见相应 [Release](https://github.com/ForceMind/V-UI/releases)。
 
