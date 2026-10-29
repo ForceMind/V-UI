@@ -309,12 +309,18 @@ class OneClickSystemTests(unittest.TestCase):
             if gate:
                 gate.installed()
             # A repeated install without explicit upgrade must not touch the running instance.
-            repeat=(configured_setup_with_tty(repeat_cmd) if os.getenv('VUI_SETUP_INSTALL') == '1' else
+            cancel_existing = bool(os.getenv('VUI_SETUP_INSTALL') == '1' and published_version
+                                   and tuple(map(int,published_version.split('.'))) >= (0,4,11))
+            repeat_configuration=Path('/etc/v-ui/service.json').read_bytes()
+            repeat=(configured_setup_with_tty(repeat_cmd,cancel_existing=cancel_existing)
+                    if os.getenv('VUI_SETUP_INSTALL') == '1' else
                     subprocess.run(repeat_cmd,capture_output=True,text=True,timeout=300 if published_version else 30))
             if gate:
                 gate.installer_receipt('implicit_repeat', repeat.stdout)
             self.assertNotEqual(repeat.returncode,0)
-            self.assertIn('安装已存在' if new_installer else 'already exists',repeat.stdout+repeat.stderr)
+            self.assertEqual(Path('/etc/v-ui/service.json').read_bytes(),repeat_configuration)
+            self.assertIn('已取消，原配置和数据未更改' if cancel_existing else
+                          ('安装已存在' if new_installer else 'already exists'),repeat.stdout+repeat.stderr)
             check_uid('v-ui.service')
             # Existing fake M1 proxy drafts must survive the actual installer
             # controller's stopped backup. No apply or network change is made.
@@ -448,6 +454,6 @@ class OneClickSystemTests(unittest.TestCase):
                 print('Domain input retry: blank / URL-with-port-and-path / invalid label rejected before email and product installation; uppercase trailing-dot domain accepted and canonicalized; real installed service, global v-ui and upgrade verified')
             if exercise_confirmations:
                 print('Chinese installer confirmation: invalid reply re-prompted, short y accepted for cloud/upstream confirmation; temporary loopback fixture only, not proof of real cloud ingress')
-            print('One-command systemd: real sudo setup / non-root workers / private state / HTTPS / fd-passed HTTP-01 port80 / auth / repeat refusal / upgrade backup / restart OK')
+            print('One-command systemd: real sudo setup / non-root workers / private state / HTTPS / fd-passed HTTP-01 port80 / auth / repeat protection / upgrade backup / restart OK')
 
 if __name__=='__main__':unittest.main()

@@ -46,6 +46,58 @@ class ShortInstallContractTests(unittest.TestCase):
         self.assertEqual(result.returncode,7)
         self.assertIn('controlling-terminal=True',result.stdout)
 
+    def fake_configured_session(self, chunks, returncode):
+        class Session:
+            def __init__(self):
+                self.chunks=list(chunks)
+                self.output=''
+                self.sent=[]
+                self.sent_outputs=[]
+                self.process=self
+                self.returncode=None
+            def __enter__(self):return self
+            def __exit__(self,*unused):pass
+            def poll(self):
+                if not self.chunks:self.returncode=returncode
+                return self.returncode
+            def _read(self,timeout):
+                if not self.chunks:return False
+                self.output+=self.chunks.pop(0)
+                return True
+            def text(self):return self.output
+            def send(self,value):
+                self.sent.append(value)
+                self.sent_outputs.append(self.output)
+        return Session()
+
+    def test_existing_menu_cancel_sends_only_zero_once_after_complete_prompt(self):
+        session=self.fake_configured_session([
+            'Panel domain: ', '请选择 [1/2/0，回车', '取消]: ',
+            '请选择 [1/2/0，回车取消]: ', '已取消，原配置和数据未更改'],17)
+        with patch.object(helpers,'MenuSession',return_value=session):
+            result=helpers.configured_setup_with_tty(['synthetic-menu'],timeout=5,cancel_existing=True)
+        self.assertEqual(session.sent,['0\n'])
+        self.assertEqual(session.sent_outputs,['Panel domain: 请选择 [1/2/0，回车取消]: '])
+        self.assertEqual(result.returncode,17)
+        self.assertIn('已取消，原配置和数据未更改',result.stdout)
+
+    def test_existing_menu_cancel_requires_exact_prompt_and_never_answers_other_prompts(self):
+        session=self.fake_configured_session([
+            'Panel domain: ', '请选择 [1/2/0，回车取消]:', '已取消，原配置和数据未更改'],7)
+        with patch.object(helpers,'MenuSession',return_value=session):
+            with self.assertRaisesRegex(AssertionError,'menu prompt was not observed'):
+                helpers.configured_setup_with_tty(['synthetic-menu'],timeout=5,cancel_existing=True)
+        self.assertEqual(session.sent,[])
+        self.assertEqual(session.returncode,7)
+
+    def test_configured_setup_default_never_injects_menu_input(self):
+        session=self.fake_configured_session(['请选择 [1/2/0，回车取消]: ','original failure'],9)
+        with patch.object(helpers,'MenuSession',return_value=session):
+            result=helpers.configured_setup_with_tty(['synthetic-menu'],timeout=5)
+        self.assertEqual(session.sent,[])
+        self.assertEqual(result.returncode,9)
+        self.assertIn('original failure',result.stdout)
+
     def test_workflow_checks_out_frozen_release_source_separately(self):
         root=Path(__file__).resolve().parents[1]
         workflow=yaml.load((root/'.github/workflows/short-install.yml').read_text(),Loader=yaml.BaseLoader)
@@ -54,11 +106,11 @@ class ShortInstallContractTests(unittest.TestCase):
         self.assertEqual(len(checkouts),2)
         self.assertEqual(checkouts[0]['with']['persist-credentials'],'false')
         self.assertEqual(checkouts[1]['with'],{'persist-credentials':'false',
-                                             'ref':'5987c2b7555a47f6759187537460a2309942ac8e',
+                                             'ref':'265e47d76ef5166c0399f916e8cf780d6c6ae22d',
                                              'path':'.published-suite'})
         acceptance=next(step for step in steps if 'VUI_SETUP_INSTALL' in step.get('env',{}))
         self.assertEqual(acceptance['env']['VUI_SETUP_RELEASE_SOURCE'],'${{ github.workspace }}/.published-suite')
-        self.assertEqual(acceptance['env']['VUI_PUBLISHED_INSTALL_VERSION'],'0.4.10')
+        self.assertEqual(acceptance['env']['VUI_PUBLISHED_INSTALL_VERSION'],'0.4.11')
         self.assertEqual(acceptance['env']['VUI_RELEASE_COMMIT'],checkouts[1]['with']['ref'])
 
     def fixture(self, folder, *, release_commit=None, raw=None):

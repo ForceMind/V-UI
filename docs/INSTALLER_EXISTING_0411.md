@@ -1,10 +1,10 @@
-# v0.4.11 候选：已有安装与配置恢复
+# v0.4.11：已有安装与配置恢复
 
 ## 范围与状态
 
 用户要求：已有安装先读取原配置，交互选择沿用升级、未完成续装或修改配置；保留数据。构建及真实安装验收只在 GitHub Actions，不做浏览器测试。
 
-从 main `586d8a2dbd0be6d7ba8d5c5823df8fe9a1f73c95` 创建版本分支 `release/v0.4.11`。用户随后明确批准本版转 Ready、dev→main 正常合并、公开发布及短命令切换，新增仅限本版的严格非浏览器发布例外；不覆盖旧版资产。当前稳定短入口仍消费公开 v0.4.10，须在本版正式公开及核对真实摘要后才切换。
+从 main `586d8a2dbd0be6d7ba8d5c5823df8fe9a1f73c95` 创建版本分支 `release/v0.4.11`。用户随后明确批准本版转 Ready、dev→main 正常合并、公开发布及短命令切换，新增仅限本版的严格非浏览器发布例外；不覆盖旧版资产。v0.4.11 现已正式公开并核对真实摘要，后续短入口切换仍须自己的审查、合并及准确主线公网验收。
 
 发布门禁固定本版 0.4.11 及上述基线，只允许安装器、测试、文档与发布流程；main.py 必须逐字节仅有 0.4.10→0.4.11 版本常量替换，build_bundle.py 必须逐字节仅增加恢复 helper 的白名单行。不允许借 builder 改写应用内容、依赖或核心；其他版本、源码链接/重命名/删除均拒绝。默认仍完整验收；显式本版选项仅允许列明 12 个浏览器步骤 skipped，其余准确 attempt jobs/steps、同源四目标及真实安装门槛保持。
 
@@ -51,3 +51,13 @@
 已有测试确认systemd active/PID后直接请求API，未等待TLS监听就绪。最小修正仅测试同步：新增monotonic 20秒窗口，单次探测及休眠限制剩余预算，只重试连接拒绝/重置/早期EOF；仍须验证TLS并获得HTTP401，错误证书、其他状态或请求超时立即失败，不重试登录。失败保存有时限/有界/脱敏的systemd与journal诊断；记录实际探测次数和用时。原401、数据与会话断言保持，不以unchanged rerun替代修复，后续提交须自己的资格。
 
 该窗口针对本测试的固定loopback短401响应；socket timeout是每次I/O限制，http.client内部多次recv不构成任意慢速分段流的独立硬总时限。窗口后到达的401始终拒绝，不把此测试helper称为通用HTTP超时实现。
+
+## 正式发布与短入口切换
+
+PR90 修正候选 `8929b8fe48c02f0574fc143db4de1050572ee29d` 自己的九组/12 jobs attempt1 成功，真实安装14次探测/1.323秒取得验证TLS的401后完成全部流程；普通2359项=2130通过+229条件skip。正常dev `fddf57ad8d66000165dff16036fb534e12e68cf7` 的push/PR两套18组/24jobs/24个浏览器明确skip，其余全部attempt1成功，再经PR89正常合并。
+
+正式发布源 main `265e47d76ef5166c0399f916e8cf780d6c6ae22d` 具有自己的九组/12最新jobs/四目标资格。portable首轮x86_64-musl job123525214324 在读取GitHub上游来源元数据时403 rate limit exceeded，日志SHA256为5a753a1769970a376ee20ad7bb8bcf4345e22bca10ff800850a926539bac13a1；保持代码/pin/凭据/断言，仅重跑失败job，portable attempt2成功，其余八组attempt1。旧失败不改判，不称永久消除上游限流。四目标实际晋升制品ID12906642965（oneclick GNU kit）/12907302434/12907524018/12907721667，head/大小/摘要与各自上传日志相符；未在本机下载Linux ZIP。
+
+[发布workflow40900107684](https://github.com/ForceMind/V-UI/actions/runs/40900107684)成功，公开 [v0.4.11](https://github.com/ForceMind/V-UI/releases/tag/v0.4.11) 的tag/target都指向上述准确main，19项资产。真实install.sh SHA256为6c47bb6f05aafe8595bd1763fe227a3d2c4a08c7d74237a18fd82070a3d4f68b，整个SHA256SUMS SHA256为8cf078530059c7483e294c1b6c7d61c3767ce8dd6a75e61f07c0ac276df5f5e6。已匿名下载小型清单，按公开资产digest重建逐字节及整文件摘要校验，源安装器摘要亦匹配；旧v0.4.10的ID/正文/19项资产ID、大小及digest保持。
+
+公开后才切换setup.sh默认版本/两摘要及short-install.yml冻结源码到已发布265e47d。新公开011的重复短命令会进入已有安装菜单，测试helper必须见完整提示后明确输入0取消、确认退出码/取消文案/配置字节不变；010的旧重复拒绝及显式upgrade保持。不以合成输入测试替代真实公网安装，后续批次准确结果见承载PR及最终Actions。
