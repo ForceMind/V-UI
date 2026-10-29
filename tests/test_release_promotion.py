@@ -36,26 +36,30 @@ SHA='a'*40
 
 class InstallerOnlyReleaseTests(unittest.TestCase):
     def scope(self, changes='M\tVERSION\nM\tmain.py\nM\tscripts/install_system.py\n',
-              mode='100644', application_extra=b''):
-        old=b"app = FastAPI(version='0.4.9')\n"
+              mode='100644', application_extra=b'', builder_extra=b''):
+        old=b"app = FastAPI(version='0.4.10')\n"
+        builder=b"allowed_files={'scripts/deploy.py','scripts/install_system.py'}\n"
         def git(args,**kwargs):
             if args[1:3]==['diff','--name-status']:return changes
             if args[1]=='ls-tree':return mode+' blob '+'f'*40+'\t'+args[-1]+'\n'
             if args[1]=='show':
                 if args[2]==INSTALLER_ONLY_BASELINE+':main.py':return old
-                if args[2]==SHA+':main.py':return old.replace(b'0.4.9',b'0.4.10')+application_extra
-                if args[2]==SHA+':VERSION':return b'0.4.10\n'
+                if args[2]==SHA+':main.py':return old.replace(b'0.4.10',b'0.4.11')+application_extra
+                if args[2]==SHA+':VERSION':return b'0.4.11\n'
+                if args[2]==INSTALLER_ONLY_BASELINE+':scripts/build_bundle.py':return builder
+                if args[2]==SHA+':scripts/build_bundle.py':return builder.replace(
+                    b"'scripts/install_system.py'}",b"'scripts/install_system.py',\n            'scripts/installer_certificate_state.py'}")+builder_extra
             raise AssertionError(args)
         with patch('scripts.publish_release.subprocess.run') as ancestry, \
                 patch('scripts.publish_release.subprocess.check_output',side_effect=git):
-            validate_installer_only_scope(SHA,'0.4.10')
+            validate_installer_only_scope(SHA,'0.4.11')
             self.assertEqual(ancestry.call_args.args[0],['git','merge-base','--is-ancestor',INSTALLER_ONLY_BASELINE,SHA])
 
     def test_regular_installer_source_and_version_only_app_change_allowed(self):
         self.scope()
 
     def test_exception_cannot_be_reused_for_another_release(self):
-        for version in ('0.4.9','0.4.11','0.5.0'):
+        for version in ('0.4.9','0.4.10','0.4.12','0.5.0'):
             with self.subTest(version=version),patch('scripts.publish_release.subprocess.run') as git,self.assertRaises(ReleaseGateError):
                 validate_installer_only_scope(SHA,version)
             git.assert_not_called()
@@ -67,6 +71,12 @@ class InstallerOnlyReleaseTests(unittest.TestCase):
     def test_additional_application_logic_is_rejected(self):
         with self.assertRaisesRegex(ReleaseGateError,'Application changes exceed'):
             self.scope(application_extra=b'new_application_logic()\n')
+
+    def test_builder_cannot_rewrite_payload_or_core_selection(self):
+        self.scope(changes='M\tscripts/build_bundle.py\nA\tscripts/installer_certificate_state.py\n')
+        for extra in (b'fetch_cores(payload, "other-core")\n', b'payload.write_text("modified app")\n'):
+            with self.subTest(extra=extra),self.assertRaisesRegex(ReleaseGateError,'Builder changes exceed'):
+                self.scope(builder_extra=extra)
 
     def test_deleted_renamed_or_linked_files_are_rejected(self):
         for change,mode in (('D\tsetup.sh\n','100644'),('R100\tsetup.sh\tother.sh\n','100644'),('M\tsetup.sh\n','120000')):
