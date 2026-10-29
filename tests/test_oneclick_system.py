@@ -30,6 +30,34 @@ def installer_has_chinese_prompts(version):
     return tuple(map(int, version.split('.'))) >= (0, 4, 10)
 
 
+def wait_for_managed_https(probe, diagnostics, *, timeout=20):
+    """systemd active is not a TLS/authentication readiness observation."""
+    started=time.monotonic();deadline=started+timeout;attempts=0;last='no response'
+    while True:
+        remaining=deadline-time.monotonic()
+        if remaining<=0:
+            raise AssertionError('Managed HTTPS did not become ready: '+last+'\n'+diagnostics())
+        attempts+=1
+        try:
+            status,_=probe(min(5,remaining))
+        except (ConnectionRefusedError,ConnectionResetError,ssl.SSLEOFError,http.client.RemoteDisconnected) as exc:
+            last=type(exc).__name__+': '+str(exc)[:200]
+            pause=min(.1,max(0,deadline-time.monotonic()))
+            if pause:time.sleep(pause)
+        except Exception as exc:
+            raise AssertionError('Managed HTTPS readiness failed without retry: '+type(exc).__name__+
+                                 ': '+str(exc)[:200]+'\n'+diagnostics()) from exc
+        else:
+            if status!=401:
+                raise AssertionError('Managed HTTPS must enforce authentication; got '+str(status)+'\n'+diagnostics())
+            elapsed=time.monotonic()-started
+            if elapsed>timeout:
+                raise AssertionError('Managed HTTPS response exceeded readiness deadline\n'+diagnostics())
+            print('Managed HTTPS ready: TLS verified, HTTP401, attempts='+str(attempts)+
+                  ', seconds='+format(elapsed,'.3f'))
+            return
+
+
 @unittest.skipUnless(os.getenv('VUI_SYSTEM_INSTALL_TEST') == '1', 'explicit ephemeral systemd installer gate')
 class OneClickSystemTests(unittest.TestCase):
     def test_actual_offline_installer_permissions_socket_and_autostart(self):
@@ -226,21 +254,42 @@ class OneClickSystemTests(unittest.TestCase):
                 session.send('0\n');session.finish()
             context=ssl.create_default_context(cafile=ca)
             cookie=''
-            def api(path,body=None,*,method=None,extra_headers=()):
+            def api(path,body=None,*,method=None,extra_headers=(),timeout=5,readiness=False):
                 nonlocal cookie
+                deadline=time.monotonic()+timeout
+                def budget():
+                    remaining=deadline-time.monotonic()
+                    if remaining<=0:raise TimeoutError('Managed HTTPS request exceeded readiness budget')
+                    return remaining
                 data=b'' if body is None else json.dumps(body).encode()
-                with socket.create_connection(('127.0.0.1',port),timeout=5) as connection:
+                with socket.create_connection(('127.0.0.1',port),timeout=timeout) as connection:
+                    if readiness:connection.settimeout(budget())
                     with context.wrap_socket(connection,server_hostname=domain) as tls:
                         headers=[(method or ('GET' if body is None else 'POST'))+' '+path+' HTTP/1.0',
                             'Host: '+domain+':'+str(port),'Origin: '+origin,'X-VUI-Request: 1',
                             'Content-Type: application/json','Content-Length: '+str(len(data))]
                         headers.extend(extra_headers)
                         if cookie:headers.append('Cookie: '+cookie)
+                        if readiness:tls.settimeout(budget())
                         tls.sendall(('\r\n'.join(headers)+'\r\n\r\n').encode()+data)
-                        response=http.client.HTTPResponse(tls);response.begin();raw=response.read()
+                        if readiness:tls.settimeout(budget())
+                        response=http.client.HTTPResponse(tls);response.begin()
+                        if readiness:tls.settimeout(budget())
+                        raw=response.read()
                         if response.getheader('Set-Cookie'):
                             c=SimpleCookie();c.load(response.getheader('Set-Cookie'));cookie='; '.join(k+'='+v.value for k,v in c.items())
                         return response.status,raw
+            def readiness_diagnostics():
+                pieces=[]
+                for command in (['systemctl','show','v-ui.service','--property=MainPID,ActiveState,SubState,Result'],
+                                ['sudo','journalctl','-u','v-ui.service','-n','40','--no-pager']):
+                    try:
+                        state=subprocess.run(command,capture_output=True,text=True,timeout=5)
+                        pieces.append((state.stdout+state.stderr).replace(password,'[REDACTED]')[-6000:])
+                    except subprocess.SubprocessError:
+                        pieces.append('Readiness diagnostic command did not complete')
+                return '\n'.join(pieces)
+            wait_for_managed_https(lambda budget:api('/api/certificates',timeout=budget,readiness=True),readiness_diagnostics)
             self.assertEqual(api('/api/certificates')[0],401)
             self.assertEqual(api('/api/auth/login',{'username':'installer-admin','password':password})[0],200)
             caps=json.loads(api('/api/certificates/capabilities')[1])
