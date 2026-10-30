@@ -251,20 +251,31 @@ def global_menu_check(test, env, *, exercise_start_stop):
         session.finish()
 
 
-def configured_setup_with_tty(command, *, timeout=300, cancel_existing=False):
-    """Use a real /dev/tty; optionally cancel only the existing-install menu."""
+def configured_setup_with_tty(command, *, timeout=300, cancel_existing=False, bootstrap_action=None):
+    """Use a real /dev/tty; answer only explicitly requested complete menu prompts."""
+    if bootstrap_action not in (None, "2", "3", "0"):
+        raise ValueError("Unsupported bootstrap action")
     with MenuSession(command, cwd='/tmp', env=dict(os.environ), timeout=timeout) as session:
         deadline=time.monotonic()+timeout
         cancelled=False
+        bootstrap_sent=False
         while session.process.poll() is None:
             if time.monotonic() >= deadline:
                 raise subprocess.TimeoutExpired(command,timeout,output=session.text())
             session._read(.1)
+            if not bootstrap_sent and '请选择 [1/2/3/0，回车退出]: ' in session.text():
+                action = bootstrap_action or ('0' if cancel_existing else None)
+                if action is not None:
+                    session.send(action+'\n')
+                    bootstrap_sent=True
+                    if action == '0':cancelled=True
             if cancel_existing and not cancelled and '请选择 [1/2/0，回车取消]: ' in session.text():
                 session.send('0\n')
                 cancelled=True
         while session._read(.02) and select.select([session.fd],[],[],0)[0]:
             pass
+        if bootstrap_action is not None and not bootstrap_sent:
+            raise AssertionError("Bootstrap menu prompt was not observed; selected action was not exercised")
         if cancel_existing and not cancelled:
             raise AssertionError('Existing-install menu prompt was not observed; cancellation was not exercised')
         return subprocess.CompletedProcess(command,session.process.returncode,session.text(),'')

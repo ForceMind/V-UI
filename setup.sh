@@ -27,7 +27,9 @@ V-UI v0.4.11 交互安装与全局 v-ui 命令（仅支持 Linux）。
 域名规范化并校验通过后才继续；无效输入会立即提示重新输入。
 域名每行最多 4096 个 UTF-8 字节（含换行）。其他参数值原样转发。
 管理员密码通过安全提示输入。
-已有安装会读取原配置，选择升级、继续未完成安装、修改或取消；回车取消。
+已有安装先显示本地管理菜单；只有选择在线升级或继续/修复时才下载套件。
+本地管理不联网；升级沿用原配置，继续/修复可选择修改；回车退出。
+控制组件损坏仍会安全拒绝，不覆盖不可信文件或删除原数据。
 版本、交互模式、全局命令和可信套件设置不能覆盖。
 此入口仅内置 v0.4.11 的可信摘要。你仍须信任可变的原始 setup.sh URL；
 下载的发布资产会按固定摘要校验。
@@ -63,6 +65,106 @@ HELP
     command -v sudo >/dev/null 2>&1 || { printf '%s\n' '请以 root 运行，或安装 sudo 后重新运行安装入口。' >&2; return 1; }
     exec sudo -- /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8 \
       PYTHONDONTWRITEBYTECODE=1 /bin/bash -c "$(declare -f setup_main); setup_main \"\$@\"" v-ui-setup --version "$version" "--domain=$domain" ${installer_args[@]+"${installer_args[@]}"}
+  fi
+
+  # Detect presence only. Never source or parse installation metadata in Bash.
+  # Offer local management before dependency installation or release downloads.
+  if [[ -e /etc/v-ui/service.json || -L /etc/v-ui/service.json || -e /usr/local/sbin/v-ui || -L /usr/local/sbin/v-ui || -e /usr/local/lib/v-ui/ops-control.json || -L /usr/local/lib/v-ui/ops-control.json ]]; then
+    local selection
+    if ! exec 9<>/dev/tty; then
+      printf '%s\n' '已有安装需要控制终端选择管理、升级或修复；尚未下载或更改安装。' >&2
+      return 1
+    fi
+    while true; do
+      printf '%s\n' '' 'V-UI 已有安装管理菜单' \
+        '1  打开本地管理菜单（状态、启停、备份等；不下载）' \
+        '2  在线升级（下载已校验套件，沿用原配置和数据）' \
+        '3  继续/修复安装（下载套件，读取原配置，可选择修改）' \
+        '0  退出（不下载、不更改安装）' >&9
+      printf '%s' '请选择 [1/2/3/0，回车退出]: ' >&9
+      if ! IFS= read -r -u 9 selection; then selection=0; fi
+      case "$selection" in
+        ''|0)
+          exec 9>&-
+          printf '%s\n' '已退出，未下载套件，原配置和数据未更改。'
+          return 0 ;;
+        1)
+          # Do not execute a PATH-selected, linked, writable or unreceipted
+          # controller as root. The installed controller checks its full closure
+          # again under its existing installation lock before any operation.
+          if [[ -x /usr/bin/python3 ]] && /usr/bin/python3 -B -I -S - <<'PYLOCAL'
+import hashlib
+import json
+import os
+import stat
+import subprocess
+import sys
+
+
+def trusted(path, limit):
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if info.st_uid != 0 or info.st_mode & 0o022:
+            raise ValueError('untrusted root')
+        parts = path.strip('/').split('/')
+        for part in parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+            info = os.fstat(fd)
+            if info.st_uid != 0 or info.st_mode & 0o022:
+                raise ValueError('untrusted directory')
+        child = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        try:
+            info = os.fstat(child)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022
+                    or info.st_nlink != 1 or info.st_size > limit):
+                raise ValueError('untrusted file')
+            with os.fdopen(child, 'rb', closefd=False) as stream:
+                raw = stream.read(limit + 1)
+            if len(raw) > limit:
+                raise ValueError('oversized file')
+            return raw
+        finally:
+            os.close(child)
+    finally:
+        os.close(fd)
+
+
+try:
+    if sys.version_info < (3, 9):
+        raise ValueError('unsupported OS Python')
+    receipt = json.loads(trusted('/usr/local/lib/v-ui/ops-control.json', 16384))
+    if type(receipt.get('schema')) is not int or receipt['schema'] != 1:
+        raise ValueError('invalid receipt')
+    for path in ('/usr/local/sbin/v-ui', '/usr/local/lib/v-ui/system_ops.py'):
+        raw = trusted(path, 4_000_000)
+        if hashlib.sha256(raw).hexdigest() != receipt['files'][path]:
+            raise ValueError('controller drift')
+except (OSError, ValueError, TypeError, KeyError, AttributeError, RecursionError):
+    print('本地管理入口缺失或校验失败；尚未下载、未更改配置和数据。', file=sys.stderr)
+    raise SystemExit(1) from None
+with open('/dev/tty', 'rb+', buffering=0) as terminal:
+    result = subprocess.run(['/usr/local/sbin/v-ui'], stdin=terminal, stdout=terminal, stderr=terminal,
+                            env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': '/',
+                                 'LANG': 'C', 'LC_ALL': 'C', 'PYTHONDONTWRITEBYTECODE': '1'})
+raise SystemExit(result.returncode)
+PYLOCAL
+          then :
+          else
+            printf '%s\n' '本地管理未完成。安装中断可选 3 继续；控制组件损坏须人工核查，安装器不会绕过校验。' >&9
+          fi ;;
+        2)
+          installer_args+=(--upgrade)
+          exec 9>&-
+          break ;;
+        3)
+          exec 9>&-
+          break ;;
+        *) printf '%s\n' '无效选项，请输入 1、2、3 或 0。' >&9 ;;
+      esac
+    done
   fi
 
   # EXIT traps run after a function's local variables have left scope.
