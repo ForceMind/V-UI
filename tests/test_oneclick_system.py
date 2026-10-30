@@ -317,10 +317,50 @@ class OneClickSystemTests(unittest.TestCase):
                     subprocess.run(repeat_cmd,capture_output=True,text=True,timeout=300 if published_version else 30))
             if gate:
                 gate.installer_receipt('implicit_repeat', repeat.stdout)
-            self.assertNotEqual(repeat.returncode,0)
+            if cancel_existing:
+                self.assertEqual(repeat.returncode,0,repeat.stdout)
+                self.assertIn('已退出，未下载套件',repeat.stdout)
+                self.assertNotIn('Detected release target:',repeat.stdout)
+            else:
+                self.assertNotEqual(repeat.returncode,0)
             self.assertEqual(Path('/etc/v-ui/service.json').read_bytes(),repeat_configuration)
-            self.assertIn('已取消，原配置和数据未更改' if cancel_existing else
+            self.assertIn('原配置和数据未更改' if cancel_existing else
                           ('安装已存在' if new_installer else 'already exists'),repeat.stdout+repeat.stderr)
+            if cancel_existing:
+                # Disable all IP networking for the entire bootstrap process,
+                # including any dependency/download children. The initial tiny
+                # raw script itself has already been verified by setup_commands.
+                # Existing systemd management still uses the host's Unix socket.
+                # This is a disposable hosted runner, never a production host.
+                local_command=['sudo','unshare','--net','/usr/bin/env','-i',
+                               'PATH=/usr/sbin:/usr/bin:/sbin:/bin','HOME=/root',
+                               'LANG=C.UTF-8','/bin/bash',str(source/'setup.sh')]
+                with MenuSession(local_command,cwd='/tmp',env=dict(os.environ)) as session:
+                    session.expect('请选择 [1/2/3/0，回车退出]: ')
+                    session.send('1\n')
+                    session.expect('请选择: ')
+                    session.send('1\n')
+                    status_text=session.expect('请选择: ')
+                    self.assertIn('v-ui.service',status_text)
+                    self.assertNotIn('操作未完成',status_text)
+                    session.send('0\n')
+                    session.expect('请选择 [1/2/3/0，回车退出]: ')
+                    session.send('0\n')
+                    session.finish()
+                    self.assertNotIn('Detected release target:',session.text())
+                    self.assertNotIn('可信全局 v-ui 预检',session.text())
+                self.assertEqual(Path('/etc/v-ui/service.json').read_bytes(),repeat_configuration)
+                self.assertEqual(api('/api/certificates')[0],200)
+                print('Existing bootstrap: offline network namespace / actual receipted local menu / service status / exit / original configuration and authenticated session retained OK')
+                # Repair is explicit and still delegates configuration ownership
+                # to the frozen authenticated installer. Cancel that inner menu
+                # after a real public download; preserve the existing instance.
+                repair=configured_setup_with_tty(repeat_cmd,cancel_existing=True,bootstrap_action='3')
+                self.assertNotEqual(repair.returncode,0,repair.stdout)
+                self.assertIn('可信全局 v-ui 预检通过',repair.stdout)
+                self.assertIn('已取消，原配置和数据未更改',repair.stdout)
+                self.assertEqual(Path('/etc/v-ui/service.json').read_bytes(),repeat_configuration)
+                self.assertEqual(api('/api/certificates')[0],200)
             check_uid('v-ui.service')
             # Existing fake M1 proxy drafts must survive the actual installer
             # controller's stopped backup. No apply or network change is made.
@@ -347,7 +387,7 @@ class OneClickSystemTests(unittest.TestCase):
             self.assertTrue(saved_proxy['settings']['local_password_set'])
             self.assertNotIn(b'Fake-upgrade-password!', raw)
             # Rerunning with --upgrade checks/stages and makes a stopped backup.
-            upgraded=(configured_setup_with_tty(upgrade_cmd) if os.getenv('VUI_SETUP_INSTALL') == '1' else
+            upgraded=(configured_setup_with_tty(upgrade_cmd,bootstrap_action='2') if os.getenv('VUI_SETUP_INSTALL') == '1' else
                       subprocess.run(upgrade_cmd,capture_output=True,text=True,timeout=300 if published_version else 120))
             if gate:
                 gate.installer_receipt('same_bundle_upgrade', upgraded.stdout)
