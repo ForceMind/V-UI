@@ -125,18 +125,95 @@ class SetupShellTests(unittest.TestCase):
         text=self.source.replace(PATH_VALUE,str(self.bin)).replace('/bin/bash',BASH)
         text=text.replace(INSTALLER_SHA,fixture_sha).replace('/usr/bin/python3',sys.executable)
         text=text.replace('/etc/v-ui/service.json',str(self.root/'existing-service.json'))
+        text=text.replace('/usr/local/sbin/v-ui',str(self.root/'local-v-ui'))
+        text=text.replace('/usr/local/lib/v-ui/ops-control.json',str(self.root/'ops-control.json'))
         text=text.replace('[[ "$EUID" -ne 0 ]]','[[ -f '+shlex.quote(str(self.root/'nonroot'))+' ]]')
         self.script.write_text(text)
 
-    def test_existing_install_defers_configuration_to_verified_installer_without_domain_prompt(self):
-        # Presence alone defers questions; mutable metadata is never executed or
-        # parsed by Bash. The authenticated installer owns all trust checks.
-        existing=self.root/'existing-service.json'
-        existing.write_text('$(exit 99)\nnot JSON, must not be sourced\n')
+    def test_local_controller_trusted_reader_rejects_links_permissions_and_size(self):
+        from types import SimpleNamespace
+        program=self.source.split("<<'PYLOCAL'\n",1)[1].split('\nPYLOCAL',1)[0]
+        function=next(n for n in ast.parse(program).body if isinstance(n,ast.FunctionDef) and n.name=='trusted')
+        leaf=self.root/'trusted-controller'
+        leaf.write_bytes(b'fixed controller')
+        leaf.chmod(0o600)
+        wrong_owner=False
+        def root_stat(fd):
+            info=os.fstat(fd)
+            mode=info.st_mode
+            # Host fixture parents may be user-owned or sticky temp dirs; model
+            # trusted root ancestors, retaining permissions inside this fixture.
+            if info.st_ino not in {leaf.lstat().st_ino,self.root.stat().st_ino}:
+                mode &= ~0o022
+            return SimpleNamespace(st_uid=123 if wrong_owner and info.st_ino==leaf.lstat().st_ino else 0,
+                                   st_mode=mode,st_nlink=info.st_nlink,st_size=info.st_size)
+        proxy=SimpleNamespace(**{name:getattr(os,name) for name in
+            ('open','close','fdopen','O_RDONLY','O_DIRECTORY','O_NOFOLLOW','O_NONBLOCK')},fstat=root_stat)
+        namespace={'os':proxy,'stat':__import__('stat')}
+        exec(compile(ast.Module(body=[function],type_ignores=[]),'local-controller-reader','exec'),namespace)
+        reader=namespace['trusted']
+        self.assertEqual(reader(str(leaf),100),b'fixed controller')
+        with self.assertRaises(ValueError):reader(str(leaf),3)
+        wrong_owner=True
+        with self.assertRaises(ValueError):reader(str(leaf),100)
+        wrong_owner=False
+        leaf.chmod(0o666)
+        with self.assertRaises(ValueError):reader(str(leaf),100)
+        leaf.chmod(0o600)
+        self.root.chmod(0o777)
+        try:
+            with self.assertRaises(ValueError):reader(str(leaf),100)
+        finally:self.root.chmod(0o700)
+        link=self.root/'linked-controller'
+        link.symlink_to(leaf)
+        with self.assertRaises(OSError):reader(str(link),100)
+        hard=self.root/'hard-controller'
+        os.link(leaf,hard)
+        with self.assertRaises(ValueError):reader(str(leaf),100)
+
+    def test_existing_install_requires_menu_before_any_download_or_dependency(self):
+        (self.root/'existing-service.json').write_text('$(exit 99)\nnot JSON\n')
         result=self.run_setup(default_domain=False)
-        self.assertEqual(result.returncode,0,result.stderr)
-        self.assertEqual(self.logs('installer')[0]['args'][-2:],['--domain',''])
-        self.assertNotIn('Panel domain',result.stdout+result.stderr)
+        self.assertNotEqual(result.returncode,0,result.stderr)
+        self.assertIn('已有安装需要控制终端',result.stderr)
+        self.assertFalse(self.logs('curl'))
+        self.assertFalse(self.logs('mktemp'))
+        self.assertFalse(self.logs('apt-get'))
+        self.assertFalse(self.logs('installer'))
+
+    def test_existing_exit_invalid_input_and_default_never_download(self):
+        (self.root/'existing-service.json').write_text('unparsed metadata')
+        for answers in ([b'0\n'],[b'\n'],[b'unknown\n',b'0\n'],[b'\x04']):
+            with self.subTest(answers=answers):
+                status,output=self.run_setup_pty(answers,prompt='请选择 [1/2/3/0，回车退出]: ')
+                self.assertEqual(status,0,output)
+                self.assertIn('原配置和数据未更改',output)
+                self.assertFalse(self.logs('curl'))
+                self.assertFalse(self.logs('mktemp'))
+                self.assertFalse(self.logs('apt-get'))
+                self.assertFalse(self.logs('installer'))
+        self.assertEqual((self.root/'existing-service.json').read_text(),'unparsed metadata')
+
+    def test_existing_upgrade_and_repair_require_explicit_menu_choice(self):
+        (self.root/'existing-service.json').write_text('unparsed metadata')
+        for choice,upgrade in ((b'2\n',True),(b'3\n',False)):
+            with self.subTest(choice=choice):
+                status,output=self.run_setup_pty([choice],prompt='请选择 [1/2/3/0，回车退出]: ')
+                self.assertEqual(status,0,output)
+                args=self.logs('installer')[-1]['args']
+                self.assertEqual('--upgrade' in args,upgrade)
+                self.assertIn('--interactive',args)
+                self.assertNotIn('Panel domain',output)
+                self.assert_clean()
+
+    def test_missing_local_entry_never_downloads_without_online_choice(self):
+        (self.root/'existing-service.json').write_text('unparsed metadata')
+        status,output=self.run_setup_pty([b'1\n',b'0\n'],prompt='请选择 [1/2/3/0，回车退出]: ')
+        self.assertEqual(status,0,output)
+        self.assertIn('本地管理未完成',output)
+        self.assertFalse(self.logs('curl'))
+        self.assertFalse(self.logs('apt-get'))
+        self.assertFalse(self.logs('installer'))
 
     def run_setup(self,*args,stdin='fixture-password\n',process_substitution=False,default_domain=True):
         if default_domain and not any(value == '--domain' or value.startswith('--domain=') for value in args):
@@ -151,7 +228,7 @@ class SetupShellTests(unittest.TestCase):
              'HTTPS_PROXY':'untrusted','BASH_ENV':str(self.root/'nonexistent-startup')}
         return subprocess.run(command,input=stdin,text=True,capture_output=True,env=env,timeout=15)
 
-    def run_setup_pty(self, answers, *args, nonroot=False):
+    def run_setup_pty(self, answers, *args, nonroot=False, prompt="Panel domain: "):
         """A real controlling terminal, with a separate stdin password pipe."""
         (self.root/'config.json').write_text(json.dumps(self.config))
         if nonroot:
@@ -166,6 +243,8 @@ class SetupShellTests(unittest.TestCase):
         os.close(slave)
         process.stdin.write(b'fixture-password\n')
         process.stdin.close()
+        baseline_downloads=len(self.logs('curl'))
+        baseline_installs=len(self.logs('installer'))
         output=b''
         sent=0
         deadline=time.monotonic()+15
@@ -179,10 +258,10 @@ class SetupShellTests(unittest.TestCase):
                             raise
                         chunk=b''
                     output+=chunk
-                    prompts=output.count(b'Panel domain: ')
+                    prompts=output.count(prompt.encode())
                     if prompts > sent and sent < len(answers):
-                        self.assertFalse(self.logs('curl'),'download started before valid domain')
-                        self.assertFalse(self.logs('installer'))
+                        self.assertEqual(len(self.logs('curl')),baseline_downloads,'download started before explicit input')
+                        self.assertEqual(len(self.logs('installer')),baseline_installs)
                         os.write(master,answers[sent])
                         sent+=1
                 if process.poll() is not None:

@@ -98,6 +98,34 @@ class ShortInstallContractTests(unittest.TestCase):
         self.assertEqual(result.returncode,9)
         self.assertIn('original failure',result.stdout)
 
+    def test_bootstrap_cancel_and_online_choices_require_complete_distinct_prompt(self):
+        for action,cancel,expected in ((None,True,'0'),('2',False,'2'),('3',False,'3')):
+            with self.subTest(action=action):
+                session=self.fake_configured_session([
+                    '请选择 [1/2/3/0，回车', '退出]: ', 'done'],0)
+                with patch.object(helpers,'MenuSession',return_value=session):
+                    result=helpers.configured_setup_with_tty(['synthetic'],timeout=5,
+                                cancel_existing=cancel,bootstrap_action=action)
+                self.assertEqual(result.returncode,0)
+                self.assertEqual(session.sent,[expected+'\n'])
+                self.assertEqual(session.sent_outputs,['请选择 [1/2/3/0，回车退出]: '])
+
+    def test_bootstrap_repair_then_inner_cancel_are_separate_choices(self):
+        session=self.fake_configured_session(['请选择 [1/2/3/0，回车退出]: ',
+            '请选择 [1/2/0，回车取消]: ', 'cancelled'],17)
+        with patch.object(helpers,'MenuSession',return_value=session):
+            result=helpers.configured_setup_with_tty(['synthetic'],timeout=5,
+                                                    cancel_existing=True,bootstrap_action='3')
+        self.assertEqual(session.sent,['3\n','0\n'])
+        self.assertEqual(result.returncode,17)
+
+    def test_bootstrap_choice_refuses_missing_or_incomplete_prompt(self):
+        session=self.fake_configured_session(['请选择 [1/2/3/0，回车退出]:'],0)
+        with patch.object(helpers,'MenuSession',return_value=session):
+            with self.assertRaisesRegex(AssertionError,'Bootstrap menu prompt'):
+                helpers.configured_setup_with_tty(['synthetic'],timeout=5,bootstrap_action='2')
+        self.assertEqual(session.sent,[])
+
     def test_workflow_checks_out_frozen_release_source_separately(self):
         root=Path(__file__).resolve().parents[1]
         workflow=yaml.load((root/'.github/workflows/short-install.yml').read_text(),Loader=yaml.BaseLoader)
