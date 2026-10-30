@@ -171,6 +171,46 @@ class SetupShellTests(unittest.TestCase):
         os.link(leaf,hard)
         with self.assertRaises(ValueError):reader(str(leaf),100)
 
+    def test_local_menu_executes_only_receipted_fixed_controller_without_installer_args(self):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+        program=self.source.split("<<'PYLOCAL'\n",1)[1].split('\nPYLOCAL',1)[0]
+        tail=ast.Module(body=[n for n in ast.parse(program).body
+                             if isinstance(n,(ast.Try,ast.With,ast.Raise))],type_ignores=[])
+        wrapper='/usr/local/sbin/v-ui'
+        controller='/usr/local/lib/v-ui/system_ops.py'
+        expected={wrapper:b'fixed wrapper',controller:b'fixed controller'}
+        for failure in (None,'wrapper drift','controller drift','no receipt','invalid receipt'):
+            with self.subTest(failure=failure):
+                files={path:hashlib.sha256(raw).hexdigest() for path,raw in expected.items()}
+                receipt=json.dumps({'schema':1,'files':files}).encode()
+                def trusted(path,limit):
+                    if path.endswith('ops-control.json'):
+                        if failure=='no receipt':raise FileNotFoundError()
+                        return b'[]' if failure=='invalid receipt' else receipt
+                    if failure=='wrapper drift' and path==wrapper:return b'changed'
+                    if failure=='controller drift' and path==controller:return b'changed'
+                    return expected[path]
+                run=MagicMock(return_value=SimpleNamespace(returncode=7))
+                terminal=MagicMock()
+                terminal.__enter__.return_value='controlled terminal'
+                opener=MagicMock(return_value=terminal)
+                namespace={'trusted':trusted,'json':json,'hashlib':hashlib,
+                           'sys':SimpleNamespace(version_info=(3,12),stderr=io.StringIO()),
+                           'subprocess':SimpleNamespace(run=run),'open':opener}
+                with self.assertRaises(SystemExit) as ended:
+                    exec(compile(tail,'receipted-local-menu','exec'),namespace)
+                self.assertEqual(ended.exception.code,7 if failure is None else 1)
+                if failure:
+                    run.assert_not_called()
+                    opener.assert_not_called()
+                else:
+                    self.assertEqual(run.call_args.args,([wrapper],))
+                    env=run.call_args.kwargs['env']
+                    self.assertEqual(env['PATH'],PATH_VALUE)
+                    self.assertNotIn('PYTHONPATH',env)
+                    self.assertEqual(run.call_args.kwargs['stdin'],'controlled terminal')
+
     def test_existing_install_requires_menu_before_any_download_or_dependency(self):
         (self.root/'existing-service.json').write_text('$(exit 99)\nnot JSON\n')
         result=self.run_setup(default_domain=False)
