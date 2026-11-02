@@ -2,20 +2,128 @@
 from datetime import datetime, timezone
 import hashlib
 import ipaddress
+import os
 from pathlib import Path
 import re
 import ssl
+import stat
+import sys
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
-from cryptography.x509.verification import PolicyBuilder, Store
+from cryptography.x509.verification import PolicyBuilder, Store, VerificationError
 
 
 class CertificateError(ValueError):
     def __init__(self, code: str):
         self.code = code
         super().__init__(code)
+
+
+_MAX_CA_BYTES = 4 * 1024 * 1024
+_MAX_CA_CERTIFICATES = 4096
+_MAX_CA_DIRECTORY_ENTRIES = 8192
+_LINUX_CA_BUNDLES = (
+    '/etc/ssl/certs/ca-certificates.crt',  # Debian, Ubuntu, Alpine
+    '/etc/pki/tls/certs/ca-bundle.crt',  # RHEL family
+    '/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem',
+    '/etc/ssl/cert.pem',
+)
+
+
+def _ca_file(path: Path, *, limit: int = _MAX_CA_BYTES) -> bytes:
+    # System bundles/hash links may legitimately be symlinks. Only read a
+    # regular file and bound its bytes; never consume an arbitrary device/FIFO.
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError()
+        raw = stream.read(limit + 1)
+    if not raw or len(raw) > limit:
+        raise ValueError()
+    return raw
+
+
+def _ca_directory(path: Path) -> list[x509.Certificate]:
+    # OpenSSL capath loads subject-hash entries lazily, so get_ca_certs() can
+    # remain empty until a handshake. Enumerate only its certificate entries,
+    # not arbitrary PEM files or the revocation-list (<hash>.rN) namespace.
+    from OpenSSL.crypto import X509  # Already pinned in the application runtime.
+    roots, seen, groups, remaining = [], set(), {}, _MAX_CA_BYTES
+    for count, entry in enumerate(path.iterdir(), start=1):
+        if count > _MAX_CA_DIRECTORY_ENTRIES:
+            raise ValueError()
+        match = re.fullmatch(r'([0-9a-f]{8})\.(0|[1-9][0-9]*)', entry.name)
+        if match:
+            groups.setdefault(match[1], set()).add(match[2])
+    for subject_hash, suffixes in groups.items():
+        index = 0
+        while str(index) in suffixes:
+            raw = _ca_file(path / (subject_hash + '.' + str(index)), limit=remaining)
+            remaining -= len(raw)
+            index += 1
+            certificates = x509.load_pem_x509_certificates(raw)
+            if len(certificates) != 1:
+                raise ValueError()
+            certificate = certificates[0]
+            # Old MD5 aliases share the same filename shape. They must not
+            # expand current OpenSSL trust, nor invalidate otherwise good roots.
+            if f'{X509.from_cryptography(certificate).subject_name_hash():08x}' != subject_hash:
+                continue
+            try:
+                if not certificate.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
+                    continue
+            except x509.ExtensionNotFound:
+                continue
+            der = certificate.public_bytes(serialization.Encoding.DER)
+            if der not in seen:
+                seen.add(der)
+                roots.append(certificate)
+                if len(roots) > _MAX_CA_CERTIFICATES:
+                    raise ValueError()
+    return roots
+
+
+def _certificate_trust_store(trusted_roots: bytes | None) -> Store:
+    try:
+        if trusted_roots is not None:
+            # An explicit empty/invalid repository must not select host trust.
+            if not isinstance(trusted_roots, bytes) or len(trusted_roots) > _MAX_CA_BYTES:
+                raise ValueError()
+            roots = x509.load_pem_x509_certificates(trusted_roots)
+        elif 'SSL_CERT_FILE' in os.environ or 'SSL_CERT_DIR' in os.environ:
+            # Explicit settings define an isolated trust repository. Do not
+            # supplement it with unrequested host defaults, even on failure.
+            roots = []
+            if os.environ.get('SSL_CERT_FILE'):
+                roots.extend(x509.load_pem_x509_certificates(_ca_file(Path(os.environ['SSL_CERT_FILE']))))
+            for directory in os.environ.get('SSL_CERT_DIR', '').split(os.pathsep):
+                if directory:
+                    roots.extend(_ca_directory(Path(directory)))
+        else:
+            roots = [x509.load_der_x509_certificate(raw) for raw in
+                     ssl.create_default_context().get_ca_certs(binary_form=True)]
+            if not roots:
+                paths = ssl.get_default_verify_paths()
+                candidates = [paths.cafile, paths.openssl_cafile]
+                if sys.platform.startswith('linux'):
+                    candidates.extend(_LINUX_CA_BUNDLES)
+                for candidate in dict.fromkeys(candidates):
+                    if candidate and Path(candidate).exists():
+                        roots = x509.load_pem_x509_certificates(_ca_file(Path(candidate)))
+                        break
+                else:
+                    for directory in dict.fromkeys((paths.capath, paths.openssl_capath)):
+                        if directory and Path(directory).exists():
+                            roots.extend(_ca_directory(Path(directory)))
+        roots = list({certificate.public_bytes(serialization.Encoding.DER): certificate
+                      for certificate in roots}.values())
+        if not roots or len(roots) > _MAX_CA_CERTIFICATES:
+            raise ValueError()
+        return Store(roots)
+    except Exception:
+        raise CertificateError('CERTIFICATE_CA_STORE_UNAVAILABLE') from None
 
 
 def domain_name(value: str) -> str:
@@ -71,9 +179,11 @@ def validate_material(chain_pem: bytes, key_pem: bytes, domain: str, *,
         if not leaf.not_valid_before_utc <= now < leaf.not_valid_after_utc:
             raise CertificateError('CERTIFICATE_EXPIRED_OR_NOT_YET_VALID')
         if verify_chain:
-            roots = (x509.load_pem_x509_certificates(trusted_roots) if trusted_roots else
-                     [x509.load_der_x509_certificate(raw) for raw in ssl.create_default_context().get_ca_certs(binary_form=True)])
-            PolicyBuilder().store(Store(roots)).time(now).build_server_verifier(x509.DNSName(domain)).verify(leaf, chain[1:])
+            store = _certificate_trust_store(trusted_roots)
+            try:
+                PolicyBuilder().store(store).time(now).build_server_verifier(x509.DNSName(domain)).verify(leaf, chain[1:])
+            except VerificationError:
+                raise CertificateError('CERTIFICATE_CHAIN_VERIFICATION_FAILED') from None
         start, end = int(leaf.not_valid_before_utc.timestamp()), int(leaf.not_valid_after_utc.timestamp())
         return {'revision': hashlib.sha256(chain_pem).hexdigest(), 'not_before': start, 'not_after': end,
                 'renew_at': start + (end - start) * 2 // 3}

@@ -39,6 +39,18 @@ INSTALLER_ONLY_FILES = {
     '.github/workflows/oneclick.yml',
     '.github/workflows/online-release-acceptance.yml',
 }
+CA_TRUST_BASELINE = '4f24e4ce12a5dbe4fbd2da745a936734f82121f6'
+CA_TRUST_VERSION = '0.4.12'
+CA_TRUST_FILES = {
+    'VERSION', 'main.py', 'install.sh', 'setup.sh', 'app/certificates/material.py',
+    'scripts/publish_release.py', '.github/workflows/publish.yml',
+    '.github/workflows/short-install.yml',
+    'README.md', 'CHANGELOG.md', 'AGENTS.md',
+    'tests/test_certificate_system_trust.py', 'tests/installed_system_ca_helpers.py',
+    'tests/test_acme_real.py', 'tests/test_oneclick_system.py',
+    'tests/test_release_promotion.py', 'tests/test_setup_shell.py',
+    'tests/test_short_install_contract.py',
+}
 BROWSER_SKIP_STEPS = {
     name: steps | {'Install explicit test browser'} for name, steps in REQUIRED_ACCEPTANCE_STEPS.items()
 }
@@ -173,7 +185,43 @@ def validate_installer_only_scope(commit, version):
         raise ReleaseGateError('Cannot prove installer-only source ancestry/scope') from exc
 
 
-def validate_run_jobs(checks, commit, *, installer_only_no_browser=False):
+def validate_ca_trust_scope(commit, version):
+    """One approved CA-source fix; never a reusable non-browser release switch."""
+    if version != CA_TRUST_VERSION:
+        raise ReleaseGateError('Non-browser CA exception is only approved for 0.4.12')
+    try:
+        subprocess.run(['git','merge-base','--is-ancestor',CA_TRUST_BASELINE,commit],check=True,
+                       stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        changes=subprocess.check_output(['git','diff','--name-status',CA_TRUST_BASELINE,commit],text=True)
+        for line in changes.splitlines():
+            fields=line.split('\t')
+            if len(fields)!=2 or fields[0] not in ('A','M'):
+                raise ReleaseGateError('CA trust scope refuses deletion, rename or type change')
+            name=fields[1]
+            if name not in CA_TRUST_FILES and not (name.startswith('docs/') and name.endswith('.md')):
+                raise ReleaseGateError('Changes exceed the approved CA trust fix: '+name)
+            mode=subprocess.check_output(['git','ls-tree',commit,'--',name],text=True).split()[0]
+            if mode not in ('100644','100755'):
+                raise ReleaseGateError('CA trust exception requires regular source files')
+        previous=subprocess.check_output(['git','show',CA_TRUST_BASELINE+':main.py'])
+        current=subprocess.check_output(['git','show',commit+':main.py'])
+        if previous.count(b"version='0.4.11'")!=1 or current!=previous.replace(b"version='0.4.11'",b"version='0.4.12'",1):
+            raise ReleaseGateError('Application changes exceed the CA fix version bump')
+        if subprocess.check_output(['git','show',commit+':VERSION']).strip()!=b'0.4.12':
+            raise ReleaseGateError('CA trust version identity differs')
+        old=subprocess.check_output(['git','show',CA_TRUST_BASELINE+':install.sh'])
+        new=subprocess.check_output(['git','show',commit+':install.sh'])
+        if old.count(b'--version v0.4.11')!=1 or new!=old.replace(b'--version v0.4.11',b'--version v0.4.12',1):
+            raise ReleaseGateError('Installer changes exceed the CA fix version documentation')
+        old=subprocess.check_output(['git','show',CA_TRUST_BASELINE+':scripts/build_bundle.py'])
+        new=subprocess.check_output(['git','show',commit+':scripts/build_bundle.py'])
+        if old!=new:
+            raise ReleaseGateError('CA trust fix must not change builder/dependencies/core selection')
+    except subprocess.CalledProcessError as exc:
+        raise ReleaseGateError('Cannot prove CA trust source ancestry/scope') from exc
+
+
+def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_trust_no_browser=False):
     """A green workflow with skipped acceptance is not release qualification."""
     for path, run in sorted(checks.items()):
         attempt = run.get('run_attempt')
@@ -201,7 +249,7 @@ def validate_run_jobs(checks, commit, *, installer_only_no_browser=False):
             def accepted(step):
                 return (step.get('status') == 'completed' and
                         (step.get('conclusion') == 'success' or
-                         (installer_only_no_browser and step.get('conclusion') == 'skipped'
+                         ((installer_only_no_browser or ca_trust_no_browser) and step.get('conclusion') == 'skipped'
                           and step.get('name') in BROWSER_SKIP_STEPS.get(path,set()))))
             if not steps or not all(accepted(step) for step in steps):
                 raise ReleaseGateError('Workflow has unverified, skipped or failed steps: '+path)
@@ -322,6 +370,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--commit',required=True);p.add_argument('--version',required=True)
     p.add_argument('--confirm',required=True);p.add_argument('--publish',action='store_true')
+    p.add_argument('--ca-trust-no-browser',action='store_true',
+                   help='Explicitly approved 0.4.12 system CA fix; browsers remain unverified')
     p.add_argument('--installer-only-no-browser',action='store_true',
                    help='Explicitly approved 0.4.11 installer-only exception; browser evidence stays unverified')
     args=p.parse_args()
@@ -347,9 +397,14 @@ def main():
         if len(batch)<100:
             break
     checks=select_runs(runs,args.commit)
+    if args.installer_only_no_browser and args.ca_trust_no_browser:
+        raise ReleaseGateError('Non-browser scope exceptions are mutually exclusive')
+    if args.ca_trust_no_browser:
+        validate_ca_trust_scope(args.commit,args.version)
     if args.installer_only_no_browser:
         validate_installer_only_scope(args.commit,args.version)
-    validate_run_jobs(checks,args.commit,installer_only_no_browser=args.installer_only_no_browser)
+    validate_run_jobs(checks,args.commit,installer_only_no_browser=args.installer_only_no_browser,
+                      ca_trust_no_browser=args.ca_trust_no_browser)
 
     tag='v'+args.version
     for path in ('git/ref/tags/'+tag,'releases/tags/'+tag):
@@ -381,6 +436,11 @@ def main():
         body+='\n\n验收范围：用户明确批准本次 0.4.11 纯安装交互修复采用非浏览器验收。浏览器未验证；'+\
               '仅跳过明列的浏览器步骤，其余 jobs/steps、四目标制品及实际安装门禁保持。'+\
               '已检查相对 `'+INSTALLER_ONLY_BASELINE+'` 无前端、应用逻辑、运行依赖或固定核心变更；此例外不适用于其他版本。\n'
+    if args.ca_trust_no_browser:
+        body+='\n\n验收范围：用户明确批准本次0.4.12系统CA兼容修复采用非浏览器验收。浏览器未验证；'+\
+              '只跳过明列浏览器步骤，其余准确提交/attempt/jobs/steps、四目标与实际安装门禁保持。'+\
+              '相对 `'+CA_TRUST_BASELINE+'` 仅允许证书材料系统根加载、固定错误分类及对应测试/版本/发布说明；'+\
+              '前端、其他应用逻辑、运行依赖、builder和固定核心变更均拒绝，此例外仅适用0.4.12。\n'
     body+='\n\n## 一行交互安装并注册 v-ui\n\n```sh\n'+installation_command(files,args.version)+'\n```\n'
     body+='\n安装成功后输入 `v-ui`。普通管理员按已有 sudo 策略认证；不增加免密 sudoers。\n'
     release=request('releases','POST',{'tag_name':tag,'target_commitish':args.commit,'name':'V-UI '+tag,

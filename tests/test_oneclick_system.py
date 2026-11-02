@@ -292,6 +292,14 @@ class OneClickSystemTests(unittest.TestCase):
             wait_for_managed_https(lambda budget:api('/api/certificates',timeout=budget,readiness=True),readiness_diagnostics)
             self.assertEqual(api('/api/certificates')[0],401)
             self.assertEqual(api('/api/auth/login',{'username':'installer-admin','password':password})[0],200)
+            product_version = published_version or (source/'VERSION').read_text().strip()
+            if tuple(map(int,product_version.split('.'))) >= (0,4,12):
+                from installed_system_ca_helpers import installed_system_ca_check
+                self.assertEqual(api('/api/auth/me')[0],200)
+                check_uid('v-ui.service')
+                installed_system_ca_check(self,release)
+                self.assertEqual(api('/api/auth/me')[0],200)
+                check_uid('v-ui.service')
             caps=json.loads(api('/api/certificates/capabilities')[1])
             self.assertTrue(caps['worker_running']);self.assertTrue(caps['panel_hot_reload'])
             self.assertIn(b'certificate-list',api('/certificates')[1])
