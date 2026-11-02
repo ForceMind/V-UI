@@ -29,6 +29,8 @@ from scripts.publish_release import (
     INSTALLER_ONLY_BASELINE,
     validate_ca_trust_scope,
     CA_TRUST_BASELINE,
+    validate_install_interaction_scope,
+    INSTALL_INTERACTION_BASELINE,
     validate_kit,
     validate_target_artifact,
 )
@@ -155,6 +157,67 @@ class CATrustReleaseTests(unittest.TestCase):
             bad={**job,'steps':job['steps']+[{'name':'Run tests','status':'completed','conclusion':conclusion}]}
             with self.subTest(conclusion=conclusion),patch('scripts.publish_release.request',return_value={'jobs':[bad]}),self.assertRaises(ReleaseGateError):
                 validate_run_jobs({'test.yml':run},SHA,ca_trust_no_browser=True)
+
+
+class InstallInteractionReleaseTests(unittest.TestCase):
+    def scope(self, changes='M\tVERSION\nM\tmain.py\nM\tinstall.sh\nM\tapp/admin.py\n',
+              mode='100644', application_extra=b'', installer_extra=b'', builder_extra=b'', controller_extra=b''):
+        app=b"app = FastAPI(version='0.4.12')\n"
+        installer=b'# install.sh --version v0.4.12\nactual_installer()\n'
+        controller=b"print('Activated verified release; start explicitly after checking configuration')\nprint('Backup SHA-256: ')\n"
+        def git(args, **kwargs):
+            if args[1:3]==['diff','--name-status']:return changes
+            if args[1]=='ls-tree':return mode+' blob '+'f'*40+'\t'+args[-1]+'\n'
+            if args[1]=='show':
+                ref=args[2]
+                if ref==INSTALL_INTERACTION_BASELINE+':main.py':return app
+                if ref==SHA+':main.py':return app.replace(b'0.4.12',b'0.4.13')+application_extra
+                if ref==SHA+':VERSION':return b'0.4.13\n'
+                if ref==INSTALL_INTERACTION_BASELINE+':install.sh':return installer
+                if ref==SHA+':install.sh':return installer.replace(b'0.4.12',b'0.4.13')+installer_extra
+                if ref==INSTALL_INTERACTION_BASELINE+':scripts/build_bundle.py':return b'unchanged builder\n'
+                if ref==SHA+':scripts/build_bundle.py':return b'unchanged builder\n'+builder_extra
+                if ref==INSTALL_INTERACTION_BASELINE+':scripts/deploy.py':return controller
+                if ref==SHA+':scripts/deploy.py':return controller.replace(b'Activated verified release; start explicitly after checking configuration','已激活通过校验的版本；核对配置后再启动'.encode()).replace(b'Backup SHA-256: ','备份 SHA-256：'.encode())+controller_extra
+            raise AssertionError(args)
+        with patch('scripts.publish_release.subprocess.run') as ancestry, \
+                patch('scripts.publish_release.subprocess.check_output',side_effect=git):
+            validate_install_interaction_scope(SHA,'0.4.13')
+            self.assertEqual(ancestry.call_args.args[0],['git','merge-base','--is-ancestor',INSTALL_INTERACTION_BASELINE,SHA])
+
+    def test_only_current_approved_interaction_patch_allowed(self):self.scope()
+
+    def test_exception_is_not_reusable_for_old_or_future_versions(self):
+        for version in ('0.4.10','0.4.12','0.4.14','0.5.0'):
+            with self.subTest(version=version),patch('scripts.publish_release.subprocess.run') as git,self.assertRaises(ReleaseGateError):
+                validate_install_interaction_scope(SHA,version)
+            git.assert_not_called()
+
+    def test_other_app_web_runtime_and_deployment_changes_rejected(self):
+        for path in ('app/certificates/material.py','app/services/auth_service.py','app/api/auth.py','web/js/certificates.js',
+                     'requirements-runtime.txt','deploy/system_ops.py','scripts/build_bundle.py',
+                     '.github/workflows/test.yml','tests/unrelated_new_acceptance.py'):
+            with self.subTest(path=path),self.assertRaises(ReleaseGateError):self.scope(changes='M\t'+path+'\n')
+
+    def test_renames_deletions_and_symlinks_rejected(self):
+        for change,mode in (('D\tsetup.sh\n','100644'),('R100\tmain.py\tother.py\n','100644'),
+                            ('M\tapp/admin.py\n','120000')):
+            with self.subTest(change=change),self.assertRaises(ReleaseGateError):self.scope(changes=change,mode=mode)
+
+    def test_main_installer_and_builder_cannot_hide_logic_changes(self):
+        for kwargs in ({'application_extra':b'new_logic()\n'}, {'installer_extra':b'new_logic()\n'},
+                       {'builder_extra':b'rewrite_payload()\n'}, {'controller_extra':b'new_logic()\n'}):
+            with self.subTest(kwargs=kwargs),self.assertRaises(ReleaseGateError):self.scope(**kwargs)
+
+    def test_interaction_exception_accepts_only_explicit_browser_skips(self):
+        run,base=ExactJobQualificationTests().fixtures()
+        job={**base,'steps':[dict(s,conclusion='skipped') for s in base['steps']]}
+        with patch('scripts.publish_release.request',side_effect=[{'jobs':[job]},run]):
+            validate_run_jobs({'test.yml':run},SHA,install_interaction_no_browser=True)
+        for conclusion in ('skipped','failure','cancelled'):
+            bad={**job,'steps':job['steps']+[{'name':'Run tests','status':'completed','conclusion':conclusion}]}
+            with self.subTest(conclusion=conclusion),patch('scripts.publish_release.request',return_value={'jobs':[bad]}),self.assertRaises(ReleaseGateError):
+                validate_run_jobs({'test.yml':run},SHA,install_interaction_no_browser=True)
 
 
 class ExactJobQualificationTests(unittest.TestCase):

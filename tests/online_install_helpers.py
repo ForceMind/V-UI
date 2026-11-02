@@ -27,6 +27,43 @@ from scripts.ops_menu_smoke import MenuSession
 COMMAND_DIRECTORY = Path('/usr/local/bin')
 
 
+def private_installer_credentials(text):
+    pairs=re.findall(r'初始用户名：([A-Za-z0-9_.-]{3,64})\r?\n初始密码：([A-Za-z0-9_-]{40,128})(?:\r?\n|$)',text)
+    if not pairs or len(set(pairs))!=1:
+        raise AssertionError('Private installer credential frame missing or inconsistent')
+    return pairs[0]
+
+
+def redact_installer_output(text, *private_values):
+    # Also cover a partial final TTY line when a timeout interrupts delivery.
+    values=[value for value in private_values if isinstance(value,str) and value]
+    values.extend(re.findall(r'初始(?:用户名|密码)：([^\r\n]+)',text))
+    for value in sorted(set(values),key=len,reverse=True):
+        text=text.replace(value,'[REDACTED]')
+    return text
+
+
+class PrivateMenuSession(MenuSession):
+    def __init__(self,*args,private_values=(),**kwargs):
+        self.private_values=private_values
+        super().__init__(*args,**kwargs)
+
+    def text(self):
+        return redact_installer_output(super().text(),*self.private_values)
+
+    def expect(self,*args,**kwargs):
+        try:
+            return redact_installer_output(super().expect(*args,**kwargs),*self.private_values)
+        except (AssertionError,subprocess.SubprocessError) as exc:
+            raise AssertionError(redact_installer_output(str(exc),*self.private_values)) from None
+
+    def finish(self,*args,**kwargs):
+        try:
+            return redact_installer_output(super().finish(*args,**kwargs),*self.private_values)
+        except (AssertionError,subprocess.SubprocessError) as exc:
+            raise AssertionError(redact_installer_output(str(exc),*self.private_values)) from None
+
+
 def sudo_policy_snapshot():
     """Read-only hashes, not rule contents; inaccessible is an error, not absence."""
     program = '''import hashlib,json,os,stat
@@ -251,7 +288,7 @@ def global_menu_check(test, env, *, exercise_start_stop):
         session.finish()
 
 
-def configured_setup_with_tty(command, *, timeout=300, cancel_existing=False, bootstrap_action=None):
+def configured_setup_with_tty(command, *, timeout=300, cancel_existing=False, bootstrap_action=None, private_values=()):
     """Use a real /dev/tty; answer only explicitly requested complete menu prompts."""
     if bootstrap_action not in (None, "2", "3", "0"):
         raise ValueError("Unsupported bootstrap action")
@@ -261,7 +298,7 @@ def configured_setup_with_tty(command, *, timeout=300, cancel_existing=False, bo
         bootstrap_sent=False
         while session.process.poll() is None:
             if time.monotonic() >= deadline:
-                raise subprocess.TimeoutExpired(command,timeout,output=session.text())
+                raise subprocess.TimeoutExpired(command,timeout,output=redact_installer_output(session.text(),*private_values))
             session._read(.1)
             if not bootstrap_sent and '请选择 [1/2/3/0，回车退出]: ' in session.text():
                 action = bootstrap_action or ('0' if cancel_existing else None)
@@ -278,4 +315,5 @@ def configured_setup_with_tty(command, *, timeout=300, cancel_existing=False, bo
             raise AssertionError("Bootstrap menu prompt was not observed; selected action was not exercised")
         if cancel_existing and not cancelled:
             raise AssertionError('Existing-install menu prompt was not observed; cancellation was not exercised')
-        return subprocess.CompletedProcess(command,session.process.returncode,session.text(),'')
+        return subprocess.CompletedProcess(command,session.process.returncode,
+            redact_installer_output(session.text(),*private_values),'')

@@ -34,13 +34,13 @@ def main():
         raise SystemExit(run_menu(args.root))
     supported_environment();os.umask(0o077);root=private_root(args.root)
     if args.command=='stage': print(stage(args.archive,args.sha256,root))
-    elif args.command=='activate': activate(root,args.release_id);print('Activated verified release; start explicitly after checking configuration')
+    elif args.command=='activate': activate(root,args.release_id);print('已激活通过校验的版本；核对配置后再启动')
     elif args.command=='rollback':
         previous=active(root)[1].get('previous_id')
         if not previous: raise ReleaseError('No prepared previous release')
         activate(root,previous);print('Previous verified code selected; data was not rolled back')
     elif args.command=='status': print(active(root)[1])
-    elif args.command=='backup': print('Backup SHA-256: '+backup(root,args.destination))
+    elif args.command=='backup': print('备份 SHA-256：'+backup(root,args.destination))
     elif args.command=='restore': restore(root,args.archive,args.sha256);print('Data restored; all old sessions and subscription grants revoked')
     elif args.command=='recover-restore': recover_restore(root);print('Interrupted restore recovery checked')
     else:

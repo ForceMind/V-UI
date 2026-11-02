@@ -24,18 +24,18 @@ class TUICInstallationTests(unittest.TestCase):
 
     def test_tuic_udp_rule_needs_exact_consent_without_reopening_tcp(self):
         info = {'backend': 'ufw', 'managed': True, 'detail': 'synthetic'}
-        for answer in (False, True):
-            with self.subTest(answer=answer), patch.object(firewall, 'detect', return_value=info), \
+        for choice in ('ask', 'no', 'yes'):
+            with self.subTest(choice=choice), patch.object(firewall, 'detect', return_value=info), \
                  patch.object(firewall, 'port_open', side_effect=[True, False, True]), \
                  patch.object(firewall, 'open_ports') as write, \
-                 patch.object(installer, 'tty_confirm', return_value=answer) as confirm, \
-                 patch('sys.stdout', io.StringIO()):
-                args = self.args(dry_run=False, open_firewall='ask', assume_external_ports_open=True)
-                if answer:
+                 patch.object(installer, 'tty_confirm') as confirm, \
+                 patch('sys.stdout', new_callable=io.StringIO) as output:
+                args = self.args(dry_run=False, open_firewall=choice, assume_external_ports_open=True)
+                if choice == 'yes':
                     installer.firewall_preflight(args, [19446], [19446])
                     write.assert_called_once_with(info, [19446], protocol='udp')
                 else:
                     with self.assertRaises(installer.InstallError): installer.firewall_preflight(args, [19446], [19446])
                     write.assert_not_called()
-                self.assertIn('19446/udp', confirm.call_args.args[0])
-                self.assertNotIn('19446/tcp', confirm.call_args.args[0])
+                self.assertIn('19446/udp', output.getvalue())
+                confirm.assert_not_called()
