@@ -15,6 +15,7 @@ from pathlib import Path
 import platform
 import pwd
 import re
+import secrets
 import shutil
 import signal
 import socket
@@ -392,15 +393,86 @@ def write_root_file(path, raw, mode=0o644):
         if os.path.exists(name): os.unlink(name)
 
 
-def as_service(args, *, capture=False, tty=None, cwd=ROOT):
+def as_service(args, *, capture=False, tty=None, cwd=ROOT, input_text=None):
     account=pwd.getpwnam('v-ui')
     env={'PATH':'/usr/bin:/bin','LANG':'C.UTF-8','HOME':str(ROOT),
          'PYTHONDONTWRITEBYTECODE':'1','VUI_DATA_DIR':str(ROOT/'data')}
     def demote():
         os.setgroups([])
         os.setgid(account.pw_gid);os.setuid(account.pw_uid);os.umask(0o077)
-    return command(args,cwd=cwd,env=env,capture_output=capture,text=capture,stdin=tty,
-                   timeout=360,preexec_fn=demote)
+    options = {'input': input_text} if input_text is not None else {'stdin': tty}
+    if input_text is not None and (not capture or tty is not None):
+        raise InstallError('私有账户请求必须使用捕获管道')
+    return command(args,cwd=cwd,env=env,capture_output=capture,text=capture,
+                   timeout=360,preexec_fn=demote,**options)
+
+
+def installer_account(python, payload, action, **values):
+    try:
+        result = as_service([str(python), '-B', '-m', 'app.admin', action], capture=True,
+                            cwd=payload, input_text=json.dumps({'version': 1, **values}))
+        response = json.loads(result.stdout)
+        expected = {'version', 'has_account'} if action == 'installer-status' else {'version', 'created'}
+        field = 'has_account' if action == 'installer-status' else 'created'
+        if (type(response) is not dict or set(response) != expected
+                or type(response['version']) is not int or response['version'] != 1
+                or type(response[field]) is not bool or (field == 'created' and not response[field])):
+            raise ValueError()
+        return response[field]
+    except (subprocess.SubprocessError, OSError, ValueError, TypeError):
+        # CalledProcessError/TimeoutExpired can retain captured private output.
+        # Do not propagate these objects or interpolate their input/output.
+        raise InstallError('管理员初始化未完成；已有账户未被覆盖，请保留终端中预交付的凭据后重试。') from None
+
+
+@contextmanager
+def provision_initial_account(python, payload, config):
+    if installer_account(python, payload, 'installer-status'):
+        yield
+        return
+    password = secrets.token_urlsafe(32)
+    # Pre-delivery closes the commit -> lost-password crash window without a
+    # plaintext credential journal. A failed/partial TTY write never creates a user.
+    terminal_scope = controlling_terminal()
+    terminal = terminal_scope.__enter__()
+    try:
+        credentials = ('面板地址：'+config['origin']+'/login\n初始用户名：'+config['admin']+
+                       '\n初始密码：'+password+'\n')
+        pending = '即将创建初始管理员，请保存以下凭据；账户尚未创建，以最终安装成功为准。\n'+credentials
+        try:
+            if terminal.write(pending) != len(pending):
+                raise OSError()
+            terminal.flush()
+        except (OSError, UnicodeError):
+            raise InstallError('私有终端凭据交付未完成，尚未创建管理员') from None
+        installer_account(python, payload, 'installer-create', username=config['admin'], password=password)
+        yield  # Final root configuration/journal writes must also succeed.
+    except BaseException:
+        # A close error must not replace a meaningful precommit failure.
+        try:
+            terminal_scope.__exit__(*sys.exc_info())
+        except (OSError, UnicodeError):
+            pass
+        raise
+    else:
+        # Root ready:true and journal finalization have committed. Further TTY
+        # write/flush/close failures cannot re-enter installation rollback.
+        summary_lost = False
+        try:
+            summary = '安装完成。请保存初始凭据，登录后可修改用户名和密码。\n'+credentials
+            summary_lost = terminal.write(summary) != len(summary)
+            terminal.flush()
+        except (OSError, UnicodeError, KeyboardInterrupt, InstallError):
+            summary_lost = True
+        try:
+            terminal_scope.__exit__(None, None, None)
+        except (OSError, UnicodeError, KeyboardInterrupt, InstallError):
+            summary_lost = True
+        if summary_lost:
+            try:
+                print('安装已完成；终端汇总未送达，请使用创建前已交付的凭据。', file=sys.stderr)
+            except (OSError, InstallError, KeyboardInterrupt):
+                pass
 
 
 def saved_configuration():
@@ -426,9 +498,34 @@ def saved_configuration():
         validate_options(sample)
         if sample.domain != saved['domain'] or sample.email != saved['email']:
             raise ValueError('canonical')
+        ca_authorizations(saved)
     except (ValueError, TypeError, KeyError, InstallError):
         raise InstallError('现有安装配置不完整或无效；已保留原文件，请先修复配置') from None
     return saved
+
+
+def ca_authorizations(saved):
+    records = saved.get('ca_authorizations', [])
+    if (type(records) is not list or len(records) > 64 or any(
+            type(row) is not dict or set(row) != {'domain', 'environment'}
+            or row['environment'] != 'production' or type(row['domain']) is not str
+            or fqdn(row['domain']) != row['domain'] for row in records)):
+        raise InstallError('现有 CA 授权记录无效，已保留原配置')
+    return records
+
+
+def has_ca_authorization(saved, domain):
+    return {'domain': domain, 'environment': 'production'} in ca_authorizations(saved)
+
+
+def bootstrap_managed_certificate(python, payload, args):
+    try:
+        as_service([str(python),'-B','-m','app.certificates.cli','bootstrap','--root',str(ROOT),
+                    '--domain',args.domain,'--email',args.email,'--accept-terms'], cwd=payload)
+    except subprocess.CalledProcessError as exc:
+        raise InstallError('托管证书签发未完成（退出码 '+str(exc.returncode)+'，原始错误码见上方输出）。'
+            '若为 HTTP-01 验证失败，请检查域名 DNS 是否指向本机、公网 TCP 80 是否可达，'
+            '以及本机防火墙、云安全组和上游入站规则。此提示不代表已确定根因。') from None
 
 
 def certificate_state(work, action, *values):
@@ -637,6 +734,8 @@ def firewall_description(info):
             '无法唯一确定 firewalld 入站区域，需要手动配置',
         'custom nftables rules detected': '检测到自定义 nftables 规则',
         'custom iptables rules detected': '检测到自定义 iptables 规则',
+        'nftables rules unavailable': '无法读取 nftables 规则，端口状态未知',
+        'iptables rules unavailable': '无法读取 iptables 规则，端口状态未知',
         'no active supported local firewall detected': '未检测到已启用且受支持的本机防火墙',
     }
     prefix = 'firewalld active interface zone: '
@@ -666,12 +765,12 @@ def firewall_preflight(args, ports, udp_ports=None):
     if args.dry_run:
         return result
     if missing or missing_udp:
-        print('申请修改本机防火墙，放行：',labels(missing,missing_udp))
         choice=args.open_firewall
-        if choice=='ask':
-            choice='yes' if tty_confirm('本机防火墙需要放行 '+labels(missing,missing_udp)+'，现在放行这些端口吗？') else 'no'
         if choice!='yes':
-            raise InstallError('必要的本机防火墙端口仍未放行：'+labels(missing,missing_udp))
+            raise InstallError('本机防火墙尚未放行：'+labels(missing,missing_udp)+
+                '。请先手动放行后重试；仅 UFW/firewalld 可显式使用 --open-firewall yes 授权精确放行。')
+        if info['backend'] not in ('ufw','firewalld') or not info.get('managed'):
+            raise InstallError('当前防火墙规则不支持安全自动修改；请手动放行：'+labels(missing,missing_udp))
         try:
             if missing:firewall_support.open_ports(info,missing)
             if missing_udp:firewall_support.open_ports(info,missing_udp,protocol='udp')
@@ -682,12 +781,8 @@ def firewall_preflight(args, ports, udp_ports=None):
     if unknown or unknown_udp:
         print('无法验证防火墙规则或实际入站区域，已禁用自动修改。')
         print('请手动放行端口：',labels(unknown,unknown_udp))
-        if not args.assume_external_ports_open and not tty_confirm('你是否已在实际入站防火墙区域中手动核对并放行 '+labels(unknown,unknown_udp)+'？'):
-            raise InstallError('等待手动配置本机防火墙')
-    if not args.assume_external_ports_open:
-        print('V-UI 无法修改云安全组或服务商防火墙。')
-        if not tty_confirm('你是否已在云安全组或上游防火墙中放行 '+labels(ports,udp_ports)+'？'):
-            raise InstallError('等待配置云安全组或上游防火墙端口')
+    print('云安全组或服务商防火墙未验证；请按实际入站方向核对并放行：',labels(ports,udp_ports))
+    print('本机规则检测不代表公网可达；安装器不会修改 SSH、云安全组或未知防火墙。')
     return result
 
 
@@ -757,6 +852,7 @@ def install_verified(args, snapshot, archive, meta):
               'bootstrap_python':str(Path(sys.executable).resolve()),'node_port':args.node_port}
     if existing:
         saved = json.loads(CONFIG.read_text())
+        config['ca_authorizations'] = list(ca_authorizations(saved))
         if hasattr(args, '_existing_config') and saved != args._existing_config:
             raise InstallError('安装配置在确认后发生变化，请重新运行；未覆盖其他修改')
         if saved.get('service_manager','systemd') != manager:
@@ -791,6 +887,13 @@ def install_verified(args, snapshot, archive, meta):
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(args.cert, args.key)
     firewall=firewall_preflight(args,sorted(set([80,args.port,args.node_port])),args.node_udp_port)
+    if not args.cert and args.accept_terms:
+        record = {'domain': args.domain, 'environment': 'production'}
+        records = config.setdefault('ca_authorizations', [])
+        if record not in records:
+            if len(records) >= 64:
+                raise InstallError('CA 授权记录达到上限，未修改配置')
+            records.append(record)
     if args.dry_run:
         print(json.dumps({'checks':'passed','no_changes':True,'domain':args.domain,
               'release_id':meta['release_id'],'distro':info,'service_manager':manager,
@@ -829,6 +932,7 @@ def install_verified(args, snapshot, archive, meta):
         elif json.loads(prepared.read_text()).get('archive_sha256') != args.sha256:
             raise InstallError('已准备的版本对应另一安装包校验值，拒绝覆盖')
         stopped = False
+        committed = False
         try:
             if existing:
                 begin_transaction(work, manager, was_running)
@@ -864,22 +968,17 @@ def install_verified(args, snapshot, archive, meta):
             else:
                 if existing:
                     certificate_state(work, 'contact', args.domain, args.email)
-                as_service([str(python),'-B','-m','app.certificates.cli','bootstrap','--root',str(ROOT),
-                            '--domain',args.domain,'--email',args.email,'--accept-terms'], cwd=payload)
+                bootstrap_managed_certificate(python, payload, args)
                 if existing:
                     certificate_state(work, 'contact', args.domain, args.email)
-            check = as_service([str(python),'-B','-c',
-                'from app.models.database import init_db,SessionLocal,User; init_db(); s=SessionLocal(); print(s.query(User).count()); s.close()'], capture=True,cwd=payload)
-            if check.stdout.strip() == '0':
-                # /dev/tty keeps piped installer input out of the password path.
-                with open('/dev/tty', 'rb+', buffering=0) as tty:
-                    as_service([str(python),'-B','-m','app.admin','create',args.admin],tty=tty,cwd=payload)
             service_support.enable_start(manager,[panel_name])
             https_health(config, args.health_ca)
-            write_root_file(CONFIG, json.dumps({**config, 'ready': True, 'release_id': meta['release_id']}, indent=2).encode())
-            if existing: finish_transaction()
+            with provision_initial_account(python, payload, config):
+                write_root_file(CONFIG, json.dumps({**config, 'ready': True, 'release_id': meta['release_id']}, indent=2).encode())
+                if existing: finish_transaction()
+                committed = True
         except BaseException:
-            if stopped:
+            if stopped and not committed:
                 if existing and os.path.lexists(CONFIG_DIR/TRANSACTION_NAME):
                     # Keep the durable journal if any recovery step fails. A
                     # later run recovers it before showing configuration choices.
@@ -892,9 +991,8 @@ def install_verified(args, snapshot, archive, meta):
             raise
     print('检测到 Linux：',info['name'],'|',info['arch'],info['libc'],'|',manager)
     print('安装完成，面板登录及证书管理地址如下：')
-    print('Installed:',meta['release_id'])
-    print('Panel:', config['origin']+'/login')
-    print('Certificates:', config['origin']+'/certificates')
+    print('已安装版本：',meta['release_id'])
+    print('面板地址及首次凭据已通过私有终端交付；已有账户保持不变。')
     print('SSH 和无关网站服务未被修改。防火墙仅在明确确认后修改。')
 
 
@@ -930,8 +1028,6 @@ def read_configuration(args):
             if not args.email:
                 args.email = ask('联系邮箱: ')
             if interactive:
-                if args.admin is None:
-                    args.admin = ask('管理员用户名 [admin]: ', 'admin')
                 for attr, prompt, default in (
                         ('port', '面板 HTTPS 端口 [8443]: ', 8443),
                         ('node_port', '默认节点 TCP 端口 [10443]: ', 10443)):
@@ -943,7 +1039,7 @@ def read_configuration(args):
             if not args.cert and not args.accept_terms:
                 args.accept_terms = terminal_confirm(terminal,
                     '我控制该域名，并同意 https://letsencrypt.org/repository/ 的 CA 条款及公开证书记录')
-    for attr, default in (('admin', 'admin'), ('port', 8443), ('node_port', 10443)):
+    for attr, default in (('admin', 'vui_'+secrets.token_hex(6)), ('port', 8443), ('node_port', 10443)):
         if getattr(args, attr) is None:
             setattr(args, attr, default)
 
@@ -973,13 +1069,15 @@ def read_existing_configuration(args, saved):
             raise InstallError('参数与已有配置不一致：'+', '.join(requested)+'；请使用短命令交互选择“修改配置”')
         for key, value in original.items(): setattr(args, key, value)
         args.admin = saved['admin']
+        if not args.cert and has_ca_authorization(saved, args.domain):
+            args.accept_terms = True
         return
     # --upgrade is already an explicit choice, but cannot silently change values.
     edit = False
     with controlling_terminal() as terminal:
         terminal.write('检测到已有安装（'+('已完成' if saved['ready'] else '尚未完成，可继续安装')+'）。\n')
         terminal.write(f"原面板：https://{saved['domain']}:{saved['port']}\n"
-                       f"原联系邮箱：{saved['email']}\n原管理员：{saved['admin']}（保留现有账户）\n"
+                       f"原联系邮箱：{saved['email']}\n初始管理员记录：{saved['admin']}（已有账户保留，以面板实际为准）\n"
                        f"监听地址：{saved['bind']}；节点 TCP 预检端口：{original['node_port']}\n")
         terminal.flush()
         if not args.upgrade or requested:
@@ -1039,6 +1137,8 @@ def read_existing_configuration(args, saved):
             terminal.flush()
             if not terminal_confirm(terminal, '确认保留数据，按上述配置继续安装'):
                 raise InstallError('已取消，原配置和数据未更改')
+        if not args.cert and has_ca_authorization(saved, args.domain):
+            args.accept_terms = True
         if not args.cert and not args.accept_terms:
             args.accept_terms = terminal_confirm(terminal,
                 '我控制该域名，并同意 https://letsencrypt.org/repository/ 的 CA 条款及公开证书记录')
@@ -1053,11 +1153,11 @@ def main():
     p.add_argument('--domain'); p.add_argument('--email'); p.add_argument('--admin')
     p.add_argument('--port',type=int);p.add_argument('--bind')
     p.add_argument('--node-port',type=int,help='需要预检或放行的默认节点 TCP 端口')
-    p.add_argument('--interactive',action='store_true',help='交互填写缺失的域名、邮箱、管理员用户名和端口')
+    p.add_argument('--interactive',action='store_true',help='交互填写域名、邮箱和端口；首次管理员自动生成')
     p.add_argument('--node-udp-port',type=int,action='append',default=[],metavar='PORT',
                    help='显式预检或放行的节点 UDP/QUIC 端口，可重复指定；不会创建节点')
     p.add_argument('--open-firewall',choices=['ask','yes','no'],default='ask')
-    p.add_argument('--assume-external-ports-open',action='store_true',help='显式确认云安全组和上游防火墙已放行，跳过交互确认')
+    p.add_argument('--assume-external-ports-open',action='store_true',help='兼容旧调用；本机检测不能证明云安全组或公网已放行')
     p.add_argument('--accept-terms', action='store_true'); p.add_argument('--upgrade', action='store_true')
     p.add_argument('--cert'); p.add_argument('--key')
     p.add_argument('--health-ca', help='可选的私有 CA 信任文件，仅用于自带证书的 HTTPS 健康验证')

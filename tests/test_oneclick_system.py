@@ -8,6 +8,7 @@ from pathlib import Path
 import pty
 import pwd
 import re
+import secrets
 import select
 import signal
 import socket
@@ -20,8 +21,9 @@ from http.cookies import SimpleCookie
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from loopback_helpers import certificate_files, unused_port
-from scripts.ops_menu_smoke import MenuSession
+from online_install_helpers import PrivateMenuSession as MenuSession
 from online_install_helpers import fixture_commands, published_commands, setup_commands, configured_setup_with_tty, global_menu_check, hosted_command_directory, sudo_policy_snapshot
+from online_install_helpers import private_installer_credentials, redact_installer_output
 
 
 def installer_has_chinese_prompts(version):
@@ -30,29 +32,32 @@ def installer_has_chinese_prompts(version):
     return tuple(map(int, version.split('.'))) >= (0, 4, 10)
 
 
-def wait_for_managed_https(probe, diagnostics, *, timeout=20):
+def wait_for_managed_https(probe, diagnostics, *, timeout=20, private_values=()):
     """systemd active is not a TLS/authentication readiness observation."""
+    def safe(text):return redact_installer_output(text,*private_values)
     started=time.monotonic();deadline=started+timeout;attempts=0;last='no response'
     while True:
         remaining=deadline-time.monotonic()
         if remaining<=0:
-            raise AssertionError('Managed HTTPS did not become ready: '+last+'\n'+diagnostics())
+            raise AssertionError(safe('Managed HTTPS did not become ready: '+last+'\n'+diagnostics()))
         attempts+=1
         try:
             status,_=probe(min(5,remaining))
         except (ConnectionRefusedError,ConnectionResetError,ssl.SSLEOFError,http.client.RemoteDisconnected) as exc:
-            last=type(exc).__name__+': '+str(exc)[:200]
+            last=type(exc).__name__+': '+safe(str(exc))[:200]
             pause=min(.1,max(0,deadline-time.monotonic()))
             if pause:time.sleep(pause)
         except Exception as exc:
-            raise AssertionError('Managed HTTPS readiness failed without retry: '+type(exc).__name__+
-                                 ': '+str(exc)[:200]+'\n'+diagnostics()) from exc
+            error=AssertionError(safe('Managed HTTPS readiness failed without retry: '+type(exc).__name__+
+                                 ': '+safe(str(exc))[:200]+'\n'+diagnostics()))
+            if private_values:raise error from None
+            raise error from exc
         else:
             if status!=401:
-                raise AssertionError('Managed HTTPS must enforce authentication; got '+str(status)+'\n'+diagnostics())
+                raise AssertionError(safe('Managed HTTPS must enforce authentication; got '+str(status)+'\n'+diagnostics()))
             elapsed=time.monotonic()-started
             if elapsed>timeout:
-                raise AssertionError('Managed HTTPS response exceeded readiness deadline\n'+diagnostics())
+                raise AssertionError(safe('Managed HTTPS response exceeded readiness deadline\n'+diagnostics()))
             print('Managed HTTPS ready: TLS verified, HTTP401, attempts='+str(attempts)+
                   ', seconds='+format(elapsed,'.3f'))
             return
@@ -64,8 +69,10 @@ class OneClickSystemTests(unittest.TestCase):
         self.assertNotEqual(os.geteuid(), 0)
         source = Path(__file__).resolve().parents[1]
         published_version = os.getenv('VUI_PUBLISHED_INSTALL_VERSION')
-        new_installer = installer_has_chinese_prompts(published_version or (source/'VERSION').read_text().strip())
-        exercise_confirmations = new_installer and os.getenv('VUI_INSTALLER_YN_TEST') == '1'
+        product_version=published_version or (source/'VERSION').read_text().strip()
+        new_installer = installer_has_chinese_prompts(product_version)
+        automatic_credentials=tuple(map(int,product_version.split('.'))) >= (0,4,13)
+        exercise_confirmations = new_installer and not automatic_credentials and os.getenv('VUI_INSTALLER_YN_TEST') == '1'
         bundle = Path(os.environ['VUI_RELEASE_BUNDLE']) if not published_version else None
         sha = bundle.with_suffix(bundle.suffix+'.sha256').read_text().split()[0] if bundle else None
         root = Path('/var/lib/v-ui')
@@ -82,13 +89,18 @@ class OneClickSystemTests(unittest.TestCase):
             ca, cert, key = certificate_files(work, 'installer')
             port = unused_port(); domain='vpn.example.test'; origin=f'https://{domain}:{port}'
             password = 'Synthetic-systemd-install-password!'
+            admin_username='installer-admin'
+            installation_admin=admin_username
+            private_values=[password]
+            def safe_output(text):return redact_installer_output(text,*private_values)
             node_port = unused_port()
             certificate_args = ['--cert',str(cert),'--key',str(key),'--health-ca',str(ca),
                                 '--bind','127.0.0.1','--open-firewall','no']
             if not exercise_confirmations:
                 certificate_args.append('--assume-external-ports-open')
-            configured_args = ['--domain',domain,'--email','admin@example.test','--admin','installer-admin',
+            configured_args = ['--domain',domain,'--email','admin@example.test',
                                '--port',str(port),'--node-port',str(node_port)]
+            if not automatic_credentials:configured_args.extend(['--admin',admin_username])
             if exercise_confirmations:
                 # Initial installation exercises actual y/n consent below.
                 # Same unchanged loopback fixture is explicitly acknowledged on
@@ -140,7 +152,7 @@ class OneClickSystemTests(unittest.TestCase):
             domain_prompt = '面板域名（例如 panel.example.com）: ' if new_installer and os.getenv('VUI_SETUP_INSTALL') != '1' else 'Panel domain: '
             email_prompt = '联系邮箱: ' if new_installer else 'Contact email: '
             choices = [(domain_prompt,domain),(email_prompt,'admin@example.test'),
-                       ('管理员用户名 [admin]: ','installer-admin'),('面板 HTTPS 端口 [8443]: ',str(port)),
+                       *([] if automatic_credentials else [('管理员用户名 [admin]: ',admin_username)]),('面板 HTTPS 端口 [8443]: ',str(port)),
                        ('默认节点 TCP 端口 [10443]: ',str(node_port))] if online else []
             domain_retry = os.getenv('VUI_SETUP_INSTALL') == '1' or os.getenv('VUI_DOMAIN_RETRY_TEST') == '1'
             domain_values = ['', 'https://vpn.example.test:3215/path', 'bad..example.test', domain.upper()+'.'] if domain_retry else []
@@ -196,9 +208,24 @@ class OneClickSystemTests(unittest.TestCase):
                         while time.monotonic()<grace:
                             if os.waitpid(child,os.WNOHANG)[0]:break
                             time.sleep(.05)
-                    self.fail('Installer timed out: '+output.decode(errors='replace').replace(password,'[REDACTED]')[-12000:])
-            finally: os.close(fd)
-            clean=output.decode(errors='replace').replace(password,'[REDACTED]')
+                    self.fail('Installer timed out: '+safe_output(output.decode(errors='replace'))[-12000:])
+            finally:
+                if status is not None:
+                    while select.select([fd],[],[],0)[0]:
+                        try:remaining=os.read(fd,65536)
+                        except OSError:break
+                        if not remaining:break
+                        output+=remaining
+                os.close(fd)
+            if automatic_credentials and os.waitstatus_to_exitcode(status)==0:
+                try:admin_username,password=private_installer_credentials(output.decode(errors='replace'))
+                except AssertionError:
+                    self.fail('Automatic private credential delivery missing or inconsistent\n'+safe_output(output.decode(errors='replace'))[-8000:])
+                installation_admin=admin_username
+                private_values.extend([admin_username,password])
+                self.assertTrue(re.fullmatch(r'vui_[0-9a-f]{12}',admin_username) is not None,'Random default username required')
+                self.assertTrue(len(password)>=40,'Strong generated password required')
+            clean=safe_output(output.decode(errors='replace'))
             if domain_retry:
                 self.assertEqual(sent_domains,len(domain_values),clean[-8000:])
                 self.assertFalse(advanced_before_valid_domain,clean[-8000:])
@@ -207,20 +234,24 @@ class OneClickSystemTests(unittest.TestCase):
             if exercise_confirmations:
                 self.assertGreaterEqual(confirmations['你是否已在云安全组或上游防火墙中放行 '],2,clean[-8000:])
                 self.assertIn('请输入 y/yes 或 n/no',clean)
-            self.assertTrue(sent_second,clean[-8000:])
+            if automatic_credentials:
+                self.assertFalse(sent_first or sent_second,'Automatic credentials must not request a password')
+                self.assertNotIn('管理员用户名 [admin]',clean)
+                self.assertNotIn('你是否已在',clean)
+            else:self.assertTrue(sent_second,clean[-8000:])
             if online:
                 self.assertEqual(len(sent_choices),len(choices),clean[-8000:])
             if os.waitstatus_to_exitcode(status) != 0:
                 journal=subprocess.run(['sudo','journalctl','-u','v-ui.service','-u','v-ui-http01.service','-n','60','--no-pager'],capture_output=True,text=True)
-                clean += '\n' + journal.stdout.replace(password,'[REDACTED]')
+                clean += '\n' + safe_output(journal.stdout)
             self.assertEqual(os.waitstatus_to_exitcode(status),0,clean[-20000:])
-            self.assertNotIn(password,output.decode(errors='replace'))
+            if not automatic_credentials:self.assertNotIn(password,output.decode(errors='replace'))
             if online:
                 self.assertIn('一键安装完成',clean)
                 self.assertEqual(sudo_policy_snapshot(),sudoers_before)
                 global_menu_check(self,{**os.environ,'PYTHONDONTWRITEBYTECODE':'1'},exercise_start_stop=True)
             if gate:
-                gate.installer_receipt('initial_install', output.decode(errors='replace'))
+                gate.installer_receipt('initial_install', clean)
             uid=pwd.getpwnam('v-ui').pw_uid;self.assertGreater(uid,0)
             for name in ('v-ui.service','v-ui-http01.socket'):
                 self.assertEqual(subprocess.run(['systemctl','is-enabled','--quiet',name]).returncode,0)
@@ -240,7 +271,7 @@ class OneClickSystemTests(unittest.TestCase):
             release=root/'releases'/identity;payload=release/'payload'
             menu=['sudo','-u','v-ui',str(release/'runtime/python/bin/python3'),'-B',
                   str(payload/'scripts/deploy.py'),'--root',str(root),'menu']
-            with MenuSession(menu,cwd='/tmp',env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1'}) as session:
+            with MenuSession(menu,cwd='/tmp',env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1'},private_values=private_values) as session:
                 session.expect()
                 session.send('1\n');status=session.expect()
                 self.assertIn('v-ui.service: active (running)',status)
@@ -285,13 +316,30 @@ class OneClickSystemTests(unittest.TestCase):
                                 ['sudo','journalctl','-u','v-ui.service','-n','40','--no-pager']):
                     try:
                         state=subprocess.run(command,capture_output=True,text=True,timeout=5)
-                        pieces.append((state.stdout+state.stderr).replace(password,'[REDACTED]')[-6000:])
+                        pieces.append(safe_output(state.stdout+state.stderr)[-6000:])
                     except subprocess.SubprocessError:
                         pieces.append('Readiness diagnostic command did not complete')
                 return '\n'.join(pieces)
-            wait_for_managed_https(lambda budget:api('/api/certificates',timeout=budget,readiness=True),readiness_diagnostics)
+            wait_for_managed_https(lambda budget:api('/api/certificates',timeout=budget,readiness=True),
+                                   readiness_diagnostics,private_values=private_values)
             self.assertEqual(api('/api/certificates')[0],401)
-            self.assertEqual(api('/api/auth/login',{'username':'installer-admin','password':password})[0],200)
+            self.assertEqual(api('/api/auth/login',{'username':admin_username,'password':password})[0],200)
+            if automatic_credentials:
+                initial_username,initial_password=admin_username,password
+                admin_username='owner_'+secrets.token_hex(6)
+                password=secrets.token_urlsafe(32)
+                private_values.extend([admin_username,password])
+                self.assertEqual(api('/api/auth/update_profile',{'username':admin_username,
+                    'current_password':initial_password,'password':password})[0],200)
+                self.assertEqual(api('/api/auth/me')[0],401)
+                self.assertEqual(api('/api/auth/login',{'username':initial_username,'password':initial_password})[0],401)
+                self.assertEqual(api('/api/auth/login',{'username':admin_username,'password':initial_password})[0],401)
+                self.assertEqual(api('/api/auth/login',{'username':admin_username,'password':password})[0],200)
+                configuration=Path('/etc/v-ui/service.json').read_bytes()
+                self.assertTrue(initial_password.encode() not in configuration and password.encode() not in configuration,
+                                'Passwords must never enter installer configuration')
+                print('Automatic credentials: random default username and strong password delivered only to PTY; '
+                      'real login / profile rename and password change / old credentials rejected / new login passed')
             product_version = published_version or (source/'VERSION').read_text().strip()
             if tuple(map(int,product_version.split('.'))) >= (0,4,12):
                 from installed_system_ca_helpers import installed_system_ca_check
@@ -320,7 +368,7 @@ class OneClickSystemTests(unittest.TestCase):
             cancel_existing = bool(os.getenv('VUI_SETUP_INSTALL') == '1' and published_version
                                    and tuple(map(int,published_version.split('.'))) >= (0,4,11))
             repeat_configuration=Path('/etc/v-ui/service.json').read_bytes()
-            repeat=(configured_setup_with_tty(repeat_cmd,cancel_existing=cancel_existing)
+            repeat=(configured_setup_with_tty(repeat_cmd,cancel_existing=cancel_existing,private_values=private_values)
                     if os.getenv('VUI_SETUP_INSTALL') == '1' else
                     subprocess.run(repeat_cmd,capture_output=True,text=True,timeout=300 if published_version else 30))
             if gate:
@@ -331,7 +379,7 @@ class OneClickSystemTests(unittest.TestCase):
                 self.assertNotIn('Detected release target:',repeat.stdout)
             else:
                 self.assertNotEqual(repeat.returncode,0)
-            self.assertEqual(Path('/etc/v-ui/service.json').read_bytes(),repeat_configuration)
+            self.assertTrue(Path('/etc/v-ui/service.json').read_bytes()==repeat_configuration,'Repeat changed protected configuration')
             self.assertIn('原配置和数据未更改' if cancel_existing else
                           ('安装已存在' if new_installer else 'already exists'),repeat.stdout+repeat.stderr)
             if cancel_existing:
@@ -343,7 +391,7 @@ class OneClickSystemTests(unittest.TestCase):
                 local_command=['sudo','unshare','--net','/usr/bin/env','-i',
                                'PATH=/usr/sbin:/usr/bin:/sbin:/bin','HOME=/root',
                                'LANG=C.UTF-8','/bin/bash',str(source/'setup.sh')]
-                with MenuSession(local_command,cwd='/tmp',env=dict(os.environ)) as session:
+                with MenuSession(local_command,cwd='/tmp',env=dict(os.environ),private_values=private_values) as session:
                     session.expect('请选择 [1/2/3/0，回车退出]: ')
                     session.send('1\n')
                     session.expect('请选择: ')
@@ -357,17 +405,17 @@ class OneClickSystemTests(unittest.TestCase):
                     session.finish()
                     self.assertNotIn('Detected release target:',session.text())
                     self.assertNotIn('可信全局 v-ui 预检',session.text())
-                self.assertEqual(Path('/etc/v-ui/service.json').read_bytes(),repeat_configuration)
+                self.assertTrue(Path('/etc/v-ui/service.json').read_bytes()==repeat_configuration,'Offline menu changed protected configuration')
                 self.assertEqual(api('/api/certificates')[0],200)
                 print('Existing bootstrap: offline network namespace / actual receipted local menu / service status / exit / original configuration and authenticated session retained OK')
                 # Repair is explicit and still delegates configuration ownership
                 # to the frozen authenticated installer. Cancel that inner menu
                 # after a real public download; preserve the existing instance.
-                repair=configured_setup_with_tty(repeat_cmd,cancel_existing=True,bootstrap_action='3')
+                repair=configured_setup_with_tty(repeat_cmd,cancel_existing=True,bootstrap_action='3',private_values=private_values)
                 self.assertNotEqual(repair.returncode,0,repair.stdout)
                 self.assertIn('可信全局 v-ui 预检通过',repair.stdout)
                 self.assertIn('已取消，原配置和数据未更改',repair.stdout)
-                self.assertEqual(Path('/etc/v-ui/service.json').read_bytes(),repeat_configuration)
+                self.assertTrue(Path('/etc/v-ui/service.json').read_bytes()==repeat_configuration,'Repair changed protected configuration')
                 self.assertEqual(api('/api/certificates')[0],200)
             check_uid('v-ui.service')
             # Existing fake M1 proxy drafts must survive the actual installer
@@ -395,7 +443,7 @@ class OneClickSystemTests(unittest.TestCase):
             self.assertTrue(saved_proxy['settings']['local_password_set'])
             self.assertNotIn(b'Fake-upgrade-password!', raw)
             # Rerunning with --upgrade checks/stages and makes a stopped backup.
-            upgraded=(configured_setup_with_tty(upgrade_cmd,bootstrap_action='2') if os.getenv('VUI_SETUP_INSTALL') == '1' else
+            upgraded=(configured_setup_with_tty(upgrade_cmd,bootstrap_action='2',private_values=private_values) if os.getenv('VUI_SETUP_INSTALL') == '1' else
                       subprocess.run(upgrade_cmd,capture_output=True,text=True,timeout=300 if published_version else 120))
             if gate:
                 gate.installer_receipt('same_bundle_upgrade', upgraded.stdout)
@@ -415,7 +463,7 @@ class OneClickSystemTests(unittest.TestCase):
             self.assertTrue(json.loads(api('/api/certificates/capabilities')[1])['worker_running'])
             if gate:
                 def login_again():
-                    self.assertEqual(api('/api/auth/login', {'username': 'installer-admin', 'password': password})[0], 200)
+                    self.assertEqual(api('/api/auth/login', {'username': admin_username, 'password': password})[0], 200)
                 gate.finish(self, cmd, api, login_again)
             if os.getenv('VUI_EXISTING_INSTALL_TEST') == '1':
                 self.assertIsNone(published_version, 'Exercise the exact new candidate, not the frozen public suite')
@@ -423,7 +471,7 @@ class OneClickSystemTests(unittest.TestCase):
                 existing_cmd = [*(online['initial'] if online else [*cmd,'--interactive']),
                                 '--assume-external-ports-open']
                 def interaction(answers, expected=0):
-                    with MenuSession(existing_cmd,cwd='/tmp',env=dict(os.environ),timeout=300) as session:
+                    with MenuSession(existing_cmd,cwd='/tmp',env=dict(os.environ),timeout=300,private_values=private_values) as session:
                         session.expect('请选择 [1/2/0，回车取消]: ')
                         prefix=session.text()
                         self.assertNotIn('联系邮箱:',prefix)
@@ -439,7 +487,7 @@ class OneClickSystemTests(unittest.TestCase):
                 # Cancellation preserves config bytes and the live authenticated service.
                 before=Path('/etc/v-ui/service.json').read_bytes()
                 interaction([(None,'0')],1)
-                self.assertEqual(Path('/etc/v-ui/service.json').read_bytes(),before)
+                self.assertTrue(Path('/etc/v-ui/service.json').read_bytes()==before,'Cancellation changed protected configuration')
                 self.assertEqual(api('/api/auth/me')[0],200)
                 interaction([(None,'1')])
                 self.assertEqual(json.loads(api('/api/proxy/settings')[1]),saved_proxy)
@@ -465,7 +513,7 @@ class OneClickSystemTests(unittest.TestCase):
                 config=json.loads(Path('/etc/v-ui/service.json').read_text())
                 self.assertEqual(config['email'],'new-contact@example.test')
                 self.assertEqual(config['port'],port)
-                self.assertEqual(config['admin'],'installer-admin')
+                self.assertTrue(config['admin']==installation_admin,'Installer username metadata must remain unchanged')
                 self.assertEqual(api('/api/auth/me')[0],200)
                 self.assertEqual(json.loads(api('/api/proxy/settings')[1]),saved_proxy)
                 # A real unrelated occupied port is rejected before stopping the panel.
@@ -475,7 +523,7 @@ class OneClickSystemTests(unittest.TestCase):
                     bad=[(prompt,str(busy) if prompt=='面板 HTTPS 端口 [' else answer) for prompt,answer in edits]
                     blocked=interaction(bad,1)
                     self.assertIn('已被占用',blocked)
-                    self.assertEqual(json.loads(Path('/etc/v-ui/service.json').read_text()),config)
+                    self.assertTrue(json.loads(Path('/etc/v-ui/service.json').read_text())==config,'Port conflict changed protected configuration')
                     self.assertEqual(api('/api/auth/me')[0],200)
                 # A syntactically valid but wrong certificate hostname causes real
                 # TLS health failure, and then restores the old binding/config/service.
@@ -489,7 +537,7 @@ class OneClickSystemTests(unittest.TestCase):
                 failed=interaction(bad,1)
                 self.assertIn('HTTPS 健康验证失败',failed)
                 self.assertIn('已恢复上次操作前',failed)
-                self.assertEqual(json.loads(Path('/etc/v-ui/service.json').read_text()),config)
+                self.assertTrue(json.loads(Path('/etc/v-ui/service.json').read_text())==config,'Recovery changed protected configuration')
                 self.assertEqual(api('/api/auth/me')[0],200)
                 self.assertEqual(json.loads(api('/api/proxy/settings')[1]),saved_proxy)
                 self.assertFalse(Path('/etc/v-ui/.install-transaction.json').exists())

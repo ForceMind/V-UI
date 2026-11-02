@@ -180,7 +180,7 @@ class LinuxInstallationRegressions(unittest.TestCase):
     def test_firewall_changes_require_explicit_yes(self):
         info = {'backend': 'firewalld', 'managed': True, 'zone': 'external', 'detail': 'fixture'}
         for choice, answer, allowed in (('no', True, False), ('ask', False, False),
-                                        ('ask', True, True), ('yes', False, True)):
+                                        ('ask', True, False), ('yes', False, True)):
             args = argparse.Namespace(open_firewall=choice, dry_run=False,
                                       assume_external_ports_open=True)
             with self.subTest(choice=choice, answer=answer), \
@@ -196,22 +196,24 @@ class LinuxInstallationRegressions(unittest.TestCase):
                     with self.assertRaises(installer.InstallError):
                         installer.firewall_preflight(args, [8443])
                     change.assert_not_called()
-                self.assertEqual(confirm.called, choice == 'ask')
+                confirm.assert_not_called()
 
-    def test_ambiguous_zone_requires_manual_confirmation_even_with_yes(self):
+    def test_ambiguous_zone_warns_without_modification_even_with_yes(self):
         info = {'backend': 'firewalld', 'managed': False, 'detail': 'ambiguous ingress'}
-        args = argparse.Namespace(open_firewall='yes', dry_run=False,
-                                  assume_external_ports_open=False)
+        args = argparse.Namespace(open_firewall='yes', dry_run=False, assume_external_ports_open=False)
+        output = io.StringIO()
         with patch.object(firewall, 'detect', return_value=info), \
              patch.object(firewall, 'run') as query, \
+             patch.object(firewall, 'port_open', return_value=None), \
              patch.object(firewall, 'open_ports') as change, \
-             patch.object(installer, 'tty_confirm', return_value=False) as confirm, \
-             patch('sys.stdout', new=io.StringIO()):
-            with self.assertRaisesRegex(installer.InstallError, '等待手动配置本机防火墙'):
-                installer.firewall_preflight(args, [80, 8443, 10443])
+             patch.object(installer, 'tty_confirm') as confirm, patch('sys.stdout', output):
+            result = installer.firewall_preflight(args, [80, 8443, 10443])
+            self.assertEqual(result['unknown'], [80, 8443, 10443])
+            self.assertIn('80/tcp, 8443/tcp, 10443/tcp', output.getvalue())
+            self.assertIn('已禁用自动修改', output.getvalue())
             query.assert_not_called()
             change.assert_not_called()
-            self.assertIn('实际入站', confirm.call_args.args[0])
+            confirm.assert_not_called()
 
     def test_firewall_dry_run_never_writes_or_confirms(self):
         args = argparse.Namespace(open_firewall='yes', dry_run=True,

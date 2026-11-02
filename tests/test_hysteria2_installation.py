@@ -179,10 +179,10 @@ class Hysteria2InstallationTests(unittest.TestCase):
         write.assert_not_called()
         confirm.assert_not_called()
 
-    def test_tcp_and_udp_changes_require_one_explicit_yes_for_exact_ports(self):
+    def test_tcp_and_udp_changes_require_explicit_parameter_for_exact_ports(self):
         info = {'backend': 'ufw', 'managed': True, 'detail': 'fixture'}
         for choice, answer, allowed in (('no', True, False), ('ask', False, False),
-                                        ('ask', True, True), ('yes', False, True)):
+                                        ('ask', True, False), ('yes', False, True)):
             args = self.args(dry_run=False, open_firewall=choice, assume_external_ports_open=True)
             output = io.StringIO()
             with self.subTest(choice=choice, answer=answer), \
@@ -198,10 +198,8 @@ class Hysteria2InstallationTests(unittest.TestCase):
                     with self.assertRaisesRegex(installer.InstallError, '10443/tcp, 10443/udp'):
                         installer.firewall_preflight(args, [10443], [10443])
                     write.assert_not_called()
-                self.assertEqual(confirm.called, choice == 'ask')
-                if confirm.called:
-                    self.assertIn('10443/tcp, 10443/udp', confirm.call_args.args[0])
-                self.assertIn('申请修改本机防火墙，放行： 10443/tcp, 10443/udp', output.getvalue())
+                confirm.assert_not_called()
+                self.assertIn('10443/tcp, 10443/udp', output.getvalue())
 
     def test_udp_only_change_does_not_reopen_tcp_and_must_verify_udp(self):
         info = {'backend': 'ufw', 'managed': True, 'detail': 'fixture'}
@@ -218,31 +216,35 @@ class Hysteria2InstallationTests(unittest.TestCase):
                 write.assert_called_once_with(info, [10443], protocol='udp')
                 self.assertEqual(query.call_args, call(info, 10443, protocol='udp'))
 
-    def test_custom_or_ambiguous_udp_firewall_remains_manual_even_with_yes(self):
+    def test_custom_or_ambiguous_udp_firewall_warns_without_changes_even_with_yes(self):
         for backend in ('nftables', 'iptables', 'firewalld'):
             info = {'backend': backend, 'managed': False, 'detail': 'manual fixture'}
+            output = io.StringIO()
             with self.subTest(backend=backend), patch.object(firewall, 'detect', return_value=info), \
-                 patch.object(firewall, 'open_ports') as write, patch.object(firewall, 'run') as query, \
-                 patch.object(installer, 'tty_confirm', return_value=False) as confirm, \
-                 patch('sys.stdout', io.StringIO()):
-                with self.assertRaisesRegex(installer.InstallError, '等待手动配置本机防火墙'):
-                    installer.firewall_preflight(self.args(dry_run=False, open_firewall='yes'), [8443], [10443])
-                self.assertIn('8443/tcp, 10443/udp', confirm.call_args.args[0])
-                self.assertIn('实际入站', confirm.call_args.args[0])
+                 patch.object(firewall, 'port_open', return_value=None), \
+                 patch.object(firewall, 'open_ports') as write, \
+                 patch.object(installer, 'tty_confirm') as confirm, patch('sys.stdout', output):
+                result = installer.firewall_preflight(self.args(dry_run=False, open_firewall='yes'), [8443], [10443])
+                self.assertEqual(result['unknown'], [8443])
+                self.assertEqual(result['unknown_udp'], [10443])
+                self.assertIn('8443/tcp, 10443/udp', output.getvalue())
+                self.assertIn('已禁用自动修改', output.getvalue())
+                confirm.assert_not_called()
                 write.assert_not_called()
-                query.assert_not_called()
 
-    def test_cloud_udp_confirmation_is_required_even_when_local_firewall_open(self):
+    def test_cloud_udp_warning_needs_no_confirmation_when_local_firewall_open(self):
         info = {'backend': 'none', 'managed': False, 'detail': 'no firewall'}
+        output = io.StringIO()
         with patch.object(firewall, 'detect', return_value=info), \
+             patch.object(firewall, 'port_open', return_value=True), \
              patch.object(firewall, 'open_ports') as write, \
-             patch.object(installer, 'tty_confirm', return_value=False) as confirm, \
-             patch('sys.stdout', io.StringIO()):
-            with self.assertRaisesRegex(installer.InstallError, '云安全组或上游防火墙'):
-                installer.firewall_preflight(self.args(dry_run=False, open_firewall='yes'), [80, 8443], [10443])
-            self.assertIn('80/tcp, 8443/tcp, 10443/udp', confirm.call_args.args[0])
-            self.assertIn('云安全组或上游防火墙', confirm.call_args.args[0])
+             patch.object(installer, 'tty_confirm') as confirm, patch('sys.stdout', output):
+            installer.firewall_preflight(self.args(dry_run=False, open_firewall='yes'), [80, 8443], [10443])
+            self.assertIn('80/tcp, 8443/tcp, 10443/udp', output.getvalue())
+            self.assertIn('云安全组或服务商防火墙未验证', output.getvalue())
+            self.assertIn('本机规则检测不代表公网可达', output.getvalue())
             write.assert_not_called()
+            confirm.assert_not_called()
 
 
 if __name__ == '__main__':

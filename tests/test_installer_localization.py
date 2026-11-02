@@ -178,68 +178,66 @@ class InstallerLocalizationTests(unittest.TestCase):
             self.assertNotIn('联系邮箱', terminal.output.getvalue())
             self.assertNotIn('CA 条款', terminal.output.getvalue())
 
-    def test_firewall_waits_for_explicit_yes_and_rechecks_ports(self):
-        for answers, permitted in (('ok\ny\n', True), ('n\n', False), ('\n', False), ('', False)):
-            info = {'backend': 'ufw', 'managed': True, 'detail': 'UFW active'}
-            with self.subTest(answers=answers), patch.object(installer.firewall_support, 'detect', return_value=info), \
-                 patch.object(installer.firewall_support, 'port_open', side_effect=[False, False, True, True]) as checked, \
-                 patch.object(installer.firewall_support, 'open_ports') as opened, \
-                 patch('sys.stdout', new_callable=io.StringIO) as output:
-                terminal = Terminal(answers, before_read=opened.assert_not_called)
-                with patch.object(installer, 'controlling_terminal', side_effect=lambda: opened_terminal(terminal)):
-                    if permitted:
-                        result = installer.firewall_preflight(self.args(), [8443, 80])
-                        self.assertEqual(result['backend'], 'ufw')
-                        self.assertEqual(result['missing'], [80, 8443])
-                        opened.assert_called_once_with(info, [80, 8443])
-                        self.assertEqual(checked.call_count, 4)
-                    else:
-                        with self.assertRaises(installer.InstallError):
-                            installer.firewall_preflight(self.args(), [8443, 80])
-                        opened.assert_not_called()
-                self.assertIn('本机防火墙： UFW 已启用', output.getvalue())
-                self.assertIn('80/tcp, 8443/tcp', output.getvalue())
-                self.assertEqual(info['detail'], 'UFW active')
+    def test_missing_firewall_ports_stop_without_confirmation_or_modification(self):
+        info = {'backend': 'ufw', 'managed': True, 'detail': 'UFW active'}
+        with patch.object(installer.firewall_support, 'detect', return_value=info), \
+             patch.object(installer.firewall_support, 'port_open', return_value=False), \
+             patch.object(installer.firewall_support, 'open_ports') as opened, \
+             patch.object(installer, 'controlling_terminal', side_effect=AssertionError('no firewall confirmation')), \
+             patch('sys.stdout', new_callable=io.StringIO) as output:
+            with self.assertRaisesRegex(installer.InstallError, '80/tcp, 8443/tcp'):
+                installer.firewall_preflight(self.args(), [8443, 80])
+            opened.assert_not_called()
+            self.assertIn('本机防火墙： UFW 已启用', output.getvalue())
 
-    def test_custom_rules_and_ambiguous_zone_never_modify_automatically(self):
+    def test_explicit_firewall_authorization_still_rechecks_precise_ports(self):
+        info = {'backend': 'ufw', 'managed': True, 'detail': 'UFW active'}
+        with patch.object(installer.firewall_support, 'detect', return_value=info), \
+             patch.object(installer.firewall_support, 'port_open', side_effect=[False, False, True, True]) as checked, \
+             patch.object(installer.firewall_support, 'open_ports') as opened, \
+             patch.object(installer, 'controlling_terminal', side_effect=AssertionError('explicit authorization needs no prompt')), \
+             patch('sys.stdout', new_callable=io.StringIO):
+            result = installer.firewall_preflight(self.args(open_firewall='yes'), [8443, 80])
+            self.assertEqual(result['missing'], [80, 8443])
+            opened.assert_called_once_with(info, [80, 8443])
+            self.assertEqual(checked.call_count, 4)
+
+    def test_custom_rules_and_ambiguous_zone_warn_without_questions_or_changes(self):
         fixtures = (
             ('nftables', 'custom nftables rules detected', '自定义 nftables'),
             ('iptables', 'custom iptables rules detected', '自定义 iptables'),
             ('firewalld', 'firewalld ingress zone is ambiguous or unavailable; manual configuration required', '无法唯一确定 firewalld 入站区域'),
         )
         for backend, detail, text in fixtures:
-            for answer in ('ok\ny\ny\n', 'n\n', '\n'):
-                info = {'backend': backend, 'managed': False, 'detail': detail}
-                with self.subTest(backend=backend, answer=answer), \
-                     patch.object(installer.firewall_support, 'detect', return_value=info), \
-                     patch.object(installer.firewall_support, 'open_ports') as opened, \
-                     patch('sys.stdout', new_callable=io.StringIO) as output:
-                    terminal = Terminal(answer)
-                    with patch.object(installer, 'controlling_terminal', side_effect=lambda: opened_terminal(terminal)):
-                        if answer.startswith('ok'):
-                            result = installer.firewall_preflight(self.args(assume_external_ports_open=False), [80], [10443])
-                            self.assertEqual(result['unknown'], [80])
-                            self.assertEqual(result['unknown_udp'], [10443])
-                            self.assertIn('实际入站防火墙区域', terminal.output.getvalue())
-                            self.assertIn('云安全组或上游防火墙', terminal.output.getvalue())
-                        else:
-                            with self.assertRaises(installer.InstallError):
-                                installer.firewall_preflight(self.args(assume_external_ports_open=False), [80], [10443])
-                    opened.assert_not_called()
-                    self.assertIn(text, output.getvalue())
-                    self.assertIn('已禁用自动修改', output.getvalue())
-                    self.assertEqual(info['detail'], detail)
-
-    def test_cloud_ports_confirmation_defaults_no(self):
-        info = {'backend': 'none', 'managed': False, 'detail': 'no active supported local firewall detected'}
-        for answer in ('n\n', '\n', ''):
-            with self.subTest(answer=answer), patch.object(installer.firewall_support, 'detect', return_value=info), \
+            info = {'backend': backend, 'managed': False, 'detail': detail}
+            with self.subTest(backend=backend), \
+                 patch.object(installer.firewall_support, 'detect', return_value=info), \
+                 patch.object(installer.firewall_support, 'port_open', return_value=None), \
                  patch.object(installer.firewall_support, 'open_ports') as opened, \
-                 patch.object(installer, 'controlling_terminal', return_value=opened_terminal(Terminal(answer))), \
-                 patch('sys.stdout', new_callable=io.StringIO):
-                with self.assertRaises(installer.InstallError):
-                    installer.firewall_preflight(self.args(assume_external_ports_open=False), [80])
+                 patch.object(installer, 'controlling_terminal', side_effect=AssertionError('no repeated confirmation')), \
+                 patch('sys.stdout', new_callable=io.StringIO) as output:
+                result = installer.firewall_preflight(self.args(assume_external_ports_open=False), [80], [10443])
+                self.assertEqual(result['unknown'], [80])
+                self.assertEqual(result['unknown_udp'], [10443])
                 opened.assert_not_called()
+                self.assertIn(text, output.getvalue())
+                self.assertIn('已禁用自动修改', output.getvalue())
+                self.assertIn('云安全组或服务商防火墙未验证', output.getvalue())
+                self.assertIn('80/tcp, 10443/udp', output.getvalue())
+                self.assertNotIn('[y/N', output.getvalue())
+                self.assertEqual(info['detail'], detail)
+
+    def test_cloud_unknown_reports_limit_without_confirmation(self):
+        info = {'backend': 'none', 'managed': False, 'detail': 'no active supported local firewall detected'}
+        with patch.object(installer.firewall_support, 'detect', return_value=info), \
+             patch.object(installer.firewall_support, 'port_open', return_value=True), \
+             patch.object(installer.firewall_support, 'open_ports') as opened, \
+             patch.object(installer, 'controlling_terminal', side_effect=AssertionError('cloud prompt removed')), \
+             patch('sys.stdout', new_callable=io.StringIO) as output:
+            installer.firewall_preflight(self.args(assume_external_ports_open=False), [80])
+            opened.assert_not_called()
+            self.assertIn('云安全组或服务商防火墙未验证', output.getvalue())
+            self.assertIn('本机规则检测不代表公网可达', output.getvalue())
 
 
 if __name__ == '__main__':

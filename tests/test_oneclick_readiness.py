@@ -1,6 +1,7 @@
 """Protocol readiness is bounded; authentication/TLS failures cannot be retried away."""
 import http.client
 import ssl
+import traceback
 import unittest
 from unittest.mock import Mock, patch
 
@@ -8,6 +9,33 @@ from test_oneclick_system import wait_for_managed_https
 
 
 class ManagedHTTPSReadinessTests(unittest.TestCase):
+    def test_private_credentials_are_removed_from_transport_errors_and_diagnostics(self):
+        username='synthetic-owner-sensitive';password='Synthetic-sensitive-password-only!'
+        probe=Mock(side_effect=ssl.SSLCertVerificationError(username+' '+password))
+        diagnostic=Mock(return_value='diagnostic '+password+' '+username)
+        with patch('test_oneclick_system.time.monotonic',return_value=0):
+            with self.assertRaises(AssertionError) as failed:
+                wait_for_managed_https(probe,diagnostic,private_values=[username,password])
+        formatted=''.join(traceback.format_exception(type(failed.exception),failed.exception,failed.exception.__traceback__))
+        self.assertNotIn(username,formatted);self.assertNotIn(password,formatted)
+        self.assertIsNone(failed.exception.__cause__)
+        probe.assert_called_once();diagnostic.assert_called_once()
+
+    def test_private_values_are_redacted_before_transport_error_truncation(self):
+        secret = 'Sensitive-boundary-synthetic-password!'
+        for retryable in (False, True):
+            error = (ConnectionRefusedError if retryable else ssl.SSLCertVerificationError)('A' * 190 + secret)
+            clock = {'side_effect': [0, 0, 20, 20]} if retryable else {'return_value': 0}
+            with self.subTest(retryable=retryable), \
+                 patch('test_oneclick_system.time.monotonic', **clock), \
+                 patch('test_oneclick_system.time.sleep'):
+                with self.assertRaises(AssertionError) as failed:
+                    wait_for_managed_https(Mock(side_effect=error), Mock(return_value='bounded'), private_values=[secret])
+            formatted = ''.join(traceback.format_exception(type(failed.exception), failed.exception, failed.exception.__traceback__))
+            self.assertNotIn(secret, formatted)
+            self.assertNotIn(secret[:8], formatted, 'A truncated private value escaped redaction')
+            self.assertIsNone(failed.exception.__cause__)
+
     def test_transient_startup_connections_then_real_unauthorized_response(self):
         probe=Mock(side_effect=[ConnectionRefusedError('not bound'),ConnectionResetError('starting'),
                                ssl.SSLEOFError('starting'),http.client.RemoteDisconnected('starting'),(401,b'auth')])
