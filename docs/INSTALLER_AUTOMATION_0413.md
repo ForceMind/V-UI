@@ -41,3 +41,7 @@ Actions 使用隔离假凭据、临时 CA、空白临时 Linux，验证实际安
 保留首次旧环境失败：系统Python3.9运行旧installer13项有4个错误，分别为/var/tmp沙箱写入拒绝、macOS不支持Linux安装target、回环bind被沙箱拒绝、/var临时目录符号链接拒绝；旧online helper4项有1个BaseException.add_note在3.9不存在的错误。没有放宽防护或断言；切换已存在的Python3.12后仅运行无主机修改的合成部分通过，Linux平台和实际数据库/安装仍由Actions验证。精确case和错误记录在本批临时worker-local-checks.txt。
 
 首次候选4ec5cf3b已推送Draft PR99。最终独审发现readiness错误字符串先截断后脱敏会泄漏跨边界的残缺随机凭据；已改为先完整脱敏再截断，并新增retryable和立即失败两分支的跨200字符边界反例。该候选不作最终验收，新提交须重新取得完整Actions资格；保留原候选运行历史，不借绿灯覆盖审查发现。
+
+候选47d0f936的真实安装run41489842983/job125429666857在199.947秒通过：缺省随机账号和强密码、真实登录→改名改密→旧凭据拒绝→新登录、已装portable系统CA、升级/ready:false/变更/TLS失败恢复与会话/代理数据保持均实际断言。该结果仅属于该候选，后续准确提交仍须独立验收。
+
+同候选普通测试run41489843145/job125429667693首次2434项、284.212秒，9个failure/4个error、230环境skip；全部13个subtest失败来自三组旧防火墙用例仍要求原有交互确认。漏同步已修：tests/test_hysteria2_installation.py、test_tuic_installation.py、test_linux_installation_regressions.py六个方法更新为默认不问不改、未知仅提示、显式safe后端授权才写并回读；精确TCP/UDP和无修改断言保留。六方法纯合成通过；首次命令中两条类名拼错未加载，纠正后两条通过。新发布例外仅增加这三个直接相关测试文件，其他范围不扩大。原失败日志SHA256=839c27fe706b67b70c940dc93a133fa9b88da1600b6c5b24302524e67447857e。未合并/发布该失败候选。
