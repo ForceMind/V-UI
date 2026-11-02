@@ -1,6 +1,6 @@
 ## 2026-11-02 当前：v0.4.12 系统CA兼容修复
 
-用户已批准实现、独审、正常dev→main合并、公开新v0.4.12和切换短入口，构建/真实安装全部Actions、无浏览器。当前release/v0.4.12基于main4f24e4c，仅修复系统根加载及固定错误分类，完整计划/状态统一见[CERTIFICATE_SYSTEM_CA_0412.md](CERTIFICATE_SYSTEM_CA_0412.md)。旧0.4.11源265e47d、19项公开资产和当前短入口摘要保持；公开新版本后才更新真实pin。当前源码是候选，未预填验收。保留未跟踪xcrun_db，不访问用户VPS/不代同意真实CA，不恢复其他待办。
+v0.4.12已按用户授权独审、正常dev→main合并，并从准确main `dacaa7c26bbadf3ba6e7a4e2cc36f7c85a38d7cf` 正式公开（19项资产）；实际CA默认根/安装/四目标均Actions验收，浏览器未验证。已核对公开install.sh和完整SHA256SUMS真实摘要，再更新短入口、冻结工作流测试源到该发布提交。候选/主线证据、一次dev健康检查首败与未改代码单次重试保留于[CERTIFICATE_SYSTEM_CA_0412.md](CERTIFICATE_SYSTEM_CA_0412.md)及承载PR；引导入口后的准确资格见最终承载PR。旧版资产、配置和用户数据保持。不访问用户VPS、不代同意真实CA。
 
 # 当前开发与接手入口
 
