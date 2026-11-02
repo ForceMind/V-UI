@@ -30,8 +30,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'setup.sh'
 BASH = shutil.which('bash')
 PATH_VALUE = '/usr/sbin:/usr/bin:/sbin:/bin'
-INSTALLER_SHA = 'f3d9700d10ac3c501b887de9681b0e6b0f45ac41e01ad751d986842583313559'
-KIT_SHA = '4b5c67d4d4b8baf6c9f044ea1e53d7226450adb09fd41862fd55672eea574b43'
+INSTALLER_SHA = '79e154fe357405820cd50f822feaaf5fb4e3b7928e7290eeb58925fcf81ea621'
+KIT_SHA = '74d5570aa11f6b6fa42c214e5c3b1cc2646fe0701bb855b74394a6acb8bf5145'
 
 TOOL = r'''
 import hashlib, json, os, pathlib, shutil, signal, sys, tempfile
@@ -67,7 +67,7 @@ elif name == 'curl':
     assert '--proto' in args and args[args.index('--proto')+1] == '=https'
     assert args[args.index('--proto-redir')+1] == '=https'
     assert '--tlsv1.2' in args and '--fail' in args
-    assert 'https://github.com/ForceMind/V-UI/releases/download/v0.4.12/install.sh' in args
+    assert 'https://github.com/ForceMind/V-UI/releases/download/v0.4.13/install.sh' in args
     destination=owned(args[args.index('-o')+1])
     destination.write_bytes((root/'release-install.sh').read_bytes())
     if config.get('tamper'):destination.write_bytes(b'exit 0\n')
@@ -243,7 +243,7 @@ class SetupShellTests(unittest.TestCase):
                 args=self.logs('installer')[-1]['args']
                 self.assertEqual('--upgrade' in args,upgrade)
                 self.assertIn('--interactive',args)
-                self.assertNotIn('Panel domain',output)
+                self.assertNotIn('面板域名',output)
                 self.assert_clean()
 
     def test_missing_local_entry_never_downloads_without_online_choice(self):
@@ -268,7 +268,7 @@ class SetupShellTests(unittest.TestCase):
              'HTTPS_PROXY':'untrusted','BASH_ENV':str(self.root/'nonexistent-startup')}
         return subprocess.run(command,input=stdin,text=True,capture_output=True,env=env,timeout=15)
 
-    def run_setup_pty(self, answers, *args, nonroot=False, prompt="Panel domain: "):
+    def run_setup_pty(self, answers, *args, nonroot=False, prompt="面板域名（例如 panel.example.com）: "):
         """A real controlling terminal, with a separate stdin password pipe."""
         (self.root/'config.json').write_text(json.dumps(self.config))
         if nonroot:
@@ -325,8 +325,8 @@ class SetupShellTests(unittest.TestCase):
         self.assertEqual(list((self.root/'temporary').iterdir()),[])
 
     def test_production_fixed_trust_and_environment(self):
-        self.assertIn('local version=v0.4.12 ',self.source)
-        self.assertIn('[[ "$version" == v0.4.12 ]]',self.source)
+        self.assertIn('local version=v0.4.13 ',self.source)
+        self.assertIn('[[ "$version" == v0.4.13 ]]',self.source)
         self.assertIn('local installer_sha='+INSTALLER_SHA,self.source)
         self.assertIn('local kit_sha='+KIT_SHA,self.source)
         self.assertIn('mktemp -d /root/vui-bootstrap.XXXXXXXX',self.source)
@@ -340,13 +340,13 @@ class SetupShellTests(unittest.TestCase):
         self.assertEqual(result.returncode,0,result.stderr)
 
     def test_root_flow_preserves_options_stdin_and_clean_environment(self):
-        values=['--version','v0.4.12','--domain','panel.example.test',
+        values=['--version','v0.4.13','--domain','panel.example.test',
                 '--cert','/path with spaces/$(touch never); cert.pem','--node-udp-port','18000',
                 '--node-udp-port=18001','--accept-terms','--upgrade']
         result=self.run_setup(*values)
         self.assertEqual(result.returncode,0,result.stderr)
         installer=self.logs('installer')[0]
-        self.assertEqual(installer['args'],['--version','v0.4.12','--with-global-cli',
+        self.assertEqual(installer['args'],['--version','v0.4.13','--with-global-cli',
                                          '--kit-sha256',KIT_SHA,'--interactive',*values[2:]])
         self.assertEqual(installer['stdin'],'fixture-password')
         self.assertNotIn('fixture-password',installer['args'])
@@ -361,13 +361,13 @@ class SetupShellTests(unittest.TestCase):
         result=self.run_setup('--port','12345',process_substitution=True)
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(len(self.logs('sudo')),1)
-        self.assertEqual(self.logs('installer')[0]['args'][:2],['--version','v0.4.12'])
+        self.assertEqual(self.logs('installer')[0]['args'][:2],['--version','v0.4.13'])
         self.assertEqual(self.logs('installer')[0]['args'][-2:],['--port','12345'])
         self.assert_clean()
 
     def test_rejects_untrusted_versions_and_managed_or_unknown_options(self):
-        cases=[['--version','v0.4.13'],['--version','v0.4.10'],['--version','v0.4.9'],['--version=v0.4.8'],['--version'],
-               ['--version','v0.4.12','--version','v0.4.12'],['--interactive'],
+        cases=[['--version','v0.4.14'],['--version','v0.4.10'],['--version','v0.4.9'],['--version=v0.4.8'],['--version'],
+               ['--version','v0.4.13','--version','v0.4.13'],['--interactive'],
                ['--with-global-cli'],['--kit-sha256','0'*64],['--kit-sha256='+'0'*64],
                ['--bundle','/untrusted.zip'],['--sha256','0'*64],['--dry-run'],
                ['--password','secret'],['--port'],['--domain','--upgrade'],['--unknown']]
@@ -381,7 +381,7 @@ class SetupShellTests(unittest.TestCase):
     def test_help_and_os_refusal_never_download_or_elevate(self):
         result=self.run_setup('--help')
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn('v0.4.12',result.stdout)
+        self.assertIn('v0.4.13',result.stdout)
         self.assertIn('用法：bash setup.sh',result.stdout)
         self.assertIn('域名每行最多 4096 个 UTF-8 字节',result.stdout)
         self.assertEqual([line['tool'] for line in self.logs()],['cat'])
@@ -453,7 +453,7 @@ class SetupShellTests(unittest.TestCase):
         self.assertEqual(status,0)
         self.assertEqual(output,'xn--bcher-kva.example\n')
         self.assertEqual(terminal.output.decode().count('域名无效'),1)
-        self.assertEqual(terminal.output.decode().count('Panel domain: '),2)
+        self.assertEqual(terminal.output.decode().count('面板域名（例如 panel.example.com）: '),2)
         self.assertEqual(len(terminal.sizes),3)
         self.assertEqual(terminal.input.read(),b'')
 
@@ -514,7 +514,7 @@ class SetupShellTests(unittest.TestCase):
                 self.assertEqual(result.returncode,0,result.stderr)
                 received=self.logs('installer')[-1]['args']
                 self.assertEqual(received[received.index('--domain')+1],expected)
-                self.assertNotIn('Panel domain: ',result.stderr)
+                self.assertNotIn('面板域名（例如 panel.example.com）: ',result.stderr)
                 self.assert_clean()
 
     def test_invalid_explicit_domain_without_tty_fails_before_download(self):
