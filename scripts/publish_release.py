@@ -51,6 +51,20 @@ CA_TRUST_FILES = {
     'tests/test_release_promotion.py', 'tests/test_setup_shell.py',
     'tests/test_short_install_contract.py',
 }
+INSTALL_INTERACTION_BASELINE = '4fc66de1dbb9d9b9a9edec6845609fd32e99e9cc'
+INSTALL_INTERACTION_VERSION = '0.4.13'
+INSTALL_INTERACTION_FILES = {
+    'VERSION', 'main.py', 'install.sh', 'setup.sh', 'app/admin.py',
+    'scripts/install_system.py', 'scripts/firewall_support.py', 'scripts/deploy.py',
+    'scripts/publish_release.py', '.github/workflows/publish.yml',
+    '.github/workflows/short-install.yml',
+    'README.md', 'CHANGELOG.md', 'AGENTS.md',
+    'tests/test_installer.py', 'tests/test_installer_interactions.py',
+    'tests/test_firewall_support.py', 'tests/test_admin_bootstrap.py',
+    'tests/test_oneclick_system.py', 'tests/online_install_helpers.py',
+    'tests/test_oneclick_readiness.py', 'tests/test_release_promotion.py',
+    'tests/test_setup_shell.py', 'tests/test_short_install_contract.py',
+}
 BROWSER_SKIP_STEPS = {
     name: steps | {'Install explicit test browser'} for name, steps in REQUIRED_ACCEPTANCE_STEPS.items()
 }
@@ -221,7 +235,52 @@ def validate_ca_trust_scope(commit, version):
         raise ReleaseGateError('Cannot prove CA trust source ancestry/scope') from exc
 
 
-def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_trust_no_browser=False):
+def validate_install_interaction_scope(commit, version):
+    """Version-bound automatic credentials and firewall UX patch only."""
+    if version != INSTALL_INTERACTION_VERSION:
+        raise ReleaseGateError('Non-browser install interaction exception is only approved for 0.4.13')
+    try:
+        subprocess.run(['git','merge-base','--is-ancestor',INSTALL_INTERACTION_BASELINE,commit],check=True,
+                       stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        changes=subprocess.check_output(['git','diff','--name-status',INSTALL_INTERACTION_BASELINE,commit],text=True)
+        for line in changes.splitlines():
+            fields=line.split('\t')
+            if len(fields)!=2 or fields[0] not in ('A','M'):
+                raise ReleaseGateError('Install interaction scope refuses deletion, rename or type change')
+            name=fields[1]
+            if name not in INSTALL_INTERACTION_FILES and not (name.startswith('docs/') and name.endswith('.md')):
+                raise ReleaseGateError('Changes exceed the approved install interaction patch: '+name)
+            mode=subprocess.check_output(['git','ls-tree',commit,'--',name],text=True).split()[0]
+            if mode not in ('100644','100755'):
+                raise ReleaseGateError('Install interaction exception requires regular source files')
+        previous=subprocess.check_output(['git','show',INSTALL_INTERACTION_BASELINE+':main.py'])
+        current=subprocess.check_output(['git','show',commit+':main.py'])
+        if previous.count(b"version='0.4.12'")!=1 or current!=previous.replace(b"version='0.4.12'",b"version='0.4.13'",1):
+            raise ReleaseGateError('Application changes exceed the install interaction version bump')
+        if subprocess.check_output(['git','show',commit+':VERSION']).strip()!=b'0.4.13':
+            raise ReleaseGateError('Install interaction version identity differs')
+        old=subprocess.check_output(['git','show',INSTALL_INTERACTION_BASELINE+':install.sh'])
+        new=subprocess.check_output(['git','show',commit+':install.sh'])
+        if old.count(b'--version v0.4.12')!=1 or new!=old.replace(b'--version v0.4.12',b'--version v0.4.13',1):
+            raise ReleaseGateError('Shell installer changes exceed the version documentation')
+        old=subprocess.check_output(['git','show',INSTALL_INTERACTION_BASELINE+':scripts/build_bundle.py'])
+        if subprocess.check_output(['git','show',commit+':scripts/build_bundle.py'])!=old:
+            raise ReleaseGateError('Install interaction patch must not change builder/dependencies/core selection')
+        old=subprocess.check_output(['git','show',INSTALL_INTERACTION_BASELINE+':scripts/deploy.py'])
+        new=subprocess.check_output(['git','show',commit+':scripts/deploy.py'])
+        replacements=(('Activated verified release; start explicitly after checking configuration',
+                       '已激活通过校验的版本；核对配置后再启动'), ('Backup SHA-256: ', '备份 SHA-256：'))
+        for previous, current in replacements:
+            if old.count(previous.encode())!=1:
+                raise ReleaseGateError('Controller message baseline differs')
+            old=old.replace(previous.encode(),current.encode(),1)
+        if new!=old:
+            raise ReleaseGateError('Controller changes exceed the two translated messages')
+    except subprocess.CalledProcessError as exc:
+        raise ReleaseGateError('Cannot prove install interaction source ancestry/scope') from exc
+
+
+def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_trust_no_browser=False, install_interaction_no_browser=False):
     """A green workflow with skipped acceptance is not release qualification."""
     for path, run in sorted(checks.items()):
         attempt = run.get('run_attempt')
@@ -249,7 +308,7 @@ def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_tru
             def accepted(step):
                 return (step.get('status') == 'completed' and
                         (step.get('conclusion') == 'success' or
-                         ((installer_only_no_browser or ca_trust_no_browser) and step.get('conclusion') == 'skipped'
+                         ((installer_only_no_browser or ca_trust_no_browser or install_interaction_no_browser) and step.get('conclusion') == 'skipped'
                           and step.get('name') in BROWSER_SKIP_STEPS.get(path,set()))))
             if not steps or not all(accepted(step) for step in steps):
                 raise ReleaseGateError('Workflow has unverified, skipped or failed steps: '+path)
@@ -370,6 +429,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--commit',required=True);p.add_argument('--version',required=True)
     p.add_argument('--confirm',required=True);p.add_argument('--publish',action='store_true')
+    p.add_argument('--install-interaction-no-browser',action='store_true',
+                   help='Explicitly approved 0.4.13 credentials/firewall patch; browsers remain unverified')
     p.add_argument('--ca-trust-no-browser',action='store_true',
                    help='Explicitly approved 0.4.12 system CA fix; browsers remain unverified')
     p.add_argument('--installer-only-no-browser',action='store_true',
@@ -397,14 +458,17 @@ def main():
         if len(batch)<100:
             break
     checks=select_runs(runs,args.commit)
-    if args.installer_only_no_browser and args.ca_trust_no_browser:
+    if sum((args.installer_only_no_browser, args.ca_trust_no_browser, args.install_interaction_no_browser)) > 1:
         raise ReleaseGateError('Non-browser scope exceptions are mutually exclusive')
+    if args.install_interaction_no_browser:
+        validate_install_interaction_scope(args.commit,args.version)
     if args.ca_trust_no_browser:
         validate_ca_trust_scope(args.commit,args.version)
     if args.installer_only_no_browser:
         validate_installer_only_scope(args.commit,args.version)
     validate_run_jobs(checks,args.commit,installer_only_no_browser=args.installer_only_no_browser,
-                      ca_trust_no_browser=args.ca_trust_no_browser)
+                      ca_trust_no_browser=args.ca_trust_no_browser,
+                      install_interaction_no_browser=args.install_interaction_no_browser)
 
     tag='v'+args.version
     for path in ('git/ref/tags/'+tag,'releases/tags/'+tag):
@@ -441,6 +505,11 @@ def main():
               '只跳过明列浏览器步骤，其余准确提交/attempt/jobs/steps、四目标与实际安装门禁保持。'+\
               '相对 `'+CA_TRUST_BASELINE+'` 仅允许证书材料系统根加载、固定错误分类及对应测试/版本/发布说明；'+\
               '前端、其他应用逻辑、运行依赖、builder和固定核心变更均拒绝，此例外仅适用0.4.12。\n'
+    if args.install_interaction_no_browser:
+        body+='\n\n验收范围：用户明确批准本次0.4.13账号自动初始化与防火墙交互修复采用非浏览器验收。浏览器未验证；'+\
+              '只跳过明列浏览器步骤，其余准确提交/attempt/jobs/steps、四目标与真实安装门禁保持。'+\
+              '相对 `'+INSTALL_INTERACTION_BASELINE+'` 仅允许安装器、只读防火墙检查、本地管理员初始化及对应测试/版本/文档；'+\
+              '前端、Web认证API、运行依赖、builder、固定核心和证书验证逻辑变更均拒绝，此例外仅适用0.4.13。\n'
     body+='\n\n## 一行交互安装并注册 v-ui\n\n```sh\n'+installation_command(files,args.version)+'\n```\n'
     body+='\n安装成功后输入 `v-ui`。普通管理员按已有 sudo 策略认证；不增加免密 sudoers。\n'
     release=request('releases','POST',{'tag_name':tag,'target_commitish':args.commit,'name':'V-UI '+tag,
