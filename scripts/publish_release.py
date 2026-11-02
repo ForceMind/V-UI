@@ -60,6 +60,7 @@ INSTALL_INTERACTION_FILES = {
     '.github/workflows/short-install.yml',
     'README.md', 'CHANGELOG.md', 'AGENTS.md',
     'tests/test_installer.py', 'tests/test_installer_interactions.py',
+    'tests/test_installer_localization.py', 'tests/test_existing_install.py',
     'tests/test_firewall_support.py', 'tests/test_admin_bootstrap.py',
     'tests/test_oneclick_system.py', 'tests/online_install_helpers.py',
     'tests/test_oneclick_readiness.py', 'tests/test_release_promotion.py',

@@ -41,11 +41,13 @@ class InstallerTests(unittest.TestCase):
                        accept_terms=False,interactive=True)
         terminal=unittest.mock.MagicMock()
         terminal.__enter__.return_value=terminal
-        terminal.readline.side_effect=['panel.example.test\n','admin@example.test\n','owner\n','9443\n','11443\n','yes\n']
+        terminal.readline.side_effect=['panel.example.test\n','admin@example.test\n','9443\n','11443\n','yes\n']
         with patch.object(installer,'controlling_terminal',return_value=terminal) as opened:
             installer.read_configuration(args)
         opened.assert_called_once_with()
-        self.assertEqual((args.admin,args.port,args.node_port),('owner',9443,11443))
+        self.assertRegex(args.admin,r'^vui_[0-9a-f]{12}$')
+        self.assertEqual((args.port,args.node_port),(9443,11443))
+        self.assertNotIn('管理员用户名', ''.join(str(call) for call in terminal.write.call_args_list))
         self.assertTrue(args.accept_terms)
         installer.validate_options(args)
         explicit=self.args(interactive=False)
@@ -54,8 +56,8 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(explicit.admin,'admin')
 
     def test_interactive_eof_invalid_port_and_unapproved_terms_do_not_install(self):
-        for values in ([''],['panel.example.test\n','admin@example.test\n','\n','443\n'],
-                       ['panel.example.test\n','admin@example.test\n','\n','$(id)\n']):
+        for values in ([''],['panel.example.test\n','admin@example.test\n','443\n'],
+                       ['panel.example.test\n','admin@example.test\n','$(id)\n']):
             terminal=unittest.mock.MagicMock()
             terminal.__enter__.return_value=terminal
             terminal.readline.side_effect=values
@@ -65,12 +67,13 @@ class InstallerTests(unittest.TestCase):
                 installer.read_configuration(args)
         terminal=unittest.mock.MagicMock()
         terminal.__enter__.return_value=terminal
-        terminal.readline.side_effect=['panel.example.test\n','admin@example.test\n','\n','\n','\n','no\n']
+        terminal.readline.side_effect=['panel.example.test\n','admin@example.test\n','\n','\n','no\n']
         args=self.args(domain=None,email=None,admin=None,port=None,node_port=None,
                        accept_terms=False,interactive=True)
         with patch.object(installer,'controlling_terminal',return_value=terminal):
             installer.read_configuration(args)
-        self.assertEqual((args.admin,args.port,args.node_port),('admin',8443,10443))
+        self.assertRegex(args.admin,r'^vui_[0-9a-f]{12}$')
+        self.assertEqual((args.port,args.node_port),(8443,10443))
         with self.assertRaises(installer.InstallError):installer.validate_options(args)
 
     def test_configuration_and_confirmation_use_real_nonseekable_pty_io(self):
@@ -79,7 +82,7 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual((path,mode,buffering),('/dev/tty','rb+',0))
             return os.fdopen(os.dup(slave),'rb+',buffering=0)
         try:
-            os.write(master,b'panel.example.test\nadmin@example.test\nowner\n9443\n11443\nyes\n')
+            os.write(master,b'panel.example.test\nadmin@example.test\n9443\n11443\nyes\n')
             args=self.args(domain=None,email=None,admin=None,port=None,node_port=None,
                            accept_terms=False,interactive=True)
             with patch('builtins.open',side_effect=terminal):
@@ -87,7 +90,8 @@ class InstallerTests(unittest.TestCase):
                 installer.read_configuration(args)
                 os.write(master,b'yes\n')
                 self.assertTrue(installer.tty_confirm('Allow this fixture?'))
-            self.assertEqual((args.domain,args.admin,args.port,args.node_port),('panel.example.test','owner',9443,11443))
+            self.assertRegex(args.admin,r'^vui_[0-9a-f]{12}$')
+            self.assertEqual((args.domain,args.port,args.node_port),('panel.example.test',9443,11443))
             self.assertTrue(args.accept_terms)
         finally:
             os.close(master);os.close(slave)

@@ -77,6 +77,40 @@ class ExistingInstallTests(unittest.TestCase):
         self.assertEqual(args.port,3215)
         self.assertEqual(args.admin,'original-admin')
 
+    def test_existing_domain_production_consent_is_reused_interactive_and_explicit_upgrade(self):
+        self.saved['ca_authorizations'] = [{'domain': self.saved['domain'], 'environment': 'production'}]
+        self.save()
+        args, output = self.read('1\n')
+        self.assertTrue(args.accept_terms)
+        self.assertNotIn('CA 条款', output)
+        args = self.args(upgrade=True, interactive=False)
+        with patch.object(installer, 'controlling_terminal', side_effect=AssertionError('no terminal needed')):
+            installer.read_configuration(args)
+        self.assertTrue(args.accept_terms)
+        installer.validate_options(args)
+
+    def test_changing_domain_needs_its_own_ca_consent_and_cancel_has_no_writes(self):
+        self.saved['ca_authorizations'] = [{'domain': self.saved['domain'], 'environment': 'production'}]
+        self.save()
+        before = self.config.read_bytes()
+        args, output = self.read('2\nnew.example.test\n\n\n\n\ny\nn\n')
+        self.assertEqual(args.domain, 'new.example.test')
+        self.assertFalse(args.accept_terms)
+        self.assertIn('CA 条款', output)
+        with self.assertRaises(installer.InstallError): installer.validate_options(args)
+        self.assertEqual(self.config.read_bytes(), before)
+
+    def test_malformed_or_wrong_environment_ca_records_are_not_trusted(self):
+        for records in (None, 'yes', [{'domain': self.saved['domain'], 'environment': 'staging'}],
+                        [{'domain': 'NEW.Example.Test.', 'environment': 'production'}],
+                        [{'domain': self.saved['domain'], 'environment': 'production', 'extra': True}]):
+            self.saved['ca_authorizations'] = records
+            self.save()
+            before = self.config.read_bytes()
+            with self.subTest(records=records), self.assertRaises(installer.InstallError):
+                installer.saved_configuration()
+            self.assertEqual(self.config.read_bytes(), before)
+
     def test_edit_prefills_and_validates_before_confirmation_and_ca_consent(self):
         args, output = self.read('2\nhttps://bad.test\nNEW.Example.Test.\ninvalid\nnew@example.test\n80\n3220\nnot-an-ip\n127.0.0.1\n8001\ny\ny\n')
         self.assertTrue(args._reconfigure)
