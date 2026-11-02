@@ -75,6 +75,8 @@ python -m app.certificates.cli bootstrap --root /var/lib/v-ui \
 
 | 提示 | 处理 |
 | --- | --- |
+| CERTIFICATE_CA_STORE_UNAVAILABLE | 系统CA仓库缺失、不可读、空或无效；v0.4.12支持Linux系统bundle和hash目录，不关闭TLS验证 |
+| CERTIFICATE_CHAIN_VERIFICATION_FAILED | 证书链无法连接到选定可信根；核对链和根仓库，不将leaf或返回chain自动当根 |
 | ACME_VALIDATION_FAILED | 检查域名A/AAAA、CAA、80端口、socket服务和本机Certbot日志 |
 | STAGING_CANNOT_BE_DEPLOYED | 正常保护；需要正式签发，不要关闭客户端证书校验 |
 | PANEL_DOMAIN_MISMATCH | 必须与面板固定公开来源的域名一致 |
