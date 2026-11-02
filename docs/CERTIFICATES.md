@@ -90,7 +90,7 @@ python -m app.certificates.cli bootstrap --root /var/lib/v-ui \
 
 固定Pebble 2.10.1的真实ACME测试使用实际HTTP-01取文件，不启用“always valid”。实际测试签发、再次签发、验证失败、CA链/私钥隔离；独立TLS socket测试验证热更新与错误材料拒绝。图形界面由Chromium使用同一真实ACME流程验证。
 
-测试的临时CA仅传给测试子进程/构造器，不修改系统信任，不关闭TLS校验，不提供可由管理API指定任意CA URL的参数。测试通过证明实现路径，不等于已经替你的公网域名完成验证。
+原ACME/Pebble和REALITY测试的临时CA仅传给测试子进程/构造器，不修改系统信任。v0.4.12另有默认关闭、仅空白GitHub hosted runner运行的实际portable系统CA回归：临时向CI系统bundle加入隔离假根，完整恢复原bytes/mode/uid/gid/hash并回读；它不在用户VPS运行。所有路径保留TLS校验，也不提供管理API任意CA URL。测试通过证明实现路径，不等于已替真实公网域名完成签发。
 
 依据：[Let’s Encrypt 验证方式](https://letsencrypt.org/docs/challenge-types/)；[Certbot 5.8.0 参数](https://eff-certbot.readthedocs.io/en/stable/man/certbot.html)。
 
