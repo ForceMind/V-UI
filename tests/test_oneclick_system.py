@@ -149,7 +149,7 @@ class OneClickSystemTests(unittest.TestCase):
             if child == 0:
                 os.execvp(cmd[0], cmd)
             output = b''; sent_first=False; sent_second=False; status=None
-            domain_prompt = '面板域名（例如 panel.example.com）: ' if new_installer and os.getenv('VUI_SETUP_INSTALL') != '1' else 'Panel domain: '
+            domain_prompt = '面板域名（例如 panel.example.com）: ' if automatic_credentials or (new_installer and os.getenv('VUI_SETUP_INSTALL') != '1') else 'Panel domain: '
             email_prompt = '联系邮箱: ' if new_installer else 'Contact email: '
             choices = [(domain_prompt,domain),(email_prompt,'admin@example.test'),
                        *([] if automatic_credentials else [('管理员用户名 [admin]: ',admin_username)]),('面板 HTTPS 端口 [8443]: ',str(port)),

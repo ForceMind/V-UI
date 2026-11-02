@@ -4,7 +4,7 @@
 
 2026-11-03 用户批准本批开发、独立审查、正常 dev→main 合并、公开发布 v0.4.13 和短入口切换。所有构建与实际安装验收在 GitHub Actions，不做浏览器测试。固定基线 main `4fc66de1dbb9d9b9a9edec6845609fd32e99e9cc`；版本分支 release/v0.4.13 从 dev 创建并快进该基线。原工作目录和既有未跟踪文件保留。
 
-当前处于实现阶段，未赋予候选或新发布资格；公网短入口仍消费公开 v0.4.12。每阶段准确提交、CI、独审、已知失败和发布状态在本记录及承载 PR 更新；临时详细机器状态保存在 /private/tmp/vui-installer-0413/state.json。
+以下开发阶段记录按当时事实保留；v0.4.13现已公开，发布后短入口切换处于独审/准确资格阶段。每阶段准确提交、CI、独审、已知失败和发布状态在本记录及承载 PR 更新；临时详细机器状态保存在 /private/tmp/vui-installer-0413/state.json。
 
 ## 用户可观察行为
 
@@ -45,3 +45,15 @@ Actions 使用隔离假凭据、临时 CA、空白临时 Linux，验证实际安
 候选47d0f936的真实安装run41489842983/job125429666857在199.947秒通过：缺省随机账号和强密码、真实登录→改名改密→旧凭据拒绝→新登录、已装portable系统CA、升级/ready:false/变更/TLS失败恢复与会话/代理数据保持均实际断言。该结果仅属于该候选，后续准确提交仍须独立验收。
 
 同候选普通测试run41489843145/job125429667693首次2434项、284.212秒，9个failure/4个error、230环境skip；全部13个subtest失败来自三组旧防火墙用例仍要求原有交互确认。漏同步已修：tests/test_hysteria2_installation.py、test_tuic_installation.py、test_linux_installation_regressions.py六个方法更新为默认不问不改、未知仅提示、显式safe后端授权才写并回读；精确TCP/UDP和无修改断言保留。六方法纯合成通过；首次命令中两条类名拼错未加载，纠正后两条通过。新发布例外仅增加这三个直接相关测试文件，其他范围不扩大。原失败日志SHA256=839c27fe706b67b70c940dc93a133fa9b88da1600b6c5b24302524e67447857e。未合并/发布该失败候选。
+
+## 正式发布与短入口切换
+
+独审候选 `2bffda725cea19445f951588a10b772c056e5710`、正常dev `e700c7bbfe47046a7473d01e1e28c986a6cd81b4` 及正式main `89e5c8912ff685b27006a4e91c487dbdfffd0e74` 的tree均为98e3068f11670ef14ab033ff92c93f966ace659d。候选/main各九组12jobs首次通过，dev push+PR共18组24jobs首次通过；只跳过明列浏览器步骤（各12/24项），其他全部步骤成功。候选、dev push/PR、main的每套四目标均回读artifact来源/大小/真实digest及上传日志一致，未在本机下载Linux包。
+
+准确main普通2434项=2204通过+230环境skip，284.042秒；固定真实core/parser各1项通过。main真实安装run41496035094/job125451111301为190.503秒，自动账号实际登录/改名改密/旧拒绝/新登录及升级、ready:false、失败恢复、会话和代理数据保持均通过。[正式发布run41497937666](https://github.com/ForceMind/V-UI/actions/runs/41497937666)首次成功，[v0.4.13](https://github.com/ForceMind/V-UI/releases/tag/v0.4.13)于2026-11-02 18:11:05 UTC公开，19项资产，tag和target均为上述准确main。只晋升已验附件，不重建。
+
+匿名读取公开install.sh与整个SHA256SUMS并逐字节对照源和API digest；按18项资产真实digest重建checksum清单完全一致。install.sh SHA256=`79e154fe357405820cd50f822feaaf5fb4e3b7928e7290eeb58925fcf81ea621`；整个SHA256SUMS SHA256=`74d5570aa11f6b6fa42c214e5c3b1cc2646fe0701bb855b74394a6acb8bf5145`。旧v0.4.12标签、Release正文及19项资产身份/大小/digest保持；下载计数变化不属于覆盖。
+
+公开后才把setup默认版本/真实摘要、short-install.yml冻结应用源和契约测试切到上述M，并把短入口域名提示统一中文，更新实际PTY驱动与无网络合成反例。冻结应用、安装器、依赖及核心不改，公开tag/资产不覆盖。此后bootstrap候选/dev/main及实际main短命令仍需自己的准确资格，最终提交和结果在承载PR记录，避免仅补最终SHA造成无穷文档验收循环。浏览器未验证；真实公网CA签发和用户VPS未操作。
+
+公开套件匿名真实安装run41498346772/job125459103613首次成功（空白Actions、冻结M、真实下载公开资产、自动凭据/API及数据保持；详见承载PR）。后续bootstrap本地20项fake-tool非TTY合成通过，文档/版本/壳语法及差异检查通过。完整setup27项报告12个failure，所见为sandbox禁止/dev/tty导致输入未送达；未放宽测试，完整PTY留Linux Actions。shortcontract尝试的8项均在模块加载时缺少yaml，未安装本机依赖或将其当作通过；完整契约与crypto仍由Actions执行。
