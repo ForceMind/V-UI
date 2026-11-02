@@ -2,9 +2,11 @@
 from contextlib import ExitStack
 import os
 from pathlib import Path
+import ssl
 import tempfile
 import unittest
 from unittest.mock import patch
+from OpenSSL.crypto import X509
 from cryptography import x509
 from app.certificates.manager import CertificateManager
 from app.certificates.models import Certificate
@@ -51,6 +53,38 @@ class RealACMETests(unittest.TestCase):
             'Managed data must remain compatible with no-symlink backups')
         self.assertIn('valid',self.pebble.log_path.read_text().lower())
         print('Real ACME: Certbot CSR, actual HTTP-01 fetch, trusted chain and repeat issuance passed')
+
+    def test_real_production_issue_uses_isolated_default_capath_without_explicit_roots(self):
+        def capath(name, pem):
+            directory=self.root/name;directory.mkdir()
+            certificate=x509.load_pem_x509_certificate(pem)
+            identity=f'{X509.from_cryptography(certificate).subject_name_hash():08x}'
+            self.assertRegex(identity,r'\A[0-9a-f]{8}\Z')
+            (directory/(identity+'.0')).write_bytes(pem)
+            return directory
+        roots=capath('issuance-capath',self.pebble.root_pem)
+        # The HTTPS fake CA is distinct from Pebble's issuance root. It is
+        # deliberately wrong for issued material, while provider.test_ca still
+        # authenticates the ACME HTTPS endpoint only through Requests.
+        wrong=capath('unrelated-capath',self.pebble.ca.read_bytes())
+        self.manager=CertificateManager(self.root/'managed',
+            CertbotProvider(self.root/'managed',test_directory=self.pebble.directory,test_ca=self.pebble.ca))
+        self.assertIsNone(self.manager.trusted_roots)
+        with patch.dict(os.environ,{'SSL_CERT_FILE':'','SSL_CERT_DIR':str(roots)}):
+            self.assertEqual(ssl.create_default_context().get_ca_certs(binary_form=True),[])
+            job=self.manager.create(self.pebble.domain,'admin@example.test','production',True,True)
+            self.execute(job);identity=job['certificate_id'];original=self.manager.material(identity)
+            with database.SessionLocal() as db:
+                self.assertEqual(db.get(Certificate,identity).environment,'production')
+            with patch.dict(os.environ,{'SSL_CERT_DIR':str(wrong)}):
+                self.assertEqual(ssl.create_default_context().get_ca_certs(binary_form=True),[])
+                with self.assertRaises(CertificateError) as rejected:
+                    self.manager.material(identity)
+                self.assertEqual(rejected.exception.code,'CERTIFICATE_CHAIN_VERIFICATION_FAILED')
+            self.assertEqual(self.manager.material(identity),original)
+            self.assertTrue(original[0][0].is_file())
+        print('Real isolated ACME: production trusted_roots=None; lazy capath enumeration=0; '
+              'Certbot/Pebble HTTP-01 issue/material succeeded; unrelated capath CA rejected')
 
     def test_real_due_renewal_with_fresh_fake_account_always_revalidates(self):
         # Force 100% authorization reuse at the fake CA. A new account must
