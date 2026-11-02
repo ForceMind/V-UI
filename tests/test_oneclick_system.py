@@ -44,12 +44,12 @@ def wait_for_managed_https(probe, diagnostics, *, timeout=20, private_values=())
         try:
             status,_=probe(min(5,remaining))
         except (ConnectionRefusedError,ConnectionResetError,ssl.SSLEOFError,http.client.RemoteDisconnected) as exc:
-            last=type(exc).__name__+': '+str(exc)[:200]
+            last=type(exc).__name__+': '+safe(str(exc))[:200]
             pause=min(.1,max(0,deadline-time.monotonic()))
             if pause:time.sleep(pause)
         except Exception as exc:
             error=AssertionError(safe('Managed HTTPS readiness failed without retry: '+type(exc).__name__+
-                                 ': '+str(exc)[:200]+'\n'+diagnostics()))
+                                 ': '+safe(str(exc))[:200]+'\n'+diagnostics()))
             if private_values:raise error from None
             raise error from exc
         else:
