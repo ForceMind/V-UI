@@ -8,17 +8,17 @@ export PATH
 setup_main() {
   set -euo pipefail
   umask 077
-  local version=v0.4.13 version_seen=0 argument domain=
-  local installer_sha=79e154fe357405820cd50f822feaaf5fb4e3b7928e7290eeb58925fcf81ea621
-  local kit_sha=74d5570aa11f6b6fa42c214e5c3b1cc2646fe0701bb855b74394a6acb8bf5145
+  local version=v0.4.14 version_seen=0 argument domain=
+  local installer_sha=019308de74c19aa4e66234cc32d89ddc446a447f565c7ff3c98fcbf9ffae8886
+  local kit_sha=fc4656d4c07d86cf84be66fb503e67ef697ff5b04da171fd33c622537094ae8a
   local -a installer_args=()
   while [[ "$#" -gt 0 ]]; do
     argument="$1"
     case "$argument" in
       --help|-h)
         cat <<'HELP'
-V-UI v0.4.13 交互安装与全局 v-ui 命令（仅支持 Linux）。
-用法：bash setup.sh [--version v0.4.13] [安装器选项]
+V-UI v0.4.14 交互安装与全局 v-ui 命令（仅支持 Linux）。
+用法：bash setup.sh [--version v0.4.14] [安装器选项]
 
 使用 root 或已有 sudo 授权；不新增免密 sudo 规则。
 支持的安装器选项：--domain、--email、--admin、--port、--bind、
@@ -31,7 +31,7 @@ V-UI v0.4.13 交互安装与全局 v-ui 命令（仅支持 Linux）。
 本地管理不联网；升级沿用原配置，继续/修复可选择修改；回车退出。
 控制组件损坏仍会安全拒绝，不覆盖不可信文件或删除原数据。
 版本、交互模式、全局命令和可信套件设置不能覆盖。
-此入口仅内置 v0.4.13 的可信摘要。你仍须信任可变的原始 setup.sh URL；
+此入口仅内置 v0.4.14 的可信摘要。你仍须信任可变的原始 setup.sh URL；
 下载的发布资产会按固定摘要校验。
 HELP
         return 0 ;;
@@ -57,7 +57,7 @@ HELP
         return 2 ;;
     esac
   done
-  [[ "$version" == v0.4.13 ]] || { printf '版本 %s 没有内置的可信发布摘要\n' "$version" >&2; return 2; }
+  [[ "$version" == v0.4.14 ]] || { printf '版本 %s 没有内置的可信发布摘要\n' "$version" >&2; return 2; }
   [[ "$(uname -s)" == Linux ]] || { printf '%s\n' 'V-UI 安装入口仅支持 Linux。' >&2; return 1; }
   # Re-enter the already loaded function as a command string, never through the
   # original file descriptor: sudo commonly closes process-substitution /dev/fd.
