@@ -113,7 +113,13 @@ class OneClickSystemTests(unittest.TestCase):
                 # must not request firewall or cloud confirmations.
                 configured_args.append('--assume-external-ports-open')
             online = None
-            if published_version:
+            published_upgrade = None
+            if os.getenv('VUI_PUBLISHED_UPGRADE_SOURCE'):
+                self.assertIsNone(gate, 'Public old-to-new upgrade requires its own empty hosted runner')
+                from published_upgrade_helpers import PublishedUpgrade
+                published_upgrade = PublishedUpgrade(self,source,work,certificate_args,configured_args)
+                online = published_upgrade.old
+            elif published_version:
                 self.assertIsNone(gate, 'Published online acceptance is separate from the resource fixture')
                 if os.getenv('VUI_SETUP_INSTALL') == '1':
                     online = setup_commands(source,published_version,os.environ['VUI_RELEASE_COMMIT'],
@@ -133,6 +139,8 @@ class OneClickSystemTests(unittest.TestCase):
                     *configured_args,*certificate_args])
             repeat_cmd = online['repeat'] if online else cmd
             upgrade_cmd = online['upgrade'] if online else [*cmd,'--upgrade']
+            if published_upgrade:
+                upgrade_cmd = published_upgrade.new['upgrade']
             sudoers_before = sudo_policy_snapshot() if online else None
             if online:
                 self.assertNotIn('/etc/sudoers.d/v-ui',sudoers_before)
@@ -493,12 +501,14 @@ class OneClickSystemTests(unittest.TestCase):
             self.assertIsNone(saved_proxy['active'])
             self.assertTrue(saved_proxy['settings']['local_password_set'])
             self.assertNotIn(b'Fake-upgrade-password!', raw)
+            if published_upgrade:
+                published_upgrade.before(release,api,private_values)
             # Rerunning with --upgrade checks/stages and makes a stopped backup.
             upgraded=(configured_setup_with_tty(upgrade_cmd,bootstrap_action='2',private_values=private_values) if os.getenv('VUI_SETUP_INSTALL') == '1' else
                       subprocess.run(upgrade_cmd,capture_output=True,text=True,timeout=300 if published_version else 120))
             if gate:
                 gate.installer_receipt('same_bundle_upgrade', upgraded.stdout)
-            self.assertEqual(upgraded.returncode,0,(upgraded.stdout+upgraded.stderr)[-15000:])
+            self.assertEqual(upgraded.returncode,0,safe_output(upgraded.stdout+upgraded.stderr)[-15000:])
             if online:
                 global_menu_check(self,{**os.environ,'PYTHONDONTWRITEBYTECODE':'1'},exercise_start_stop=False)
             self.assertEqual(api('/api/auth/me')[0],200)
@@ -553,6 +563,16 @@ class OneClickSystemTests(unittest.TestCase):
             else:self.fail('Managed panel failed restart')
             check_uid('v-ui.service')
             self.assertTrue(json.loads(api('/api/certificates/capabilities')[1])['worker_running'])
+            if published_upgrade:
+                # A surviving cookie is separate from fresh password validation.
+                published_upgrade.after(api)
+                cookie=''
+                wait_for_managed_https(lambda budget:api('/api/certificates',timeout=budget,readiness=True),
+                                       readiness_diagnostics,private_values=private_values)
+                published_upgrade.public_subscription(api)
+                self.assertEqual(api('/api/auth/login',{'username':admin_username,'password':password})[0],200)
+                self.assertEqual(api('/api/auth/me')[0],200)
+                global_menu_check(self,{**os.environ,'PYTHONDONTWRITEBYTECODE':'1'},exercise_start_stop=True)
             if gate:
                 def login_again():
                     self.assertEqual(api('/api/auth/login', {'username': admin_username, 'password': password})[0], 200)

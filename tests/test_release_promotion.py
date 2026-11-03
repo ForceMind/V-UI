@@ -29,6 +29,11 @@ from scripts.publish_release import (
     INSTALLER_ONLY_BASELINE,
     validate_ca_trust_scope,
     CA_TRUST_BASELINE,
+    UI_REDESIGN_BASELINE,
+    UI_REDESIGN_FILES,
+    UI_REDESIGN_UPGRADE_STEP,
+    BROWSER_SKIP_STEPS,
+    validate_ui_redesign_scope,
     STARTUP_BASELINE,
     validate_startup_scope,
     validate_install_interaction_scope,
@@ -278,6 +283,114 @@ class StartupReadinessReleaseTests(unittest.TestCase):
             bad={**job,'steps':job['steps']+[{'name':'Run tests','status':'completed','conclusion':conclusion}]}
             with self.subTest(conclusion=conclusion),patch('scripts.publish_release.request',return_value={'jobs':[bad]}),self.assertRaises(ReleaseGateError):
                 validate_run_jobs({'test.yml':run},SHA,startup_no_browser=True)
+
+
+class UIRedesignReleaseTests(unittest.TestCase):
+    def scope(self, changes='M\tVERSION\nM\tmain.py\nM\tinstall.sh\n', mode=None,
+              application_extra=b'', installer_extra=b'', version=b'0.4.15\n', ancestry=True):
+        app=b"app = FastAPI(version='0.4.14')\n"
+        installer=b'# install.sh --version v0.4.14\nactual_installer()\n'
+        def git(args, **kwargs):
+            if args[1:3]==['diff','--name-status']:
+                self.assertIn('--no-renames',args)
+                return changes
+            if args[1]=='ls-tree':
+                file_mode=mode or ('100755' if args[-1]=='install.sh' else '100644')
+                return file_mode+' blob '+'f'*40+'\t'+args[-1]+'\n'
+            if args[1]=='show':
+                return {
+                    UI_REDESIGN_BASELINE+':main.py': app,
+                    SHA+':main.py': app.replace(b'0.4.14',b'0.4.15')+application_extra,
+                    SHA+':VERSION': version,
+                    UI_REDESIGN_BASELINE+':install.sh': installer,
+                    SHA+':install.sh': installer.replace(b'0.4.14',b'0.4.15')+installer_extra,
+                }[args[2]]
+            raise AssertionError(args)
+        failure=None if ancestry else subprocess.CalledProcessError(1,['git','merge-base'])
+        with patch('scripts.publish_release.subprocess.run',side_effect=failure) as ancestor, \
+                patch('scripts.publish_release.subprocess.check_output',side_effect=git):
+            validate_ui_redesign_scope(SHA,'0.4.15')
+            self.assertEqual(ancestor.call_args.args[0],
+                             ['git','merge-base','--is-ancestor',UI_REDESIGN_BASELINE,SHA])
+
+    def test_approved_version_and_exact_release_paths_allowed(self):
+        self.scope(changes=''.join('M\t'+path+'\n' for path in sorted(UI_REDESIGN_FILES)))
+        self.scope(changes='A\ttests/published_upgrade_helpers.py\n')
+
+    def test_exception_rejects_old_future_or_nonstable_versions_before_git(self):
+        for version in ('0.4.14','0.4.16','0.5.0','0.4.15-rc1'):
+            with self.subTest(version=version),patch('scripts.publish_release.subprocess.run') as git, self.assertRaises(ReleaseGateError):
+                validate_ui_redesign_scope(SHA,version)
+            git.assert_not_called()
+
+    def test_missing_approved_ancestor_is_rejected(self):
+        with self.assertRaisesRegex(ReleaseGateError,'ancestry'):self.scope(ancestry=False)
+
+    def test_other_production_and_unlisted_test_or_doc_paths_rejected(self):
+        for path in ('app/api/auth.py','app/admin.py','web/index.html','web/css/style.css',
+                     'requirements-runtime.txt','scripts/build_bundle.py','scripts/install_system.py',
+                     'setup.sh','.github/workflows/short-install.yml','.github/workflows/test.yml',
+                     'tests/unrelated.py','docs/unrelated.md'):
+            with self.subTest(path=path),self.assertRaises(ReleaseGateError):self.scope(changes='M\t'+path+'\n')
+
+    def test_rename_delete_type_change_and_nonregular_or_executable_modes_rejected(self):
+        for change in ('D\tREADME.md\n','R100\tREADME.md\tdocs/README.md\n',
+                       'T\tREADME.md\n','C100\tREADME.md\tdocs/README.md\n'):
+            with self.subTest(change=change),self.assertRaises(ReleaseGateError):self.scope(changes=change)
+        for mode in ('100755','120000','160000','040000'):
+            with self.subTest(mode=mode),self.assertRaises(ReleaseGateError):self.scope(mode=mode)
+
+    def test_installer_executable_bit_cannot_be_removed(self):
+        with self.assertRaises(ReleaseGateError):self.scope(changes='M\tinstall.sh\n',mode='100644')
+
+    def test_application_installer_and_version_cannot_hide_changes(self):
+        for kwargs in ({'application_extra':b'new_logic()\n'}, {'installer_extra':b'new_logic()\n'},
+                       {'version':b'0.4.14\n'}, {'version':b'0.4.15 \n'}):
+            with self.subTest(kwargs=kwargs),self.assertRaises(ReleaseGateError):self.scope(**kwargs)
+
+    def test_only_twelve_explicit_browser_skips_are_accepted(self):
+        self.assertEqual(sum(map(len,BROWSER_SKIP_STEPS.values())),12)
+        for path, names in BROWSER_SKIP_STEPS.items():
+            run={'id':42,'run_attempt':1,'head_sha':SHA,'status':'completed','conclusion':'success'}
+            job={'id':7,'run_id':42,'head_sha':SHA,'status':'completed','conclusion':'success',
+                 'steps':[{'name':name,'status':'completed','conclusion':'skipped'} for name in names]}
+            with self.subTest(path=path),patch('scripts.publish_release.request',side_effect=[{'jobs':[job]},run]):
+                validate_run_jobs({path:run},SHA,ui_redesign_no_browser=True)
+            for invalid in ('missing','failure','cancelled','in_progress'):
+                bad={**job,'steps':[dict(step) for step in job['steps']]}
+                if invalid=='missing':bad['steps'].pop()
+                elif invalid=='in_progress':bad['steps'][0]['status']=invalid
+                else:bad['steps'][0]['conclusion']=invalid
+                with self.subTest(path=path,invalid=invalid),patch('scripts.publish_release.request',return_value={'jobs':[bad]}),self.assertRaises(ReleaseGateError):
+                    validate_run_jobs({path:run},SHA,ui_redesign_no_browser=True)
+
+    def test_ui_exception_rejects_every_other_skipped_step(self):
+        run,job=ExactJobQualificationTests().fixtures()
+        job['steps']=[{'name':name,'status':'completed','conclusion':'skipped'} for name in BROWSER_SKIP_STEPS['test.yml']]
+        job['steps'].append({'name':'Run tests','status':'completed','conclusion':'skipped'})
+        with patch('scripts.publish_release.request',return_value={'jobs':[job]}),self.assertRaises(ReleaseGateError):
+            validate_run_jobs({'test.yml':run},SHA,ui_redesign_no_browser=True)
+
+    def test_real_published_upgrade_step_is_mandatory_and_must_succeed(self):
+        run,job=ExactJobQualificationTests().fixtures()
+        for state in ('success','missing','skipped','failure','cancelled','in_progress'):
+            steps=[{'name':UI_REDESIGN_UPGRADE_STEP,'status':'completed','conclusion':'success'}]
+            if state=='missing':steps=[{'name':'Unrelated test','status':'completed','conclusion':'success'}]
+            elif state=='in_progress':steps[0]['status']=state
+            else:steps[0]['conclusion']=state
+            with self.subTest(state=state),patch('scripts.publish_release.request',side_effect=[{'jobs':[{**job,'steps':steps}]},run]):
+                if state=='success':validate_run_jobs({'oneclick.yml':run},SHA,ui_redesign_no_browser=True)
+                else:
+                    with self.assertRaises(ReleaseGateError):validate_run_jobs({'oneclick.yml':run},SHA,ui_redesign_no_browser=True)
+        # Old release scope does not acquire a retroactive step requirement.
+        with patch('scripts.publish_release.request',side_effect=[{'jobs':[job]},run]):
+            validate_run_jobs({'oneclick.yml':run},SHA,startup_no_browser=True)
+
+    def test_ui_exception_cannot_mix_with_any_previous_exception(self):
+        for name in ('installer_only_no_browser','ca_trust_no_browser','install_interaction_no_browser','startup_no_browser'):
+            with self.subTest(name=name),patch('scripts.publish_release.request') as request,self.assertRaisesRegex(ReleaseGateError,'mutually exclusive'):
+                validate_run_jobs({},SHA,ui_redesign_no_browser=True,**{name:True})
+            request.assert_not_called()
 
 
 class ExactJobQualificationTests(unittest.TestCase):

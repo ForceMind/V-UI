@@ -24,6 +24,11 @@ on:
         required: true
         type: boolean
         default: false
+      ui_redesign_no_browser:
+        description: Approved frozen 0.4.15 UI candidate and bounded release preparation, browsers unverified
+        required: true
+        type: boolean
+        default: false
       startup_no_browser:
         description: Approved 0.4.14 bounded startup and diagnostics, browsers unverified
         required: true
@@ -62,6 +67,7 @@ jobs:
           VERSION: ${{ inputs.version }}
           CONFIRM: ${{ inputs.confirm }}
           PUBLISH: ${{ inputs.publish }}
+          UI_REDESIGN_NO_BROWSER: ${{ inputs.ui_redesign_no_browser }}
           STARTUP_NO_BROWSER: ${{ inputs.startup_no_browser }}
           INSTALL_INTERACTION_NO_BROWSER: ${{ inputs.install_interaction_no_browser }}
           CA_TRUST_NO_BROWSER: ${{ inputs.ca_trust_no_browser }}
@@ -73,5 +79,6 @@ jobs:
           if [[ "$INSTALLER_ONLY_NO_BROWSER" == 'true' ]]; then args+=(--installer-only-no-browser); fi
           if [[ "$CA_TRUST_NO_BROWSER" == 'true' ]]; then args+=(--ca-trust-no-browser); fi
           if [[ "$INSTALL_INTERACTION_NO_BROWSER" == 'true' ]]; then args+=(--install-interaction-no-browser); fi
+          if [[ "$UI_REDESIGN_NO_BROWSER" == 'true' ]]; then args+=(--ui-redesign-no-browser); fi
           if [[ "$STARTUP_NO_BROWSER" == 'true' ]]; then args+=(--startup-no-browser); fi
           python3 scripts/publish_release.py "${args[@]}"
