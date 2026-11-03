@@ -69,3 +69,13 @@
 当前准备中，尚未公开015。公开后核真实installer/完整SHA256SUMS/19资产摘要，才另切setup.sh和short-install冻结源，正常PR经dev→main及准确公网短命令验收。准确提交/失败与最终结果记录于承载PR，避免回写自身SHA的循环提交。
 
 发布首候选d27e306：完整2494项仅1失败/230skip，旧测试假定oneclick只有一个安装入口，新增加的独立升级入口使计数不匹配；已分别严格验证普通/升级两个环境，不放宽版本、语言及browser opt-in。普通交互安装通过；新增真实014→候选步骤在完成安装/升级后，被配置断言阻止：测试只排除了release_id，未考虑bootstrap_python随版本切换、provided初装无CA授权列表而升级规范化为空列表。后续改为精确构造这三项元数据期望，其他原配置逐项相同；在新SHA真实重验前，不把该次失败称为保数据升级通过。
+
+## v0.4.15 已公开与短入口后续
+
+修正候选194c641已独审，九组/12jobs首次通过，2496项完整测试/230skip；公开014→候选真实升级137秒，完整配置迁移期望、root receipt、私有数据hash、自带证书、原token订阅、fresh登录和全局菜单全部回读通过。PR107 Ready后正常合dev38c979e，与候选tree相同；dev push及PR108各九组、共24jobs全部首次通过后，PR108正常合main65b1e75，tree仍相同。main自身九组/12jobs首次通过，只有12明确browser步骤skip，真实升级/四目标与其他非browser步骤均success。
+
+人工发布run41628021831成功，从准确main `65b1e75d90de733408101ec280a92be935731baa` 公开v0.4.15，19资产，旧标签/资产保留。匿名回读tag目标、全部asset digest、install.sh和完整SHA256SUMS真实字节；installer SHA256 `b4492af2274a3fd0088912aeb8395cf4d32cfd8c51ecb000d6c9fedf617d6e61`，完整checksum文件SHA256 `e212b74fba6bfe7c740e959d2a1676c8666d34e128ab19ce08b57e078ead89eb`。不在本机下载Linux包。发布后匿名安装run41628411299已派发，尚未预填通过。
+
+当前引导入口批次仅把setup.sh的版本/两个可信摘要与short-install.yml冻结源切到上述已公开套件，并同步相应测试/说明，不改应用、安装器、VERSION、依赖、核心或已发布资产。此引导批次仍须独审与自己的准确候选/dev/main、实际main原始URL短命令验收；最终结果记录于承载PR，浏览器未验证。已有配置和数据保持，不操作用户VPS。
+
+发布后匿名长命令安装run41628411299已成功，真实公开套件安装/HTTPS鉴权/全局菜单/重复拒绝和升级恢复通过；不属于用户VPS验收。短入口WIP独审核对公开M及19资产/两个真实摘要一致，参数和菜单逻辑无变化；测试中的旧摘要常量已同步。首次本地27项mock尝试受sandbox `/dev/tty` EPERM及未同步常量影响，未改产品或交互断言；常量修复后19项明确非TTY回归、docs/diff通过，真实TTY仍交Actions。短入口准确候选与dev/main结果尚未预填。
