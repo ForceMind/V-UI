@@ -44,7 +44,8 @@
     let exportEpoch = 0, exportController = null;
     const downloadUrls = new Set();
     function invalidateReview() {
-        applyReview=null; $('apply-review').hidden=true; $('review-coverage').replaceChildren();
+        applyReview=null; $('apply-review').hidden=true;
+        globalThis.VUI_NAV?.modal.close('apply-review'); $('review-coverage').replaceChildren();
         $('confirm-apply').disabled=true;
         $('review-disable-warning').hidden=true;
     }
@@ -78,6 +79,7 @@
     function closeImport() {
         clearImport();
         if ($('import-dialog').open) $('import-dialog').close();
+        globalThis.VUI_NAV?.modal.close('upstream-import');
     }
     class ApiError extends Error {
         constructor(message,status,code='',coverage=[]) { super(message); this.status=status; this.code=code; this.coverage=coverage; }
@@ -450,6 +452,7 @@
         result.coverage.forEach(item=>$('review-coverage').append(element('li',coverageLabel(item))));
         if (!result.coverage.length) $('review-coverage').append(element('li','没有启用的设备接入节点。'));
         $('apply-review').hidden=false;
+        globalThis.VUI_NAV?.modal.open('apply-review', () => { invalidateReview(); updateControls(); }, () => !busy);
         notice('同一保存修订的配置预检已返回。请核对影响，再点击独立确认按钮；尚未应用。');
     }));
     $('confirm-apply').addEventListener('click',()=>action(()=>apply(false)));
@@ -465,9 +468,14 @@
     }
     $('open-import').addEventListener('click',()=>{
         invalidateReview(); clearImport(); $('import-format').value='uri'; importNotice(''); $('import-dialog').showModal();
+        globalThis.VUI_NAV?.modal.open('upstream-import', closeImport, canLeaveImport);
     });
+    function canLeaveImport() {
+        return !importSaving && (!$('import-content').value || confirm('放弃本次未保存的上游导入内容？'));
+    }
     function cancelImport() {
-        if (importSaving) notice('本地输入已清空；正在发送的保存可能已到达服务器，请刷新上游列表核对。',true);
+        if (importSaving) { notice('正在保存上游，请等待服务器结果后再关闭；保存结果仍须核对。',true); return; }
+        if (!canLeaveImport()) return;
         importSaving=false; closeImport();
     }
     $('close-import').addEventListener('click',cancelImport);
@@ -642,9 +650,10 @@
         $('proxy-workspace').hidden=true;
         $('inbound-policy-list').replaceChildren();
         $('export-inbound').value=''; $('export-server').value=''; $('export-notice').textContent='';
-        location.replace('/login');
+        globalThis.VUI_NAV ? VUI_NAV.replaceLogin() : location.replace('/login');
     }
     function leave() {
+        globalThis.VUI_NAV?.modal.forget();
         pageActive=false;
         invalidateReview();
         closeImport(); clearCredentials(); clearTimeout(diagnosticTimer); clearTimeout(diagnosticExpiryTimer); diagnosticEpoch++;
@@ -655,7 +664,10 @@
         }
     }
     addEventListener('pagehide',leave);
-    addEventListener('popstate',leave);
+    // Same-document modal Back must not deactivate the business page.
+    if (!globalThis.VUI_NAV) addEventListener('popstate',leave);
+    globalThis.VUI_NAV?.guard(() => !busy && !importSaving &&
+        (!isDirty() || confirm('放弃本次未保存的代理与中转编辑？')));
     addEventListener('pageshow',event=>{ if (event.persisted) { leave(); location.reload(); } });
     action(async()=>{
         closeImport(); clearCredentials();

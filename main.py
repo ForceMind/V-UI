@@ -91,7 +91,7 @@ def get_web_path() -> str:
 @app.get('/login',include_in_schema=False)
 @app.get('/account',include_in_schema=False)
 def account_page():
-    return FileResponse(os.path.join(get_web_path(),'account.html'),headers={'Content-Security-Policy':"default-src 'none'; img-src 'self'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
+    return FileResponse(os.path.join(get_web_path(),'account.html'),headers={'Content-Security-Policy':"default-src 'none'; img-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
 
 @app.get('/certificates',include_in_schema=False)
 def certificates_page():

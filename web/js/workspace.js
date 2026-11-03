@@ -4,6 +4,22 @@
     let savedRevision = '', savedForm = '', editNumber = 0, catalog = null, issued = null, issuedNumber = 0, busy = false;
     let nodeRevision = '', nodeReadNumber = 0;
     let initialized = false, initialAuthExpired = false;
+    let workspaceSection = globalThis.VUI_NAV?.route().id === 'subscriptions' ? 'subscriptions' : 'routing';
+    const sectionScroll = new Map();
+    function selectSection() {
+        const next = globalThis.VUI_NAV?.route().id === 'subscriptions' ? 'subscriptions' : 'routing';
+        if (next !== workspaceSection) {
+            sectionScroll.set(workspaceSection, globalThis.scrollY || 0);
+            hideIssued(); // Never revive an issued token when returning to a section.
+            workspaceSection = next;
+            globalThis.scrollTo?.(0, sectionScroll.get(next) || 0);
+        }
+        document.querySelectorAll('[data-workspace-section]').forEach(section => {
+            section.hidden = section.dataset.workspaceSection !== workspaceSection;
+        });
+    }
+    globalThis.VUI_NAV?.subscribe(selectSection);
+    selectSection();
     const validNodeRevision = value => typeof value === 'string' && value.length === 64 && /^[0-9a-f]{64}$/.test(value);
     const sameSavedRevision = (revision, plan) => typeof revision === 'string' && revision.length === 64 && /^[0-9a-f]{64}$/.test(revision) && plan?.revision === revision;
     const nodeRefreshGuidance = '请点击“刷新节点和订阅”，重新选择节点后创建订阅。';
@@ -18,7 +34,7 @@
     const request = async (url, options = {}) => {
         const response = await fetch(url, {credentials:'same-origin', cache:'no-store', ...options,
             headers:{'X-VUI-Request':'1', ...(options.body ? {'Content-Type':'application/json'} : {}), ...(options.headers || {})}});
-        if (response.status === 401) { initialAuthExpired = true; $('initial-retry').hidden = true; hideIssued(); invalidateNodes(); location.replace('/login'); throw new Error('登录已过期'); }
+        if (response.status === 401) { initialAuthExpired = true; $('initial-retry').hidden = true; hideIssued(); invalidateNodes(); globalThis.VUI_NAV ? VUI_NAV.replaceLogin() : location.replace('/login'); throw new Error('登录已过期'); }
         if (!response.ok) {
             let text = '请求未完成';
             try { const value = await response.json(); text = typeof value.detail === 'string' ? value.detail : '输入格式不正确，未保存'; } catch {}
@@ -244,7 +260,8 @@
         const a = element('a', null, {href:objectUrl, download:'vui-mihomo.yaml'}); document.body.append(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
     }));
-    addEventListener('beforeunload', event => { if (savedRevision && dirty()) { event.preventDefault(); event.returnValue = ''; } });
+    globalThis.VUI_NAV?.guard(() => !busy);
+    addEventListener('beforeunload', event => { if (!initialAuthExpired && savedRevision && dirty()) { event.preventDefault(); event.returnValue = ''; } });
     addEventListener('pagehide', () => { hideIssued(); invalidateNodes(); });
     addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
     function initialize() {

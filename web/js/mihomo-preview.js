@@ -132,7 +132,7 @@
                 active = false;
                 clear();
                 if (dialog.open) dialog.close();
-                location.replace('/login');
+                globalThis.VUI_NAV ? VUI_NAV.replaceLogin() : location.replace('/login');
                 return;
             }
             const result = await response.json();
@@ -162,13 +162,14 @@
         if (!active || dialog.open) return;
         clear();
         dialog.showModal();
+        globalThis.VUI_NAV?.modal.open('yaml-preview', () => { clear(); if (dialog.open) dialog.close(); });
         $('yaml-candidate').focus();
     });
     $('close-yaml-preview').addEventListener('click', () => { clear(); if (dialog.open) dialog.close(); });
     $('clear-yaml-preview').addEventListener('click', clear);
     // Native close events are queued. An old close delivered after reopening
     // must not clear the new dialog session or abort its request.
-    dialog.addEventListener('close', () => { if (!dialog.open) clear(); });
+    dialog.addEventListener('close', () => { if (!dialog.open) { clear(); globalThis.VUI_NAV?.modal.close('yaml-preview'); } });
     dialog.addEventListener('cancel', clear);
     $('yaml-preview-form').addEventListener('submit', submit);
     for (const role of roles) {

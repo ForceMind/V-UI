@@ -182,7 +182,7 @@ def assert_dashboard_responsive_layout(case):
 
     def layout(width, height, columns, with_gauges=True):
         page.set_viewport_size({'width': width, 'height': height})
-        aside = page.locator('.aside-menu')
+        aside = page.locator('.vui-sidebar')
         expect(aside).to_have_css('width', str(width if width < 768 else 220) + 'px')
         dimensions = page.evaluate('''() => ({width: innerWidth,
             document: document.documentElement.scrollWidth, body: document.body.scrollWidth})''')
@@ -295,7 +295,7 @@ def assert_dashboard_responsive_layout(case):
         case.assertEqual(case.errors, [])
         print('Dashboard old-CSS native containment: ' + json.dumps(observed, sort_keys=True))
         page.set_viewport_size({'width': 1440, 'height': 1000})
-        expect(page.locator('.aside-menu')).to_have_css('width', '220px')
+        expect(page.locator('.vui-sidebar')).to_have_css('width', '220px')
         desktop_before = {'headerHeight': box('.header')['rect']['height'],
                           'columnWidths': page.locator('.dashboard-view > .el-row > .el-col')
                           .evaluate_all('elements => elements.map(e => e.getBoundingClientRect().width)')}
@@ -356,7 +356,7 @@ def assert_dashboard_responsive_layout(case):
         try:
             visit()
             known()
-            expect(page.locator('#system-status-tag')).to_have_text('Running on ' + long_os)
+            expect(page.locator('#system-status-tag')).to_have_text('运行系统：' + long_os)
             expect(page.locator('.header .el-dropdown-link')).to_have_text(long_username)
             for viewport in VIEWPORTS:
                 layout(*viewport)

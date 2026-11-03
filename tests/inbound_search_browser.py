@@ -106,7 +106,7 @@ def assert_inbound_local_search(case):
         expect(page.locator('.layout-container')).to_have_css(
             'flex-direction', 'column' if width < 768 else 'row')
         if width >= 768:
-            expect(page.locator('.aside-menu')).to_have_css('width', '220px')
+            expect(page.locator('.vui-sidebar')).to_have_css('width', '220px')
 
     create('Cloud ALPHA 北京', 10471, uuids[0])
     selected = create('Literal [a-z].* Beta', 10472, uuids[1])

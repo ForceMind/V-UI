@@ -1,9 +1,12 @@
 <!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>V-UI · 代理与中转</title><link rel="icon" type="image/svg+xml" href="/ui/brand/vui-icon.svg"><link rel="stylesheet" href="/ui/css/workspace.css"><link rel="stylesheet" href="/ui/css/proxy.css"><script src="/ui/js/proxy.js" defer></script><script src="/ui/js/tailscale-status.js" defer></script><script src="/ui/js/mihomo-preview.js" defer></script></head>
-<body><header><a class="brand" href="/ui/"><img class="vui-brand-image" src="/ui/brand/vui-icon.svg" alt="V-UI" width="30" height="30"><span aria-hidden="true">V-UI</span></a><nav><a href="/workspace">分流与订阅</a><a href="/proxy" aria-current="page">代理与中转</a><a href="/certificates">证书管理</a><a href="/account">账户</a></nav></header>
-<main><div class="page-title"><div><h1>代理与中转</h1><p>主机代理与默认入口策略独立；每个节点可指定直连或中转，共用一个上游。</p></div><span id="stage">正在读取</span></div>
+<title>V-UI · 代理与中转</title><link rel="icon" type="image/svg+xml" href="/ui/brand/vui-icon.svg"><link rel="stylesheet" href="/ui/css/workspace.css"><link rel="stylesheet" href="/ui/css/proxy.css"><script src="/ui/js/proxy.js" defer></script><script src="/ui/js/tailscale-status.js" defer></script><script src="/ui/js/mihomo-preview.js" defer></script><link rel="stylesheet" href="/ui/css/shell.css">
+<script src="/ui/js/navigation.js"></script>
+<script src="/ui/js/shell.js" defer></script>
+</head>
+<body data-vui-page="proxy">
+<main class="vui-main" id="vui-main"><div class="page-title"><div><h1>代理与中转</h1><p>主机代理与默认入口策略独立；每个节点可指定直连或中转，共用一个上游。</p></div><span id="stage">正在读取</span></div>
 <p id="notice" role="status" aria-live="polite">正在读取服务器草稿与活动配置…</p>
 <section aria-labelledby="yaml-preview-heading"><div class="section-head"><div><h2 id="yaml-preview-heading">YAML 只读预览</h2><p class="hint">检查候选配置的有限结构、引用冲突和可选基线差异；与“导入上游”独立，不保存、合并或应用。</p></div><button id="open-yaml-preview" type="button">打开只读预览</button></div></section>
 <div id="proxy-workspace" hidden>

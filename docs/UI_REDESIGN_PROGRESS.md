@@ -41,3 +41,17 @@
 独立只读审查：根控制模块、receipt精确旧closure迁移、固定OS执行、协议/端口确认回读、默认安装跳过全面探测与线稿静态隔离均无确定阻断；另35项独立纯mock通过。正式web/app无本批差异。将提交准确候选，推送ForceMind/V-UI的release/v0.4.15并建Draft PR以取得Actions证据，不合main、不发布；真实安装/旧014升级和浏览器当前仍未验证。
 
 首次candidate a4aef6a的Actions：oneclick在构建前遇上游GitHub403限流，仅该job原样重试；portable三目标实际包消费暴露新增root closure的scripts/firewall_support.py未进入payload（FileNotFoundError），非线上014故障。已补builder精确允许文件一项，保持现有19公开asset集合；新提交重新完整验收，原日志保留，不继承部分成功或改断言。旧014→新root closure的真实升级仍须发布前单独证明，不将纯mock迁移当作整机升级证据。
+
+## 用户确认后：正式UI实现
+
+用户于2026-11-03确认线稿并要求开始制作。当前迭代在同release/v0.4.15上实现共享壳和真实导航/返回/弹窗历史，保留现有业务DOM/字段/API/权限/敏感清理/请求代际，不把wireframe示例数据带入产品。桌面固定左导航，手机同导航树抽屉；登录独立，账户登录态共享壳。尚未授权main合并或公开新版本，当前VERSION14仅开发候选，发布批次另按授权更新。
+
+文件分工：shell worker拥有所有HTML/CSS与新shell.js；navigation worker拥有navigation.js和现有业务JS的导航/会话相关改动，必要main.py安全入口；root负责跨文件集成、测试兼容、记录和Actions。无递归派工，现有防火墙候选与xcrun_db保留。不会跳过业务、安全、核心、配置保真断言来适应新布局；旧结构专属断言必要时改为新共同布局契约。
+
+主导航URL：/ui/#dashboard、#inbounds、#cores、#diagnostics、#firewall、#security、#legacy；/workspace#routing、#subscriptions；/proxy、/certificates、/account。返回目标使用固定站内允许集合，登录恢复不得信任任意nextURL；history只存非敏感路由/弹窗标识，密码/token/私钥不入URL或storage。现有站点隔离、通用日志及网页firewall权限边界继续明确，不能虚构可用API。
+
+本轮正式UI开发中，未完成浏览器渲染/交互验收。仅非浏览器静态与mock契约检查，本机不构建Linux包或安装依赖；完整构建及安装在Actions。最终精确候选/失败/修正与结果在Draft PR107记录，不预填通过。
+
+正式实现收口：五个业务入口已接同一shell与手机抽屉，原节点32字段绑定及表单API保持，节点编辑分五组；核心真实状态/重启保留，不可用入口明确说明。导航使用固定站内目标，workspace分区、401恢复、敏感modal Back/Forward与busy/dirty守卫已接入。新15项真实JS VM用例、shell事件/静态测试和既有YAML25项通过；无浏览器。独审发现pushState后nav/crumb/title不更新及refresh position重号，均已修并加源码联动/刷新多步返回回归；手机导航focus回主内容/拒绝回toggle亦补测。workspace Python bridge本地缺fastapi，留Actions不装依赖。
+
+旧browser harness的aside选择器与中文状态断言仅同步当前markup语义，不执行browser；旧CSS历史fixture仍保留不可篡改。正式视觉/触控/浏览器Back验收仍未验证，不把Node mocks当DOM渲染。当前制作候选留Draft，未合main/发布，数据/账号/证书与已发布014保持。

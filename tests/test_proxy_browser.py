@@ -223,8 +223,10 @@ class ProxyPageRouteTests(unittest.TestCase):
             self.assertNotIn(UUID, response.text)
         index = (ROOT / 'web/index.html').read_text()
         script = (ROOT / 'web/js/app.js').read_text()
-        self.assertIn('index="proxy"', index)
-        self.assertIn("if (key === 'proxy') { location.assign('/proxy'); return; }", script)
+        self.assertIn('/ui/js/navigation.js', index)
+        navigation = (ROOT / 'web/js/navigation.js').read_text()
+        self.assertIn("['proxy', '/proxy']", navigation)
+        self.assertIn('VUI_NAV', script)
 
     def test_ci_uses_exact_head_and_explicit_non_skipping_browser_gate(self):
         import yaml
