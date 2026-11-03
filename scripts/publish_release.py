@@ -89,6 +89,7 @@ UI_REDESIGN_FILES = {
     'VERSION', 'main.py', 'scripts/publish_release.py',
     '.github/workflows/publish.yml', '.github/workflows/oneclick.yml',
     'tests/test_release_promotion.py', 'tests/test_oneclick_system.py',
+    'tests/test_short_install_contract.py',
     'tests/published_upgrade_helpers.py', 'tests/test_published_upgrade_helpers.py',
     'AGENTS.md', 'install.sh', 'docs/README.md',
     'docs/RELEASE_NOTES.md', 'docs/INSTALLATION.md', 'docs/OPERATIONS.md',

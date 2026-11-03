@@ -37,6 +37,19 @@ def assert_receipt_migration(test, before, after):
         test.assertEqual(after[field], before[field])
 
 
+def assert_upgrade_configuration(test, before, after, old_release, new_release):
+    """Match the complete saved configuration and its exact runtime transition."""
+    test.assertEqual(before['release_id'], old_release.name)
+    test.assertEqual(before['bootstrap_python'], str(old_release / 'runtime/python/bin/python3'))
+    test.assertNotEqual(old_release, new_release)
+    expected = {**before, 'release_id':new_release.name,
+                'bootstrap_python':str(new_release / 'runtime/python/bin/python3')}
+    # Fresh provided-certificate 0.4.14 omitted this field. The upgrade writes
+    # the canonical empty authorization list; existing authorizations must stay.
+    expected.setdefault('ca_authorizations', [])
+    test.assertEqual(after, expected)
+
+
 class PublishedUpgrade:
     def __init__(self, test, source, work, certificate_args, configured_args):
         self.test = test
@@ -105,6 +118,8 @@ print(json.dumps(result,sort_keys=True))
         self.test.assertNotIn(FIREWALL, self.old_receipt['files'])
         self.test.assertFalse(os.path.lexists(FIREWALL), 'Do not pre-create new root closure helper')
         self.config = json.loads(Path('/etc/v-ui/service.json').read_bytes())
+        self.old_release = release
+        self.test.assertEqual(self.config['bootstrap_python'], str(release / 'runtime/python/bin/python3'))
         self.test.assertEqual(self._manifest(release)['source_commit'], OLD_COMMIT)
         self._service_python(release, '''
 import json,time
@@ -141,10 +156,8 @@ print('{}')
 
     def after(self, api):
         config = json.loads(Path('/etc/v-ui/service.json').read_bytes())
-        self.test.assertEqual({k:v for k,v in config.items() if k != 'release_id'},
-                              {k:v for k,v in self.config.items() if k != 'release_id'})
-        self.test.assertNotEqual(config['release_id'], self.config['release_id'])
-        release = Path('/var/lib/v-ui/releases') / config['release_id']
+        release = Path('/var/lib/v-ui/releases') / self.candidate['release_id']
+        assert_upgrade_configuration(self.test,self.config,config,self.old_release,release)
         manifest = self._manifest(release)
         self.test.assertEqual(manifest['source_commit'], self.candidate['source_commit'])
         self.test.assertEqual(manifest['version'], self.candidate['version'])

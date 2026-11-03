@@ -26,8 +26,16 @@ class ShortInstallContractTests(unittest.TestCase):
             workflow=yaml.load((root/'.github/workflows'/name).read_text(),Loader=yaml.BaseLoader)
             envs=[step.get('env',{}) for job in workflow['jobs'].values() for step in job['steps']]
             selected=[env for env in envs if env.get('VUI_SYSTEM_INSTALL_TEST')=='1']
-            self.assertEqual(len(selected),1)
-            self.assertEqual(selected[0].get('VUI_INSTALLER_YN_TEST'),'1')
+            ordinary=[env for env in selected if not env.get('VUI_PUBLISHED_UPGRADE_SOURCE')]
+            self.assertEqual(len(ordinary),1)
+            self.assertEqual(ordinary[0].get('VUI_INSTALLER_YN_TEST'),'1')
+            upgrades=[env for env in selected if env.get('VUI_PUBLISHED_UPGRADE_SOURCE')]
+            self.assertEqual(len(selected),2 if name=='oneclick.yml' else 1)
+            self.assertEqual(len(upgrades),1 if name=='oneclick.yml' else 0)
+            if upgrades:
+                self.assertEqual(upgrades[0]['VUI_PUBLISHED_INSTALL_VERSION'],'0.4.14')
+                self.assertEqual(upgrades[0]['VUI_RELEASE_COMMIT'],'b0cc174d04d05e61277075412586f0ba0dd231db')
+                self.assertNotIn('VUI_EXISTING_INSTALL_TEST',upgrades[0])
 
     def test_existing_browser_steps_remain_explicit_manual_opt_in(self):
         root=Path(__file__).resolve().parents[1]
