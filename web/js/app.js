@@ -352,6 +352,42 @@ const app = createApp({
         const currentUser = ref({ username: '' });
         const mihomoWarnings = ref([]);
         const managedCertificates = ref([]);
+        const managedCertificateState = ref('idle');
+        const certificateMode = ref('managed');
+        let certificateReadGeneration = 0, automaticCertificateId = null, tlsCertificateDraft = null;
+        const certificateDomain = value => typeof value === 'string' ? value.toLowerCase().replace(/\.$/, '') : '';
+        const managedCertificateEligible = computed(() => newInbound.profile.security === 'tls' && (
+            (newInbound.core === 'sing-box' && ['vless','vmess','trojan','hysteria2','tuic'].includes(newInbound.protocol)) ||
+            (newInbound.core === 'xray' && newInbound.protocol === 'vless' &&
+                ['raw','tcp'].includes(newInbound.profile.transport) && !newInbound.profile.flow)));
+        const certificateMatchesSNI = cert => !newInbound.profile.server_name ||
+            certificateDomain(cert.domain) === certificateDomain(newInbound.profile.server_name);
+        const managedCertificateHint = computed(() => {
+            if (managedCertificateState.value === 'loading') return '正在读取已有证书…';
+            if (managedCertificateState.value === 'error') return '证书列表读取失败，请重试；已有选择和配置已保留。';
+            const selected = managedCertificates.value.find(c => c.id === newInbound.certificate_id);
+            if (newInbound.certificate_id && !selected) return '当前绑定的证书不在可用列表中，请重试或明确选择其他证书；原绑定已保留。';
+            if (selected && !certificateMatchesSNI(selected)) return 'SNI 与所选证书域名不匹配，请修改 SNI 或重新选择证书。';
+            if (selected) return '已选择托管证书；服务器自动填写材料路径，续期后自动更新节点。';
+            if (!managedCertificates.value.length) return '暂无可用的正式证书，请先到证书页签发，或选择手工证书路径。';
+            if (managedCertificates.value.length > 1) return '有多张可用证书，请选择一张；SNI 必须与证书域名匹配。';
+            return 'SNI 与唯一可用证书域名不匹配，请修改 SNI 或选择手工证书路径。';
+        });
+        const inboundEditorError = (error, action) => {
+            const status = error.response?.status;
+            const detail = error.response?.data?.detail;
+            const text = typeof detail === 'string' ? detail : detail?.message || '';
+            const safeMessages = ['请选择可用的正式证书，或填写 TLS 证书路径', '请填写 TLS 私钥路径'];
+            if (safeMessages.includes(text)) return text;
+            if (status === 401) return '登录状态已失效，请重新登录。';
+            if (status === 403) return '没有操作该节点的权限，请重新登录后重试。';
+            if (status === 404) return '节点或证书已不存在，请刷新列表后重试。';
+            if (/instance.*(changed|revision)|expected_instance_revision/i.test(text)) return '节点已发生变化，请刷新节点列表并重新打开编辑。';
+            if (/certificate|certificat|\bTLS\b|\bSNI\b/i.test(text)) return '证书配置不可用：请核对证书是否有效、SNI 是否匹配，以及当前核心、协议和传输是否支持该证书。';
+            if (status === 422 || status === 400) return '节点参数不符合要求，请核对端口、协议和安全设置后重试。';
+            if (status === 409) return '节点配置发生冲突或无法应用，请刷新后核对设置并重试。';
+            return action + '失败，请稍后重试。';
+        };
 
         const routingCatalog = ref({ categories: [], presets: [] });
         const routingPreview = ref({ sections: [], dns: {}, warnings: [] });
@@ -430,6 +466,8 @@ const app = createApp({
         };
         const closeInboundEditor = () => {
             inboundEditorGeneration++;
+            certificateReadGeneration++;
+            managedCertificateState.value = 'idle';
             showAddInbound.value = false;
             globalThis.VUI_NAV?.modal.close('inbound-editor');
             editingInboundId.value = null;
@@ -700,13 +738,61 @@ const app = createApp({
             routingForm.intranet.splice(index, 1);
         };
 
-        const loadManagedCertificates = async () => {
-            try {
-                managedCertificates.value = (await axios.get('/api/certificates')).data
-                    .filter(c => c.environment === 'production' && c.revision && c.days_remaining >= 0);
-            } catch {
-                managedCertificates.value = [];
+        const reconcileManagedCertificate = () => {
+            if (savingInbound.value || adminSessionEnded || editingInboundId.value ||
+                certificateMode.value !== 'managed' || !managedCertificateEligible.value ||
+                managedCertificateState.value !== 'ready') return;
+            if (automaticCertificateId && newInbound.certificate_id === automaticCertificateId) {
+                const selected = managedCertificates.value.find(c => c.id === automaticCertificateId);
+                if (!selected || !certificateMatchesSNI(selected)) newInbound.certificate_id = null;
             }
+            if (newInbound.certificate_id) return;
+            automaticCertificateId = null;
+            // Multiple available certificates always require a deliberate choice,
+            // even if an entered SNI happens to match only one of them.
+            if (managedCertificates.value.length !== 1) return;
+            const cert = managedCertificates.value[0];
+            if (!certificateMatchesSNI(cert)) return;
+            newInbound.certificate_id = cert.id;
+            automaticCertificateId = cert.id;
+            if (!newInbound.profile.server_name) newInbound.profile.server_name = cert.domain;
+        };
+        const loadManagedCertificates = async (editorGeneration = inboundEditorGeneration, selectDefault = true) => {
+            if (savingInbound.value || adminSessionEnded) return;
+            const readGeneration = ++certificateReadGeneration;
+            const current = () => readGeneration === certificateReadGeneration &&
+                editorGeneration === inboundEditorGeneration && !adminSessionEnded && !savingInbound.value;
+            managedCertificateState.value = 'loading';
+            try {
+                const {data} = await axios.get('/api/certificates');
+                if (!current()) return;
+                if (!Array.isArray(data)) throw new Error('Invalid certificate list');
+                managedCertificates.value = data.filter(c => c && c.environment === 'production' &&
+                    typeof c.id === 'string' && c.id && typeof c.domain === 'string' && c.domain &&
+                    typeof c.revision === 'string' && c.revision &&
+                    typeof c.days_remaining === 'number' && Number.isFinite(c.days_remaining) && c.days_remaining >= 0 &&
+                    (c.not_after == null || (typeof c.not_after === 'number' && c.not_after > Date.now() / 1000)));
+                managedCertificateState.value = 'ready';
+                if (selectDefault) reconcileManagedCertificate();
+            } catch {
+                if (!current()) return;
+                managedCertificateState.value = 'error';
+            }
+        };
+        const retryManagedCertificates = () => {
+            if (!showAddInbound.value || savingInbound.value || adminSessionEnded) return;
+            return loadManagedCertificates();
+        };
+        const onManagedCertificateChanged = () => {
+            if (savingInbound.value || adminSessionEnded) return;
+            automaticCertificateId = null;
+            const selected = managedCertificates.value.find(c => c.id === newInbound.certificate_id);
+            if (selected && !newInbound.profile.server_name) newInbound.profile.server_name = selected.domain;
+        };
+        const onCertificateModeChanged = () => {
+            if (savingInbound.value || adminSessionEnded) return;
+            if (certificateMode.value === 'manual') newInbound.certificate_id = null;
+            reconcileManagedCertificate();
         };
 
         const openAddInbound = async () => {
@@ -724,8 +810,12 @@ const app = createApp({
             newInbound.settings = {};
             newInbound.stream_settings = {};
             resetInboundProfile();
-            await loadManagedCertificates();
-            if (generation !== inboundEditorGeneration || adminSessionEnded) return;
+            certificateMode.value = 'managed';
+            automaticCertificateId = null;
+            tlsCertificateDraft = null;
+            managedCertificates.value = [];
+            await loadManagedCertificates(generation);
+            if (generation !== inboundEditorGeneration || adminSessionEnded || savingInbound.value) return;
             showAddInbound.value = true;
         };
 
@@ -736,22 +826,26 @@ const app = createApp({
             // refreshed row (or recycled integer ID) cannot redefine this intent.
             const editingId = row.id, revision = row.mutation_revision;
             if (!validInboundRevision(revision)) {
-                ElMessage.error('Failed to load inbound editor: ' + inboundInstanceUnknown);
+                ElMessage.error('无法确认节点版本，请刷新节点列表或重新加载页面。');
                 return;
             }
             try {
                 const [state] = await Promise.all([
                     axios.get(`/api/inbounds/${editingId}/editor`),
-                    loadManagedCertificates()
+                    loadManagedCertificates(generation, false)
                 ]);
-                if (generation !== inboundEditorGeneration || adminSessionEnded) return;
+                if (generation !== inboundEditorGeneration || adminSessionEnded || savingInbound.value) return;
                 const value = state.data;
+                if (value?.certificate_binding_unavailable) {
+                    ElMessage.error('无法读取节点原证书绑定，请稍后重试；尚未修改节点配置。');
+                    return;
+                }
                 if (!validInboundRevision(value?.mutation_revision)) {
-                    ElMessage.error('Failed to load inbound editor: ' + inboundInstanceUnknown);
+                    ElMessage.error('无法确认节点版本，请刷新节点列表或重新加载页面。');
                     return;
                 }
                 if (value.id !== editingId || value.mutation_revision !== revision) {
-                    ElMessage.error('Failed to load inbound editor: ' + inboundInstanceChanged);
+                    ElMessage.error('节点已发生变化，请刷新节点列表并重新打开编辑。');
                     return;
                 }
                 editingInboundId.value = editingId;
@@ -770,11 +864,14 @@ const app = createApp({
                 resetInboundProfile();
                 Object.assign(newInbound.profile, value.profile || {});
                 newInbound.certificate_id = value.certificate_id || null;
+                certificateMode.value = newInbound.certificate_id ? 'managed' : 'manual';
+                automaticCertificateId = null;
+                tlsCertificateDraft = null;
                 inboundCredentials.value = value.credentials || {};
                 showAddInbound.value = true;
             } catch (error) {
                 if (generation !== inboundEditorGeneration || adminSessionEnded || error.response?.status === 401) return;
-                ElMessage.error(error.response?.data?.detail || 'Failed to load inbound editor');
+                ElMessage.error(inboundEditorError(error, '读取节点配置'));
             }
         };
 
@@ -828,31 +925,62 @@ const app = createApp({
             p.zero_rtt_handshake = false;
         };
 
+        const rememberTLSCertificate = () => {
+            if (newInbound.profile.security === 'tls') tlsCertificateDraft = {
+                certificate_id: newInbound.certificate_id, mode: certificateMode.value,
+                server_name: newInbound.profile.server_name,
+                certificate_path: newInbound.profile.certificate_path, key_path: newInbound.profile.key_path
+            };
+        };
+        const restoreTLSCertificate = () => {
+            if (newInbound.profile.security !== 'tls' || !tlsCertificateDraft) return;
+            const {certificate_id, mode, ...profile} = tlsCertificateDraft;
+            Object.assign(newInbound.profile, profile);
+            newInbound.certificate_id = certificate_id;
+            certificateMode.value = mode;
+        };
+        const resetProtocolWithCommonFields = () => {
+            rememberTLSCertificate();
+            const p = newInbound.profile;
+            const common = {server_name:p.server_name, certificate_path:p.certificate_path, key_path:p.key_path};
+            resetInboundProfile();
+            Object.assign(p, common);
+            restoreTLSCertificate();
+            reconcileManagedCertificate();
+        };
         const onCoreChanged = () => {
+            if (savingInbound.value || adminSessionEnded || editingInboundId.value) return;
             newInbound.protocol = 'vless';
             newInbound.settings = {};
             newInbound.stream_settings = {};
-            resetInboundProfile();
+            resetProtocolWithCommonFields();
         };
 
         const onProtocolChanged = () => {
+            if (savingInbound.value || adminSessionEnded || editingInboundId.value) return;
             newInbound.settings = {};
             newInbound.stream_settings = {};
-            resetInboundProfile();
+            resetProtocolWithCommonFields();
         };
 
         const clearManagedCertificate = () => {
-            if (!editingInboundId.value) return;
-            newInbound.profile.certificate_path = '';
-            newInbound.profile.key_path = '';
+            automaticCertificateId = null;
         };
 
         const onSecurityChanged = () => {
-            if (newInbound.profile.security !== 'tls' && newInbound.certificate_id) {
+            if (savingInbound.value || adminSessionEnded) return;
+            if (newInbound.profile.security !== 'tls' && (newInbound.certificate_id ||
+                newInbound.profile.certificate_path || newInbound.profile.key_path)) {
+                tlsCertificateDraft = {
+                    certificate_id:newInbound.certificate_id, mode:certificateMode.value,
+                    server_name:newInbound.profile.server_name,
+                    certificate_path:newInbound.profile.certificate_path, key_path:newInbound.profile.key_path
+                };
                 newInbound.certificate_id = null;
                 newInbound.profile.certificate_path = '';
                 newInbound.profile.key_path = '';
             }
+            restoreTLSCertificate();
             if (newInbound.core === 'sing-box' && newInbound.protocol === 'vless') {
                 if (newInbound.profile.security === 'reality') {
                     newInbound.profile.transport = 'direct';
@@ -863,18 +991,36 @@ const app = createApp({
                     newInbound.profile.flow = '';
                 }
             }
+            reconcileManagedCertificate();
         };
 
         const saveInbound = async () => {
             if (savingInbound.value || !showAddInbound.value || adminSessionEnded) return;
+            certificateReadGeneration++;
+            if (managedCertificateState.value === 'loading') managedCertificateState.value = 'error';
             savingInbound.value = true;
             const generation = inboundEditorGeneration, editingId = editingInboundId.value;
             const revision = editingInboundRevision;
             const routing = knownRoutingMode(newInbound.routing_mode) ? {routing_mode: newInbound.routing_mode} : {};
             try {
                 if (editingId && !validInboundRevision(revision)) {
-                    ElMessage.error('Failed to update inbound: ' + inboundInstanceUnknown);
+                    ElMessage.error('无法确认节点版本，请刷新节点列表并重新打开编辑。');
                     return;
+                }
+                if (newInbound.profile.security === 'tls' && certificateMode.value === 'managed') {
+                    if (!managedCertificateEligible.value) {
+                        ElMessage.error('当前核心、协议或传输不支持托管证书；Xray 仅支持 VLESS / RAW TCP / TLS / 空 flow。');
+                        return;
+                    }
+                    if (managedCertificateState.value !== 'ready') {
+                        ElMessage.error('证书列表尚未成功读取，请重试后保存。');
+                        return;
+                    }
+                    const selected = managedCertificates.value.find(c => c.id === newInbound.certificate_id);
+                    if (!selected || !certificateMatchesSNI(selected)) {
+                        ElMessage.error(selected ? 'SNI 与所选证书域名不匹配，请核对后保存。' : '请选择一张可用的正式证书后保存。');
+                        return;
+                    }
                 }
                 let profile = { ...newInbound.profile };
                 if (newInbound.core === 'sing-box' && newInbound.protocol === 'vless' && profile.security === 'reality' && profile.transport === 'direct') {
@@ -901,7 +1047,7 @@ const app = createApp({
                         certificate_id: certificateId,
                         enable: newInbound.enable
                     });
-                    if (generation === inboundEditorGeneration && !adminSessionEnded) ElMessage.success('Inbound updated successfully');
+                    if (generation === inboundEditorGeneration && !adminSessionEnded) ElMessage.success('节点已更新');
                 } else {
                     res = await axios.post('/api/inbounds', {
                         ...routing,
@@ -913,7 +1059,7 @@ const app = createApp({
                         certificate_id: certificateId,
                         enable: newInbound.enable
                     });
-                    if (generation === inboundEditorGeneration && !adminSessionEnded) ElMessage.success('Inbound added successfully');
+                    if (generation === inboundEditorGeneration && !adminSessionEnded) ElMessage.success('节点已添加');
                 }
                 if (generation !== inboundEditorGeneration || adminSessionEnded) return;
                 closeInboundEditor();
@@ -923,14 +1069,11 @@ const app = createApp({
                 const detail = error.response?.data?.detail;
                 if (error.response?.status === 409 && detail?.saved === true) {
                     closeInboundEditor();
-                    ElMessage.warning('设置已保存为期望状态，但核心未应用：' + (detail.message || 'validation failed'));
+                    ElMessage.warning('设置已保存为期望状态，但核心未应用。请检查节点配置与核心状态后重试。');
                     await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
                     return;
                 }
-                ElMessage.error(
-                    (editingId ? 'Failed to update inbound: ' : 'Failed to add inbound: ') +
-                    (typeof detail === 'string' ? detail : detail?.message || error.message)
-                );
+                ElMessage.error(inboundEditorError(error, editingId ? '更新节点' : '添加节点'));
             } finally { savingInbound.value = false; }
         };
 
@@ -1150,6 +1293,14 @@ const app = createApp({
             userForm,
             mihomoWarnings,
             managedCertificates,
+            managedCertificateState,
+            managedCertificateEligible,
+            managedCertificateHint,
+            certificateMode,
+            retryManagedCertificates,
+            reconcileManagedCertificate,
+            onManagedCertificateChanged,
+            onCertificateModeChanged,
             showQrDialog,
             qrLink,
             qrBusy,

@@ -1,4 +1,8 @@
-## 2026-11-03 当前：v0.4.15 已公开，短入口切换验收中
+## 2026-11-04 当前：TLS 已有证书自动绑定修复候选
+
+用户要求新增TLS唯一可用证书默认选、多张手选、Xray支持及相关中文错误，保留原配置数据。独立fix/tls-certificate-binding，统一新建/编辑/续期资格和前端选择状态；Xray限已有VLESS RAW/TCP TLS空flow，不扩大未验传输/REALITY。构建、安装、固定真实核心仅Actions，无browser；公开15及其入口已完成且冻结。本批修复范围、失败及准确候选证据集中于[TLS修复记录](TLS_CERTIFICATE_BINDING_FIX.md)，先交独审开发PR，新版公开需自己的授权。
+
+## 2026-11-03 v0.4.15 已公开，短入口切换验收记录
 
 v0.4.15已从准确main `65b1e75d90de733408101ec280a92be935731baa` 公开（19资产），PR107/108正常合并，独审及准确候选/dev/main非浏览器、四目标和公开014真实保数据升级通过。已匿名核验tag、全部asset digest及installer/完整SHA256SUMS真实摘要；现在只切setup和short-install冻结源，应用/tag/旧资产不重建或覆盖。发布后匿名长命令安装与引导入口候选/dev/main/实际main短命令分别验收，准确结果见承载PR和统一账本。浏览器未验证，不修改用户VPS。
 

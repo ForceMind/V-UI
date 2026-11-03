@@ -1,5 +1,9 @@
 # V-UI 开发约束
 
+## 2026-11-04 TLS 已有证书自动绑定修复
+
+用户批准新增TLS节点自动选择唯一可用正式证书、多张手选、Xray支持及相关中文错误，保留原配置数据。独立fix/tls-certificate-binding候选，先完成后端新建/编辑/续期和前端选择状态一致性；Xray限VLESS RAW/TCP TLS无flow，未验传输与REALITY资格保持。构建/安装及固定真实核心只Actions，不browser，不覆盖公开15，不修改用户VPS。范围和证据见docs/TLS_CERTIFICATE_BINDING_FIX.md；新发布须自己的明确授权。
+
 ## 2026-11-03 v0.4.15 正式发布（已批准）
 
 v0.4.15现已从准确main `65b1e75d90de733408101ec280a92be935731baa` 公开，19资产、tag目标及匿名installer/完整SHA256SUMS摘要已核。候选/dev/main各自非浏览器、四目标与真实旧014保数据升级均通过；当前仅切短入口到真实新摘要及冻结验收源，并另验准确候选/dev/main。应用、安装器、版本和Release保持冻结，不覆盖旧资产；浏览器未验证。实际结果仍以承载PR与统一账本为准。

@@ -21,6 +21,7 @@ from app.services.hysteria2_profile import password_value
 from app.services import tuic_profile, reality_profile
 from app.services.node_selection_revision import node_selection_revision
 from app.services.inbound_instance_revision import INSTANCE_CHANGED, REVISION_RE, mutation_revision
+from app.services.managed_tls import eligible as managed_certificate_eligible
 
 SUPPORTED_CORES = {"xray", "sing-box"}
 XRAY_PROTOCOLS = {"vless", "vmess", "trojan", "shadowsocks"}
@@ -208,10 +209,7 @@ def to_dict(item: Inbound) -> dict:
             "has_password": bool(settings.get("password")) or any(bool(user.get("password")) for user in user_maps),
             "has_obfs_password": isinstance(obfs, dict) and bool(obfs.get("password")),
         },
-        "managed_certificate_eligible": (
-            item.core == "sing-box" and item.protocol in {"vless", "trojan", "vmess", "hysteria2", "tuic"}
-            and isinstance(tls, dict) and tls.get("enabled") is True and not reality_profile.has_reality(stream)
-        ),
+        "managed_certificate_eligible": managed_certificate_eligible(item),
         "tag": item.tag,
     }
 
