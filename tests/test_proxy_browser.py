@@ -722,7 +722,7 @@ rules:
         page.locator('#import-content').fill(URI)
         self.context.clear_cookies()
         page.locator('#preview-import').click()
-        page.wait_for_url('**/login')
+        page.wait_for_url('**/login?return=proxy')
         self.login(page)
         page.goto(self.base + '/proxy')
         expect(page.locator('#proxy-workspace')).to_be_visible()
@@ -1189,7 +1189,7 @@ rules:
         self.context.route('**/api/auth/me', lambda route: route.fulfill(status=401, json={'detail': 'expired'}))
         self.context.route('**/api/inbounds/2', lambda route: route.fulfill(status=401, json={'detail': 'expired'}))
         editor.get_by_role('button', name='保存并应用', exact=True).click()
-        page.wait_for_url('**/login')
+        page.wait_for_url('**/login?return=inbounds')
         expect(page.locator('#inbound-routing-mode')).to_have_count(0)
         self.assert_private()
 
