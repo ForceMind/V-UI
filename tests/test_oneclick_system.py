@@ -1,6 +1,7 @@
 """Ephemeral CI host only: exercise the real sudo installer and systemd services."""
 from contextlib import ExitStack
 import hashlib
+import grp
 import http.client
 import json
 import os
@@ -72,6 +73,7 @@ class OneClickSystemTests(unittest.TestCase):
         product_version=published_version or (source/'VERSION').read_text().strip()
         new_installer = installer_has_chinese_prompts(product_version)
         automatic_credentials=tuple(map(int,product_version.split('.'))) >= (0,4,13)
+        startup_wait_fix=tuple(map(int,product_version.split('.'))) >= (0,4,14)
         exercise_confirmations = new_installer and not automatic_credentials and os.getenv('VUI_INSTALLER_YN_TEST') == '1'
         bundle = Path(os.environ['VUI_RELEASE_BUNDLE']) if not published_version else None
         sha = bundle.with_suffix(bundle.suffix+'.sha256').read_text().split()[0] if bundle else None
@@ -79,6 +81,7 @@ class OneClickSystemTests(unittest.TestCase):
         # Never clean up or overwrite a pre-existing installation on a test host.
         for path in (root,Path('/etc/v-ui'),Path('/usr/local/lib/v-ui'),
                      Path('/usr/local/sbin/v-ui'),Path('/usr/local/bin/v-ui'),
+                     Path('/etc/systemd/system/v-ui.service.d'),
                      *(Path('/etc/systemd/system')/name for name in
                        ('v-ui.service','v-ui-http01.service','v-ui-http01.socket'))):
             self.assertFalse(os.path.lexists(path),'Empty installer runner required: '+str(path))
@@ -145,6 +148,45 @@ class OneClickSystemTests(unittest.TestCase):
                 cmd = gate.command(cmd)
                 repeat_cmd = cmd
                 upgrade_cmd = [*cmd,'--upgrade']
+            startup_fixture = startup_wait_fix and gate is None
+            dropin=Path('/etc/systemd/system/v-ui.service.d')
+            fixture_root=Path('/run/v-ui-startup-fixture-'+secrets.token_hex(12))
+            if startup_fixture:
+                # This fixture belongs exclusively to the empty GitHub-hosted
+                # runner. It changes systemd scheduling, never verified payload
+                # bytes or a production installer environment/argument.
+                self.assertEqual(os.getenv('GITHUB_ACTIONS'),'true')
+                self.assertEqual(os.getenv('RUNNER_ENVIRONMENT'),'github-hosted')
+                for lookup in (pwd.getpwnam,grp.getgrnam):
+                    with self.assertRaises(KeyError):lookup('v-ui')
+                self.assertFalse(os.path.lexists(fixture_root))
+                subprocess.run(['sudo','install','-d','-m','0700',str(fixture_root)],check=True)
+                subprocess.run(['sudo','install','-d','-m','0755',str(dropin)],check=True)
+                def cleanup_startup_fixture():
+                    subprocess.run(['sudo','rm','-rf',str(dropin),str(fixture_root)],check=True)
+                    subprocess.run(['sudo','systemctl','daemon-reload'],check=True)
+                stack.callback(cleanup_startup_fixture)
+                fixture_script=work/'startup-once.py'
+                fixture_script.write_text("import pathlib,time\n"
+                    "flag=pathlib.Path(__file__).with_name('mode')\n"
+                    "if flag.exists():\n"
+                    " mode=flag.read_text();flag.unlink()\n"
+                    " if mode=='exit':\n"
+                    "  print('RuntimeError: synthetic startup fixture',flush=True)\n"
+                    "  raise SystemExit(23)\n"
+                    " if mode=='timeout':time.sleep(130)\n")
+                subprocess.run(['sudo','install','-m','0700',str(fixture_script),str(fixture_root/'once.py')],check=True)
+                def configure_startup_fixture(mode):
+                    content='[Service]\nTimeoutStartSec=150\n'
+                    if mode=='slow':content+='ExecStartPre=/bin/sleep 12\n'
+                    else:
+                        marker=work/'startup-mode';marker.write_text(mode)
+                        subprocess.run(['sudo','install','-m','0600',str(marker),str(fixture_root/'mode')],check=True)
+                        content+='Restart=no\nExecStartPre=+/usr/bin/python3 -B -I -S '+str(fixture_root/'once.py')+'\n'
+                    override=work/'startup-override.conf';override.write_text(content)
+                    subprocess.run(['sudo','install','-m','0644',str(override),str(dropin/'startup.conf')],check=True)
+                    subprocess.run(['sudo','systemctl','daemon-reload'],check=True)
+                configure_startup_fixture('slow')
             child, fd = pty.fork()
             if child == 0:
                 os.execvp(cmd[0], cmd)
@@ -245,6 +287,13 @@ class OneClickSystemTests(unittest.TestCase):
                 journal=subprocess.run(['sudo','journalctl','-u','v-ui.service','-u','v-ui-http01.service','-n','60','--no-pager'],capture_output=True,text=True)
                 clean += '\n' + safe_output(journal.stdout)
             self.assertEqual(os.waitstatus_to_exitcode(status),0,clean[-20000:])
+            if startup_fixture:
+                observations=re.findall(r'HTTPS 就绪验证通过：[^\n]*用时 ([0-9.]+) 秒',clean)
+                self.assertTrue(observations,clean[-12000:])
+                self.assertGreaterEqual(float(observations[0]),10,'Slow startup did not exercise the old ten-second health window')
+                subprocess.run(['sudo','rm',str(dropin/'startup.conf')],check=True)
+                subprocess.run(['sudo','systemctl','daemon-reload'],check=True)
+                print('Startup fixture: unchanged verified bundle, systemd activating for 12s, TLS/hostname verified HTTP401 after >10s OK')
             if not automatic_credentials:self.assertNotIn(password,output.decode(errors='replace'))
             if online:
                 self.assertIn('一键安装完成',clean)
@@ -452,6 +501,44 @@ class OneClickSystemTests(unittest.TestCase):
                 global_menu_check(self,{**os.environ,'PYTHONDONTWRITEBYTECODE':'1'},exercise_start_stop=False)
             self.assertEqual(api('/api/auth/me')[0],200)
             self.assertEqual(json.loads(api('/api/proxy/settings')[1]), saved_proxy)
+            if startup_fixture and os.getenv('VUI_EXISTING_INSTALL_TEST') == '1':
+                # A one-shot failure is consumed by ExecStartPre; recovery starts
+                # the original service without the fault and retains live data.
+                before_config=Path('/etc/v-ui/service.json').read_bytes()
+                before_pointer=json.loads((root/'CURRENT.json').read_text())
+                for mode in ('exit','timeout'):
+                    configure_startup_fixture(mode)
+                    started_failure=time.monotonic()
+                    failed=subprocess.run(upgrade_cmd,capture_output=True,text=True,timeout=300)
+                    elapsed_failure=time.monotonic()-started_failure
+                    failure_text=safe_output(failed.stdout+failed.stderr)
+                    self.assertNotEqual(failed.returncode,0,failure_text[-15000:])
+                    self.assertIn('启动失败诊断（本次启动，恢复前）',failure_text)
+                    self.assertIn('已恢复上次操作前',failure_text)
+                    if mode=='exit':
+                        self.assertIn('服务已终止',failure_text)
+                        self.assertIn('status=23',failure_text)
+                        self.assertLess(elapsed_failure,110,'Terminal exit waited for the full readiness timeout')
+                    else:
+                        self.assertIn('120 秒启动预算已耗尽',failure_text)
+                        self.assertGreaterEqual(elapsed_failure,120)
+                        self.assertLess(elapsed_failure,210,'Timeout/diagnostics/recovery were not bounded')
+                    self.assertLess(failure_text.index('启动失败诊断（本次启动，恢复前）'),
+                                    failure_text.index('已恢复上次操作前'))
+                    self.assertEqual(Path('/etc/v-ui/service.json').read_bytes(),before_config)
+                    self.assertEqual(json.loads((root/'CURRENT.json').read_text()),before_pointer)
+                    self.assertFalse(Path('/etc/v-ui/.install-transaction.json').exists())
+                    self.assertEqual(api('/api/auth/me')[0],200)
+                    self.assertEqual(json.loads(api('/api/proxy/settings')[1]),saved_proxy)
+                    for line in failure_text.splitlines():
+                        if line.startswith(('启动失败诊断（','服务状态：','本次启动日志摘要：',
+                                            'Control process exited','Main process exited','RuntimeError',
+                                            '已恢复上次操作前')):
+                            print(line)
+                    subprocess.run(['sudo','rm',str(dropin/'startup.conf')],check=True)
+                    subprocess.run(['sudo','systemctl','daemon-reload'],check=True)
+                    print('Startup fixture '+mode+': elapsed='+format(elapsed_failure,'.3f')+
+                          's, pre-rollback bounded diagnostics, exact saved config/pointer, owner login/session and proxy data retained OK')
             subprocess.run(['sudo','systemctl','restart','v-ui.service'],check=True)
             deadline=time.monotonic()+20
             while time.monotonic()<deadline:

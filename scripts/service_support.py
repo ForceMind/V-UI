@@ -2,6 +2,7 @@
 from __future__ import annotations
 from pathlib import Path
 import subprocess
+import time
 
 SYSTEMD_DIR=Path("/etc/systemd/system")
 OPENRC_DIR=Path("/etc/init.d")
@@ -63,18 +64,53 @@ def stop(manager: str, names: list[str]) -> None:
     else:
         for name in names: subprocess.run(["rc-service",name,"stop"],check=False)
 
-def enable_start(manager: str, names: list[str]) -> None:
-    if manager=="systemd":
-        subprocess.run(["systemctl","enable","--now",*names],check=True)
-    else:
-        for name in names:
-            subprocess.run(["rc-update","add",name,"default"],check=True)
-            subprocess.run(["rc-service",name,"start"],check=True)
+def _startup_options(timeout):
+    deadline = time.monotonic()+timeout if timeout is not None else None
+    def options():
+        if deadline is None:return {}
+        remaining=deadline-time.monotonic()
+        if remaining<=0:raise subprocess.TimeoutExpired('service startup',timeout)
+        return {'timeout':remaining}
+    return options
 
-def start(manager: str, names: list[str]) -> None:
-    if manager=="systemd": subprocess.run(["systemctl","start",*names],check=True)
+def enable_start(manager: str, names: list[str], *, no_wait=False, timeout=None) -> None:
+    options=_startup_options(timeout)
+    if manager=="systemd":
+        subprocess.run(["systemctl","enable","--now",*(["--no-block"] if no_wait else []),*names],check=True,**options())
     else:
-        for name in names: subprocess.run(["rc-service",name,"start"],check=True)
+        # OpenRC has no equivalent asynchronous start contract.
+        for name in names:
+            subprocess.run(["rc-update","add",name,"default"],check=True,**options())
+            subprocess.run(["rc-service",name,"start"],check=True,**options())
+
+def start(manager: str, names: list[str], *, no_wait=False, timeout=None) -> None:
+    options=_startup_options(timeout)
+    if manager=="systemd": subprocess.run(["systemctl","start",*(["--no-block"] if no_wait else []),*names],check=True,**options())
+    else:
+        for name in names: subprocess.run(["rc-service",name,"start"],check=True,**options())
+
+def startup_state(manager: str, name: str, *, timeout: float) -> dict:
+    """Read bounded startup state; active alone never proves HTTPS readiness."""
+    if manager=="systemd":
+        fields=('LoadState','ActiveState','SubState','Result','ExecMainCode','ExecMainStatus','Job')
+        result=subprocess.run(['systemctl','show',name,'--property='+','.join(fields)],
+                              capture_output=True,text=True,timeout=timeout,check=False)
+        if result.returncode:return {}
+        values=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
+        # Never forward arbitrary property values or command stderr to the terminal.
+        states={'loaded','not-found','active','inactive','failed','activating','deactivating',
+                'running','dead','auto-restart','start-pre','start','start-post','stop',
+                'success','exit-code','signal','core-dump','timeout','start-limit-hit','resources'}
+        clean={key:value for key,value in values.items() if key in fields
+                and (value in states or key in ('ExecMainCode','ExecMainStatus') and value.isdecimal())}
+        job=values.get('Job','').split(' ',1)[0]
+        if job.isdecimal():clean['Job']='none' if job=='0' else 'pending'
+        return clean
+    if manager=='openrc':
+        result=subprocess.run(['rc-service',name,'status'],stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL,timeout=timeout,check=False)
+        return {'ActiveState':'active' if result.returncode==0 else 'unknown'}
+    raise RuntimeError('Unsupported service manager')
 
 def is_active(manager: str, name: str) -> bool:
     if manager=="systemd":

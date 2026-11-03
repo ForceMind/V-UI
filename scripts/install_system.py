@@ -16,6 +16,7 @@ import platform
 import pwd
 import re
 import secrets
+import select
 import shutil
 import signal
 import socket
@@ -42,6 +43,7 @@ MAX_ARCHIVE = 850_000_000
 INSTALL_LOCK = Path('/run/lock/v-ui-install.lock')
 TRANSACTION_NAME = '.install-transaction.json'
 STREAM_CHUNK = 1024 * 1024
+HTTPS_STARTUP_TIMEOUT = 120
 # Complete stdlib-only dependency closure of the offline backup/restore controller.
 # Every member must come from the same checksum-verified bundle, never the
 # mutable installed payload. Keep the public release-kit asset set unchanged.
@@ -637,14 +639,18 @@ def _recover_transaction(work):
     service_support.reload(manager)
     if journal['was_running']:
         http = 'v-ui-http01.socket' if manager == 'systemd' else 'v-ui-http01'
-        service_support.start(manager, [http, panel])
         restored = saved_configuration()
         # A provided chain can be private/self-signed. Add the exact saved
         # chain to default trust for this recovery check; retain hostname checks.
         ca = str(ROOT/'data/certs/provided-fullchain.pem') if restored['certificate_mode'] == 'provided' else None
+        deadline = time.monotonic() + HTTPS_STARTUP_TIMEOUT
+        started_at = time.time()
         try:
-            https_health(restored, ca, trust_saved_chain=ca is not None)
+            service_support.start(manager, [http], timeout=_startup_remaining(deadline))
+            service_support.start(manager, [panel], no_wait=True, timeout=_startup_remaining(deadline))
+            https_health(restored, ca, trust_saved_chain=ca is not None, deadline=deadline)
         except BaseException:
+            startup_diagnostics(manager, panel, started_at)
             service_support.stop(manager, [http, panel])
             raise
     finish_transaction()
@@ -799,7 +805,131 @@ def copy_private(source, target, uid, gid):
         if os.path.exists(name): os.unlink(name)
 
 
-def https_health(config, cafile=None, *, trust_saved_chain=False):
+def _startup_remaining(deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError('HTTPS startup deadline exhausted')
+    return remaining
+
+
+def _startup_budget(deadline):
+    return min(2, _startup_remaining(deadline))
+
+
+class _DeadlineReader(io.RawIOBase):
+    """Bound every HTTP header read, including a peer that dribbles bytes."""
+    def __init__(self, tls, deadline):
+        self.tls, self.deadline = tls, deadline
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        self.tls.settimeout(_startup_budget(self.deadline))
+        return self.tls.recv_into(buffer)
+
+
+class _DeadlineHTTPTransport:
+    def __init__(self, tls, deadline):
+        self.tls, self.deadline = tls, deadline
+
+    def makefile(self, mode):
+        return io.BufferedReader(_DeadlineReader(self.tls, self.deadline))
+
+
+def _startup_state(manager, name, deadline):
+    try:
+        return service_support.startup_state(manager, name, timeout=_startup_budget(deadline))
+    except (OSError, subprocess.SubprocessError):
+        return {}
+
+
+def _startup_journal(name, started_at):
+    """Read at most 64 KiB and spend at most three seconds on journalctl."""
+    process = subprocess.Popen(['journalctl', '--unit='+name, '--since=@'+format(started_at,'.6f'),
+                                '--lines=40', '--no-pager', '--output=json',
+                                '--output-fields=MESSAGE'], stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+    deadline = time.monotonic() + 3
+    chunks = []; size = 0
+    try:
+        while True:
+            remaining = deadline-time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError('Startup journal collection deadline exhausted')
+            ready, _, _ = select.select([process.stdout], [], [], remaining)
+            if not ready:
+                raise TimeoutError('Startup journal collection deadline exhausted')
+            chunk = os.read(process.stdout.fileno(), min(8192, 65537-size))
+            if not chunk:
+                process.wait(timeout=max(.001, deadline-time.monotonic()))
+                if process.returncode:
+                    raise OSError('Startup journal unavailable')
+                return b''.join(chunks).decode('utf-8', errors='replace')
+            size += len(chunk)
+            if size > 65536:
+                raise OSError('Startup journal byte limit exceeded')
+            chunks.append(chunk)
+    finally:
+        if process.poll() is None:
+            process.kill()
+        try:
+            process.wait(timeout=1)
+        finally:
+            process.stdout.close()
+
+
+def startup_diagnostics(manager, name, started_at):
+    """Best effort, before rollback: no arbitrary service log text is disclosed."""
+    try:
+        print('启动失败诊断（本次启动，恢复前）：', manager, name)
+        state = service_support.startup_state(manager, name, timeout=2)
+        print('服务状态：', json.dumps(state, ensure_ascii=True, sort_keys=True))
+        if manager != 'systemd':
+            return
+        raw = _startup_journal(name, started_at)
+        summaries = []
+        known = ('Launch code failed integrity check', 'Prepared manifest changed',
+                 'Portable runtime is missing', 'Service configuration is not root-controlled',
+                 'Symbolic release paths are not permitted', 'Invalid current version')
+        errors = ('ModuleNotFoundError','ImportError','PermissionError','FileNotFoundError',
+                  'RuntimeError','ValueError','OSError','SSLError','IntegrityError','MemoryError')
+        for line in raw.splitlines():
+            try:
+                message = json.loads(line).get('MESSAGE', '')
+            except (ValueError, AttributeError):
+                continue
+            if not isinstance(message, str):
+                continue
+            # Only fixed literals survive. Unknown passwords, URLs, tokens,
+            # exception values and even partial/truncated secrets are discarded.
+            safe = next((value for value in known if value in message), None)
+            if safe is None:
+                safe = next((value for value in errors if re.search(r'\b'+value+r'\b', message)), None)
+            if safe is None:
+                safe = next((value for value in ('Main process exited','Control process exited',
+                    'Failed with result','Scheduled restart job','Started V-UI','Starting V-UI') if value in message),
+                    '[日志正文已隐藏]')
+                if safe in ('Main process exited','Control process exited'):
+                    status = re.search(r'\bcode=(exited|killed|dumped), status=(\d+)\b', message)
+                    if status:
+                        safe += ' code='+status.group(1)+' status='+status.group(2)
+            summaries.append(safe)
+        # Sanitize all records before applying the terminal output limit.
+        print('本次启动日志摘要：\n' + '\n'.join(summaries)[-4096:])
+    except BaseException:
+        # Even interruption/output failure in diagnostics cannot replace the
+        # original installation exception or prevent transaction restoration.
+        try:
+            print('本次启动诊断不可用；继续恢复。')
+        except BaseException:
+            pass
+
+
+def https_health(config, cafile=None, *, trust_saved_chain=False, deadline=None):
+    started = time.monotonic()
+    if deadline is None:
+        deadline = started + HTTPS_STARTUP_TIMEOUT
     # Connect locally, verify the real hostname and chain; never use -k.
     context = ssl.create_default_context()
     if cafile:
@@ -817,19 +947,39 @@ def https_health(config, cafile=None, *, trust_saved_chain=False):
             flag = 0x80000
         context.verify_flags |= flag
     address = {'0.0.0.0': '127.0.0.1', '::': '::1'}.get(config['bind'], config['bind'])
-    last = None
-    for _ in range(40):
+    manager = config.get('service_manager')
+    name = 'v-ui.service' if manager == 'systemd' else 'v-ui'
+    last = '尚未收到 HTTPS 响应'
+    while time.monotonic() < deadline:
         try:
-            with socket.create_connection((address, config['port']), timeout=2) as sock:
+            if manager in ('systemd', 'openrc'):
+                state = _startup_state(manager, name, deadline)
+                if (state.get('ActiveState') in ('failed','inactive')
+                        and state.get('SubState') != 'auto-restart' and state.get('Job') == 'none'):
+                    raise InstallError('HTTPS 健康验证失败：面板服务已终止（'+json.dumps(state,sort_keys=True)+'）')
+            with socket.create_connection((address, config['port']), timeout=_startup_budget(deadline)) as sock:
+                sock.settimeout(_startup_budget(deadline))
                 with context.wrap_socket(sock, server_hostname=config['domain']) as tls:
+                    tls.settimeout(_startup_budget(deadline))
                     tls.sendall(('GET /api/auth/me HTTP/1.0\r\nHost: '+config['domain']+':'+str(config['port'])+'\r\n\r\n').encode())
-                    response = http.client.HTTPResponse(tls); response.begin()
-                    if response.status != 401:
-                        raise InstallError('HTTPS 健康检查发现管理员认证未被强制执行')
+                    response = http.client.HTTPResponse(_DeadlineHTTPTransport(tls, deadline))
+                    try:
+                        response.begin()
+                        _startup_budget(deadline)
+                        if response.status != 401:
+                            raise InstallError('HTTPS 健康验证失败：管理员认证未被强制执行（必须为 HTTP 401）')
+                    finally:
+                        response.close()
+                    print('HTTPS 就绪验证通过：TLS 主机名和证书链已验证，HTTP 401；用时 '+format(time.monotonic()-started,'.3f')+' 秒')
                     return
+        except ssl.SSLError:
+            raise InstallError('HTTPS 健康验证失败：TLS 证书、主机名或握手验证失败') from None
         except (OSError, http.client.HTTPException) as exc:
-            last = exc; time.sleep(.25)
-    raise InstallError('HTTPS 健康验证失败：' + str(last))
+            last = type(exc).__name__
+            pause = min(.25, max(0, deadline-time.monotonic()))
+            if pause:
+                time.sleep(pause)
+    raise InstallError('HTTPS 健康验证失败：120 秒启动预算已耗尽；最后结果 '+last) from None
 
 
 def install(args):
@@ -933,6 +1083,7 @@ def install_verified(args, snapshot, archive, meta):
             raise InstallError('已准备的版本对应另一安装包校验值，拒绝覆盖')
         stopped = False
         committed = False
+        startup_started_at = None
         try:
             if existing:
                 begin_transaction(work, manager, was_running)
@@ -971,13 +1122,17 @@ def install_verified(args, snapshot, archive, meta):
                 bootstrap_managed_certificate(python, payload, args)
                 if existing:
                     certificate_state(work, 'contact', args.domain, args.email)
-            service_support.enable_start(manager,[panel_name])
-            https_health(config, args.health_ca)
+            startup_started_at = time.time()
+            deadline = time.monotonic() + HTTPS_STARTUP_TIMEOUT
+            service_support.enable_start(manager,[panel_name], no_wait=True, timeout=_startup_remaining(deadline))
+            https_health(config, args.health_ca, deadline=deadline)
             with provision_initial_account(python, payload, config):
                 write_root_file(CONFIG, json.dumps({**config, 'ready': True, 'release_id': meta['release_id']}, indent=2).encode())
                 if existing: finish_transaction()
                 committed = True
         except BaseException:
+            if startup_started_at is not None and not committed:
+                startup_diagnostics(manager, panel_name, startup_started_at)
             if stopped and not committed:
                 if existing and os.path.lexists(CONFIG_DIR/TRANSACTION_NAME):
                     # Keep the durable journal if any recovery step fails. A
