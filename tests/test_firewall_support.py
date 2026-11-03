@@ -26,9 +26,19 @@ class FirewallSupportTests(unittest.TestCase):
             info=f.detect();self.assertEqual(info["backend"],"nftables");self.assertIsNone(f.port_open(info,80))
     def test_open_ufw_runs_only_requested_ports(self):
         calls=[]
-        with patch.object(f.subprocess,"run",side_effect=lambda args:(calls.append(args) or self.result())):
-            f.open_ports({"backend":"ufw"},[8443,80,8443])
+        with patch.object(f, "run", return_value=self.result(out="Status: active\n")), \
+             patch.object(f.subprocess,"run",side_effect=lambda args, **kwargs:(calls.append(args) or self.result())):
+            f.open_ports({"backend":"ufw", "managed":True},[8443,80,8443])
         self.assertEqual(calls,[["ufw","allow","80/tcp"],["ufw","allow","8443/tcp"]])
+
+    def test_ufw_inactive_or_unmanaged_never_enables_or_adds_rules(self):
+        for managed, state in ((False, 'Status: active\n'), (True, 'Status: inactive\n')):
+            with self.subTest(managed=managed), \
+                 patch.object(f, 'run', return_value=self.result(out=state)), \
+                 patch.object(f.subprocess, 'run') as write:
+                with self.assertRaises(RuntimeError):
+                    f.open_ports({'backend': 'ufw', 'managed': managed}, [3215])
+                write.assert_not_called()
 
 
 class IptablesReadOnlyTests(unittest.TestCase):
@@ -136,7 +146,7 @@ class FirewalldZoneRegressions(unittest.TestCase):
         self.assertEqual(query.call_args.args[0], ['firewall-cmd', '--zone', 'external', '--query-port', '8443/tcp'])
         writes = []
         with patch.object(f, 'detect', return_value=info), \
-             patch.object(f.subprocess, 'run', side_effect=lambda args: (writes.append(args) or self.result())):
+             patch.object(f.subprocess, 'run', side_effect=lambda args, **kwargs: (writes.append(args) or self.result())):
             f.open_ports(info, [8443, 80, 8443])
         self.assertEqual(writes, [
             ['firewall-cmd', '--zone', 'external', '--add-port', '80/tcp'],
@@ -220,8 +230,9 @@ class FirewallProtocolTests(unittest.TestCase):
             self.assertTrue(f.port_open({'backend': 'ufw'}, 10443, protocol='udp'))
 
     def test_ufw_udp_open_is_exact_deduplicated_and_never_enables_firewall(self):
-        with patch.object(f.subprocess, 'run', return_value=self.result()) as write:
-            f.open_ports({'backend': 'ufw'}, [20443, 10443, 20443], protocol='udp')
+        with patch.object(f, 'run', return_value=self.result(out='Status: active\n')), \
+             patch.object(f.subprocess, 'run', return_value=self.result()) as write:
+            f.open_ports({'backend': 'ufw', 'managed': True}, [20443, 10443, 20443], protocol='udp')
         self.assertEqual([call.args[0] for call in write.call_args_list], [
             ['ufw', 'allow', '10443/udp'], ['ufw', 'allow', '20443/udp'],
         ])
@@ -286,6 +297,7 @@ class FirewallProtocolTests(unittest.TestCase):
         for backend in ('ufw', 'firewalld'):
             info = {'backend': backend, 'managed': True, 'zone': 'external'}
             with self.subTest(backend=backend), patch.object(f, 'detect', return_value=info), \
+                 patch.object(f, 'run', return_value=self.result(out='Status: active\n')), \
                  patch.object(f.subprocess, 'run', return_value=self.result(1)) as write:
                 with self.assertRaisesRegex(RuntimeError, '10443/udp'):
                     f.open_ports(info, [10443, 20443], protocol='udp')

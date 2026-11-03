@@ -16,7 +16,7 @@ from app.services.log_redaction import install_log_redaction
 from app.services.validated_export import ExportError
 from app.services.routing_store import RoutingStorageError
 
-app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.4.14')
+app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.4.15')
 app.add_middleware(AdminAuthMiddleware)
 app.include_router(certificates.router,prefix='/api/certificates',tags=['Certificates'])
 app.include_router(system.router,prefix='/api/system',tags=['System'])
@@ -91,7 +91,7 @@ def get_web_path() -> str:
 @app.get('/login',include_in_schema=False)
 @app.get('/account',include_in_schema=False)
 def account_page():
-    return FileResponse(os.path.join(get_web_path(),'account.html'),headers={'Content-Security-Policy':"default-src 'none'; img-src 'self'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
+    return FileResponse(os.path.join(get_web_path(),'account.html'),headers={'Content-Security-Policy':"default-src 'none'; img-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
 
 @app.get('/certificates',include_in_schema=False)
 def certificates_page():

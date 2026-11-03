@@ -178,17 +178,20 @@ def check_page_brand(page, base, *, mobile=False):
     """A real consumer must decode local SVGs, not merely find strings in HTML."""
     from playwright.sync_api import expect
 
-    logo = page.locator('img.vui-brand-image')
+    shell_active = page.locator('body').evaluate("body => body.classList.contains('vui-shell-active')")
+    drawer_opened = shell_active and page.viewport_size['width'] <= 800 and page.locator('.vui-menu-toggle').get_attribute('aria-expanded') == 'false'
+    if drawer_opened:
+        page.locator('.vui-menu-toggle').click()
+        expect(page.locator('.vui-sidebar')).to_have_css('transform', 'matrix(1, 0, 0, 1, 0, 0)')
+    logo = page.locator('.vui-shell-brand img.vui-brand-image' if shell_active else 'main img.vui-brand-image')
     expect(logo).to_have_count(1)
     expect(logo).to_have_attribute('alt', 'V-UI')
     expect(logo).to_be_visible()
     src = logo.get_attribute('src')
     brand_member(src)
     assert src == FAVICON, 'Existing application brands use the shared icon'
-    page.wait_for_function('''() => {
-        const image = document.querySelector('img.vui-brand-image');
-        return image && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0;
-    }''')
+    expect(logo).to_have_js_property('complete', True)
+    assert logo.evaluate('image => image.naturalWidth > 0 && image.naturalHeight > 0')
     violations = page.evaluate('window.__vuiBrandImageViolations')
     assert violations is not None, 'Image CSP observer must precede navigation'
     assert not [item for item in violations if not item['synthetic']], violations
@@ -211,6 +214,9 @@ def check_page_brand(page, base, *, mobile=False):
     # same-origin endpoint and its SVG bytes rather than assuming a request.
     for path in {FAVICON, src}:
         fetch_brand_asset(page, base, path)
+
+    if drawer_opened:
+        page.locator('.vui-drawer-close').click()
 
 
 
@@ -331,3 +337,18 @@ def check_readme_picture(context, base, readme):
         assert external == [], external
     finally:
         page.close()
+
+
+def page_brand_markup(web, name):
+    """Inspect shipped page plus its literal shell template, without rendering."""
+    page = (web / name).read_text()
+    markup = BrandHTML(page)
+    if name != 'account.html':
+        if '<script src="/ui/js/shell.js" defer></script>' not in page:
+            raise AssertionError('Page must load the shared brand shell')
+        shell = (web / 'js/shell.js').read_text()
+        template = re.search(r'chrome.innerHTML = `([\s\S]*?)`;', shell)
+        if template is None:
+            raise AssertionError('Missing literal shared shell template')
+        markup.images.extend(BrandHTML(template.group(1)).images)
+    return markup

@@ -8,7 +8,7 @@ import shutil
 import subprocess
 
 def run(args):
-    return subprocess.run(args,capture_output=True,text=True)
+    return subprocess.run(args,capture_output=True,text=True,timeout=10)
 
 def active_firewalld_zone(output: str) -> str | None:
     """Only one interface-bound zone with no source-specific routing is safe.
@@ -310,8 +310,14 @@ def open_ports(info: dict, ports: list[int], protocol: str = 'tcp') -> None:
         validate_port(port)
     ports=sorted(set(ports))
     if info["backend"]=="ufw":
+        if not info.get("managed"):
+            raise RuntimeError("UFW requires an active managed firewall")
+        # An inactive firewall is never enabled, including after confirmation.
+        state = run(["ufw", "status"])
+        if state.returncode or not re.search(r"^Status:\s+active\s*$", state.stdout, re.M | re.I):
+            raise RuntimeError("UFW is no longer active; no rules were added")
         for port in ports:
-            result=subprocess.run(["ufw","allow",str(port)+"/"+protocol])
+            result=subprocess.run(["ufw","allow",str(port)+"/"+protocol], timeout=10)
             if result.returncode: raise RuntimeError("UFW refused port "+str(port)+"/"+protocol)
         return
     if info["backend"]=="firewalld":
@@ -329,7 +335,7 @@ def open_ports(info: dict, ports: list[int], protocol: str = 'tcp') -> None:
                 command=["firewall-cmd","--zone",zone]
                 if permanent:command.append("--permanent")
                 command += ["--add-port",str(port)+"/"+protocol]
-                if subprocess.run(command).returncode:
+                if subprocess.run(command, timeout=10).returncode:
                     raise RuntimeError("firewalld refused port "+str(port)+"/"+protocol)
         return
     raise RuntimeError("Firewall backend is not safe for automatic modification")

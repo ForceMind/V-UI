@@ -45,7 +45,7 @@ COMMON_ASSETS = {
     'system_ops.py', 'ops_worker.py', 'release_tools.py', 'v-ui',
     'vui-source.zip', 'RELEASE.json', 'RELEASE_NOTES.md',
 }
-CODE_ASSETS = {'service_support.py', 'system_launcher.py', 'install_ops_control.py',
+CODE_ASSETS = {'firewall_support.py', 'service_support.py', 'system_launcher.py', 'install_ops_control.py',
                'system_ops.py', 'ops_worker.py', 'release_tools.py', 'v-ui', 'RELEASE.json'}
 SOURCE_MEMBERS = {
     'install.sh': 'install.sh', 'install_system.py': 'scripts/install_system.py',
@@ -358,7 +358,7 @@ def inspect_instance(verified, record):
 
 
 def destinations():
-    return {CONTROL / name: (name, 0o644) for name in ('system_ops.py', 'ops_worker.py', 'release_tools.py', *SOURCE_DEPENDENCIES)} | {
+    return {CONTROL / name: (name, 0o644) for name in ('system_ops.py', 'ops_worker.py', 'release_tools.py', 'firewall_support.py', *SOURCE_DEPENDENCIES)} | {
         ENTRY: ('v-ui', 0o755)}
 
 
@@ -448,13 +448,18 @@ def validate_existing(hashes, interpreter, manager, refresh, verified, *, missin
     receipt = load_json(read_file(RECEIPT, root=True, mode=0o644, limit=MAX_JSON)[0])
     expected = set(hashes) | {str(path) for path in paths} | set(missing_instance)
     dependencies = {str(CONTROL / name) for name in SOURCE_DEPENDENCIES}
-    # Explicit refresh may migrate either exact earlier closure: the original
-    # controller without proxy dependencies, or M1 without the data-owner helper.
-    # Every previously receipted byte must still match; no extras are adopted.
+    # Explicit refresh migrates only known complete historical closures. The
+    # pre-network controller lacks firewall_support; older closures may also
+    # lack the proxy dependencies or data-owner helper. Existing bytes must all
+    # still match their receipt; no arbitrary subset or unreceipted file is used.
+    firewall_dependency = {str(CONTROL / 'firewall_support.py')}
+    known_missing = (dependencies, {str(CONTROL / 'data_owner.py')}, firewall_dependency,
+                     dependencies | firewall_dependency,
+                     {str(CONTROL / 'data_owner.py')} | firewall_dependency)
     missing = (expected - set(receipt['files']) if isinstance(receipt, dict)
                and isinstance(receipt.get('files'), dict) else set())
     legacy = (refresh and isinstance(receipt, dict) and isinstance(receipt.get('files'), dict)
-              and missing in (dependencies, {str(CONTROL / 'data_owner.py')})
+              and missing in known_missing
               and set(receipt['files']) == expected - missing)
     if (not isinstance(receipt, dict) or set(receipt) != RECEIPT_KEYS
             or type(receipt.get('schema')) is not int or receipt['schema'] != 1

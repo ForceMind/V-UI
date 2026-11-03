@@ -10,8 +10,11 @@
 </style>
 <style>h1{display:flex;align-items:center;gap:10px}.vui-brand-image{display:block;flex:none}</style>
 <script src="/ui/js/account.js" defer></script>
+<link rel="stylesheet" href="/ui/css/shell.css">
+<script src="/ui/js/navigation.js"></script>
+<script src="/ui/js/shell.js" defer></script>
 </head>
-<body><main>
+<body data-vui-page="account"><main class="vui-account-main" id="vui-main">
 <h1><img class="vui-brand-image" src="/ui/brand/vui-icon.svg" alt="V-UI" width="42" height="42"><span aria-hidden="true">V-UI</span></h1><p class="muted" id="subtitle">管理员账户</p>
 <p id="message" role="status" aria-live="polite">正在检查登录状态…</p>
 <form id="login-form" hidden>
@@ -19,14 +22,13 @@
 <label for="login-password">密码</label><input id="login-password" type="password" autocomplete="current-password" maxlength="128" required>
 <button type="submit">登录面板</button>
 <details><summary>首次使用或忘记密码</summary>
-<p class="muted">没有默认账号密码。请在服务器的项目目录及 Python 环境中执行，下列命令会交互式询问密码：</p>
-<code>python -m app.admin create your_admin</code>
-<p class="muted">已有账号重置密码：</p><code>python -m app.admin set-password your_admin</code>
-<p class="muted">使用与面板相同的 VUI_DATA_DIR；不要将密码写进命令参数。</p>
+<p class="muted">全新安装会自动生成管理员用户名与密码，并在终端显示；升级保留已有账户。请使用安装时保存的凭据，没有通用默认密码。</p>
+<p class="muted">忘记密码时，在服务器上使用面板专用服务用户、活动版本的 Python 环境及相同的 VUI_DATA_DIR，交互重置已有账户：</p><code>python -m app.admin set-password your_admin</code>
+<p class="muted">将 your_admin 替换为实际用户名；不要把密码写入命令参数。请先核对当前服务的运行用户、Python 路径和数据目录，避免操作另一套账户数据。</p>
 </details>
 </form>
 <section id="account-panel" hidden>
-<p>已登录：<strong id="current-name"></strong></p>
+<h2>账户设置</h2><p>已登录：<strong id="current-name"></strong></p>
 <form id="profile-form">
 <label for="profile-name">用户名</label><input id="profile-name" autocomplete="username" minlength="3" maxlength="64" required>
 <label for="current-password">当前密码（修改时验证）</label><input id="current-password" type="password" autocomplete="current-password" maxlength="128" required>
@@ -34,7 +36,7 @@
 <p class="muted">保存会退出所有已登录设备，需要重新登录。</p>
 <button type="submit">保存并退出全部会话</button>
 </form>
-<div class="actions"><a href="/ui/">管理面板</a><a href="/workspace">分流与订阅</a><a href="/certificates">证书管理</a><button id="logout" type="button">退出登录</button></div>
+<div class="actions"><a href="/ui/#dashboard">返回总览</a><button id="logout" type="button">退出登录</button></div>
 </section>
 <p class="muted">会话最长一小时。管理员凭据与订阅令牌相互独立。</p>
 </main></body></html>

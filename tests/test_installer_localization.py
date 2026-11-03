@@ -178,17 +178,20 @@ class InstallerLocalizationTests(unittest.TestCase):
             self.assertNotIn('联系邮箱', terminal.output.getvalue())
             self.assertNotIn('CA 条款', terminal.output.getvalue())
 
-    def test_missing_firewall_ports_stop_without_confirmation_or_modification(self):
-        info = {'backend': 'ufw', 'managed': True, 'detail': 'UFW active'}
-        with patch.object(installer.firewall_support, 'detect', return_value=info), \
-             patch.object(installer.firewall_support, 'port_open', return_value=False), \
-             patch.object(installer.firewall_support, 'open_ports') as opened, \
-             patch.object(installer, 'controlling_terminal', side_effect=AssertionError('no firewall confirmation')), \
-             patch('sys.stdout', new_callable=io.StringIO) as output:
-            with self.assertRaisesRegex(installer.InstallError, '80/tcp, 8443/tcp'):
-                installer.firewall_preflight(self.args(), [8443, 80])
-            opened.assert_not_called()
-            self.assertIn('本机防火墙： UFW 已启用', output.getvalue())
+    def test_normal_install_skips_rule_inspection_and_all_firewall_prompts(self):
+        for choice in ('ask', 'no'):
+            with self.subTest(choice=choice), \
+                 patch.object(installer.firewall_support, 'detect') as detect, \
+                 patch.object(installer.firewall_support, 'port_open') as query, \
+                 patch.object(installer.firewall_support, 'open_ports') as opened, \
+                 patch.object(installer, 'controlling_terminal', side_effect=AssertionError('no firewall confirmation')), \
+                 patch('sys.stdout', new_callable=io.StringIO) as output:
+                result = installer.firewall_preflight(self.args(open_firewall=choice), [8443, 80, 10443])
+                self.assertIs(result['checked'], False)
+                detect.assert_not_called()
+                query.assert_not_called()
+                opened.assert_not_called()
+                self.assertEqual(output.getvalue(), '')
 
     def test_explicit_firewall_authorization_still_rechecks_precise_ports(self):
         info = {'backend': 'ufw', 'managed': True, 'detail': 'UFW active'}
@@ -202,7 +205,7 @@ class InstallerLocalizationTests(unittest.TestCase):
             opened.assert_called_once_with(info, [80, 8443])
             self.assertEqual(checked.call_count, 4)
 
-    def test_custom_rules_and_ambiguous_zone_warn_without_questions_or_changes(self):
+    def test_dryrun_custom_rules_and_ambiguous_zone_report_unknown_without_changes(self):
         fixtures = (
             ('nftables', 'custom nftables rules detected', '自定义 nftables'),
             ('iptables', 'custom iptables rules detected', '自定义 iptables'),
@@ -216,13 +219,13 @@ class InstallerLocalizationTests(unittest.TestCase):
                  patch.object(installer.firewall_support, 'open_ports') as opened, \
                  patch.object(installer, 'controlling_terminal', side_effect=AssertionError('no repeated confirmation')), \
                  patch('sys.stdout', new_callable=io.StringIO) as output:
-                result = installer.firewall_preflight(self.args(assume_external_ports_open=False), [80], [10443])
+                result = installer.firewall_preflight(self.args(dry_run=True, assume_external_ports_open=False), [80], [10443])
                 self.assertEqual(result['unknown'], [80])
                 self.assertEqual(result['unknown_udp'], [10443])
                 opened.assert_not_called()
                 self.assertIn(text, output.getvalue())
-                self.assertIn('已禁用自动修改', output.getvalue())
-                self.assertIn('云安全组或服务商防火墙未验证', output.getvalue())
+                self.assertIn('本机规则 unknown', output.getvalue())
+                self.assertNotIn('请手动放行', output.getvalue())
                 self.assertIn('80/tcp, 10443/udp', output.getvalue())
                 self.assertNotIn('[y/N', output.getvalue())
                 self.assertEqual(info['detail'], detail)
@@ -236,8 +239,8 @@ class InstallerLocalizationTests(unittest.TestCase):
              patch('sys.stdout', new_callable=io.StringIO) as output:
             installer.firewall_preflight(self.args(assume_external_ports_open=False), [80])
             opened.assert_not_called()
-            self.assertIn('云安全组或服务商防火墙未验证', output.getvalue())
-            self.assertIn('本机规则检测不代表公网可达', output.getvalue())
+            self.assertNotIn('请手动放行', output.getvalue())
+            self.assertEqual(output.getvalue(), '')
 
 
 if __name__ == '__main__':

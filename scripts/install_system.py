@@ -751,44 +751,56 @@ def firewall_description(info):
 
 
 def firewall_preflight(args, ports, udp_ports=None):
-    ports=sorted(set(ports))
-    udp_ports=sorted(set(udp_ports or []))
-    info=firewall_support.detect()
-    statuses={port:firewall_support.port_open(info,port) for port in ports}
-    udp_statuses={port:firewall_support.port_open(info,port,protocol='udp') for port in udp_ports}
-    missing=[port for port,value in statuses.items() if value is False]
-    unknown=[port for port,value in statuses.items() if value is None]
-    missing_udp=[port for port,value in udp_statuses.items() if value is False]
-    unknown_udp=[port for port,value in udp_statuses.items() if value is None]
+    """Optional local-rule inspection; ordinary installs rely on real readiness.
+
+    Declared node ports are planning inputs, not evidence of existing listeners.
+    Only --open-firewall yes authorizes changes; dry-run is always read-only.
+    """
+    ports = sorted(set(ports))
+    udp_ports = sorted(set(udp_ports or []))
+    if not args.dry_run and args.open_firewall != 'yes':
+        if udp_ports:
+            print('节点 UDP 预检声明：' + ', '.join(str(port) + '/udp' for port in udp_ports) +
+                  '；不会创建节点，也不会启用应用 UDP 转发。')
+        return {'checked': False, 'tcp_ports': ports, 'udp_ports': udp_ports}
+    info = firewall_support.detect()
+    statuses = {port: firewall_support.port_open(info, port) for port in ports}
+    udp_statuses = {port: firewall_support.port_open(info, port, protocol='udp') for port in udp_ports}
+    missing = [port for port, value in statuses.items() if value is False]
+    unknown = [port for port, value in statuses.items() if value is None]
+    missing_udp = [port for port, value in udp_statuses.items() if value is False]
+    unknown_udp = [port for port, value in udp_statuses.items() if value is None]
     def labels(tcp, udp):
-        return ', '.join([str(port)+'/tcp' for port in tcp]+[str(port)+'/udp' for port in udp])
-    result={'backend':info['backend'],'missing':missing,'unknown':unknown,
-            'tcp_ports':ports,'udp_ports':udp_ports,'missing_udp':missing_udp,'unknown_udp':unknown_udp}
-    print('本机防火墙：',firewall_description(info))
-    print('需要放行的入站端口：',labels(ports,udp_ports))
+        return ', '.join([str(port)+'/tcp' for port in tcp] + [str(port)+'/udp' for port in udp])
+    result = {'checked': True, 'backend': info['backend'], 'missing': missing, 'unknown': unknown,
+              'tcp_ports': ports, 'udp_ports': udp_ports, 'missing_udp': missing_udp, 'unknown_udp': unknown_udp,
+              'allowed': [port for port, value in statuses.items() if value is True],
+              'allowed_udp': [port for port, value in udp_statuses.items() if value is True]}
+    print('本机防火墙：', firewall_description(info))
+    print('声明的入站端口（不代表已创建节点）：', labels(ports, udp_ports))
     if udp_ports:
         print('显式节点 UDP 端口用于 QUIC 传输；此操作不会创建节点，也不会启用应用 UDP 转发。')
+    for label, tcp, udp in (('allowed', result['allowed'], result['allowed_udp']),
+                            ('blocked', missing, missing_udp), ('unknown', unknown, unknown_udp)):
+        if tcp or udp:
+            print('本机规则 ' + label + '：', labels(tcp, udp))
     if args.dry_run:
+        print('外部可达性与云规则：unknown；本次只读检查不验证公网入站。')
         return result
     if missing or missing_udp:
-        choice=args.open_firewall
-        if choice!='yes':
-            raise InstallError('本机防火墙尚未放行：'+labels(missing,missing_udp)+
-                '。请先手动放行后重试；仅 UFW/firewalld 可显式使用 --open-firewall yes 授权精确放行。')
-        if info['backend'] not in ('ufw','firewalld') or not info.get('managed'):
-            raise InstallError('当前防火墙规则不支持安全自动修改；请手动放行：'+labels(missing,missing_udp))
+        if info['backend'] not in ('ufw', 'firewalld') or not info.get('managed'):
+            raise InstallError('当前防火墙规则不支持安全自动修改；未修改端口：' + labels(missing, missing_udp))
         try:
-            if missing:firewall_support.open_ports(info,missing)
-            if missing_udp:firewall_support.open_ports(info,missing_udp,protocol='udp')
-        except RuntimeError as exc:raise InstallError('防火墙修改失败：'+str(exc)) from None
-        if (any(firewall_support.port_open(info,p) is not True for p in missing)
-                or any(firewall_support.port_open(info,p,protocol='udp') is not True for p in missing_udp)):
+            if missing:
+                firewall_support.open_ports(info, missing)
+            if missing_udp:
+                firewall_support.open_ports(info, missing_udp, protocol='udp')
+        except RuntimeError:
+            raise InstallError('防火墙修改未完成；请使用网络/防火墙诊断核对所选端口。') from None
+        if (any(firewall_support.port_open(info, port) is not True for port in missing)
+                or any(firewall_support.port_open(info, port, protocol='udp') is not True for port in missing_udp)):
             raise InstallError('无法验证防火墙修改结果')
-    if unknown or unknown_udp:
-        print('无法验证防火墙规则或实际入站区域，已禁用自动修改。')
-        print('请手动放行端口：',labels(unknown,unknown_udp))
-    print('云安全组或服务商防火墙未验证；请按实际入站方向核对并放行：',labels(ports,udp_ports))
-    print('本机规则检测不代表公网可达；安装器不会修改 SSH、云安全组或未知防火墙。')
+        print('已核验所选端口的本机规则。')
     return result
 
 
@@ -1022,10 +1034,16 @@ def install_verified(args, snapshot, archive, meta):
         check_port(80)
         if ipv6: check_port(80,'::')
         check_port(args.port,args.bind)
-        if args.node_port not in (80,args.port):check_port(args.node_port,'0.0.0.0')
-        # The default sing-box inbound listens on ::. Its IPv6-only conflicts
-        # are invisible to an IPv4 probe, on both systemd and OpenRC hosts.
-        if ipv6: check_port(args.node_port,'::')
+        # This is a reference declaration: installation creates no TCP node.
+        # Only an explicitly requested dry-run probes it, without reserving it
+        # or making a node conflict a panel-install failure.
+        if args.dry_run and args.node_port not in (80, args.port):
+            for bind in ('0.0.0.0', '::') if ipv6 else ('0.0.0.0',):
+                try:
+                    check_port(args.node_port, bind)
+                except InstallError:
+                    print('声明节点 TCP 端口 ' + str(args.node_port) + '/tcp（' + bind +
+                          '）当前不可绑定；仅供参考，不创建或预留节点端口。')
         # UDP and TCP can share a number, but each needs its own bind probe.
         # Do not infer QUIC ports from the default TCP node port.
         for port in args.node_udp_port:

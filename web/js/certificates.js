@@ -25,7 +25,7 @@
     async function api(path, method='GET', data) {
         const response=await fetch('/api/certificates'+path,{method,credentials:'same-origin',cache:'no-store',
             headers:{'X-VUI-Request':'1',...(data===undefined?{}:{'Content-Type':'application/json'})},body:data===undefined?undefined:JSON.stringify(data)});
-        if(response.status===401){if(active)location.replace('/login');throw new Error('登录已过期');}
+        if(response.status===401){if(active)globalThis.VUI_NAV ? VUI_NAV.replaceLogin() : location.replace('/login');throw new Error('登录已过期');}
         const payload=await response.json();
         if(!response.ok)throw new Error(text(typeof payload.detail==='string'?payload.detail:'输入格式不正确'));
         return payload;

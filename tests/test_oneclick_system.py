@@ -109,12 +109,17 @@ class OneClickSystemTests(unittest.TestCase):
                                '--port',str(port),'--node-port',str(node_port)]
             if not automatic_credentials:configured_args.extend(['--admin',admin_username])
             if exercise_confirmations:
-                # Initial installation exercises actual y/n consent below.
-                # Same unchanged loopback fixture is explicitly acknowledged on
-                # configured repeat/upgrade; no real cloud ingress is claimed.
+                # Legacy invocation remains accepted; ordinary installation
+                # must not request firewall or cloud confirmations.
                 configured_args.append('--assume-external-ports-open')
             online = None
-            if published_version:
+            published_upgrade = None
+            if os.getenv('VUI_PUBLISHED_UPGRADE_SOURCE'):
+                self.assertIsNone(gate, 'Public old-to-new upgrade requires its own empty hosted runner')
+                from published_upgrade_helpers import PublishedUpgrade
+                published_upgrade = PublishedUpgrade(self,source,work,certificate_args,configured_args)
+                online = published_upgrade.old
+            elif published_version:
                 self.assertIsNone(gate, 'Published online acceptance is separate from the resource fixture')
                 if os.getenv('VUI_SETUP_INSTALL') == '1':
                     online = setup_commands(source,published_version,os.environ['VUI_RELEASE_COMMIT'],
@@ -134,6 +139,8 @@ class OneClickSystemTests(unittest.TestCase):
                     *configured_args,*certificate_args])
             repeat_cmd = online['repeat'] if online else cmd
             upgrade_cmd = online['upgrade'] if online else [*cmd,'--upgrade']
+            if published_upgrade:
+                upgrade_cmd = published_upgrade.new['upgrade']
             sudoers_before = sudo_policy_snapshot() if online else None
             if online:
                 self.assertNotIn('/etc/sudoers.d/v-ui',sudoers_before)
@@ -276,8 +283,9 @@ class OneClickSystemTests(unittest.TestCase):
                 self.assertFalse(product_changed_before_valid_domain,clean[-8000:])
                 self.assertGreaterEqual(clean.count('请重新输入'),3,clean[-8000:])
             if exercise_confirmations:
-                self.assertGreaterEqual(confirmations['你是否已在云安全组或上游防火墙中放行 '],2,clean[-8000:])
-                self.assertIn('请输入 y/yes 或 n/no',clean)
+                self.assertTrue(all(count == 0 for count in confirmations.values()), clean[-8000:])
+                self.assertNotIn('云安全组或服务商防火墙未验证', clean)
+                self.assertNotIn('请手动放行端口', clean)
             if automatic_credentials:
                 self.assertFalse(sent_first or sent_second,'Automatic credentials must not request a password')
                 self.assertNotIn('管理员用户名 [admin]',clean)
@@ -493,12 +501,14 @@ class OneClickSystemTests(unittest.TestCase):
             self.assertIsNone(saved_proxy['active'])
             self.assertTrue(saved_proxy['settings']['local_password_set'])
             self.assertNotIn(b'Fake-upgrade-password!', raw)
+            if published_upgrade:
+                published_upgrade.before(release,api,private_values)
             # Rerunning with --upgrade checks/stages and makes a stopped backup.
             upgraded=(configured_setup_with_tty(upgrade_cmd,bootstrap_action='2',private_values=private_values) if os.getenv('VUI_SETUP_INSTALL') == '1' else
                       subprocess.run(upgrade_cmd,capture_output=True,text=True,timeout=300 if published_version else 120))
             if gate:
                 gate.installer_receipt('same_bundle_upgrade', upgraded.stdout)
-            self.assertEqual(upgraded.returncode,0,(upgraded.stdout+upgraded.stderr)[-15000:])
+            self.assertEqual(upgraded.returncode,0,safe_output(upgraded.stdout+upgraded.stderr)[-15000:])
             if online:
                 global_menu_check(self,{**os.environ,'PYTHONDONTWRITEBYTECODE':'1'},exercise_start_stop=False)
             self.assertEqual(api('/api/auth/me')[0],200)
@@ -553,6 +563,16 @@ class OneClickSystemTests(unittest.TestCase):
             else:self.fail('Managed panel failed restart')
             check_uid('v-ui.service')
             self.assertTrue(json.loads(api('/api/certificates/capabilities')[1])['worker_running'])
+            if published_upgrade:
+                # A surviving cookie is separate from fresh password validation.
+                published_upgrade.after(api)
+                cookie=''
+                wait_for_managed_https(lambda budget:api('/api/certificates',timeout=budget,readiness=True),
+                                       readiness_diagnostics,private_values=private_values)
+                published_upgrade.public_subscription(api)
+                self.assertEqual(api('/api/auth/login',{'username':admin_username,'password':password})[0],200)
+                self.assertEqual(api('/api/auth/me')[0],200)
+                global_menu_check(self,{**os.environ,'PYTHONDONTWRITEBYTECODE':'1'},exercise_start_stop=True)
             if gate:
                 def login_again():
                     self.assertEqual(api('/api/auth/login', {'username': admin_username, 'password': password})[0], 200)
@@ -641,7 +661,7 @@ class OneClickSystemTests(unittest.TestCase):
             if domain_retry:
                 print('Domain input retry: blank / URL-with-port-and-path / invalid label rejected before email and product installation; uppercase trailing-dot domain accepted and canonicalized; real installed service, global v-ui and upgrade verified')
             if exercise_confirmations:
-                print('Chinese installer confirmation: invalid reply re-prompted, short y accepted for cloud/upstream confirmation; temporary loopback fixture only, not proof of real cloud ingress')
+                print('Legacy installer invocation: no firewall/cloud confirmation or unknown warning; real local TLS readiness checked, public ingress not inferred')
             print('One-command systemd: real sudo setup / non-root workers / private state / HTTPS / fd-passed HTTP-01 port80 / auth / repeat protection / upgrade backup / restart OK')
 
 if __name__=='__main__':unittest.main()

@@ -163,7 +163,7 @@ class ProxyPageStaticTests(unittest.TestCase):
             self.assertLess(scripts.index('vendor/axios.js'), scripts.index('js/app.js'))
             self.assertFalse(any('://' in source for source in scripts))
             for source in scripts:
-                self.assertTrue((payload / 'web' / source).is_file(), source)
+                self.assertTrue((payload / 'web' / (source.removeprefix('/ui/'))).is_file(), source)
             for path in ('main.py', 'web/proxy.html', 'web/js/proxy.js', 'web/js/account.js'):
                 self.assertEqual((payload / path).read_bytes(), (ROOT / path).read_bytes())
         self.assertEqual((ROOT / 'web/index.html').read_bytes(), original)
@@ -223,8 +223,10 @@ class ProxyPageRouteTests(unittest.TestCase):
             self.assertNotIn(UUID, response.text)
         index = (ROOT / 'web/index.html').read_text()
         script = (ROOT / 'web/js/app.js').read_text()
-        self.assertIn('index="proxy"', index)
-        self.assertIn("if (key === 'proxy') { location.assign('/proxy'); return; }", script)
+        self.assertIn('/ui/js/navigation.js', index)
+        navigation = (ROOT / 'web/js/navigation.js').read_text()
+        self.assertIn("['proxy', '/proxy']", navigation)
+        self.assertIn('VUI_NAV', script)
 
     def test_ci_uses_exact_head_and_explicit_non_skipping_browser_gate(self):
         import yaml
@@ -319,10 +321,10 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         page.locator('#login-name').fill('tester')
         page.locator('#login-password').fill(PASSWORD)
         page.get_by_role('button', name='登录面板', exact=True).click()
-        page.wait_for_url('**/ui/')
+        page.wait_for_url('**/ui/#dashboard')
         # Wait for the real dashboard to mount, rather than navigating away
         # before its scripts execute. Keep every login error/request recorded.
-        expect(page.get_by_role('menuitem', name='代理与中转', exact=True)).to_be_visible()
+        expect(page.locator('.vui-nav-link[data-nav-id="proxy"]')).to_have_attribute('href', '/proxy')
         self.assertTrue(page.evaluate("typeof axios === 'function' && typeof Vue.createApp === 'function'"))
         self.assertEqual(self.external, [])
         self.assertEqual(self.errors, [])
@@ -339,13 +341,16 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
     def open_inbound_view(self, page=None):
         """Navigate the mounted dashboard through its real menu and observe its GET.
 
-        Changing only /ui/#inbounds is same-document navigation after login;
-        it does not run Vue setup again or select a new dashboard view.
+        The shared link selects /ui/#inbounds without rebuilding Vue setup.
+        Open the mobile drawer before activating the real navigation link.
         """
         page = page or self.page
         with page.expect_response(lambda response: urlparse(response.url).path == '/api/inbounds'
                                   and response.request.method == 'GET') as loaded:
-            page.get_by_role('menuitem', name='入站节点', exact=True).click()
+            if page.viewport_size['width'] <= 800:
+                page.locator('.vui-menu-toggle').click()
+                expect(page.locator('.vui-sidebar')).to_have_css('transform', 'matrix(1, 0, 0, 1, 0, 0)')
+            page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
         self.assertEqual(loaded.value.status, 200, loaded.value.text())
         return page
 
@@ -718,7 +723,7 @@ rules:
         page.locator('#import-content').fill(URI)
         self.context.clear_cookies()
         page.locator('#preview-import').click()
-        page.wait_for_url('**/login')
+        page.wait_for_url('**/login?return=proxy')
         self.login(page)
         page.goto(self.base + '/proxy')
         expect(page.locator('#proxy-workspace')).to_be_visible()
@@ -1185,7 +1190,7 @@ rules:
         self.context.route('**/api/auth/me', lambda route: route.fulfill(status=401, json={'detail': 'expired'}))
         self.context.route('**/api/inbounds/2', lambda route: route.fulfill(status=401, json={'detail': 'expired'}))
         editor.get_by_role('button', name='保存并应用', exact=True).click()
-        page.wait_for_url('**/login')
+        page.wait_for_url('**/login?return=inbounds')
         expect(page.locator('#inbound-routing-mode')).to_have_count(0)
         self.assert_private()
 

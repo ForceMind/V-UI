@@ -54,26 +54,26 @@ def assert_dashboard_status_recovery(case):
 
     def unknown_system():
         known('system-status-tag', False)
-        expect(page.locator('#system-status-tag')).to_have_text('System Unknown')
+        expect(page.locator('#system-status-tag')).to_have_text('系统状态未确认')
         for identifier in ('cpu-status', 'memory-status'):
             known(identifier, False)
             expect(page.locator('#' + identifier)).to_contain_text('状态未确认')
             expect(page.locator('#' + identifier + ' .el-progress')).to_have_count(0)
-        expect(page.locator('#cpu-status')).not_to_contain_text('2 Cores')
+        expect(page.locator('#cpu-status')).not_to_contain_text('2 核')
         expect(page.locator('#memory-status')).not_to_contain_text('MiB')
 
     def unknown_cores():
         for prefix, label in (('xray', 'Xray'), ('singbox', 'sing-box')):
             known(prefix + '-status-tag', False)
-            expect(page.locator('#' + prefix + '-status-tag')).to_have_text(label + ' Unknown')
+            expect(page.locator('#' + prefix + '-status-tag')).to_have_text(label + ' 状态未确认')
             known(prefix + '-core-status', False)
             expect(page.locator('#' + prefix + '-core-status')).to_contain_text('状态未确认')
             expect(page.locator('#' + prefix + '-core-status')).not_to_contain_text(
-                re.compile('Installed|Missing|Running|Stopped'))
+                re.compile('已安装|未安装|运行中|已停止'))
 
     def metrics(cpu, memory):
         known('system-status-tag')
-        expect(page.locator('#system-status-tag')).to_have_text('Running on Synthetic Linux')
+        expect(page.locator('#system-status-tag')).to_have_text('运行系统：Synthetic Linux')
         for identifier, percentage in (('cpu-status', cpu), ('memory-status', memory)):
             known(identifier)
             expect(page.locator('#' + identifier).get_by_role('progressbar')).to_have_attribute(
@@ -101,16 +101,16 @@ def assert_dashboard_status_recovery(case):
         held.pop(core_path).fulfill(json=cores)
         known('cpu-status')
         metrics(37, 64)
-        expect(page.locator('#xray-status-tag')).to_have_text('Xray Running')
-        expect(page.locator('#singbox-core-status')).to_contain_text('Installed')
-        expect(page.locator('#singbox-core-status')).to_contain_text('Stopped')
+        expect(page.locator('#xray-status-tag')).to_have_text('Xray 运行中')
+        expect(page.locator('#singbox-core-status')).to_contain_text('已安装')
+        expect(page.locator('#singbox-core-status')).to_contain_text('已停止')
 
         # Natural existing 3s poll, no injected timer or restart action.
         modes[system_path] = 'fail'
         known('cpu-status', False, timeout=10000)
         unknown_system()
         known('xray-status-tag')
-        expect(page.locator('#xray-status-tag')).to_have_text('Xray Running')
+        expect(page.locator('#xray-status-tag')).to_have_text('Xray 运行中')
         known('singbox-core-status')
 
         # System recovery cannot turn a failed independent core read healthy.
@@ -131,9 +131,9 @@ def assert_dashboard_status_recovery(case):
         known('xray-status-tag', timeout=15000)
         for prefix, label in (('xray', 'Xray'), ('singbox', 'sing-box')):
             known(prefix + '-core-status')
-            expect(page.locator('#' + prefix + '-status-tag')).to_have_text(label + ' Stopped')
-            expect(page.locator('#' + prefix + '-core-status')).to_contain_text('Missing')
-            expect(page.locator('#' + prefix + '-core-status')).to_contain_text('Stopped')
+            expect(page.locator('#' + prefix + '-status-tag')).to_have_text(label + ' 已停止')
+            expect(page.locator('#' + prefix + '-core-status')).to_contain_text('未安装')
+            expect(page.locator('#' + prefix + '-core-status')).to_contain_text('已停止')
         metrics(0, 0)
         case.assertGreaterEqual(reads.count(system_path), 3)
         case.assertGreaterEqual(reads.count(core_path), 3)

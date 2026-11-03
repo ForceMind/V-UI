@@ -102,11 +102,12 @@ def assert_inbound_local_search(case):
             case.assertGreaterEqual(control['left'], geometry['toolbar']['left'] - 1)
             case.assertLessEqual(control['right'], geometry['toolbar']['right'] + 1)
             case.assertLessEqual(control['scroll'], control['client'] + 1)
-        # Keep the already-established navigation modes; no drawer or new state.
-        expect(page.locator('.layout-container')).to_have_css(
-            'flex-direction', 'column' if width < 768 else 'row')
-        if width >= 768:
-            expect(page.locator('.aside-menu')).to_have_css('width', '220px')
+        if width <= 800:
+            expect(page.locator('.vui-sidebar')).to_have_attribute('inert', '')
+            expect(page.locator('.vui-menu-toggle')).to_be_visible()
+            expect(page.locator('.vui-menu-toggle')).to_have_attribute('aria-expanded', 'false')
+        else:
+            expect(page.locator('.vui-sidebar')).to_have_css('width', '220px')
 
     create('Cloud ALPHA 北京', 10471, uuids[0])
     selected = create('Literal [a-z].* Beta', 10472, uuids[1])
@@ -184,15 +185,17 @@ def assert_inbound_local_search(case):
         case.assertFalse(page.evaluate('original => ' + STATE + '.inbounds === original', original))
         original.dispose()
         original = page.evaluate_handle('() => ' + STATE + '.inbounds')
-        page.get_by_role('menuitem', name='系统状态', exact=True).click()
+        if page.viewport_size['width'] <= 800:
+            page.locator('.vui-menu-toggle').click()
+            expect(page.locator('.vui-sidebar')).to_have_css('transform', 'matrix(1, 0, 0, 1, 0, 0)')
+        page.locator('.vui-nav-link[data-nav-id="dashboard"]').click()
         case.open_inbound_view(page)
         expect(search).to_have_value(' ALPHA ')
         assert_view(matching(inventory, ' ALPHA '), inventory)
 
         # Reload starts fresh memory; there is no query persistence mechanism.
         page.reload()
-        expect(page.get_by_role('menuitem', name='入站节点', exact=True)).to_be_visible()
-        case.open_inbound_view(page)
+        expect(search).to_be_visible()
         expect(search).to_have_value('')
         assert_view(inventory, inventory)
         case.assertEqual(page.url, initial_url)
