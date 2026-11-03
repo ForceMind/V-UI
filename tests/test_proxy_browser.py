@@ -349,6 +349,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                                   and response.request.method == 'GET') as loaded:
             if page.viewport_size['width'] <= 800:
                 page.locator('.vui-menu-toggle').click()
+                expect(page.locator('.vui-sidebar')).to_have_css('transform', 'matrix(1, 0, 0, 1, 0, 0)')
             page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
         self.assertEqual(loaded.value.status, 200, loaded.value.text())
         return page

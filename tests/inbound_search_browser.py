@@ -187,6 +187,7 @@ def assert_inbound_local_search(case):
         original = page.evaluate_handle('() => ' + STATE + '.inbounds')
         if page.viewport_size['width'] <= 800:
             page.locator('.vui-menu-toggle').click()
+            expect(page.locator('.vui-sidebar')).to_have_css('transform', 'matrix(1, 0, 0, 1, 0, 0)')
         page.locator('.vui-nav-link[data-nav-id="dashboard"]').click()
         case.open_inbound_view(page)
         expect(search).to_have_value(' ALPHA ')

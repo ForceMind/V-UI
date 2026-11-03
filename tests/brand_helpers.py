@@ -182,6 +182,7 @@ def check_page_brand(page, base, *, mobile=False):
     drawer_opened = shell_active and page.viewport_size['width'] <= 800 and page.locator('.vui-menu-toggle').get_attribute('aria-expanded') == 'false'
     if drawer_opened:
         page.locator('.vui-menu-toggle').click()
+        expect(page.locator('.vui-sidebar')).to_have_css('transform', 'matrix(1, 0, 0, 1, 0, 0)')
     logo = page.locator('.vui-shell-brand img.vui-brand-image' if shell_active else 'main img.vui-brand-image')
     expect(logo).to_have_count(1)
     expect(logo).to_have_attribute('alt', 'V-UI')

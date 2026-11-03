@@ -268,6 +268,7 @@ def assert_dashboard_responsive_layout(case):
         # Every existing item is reachable by ordinary vertical scrolling.
         if width <= 800:
             page.locator('.vui-menu-toggle').click()
+            expect(page.locator('.vui-sidebar')).to_have_css('transform', 'matrix(1, 0, 0, 1, 0, 0)')
         menus = page.locator('.vui-nav-link[data-nav-id]')
         case.assertEqual(menus.count(), 12)
         for item in menus.all():
@@ -330,6 +331,7 @@ def assert_dashboard_responsive_layout(case):
 
         page.set_viewport_size({'width': 390, 'height': 844})
         page.locator('.vui-menu-toggle').click()
+        expect(page.locator('.vui-sidebar')).to_have_css('transform', 'matrix(1, 0, 0, 1, 0, 0)')
         proxy_menu = page.locator('.vui-nav-link[data-nav-id="proxy"]')
         proxy_menu.scroll_into_view_if_needed()
         in_viewport(proxy_menu, 'proxy menu')
