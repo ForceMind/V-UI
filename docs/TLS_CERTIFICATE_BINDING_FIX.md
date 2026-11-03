@@ -36,3 +36,11 @@
 两个worker分别负责本版严格门禁/版本与公开15升级验收，root集成文档、独审、准确候选/dev/main、公开和短入口；不递归派工。升级保留原14用例、在同job复用受验kit添加15基线的真实安装→升级，精确核config、root receipt、账户/密码/节点/订阅/证书及手工TLS路径/未绑定状态。此新增整轮公共下载与systemd验收预留10分钟，将job timeout从35调到45，非重复构建。
 
 本地发布器62项合成回归、升级helper7项、AST/文档/差异检查通过；short contract本机缺PyYAML，留Actions不安装依赖。构建/实际安装/核心仅Actions，浏览器未验证，不操作用户VPS。当前16尚未公开；准确候选/dev/main通过后人工晋升同源制品，公开后核19资产及installer/完整SHA256SUMS真实摘要，再另切setup和short-install冻结源并验实际main短命令。最终准确证据集中承载PR，避免回写自身SHA造成循环提交。
+
+## v0.4.16 已公开与短入口后续
+
+发布候选ee11180独审绑定并完成九组/12jobs；首次oneclick旧14匿名下载连续HTTP500、7.734秒前交互未开始，单次原样job重跑attempt2成功，其他八组attempt1。重跑完整14/15真实保数据升级与15手工TLS未绑定editor保持通过，未改源码或放宽校验。PR111普通merge至dev c01e377，tree与候选相同；dev push/PR112共18组24jobs全attempt1通过后，PR112普通合main18fe631，tree仍相同。准确main自身九组12jobs全attempt1通过，固定真实核心及两旧版升级必需步骤均success，仅12明确browser步骤skip。
+
+人工发布run41702750324成功，从准确main `18fe631bcf69b68425b454db1795a101e0378842` 公开v0.4.16（19资产）。匿名回读tag、所有asset digest及3个小文本实字节；installer SHA256 `8427e41c1a3da2fb01353e83c539a786ada4f964f312853d03392dd21bf1f7a7`，完整SHA256SUMS文件SHA256 `a62b7e278d281bd0f8e15a8eb21be493d1c4f9542246e4f4e530424385e03b5c`。旧15资产ID/大小/digest与发布前快照一致，不在本机下载Linux包。发布后匿名安装run41703160250已派发，不预填通过。
+
+当前引导批次仅切setup版本/两个已核摘要、short-install冻结源及对应测试/说明。应用、install.sh、VERSION、core/runtime依赖和发布门禁均无变化，公开资产保持冻结；必须独审与本批准确候选/dev/main及实际main原始URL短命令通过后交付。浏览器未验证，原配置数据与用户VPS保持。

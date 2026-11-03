@@ -1,6 +1,6 @@
 ## **v0.4.16** TLS已有证书自动绑定
 
-新增TLS唯一适用证书默认选、多张手选，支持Xray VLESS RAW/TCP TLS托管绑定和续期，保留既有配置数据。当前已批准发布准备，公开状态以官方Release为准；[统一记录](TLS_CERTIFICATE_BINDING_FIX.md)保留准确资格和旧失败。构建与真实安装仅Actions，浏览器未验证。
+新增TLS唯一适用证书默认选、多张手选，支持Xray VLESS RAW/TCP TLS托管绑定和续期，保留既有配置数据。已从准确main `18fe631bcf69b68425b454db1795a101e0378842` [公开发布](https://github.com/ForceMind/V-UI/releases/tag/v0.4.16)，19项资产及真实摘要已核验；[统一记录](TLS_CERTIFICATE_BINDING_FIX.md)保留准确资格和旧失败。构建与真实安装仅Actions，浏览器未验证。
 
 ## v0.4.15 统一界面与安装流程
 
