@@ -2,6 +2,8 @@
 
 ## 2026-11-04 v0.4.16 发布（已批准）
 
+v0.4.16现已从准确main `18fe631bcf69b68425b454db1795a101e0378842` 公开（19资产），匿名tag/所有asset digest及installer/完整SHA256SUMS真实摘要已核；旧15资产ID/大小/digest未变。当前只切setup和short-install冻结源并验自己的候选/dev/main与真实main URL，应用/版本/发布器/旧tag资产保持冻结，不重新发布覆盖。浏览器未验证，不改用户VPS；最终资格见承载PR和统一记录。
+
 用户明确批准PR111转Ready、正常dev→main合并、公开v0.4.16及更新短入口。冻结产品批准基线26e7bdd7f258f6ddf025291d5b6d86b71efebbe5（独审、九组/12jobs及实际Xray TLS生命周期通过）；其后仅本版版本/严格发布门禁/公开15保数据升级验收与说明。保留原14升级检查和已公开资产。所有构建/真实核心/安装只Actions、不browser，不修改用户VPS或真实CA授权；准确候选/dev/main各自验收后仅晋升同源受验制品。公开后核真实摘要才另切短入口，应用/旧tag/资产不可覆盖。统一记录沿用docs/TLS_CERTIFICATE_BINDING_FIX.md，下方旧“未授权发布”仅此前阶段快照。
 
 ## 2026-11-04 TLS 已有证书自动绑定修复
