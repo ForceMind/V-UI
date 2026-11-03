@@ -87,6 +87,10 @@ class OneClickSystemTests(unittest.TestCase):
             self.assertFalse(os.path.lexists(path),'Empty installer runner required: '+str(path))
         from scripts.low_resource_root import optional_gate
         gate = optional_gate()
+        if startup_wait_fix and gate is None:
+            self.assertEqual(os.getenv('GITHUB_ACTIONS'),'true')
+            self.assertEqual(os.getenv('RUNNER_ENVIRONMENT'),'github-hosted')
+            self.assertEqual(os.getenv('GITHUB_REPOSITORY'),'ForceMind/V-UI')
         with ExitStack() as stack:
             work = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix='vui-system-test-')))
             ca, cert, key = certificate_files(work, 'installer')
@@ -155,8 +159,6 @@ class OneClickSystemTests(unittest.TestCase):
                 # This fixture belongs exclusively to the empty GitHub-hosted
                 # runner. It changes systemd scheduling, never verified payload
                 # bytes or a production installer environment/argument.
-                self.assertEqual(os.getenv('GITHUB_ACTIONS'),'true')
-                self.assertEqual(os.getenv('RUNNER_ENVIRONMENT'),'github-hosted')
                 for lookup in (pwd.getpwnam,grp.getgrnam):
                     with self.assertRaises(KeyError):lookup('v-ui')
                 self.assertFalse(os.path.lexists(fixture_root))

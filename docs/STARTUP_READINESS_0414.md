@@ -27,3 +27,5 @@
 实现阶段：15项startup预算/状态/真实HTTPResponse慢头解析合成，加恢复、服务控制、交互既有检查，共48项通过；1项既有SQLAlchemy绑定恢复测试因本地未安装依赖未执行，留完整Actions，不安装本机依赖。五个实现/测试文件及新发布门禁已独立静态审查，无剩余确定阻断；候选提交身份和真实Linux结果仍待分别绑定。
 
 真实CI fixture仅在产品>=0.4.14、GitHub hosted/本仓库/显式安装测试/非低资源/空账号组及无预存fixture路径时创建root-owned dropin。systemd面板异步提交后ExecStartPre12秒实际落入health预算；升级演练one-shot exit23和sleep130（TimeoutStartSec150）验证提前失败/120秒截止、诊断先于恢复、配置指针和会话/代理数据保持。应用包和冻结启动器不改；公开0.4.13用例不启这些新fixture。真实结果尚待Actions，不把合成或静态审查称为真实安装通过。
+
+独审绑定首提交7c8637d时发现CI fixture缺本仓库断言（已有hosted判定但离线路径可绕过旧helper的repo gate）。已将GITHUB_ACTIONS/RUNNER_ENVIRONMENT/GITHUB_REPOSITORY三重检查放到ExitStack及cleanup注册之前，拒绝时不进行fixture写入或清理。生产逻辑未改，首提交尚未创建PR/触发完整验收，不授予资格。
