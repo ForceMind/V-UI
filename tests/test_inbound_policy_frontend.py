@@ -223,12 +223,16 @@ class InboundPolicyMarkupTests(unittest.TestCase):
             self.assertNotIn('v-if', note['attrs'])
             self.assertNotIn('v-show', note['attrs'])
         subscriptions = html[html.index("<div v-if=\"currentView === 'subscriptions'\">"):
-                             html.index("<div v-if=\"currentView === 'site'\">")]
+                             html.index("</el-main>")]
         share = html[html.index('<el-dialog v-model="showQrDialog"'):
                      html.index('</el-dialog>', html.index('<el-dialog v-model="showQrDialog"'))]
         self.assertIn('id="subscription-routing-capability"', subscriptions)
         self.assertIn('id="share-routing-capability"', share)
         self.assertIn(':value="qrLink" readonly', share)
+        live = Notes()
+        live.feed((ROOT / 'web/workspace.html').read_text())
+        self.assertEqual(live.notes['subscription-routing-capability']['text'], expected)
+        self.assertEqual(live.notes['subscription-routing-capability']['attrs']['role'], 'note')
 
 
 if __name__ == '__main__':

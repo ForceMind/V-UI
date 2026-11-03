@@ -107,6 +107,9 @@ class ShellMarkupTests(unittest.TestCase):
         self.assertIn('[hidden]{display:none!important}', css)
         self.assertIn('overflow-x:auto', css)
         self.assertIn('min-height:44px', css)
+        user = re.search(r'\.vui-current-user\{([^}]+)\}', css).group(1)
+        for rule in ('min-width:0', 'max-width:100%', 'overflow-wrap:anywhere'):
+            self.assertIn(rule, user)
 
 
 if __name__ == '__main__':

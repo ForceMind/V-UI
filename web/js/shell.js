@@ -29,7 +29,7 @@
     chrome.innerHTML = `
         <a class="vui-skip" href="#vui-main">跳到主要内容</a>
         <aside id="vui-sidebar" class="vui-sidebar" aria-label="主导航">
-            <a class="vui-shell-brand" href="/ui/#dashboard"><img src="/ui/brand/vui-icon.svg" width="32" height="32" alt=""><span>V-UI<small>管理控制台</small></span></a>
+            <a class="vui-shell-brand" href="/ui/#dashboard"><img class="vui-brand-image" src="/ui/brand/vui-icon.svg" width="32" height="32" alt="V-UI"><span aria-hidden="true">V-UI<small>管理控制台</small></span></a>
             <button class="vui-drawer-close" type="button" aria-label="关闭导航">关闭导航 ×</button>
             <nav>${groups.map(([label, links]) => `<div class="vui-nav-group">${label}</div>${links.map(([id, title, href]) => `<a class="vui-nav-link" data-nav-id="${id}" href="${href}">${title}</a>`).join('')}`).join('')}</nav>
             <div class="vui-shell-foot">配置保存与实际线路验收分开<br>敏感内容仅在授权后展示</div>

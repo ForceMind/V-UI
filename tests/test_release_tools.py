@@ -18,7 +18,7 @@ from unittest.mock import patch
 import zipfile
 from app import release_tools as tools
 from scripts.vendor_frontend import extract_selected
-from brand_helpers import BRAND_MEMBERS, FAVICON, BrandHTML, parse_svg
+from brand_helpers import BRAND_MEMBERS, FAVICON, BrandHTML, page_brand_markup, parse_svg
 
 
 class ReleaseToolsTests(unittest.TestCase):
@@ -293,7 +293,7 @@ class ReleaseToolsTests(unittest.TestCase):
         # Exercise the actual prepare() transformation: CDN localization must
         # retain all local favicon/brand consumers, including the dashboard.
         for name in ('index.html', 'account.html', 'workspace.html', 'certificates.html'):
-            markup = BrandHTML((packed/'web'/name).read_text())
+            markup = page_brand_markup(packed / 'web', name)
             self.assertEqual([item.get('href') for item in markup.favicons], [FAVICON])
             self.assertEqual([item.get('src') for item in markup.images
                 if 'vui-brand-image' in item.get('class', '').split()], [FAVICON])

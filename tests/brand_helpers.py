@@ -331,3 +331,18 @@ def check_readme_picture(context, base, readme):
         assert external == [], external
     finally:
         page.close()
+
+
+def page_brand_markup(web, name):
+    """Inspect shipped page plus its literal shell template, without rendering."""
+    page = (web / name).read_text()
+    markup = BrandHTML(page)
+    if name != 'account.html':
+        if '<script src="/ui/js/shell.js" defer></script>' not in page:
+            raise AssertionError('Page must load the shared brand shell')
+        shell = (web / 'js/shell.js').read_text()
+        template = re.search(r'chrome.innerHTML = `([\s\S]*?)`;', shell)
+        if template is None:
+            raise AssertionError('Missing literal shared shell template')
+        markup.images.extend(BrandHTML(template.group(1)).images)
+    return markup

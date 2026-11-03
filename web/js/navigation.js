@@ -73,9 +73,10 @@
         if (currentURL() === url) return true;
         if (!allowed()) return false;
         const parsed = new URL(url, location.origin);
-        if (parsed.pathname !== location.pathname) { approvedExit = true; location.assign(url); return true; }
-        // Close the active modal synchronously without traversing its old layer.
+        // Invalidate secrets and pending reads before either kind of navigation.
+        // Clear ownership first so the close callback cannot traverse old history.
         if (modal) { const old = modal; modal = null; old.close(); }
+        if (parsed.pathname !== location.pathname) { approvedExit = true; location.assign(url); return true; }
         if (history.state?.modal) history.replaceState(marker(), '', url);
         else { sequence++; history.pushState(marker(), '', url); }
         notify();

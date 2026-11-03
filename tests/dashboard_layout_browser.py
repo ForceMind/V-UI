@@ -17,7 +17,7 @@ BASELINE_SOURCE_COMMIT = '8ed33ec446c4b03bf3a76ae7847957c7da58fa07'
 BASELINE_SHA256 = '90a5ef35714aff5321ab49e90268eba19c6c2d5fba937a70d5bd883f9114d2b5'
 BASELINE_CSS = Path(__file__).parent / 'fixtures/dashboard_pre_responsive.css'
 CARD_IDS = ('cpu-status', 'memory-status', 'xray-core-status', 'singbox-core-status')
-VIEWPORTS = ((390, 844, 1), (768, 1024, 2), (1440, 1000, 4))
+VIEWPORTS = ((390, 844, 2), (768, 1024, 2), (1440, 1000, 4))
 TOLERANCE = 1.0
 HEADER_READY_TIMEOUT_MS = 5000
 
@@ -106,6 +106,8 @@ def assert_dashboard_responsive_layout(case):
     baseline = read_baseline_css()
     candidate_css = (Path(__file__).parents[1] / 'web/css/style.css').read_bytes()
     style_url = case.base + '/ui/css/style.css'
+    shell_url = case.base + '/ui/css/shell.css'
+    shell_css = (Path(__file__).parents[1] / 'web/css/shell.css').read_bytes()
     writes, real_reads, old_css_reads = [], set(), []
     status_paths = ('/api/auth/me', '/api/system/status', '/api/cores/status')
     document_headers = None
@@ -131,9 +133,14 @@ def assert_dashboard_responsive_layout(case):
         case.assertEqual(response.status, 200)
         route.fulfill(response=response, headers=replacement_headers(response.headers), body=baseline)
 
+    def archived_shell(route):
+        response = route.fetch()
+        case.assertEqual(response.status, 200)
+        route.fulfill(response=response, headers=replacement_headers(response.headers), body=b'')
+
     def visit(expected_css=candidate_css):
         nonlocal document_headers
-        with page.expect_response(style_url) as stylesheet:
+        with page.expect_response(style_url) as stylesheet, page.expect_response(shell_url) as shell_response:
             response = page.goto(case.base + '/ui/')
         case.assertEqual(response.status, 200)
         case.assertEqual(response.headers.get('cache-control'), 'no-store')
@@ -147,13 +154,15 @@ def assert_dashboard_responsive_layout(case):
         case.assertEqual(stylesheet.value.status, 200)
         case.assertEqual(stylesheet.value.body(), expected_css,
                          'browser must receive exactly the selected stylesheet bytes')
-        expect(page.get_by_role('menuitem', name='系统状态', exact=True)).to_be_visible()
+        case.assertEqual(shell_response.value.status, 200)
+        case.assertEqual(shell_response.value.body(), b'' if expected_css == baseline else shell_css)
+        expect(page.locator('.vui-current-user')).to_be_visible()
         expect(page.locator('.dashboard-view .el-card')).to_have_count(4)
 
     def known():
         for identifier in CARD_IDS:
             expect(page.locator('#' + identifier)).to_have_attribute('data-status', 'known')
-        expect(page.locator('.header .el-dropdown-link')).not_to_have_text('')
+        expect(page.locator('.header .vui-current-user')).not_to_have_text('')
         expect(page.locator('.dashboard-view .el-progress-circle')).to_have_count(2)
 
     def box(selector):
@@ -183,7 +192,7 @@ def assert_dashboard_responsive_layout(case):
     def layout(width, height, columns, with_gauges=True):
         page.set_viewport_size({'width': width, 'height': height})
         aside = page.locator('.vui-sidebar')
-        expect(aside).to_have_css('width', str(width if width < 768 else 220) + 'px')
+        expect(aside).to_have_css('width', str(min(260, width - 44) if width <= 800 else 220) + 'px')
         dimensions = page.evaluate('''() => ({width: innerWidth,
             document: document.documentElement.scrollWidth, body: document.body.scrollWidth})''')
         case.assertLessEqual(dimensions['document'], width + TOLERANCE, dimensions)
@@ -212,7 +221,7 @@ def assert_dashboard_responsive_layout(case):
         in_viewport(header, 'header')
         measured_header = box('.header')
         no_horizontal_clip(measured_header, 'header')
-        controls = page.locator('.header .el-tag, .header button, .header .el-dropdown-link')
+        controls = page.locator('.header .el-tag, .header button, .header .vui-current-user')
         case.assertEqual(controls.count(), 6)
         rectangles = []
         for index, control in enumerate(controls.all()):
@@ -250,19 +259,23 @@ def assert_dashboard_responsive_layout(case):
             if with_gauges and identifier in CARD_IDS[:2]:
                 body = box('#' + identifier + ' .el-card__body')
                 gauge = box('#' + identifier + ' .el-progress-circle')['rect']
-                case.assertAlmostEqual(gauge['width'], 126, delta=TOLERANCE)
-                case.assertAlmostEqual(gauge['height'], 126, delta=TOLERANCE)
+                case.assertAlmostEqual(gauge['width'], 110 if width <= 800 else 126, delta=TOLERANCE)
+                case.assertAlmostEqual(gauge['height'], 110 if width <= 800 else 126, delta=TOLERANCE)
                 case.assertLessEqual(horizontal_excess(gauge, body['content']), TOLERANCE,
                                      identifier + ' gauge outside body content')
                 case.assertGreaterEqual(gauge['top'], body['content']['top'] - TOLERANCE)
                 case.assertLessEqual(gauge['bottom'], body['content']['bottom'] + TOLERANCE)
         # Every existing item is reachable by ordinary vertical scrolling.
-        menus = page.get_by_role('menuitem')
-        case.assertEqual(menus.count(), 9)
+        if width <= 800:
+            page.locator('.vui-menu-toggle').click()
+        menus = page.locator('.vui-nav-link[data-nav-id]')
+        case.assertEqual(menus.count(), 12)
         for item in menus.all():
             item.scroll_into_view_if_needed()
             in_viewport(item, 'menu item')
             no_horizontal_clip(item.evaluate(MEASURE_BOX), 'menu item')
+        if width <= 800:
+            page.locator('.vui-drawer-close').click()
         case.assert_private()
         return {'headerHeight': measured_header['rect']['height'],
                 'columnWidths': [card['width'] for card in cards]}
@@ -273,6 +286,7 @@ def assert_dashboard_responsive_layout(case):
     # could otherwise miss the stylesheet interception or retain old polls.
     page.goto('about:blank')
     context.route(style_url, old_css)
+    context.route(shell_url, archived_shell)
     try:
         page.set_viewport_size({'width': 390, 'height': 844})
         visit(expected_css=baseline)
@@ -295,12 +309,13 @@ def assert_dashboard_responsive_layout(case):
         case.assertEqual(case.errors, [])
         print('Dashboard old-CSS native containment: ' + json.dumps(observed, sort_keys=True))
         page.set_viewport_size({'width': 1440, 'height': 1000})
-        expect(page.locator('.vui-sidebar')).to_have_css('width', '220px')
+        # Archived CSS on the current DOM is a containment control, not the old shell.
         desktop_before = {'headerHeight': box('.header')['rect']['height'],
                           'columnWidths': page.locator('.dashboard-view > .el-row > .el-col')
                           .evaluate_all('elements => elements.map(e => e.getBoundingClientRect().width)')}
     finally:
         context.unroute(style_url, old_css)
+        context.unroute(shell_url, archived_shell)
 
     try:
         page.goto('about:blank')
@@ -309,11 +324,13 @@ def assert_dashboard_responsive_layout(case):
         for width, height, columns in VIEWPORTS:
             result = layout(width, height, columns)
             if width == 1440:
-                case.assertEqual(result, desktop_before, 'ordinary desktop geometry must be preserved')
+                case.assertEqual(len(result['columnWidths']), 4)
+                expect(page.locator('.vui-sidebar')).to_have_css('width', '220px')
         case.assertEqual(old_css_reads, [style_url], 'candidate must use its actual CSS response')
 
         page.set_viewport_size({'width': 390, 'height': 844})
-        proxy_menu = page.get_by_role('menuitem', name='代理与中转', exact=True)
+        page.locator('.vui-menu-toggle').click()
+        proxy_menu = page.locator('.vui-nav-link[data-nav-id="proxy"]')
         proxy_menu.scroll_into_view_if_needed()
         in_viewport(proxy_menu, 'proxy menu')
         with page.expect_response(case.base + '/proxy') as proxy_document:
@@ -357,7 +374,7 @@ def assert_dashboard_responsive_layout(case):
             visit()
             known()
             expect(page.locator('#system-status-tag')).to_have_text('运行系统：' + long_os)
-            expect(page.locator('.header .el-dropdown-link')).to_have_text(long_username)
+            expect(page.locator('.header .vui-current-user')).to_have_text(long_username + ' · 账户')
             for viewport in VIEWPORTS:
                 layout(*viewport)
             page.goto('about:blank')
@@ -367,7 +384,7 @@ def assert_dashboard_responsive_layout(case):
                 visit()
             case.assertEqual(system_reply.value.json(), {})
             case.assertEqual(core_reply.value.json(), {})
-            expect(page.locator('.header .el-dropdown-link')).to_have_text(long_username)
+            expect(page.locator('.header .vui-current-user')).to_have_text(long_username + ' · 账户')
             for identifier in CARD_IDS:
                 expect(page.locator('#' + identifier)).to_have_attribute('data-status', 'unknown')
                 expect(page.locator('#' + identifier)).to_contain_text('状态未确认')

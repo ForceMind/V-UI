@@ -5,7 +5,7 @@ import unittest
 from fastapi.testclient import TestClient
 
 from brand_helpers import (BRAND_FILES, BRAND_MEMBERS, FAVICON, MAX_SVG_BYTES,
-    BrandHTML, brand_member, parse_svg, validate_brand_assets)
+    BrandHTML, page_brand_markup, brand_member, parse_svg, validate_brand_assets)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -129,7 +129,7 @@ class BrandAssetTests(unittest.TestCase):
         self.assertEqual({page.name for page in pages}, {'account.html', 'index.html', 'workspace.html', 'certificates.html', 'proxy.html'})
         for page in pages:
             with self.subTest(page=page.name):
-                markup = BrandHTML(page.read_text())
+                markup = page_brand_markup(ROOT / 'web', page.name)
                 self.assertEqual(len(markup.favicons), 1)
                 self.assertEqual(markup.favicons[0].get('href'), FAVICON)
                 self.assertEqual(markup.favicons[0].get('type'), 'image/svg+xml')
@@ -171,10 +171,10 @@ class BrandAssetTests(unittest.TestCase):
                                   for item in response.headers['content-security-policy'].split(';') if item.strip())
                     self.assertEqual(policy, {
                         'default-src': "'none'", 'script-src': "'self'",
-                        'style-src': "'unsafe-inline'" if path in {'/login', '/account'} else "'self'",
+                        'style-src': "'self' 'unsafe-inline'" if path in {'/login', '/account'} else "'self'",
                         'img-src': "'self'", 'connect-src': "'self'", 'form-action': "'self'",
                         'frame-ancestors': "'none'", 'base-uri': "'none'",
-                    }, 'Only same-origin images may be added to the existing CSP')
+                    }, 'Only same-origin shell CSS and images may be added to the existing CSP')
         finally:
             client.close()
 

@@ -92,6 +92,35 @@ test('real app route selection, Back/Forward and same-tab click retain non-secre
     state.handleSelect('subscriptions'); assert.equal(env.assignments.at(-1), '/workspace#subscriptions');
     state.handleSelect('site'); await flush(); assert.equal(state.currentView.value, 'legacy');
 });
+test('cross-document navigation synchronously clears real share secrets and aborts late reads', async () => {
+    for (const destination of ['proxy', 'certificates', 'account']) {
+        for (const pending of [false, true]) {
+            const env = environment(), state = env.app();
+            let resolveRead, signal;
+            env.sandbox.axios.get = (_path, options) => {
+                signal = options.signal;
+                return new Promise(resolve => { resolveRead = resolve; });
+            };
+            const opening = state.showQrCode({id: 7});
+            if (!pending) { resolveRead({data: 'synthetic-share-secret'}); await opening; }
+            assert.equal(state.showQrDialog.value, true);
+            const position = env.position;
+            assert.equal(env.sandbox.VUI_NAV.navigate(destination), true);
+            assert.equal(state.showQrDialog.value, false);
+            assert.equal(state.qrBusy.value, false);
+            assert.equal(state.qrLink.value, '');
+            if (pending) {
+                assert.equal(signal.aborted, true);
+                resolveRead({data: 'synthetic-late-secret'}); await opening;
+            }
+            await flush();
+            assert.equal(state.qrLink.value, '');
+            assert.equal(env.position, position, 'cleanup must not traverse old modal history');
+            assert.equal(env.assignments.at(-1), '/' + destination);
+            assert.equal(JSON.stringify(env.entries).includes('secret'), false);
+        }
+    }
+});
 test('real inbound dirty editor Back blocks before clearing, accepted Back clears secrets and Forward stays closed', async () => {
     const env = environment(), state = env.app();
     await state.openAddInbound(); state.newInbound.remark = 'unsaved'; state.newInbound.profile.reality_uuid = 'fake-sensitive-value';

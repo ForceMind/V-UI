@@ -163,7 +163,7 @@ class ProxyPageStaticTests(unittest.TestCase):
             self.assertLess(scripts.index('vendor/axios.js'), scripts.index('js/app.js'))
             self.assertFalse(any('://' in source for source in scripts))
             for source in scripts:
-                self.assertTrue((payload / 'web' / source).is_file(), source)
+                self.assertTrue((payload / 'web' / (source.removeprefix('/ui/'))).is_file(), source)
             for path in ('main.py', 'web/proxy.html', 'web/js/proxy.js', 'web/js/account.js'):
                 self.assertEqual((payload / path).read_bytes(), (ROOT / path).read_bytes())
         self.assertEqual((ROOT / 'web/index.html').read_bytes(), original)
@@ -321,10 +321,10 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         page.locator('#login-name').fill('tester')
         page.locator('#login-password').fill(PASSWORD)
         page.get_by_role('button', name='登录面板', exact=True).click()
-        page.wait_for_url('**/ui/')
+        page.wait_for_url('**/ui/#dashboard')
         # Wait for the real dashboard to mount, rather than navigating away
         # before its scripts execute. Keep every login error/request recorded.
-        expect(page.get_by_role('menuitem', name='代理与中转', exact=True)).to_be_visible()
+        expect(page.locator('.vui-nav-link[data-nav-id="proxy"]')).to_have_attribute('href', '/proxy')
         self.assertTrue(page.evaluate("typeof axios === 'function' && typeof Vue.createApp === 'function'"))
         self.assertEqual(self.external, [])
         self.assertEqual(self.errors, [])
@@ -341,13 +341,15 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
     def open_inbound_view(self, page=None):
         """Navigate the mounted dashboard through its real menu and observe its GET.
 
-        Changing only /ui/#inbounds is same-document navigation after login;
-        it does not run Vue setup again or select a new dashboard view.
+        The shared link selects /ui/#inbounds without rebuilding Vue setup.
+        Open the mobile drawer before activating the real navigation link.
         """
         page = page or self.page
         with page.expect_response(lambda response: urlparse(response.url).path == '/api/inbounds'
                                   and response.request.method == 'GET') as loaded:
-            page.get_by_role('menuitem', name='入站节点', exact=True).click()
+            if page.viewport_size['width'] <= 800:
+                page.locator('.vui-menu-toggle').click()
+            page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
         self.assertEqual(loaded.value.status, 200, loaded.value.text())
         return page
 

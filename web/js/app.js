@@ -525,7 +525,11 @@ const app = createApp({
             const id = key === 'settings' ? 'account' : key === 'site' ? 'legacy' : key;
             if (globalThis.VUI_NAV) { VUI_NAV.navigate(id); return; }
             const external = {proxy:'/proxy', certificates:'/certificates', routing:'/workspace#routing', subscriptions:'/workspace#subscriptions', account:'/account'};
-            if (external[id]) { location.assign(external[id]); return; }
+            if (external[id]) {
+                if (!canLeaveInboundEditor()) return;
+                closeQrDialog(); closeUpstreamExport(); closeInboundEditor();
+                location.assign(external[id]); return;
+            }
             currentView.value = ['dashboard', 'inbounds', 'cores', 'diagnostics', 'firewall', 'security', 'legacy'].includes(id) ? id : 'dashboard';
             if (id === 'inbounds') fetchInbounds();
         };
@@ -997,7 +1001,7 @@ const app = createApp({
             }
         };
 
-        const updateProfile = () => { closeQrDialog(); location.assign('/account'); };
+        const updateProfile = () => { handleSelect('account'); };
 
         const showQrCode = async (row) => {
             if (adminSessionEnded) return;

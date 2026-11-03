@@ -59,7 +59,7 @@ def assert_dashboard_status_recovery(case):
             known(identifier, False)
             expect(page.locator('#' + identifier)).to_contain_text('状态未确认')
             expect(page.locator('#' + identifier + ' .el-progress')).to_have_count(0)
-        expect(page.locator('#cpu-status')).not_to_contain_text('2 Cores')
+        expect(page.locator('#cpu-status')).not_to_contain_text('2 核')
         expect(page.locator('#memory-status')).not_to_contain_text('MiB')
 
     def unknown_cores():
@@ -69,7 +69,7 @@ def assert_dashboard_status_recovery(case):
             known(prefix + '-core-status', False)
             expect(page.locator('#' + prefix + '-core-status')).to_contain_text('状态未确认')
             expect(page.locator('#' + prefix + '-core-status')).not_to_contain_text(
-                re.compile('Installed|Missing|Running|Stopped'))
+                re.compile('已安装|未安装|运行中|已停止'))
 
     def metrics(cpu, memory):
         known('system-status-tag')
@@ -102,8 +102,8 @@ def assert_dashboard_status_recovery(case):
         known('cpu-status')
         metrics(37, 64)
         expect(page.locator('#xray-status-tag')).to_have_text('Xray 运行中')
-        expect(page.locator('#singbox-core-status')).to_contain_text('Installed')
-        expect(page.locator('#singbox-core-status')).to_contain_text('Stopped')
+        expect(page.locator('#singbox-core-status')).to_contain_text('已安装')
+        expect(page.locator('#singbox-core-status')).to_contain_text('已停止')
 
         # Natural existing 3s poll, no injected timer or restart action.
         modes[system_path] = 'fail'
@@ -132,8 +132,8 @@ def assert_dashboard_status_recovery(case):
         for prefix, label in (('xray', 'Xray'), ('singbox', 'sing-box')):
             known(prefix + '-core-status')
             expect(page.locator('#' + prefix + '-status-tag')).to_have_text(label + ' 已停止')
-            expect(page.locator('#' + prefix + '-core-status')).to_contain_text('Missing')
-            expect(page.locator('#' + prefix + '-core-status')).to_contain_text('Stopped')
+            expect(page.locator('#' + prefix + '-core-status')).to_contain_text('未安装')
+            expect(page.locator('#' + prefix + '-core-status')).to_contain_text('已停止')
         metrics(0, 0)
         case.assertGreaterEqual(reads.count(system_path), 3)
         case.assertGreaterEqual(reads.count(core_path), 3)
