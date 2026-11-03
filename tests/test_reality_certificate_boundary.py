@@ -120,7 +120,7 @@ class RealityCertificateBoundaryTests(unittest.TestCase):
                 after = self.snapshot(identity)
                 self.assertEqual((response.status_code, material.call_count,
                     after[0] == before[0], after[1] == before[1]), (409, 0, True, True))
-                self.assertIn('explicit TLS', response.json()['detail'])
+                self.assertIn('明确切换为 TLS', response.json()['detail'])
 
     def test_modern_explicit_tls_transition_still_binds_and_preserves_uuid(self):
         from app.api import inbounds as inbound_api

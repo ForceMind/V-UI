@@ -456,7 +456,11 @@ class CoreRuntime:
                 sockets = [s for child in children for s in child.net_connections(kind="inet")]
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 children, sockets = [], []
-            if children and self._listeners_ready(value, sockets):
+            ready = bool(children) and self._listeners_ready(value, sockets)
+            if children and not ready and self.name == "xray":
+                sockets = self._xray_ipv4_wildcard_sockets(value, sockets, children, deadline)
+                ready = self._listeners_ready(value, sockets)
+            if ready:
                 ready_since = ready_since or time.monotonic()
                 if time.monotonic() - ready_since >= 0.3:
                     return
@@ -464,6 +468,69 @@ class CoreRuntime:
                 ready_since = None
             time.sleep(0.05)
         raise CoreError("Candidate core did not establish the expected listeners")
+
+    def _xray_ipv4_wildcard_sockets(self, config, sockets, children, deadline):
+        """Prove that an owned IPv6 wildcard also serves requested IPv4 TCP.
+
+        Go may implement Xray's 0.0.0.0 listener with a dual-stack :: socket.
+        A successful connect alone could hit a foreign IPv4 listener beside an
+        IPv6-only core. While connected, require the exact server-side tuple
+        in the owned child's sockets before adding an IPv4 readiness view.
+        Keep the original wildcard so loopback-only checks remain strict.
+        """
+        if self.name != "xray":
+            return sockets
+        requested = {int(row.get("port", 0)) for row in config.get("inbounds", [])
+                     if row.get("listen") == "0.0.0.0"
+                     and row.get("protocol") in {"vless", "vmess", "trojan", "mixed", "http", "socks"}
+                     and row.get("streamSettings", {}).get("network") not in {"kcp", "quic"}}
+        listeners = [item for item in sockets if item.laddr
+                     and item.status == psutil.CONN_LISTEN and item.type == socket.SOCK_STREAM]
+        exact = {item.laddr.port for item in listeners if item.laddr.ip == "0.0.0.0"}
+        result = list(sockets)
+
+        def endpoint(value):
+            address = ipaddress.ip_address(value[0])
+            if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+                address = address.ipv4_mapped
+            return address, value[1]
+
+        for listener in listeners:
+            port = listener.laddr.port
+            if port not in requested or port in exact or listener.laddr.ip != "::":
+                continue
+            # A separate owned IPv4/loopback listener could accept the probe
+            # without proving this wildcard serves IPv4. Ambiguity fails closed.
+            if any(item.laddr.port == port and item.laddr.ip != "::" for item in listeners):
+                continue
+            started = time.monotonic()
+            remaining = deadline - started
+            if remaining <= 0:
+                break
+            probe_deadline = min(deadline, started + 0.15)
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=min(0.15, remaining)) as probe:
+                    local, peer = endpoint(probe.getsockname()), endpoint(probe.getpeername())
+                    # The handshake may finish before Go accepts the socket.
+                    # Keep this same connection alive through bounded snapshots.
+                    while time.monotonic() < probe_deadline:
+                        owned = [item for child in children for item in child.net_connections(kind="inet")]
+                        verified = any(item.family == socket.AF_INET6 and item.type == socket.SOCK_STREAM
+                                       and item.status == psutil.CONN_ESTABLISHED
+                                       and item.laddr and item.raddr
+                                       and endpoint(item.laddr) == peer and endpoint(item.raddr) == local
+                                       for item in owned)
+                        observed = time.monotonic()
+                        if verified and observed < probe_deadline:
+                            result.append(listener._replace(laddr=listener.laddr._replace(ip="0.0.0.0")))
+                            exact.add(port)
+                            break
+                        if observed >= probe_deadline:
+                            break
+                        time.sleep(min(0.01, probe_deadline - observed))
+            except (OSError, ValueError, psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return result
 
     @staticmethod
     def _listeners_ready(config: dict, sockets) -> bool:

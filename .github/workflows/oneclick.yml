@@ -8,7 +8,7 @@ permissions:
 jobs:
   system-install:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -57,6 +57,23 @@ jobs:
         run: |
           set -euo pipefail
           python -B -m unittest discover -s tests -p test_oneclick_system.py -v 2>&1 | tee /tmp/vui-oneclick/published-upgrade.log
+      - name: Check out immutable published v0.4.15 source for real upgrade acceptance
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: 65b1e75d90de733408101ec280a92be935731baa
+          path: .published-v0415
+      - name: Test published v0.4.15 to exact candidate upgrade on ephemeral systemd runner
+        env:
+          VUI_SYSTEM_INSTALL_TEST: '1'
+          VUI_PUBLISHED_INSTALL_VERSION: '0.4.15'
+          VUI_RELEASE_COMMIT: 65b1e75d90de733408101ec280a92be935731baa
+          VUI_PUBLISHED_UPGRADE_SOURCE: ${{ github.workspace }}/.published-v0415
+          VUI_RELEASE_KIT: /tmp/vui-oneclick/kit
+          VUI_RELEASE_BUNDLE: /tmp/vui-oneclick/vui-linux.zip
+        run: |
+          set -euo pipefail
+          python -B -m unittest discover -s tests -p test_oneclick_system.py -v 2>&1 | tee /tmp/vui-oneclick/published-v0415-upgrade.log
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: vui-release-kit-${{ github.event.pull_request.head.sha || github.sha }}

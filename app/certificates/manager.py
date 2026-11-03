@@ -18,7 +18,7 @@ from app.certificates.models import Certificate, CertificateJob, CertificateBind
 from app.certificates.material import (CertificateError, domain_name, email_address,
     make_csr, private_write, validate_material)
 from app.certificates.provider import CertbotProvider
-from app.services.reality_profile import has_reality
+from app.services import managed_tls
 from app.release_tools import lease, ReleaseError, sync_directory
 
 ACTIVE_JOBS = ('queued', 'running')
@@ -256,10 +256,13 @@ class CertificateManager:
                 db.execute(text('BEGIN IMMEDIATE'))
                 if target != 'panel':
                     row = db.get(database.Inbound, int(target.split(':')[1]))
-                    # REALITY exclusion is a precondition, not a failed apply:
+                    # Target/TLS exclusion is a precondition, not a failed apply:
                     # preserve any previous desired/applied certificate state.
-                    if row is not None and has_reality(row.stream_settings):
-                        raise CertificateError('TLS_NODE_REQUIRED')
+                    if row is None:
+                        raise CertificateError('INBOUND_NOT_FOUND')
+                    error = managed_tls.target_error(row)
+                    if error:
+                        raise CertificateError(error)
                 binding = db.get(CertificateBinding, target)
                 if binding is None:
                     binding = CertificateBinding(target=target); db.add(binding)
@@ -283,21 +286,17 @@ class CertificateManager:
                 else:
                     row = db.get(database.Inbound, int(target.split(':')[1]))
                     if not row: raise CertificateError('INBOUND_NOT_FOUND')
-                    if row.core != 'sing-box' or row.protocol not in {'vless','trojan','vmess','hysteria2','tuic'}: raise CertificateError('UNSUPPORTED_CERTIFICATE_TARGET')
                     stream = deepcopy(row.stream_settings or {})
-                    tls = stream.get('tls') or {}
-                    if has_reality(stream) or not tls.get('enabled'):
-                        raise CertificateError('TLS_NODE_REQUIRED')
+                    error = managed_tls.target_error(row)
+                    if error:
+                        raise CertificateError(error)
                     if not explicit and binding.applied_revision:
                         oldroot = self.root / 'revisions' / binding.applied_certificate_id / binding.applied_revision
                         allowed = {(str(oldroot / 'fullchain.pem'), str(oldroot / 'privkey.pem')),
                                    (str(paths[0]), str(paths[1]))}
-                        if (tls.get('certificate_path'), tls.get('key_path')) not in allowed:
+                        if managed_tls.paths(row.core, stream) not in allowed:
                             raise CertificateError('BINDING_CHANGED_MANUALLY')
-                    tls.update(certificate_path=str(paths[0]), key_path=str(paths[1]), server_name=domain)
-                    stream['tls'] = tls
-                    if '_vui' in stream:
-                        stream['_vui']['server_name'] = domain
+                    managed_tls.replace_material(row.core, stream, paths, domain)
                     row.stream_settings = stream
                     db.flush()
                     core_manager.validate_inbound_change(

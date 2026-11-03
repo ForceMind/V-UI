@@ -97,6 +97,23 @@ UI_REDESIGN_FILES = {
     'docs/UI_REDESIGN_PROGRESS.md', 'docs/DEVELOPMENT_HANDOFF.md',
 }
 UI_REDESIGN_UPGRADE_STEP = 'Test published v0.4.14 to exact candidate upgrade on ephemeral systemd runner'
+TLS_CERTIFICATE_BASELINE = '26e7bdd7f258f6ddf025291d5b6d86b71efebbe5'
+TLS_CERTIFICATE_VERSION = '0.4.16'
+# The reviewed TLS binding/API/UI/readiness implementation is frozen. Only this
+# explicit release-preparation and published-upgrade scope may follow it.
+TLS_CERTIFICATE_FILES = {
+    'VERSION', 'main.py', 'install.sh', 'scripts/publish_release.py',
+    '.github/workflows/publish.yml', '.github/workflows/oneclick.yml',
+    'tests/test_release_promotion.py', 'tests/test_oneclick_system.py',
+    'tests/test_short_install_contract.py', 'tests/published_upgrade_helpers.py',
+    'tests/test_published_upgrade_helpers.py',
+    'README.md', 'CHANGELOG.md', 'AGENTS.md', 'docs/RELEASING.md',
+    'docs/CERTIFICATES.md', 'docs/README.md', 'docs/INSTALLATION.md',
+    'docs/RELEASE_NOTES.md', 'docs/DEVELOPMENT_HANDOFF.md',
+    'docs/TLS_CERTIFICATE_BINDING_FIX.md',
+}
+TLS_CERTIFICATE_UPGRADE_STEP = 'Test published v0.4.15 to exact candidate upgrade on ephemeral systemd runner'
+TLS_CERTIFICATE_CORE_STEP = 'Validate with pinned real cores'
 BROWSER_SKIP_STEPS = {
     name: steps | {'Install explicit test browser'} for name, steps in REQUIRED_ACCEPTANCE_STEPS.items()
 }
@@ -384,10 +401,46 @@ def validate_ui_redesign_scope(commit, version):
         raise ReleaseGateError('Cannot prove UI release source ancestry/scope') from exc
 
 
-def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_trust_no_browser=False, install_interaction_no_browser=False, startup_no_browser=False, ui_redesign_no_browser=False):
+def validate_tls_certificate_scope(commit, version):
+    """Only the approved 0.4.16 TLS certificate candidate plus bounded release preparation."""
+    if version != TLS_CERTIFICATE_VERSION:
+        raise ReleaseGateError('Non-browser TLS certificate exception is only approved for 0.4.16')
+    try:
+        subprocess.run(['git','merge-base','--is-ancestor',TLS_CERTIFICATE_BASELINE,commit],check=True,
+                       stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        changes=subprocess.check_output(
+            ['git','diff','--name-status','--no-renames',TLS_CERTIFICATE_BASELINE,commit],text=True)
+        for line in changes.splitlines():
+            fields=line.split('\t')
+            if len(fields)!=2 or fields[0] not in ('A','M'):
+                raise ReleaseGateError('TLS certificate release scope refuses deletion, rename or type change')
+            name=fields[1]
+            if name not in TLS_CERTIFICATE_FILES:
+                raise ReleaseGateError('Changes exceed the approved TLS certificate release preparation: '+name)
+            # Preserve the executable installer and non-executable source modes;
+            # reject links, gitlinks and mode changes even without a content edit.
+            mode = '100755' if name == 'install.sh' else '100644'
+            entry=subprocess.check_output(['git','ls-tree',commit,'--',name],text=True)
+            if not re.fullmatch(mode+r' blob [a-f0-9]{40}\t'+re.escape(name)+r'\n',entry):
+                raise ReleaseGateError('TLS certificate release exception refuses nonregular files or mode changes')
+        previous=subprocess.check_output(['git','show',TLS_CERTIFICATE_BASELINE+':main.py'])
+        current=subprocess.check_output(['git','show',commit+':main.py'])
+        if previous.count(b"version='0.4.15'")!=1 or current!=previous.replace(b"version='0.4.15'",b"version='0.4.16'",1):
+            raise ReleaseGateError('Application changes exceed the TLS certificate release version bump')
+        if subprocess.check_output(['git','show',commit+':VERSION'])!=b'0.4.16\n':
+            raise ReleaseGateError('TLS certificate release version identity differs')
+        previous=subprocess.check_output(['git','show',TLS_CERTIFICATE_BASELINE+':install.sh'])
+        current=subprocess.check_output(['git','show',commit+':install.sh'])
+        if previous.count(b'--version v0.4.15')!=1 or current!=previous.replace(b'--version v0.4.15',b'--version v0.4.16',1):
+            raise ReleaseGateError('Installer changes exceed the TLS certificate release version documentation')
+    except subprocess.CalledProcessError as exc:
+        raise ReleaseGateError('Cannot prove TLS certificate release source ancestry/scope') from exc
+
+
+def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_trust_no_browser=False, install_interaction_no_browser=False, startup_no_browser=False, ui_redesign_no_browser=False, tls_certificate_no_browser=False):
     """A green workflow with skipped acceptance is not release qualification."""
     if sum((installer_only_no_browser, ca_trust_no_browser, install_interaction_no_browser,
-            startup_no_browser, ui_redesign_no_browser)) > 1:
+            startup_no_browser, ui_redesign_no_browser, tls_certificate_no_browser)) > 1:
         raise ReleaseGateError('Non-browser scope exceptions are mutually exclusive')
     for path, run in sorted(checks.items()):
         attempt = run.get('run_attempt')
@@ -406,10 +459,15 @@ def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_tru
             raise ReleaseGateError('Missing or duplicated exact-attempt jobs: '+path)
         names={step.get('name') for job in jobs for step in job.get('steps', [])}
         required_steps = REQUIRED_ACCEPTANCE_STEPS.get(path,set())
-        if ui_redesign_no_browser:
+        if ui_redesign_no_browser or tls_certificate_no_browser:
             required_steps = required_steps | BROWSER_SKIP_STEPS.get(path,set())
             if path == 'oneclick.yml':
                 required_steps = required_steps | {UI_REDESIGN_UPGRADE_STEP}
+        if tls_certificate_no_browser:
+            if path == 'oneclick.yml':
+                required_steps = required_steps | {TLS_CERTIFICATE_UPGRADE_STEP}
+            if path == 'test.yml':
+                required_steps = required_steps | {TLS_CERTIFICATE_CORE_STEP}
         if not required_steps <= names:
             raise ReleaseGateError('Missing required acceptance steps: '+path)
         for job in jobs:
@@ -420,7 +478,7 @@ def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_tru
             def accepted(step):
                 return (step.get('status') == 'completed' and
                         (step.get('conclusion') == 'success' or
-                         ((installer_only_no_browser or ca_trust_no_browser or install_interaction_no_browser or startup_no_browser or ui_redesign_no_browser) and step.get('conclusion') == 'skipped'
+                         ((installer_only_no_browser or ca_trust_no_browser or install_interaction_no_browser or startup_no_browser or ui_redesign_no_browser or tls_certificate_no_browser) and step.get('conclusion') == 'skipped'
                           and step.get('name') in BROWSER_SKIP_STEPS.get(path,set()))))
             if not steps or not all(accepted(step) for step in steps):
                 raise ReleaseGateError('Workflow has unverified, skipped or failed steps: '+path)
@@ -541,6 +599,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--commit',required=True);p.add_argument('--version',required=True)
     p.add_argument('--confirm',required=True);p.add_argument('--publish',action='store_true')
+    p.add_argument('--tls-certificate-no-browser',action='store_true',
+                   help='Approved frozen 0.4.16 TLS certificate candidate; browsers remain unverified')
     p.add_argument('--ui-redesign-no-browser',action='store_true',
                    help='Approved frozen 0.4.15 UI candidate; browsers remain unverified')
     p.add_argument('--startup-no-browser',action='store_true',
@@ -574,8 +634,10 @@ def main():
         if len(batch)<100:
             break
     checks=select_runs(runs,args.commit)
-    if sum((args.installer_only_no_browser, args.ca_trust_no_browser, args.install_interaction_no_browser, args.startup_no_browser, args.ui_redesign_no_browser)) > 1:
+    if sum((args.installer_only_no_browser, args.ca_trust_no_browser, args.install_interaction_no_browser, args.startup_no_browser, args.ui_redesign_no_browser, args.tls_certificate_no_browser)) > 1:
         raise ReleaseGateError('Non-browser scope exceptions are mutually exclusive')
+    if args.tls_certificate_no_browser:
+        validate_tls_certificate_scope(args.commit,args.version)
     if args.ui_redesign_no_browser:
         validate_ui_redesign_scope(args.commit,args.version)
     if args.startup_no_browser:
@@ -589,7 +651,8 @@ def main():
     validate_run_jobs(checks,args.commit,installer_only_no_browser=args.installer_only_no_browser,
                       ca_trust_no_browser=args.ca_trust_no_browser,
                       install_interaction_no_browser=args.install_interaction_no_browser, startup_no_browser=args.startup_no_browser,
-                      ui_redesign_no_browser=args.ui_redesign_no_browser)
+                      ui_redesign_no_browser=args.ui_redesign_no_browser,
+                      tls_certificate_no_browser=args.tls_certificate_no_browser)
 
     tag='v'+args.version
     for path in ('git/ref/tags/'+tag,'releases/tags/'+tag):
@@ -641,6 +704,12 @@ def main():
               '仅允许12个明列浏览器步骤跳过，准确提交/attempt/全部jobs与其他steps、四目标、真实安装与旧0.4.14升级门禁保持。'+\
               '批准UI候选固定为 `'+UI_REDESIGN_BASELINE+'`；此后仅允许列明版本、发布门禁、升级验收和文档；'+\
               'main.py仅版本替换，其他生产UI、后端、依赖、核心与短入口保持，安装器仅版本注释替换。此例外只适用0.4.15，不覆盖旧资产。\n'
+    if args.tls_certificate_no_browser:
+        body+='\n\n验收范围：用户明确批准本次0.4.16 TLS节点托管证书绑定修复采用非浏览器验收。浏览器未验证；'+\
+              '仅允许12个明列浏览器步骤跳过且必须存在，其余准确提交/attempt/全部jobs与steps、四目标、真实安装、旧0.4.14和0.4.15升级门禁保持。'+\
+              '固定核心真实Xray TLS/SNI、证书轮换与失败恢复测试必须成功；批准候选冻结为 `'+TLS_CERTIFICATE_BASELINE+'`；'+\
+              '此后仅允许精确列明版本、发布门禁、升级验收和文档，main.py仅15→16版本替换，install.sh仅同一版本注释替换。'+\
+              '其他UI、API、CoreRuntime、依赖、固定核心与短入口保持，不覆盖旧资产；此例外只适用0.4.16。\n'
     body+='\n\n## 一行交互安装并注册 v-ui\n\n```sh\n'+installation_command(files,args.version)+'\n```\n'
     body+='\n安装成功后输入 `v-ui`。普通管理员按已有 sudo 策略认证；不增加免密 sudoers。\n'
     release=request('releases','POST',{'tag_name':tag,'target_commitish':args.commit,'name':'V-UI '+tag,

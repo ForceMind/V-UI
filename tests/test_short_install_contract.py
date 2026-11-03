@@ -30,12 +30,30 @@ class ShortInstallContractTests(unittest.TestCase):
             self.assertEqual(len(ordinary),1)
             self.assertEqual(ordinary[0].get('VUI_INSTALLER_YN_TEST'),'1')
             upgrades=[env for env in selected if env.get('VUI_PUBLISHED_UPGRADE_SOURCE')]
-            self.assertEqual(len(selected),2 if name=='oneclick.yml' else 1)
-            self.assertEqual(len(upgrades),1 if name=='oneclick.yml' else 0)
+            self.assertEqual(len(selected),3 if name=='oneclick.yml' else 1)
+            self.assertEqual(len(upgrades),2 if name=='oneclick.yml' else 0)
             if upgrades:
-                self.assertEqual(upgrades[0]['VUI_PUBLISHED_INSTALL_VERSION'],'0.4.14')
-                self.assertEqual(upgrades[0]['VUI_RELEASE_COMMIT'],'b0cc174d04d05e61277075412586f0ba0dd231db')
-                self.assertNotIn('VUI_EXISTING_INSTALL_TEST',upgrades[0])
+                expected=[('0.4.14','b0cc174d04d05e61277075412586f0ba0dd231db','.published-v0414'),
+                          ('0.4.15','65b1e75d90de733408101ec280a92be935731baa','.published-v0415')]
+                self.assertEqual([(env['VUI_PUBLISHED_INSTALL_VERSION'],env['VUI_RELEASE_COMMIT'],
+                                   env['VUI_PUBLISHED_UPGRADE_SOURCE']) for env in upgrades],
+                                 [(version,commit,'${{ github.workspace }}/'+path)
+                                  for version,commit,path in expected])
+                for env in upgrades:
+                    self.assertNotIn('VUI_EXISTING_INSTALL_TEST',env)
+                    self.assertNotIn('VUI_SETUP_INSTALL',env)
+                    self.assertEqual(env['VUI_RELEASE_KIT'],'/tmp/vui-oneclick/kit')
+                    self.assertEqual(env['VUI_RELEASE_BUNDLE'],'/tmp/vui-oneclick/vui-linux.zip')
+                steps=workflow['jobs']['system-install']['steps']
+                self.assertEqual(sum('scripts/build_bundle.py ' in s.get('run','') for s in steps),1)
+                self.assertEqual(sum('scripts/build_release_kit.py ' in s.get('run','') for s in steps),1)
+                for version,commit,path in expected:
+                    checkout=next(s for s in steps if s.get('with',{}).get('path')==path)
+                    self.assertEqual(checkout['with']['ref'],commit)
+                    self.assertEqual(checkout['with']['persist-credentials'],'false')
+                    accepted=next(s for s in steps if s.get('env',{}).get('VUI_PUBLISHED_INSTALL_VERSION')==version)
+                    self.assertEqual(accepted['name'],f'Test published v{version} to exact candidate upgrade on ephemeral systemd runner')
+                    self.assertLess(steps.index(checkout),steps.index(accepted))
 
     def test_existing_browser_steps_remain_explicit_manual_opt_in(self):
         root=Path(__file__).resolve().parents[1]
