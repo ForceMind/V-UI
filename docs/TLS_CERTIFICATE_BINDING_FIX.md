@@ -24,3 +24,5 @@
 独审发现的旧HY2/TUIC错误码分类回归已修，bind和续期共用分类，14个负向保留desired/applied/revision/error不变。显式SNI冲突的API边界同步补齐，避免只靠前端；最终准确候选/Actions结果记录承载PR，不预填通过。
 
 首候选4029d34的Actions普通测试2505项/231skip通过；新增实际Xray用例启动时失败，尚未取得TLS轮换证明。原CoreRuntime通用错误未保留底层原因，先仅增加测试专用有界脱敏诊断：输出真实启动异常、请求和自有监听、假材料核心日志，保留原超时、就绪和TLS断言，生产代码不变。双栈监听只是静态疑点，待Actions证据，不先按猜测放宽。
+
+诊断候选b276709再次普通2505项/231skip通过，真实用例取得确定证据：固定Xray26.3.27已启动，请求0.0.0.0 TCP而自有监听为同端口::，精确地址检查导致5秒就绪误判。为完成Xray默认TLS节点的必要运行链路，本批增加有界readiness修正：保持原静态检查，仅Xray IPv4通配TCP场景，用实际IPv4 loopback连接在自有子进程中的AF_INET6 ESTABLISHED完整元组证明双栈接收后补充视图；拒绝外部IPv4服务及独立自有IPv4监听冒充，不放宽loopback/UDP/sing-box或总5秒预算。新纯mock和真实TLS原断言保留，具体运行资格仍待新准确Actions。
