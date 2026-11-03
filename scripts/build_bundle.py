@@ -94,7 +94,7 @@ def main():
         tracked=subprocess.check_output(['git','ls-files','-z'],cwd=ROOT).decode().split('\x00')
         allowed_files={'main.py','README.md','ROADMAP.md','AGENTS.md','VERSION','CHANGELOG.md','SECURITY.md',
             'CONTRIBUTING.md','LICENSE','install.sh','requirements-runtime.txt','scripts/deploy.py','scripts/install_system.py',
-            'scripts/installer_certificate_state.py'}
+            'scripts/installer_certificate_state.py','scripts/firewall_support.py'}
         for name in filter(None,tracked):
             if not (name in allowed_files or name.startswith(('app/','web/','docs/','third_party/','deploy/'))):continue
             if '__pycache__' in name or name.endswith(('.pyc','.ttf','.otf','.woff','.woff2')):continue

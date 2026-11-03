@@ -39,3 +39,5 @@
 独立审查进行中。当前正式web/app和公开014资产保持，导航/返回修复仍是设计契约，尚未上线。
 
 独立只读审查：根控制模块、receipt精确旧closure迁移、固定OS执行、协议/端口确认回读、默认安装跳过全面探测与线稿静态隔离均无确定阻断；另35项独立纯mock通过。正式web/app无本批差异。将提交准确候选，推送ForceMind/V-UI的release/v0.4.15并建Draft PR以取得Actions证据，不合main、不发布；真实安装/旧014升级和浏览器当前仍未验证。
+
+首次candidate a4aef6a的Actions：oneclick在构建前遇上游GitHub403限流，仅该job原样重试；portable三目标实际包消费暴露新增root closure的scripts/firewall_support.py未进入payload（FileNotFoundError），非线上014故障。已补builder精确允许文件一项，保持现有19公开asset集合；新提交重新完整验收，原日志保留，不继承部分成功或改断言。旧014→新root closure的真实升级仍须发布前单独证明，不将纯mock迁移当作整机升级证据。
