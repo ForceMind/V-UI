@@ -507,7 +507,10 @@ class OneClickSystemTests(unittest.TestCase):
                 # A one-shot failure is consumed by ExecStartPre; recovery starts
                 # the original service without the fault and retains live data.
                 before_config=Path('/etc/v-ui/service.json').read_bytes()
-                before_pointer=json.loads((root/'CURRENT.json').read_text())
+                def read_pointer():
+                    return json.loads(subprocess.check_output(
+                        ['sudo','-u','v-ui','/bin/cat',str(root/'CURRENT.json')],timeout=10))
+                before_pointer=read_pointer()
                 for mode in ('exit','timeout'):
                     configure_startup_fixture(mode)
                     started_failure=time.monotonic()
@@ -528,7 +531,7 @@ class OneClickSystemTests(unittest.TestCase):
                     self.assertLess(failure_text.index('启动失败诊断（本次启动，恢复前）'),
                                     failure_text.index('已恢复上次操作前'))
                     self.assertEqual(Path('/etc/v-ui/service.json').read_bytes(),before_config)
-                    self.assertEqual(json.loads((root/'CURRENT.json').read_text()),before_pointer)
+                    self.assertEqual(read_pointer(),before_pointer)
                     self.assertFalse(Path('/etc/v-ui/.install-transaction.json').exists())
                     self.assertEqual(api('/api/auth/me')[0],200)
                     self.assertEqual(json.loads(api('/api/proxy/settings')[1]),saved_proxy)
