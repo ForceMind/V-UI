@@ -199,7 +199,11 @@ class ExistingInstallTests(unittest.TestCase):
              patch.multiple(installer.service_support,stop=Mock(),start=Mock(),reload=Mock()) as services:
             installer.begin_transaction(self.root,'systemd',True)
             installer.recover_transaction(self.root)
-            installer.service_support.start.assert_called_once_with('systemd',['v-ui-http01.socket','v-ui.service'])
+            calls=installer.service_support.start.call_args_list
+            self.assertEqual([call.args for call in calls],[('systemd',['v-ui-http01.socket']),('systemd',['v-ui.service'])])
+            self.assertNotIn('no_wait',calls[0].kwargs)
+            self.assertTrue(calls[1].kwargs['no_wait'])
+            self.assertTrue(all(0<call.kwargs['timeout']<=120 for call in calls))
 
     def test_dry_run_pending_transaction_refuses_before_recovery_or_lock(self):
         (self.config.parent/installer.TRANSACTION_NAME).write_text('{}')
@@ -207,6 +211,25 @@ class ExistingInstallTests(unittest.TestCase):
              patch.object(installer,'recover_transaction',side_effect=AssertionError('mutation')), \
              patch.object(installer,'_installation_lock',side_effect=AssertionError('write lock')):
             with self.assertRaisesRegex(installer.InstallError,'只读预检不会恢复'): installer.main()
+
+    def test_recovery_diagnostics_fail_safely_before_stopping_failed_restored_service(self):
+        events=[];original=installer.InstallError('original-health-failure')
+        def failed_journal(*args):
+            events.append('diagnostics')
+            raise KeyboardInterrupt()
+        with patch.object(installer.os,'chown'), \
+             patch.object(installer,'https_health',side_effect=original), \
+             patch.object(installer,'_startup_journal',side_effect=failed_journal), \
+             patch.object(installer.service_support,'startup_state',return_value={}), \
+             patch.multiple(installer.service_support,start=Mock(),reload=Mock(),
+                 stop=Mock(side_effect=lambda *args:events.append('stop'))), \
+             patch('sys.stdout',new=io.StringIO()):
+            installer.begin_transaction(self.root,'systemd',True)
+            with self.assertRaises(installer.InstallError) as caught:
+                installer.recover_transaction(self.root)
+        self.assertIs(caught.exception,original)
+        self.assertEqual(events[-2:],['diagnostics','stop'])
+        self.assertTrue((self.config.parent/installer.TRANSACTION_NAME).exists())
 
     def test_read_and_apply_are_inside_same_install_lock(self):
         events=[]
@@ -283,7 +306,7 @@ class ExistingInstallTests(unittest.TestCase):
                     if failure=='first-stop' and active['stops']==1:
                         raise KeyboardInterrupt()
                     if 'v-ui.service' in names: active['value']=False
-                def start(manager,names):
+                def start(manager,names,**kwargs):
                     if 'v-ui.service' in names: active['value']=True
                 def health(*unused,**kwargs):
                     active['health']+=1
@@ -311,6 +334,8 @@ class ExistingInstallTests(unittest.TestCase):
                      patch.object(installer.os,'chown'),patch.object(installer.pwd,'getpwnam',return_value=account), \
                      patch.object(installer,'as_service',side_effect=service), \
                      patch.object(installer,'https_health',side_effect=health), \
+                     patch.object(installer,'_startup_journal',side_effect=RuntimeError('private-diagnostic-error')), \
+                     patch.object(installer.service_support,'startup_state',return_value={}), \
                      patch.multiple(installer.service_support,stop=Mock(side_effect=stop),start=Mock(side_effect=start),
                          is_active=Mock(return_value=True),reload=Mock(),enable_start=Mock()), \
                      installer.installation_signals(),zipfile.ZipFile(packed) as archive:

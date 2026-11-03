@@ -68,6 +68,19 @@ INSTALL_INTERACTION_FILES = {
     'tests/test_oneclick_readiness.py', 'tests/test_release_promotion.py',
     'tests/test_setup_shell.py', 'tests/test_short_install_contract.py',
 }
+STARTUP_BASELINE = 'f81ce5e04aadee8f8e8d53d8b1f4cfc53e1b0f3f'
+STARTUP_VERSION = '0.4.14'
+STARTUP_FILES = {
+    'VERSION', 'main.py', 'install.sh', 'setup.sh',
+    'scripts/install_system.py', 'scripts/service_support.py', 'scripts/publish_release.py',
+    '.github/workflows/publish.yml', '.github/workflows/short-install.yml',
+    'README.md', 'CHANGELOG.md', 'AGENTS.md',
+    'tests/test_installer_startup.py', 'tests/test_existing_install.py',
+    'tests/test_installer_interactions.py', 'tests/test_oneclick_system.py',
+    'tests/test_oneclick_readiness.py', 'tests/test_service_support.py',
+    'tests/test_release_promotion.py', 'tests/test_setup_shell.py',
+    'tests/test_short_install_contract.py',
+}
 BROWSER_SKIP_STEPS = {
     name: steps | {'Install explicit test browser'} for name, steps in REQUIRED_ACCEPTANCE_STEPS.items()
 }
@@ -283,7 +296,43 @@ def validate_install_interaction_scope(commit, version):
         raise ReleaseGateError('Cannot prove install interaction source ancestry/scope') from exc
 
 
-def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_trust_no_browser=False, install_interaction_no_browser=False):
+def validate_startup_scope(commit, version):
+    """One approved bounded-startup fix; never a reusable non-browser release switch."""
+    if version != STARTUP_VERSION:
+        raise ReleaseGateError('Non-browser startup exception is only approved for 0.4.14')
+    try:
+        subprocess.run(['git','merge-base','--is-ancestor',STARTUP_BASELINE,commit],check=True,
+                       stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        changes=subprocess.check_output(['git','diff','--name-status',STARTUP_BASELINE,commit],text=True)
+        for line in changes.splitlines():
+            fields=line.split('\t')
+            if len(fields)!=2 or fields[0] not in ('A','M'):
+                raise ReleaseGateError('Startup readiness scope refuses deletion, rename or type change')
+            name=fields[1]
+            if name not in STARTUP_FILES and not (name.startswith('docs/') and name.endswith('.md')):
+                raise ReleaseGateError('Changes exceed the approved Startup readiness fix: '+name)
+            mode=subprocess.check_output(['git','ls-tree',commit,'--',name],text=True).split()[0]
+            if mode not in ('100644','100755'):
+                raise ReleaseGateError('Startup readiness exception requires regular source files')
+        previous=subprocess.check_output(['git','show',STARTUP_BASELINE+':main.py'])
+        current=subprocess.check_output(['git','show',commit+':main.py'])
+        if previous.count(b"version='0.4.13'")!=1 or current!=previous.replace(b"version='0.4.13'",b"version='0.4.14'",1):
+            raise ReleaseGateError('Application changes exceed the startup fix version bump')
+        if subprocess.check_output(['git','show',commit+':VERSION']).strip()!=b'0.4.14':
+            raise ReleaseGateError('Startup readiness version identity differs')
+        old=subprocess.check_output(['git','show',STARTUP_BASELINE+':install.sh'])
+        new=subprocess.check_output(['git','show',commit+':install.sh'])
+        if old.count(b'--version v0.4.13')!=1 or new!=old.replace(b'--version v0.4.13',b'--version v0.4.14',1):
+            raise ReleaseGateError('Installer changes exceed the startup fix version documentation')
+        old=subprocess.check_output(['git','show',STARTUP_BASELINE+':scripts/build_bundle.py'])
+        new=subprocess.check_output(['git','show',commit+':scripts/build_bundle.py'])
+        if old!=new:
+            raise ReleaseGateError('Startup readiness fix must not change builder/dependencies/core selection')
+    except subprocess.CalledProcessError as exc:
+        raise ReleaseGateError('Cannot prove Startup readiness source ancestry/scope') from exc
+
+
+def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_trust_no_browser=False, install_interaction_no_browser=False, startup_no_browser=False):
     """A green workflow with skipped acceptance is not release qualification."""
     for path, run in sorted(checks.items()):
         attempt = run.get('run_attempt')
@@ -311,7 +360,7 @@ def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_tru
             def accepted(step):
                 return (step.get('status') == 'completed' and
                         (step.get('conclusion') == 'success' or
-                         ((installer_only_no_browser or ca_trust_no_browser or install_interaction_no_browser) and step.get('conclusion') == 'skipped'
+                         ((installer_only_no_browser or ca_trust_no_browser or install_interaction_no_browser or startup_no_browser) and step.get('conclusion') == 'skipped'
                           and step.get('name') in BROWSER_SKIP_STEPS.get(path,set()))))
             if not steps or not all(accepted(step) for step in steps):
                 raise ReleaseGateError('Workflow has unverified, skipped or failed steps: '+path)
@@ -432,6 +481,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--commit',required=True);p.add_argument('--version',required=True)
     p.add_argument('--confirm',required=True);p.add_argument('--publish',action='store_true')
+    p.add_argument('--startup-no-browser',action='store_true',
+                   help='Explicitly approved 0.4.14 bounded startup and diagnostic fix; browsers unverified')
     p.add_argument('--install-interaction-no-browser',action='store_true',
                    help='Explicitly approved 0.4.13 credentials/firewall patch; browsers remain unverified')
     p.add_argument('--ca-trust-no-browser',action='store_true',
@@ -461,8 +512,10 @@ def main():
         if len(batch)<100:
             break
     checks=select_runs(runs,args.commit)
-    if sum((args.installer_only_no_browser, args.ca_trust_no_browser, args.install_interaction_no_browser)) > 1:
+    if sum((args.installer_only_no_browser, args.ca_trust_no_browser, args.install_interaction_no_browser, args.startup_no_browser)) > 1:
         raise ReleaseGateError('Non-browser scope exceptions are mutually exclusive')
+    if args.startup_no_browser:
+        validate_startup_scope(args.commit,args.version)
     if args.install_interaction_no_browser:
         validate_install_interaction_scope(args.commit,args.version)
     if args.ca_trust_no_browser:
@@ -471,7 +524,7 @@ def main():
         validate_installer_only_scope(args.commit,args.version)
     validate_run_jobs(checks,args.commit,installer_only_no_browser=args.installer_only_no_browser,
                       ca_trust_no_browser=args.ca_trust_no_browser,
-                      install_interaction_no_browser=args.install_interaction_no_browser)
+                      install_interaction_no_browser=args.install_interaction_no_browser, startup_no_browser=args.startup_no_browser)
 
     tag='v'+args.version
     for path in ('git/ref/tags/'+tag,'releases/tags/'+tag):
@@ -513,6 +566,11 @@ def main():
               '只跳过明列浏览器步骤，其余准确提交/attempt/jobs/steps、四目标与真实安装门禁保持。'+\
               '相对 `'+INSTALL_INTERACTION_BASELINE+'` 仅允许安装器、只读防火墙检查、本地管理员初始化及对应测试/版本/文档；'+\
               '前端、Web认证API、运行依赖、builder、固定核心和证书验证逻辑变更均拒绝，此例外仅适用0.4.13。\n'
+    if args.startup_no_browser:
+        body+='\n\n验收范围：用户明确批准本次0.4.14安装启动等待与诊断修复采用非浏览器验收。浏览器未验证；'+\
+              '只跳过明列浏览器步骤，其余准确提交/attempt/jobs/steps、四目标与真实慢启动/失败恢复安装门禁保持。'+\
+              '相对 `'+STARTUP_BASELINE+'` 仅允许安装器、服务控制、对应测试/文档和版本；'+\
+              '应用逻辑、前端、证书校验、运行依赖、builder和固定核心变更均拒绝，此例外只适用0.4.14。\n'
     body+='\n\n## 一行交互安装并注册 v-ui\n\n```sh\n'+installation_command(files,args.version)+'\n```\n'
     body+='\n安装成功后输入 `v-ui`。普通管理员按已有 sudo 策略认证；不增加免密 sudoers。\n'
     release=request('releases','POST',{'tag_name':tag,'target_commitish':args.commit,'name':'V-UI '+tag,
