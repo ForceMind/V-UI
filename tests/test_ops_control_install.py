@@ -193,7 +193,7 @@ class ControlInstallTests(unittest.TestCase):
         self.assertEqual(receipt['interpreter_resolved'], str(self.real_python))
         self.assertEqual(receipt, json.loads(installer.RECEIPT.read_bytes()))
         expected = {self.config, self.control / 'launcher.py', self.entry,
-                    *(self.control / name for name in ('system_ops.py', 'ops_worker.py', 'release_tools.py', *installer.SOURCE_DEPENDENCIES)),
+                    *(self.control / name for name in ('system_ops.py', 'ops_worker.py', 'release_tools.py', 'firewall_support.py', *installer.SOURCE_DEPENDENCIES)),
                     *(self.units / name for name in ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket'))}
         self.assertEqual(set(receipt['files']), {str(path) for path in expected})
         for path in expected:
@@ -299,6 +299,44 @@ class ControlInstallTests(unittest.TestCase):
                     self.assert_not_published()
                     self.assertFalse(self.lock.exists())
                     self.run.assert_not_called()
+
+    def test_explicit_refresh_migrates_exact_pre_network_receipt_and_refuses_drift(self):
+        self.install()
+        receipt = json.loads(installer.RECEIPT.read_bytes())
+        path = self.control / 'firewall_support.py'
+        receipt['files'].pop(str(path))
+        path.unlink()
+        installer.RECEIPT.write_text(json.dumps(receipt))
+        with self.assertRaises(installer.InstallError):
+            self.install(refresh=False)
+        result = self.install(refresh=True)
+        self.assertIn(str(path), result['files'])
+        self.assertEqual(path.read_bytes(), (REPO / 'scripts/firewall_support.py').read_bytes())
+
+    def test_pre_network_receipt_does_not_adopt_unreceipted_firewall_code(self):
+        self.install()
+        receipt = json.loads(installer.RECEIPT.read_bytes())
+        receipt['files'].pop(str(self.control / 'firewall_support.py'))
+        installer.RECEIPT.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(installer.InstallError, 'Unreceipted dependency'):
+            self.install(refresh=True)
+
+    def test_pre_network_refresh_refuses_arbitrary_missing_or_extra_receipt_members(self):
+        self.install()
+        original = json.loads(installer.RECEIPT.read_bytes())
+        path = self.control / 'firewall_support.py'
+        original['files'].pop(str(path))
+        path.unlink()
+        for change in ('missing', 'extra'):
+            receipt = json.loads(json.dumps(original))
+            if change == 'missing':
+                receipt['files'].pop(str(self.control / 'release_tools.py'))
+            else:
+                receipt['files'][str(self.control / 'unrelated.py')] = '0' * 64
+            installer.RECEIPT.write_text(json.dumps(receipt))
+            with self.subTest(change=change), self.assertRaisesRegex(installer.InstallError, 'incompatible'):
+                self.install(refresh=True)
+            self.assertFalse(path.exists())
 
     def test_internal_source_dependencies_do_not_expand_public_kit_assets(self):
         verified, _ = installer.verify_kit(self.kit, self.sha)

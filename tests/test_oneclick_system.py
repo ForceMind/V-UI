@@ -109,9 +109,8 @@ class OneClickSystemTests(unittest.TestCase):
                                '--port',str(port),'--node-port',str(node_port)]
             if not automatic_credentials:configured_args.extend(['--admin',admin_username])
             if exercise_confirmations:
-                # Initial installation exercises actual y/n consent below.
-                # Same unchanged loopback fixture is explicitly acknowledged on
-                # configured repeat/upgrade; no real cloud ingress is claimed.
+                # Legacy invocation remains accepted; ordinary installation
+                # must not request firewall or cloud confirmations.
                 configured_args.append('--assume-external-ports-open')
             online = None
             if published_version:
@@ -276,8 +275,9 @@ class OneClickSystemTests(unittest.TestCase):
                 self.assertFalse(product_changed_before_valid_domain,clean[-8000:])
                 self.assertGreaterEqual(clean.count('请重新输入'),3,clean[-8000:])
             if exercise_confirmations:
-                self.assertGreaterEqual(confirmations['你是否已在云安全组或上游防火墙中放行 '],2,clean[-8000:])
-                self.assertIn('请输入 y/yes 或 n/no',clean)
+                self.assertTrue(all(count == 0 for count in confirmations.values()), clean[-8000:])
+                self.assertNotIn('云安全组或服务商防火墙未验证', clean)
+                self.assertNotIn('请手动放行端口', clean)
             if automatic_credentials:
                 self.assertFalse(sent_first or sent_second,'Automatic credentials must not request a password')
                 self.assertNotIn('管理员用户名 [admin]',clean)
@@ -641,7 +641,7 @@ class OneClickSystemTests(unittest.TestCase):
             if domain_retry:
                 print('Domain input retry: blank / URL-with-port-and-path / invalid label rejected before email and product installation; uppercase trailing-dot domain accepted and canonicalized; real installed service, global v-ui and upgrade verified')
             if exercise_confirmations:
-                print('Chinese installer confirmation: invalid reply re-prompted, short y accepted for cloud/upstream confirmation; temporary loopback fixture only, not proof of real cloud ingress')
+                print('Legacy installer invocation: no firewall/cloud confirmation or unknown warning; real local TLS readiness checked, public ingress not inferred')
             print('One-command systemd: real sudo setup / non-root workers / private state / HTTPS / fd-passed HTTP-01 port80 / auth / repeat protection / upgrade backup / restart OK')
 
 if __name__=='__main__':unittest.main()
