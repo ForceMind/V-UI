@@ -181,7 +181,7 @@ class VlessGrpcManagedCertificateTests(unittest.TestCase):
         self.assertEqual(result.status_code, 200, result.text)
         self.assertEqual(self.snapshot(identity)[1]['tls']['reality']['private_key'], private)
         result = self.client.put(f'/api/inbounds/{identity}', headers=auth_tests.HEADERS, json={
-            'profile': {**state['profile'], 'security': 'tls'}, 'certificate_id': 'a' * 32})
+            'profile': {**state['profile'], 'security': 'tls', 'server_name': 'vpn.example.test'}, 'certificate_id': 'a' * 32})
         self.assertEqual(result.status_code, 200, result.text)
         restored = self.client.get(f'/api/inbounds/{identity}/editor').json()
         self.assertEqual(restored['profile']['security'], 'tls')

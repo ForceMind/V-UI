@@ -605,32 +605,44 @@
             <el-form-item
                 v-if="newInbound.protocol === 'vless'"
                 label="Flow">
-                <el-select v-model="newInbound.profile.flow" :disabled="savingInbound || (newInbound.core === 'sing-box' && newInbound.profile.security === 'reality' && newInbound.profile.transport === 'direct')" style="width: 100%">
+                <el-select v-model="newInbound.profile.flow" @change="reconcileManagedCertificate" :disabled="savingInbound || (newInbound.core === 'sing-box' && newInbound.profile.security === 'reality' && newInbound.profile.transport === 'direct')" style="width: 100%">
                     <el-option label="None" value=""></el-option>
                     <el-option label="XTLS Vision" value="xtls-rprx-vision"></el-option>
                 </el-select>
             </el-form-item>
 
             <template v-if="newInbound.profile.security === 'tls'">
-                <el-form-item label="托管证书" v-if="newInbound.core === 'sing-box' && ['vless','trojan','vmess','hysteria2','tuic'].includes(newInbound.protocol)">
-                    <el-select v-model="newInbound.certificate_id" clearable @clear="clearManagedCertificate" placeholder="选证书自动填入；或手动填写路径" style="width:100%">
+                <el-form-item label="证书来源">
+                    <el-select v-model="certificateMode" @change="onCertificateModeChanged" :disabled="savingInbound" style="width:100%">
+                        <el-option label="已有托管证书（自动填写材料路径）" value="managed"></el-option>
+                        <el-option label="手工证书路径（保留现有配置）" value="manual"></el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="托管证书" v-if="certificateMode === 'managed' && managedCertificateEligible">
+                    <el-select v-model="newInbound.certificate_id" @change="onManagedCertificateChanged" :disabled="savingInbound || managedCertificateState !== 'ready'" :loading="managedCertificateState === 'loading'" placeholder="请选择已有的正式证书" style="width:100%">
                         <el-option v-for="cert in managedCertificates" :key="cert.id" :label="cert.domain" :value="cert.id"></el-option>
                     </el-select>
                 </el-form-item>
-                <p v-if="newInbound.certificate_id">使用托管证书的域名与路径；后续续期自动更新该节点。</p>
+                <template v-if="certificateMode === 'managed'">
+                    <p v-if="managedCertificateEligible" role="status">{{ managedCertificateHint }}</p>
+                    <p v-else role="status">当前组合不支持托管证书。Xray 仅支持 VLESS / RAW TCP / TLS / 空 flow；请保留配置或明确调整组合。</p>
+                    <el-button @click="retryManagedCertificates" :disabled="savingInbound || managedCertificateState === 'loading'">重新读取证书</el-button>
+                    <a href="/certificates">打开证书页</a>
+                </template>
                 <el-form-item label="SNI">
                     <el-input
                         v-model="newInbound.profile.server_name"
+                        @input="reconcileManagedCertificate"
                         placeholder="example.com">
                     </el-input>
                 </el-form-item>
-                <el-form-item label="证书路径">
+                <el-form-item label="证书路径" v-if="certificateMode === 'manual'">
                     <el-input
                         v-model="newInbound.profile.certificate_path"
                         placeholder="/etc/letsencrypt/live/example.com/fullchain.pem">
                     </el-input>
                 </el-form-item>
-                <el-form-item label="私钥路径">
+                <el-form-item label="私钥路径" v-if="certificateMode === 'manual'">
                     <el-input
                         v-model="newInbound.profile.key_path"
                         placeholder="/etc/letsencrypt/live/example.com/privkey.pem">
@@ -702,7 +714,7 @@
             <fieldset class="vui-editor-group" data-editor-group="transport"><legend>03 · 传输</legend>
             <template v-if="!['shadowsocks','hysteria2','tuic'].includes(newInbound.protocol)">
                 <el-form-item label="传输方式">
-                    <el-select v-model="newInbound.profile.transport" :disabled="savingInbound || (newInbound.core === 'sing-box' && newInbound.profile.security === 'reality' && newInbound.profile.transport === 'direct')" style="width: 100%">
+                    <el-select v-model="newInbound.profile.transport" @change="reconcileManagedCertificate" :disabled="savingInbound || (newInbound.core === 'sing-box' && newInbound.profile.security === 'reality' && newInbound.profile.transport === 'direct')" style="width: 100%">
                         <template v-if="newInbound.core === 'xray'">
                             <el-option label="RAW / TCP" value="raw"></el-option>
                             <el-option label="WebSocket" value="websocket"></el-option>

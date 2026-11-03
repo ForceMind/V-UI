@@ -1,3 +1,11 @@
+## 2026-11-04 v0.4.16 TLS节点托管证书绑定（已批准，发布准备）
+
+用户明确批准PR111转Ready、正常dev→main合并、公开v0.4.16以及公开后的短入口切换，保留原数据，继续仅Actions构建/实际安装且不运行浏览器。本版使用 `tls_certificate_no_browser=true`，仅适用0.4.16，与所有旧版例外互斥。已独审和Actions验证的候选 `26e7bdd7f258f6ddf025291d5b6d86b71efebbe5` 为固定祖先；其后的改动只能是发布器精确枚举的发布门禁、旧版升级验收、文档与版本准备。main.py仅15→16版本字符串替换，install.sh仅同一版本头注释替换；其他UI、API、CoreRuntime、依赖及固定核心保持。拒绝删除、rename、类型、链接或mode变化，不允许任意docs或tests扩围。
+
+仅原有12个明列浏览器步骤可跳过，且必须存在；浏览器未验证。准确默认main HEAD、最新run_attempt、全部jobs及其余steps成功、同提交四目标与真实安装仍是必要门禁。`Validate with pinned real cores` 必须成功，包含固定Xray真实TLS/SNI、证书轮换、失败保旧、停止待应用与恢复；oneclick必须同时成功完成 `Test published v0.4.14 to exact candidate upgrade on ephemeral systemd runner` 和 `Test published v0.4.15 to exact candidate upgrade on ephemeral systemd runner`，核对账号、数据、配置及恢复。候选、dev、main和公开后资格分别记录在[本批记录](TLS_CERTIFICATE_BINDING_FIX.md)，未运行项不称通过。
+
+发布器只晋升准确同提交受验资产，不重新构建，不覆盖旧tag、Release或资产。发布前不改setup.sh或短入口冻结源；公开后先核验19项资产、tag目标与真实摘要，再通过独立PR更新短入口版本、摘要和冻结源，并在准确候选/dev/main及真实main短命令复验。
+
 ## 2026-11-03 v0.4.15 已公开，短入口切换验收中
 
 v0.4.15已从准确main `65b1e75d90de733408101ec280a92be935731baa` 公开（19资产），用户批准的PR107/dev→main正常合并与准确候选/dev/main验收已完成。当前只切公开后短入口真实摘要与冻结验收源，随后另验候选/dev/main及实际main短命令；旧tag/资产不覆盖。使用 `ui_redesign_no_browser=true`，仅适用0.4.15、固定已批准UI候选 `7726c44d16fd88a8dfc7a4ffd404de88942da4ad`，不得与旧版例外混用。基线后严格枚举版本、发布门禁、旧版升级验收与相关说明文件；main.py仅14→15版本替换，install.sh仅同一版本注释替换；其他生产UI、后端、依赖、固定核心与短入口不得变化。rename、删除、链接与mode变化均拒绝。
@@ -139,7 +147,7 @@ GitHub权限只在该人工工作流的发布job授予contents:write/actions:rea
 
 ## 公开后检查
 
-核对 Release 公开状态、tag 目标、下载文件摘要和文档链接。公开套件入口为 `install.sh --version v0.4.15`，短入口仅使用核验后的真实摘要。每次仍须确认完整 19 项资产并核验。自动目标选择复核须使用独立临时 Linux 机器；版本字符串本身不证明下载存在，也不赋予后续未发布主线功能资格。发布源提交与后续 bootstrap/doc 提交分别记录，不能用当前 checkout 冒充冻结发布源。
+核对 Release 公开状态、tag 目标、下载文件摘要和文档链接。本版公开后手工套件入口为 `install.sh --version v0.4.16`，短入口仅使用核验后的真实摘要。每次仍须确认完整 19 项资产并核验。自动目标选择复核须使用独立临时 Linux 机器；版本字符串本身不证明下载存在，也不赋予后续未发布主线功能资格。发布源提交与后续 bootstrap/doc 提交分别记录，不能用当前 checkout 冒充冻结发布源。
 
 外部CA域名验证、云安全组和真实用户网络需要用户自己的配置，不属于维护者自动取得的授权。不要把发布流程顺手变成登录真实VPS部署。
 

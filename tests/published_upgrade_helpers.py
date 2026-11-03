@@ -1,4 +1,4 @@
-"""Opt-in empty-host public 0.4.14 -> exact candidate upgrade observations.
+"""Opt-in empty-host public 0.4.14/0.4.15 -> exact candidate upgrade observations.
 
 The old installation uses anonymous published HTTPS. Only the unpublished new
 kit's download transport is adapted; neither installer nor root receipt is faked.
@@ -14,8 +14,10 @@ import subprocess
 
 from online_install_helpers import fixture_commands, published_commands
 
-OLD_VERSION = '0.4.14'
-OLD_COMMIT = 'b0cc174d04d05e61277075412586f0ba0dd231db'
+PUBLISHED_BASELINES = {
+    '0.4.14': 'b0cc174d04d05e61277075412586f0ba0dd231db',
+    '0.4.15': '65b1e75d90de733408101ec280a92be935731baa',
+}
 CONTROL = Path('/usr/local/lib/v-ui')
 FIREWALL = str(CONTROL / 'firewall_support.py')
 
@@ -29,9 +31,21 @@ def assert_download_boundary(test, kit, log):
     test.assertEqual({row['name']: row['sha256'] for row in records}, expected)
 
 
-def assert_receipt_migration(test, before, after):
-    test.assertNotIn(FIREWALL, before['files'])
-    test.assertEqual(set(after['files']) - set(before['files']), {FIREWALL})
+def fixed_public_baseline(version, commit):
+    if version not in PUBLISHED_BASELINES or PUBLISHED_BASELINES[version] != commit:
+        raise AssertionError('Fixed public 0.4.14 or 0.4.15 upgrade baseline required')
+    return version, commit
+
+
+def assert_receipt_migration(test, before, after, old_version):
+    if old_version not in PUBLISHED_BASELINES:
+        raise AssertionError('Unknown public upgrade receipt baseline')
+    if old_version == '0.4.14':
+        test.assertNotIn(FIREWALL, before['files'])
+        test.assertEqual(set(after['files']) - set(before['files']), {FIREWALL})
+    else:
+        test.assertIn(FIREWALL, before['files'])
+        test.assertEqual(set(after['files']), set(before['files']))
     test.assertFalse(set(before['files']) - set(after['files']))
     for field in ('schema', 'service_manager', 'system_python', 'interpreter_resolved', 'interpreter_sha256'):
         test.assertEqual(after[field], before[field])
@@ -44,7 +58,7 @@ def assert_upgrade_configuration(test, before, after, old_release, new_release):
     test.assertNotEqual(old_release, new_release)
     expected = {**before, 'release_id':new_release.name,
                 'bootstrap_python':str(new_release / 'runtime/python/bin/python3')}
-    # Fresh provided-certificate 0.4.14 omitted this field. The upgrade writes
+    # Fresh provided-certificate baselines may omit this field. The upgrade writes
     # the canonical empty authorization list; existing authorizations must stay.
     expected.setdefault('ca_authorizations', [])
     test.assertEqual(after, expected)
@@ -53,20 +67,20 @@ def assert_upgrade_configuration(test, before, after, old_release, new_release):
 class PublishedUpgrade:
     def __init__(self, test, source, work, certificate_args, configured_args):
         self.test = test
-        if (os.environ.get('VUI_PUBLISHED_INSTALL_VERSION') != OLD_VERSION
-                or os.environ.get('VUI_RELEASE_COMMIT') != OLD_COMMIT
-                or os.environ.get('VUI_SETUP_INSTALL')
+        self.old_version, self.old_commit = fixed_public_baseline(
+            os.environ.get('VUI_PUBLISHED_INSTALL_VERSION'), os.environ.get('VUI_RELEASE_COMMIT'))
+        if (os.environ.get('VUI_SETUP_INSTALL')
                 or os.environ.get('VUI_EXISTING_INSTALL_TEST')):
-            raise AssertionError('Fixed public 0.4.14 upgrade mode required')
+            raise AssertionError('Fixed public upgrade requires standalone empty-host mode')
         self.source = source
         self.kit = Path(os.environ['VUI_RELEASE_KIT'])
         self.candidate = json.loads((self.kit / 'RELEASE.json').read_bytes())
         commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip()
         test.assertEqual(self.candidate['source_commit'], commit)
         test.assertEqual(self.candidate['version'], (source / 'VERSION').read_text().strip())
-        test.assertNotEqual(self.candidate['version'], OLD_VERSION)
-        self.old = published_commands(Path(os.environ['VUI_PUBLISHED_UPGRADE_SOURCE']), OLD_VERSION,
-                                      OLD_COMMIT, certificate_args, configured_args)
+        test.assertNotEqual(self.candidate['version'], self.old_version)
+        self.old = published_commands(Path(os.environ['VUI_PUBLISHED_UPGRADE_SOURCE']), self.old_version,
+                                      self.old_commit, certificate_args, configured_args)
         self.new = fixture_commands(source, work, self.kit, certificate_args, configured_args)
 
     def _service_python(self, release, program):
@@ -115,12 +129,16 @@ print(json.dumps(result,sort_keys=True))
 
     def before(self, release, api, private_values):
         self.old_receipt = self._receipt()
-        self.test.assertNotIn(FIREWALL, self.old_receipt['files'])
-        self.test.assertFalse(os.path.lexists(FIREWALL), 'Do not pre-create new root closure helper')
+        if self.old_version == '0.4.14':
+            self.test.assertNotIn(FIREWALL, self.old_receipt['files'])
+            self.test.assertFalse(os.path.lexists(FIREWALL), 'Do not pre-create new root closure helper')
+        else:
+            self.test.assertIn(FIREWALL, self.old_receipt['files'])
+            self.test.assertTrue(Path(FIREWALL).is_file())
         self.config = json.loads(Path('/etc/v-ui/service.json').read_bytes())
         self.old_release = release
         self.test.assertEqual(self.config['bootstrap_python'], str(release / 'runtime/python/bin/python3'))
-        self.test.assertEqual(self._manifest(release)['source_commit'], OLD_COMMIT)
+        self.test.assertEqual(self._manifest(release)['source_commit'], self.old_commit)
         self._service_python(release, '''
 import json,time
 from app.models import database
@@ -135,10 +153,37 @@ with database.SessionLocal() as db:
  db.commit()
 print('{}')
 ''')
+        if self.old_version == '0.4.15':
+            # An existing manual TLS consumer stays manual across the new
+            # certificate-binding release; this draft is never applied.
+            self._service_python(release, '''
+import json
+from app.models import database
+with database.SessionLocal() as db:
+ node=db.query(database.Inbound).one()
+ stream=dict(node.stream_settings)
+ stream['tls']={**stream['tls'],
+  'certificate_path':'/var/lib/v-ui/data/certs/provided-fullchain.pem',
+  'key_path':'/var/lib/v-ui/data/certs/provided-privkey.pem'}
+ node.stream_settings=stream
+ db.commit()
+print('{}')
+''')
         status, raw = api('/api/inbounds')
         self.test.assertEqual(status, 200)
         self.nodes = json.loads(raw)
         self.test.assertEqual(len(self.nodes), 1)
+        self.manual_editor = None
+        if self.old_version == '0.4.15':
+            status, raw = api('/api/inbounds/'+str(self.nodes[0]['id'])+'/editor')
+            self.test.assertEqual(status, 200)
+            self.manual_editor = json.loads(raw)
+            self.test.assertIsNone(self.manual_editor['certificate_id'])
+            self.test.assertEqual(self.manual_editor['profile']['certificate_path'],
+                                  '/var/lib/v-ui/data/certs/provided-fullchain.pem')
+            self.test.assertEqual(self.manual_editor['profile']['key_path'],
+                                  '/var/lib/v-ui/data/certs/provided-privkey.pem')
+
         status, raw = api('/api/subscriptions', {'label':'published-upgrade-fixture',
             'server':'vpn.example.test', 'inbound_ids':[self.nodes[0]['id']], 'formats':['raw']})
         self.test.assertEqual(status, 201, 'Real old HTTPS subscription creation required')
@@ -161,13 +206,19 @@ print('{}')
         manifest = self._manifest(release)
         self.test.assertEqual(manifest['source_commit'], self.candidate['source_commit'])
         self.test.assertEqual(manifest['version'], self.candidate['version'])
-        assert_receipt_migration(self.test, self.old_receipt, self._receipt())
+        assert_receipt_migration(self.test, self.old_receipt, self._receipt(), self.old_version)
         self.test.assertEqual(self._snapshot(release), self.data, 'Private DB rows and certificate bytes must survive')
         self.test.assertEqual(json.loads(api('/api/inbounds')[1]), self.nodes)
+        if self.manual_editor is not None:
+            status, raw = api('/api/inbounds/'+str(self.nodes[0]['id'])+'/editor')
+            self.test.assertEqual(status, 200)
+            self.test.assertEqual(json.loads(raw), self.manual_editor,
+                                  'Existing manual TLS paths and unbound editor must survive unchanged')
+
         self.test.assertEqual(json.loads(api('/api/subscriptions')[1]), self.grants)
         self.public_subscription(api)
         assert_download_boundary(self.test, self.kit, self.new['download_log'])
-        print('Published upgrade: immutable public 0.4.14 source/assets -> exact candidate; intact old receipt migrated with firewall_support; config, users/password hashes, node draft, live subscription, provided certificate bytes and managed certificate metadata retained; candidate-only bounded downloads OK')
+        print('Published upgrade: immutable public '+self.old_version+' source/assets -> exact candidate; exact historical root receipt closure; config, users/password hashes, node draft/manual TLS paths, live subscription, provided certificate bytes and managed certificate metadata retained; candidate-only bounded downloads OK')
 
     def public_subscription(self, api):
         status, raw = api(self.subscription)

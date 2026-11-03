@@ -1,5 +1,13 @@
 # V-UI 开发约束
 
+## 2026-11-04 v0.4.16 发布（已批准）
+
+用户明确批准PR111转Ready、正常dev→main合并、公开v0.4.16及更新短入口。冻结产品批准基线26e7bdd7f258f6ddf025291d5b6d86b71efebbe5（独审、九组/12jobs及实际Xray TLS生命周期通过）；其后仅本版版本/严格发布门禁/公开15保数据升级验收与说明。保留原14升级检查和已公开资产。所有构建/真实核心/安装只Actions、不browser，不修改用户VPS或真实CA授权；准确候选/dev/main各自验收后仅晋升同源受验制品。公开后核真实摘要才另切短入口，应用/旧tag/资产不可覆盖。统一记录沿用docs/TLS_CERTIFICATE_BINDING_FIX.md，下方旧“未授权发布”仅此前阶段快照。
+
+## 2026-11-04 TLS 已有证书自动绑定修复
+
+用户批准新增TLS节点自动选择唯一可用正式证书、多张手选、Xray支持及相关中文错误，保留原配置数据。独立fix/tls-certificate-binding候选，先完成后端新建/编辑/续期和前端选择状态一致性；Xray限VLESS RAW/TCP TLS无flow，未验传输与REALITY资格保持。构建/安装及固定真实核心只Actions，不browser，不覆盖公开15，不修改用户VPS。范围和证据见docs/TLS_CERTIFICATE_BINDING_FIX.md；新发布须自己的明确授权。
+
 ## 2026-11-03 v0.4.15 正式发布（已批准）
 
 v0.4.15现已从准确main `65b1e75d90de733408101ec280a92be935731baa` 公开，19资产、tag目标及匿名installer/完整SHA256SUMS摘要已核。候选/dev/main各自非浏览器、四目标与真实旧014保数据升级均通过；当前仅切短入口到真实新摘要及冻结验收源，并另验准确候选/dev/main。应用、安装器、版本和Release保持冻结，不覆盖旧资产；浏览器未验证。实际结果仍以承载PR与统一账本为准。

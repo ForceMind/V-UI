@@ -118,12 +118,12 @@ def _target_parts(target: str) -> tuple[str, int]:
 
 
 def _certificate_paths(profile: dict) -> tuple[str, str]:
-    certificate_path = _required(
-        profile,
-        "certificate_path",
-        "TLS certificate path",
-    )
-    key_path = _required(profile, "key_path", "TLS private key path")
+    certificate_path = str(profile.get("certificate_path") or "").strip()
+    if not certificate_path:
+        raise HTTPException(422, "请选择可用的正式证书，或填写 TLS 证书路径")
+    key_path = str(profile.get("key_path") or "").strip()
+    if not key_path:
+        raise HTTPException(422, "请填写 TLS 私钥路径")
     return certificate_path, key_path
 
 

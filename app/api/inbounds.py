@@ -23,6 +23,7 @@ from app.services.inbound_service import (
 from app.services.protocol_profiles import profile_catalog
 from app.services.reality_profile import has_reality
 from app.services.node_selection_revision import NODE_REVISION_HEADER
+from app.services.managed_tls import supports_profile
 
 router = APIRouter()
 
@@ -76,12 +77,23 @@ class InboundDeletePayload(BaseModel):
 
 def _managed_certificate(profile: dict | None, certificate_id: str, core: str, protocol: str):
     from app.certificates.manager import get_manager
+    from app.certificates.material import CertificateError, domain_name
     from app.api.certificates import perform
-    if core != "sing-box" or protocol not in {"vless", "trojan", "vmess", "hysteria2", "tuic"}:
-        raise HTTPException(409, "Managed certificates require sing-box VLESS/TLS, Trojan/TLS, VMess/TLS or Hysteria2/TLS or TUIC/TLS")
+    if not supports_profile(core, protocol, profile):
+        raise HTTPException(409, "此协议或传输暂不支持托管证书；Xray 仅支持 VLESS RAW/TCP TLS")
     if profile and "security" in profile and str(profile["security"]).lower() != "tls":
-        raise HTTPException(409, "Managed certificates require TLS; clear certificate_id when leaving TLS")
+        raise HTTPException(409, "托管证书只能用于 TLS；切换安全方式时请取消证书绑定")
+    server_name = (profile or {}).get("server_name", "")
+    if not isinstance(server_name, str):
+        raise HTTPException(422, "SNI 必须是域名字符串")
     paths, domain, _ = perform(lambda: get_manager().material(certificate_id))
+    if server_name:
+        try:
+            matches = domain_name(server_name) == domain_name(domain)
+        except CertificateError:
+            raise HTTPException(422, "SNI 格式无效，请填写有效域名") from None
+        if not matches:
+            raise HTTPException(409, "SNI 与所选证书域名不匹配，请核对后保存")
     return {
         **(profile or {}),
         "security": "tls",
@@ -124,7 +136,7 @@ def add_inbound(payload: InboundPayload, db: Session = Depends(get_db)):
     data = payload.model_dump()
     if payload.certificate_id:
         if has_reality(normalize_mapping(payload.stream_settings)):
-            raise HTTPException(409, "REALITY cannot bind a managed certificate")
+            raise HTTPException(409, "REALITY 不能绑定托管证书")
         data["profile"] = _managed_certificate(
             payload.profile, payload.certificate_id, payload.core, payload.protocol
         )
@@ -143,7 +155,7 @@ def _prepare_inbound_edit(item, data: dict) -> tuple[dict, tuple[bool, str | Non
     profile = data.get("profile")
     if (data.get("certificate_id") and has_reality(item.stream_settings)
             and (not isinstance(profile, dict) or profile.get("security") != "tls")):
-        raise HTTPException(409, "Choose an explicit TLS transition before binding a managed certificate to REALITY")
+        raise HTTPException(409, "请先明确切换为 TLS，再绑定托管证书")
     # Match compile_profile: {} is a no-op; implicit security is protocol-aware.
     # In particular, Trojan remains TLS when security is missing/empty/null.
     default_security = "tls" if item.core == "sing-box" and item.protocol in {"hysteria2", "tuic", "trojan"} else "none"
@@ -170,7 +182,7 @@ def _prepare_inbound_edit(item, data: dict) -> tuple[dict, tuple[bool, str | Non
             if not isinstance(profile, dict):
                 raise HTTPException(
                     409,
-                    "Provide explicit manual certificate and key paths before removing managed renewal",
+                    "取消自动续期前，请填写新的手工证书和私钥路径",
                 )
             old_paths, _, _ = perform(
                 lambda: certificate_manager.material(previous_certificate)
@@ -185,8 +197,7 @@ def _prepare_inbound_edit(item, data: dict) -> tuple[dict, tuple[bool, str | Non
             ):
                 raise HTTPException(
                     409,
-                    "Replace the managed certificate/key paths before unbinding; "
-                    "otherwise the node would lose automatic renewal while still using old material",
+                    "取消绑定前，请替换托管证书和私钥路径，避免继续使用旧材料却失去自动续期",
                 )
 
     return data, (certificate_changed, certificate_id, previous_certificate)

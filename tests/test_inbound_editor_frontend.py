@@ -348,7 +348,7 @@ const sandbox={document:{getElementById(){return null}},addEventListener(){},loc
  computed:fn=>({get value(){return fn();}}),watch(){},onMounted(){}},
  ElementPlus:{ElMessage:{success(){},error(m){throw Error(m);}},ElMessageBox:{}},ElementPlusIconsVue:{},
  axios:{defaults:{headers:{common:{}}},interceptors:{response:{use(){}}},
- async get(url){return {data:url.endsWith('/editor')?clone(stored):[]};},
+ async get(url){return {data:url.endsWith('/editor')?clone(stored):url === '/api/certificates' ? [{id:stored.certificate_id,domain:'vpn.example.test',environment:'production',revision:'test-revision',days_remaining:30}] : []};},
  async post(url,body){writes.push({url,body:clone(body)});return {data:{}};},
  async put(url,body){writes.push({url,body:clone(body)});return {data:{}};}}};
 vm.runInNewContext(fs.readFileSync('web/js/app.js','utf8'),sandbox);
@@ -396,7 +396,7 @@ const sandbox={document:{getElementById(){return null}},addEventListener(){},loc
  computed:fn=>({get value(){return fn();}}),watch(){},onMounted(){}},
  ElementPlus:{ElMessage:{success(){},error(m){throw Error(m);}},ElMessageBox:{}},ElementPlusIconsVue:{},
  axios:{defaults:{headers:{common:{}}},interceptors:{response:{use(){}}},
- async get(url){return {data:url.endsWith('/editor')?clone(stored):[]};},
+ async get(url){return {data:url.endsWith('/editor')?clone(stored):url === '/api/certificates' ? [{id:stored.certificate_id,domain:'vpn.example.test',environment:'production',revision:'test-revision',days_remaining:30}] : []};},
  async post(url,body){writes.push({url,body:clone(body)});return {data:{}};},
  async put(url,body){writes.push({url,body:clone(body)});return {data:{}};}}};
 vm.runInNewContext(fs.readFileSync('web/js/app.js','utf8'),sandbox);
@@ -437,17 +437,11 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js','utf8'),sandbox);
         script = r'''
 const fs = require('node:fs'), assert = require('node:assert/strict');
 const html = fs.readFileSync('web/index.html', 'utf8');
-const selector = html.match(/<template v-if="([^"]+)">\s*<el-form-item label="托管证书" v-if="([^"]+)"/);
-assert.ok(selector, 'managed selector must remain inside the TLS template');
-const visible = new Function('newInbound', `return (${selector[1]}) && (${selector[2]});`);
-for (const protocol of ['vless', 'trojan', 'vmess', 'hysteria2', 'tuic']) {
-  assert.equal(visible({core: 'sing-box', protocol, profile: {security: 'tls'}}), true, protocol);
-  for (const security of ['none', 'reality'])
-    assert.equal(visible({core: 'sing-box', protocol, profile: {security}}), false, `${protocol}/${security}`);
-  assert.equal(visible({core: 'xray', protocol, profile: {security: 'tls'}}), false, `xray/${protocol}`);
-}
-for (const protocol of ['shadowsocks'])
-  assert.equal(visible({core: 'sing-box', protocol, profile: {security: 'tls'}}), false, protocol);
+assert.match(html, /<template v-if="newInbound.profile.security === 'tls'">/);
+assert.match(html, /label="托管证书" v-if="certificateMode === 'managed' && managedCertificateEligible"/);
+assert.match(html, /label="证书路径" v-if="certificateMode === 'manual'"/);
+assert.match(html, /label="私钥路径" v-if="certificateMode === 'manual'"/);
+assert.match(html, /Xray 仅支持 VLESS \/ RAW TCP \/ TLS \/ 空 flow/);
 '''
         result = subprocess.run(['node', '-e', script], cwd=root, text=True, capture_output=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

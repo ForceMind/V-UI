@@ -95,7 +95,7 @@ function fixture({legacy = false} = {}) {
         replace(changes = {}){const replacement = node(1, B, {remark:'Replacement node', port:10444, ...changes}); rows.set(1, replacement); return replacement;}};
 }
 const assertNoSuccess = f => assert.equal(f.messages.filter(message => message.kind === 'success').length, 0);
-const assertConflict = f => assert.ok(f.messages.some(message => message.kind === 'error' && message.text.includes(CONFLICT)), plain(f.messages));
+const assertConflict = f => assert.ok(f.messages.some(message => message.kind === 'error' && (message.text.includes(CONFLICT) || message.text.includes('节点已发生变化'))), JSON.stringify(plain(f.messages)));
 
 test('edit/get replacement race refuses to open the replacement from the old row', async () => {
     const f = fixture(), row = await f.load(), held = f.hold('GET', '/api/inbounds/1/editor');
@@ -122,7 +122,7 @@ for (const value of [undefined, null, '', 'A'.repeat(64), 'a'.repeat(63), A + '\
         if (f.confirmations.length) f.cancel(); await deleting;
         assert.equal(f.reads.length, 0); assert.equal(f.writes.length, 0); assert.equal(f.confirmations.length, 0);
         assert.equal(f.state.showAddInbound.value, false);
-        assert.equal(f.messages.length, 2); assert.ok(f.messages.every(message => /refresh|reload/i.test(message.text)));
+        assert.equal(f.messages.length, 2); assert.ok(f.messages.every(message => /refresh|reload|刷新|重新加载/i.test(message.text)));
     });
 }
 for (const value of [undefined, null, '', 'A'.repeat(64), 'a'.repeat(63), A + '\n', [A]]) {
@@ -130,7 +130,7 @@ for (const value of [undefined, null, '', 'A'.repeat(64), 'a'.repeat(63), A + '\
         const f = fixture(), row = await f.load(); f.editorValues.set(1, {...node(), mutation_revision:value});
         await f.state.openEditInbound(row); await f.state.saveInbound();
         assert.equal(f.state.showAddInbound.value, false); assert.equal(f.writes.length, 0);
-        assert.ok(f.messages.some(message => /refresh|reload/i.test(message.text)));
+        assert.ok(f.messages.some(message => /refresh|reload|刷新|重新加载/i.test(message.text)));
     });
 }
 for (const value of [null, undefined, []]) {
@@ -138,7 +138,7 @@ for (const value of [null, undefined, []]) {
         const f = fixture(), row = await f.load(); f.editorValues.set(1, value);
         await f.state.openEditInbound(row); await f.state.saveInbound();
         assert.equal(f.state.showAddInbound.value, false); assert.equal(f.writes.length, 0);
-        assert.ok(f.messages.some(message => /refresh|reload/i.test(message.text)));
+        assert.ok(f.messages.some(message => /refresh|reload|刷新|重新加载/i.test(message.text)));
     });
 }
 test('refresh to the same integer id cannot rebase an open edit; conflict preserves all draft intent', async () => {
@@ -269,7 +269,7 @@ test('save refuses an editing id without a verified editor snapshot', async () =
     f.state.newInbound.remark = 'Keep unverified draft'; await f.state.saveInbound();
     assert.equal(f.writes.length, 0); assert.equal(f.state.savingInbound.value, false);
     assert.equal(f.state.showAddInbound.value, true); assert.equal(f.state.newInbound.remark, 'Keep unverified draft');
-    assert.ok(f.messages.some(message => /refresh|reload/i.test(message.text)));
+    assert.ok(f.messages.some(message => /refresh|reload|刷新|重新加载/i.test(message.text)));
 });
 test('same-instance changes while editor fetch is pending use its returned snapshot, not the old list', async () => {
     const f = fixture(), row = await f.load(), held = f.hold('GET', '/api/inbounds/1/editor');
