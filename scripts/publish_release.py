@@ -81,6 +81,22 @@ STARTUP_FILES = {
     'tests/test_release_promotion.py', 'tests/test_setup_shell.py',
     'tests/test_short_install_contract.py',
 }
+UI_REDESIGN_BASELINE = '7726c44d16fd88a8dfc7a4ffd404de88942da4ad'
+UI_REDESIGN_VERSION = '0.4.15'
+# The reviewed UI/firewall implementation is frozen at this candidate. Only
+# the listed release metadata, gate and published-upgrade acceptance may follow.
+UI_REDESIGN_FILES = {
+    'VERSION', 'main.py', 'scripts/publish_release.py',
+    '.github/workflows/publish.yml', '.github/workflows/oneclick.yml',
+    'tests/test_release_promotion.py', 'tests/test_oneclick_system.py',
+    'tests/test_short_install_contract.py',
+    'tests/published_upgrade_helpers.py', 'tests/test_published_upgrade_helpers.py',
+    'AGENTS.md', 'install.sh', 'docs/README.md',
+    'docs/RELEASE_NOTES.md', 'docs/INSTALLATION.md', 'docs/OPERATIONS.md',
+    'README.md', 'CHANGELOG.md', 'docs/RELEASING.md',
+    'docs/UI_REDESIGN_PROGRESS.md', 'docs/DEVELOPMENT_HANDOFF.md',
+}
+UI_REDESIGN_UPGRADE_STEP = 'Test published v0.4.14 to exact candidate upgrade on ephemeral systemd runner'
 BROWSER_SKIP_STEPS = {
     name: steps | {'Install explicit test browser'} for name, steps in REQUIRED_ACCEPTANCE_STEPS.items()
 }
@@ -332,8 +348,47 @@ def validate_startup_scope(commit, version):
         raise ReleaseGateError('Cannot prove Startup readiness source ancestry/scope') from exc
 
 
-def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_trust_no_browser=False, install_interaction_no_browser=False, startup_no_browser=False):
+def validate_ui_redesign_scope(commit, version):
+    """Only the approved 0.4.15 UI candidate plus bounded release preparation."""
+    if version != UI_REDESIGN_VERSION:
+        raise ReleaseGateError('Non-browser UI exception is only approved for 0.4.15')
+    try:
+        subprocess.run(['git','merge-base','--is-ancestor',UI_REDESIGN_BASELINE,commit],check=True,
+                       stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        changes=subprocess.check_output(
+            ['git','diff','--name-status','--no-renames',UI_REDESIGN_BASELINE,commit],text=True)
+        for line in changes.splitlines():
+            fields=line.split('\t')
+            if len(fields)!=2 or fields[0] not in ('A','M'):
+                raise ReleaseGateError('UI release scope refuses deletion, rename or type change')
+            name=fields[1]
+            if name not in UI_REDESIGN_FILES:
+                raise ReleaseGateError('Changes exceed the approved UI release preparation: '+name)
+            # Preserve the executable installer and non-executable source modes;
+            # reject links, gitlinks and mode changes even without a content edit.
+            mode = '100755' if name == 'install.sh' else '100644'
+            entry=subprocess.check_output(['git','ls-tree',commit,'--',name],text=True)
+            if not re.fullmatch(mode+r' blob [a-f0-9]{40}\t'+re.escape(name)+r'\n',entry):
+                raise ReleaseGateError('UI release exception refuses nonregular files or mode changes')
+        previous=subprocess.check_output(['git','show',UI_REDESIGN_BASELINE+':main.py'])
+        current=subprocess.check_output(['git','show',commit+':main.py'])
+        if previous.count(b"version='0.4.14'")!=1 or current!=previous.replace(b"version='0.4.14'",b"version='0.4.15'",1):
+            raise ReleaseGateError('Application changes exceed the UI release version bump')
+        if subprocess.check_output(['git','show',commit+':VERSION'])!=b'0.4.15\n':
+            raise ReleaseGateError('UI release version identity differs')
+        previous=subprocess.check_output(['git','show',UI_REDESIGN_BASELINE+':install.sh'])
+        current=subprocess.check_output(['git','show',commit+':install.sh'])
+        if previous.count(b'--version v0.4.14')!=1 or current!=previous.replace(b'--version v0.4.14',b'--version v0.4.15',1):
+            raise ReleaseGateError('Installer changes exceed the UI release version documentation')
+    except subprocess.CalledProcessError as exc:
+        raise ReleaseGateError('Cannot prove UI release source ancestry/scope') from exc
+
+
+def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_trust_no_browser=False, install_interaction_no_browser=False, startup_no_browser=False, ui_redesign_no_browser=False):
     """A green workflow with skipped acceptance is not release qualification."""
+    if sum((installer_only_no_browser, ca_trust_no_browser, install_interaction_no_browser,
+            startup_no_browser, ui_redesign_no_browser)) > 1:
+        raise ReleaseGateError('Non-browser scope exceptions are mutually exclusive')
     for path, run in sorted(checks.items()):
         attempt = run.get('run_attempt')
         if type(attempt) is not int or attempt < 1:
@@ -350,7 +405,12 @@ def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_tru
         if not jobs or len({job['id'] for job in jobs}) != len(jobs):
             raise ReleaseGateError('Missing or duplicated exact-attempt jobs: '+path)
         names={step.get('name') for job in jobs for step in job.get('steps', [])}
-        if not REQUIRED_ACCEPTANCE_STEPS.get(path,set()) <= names:
+        required_steps = REQUIRED_ACCEPTANCE_STEPS.get(path,set())
+        if ui_redesign_no_browser:
+            required_steps = required_steps | BROWSER_SKIP_STEPS.get(path,set())
+            if path == 'oneclick.yml':
+                required_steps = required_steps | {UI_REDESIGN_UPGRADE_STEP}
+        if not required_steps <= names:
             raise ReleaseGateError('Missing required acceptance steps: '+path)
         for job in jobs:
             if (job.get('run_id') != run['id'] or job.get('head_sha') != commit
@@ -360,7 +420,7 @@ def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_tru
             def accepted(step):
                 return (step.get('status') == 'completed' and
                         (step.get('conclusion') == 'success' or
-                         ((installer_only_no_browser or ca_trust_no_browser or install_interaction_no_browser or startup_no_browser) and step.get('conclusion') == 'skipped'
+                         ((installer_only_no_browser or ca_trust_no_browser or install_interaction_no_browser or startup_no_browser or ui_redesign_no_browser) and step.get('conclusion') == 'skipped'
                           and step.get('name') in BROWSER_SKIP_STEPS.get(path,set()))))
             if not steps or not all(accepted(step) for step in steps):
                 raise ReleaseGateError('Workflow has unverified, skipped or failed steps: '+path)
@@ -481,6 +541,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--commit',required=True);p.add_argument('--version',required=True)
     p.add_argument('--confirm',required=True);p.add_argument('--publish',action='store_true')
+    p.add_argument('--ui-redesign-no-browser',action='store_true',
+                   help='Approved frozen 0.4.15 UI candidate; browsers remain unverified')
     p.add_argument('--startup-no-browser',action='store_true',
                    help='Explicitly approved 0.4.14 bounded startup and diagnostic fix; browsers unverified')
     p.add_argument('--install-interaction-no-browser',action='store_true',
@@ -512,8 +574,10 @@ def main():
         if len(batch)<100:
             break
     checks=select_runs(runs,args.commit)
-    if sum((args.installer_only_no_browser, args.ca_trust_no_browser, args.install_interaction_no_browser, args.startup_no_browser)) > 1:
+    if sum((args.installer_only_no_browser, args.ca_trust_no_browser, args.install_interaction_no_browser, args.startup_no_browser, args.ui_redesign_no_browser)) > 1:
         raise ReleaseGateError('Non-browser scope exceptions are mutually exclusive')
+    if args.ui_redesign_no_browser:
+        validate_ui_redesign_scope(args.commit,args.version)
     if args.startup_no_browser:
         validate_startup_scope(args.commit,args.version)
     if args.install_interaction_no_browser:
@@ -524,7 +588,8 @@ def main():
         validate_installer_only_scope(args.commit,args.version)
     validate_run_jobs(checks,args.commit,installer_only_no_browser=args.installer_only_no_browser,
                       ca_trust_no_browser=args.ca_trust_no_browser,
-                      install_interaction_no_browser=args.install_interaction_no_browser, startup_no_browser=args.startup_no_browser)
+                      install_interaction_no_browser=args.install_interaction_no_browser, startup_no_browser=args.startup_no_browser,
+                      ui_redesign_no_browser=args.ui_redesign_no_browser)
 
     tag='v'+args.version
     for path in ('git/ref/tags/'+tag,'releases/tags/'+tag):
@@ -571,6 +636,11 @@ def main():
               '只跳过明列浏览器步骤，其余准确提交/attempt/jobs/steps、四目标与真实慢启动/失败恢复安装门禁保持。'+\
               '相对 `'+STARTUP_BASELINE+'` 仅允许安装器、服务控制、对应测试/文档和版本；'+\
               '应用逻辑、前端、证书校验、运行依赖、builder和固定核心变更均拒绝，此例外只适用0.4.14。\n'
+    if args.ui_redesign_no_browser:
+        body+='\n\n验收范围：用户明确批准本次0.4.15统一UI与防火墙整理采用非浏览器验收。浏览器未验证；'+\
+              '仅允许12个明列浏览器步骤跳过，准确提交/attempt/全部jobs与其他steps、四目标、真实安装与旧0.4.14升级门禁保持。'+\
+              '批准UI候选固定为 `'+UI_REDESIGN_BASELINE+'`；此后仅允许列明版本、发布门禁、升级验收和文档；'+\
+              'main.py仅版本替换，其他生产UI、后端、依赖、核心与短入口保持，安装器仅版本注释替换。此例外只适用0.4.15，不覆盖旧资产。\n'
     body+='\n\n## 一行交互安装并注册 v-ui\n\n```sh\n'+installation_command(files,args.version)+'\n```\n'
     body+='\n安装成功后输入 `v-ui`。普通管理员按已有 sudo 策略认证；不增加免密 sudoers。\n'
     release=request('releases','POST',{'tag_name':tag,'target_commitish':args.commit,'name':'V-UI '+tag,

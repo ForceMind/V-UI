@@ -11,74 +11,31 @@
     <script src="https://unpkg.com/element-plus"></script>
     <script src="https://unpkg.com/@element-plus/icons-vue"></script>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+<link rel="stylesheet" href="/ui/css/shell.css">
+<script src="/ui/js/navigation.js"></script>
+<script src="/ui/js/shell.js" defer></script>
 </head>
-<body>
+<body data-vui-page="dashboard">
 <div id="app">
-    <el-container class="layout-container">
-        <el-aside width="220px" class="aside-menu">
-            <div class="logo"><h2><img class="vui-brand-image" src="/ui/brand/vui-icon.svg" alt="V-UI" width="36" height="36"><span aria-hidden="true">V-UI</span></h2></div>
-            <el-menu
-                active-text-color="#409EFF"
-                background-color="#304156"
-                text-color="#bfcbd9"
-                :default-active="currentView"
-                @select="handleSelect"
-                class="el-menu-vertical">
-                <el-menu-item index="dashboard">
-                    <el-icon><Odometer /></el-icon>
-                    <span>系统状态</span>
-                </el-menu-item>
-                <el-menu-item index="inbounds">
-                    <el-icon><Connection /></el-icon>
-                    <span>入站节点</span>
-                </el-menu-item>
-                <el-menu-item index="routing">
-                    <el-icon><Setting /></el-icon>
-                    <span>Mihomo 分流</span>
-                </el-menu-item>
-                <el-menu-item index="proxy"><el-icon><Connection /></el-icon><span>代理与中转</span></el-menu-item>
-                <el-menu-item index="certificates"><el-icon><Lock /></el-icon><span>证书管理</span></el-menu-item>
-                <el-menu-item index="subscriptions">
-                    <el-icon><Link /></el-icon>
-                    <span>订阅输出</span>
-                </el-menu-item>
-                <el-menu-item index="site">
-                    <el-icon><Document /></el-icon>
-                    <span>站点部署</span>
-                </el-menu-item>
-                <el-menu-item index="settings">
-                    <el-icon><Setting /></el-icon>
-                    <span>面板设置</span>
-                </el-menu-item>
-                <el-menu-item
-                    index="security"
-                    tabindex="0"
-                    @keydown.enter.prevent="handleSelect('security')"
-                    @keydown.space.prevent="handleSelect('security')">
-                    <el-icon><Lock /></el-icon>
-                    <span>安全中心</span>
-                </el-menu-item>
-            </el-menu>
-        </el-aside>
-
+    <el-container class="layout-container vui-main" id="vui-main">
         <el-container>
-            <el-header class="header">
+            <el-header class="header vui-status-toolbar">
                 <div class="header-left">
                     <el-tag id="system-status-tag" :data-status="systemOsKnown ? 'known' : 'unknown'"
                         :type="systemOsKnown ? 'success' : 'warning'">
-                        {{ systemOsKnown ? 'Running on ' + systemStatus.os : 'System Unknown' }}
+                        {{ systemOsKnown ? '运行系统：' + systemStatus.os : '系统状态未确认' }}
                     </el-tag>
                     <el-tag id="xray-status-tag"
                         style="margin-left: 8px"
                         :data-status="coreFieldKnown('xray', 'running') ? 'known' : 'unknown'"
                         :type="!coreFieldKnown('xray', 'running') ? 'warning' : coreStatus.xray.running ? 'success' : 'info'">
-                        Xray {{ !coreFieldKnown('xray', 'running') ? 'Unknown' : coreStatus.xray.running ? 'Running' : 'Stopped' }}
+                        Xray {{ !coreFieldKnown('xray', 'running') ? '状态未确认' : coreStatus.xray.running ? '运行中' : '已停止' }}
                     </el-tag>
                     <el-tag id="singbox-status-tag"
                         style="margin-left: 8px"
                         :data-status="coreFieldKnown('sing-box', 'running') ? 'known' : 'unknown'"
                         :type="!coreFieldKnown('sing-box', 'running') ? 'warning' : coreStatus['sing-box'].running ? 'success' : 'info'">
-                        sing-box {{ !coreFieldKnown('sing-box', 'running') ? 'Unknown' : coreStatus['sing-box'].running ? 'Running' : 'Stopped' }}
+                        sing-box {{ !coreFieldKnown('sing-box', 'running') ? '状态未确认' : coreStatus['sing-box'].running ? '运行中' : '已停止' }}
                     </el-tag>
                 </div>
                 <div class="header-right">
@@ -87,21 +44,17 @@
                         @click="restartCore('xray')"
                         :disabled="!!restartingCore"
                         :loading="restartingCore === 'xray'">
-                        <el-icon><Refresh /></el-icon> Xray
+                        <el-icon><Refresh /></el-icon> 重启 Xray
                     </el-button>
                     <el-button
                         size="small"
                         @click="restartCore('sing-box')"
                         :disabled="!!restartingCore"
                         :loading="restartingCore === 'sing-box'">
-                        <el-icon><Refresh /></el-icon> sing-box
+                        <el-icon><Refresh /></el-icon> 重启 sing-box
                     </el-button>
-                    <el-dropdown style="margin-left: 16px">
-                        <span class="el-dropdown-link">
-                            {{ currentUser.username }}
-                            <el-icon class="el-icon--right"><arrow-down /></el-icon>
-                        </span>
-                    </el-dropdown>
+                    <a class="vui-current-user" href="/account">{{ currentUser.username }} · 账户</a>
+
                 </div>
             </el-header>
 
@@ -109,7 +62,7 @@
                 <div v-if="currentView === 'dashboard'" class="dashboard-view">
                     <div class="view-header">
                         <div>
-                            <h3>系统状态</h3>
+                            <h1>总览</h1>
                             <div id="status-refresh-help" class="stat-text">只读取最新状态，不会重启核心。</div>
                         </div>
                         <el-button id="refresh-status" @click="refreshStatus"
@@ -125,21 +78,21 @@
                                     :percentage="systemStatus.cpu.percent"
                                     :color="colors">
                                 </el-progress>
-                                <p v-else role="status">Unknown · 状态未确认</p>
+                                <p v-else role="status">状态未确认</p>
                                 <div v-if="systemMetricKnown('cpu')" class="stat-text">
-                                    {{ systemStatus.cpu?.cores }} Cores
+                                    {{ systemStatus.cpu?.cores }} 核
                                 </div>
                             </el-card>
                         </el-col>
                         <el-col :span="6">
                             <el-card id="memory-status" shadow="hover" :data-status="systemMetricKnown('memory') ? 'known' : 'unknown'">
-                                <template #header>Memory</template>
+                                <template #header>内存</template>
                                 <el-progress v-if="systemMetricKnown('memory')"
                                     type="dashboard"
                                     :percentage="systemStatus.memory.percent"
                                     :color="colors">
                                 </el-progress>
-                                <p v-else role="status">Unknown · 状态未确认</p>
+                                <p v-else role="status">状态未确认</p>
                                 <div v-if="systemMetricKnown('memory')" class="stat-text">
                                     {{ systemStatus.memory?.used }} / {{ systemStatus.memory?.total }}
                                 </div>
@@ -148,22 +101,22 @@
                         <el-col :span="6">
                             <el-card id="xray-core-status" shadow="hover"
                                 :data-status="coreFieldKnown('xray', 'binary_exists') && coreFieldKnown('xray', 'running') ? 'known' : 'unknown'">
-                                <template #header>Xray Core</template>
+                                <template #header>Xray 核心</template>
                                 <el-tag :type="!coreFieldKnown('xray', 'binary_exists') ? 'warning' : coreStatus.xray.binary_exists ? 'success' : 'danger'">
-                                    {{ !coreFieldKnown('xray', 'binary_exists') ? 'Unknown' : coreStatus.xray.binary_exists ? 'Installed' : 'Missing' }}
+                                    {{ !coreFieldKnown('xray', 'binary_exists') ? '状态未确认' : coreStatus.xray.binary_exists ? '已安装' : '未安装' }}
                                 </el-tag>
-                                <p>{{ !coreFieldKnown('xray', 'running') ? 'Unknown' : coreStatus.xray.running ? 'Running' : 'Stopped' }}</p>
+                                <p>{{ !coreFieldKnown('xray', 'running') ? '状态未确认' : coreStatus.xray.running ? '运行中' : '已停止' }}</p>
                                 <p v-if="!coreFieldKnown('xray', 'binary_exists') || !coreFieldKnown('xray', 'running')" role="status" class="stat-text">状态未确认</p>
                             </el-card>
                         </el-col>
                         <el-col :span="6">
                             <el-card id="singbox-core-status" shadow="hover"
                                 :data-status="coreFieldKnown('sing-box', 'binary_exists') && coreFieldKnown('sing-box', 'running') ? 'known' : 'unknown'">
-                                <template #header>sing-box Core</template>
+                                <template #header>sing-box 核心</template>
                                 <el-tag :type="!coreFieldKnown('sing-box', 'binary_exists') ? 'warning' : coreStatus['sing-box'].binary_exists ? 'success' : 'danger'">
-                                    {{ !coreFieldKnown('sing-box', 'binary_exists') ? 'Unknown' : coreStatus['sing-box'].binary_exists ? 'Installed' : 'Missing' }}
+                                    {{ !coreFieldKnown('sing-box', 'binary_exists') ? '状态未确认' : coreStatus['sing-box'].binary_exists ? '已安装' : '未安装' }}
                                 </el-tag>
-                                <p>{{ !coreFieldKnown('sing-box', 'running') ? 'Unknown' : coreStatus['sing-box'].running ? 'Running' : 'Stopped' }}</p>
+                                <p>{{ !coreFieldKnown('sing-box', 'running') ? '状态未确认' : coreStatus['sing-box'].running ? '运行中' : '已停止' }}</p>
                                 <p v-if="!coreFieldKnown('sing-box', 'binary_exists') || !coreFieldKnown('sing-box', 'running')" role="status" class="stat-text">状态未确认</p>
                             </el-card>
                         </el-col>
@@ -492,57 +445,41 @@
                     </el-card>
                 </div>
 
-                <div v-if="currentView === 'site'">
-                    <h3>站点部署</h3>
-                    <el-card>
-                        <el-upload
-                            drag
-                            action="/api/files/upload_site"
-                            :on-success="handleUploadSuccess"
-                            :on-error="handleUploadError"
-                            accept=".zip">
-                            <el-icon class="el-icon--upload"><upload-filled /></el-icon>
-                            <div class="el-upload__text">
-                                Drop file here or <em>click to upload</em>
-                            </div>
-                        </el-upload>
-                        <div style="margin-top: 20px">
-                            <h4>Current Files</h4>
-                            <ul>
-                                <li v-for="file in siteFiles" :key="file">
-                                    {{ file }}
-                                </li>
-                            </ul>
-                        </div>
-                    </el-card>
-                </div>
-
-                <div v-if="currentView === 'settings'">
-                    <h3>面板设置</h3>
-                    <el-card style="max-width: 500px">
-                        <el-form :model="userForm" label-width="100px">
-                            <el-form-item label="用户名">
-                                <el-input v-model="userForm.username"></el-input>
-                            </el-form-item>
-                            <el-form-item label="新密码">
-                                <el-input
-                                    v-model="userForm.password"
-                                    type="password"
-                                    show-password
-                                    placeholder="留空不修改">
-                                </el-input>
-                            </el-form-item>
-                            <el-form-item>
-                                <el-button type="primary" @click="updateProfile">
-                                    保存修改
-                                </el-button>
-                            </el-form-item>
-                        </el-form>
-                    </el-card>
-                </div>
+                <section v-if="currentView === 'cores'" class="vui-content-panel" aria-labelledby="cores-heading">
+                    <div class="view-header"><div><h1 id="cores-heading">核心与服务</h1><p class="stat-text">读取固定核心的安装与运行状态；重启会影响现有连接。</p></div>
+                    <el-button @click="refreshStatus" :disabled="!statusRefreshReady || refreshingStatus" :loading="refreshingStatus">刷新状态</el-button></div>
+                    <div class="vui-core-grid">
+                        <el-card v-for="core in ['xray', 'sing-box']" :key="core" shadow="never">
+                            <template #header>{{ core === 'xray' ? 'Xray' : 'sing-box' }}</template>
+                            <p>安装：{{ !coreFieldKnown(core, 'binary_exists') ? '状态未确认' : coreStatus[core].binary_exists ? '已安装' : '未安装' }}</p>
+                            <p>运行：{{ !coreFieldKnown(core, 'running') ? '状态未确认' : coreStatus[core].running ? '运行中' : '已停止' }}</p>
+                            <el-button @click="restartCore(core)" :disabled="!!restartingCore" :loading="restartingCore === core">重启 {{ core === 'xray' ? 'Xray' : 'sing-box' }}</el-button>
+                        </el-card>
+                    </div>
+                </section>
+                <section v-if="currentView === 'diagnostics'" class="vui-content-panel" aria-labelledby="diagnostics-heading">
+                    <h1 id="diagnostics-heading">日志与诊断</h1>
+                    <p>通用面板 / 核心日志读取与下载能力尚未提供；此页不展示模拟日志。</p>
+                    <p>代理配置、活动修订与分层诊断请在代理与中转页面查看。当前服务器线路诊断未开放，外部设备连接需要单独验证。</p>
+                    <a class="vui-button" href="/proxy">查看代理与中转</a>
+                </section>
+                <section v-if="currentView === 'firewall'" class="vui-content-panel" aria-labelledby="firewall-heading">
+                    <h1 id="firewall-heading">防火墙</h1>
+                    <p>网页不提供主机规则读取、保存、开放端口或封禁 IP 的操作，也不修改 SSH 设置。</p>
+                    <p>终端候选菜单 10 / 11 提供诊断与明确确认后的放行；该候选尚未发布。主机及云防火墙仍需分别核对。</p>
+                    <p class="stat-text">请使用已审阅的终端候选或主机 / 云服务商管理工具；此页不会请求 root 管理接口。</p>
+                </section>
+                <section v-if="currentView === 'legacy'" class="vui-content-panel" aria-labelledby="legacy-heading">
+                    <h1 id="legacy-heading">站点托管</h1>
+                    <p>历史功能保留说明：当前站点托管不可用，未开放上传、文件列表或站点管理。</p>
+                    <p class="stat-text">此状态不代表服务器上的历史站点正常运行。请通过服务器现有管理方式核对。</p>
+                    <el-button disabled>上传站点（不可用）</el-button>
+                </section>
 
                 <section v-if="currentView === 'security'" aria-labelledby="security-center-heading">
-                    <h3 id="security-center-heading">安全中心</h3>
+                    <h1 id="security-center-heading">安全中心</h1>
+                    <p class="stat-text">管理员会话、订阅授权与主机权限分别管理。</p>
+                    <div class="vui-security-links"><a class="vui-button" href="/account">账户与密码</a><a class="vui-button" href="/workspace#subscriptions">订阅授权</a><a class="vui-button" href="/ui/#firewall">主机防火墙边界</a></div>
                     <el-card style="max-width: 600px">
                         <el-alert
                             title="本版本不支持主机防火墙与 SSH 管理"
@@ -557,9 +494,10 @@
         </el-container>
     </el-container>
 
-    <el-dialog v-model="showAddInbound" :title="editingInboundId ? '编辑节点' : '添加节点'" width="720px"
-        @close="closeInboundEditor" :close-on-click-modal="!savingInbound" :close-on-press-escape="!savingInbound" :show-close="!savingInbound">
+    <el-dialog v-model="showAddInbound" :title="editingInboundId ? '编辑节点' : '添加节点'" width="min(860px, 94vw)" class="vui-node-editor"
+        :before-close="beforeInboundEditorClose" @close="closeInboundEditor" :close-on-click-modal="!savingInbound" :close-on-press-escape="!savingInbound" :show-close="!savingInbound">
         <el-form :model="newInbound" label-width="130px" :disabled="savingInbound">
+            <fieldset class="vui-editor-group" data-editor-group="basic"><legend>01 · 基础</legend>
             <el-form-item label="核心">
                 <el-radio-group v-model="newInbound.core" @change="onCoreChanged" :disabled="savingInbound || (Boolean(editingInboundId))">
                     <el-radio-button label="xray">Xray</el-radio-button>
@@ -623,91 +561,6 @@
                 </el-switch>
             </el-form-item>
 
-            <el-form-item label="已保存路由策略">
-                <select id="inbound-routing-mode" v-model="newInbound.routing_mode" aria-label="已保存路由策略" :disabled="savingInbound">
-                    <option v-if="newInbound.routing_mode === null" :value="null">策略未确认（保持不改）</option>
-                    <option value="inherit">跟随全局（默认）</option>
-                    <option value="direct">指定直连</option>
-                    <option value="relay">指定中转</option>
-                </select>
-            </el-form-item>
-            <el-alert :title="inboundRoutingHint" type="info" :closable="false"></el-alert>
-            <p>此处编辑期望策略；保存后请以列表中的已应用出口 / 状态为准。普通分享只包含此入口信息。</p>
-
-            <template v-if="!['shadowsocks','hysteria2','tuic'].includes(newInbound.protocol)">
-                <el-form-item label="传输方式">
-                    <el-select v-model="newInbound.profile.transport" :disabled="savingInbound || (newInbound.core === 'sing-box' && newInbound.profile.security === 'reality' && newInbound.profile.transport === 'direct')" style="width: 100%">
-                        <template v-if="newInbound.core === 'xray'">
-                            <el-option label="RAW / TCP" value="raw"></el-option>
-                            <el-option label="WebSocket" value="websocket"></el-option>
-                            <el-option label="gRPC" value="grpc"></el-option>
-                            <el-option
-                                v-if="newInbound.protocol === 'vless'"
-                                label="XHTTP"
-                                value="xhttp">
-                            </el-option>
-                        </template>
-                        <template v-else>
-                            <el-option label="Direct / TCP" value="direct"></el-option>
-                            <el-option label="WebSocket" value="ws"></el-option>
-                            <el-option label="gRPC" value="grpc"></el-option>
-                            <el-option label="HTTP Upgrade" value="httpupgrade"></el-option>
-                        </template>
-                    </el-select>
-                </el-form-item>
-
-                <el-form-item
-                    v-if="['websocket','ws','httpupgrade','xhttp'].includes(newInbound.profile.transport)"
-                    label="Path">
-                    <el-input v-model="newInbound.profile.path" placeholder="/"></el-input>
-                </el-form-item>
-
-                <el-form-item
-                    v-if="['websocket','ws','httpupgrade','xhttp'].includes(newInbound.profile.transport)"
-                    label="Host">
-                    <el-input
-                        v-model="newInbound.profile.host"
-                        placeholder="可选，例如 cdn.example.com">
-                    </el-input>
-                </el-form-item>
-
-                <el-alert
-                    v-if="newInbound.core === 'sing-box' && newInbound.protocol === 'vless' && newInbound.profile.transport === 'ws'"
-                    type="warning" :closable="false" show-icon
-                    title="VLESS WebSocket 验证范围"
-                    description="公开导出要求 TLS、正确 SNI、证书校验和空 flow。Path 须以 / 开头，最长 256 个 ASCII 字符，仅字母、数字、/、.、_、~、-，无点路径段、查询、转义或 early data。Host 仅为客户端路由参数，可留空或填写无端口的 ASCII 主机名；sing-box 不校验请求 Host，不能当作访问控制，也不替代 SNI/证书校验。仅验证 HTTP/TCP 转发。"
-                    style="margin-bottom: 18px">
-                </el-alert>
-
-                <el-alert
-                    v-if="newInbound.core === 'sing-box' && newInbound.protocol === 'vless' && newInbound.profile.transport === 'grpc'"
-                    type="warning" :closable="false" show-icon
-                    title="VLESS gRPC Lite 验证范围"
-                    description="固定 sing-box 1.14.2 gRPC Lite / Mihomo 1.19.32。公开导出要求 TLS、正确 SNI、证书校验、HTTP/2 和空 flow；ALPN 省略或仅 h2。Service 为 1–128 个 ASCII 字母、数字、.、_、-，区分大小写，不裁剪空白或转义。不支持自定义 authority / Host 或其他 gRPC 参数；仅验证 HTTP/TCP 转发，不新增 UDP。"
-                    style="margin-bottom: 18px">
-                </el-alert>
-
-                <el-form-item
-                    v-if="newInbound.profile.transport === 'grpc'"
-                    label="gRPC Service">
-                    <el-input
-                        v-model="newInbound.profile.service_name"
-                        placeholder="TunService">
-                    </el-input>
-                </el-form-item>
-
-                <el-form-item
-                    v-if="newInbound.profile.transport === 'xhttp'"
-                    label="XHTTP Mode">
-                    <el-select v-model="newInbound.profile.xhttp_mode" style="width: 100%">
-                        <el-option label="Auto" value="auto"></el-option>
-                        <el-option label="Stream One" value="stream-one"></el-option>
-                        <el-option label="Stream Up" value="stream-up"></el-option>
-                        <el-option label="Packet Up" value="packet-up"></el-option>
-                    </el-select>
-                </el-form-item>
-            </template>
-
             <template v-if="newInbound.protocol === 'shadowsocks'">
                 <el-form-item label="加密方法">
                     <el-select v-model="newInbound.profile.shadowsocks_method" style="width: 100%">
@@ -725,6 +578,8 @@
                 </el-alert>
             </template>
 
+            </fieldset>
+            <fieldset class="vui-editor-group" data-editor-group="security"><legend>02 · 安全</legend>
             <el-form-item
                 v-if="newInbound.protocol !== 'shadowsocks'"
                 label="传输安全">
@@ -843,6 +698,98 @@
                     type="warning" :closable="false" style="margin-bottom: 16px"></el-alert>
             </template>
 
+            </fieldset>
+            <fieldset class="vui-editor-group" data-editor-group="transport"><legend>03 · 传输</legend>
+            <template v-if="!['shadowsocks','hysteria2','tuic'].includes(newInbound.protocol)">
+                <el-form-item label="传输方式">
+                    <el-select v-model="newInbound.profile.transport" :disabled="savingInbound || (newInbound.core === 'sing-box' && newInbound.profile.security === 'reality' && newInbound.profile.transport === 'direct')" style="width: 100%">
+                        <template v-if="newInbound.core === 'xray'">
+                            <el-option label="RAW / TCP" value="raw"></el-option>
+                            <el-option label="WebSocket" value="websocket"></el-option>
+                            <el-option label="gRPC" value="grpc"></el-option>
+                            <el-option
+                                v-if="newInbound.protocol === 'vless'"
+                                label="XHTTP"
+                                value="xhttp">
+                            </el-option>
+                        </template>
+                        <template v-else>
+                            <el-option label="Direct / TCP" value="direct"></el-option>
+                            <el-option label="WebSocket" value="ws"></el-option>
+                            <el-option label="gRPC" value="grpc"></el-option>
+                            <el-option label="HTTP Upgrade" value="httpupgrade"></el-option>
+                        </template>
+                    </el-select>
+                </el-form-item>
+
+                <el-form-item
+                    v-if="['websocket','ws','httpupgrade','xhttp'].includes(newInbound.profile.transport)"
+                    label="Path">
+                    <el-input v-model="newInbound.profile.path" placeholder="/"></el-input>
+                </el-form-item>
+
+                <el-form-item
+                    v-if="['websocket','ws','httpupgrade','xhttp'].includes(newInbound.profile.transport)"
+                    label="Host">
+                    <el-input
+                        v-model="newInbound.profile.host"
+                        placeholder="可选，例如 cdn.example.com">
+                    </el-input>
+                </el-form-item>
+
+                <el-alert
+                    v-if="newInbound.core === 'sing-box' && newInbound.protocol === 'vless' && newInbound.profile.transport === 'ws'"
+                    type="warning" :closable="false" show-icon
+                    title="VLESS WebSocket 验证范围"
+                    description="公开导出要求 TLS、正确 SNI、证书校验和空 flow。Path 须以 / 开头，最长 256 个 ASCII 字符，仅字母、数字、/、.、_、~、-，无点路径段、查询、转义或 early data。Host 仅为客户端路由参数，可留空或填写无端口的 ASCII 主机名；sing-box 不校验请求 Host，不能当作访问控制，也不替代 SNI/证书校验。仅验证 HTTP/TCP 转发。"
+                    style="margin-bottom: 18px">
+                </el-alert>
+
+                <el-alert
+                    v-if="newInbound.core === 'sing-box' && newInbound.protocol === 'vless' && newInbound.profile.transport === 'grpc'"
+                    type="warning" :closable="false" show-icon
+                    title="VLESS gRPC Lite 验证范围"
+                    description="固定 sing-box 1.14.2 gRPC Lite / Mihomo 1.19.32。公开导出要求 TLS、正确 SNI、证书校验、HTTP/2 和空 flow；ALPN 省略或仅 h2。Service 为 1–128 个 ASCII 字母、数字、.、_、-，区分大小写，不裁剪空白或转义。不支持自定义 authority / Host 或其他 gRPC 参数；仅验证 HTTP/TCP 转发，不新增 UDP。"
+                    style="margin-bottom: 18px">
+                </el-alert>
+
+                <el-form-item
+                    v-if="newInbound.profile.transport === 'grpc'"
+                    label="gRPC Service">
+                    <el-input
+                        v-model="newInbound.profile.service_name"
+                        placeholder="TunService">
+                    </el-input>
+                </el-form-item>
+
+                <el-form-item
+                    v-if="newInbound.profile.transport === 'xhttp'"
+                    label="XHTTP Mode">
+                    <el-select v-model="newInbound.profile.xhttp_mode" style="width: 100%">
+                        <el-option label="Auto" value="auto"></el-option>
+                        <el-option label="Stream One" value="stream-one"></el-option>
+                        <el-option label="Stream Up" value="stream-up"></el-option>
+                        <el-option label="Packet Up" value="packet-up"></el-option>
+                    </el-select>
+                </el-form-item>
+            </template>
+
+            </fieldset>
+            <fieldset class="vui-editor-group" data-editor-group="routing"><legend>04 · 路由</legend>
+            <el-form-item label="已保存路由策略">
+                <select id="inbound-routing-mode" v-model="newInbound.routing_mode" aria-label="已保存路由策略" :disabled="savingInbound">
+                    <option v-if="newInbound.routing_mode === null" :value="null">策略未确认（保持不改）</option>
+                    <option value="inherit">跟随全局（默认）</option>
+                    <option value="direct">指定直连</option>
+                    <option value="relay">指定中转</option>
+                </select>
+            </el-form-item>
+            <el-alert :title="inboundRoutingHint" type="info" :closable="false"></el-alert>
+            <p>此处编辑期望策略；保存后请以列表中的已应用出口 / 状态为准。普通分享只包含此入口信息。</p>
+
+            </fieldset>
+            <fieldset class="vui-editor-group" data-editor-group="advanced"><legend>05 · 高级</legend>
+            <p class="stat-text">高级参数仅在适用协议下显示。已有未知字段由现有编辑器保留或明确拒绝，不能通过删除字段解锁公开导出。</p>
             <template v-if="newInbound.protocol === 'hysteria2'">
                 <el-alert
                     :title="'Hysteria2 使用 QUIC：服务器与云防火墙需允许 UDP ' + newInbound.port + '；TCP 放行不能代替 UDP。当前验收仅覆盖 HTTP/TCP 负载，不承诺应用 UDP 转发。'"
@@ -922,10 +869,10 @@
                     启用 0-RTT（连接更快，但存在重放风险）
                 </el-checkbox>
             </template>
-        </el-form>
+            </fieldset>        </el-form>
 
         <template #footer>
-            <el-button @click="closeInboundEditor" :disabled="savingInbound">取消</el-button>
+            <el-button @click="beforeInboundEditorClose" :disabled="savingInbound">取消</el-button>
             <el-button type="primary" @click="saveInbound" :loading="savingInbound" :disabled="savingInbound">{{ editingInboundId ? '保存并应用' : '创建并应用' }}</el-button>
         </template>
     </el-dialog>

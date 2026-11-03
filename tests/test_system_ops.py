@@ -821,6 +821,103 @@ class IntegratedWorkerTests(unittest.TestCase):
         self.assertEqual(self.events, [])
 
 
+class NetworkTests(unittest.TestCase):
+    def fake_firewall(self, status=False, backend='ufw', managed=True):
+        from unittest.mock import Mock
+        self.firewall = types.SimpleNamespace(
+            detect=Mock(return_value={'backend': backend, 'managed': managed}),
+            port_open=Mock(return_value=status), open_ports=Mock())
+        return self.firewall
+
+    def test_diagnostics_are_readonly_and_separate_rule_listener_tls_and_external(self):
+        firewall = self.fake_firewall(status=None, backend='nftables', managed=False)
+        config = {'port': 3215, 'domain': 'panel.example.test'}
+        with patch.object(ops, 'network_context', return_value=(firewall, config)), \
+             patch.object(ops, 'local_tcp_listener', return_value=True), \
+             patch.object(ops, 'local_panel_tls', return_value='ready（本机）'):
+            lines = ops.network_diagnostics()
+        text = '\n'.join(lines)
+        self.assertIn('3215/tcp：本机规则 unknown；本机监听 listening', text)
+        self.assertIn('云规则与公网入站：unknown', text)
+        self.assertIn('不能证明外部可达', text)
+        self.assertNotIn('10443', text)
+        firewall.open_ports.assert_not_called()
+
+    def test_open_exact_protocol_port_requires_known_managed_block_and_readback(self):
+        firewall = self.fake_firewall()
+        firewall.port_open.side_effect = [False, True]
+        with patch.object(ops, 'network_context', return_value=(firewall, {})):
+            result = ops.network_open('udp', 20443)
+        firewall.open_ports.assert_called_once_with(firewall.detect.return_value, [20443], protocol='udp')
+        self.assertIn('20443/udp 本机规则已放行并回读', result)
+        self.assertIn('公网可达性未验证', result)
+
+    def test_unknown_inactive_custom_and_already_allowed_never_modify_rules(self):
+        for backend, managed, status in (('ufw', True, None), ('ufw', False, False),
+                                        ('nftables', False, False), ('firewalld', False, False),
+                                        ('ufw', True, True)):
+            firewall = self.fake_firewall(status, backend, managed)
+            with self.subTest(backend=backend, managed=managed, status=status), \
+                 patch.object(ops, 'network_context', return_value=(firewall, {})):
+                ops.network_open('tcp', 3215)
+                firewall.open_ports.assert_not_called()
+
+    def test_readback_failure_does_not_claim_success(self):
+        for final in (False, None):
+            firewall = self.fake_firewall()
+            firewall.port_open.side_effect = [False, final]
+            with self.subTest(final=final), patch.object(ops, 'network_context', return_value=(firewall, {})):
+                with self.assertRaises(ops.Refused):
+                    ops.network_open('tcp', 3215)
+
+    def test_invalid_protocol_port_and_ssh_rejected_before_trusted_reads(self):
+        with patch.object(ops, 'network_context') as read:
+            for protocol, port in (('udp;sh', 3215), ('tcp', 22), ('tcp', 0), ('tcp', 65536), ('tcp', True)):
+                with self.subTest(protocol=protocol, port=port), self.assertRaises(ops.Refused):
+                    ops.network_open(protocol, port)
+            read.assert_not_called()
+
+    def test_network_module_bytes_are_receipt_bound_and_never_import_payload(self):
+        raw = (SOURCE / 'scripts/firewall_support.py').read_bytes()
+        config = b'{"port":3215,"domain":"panel.example.test"}'
+        receipt = {'files': {str(ops.CONFIG): hashlib.sha256(config).hexdigest(),
+                            str(ops.CONTROL / 'firewall_support.py'): hashlib.sha256(raw).hexdigest()}}
+        def trusted(path, limit=None):
+            return json.dumps(receipt).encode() if path == ops.RECEIPT else config if path == ops.CONFIG else raw
+        with patch.object(ops, 'trusted_bytes', side_effect=trusted), \
+             patch.object(ops, 'firewall_program', return_value='/usr/sbin/ufw'), \
+             patch.object(ops, 'run_command', return_value=(0, b'Status: active\n')) as run:
+            module, value = ops.network_context()
+            self.assertEqual(value['port'], 3215)
+            self.assertEqual(module.detect()['backend'], 'ufw')
+            run.assert_called_once_with(['/usr/sbin/ufw', 'status'], None, timeout=10)
+        receipt['files'][str(ops.CONTROL / 'firewall_support.py')] = '0' * 64
+        with patch.object(ops, 'trusted_bytes', side_effect=trusted), \
+             patch.object(ops, 'run_command') as run:
+            with self.assertRaises(ops.Refused):
+                ops.network_context()
+            run.assert_not_called()
+
+    def test_local_tls_keeps_ca_and_hostname_validation_and_uses_no_proxy(self):
+        context = ops.ssl.create_default_context()
+        from unittest.mock import MagicMock
+        with patch.object(ops.ssl, 'create_default_context', return_value=context), \
+             patch.object(ops.socket, 'create_connection', return_value=MagicMock()) as connect, \
+             patch.object(context, 'wrap_socket', return_value=MagicMock()) as wrap:
+            result = ops.local_panel_tls({'port':3215, 'domain':'panel.example.test', 'bind':'0.0.0.0'})
+        self.assertTrue(context.check_hostname)
+        self.assertEqual(context.verify_mode, ops.ssl.CERT_REQUIRED)
+        self.assertIn('ready', result)
+        connect.assert_called_once_with(('127.0.0.1', 3215), timeout=3)
+        self.assertEqual(wrap.call_args.kwargs['server_hostname'], 'panel.example.test')
+
+    def test_fixed_firewall_commands_reject_arbitrary_executable(self):
+        with patch.object(ops, 'trusted_executable') as executable:
+            with self.assertRaises(ops.Refused):
+                ops.firewall_program('sh')
+            executable.assert_not_called()
+
+
 class MenuTests(unittest.TestCase):
     def run_menu(self, data, input_tty=True, output_tty=True):
         output = Terminal() if output_tty else io.StringIO()
@@ -958,6 +1055,40 @@ class MenuTests(unittest.TestCase):
         self.assertNotIn('/private/fixture.zip', text)
         self.assertNotIn('a' * 64, text)
         self.assertIsNone(operate.call_args.args[1])
+
+    def test_network_cancel_and_invalid_input_never_lock_read_or_write(self):
+        with patch.object(ops, 'installation_lock', side_effect=AssertionError('no host lock')), \
+             patch.object(ops, 'network_open', side_effect=AssertionError('no change')):
+            for data in ('11\n\n0\n', '11\ntcp\n3215\nno\n0\n', '11\ntcp\n22\n0\n',
+                         '11\nudp\n3215\n\n0\n'):
+                code, text = self.run_menu(data)
+                self.assertEqual(code, 0, text)
+
+    def test_network_diagnostics_need_no_write_confirmation_or_service_operation(self):
+        @contextmanager
+        def fake_lock():
+            yield
+        with patch.object(ops, 'installation_lock', fake_lock), \
+             patch.object(ops, 'verify_installation', return_value=('systemd', ACCOUNT)), \
+             patch.object(ops, 'network_diagnostics', return_value=['只读诊断 unknown']) as diagnose, \
+             patch.object(ops, 'Services', side_effect=AssertionError('no service operation')), \
+             patch.object(ops, 'network_open', side_effect=AssertionError('no firewall change')):
+            code, text = self.run_menu('10\n0\n')
+        self.assertEqual(code, 0, text)
+        self.assertIn('只读诊断 unknown', text)
+        diagnose.assert_called_once()
+
+    def test_manual_port_confirmation_names_exact_protocol_and_port(self):
+        @contextmanager
+        def fake_lock():
+            yield
+        with patch.object(ops, 'installation_lock', fake_lock), \
+             patch.object(ops, 'verify_installation', return_value=('systemd', ACCOUNT)), \
+             patch.object(ops, 'network_open', return_value='精确规则已回读') as opened:
+            code, text = self.run_menu('11\nudp\n20443\nyes\n0\n')
+        self.assertEqual(code, 0, text)
+        self.assertIn('确认放行 20443/udp [yes/N]', text)
+        self.assertEqual(opened.call_args.args[:2], ('udp', 20443))
 
     def test_real_pty_uses_only_fake_backend_and_cancel_or_eof_does_nothing(self):
         if os.geteuid() == 0:

@@ -79,7 +79,7 @@ function endAdminSession(announce = false) {
     statusPollers.forEach(poller => poller.stop());
     try { if (announce && adminSessionChannel) adminSessionChannel.postMessage('session-ended'); } catch (_) {}
     try { if (adminSessionChannel) adminSessionChannel.close(); } catch (_) {}
-    location.replace('/login');
+    globalThis.VUI_NAV ? VUI_NAV.replaceLogin() : location.replace('/login');
 }
 if (adminSessionChannel) adminSessionChannel.onmessage = (event) => {
     if (event.data === 'session-ended') void checkAdminSession(false, true);
@@ -142,7 +142,8 @@ const {
 
 const app = createApp({
     setup() {
-        const currentView = ref(location.hash === '#inbounds' ? 'inbounds' : 'dashboard');
+        const currentView = ref(globalThis.VUI_NAV ? VUI_NAV.appView(location.hash) : (location.hash === '#inbounds' ? 'inbounds' : 'dashboard'));
+        const viewScroll = new Map();
         const systemStatus = ref({});
         const coreStatus = ref({});
         // Pending polls retain the last confirmed display; rejected reads hide
@@ -219,6 +220,7 @@ const app = createApp({
         const closeQrDialog = () => {
             clearQrCode();
             showQrDialog.value = false;
+            globalThis.VUI_NAV?.modal.close('share');
         };
         // Element Plus emits v-model=false only after its leave transition.
         // Invalidate before Escape/header/backdrop dismissal starts, not after
@@ -228,11 +230,14 @@ const app = createApp({
             done();
         };
         // Keep the synchronous watcher for direct model changes too.
-        watch(showQrDialog, (open) => { if (!open) clearQrCode(); }, { flush: 'sync' });
+        watch(showQrDialog, (open) => {
+            if (open) globalThis.VUI_NAV?.modal.open('share', closeQrDialog);
+            else { clearQrCode(); globalThis.VUI_NAV?.modal.close('share'); }
+        }, { flush: 'sync' });
         watch(currentView, closeQrDialog, { flush: 'sync' });
         clearAdminSecrets.push(closeQrDialog);
         addEventListener('pagehide', closeQrDialog);
-        addEventListener('popstate', closeQrDialog);
+        if (!globalThis.VUI_NAV) addEventListener('popstate', closeQrDialog);
         const upstreamExport = reactive({
             open: false, inboundId: null, name: '', server: '', format: 'uri',
             acknowledged: false, busy: false, content: '', error: '', notice: ''
@@ -252,6 +257,7 @@ const app = createApp({
         const closeUpstreamExport = () => {
             clearUpstreamExport();
             upstreamExport.open = false;
+            globalThis.VUI_NAV?.modal.close('upstream-export');
             upstreamExport.inboundId = null;
             upstreamExport.name = '';
             upstreamExport.server = '';
@@ -269,11 +275,14 @@ const app = createApp({
             upstreamExport.acknowledged = false;
         }, { flush: 'sync' });
         watch(() => upstreamExport.acknowledged, clearUpstreamExport, { flush: 'sync' });
-        watch(() => upstreamExport.open, (open) => { if (!open) closeUpstreamExport(); }, { flush: 'sync' });
+        watch(() => upstreamExport.open, (open) => {
+            if (open) globalThis.VUI_NAV?.modal.open('upstream-export', closeUpstreamExport);
+            else closeUpstreamExport();
+        }, { flush: 'sync' });
         watch(currentView, closeUpstreamExport, { flush: 'sync' });
         clearAdminSecrets.push(closeUpstreamExport);
         addEventListener('pagehide', closeUpstreamExport);
-        addEventListener('popstate', closeUpstreamExport);
+        if (!globalThis.VUI_NAV) addEventListener('popstate', closeUpstreamExport);
 
         const requestUpstreamExport = async () => {
             if (upstreamExport.busy || !upstreamExport.open || adminSessionEnded ||
@@ -411,19 +420,37 @@ const app = createApp({
                 '指定中转共用唯一已选上游，不受默认开关影响；有效中转仅 TCP，服务器拒绝应用 UDP。先在代理与中转页选择并应用上游；禁用节点可保存为草稿。' :
                 '指定直连无需海外上游，排除此中转策略，保留普通入口既有路由、拒绝规则与能力。首次尚无活动配置时，可在代理与中转页保持两个开关关闭、不选上游，检查并应用建立活动配置。';
         });
+        let inboundEditorBaseline = '';
+        const canLeaveInboundEditor = () => !savingInbound.value && (!showAddInbound.value ||
+            inboundEditorBaseline === JSON.stringify(newInbound) || confirm('放弃本次未保存的节点编辑？'));
+        const beforeInboundEditorClose = (done) => {
+            if (!canLeaveInboundEditor()) return;
+            closeInboundEditor();
+            if (typeof done === 'function') done();
+        };
         const closeInboundEditor = () => {
             inboundEditorGeneration++;
             showAddInbound.value = false;
+            globalThis.VUI_NAV?.modal.close('inbound-editor');
             editingInboundId.value = null;
             editingInboundRevision = null;
             inboundCredentials.value = {};
+            inboundEditorBaseline = '';
             newInbound.routing_mode = 'inherit';
             resetInboundProfile();
         };
+        watch(showAddInbound, (open) => {
+            if (open) {
+                inboundEditorBaseline = JSON.stringify(newInbound);
+                globalThis.VUI_NAV?.modal.open('inbound-editor', closeInboundEditor, canLeaveInboundEditor);
+            }
+            else globalThis.VUI_NAV?.modal.close('inbound-editor');
+        }, { flush: 'sync' });
+        globalThis.VUI_NAV?.guard(() => !savingInbound.value);
         watch(currentView, closeInboundEditor, { flush: 'sync' });
         clearAdminSecrets.push(() => { closeInboundEditor(); inboundListGeneration++; inbounds.value = []; });
         addEventListener('pagehide', closeInboundEditor);
-        addEventListener('popstate', closeInboundEditor);
+        if (!globalThis.VUI_NAV) addEventListener('popstate', closeInboundEditor);
 
         const protocolOptions = computed(() => {
             if (newInbound.core === 'sing-box') {
@@ -479,26 +506,32 @@ const app = createApp({
                 .filter(Boolean);
         };
 
+        const applyRoute = () => {
+            if (!globalThis.VUI_NAV) return;
+            const target = VUI_NAV.route();
+            if (!target.view) { location.replace(target.url); return; }
+            const previous = currentView.value;
+            if (previous === target.view) return;
+            viewScroll.set(previous, globalThis.scrollY || 0);
+            currentView.value = target.view;
+            if (target.view === 'inbounds') fetchInbounds();
+            nextTick(() => globalThis.scrollTo?.(0, viewScroll.get(target.view) || 0));
+        };
+        if (globalThis.VUI_NAV) VUI_NAV.subscribe((_route, reason) => {
+            if (reason === 'popstate') { closeQrDialog(); closeUpstreamExport(); closeInboundEditor(); }
+            applyRoute();
+        });
         const handleSelect = (key) => {
-            closeQrDialog();
-            if (key === 'proxy') { location.assign('/proxy'); return; }
-            if (key === 'certificates') { location.assign('/certificates'); return; }
-            if (['routing', 'subscriptions'].includes(key)) { location.assign('/workspace'); return; }
-            if (key === 'settings') { location.assign('/account'); return; }
-            if (key === 'site') {
-                ElMessage.warning('站点托管已暂时隔离，现有文件仍保留在服务器。');
-                return;
+            const id = key === 'settings' ? 'account' : key === 'site' ? 'legacy' : key;
+            if (globalThis.VUI_NAV) { VUI_NAV.navigate(id); return; }
+            const external = {proxy:'/proxy', certificates:'/certificates', routing:'/workspace#routing', subscriptions:'/workspace#subscriptions', account:'/account'};
+            if (external[id]) {
+                if (!canLeaveInboundEditor()) return;
+                closeQrDialog(); closeUpstreamExport(); closeInboundEditor();
+                location.assign(external[id]); return;
             }
-            currentView.value = key;
-            if (key === 'inbounds') fetchInbounds();
-            if (key === 'routing') fetchRouting();
-            if (key === 'settings') userForm.username = currentUser.value.username;
-            if (key === 'site') fetchSiteFiles();
-            if (key === 'subscriptions') {
-                fetchCoreStatus.fresh();
-                fetchRoutingPreview();
-                fetchMihomoWarnings();
-            }
+            currentView.value = ['dashboard', 'inbounds', 'cores', 'diagnostics', 'firewall', 'security', 'legacy'].includes(id) ? id : 'dashboard';
+            if (id === 'inbounds') fetchInbounds();
         };
 
         const fetchSystemStatus = singleStatusRequest(async () => {
@@ -968,7 +1001,7 @@ const app = createApp({
             }
         };
 
-        const updateProfile = () => { closeQrDialog(); location.assign('/account'); };
+        const updateProfile = () => { handleSelect('account'); };
 
         const showQrCode = async (row) => {
             if (adminSessionEnded) return;
@@ -1064,6 +1097,7 @@ const app = createApp({
         };
 
         onMounted(async () => {
+            applyRoute();
             try {
                 currentUser.value = (await axios.get('/api/auth/me')).data;
             } catch (error) {
@@ -1107,6 +1141,7 @@ const app = createApp({
             inboundAppliedRouting,
             inboundRoutingHint,
             closeInboundEditor,
+            beforeInboundEditorClose,
             newInbound,
             protocolOptions,
             colors,

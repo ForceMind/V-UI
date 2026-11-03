@@ -35,7 +35,9 @@ class TUICInstallationTests(unittest.TestCase):
                     installer.firewall_preflight(args, [19446], [19446])
                     write.assert_called_once_with(info, [19446], protocol='udp')
                 else:
-                    with self.assertRaises(installer.InstallError): installer.firewall_preflight(args, [19446], [19446])
+                    result = installer.firewall_preflight(args, [19446], [19446])
+                    self.assertIs(result['checked'], False)
                     write.assert_not_called()
                 self.assertIn('19446/udp', output.getvalue())
+                self.assertNotIn('请手动放行', output.getvalue())
                 confirm.assert_not_called()

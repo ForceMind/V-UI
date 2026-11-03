@@ -167,10 +167,48 @@ class LinuxInstallationRegressions(unittest.TestCase):
                 client.sendall(b'alive')
                 self.assertEqual(accepted.recv(5), b'alive')
 
-    def test_ipv6_node_conflict_precedes_all_writes_for_both_managers(self):
+    def test_normal_install_does_not_probe_declared_node_tcp_for_either_manager(self):
         for manager in ('systemd', 'openrc'):
-            with self.subTest(manager=manager):
-                self.assert_ipv6_conflict_precedes_writes(manager, 'node')
+            args = argparse.Namespace(domain='panel.example.test', email='a@example.test',
+                admin='admin', port=8443, bind='0.0.0.0', cert=None, key=None,
+                accept_terms=True, node_port=10443, open_firewall='no',
+                assume_external_ports_open=True, dry_run=False, upgrade=False,
+                bundle='unused.zip', sha256='0' * 64)
+            with self.subTest(manager=manager), \
+                 patch.object(installer, 'CONFIG', self.root / 'service.json'), \
+                 patch.object(installer, 'verify_archive', return_value=(io.BytesIO(), nullcontext(), {'release_id':'test'})), \
+                 patch.object(installer, 'check_platform', return_value={'init':manager,'name':'fixture','target':'x86_64-gnu'}), \
+                 patch.object(installer, 'check_reserved'), patch.object(installer, 'probe_ipv6', return_value=True), \
+                 patch.object(installer, 'check_port') as checked, \
+                 patch.object(installer, 'firewall_preflight', side_effect=installer.InstallError('stop before writes')), \
+                 patch.object(installer, 'create_service_user') as create:
+                with self.assertRaisesRegex(installer.InstallError, 'stop before writes'):
+                    installer.install(args)
+                self.assertEqual([call.args for call in checked.call_args_list],
+                                 [(80,), (80, '::'), (8443, '0.0.0.0')])
+                create.assert_not_called()
+
+    def test_dryrun_declared_node_tcp_conflict_reports_reference_without_failing(self):
+        args = argparse.Namespace(domain='panel.example.test', email='a@example.test',
+            admin='admin', port=8443, bind='0.0.0.0', cert=None, key=None,
+            accept_terms=True, node_port=10443, open_firewall='no',
+            assume_external_ports_open=True, dry_run=True, upgrade=False,
+            bundle='unused.zip', sha256='0' * 64)
+        def check(port, bind='0.0.0.0'):
+            if port == 10443:
+                raise installer.InstallError('fixture node conflict')
+        with patch.object(installer, 'CONFIG', self.root / 'service.json'), \
+             patch.object(installer, 'verify_archive', return_value=(io.BytesIO(), nullcontext(), {'release_id':'test'})), \
+             patch.object(installer, 'check_platform', return_value={'init':'systemd','name':'fixture','target':'x86_64-gnu'}), \
+             patch.object(installer, 'check_reserved'), patch.object(installer, 'probe_ipv6', return_value=True), \
+             patch.object(installer, 'check_port', side_effect=check), \
+             patch.object(installer, 'firewall_preflight', return_value={}), \
+             patch.object(installer, 'create_service_user') as create, patch('sys.stdout', new_callable=io.StringIO) as output:
+            installer.install(args)
+        self.assertIn('10443/tcp', output.getvalue())
+        self.assertIn('仅供参考，不创建或预留节点端口', output.getvalue())
+        self.assertIn('"no_changes": true', output.getvalue())
+        create.assert_not_called()
 
     def test_ipv6_http01_conflict_precedes_all_writes_for_both_managers(self):
         for manager in ('systemd', 'openrc'):
@@ -193,12 +231,12 @@ class LinuxInstallationRegressions(unittest.TestCase):
                     installer.firewall_preflight(args, [8443])
                     change.assert_called_once_with(info, [8443])
                 else:
-                    with self.assertRaises(installer.InstallError):
-                        installer.firewall_preflight(args, [8443])
+                    result = installer.firewall_preflight(args, [8443])
+                    self.assertIs(result['checked'], False)
                     change.assert_not_called()
                 confirm.assert_not_called()
 
-    def test_ambiguous_zone_warns_without_modification_even_with_yes(self):
+    def test_explicit_ambiguous_zone_inspection_reports_unknown_without_modification(self):
         info = {'backend': 'firewalld', 'managed': False, 'detail': 'ambiguous ingress'}
         args = argparse.Namespace(open_firewall='yes', dry_run=False, assume_external_ports_open=False)
         output = io.StringIO()
@@ -210,7 +248,7 @@ class LinuxInstallationRegressions(unittest.TestCase):
             result = installer.firewall_preflight(args, [80, 8443, 10443])
             self.assertEqual(result['unknown'], [80, 8443, 10443])
             self.assertIn('80/tcp, 8443/tcp, 10443/tcp', output.getvalue())
-            self.assertIn('已禁用自动修改', output.getvalue())
+            self.assertIn('本机规则 unknown', output.getvalue())
             query.assert_not_called()
             change.assert_not_called()
             confirm.assert_not_called()

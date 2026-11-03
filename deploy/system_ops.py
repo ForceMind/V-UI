@@ -16,6 +16,9 @@ import pwd
 import re
 import select
 import signal
+import socket
+import ssl
+import types
 import stat
 import subprocess
 import sys
@@ -186,7 +189,7 @@ def trusted_executable(path):
 def fixed_files(manager):
     base = {CONFIG, CONTROL / 'launcher.py', CONTROL / 'system_ops.py', WORKER,
             CONTROL / 'release_tools.py', CONTROL / 'data_owner.py', CONTROL / 'proxy_store.py',
-            CONTROL / 'upstream_profile.py', CONTROL / 'inbound_policy.py', WRAPPER}
+            CONTROL / 'upstream_profile.py', CONTROL / 'inbound_policy.py', CONTROL / 'firewall_support.py', WRAPPER}
     if manager == 'systemd':
         return base | {Path('/etc/systemd/system') / name for name in SYSTEMD_UNITS}
     if manager == 'openrc':
@@ -738,6 +741,123 @@ def prepare_candidate(request, account, cancelled, worker_factory):
         worker.close()
 
 
+FIREWALL_PROGRAMS = ('ufw', 'firewall-cmd', 'nft', 'iptables-save')
+
+
+def firewall_program(name):
+    """Resolve a fixed OS command through root-owned paths, never caller PATH."""
+    if name not in FIREWALL_PROGRAMS:
+        raise Refused('unsupported firewall command')
+    for directory in ('/usr/sbin', '/usr/bin', '/sbin', '/bin'):
+        candidate = Path(directory) / name
+        if candidate.exists():
+            return str(trusted_executable(candidate))
+    return None
+
+
+def network_context(cancelled=None):
+    """Load only root-owned kit bytes bound to the verified control receipt."""
+    receipt = decode_json(trusted_bytes(RECEIPT, MAX_JSON))
+    contents = {}
+    for path in (CONFIG, CONTROL / 'firewall_support.py'):
+        raw = trusted_bytes(path, MAX_JSON if path == CONFIG else MAX_FILE)
+        if hashlib.sha256(raw).hexdigest() != receipt.get('files', {}).get(str(path)):
+            raise Refused('network control receipt mismatch')
+        contents[path] = raw
+    module = types.ModuleType('_verified_firewall_support')
+    exec(compile(contents[CONTROL / 'firewall_support.py'], '<verified firewall_support.py>', 'exec'), module.__dict__)
+    def run(arguments, **kwargs):
+        name = Path(arguments[0]).name
+        executable = firewall_program(name)
+        if executable is None:
+            raise Refused('firewall executable unavailable')
+        code, output = run_command([executable, *arguments[1:]], cancelled, timeout=10)
+        return subprocess.CompletedProcess(arguments, code, output.decode('utf-8', errors='replace'), '')
+    module.run = run
+    module.shutil = types.SimpleNamespace(which=firewall_program)
+    module.subprocess = types.SimpleNamespace(run=run)
+    return module, decode_json(contents[CONFIG])
+
+
+def local_tcp_listener(port):
+    """Read Linux listener tables; no connection implies public reachability."""
+    readable = False
+    for name in ('tcp', 'tcp6'):
+        try:
+            with Path('/proc/net', name).open() as source:
+                for index, line in enumerate(source):
+                    if index > 65536:
+                        return None
+                    fields = line.split()
+                    if len(fields) > 3 and fields[3] == '0A':
+                        if int(fields[1].rsplit(':', 1)[1], 16) == port:
+                            return True
+            readable = True
+        except (OSError, ValueError, IndexError):
+            return None
+    return False if readable else None
+
+
+def local_panel_tls(config):
+    """Check local panel TLS with system CA and hostname validation enabled."""
+    context = ssl.create_default_context()
+    port = config.get('port')
+    domain = config.get('domain')
+    bind = config.get('bind', '0.0.0.0')
+    if type(port) is not int or not 1 <= port <= 65535 or not isinstance(domain, str):
+        raise Refused('invalid panel endpoint')
+    host = '127.0.0.1' if bind == '0.0.0.0' else '::1' if bind == '::' else bind
+    try:
+        with socket.create_connection((host, port), timeout=3) as connection:
+            with context.wrap_socket(connection, server_hostname=domain):
+                return 'ready（本机握手、系统 CA 与域名校验通过）'
+    except ssl.SSLCertVerificationError:
+        return 'unknown（本机系统 CA 或域名校验未通过）'
+    except (OSError, ssl.SSLError):
+        return 'unknown（本机 TLS 握手未完成）'
+
+
+def network_diagnostics(cancelled=None):
+    firewall, config = network_context(cancelled)
+    port = config.get('port')
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise Refused('invalid panel port')
+    info = firewall.detect()
+    lines = ['网络/防火墙诊断（只读）', '本机规则后端：' + info['backend']]
+    for number in sorted({80, port}):
+        status = firewall.port_open(info, number)
+        label = 'allowed' if status is True else 'blocked' if status is False else 'unknown'
+        listener = local_tcp_listener(number)
+        listening = 'listening' if listener is True else 'not-listening' if listener is False else 'unknown'
+        lines.append(str(number) + '/tcp：本机规则 ' + label + '；本机监听 ' + listening)
+    lines.extend(['面板 TLS：' + local_panel_tls(config),
+                  '云规则与公网入站：unknown；本机规则、监听或本机 TLS 成功不能证明外部可达。',
+                  '节点端口按实际创建的节点核对；默认声明端口不代表节点已创建。'])
+    return lines
+
+
+def network_open(protocol, port, cancelled=None):
+    """The terminal's exact confirmation is required before calling this method."""
+    if protocol not in ('tcp', 'udp') or type(port) is not int or not 1 <= port <= 65535 or port == 22:
+        raise Refused('invalid manual firewall port')
+    firewall, _ = network_context(cancelled)
+    info = firewall.detect()
+    if info.get('backend') not in ('ufw', 'firewalld') or not info.get('managed'):
+        return '当前规则不支持安全修改，未改动；仅支持已启用的 UFW 或明确入站区域的 firewalld。'
+    before = firewall.port_open(info, port, protocol=protocol)
+    if before is None:
+        return '所选端口的本机规则为 unknown，未改动。'
+    if before is True:
+        return str(port) + '/' + protocol + ' 本机规则已为 allowed，未新增规则。'
+    try:
+        firewall.open_ports(info, [port], protocol=protocol)
+    except RuntimeError:
+        raise Refused('precise firewall change unconfirmed') from None
+    if firewall.port_open(info, port, protocol=protocol) is not True:
+        raise Refused('precise firewall readback unconfirmed')
+    return str(port) + '/' + protocol + ' 本机规则已放行并回读；公网可达性未验证。'
+
+
 HELP = ('V-UI 受管维护菜单\n'
         '1 / status   查看受管服务状态\n'
         '2 / start    启动已停止的服务\n'
@@ -748,11 +868,13 @@ HELP = ('V-UI 受管维护菜单\n'
         '7 / activate 选择已准备版本（升级或代码回退，先备份）\n'
         '8 / stage    准备可信本地候选（不激活）\n'
         '9 / recover-restore 完成中断还原的恢复\n'
+        '10 / network 网络/防火墙诊断（只读）\n'
+        '11 / open-port 手动精确放行端口（明确确认）\n'
         'h            帮助\n'
         '0            退出\n'
         '操作失败后不会自动恢复启动。OpenRC 当前仅支持状态查询与候选准备。')
 CHOICES = {'1': 'status', '2': 'start', '3': 'stop', '4': 'restart',
-           '5': 'backup', '6': 'restore', '7': 'activate', '8': 'stage', '9': 'recover-restore'}
+           '5': 'backup', '6': 'restore', '7': 'activate', '8': 'stage', '9': 'recover-restore', '10': 'network', '11': 'open-port'}
 
 
 def read_input(prompt, limit=4096, hidden=False):
@@ -809,8 +931,42 @@ def menu():
             print(HELP)
             continue
         action = CHOICES.get(selection, selection)
-        if action not in ('status', *ACTIONS):
+        if action not in ('status', 'network', 'open-port', *ACTIONS):
             print('未知选项，请输入 h 查看帮助。')
+            continue
+        if action in ('network', 'open-port'):
+            try:
+                if action == 'open-port':
+                    protocol = read_input('协议 tcp/udp（留空取消）: ', 3)
+                    if not protocol:
+                        continue
+                    value = read_input('精确端口 1–65535（22 除外，留空取消）: ', 5)
+                    if not value:
+                        continue
+                    if protocol not in ('tcp', 'udp') or not value.isascii() or not value.isdecimal():
+                        print('协议或端口无效，未执行操作。')
+                        continue
+                    port = int(value)
+                    if not 1 <= port <= 65535 or port == 22:
+                        print('协议或端口无效，未执行操作。')
+                        continue
+                    print('仅新增所选本机规则，不自动启用防火墙、不创建节点；UDP 放行不等于应用 UDP 已获支持。')
+                    answer = read_input('确认放行 ' + str(port) + '/' + protocol + ' [yes/N]: ', 16)
+                    if answer is None:
+                        return 0
+                    if answer != 'yes':
+                        print('已取消，未执行操作。')
+                        continue
+                with deferred_signals() as cancelled:
+                    with installation_lock():
+                        verify_installation()
+                        lines = network_diagnostics(cancelled) if action == 'network' else [network_open(protocol, port, cancelled)]
+                    for line in lines:
+                        print(line)
+                    if cancelled:
+                        return 128 + cancelled[0]
+            except (Refused, OSError, ValueError, KeyError, subprocess.SubprocessError):
+                print('网络检查或规则修改未完成；所选规则状态无法确认，请重新只读诊断。')
             continue
         request = {'protocol': 1, 'action': action}
         if action in ('restore', 'stage'):

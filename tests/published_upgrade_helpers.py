@@ -1,0 +1,175 @@
+"""Opt-in empty-host public 0.4.14 -> exact candidate upgrade observations.
+
+The old installation uses anonymous published HTTPS. Only the unpublished new
+kit's download transport is adapted; neither installer nor root receipt is faked.
+Synthetic node/certificate records are persisted through the installed old app's
+models, without applying a proxy or contacting a CA. A real HTTPS subscription
+is issued and fetched before and after the real systemd upgrade.
+"""
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+
+from online_install_helpers import fixture_commands, published_commands
+
+OLD_VERSION = '0.4.14'
+OLD_COMMIT = 'b0cc174d04d05e61277075412586f0ba0dd231db'
+CONTROL = Path('/usr/local/lib/v-ui')
+FIREWALL = str(CONTROL / 'firewall_support.py')
+
+
+def assert_download_boundary(test, kit, log):
+    """Require exactly this one candidate kit, once, with the accepted bytes."""
+    expected = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in kit.iterdir() if path.is_file()}
+    records = [json.loads(line) for line in log.read_text().splitlines()]
+    test.assertEqual(len(records), len(expected), 'Unexpected repeated/missing candidate downloads')
+    test.assertEqual({row['name']: row['sha256'] for row in records}, expected)
+
+
+def assert_receipt_migration(test, before, after):
+    test.assertNotIn(FIREWALL, before['files'])
+    test.assertEqual(set(after['files']) - set(before['files']), {FIREWALL})
+    test.assertFalse(set(before['files']) - set(after['files']))
+    for field in ('schema', 'service_manager', 'system_python', 'interpreter_resolved', 'interpreter_sha256'):
+        test.assertEqual(after[field], before[field])
+
+
+def assert_upgrade_configuration(test, before, after, old_release, new_release):
+    """Match the complete saved configuration and its exact runtime transition."""
+    test.assertEqual(before['release_id'], old_release.name)
+    test.assertEqual(before['bootstrap_python'], str(old_release / 'runtime/python/bin/python3'))
+    test.assertNotEqual(old_release, new_release)
+    expected = {**before, 'release_id':new_release.name,
+                'bootstrap_python':str(new_release / 'runtime/python/bin/python3')}
+    # Fresh provided-certificate 0.4.14 omitted this field. The upgrade writes
+    # the canonical empty authorization list; existing authorizations must stay.
+    expected.setdefault('ca_authorizations', [])
+    test.assertEqual(after, expected)
+
+
+class PublishedUpgrade:
+    def __init__(self, test, source, work, certificate_args, configured_args):
+        self.test = test
+        if (os.environ.get('VUI_PUBLISHED_INSTALL_VERSION') != OLD_VERSION
+                or os.environ.get('VUI_RELEASE_COMMIT') != OLD_COMMIT
+                or os.environ.get('VUI_SETUP_INSTALL')
+                or os.environ.get('VUI_EXISTING_INSTALL_TEST')):
+            raise AssertionError('Fixed public 0.4.14 upgrade mode required')
+        self.source = source
+        self.kit = Path(os.environ['VUI_RELEASE_KIT'])
+        self.candidate = json.loads((self.kit / 'RELEASE.json').read_bytes())
+        commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip()
+        test.assertEqual(self.candidate['source_commit'], commit)
+        test.assertEqual(self.candidate['version'], (source / 'VERSION').read_text().strip())
+        test.assertNotEqual(self.candidate['version'], OLD_VERSION)
+        self.old = published_commands(Path(os.environ['VUI_PUBLISHED_UPGRADE_SOURCE']), OLD_VERSION,
+                                      OLD_COMMIT, certificate_args, configured_args)
+        self.new = fixture_commands(source, work, self.kit, certificate_args, configured_args)
+
+    def _service_python(self, release, program):
+        # Explicit isolated interpreter, installed old/new payload, service UID.
+        result = subprocess.run(['sudo', '-u', 'v-ui', '/usr/bin/env',
+            'VUI_DATA_DIR=/var/lib/v-ui/data', str(release / 'runtime/python/bin/python3'),
+            '-B', '-I', '-c', 'import sys;sys.path.insert(0,' + repr(str(release / 'payload')) + ');' + program],
+            capture_output=True, text=True, timeout=30)
+        if result.returncode:
+            # Do not expose a model/SQL exception containing credential values.
+            raise AssertionError('Installed service-user data fixture failed (exit '+str(result.returncode)+')')
+        return json.loads(result.stdout)
+
+    def _receipt(self):
+        receipt = json.loads((CONTROL / 'ops-control.json').read_bytes())
+        self.test.assertEqual(receipt['schema'], 1)
+        self.test.assertEqual(receipt['service_manager'], 'systemd')
+        for name, expected in receipt['files'].items():
+            path = Path(name)
+            self.test.assertTrue(path.is_absolute())
+            self.test.assertEqual(path.stat().st_uid, 0)
+            self.test.assertEqual(path.stat().st_mode & 0o022, 0)
+            self.test.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), expected,
+                                  'Installed root receipt must match every live file: '+name)
+        return receipt
+
+    def _snapshot(self, release):
+        # Only counts and hashes leave the service process. No DB credentials,
+        # password hashes, token hashes or certificate private bytes are printed.
+        return self._service_python(release, '''
+import hashlib,json,sqlite3
+from pathlib import Path
+result={}
+with sqlite3.connect('file:/var/lib/v-ui/data/v-ui.db?mode=ro',uri=True) as db:
+ for table in ('users','inbounds','subscription_grants','managed_certificates','certificate_bindings'):
+  rows=db.execute('SELECT * FROM '+table+' ORDER BY 1').fetchall()
+  result[table]={'count':len(rows),'sha256':hashlib.sha256(json.dumps(rows,sort_keys=True).encode()).hexdigest()}
+root=Path('/var/lib/v-ui/data/certs')
+result['certificate_material']={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()
+ for p in sorted(root.rglob('*')) if p.is_file()}
+print(json.dumps(result,sort_keys=True))
+''')
+
+    def _manifest(self, release):
+        return self._service_python(release, 'import json;from pathlib import Path;print((Path('+repr(str(release / 'payload' / 'MANIFEST.json'))+')).read_text())')
+
+    def before(self, release, api, private_values):
+        self.old_receipt = self._receipt()
+        self.test.assertNotIn(FIREWALL, self.old_receipt['files'])
+        self.test.assertFalse(os.path.lexists(FIREWALL), 'Do not pre-create new root closure helper')
+        self.config = json.loads(Path('/etc/v-ui/service.json').read_bytes())
+        self.old_release = release
+        self.test.assertEqual(self.config['bootstrap_python'], str(release / 'runtime/python/bin/python3'))
+        self.test.assertEqual(self._manifest(release)['source_commit'], OLD_COMMIT)
+        self._service_python(release, '''
+import json,time
+from app.models import database
+from app.certificates.models import Certificate
+with database.SessionLocal() as db:
+ db.add(database.Inbound(core='sing-box',protocol='vless',remark='published-upgrade-synthetic-draft',
+  port=19371,enable=True,settings={'users':[{'uuid':'11111111-1111-4111-8111-111111111111'}]},
+  stream_settings={'tls':{'enabled':True,'server_name':'vpn.example.test'},
+                   '_vui':{'security':'tls','server_name':'vpn.example.test'}}))
+ db.add(Certificate(id='a'*32,domain='upgrade.example.test',email='fixture@example.test',
+  environment='staging',auto_renew=False,created_at=int(time.time())))
+ db.commit()
+print('{}')
+''')
+        status, raw = api('/api/inbounds')
+        self.test.assertEqual(status, 200)
+        self.nodes = json.loads(raw)
+        self.test.assertEqual(len(self.nodes), 1)
+        status, raw = api('/api/subscriptions', {'label':'published-upgrade-fixture',
+            'server':'vpn.example.test', 'inbound_ids':[self.nodes[0]['id']], 'formats':['raw']})
+        self.test.assertEqual(status, 201, 'Real old HTTPS subscription creation required')
+        grant = json.loads(raw)
+        private_values.append(grant['token'])
+        self.subscription = grant['paths']['raw']
+        self.test.assertEqual(api(self.subscription)[0], 200)
+        self.subscription_bytes = api(self.subscription)[1]
+        self.grants = json.loads(api('/api/subscriptions')[1])
+        self.data = self._snapshot(release)
+        for table in ('users','inbounds','subscription_grants','managed_certificates'):
+            self.test.assertGreater(self.data[table]['count'], 0)
+        self.test.assertGreaterEqual(len(self.data['certificate_material']), 2)
+        self.test.assertEqual(self.new['download_log'].read_text(), '', 'Candidate must not download before old-data snapshot')
+
+    def after(self, api):
+        config = json.loads(Path('/etc/v-ui/service.json').read_bytes())
+        release = Path('/var/lib/v-ui/releases') / self.candidate['release_id']
+        assert_upgrade_configuration(self.test,self.config,config,self.old_release,release)
+        manifest = self._manifest(release)
+        self.test.assertEqual(manifest['source_commit'], self.candidate['source_commit'])
+        self.test.assertEqual(manifest['version'], self.candidate['version'])
+        assert_receipt_migration(self.test, self.old_receipt, self._receipt())
+        self.test.assertEqual(self._snapshot(release), self.data, 'Private DB rows and certificate bytes must survive')
+        self.test.assertEqual(json.loads(api('/api/inbounds')[1]), self.nodes)
+        self.test.assertEqual(json.loads(api('/api/subscriptions')[1]), self.grants)
+        self.public_subscription(api)
+        assert_download_boundary(self.test, self.kit, self.new['download_log'])
+        print('Published upgrade: immutable public 0.4.14 source/assets -> exact candidate; intact old receipt migrated with firewall_support; config, users/password hashes, node draft, live subscription, provided certificate bytes and managed certificate metadata retained; candidate-only bounded downloads OK')
+
+    def public_subscription(self, api):
+        status, raw = api(self.subscription)
+        self.test.assertEqual(status, 200)
+        self.test.assertTrue(raw == self.subscription_bytes, 'Existing public subscription bytes changed')

@@ -3,7 +3,7 @@
     addEventListener('pageshow', (event) => { if (event.persisted) location.reload(); });
     const el = (id) => document.getElementById(id);
     const message = (text) => { el('message').textContent = text; };
-    let accountGeneration = 0;
+    let accountGeneration = 0, accountBusy = false;
     const api = async (path, data) => {
         const controller = data === undefined && typeof AbortController === 'function' ? new AbortController() : null;
         const deadline = controller ? setTimeout(() => controller.abort(), 5000) : null;
@@ -32,6 +32,7 @@
         el('login-password').value = '';
         el('current-password').value = '';
         el('new-password').value = '';
+        if (location.pathname === '/account' && globalThis.VUI_NAV) VUI_NAV.replaceLogin('/account', '');
     };
     let sessionChannel = null;
     try {
@@ -42,6 +43,7 @@
     };
     const showAccount = (user, generation) => {
         if (generation !== accountGeneration) return;
+        if (location.pathname === '/login' && globalThis.VUI_NAV) { VUI_NAV.resume(); return; }
         el('current-name').textContent = user.username;
         if (el('account-panel').hidden) el('profile-name').value = user.username;
         el('login-form').hidden = true;
@@ -72,15 +74,22 @@
     if (sessionChannel) sessionChannel.onmessage = (event) => {
         if (event.data === 'session-ended') return checkCurrentSession();
     };
-    const busy = (value) => document.querySelectorAll('button').forEach((b) => { b.disabled = value; });
+    const busy = (value) => { accountBusy = value; document.querySelectorAll('button').forEach((b) => { b.disabled = value; }); };
+    globalThis.VUI_NAV?.guard(() => !accountBusy && (el('account-panel').hidden ||
+        (el('profile-name').value === el('current-name').textContent && !el('current-password').value && !el('new-password').value) ||
+        confirm('放弃本次未保存的账户编辑？')));
+    addEventListener('pagehide', () => {
+        accountGeneration++;
+        ['login-password', 'current-password', 'new-password'].forEach(id => { el(id).value = ''; });
+    });
     el('login-form').addEventListener('submit', async (event) => {
         event.preventDefault(); busy(true); message('正在登录…');
         try {
             await api('login', { username: el('login-name').value, password: el('login-password').value });
             el('login-password').value = '';
             accountGeneration++;
-            // Fixed destination, never trust a next/redirect query parameter.
-            location.replace('/ui/');
+            // The return parameter is an enum mapped to fixed internal destinations.
+            globalThis.VUI_NAV ? VUI_NAV.resume() : location.replace('/ui/');
         } catch (error) {
             message(error.status === 401 ? '用户名或密码不正确。' : error.message);
             el('login-password').value = '';
