@@ -26,3 +26,13 @@
 首候选4029d34的Actions普通测试2505项/231skip通过；新增实际Xray用例启动时失败，尚未取得TLS轮换证明。原CoreRuntime通用错误未保留底层原因，先仅增加测试专用有界脱敏诊断：输出真实启动异常、请求和自有监听、假材料核心日志，保留原超时、就绪和TLS断言，生产代码不变。双栈监听只是静态疑点，待Actions证据，不先按猜测放宽。
 
 诊断候选b276709再次普通2505项/231skip通过，真实用例取得确定证据：固定Xray26.3.27已启动，请求0.0.0.0 TCP而自有监听为同端口::，精确地址检查导致5秒就绪误判。为完成Xray默认TLS节点的必要运行链路，本批增加有界readiness修正：保持原静态检查，仅Xray IPv4通配TCP场景，用实际IPv4 loopback连接在自有子进程中的AF_INET6 ESTABLISHED完整元组证明双栈接收后补充视图；拒绝外部IPv4服务及独立自有IPv4监听冒充，不放宽loopback/UDP/sing-box或总5秒预算。新纯mock和真实TLS原断言保留，具体运行资格仍待新准确Actions。
+
+## v0.4.16 发布迭代（已批准）
+
+产品修复26e7bdd已独审准确绑定，九组Actions/12jobs全部attempt1成功，仅12明确browser步骤skip；普通2516项/231skip通过，实际固定Xray TLS/SNI、续期serial、失败保旧、停止待应用/重试/恢复通过，四目标与真实安装/旧14升级也通过。历史“等待新结果”是此前开发快照，不覆盖该准确收口证据（见PR111）。
+
+用户随后明确批准PR111 Ready、正常dev→main、公开v0.4.16及短入口更新，保留原配置数据与旧资产。当前版本与门禁准备只允许26e后的精确元数据/发布及升级验收变化；main.py/install.sh仅版本文字替换，其他产品UI/API/runtime不再变化。专用tls_certificate_no_browser不复用旧版例外，额外要求固定真实核心、旧14和旧15两个真实升级步骤成功；不能把mock或跳过当验收。
+
+两个worker分别负责本版严格门禁/版本与公开15升级验收，root集成文档、独审、准确候选/dev/main、公开和短入口；不递归派工。升级保留原14用例、在同job复用受验kit添加15基线的真实安装→升级，精确核config、root receipt、账户/密码/节点/订阅/证书及手工TLS路径/未绑定状态。此新增整轮公共下载与systemd验收预留10分钟，将job timeout从35调到45，非重复构建。
+
+本地发布器62项合成回归、升级helper7项、AST/文档/差异检查通过；short contract本机缺PyYAML，留Actions不安装依赖。构建/实际安装/核心仅Actions，浏览器未验证，不操作用户VPS。当前16尚未公开；准确候选/dev/main通过后人工晋升同源制品，公开后核19资产及installer/完整SHA256SUMS真实摘要，再另切setup和short-install冻结源并验实际main短命令。最终准确证据集中承载PR，避免回写自身SHA造成循环提交。
