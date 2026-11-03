@@ -55,3 +55,5 @@
 正式实现收口：五个业务入口已接同一shell与手机抽屉，原节点32字段绑定及表单API保持，节点编辑分五组；核心真实状态/重启保留，不可用入口明确说明。导航使用固定站内目标，workspace分区、401恢复、敏感modal Back/Forward与busy/dirty守卫已接入。新15项真实JS VM用例、shell事件/静态测试和既有YAML25项通过；无浏览器。独审发现pushState后nav/crumb/title不更新及refresh position重号，均已修并加源码联动/刷新多步返回回归；手机导航focus回主内容/拒绝回toggle亦补测。workspace Python bridge本地缺fastapi，留Actions不装依赖。
 
 旧browser harness的aside选择器与中文状态断言仅同步当前markup语义，不执行browser；旧CSS历史fixture仍保留不可篡改。正式视觉/触控/浏览器Back验收仍未验证，不把Node mocks当DOM渲染。当前制作候选留Draft，未合main/发布，数据/账号/证书与已发布014保持。
+
+首轮正式UI候选5225f73：Actions Test V-UI在2481项中10失败/1错误（230 skip）。失败包括共享品牌、同源CSS CSP、旧导航契约及跨文档分享清理。修正保留SVG安全、包字节、身份、CSP来源及零API写入断言；分享在守卫允许后、assign前同步清理并取消请求，真实navigation+app的pending/displayed三目的地回归通过。补充长用户名换行、共享品牌名称及实际订阅页面的TCP能力说明。修正后33项定向unittest（内含16项navigation Node案例）、shell事件、docs/语法/diff检查通过。首轮失败保留，不继承旧提交CI。浏览器helper仅做相关静态同步，未执行browser；其他opt-in浏览器套件不据此授予资格。
