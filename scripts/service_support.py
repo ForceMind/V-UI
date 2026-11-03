@@ -93,7 +93,7 @@ def startup_state(manager: str, name: str, *, timeout: float) -> dict:
     """Read bounded startup state; active alone never proves HTTPS readiness."""
     if manager=="systemd":
         fields=('LoadState','ActiveState','SubState','Result','ExecMainCode','ExecMainStatus','Job')
-        result=subprocess.run(['systemctl','show',name,'--property='+','.join(fields)],
+        result=subprocess.run(['systemctl','show',name,'--all','--property='+','.join(fields)],
                               capture_output=True,text=True,timeout=timeout,check=False)
         if result.returncode:return {}
         values=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
@@ -103,8 +103,13 @@ def startup_state(manager: str, name: str, *, timeout: float) -> dict:
                 'success','exit-code','signal','core-dump','timeout','start-limit-hit','resources'}
         clean={key:value for key,value in values.items() if key in fields
                 and (value in states or key in ('ExecMainCode','ExecMainStatus') and value.isdecimal())}
-        job=values.get('Job','').split(' ',1)[0]
-        if job.isdecimal():clean['Job']='none' if job=='0' else 'pending'
+        # systemctl normally suppresses empty properties. With --all an
+        # explicitly empty Job means no job; a missing/unknown property does
+        # not prove that an accepted asynchronous start has finished.
+        if 'Job' in values:
+            job=values['Job'].split(' ',1)[0]
+            if values['Job']=='' or job=='0':clean['Job']='none'
+            elif job.isdecimal() and int(job)>0:clean['Job']='pending'
         return clean
     if manager=='openrc':
         result=subprocess.run(['rc-service',name,'status'],stdout=subprocess.DEVNULL,

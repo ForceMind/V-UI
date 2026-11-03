@@ -220,6 +220,32 @@ class InstallerStartupTests(unittest.TestCase):
         self.assertNotIn('private',str(state));self.assertNotIn('secret',str(state))
         self.assertEqual(run.call_args.kwargs['timeout'],.25)
         self.assertEqual(run.call_args.args[0][:3],['systemctl','show','v-ui.service'])
+        self.assertIn('--all',run.call_args.args[0])
+        self.assertIn('--property=LoadState,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus,Job',
+                      run.call_args.args[0])
+
+    def test_systemd_job_representations_only_prove_terminal_state_when_explicit(self):
+        read_state=service_support.startup_state
+        for representation,expected in (('', 'none'),('0','none'),('0 /','none'),
+                ('9 /secret-token','pending'),(None,None),('unavailable',None),(' ',None)):
+            with self.subTest(job=representation):
+                raw='ActiveState=failed\nSubState=failed\nResult=exit-code\n'
+                if representation is not None:raw+='Job='+representation+'\n'
+                result=subprocess.CompletedProcess([],0,raw,'')
+                with patch.object(service_support.subprocess,'run',return_value=result) as run:
+                    state=read_state('systemd','v-ui.service',timeout=.25)
+                self.assertEqual(state.get('Job'),expected)
+                self.assertIn('--all',run.call_args.args[0])
+                clock,connection,*_=self.harness(state=lambda *a,**k:state)
+                if expected=='none':
+                    with self.assertRaisesRegex(installer.InstallError,'服务已终止'):
+                        installer.https_health(self.config)
+                    connection.assert_not_called();self.assertEqual(clock.now,0)
+                else:
+                    # Missing, unknown or queued jobs cannot cause an early
+                    # stop. Only the actual verified HTTPS/401 may succeed.
+                    installer.https_health(self.config)
+                    connection.assert_called_once()
 
 
 if __name__=='__main__':unittest.main()

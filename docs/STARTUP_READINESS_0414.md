@@ -31,3 +31,5 @@
 独审绑定首提交7c8637d时发现CI fixture缺本仓库断言（已有hosted判定但离线路径可绕过旧helper的repo gate）。已将GITHUB_ACTIONS/RUNNER_ENVIRONMENT/GITHUB_REPOSITORY三重检查放到ExitStack及cleanup注册之前，拒绝时不进行fixture写入或清理。生产逻辑未改，首提交尚未创建PR/触发完整验收，不授予资格。
 
 首个实际候选fda7a16的oneclick run41573495065/job125711588177（99.763秒）在初装慢启动、登录及常规升级后，测试直接读取私有CURRENT.json时PermissionError失败，尚未进入exit/timeout回归。已改为sudo -u v-ui只读该指针再比较；不改用户/目录/文件权限、不改生产逻辑或验收断言。原失败日志保留，新候选必须重新完整Actions，不继承部分成功结果。
+
+候选24c1695的oneclick run41574122520/job125713574932在228.067秒失败：初装12秒慢启动成功；exit23演练已记录failed/exit-code及Control process exited status23、且回滚成功，但Job空属性未显示，保守判断一直等待120秒，未满足明确退出及时失败断言。按[systemd官方show说明](https://www.freedesktop.org/software/systemd/man/latest/systemctl.html#show%20%5BPATTERN%E2%80%A6%7CJOB%E2%80%A6%5D)改为--all保留空属性；仅显式空/0是无job，缺失或未知不误判。新增7种表示与终态联动回归，16项startup+2项service通过；真实退出/超时断言不改，新候选仍须完整Actions。旧源码和失败日志保留，不以重试制造成功。
