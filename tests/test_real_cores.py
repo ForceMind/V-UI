@@ -2,8 +2,10 @@
 import os
 import json
 from pathlib import Path
+import re
 import socket
 import ssl
+import subprocess
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -19,6 +21,57 @@ from app.services.core_manager import SingBoxAdapter, XrayAdapter, core_manager
 from app.services.core_runtime import CoreRuntime, CoreError, atomic_write
 import test_auth as auth_tests
 import test_certificates as certificate_fixtures
+
+
+class DiagnosticXrayRuntime(CoreRuntime):
+    """Capture only this synthetic fixture's failed launch; production stays quiet."""
+
+    def _listeners_ready(self, config, sockets):
+        self._diagnostic_requested = [
+            {'address': row.get('listen'), 'port': row.get('port'),
+             'protocol': row.get('protocol'), 'network': row.get('streamSettings', {}).get('network')}
+            for row in config.get('inbounds', [])]
+        self._diagnostic_observed = [
+            {'address': item.laddr.ip, 'port': item.laddr.port,
+             'type': int(item.type), 'status': item.status}
+            for item in sockets if item.laddr]
+        return super()._listeners_ready(config, sockets)
+
+    def _launch(self, path):
+        log = self.root.parent / 'synthetic-xray-launch.log'
+        original_popen = subprocess.Popen
+        self._diagnostic_requested = self._diagnostic_observed = []
+        with log.open('wb') as output:
+            log.chmod(0o600)
+
+            def capture(*args, **kwargs):
+                kwargs.update(stdout=output, stderr=subprocess.STDOUT)
+                return original_popen(*args, **kwargs)
+
+            try:
+                with patch('app.services.core_runtime.subprocess.Popen', side_effect=capture):
+                    return super()._launch(path)
+            except (CoreError, OSError, ValueError) as exc:
+                output.flush()
+                # Read a bounded complete diagnostic. Oversized output is
+                # suppressed rather than truncating potentially sensitive PEM.
+                with log.open('rb') as source:
+                    raw = source.read(65537)
+                if len(raw) > 65536:
+                    text = '[oversized synthetic core log suppressed]'
+                else:
+                    text = raw.decode(errors='replace')
+                    text = re.sub(r'-----BEGIN\b[\s\S]*?(?:-----END [^-]+-----|\Z)', '[PEM redacted]', text)
+                    text = text.replace(str(self.root.parent), '[fixture]')
+                    text = re.sub(r'(?i)\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b', '[uuid]', text)
+                    text = re.sub(r'(?i)\b(?:[0-9a-f]{64}|[0-9a-f]{32})\b', '[identity]', text)
+                    text = re.sub(r'(?i)(password|token|secret|private.?key)(["\s:=]+)[^\s,;}]+', r'\1\2[redacted]', text)
+                    text = text[-6000:]
+                print('Synthetic Xray launch failure: ' + json.dumps({
+                    'reason': str(exc), 'requested': self._diagnostic_requested,
+                    'observed_owned_sockets': self._diagnostic_observed,
+                    'core_output': text}, ensure_ascii=False), flush=True)
+                raise
 
 
 @unittest.skipUnless(os.getenv('VUI_TEST_CORES'), 'real binary path not provided')
@@ -63,7 +116,7 @@ class XrayManagedTLSRealTests(unittest.TestCase):
             port = available.getsockname()[1]
         root = Path(self.temp.name)
         adapter = XrayAdapter()
-        runtime = CoreRuntime('xray', Path(os.environ['VUI_TEST_CORES']) / 'xray', root / 'xray-runtime')
+        runtime = DiagnosticXrayRuntime('xray', Path(os.environ['VUI_TEST_CORES']) / 'xray', root / 'xray-runtime')
         self.addCleanup(runtime.close)
         adapter._runtime = runtime
 

@@ -22,3 +22,5 @@
 实现候选已落地。前端10项真实app.js Node控制器契约及相关原实例竞态检查保持；root聚合34项非浏览器测试通过。后端本机缺fastapi等依赖，仅AST/分类smoke和差异检查，API/续期与固定Xray真实TLS测试交Actions，不安装本机依赖。真实用例进入既有test_real_cores.py步骤，使用临时CA验证TLS/SNI、serial轮换、失败保旧、停止待应用及恢复；全局proxy policy gate为mock，不把它称为VLESS应用转发资格。
 
 独审发现的旧HY2/TUIC错误码分类回归已修，bind和续期共用分类，14个负向保留desired/applied/revision/error不变。显式SNI冲突的API边界同步补齐，避免只靠前端；最终准确候选/Actions结果记录承载PR，不预填通过。
+
+首候选4029d34的Actions普通测试2505项/231skip通过；新增实际Xray用例启动时失败，尚未取得TLS轮换证明。原CoreRuntime通用错误未保留底层原因，先仅增加测试专用有界脱敏诊断：输出真实启动异常、请求和自有监听、假材料核心日志，保留原超时、就绪和TLS断言，生产代码不变。双栈监听只是静态疑点，待Actions证据，不先按猜测放宽。
