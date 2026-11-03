@@ -249,7 +249,8 @@ class ReleaseToolsTests(unittest.TestCase):
             from scripts import build_bundle
         tracked=('main.py','VERSION','README.md','requirements-runtime.txt','web/index.html',
                  'web/account.html','web/workspace.html','web/certificates.html',
-                 'web/js/app.js','web/proxy.html','web/js/tailscale-status.js',
+                 'web/js/app.js','web/js/shell.js','web/js/navigation.js','web/css/shell.css',
+                 'web/proxy.html','web/js/tailscale-status.js',
                  'app/api/management.py','app/services/tailscale_status.py',
                  'docs/COMPATIBILITY.md',*BRAND_MEMBERS,*CONTROLLER_MEMBERS)
         for name in tracked:
@@ -281,6 +282,7 @@ class ReleaseToolsTests(unittest.TestCase):
         packed = self.root/'generated-payload'
         with zipfile.ZipFile(bundle) as archive:
             for name in ('README.md', 'web/proxy.html', 'web/js/tailscale-status.js',
+                         'web/js/shell.js', 'web/js/navigation.js', 'web/css/shell.css',
                          'app/api/management.py', 'app/services/tailscale_status.py', *BRAND_MEMBERS):
                 with self.subTest(member=name):
                     expected = (source/name).read_bytes()

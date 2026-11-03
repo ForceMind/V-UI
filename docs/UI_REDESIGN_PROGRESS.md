@@ -57,3 +57,5 @@
 旧browser harness的aside选择器与中文状态断言仅同步当前markup语义，不执行browser；旧CSS历史fixture仍保留不可篡改。正式视觉/触控/浏览器Back验收仍未验证，不把Node mocks当DOM渲染。当前制作候选留Draft，未合main/发布，数据/账号/证书与已发布014保持。
 
 首轮正式UI候选5225f73：Actions Test V-UI在2481项中10失败/1错误（230 skip）。失败包括共享品牌、同源CSS CSP、旧导航契约及跨文档分享清理。修正保留SVG安全、包字节、身份、CSP来源及零API写入断言；分享在守卫允许后、assign前同步清理并取消请求，真实navigation+app的pending/displayed三目的地回归通过。补充长用户名换行、共享品牌名称及实际订阅页面的TCP能力说明。修正后33项定向unittest（内含16项navigation Node案例）、shell事件、docs/语法/diff检查通过。首轮失败保留，不继承旧提交CI。浏览器helper仅做相关静态同步，未执行browser；其他opt-in浏览器套件不据此授予资格。
+
+第二轮930ea60完整测试为2481项、1错误、230 skip，其余断言已通过；唯一错误来自生成包单测手工tracked夹具未列入新增shell.js。真实builder按Git tracked文件打包，没有相应生产缺失证据。修正夹具纳入shell.js/navigation.js/shell.css，并对三个新资源保留manifest SHA-256、ZIP及解包逐字节断言。该提交重新验收，第二轮失败与已通过的真实安装结果保留，不能赋予新SHA资格。
