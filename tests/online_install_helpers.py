@@ -40,6 +40,7 @@ def redact_installer_output(text, *private_values):
     values.extend(re.findall(r'初始(?:用户名|密码)：([^\r\n]+)',text))
     for value in sorted(set(values),key=len,reverse=True):
         text=text.replace(value,'[REDACTED]')
+    text=re.sub(r'(/maintenance#grant=)[A-Za-z0-9_-]+',r'\1[REDACTED]',text)
     return text
 
 

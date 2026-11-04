@@ -1,5 +1,11 @@
 # 安装与首次运行
 
+## v0.4.17 发布准备
+
+本批新增临时远程维护与全局 `v-ui` 在线升级。正式Release公开并切换短入口后才安装17；当前短入口仍固定公开16，以 `setup.sh --help` 为准。[统一记录](REMOTE_MAINTENANCE_PROGRESS.md)和承载PR分别记录候选、主线和公开状态，下面旧16说明是现有稳定入口的状态。
+
+安装17后运行 `sudo v-ui`：12在线升级（选择并明确确认后才下载），13生成/列举/撤销维护授权，默认只读。面板“远程维护与升级”也可生成限时链接，按需允许节点、分享、证书、中转、备份恢复或升级。已有安装沿用配置、账户和数据；维护任务由独立systemd组件执行。OpenRC保留原支持，新增远程系统任务暂不可用；详见[终端指南](MANAGED_OPERATIONS.md)及[权限契约](REMOTE_MAINTENANCE_CONTRACT.md)。
+
 v0.4.9 纳入双开关、每入口 TCP 和 YAML 只读预览；历史版本与候选身份见[版本选择与验收交接](FROZEN_VERSION_TEST_HANDOFF.md)，本批准确状态见[一行安装计划](ONE_LINE_INSTALL_049.md)。
 
 本页对应 [v0.4.16](https://github.com/ForceMind/V-UI/releases/tag/v0.4.16) TLS已有证书自动绑定修复；[执行账本](TLS_CERTIFICATE_BINDING_FIX.md)记录准确资格。短入口使用公开套件的真实可信摘要。旧标签与资产保持，引导入口与冻结应用套件分别记录源码身份。
@@ -216,7 +222,7 @@ root 只负责系统初始化和受管服务文件；应用、核心与 Certbot 
 
 ```sh
 # 按README完成固定入口校验/root私有副本及函数定义后：
-run_vui_installer --version v0.4.16
+run_vui_installer --version v0.4.17
 ```
 
 脚本先检测 `x86_64/aarch64 + gnu/musl`，再从该明确版本下载对应目标包、安装控制器和 `SHA256SUMS`，逐个验证摘要后执行。不会下载 `latest`，也不会在发布时重新构建包。

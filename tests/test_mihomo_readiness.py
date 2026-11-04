@@ -16,6 +16,7 @@ from test_proxy_double_hop import DoubleHopFixture
 # Audited persistent-client construction sites. Parser/version subprocess.run
 # and the HY2/TUIC sing-box-only UDP-server Popen paths are intentionally absent.
 SITES = {
+    ("test_xray_share_loopback.py", "XrayShareLoopbackTests.start_client"): "direct",
     ("test_loopback_chain.py", "LoopbackChainTests.start"): "direct",
     ("test_trojan_loopback.py", "TrojanLoopbackTests.start_mihomo"): "direct",
     ("test_vmess_loopback.py", "VMessLoopbackTests.start_mihomo"): "direct",

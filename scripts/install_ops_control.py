@@ -5,7 +5,8 @@ Run this separately with the OS Python's -B -I -S flags. --sha256 authenticates 
 entire SHA256SUMS file using an independently trusted digest, not a digest copied
 from the same untrusted download. The online --with-global-cli flow explicitly
 calls this tool after the panel installer succeeds.
-No account, service, sudoers, SUID, package runtime or firewall is changed here.
+Installs/starts only the fixed independent maintenance service on systemd.
+No account, sudoers, SUID, package runtime or firewall is changed here.
 """
 from __future__ import annotations
 
@@ -64,6 +65,12 @@ SOURCE_DEPENDENCIES = {
     'proxy_store.py': 'app/services/proxy_store.py',
     'upstream_profile.py': 'app/services/upstream_profile.py',
     'inbound_policy.py': 'app/services/inbound_policy.py',
+    'maintenance_daemon.py': 'deploy/maintenance_daemon.py',
+    'maintenance_upgrade.py': 'deploy/maintenance_upgrade.py',
+    'maintenance_client.py': 'deploy/maintenance_client.py',
+    'maintenance_cli_worker.py': 'deploy/maintenance_cli_worker.py',
+    'install_control_verifier.py': 'scripts/install_ops_control.py',
+    'v-ui-maintenance.service': 'deploy/v-ui-maintenance.service',
 }
 RECEIPT_KEYS = {'schema', 'service_manager', 'system_python', 'interpreter_resolved',
                 'interpreter_sha256', 'files'}
@@ -177,7 +184,7 @@ def load_json(raw):
         raise InstallError('Invalid JSON metadata') from exc
 
 
-def verify_kit(directory, sha256):
+def verify_kit(directory, sha256, *, local_target_only=False):
     if not re.fullmatch(r'[a-f0-9]{64}', sha256 or ''):
         raise InstallError('An independently trusted SHA256SUMS digest is required')
     directory = Path(directory).absolute()
@@ -196,12 +203,19 @@ def verify_kit(directory, sha256):
         values[match[2]] = match[1]
     bundles = set(values) - COMMON_ASSETS
     permitted = {'vui-linux-' + target + '.zip' for target in TARGETS}
+    # Remote upgrades keep the complete authenticated manifest, while omitting
+    # only bundles for other machine targets. The machine target is detected
+    # locally, never supplied by a request, flag value or environment variable.
+    selected = COMMON_ASSETS | {'vui-linux-' + local_target() + '.zip'} if local_target_only else set(values)
     if (not COMMON_ASSETS <= values.keys() or not bundles <= permitted
             or len(bundles) not in (1, len(TARGETS))
-            or {p.name for p in directory.iterdir()} != set(values) | {'SHA256SUMS'}):
+            or not selected <= values.keys()
+            or {p.name for p in directory.iterdir()} != selected | {'SHA256SUMS'}):
         raise InstallError('Complete fixed release kit required; unexpected or missing member')
     verified = {}
     for name, expected in sorted(values.items()):
+        if name not in selected:
+            continue
         raw, actual = read_file(directory / name, limit=MAX_CODE if name in CODE_ASSETS else MAX_ASSET,
                                 keep=name in CODE_ASSETS)
         if actual != expected:
@@ -358,8 +372,13 @@ def inspect_instance(verified, record):
 
 
 def destinations():
-    return {CONTROL / name: (name, 0o644) for name in ('system_ops.py', 'ops_worker.py', 'release_tools.py', 'firewall_support.py', *SOURCE_DEPENDENCIES)} | {
+    paths = {CONTROL / name: (name, 0o644) for name in ('system_ops.py', 'ops_worker.py', 'release_tools.py', 'firewall_support.py', *SOURCE_DEPENDENCIES)} | {
         ENTRY: ('v-ui', 0o755)}
+    manager = (load_json(read_file(CONFIG, root=True, limit=MAX_JSON)[0]).get('service_manager', 'systemd')
+               if CONFIG.exists() else 'systemd')
+    if manager == 'systemd':
+        paths[SYSTEMD_DIR / 'v-ui-maintenance.service'] = ('v-ui-maintenance.service', 0o644)
+    return paths
 
 
 def check_command_alias():
@@ -380,13 +399,13 @@ def check_partial_control(verified):
                 raise InstallError('Partial control installation differs from this trusted kit; inspect manually')
 
 
-def preflight(directory, sha256):
+def preflight(directory, sha256, *, local_target_only=False):
     """Authenticate the kit and OS interpreter before the online panel install."""
     if os.geteuid() != 0:
         raise InstallError('Explicit root invocation is required')
     if platform.system() != 'Linux':
         raise InstallError('Linux only; nothing was installed')
-    verified, record = verify_kit(directory, sha256)
+    verified, record = verify_kit(directory, sha256, local_target_only=local_target_only)
     check_command_alias()
     interpreter = verify_system_python()
     paths = destinations()
@@ -402,6 +421,9 @@ def preflight(directory, sha256):
             units = ({SYSTEMD_DIR / name: 0o644 for name in ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')}
                      if manager == 'systemd' else {OPENRC_DIR / name: 0o755 for name in ('v-ui', 'v-ui-http01')})
             current = {CONFIG: 0o644, LAUNCHER: 0o644, **units}
+            maintenance_unit = SYSTEMD_DIR / 'v-ui-maintenance.service'
+            if manager == 'systemd' and str(maintenance_unit) in previous.get('files', {}):
+                current[maintenance_unit] = 0o644
             raw, config_hash = read_file(CONFIG, root=True, mode=0o644, limit=MAX_JSON)
             config = load_json(raw)
             incomplete = (isinstance(config, dict) and type(config.get('installer')) is int
@@ -427,6 +449,8 @@ def validate_existing(hashes, interpreter, manager, refresh, verified, *, missin
     unit_dir = SYSTEMD_DIR if manager == 'systemd' else OPENRC_DIR
     unit_names = ('v-ui.service','v-ui-http01.service','v-ui-http01.socket') if manager == 'systemd' else ('v-ui','v-ui-http01')
     allowed_missing = {str(LAUNCHER)} | {str(unit_dir/name) for name in unit_names}
+    if manager == 'systemd':
+        allowed_missing.add(str(SYSTEMD_DIR / 'v-ui-maintenance.service'))
     if missing_instance and (not refresh or not set(missing_instance) <= allowed_missing):
         raise InstallError('Only guarded incomplete-instance preflight may defer missing service files')
     for path in (*paths, RECEIPT):
@@ -453,9 +477,15 @@ def validate_existing(hashes, interpreter, manager, refresh, verified, *, missin
     # lack the proxy dependencies or data-owner helper. Existing bytes must all
     # still match their receipt; no arbitrary subset or unreceipted file is used.
     firewall_dependency = {str(CONTROL / 'firewall_support.py')}
-    known_missing = (dependencies, {str(CONTROL / 'data_owner.py')}, firewall_dependency,
+    historical = (dependencies, {str(CONTROL / 'data_owner.py')}, firewall_dependency,
                      dependencies | firewall_dependency,
                      {str(CONTROL / 'data_owner.py')} | firewall_dependency)
+    maintenance = {str(CONTROL / name) for name in SOURCE_DEPENDENCIES
+                   if name.startswith('maintenance_') or name in ('install_control_verifier.py', 'v-ui-maintenance.service')}
+    if manager == 'systemd':
+        maintenance.add(str(SYSTEMD_DIR / 'v-ui-maintenance.service'))
+    # Permit only complete historical closures plus the whole new closure.
+    known_missing = historical + (maintenance,) + tuple(item | maintenance for item in historical)
     missing = (expected - set(receipt['files']) if isinstance(receipt, dict)
                and isinstance(receipt.get('files'), dict) else set())
     legacy = (refresh and isinstance(receipt, dict) and isinstance(receipt.get('files'), dict)
@@ -476,13 +506,15 @@ def validate_existing(hashes, interpreter, manager, refresh, verified, *, missin
         raise InstallError('Existing control receipt is unrelated or incompatible')
     actual = dict(hashes)
     for path, (_, mode) in paths.items():
+        if str(path) in missing_instance:
+            continue
         if legacy and str(path) in missing:
             if path.exists() or path.is_symlink():
                 raise InstallError('Unreceipted dependency already exists; inspect manually')
             continue
         actual[str(path)] = read_file(path, root=True, mode=mode)[1]
     if any(receipt['files'][str(path)] != actual[str(path)] for path in paths
-           if not legacy or str(path) not in missing):
+           if str(path) not in missing_instance and (not legacy or str(path) not in missing)):
         raise InstallError('Existing control code drift; refusing to re-endorse changed helpers or wrapper')
     if not refresh:
         if receipt['files'] != actual or any(receipt[key] != value for key, value in interpreter.items()):
@@ -578,8 +610,8 @@ def publish(verified, receipt):
             staged_alias.unlink(missing_ok=True)
 
 
-def install(directory, sha256, *, refresh=False):
-    verified, record, interpreter = preflight(directory, sha256)
+def install(directory, sha256, *, refresh=False, local_target_only=False):
+    verified, record, interpreter = preflight(directory, sha256, local_target_only=local_target_only)
     with installation_lock():
         config, hashes = inspect_instance(verified, record)
         validate_existing(hashes, interpreter, config['service_manager'], refresh, verified)
@@ -589,7 +621,17 @@ def install(directory, sha256, *, refresh=False):
         receipt = {'schema': 1, 'service_manager': config['service_manager'],
                    **interpreter, 'files': files}
         publish(verified, receipt)
+    if config['service_manager'] == 'systemd':
+        start_maintenance_service()
     return receipt
+
+
+def start_maintenance_service():
+    # Starting an already active daemon must not kill its in-flight upgrade.
+    for args in (['daemon-reload'], ['enable', '--now', 'v-ui-maintenance.service']):
+        subprocess.run(['/usr/bin/systemctl', *args], env=ENV, cwd='/',
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=45, check=True)
 
 
 def main(argv=None):
@@ -600,6 +642,8 @@ def main(argv=None):
                         help='Refresh an intact controller or complete a receipt-free partial copy of this exact kit')
     parser.add_argument('--preflight', action='store_true',
                         help='Only authenticate the kit, command path and fixed OS interpreter; do not install')
+    parser.add_argument('--local-target-only', action='store_true',
+                        help='Retain the complete accepted manifest but download only the locally detected target bundle')
     args = parser.parse_args(argv)
     if (not sys.dont_write_bytecode or not sys.flags.isolated or not sys.flags.no_site
             or Path(sys.executable).resolve() != SYSTEM_PYTHON.resolve()):
@@ -607,11 +651,11 @@ def main(argv=None):
     if args.preflight:
         if args.refresh:
             raise InstallError('--preflight does not refresh an installation')
-        preflight(args.kit, args.sha256)
+        preflight(args.kit, args.sha256, local_target_only=args.local_target_only)
         print('可信全局 v-ui 预检通过；尚未更改任何安装。')
         return
-    install(args.kit, args.sha256, refresh=args.refresh)
-    print('可信系统控制组件已安装；未更改服务、账户、sudoers 或 SUID 设置。')
+    install(args.kit, args.sha256, refresh=args.refresh, local_target_only=args.local_target_only)
+    print('可信系统控制组件已安装；独立维护服务已启动，账户、sudoers 和 SUID 设置保持。')
 
 
 if __name__ == '__main__':

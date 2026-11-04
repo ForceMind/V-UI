@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from types import SimpleNamespace
 from urllib.parse import quote, urlencode
 
 from app.services.subscription_tokens import normalize_server
@@ -234,7 +235,57 @@ def _shadowsocks_node(item, server: str, name: str) -> dict:
             "cipher":method,"password":password,"udp":True}
 
 
+def _xray_tcp_tls_node(item, server: str) -> dict:
+    """Translate only the bounded Xray VLESS raw TLS profile, never a draft fallback.
+
+    This does not migrate the saved row or expand Xray relay/UDP qualification.
+    Unknown material/transport/client fields fail closed before exporting secrets.
+    """
+    if item.protocol != 'vless':
+        raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
+    settings = mapping(item.settings or {}, {'users', 'clients', 'decryption'}, 'Xray settings')
+    if settings.get('decryption', 'none') != 'none':
+        raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
+    users = settings.get('users', settings.get('clients'))
+    if ('users' in settings and 'clients' in settings and settings['users'] != settings['clients']):
+        raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
+    if not isinstance(users, list) or len(users) != 1:
+        raise ExportError('XRAY_SHARE_SINGLE_USER_REQUIRED')
+    user = mapping(users[0], {'id', 'flow', 'email', 'level'}, 'Xray client')
+    if user.get('flow', '') != '' or user.get('level', 0) != 0:
+        raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
+    stream = mapping(item.stream_settings or {}, {'method', 'network', 'security', 'tlsSettings', '_vui', 'rawSettings'}, 'Xray stream')
+    if (stream.get('method', stream.get('network', 'raw')) not in ('raw', 'tcp')
+            or stream.get('network', 'raw') not in ('raw', 'tcp') or stream.get('security') != 'tls'):
+        raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
+    if 'rawSettings' in stream and stream['rawSettings'] not in ({}, {'header': {'type': 'none'}}):
+        raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
+    tls = mapping(stream.get('tlsSettings'), {'serverName', 'certificates', 'alpn'}, 'Xray TLS')
+    certificates = tls.get('certificates')
+    if not isinstance(certificates, list) or len(certificates) != 1:
+        raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
+    cert = mapping(certificates[0], {'certificateFile', 'keyFile'}, 'Xray certificate')
+    if any(not isinstance(cert.get(key), str) or not cert[key] for key in ('certificateFile', 'keyFile')):
+        raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
+    neutral_tls = {'enabled': True, 'server_name': tls.get('serverName', ''),
+                   'certificate_path': cert['certificateFile'], 'key_path': cert['keyFile']}
+    if 'alpn' in tls:
+        neutral_tls['alpn'] = tls['alpn']
+    neutral = SimpleNamespace(core='sing-box', protocol='vless', id=item.id,
+        enable=item.enable, expiry_time=getattr(item, 'expiry_time', 0), port=item.port,
+        remark=item.remark, settings={'users': [{'uuid': user.get('id'), 'flow': ''}]},
+        stream_settings={'tls': neutral_tls, '_vui': stream.get('_vui', {})})
+    host, name = _common(neutral, server)
+    sni, meta, alpn = _verified_tls(neutral)
+    result = _vless_node(neutral, host, name, sni, meta, alpn)
+    result['udp'] = False
+    result.pop('packet-encoding', None)
+    return result
+
+
 def validated_node(item, server: str) -> dict:
+    if item.core == 'xray':
+        return _xray_tcp_tls_node(item, server)
     server,name=_common(item,server)
     if item.protocol=="shadowsocks":
         return _shadowsocks_node(item,server,name)
@@ -301,7 +352,7 @@ def share_link(item, server: str) -> str:
                 params["host"] = node["ws-opts"]["headers"]["Host"]
         elif node["network"] == "grpc":
             params["serviceName"] = node["grpc-opts"]["grpc-service-name"]
-        else:
+        elif node.get('packet-encoding') == 'xudp':
             params["packetEncoding"] = "xudp"
         if node.get("client-fingerprint"):
             params["fp"]=node["client-fingerprint"]
@@ -394,6 +445,9 @@ def singbox_client_config(items, server: str) -> dict:
                 outbound.pop("packet_encoding")
                 outbound["network"] = "tcp"
                 outbound["transport"] = {"type": "grpc", "service_name": node["grpc-opts"]["grpc-service-name"]}
+            elif not node.get('udp', False) and 'packet-encoding' not in node:
+                outbound.pop('packet_encoding')
+                outbound['network'] = 'tcp'
         elif node["type"]=="trojan":
             outbound={"type":"trojan","tag":node["name"],"server":node["server"],
                       "server_port":node["port"],"password":node["password"],

@@ -3,12 +3,13 @@ import logging
 import re
 
 PATTERN = re.compile(r"/sub/[^\s\"']*", re.IGNORECASE)
+MAINTENANCE_TOKEN = re.compile(r"vui_m[gs]_[A-Za-z0-9_-]+")
 
 
 class SubscriptionURLFilter(logging.Filter):
     def filter(self, record):
         def clean(value):
-            return PATTERN.sub('/sub/[redacted]', value) if isinstance(value, str) else value
+            return MAINTENANCE_TOKEN.sub('[maintenance-redacted]', PATTERN.sub('/sub/[redacted]', value)) if isinstance(value, str) else value
         record.msg = clean(record.msg)
         if isinstance(record.args, tuple):
             record.args = tuple(clean(v) for v in record.args)

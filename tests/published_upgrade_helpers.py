@@ -1,4 +1,4 @@
-"""Opt-in empty-host public 0.4.14/0.4.15 -> exact candidate upgrade observations.
+"""Opt-in empty-host public 0.4.14/0.4.15/0.4.16 -> exact candidate upgrade observations.
 
 The old installation uses anonymous published HTTPS. Only the unpublished new
 kit's download transport is adapted; neither installer nor root receipt is faked.
@@ -17,9 +17,16 @@ from online_install_helpers import fixture_commands, published_commands
 PUBLISHED_BASELINES = {
     '0.4.14': 'b0cc174d04d05e61277075412586f0ba0dd231db',
     '0.4.15': '65b1e75d90de733408101ec280a92be935731baa',
+    '0.4.16': '18fe631bcf69b68425b454db1795a101e0378842',
 }
 CONTROL = Path('/usr/local/lib/v-ui')
 FIREWALL = str(CONTROL / 'firewall_support.py')
+MAINTENANCE_FILES = frozenset({
+    str(CONTROL / 'maintenance_daemon.py'), str(CONTROL / 'maintenance_upgrade.py'),
+    str(CONTROL / 'maintenance_client.py'), str(CONTROL / 'maintenance_cli_worker.py'),
+    str(CONTROL / 'install_control_verifier.py'), str(CONTROL / 'v-ui-maintenance.service'),
+    '/etc/systemd/system/v-ui-maintenance.service',
+})
 
 
 def assert_download_boundary(test, kit, log):
@@ -33,19 +40,20 @@ def assert_download_boundary(test, kit, log):
 
 def fixed_public_baseline(version, commit):
     if version not in PUBLISHED_BASELINES or PUBLISHED_BASELINES[version] != commit:
-        raise AssertionError('Fixed public 0.4.14 or 0.4.15 upgrade baseline required')
+        raise AssertionError('Fixed public 0.4.14, 0.4.15 or 0.4.16 upgrade baseline required')
     return version, commit
 
 
 def assert_receipt_migration(test, before, after, old_version):
     if old_version not in PUBLISHED_BASELINES:
         raise AssertionError('Unknown public upgrade receipt baseline')
+    test.assertTrue(MAINTENANCE_FILES.isdisjoint(before['files']))
+    additions = MAINTENANCE_FILES | ({FIREWALL} if old_version == '0.4.14' else set())
+    test.assertEqual(set(after['files']) - set(before['files']), additions)
     if old_version == '0.4.14':
         test.assertNotIn(FIREWALL, before['files'])
-        test.assertEqual(set(after['files']) - set(before['files']), {FIREWALL})
     else:
         test.assertIn(FIREWALL, before['files'])
-        test.assertEqual(set(after['files']), set(before['files']))
     test.assertFalse(set(before['files']) - set(after['files']))
     for field in ('schema', 'service_manager', 'system_python', 'interpreter_resolved', 'interpreter_sha256'):
         test.assertEqual(after[field], before[field])
@@ -62,6 +70,42 @@ def assert_upgrade_configuration(test, before, after, old_release, new_release):
     # the canonical empty authorization list; existing authorizations must stay.
     expected.setdefault('ca_authorizations', [])
     test.assertEqual(after, expected)
+
+
+def managed_xray_fixture_program(data_root='/var/lib/v-ui/data'):
+    """Persist synthetic v0.4.16 bound state; never apply a core or issue a cert."""
+    return 'data_root=' + repr(str(data_root)) + ';' + '''
+import hashlib,json,time
+from pathlib import Path
+from app.models import database
+from app.certificates.models import Certificate,CertificateBinding
+root=Path(data_root)
+chain=(root/'certs/provided-fullchain.pem').read_bytes()
+key=(root/'certs/provided-privkey.pem').read_bytes()
+identity='b'*32
+revision=hashlib.sha256(chain).hexdigest()
+material=root/'certificates/revisions'/identity/revision
+material.mkdir(parents=True,mode=0o700)
+for name,content in (('fullchain.pem',chain),('privkey.pem',key)):
+ path=material/name
+ path.write_bytes(content)
+ path.chmod(0o600)
+with database.SessionLocal() as db:
+ db.add(Certificate(id=identity,domain='vpn.example.test',email='fixture@example.test',
+  environment='production',auto_renew=False,revision=revision,created_at=int(time.time())))
+ node=database.Inbound(core='xray',protocol='vless',remark='published-upgrade-synthetic-managed-xray-draft',
+  port=19372,enable=False,settings={'clients':[{'id':'22222222-2222-4222-8222-222222222222'}]},
+  stream_settings={'network':'raw','security':'tls','tlsSettings':{'serverName':'vpn.example.test',
+   'certificates':[{'certificateFile':str(material/'fullchain.pem'),'keyFile':str(material/'privkey.pem')}]},
+   '_vui':{'security':'tls','server_name':'vpn.example.test'}})
+ db.add(node)
+ db.flush()
+ node_id=node.id
+ db.add(CertificateBinding(target='inbound:'+str(node.id),certificate_id=identity,
+  error='CORE_STOPPED_PENDING_APPLY'))
+ db.commit()
+print(json.dumps({'inbound_id':node_id,'certificate_id':identity}))
+'''
 
 
 class PublishedUpgrade:
@@ -118,9 +162,10 @@ with sqlite3.connect('file:/var/lib/v-ui/data/v-ui.db?mode=ro',uri=True) as db:
  for table in ('users','inbounds','subscription_grants','managed_certificates','certificate_bindings'):
   rows=db.execute('SELECT * FROM '+table+' ORDER BY 1').fetchall()
   result[table]={'count':len(rows),'sha256':hashlib.sha256(json.dumps(rows,sort_keys=True).encode()).hexdigest()}
-root=Path('/var/lib/v-ui/data/certs')
-result['certificate_material']={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()
- for p in sorted(root.rglob('*')) if p.is_file()}
+for field,directory in (('certificate_material','certs'),('managed_certificate_material','certificates/revisions')):
+ root=Path('/var/lib/v-ui/data')/directory
+ result[field]={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()
+  for p in sorted(root.rglob('*')) if p.is_file()}
 print(json.dumps(result,sort_keys=True))
 ''')
 
@@ -169,10 +214,15 @@ with database.SessionLocal() as db:
  db.commit()
 print('{}')
 ''')
+        self.managed_xray = None
+        if self.old_version == '0.4.16':
+            # The stored binding and its local fixture material are observed as
+            # data only. No CA, certificate validation or business core is run.
+            self.managed_xray = self._service_python(release, managed_xray_fixture_program())
         status, raw = api('/api/inbounds')
         self.test.assertEqual(status, 200)
         self.nodes = json.loads(raw)
-        self.test.assertEqual(len(self.nodes), 1)
+        self.test.assertEqual(len(self.nodes), 2 if self.managed_xray else 1)
         self.manual_editor = None
         if self.old_version == '0.4.15':
             status, raw = api('/api/inbounds/'+str(self.nodes[0]['id'])+'/editor')
@@ -183,6 +233,15 @@ print('{}')
                                   '/var/lib/v-ui/data/certs/provided-fullchain.pem')
             self.test.assertEqual(self.manual_editor['profile']['key_path'],
                                   '/var/lib/v-ui/data/certs/provided-privkey.pem')
+
+        self.managed_editor = None
+        if self.managed_xray:
+            status, raw = api('/api/inbounds/'+str(self.managed_xray['inbound_id'])+'/editor')
+            self.test.assertEqual(status, 200)
+            self.managed_editor = json.loads(raw)
+            self.test.assertEqual(self.managed_editor['core'], 'xray')
+            self.test.assertEqual(self.managed_editor['certificate_id'], self.managed_xray['certificate_id'])
+            self.test.assertFalse(self.managed_editor['enable'])
 
         status, raw = api('/api/subscriptions', {'label':'published-upgrade-fixture',
             'server':'vpn.example.test', 'inbound_ids':[self.nodes[0]['id']], 'formats':['raw']})
@@ -197,6 +256,9 @@ print('{}')
         for table in ('users','inbounds','subscription_grants','managed_certificates'):
             self.test.assertGreater(self.data[table]['count'], 0)
         self.test.assertGreaterEqual(len(self.data['certificate_material']), 2)
+        if self.managed_xray:
+            self.test.assertGreater(self.data['certificate_bindings']['count'], 0)
+            self.test.assertEqual(len(self.data['managed_certificate_material']), 2)
         self.test.assertEqual(self.new['download_log'].read_text(), '', 'Candidate must not download before old-data snapshot')
 
     def after(self, api):
@@ -215,10 +277,16 @@ print('{}')
             self.test.assertEqual(json.loads(raw), self.manual_editor,
                                   'Existing manual TLS paths and unbound editor must survive unchanged')
 
+        if self.managed_editor is not None:
+            status, raw = api('/api/inbounds/'+str(self.managed_xray['inbound_id'])+'/editor')
+            self.test.assertEqual(status, 200)
+            self.test.assertEqual(json.loads(raw), self.managed_editor,
+                                  'Synthetic Xray managed TLS draft and desired binding must survive unchanged')
+
         self.test.assertEqual(json.loads(api('/api/subscriptions')[1]), self.grants)
         self.public_subscription(api)
         assert_download_boundary(self.test, self.kit, self.new['download_log'])
-        print('Published upgrade: immutable public '+self.old_version+' source/assets -> exact candidate; exact historical root receipt closure; config, users/password hashes, node draft/manual TLS paths, live subscription, provided certificate bytes and managed certificate metadata retained; candidate-only bounded downloads OK')
+        print('Published upgrade: immutable public '+self.old_version+' source/assets -> exact candidate; exact historical root receipt closure; config, users/password hashes, node draft/manual TLS paths, live subscription, provided/managed fixture certificate bytes and managed certificate/binding metadata retained (synthetic un-applied Xray binding on 0.4.16; no CA/core qualification); candidate-only bounded downloads OK')
 
     def public_subscription(self, api):
         status, raw = api(self.subscription)

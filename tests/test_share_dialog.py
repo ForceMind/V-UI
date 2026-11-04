@@ -49,6 +49,17 @@ function boot(realVue=process.argv[1]||''){
 '''
 
 SCENARIOS = {
+
+'known_share_error_is_chinese_retry_and_unknown_body_is_not_echoed': r'''
+const h=boot(),a=h.start();
+a.request.reject({response:{status:409,data:JSON.stringify({detail:{code:'SHARE_PROFILE_UNSUPPORTED',message:'must-not-echo-secret'}})}});await a.done;
+assert(h.api.qrNotice.value.includes('Xray'));assert(!h.api.qrNotice.value.includes('must-not-echo-secret'));
+const retry=h.api.retryShare();const pending=h.pending.at(-1);assert.equal(pending.url,'/api/subscription/link/1');
+pending.resolve({data:'vless://synthetic-retry'});await retry;assert.equal(h.api.qrLink.value,'vless://synthetic-retry');
+h.api.closeQrDialog();const count=h.pending.length;await h.api.retryShare();assert.equal(h.pending.length,count);
+const b=h.start(2);b.request.reject({response:{status:500,data:'raw-private-token'}});await b.done;
+assert(!h.api.qrNotice.value.includes('raw-private-token'));
+''',
 'reverse_completion_and_duplicate_selection': r'''
 const h=boot(),a=h.start(1),b=h.start(2);
 assert(a.request.options.signal.aborted);assert(h.api.showQrDialog.value);assert(h.api.qrBusy.value);
@@ -209,6 +220,9 @@ def run_pinned_vue(testcase, vue):
 
 @unittest.skipUnless(shutil.which('node'), 'Node required for share controller contracts')
 class ShareDialogControllerTests(unittest.TestCase):
+    def test_known_errors_retry_and_unknown_body_is_not_echoed(self):
+        run_node(self, SCENARIOS['known_share_error_is_chinese_retry_and_unknown_body_is_not_echoed'])
+
     def test_reverse_completion_and_duplicate_selection(self):
         run_node(self, SCENARIOS['reverse_completion_and_duplicate_selection'])
 
