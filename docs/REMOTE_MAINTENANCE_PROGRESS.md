@@ -69,3 +69,9 @@ Draft PR115 已推送，独审结论绑定 79f4d89e57d1beb5a33faad11728e6f272864
 首轮 loopback run41849338433/job126641112318 的 124 项仅新增 Xray 分享失败，维护 HTTP 创建/编辑和真实 Xray 已启动，GET 分享返回409。实际 RAW 编译器会写 rawSettings.header.type=none，导出白名单遗漏该正常字段。最小修复只允许空 rawSettings 或精确无伪装头，HTTP伪装/未知字段仍拒绝；合成 fixture 同步采用实际编译形状，新增负向，并经独审的实际编译函数→导出器提取验证通过。新提交仍必须重新跑真实链路。
 
 02ba848 oneclick run41850926225/job126646681360 的“Test interactive installer and global v-ui on ephemeral systemd runner”已成功，随后进入公开14升级；证明此次实际 daemon 与新增系统维护 smoke 已执行通过，但不将该阶段成功描述成完整工作流通过，更不授予后续提交资格。新准确提交全部状态、job/step、制品与最终资格以 PR115 最新证据为准，本文各段保留阶段快照。
+
+### 第三轮 62f628c 的真实证据与 URI 夹具修正
+
+62f628c833c627ceb9eb61ef0dff3b18ba4aec38 的普通 run41852617482/job126652643484 已通过：2573 项 / 232 环境 skip，以及 2 项固定真实核心检查。四目标 portable、文档、ACME、ToClash 和公开短入口成功；oneclick 的本批真实维护安装步骤也成功，旧版升级仍在执行。以上是该轮阶段证据，不继承给后续提交。
+
+loopback run41852616893/job126652640804 的 124 项只有 URI 子场景失败：真实 Mihomo 明确拒绝 provider 不在自身 -d 或 SAFE_PATHS 目录；YAML转发与后续错CA/停用/撤销没有失败。仅修夹具，把 provider 放进该客户端私有数据目录；使用实际 API 的标准 base64 URI订阅原字节，并验证解码与同节点分享链接完全相同。不改 SAFE_PATHS、不绕过 TLS，不改生产导出字段。新准确提交再做全套必需检查。

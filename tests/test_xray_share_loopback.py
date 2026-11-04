@@ -4,6 +4,7 @@ Runs only in the existing Actions loopback step. Fake CA, local target and
 isolated per-child trust; no host trust, browser, public CA or real credentials.
 """
 from contextlib import ExitStack
+import base64
 import json
 import os
 from pathlib import Path
@@ -82,7 +83,13 @@ class XrayShareLoopbackTests(unittest.TestCase):
             target_port, deliveries = start_http_target(stack)
             link = self.client.get(f'/api/subscription/link/{identity}?host=127.0.0.1',headers=headers)
             self.assertEqual(link.status_code,200,link.text)
-            uri = root / 'ordinary.txt'; uri.write_text(link.text + '\n')
+            subscription = self.client.get('/api/subscription/raw?host=127.0.0.1&core=xray',headers=headers)
+            self.assertEqual(subscription.status_code,200,subscription.text)
+            self.assertEqual(base64.b64decode(subscription.text).decode().strip(),link.text.strip())
+            # Keep the actual URI subscription bytes inside Mihomo's own data
+            # directory. Do not bypass its provider SAFE_PATHS protection.
+            uri = root / 'uri-data' / 'ordinary.txt'; uri.parent.mkdir(mode=0o700)
+            uri.write_text(subscription.text)
             artifact = self.client.get('/api/subscription/mihomo.yaml?host=127.0.0.1&core=xray',headers=headers)
             self.assertEqual(artifact.status_code,200,artifact.text)
             node = yaml.safe_load(artifact.text)['proxies'][0]
