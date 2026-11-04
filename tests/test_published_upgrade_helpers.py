@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from published_upgrade_helpers import (FIREWALL, PUBLISHED_BASELINES, PublishedUpgrade,
+from published_upgrade_helpers import (FIREWALL, MAINTENANCE_FILES, PUBLISHED_BASELINES, PublishedUpgrade,
                                        assert_download_boundary, assert_receipt_migration,
                                        assert_upgrade_configuration, fixed_public_baseline)
 
@@ -73,11 +73,14 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
                 'interpreter_resolved':'/usr/bin/python3.12','interpreter_sha256':'1'*64,
                 'files':{'/usr/local/lib/v-ui/system_ops.py':'2'*64}}
         after=deepcopy(before);after['files'][FIREWALL]='3'*64
+        after['files'].update({name:'6'*64 for name in MAINTENANCE_FILES})
         assert_receipt_migration(self,before,after,'0.4.14')
         variants=[]
         missing=deepcopy(after);del missing['files']['/usr/local/lib/v-ui/system_ops.py'];variants.append(missing)
         extra=deepcopy(after);extra['files']['/unrelated']='4'*64;variants.append(extra)
         drift=deepcopy(after);drift['interpreter_sha256']='0'*64;variants.append(drift)
+        for name in MAINTENANCE_FILES:
+            missing=deepcopy(after);del missing['files'][name];variants.append(missing)
         for changed in variants:
             with self.subTest(changed=changed):
                 with self.assertRaises(AssertionError):assert_receipt_migration(self,before,changed,'0.4.14')
@@ -108,12 +111,16 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
                 'interpreter_resolved':'/usr/bin/python3.12','interpreter_sha256':'1'*64,
                 'files':{'/usr/local/lib/v-ui/system_ops.py':'2'*64,FIREWALL:'3'*64}}
         after=deepcopy(before)
+        after['files'].update({name:'6'*64 for name in MAINTENANCE_FILES})
         # A new candidate may replace verified helper bytes; the exact file set
-        # and interpreter identity must survive, each hash is checked on-host.
+        # plus the exact new maintenance closure and interpreter identity must
+        # survive; each actual helper hash is checked on-host.
         after['files'][FIREWALL]='4'*64
         assert_receipt_migration(self,before,after,'0.4.15')
         variants=[]
         for name in before['files']:
+            missing=deepcopy(after);del missing['files'][name];variants.append(missing)
+        for name in MAINTENANCE_FILES:
             missing=deepcopy(after);del missing['files'][name];variants.append(missing)
         extra=deepcopy(after);extra['files']['/unrelated']='5'*64;variants.append(extra)
         for field in ('schema','service_manager','system_python','interpreter_resolved','interpreter_sha256'):

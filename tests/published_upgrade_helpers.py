@@ -20,6 +20,12 @@ PUBLISHED_BASELINES = {
 }
 CONTROL = Path('/usr/local/lib/v-ui')
 FIREWALL = str(CONTROL / 'firewall_support.py')
+MAINTENANCE_FILES = frozenset({
+    str(CONTROL / 'maintenance_daemon.py'), str(CONTROL / 'maintenance_upgrade.py'),
+    str(CONTROL / 'maintenance_client.py'), str(CONTROL / 'maintenance_cli_worker.py'),
+    str(CONTROL / 'install_control_verifier.py'), str(CONTROL / 'v-ui-maintenance.service'),
+    '/etc/systemd/system/v-ui-maintenance.service',
+})
 
 
 def assert_download_boundary(test, kit, log):
@@ -40,12 +46,13 @@ def fixed_public_baseline(version, commit):
 def assert_receipt_migration(test, before, after, old_version):
     if old_version not in PUBLISHED_BASELINES:
         raise AssertionError('Unknown public upgrade receipt baseline')
+    test.assertTrue(MAINTENANCE_FILES.isdisjoint(before['files']))
+    additions = MAINTENANCE_FILES | ({FIREWALL} if old_version == '0.4.14' else set())
+    test.assertEqual(set(after['files']) - set(before['files']), additions)
     if old_version == '0.4.14':
         test.assertNotIn(FIREWALL, before['files'])
-        test.assertEqual(set(after['files']) - set(before['files']), {FIREWALL})
     else:
         test.assertIn(FIREWALL, before['files'])
-        test.assertEqual(set(after['files']), set(before['files']))
     test.assertFalse(set(before['files']) - set(after['files']))
     for field in ('schema', 'service_manager', 'system_python', 'interpreter_resolved', 'interpreter_sha256'):
         test.assertEqual(after[field], before[field])
