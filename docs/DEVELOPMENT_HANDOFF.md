@@ -1,4 +1,8 @@
-## v0.4.17 发布准备（已批准）
+## v0.4.17 已公开：短入口切换与验收
+
+PR115普通merge至dev A008，PR116普通merge至准确main95c201c6e26ed54960f964c675e515890f2eea2a；与发布候选A9同tree。候选/dev与PR/main各自全部非浏览器checks、四目标、14/15/16保数据升级均attempt1成功。人工发布run41876406580成功，已匿名核验19资产/tag/真实摘要及旧16资产不变。当前只切setup真实pin、short-install冻结源和配套说明/测试，应用/install/VERSION/发布器/公开资产不变。先验引导自己的候选/dev/main及实际main URL；公开匿名安装另记。浏览器未验证，不修改用户VPS。唯一记录继续[本批账本](REMOTE_MAINTENANCE_PROGRESS.md)。
+
+## v0.4.17 发布准备（历史批准快照）
 
 用户已批准PR115 Ready、正常dev→main合并、公开17及短入口更新。产品冻结629d44c，已独审与自身九组/12jobs/四目标/真实维护/旧14和15升级全部attempt1成功，12明列browser步骤skip。当前仅版本、严格本版门禁、公开16真实升级与说明，应用/UI/root/依赖/core保持；准确新候选/dev/main分别重验。先晋升已受验同源资产，公开后读真实摘要，再独立切短入口并验main URL。不操作用户VPS，浏览器未验证。唯一阶段账本：[发布记录](REMOTE_MAINTENANCE_PROGRESS.md)；下方旧“未授权”按历史日期保留。
 
