@@ -721,9 +721,12 @@ class ReleasePromotionTests(unittest.TestCase):
                 with zipfile.ZipFile(output,'w') as archive:
                     archive.comment=SHA.encode()
                     archive.writestr('VERSION','0.3.1')
-                    for source,_ in (*build_release_kit.SOURCE_ASSETS,('docs/RELEASE_NOTES.md','RELEASE_NOTES.md')):
-                        archive.writestr(source,(root/source).read_bytes())
-                    for member in install_ops_control.SOURCE_DEPENDENCIES.values():
+                    members = [source for source,_ in (*build_release_kit.SOURCE_ASSETS,
+                        ('docs/RELEASE_NOTES.md','RELEASE_NOTES.md'))]
+                    members.extend(install_ops_control.SOURCE_DEPENDENCIES.values())
+                    # A root helper may intentionally reuse the same source as
+                    # a public kit asset. git archive writes that path once.
+                    for member in dict.fromkeys(members):
                         archive.writestr(member, (root/member).read_bytes())
             with patch.object(build_release_kit.subprocess,'run',side_effect=archive_source):
                 build_release_kit.build(source,destination,SHA)

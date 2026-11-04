@@ -27,6 +27,7 @@ ACTIONS = ('status', 'start', 'stop', 'restart', 'backup', 'restore', 'upgrade')
 MAX_TASKS = 1024
 MAX_BACKUPS = 256
 MAX_RECORD = 16384
+STARTUP_STAGE = 'ENTRY'
 
 
 def load(name):
@@ -75,16 +76,31 @@ def daemon_lock(ops):
 
 
 def directory(ops, path, mode=0o700, gid=0):
-    with ops.trusted_directory(path.parent):
+    with ops.trusted_directory(path.parent) as parent:
+        created = False
         try:
-            path.mkdir(mode=mode)
-            os.chown(path, 0, gid)
+            # Start private even when the caller's umask is unusual. Set the
+            # exact published mode only on this newly created, opened inode.
+            os.mkdir(path.name, mode=0o700, dir_fd=parent)
+            created = True
         except FileExistsError:
             pass
-        info = path.lstat()
-        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != gid
-                or stat.S_IMODE(info.st_mode) != mode):
-            raise ValueError('unsafe state directory')
+        fd = os.open(path.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0:
+                raise ValueError('unsafe state directory')
+            if created:
+                os.fchown(fd, 0, gid)
+                os.fchmod(fd, mode)
+                info = os.fstat(fd)
+            if info.st_gid != gid or stat.S_IMODE(info.st_mode) != mode:
+                raise ValueError('unsafe state directory')
+            named = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+            if (named.st_dev, named.st_ino) != (info.st_dev, info.st_ino):
+                raise ValueError('state directory replaced')
+        finally:
+            os.close(fd)
 
 
 class Store:
@@ -288,13 +304,19 @@ def receive(connection, ops, uid):
 
 
 def serve(ops):
+    global STARTUP_STAGE
+    STARTUP_STAGE = 'VERIFY_RECEIPT'
     manager, account = ops.verify_installation()
     receipt_snapshot = ops.trusted_bytes(ops.RECEIPT, 16384)
     if manager != 'systemd':
         raise ValueError('systemd required')
+    STARTUP_STAGE = 'STATE_DIRECTORY'
     directory(ops, STATE)
+    STARTUP_STAGE = 'TASK_DIRECTORY'
     directory(ops, TASKS)
+    STARTUP_STAGE = 'SOCKET_DIRECTORY'
     directory(ops, SOCKET.parent, 0o750, account.pw_gid)
+    STARTUP_STAGE = 'READ_TASKS'
     store = Store(ops)
     store.interrupt()
     if os.path.lexists(SOCKET):
@@ -303,9 +325,11 @@ def serve(ops):
             raise ValueError('socket')
         SOCKET.unlink()
     active = None
+    STARTUP_STAGE = 'SOCKET_BIND'
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
         server.bind(str(SOCKET)); os.chown(SOCKET, 0, account.pw_gid); SOCKET.chmod(0o660)
         server.listen(8); server.settimeout(1)
+        STARTUP_STAGE = 'SERVING'
         while True:
             if active is not None:
                 pid, identity = active
@@ -379,11 +403,14 @@ def serve(ops):
 
 
 def main():
+    global STARTUP_STAGE
     if (len(sys.argv) != 1 or os.getuid() != 0 or os.geteuid() != 0
             or not sys.flags.isolated or not sys.flags.no_site or not sys.flags.dont_write_bytecode):
         return 1
     os.umask(0o077)
+    STARTUP_STAGE = 'LOAD_CONTROLLER'
     ops = load('system_ops')
+    STARTUP_STAGE = 'INSTANCE_LOCK'
     with daemon_lock(ops):
         serve(ops)
     return 0
@@ -393,5 +420,6 @@ if __name__ == '__main__':
     try:
         raise SystemExit(main())
     except Exception:
-        print('V-UI system maintenance unavailable; inspect trusted installation.', file=sys.stderr)
+        # Fixed stage only: never interpolate exception text, paths or state.
+        print('V-UI maintenance startup refused: STARTUP_' + STARTUP_STAGE, file=sys.stderr)
         raise SystemExit(1)

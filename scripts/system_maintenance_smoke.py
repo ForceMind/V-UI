@@ -12,6 +12,8 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
+import select
 import shutil
 import subprocess
 import sys
@@ -20,6 +22,79 @@ import uuid
 
 CONTROL = Path('/usr/local/lib/v-ui')
 CLIENT = "import json,runpy,sys;api=runpy.run_path('/usr/local/lib/v-ui/maintenance_client.py');print(json.dumps(api['request'](json.loads(sys.stdin.read()))))"
+MAINTENANCE_UNIT = 'v-ui-maintenance.service'
+STATE_FIELDS = {'ActiveState', 'SubState', 'Result', 'ExecMainCode', 'ExecMainStatus'}
+STARTUP_CODES = ('ENTRY', 'LOAD_CONTROLLER', 'INSTANCE_LOCK', 'VERIFY_RECEIPT', 'STATE_DIRECTORY',
+                 'TASK_DIRECTORY', 'SOCKET_DIRECTORY', 'READ_TASKS', 'SOCKET_BIND', 'SERVING')
+
+
+def safe_maintenance_journal(raw):
+    codes = []
+    for line in raw.decode('utf-8', errors='replace').splitlines()[-20:]:
+        try:
+            row = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(row, dict) or not isinstance(row.get('MESSAGE'), str):
+            continue
+        message = row['MESSAGE']
+        code = next(('STARTUP_' + stage for stage in STARTUP_CODES
+                     if 'V-UI maintenance startup refused: STARTUP_' + stage in message), None)
+        if code is None:
+            code = next((code for needle, code in (
+                ('V-UI system maintenance unavailable', 'STARTUP_UNCLASSIFIED'),
+                ('PermissionError', 'PERMISSION_DENIED'),
+                ('ModuleNotFoundError', 'MODULE_MISSING'),
+                ('SyntaxError', 'CODE_SYNTAX'),
+                ('Main process exited', 'PROCESS_EXITED'),
+                ('Failed with result', 'SERVICE_FAILED'),
+                ('Scheduled restart job', 'RESTART_SCHEDULED')) if needle in message), 'UNCLASSIFIED')
+        codes.append(code)
+    return codes
+
+
+def bounded_diagnostic(command):
+    # Only fixed OS commands below use this. timeout bounds even a privileged
+    # journal process; reads are capped before decoding/retaining any message.
+    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C', 'HOME': '/'})
+    deadline = time.monotonic() + 4
+    data = bytearray()
+    try:
+        while time.monotonic() < deadline:
+            if not select.select([process.stdout], [], [], min(.1, max(0, deadline-time.monotonic())))[0]:
+                continue
+            chunk = os.read(process.stdout.fileno(), min(8192, 65537-len(data)))
+            if not chunk:
+                return bytes(data) if process.wait(timeout=1) == 0 else None
+            data.extend(chunk)
+            if len(data) > 65536:
+                return None
+        return None
+    finally:
+        process.stdout.close()
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass  # The fixed OS timeout child still terminates within 3s.
+
+
+def maintenance_diagnostics():
+    result = {'unit': MAINTENANCE_UNIT}
+    try:
+        raw = bounded_diagnostic(['/usr/bin/timeout', '3s', '/usr/bin/systemctl', 'show',
+            '--no-pager', '--property='+','.join(sorted(STATE_FIELDS)), MAINTENANCE_UNIT])
+        if raw is not None:
+            for line in raw.decode('ascii', errors='replace').splitlines():
+                key, _, value = line.partition('=')
+                if key in STATE_FIELDS and re.fullmatch(r'[A-Za-z0-9_.-]{0,40}', value):
+                    result[key] = value
+        raw = bounded_diagnostic(['sudo', '-n', '/usr/bin/timeout', '3s', '/usr/bin/journalctl',
+            '--unit='+MAINTENANCE_UNIT, '--lines=20', '--no-pager', '--output=json', '--output-fields=MESSAGE'])
+        result['journal_codes'] = safe_maintenance_journal(raw) if raw is not None else ['DIAGNOSTIC_UNAVAILABLE']
+    except (OSError, ValueError, subprocess.SubprocessError):
+        result['journal_codes'] = ['DIAGNOSTIC_UNAVAILABLE']
+    return result
 
 
 def invoke(value, *, user='v-ui', expect_success=True):
@@ -46,7 +121,7 @@ def task(action):
 
 def daemon_pid():
     result = subprocess.check_output(['systemctl', 'show', '--property=MainPID', '--value', 'v-ui-maintenance.service'], text=True).strip()
-    assert result.isdecimal() and int(result) > 1, 'Independent root service not running'
+    assert result.isdecimal() and int(result) > 1, 'Independent root service not running: ' + json.dumps(maintenance_diagnostics(), sort_keys=True)
     return result
 
 

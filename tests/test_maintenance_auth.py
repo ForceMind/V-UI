@@ -143,6 +143,9 @@ class MaintenanceAuthorizationTests(unittest.TestCase):
         self.assertEqual(rows[0]['operation'], 'denied')
         self.assertIsNone(rows[0]['task_id'])
         self.assertNotIn(token, json.dumps(rows))
+        for invalid_id in (token, 'vui_ms_' + 'A' * 43, '../backup', {'not':'a task'}):
+            maintenance.audit(record['id'], 'GET /api/maintenance/tasks', 200, invalid_id)
+            self.assertIsNone(maintenance.audit_rows()[0]['task_id'])
 
     def test_default_deny_precise_methods_and_no_admin_cookie_fallback(self):
         _, headers = self.bearer()
@@ -330,7 +333,7 @@ class MaintenanceAuthorizationTests(unittest.TestCase):
             self.assertEqual(db.get(database.Inbound, node['id']).stream_settings, {})
 
     def test_manual_tls_remote_editor_preserves_server_material_without_exposing_paths(self):
-        for core, transport in [('sing-box', 'tcp'), ('xray', 'raw')]:
+        for core, transport in [('sing-box', 'raw'), ('xray', 'raw')]:
             with self.subTest(core=core):
                 manager = Mock(); manager.binding.return_value = None
                 with patch('app.certificates.manager.get_manager', return_value=manager):

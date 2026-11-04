@@ -34,6 +34,48 @@ def no_lock(*args, **kwargs):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_failed_service_diagnostics_only_disclose_fixed_classifications(self):
+        from scripts.system_maintenance_smoke import safe_maintenance_journal, maintenance_diagnostics
+        raw = ('\n'.join(json.dumps({'MESSAGE': text}) for text in (
+            'V-UI maintenance startup refused: STARTUP_SOCKET_DIRECTORY private-token-secret',
+            'ModuleNotFoundError private-grant-secret', 'arbitrary-url-password-secret'))).encode()
+        self.assertEqual(safe_maintenance_journal(raw), ['STARTUP_SOCKET_DIRECTORY', 'MODULE_MISSING', 'UNCLASSIFIED'])
+        with patch('scripts.system_maintenance_smoke.bounded_diagnostic', side_effect=[
+                b'ActiveState=failed\nExecMainStatus=1\nSecret=private-grant-secret\n', raw]) as run:
+            result = maintenance_diagnostics()
+        self.assertNotIn('secret', json.dumps(result))
+        self.assertEqual(result['ExecMainStatus'], '1')
+        self.assertEqual(run.call_count, 2)
+        for call in run.call_args_list:
+            self.assertIn('v-ui-maintenance.service', ' '.join(call.args[0]))
+
+    def test_private_umask_creates_exact_socket_directory_mode_via_new_fd_only(self):
+        @contextmanager
+        def directory(path):
+            fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+            try: yield fd
+            finally: os.close(fd)
+        real_fstat = os.fstat
+        def root_info(fd):
+            info = real_fstat(fd)
+            return types.SimpleNamespace(st_uid=0, st_gid=info.st_gid, st_mode=info.st_mode,
+                st_dev=info.st_dev, st_ino=info.st_ino)
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / 'socket-parent'
+            previous = os.umask(0o077)
+            try:
+                with patch.object(daemon.os, 'fstat', side_effect=root_info), patch.object(daemon.os, 'fchown'):
+                    daemon.directory(types.SimpleNamespace(trusted_directory=directory), target, 0o750, os.getgid())
+                self.assertEqual(target.stat().st_mode & 0o777, 0o750)
+                # Existing metadata is not silently repaired or re-endorsed.
+                target.chmod(0o700)
+                with patch.object(daemon.os, 'fstat', side_effect=root_info), patch.object(daemon.os, 'fchmod') as chmod:
+                    with self.assertRaises(ValueError):
+                        daemon.directory(types.SimpleNamespace(trusted_directory=directory), target, 0o750, os.getgid())
+                    chmod.assert_not_called()
+            finally:
+                os.umask(previous)
+
     def test_installed_summary_exposes_only_fixed_safe_version_target_readiness(self):
         config = {'release_id': '0.4.17-' + 'a' * 12, 'target': 'x86_64-gnu', 'ready': True,
                   'domain': 'private.example.test', 'email': 'private@example.test', 'admin': 'private', 'bootstrap_python': '/private/path'}

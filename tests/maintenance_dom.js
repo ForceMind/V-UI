@@ -81,5 +81,14 @@ async function admin() {
         assert(!h.el('maintenance-notice').textContent.includes(secret));
         assert(h.el('maintenance-notice').textContent.includes('系统维护组件'));
     }
+    {
+        const h=await admin();h.el('maintenance-refresh-logs').fire();await flush();
+        await h.reply({entries:[{timestamp:1800000000,code:'PERMISSION_DENIED',summary:'private-raw-'+secret}]});
+        const display=h.el('maintenance-logs').children.at(-1).children[0].textContent;
+        assert(display.includes('权限不足'));assert(!display.includes(secret));
+        h.el('maintenance-refresh-status').fire();await flush();
+        await h.reply({release_id:'0.4.16-'+'a'.repeat(12),services:{'v-ui.service':'active'}});
+        assert(h.el('maintenance-installation').textContent.includes('0.4.16-'));assert(h.el('maintenance-installation').textContent.includes('运行中'));
+    }
     process.stdout.write('Maintenance fragment/session/scope/cleanup/error/restore synthetic contracts passed\n');
 })().catch(error=>{console.error(error);process.exitCode=1});

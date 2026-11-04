@@ -30,6 +30,14 @@ class XrayShareLoopbackTests(unittest.TestCase):
     login = auth_tests.AuthenticationTests.login
     issue = certificate_fixtures.CertificateTests.issue
 
+    def start_client(self, stack, root, kind, config, port, env):
+        # One reviewed stock-client constructor, always using its post-up gate.
+        path = root / (kind + '.yaml'); path.write_text(yaml.safe_dump(config, allow_unicode=True))
+        log = root / (kind + '.log')
+        client = ReadyMihomoProcess(stack, [os.environ['VUI_TEST_MIHOMO'], '-d', str(root / (kind + '-data')), '-f', str(path)], log, env)
+        client.start(port)
+        return client, log
+
     def test_real_uri_provider_and_yaml_forward_and_wrong_ca_rejects(self):
         with ExitStack() as stack:
             root = Path(self.temp.name)
@@ -85,9 +93,7 @@ class XrayShareLoopbackTests(unittest.TestCase):
                     proxy_port, controller = unused_port(), unused_port()
                     config = (yaml_client({'proxies':[node]}, [node['name']], proxy_port, controller) if kind == 'yaml'
                               else uri_client(uri, proxy_port, controller))
-                    path = root / (kind + '.yaml'); path.write_text(yaml.safe_dump(config, allow_unicode=True))
-                    client = ReadyMihomoProcess(stack, [os.environ['VUI_TEST_MIHOMO'], '-d', str(root / (kind + '-data')), '-f', str(path)], root / (kind + '.log'), env)
-                    client.start(proxy_port)
+                    client, _ = self.start_client(stack, root, kind, config, proxy_port, env)
                     before = len(deliveries)
                     status, body = http_through(proxy_port, '127.0.0.1', target_port)
                     self.assertEqual(status, 200); self.assertEqual(body, b'VUI-LOOPBACK-TARGET')
@@ -97,10 +103,7 @@ class XrayShareLoopbackTests(unittest.TestCase):
             other_ca, _, _ = certificate_files(root, 'untrusted')
             bad_env = {**env, 'SSL_CERT_FILE':str(other_ca)}
             port = unused_port(); config = yaml_client({'proxies':[node]}, [node['name']], port, unused_port())
-            path = root / 'untrusted.yaml'; path.write_text(yaml.safe_dump(config, allow_unicode=True))
-            log = root / 'untrusted.log'
-            rejected = ReadyMihomoProcess(stack, [os.environ['VUI_TEST_MIHOMO'], '-d', str(root / 'bad-data'), '-f', str(path)], log, bad_env)
-            rejected.start(port)
+            rejected, log = self.start_client(stack, root, 'untrusted', config, port, bad_env)
             expected = len(deliveries)
             def attempt():
                 try:

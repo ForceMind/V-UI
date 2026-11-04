@@ -51,3 +51,13 @@
 新增 Xray loopback 已串联真实维护 HTTP 授权→创建托管节点→guarded 编辑→HTTP URI/YAML 导出→固定 Xray+stock Mihomo TCP 转发→错误 CA 拒绝/零目标送达→停用→撤销401。仅 CA 签发及无关全局策略为夹具，不授予 Xray 中转或 UDP 资格。
 
 本机纯软件证据：系统维护16、控制组件安装43、安装交互11、页面静态/合成2、分享9、既有壳7及 AST/docs/diff 通过。旧 system_ops Linux-only 限制失败、existing_install 缺 SQLAlchemy 单项及恢复 Linux-only 两项均保留；不安装本地依赖、不通过改平台/断言伪造通过。下一步准确候选开发 PR 与 Linux Actions，未得到结果前不称部署就绪。
+
+### 首轮准确候选 79f4d89 与修正
+
+Draft PR115 已推送，独审结论绑定 79f4d89e57d1beb5a33faad11728e6f2728643d6，无当时未修复已确认阻塞；此结论不替代随后实际 CI。
+
+- docs run41849337904/job126641112649：62 测试有 1 error，假 git archive 把 install_ops_control 同时作为公共 asset 与内部 verifier 来源重复写入。只对夹具路径去重，生产构建器的 duplicate-member 拒绝保留，定向复验通过。
+- 普通 run41849338613/job126641114411：2571 项 / 232 skip，5 failures、1 error。除上述夹具外：品牌页清单未含新页面、审计 task_id 允许范围过宽、sing-box 测试误用 tcp 而非既有 raw 名称、新 Mihomo 真实客户端构造未登记 readiness 审计、旧订阅 Bearer 拒绝文案被维护文案覆盖。分别补清单/严格32hex审计和任务ID/测试raw/统一post-up工厂与登记/非维护Bearer原文案，保持 TLS、认证拒绝和启动门槛。
+- oneclick run41849338344/job126641114841：原 HTTPS、自动凭据、CA 检查通过，独立 daemon MainPID0。独审与实现者确认 umask0077 将 socket父目录0750裁成0700，精确权限检查拒绝。只对本次新建目录用 fd 显式设置精确权限，既有错误目录仍拒绝；新增 umask 回归，系统维护17项通过。保留 PID 断言，增加固定 unit 的有界安全失败诊断。
+
+修正增量再独审未发现未解决代码阻塞。新准确提交的全部 Actions 仍须重新验收。首轮旧结果不覆盖、不继承。补测品牌模块本机缺 FastAPI，未安装依赖，留待 Actions。

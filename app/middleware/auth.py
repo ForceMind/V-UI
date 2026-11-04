@@ -135,13 +135,15 @@ class AdminAuthMiddleware:
                 return
         elif authorization is not None:
             from app.services import maintenance_auth
+            invalid_detail = (maintenance_auth.INVALID if authorization.startswith(
+                ('Bearer vui_ms_', 'Bearer vui_mg_')) else 'Authentication required')
             if (len(request.headers.getlist('authorization')) != 1
                     or not authorization.startswith('Bearer ')):
-                await reject(401, maintenance_auth.INVALID)
+                await reject(401, invalid_detail)
                 return
             principal = await run_in_threadpool(maintenance_auth.authenticate, authorization[7:])
             if principal is None:
-                await reject(401, maintenance_auth.INVALID)
+                await reject(401, invalid_detail)
                 return
             # Never fall back to an administrator cookie when Bearer is present.
             scope.setdefault('state', {})['maintenance'] = principal

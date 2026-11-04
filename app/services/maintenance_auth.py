@@ -252,7 +252,7 @@ _cap('POST', '/api/maintenance/tasks', 'operate', '固定系统任务；status�
 def capability(method, path):
     kinds = {'inbound_id': '[1-9][0-9]{0,18}', 'grant_id': '[1-9][0-9]{0,18}',
              'core': '(?:xray|sing-box)', 'certificate_id': '[0-9a-f]{32}',
-             'job_id': '(?:diag_)?[0-9a-f]{32}', 'task_id': '[A-Za-z0-9_-]{1,64}'}
+             'job_id': '(?:diag_)?[0-9a-f]{32}', 'task_id': '[0-9a-f]{32}'}
     for item in CAPABILITIES:
         pattern = re.escape(item['path'])
         for key, value in kinds.items():
@@ -318,8 +318,12 @@ def audit(grant_id, operation, status, task_id=None):
         item['method'] + ' ' + item['path'] for item in CAPABILITIES}
     if operation not in allowed:
         operation = 'denied'
-    if task_id is not None and not re.fullmatch('[A-Za-z0-9_-]{1,64}', task_id):
+    if task_id is not None and (type(task_id) is not str or not re.fullmatch('[0-9a-f]{32}', task_id)):
         task_id = None
+    if type(grant_id) is not int or grant_id <= 0:
+        grant_id = None
+    if type(status) is not int or not 100 <= status <= 599:
+        status = 500
     now = int(time.time())
     with database.SessionLocal() as db:
         db.execute(text('BEGIN IMMEDIATE'))

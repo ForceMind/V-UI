@@ -137,7 +137,7 @@ def tasks():
 
 @router.get('/tasks/{task_id}')
 def task(task_id: str):
-    if not re.fullmatch('[A-Za-z0-9_-]{1,64}', task_id):
+    if not re.fullmatch('[0-9a-f]{32}', task_id):
         raise HTTPException(422, '任务编号无效')
     return _bridge('get_task', task_id)
 
@@ -149,7 +149,7 @@ def create_task(payload: TaskPayload, request: Request):
         auth.authorize(principal, 'POST', '/api/maintenance/tasks', payload.model_dump())
     result = _bridge('submit_task', payload.action, **({'backup_id': payload.backup_id} if payload.backup_id is not None else {}))
     task_id = result.get('id') if type(result) is dict else None
-    if type(task_id) is str and re.fullmatch('[A-Za-z0-9_-]{1,64}', task_id):
+    if type(task_id) is str and re.fullmatch('[0-9a-f]{32}', task_id):
         request.scope.setdefault('state', {})['maintenance_task_id'] = task_id
     if principal is None:
         auth.audit(None, 'POST /api/maintenance/tasks', 202, task_id)
