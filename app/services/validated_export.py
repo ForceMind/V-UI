@@ -254,9 +254,11 @@ def _xray_tcp_tls_node(item, server: str) -> dict:
     user = mapping(users[0], {'id', 'flow', 'email', 'level'}, 'Xray client')
     if user.get('flow', '') != '' or user.get('level', 0) != 0:
         raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
-    stream = mapping(item.stream_settings or {}, {'method', 'network', 'security', 'tlsSettings', '_vui'}, 'Xray stream')
+    stream = mapping(item.stream_settings or {}, {'method', 'network', 'security', 'tlsSettings', '_vui', 'rawSettings'}, 'Xray stream')
     if (stream.get('method', stream.get('network', 'raw')) not in ('raw', 'tcp')
             or stream.get('network', 'raw') not in ('raw', 'tcp') or stream.get('security') != 'tls'):
+        raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
+    if 'rawSettings' in stream and stream['rawSettings'] not in ({}, {'header': {'type': 'none'}}):
         raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
     tls = mapping(stream.get('tlsSettings'), {'serverName', 'certificates', 'alpn'}, 'Xray TLS')
     certificates = tls.get('certificates')

@@ -333,7 +333,7 @@ class MaintenanceAuthorizationTests(unittest.TestCase):
             self.assertEqual(db.get(database.Inbound, node['id']).stream_settings, {})
 
     def test_manual_tls_remote_editor_preserves_server_material_without_exposing_paths(self):
-        for core, transport in [('sing-box', 'raw'), ('xray', 'raw')]:
+        for core, transport in [('sing-box', 'direct'), ('xray', 'raw')]:
             with self.subTest(core=core):
                 manager = Mock(); manager.binding.return_value = None
                 with patch('app.certificates.manager.get_manager', return_value=manager):

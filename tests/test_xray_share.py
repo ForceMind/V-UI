@@ -12,7 +12,7 @@ def xray_node(**changes):
     values = dict(id=7, core='xray', protocol='vless', port=10443, remark='示例 Xray',
         enable=True, expiry_time=0,
         settings={'users': [{'id': '11111111-1111-1111-1111-111111111111', 'flow': ''}], 'decryption': 'none'},
-        stream_settings={'method': 'raw', 'security': 'tls', 'tlsSettings': {
+        stream_settings={'method': 'raw', 'rawSettings': {'header': {'type':'none'}}, 'security': 'tls', 'tlsSettings': {
             'serverName': 'vpn.example.test', 'certificates': [{
                 'certificateFile': '/private/fake/cert.pem', 'keyFile': '/private/fake/key.pem'}]},
             '_vui': {'security': 'tls', 'server_name': 'vpn.example.test', 'client_fingerprint': '', 'skip_cert_verify': False}})
@@ -45,6 +45,8 @@ class XrayShareTests(unittest.TestCase):
             lambda r: r.stream_settings.update(network='grpc'),
             lambda r: r.stream_settings.update(security='reality'),
             lambda r: r.stream_settings.update(sockopt={'dialerProxy':'secret'}),
+            lambda r: r.stream_settings.update(rawSettings={'header':{'type':'http'}}),
+            lambda r: r.stream_settings.update(rawSettings={'header':{'type':'none'},'unknown':True}),
             lambda r: r.stream_settings['tlsSettings'].update(allowInsecure=True),
             lambda r: r.stream_settings['_vui'].update(skip_cert_verify=True),
             lambda r: r.settings['users'][0].update(flow='xtls-rprx-vision'),
