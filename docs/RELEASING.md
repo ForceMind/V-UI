@@ -1,4 +1,6 @@
-## v0.4.17 发布（已批准，准备中）
+## v0.4.17 已公开，短入口后续
+
+准确main95c201c6e26ed54960f964c675e515890f2eea2a已从受验同源制品公开（run41876406580，19资产）。匿名tag、每项digest和installer/完整清单真实字节已核验，旧16资产ID/大小/digest未变。当前仅切真实短入口pin与冻结应用源95c、相关测试和说明；不重新发布或覆盖资产。引导候选/dev/main及实际main URL继续验自己的资格，浏览器未验证。下方门禁是本版已执行的契约，最终结果仍在[统一记录](REMOTE_MAINTENANCE_PROGRESS.md)及承载PR/Release。
 
 用户已批准PR115 Ready、正常dev→main、公开v0.4.17与短入口更新；产品冻结于629d44c7e0acf2f9aebdfdac765522cc93f9af22。专用 `remote_maintenance_no_browser=true` 只适用0.4.17、固定祖先及严格枚举的版本/门禁/旧版升级验收/文档路径，不能与旧例外混用。main.py和install.sh仅16→17字节替换，其他app/UI/root/依赖/core逻辑不得再改，拒绝删除、rename、链接、类型和mode变化。
 

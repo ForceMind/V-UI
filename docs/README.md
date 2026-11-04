@@ -1,6 +1,6 @@
-## **v0.4.17** 发布准备：远程维护与节点管理
+## **v0.4.17** 远程维护与终端在线升级
 
-[线稿](remote-maintenance-wireframe.html) · [权限契约](REMOTE_MAINTENANCE_CONTRACT.md) · [实现与验收记录](REMOTE_MAINTENANCE_PROGRESS.md)。用户已批准PR115正常dev→main和公开发布；产品629d44c已完成九组/12jobs，当前只补本版版本、严格门禁、公开16升级验收与说明。正式公开并核验摘要后才切短入口；当前公开稳定版仍为下方v0.4.16，浏览器未验证。
+[线稿](remote-maintenance-wireframe.html) · [权限契约](REMOTE_MAINTENANCE_CONTRACT.md) · [实现与验收记录](REMOTE_MAINTENANCE_PROGRESS.md)。已从准确main95c201c [公开发布](https://github.com/ForceMind/V-UI/releases/tag/v0.4.17)，19资产与真实摘要核验；候选/dev/main各自检查、四目标和14/15/16保数据升级通过。公开后短入口及其准确资格另记，旧16资产保持。构建和真实安装只Actions，浏览器未验证。
 
 ## **v0.4.16** TLS已有证书自动绑定
 

@@ -1,5 +1,9 @@
 # V-UI 开发约束
 
+## v0.4.17 已公开：短入口切换
+
+v0.4.17已从准确main95c201c6e26ed54960f964c675e515890f2eea2a公开（19资产）；候选A9、dev A008/PR116、准确main各自全部非浏览器checks与四目标、14/15/16真实保数据升级成功，人工发布run41876406580成功。匿名tag/所有asset digest及installer/完整清单真实摘要已核验，旧16资产ID/大小/digest未变。当前只切setup.sh真实pin与short-install冻结源95c，配套测试和说明；应用、install.sh、VERSION、发布器、旧tag/资产保持冻结，不重发覆盖。本批仍需自己的独审、准确候选/dev/main与实际main URL验收，浏览器未验证，不修改用户VPS。统一记录沿用docs/REMOTE_MAINTENANCE_PROGRESS.md。
+
 ## 2026-11-04 v0.4.17 发布（已批准）
 
 用户明确批准发布准备、PR115 Ready、正常 dev→main 合并、公开 v0.4.17 及短入口更新。产品冻结基线为 629d44c7e0acf2f9aebdfdac765522cc93f9af22，已独审并通过自身九组/12jobs/全部非浏览器steps及四目标、真实维护与旧14/15保数据升级；此前失败保留。其后只补版本、严格本版 remote_maintenance_no_browser 门禁、公开16保数据升级验收与说明；不追加应用/UI/root/依赖/核心逻辑。保留14/15检查、旧资产与原配置数据。准确候选/dev/main各自通过后只晋升同源受验套件，公开后核真实摘要才切短入口并验实际main URL。构建/真实核心/安装只Actions，浏览器未验证，不进入用户VPS或代同意新CA条款。统一记录继续 docs/REMOTE_MAINTENANCE_PROGRESS.md；下方旧“未授权发布”是阶段历史。
