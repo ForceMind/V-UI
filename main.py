@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.staticfiles import StaticFiles
-from app.api import auth, certificates, cores, files, inbounds, management, mihomo_preview, proxy, proxy_diagnostics, proxy_exports, routing, security, singbox, subscription, subscriptions, system, xray
+from app.api import auth, maintenance, certificates, cores, files, inbounds, management, mihomo_preview, proxy, proxy_diagnostics, proxy_exports, routing, security, singbox, subscription, subscriptions, system, xray
 from app.data_owner import data_owner
 from app.models.database import DB_PATH, init_db
 from app.middleware.auth import AdminAuthMiddleware, configured_origin
@@ -18,6 +18,7 @@ from app.services.routing_store import RoutingStorageError
 
 app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.4.16')
 app.add_middleware(AdminAuthMiddleware)
+app.include_router(maintenance.router,prefix='/api/maintenance',tags=['Temporary maintenance'])
 app.include_router(certificates.router,prefix='/api/certificates',tags=['Certificates'])
 app.include_router(system.router,prefix='/api/system',tags=['System'])
 app.include_router(management.router,prefix='/api/management',tags=['Management observations'])
@@ -47,7 +48,7 @@ async def invalid_export(request: Request,exc: ExportError):
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request,exc: RequestValidationError):
-    if request.url.path.startswith(('/api/auth/','/api/subscriptions','/sub/','/api/proxy/')):
+    if getattr(request.state, 'maintenance', None) is not None or request.url.path.startswith(('/api/maintenance','/api/auth/','/api/subscriptions','/sub/','/api/proxy/')):
         return JSONResponse({'detail':'Invalid request'},status_code=422)
     return await request_validation_exception_handler(request,exc)
 
@@ -100,6 +101,10 @@ def certificates_page():
 @app.get('/proxy',include_in_schema=False)
 def proxy_page():
     return FileResponse(os.path.join(get_web_path(),'proxy.html'),headers={'Content-Security-Policy':"default-src 'none'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
+
+@app.get('/maintenance',include_in_schema=False)
+def maintenance_page():
+    return FileResponse(os.path.join(get_web_path(),'maintenance.html'),headers={'Content-Security-Policy':"default-src 'none'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
 
 @app.get('/workspace',include_in_schema=False)
 def workspace_page():

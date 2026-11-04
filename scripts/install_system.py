@@ -428,10 +428,12 @@ def installer_account(python, payload, action, **values):
 
 
 @contextmanager
-def provision_initial_account(python, payload, config):
+def provision_initial_account(python, payload, config, *, require_existing=False):
     if installer_account(python, payload, 'installer-status'):
         yield
         return
+    if require_existing:
+        raise InstallError('无人值守升级要求已有管理员；不会创建账户或请求终端凭据')
     password = secrets.token_urlsafe(32)
     # Pre-delivery closes the commit -> lost-password crash window without a
     # plaintext credential journal. A failed/partial TTY write never creates a user.
@@ -1143,8 +1145,8 @@ def install_verified(args, snapshot, archive, meta):
             startup_started_at = time.time()
             deadline = time.monotonic() + HTTPS_STARTUP_TIMEOUT
             service_support.enable_start(manager,[panel_name], no_wait=True, timeout=_startup_remaining(deadline))
-            https_health(config, args.health_ca, deadline=deadline)
-            with provision_initial_account(python, payload, config):
+            https_health(config, args.health_ca, trust_saved_chain=getattr(args, 'unattended_upgrade', False) and config['certificate_mode'] == 'provided', deadline=deadline)
+            with provision_initial_account(python, payload, config, require_existing=getattr(args, 'unattended_upgrade', False)):
                 write_root_file(CONFIG, json.dumps({**config, 'ready': True, 'release_id': meta['release_id']}, indent=2).encode())
                 if existing: finish_transaction()
                 committed = True
@@ -1332,6 +1334,8 @@ def main():
     p.add_argument('--open-firewall',choices=['ask','yes','no'],default='ask')
     p.add_argument('--assume-external-ports-open',action='store_true',help='兼容旧调用；本机检测不能证明云安全组或公网已放行')
     p.add_argument('--accept-terms', action='store_true'); p.add_argument('--upgrade', action='store_true')
+    p.add_argument('--unattended-upgrade', action='store_true',
+                   help='仅沿用完整已有安装升级；拒绝新账户、新 CA 授权及未完成事务')
     p.add_argument('--cert'); p.add_argument('--key')
     p.add_argument('--health-ca', help='可选的私有 CA 信任文件，仅用于自带证书的 HTTPS 健康验证')
     p.add_argument('--dry-run',action='store_true')
@@ -1339,6 +1343,16 @@ def main():
     if os.geteuid() != 0 and not args.dry_run:
         raise InstallError('请使用 sudo 运行此受保护安装器')
     os.umask(0o077)
+    if args.unattended_upgrade:
+        if not args.upgrade or args.interactive or args.dry_run or args.accept_terms:
+            raise InstallError('无人值守仅适用于明确升级，不接受新 CA 条款')
+        saved = saved_configuration()
+        if saved is None or saved.get('ready') is not True or os.path.lexists(CONFIG_DIR/TRANSACTION_NAME):
+            raise InstallError('无人值守升级要求完整已有安装，不能自动恢复未完成事务')
+        if saved['certificate_mode'] == 'managed' and not has_ca_authorization(saved, saved['domain']):
+            raise InstallError('缺少原 CA 授权，必须由本机管理员确认')
+        if saved['certificate_mode'] == 'provided':
+            args.health_ca = str(ROOT/'data/certs/provided-fullchain.pem')
     if args.dry_run:
         if os.path.lexists(CONFIG_DIR/TRANSACTION_NAME):
             raise InstallError('检测到未完成的配置事务；只读预检不会恢复或修改安装，请正常运行安装器恢复')
@@ -1350,6 +1364,10 @@ def main():
     # Config selection and application share the same lease. Never accept a
     # stale menu choice from another concurrent installer.
     with installation_signals(), _installation_lock(INSTALL_LOCK):
+        if args.unattended_upgrade:
+            current = saved_configuration()
+            if current != saved or os.path.lexists(CONFIG_DIR/TRANSACTION_NAME):
+                raise InstallError('安装状态已变化，无人值守升级已停止')
         snapshot, archive, meta = verify_archive(args.bundle, args.sha256,
             temp_dir=getattr(args, 'archive_temp_dir', None))
         with snapshot, archive:

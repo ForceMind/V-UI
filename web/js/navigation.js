@@ -6,7 +6,7 @@
     const targets = Object.freeze(Object.fromEntries([
         ...views.map(view => [view, '/ui/#' + view]),
         ['routing', '/workspace#routing'], ['subscriptions', '/workspace#subscriptions'],
-        ['proxy', '/proxy'], ['certificates', '/certificates'], ['account', '/account']
+        ['proxy', '/proxy'], ['certificates', '/certificates'], ['account', '/account'], ['maintenance', '/maintenance']
     ]));
     const appView = hash => {
         const value = String(hash || '').replace(/^#/, '');
@@ -21,6 +21,7 @@
         else if (pathname === '/proxy') id = 'proxy';
         else if (pathname === '/certificates') id = 'certificates';
         else if (pathname === '/account') id = 'account';
+        else if (pathname === '/maintenance') id = 'maintenance';
         return { id, url: targets[id], view: views.includes(id) ? id : null };
     };
     const loginURL = (pathname = location.pathname, hash = location.hash) => '/login?return=' + route(pathname, hash).id;

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 from typing import Any, Literal
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 from app.models.database import get_db
-from app.api.cores import apply_checked
+from app.api.cores import apply_checked, maintenance_result
 from app.services.inbound_service import (
     create_inbound,
     delete_inbound,
@@ -20,7 +20,7 @@ from app.services.inbound_service import (
     update_inbound,
     update_inbound_if_instance,
 )
-from app.services.protocol_profiles import profile_catalog
+from app.services.protocol_profiles import decompile_profile, profile_catalog
 from app.services.reality_profile import has_reality
 from app.services.node_selection_revision import NODE_REVISION_HEADER
 from app.services.managed_tls import supports_profile
@@ -117,7 +117,7 @@ def get_all_inbounds(response: Response, core: str | None = None, db: Session = 
 
 
 @router.get("/{inbound_id}/editor")
-def get_inbound_editor(inbound_id: int, db: Session = Depends(get_db)):
+def get_inbound_editor(inbound_id: int, request: Request = None, db: Session = Depends(get_db)):
     item = get_inbound(db, inbound_id)
     value = editor_dict(item)
     try:
@@ -127,12 +127,17 @@ def get_inbound_editor(inbound_id: int, db: Session = Depends(get_db)):
         # Certificate storage availability must not hide a node from the editor.
         value["certificate_id"] = None
         value["certificate_binding_unavailable"] = True
+    if getattr(getattr(request, 'state', None), 'maintenance', None) is not None:
+        # Remote editing uses certificate_id and preserves existing manual
+        # bindings; the filesystem layout is not part of delegated authority.
+        value.get('profile', {}).pop('certificate_path', None)
+        value.get('profile', {}).pop('key_path', None)
     return value
 
 
 @router.post("")
 @router.post("/")
-def add_inbound(payload: InboundPayload, db: Session = Depends(get_db)):
+def add_inbound(payload: InboundPayload, request: Request = None, db: Session = Depends(get_db)):
     data = payload.model_dump()
     if payload.certificate_id:
         if has_reality(normalize_mapping(payload.stream_settings)):
@@ -146,10 +151,10 @@ def add_inbound(payload: InboundPayload, db: Session = Depends(get_db)):
         from app.certificates.manager import get_manager
         from app.api.certificates import perform
         perform(lambda: get_manager().bind(payload.certificate_id, "inbound:" + str(item.id)))
-    return {"message": "Inbound added", "inbound": to_dict(item), "core": core_status}
+    return {"message": "Inbound added", "inbound": to_dict(item), "core": maintenance_result(request, core_status)}
 
 
-def _prepare_inbound_edit(item, data: dict) -> tuple[dict, tuple[bool, str | None, str | None]]:
+def _prepare_inbound_edit(item, data: dict, *, allow_certificate_changes=True, preserve_material_paths=False) -> tuple[dict, tuple[bool, str | None, str | None]]:
     """Read-only preparation; guarded callers already checked this model."""
     data = dict(data)
     profile = data.get("profile")
@@ -159,6 +164,16 @@ def _prepare_inbound_edit(item, data: dict) -> tuple[dict, tuple[bool, str | Non
     # Match compile_profile: {} is a no-op; implicit security is protocol-aware.
     # In particular, Trojan remains TLS when security is missing/empty/null.
     default_security = "tls" if item.core == "sing-box" and item.protocol in {"hysteria2", "tuic", "trojan"} else "none"
+    if (preserve_material_paths and isinstance(profile, dict)
+            and str(profile.get('security') or default_security).lower() == 'tls'):
+        # Delegated clients cannot read/supply material paths. Reuse only this
+        # guarded instance's saved TLS material inside the write transaction.
+        previous = decompile_profile(item.core or 'xray', item.protocol,
+            item.settings, item.stream_settings)
+        if previous.get('security') == 'tls':
+            profile = {**profile, **{key: previous[key] for key in ('certificate_path','key_path')
+                if key in previous}}
+            data['profile'] = profile
     leaving_tls = bool(profile) and str(profile.get("security") or default_security).lower() in {"none", "reality"}
     certificate_changed = "certificate_id" in data or leaving_tls
     certificate_id = data.pop("certificate_id", None)
@@ -173,6 +188,10 @@ def _prepare_inbound_edit(item, data: dict) -> tuple[dict, tuple[bool, str | Non
         certificate_manager = get_manager()
         target = "inbound:" + str(item.id)
         previous_certificate = certificate_manager.binding(target)
+        if previous_certificate and not allow_certificate_changes:
+            # Guarded edits hold BEGIN IMMEDIATE here: check the actual binding
+            # with the same write authority as the node instance precondition.
+            raise HTTPException(403, '修改已有托管证书绑定需要证书管理权限')
         if certificate_id:
             data["profile"] = _managed_certificate(
                 data.get("profile"), certificate_id, data["core"], data["protocol"]
@@ -228,20 +247,25 @@ def _finish_inbound_edit(inbound_id: int, core: str, certificate_plan: tuple):
 def edit_inbound(
     inbound_id: int,
     payload: InboundUpdatePayload,
+    request: Request = None,
     db: Session = Depends(get_db),
 ):
     data = payload.model_dump(exclude_unset=True)
     guarded = "expected_instance_revision" in data
     expected = data.pop("expected_instance_revision", None)
+    principal = getattr(getattr(request, 'state', None), 'maintenance', None)
+    allow_certificates = principal is None or 'certificates' in principal['scopes']
     if guarded:
         updated = update_inbound_if_instance(db, inbound_id, expected,
-            lambda item: _prepare_inbound_edit(item, data))
+            lambda item: _prepare_inbound_edit(item, data, allow_certificate_changes=allow_certificates,
+                preserve_material_paths=principal is not None))
         result = _finish_inbound_edit(inbound_id, updated.core, updated.certificate_plan)
         value = json.loads(updated.inbound_json)
     else:
         # Preserve legacy callers' current-ID behavior and transaction shape.
         item = get_inbound(db, inbound_id)
-        data, certificate_plan = _prepare_inbound_edit(item, data)
+        data, certificate_plan = _prepare_inbound_edit(item, data, allow_certificate_changes=allow_certificates,
+            preserve_material_paths=principal is not None)
         updated = update_inbound(db, inbound_id, data)
         result = _finish_inbound_edit(inbound_id, updated.core, certificate_plan)
         value = to_dict(updated)
@@ -249,7 +273,7 @@ def edit_inbound(
     return {
         "message": "Inbound updated",
         "inbound": value,
-        "core": result,
+        "core": maintenance_result(request, result),
     }
 
 

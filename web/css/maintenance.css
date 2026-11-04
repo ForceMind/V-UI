@@ -1,0 +1,9 @@
+[hidden]{display:none!important}
+#maintenance-scopes{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+#maintenance-scopes .check{display:flex;align-items:flex-start;gap:8px;margin:0}
+#maintenance-scopes input{width:auto;flex:none;margin-top:5px}
+#maintenance-link{width:100%;box-sizing:border-box;overflow-wrap:anywhere}
+.maintenance-record{border:1px solid var(--line,#d5dce3);border-radius:8px;padding:14px;margin:12px 0;overflow-wrap:anywhere}
+.maintenance-record p{margin:4px 0}
+#maintenance-actions{flex-wrap:wrap}
+#maintenance-notice{white-space:pre-wrap;overflow-wrap:anywhere;min-height:24px}

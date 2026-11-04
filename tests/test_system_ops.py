@@ -934,11 +934,20 @@ class MenuTests(unittest.TestCase):
     def test_menu_first_screen_unknown_help_cancel_and_eof_no_external_action(self):
         with patch.object(ops, 'installation_lock', side_effect=AssertionError('host lock')), \
                 patch.object(ops, 'verify_installation', side_effect=AssertionError('host reads')):
-            for data in ('0\n', '', 'h\ninvalid\n0\n', '2\nno\n0\n', '2\n', '6\n\n0\n', '7\n\n0\n'):
+            for data in ('0\n', '', 'h\ninvalid\n0\n', '2\nno\n0\n', '2\n', '6\n\n0\n', '7\n\n0\n', '12\nn\n0\n', '12\n\n0\n', '13\n0\n0\n'):
                 code, text = self.run_menu(data)
                 self.assertEqual(code, 0, text)
                 self.assertIn('V-UI 受管维护菜单', text)
                 self.assertNotIn('操作完成', text)
+
+    def test_online_upgrade_accepts_y_and_yes_without_other_confirmation(self):
+        client = types.SimpleNamespace(request=lambda request: {'id': 'a' * 32, 'state': 'succeeded', 'result': {'upgraded': False}})
+        for answer in ('y', 'yes', 'Y'):
+            with self.subTest(answer=answer), patch.object(ops, 'fixed_module', return_value=client) as load:
+                code, text = self.run_menu('12\n' + answer + '\n0\n')
+            self.assertEqual(code, 0)
+            self.assertIn('当前已是相同或更高版本', text)
+            load.assert_called_once_with('maintenance_client')
 
     def test_nonroot_noninteractive_and_argument_injection_refused(self):
         for input_tty, output_tty in ((False, True), (True, False), (False, False)):

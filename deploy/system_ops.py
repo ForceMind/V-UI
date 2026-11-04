@@ -189,9 +189,11 @@ def trusted_executable(path):
 def fixed_files(manager):
     base = {CONFIG, CONTROL / 'launcher.py', CONTROL / 'system_ops.py', WORKER,
             CONTROL / 'release_tools.py', CONTROL / 'data_owner.py', CONTROL / 'proxy_store.py',
-            CONTROL / 'upstream_profile.py', CONTROL / 'inbound_policy.py', CONTROL / 'firewall_support.py', WRAPPER}
+            CONTROL / 'upstream_profile.py', CONTROL / 'inbound_policy.py', CONTROL / 'firewall_support.py', WRAPPER,
+            *(CONTROL / name for name in ('maintenance_daemon.py', 'maintenance_upgrade.py',
+              'maintenance_client.py', 'maintenance_cli_worker.py', 'install_control_verifier.py', 'v-ui-maintenance.service'))}
     if manager == 'systemd':
-        return base | {Path('/etc/systemd/system') / name for name in SYSTEMD_UNITS}
+        return base | {Path('/etc/systemd/system') / name for name in (*SYSTEMD_UNITS, 'v-ui-maintenance.service')}
     if manager == 'openrc':
         return base | {Path('/etc/init.d') / name for name in OPENRC_UNITS}
     raise Refused('unknown service manager')
@@ -870,11 +872,13 @@ HELP = ('V-UI 受管维护菜单\n'
         '9 / recover-restore 完成中断还原的恢复\n'
         '10 / network 网络/防火墙诊断（只读）\n'
         '11 / open-port 手动精确放行端口（明确确认）\n'
+        '12 / upgrade 在线升级官方稳定版（选择后才下载，保留配置与数据）\n'
+        '13 / grants  创建、列举或撤销临时维护授权\n'
         'h            帮助\n'
         '0            退出\n'
         '操作失败后不会自动恢复启动。OpenRC 当前仅支持状态查询与候选准备。')
 CHOICES = {'1': 'status', '2': 'start', '3': 'stop', '4': 'restart',
-           '5': 'backup', '6': 'restore', '7': 'activate', '8': 'stage', '9': 'recover-restore', '10': 'network', '11': 'open-port'}
+           '5': 'backup', '6': 'restore', '7': 'activate', '8': 'stage', '9': 'recover-restore', '10': 'network', '11': 'open-port', '12': 'upgrade', '13': 'grants'}
 
 
 def read_input(prompt, limit=4096, hidden=False):
@@ -915,6 +919,50 @@ def read_input(prompt, limit=4096, hidden=False):
     return value
 
 
+def fixed_module(name):
+    if name != 'maintenance_client':
+        raise Refused('fixed module required')
+    verify_installation()
+    module = types.ModuleType('_vui_fixed_' + name)
+    exec(compile(trusted_bytes(CONTROL / (name + '.py')), '<fixed client>', 'exec'), module.__dict__)
+    return module
+
+
+def terminal_grants():
+    print('临时授权: 1 创建  2 列举  3 撤销  0 返回。链接仅本次显示，请妥善保存。')
+    choice = read_input('请选择授权操作: ', 2)
+    if choice in (None, '', '0'):
+        return
+    _, account = verify_installation()
+    if choice == '1':
+        print('1 只读（默认）：诊断、状态与脱敏日志\n'
+              '2 日常维护：另含节点、分享、中转、证书、服务操作与升级\n'
+              '3 完整维护：另含删除与备份恢复，可能永久改变业务数据')
+        preset = read_input('请选择权限 [1/2/3，默认 1]: ', 1) or '1'
+        choices = {'1': 'diagnose',
+                   '2': 'diagnose,nodes,share,relay,certificates,operate,upgrade',
+                   '3': 'diagnose,nodes,share,relay,certificates,operate,upgrade,destructive'}
+        minutes = read_input('有效分钟数 1–120（默认 30）: ', 3) or '30'
+        if (preset not in choices or not minutes.isascii() or not minutes.isdecimal()
+                or not 1 <= int(minutes) <= 120):
+            raise Refused('invalid grant input')
+        arguments = ['create', choices[preset], str(int(minutes) * 60)]
+    elif choice == '2':
+        arguments = ['list']
+    elif choice == '3':
+        identity = read_input('撤销授权 ID: ', 19)
+        if not identity or not re.fullmatch(r'[1-9][0-9]{0,18}', identity):
+            raise Refused('invalid grant identity')
+        arguments = ['revoke', identity]
+    else:
+        raise Refused('invalid grant operation')
+    # Kernel credential demotion precedes the OS interpreter and all payload
+    # access. No service-owned code or runtime can ever execute as root here.
+    subprocess.run([str(PYTHON), '-B', '-I', '-S', str(CONTROL / 'maintenance_cli_worker.py'), *arguments],
+                   env=ENV, cwd='/', user=account.pw_uid, group=account.pw_gid, extra_groups=[],
+                   stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, check=True)
+
+
 def menu():
     if (os.getuid() != 0 or os.geteuid() != 0 or not sys.stdin.isatty()
             or not sys.stdout.isatty() or len(sys.argv) != 1
@@ -931,8 +979,32 @@ def menu():
             print(HELP)
             continue
         action = CHOICES.get(selection, selection)
-        if action not in ('status', 'network', 'open-port', *ACTIONS):
+        if action not in ('status', 'network', 'open-port', 'upgrade', 'grants', *ACTIONS):
             print('未知选项，请输入 h 查看帮助。')
+            continue
+        if action in ('upgrade', 'grants'):
+            try:
+                if action == 'upgrade':
+                    answer = read_input('确认下载官方稳定版本并沿用原配置升级 [y/N]: ', 16)
+                    if answer is None or answer.strip().lower() not in ('y', 'yes'):
+                        print('已取消，未下载或更改安装。')
+                        continue
+                    client = fixed_module('maintenance_client')
+                    task = client.request({'protocol': 1, 'operation': 'submit', 'action': 'upgrade'})
+                    print('升级任务已登记: ' + task['id'] + '；面板停止期间由独立维护服务继续执行。')
+                    while task['state'] in ('queued', 'running'):
+                        time.sleep(1)
+                        task = client.request({'protocol': 1, 'operation': 'get', 'task_id': task['id']})
+                    if task['state'] != 'succeeded':
+                        print('升级未完成；任务及原配置恢复证据已保留，请检查受管安装。')
+                    elif task.get('result', {}).get('upgraded'):
+                        print('升级完成，TLS 健康已核验。')
+                    else:
+                        print('当前已是相同或更高版本，未降级。')
+                else:
+                    terminal_grants()
+            except (Exception, KeyboardInterrupt):
+                print('系统维护请求未完成；已登记任务不会因终端退出取消，请通过面板查询。')
             continue
         if action in ('network', 'open-port'):
             try:

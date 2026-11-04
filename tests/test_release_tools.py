@@ -124,6 +124,21 @@ class ReleaseToolsTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT revoked FROM subscription_grants').fetchone()[0],1)
         self.assertEqual(len(list((self.root/'recovery').glob('before-*'))),1)
 
+    def test_restore_does_not_resurrect_remote_maintenance_authority(self):
+        data = self.fixture_database()
+        with sqlite3.connect(data/'v-ui.db') as db:
+            db.executescript('CREATE TABLE maintenance_grants(id INTEGER, token_hash TEXT);'
+                'CREATE TABLE maintenance_sessions(token_hash TEXT, grant_id INTEGER);'
+                "INSERT INTO maintenance_grants VALUES(1,'fake-hash');"
+                "INSERT INTO maintenance_sessions VALUES('fake-session-hash',1);")
+        destination = self.root/'maintenance-backup.zip'
+        checksum = tools.backup(self.root,destination)
+        tools.restore(self.root,destination,checksum)
+        with sqlite3.connect(data/'v-ui.db') as db:
+            for table in ('maintenance_grants','maintenance_sessions','admin_sessions'):
+                self.assertEqual(db.execute('SELECT count(*) FROM '+table).fetchone()[0],0)
+            self.assertEqual(db.execute('SELECT remark FROM inbounds').fetchone()[0],'preserved')
+
     def test_restore_checksum_or_root_mismatch_leaves_original_untouched(self):
         data=self.fixture_database();destination=self.root/'backup.zip';checksum=tools.backup(self.root,destination)
         before=(data/'v-ui.db').read_bytes()

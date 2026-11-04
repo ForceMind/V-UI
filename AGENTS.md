@@ -1,5 +1,9 @@
 # V-UI 开发约束
 
+## 2026-11-04 临时远程维护与节点管理（已批准开发）
+
+用户确认先线稿/权限契约，再实现、独审：临时远程授权可创建维护节点、分享、配置中转和执行正式在线升级；同时补齐全局 v-ui 在线升级。范围/状态与准确证据统一见 [本批记录](docs/REMOTE_MAINTENANCE_PROGRESS.md)，权限契约见 docs/REMOTE_MAINTENANCE_CONTRACT.md。保留既有配置数据；构建、真实核心、安装只 Actions，不 browser，不访问用户 VPS。原公开16及短入口保持；本批只开发 PR，不含保护分支合并或公开新版本。临时权限不开放任意 root 命令/文件路径/下载 URL，默认拒绝未列明 API；当前资格不能继承旧版本绿灯。
+
 ## 2026-11-04 v0.4.16 发布（已批准）
 
 v0.4.16现已从准确main `18fe631bcf69b68425b454db1795a101e0378842` 公开（19资产），匿名tag/所有asset digest及installer/完整SHA256SUMS真实摘要已核；旧15资产ID/大小/digest未变。当前只切setup和short-install冻结源并验自己的候选/dev/main与真实main URL，应用/版本/发布器/旧tag资产保持冻结，不重新发布覆盖。浏览器未验证，不改用户VPS；最终资格见承载PR和统一记录。

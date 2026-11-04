@@ -8,7 +8,7 @@ permissions:
 jobs:
   system-install:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -32,6 +32,7 @@ jobs:
       - name: Test interactive installer and global v-ui on ephemeral systemd runner
         env:
           VUI_SYSTEM_INSTALL_TEST: '1'
+          VUI_REMOTE_MAINTENANCE_TEST: '1'
           VUI_DOMAIN_RETRY_TEST: '1'
           VUI_INSTALLER_YN_TEST: '1'
           VUI_EXISTING_INSTALL_TEST: '1'
@@ -50,6 +51,7 @@ jobs:
         env:
           VUI_SYSTEM_INSTALL_TEST: '1'
           VUI_PUBLISHED_INSTALL_VERSION: '0.4.14'
+          VUI_REMOTE_MAINTENANCE_TEST: '1'
           VUI_RELEASE_COMMIT: b0cc174d04d05e61277075412586f0ba0dd231db
           VUI_PUBLISHED_UPGRADE_SOURCE: ${{ github.workspace }}/.published-v0414
           VUI_RELEASE_KIT: /tmp/vui-oneclick/kit
@@ -67,6 +69,7 @@ jobs:
         env:
           VUI_SYSTEM_INSTALL_TEST: '1'
           VUI_PUBLISHED_INSTALL_VERSION: '0.4.15'
+          VUI_REMOTE_MAINTENANCE_TEST: '1'
           VUI_RELEASE_COMMIT: 65b1e75d90de733408101ec280a92be935731baa
           VUI_PUBLISHED_UPGRADE_SOURCE: ${{ github.workspace }}/.published-v0415
           VUI_RELEASE_KIT: /tmp/vui-oneclick/kit

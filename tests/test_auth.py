@@ -48,7 +48,7 @@ class AuthenticationTests(unittest.TestCase):
             if not path.startswith("/api/"): continue
             for method in methods:
                 if method not in {"get", "post", "put", "patch", "delete", "head", "options"}: continue
-                if path == "/api/auth/login" and method == "post": continue
+                if path in {"/api/auth/login", "/api/maintenance/exchange"} and method == "post": continue
                 concrete = re.sub(r"\{[^}]+\}", "1", path)
                 with self.subTest(method=method, path=path):
                     response = self.client.request(method, concrete)

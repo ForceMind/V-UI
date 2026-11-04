@@ -1077,7 +1077,15 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
             if not {'users','inbounds','admin_sessions','subscription_grants'} <= tables:
                 raise ReleaseError('Unsupported backup database schema')
             # Restoring must never resurrect previously revoked access tokens.
-            db.execute('DELETE FROM admin_sessions'); db.execute('UPDATE subscription_grants SET revoked=1'); db.commit()
+            db.execute('DELETE FROM admin_sessions')
+            # Restoring an old backup must not resurrect a revoked temporary
+            # maintenance link/session. Legacy archives may lack these tables.
+            if 'maintenance_sessions' in tables:
+                db.execute('DELETE FROM maintenance_sessions')
+            if 'maintenance_grants' in tables:
+                db.execute('DELETE FROM maintenance_grants')
+            db.execute('UPDATE subscription_grants SET revoked=1')
+            db.commit()
         with db_path.open('rb') as handle: os.fsync(handle.fileno())
         if not (root/'data').is_dir() or (root/'data').is_symlink():
             raise ReleaseError('Existing data directory is required for a reversible restore')

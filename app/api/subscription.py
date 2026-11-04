@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import ClientDisconnect
 from sqlalchemy.orm import Session
 from app.models.database import get_db
-from app.services.validated_export import base64_subscription, export_warnings, share_link, singbox_client_config
+from app.services.validated_export import ExportError, base64_subscription, export_warnings, share_link, singbox_client_config
 from app.services.inbound_service import get_inbound, list_inbounds
 from app.services.routing_store import load_routing
 from app.services.mihomo_subscription import mihomo_config
@@ -50,7 +50,18 @@ def singbox_subscription(request: Request, host: str | None = Query(default=None
 
 @router.get('/link/{inbound_id}', response_class=PlainTextResponse)
 def inbound_share_link(inbound_id: int, request: Request, host: str | None = Query(default=None), db: Session = Depends(get_db)):
-    return share_link(get_inbound(db,inbound_id),_host(request,host))
+    item = get_inbound(db, inbound_id)
+    if not item.enable or getattr(item, 'expiry_time', 0):
+        raise HTTPException(409, {'code': 'SHARE_NODE_INELIGIBLE',
+            'message': '此节点已停用或设置了到期时间，暂不符合当前分享格式要求，请编辑节点后重试。'})
+    try:
+        return share_link(item, _host(request, host))
+    except ExportError:
+        message = ('此 Xray 节点暂不符合分享格式：目前支持单用户 VLESS、RAW/TCP、TLS、空 flow，'
+                   '需要有效 SNI；REALITY、WS、gRPC 等配置暂不能从此入口导出。'
+                   if item.core == 'xray' else
+                   '此节点配置暂不符合已支持的分享格式，请检查协议、传输、TLS 名称及用户配置。')
+        raise HTTPException(409, {'code': 'SHARE_PROFILE_UNSUPPORTED', 'message': message}) from None
 
 
 def _unique_json_object(pairs):

@@ -97,7 +97,8 @@ class ControlInstallTests(unittest.TestCase):
             for name, member in installer.SOURCE_MEMBERS.items():
                 source.writestr(member, (self.kit / name).read_bytes())
             for member in installer.SOURCE_DEPENDENCIES.values():
-                source.writestr(member, (REPO / member).read_bytes())
+                if member not in source.namelist():
+                    source.writestr(member, (REPO / member).read_bytes())
         self.rehash()
 
     def rehash(self):
@@ -186,7 +187,7 @@ class ControlInstallTests(unittest.TestCase):
         self.assertFalse(self.entry.exists())
         self.assertFalse(installer.RECEIPT.exists())
 
-    def test_installs_exact_receipt_and_real_code_without_service_or_user_commands(self):
+    def test_installs_exact_receipt_and_starts_only_fixed_maintenance_service(self):
         receipt = self.install()
         self.assertEqual(set(receipt), installer.RECEIPT_KEYS)
         self.assertEqual(receipt['schema'], 1)
@@ -195,6 +196,7 @@ class ControlInstallTests(unittest.TestCase):
         expected = {self.config, self.control / 'launcher.py', self.entry,
                     *(self.control / name for name in ('system_ops.py', 'ops_worker.py', 'release_tools.py', 'firewall_support.py', *installer.SOURCE_DEPENDENCIES)),
                     *(self.units / name for name in ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket'))}
+        expected.add(self.units / 'v-ui-maintenance.service')
         self.assertEqual(set(receipt['files']), {str(path) for path in expected})
         for path in expected:
             self.assertEqual(receipt['files'][str(path)], hashlib.sha256(path.read_bytes()).hexdigest())
@@ -209,8 +211,10 @@ class ControlInstallTests(unittest.TestCase):
         self.assertEqual(os.readlink(self.command_alias), str(self.entry))
         self.assertIn(b'def operate(', (self.control / 'system_ops.py').read_bytes())
         self.assertIn(b'class _MaintenanceSession(', (self.control / 'release_tools.py').read_bytes())
-        self.assertEqual(len(self.run.call_args_list), 1)
-        self.assertEqual(self.run.call_args.args[0][:4], [str(self.python), '-B', '-I', '-S'])
+        self.assertEqual(len(self.run.call_args_list), 3)
+        self.assertEqual(self.run.call_args_list[0].args[0][:4], [str(self.python), '-B', '-I', '-S'])
+        self.assertEqual(self.run.call_args_list[1].args[0], ['/usr/bin/systemctl', 'daemon-reload'])
+        self.assertEqual(self.run.call_args_list[2].args[0], ['/usr/bin/systemctl', 'enable', '--now', 'v-ui-maintenance.service'])
         self.assertEqual(stat.S_IMODE(self.lock.stat().st_mode), 0o600)
 
     def test_bad_manifest_digest_and_bad_code_hash_fail_before_any_host_write(self):
@@ -313,6 +317,20 @@ class ControlInstallTests(unittest.TestCase):
         self.assertIn(str(path), result['files'])
         self.assertEqual(path.read_bytes(), (REPO / 'scripts/firewall_support.py').read_bytes())
 
+    def test_explicit_refresh_migrates_intact_v0416_openrc_without_systemd_unit(self):
+        self.write_instance('openrc')
+        old = self.install()
+        added = {name for name in installer.SOURCE_DEPENDENCIES if name.startswith('maintenance_')
+                 or name in ('install_control_verifier.py', 'v-ui-maintenance.service')}
+        for name in added:
+            path = self.control / name
+            old['files'].pop(str(path)); path.unlink()
+        installer.RECEIPT.write_text(json.dumps(old))
+        result = self.install(refresh=True)
+        self.assertTrue(all(str(self.control / name) in result['files'] for name in added))
+        self.assertNotIn(str(self.units / 'v-ui-maintenance.service'), result['files'])
+        self.assertTrue(all(call.args[0][0] == str(self.python) for call in self.run.call_args_list))
+
     def test_pre_network_receipt_does_not_adopt_unreceipted_firewall_code(self):
         self.install()
         receipt = json.loads(installer.RECEIPT.read_bytes())
@@ -345,6 +363,25 @@ class ControlInstallTests(unittest.TestCase):
         for name, member in installer.SOURCE_DEPENDENCIES.items():
             self.assertEqual(verified[name], (REPO / member).read_bytes())
             self.assertFalse((self.kit / name).exists())
+
+    def test_local_target_kit_keeps_complete_manifest_and_rejects_extra_or_missing_assets(self):
+        record = json.loads((self.kit / 'RELEASE.json').read_bytes())
+        record['targets'] = sorted(installer.TARGETS)
+        (self.kit / 'RELEASE.json').write_text(json.dumps(record))
+        for target in installer.TARGETS - {'x86_64-gnu'}:
+            (self.kit / ('vui-linux-' + target + '.zip')).write_bytes(b'unselected archive')
+        self.rehash()
+        for target in installer.TARGETS - {'x86_64-gnu'}:
+            (self.kit / ('vui-linux-' + target + '.zip')).unlink()
+        with self.assertRaises(installer.InstallError): installer.verify_kit(self.kit, self.sha)
+        _, result = installer.verify_kit(self.kit, self.sha, local_target_only=True)
+        self.assertEqual(set(result['targets']), installer.TARGETS)
+        extra = self.kit / 'vui-linux-aarch64-musl.zip'
+        extra.write_bytes(b'unexpected even though in manifest')
+        with self.assertRaises(installer.InstallError): installer.verify_kit(self.kit, self.sha, local_target_only=True)
+        extra.unlink()
+        (self.kit / 'vui-linux-x86_64-gnu.zip').unlink()
+        with self.assertRaises(installer.InstallError): installer.verify_kit(self.kit, self.sha, local_target_only=True)
 
     def test_kit_symlink_hardlink_and_linked_parent_are_rejected(self):
         path = self.kit / 'system_ops.py'

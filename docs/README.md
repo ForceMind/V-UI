@@ -1,3 +1,7 @@
+## 当前开发：远程维护与节点管理
+
+[线稿](remote-maintenance-wireframe.html) · [权限契约](REMOTE_MAINTENANCE_CONTRACT.md) · [实现与验收记录](REMOTE_MAINTENANCE_PROGRESS.md)。开发候选尚未合并或发布，当前公开稳定版仍为下方 v0.4.16。浏览器未验证。
+
 ## **v0.4.16** TLS已有证书自动绑定
 
 新增TLS唯一适用证书默认选、多张手选，支持Xray VLESS RAW/TCP TLS托管绑定和续期，保留既有配置数据。已从准确main `18fe631bcf69b68425b454db1795a101e0378842` [公开发布](https://github.com/ForceMind/V-UI/releases/tag/v0.4.16)，19项资产及真实摘要已核验；[统一记录](TLS_CERTIFICATE_BINDING_FIX.md)保留准确资格和旧失败。构建与真实安装仅Actions，浏览器未验证。
