@@ -1,15 +1,19 @@
 """Pure fixture checks; these do not qualify any installed upgrade."""
+from contextlib import redirect_stdout
 from copy import deepcopy
 import hashlib
+import io
 import json
 from pathlib import Path
 import tempfile
 import unittest
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 from published_upgrade_helpers import (FIREWALL, MAINTENANCE_FILES, PUBLISHED_BASELINES, PublishedUpgrade,
                                        assert_download_boundary, assert_receipt_migration,
-                                       assert_upgrade_configuration, fixed_public_baseline)
+                                       assert_upgrade_configuration, fixed_public_baseline,
+                                       managed_xray_fixture_program)
 
 
 class PublishedUpgradeBoundaryTests(unittest.TestCase):
@@ -87,13 +91,15 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
         with self.assertRaises(AssertionError):assert_receipt_migration(self,after,after,'0.4.14')
 
 
-    def test_only_immutable_public_014_and_015_sources_are_accepted(self):
+    def test_only_immutable_public_014_015_and_016_sources_are_accepted(self):
         expected={'0.4.14':'b0cc174d04d05e61277075412586f0ba0dd231db',
-                  '0.4.15':'65b1e75d90de733408101ec280a92be935731baa'}
+                  '0.4.15':'65b1e75d90de733408101ec280a92be935731baa',
+                  '0.4.16':'18fe631bcf69b68425b454db1795a101e0378842'}
         self.assertEqual(PUBLISHED_BASELINES,expected)
         for version,commit in expected.items():
             self.assertEqual(fixed_public_baseline(version,commit),(version,commit))
-        for version,commit in [('0.4.13','a'*40),('0.4.16',expected['0.4.15']),
+        for version,commit in [('0.4.13','a'*40),('0.4.17',expected['0.4.16']),
+                               ('0.4.16',expected['0.4.15']),('0.4.16','a'*40),
                                ('0.4.14',expected['0.4.15']),('0.4.15',expected['0.4.14']),
                                ('0.4.15','a'*40),(None,None)]:
             with self.subTest(version=version,commit=commit):
@@ -106,7 +112,7 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
                         PublishedUpgrade(self,Path('/unused'),Path('/unused'),[],[])
                     public.assert_not_called();fixture.assert_not_called()
 
-    def test_receipt_015_preserves_the_complete_existing_closure(self):
+    def test_receipt_015_and_016_preserve_the_complete_existing_closure(self):
         before={'schema':1,'service_manager':'systemd','system_python':'/usr/bin/python3',
                 'interpreter_resolved':'/usr/bin/python3.12','interpreter_sha256':'1'*64,
                 'files':{'/usr/local/lib/v-ui/system_ops.py':'2'*64,FIREWALL:'3'*64}}
@@ -116,22 +122,66 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
         # plus the exact new maintenance closure and interpreter identity must
         # survive; each actual helper hash is checked on-host.
         after['files'][FIREWALL]='4'*64
-        assert_receipt_migration(self,before,after,'0.4.15')
-        variants=[]
-        for name in before['files']:
-            missing=deepcopy(after);del missing['files'][name];variants.append(missing)
-        for name in MAINTENANCE_FILES:
-            missing=deepcopy(after);del missing['files'][name];variants.append(missing)
-        extra=deepcopy(after);extra['files']['/unrelated']='5'*64;variants.append(extra)
-        for field in ('schema','service_manager','system_python','interpreter_resolved','interpreter_sha256'):
-            drift=deepcopy(after);drift[field]='changed';variants.append(drift)
-        for changed in variants:
-            with self.subTest(changed=changed):
-                with self.assertRaises(AssertionError):
-                    assert_receipt_migration(self,before,changed,'0.4.15')
-        legacy=deepcopy(before);del legacy['files'][FIREWALL]
-        with self.assertRaises(AssertionError):assert_receipt_migration(self,legacy,after,'0.4.15')
-        with self.assertRaises(AssertionError):assert_receipt_migration(self,before,after,'0.4.16')
+        for version in ('0.4.15','0.4.16'):
+            assert_receipt_migration(self,before,after,version)
+            variants=[]
+            for name in before['files']:
+                missing=deepcopy(after);del missing['files'][name];variants.append(missing)
+            for name in MAINTENANCE_FILES:
+                missing=deepcopy(after);del missing['files'][name];variants.append(missing)
+            extra=deepcopy(after);extra['files']['/unrelated']='5'*64;variants.append(extra)
+            for field in ('schema','service_manager','system_python','interpreter_resolved','interpreter_sha256'):
+                drift=deepcopy(after);drift[field]='changed';variants.append(drift)
+            for changed in variants:
+                with self.subTest(changed=changed):
+                    with self.assertRaises(AssertionError):
+                        assert_receipt_migration(self,before,changed,version)
+            legacy=deepcopy(before);del legacy['files'][FIREWALL]
+            with self.assertRaises(AssertionError):assert_receipt_migration(self,legacy,after,version)
+        with self.assertRaises(AssertionError):assert_receipt_migration(self,before,after,'0.4.17')
+
+    def test_managed_xray_fixture_keeps_local_material_and_pending_binding_without_apply(self):
+        # Execute only the pure fixture construction against in-memory models.
+        # No app, CA, business core, systemd, network or installed release runs.
+        rows=[]
+        class Record:
+            def __init__(self,**values):self.__dict__.update(values)
+        class Session:
+            def __enter__(self):return self
+            def __exit__(self,*unused):pass
+            def add(self,row):rows.append(row)
+            def flush(self):
+                for row in rows:
+                    if hasattr(row,'core'):row.id=31
+            def commit(self):pass
+        models=ModuleType('app.models')
+        models.database=SimpleNamespace(SessionLocal=Session,Inbound=Record)
+        certificates=ModuleType('app.certificates.models')
+        certificates.Certificate=Record;certificates.CertificateBinding=Record
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'certs').mkdir()
+            chain=b'synthetic-local-certificate';key=b'synthetic-local-private-key'
+            (root/'certs/provided-fullchain.pem').write_bytes(chain)
+            (root/'certs/provided-privkey.pem').write_bytes(key)
+            output=io.StringIO()
+            with patch.dict('sys.modules',{'app.models':models,'app.certificates.models':certificates}), redirect_stdout(output):
+                exec(compile(managed_xray_fixture_program(root),'<managed-upgrade-fixture>','exec'),{})
+            self.assertEqual(json.loads(output.getvalue()),{'inbound_id':31,'certificate_id':'b'*32})
+            certificate,node,binding=rows
+            revision=hashlib.sha256(chain).hexdigest()
+            self.assertEqual(certificate.revision,revision)
+            self.assertFalse(certificate.auto_renew)
+            self.assertEqual(node.core,'xray');self.assertEqual(node.protocol,'vless')
+            self.assertFalse(node.enable)
+            self.assertEqual(binding.target,'inbound:31')
+            self.assertEqual(binding.certificate_id,certificate.id)
+            self.assertEqual(binding.error,'CORE_STOPPED_PENDING_APPLY')
+            material=node.stream_settings['tlsSettings']['certificates'][0]
+            for field,expected in (('certificateFile',chain),('keyFile',key)):
+                path=Path(material[field])
+                self.assertEqual(path.parent,root/'certificates/revisions'/certificate.id/revision)
+                self.assertEqual(path.read_bytes(),expected)
+                self.assertEqual(path.stat().st_mode & 0o777,0o600)
 
     def test_empty_existing_ca_authorizations_remain_present_and_empty(self):
         old_release=Path('/var/lib/v-ui/releases/old-015')

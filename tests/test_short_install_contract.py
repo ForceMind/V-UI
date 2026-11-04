@@ -30,11 +30,12 @@ class ShortInstallContractTests(unittest.TestCase):
             self.assertEqual(len(ordinary),1)
             self.assertEqual(ordinary[0].get('VUI_INSTALLER_YN_TEST'),'1')
             upgrades=[env for env in selected if env.get('VUI_PUBLISHED_UPGRADE_SOURCE')]
-            self.assertEqual(len(selected),3 if name=='oneclick.yml' else 1)
-            self.assertEqual(len(upgrades),2 if name=='oneclick.yml' else 0)
+            self.assertEqual(len(selected),4 if name=='oneclick.yml' else 1)
+            self.assertEqual(len(upgrades),3 if name=='oneclick.yml' else 0)
             if upgrades:
                 expected=[('0.4.14','b0cc174d04d05e61277075412586f0ba0dd231db','.published-v0414'),
-                          ('0.4.15','65b1e75d90de733408101ec280a92be935731baa','.published-v0415')]
+                          ('0.4.15','65b1e75d90de733408101ec280a92be935731baa','.published-v0415'),
+                          ('0.4.16','18fe631bcf69b68425b454db1795a101e0378842','.published-v0416')]
                 self.assertEqual([(env['VUI_PUBLISHED_INSTALL_VERSION'],env['VUI_RELEASE_COMMIT'],
                                    env['VUI_PUBLISHED_UPGRADE_SOURCE']) for env in upgrades],
                                  [(version,commit,'${{ github.workspace }}/'+path)
@@ -42,6 +43,7 @@ class ShortInstallContractTests(unittest.TestCase):
                 for env in upgrades:
                     self.assertNotIn('VUI_EXISTING_INSTALL_TEST',env)
                     self.assertNotIn('VUI_SETUP_INSTALL',env)
+                    self.assertEqual(env['VUI_REMOTE_MAINTENANCE_TEST'],'1')
                     self.assertEqual(env['VUI_RELEASE_KIT'],'/tmp/vui-oneclick/kit')
                     self.assertEqual(env['VUI_RELEASE_BUNDLE'],'/tmp/vui-oneclick/vui-linux.zip')
                 steps=workflow['jobs']['system-install']['steps']
