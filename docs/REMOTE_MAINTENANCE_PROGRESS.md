@@ -1,13 +1,23 @@
 # 远程维护、节点与中转管理
 
+## v0.4.17 已公开与短入口后续
+
+正式发布源为95c201c6e26ed54960f964c675e515890f2eea2a。发布候选a9b9479独审和自身九组/12jobs成功；PR115普通merge至dev a008c71，dev push/PR116共18组/24jobs全部成功；PR116普通merge至main95c201c，tree仍与候选相同，main自身九组/12jobs成功。各次均attempt1，仅规定12个browser steps/每套skip，其余steps全成功；14/15/16真实升级、固定核心与完整链路、四目标必须成功。
+
+人工发布run41876406580/job126736888385成功，从该main受验同源资产晋升公开17，19资产；匿名latest/tag/所有asset digest与installer、完整SHA256SUMS真实字节均核验。installer SHA256为c0488e824b9baff09dd9165fd5d1be26bff2b7b4a20e74a19a8e7ac1bf93c124，完整清单文件SHA256为e95ca641131b17ab8ba009ceba2896d590fb5370fd091cdcef7c63e7ee20169a。旧16资产ID/大小/digest及tag保留。未在本机下载Linux包，未操作用户VPS。
+
+GitHub Actions/Pages在发布候选入队时发生官方故障，排队及一次workflow汇总success/job仍in_progress的不一致均未算通过；等待原始job completed/success再严格复核，未降门槛或重建掩盖。公开匿名安装已派发run41877172998，不预填结果。
+
+当前仅更新setup.sh的版本/两个真实pin、short-install的冻结发布源95c及对应测试/文档；应用、install.sh、VERSION、publisher和公开资产不变。引导候选/dev/main及真实main URL必须取得自身资格，最终准确结果由承载PR记录，避免回写自身SHA循环构建。浏览器未验证。
+
 ## v0.4.17 发布迭代（已批准）
 
 用户已批准PR115转Ready、正常dev→main合并、公开v0.4.17及更新短入口，保留配置和数据，只Actions构建/真实安装、无浏览器。产品629d44c7e0acf2f9aebdfdac765522cc93f9af22已独审、自身九组/12jobs/全部非浏览器steps/四目标/真实维护和公开14/15保数据升级全部attempt1成功；原失败保留，准确读回见PR115。其后只补版本、严格专用门禁、公开16升级及说明。
 
-- [ ] 发布准备与独审：版本17；remote_maintenance_no_browser固定629祖先与精确允许路径，生产逻辑冻结；保留14/15并新增16真实升级。
-- [ ] 准确新候选全部非浏览器检查与四目标，PR115 Ready及普通merge至dev。
-- [ ] 准确dev/主线PR、普通merge至main，准确main全部检查与同源制品。
-- [ ] 人工晋升main受验19资产，匿名tag/全部digest与installer/完整清单字节，保留旧16资产。
+- [x] 发布准备与独审：版本17；remote_maintenance_no_browser固定629祖先与精确允许路径，生产逻辑冻结；保留14/15并新增16真实升级。
+- [x] 准确新候选全部非浏览器检查与四目标，PR115 Ready及普通merge至dev。
+- [x] 准确dev/主线PR、普通merge至main，准确main全部检查与同源制品。
+- [x] 人工晋升main受验19资产，匿名tag/全部digest与installer/完整清单字节，保留旧16资产。
 - [ ] 公开匿名安装；切真实短入口pin/冻结源并独审，准确候选/dev/main及实际main URL验收。
 
 两个worker分别拥有严格门禁/版本和公开16升级验收；root集成文档、独审、资格、合并/发布/短入口。真实签发CA和用户VPS不在范围。新16夹具的Xray草稿/待应用绑定仅用于材料及数据保留，不冒充真实已应用核心资格。此处是发布准备快照，最终准确提交与结果记录于承载PR/Release，避免为回写自身SHA循环构建。
@@ -27,7 +37,7 @@
 3. [x] 固定系统维护任务、独立升级、全局 v-ui 在线升级及终端授权入口。
 4. [x] 页面授权入口、节点管理/分享错误与中转操作说明，保留原业务保护。
 5. [x] 定向非浏览器检查、只读独审、范围内修复（后续 CI 必要修正也须增量独审）。
-6. [ ] 准确候选 PR 与 Actions 全部必需非浏览器 jobs/steps、四目标和真实安装升级验收。
+6. [x] 准确候选 PR 与 Actions 全部必需非浏览器 jobs/steps、四目标和真实安装升级验收（产品629及发布准备后自身资格各自记录）。
 
 主智能体负责契约、页面、集成和证据。两个 gpt-6.1-sol/high 实现子任务分别拥有授权后端、系统维护与升级；只读独审在实现结束后安排。不得递归派工。不使用用户 VPS、真实 CA、SSH 凭据，不自动改变云安全组或系统防火墙。
 
