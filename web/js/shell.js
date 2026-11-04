@@ -13,6 +13,7 @@
             ['certificates', '证书管理', '/certificates']
         ]],
         ['运行维护', [
+            ['maintenance', '远程维护与升级', '/maintenance'],
             ['cores', '核心与服务', '/ui/#cores'],
             ['diagnostics', '日志与诊断', '/ui/#diagnostics'],
             ['firewall', '防火墙', '/ui/#firewall']

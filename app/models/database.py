@@ -189,7 +189,7 @@ def init_db() -> None:
     with core_manager.lock, data_owner(Path(engine.url.database).absolute().parent):
         _guard_policy_schema_before_create()
         # Register grants even when init_db is called from the standalone CLI.
-        from app.services import subscription_tokens  # noqa: F401
+        from app.services import subscription_tokens, maintenance_auth  # noqa: F401
         with engine.connect() as conn:
             conn.execute(text("BEGIN IMMEDIATE"))
             try:

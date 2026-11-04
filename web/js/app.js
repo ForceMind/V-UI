@@ -202,7 +202,7 @@ const app = createApp({
         const qrLink = ref('');
         const qrBusy = ref(false);
         const qrNotice = ref('');
-        let qrGeneration = 0, qrController = null, qrRenderTimer = null;
+        let qrGeneration = 0, qrController = null, qrRenderTimer = null, qrRetryRow = null;
         const clearQrCode = () => {
             qrGeneration++;
             if (qrController) qrController.abort();
@@ -212,6 +212,7 @@ const app = createApp({
             qrLink.value = '';
             qrBusy.value = false;
             qrNotice.value = '';
+            qrRetryRow = null;
             const container = document.getElementById('qrcode');
             if (container) { container.textContent = ''; container.title = ''; }
             const output = document.getElementById('share-link');
@@ -1149,6 +1150,7 @@ const app = createApp({
         const showQrCode = async (row) => {
             if (adminSessionEnded) return;
             clearQrCode();
+            qrRetryRow = {id: row.id};
             const generation = qrGeneration;
             qrController = new AbortController();
             showQrDialog.value = true;
@@ -1183,11 +1185,31 @@ const app = createApp({
                         qrNotice.value = '二维码生成失败，请复制下方链接。';
                     }
                 }, 0);
-            } catch (_) {
-                if (current()) qrNotice.value = '获取分享链接失败，请重试。';
+            } catch (error) {
+                if (current()) {
+                    const status = error.response?.status;
+                    let detail = error.response?.data?.detail;
+                    if (typeof error.response?.data === 'string' && error.response.data.length < 2048) {
+                        try { detail = JSON.parse(error.response.data).detail; } catch (_) {}
+                    }
+                    // Only known server messages may reach the dialog. Unknown
+                    // bodies/errors may contain credentials or internal paths.
+                    const messages = {
+                        SHARE_NODE_INELIGIBLE: '此节点已停用或设置了到期时间，暂不符合当前分享格式要求，请编辑节点后重试。',
+                        SHARE_PROFILE_UNSUPPORTED: '此节点的协议、传输或 TLS 配置暂不符合已支持的分享格式。Xray 目前支持单用户 VLESS RAW/TCP TLS、空 flow 和有效 SNI。'
+                    };
+                    qrNotice.value = messages[detail?.code] || (status === 404 ? '节点已不存在，请刷新节点列表。' :
+                        status === 403 ? '没有分享此节点的权限，请核对授权。' :
+                        status === 409 ? '节点配置不符合当前分享格式，请检查协议、传输和 TLS 设置。' :
+                        '获取分享链接失败，请检查网络后重试；原节点未更改。');
+                }
             } finally {
                 if (current()) { qrBusy.value = false; qrController = null; }
             }
+        };
+
+        const retryShare = () => {
+            if (qrRetryRow && !qrBusy.value && !adminSessionEnded) return showQrCode(qrRetryRow);
         };
 
         const copyLink = async () => {
@@ -1305,6 +1327,7 @@ const app = createApp({
             qrLink,
             qrBusy,
             qrNotice,
+            retryShare,
             closeQrDialog,
             beforeQrDialogClose,
             upstreamExport,

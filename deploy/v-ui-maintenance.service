@@ -1,0 +1,20 @@
+# Managed by V-UI fixed remote-maintenance controller v1
+[Unit]
+Description=V-UI restricted system maintenance
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=v-ui
+UMask=0077
+ExecStart=/usr/bin/python3 -B -I -S /usr/local/lib/v-ui/maintenance_daemon.py
+WorkingDirectory=/
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=45
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

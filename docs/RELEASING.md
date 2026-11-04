@@ -1,3 +1,11 @@
+## v0.4.17 发布（已批准，准备中）
+
+用户已批准PR115 Ready、正常dev→main、公开v0.4.17与短入口更新；产品冻结于629d44c7e0acf2f9aebdfdac765522cc93f9af22。专用 `remote_maintenance_no_browser=true` 只适用0.4.17、固定祖先及严格枚举的版本/门禁/旧版升级验收/文档路径，不能与旧例外混用。main.py和install.sh仅16→17字节替换，其他app/UI/root/依赖/core逻辑不得再改，拒绝删除、rename、链接、类型和mode变化。
+
+仅明列12个浏览器步骤可跳过且必须存在；浏览器未验证。固定真实核心、完整loopback、公开14/15/16三个真实保数据升级都必须success。准确候选、dev和main各自最新attempt/全部jobs及其他steps必须成功，同提交四目标和真实安装不能借旧绿灯。全部构建和真实安装只Actions，不触碰用户VPS或新CA条款。
+
+人工发布只晋升准确默认main已受验同源资产，不重建、不覆盖旧tag/Release/文件。公开后匿名核对19资产、tag目标与真实installer/完整SHA256SUMS摘要，再通过独立PR切setup.sh及short-install冻结源，并验自身候选/dev/main和真实main URL。统一证据见[本批记录](REMOTE_MAINTENANCE_PROGRESS.md)，最终结果由承载PR/Release记录，避免回写自身SHA循环提交。
+
 ## 2026-11-04 v0.4.16 已公开，短入口切换验收中
 
 准确发布源 `18fe631bcf69b68425b454db1795a101e0378842` 已公开，19资产、tag及真实摘要已匿名核验，旧15资产保持。当前只更新短入口版本/pin和冻结验收源，仍需自己的候选/dev/main与实际main短命令验收；应用、发布器、VERSION及tag资产不重建覆盖，浏览器未验证。下方为本版已执行的发布门禁契约。
@@ -149,7 +157,7 @@ GitHub权限只在该人工工作流的发布job授予contents:write/actions:rea
 
 ## 公开后检查
 
-核对 Release 公开状态、tag 目标、下载文件摘要和文档链接。本版公开后手工套件入口为 `install.sh --version v0.4.16`，短入口仅使用核验后的真实摘要。每次仍须确认完整 19 项资产并核验。自动目标选择复核须使用独立临时 Linux 机器；版本字符串本身不证明下载存在，也不赋予后续未发布主线功能资格。发布源提交与后续 bootstrap/doc 提交分别记录，不能用当前 checkout 冒充冻结发布源。
+核对 Release 公开状态、tag 目标、下载文件摘要和文档链接。本版公开后手工套件入口为 `install.sh --version v0.4.17`，短入口仅使用核验后的真实摘要。每次仍须确认完整 19 项资产并核验。自动目标选择复核须使用独立临时 Linux 机器；版本字符串本身不证明下载存在，也不赋予后续未发布主线功能资格。发布源提交与后续 bootstrap/doc 提交分别记录，不能用当前 checkout 冒充冻结发布源。
 
 外部CA域名验证、云安全组和真实用户网络需要用户自己的配置，不属于维护者自动取得的授权。不要把发布流程顺手变成登录真实VPS部署。
 

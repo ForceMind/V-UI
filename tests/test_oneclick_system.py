@@ -81,6 +81,8 @@ class OneClickSystemTests(unittest.TestCase):
         # Never clean up or overwrite a pre-existing installation on a test host.
         for path in (root,Path('/etc/v-ui'),Path('/usr/local/lib/v-ui'),
                      Path('/usr/local/sbin/v-ui'),Path('/usr/local/bin/v-ui'),
+                     Path('/var/lib/v-ui-maintenance'),Path('/run/v-ui-maintenance'),
+                     Path('/etc/systemd/system/v-ui-maintenance.service'),
                      Path('/etc/systemd/system/v-ui.service.d'),
                      *(Path('/etc/systemd/system')/name for name in
                        ('v-ui.service','v-ui-http01.service','v-ui-http01.socket'))):
@@ -145,12 +147,14 @@ class OneClickSystemTests(unittest.TestCase):
             if online:
                 self.assertNotIn('/etc/sudoers.d/v-ui',sudoers_before)
             def cleanup():
+                subprocess.run(['sudo','systemctl','disable','--now','v-ui-maintenance.service'],capture_output=True)
                 subprocess.run(['sudo','systemctl','disable','--now','v-ui.service','v-ui-http01.socket'],capture_output=True)
                 subprocess.run(['sudo','systemctl','stop','v-ui-http01.service'],capture_output=True)
-                for name in ('v-ui.service','v-ui-http01.service','v-ui-http01.socket'):
+                for name in ('v-ui.service','v-ui-http01.service','v-ui-http01.socket','v-ui-maintenance.service'):
                     subprocess.run(['sudo','rm','-f','/etc/systemd/system/'+name],check=True)
                 subprocess.run(['sudo','systemctl','daemon-reload'],check=True)
                 subprocess.run(['sudo','rm','-rf','/etc/v-ui','/usr/local/lib/v-ui','/var/lib/v-ui'],check=True)
+                subprocess.run(['sudo','rm','-rf','/var/lib/v-ui-maintenance','/run/v-ui-maintenance'],check=True)
                 subprocess.run(['sudo','rm','-f','/usr/local/bin/v-ui','/usr/local/sbin/v-ui'],check=True)
                 subprocess.run(['sudo','userdel','v-ui'],capture_output=True)
             if gate is None:
@@ -511,6 +515,9 @@ class OneClickSystemTests(unittest.TestCase):
             self.assertEqual(upgraded.returncode,0,safe_output(upgraded.stdout+upgraded.stderr)[-15000:])
             if online:
                 global_menu_check(self,{**os.environ,'PYTHONDONTWRITEBYTECODE':'1'},exercise_start_stop=False)
+            if online and os.getenv('VUI_REMOTE_MAINTENANCE_TEST') == '1':
+                from scripts.system_maintenance_smoke import nonroot_smoke
+                nonroot_smoke(self,source,Path(os.environ['VUI_RELEASE_KIT']),api,saved_proxy)
             self.assertEqual(api('/api/auth/me')[0],200)
             self.assertEqual(json.loads(api('/api/proxy/settings')[1]), saved_proxy)
             if startup_fixture and os.getenv('VUI_EXISTING_INSTALL_TEST') == '1':

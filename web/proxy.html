@@ -10,6 +10,8 @@
 <p id="notice" role="status" aria-live="polite">正在读取服务器草稿与活动配置…</p>
 <section aria-labelledby="yaml-preview-heading"><div class="section-head"><div><h2 id="yaml-preview-heading">YAML 只读预览</h2><p class="hint">检查候选配置的有限结构、引用冲突和可选基线差异；与“导入上游”独立，不保存、合并或应用。</p></div><button id="open-yaml-preview" type="button">打开只读预览</button></div></section>
 <div id="proxy-workspace" hidden>
+<section id="relay-quickstart" aria-labelledby="relay-quickstart-title"><h2 id="relay-quickstart-title">选择中转方向</h2><div class="columns"><div><h3>此机通过上游转发</h3><p>客户端 → 此服务器 → 上游节点 → 目标网站。</p><ol><li>在下方导入并选择一个上游节点。</li><li>在<a href="/ui/#inbounds">节点管理</a>编辑节点，将出口设置为“指定中转”；或开启下方“默认入口中转”，使“跟随全局”的节点采用上游。</li><li>保存草稿、检查并应用，核对节点的“已应用出口 / 状态”。</li></ol></div><div><h3>让另一服务器使用此机作上游</h3><p>客户端 → 另一服务器 → 此服务器 → 目标网站。</p><p>在<a href="/ui/#inbounds">节点管理</a>选择“导出为中转上游（仅 TCP）”，再到另一台 V-UI 导入该配置。</p><p>普通设备分享与中转上游导出用途不同，均含连接凭据，请妥善保管。</p></div></div><p class="hint">主机代理与入口中转是两个独立开关。中转目前仅 TCP；不能以启用 UDP 端口代替 UDP 中转支持。配置失败不会静默切成直连。</p></section>
+
 <section aria-labelledby="status-heading"><div class="section-head"><h2 id="status-heading">当前状态</h2><button id="refresh" type="button">刷新服务器状态</button></div>
 <div class="status-grid"><div><h3>已保存草稿</h3><p id="draft-state"></p><p id="draft-revision" class="revision"></p></div><div><h3>已提交活动配置</h3><p id="active-state"></p><p id="active-revision" class="revision"></p><p id="active-address" class="hint"></p></div></div>
 <p id="inbound-policy-summary" class="hint"></p><ul id="inbound-policy-list"></ul>
