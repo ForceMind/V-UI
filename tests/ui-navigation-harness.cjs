@@ -123,7 +123,7 @@ test('cross-document navigation synchronously clears real share secrets and abor
 });
 test('real inbound dirty editor Back blocks before clearing, accepted Back clears secrets and Forward stays closed', async () => {
     const env = environment(), state = env.app();
-    await state.openAddInbound(); state.newInbound.remark = 'unsaved'; state.newInbound.profile.reality_uuid = 'fake-sensitive-value';
+    await state.openAdvancedInbound(); state.newInbound.remark = 'unsaved'; state.newInbound.profile.reality_uuid = 'fake-sensitive-value';
     env.sandbox.confirm = () => false;
     env.history.back(); await flush();
     assert.equal(state.showAddInbound.value, true); assert.equal(state.newInbound.remark, 'unsaved');
@@ -136,7 +136,7 @@ test('real inbound dirty editor Back blocks before clearing, accepted Back clear
 });
 test('real inbound saving Back and route clicks cannot dismiss the editor or change view', async () => {
     const env = environment(), state = env.app();
-    await state.openAddInbound();
+    await state.openAdvancedInbound();
     env.sandbox.axios.post = () => new Promise(() => {});
     void state.saveInbound();
     assert.equal(state.savingInbound.value, true);
@@ -311,7 +311,7 @@ test('refresh preserves valid history cursor so rejected multi-step Back restore
 });
 test('real app forced session expiry clears editor and can replace login while a save is busy', async () => {
     const env = environment('/ui/#inbounds'), state = env.app();
-    await state.openAddInbound(); state.newInbound.profile.reality_uuid = 'fake-sensitive-value';
+    await state.openAdvancedInbound(); state.newInbound.profile.reality_uuid = 'fake-sensitive-value';
     env.sandbox.axios.post = () => new Promise(() => {}); void state.saveInbound();
     vm.runInContext('endAdminSession()', env.context);
     assert.equal(state.showAddInbound.value, false); assert.equal(state.newInbound.profile.reality_uuid, '');
@@ -322,7 +322,7 @@ test('real app forced session expiry clears editor and can replace login while a
 });
 test('address-bar hash navigation obeys real editor dirty guard and restores the original cursor', async () => {
     const env = environment('/ui/#inbounds'), state = env.app();
-    await state.openAddInbound(); state.newInbound.remark = 'unsaved'; env.sandbox.confirm = () => false;
+    await state.openAdvancedInbound(); state.newInbound.remark = 'unsaved'; env.sandbox.confirm = () => false;
     const originalPosition = env.position;
     // Browser-created hash entries initially inherit the old state.
     env.history.pushState(env.history.state, '', '/ui/#cores'); env.emit('hashchange'); await flush();

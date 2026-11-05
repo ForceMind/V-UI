@@ -24,6 +24,11 @@ on:
         required: true
         type: boolean
         default: false
+      simple_node_no_browser:
+        description: Approved frozen 0.4.18 simple-node product and bounded release preparation, browsers unverified
+        required: true
+        type: boolean
+        default: false
       remote_maintenance_no_browser:
         description: Approved frozen 0.4.17 remote-maintenance product and bounded release preparation, browsers unverified
         required: true
@@ -77,6 +82,7 @@ jobs:
           VERSION: ${{ inputs.version }}
           CONFIRM: ${{ inputs.confirm }}
           PUBLISH: ${{ inputs.publish }}
+          SIMPLE_NODE_NO_BROWSER: ${{ inputs.simple_node_no_browser }}
           REMOTE_MAINTENANCE_NO_BROWSER: ${{ inputs.remote_maintenance_no_browser }}
           TLS_CERTIFICATE_NO_BROWSER: ${{ inputs.tls_certificate_no_browser }}
           UI_REDESIGN_NO_BROWSER: ${{ inputs.ui_redesign_no_browser }}
@@ -91,6 +97,7 @@ jobs:
           if [[ "$INSTALLER_ONLY_NO_BROWSER" == 'true' ]]; then args+=(--installer-only-no-browser); fi
           if [[ "$CA_TRUST_NO_BROWSER" == 'true' ]]; then args+=(--ca-trust-no-browser); fi
           if [[ "$INSTALL_INTERACTION_NO_BROWSER" == 'true' ]]; then args+=(--install-interaction-no-browser); fi
+          if [[ "$SIMPLE_NODE_NO_BROWSER" == 'true' ]]; then args+=(--simple-node-no-browser); fi
           if [[ "$REMOTE_MAINTENANCE_NO_BROWSER" == 'true' ]]; then args+=(--remote-maintenance-no-browser); fi
           if [[ "$TLS_CERTIFICATE_NO_BROWSER" == 'true' ]]; then args+=(--tls-certificate-no-browser); fi
           if [[ "$UI_REDESIGN_NO_BROWSER" == 'true' ]]; then args+=(--ui-redesign-no-browser); fi

@@ -1,4 +1,4 @@
-"""Opt-in empty-host public 0.4.14/0.4.15/0.4.16 -> exact candidate upgrade observations.
+"""Opt-in empty-host public 0.4.14/0.4.15/0.4.16/0.4.17 -> exact candidate upgrade observations.
 
 The old installation uses anonymous published HTTPS. Only the unpublished new
 kit's download transport is adapted; neither installer nor root receipt is faked.
@@ -18,6 +18,7 @@ PUBLISHED_BASELINES = {
     '0.4.14': 'b0cc174d04d05e61277075412586f0ba0dd231db',
     '0.4.15': '65b1e75d90de733408101ec280a92be935731baa',
     '0.4.16': '18fe631bcf69b68425b454db1795a101e0378842',
+    '0.4.17': '95c201c6e26ed54960f964c675e515890f2eea2a',
 }
 CONTROL = Path('/usr/local/lib/v-ui')
 FIREWALL = str(CONTROL / 'firewall_support.py')
@@ -40,15 +41,19 @@ def assert_download_boundary(test, kit, log):
 
 def fixed_public_baseline(version, commit):
     if version not in PUBLISHED_BASELINES or PUBLISHED_BASELINES[version] != commit:
-        raise AssertionError('Fixed public 0.4.14, 0.4.15 or 0.4.16 upgrade baseline required')
+        raise AssertionError('Fixed public 0.4.14, 0.4.15, 0.4.16 or 0.4.17 upgrade baseline required')
     return version, commit
 
 
 def assert_receipt_migration(test, before, after, old_version):
     if old_version not in PUBLISHED_BASELINES:
         raise AssertionError('Unknown public upgrade receipt baseline')
-    test.assertTrue(MAINTENANCE_FILES.isdisjoint(before['files']))
-    additions = MAINTENANCE_FILES | ({FIREWALL} if old_version == '0.4.14' else set())
+    if old_version == '0.4.17':
+        test.assertTrue(MAINTENANCE_FILES <= set(before['files']))
+        additions = set()
+    else:
+        test.assertTrue(MAINTENANCE_FILES.isdisjoint(before['files']))
+        additions = MAINTENANCE_FILES | ({FIREWALL} if old_version == '0.4.14' else set())
     test.assertEqual(set(after['files']) - set(before['files']), additions)
     if old_version == '0.4.14':
         test.assertNotIn(FIREWALL, before['files'])
@@ -57,6 +62,22 @@ def assert_receipt_migration(test, before, after, old_version):
     test.assertFalse(set(before['files']) - set(after['files']))
     for field in ('schema', 'service_manager', 'system_python', 'interpreter_resolved', 'interpreter_sha256'):
         test.assertEqual(after[field], before[field])
+
+
+def assert_node_summary_upgrade(test, before, after):
+    """Keep every historical field, permitting only the two derived booleans.
+
+    These are response capabilities, not a private-row/storage migration. The
+    separate database/material/subscription snapshots must remain byte-exact.
+    """
+    added = {'share_eligible', 'upstream_export_eligible'}
+    test.assertEqual(len(after), len(before))
+    for old, new in zip(before, after):
+        test.assertTrue(added.isdisjoint(old))
+        test.assertEqual(set(new), set(old) | added)
+        for key in added:
+            test.assertIs(type(new[key]), bool)
+        test.assertEqual({key: value for key, value in new.items() if key not in added}, old)
 
 
 def assert_upgrade_configuration(test, before, after, old_release, new_release):
@@ -215,7 +236,7 @@ with database.SessionLocal() as db:
 print('{}')
 ''')
         self.managed_xray = None
-        if self.old_version == '0.4.16':
+        if self.old_version in ('0.4.16', '0.4.17'):
             # The stored binding and its local fixture material are observed as
             # data only. No CA, certificate validation or business core is run.
             self.managed_xray = self._service_python(release, managed_xray_fixture_program())
@@ -270,7 +291,7 @@ print('{}')
         self.test.assertEqual(manifest['version'], self.candidate['version'])
         assert_receipt_migration(self.test, self.old_receipt, self._receipt(), self.old_version)
         self.test.assertEqual(self._snapshot(release), self.data, 'Private DB rows and certificate bytes must survive')
-        self.test.assertEqual(json.loads(api('/api/inbounds')[1]), self.nodes)
+        assert_node_summary_upgrade(self.test, self.nodes, json.loads(api('/api/inbounds')[1]))
         if self.manual_editor is not None:
             status, raw = api('/api/inbounds/'+str(self.nodes[0]['id'])+'/editor')
             self.test.assertEqual(status, 200)
@@ -286,7 +307,7 @@ print('{}')
         self.test.assertEqual(json.loads(api('/api/subscriptions')[1]), self.grants)
         self.public_subscription(api)
         assert_download_boundary(self.test, self.kit, self.new['download_log'])
-        print('Published upgrade: immutable public '+self.old_version+' source/assets -> exact candidate; exact historical root receipt closure; config, users/password hashes, node draft/manual TLS paths, live subscription, provided/managed fixture certificate bytes and managed certificate/binding metadata retained (synthetic un-applied Xray binding on 0.4.16; no CA/core qualification); candidate-only bounded downloads OK')
+        print('Published upgrade: immutable public '+self.old_version+' source/assets -> exact candidate; exact historical root receipt closure; config, users/password hashes, node draft/manual TLS paths, live subscription, provided/managed fixture certificate bytes and managed certificate/binding metadata retained (synthetic un-applied Xray binding on 0.4.16/17; no CA/core qualification); candidate-only bounded downloads OK')
 
     def public_subscription(self, api):
         status, raw = api(self.subscription)

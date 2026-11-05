@@ -24,6 +24,9 @@ CONTROL = Path('/usr/local/lib/v-ui')
 CLIENT = "import json,runpy,sys;api=runpy.run_path('/usr/local/lib/v-ui/maintenance_client.py');print(json.dumps(api['request'](json.loads(sys.stdin.read()))))"
 MAINTENANCE_UNIT = 'v-ui-maintenance.service'
 STATE_FIELDS = {'ActiveState', 'SubState', 'Result', 'ExecMainCode', 'ExecMainStatus'}
+SERVICE_UNITS = ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')
+SERVICE_FIELDS = ('LoadState', 'ActiveState', 'SubState', 'MainPID', 'ControlPID', 'ControlGroup',
+                  'User', 'Group', 'KillMode', 'NeedDaemonReload', 'FragmentPath', 'DropInPaths')
 STARTUP_CODES = ('ENTRY', 'LOAD_CONTROLLER', 'INSTANCE_LOCK', 'VERIFY_RECEIPT', 'STATE_DIRECTORY',
                  'TASK_DIRECTORY', 'SOCKET_DIRECTORY', 'READ_TASKS', 'SOCKET_BIND', 'SERVING')
 
@@ -97,13 +100,86 @@ def maintenance_diagnostics():
     return result
 
 
+def maintenance_failure_class(stderr):
+    # Inspect only the final fixed client exception. Never return a traceback,
+    # arbitrary exception text, captured stdout, or caller/request values.
+    last = stderr.rstrip().rsplit('\n', 1)[-1] if isinstance(stderr, str) else ''
+    if last.endswith('MaintenanceUnavailable: 系统维护未接受请求，请检查任务与本机受管组件'):
+        return 'DAEMON_REFUSED'
+    if last.endswith('MaintenanceUnavailable: 系统维护组件不可用，请通过本机终端检查'):
+        return 'SOCKET_OR_TRANSPORT_UNAVAILABLE'
+    return 'UNKNOWN'
+
+
+def safe_service_status(raw, unit):
+    if unit not in SERVICE_UNITS:
+        raise ValueError('Fixed service required')
+    values = {}
+    for line in raw.decode('ascii', errors='replace').splitlines():
+        key, separator, value = line.partition('=')
+        if not separator or key in values:
+            return {'diagnostic': 'INVALID_STATUS'}
+        if key in SERVICE_FIELDS:
+            values[key] = value
+    result = {}
+    choices = {
+        'LoadState': {'loaded', 'not-found', 'bad-setting', 'error', 'masked', 'merged', 'stub'},
+        'ActiveState': {'active', 'inactive', 'failed', 'activating', 'deactivating', 'reloading', 'maintenance'},
+        'SubState': {'running', 'dead', 'listening', 'auto-restart', 'start-pre', 'start', 'start-post',
+                     'stop', 'stop-sigterm', 'stop-sigkill', 'stop-post', 'final-sigterm', 'final-sigkill',
+                     'failed', 'exited', 'waiting'},
+        'User': {'', 'root', 'v-ui'}, 'Group': {'', 'root', 'v-ui'},
+        'KillMode': {'', 'control-group', 'process', 'mixed', 'none'},
+        'NeedDaemonReload': {'yes', 'no'},
+    }
+    for key, allowed in choices.items():
+        if key in values:
+            result[key] = values[key] if values[key] in allowed else 'OTHER'
+    for key in ('MainPID', 'ControlPID'):
+        if key in values:
+            result[key] = values[key] if re.fullmatch(r'0|[1-9][0-9]{0,9}', values[key]) else 'INVALID'
+    if 'FragmentPath' in values:
+        result['fragment_path_matches'] = values['FragmentPath'] == '/etc/systemd/system/' + unit
+    if 'ControlGroup' in values:
+        result['control_group_matches'] = values['ControlGroup'] == '/system.slice/' + unit
+        result['control_group_empty'] = values['ControlGroup'] == ''
+    if 'DropInPaths' in values:
+        result['has_drop_ins'] = values['DropInPaths'] != ''
+    return result
+
+
+def service_status_diagnostics():
+    result = {}
+    for unit in SERVICE_UNITS:
+        try:
+            raw = bounded_diagnostic(['/usr/bin/timeout', '3s', '/usr/bin/systemctl', 'show',
+                '--all', '--no-pager', '--property='+','.join(SERVICE_FIELDS), unit])
+            result[unit] = safe_service_status(raw, unit) if raw is not None else {'diagnostic': 'DIAGNOSTIC_UNAVAILABLE'}
+        except (OSError, ValueError, subprocess.SubprocessError):
+            result[unit] = {'diagnostic': 'DIAGNOSTIC_UNAVAILABLE'}
+    return result
+
+
 def invoke(value, *, user='v-ui', expect_success=True):
+    started = time.monotonic()
     result = subprocess.run(['sudo', '-u', user, '/usr/bin/python3', '-B', '-I', '-S', '-c', CLIENT],
         input=json.dumps(value), capture_output=True, text=True, timeout=15)
+    elapsed_ms = int(max(0, time.monotonic() - started) * 1000)
     if not expect_success:
         assert result.returncode != 0, 'Unexpected maintenance peer accepted'
         return
-    assert result.returncode == 0, 'Installed maintenance bridge unavailable'
+    if result.returncode != 0:
+        failure = {'classification': maintenance_failure_class(result.stderr),
+                   'returncode': result.returncode, 'elapsed_ms': elapsed_ms}
+        try:
+            failure['maintenance'] = maintenance_diagnostics()
+            if failure['classification'] == 'DAEMON_REFUSED':
+                failure['services'] = service_status_diagnostics()
+        except Exception:
+            # Diagnostics must neither replace the original failure nor expose
+            # their own exception. The failed request is never retried.
+            failure['diagnostic'] = 'DIAGNOSTIC_UNAVAILABLE'
+        raise AssertionError('Installed maintenance bridge unavailable: ' + json.dumps(failure, sort_keys=True)) from None
     return json.loads(result.stdout)
 
 

@@ -62,6 +62,8 @@ class InboundResponseRedactionTests(unittest.TestCase):
         for row in rows:
             self.assertNotIn('settings', row); self.assertNotIn('stream_settings', row)
             self.assertIs(type(row['managed_certificate_eligible']), bool)
+            self.assertIs(type(row['share_eligible']), bool)
+            self.assertIs(type(row['upstream_export_eligible']), bool)
             self.assertIs(type(row['credentials']['has_uuid']), bool)
             self.assertIs(type(row['credentials']['has_password']), bool)
 
@@ -165,6 +167,46 @@ class InboundResponseRedactionTests(unittest.TestCase):
                         db.commit()
                 row = next(x for x in self.client.get('/api/inbounds').json() if x['id'] == identity)
                 self.assertIs(row['managed_certificate_eligible'], expected)
+
+    def test_export_eligibility_is_safe_on_all_list_apis_and_matches_explicit_export_requests(self):
+        from tests.test_inbound_export_eligibility import inbound, reality, xray
+        for identity, item in enumerate((inbound(), reality(), xray()), start=40):
+            item.id = identity
+            item.port += identity
+            core = item.core
+            with database.SessionLocal() as db:
+                db.add(item); db.commit()
+            original = self.snapshot(identity)
+            for path in ('/api/inbounds', '/api/singbox/inbounds', '/api/xray/inbounds'):
+                listed = self.client.get(path)
+                self.assert_safe(listed)
+                # Legacy routes filter by their own core.
+                rows = [row for row in listed.json() if row['id'] == identity]
+                self.assertEqual(len(rows), 1 if path == '/api/inbounds' or
+                    (core == 'sing-box' and 'singbox' in path) or
+                    (core == 'xray' and 'xray' in path) else 0)
+                for row in rows:
+                    self.assertIs(row['share_eligible'], True)
+                    self.assertIs(row['upstream_export_eligible'], core == 'sing-box')
+            shared = self.client.get(f'/api/subscription/link/{identity}?host=actual.example.test')
+            self.assertEqual(shared.status_code, 200, shared.text)
+            upstream = self.client.post(f'/api/subscription/upstream/{identity}',
+                headers=auth_tests.HEADERS, json={'server': 'actual.example.test',
+                    'format': 'uri', 'acknowledge_tcp_only': True})
+            self.assertEqual(upstream.status_code, 200 if core == 'sing-box' else 409, upstream.text)
+            self.assertEqual(self.snapshot(identity), original)
+            with database.SessionLocal() as db:
+                stored = db.get(database.Inbound, identity)
+                stored.settings = {**stored.settings, 'future_secret': UNKNOWN}
+                db.commit()
+            for path in ('/api/inbounds', '/api/singbox/inbounds', '/api/xray/inbounds'):
+                listed = self.client.get(path); self.assert_safe(listed)
+                for row in [row for row in listed.json() if row['id'] == identity]:
+                    self.assertIs(row['share_eligible'], False)
+                    self.assertIs(row['upstream_export_eligible'], False)
+            denied = self.client.get(f'/api/subscription/link/{identity}?host=actual.example.test')
+            self.assertEqual(denied.status_code, 409, denied.text)
+            self.assertNotIn(UNKNOWN, denied.text)
 
     def test_privileged_editor_retains_manual_path_contract_but_not_secret_contents(self):
         from app.services.protocol_profiles import compile_profile

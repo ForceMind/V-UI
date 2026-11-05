@@ -1,3 +1,11 @@
+## 2026-11-05 v0.4.18 发布准备
+
+用户已批准 PR119 Ready、正常dev→main、公开18和更新短入口。产品冻结于85bc22d92696bb51a5eb71c1827838d0e0a05a54，其自身独审/九组12 jobs/四目标/真实安装和14/15/16升级已过；不借此授予后续提交资格。当前只补版本、严格本版非浏览器发布门禁、公开17保数据升级和说明，准确候选/dev/main另验。原配置/数据/旧资产保持；构建安装仅Actions，不browser，不进入VPS。[统一记录](SIMPLE_NODE_WIZARD_PROGRESS.md)。
+
+## 当前：简单节点向导开发（已确认线稿）
+
+用户已确认“按线稿开发”。从同树main7010c83/dev3b713f5建立release/v0.4.18，按用途引导新建、明确分享/给另一服务器使用，旧编辑器和数据保护保持；不回到VPS盲改节点。统一[实施契约](SIMPLE_NODE_WIZARD_CONTRACT.md)、[进度与准确证据](SIMPLE_NODE_WIZARD_PROGRESS.md)。只Actions构建/实际核心/安装、无browser；当前开发候选仍VERSION17，非18已发布，不覆盖17或其短入口，合并/公开/生产升级另需授权。下面17阶段快照保留；17短入口已经完成并准确合main7010c83。
+
 ## v0.4.17 已公开：短入口切换与验收
 
 PR115普通merge至dev A008，PR116普通merge至准确main95c201c6e26ed54960f964c675e515890f2eea2a；与发布候选A9同tree。候选/dev与PR/main各自全部非浏览器checks、四目标、14/15/16保数据升级均attempt1成功。人工发布run41876406580成功，已匿名核验19资产/tag/真实摘要及旧16资产不变。当前只切setup真实pin、short-install冻结源和配套说明/测试，应用/install/VERSION/发布器/公开资产不变。先验引导自己的候选/dev/main及实际main URL；公开匿名安装另记。浏览器未验证，不修改用户VPS。唯一记录继续[本批账本](REMOTE_MAINTENANCE_PROGRESS.md)。

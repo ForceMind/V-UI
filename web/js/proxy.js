@@ -74,6 +74,9 @@
         if (importController) importController.abort();
         importController=null; importBusy=false;
         $('import-content').value=''; $('import-file').value=''; resetPreview();
+        // A fresh simple import always starts with a connection link. Other
+        // formats remain explicitly selectable under the advanced controls.
+        $('import-format').value='uri';
         $('import-fields').disabled=false;
     }
     function closeImport() {

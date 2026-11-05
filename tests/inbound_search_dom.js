@@ -241,7 +241,10 @@ test('refresh retains the exact query and current generation, never applying a l
 });
 
 test('filtered row edit, export, share and cancelled delete keep the selected original identity', async t => {
-    const f = fixture(t); await f.load(); await f.search('beta');
+    const f = fixture(t), rows = sample();
+    // Explicit qualified TLS node for this action fixture; other search cases retain VMess.
+    Object.assign(rows[1], {protocol:'vless', share_eligible:true, upstream_export_eligible:true});
+    await f.load(rows); await f.search('beta');
     const selected = f.state.inbounds.value[1];
     assert.equal(f.table().children[0].props.row, selected);
     await f.button('编辑').props.onClick(); await flush();
@@ -249,14 +252,14 @@ test('filtered row edit, export, share and cancelled delete keep the selected or
     assert.equal(f.state.newInbound.remark, selected.remark);
     assert.deepEqual(f.reads, ['/api/inbounds', '/api/inbounds/72/editor', '/api/certificates']);
     f.state.closeInboundEditor();
-    f.button('导出为中转上游（仅 TCP）').props.onClick();
+    f.button('给另一台 V-UI').props.onClick();
     assert.equal(f.state.upstreamExport.inboundId, selected.id); assert.equal(f.state.upstreamExport.name, selected.remark);
     f.state.closeUpstreamExport();
-    const held = f.hold('/api/subscription/link/72'), sharing = f.button('分享').props.onClick();
+    const held = f.hold('/api/subscription/link/72'), sharing = f.button('分享给客户端').props.onClick();
     assert.equal(f.reads.at(-1), '/api/subscription/link/72');
     f.state.closeQrDialog(); held.resolve({data: 'synthetic-late-link'}); await sharing;
     assert.equal(f.state.qrLink.value, '');
-    await f.button('删除').props.onClick();
+    await f.button('删除节点').props.onClick();
     assert.deepEqual(f.confirmations, ['Delete Literal [a-z].* Beta:20472?']);
     assert.equal(f.state.inbounds.value[1], selected); assert.deepEqual(f.writes, []);
 });

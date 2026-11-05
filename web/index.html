@@ -147,38 +147,36 @@
                         </span>
                     </div>
                     <el-table :data="filteredInbounds" style="width: 100%" border>
-                        <el-table-column prop="id" label="ID" width="70"></el-table-column>
-                        <el-table-column prop="remark" label="备注"></el-table-column>
-                        <el-table-column prop="core" label="核心" width="110">
+                        <el-table-column label="节点" min-width="160">
                             <template #default="scope">
-                                <el-tag :type="scope.row.core === 'xray' ? 'primary' : 'success'">
-                                    {{ scope.row.core }}
-                                </el-tag>
+                                <strong>{{ scope.row.remark || '未命名节点' }}</strong>
+                                <p class="stat-text">端口 {{ scope.row.port }} · {{ scope.row.enable ? '已启用' : '已停用' }}</p>
                             </template>
                         </el-table-column>
-                        <el-table-column prop="protocol" label="协议" width="120"></el-table-column>
-                        <el-table-column prop="port" label="端口" width="100"></el-table-column>
-                        <el-table-column label="节点开关" width="100"><template #default="scope">{{ scope.row.enable ? '已启用' : '已停用' }}</template></el-table-column>
-                        <el-table-column label="已保存策略" min-width="130">
-                            <template #default="scope">{{ inboundSavedRouting(scope.row) }}</template>
-                        </el-table-column>
-                        <el-table-column label="已应用出口 / 状态" min-width="240">
-                            <template #default="scope">{{ inboundAppliedRouting(scope.row) }}</template>
-                        </el-table-column>
-                        <el-table-column label="操作" width="450">
+                        <el-table-column label="运行状态" min-width="210">
                             <template #default="scope">
-                                <el-button size="small" type="primary" plain @click="openEditInbound(scope.row)">
-                                    编辑 / 启停
-                                </el-button>
-                                <el-button size="small" @click="showQrCode(scope.row)">
-                                    分享
-                                </el-button>
-                                <el-button size="small" @click="openUpstreamExport(scope.row)">
-                                    导出为中转上游（仅 TCP）
-                                </el-button>
-                                <el-button size="small" type="danger" @click="deleteInbound(scope.row)">
-                                    删除
-                                </el-button>
+                                <p>{{ inboundAppliedRouting(scope.row) }}</p>
+                                <span class="stat-text">外部连接未验证</span>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="操作" min-width="370">
+                            <template #default="scope">
+                                <div class="node-common-actions">
+                                    <el-button v-if="scope.row.share_eligible === true" size="small" type="primary" plain @click="showQrCode(scope.row)">分享给客户端</el-button>
+                                    <el-button v-if="scope.row.upstream_export_eligible === true" size="small" @click="openUpstreamExport(scope.row)">给另一台 V-UI</el-button>
+                                    <el-button size="small" @click="openEditInbound(scope.row)">编辑</el-button>
+                                    <el-button size="small" :disabled="togglingInbound !== null" :loading="togglingInbound === scope.row.id" @click="toggleInbound(scope.row)">{{ scope.row.enable ? '停用' : '启用' }}</el-button>
+                                </div>
+                                <details class="node-more">
+                                    <summary>更多 / 技术详情</summary>
+                                    <p>ID {{ scope.row.id }} · {{ scope.row.core }} · {{ scope.row.protocol }}</p>
+                                    <p>已保存策略：{{ inboundSavedRouting(scope.row) }}</p>
+                                    <p>已应用出口 / 状态：{{ inboundAppliedRouting(scope.row) }}</p>
+                                    <p v-if="scope.row.share_eligible !== true" class="stat-text">此配置暂不具备普通分享资格，原配置保留。</p>
+                                    <p v-if="scope.row.upstream_export_eligible !== true" class="stat-text">此配置暂不具备另一台 V-UI 的 TCP 上游导出资格。</p>
+                                    <a href="/ui/#diagnostics">查看服务诊断</a>
+                                    <p><el-button size="small" type="danger" plain @click="deleteInbound(scope.row)">删除节点</el-button></p>
+                                </details>
                             </template>
                         </el-table-column>
                     </el-table>
@@ -496,7 +494,74 @@
         </el-container>
     </el-container>
 
-    <el-dialog v-model="showAddInbound" :title="editingInboundId ? '编辑节点' : '添加节点'" width="min(860px, 94vw)" class="vui-node-editor"
+    <el-dialog v-model="nodeWizard.open" title="创建节点" width="min(680px, 94vw)" class="node-wizard"
+        :before-close="beforeNodeWizardClose" :close-on-click-modal="!nodeWizard.busy"
+        :close-on-press-escape="!nodeWizard.busy" :show-close="!nodeWizard.busy">
+        <section id="node-wizard" :aria-busy="nodeWizard.busy">
+            <ol class="node-wizard-steps" aria-label="创建进度">
+                <li :aria-current="nodeWizard.step === 1 ? 'step' : undefined">1 选用途</li>
+                <li :aria-current="nodeWizard.step === 2 ? 'step' : undefined">2 确认信息</li>
+                <li :aria-current="nodeWizard.step === 3 ? 'step' : undefined">3 交付连接</li>
+            </ol>
+            <template v-if="nodeWizard.step === 1">
+                <h2>这个节点给谁用？</h2>
+                <div class="node-purpose-grid" role="group" aria-label="节点用途">
+                    <button type="button" class="node-purpose-card" :aria-pressed="nodeWizard.purpose === 'device'" @click="nodeWizard.purpose = 'device'">
+                        <strong>给手机或电脑用</strong><span>手机 / 电脑 → 本机 → 网站</span><small>创建后获取连接链接或二维码。</small>
+                    </button>
+                    <button type="button" class="node-purpose-card" :aria-pressed="nodeWizard.purpose === 'server'" @click="nodeWizard.purpose = 'server'">
+                        <strong>给另一台服务器用</strong><span>另一台服务器 → 本机 → 网站</span><small>本机提供出口，供另一台 V-UI 导入。</small>
+                    </button>
+                </div>
+                <p class="node-wizard-note">这两种用途都从本机直接访问网站，不需要填写其他服务器的配置。</p>
+                <details><summary>其他用途</summary><p>本机通过另一台服务器转发：手机 / 电脑 → 本机 → 另一台服务器 → 网站。</p><a href="/proxy">连接另一台服务器</a></details>
+            </template>
+            <template v-if="nodeWizard.step === 2">
+                <h2>确认连接信息</h2>
+                <p>{{ nodeWizard.purpose === 'device' ? '手机 / 电脑 → 本机 → 网站' : '另一台服务器 → 本机 → 网站' }}</p>
+                <el-form label-position="top" :disabled="nodeWizard.busy" @submit.prevent="createSimpleNode">
+                    <el-form-item label="名称（可不填）"><el-input id="node-wizard-name" v-model="nodeWizard.remark" placeholder="例如：我的服务器出口" maxlength="128"></el-input></el-form-item>
+                    <p v-if="wizardNameHint" role="alert" class="node-wizard-error">{{ wizardNameHint }}</p>
+                    <el-form-item label="连接端口"><el-input-number id="node-wizard-port" v-model="nodeWizard.port" :min="1024" :max="65535" :precision="0"></el-input-number></el-form-item>
+                    <p v-if="wizardPortHint" role="alert" class="node-wizard-error">{{ wizardPortHint }}</p>
+                    <p class="node-wizard-note">建议端口 10443。节点列表未占用不代表系统端口空闲或公网已放行；面板不会修改云防火墙。</p>
+                    <el-form-item label="已有正式证书">
+                        <el-select id="node-wizard-certificate" v-model="nodeWizard.certificateId" :disabled="nodeWizard.busy || nodeWizard.certificateState !== 'ready'" :loading="nodeWizard.certificateState === 'loading'" placeholder="请选择域名">
+                            <el-option v-for="cert in nodeWizard.certificates" :key="cert.id" :value="cert.id" :label="cert.domain"></el-option>
+                        </el-select>
+                    </el-form-item>
+                    <p v-if="nodeWizard.certificateState === 'loading'" role="status">正在读取已有证书…</p>
+                    <p v-else-if="nodeWizard.certificateState === 'error'" role="alert">证书列表读取失败，输入和选择已保留。<el-button text :disabled="nodeWizard.busy" @click="loadWizardCertificates">重试读取</el-button></p>
+                    <p v-else-if="nodeWizard.certificateState === 'ready' && !nodeWizard.certificates.length">没有可用的正式证书。<a href="/certificates">先获取证书</a>，完成后<el-button text @click="loadWizardCertificates">重新读取</el-button>。首次签发需在证书页明确同意 CA 条款。</p>
+                    <p v-else-if="nodeWizard.certificates.length > 1">有多张可用证书，请选择用于连接的域名。</p>
+                    <p v-else-if="nodeWizard.certificateId && !nodeWizard.certificates.some(cert => cert.id === nodeWizard.certificateId)" role="alert">原选择的证书已不可用，请重新选择或重试读取。</p>
+                    <p v-else-if="nodeWizard.certificateState === 'ready'">已自动选择唯一适用证书。</p>
+                </el-form>
+                <details><summary>高级设置</summary><p>推荐配置：sing-box / VLESS / 普通 TCP / TLS，从本机直接出口。连接凭据由服务器生成。</p><el-button :disabled="nodeWizard.busy" @click="wizardAdvanced">打开高级新建，选择其他协议或配置</el-button></details>
+                <p class="node-wizard-note">创建只保存节点并尝试应用。下一步由你明确生成含连接凭据的分享内容。</p>
+            </template>
+            <template v-if="nodeWizard.step === 3">
+                <h2>{{ nodeWizard.outcome === 'created' ? '节点已创建' : nodeWizard.outcome === 'saved' ? '节点已保存，应用未完成' : '创建结果待确认' }}</h2>
+                <p>{{ nodeWizard.remark || '未命名节点' }} · 端口 {{ nodeWizard.port }}</p>
+                <p>外部连接未验证。请在节点列表查看实际运行状态；服务启动不代表公网可达。</p>
+                <template v-if="nodeWizard.outcome === 'created'">
+                    <p>{{ nodeWizard.purpose === 'device' ? '点击下方按钮后获取含连接凭据的链接和二维码，导入手机或电脑客户端。' : '打开交付后，核对目标域名 / IP，明确确认仅 TCP 和敏感凭据，再生成供另一台 V-UI 导入的配置。' }}</p>
+                    <el-button id="node-wizard-deliver" type="primary" :disabled="nodeWizard.busy || !nodeWizard.row || (nodeWizard.purpose === 'device' ? nodeWizard.row.share_eligible !== true : nodeWizard.row.upstream_export_eligible !== true)" @click="wizardDeliver">{{ nodeWizard.purpose === 'device' ? '生成客户端链接 / 二维码' : '复制给另一台 V-UI' }}</el-button>
+                    <p v-if="!nodeWizard.row || (nodeWizard.purpose === 'device' ? nodeWizard.row.share_eligible !== true : nodeWizard.row.upstream_export_eligible !== true)" role="status">当前导出资格未能确认，请刷新列表检查。</p>
+                </template>
+                <el-button :loading="nodeWizard.busy" :disabled="nodeWizard.busy" @click="refreshWizardResult">刷新节点列表和状态</el-button>
+            </template>
+            <p v-if="nodeWizard.error" class="node-wizard-error" role="alert">{{ nodeWizard.error }}</p>
+        </section>
+        <template #footer>
+            <el-button v-if="nodeWizard.step === 2" :disabled="nodeWizard.busy" @click="nodeWizard.step = 1">上一步</el-button>
+            <el-button :disabled="nodeWizard.busy" @click="closeNodeWizard">{{ nodeWizard.step === 3 ? '返回节点列表' : '取消' }}</el-button>
+            <el-button v-if="nodeWizard.step === 1" type="primary" @click="nodeWizard.step = 2">下一步</el-button>
+            <el-button v-if="nodeWizard.step === 2" id="node-wizard-create" type="primary" :disabled="!wizardReady" :loading="nodeWizard.busy" @click="createSimpleNode">创建节点</el-button>
+        </template>
+    </el-dialog>
+
+    <el-dialog v-model="showAddInbound" :title="editingInboundId ? '编辑节点（高级）' : '高级新建节点'" width="min(860px, 94vw)" class="vui-node-editor"
         :before-close="beforeInboundEditorClose" @close="closeInboundEditor" :close-on-click-modal="!savingInbound" :close-on-press-escape="!savingInbound" :show-close="!savingInbound">
         <el-form :model="newInbound" label-width="130px" :disabled="savingInbound">
             <fieldset class="vui-editor-group" data-editor-group="basic"><legend>01 · 基础</legend>
@@ -899,11 +964,12 @@
                 type="warning" :closable="false"></el-alert>
             <p>仅支持已获资格的 sing-box VLESS TCP TLS / REALITY。导出不验证远端可达性；应用时仍会检查目标地址与中转策略。</p>
             <el-form label-position="top" @submit.prevent="requestUpstreamExport">
-                <el-form-item label="目标主机或 IP（必须显式填写，不含协议、端口或路径）">
+                <el-form-item label="目标主机或 IP（核对建议，可修改；不含协议、端口或路径）">
                     <el-input id="upstream-export-server" v-model="upstreamExport.server" autocomplete="off"
                         spellcheck="false" placeholder="例如 upstream.example.com 或 203.0.113.10"></el-input>
                 </el-form-item>
-                <el-form-item label="导出格式">
+                <p class="stat-text">建议地址取自所选证书域名或当前面板主机名，请核对它确实指向此节点；管理面板端口不会用于节点连接，TLS 名称仍由原节点保留。</p>
+                <el-form-item label="其他格式（高级）">
                     <select id="upstream-export-format" v-model="upstreamExport.format" aria-label="导出格式">
                         <option value="uri">URI</option>
                         <option value="clash-yaml">单节点 Clash YAML</option>
