@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import socket
 import struct
+import subprocess
 import tempfile
 import types
 import unittest
@@ -34,6 +35,112 @@ def no_lock(*args, **kwargs):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_failed_invoke_reports_only_fixed_classification_code_and_time_without_retry(self):
+        from scripts import system_maintenance_smoke as smoke
+        secret = 'synthetic-private-token-and-configuration'
+        cases = (
+            ('<run_path>.MaintenanceUnavailable: 系统维护未接受请求，请检查任务与本机受管组件', 'DAEMON_REFUSED'),
+            ('<run_path>.MaintenanceUnavailable: 系统维护组件不可用，请通过本机终端检查', 'SOCKET_OR_TRANSPORT_UNAVAILABLE'),
+            ('RuntimeError: ' + secret, 'UNKNOWN'),
+            ('<run_path>.MaintenanceUnavailable: 系统维护组件不可用，请通过本机终端检查 ' + secret, 'UNKNOWN'),
+        )
+        for final, expected in cases:
+            with self.subTest(expected=expected), \
+                 patch.object(smoke.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1,
+                     stdout=secret, stderr='Traceback ' + secret + '\n' + final + '\n')) as run, \
+                 patch.object(smoke.time, 'monotonic', side_effect=[100, 100.125]), \
+                 patch.object(smoke, 'maintenance_diagnostics', return_value={'unit': smoke.MAINTENANCE_UNIT,
+                     'ActiveState': 'active', 'journal_codes': ['UNCLASSIFIED']}) as maintenance, \
+                 patch.object(smoke, 'service_status_diagnostics', return_value={}) as services:
+                with self.assertRaises(AssertionError) as error:
+                    smoke.invoke({'protocol': 1, 'operation': 'status', 'synthetic_secret': secret})
+                message = str(error.exception)
+                self.assertTrue(message.startswith('Installed maintenance bridge unavailable: '))
+                record = json.loads(message.split(': ', 1)[1])
+                self.assertEqual(record['classification'], expected)
+                self.assertEqual(record['returncode'], 1)
+                self.assertEqual(record['elapsed_ms'], 125)
+                self.assertNotIn(secret, message)
+                self.assertNotIn('Traceback', message)
+                self.assertNotIn('stderr', record)
+                self.assertNotIn('stdout', record)
+                run.assert_called_once()
+                self.assertEqual(run.call_args.kwargs['timeout'], 15)
+                maintenance.assert_called_once()
+                self.assertEqual(services.call_count, int(expected == 'DAEMON_REFUSED'))
+
+    def test_invoke_success_expected_denial_and_diagnostic_failure_keep_original_outcomes(self):
+        from scripts import system_maintenance_smoke as smoke
+        for code, expected_success in ((0, True), (1, False), (0, False)):
+            with self.subTest(code=code, expected_success=expected_success), \
+                 patch.object(smoke.subprocess, 'run', return_value=subprocess.CompletedProcess([], code,
+                     stdout='{"ready": true}', stderr='synthetic-private-token')) as run, \
+                 patch.object(smoke, 'maintenance_diagnostics') as diagnostic:
+                if expected_success:
+                    self.assertEqual(smoke.invoke({}, expect_success=True), {'ready': True})
+                elif code:
+                    self.assertIsNone(smoke.invoke({}, expect_success=False))
+                else:
+                    with self.assertRaisesRegex(AssertionError, 'Unexpected maintenance peer accepted'):
+                        smoke.invoke({}, expect_success=False)
+                run.assert_called_once()
+                diagnostic.assert_not_called()
+        with patch.object(smoke.subprocess, 'run', return_value=subprocess.CompletedProcess([], 2,
+                stdout='synthetic-private-token', stderr='synthetic-private-token')) as run, \
+             patch.object(smoke, 'maintenance_diagnostics', side_effect=RuntimeError('synthetic-private-token')):
+            with self.assertRaises(AssertionError) as error:
+                smoke.invoke({})
+            record = json.loads(str(error.exception).split(': ', 1)[1])
+            self.assertEqual(record['returncode'], 2)
+            self.assertEqual(record['classification'], 'UNKNOWN')
+            self.assertEqual(record['diagnostic'], 'DIAGNOSTIC_UNAVAILABLE')
+            self.assertNotIn('synthetic-private-token', str(error.exception))
+            run.assert_called_once()
+
+    def test_fixed_service_status_projection_hides_unknown_values_and_material_paths(self):
+        from scripts import system_maintenance_smoke as smoke
+        secret = 'synthetic-private-token'
+        raw = ('LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=123\nControlPID=0\n'
+               'ControlGroup=/system.slice/v-ui.service\nUser=v-ui\nGroup=v-ui\nKillMode=control-group\n'
+               'NeedDaemonReload=no\nFragmentPath=/etc/systemd/system/v-ui.service\nDropInPaths=\n'
+               'Unknown=' + secret + '\n').encode()
+        record = smoke.safe_service_status(raw, 'v-ui.service')
+        self.assertEqual(record['MainPID'], '123')
+        self.assertTrue(record['fragment_path_matches'])
+        self.assertTrue(record['control_group_matches'])
+        self.assertFalse(record['has_drop_ins'])
+        self.assertNotIn(secret, json.dumps(record))
+        corrupt = ('LoadState=' + secret + '\nActiveState=' + secret + '\nSubState=' + secret +
+                   '\nMainPID=' + secret + '\nControlPID=-1\nUser=' + secret + '\nGroup=' + secret +
+                   '\nKillMode=' + secret + '\nNeedDaemonReload=' + secret + '\nFragmentPath=/' + secret +
+                   '\nControlGroup=/' + secret + '\nDropInPaths=/' + secret + '\n').encode()
+        record = smoke.safe_service_status(corrupt, 'v-ui.service')
+        self.assertEqual(record['MainPID'], 'INVALID')
+        self.assertEqual(record['ControlPID'], 'INVALID')
+        self.assertEqual(record['ActiveState'], 'OTHER')
+        self.assertFalse(record['fragment_path_matches'])
+        self.assertFalse(record['control_group_matches'])
+        self.assertTrue(record['has_drop_ins'])
+        self.assertNotIn(secret, json.dumps(record))
+        self.assertNotIn('/', json.dumps(record))
+        for invalid in (b'ActiveState=active\nActiveState=inactive\n', b'malformed\n'):
+            self.assertEqual(smoke.safe_service_status(invalid, 'v-ui.service'), {'diagnostic': 'INVALID_STATUS'})
+        with self.assertRaises(ValueError): smoke.safe_service_status(raw, 'sshd.service')
+
+    def test_service_status_diagnostics_only_reads_three_fixed_units_with_bounded_commands(self):
+        from scripts import system_maintenance_smoke as smoke
+        with patch.object(smoke, 'bounded_diagnostic', side_effect=[b'ActiveState=active\n', None,
+                OSError('synthetic-private-token')]) as query:
+            records = smoke.service_status_diagnostics()
+        self.assertEqual(tuple(records), smoke.SERVICE_UNITS)
+        self.assertEqual(records['v-ui.service'], {'ActiveState': 'active'})
+        for unit in smoke.SERVICE_UNITS[1:]:
+            self.assertEqual(records[unit], {'diagnostic': 'DIAGNOSTIC_UNAVAILABLE'})
+        self.assertNotIn('synthetic-private-token', json.dumps(records))
+        for call, unit in zip(query.call_args_list, smoke.SERVICE_UNITS):
+            self.assertEqual(call.args[0], ['/usr/bin/timeout', '3s', '/usr/bin/systemctl', 'show',
+                '--all', '--no-pager', '--property=' + ','.join(smoke.SERVICE_FIELDS), unit])
+
     def test_failed_service_diagnostics_only_disclose_fixed_classifications(self):
         from scripts.system_maintenance_smoke import safe_maintenance_journal, maintenance_diagnostics
         raw = ('\n'.join(json.dumps({'MESSAGE': text}) for text in (
