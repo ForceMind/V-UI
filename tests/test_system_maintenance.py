@@ -35,6 +35,103 @@ def no_lock(*args, **kwargs):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_request_budget_cannot_extend_the_original_fifteen_second_limit(self):
+        from scripts import system_maintenance_smoke as smoke
+        for invalid in (0, -1, 15.01, True, float('inf'), float('nan'), '15'):
+            with self.subTest(invalid=invalid), patch.object(smoke.subprocess, 'run') as run:
+                with self.assertRaisesRegex(AssertionError, 'request budget'):
+                    smoke.invoke({'operation': 'status'}, timeout=invalid)
+                run.assert_not_called()
+
+    def test_readiness_waits_only_for_transport_and_never_retries_a_mutation(self):
+        from scripts import system_maintenance_smoke as smoke
+        with patch.object(smoke, 'invoke', side_effect=[smoke.BridgeTransportUnavailable('safe diagnostic'), {'busy': False}]) as invoke, \
+             patch.object(smoke.time, 'monotonic', return_value=100), patch.object(smoke.time, 'sleep') as sleep:
+            self.assertEqual(smoke.read_when_available({'operation': 'status'}, 101), {'busy': False})
+            self.assertEqual(invoke.call_count, 2)
+            self.assertTrue(all(c.args[0]['operation'] == 'status' for c in invoke.call_args_list))
+            self.assertTrue(all(c.kwargs['timeout'] == 1 for c in invoke.call_args_list))
+            sleep.assert_called_once_with(.2)
+        for operation in ('submit', 'restore', 'upgrade'):
+            with self.subTest(operation=operation), patch.object(smoke, 'invoke') as invoke:
+                with self.assertRaisesRegex(AssertionError, 'Only fixed maintenance reads'):
+                    smoke.read_when_available({'operation': operation}, 101)
+                invoke.assert_not_called()
+
+    def test_readiness_preserves_refusals_unknown_errors_and_original_deadline(self):
+        from scripts import system_maintenance_smoke as smoke
+        for error in (AssertionError('DAEMON_REFUSED'), ValueError('UNKNOWN')):
+            with self.subTest(error=type(error)), patch.object(smoke, 'invoke', side_effect=error) as invoke, \
+                 patch.object(smoke.time, 'monotonic', return_value=100), patch.object(smoke.time, 'sleep') as sleep:
+                with self.assertRaises(type(error)) as raised:
+                    smoke.read_when_available({'operation': 'get'}, 101)
+                self.assertIs(raised.exception, error)
+                invoke.assert_called_once(); sleep.assert_not_called()
+        error = smoke.BridgeTransportUnavailable('safe original diagnostic')
+        with patch.object(smoke, 'invoke', side_effect=error) as invoke, \
+             patch.object(smoke.time, 'monotonic', side_effect=[100, 101]), patch.object(smoke.time, 'sleep') as sleep:
+            with self.assertRaises(smoke.BridgeTransportUnavailable) as raised:
+                smoke.read_when_available({'operation': 'status'}, 101)
+            self.assertIs(raised.exception, error)
+            invoke.assert_called_once(); sleep.assert_not_called()
+        with patch.object(smoke, 'invoke') as invoke, patch.object(smoke.time, 'monotonic', return_value=101):
+            with self.assertRaisesRegex(AssertionError, 'original deadline'):
+                smoke.read_when_available({'operation': 'status'}, 101)
+            invoke.assert_not_called()
+        with patch.object(smoke, 'invoke', return_value={'busy': False}), \
+             patch.object(smoke.time, 'monotonic', side_effect=[100, 102]):
+            with self.assertRaisesRegex(AssertionError, 'after its original deadline'):
+                smoke.read_when_available({'operation': 'status'}, 101)
+
+    def test_wait_idle_requires_explicit_false_and_respects_quiescence_deadline(self):
+        from scripts import system_maintenance_smoke as smoke
+        with patch.object(smoke, 'read_when_available', side_effect=[{'busy': True}, {'busy': False}]) as read, \
+             patch.object(smoke.time, 'monotonic', return_value=100), patch.object(smoke.time, 'sleep') as sleep:
+            self.assertEqual(smoke.wait_idle(101), {'busy': False})
+            self.assertEqual(read.call_count, 2); sleep.assert_called_once_with(.2)
+        for invalid in ({}, {'busy': 0}, {'busy': None}, {'busy': 'false'}):
+            with self.subTest(invalid=invalid), patch.object(smoke, 'read_when_available', return_value=invalid):
+                with self.assertRaisesRegex(AssertionError, 'busy state'):smoke.wait_idle(101)
+        with patch.object(smoke, 'read_when_available', return_value={'busy': True}), \
+             patch.object(smoke.time, 'monotonic', return_value=101):
+            with self.assertRaisesRegex(AssertionError, 'original deadline'):smoke.wait_idle(101)
+
+    def test_task_waits_for_idle_after_success_and_submits_exactly_once(self):
+        from scripts import system_maintenance_smoke as smoke
+        queued = {'id': 'synthetic-task', 'state': 'queued'}
+        succeeded = {**queued, 'state': 'succeeded'}
+        with patch.object(smoke.time, 'monotonic', return_value=100), patch.object(smoke.time, 'sleep'), \
+             patch.object(smoke, 'wait_idle') as idle, \
+             patch.object(smoke, 'invoke', return_value=queued) as invoke, \
+             patch.object(smoke, 'read_when_available', return_value=succeeded) as read:
+            self.assertEqual(smoke.task('backup'), succeeded)
+            invoke.assert_called_once_with({'protocol': 1, 'operation': 'submit', 'action': 'backup'}, timeout=15)
+            self.assertEqual(idle.call_args_list, [unittest.mock.call(250), unittest.mock.call(250)])
+            read.assert_called_once_with({'protocol': 1, 'operation': 'get', 'task_id': 'synthetic-task'}, 250)
+        with patch.object(smoke.time, 'monotonic', return_value=100), patch.object(smoke, 'wait_idle') as idle, \
+             patch.object(smoke, 'invoke', side_effect=AssertionError('DAEMON_REFUSED')) as invoke:
+            with self.assertRaisesRegex(AssertionError, 'DAEMON_REFUSED'):smoke.task('backup')
+            invoke.assert_called_once(); idle.assert_called_once_with(250)
+
+    def test_failed_task_and_nonquiescent_worker_cannot_become_success(self):
+        from scripts import system_maintenance_smoke as smoke
+        queued = {'id': 'synthetic-task', 'state': 'queued'}
+        with patch.object(smoke.time, 'monotonic', return_value=100), patch.object(smoke.time, 'sleep'), \
+             patch.object(smoke, 'wait_idle') as idle, patch.object(smoke, 'invoke', return_value=queued) as invoke, \
+             patch.object(smoke, 'read_when_available', return_value={**queued, 'state': 'failed'}):
+            with self.assertRaisesRegex(AssertionError, 'did not confirm success'):smoke.task('backup')
+            invoke.assert_called_once(); idle.assert_called_once_with(250)
+        with patch.object(smoke.time, 'monotonic', return_value=100), \
+             patch.object(smoke, 'wait_idle', side_effect=AssertionError('worker still busy')), patch.object(smoke, 'invoke') as invoke:
+            with self.assertRaisesRegex(AssertionError, 'worker still busy'):smoke.task('backup')
+            invoke.assert_not_called()
+        with patch.object(smoke.time, 'monotonic', return_value=100), patch.object(smoke.time, 'sleep'), \
+             patch.object(smoke, 'wait_idle', side_effect=[None, AssertionError('completed child not reaped')]), \
+             patch.object(smoke, 'invoke', return_value=queued) as invoke, \
+             patch.object(smoke, 'read_when_available', return_value={**queued, 'state': 'succeeded'}):
+            with self.assertRaisesRegex(AssertionError, 'child not reaped'):smoke.task('backup')
+            invoke.assert_called_once()
+
     def test_failed_invoke_reports_only_fixed_classification_code_and_time_without_retry(self):
         from scripts import system_maintenance_smoke as smoke
         secret = 'synthetic-private-token-and-configuration'

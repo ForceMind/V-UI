@@ -61,3 +61,11 @@ CI诊断补丁已完成：首次非零即失败，无重试；仅返回固定分
 旧版本升级验收因公开摘要合法增加两bool，采用精确additive比较：数量顺序及所有旧字段逐一不变，仅允许这两个strict bool，不接纳其他extra/missing；旧私有DB哈希、证书字节、订阅原字节、editor/config/receipt断言不变。补类型/字段漂移负向，不以放宽数据保护制造成功。
 
 最终准确提交、Actions的run/job/step与未验证边界在本文件及承载PR集中记录；不借17的旧绿灯，不为回写自身SHA循环提交。
+
+## dev 准确验收中的 CI 同步修正
+
+PR119 已正常合入 dev f72e39ac49aaa2aeacdf134d688a03c71c36da3e，PR120 等待其全部资格。push run41982365249/attempt1 首次维护 status 在27ms内报告 SOCKET_OR_TRANSPORT_UNAVAILABLE，unit仍active/running；一次不改代码复验后初始安装通过。独立PR run41982443628/job127095411850 在旧15升级阶段，status任务成功后立即提交backup被DAEMON_REFUSED。两次失败保留，不再用重复重跑替代同步修正。
+
+源码确认 Type=simple/MainPID 不保证监听就绪，成功任务行持久化也早于父进程回收子进程及清除busy。测试助手原来把这两者当作可立即请求和串行提交的条件。当前仅修CI观察顺序：初次只读等待实际通道，提交前及成功后等待明确busy=false。只读status/get仅在已分类transport不可用时等待，未知错误和daemon拒绝立即失败；所有变更操作只提交一次。原15秒请求上限及150秒任务成功期限保持，准备和回收均计入同一任务期限，迟到成功拒绝。超时保留安全诊断，不放宽授权、完整性、数据或失败拒绝断言。
+
+新增范围仅两个CI文件 scripts/system_maintenance_smoke.py、tests/test_system_maintenance.py，由发布门禁逐字节SHA-256固定，拒绝其他内容；应用、UI、root组件、依赖和核心保持原冻结。只读等待、禁止变更重试、预算、明确busy类型及完成后仍忙失败等28项纯mock检查通过。macOS临时目录组继承差异单独保留，不修改产品目录安全断言。修正仍须独审及自身候选/dev/main全套Actions和真实安装；浏览器未验证。

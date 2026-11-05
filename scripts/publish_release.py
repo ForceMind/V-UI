@@ -156,6 +156,11 @@ SIMPLE_NODE_FILES = {
     'docs/RELEASE_NOTES.md', 'docs/DEVELOPMENT_HANDOFF.md',
     'docs/MANAGED_OPERATIONS.md', 'docs/SIMPLE_NODE_WIZARD_PROGRESS.md',
 }
+SIMPLE_NODE_CI_FIX_HASHES = {
+    'scripts/system_maintenance_smoke.py': '8b0f8d030ee0d5dd8f825bb27407d4650464b9bfe0f7c26a9e2f12d2ce486ec8',
+    'tests/test_system_maintenance.py': '6fc9d4d59a1c69367a73f4a96ac25ebb44da9688b159b7920cf4263457daf6bc',
+}
+SIMPLE_NODE_FILES |= set(SIMPLE_NODE_CI_FIX_HASHES)
 SIMPLE_NODE_UPGRADE_STEP = 'Test published v0.4.17 to exact candidate upgrade on ephemeral systemd runner'
 SIMPLE_NODE_LOOPBACK_STEPS = {
     'Fetch checksum-pinned real binaries',
@@ -546,6 +551,10 @@ def validate_simple_node_scope(commit, version):
             entry=subprocess.check_output(['git','ls-tree',commit,'--',name],text=True)
             if not re.fullmatch(mode+r' blob [a-f0-9]{40}\t'+re.escape(name)+r'\n',entry):
                 raise ReleaseGateError('Simple node release exception refuses nonregular files or mode changes')
+            if name in SIMPLE_NODE_CI_FIX_HASHES:
+                content = subprocess.check_output(['git','show',commit+':'+name])
+                if hashlib.sha256(content).hexdigest() != SIMPLE_NODE_CI_FIX_HASHES[name]:
+                    raise ReleaseGateError('Simple node CI synchronization fix bytes differ from the reviewed fixture')
         previous=subprocess.check_output(['git','show',SIMPLE_NODE_BASELINE+':main.py'])
         current=subprocess.check_output(['git','show',commit+':main.py'])
         if previous.count(b"version='0.4.17'")!=1 or current!=previous.replace(b"version='0.4.17'",b"version='0.4.18'",1):

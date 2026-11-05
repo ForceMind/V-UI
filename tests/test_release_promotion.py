@@ -29,6 +29,7 @@ from scripts.publish_release import (
     INSTALLER_ONLY_BASELINE,
     validate_ca_trust_scope,
     CA_TRUST_BASELINE,
+    SIMPLE_NODE_CI_FIX_HASHES,
     SIMPLE_NODE_BASELINE,
     SIMPLE_NODE_FILES,
     SIMPLE_NODE_UPGRADE_STEP,
@@ -647,7 +648,7 @@ class RemoteMaintenanceReleaseTests(unittest.TestCase):
 
 class SimpleNodeReleaseTests(unittest.TestCase):
     def scope(self, changes='M\tVERSION\nM\tmain.py\nM\tinstall.sh\n', mode=None,
-              application_extra=b'', installer_extra=b'', version=b'0.4.18\n', ancestry=True):
+              application_extra=b'', installer_extra=b'', version=b'0.4.18\n', ancestry=True, ci_extra=b''):
         app=b"app = FastAPI(version='0.4.17')\n"
         installer=b'# install.sh --version v0.4.17\nactual_installer()\n'
         def git(args, **kwargs):
@@ -658,6 +659,8 @@ class SimpleNodeReleaseTests(unittest.TestCase):
                 file_mode=mode or ('100755' if args[-1] in ('install.sh','setup.sh') else '100644')
                 return file_mode+' blob '+'f'*40+'\t'+args[-1]+'\n'
             if args[1]=='show':
+                if args[2] in (SHA+':'+name for name in SIMPLE_NODE_CI_FIX_HASHES):
+                    return b'approved CI fixture\n'+ci_extra
                 return {
                     SIMPLE_NODE_BASELINE+':main.py': app,
                     SHA+':main.py': app.replace(b'0.4.17',b'0.4.18')+application_extra,
@@ -667,7 +670,8 @@ class SimpleNodeReleaseTests(unittest.TestCase):
                 }[args[2]]
             raise AssertionError(args)
         failure=None if ancestry else subprocess.CalledProcessError(1,['git','merge-base'])
-        with patch('scripts.publish_release.subprocess.run',side_effect=failure) as ancestor, \
+        with patch('scripts.publish_release.SIMPLE_NODE_CI_FIX_HASHES', {name: hashlib.sha256(b'approved CI fixture\n').hexdigest() for name in SIMPLE_NODE_CI_FIX_HASHES}), \
+                patch('scripts.publish_release.subprocess.run',side_effect=failure) as ancestor, \
                 patch('scripts.publish_release.subprocess.check_output',side_effect=git):
             validate_simple_node_scope(SHA,'0.4.18')
             self.assertEqual(ancestor.call_args.args[0],
@@ -676,6 +680,13 @@ class SimpleNodeReleaseTests(unittest.TestCase):
     def test_approved_version_and_exact_release_paths_allowed(self):
         self.scope(changes=''.join('M\t'+path+'\n' for path in sorted(SIMPLE_NODE_FILES)))
         self.scope(changes='A\ttests/published_upgrade_helpers.py\n')
+
+    def test_ci_helpers_allow_only_the_reviewed_fixed_bytes(self):
+        for name in SIMPLE_NODE_CI_FIX_HASHES:
+            with self.subTest(name=name):
+                self.scope(changes='M\t'+name+'\n')
+                with self.assertRaisesRegex(ReleaseGateError, 'bytes differ'):
+                    self.scope(changes='M\t'+name+'\n', ci_extra=b'weakened assertion\n')
 
     def test_exception_rejects_old_future_or_nonstable_versions_before_git(self):
         for version in ('0.4.17','0.4.19','0.5.0','0.4.18-rc1'):

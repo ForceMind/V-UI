@@ -160,10 +160,15 @@ def service_status_diagnostics():
     return result
 
 
-def invoke(value, *, user='v-ui', expect_success=True):
+class BridgeTransportUnavailable(AssertionError):
+    """A read may wait for listener recreation; mutations still fail once."""
+
+
+def invoke(value, *, user='v-ui', expect_success=True, timeout=15):
+    assert type(timeout) in (int, float) and 0 < timeout <= 15, 'Invalid maintenance request budget'
     started = time.monotonic()
     result = subprocess.run(['sudo', '-u', user, '/usr/bin/python3', '-B', '-I', '-S', '-c', CLIENT],
-        input=json.dumps(value), capture_output=True, text=True, timeout=15)
+        input=json.dumps(value), capture_output=True, text=True, timeout=timeout)
     elapsed_ms = int(max(0, time.monotonic() - started) * 1000)
     if not expect_success:
         assert result.returncode != 0, 'Unexpected maintenance peer accepted'
@@ -179,19 +184,66 @@ def invoke(value, *, user='v-ui', expect_success=True):
             # Diagnostics must neither replace the original failure nor expose
             # their own exception. The failed request is never retried.
             failure['diagnostic'] = 'DIAGNOSTIC_UNAVAILABLE'
-        raise AssertionError('Installed maintenance bridge unavailable: ' + json.dumps(failure, sort_keys=True)) from None
+        error = BridgeTransportUnavailable if failure['classification'] == 'SOCKET_OR_TRANSPORT_UNAVAILABLE' else AssertionError
+        raise error('Installed maintenance bridge unavailable: ' + json.dumps(failure, sort_keys=True)) from None
     return json.loads(result.stdout)
 
 
+def read_when_available(value, deadline):
+    # Only idempotent observations may wait for the initial listener or the
+    # documented daemon exec after upgrade/receipt refresh. Never resubmit work.
+    assert value.get('operation') in ('status', 'get'), 'Only fixed maintenance reads may wait'
+    probes = 0
+    last_transport_error = None
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 and last_transport_error is not None:
+            raise last_transport_error
+        assert remaining > 0, 'Maintenance read readiness exceeded its original deadline'
+        try:
+            result = invoke(value, timeout=min(15, remaining))
+            assert time.monotonic() <= deadline, 'Maintenance read completed after its original deadline'
+            if probes:
+                print('Maintenance read-only listener readiness confirmed; transport probes=' + str(probes), flush=True)
+            return result
+        except BridgeTransportUnavailable as error:
+            last_transport_error = error
+            probes += 1
+            if probes == 1:
+                print('Maintenance read-only listener pending; waiting within the original deadline', flush=True)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(.2, remaining))
+
+
+def wait_idle(deadline):
+    while True:
+        status = read_when_available({'protocol': 1, 'operation': 'status'}, deadline)
+        assert type(status.get('busy')) is bool, 'Missing or invalid maintenance busy state'
+        if not status['busy']:
+            return status
+        remaining = deadline - time.monotonic()
+        assert remaining > 0, 'Maintenance worker did not quiesce within its original deadline'
+        time.sleep(min(.2, remaining))
+
+
 def task(action):
-    row = invoke({'protocol': 1, 'operation': 'submit', 'action': action})
+    deadline = time.monotonic() + 150
+    wait_idle(deadline)
+    # Exactly one mutating submit. Refusals and unknown errors remain failures.
+    remaining = deadline - time.monotonic()
+    assert remaining > 0, 'Maintenance task budget expired before submission'
+    row = invoke({'protocol': 1, 'operation': 'submit', 'action': action}, timeout=min(15, remaining))
     assert row['state'] == 'queued', 'Task not durably registered before response'
     identity = row['id']
-    deadline = time.monotonic() + 150
     while row['state'] in ('queued', 'running') and time.monotonic() < deadline:
         time.sleep(.2)
-        row = invoke({'protocol': 1, 'operation': 'get', 'task_id': identity})
+        row = read_when_available({'protocol': 1, 'operation': 'get', 'task_id': identity}, deadline)
     assert row['state'] == 'succeeded', 'Installed task did not confirm success: ' + action
+    # A durable succeeded row precedes child exit/reaping; busy remains true
+    # until then. Respect that contract before chaining another task.
+    wait_idle(deadline)
     return row
 
 
@@ -205,8 +257,8 @@ def nonroot_smoke(check, source, kit, api, expected_proxy):
     assert os.geteuid() != 0
     assert os.getenv('GITHUB_ACTIONS') == 'true' and os.getenv('RUNNER_ENVIRONMENT') == 'github-hosted'
     assert os.getenv('VUI_SYSTEM_INSTALL_TEST') == '1'
+    status = wait_idle(time.monotonic() + 15)
     pid = daemon_pid()
-    status = invoke({'protocol': 1, 'operation': 'status'})
     check.assertEqual(status['services']['v-ui.service'], 'active')
     check.assertTrue(status['ready'])
     check.assertRegex(status['release_id'], r'^[0-9]+\.[0-9]+\.[0-9]+-[a-f0-9]{12}$')
