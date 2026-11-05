@@ -13,10 +13,27 @@ from unittest.mock import patch
 from published_upgrade_helpers import (FIREWALL, MAINTENANCE_FILES, PUBLISHED_BASELINES, PublishedUpgrade,
                                        assert_download_boundary, assert_receipt_migration,
                                        assert_upgrade_configuration, fixed_public_baseline,
-                                       managed_xray_fixture_program)
+                                       managed_xray_fixture_program, assert_node_summary_upgrade)
 
 
 class PublishedUpgradeBoundaryTests(unittest.TestCase):
+    def test_summary_additions_are_only_strict_booleans_without_old_field_drift(self):
+        before=[{'id':1,'core':'sing-box','port':10443,'remark':'preserve',
+                 'enable':True,'routing_mode':'inherit','mutation_revision':'a'*64}]
+        after=[{**before[0],'share_eligible':True,'upstream_export_eligible':True}]
+        assert_node_summary_upgrade(self,before,after)
+        for change in ({'share_eligible':1},{'upstream_export_eligible':None},
+                       {'remark':'replaced'},{'routing_mode':'direct'},
+                       {'mutation_revision':'b'*64},{'raw_settings':{'secret':'fake'}}):
+            bad=[{**after[0],**change}]
+            with self.subTest(change=change),self.assertRaises(AssertionError):
+                assert_node_summary_upgrade(self,before,bad)
+        for key in after[0]:
+            bad=deepcopy(after);del bad[0][key]
+            with self.subTest(missing=key),self.assertRaises(AssertionError):
+                assert_node_summary_upgrade(self,before,bad)
+        with self.assertRaises(AssertionError):assert_node_summary_upgrade(self,before,after+after)
+
     def test_configuration_requires_exact_runtime_transition_and_preserved_fields(self):
         old_release=Path('/var/lib/v-ui/releases/old-014')
         new_release=Path('/var/lib/v-ui/releases/candidate-015')
@@ -91,10 +108,11 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
         with self.assertRaises(AssertionError):assert_receipt_migration(self,after,after,'0.4.14')
 
 
-    def test_only_immutable_public_014_015_and_016_sources_are_accepted(self):
+    def test_only_immutable_public_014_through_017_sources_are_accepted(self):
         expected={'0.4.14':'b0cc174d04d05e61277075412586f0ba0dd231db',
                   '0.4.15':'65b1e75d90de733408101ec280a92be935731baa',
-                  '0.4.16':'18fe631bcf69b68425b454db1795a101e0378842'}
+                  '0.4.16':'18fe631bcf69b68425b454db1795a101e0378842',
+                  '0.4.17':'95c201c6e26ed54960f964c675e515890f2eea2a'}
         self.assertEqual(PUBLISHED_BASELINES,expected)
         for version,commit in expected.items():
             self.assertEqual(fixed_public_baseline(version,commit),(version,commit))
@@ -138,7 +156,13 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
                         assert_receipt_migration(self,before,changed,version)
             legacy=deepcopy(before);del legacy['files'][FIREWALL]
             with self.assertRaises(AssertionError):assert_receipt_migration(self,legacy,after,version)
+        assert_receipt_migration(self,after,after,'0.4.17')
         with self.assertRaises(AssertionError):assert_receipt_migration(self,before,after,'0.4.17')
+        missing=deepcopy(after);missing['files'].pop(next(iter(MAINTENANCE_FILES)))
+        with self.assertRaises(AssertionError):assert_receipt_migration(self,missing,after,'0.4.17')
+        with self.assertRaises(AssertionError):assert_receipt_migration(self,after,missing,'0.4.17')
+        extra=deepcopy(after);extra['files']['/unrelated.py']='f'*64
+        with self.assertRaises(AssertionError):assert_receipt_migration(self,after,extra,'0.4.17')
 
     def test_managed_xray_fixture_keeps_local_material_and_pending_binding_without_apply(self):
         # Execute only the pure fixture construction against in-memory models.

@@ -25,9 +25,16 @@ def extract_selected(data: bytes, pin: dict, target: Path) -> dict:
             files[name]=hashlib.sha256(content).hexdigest()
     return files
 
-def fetch(target: Path):
+def fetch(target: Path, *, template_compiler=False):
     if target.exists(): raise ValueError('Use an empty asset destination')
     pins=json.loads((ROOT/'deploy/frontend-pins.json').read_text())
+    if template_compiler:
+        # CI-only diagnostics from the very same integrity-pinned Vue archive.
+        # Never replace or add to the deployment/default selected assets.
+        pins={'vue': {**pins['vue'], 'files': {
+            'package/dist/vue.global.js': 'vue-compiler.js',
+            'package/LICENSE': 'licenses/vue-LICENSE',
+        }}}
     target.mkdir(parents=True,mode=0o700)
     evidence={}
     for name,pin in pins.items():
@@ -37,5 +44,10 @@ def fetch(target: Path):
     (target/'PROVENANCE.json').write_text(json.dumps(evidence,indent=2))
 
 if __name__=='__main__':
-    import sys
-    fetch(Path(sys.argv[1]) if len(sys.argv)>1 else ROOT/'web/vendor')
+    import argparse
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('target', type=Path, nargs='?', default=ROOT/'web/vendor')
+    parser.add_argument('--template-compiler', action='store_true',
+                        help='prepare only the pinned development compiler for CI syntax checks')
+    args=parser.parse_args()
+    fetch(args.target, template_compiler=args.template_compiler)

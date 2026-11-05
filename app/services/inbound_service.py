@@ -22,6 +22,7 @@ from app.services import tuic_profile, reality_profile
 from app.services.node_selection_revision import node_selection_revision
 from app.services.inbound_instance_revision import INSTANCE_CHANGED, REVISION_RE, mutation_revision
 from app.services.managed_tls import eligible as managed_certificate_eligible
+from app.services.inbound_export_eligibility import export_eligibility
 
 SUPPORTED_CORES = {"xray", "sing-box"}
 XRAY_PROTOCOLS = {"vless", "vmess", "trojan", "shadowsocks"}
@@ -210,6 +211,7 @@ def to_dict(item: Inbound) -> dict:
             "has_obfs_password": isinstance(obfs, dict) and bool(obfs.get("password")),
         },
         "managed_certificate_eligible": managed_certificate_eligible(item),
+        **export_eligibility(item),
         "tag": item.tag,
     }
 

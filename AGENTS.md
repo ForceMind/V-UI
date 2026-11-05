@@ -1,5 +1,18 @@
 # V-UI 开发约束
 
+## v0.4.18 安装验收同步（当前必要修正）
+
+准确dev安装验收出现维护监听尚未就绪、成功任务子进程尚未回收时紧接提交被拒绝的两类同步问题。为满足原验收，仅调整两个CI助手文件的只读就绪及busy=false等待，保持变更操作只提交一次、原请求/任务成功期限和全部安全/数据断言；发布门禁将这两个文件按完整SHA-256固定，不开放任意CI变更。应用/UI/root/依赖/核心仍冻结85bc22d。此必要修正须自己的独审、准确候选/dev/main Actions后才能晋升，不继承f72的部分绿灯；旧失败保留，进度沿用docs/SIMPLE_NODE_WIZARD_PROGRESS.md。
+
+## 2026-11-05 v0.4.18 发布（已批准）
+
+用户已批准 PR119 Ready、正常 dev→main 合并、公开 v0.4.18 及更新短入口。批准产品冻结于85bc22d92696bb51a5eb71c1827838d0e0a05a54（独审，九组/12 jobs及四目标、真实安装/维护与公开14/15/16升级成功）。其后只补版本、严格 simple_node_no_browser 门禁、公开17保数据升级和相应说明，不追加应用/UI/root/依赖/核心逻辑。保留旧资产及配置数据；准确候选/dev/main各自全部非浏览器验收后，仅晋升同源制品。公开后核匿名资产摘要才更新短入口，并另验实际main URL。构建和真实安装仅Actions，不做浏览器测试、不改用户VPS。统一证据继续 docs/SIMPLE_NODE_WIZARD_PROGRESS.md；下方仅开发/未授权发布是阶段历史。
+
+
+## 2026-11-05 简单节点向导（已批准开发）
+
+用户已确认“按线稿开发”，依据 docs/SIMPLE_NODE_WIZARD_CONTRACT.md 实现用途→简短信息→明确交付三步流程。两个默认用途为设备直连和供另一V-UI使用，推荐已支持sing-box/VLESS/TCP TLS；用途不冒充运行模式，不写隐藏用途标记、不迁移旧节点。保留实例修订/If-Match、证书、导出及中转资格、原配置凭据，未知高级字段仍保留或拒绝。公开17与其资产不覆盖；新批分支release/v0.4.18暂保持VERSION17，当前仅开发/独审/准确候选PR验收，不含保护分支合并、新版发布或VPS升级。构建/真实核心/安装仅Actions，不browser；源码变化不通过维护API热改VPS。状态统一见docs/SIMPLE_NODE_WIZARD_PROGRESS.md。
+
 ## v0.4.17 已公开：短入口切换
 
 v0.4.17已从准确main95c201c6e26ed54960f964c675e515890f2eea2a公开（19资产）；候选A9、dev A008/PR116、准确main各自全部非浏览器checks与四目标、14/15/16真实保数据升级成功，人工发布run41876406580成功。匿名tag/所有asset digest及installer/完整清单真实摘要已核验，旧16资产ID/大小/digest未变。当前只切setup.sh真实pin与short-install冻结源95c，配套测试和说明；应用、install.sh、VERSION、发布器、旧tag/资产保持冻结，不重发覆盖。本批仍需自己的独审、准确候选/dev/main与实际main URL验收，浏览器未验证，不修改用户VPS。统一记录沿用docs/REMOTE_MAINTENANCE_PROGRESS.md。

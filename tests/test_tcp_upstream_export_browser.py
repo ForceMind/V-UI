@@ -326,7 +326,7 @@ const success=(content='synthetic-credential')=>({data:content,headers:{'x-vui-e
  api.openUpstreamExport({id:2});state.server='node.example';state.acknowledged=true;
  const failed=api.requestUpstreamExport();pending.shift().reject({response:{status:409,data:'never-show-this'}});await failed;
  assert(!state.busy);assert.equal(state.content,'');assert(state.error.includes('不具备'));assert(!state.error.includes('never-show-this'));
- assert.equal(listeners.pagehide.size,3);assert.equal(listeners.popstate.size,3);
+ assert.equal(listeners.pagehide.size,4);assert.equal(listeners.popstate.size,4);
  api.showAddInbound.value=true;api.editingInboundId.value=47;
  api.newInbound.profile.reality_uuid='pagehide-editor-secret';
  const req=api.requestUpstreamExport();events.dispatchEvent(new Event('pagehide'));
