@@ -154,7 +154,7 @@ SIMPLE_NODE_FILES = {
     'README.md', 'CHANGELOG.md', 'AGENTS.md', 'docs/RELEASING.md',
     'docs/README.md', 'docs/INSTALLATION.md', 'docs/OPERATIONS.md',
     'docs/RELEASE_NOTES.md', 'docs/DEVELOPMENT_HANDOFF.md',
-    'docs/MANAGED_OPERATIONS.md', 'docs/SIMPLE_NODE_PROGRESS.md',
+    'docs/MANAGED_OPERATIONS.md', 'docs/SIMPLE_NODE_WIZARD_PROGRESS.md',
 }
 SIMPLE_NODE_UPGRADE_STEP = 'Test published v0.4.17 to exact candidate upgrade on ephemeral systemd runner'
 SIMPLE_NODE_LOOPBACK_STEPS = {
