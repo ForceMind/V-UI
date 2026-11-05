@@ -1,6 +1,6 @@
 'use strict';
 // Syntax-only compilation of the shipped #app, including the node wizard/editor.
-// Uses checksum-pinned Vue from vendor_frontend.py output. Never mounts, renders,
+// Uses the same-version diagnostic Vue from vendor_frontend.py --template-compiler. Never mounts, renders,
 // starts a browser/server, or downloads anything. No document shim is installed.
 const assert = require('node:assert/strict');
 const {createHash} = require('node:crypto');
@@ -9,16 +9,22 @@ const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const requested = process.argv[2] || process.env.VUI_FRONTEND_ASSETS;
-assert(requested, 'Pass the pinned assets directory or its vue.js file');
+assert(requested, 'Pass the pinned compiler directory or its vue-compiler.js file');
 const assets = path.resolve(requested.endsWith('.js') ? path.dirname(requested) : requested);
 const pins = JSON.parse(fs.readFileSync(path.join(root, 'deploy/frontend-pins.json'), 'utf8'));
 const provenance = JSON.parse(fs.readFileSync(path.join(assets, 'PROVENANCE.json'), 'utf8'));
-for (const [key, value] of Object.entries(pins.vue))
+// Source URL/version/archive integrity stay identical to deployment Vue. Only
+// the selected archive member differs; production assets/pins stay untouched.
+const compilerPin = {...pins.vue, files:{
+    'package/dist/vue.global.js':'vue-compiler.js',
+    'package/LICENSE':'licenses/vue-LICENSE',
+}};
+for (const [key, value] of Object.entries(compilerPin))
     assert.deepEqual(provenance.vue[key], value, 'Vue provenance ' + key);
-const bytes = fs.readFileSync(path.join(assets, 'vue.js'));
-assert.equal(createHash('sha256').update(bytes).digest('hex'), provenance.vue.selected_sha256['vue.js']);
+const bytes = fs.readFileSync(path.join(assets, 'vue-compiler.js'));
+assert.equal(createHash('sha256').update(bytes).digest('hex'), provenance.vue.selected_sha256['vue-compiler.js']);
 const context = vm.createContext({console});
-vm.runInContext(bytes.toString(), context, {filename:'pinned-vue.js'});
+vm.runInContext(bytes.toString(), context, {filename:'pinned-vue-compiler.js'});
 const V = context.Vue;
 assert.equal(V.version, pins.vue.version);
 // The actual template currently uses numeric newlines in placeholders. Handle
@@ -34,13 +40,25 @@ function decodeEntities(value) {
     });
 }
 const options = {decodeEntities, onError(error) {throw error;}, onWarn(warning) {throw warning;}};
-// Production builds can silence diagnostics by default. Prove this invocation
-// really rejects malformed markup before trusting the shipped-template result.
-assert.throws(() => V.compile('<div><span></div>', options));
+// The production global build did not report the missing-end-tag control in
+// Actions. A diagnostic compiler must prove its hook reports markup, expression
+// and structural-directive errors before it can qualify the shipped template.
+for (const [template, expected] of [
+    ['<div><span></div>', /Element is missing end tag/],
+    ['<div v-if="(">invalid expression</div>', /Error parsing JavaScript expression/],
+    ['<div v-else>orphan branch</div>', /v-else\/v-else-if has no adjacent v-if/],
+]) {
+    let reported = null;
+    assert.throws(() => V.compile(template, {...options, onError(error) {
+        reported = error; throw error;
+    }}), error => error === reported && Number.isInteger(error.code) && expected.test(error.message),
+    'diagnostic compiler must reject ' + template);
+    assert.ok(reported, 'negative control must reach the compiler error hook');
+}
 const html = fs.readFileSync(path.join(root, 'web/index.html'), 'utf8');
 const marker = '<div id="app">', start = html.indexOf(marker), end = html.lastIndexOf('</div>');
 assert(start >= 0 && start === html.lastIndexOf(marker) && end > start, 'one shipped #app root');
 assert.match(html.slice(end + '</div>'.length), /^\s*<script\b[\s\S]*<\/html>\s*$/);
 const render = V.compile(html.slice(start + marker.length, end), options);
 assert.equal(typeof render, 'function');
-console.log('Compiled shipped #app with pinned Vue ' + V.version + '; no mount, render or browser.');
+console.log('Compiled shipped #app with pinned diagnostic Vue ' + V.version + '; no mount, render or browser.');

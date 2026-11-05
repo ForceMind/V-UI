@@ -38,6 +38,8 @@
 
 本机纯检查：新向导14项Node、相关25项Python与旧managed-cert/instance Node58项由前端worker通过；root连接页静态/Node3、升级helper9、docs/diff通过。后端依赖测试仅AST，未安装本机依赖，待Actions。新增非浏览器CI步骤从既有pins获取Vue，先证明错误模板会失败，再编译完整实际#app；不mount/render或启动浏览器。
 
+PR #119 首候选6c1813d的Test run41965421493/job127041195403在编译器负向自控失败：固定Vue生产global对缺失结束标签没有抛出预期异常，尚未运行后续单元/固定核心步骤，不能算通过。保留该失败。修正使用同一pins.vue/version/url/sha512归档内的诊断global编译器，新增显式CI模式，不修改生产pin或默认部署资产；缺失标签、非法表达式、孤立v-else三种负向都须到达error hook，随后编译完整实际#app。原浏览器资产静态断言精确选择原命名步骤，原路径和门禁保留；没有运行浏览器。
+
 旧版本升级验收因公开摘要合法增加两bool，采用精确additive比较：数量顺序及所有旧字段逐一不变，仅允许这两个strict bool，不接纳其他extra/missing；旧私有DB哈希、证书字节、订阅原字节、editor/config/receipt断言不变。补类型/字段漂移负向，不以放宽数据保护制造成功。
 
 最终准确提交、Actions的run/job/step与未验证边界在本文件及承载PR集中记录；不借17的旧绿灯，不为回写自身SHA循环提交。

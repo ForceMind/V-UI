@@ -239,7 +239,7 @@ class ProxyPageRouteTests(unittest.TestCase):
         browser = next(step for step in steps if step.get('env', {}).get('VUI_PROXY_BROWSER') == '1')
         self.assertIn('test_proxy_browser.py', browser['run'])
         self.assertNotIn('continue-on-error', browser)
-        assets = next(step for step in steps if 'scripts/vendor_frontend.py ' in step.get('run', ''))
+        assets = next(step for step in steps if step.get('name') == 'Prepare checksum-pinned browser frontend')
         self.assertLess(steps.index(assets), steps.index(browser))
         self.assertEqual(browser['env']['VUI_FRONTEND_ASSETS'], '/tmp/vui-editor-web')
         self.assertEqual(assets['run'], 'python scripts/vendor_frontend.py /tmp/vui-editor-web')
