@@ -1,8 +1,8 @@
-## 开发中：简单节点向导
+## **v0.4.18** 简单节点向导
 
-[已确认线稿](node-simple-flow.html) · [实施契约](SIMPLE_NODE_WIZARD_CONTRACT.md) · [进度](SIMPLE_NODE_WIZARD_PROGRESS.md)。按用途创建并直接交付，旧节点和高级编辑器保持。独立开发候选尚未合并/发布；公开稳定版仍为下方v0.4.17。真实构建、核心和安装只Actions，浏览器未验证。
+[已确认线稿](node-simple-flow.html) · [实施契约](SIMPLE_NODE_WIZARD_CONTRACT.md) · [发布与验收记录](SIMPLE_NODE_WIZARD_PROGRESS.md)。按用途创建并直接交付，旧节点和高级编辑器保持。已从准确main27862759d0d73a36fa1a7bdccf165d35a3b851b5 [公开发布](https://github.com/ForceMind/V-UI/releases/tag/v0.4.18)，19资产、tag、latest和真实安装器/完整清单摘要已匿名核验，旧17资产不变。应用与短入口分别验自己的资格；真实构建、核心和安装只Actions，浏览器未验证。
 
-## **v0.4.18**（发布准备，当前短入口稳定版仍为 v0.4.17） 远程维护与终端在线升级
+## **v0.4.17** 远程维护与终端在线升级（历史）
 
 [线稿](remote-maintenance-wireframe.html) · [权限契约](REMOTE_MAINTENANCE_CONTRACT.md) · [实现与验收记录](REMOTE_MAINTENANCE_PROGRESS.md)。已从准确main95c201c [公开发布](https://github.com/ForceMind/V-UI/releases/tag/v0.4.17)，19资产与真实摘要核验；候选/dev/main各自检查、四目标和14/15/16保数据升级通过。公开后短入口及其准确资格另记，旧16资产保持。构建和真实安装只Actions，浏览器未验证。
 
