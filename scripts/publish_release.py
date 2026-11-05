@@ -157,8 +157,8 @@ SIMPLE_NODE_FILES = {
     'docs/MANAGED_OPERATIONS.md', 'docs/SIMPLE_NODE_WIZARD_PROGRESS.md',
 }
 SIMPLE_NODE_CI_FIX_HASHES = {
-    'scripts/system_maintenance_smoke.py': '8b0f8d030ee0d5dd8f825bb27407d4650464b9bfe0f7c26a9e2f12d2ce486ec8',
-    'tests/test_system_maintenance.py': '6fc9d4d59a1c69367a73f4a96ac25ebb44da9688b159b7920cf4263457daf6bc',
+    'scripts/system_maintenance_smoke.py': 'c2f08bc31d775f01772f4b346c08685e43e7250566838df9a9028b42a0926002',
+    'tests/test_system_maintenance.py': 'e6fdef49ea23eb0f068181d3efd54be06405c1b50527576569f1887c732a9be6',
 }
 SIMPLE_NODE_FILES |= set(SIMPLE_NODE_CI_FIX_HASHES)
 SIMPLE_NODE_UPGRADE_STEP = 'Test published v0.4.17 to exact candidate upgrade on ephemeral systemd runner'

@@ -1,13 +1,17 @@
 """Root control boundary tests: temporary files and mocks only, never host changes."""
 from contextlib import contextmanager
 import hashlib
+import errno
+import io
 import importlib.util
 import json
 import os
 from pathlib import Path
 import socket
+import stat
 import struct
 import subprocess
+import sys
 import tempfile
 import types
 import unittest
@@ -35,6 +39,79 @@ def no_lock(*args, **kwargs):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_real_client_retries_only_observed_listener_syscalls(self):
+        from scripts import system_maintenance_smoke as smoke
+        cases = {
+            'missing_socket': True, 'missing_parent': True, 'refused': True, 'reset': True,
+            'missing_run': False, 'untrusted_parent': False, 'untrusted_socket': False,
+            'permission': False, 'malformed': False, 'empty': False, 'oversized': False,
+            'unsafe_socket_mode': False, 'unexpected_os': False,
+        }
+        for mode, retryable in cases.items():
+            with self.subTest(mode=mode):
+                client = module('maintenance_client')
+                def lstat(path, *args, **kwargs):
+                    name = str(path)
+                    missing = {'missing_socket': str(client.SOCKET), 'missing_parent': str(client.SOCKET.parent), 'missing_run': '/run'}
+                    if mode in missing and name == missing[mode]:raise FileNotFoundError(errno.ENOENT, 'synthetic missing')
+                    if mode == 'permission' and name == str(client.SOCKET):raise PermissionError(errno.EACCES, 'synthetic denied')
+                    socket_path = name == str(client.SOCKET)
+                    untrusted = (mode == 'untrusted_parent' and name == str(client.SOCKET.parent)
+                                 or mode == 'untrusted_socket' and socket_path)
+                    permissions = 0o667 if mode == 'unsafe_socket_mode' else 0o660
+                    return types.SimpleNamespace(st_uid=1000 if untrusted else 0,
+                        st_mode=(stat.S_IFSOCK | permissions) if socket_path else (stat.S_IFDIR | 0o755))
+                class FakeSocket:
+                    def __init__(self, *args, **kwargs):self.reads = 0
+                    def __enter__(self):return self
+                    def __exit__(self, *args):pass
+                    def settimeout(self, value):pass
+                    def connect(self, address):
+                        if mode == 'refused':raise ConnectionRefusedError(errno.ECONNREFUSED, 'synthetic refused')
+                        if mode == 'unexpected_os':raise OSError(errno.EINVAL, 'synthetic unknown')
+                    def sendall(self, value):pass
+                    def shutdown(self, value):pass
+                    def recv(self, amount):
+                        if mode == 'reset':raise ConnectionResetError(errno.ECONNRESET, 'synthetic reset')
+                        self.reads += 1
+                        if mode == 'empty':return b''
+                        if self.reads > 1:return b''
+                        if mode == 'malformed':return b'not-json'
+                        if mode == 'oversized':return b'x' * 65537
+                        return b'{"ok":true,"result":{"busy":false}}'
+                stderr = io.StringIO()
+                with patch.object(Path, 'lstat', side_effect=lstat), patch.object(socket, 'socket', FakeSocket), \
+                     patch('runpy.run_path', return_value=client.__dict__), \
+                     patch.object(sys, 'stdin', io.StringIO('{"protocol":1,"operation":"status"}')), \
+                     patch.object(sys, 'stderr', stderr), patch.object(sys, 'stdout', io.StringIO()):
+                    try:exec(smoke.CLIENT, {})
+                    except client.MaintenanceUnavailable as error:
+                        stderr.write('MaintenanceUnavailable: ' + str(error) + '\n')
+                    else:self.fail('Negative real-client fixture unexpectedly succeeded')
+                replies = [subprocess.CompletedProcess([], 1, '', stderr.getvalue()),
+                           subprocess.CompletedProcess([], 0, '{"busy":false}', '')]
+                with patch.object(smoke.subprocess, 'run', side_effect=replies) as run, \
+                     patch.object(smoke, 'maintenance_diagnostics', return_value={}), \
+                     patch.object(smoke.time, 'monotonic', return_value=100), patch.object(smoke.time, 'sleep'):
+                    if retryable:
+                        self.assertEqual(smoke.read_when_available({'operation': 'status'}, 101), {'busy': False})
+                        self.assertEqual(run.call_count, 2)
+                    else:
+                        with self.assertRaises(AssertionError) as raised:
+                            smoke.read_when_available({'operation': 'status'}, 101)
+                        self.assertIs(type(raised.exception), AssertionError)
+                        run.assert_called_once()
+
+    def test_retry_reason_must_be_a_single_exact_fixed_observation(self):
+        from scripts import system_maintenance_smoke as smoke
+        final = 'MaintenanceUnavailable: 系统维护组件不可用，请通过本机终端检查\n'
+        for marker in ('', 'VUI_CI_LISTENER=UNKNOWN\n',
+                       'VUI_CI_LISTENER=LISTENER_MISSING\nVUI_CI_LISTENER=LISTENER_MISSING\n'):
+            with self.subTest(marker=marker), patch.object(smoke.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', marker+final)), \
+                 patch.object(smoke, 'maintenance_diagnostics', return_value={}):
+                with self.assertRaises(AssertionError) as raised:smoke.invoke({'operation': 'status'})
+                self.assertIs(type(raised.exception), AssertionError)
+
     def test_request_budget_cannot_extend_the_original_fifteen_second_limit(self):
         from scripts import system_maintenance_smoke as smoke
         for invalid in (0, -1, 15.01, True, float('inf'), float('nan'), '15'):

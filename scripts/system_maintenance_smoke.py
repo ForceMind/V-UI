@@ -21,7 +21,50 @@ import time
 import uuid
 
 CONTROL = Path('/usr/local/lib/v-ui')
-CLIENT = "import json,runpy,sys;api=runpy.run_path('/usr/local/lib/v-ui/maintenance_client.py');print(json.dumps(api['request'](json.loads(sys.stdin.read()))))"
+CLIENT = r'''
+import json,runpy,socket,sys
+from pathlib import Path
+reason = None
+original_lstat = Path.lstat
+def observed_lstat(path, *args, **kwargs):
+    global reason
+    try:
+        return original_lstat(path, *args, **kwargs)
+    except FileNotFoundError:
+        if str(path) in ('/run/v-ui-maintenance', '/run/v-ui-maintenance/control.sock'):
+            reason = 'LISTENER_MISSING'
+        raise
+class ObservedSocket(socket.socket):
+    def connect(self, address):
+        global reason
+        self.observing_listener = address == '/run/v-ui-maintenance/control.sock'
+        try:
+            return super().connect(address)
+        except ConnectionRefusedError:
+            if self.observing_listener: reason = 'CONNECTION_REFUSED'
+            raise
+        except FileNotFoundError:
+            if self.observing_listener: reason = 'LISTENER_MISSING'
+            raise
+    def recv(self, *args, **kwargs):
+        global reason
+        try:
+            return super().recv(*args, **kwargs)
+        except ConnectionResetError:
+            if getattr(self, 'observing_listener', False): reason = 'CONNECTION_RESET'
+            raise
+Path.lstat = observed_lstat
+socket.socket = ObservedSocket
+api = runpy.run_path('/usr/local/lib/v-ui/maintenance_client.py')
+value = json.loads(sys.stdin.read())
+reason = None
+try:
+    result = api['request'](value)
+except BaseException:
+    if reason: print('VUI_CI_LISTENER=' + reason, file=sys.stderr)
+    raise
+print(json.dumps(result))
+'''
 MAINTENANCE_UNIT = 'v-ui-maintenance.service'
 STATE_FIELDS = {'ActiveState', 'SubState', 'Result', 'ExecMainCode', 'ExecMainStatus'}
 SERVICE_UNITS = ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')
@@ -184,7 +227,14 @@ def invoke(value, *, user='v-ui', expect_success=True, timeout=15):
             # Diagnostics must neither replace the original failure nor expose
             # their own exception. The failed request is never retried.
             failure['diagnostic'] = 'DIAGNOSTIC_UNAVAILABLE'
-        error = BridgeTransportUnavailable if failure['classification'] == 'SOCKET_OR_TRANSPORT_UNAVAILABLE' else AssertionError
+        # The production client's generic unavailable message also covers path
+        # trust and JSON errors. Only a fixed CI observation of a real listener
+        # syscall failure permits read readiness waiting; those errors do not.
+        reasons = re.findall(r'^VUI_CI_LISTENER=(LISTENER_MISSING|CONNECTION_REFUSED|CONNECTION_RESET)$', result.stderr, re.MULTILINE)
+        retryable = failure['classification'] == 'SOCKET_OR_TRANSPORT_UNAVAILABLE' and len(reasons) == 1
+        if retryable:
+            failure['listener_reason'] = reasons[0]
+        error = BridgeTransportUnavailable if retryable else AssertionError
         raise error('Installed maintenance bridge unavailable: ' + json.dumps(failure, sort_keys=True)) from None
     return json.loads(result.stdout)
 
