@@ -1,5 +1,10 @@
 # V-UI 开发约束
 
+## 2026-11-05 v0.4.18 发布（已批准）
+
+用户已批准 PR119 Ready、正常 dev→main 合并、公开 v0.4.18 及更新短入口。批准产品冻结于85bc22d92696bb51a5eb71c1827838d0e0a05a54（独审，九组/12 jobs及四目标、真实安装/维护与公开14/15/16升级成功）。其后只补版本、严格 simple_node_no_browser 门禁、公开17保数据升级和相应说明，不追加应用/UI/root/依赖/核心逻辑。保留旧资产及配置数据；准确候选/dev/main各自全部非浏览器验收后，仅晋升同源制品。公开后核匿名资产摘要才更新短入口，并另验实际main URL。构建和真实安装仅Actions，不做浏览器测试、不改用户VPS。统一证据继续 docs/SIMPLE_NODE_WIZARD_PROGRESS.md；下方仅开发/未授权发布是阶段历史。
+
+
 ## 2026-11-05 简单节点向导（已批准开发）
 
 用户已确认“按线稿开发”，依据 docs/SIMPLE_NODE_WIZARD_CONTRACT.md 实现用途→简短信息→明确交付三步流程。两个默认用途为设备直连和供另一V-UI使用，推荐已支持sing-box/VLESS/TCP TLS；用途不冒充运行模式，不写隐藏用途标记、不迁移旧节点。保留实例修订/If-Match、证书、导出及中转资格、原配置凭据，未知高级字段仍保留或拒绝。公开17与其资产不覆盖；新批分支release/v0.4.18暂保持VERSION17，当前仅开发/独审/准确候选PR验收，不含保护分支合并、新版发布或VPS升级。构建/真实核心/安装仅Actions，不browser；源码变化不通过维护API热改VPS。状态统一见docs/SIMPLE_NODE_WIZARD_PROGRESS.md。

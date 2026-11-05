@@ -108,10 +108,11 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
         with self.assertRaises(AssertionError):assert_receipt_migration(self,after,after,'0.4.14')
 
 
-    def test_only_immutable_public_014_015_and_016_sources_are_accepted(self):
+    def test_only_immutable_public_014_through_017_sources_are_accepted(self):
         expected={'0.4.14':'b0cc174d04d05e61277075412586f0ba0dd231db',
                   '0.4.15':'65b1e75d90de733408101ec280a92be935731baa',
-                  '0.4.16':'18fe631bcf69b68425b454db1795a101e0378842'}
+                  '0.4.16':'18fe631bcf69b68425b454db1795a101e0378842',
+                  '0.4.17':'95c201c6e26ed54960f964c675e515890f2eea2a'}
         self.assertEqual(PUBLISHED_BASELINES,expected)
         for version,commit in expected.items():
             self.assertEqual(fixed_public_baseline(version,commit),(version,commit))
@@ -155,7 +156,13 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
                         assert_receipt_migration(self,before,changed,version)
             legacy=deepcopy(before);del legacy['files'][FIREWALL]
             with self.assertRaises(AssertionError):assert_receipt_migration(self,legacy,after,version)
+        assert_receipt_migration(self,after,after,'0.4.17')
         with self.assertRaises(AssertionError):assert_receipt_migration(self,before,after,'0.4.17')
+        missing=deepcopy(after);missing['files'].pop(next(iter(MAINTENANCE_FILES)))
+        with self.assertRaises(AssertionError):assert_receipt_migration(self,missing,after,'0.4.17')
+        with self.assertRaises(AssertionError):assert_receipt_migration(self,after,missing,'0.4.17')
+        extra=deepcopy(after);extra['files']['/unrelated.py']='f'*64
+        with self.assertRaises(AssertionError):assert_receipt_migration(self,after,extra,'0.4.17')
 
     def test_managed_xray_fixture_keeps_local_material_and_pending_binding_without_apply(self):
         # Execute only the pure fixture construction against in-memory models.
