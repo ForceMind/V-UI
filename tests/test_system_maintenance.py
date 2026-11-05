@@ -438,8 +438,11 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(cli.arguments(['list']), ['list'])
         self.assertEqual(cli.arguments(['revoke', '1']), ['revoke', '--id', '1'])
         self.assertEqual(cli.arguments(['create', 'diagnose,nodes', '1800']), ['create', '--scopes', 'diagnose,nodes', '--seconds', '1800'])
+        self.assertEqual(cli.arguments(['create', 'diagnose', '15552000']), ['create', '--scopes', 'diagnose', '--seconds', '15552000'])
         for value in (['-c', 'id'], ['revoke', '../1'], ['create', 'admin', '1800'],
-                      ['create', 'diagnose', '7201'], ['create', 'diagnose,diagnose', '1800']):
+                      ['create', 'diagnose', '15552001'], ['create', 'diagnose', '999999999'],
+                      ['create', 'diagnose', '-1'], ['create', 'diagnose', '15552000.0'],
+                      ['create', 'diagnose,diagnose', '1800']):
             with self.subTest(value=value), self.assertRaises(ValueError): cli.arguments(value)
 
     def test_store_persists_interruption_and_hides_internal_backup_data(self):
@@ -478,10 +481,20 @@ class ProtocolTests(unittest.TestCase):
     def test_terminal_grants_use_chinese_presets_and_default_readonly(self):
         account = types.SimpleNamespace(pw_uid=101, pw_gid=102)
         for answers, scopes, seconds in ((['1', '', ''], 'diagnose', '1800'),
-                (['1', '3', '60'], 'diagnose,nodes,share,relay,certificates,operate,upgrade,destructive', '3600')):
+                (['1', '3', '60'], 'diagnose,nodes,share,relay,certificates,operate,upgrade,destructive', '3600'),
+                (['1', '2', '180天'], 'diagnose,nodes,share,relay,certificates,operate,upgrade', '15552000'),
+                (['1', '1', '180d'], 'diagnose', '15552000'),
+                (['1', '1', '259200'], 'diagnose', '15552000')):
             with self.subTest(answers=answers), patch.object(ops, 'read_input', side_effect=answers), patch.object(ops, 'verify_installation', return_value=('systemd', account)), patch.object(ops.subprocess, 'run') as run:
                 ops.terminal_grants()
                 self.assertEqual(run.call_args.args[0][-3:], ['create', scopes, seconds])
+
+    def test_terminal_grants_reject_over_max_without_launch(self):
+        account = types.SimpleNamespace(pw_uid=101, pw_gid=102)
+        for duration in ('259201', '181d', '180.0d', '０', '-1'):
+            with self.subTest(duration=duration), patch.object(ops, 'read_input', side_effect=['1', '1', duration]), patch.object(ops, 'verify_installation', return_value=('systemd', account)), patch.object(ops.subprocess, 'run') as run:
+                with self.assertRaises(ops.Refused):ops.terminal_grants()
+                run.assert_not_called()
 
 
 class UpgradeTests(unittest.TestCase):

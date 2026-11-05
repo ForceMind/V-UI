@@ -17,7 +17,8 @@
 <label class="check"><input type="checkbox" value="operate">启停服务与创建私有备份</label>
 <label class="check"><input type="checkbox" value="upgrade">下载校验并升级正式版本</label>
 <label class="check"><input type="checkbox" value="destructive">允许删除节点、撤销订阅及受支持的备份恢复</label>
-</fieldset><label for="maintenance-duration">授权有效期</label><select id="maintenance-duration"><option value="1800">30 分钟</option><option value="3600">1 小时</option><option value="7200">2 小时</option></select>
+</fieldset><label for="maintenance-duration">授权有效期</label><select id="maintenance-duration"><option value="1800">30 分钟</option><option value="3600">1 小时</option><option value="7200">2 小时</option><option value="15552000">180 天</option></select>
+<p class="hint">180天属于长期授权：持有兑换后会话凭据者可按所选权限持续操作，管理员可随时撤销。默认仍为30分钟，不自动续期或延长已有授权。</p>
 <p class="hint">默认只读。配置节点中转还需勾选“配置上游与中转出口”。权限覆盖整台 V-UI，链接相当于本次临时管理凭据。</p>
 <button id="maintenance-create" type="submit">生成一次性维护链接</button></form>
 <section id="maintenance-issued" hidden><h3>仅本次展示，请妥善交付</h3><label for="maintenance-link">一次性维护链接</label><textarea id="maintenance-link" rows="3" readonly autocomplete="off" spellcheck="false"></textarea><div class="actions"><button id="maintenance-copy" type="button">复制链接</button><button id="maintenance-clear" type="button">清除显示</button></div><p class="hint">首次兑换后原链接失效。清除显示不会撤销授权；需终止维护请在下面撤销。</p></section>
