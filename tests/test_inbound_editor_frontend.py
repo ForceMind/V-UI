@@ -26,7 +26,7 @@ const sandbox={document:{getElementById(){return null}},addEventListener(){},loc
  async put(url,body){writes.push({url,body:clone(body)});return {data:{}}}}};
 vm.runInNewContext(fs.readFileSync('web/js/app.js','utf8'),sandbox);
 (async()=>{
- const state=setup();await state.openAddInbound();state.newInbound.core='sing-box';state.onCoreChanged();
+ const state=setup();await state.openAdvancedInbound();state.newInbound.core='sing-box';state.onCoreChanged();
  const p=state.newInbound.profile;state.newInbound.certificate_id='old-managed';
  p.security='reality';state.onSecurityChanged();
  assert.equal(p.flow,'xtls-rprx-vision');assert.equal(p.transport,'direct');assert.equal(p.client_fingerprint,'chrome');
@@ -89,7 +89,7 @@ const sandbox = {document: {getElementById() {return null;}},
 vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
 (async () => {
   const state = setup();
-  await state.openAddInbound();
+  await state.openAdvancedInbound();
   state.newInbound.core = 'sing-box'; state.onCoreChanged();
   Object.assign(state.newInbound.profile, stored.profile);
   state.newInbound.certificate_id = certificate;
@@ -140,7 +140,7 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
     for (const field of ['uuid', 'password', 'max_early_data', 'early_data_header_name'])
       assert.equal(field in body.profile, false);
   }
-  await state.openAddInbound();
+  await state.openAdvancedInbound();
   assert.equal(state.newInbound.profile.path, '/');
   assert.equal(state.newInbound.profile.host, '');
   assert.equal(state.newInbound.certificate_id, null);
@@ -201,7 +201,7 @@ const sandbox = {document: {getElementById() {return null;}},
 vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
 (async () => {
   const state = setup();
-  await state.openAddInbound();
+  await state.openAdvancedInbound();
   state.newInbound.core = 'sing-box'; state.onCoreChanged();
   Object.assign(state.newInbound.profile, stored.profile);
   state.newInbound.certificate_id = certificate;
@@ -257,7 +257,7 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
     assert.deepEqual(body.profile.service_name, value);
     assert.deepEqual(body.profile.flow, value);
   }
-  await state.openAddInbound();
+  await state.openAdvancedInbound();
   assert.equal(state.newInbound.profile.service_name, '');
   assert.equal(state.newInbound.profile.path, '/');
   assert.equal(state.newInbound.profile.host, '');
@@ -306,7 +306,7 @@ vm.runInNewContext(fs.readFileSync('web/js/app.js', 'utf8'), sandbox);
   for (const editing of [null, 7]) for (const security of ['none', 'reality']) {
     const state = setup();
     if (editing) await state.openEditInbound(stored);
-    else await state.openAddInbound();
+    else await state.openAdvancedInbound();
     state.newInbound.certificate_id = 'a'.repeat(32);
     state.newInbound.profile.security = security;
     await state.saveInbound();
@@ -353,7 +353,7 @@ const sandbox={document:{getElementById(){return null}},addEventListener(){},loc
  async put(url,body){writes.push({url,body:clone(body)});return {data:{}};}}};
 vm.runInNewContext(fs.readFileSync('web/js/app.js','utf8'),sandbox);
 (async()=>{
- const state=setup();await state.openAddInbound();
+ const state=setup();await state.openAdvancedInbound();
  state.newInbound.core='sing-box';state.onCoreChanged();state.newInbound.protocol='hysteria2';state.onProtocolChanged();
  const p=state.newInbound.profile;
  assert.equal(p.security,'tls');assert.equal(p.transport,'quic');assert.equal(p.client_fingerprint,'');
@@ -401,7 +401,7 @@ const sandbox={document:{getElementById(){return null}},addEventListener(){},loc
  async put(url,body){writes.push({url,body:clone(body)});return {data:{}};}}};
 vm.runInNewContext(fs.readFileSync('web/js/app.js','utf8'),sandbox);
 (async()=>{
- const state=setup();await state.openAddInbound();
+ const state=setup();await state.openAdvancedInbound();
  state.newInbound.core='sing-box';state.onCoreChanged();state.newInbound.protocol='tuic';state.onProtocolChanged();
  const p=state.newInbound.profile;
  assert.equal(p.security,'tls');assert.equal(p.transport,'quic');assert.equal(p.client_fingerprint,'');

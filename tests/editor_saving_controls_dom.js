@@ -185,7 +185,7 @@ for (const editing of [false, true]) for (const outcome of ['success', 'rejectio
         const f = fixture(t), s = f.state;
         if (editing) await s.openEditInbound({id: 7, mutation_revision: 'a'.repeat(64)});
         else {
-            await s.openAddInbound();
+            await s.openAdvancedInbound();
             s.newInbound.profile.security = 'reality'; s.onSecurityChanged();
         }
         s.newInbound.remark = 'synthetic-unsaved-draft';
@@ -220,7 +220,7 @@ for (const editing of [false, true]) for (const outcome of ['success', 'rejectio
         if (outcome === 'success') {
             assert.equal(s.showAddInbound.value, false);
             assert.equal(f.messages.at(-1).kind, 'success');
-            await s.openAddInbound(); await V.nextTick();
+            await s.openAdvancedInbound(); await V.nextTick();
             assert.deepEqual(f.disabled(), [false, false, false, false, false, false], 'fresh editor unlocks');
         } else {
             assert.equal(s.showAddInbound.value, true);

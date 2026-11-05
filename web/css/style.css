@@ -306,3 +306,22 @@ body {
 .inbound-search-toolbar #inbound-search-count {
     color: #606266;
 }
+
+/* Simple node creation keeps protocol details in the existing advanced editor. */
+.node-wizard-steps { display:flex; gap:14px; list-style:none; padding:0 0 18px; margin:0; border-bottom:1px solid var(--el-border-color); }
+.node-wizard-steps li { color:var(--el-text-color-secondary); }
+.node-wizard-steps li[aria-current="step"] { color:var(--el-color-primary); font-weight:650; }
+.node-wizard h2 { margin:22px 0 14px; font-size:22px; }
+.node-purpose-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.node-purpose-card { display:flex; flex-direction:column; gap:12px; padding:22px 18px; border:1px solid var(--el-border-color); border-radius:10px; background:var(--el-bg-color); color:var(--el-text-color-primary); text-align:left; font:inherit; cursor:pointer; }
+.node-purpose-card strong { font-size:18px; }
+.node-purpose-card small,.node-wizard-note { color:var(--el-text-color-secondary); line-height:1.7; }
+.node-purpose-card[aria-pressed="true"] { border-color:var(--el-color-primary); box-shadow:inset 0 0 0 1px var(--el-color-primary); background:var(--el-color-primary-light-9); }
+.node-purpose-card:focus-visible { outline:2px solid var(--el-color-primary); outline-offset:3px; }
+.node-wizard details,.node-more { margin:16px 0 4px; }
+.node-wizard summary,.node-more summary { cursor:pointer; color:var(--el-color-primary); }
+.node-wizard-error { color:var(--el-color-danger); line-height:1.7; }
+.node-common-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.node-common-actions .el-button + .el-button { margin-left:0; }
+.node-more p { overflow-wrap:anywhere; }
+@media(max-width:600px) { .node-purpose-grid { grid-template-columns:1fr; } .node-wizard-steps { gap:10px; font-size:13px; } }

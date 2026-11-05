@@ -239,6 +239,8 @@ const app = createApp({
         clearAdminSecrets.push(closeQrDialog);
         addEventListener('pagehide', closeQrDialog);
         if (!globalThis.VUI_NAV) addEventListener('popstate', closeQrDialog);
+        // Read only the literal hostname; never reuse a panel URL as a node address.
+        const suggestedNodeHost = () => (location.hostname || '').replace(/^\[|\]$/g, '');
         const upstreamExport = reactive({
             open: false, inboundId: null, name: '', server: '', format: 'uri',
             acknowledged: false, busy: false, content: '', error: '', notice: ''
@@ -264,11 +266,13 @@ const app = createApp({
             upstreamExport.server = '';
             upstreamExport.acknowledged = false;
         };
-        const openUpstreamExport = (row) => {
+        const openUpstreamExport = (row, suggestedServer = '') => {
             closeUpstreamExport();
             upstreamExport.inboundId = row.id;
             upstreamExport.name = row.remark || `${row.protocol}:${row.port}`;
             upstreamExport.format = 'uri';
+            // Suggest a hostname only, never the management URL or its port/path.
+            upstreamExport.server = suggestedServer || suggestedNodeHost();
             upstreamExport.open = true;
         };
         watch(() => [upstreamExport.server, upstreamExport.format, upstreamExport.inboundId], () => {
@@ -614,14 +618,14 @@ const app = createApp({
             closeUpstreamExport();
             const generation = ++inboundListGeneration;
             try {
-                const res = await axios.get('/api/inbounds');
+                const res = await axios.get('/api/inbounds', {timeout:15000});
                 if (generation !== inboundListGeneration || adminSessionEnded) return;
                 inbounds.value = res.data;
             } catch (error) {
                 if (generation !== inboundListGeneration || adminSessionEnded || error.response?.status === 401) return;
                 // A failed refresh cannot confirm previously shown applied state.
                 inbounds.value = inbounds.value.map(row => ({...row, routing_status: null}));
-                ElMessage.error('Failed to load inbounds');
+                ElMessage.error('节点列表读取失败，请检查连接后重试；运行状态未能确认。');
             }
         };
 
@@ -796,7 +800,7 @@ const app = createApp({
             reconcileManagedCertificate();
         };
 
-        const openAddInbound = async () => {
+        const openAdvancedInbound = async () => {
             if (savingInbound.value || adminSessionEnded) return;
             const generation = ++inboundEditorGeneration;
             editingInboundId.value = null;
@@ -818,6 +822,176 @@ const app = createApp({
             await loadManagedCertificates(generation);
             if (generation !== inboundEditorGeneration || adminSessionEnded || savingInbound.value) return;
             showAddInbound.value = true;
+        };
+
+        // The simple flow owns a fresh draft. Existing nodes only use the
+        // independent advanced editor, preserving their original profile.
+        const nodeWizard = reactive({open:false, step:1, purpose:'device', remark:'', port:10443,
+            certificateId:null, certificates:[], certificateState:'idle', busy:false,
+            error:'', outcome:'draft', row:null, serverName:''});
+        let wizardGeneration = 0, wizardCertificateGeneration = 0, wizardController = null, wizardCreatedInstance = null;
+        const wizardNameHint = computed(() => {
+            const name = nodeWizard.remark;
+            if (typeof name !== 'string' || Array.from(name).length > 128 || /[\u0000-\u001f\u007f]/.test(name))
+                return '名称最多 128 个字符，不能包含换行或控制字符；也可以留空。';
+            return '';
+        });
+        const wizardPortHint = computed(() => {
+            if (!Number.isInteger(nodeWizard.port) || nodeWizard.port < 1024 || nodeWizard.port > 65535)
+                return '请填写 1024–65535 之间的整数端口；推荐流程使用无需特权的端口。';
+            if (inbounds.value.some(row => Number(row.port) === nodeWizard.port))
+                return '已有节点使用这个端口，请换一个端口。';
+            return '';
+        });
+        const wizardReady = computed(() => nodeWizard.outcome === 'draft' && !nodeWizard.busy &&
+            !wizardNameHint.value && !wizardPortHint.value && nodeWizard.certificateState === 'ready' &&
+            nodeWizard.certificates.some(cert => cert.id === nodeWizard.certificateId));
+        const closeNodeWizard = () => {
+            wizardGeneration++; wizardCertificateGeneration++;
+            if (wizardController) wizardController.abort();
+            wizardController = null; wizardCreatedInstance = null;
+            nodeWizard.open = false; nodeWizard.busy = false; nodeWizard.row = null;
+            nodeWizard.remark = ''; nodeWizard.serverName = ''; nodeWizard.error = '';
+            nodeWizard.certificates = []; nodeWizard.certificateId = null;
+            globalThis.VUI_NAV?.modal.close('node-wizard');
+        };
+        const canLeaveNodeWizard = () => !nodeWizard.busy;
+        const beforeNodeWizardClose = done => {
+            if (!canLeaveNodeWizard()) return;
+            closeNodeWizard();
+            if (typeof done === 'function') done();
+        };
+        const loadWizardCertificates = async () => {
+            if (!nodeWizard.open || nodeWizard.busy || adminSessionEnded) return;
+            const generation = wizardGeneration, read = ++wizardCertificateGeneration;
+            nodeWizard.certificateState = 'loading';
+            try {
+                const response = await axios.get('/api/certificates', {timeout:15000});
+                if (generation !== wizardGeneration || read !== wizardCertificateGeneration || adminSessionEnded) return;
+                if (!Array.isArray(response.data)) throw new Error('Invalid certificate list');
+                nodeWizard.certificates = response.data.filter(cert => cert && cert.environment === 'production' &&
+                    typeof cert.id === 'string' && cert.id && typeof cert.domain === 'string' && cert.domain &&
+                    typeof cert.revision === 'string' && cert.revision &&
+                    Number.isFinite(cert.days_remaining) && cert.days_remaining >= 0 &&
+                    (cert.not_after == null || (typeof cert.not_after === 'number' && cert.not_after > Date.now()/1000)));
+                // Never replace a deliberate selection, even if it disappeared.
+                if (!nodeWizard.certificateId && nodeWizard.certificates.length === 1)
+                    nodeWizard.certificateId = nodeWizard.certificates[0].id;
+                nodeWizard.certificateState = 'ready';
+            } catch (error) {
+                if (generation !== wizardGeneration || read !== wizardCertificateGeneration || adminSessionEnded) return;
+                nodeWizard.certificateState = 'error';
+            }
+        };
+        const openAddInbound = () => {
+            if (nodeWizard.busy || savingInbound.value || adminSessionEnded) return;
+            closeInboundEditor(); closeNodeWizard(); closeQrDialog(); closeUpstreamExport();
+            Object.assign(nodeWizard, {open:true, step:1, purpose:'device', remark:'', port:10443,
+                certificateId:null, certificates:[], certificateState:'idle', busy:false,
+                error:'', outcome:'draft', row:null, serverName:''});
+            globalThis.VUI_NAV?.modal.open('node-wizard', closeNodeWizard, canLeaveNodeWizard);
+            return loadWizardCertificates();
+        };
+        const wizardAdvanced = async () => {
+            if (nodeWizard.busy || nodeWizard.outcome !== 'draft') return;
+            const remark = nodeWizard.remark, port = nodeWizard.port;
+            closeNodeWizard();
+            const opening = openAdvancedInbound(), generation = inboundEditorGeneration;
+            await opening;
+            if (generation === inboundEditorGeneration && showAddInbound.value && !editingInboundId.value) {
+                newInbound.remark = remark; newInbound.port = port;
+            }
+        };
+        const syncWizardRow = () => {
+            if (!wizardCreatedInstance) { nodeWizard.row = null; return; }
+            const created = wizardCreatedInstance;
+            nodeWizard.row = inbounds.value.find(row => row.id === created.id &&
+                row.mutation_revision === created.mutation_revision) || null;
+        };
+        const refreshWizardResult = async () => {
+            if (!nodeWizard.open || nodeWizard.busy || adminSessionEnded) return;
+            const generation = wizardGeneration;
+            nodeWizard.busy = true;
+            try {
+                await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
+                if (generation !== wizardGeneration || adminSessionEnded) return;
+                // Bind only to the exact created instance, never a recycled ID.
+                syncWizardRow();
+            } finally { if (generation === wizardGeneration) nodeWizard.busy = false; }
+        };
+        const createSimpleNode = async () => {
+            if (!nodeWizard.open || nodeWizard.step !== 2 || !wizardReady.value || adminSessionEnded) return;
+            const cert = nodeWizard.certificates.find(value => value.id === nodeWizard.certificateId);
+            const generation = wizardGeneration;
+            nodeWizard.busy = true; nodeWizard.error = '';
+            wizardCertificateGeneration++;
+            wizardController = new AbortController();
+            try {
+                const response = await axios.post('/api/inbounds', {
+                    core:'sing-box', protocol:'vless', remark:nodeWizard.remark,
+                    port:nodeWizard.port, enable:true, routing_mode:'direct',
+                    profile:{security:'tls', transport:'direct'}, certificate_id:cert.id
+                }, {signal:wizardController.signal, timeout:20000});
+                if (generation !== wizardGeneration || adminSessionEnded) return;
+                const row = response.data?.inbound;
+                nodeWizard.outcome = row && validInboundRevision(row.mutation_revision) &&
+                    Number.isInteger(row.id) ? 'created' : 'uncertain';
+                nodeWizard.row = nodeWizard.outcome === 'created' ? row : null;
+                wizardCreatedInstance = nodeWizard.row ? {id:row.id, mutation_revision:row.mutation_revision} : null;
+                nodeWizard.serverName = cert.domain;
+                nodeWizard.step = 3;
+                if (!nodeWizard.row) nodeWizard.error = '服务器返回未能确认新节点。请刷新节点列表核对；不要重复创建。';
+                await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
+                if (generation === wizardGeneration && !adminSessionEnded) syncWizardRow();
+            } catch (error) {
+                if (generation !== wizardGeneration || adminSessionEnded || error.response?.status === 401) return;
+                const status = error.response?.status, detail = error.response?.data?.detail;
+                if (detail?.saved === true) {
+                    nodeWizard.outcome = 'saved'; nodeWizard.step = 3;
+                    nodeWizard.error = '节点已保存，但核心未应用。请刷新列表检查配置与运行状态，不要重复创建。';
+                    await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
+                } else if (!status || status >= 500 || [404, 408, 409].includes(status)) {
+                    nodeWizard.outcome = 'uncertain'; nodeWizard.step = 3;
+                    nodeWizard.error = inboundEditorError(error, '创建节点') + ' 创建结果未能确认，节点可能已保存。请刷新列表核对，不要重复创建。';
+                } else nodeWizard.error = inboundEditorError(error, '创建节点');
+            } finally {
+                if (generation === wizardGeneration) { nodeWizard.busy = false; wizardController = null; }
+            }
+        };
+        const wizardDeliver = () => {
+            if (nodeWizard.busy || !nodeWizard.row || nodeWizard.outcome !== 'created' || adminSessionEnded) return;
+            const row = nodeWizard.row, server = nodeWizard.serverName, purpose = nodeWizard.purpose;
+            if (purpose === 'device' && row.share_eligible !== true) return;
+            if (purpose === 'server' && row.upstream_export_eligible !== true) return;
+            closeNodeWizard();
+            if (purpose === 'server') openUpstreamExport(row, server);
+            else void showQrCode(row);
+        };
+        watch(currentView, closeNodeWizard, {flush:'sync'});
+        clearAdminSecrets.push(closeNodeWizard);
+        addEventListener('pagehide', closeNodeWizard);
+        if (!globalThis.VUI_NAV) addEventListener('popstate', closeNodeWizard);
+        globalThis.VUI_NAV?.guard(canLeaveNodeWizard);
+        const togglingInbound = ref(null);
+        const toggleInbound = async row => {
+            if (togglingInbound.value !== null || savingInbound.value || adminSessionEnded) return;
+            if (!validInboundRevision(row.mutation_revision)) {
+                ElMessage.error('无法确认节点版本，请刷新节点列表。'); return;
+            }
+            togglingInbound.value = row.id;
+            try {
+                await axios.put(`/api/inbounds/${row.id}`, {
+                    expected_instance_revision:row.mutation_revision, enable:!row.enable
+                }, {timeout:20000});
+                if (!adminSessionEnded) ElMessage.success('节点开关已保存，请查看运行状态。');
+            } catch (error) {
+                if (adminSessionEnded || error.response?.status === 401) return;
+                ElMessage.error(error.response?.data?.detail?.saved === true ?
+                    '开关已保存，但核心未应用，请检查运行状态。' : inboundEditorError(error, '切换节点'));
+            } finally {
+                if (!adminSessionEnded) await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
+                togglingInbound.value = null;
+            }
         };
 
         const openEditInbound = async (row) => {
@@ -1352,6 +1526,20 @@ const app = createApp({
             addIntranetZone,
             removeIntranetZone,
             openAddInbound,
+            openAdvancedInbound,
+            nodeWizard,
+            wizardNameHint,
+            wizardPortHint,
+            wizardReady,
+            loadWizardCertificates,
+            closeNodeWizard,
+            beforeNodeWizardClose,
+            wizardAdvanced,
+            createSimpleNode,
+            wizardDeliver,
+            refreshWizardResult,
+            toggleInbound,
+            togglingInbound,
             openEditInbound,
             onCoreChanged,
             onProtocolChanged,

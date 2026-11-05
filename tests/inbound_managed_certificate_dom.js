@@ -38,7 +38,7 @@ const persisted = (changes = {}) => ({id:7, mutation_revision:'a'.repeat(64), co
         certificate_path:'/original/fullchain.pem', key_path:'/original/key.pem'}, ...changes});
 
 test('unique usable certificate defaults for Xray TLS and sends binding without manual paths', async () => {
-    const f = fixture(); await f.state.openAddInbound();
+    const f = fixture(); await f.state.openAdvancedInbound();
     assert.equal(f.state.newInbound.certificate_id, null, 'plain TCP does not bind TLS material');
     tls(f);
     assert.equal(f.state.newInbound.certificate_id, 'cert-a');
@@ -50,7 +50,7 @@ test('unique usable certificate defaults for Xray TLS and sends binding without 
 });
 
 test('multiple available certificates always require a choice even with a matching SNI', async () => {
-    const f = fixture([certificate(), certificate('cert-b')]); await f.state.openAddInbound();
+    const f = fixture([certificate(), certificate('cert-b')]); await f.state.openAdvancedInbound();
     f.state.newInbound.profile.server_name = 'CERT-A.EXAMPLE.TEST.'; tls(f);
     assert.equal(f.state.newInbound.certificate_id, null);
     assert.match(f.state.managedCertificateHint.value, /多张.*选择/);
@@ -68,15 +68,15 @@ test('expired, staging, missing revision, null lifetime and expired instant neve
     const unavailable = [certificate('expired', {days_remaining:-1}), certificate('staging', {environment:'staging'}),
         certificate('unissued', {revision:null}), certificate('unknown', {days_remaining:null}),
         certificate('expired-now', {days_remaining:0, not_after:Date.now() / 1000 - 1})];
-    const f = fixture(unavailable); await f.state.openAddInbound(); tls(f);
+    const f = fixture(unavailable); await f.state.openAdvancedInbound(); tls(f);
     assert.equal(f.state.managedCertificates.value.length, 0);
     assert.equal(f.state.newInbound.certificate_id, null); assert.match(f.state.managedCertificateHint.value, /暂无可用/);
-    const g = fixture([...unavailable, certificate()]); await g.state.openAddInbound(); tls(g);
+    const g = fixture([...unavailable, certificate()]); await g.state.openAdvancedInbound(); tls(g);
     assert.equal(g.state.newInbound.certificate_id, 'cert-a');
 });
 
 test('SNI conflict prevents auto choice and only automatic choices clear after SNI changes', async () => {
-    const f = fixture(); await f.state.openAddInbound();
+    const f = fixture(); await f.state.openAdvancedInbound();
     f.state.newInbound.profile.server_name = 'other.example.test'; tls(f);
     assert.equal(f.state.newInbound.certificate_id, null); assert.match(f.state.managedCertificateHint.value, /不匹配/);
     f.state.newInbound.profile.server_name = 'CERT-A.EXAMPLE.TEST.'; f.state.reconcileManagedCertificate();
@@ -88,7 +88,7 @@ test('SNI conflict prevents auto choice and only automatic choices clear after S
 });
 
 test('load failure stays explicit, preserves choice, blocks save, and retry recovers', async () => {
-    const f = fixture(); await f.state.openAddInbound(); tls(f);
+    const f = fixture(); await f.state.openAdvancedInbound(); tls(f);
     f.certificates(async () => {throw Error('secret server pathname /private/key.pem');});
     await f.state.retryManagedCertificates();
     assert.equal(f.state.newInbound.certificate_id, 'cert-a');
@@ -98,7 +98,7 @@ test('load failure stays explicit, preserves choice, blocks save, and retry reco
     f.certificates(async () => ({data:[certificate()]})); await f.state.retryManagedCertificates();
     assert.equal(f.state.managedCertificateState.value, 'ready');
     await f.state.saveInbound(); assert.equal(f.writes.length, 1);
-    const g = fixture(); g.certificates(async () => ({data:{detail:'bad'}})); await g.state.openAddInbound();
+    const g = fixture(); g.certificates(async () => ({data:{detail:'bad'}})); await g.state.openAdvancedInbound();
     assert.equal(g.state.managedCertificateState.value, 'error');
     assert.equal(g.state.showAddInbound.value, true);
 });
@@ -124,7 +124,7 @@ test('editor preserves original manual values and existing bindings without auto
 });
 
 test('protocol/core changes retain common TLS draft but reset credentials and incompatible transport', async () => {
-    const f = fixture(); await f.state.openAddInbound(); tls(f);
+    const f = fixture(); await f.state.openAdvancedInbound(); tls(f);
     f.state.newInbound.profile.path = '/old-transport';
     f.state.newInbound.profile.hysteria2_password = 'must-not-carry';
     f.state.newInbound.core = 'sing-box'; f.state.onCoreChanged();
@@ -138,7 +138,7 @@ test('protocol/core changes retain common TLS draft but reset credentials and in
     assert.equal(f.state.newInbound.certificate_id, null);
     assert.equal(f.state.newInbound.profile.certificate_path, '');
     await f.state.saveInbound(); assert.equal(f.writes[0].body.certificate_id, null);
-    const manual = fixture(); await manual.state.openAddInbound(); tls(manual);
+    const manual = fixture(); await manual.state.openAdvancedInbound(); tls(manual);
     manual.state.certificateMode.value = 'manual'; manual.state.onCertificateModeChanged();
     manual.state.newInbound.profile.certificate_path = '/custom/cert';
     manual.state.newInbound.profile.key_path = '/custom/key';
@@ -148,7 +148,7 @@ test('protocol/core changes retain common TLS draft but reset credentials and in
 });
 
 test('Xray eligibility excludes other protocols, transports, flow and REALITY', async () => {
-    const f = fixture(); await f.state.openAddInbound(); tls(f);
+    const f = fixture(); await f.state.openAdvancedInbound(); tls(f);
     for (const transport of ['ws','grpc','xhttp']) {
         f.state.newInbound.profile.transport = transport;
         assert.equal(f.state.managedCertificateEligible.value, false);
@@ -171,7 +171,7 @@ test('Xray eligibility excludes other protocols, transports, flow and REALITY', 
 test('out-of-order editor reads, retry reads, close and session end cannot replace current list', async () => {
     const f = fixture(), first = deferred(), second = deferred();
     let count = 0; f.certificates(() => (++count === 1 ? first : second).promise);
-    const old = f.state.openAddInbound(), current = f.state.openAddInbound();
+    const old = f.state.openAdvancedInbound(), current = f.state.openAdvancedInbound();
     second.resolve({data:[certificate('new')]}); await current;
     first.resolve({data:[certificate('old')]}); await old;
     assert.equal(f.state.managedCertificates.value[0].id, 'new');
@@ -181,12 +181,12 @@ test('out-of-order editor reads, retry reads, close and session end cannot repla
     assert.equal(f.state.showAddInbound.value, false);
     assert.equal(f.state.managedCertificates.value[0].id, 'new');
     const g = fixture(), pending = deferred(); g.certificates(() => pending.promise);
-    const open = g.state.openAddInbound(); g.endSession(); pending.resolve({data:[certificate()]}); await open;
+    const open = g.state.openAdvancedInbound(); g.endSession(); pending.resolve({data:[certificate()]}); await open;
     assert.equal(g.state.showAddInbound.value, false); assert.equal(g.state.managedCertificates.value.length, 0);
 });
 
 test('saving suppresses duplicate reads and UI mutations, unknown errors stay Chinese without secrets', async () => {
-    const f = fixture(); await f.state.openAddInbound(); tls(f);
+    const f = fixture(); await f.state.openAdvancedInbound(); tls(f);
     const pending = deferred(); f.write(() => pending.promise);
     const save = f.state.saveInbound(); assert.equal(f.state.savingInbound.value, true);
     let reads = 0; f.certificates(async () => {reads++; return {data:[]};});

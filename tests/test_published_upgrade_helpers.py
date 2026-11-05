@@ -13,10 +13,27 @@ from unittest.mock import patch
 from published_upgrade_helpers import (FIREWALL, MAINTENANCE_FILES, PUBLISHED_BASELINES, PublishedUpgrade,
                                        assert_download_boundary, assert_receipt_migration,
                                        assert_upgrade_configuration, fixed_public_baseline,
-                                       managed_xray_fixture_program)
+                                       managed_xray_fixture_program, assert_node_summary_upgrade)
 
 
 class PublishedUpgradeBoundaryTests(unittest.TestCase):
+    def test_summary_additions_are_only_strict_booleans_without_old_field_drift(self):
+        before=[{'id':1,'core':'sing-box','port':10443,'remark':'preserve',
+                 'enable':True,'routing_mode':'inherit','mutation_revision':'a'*64}]
+        after=[{**before[0],'share_eligible':True,'upstream_export_eligible':True}]
+        assert_node_summary_upgrade(self,before,after)
+        for change in ({'share_eligible':1},{'upstream_export_eligible':None},
+                       {'remark':'replaced'},{'routing_mode':'direct'},
+                       {'mutation_revision':'b'*64},{'raw_settings':{'secret':'fake'}}):
+            bad=[{**after[0],**change}]
+            with self.subTest(change=change),self.assertRaises(AssertionError):
+                assert_node_summary_upgrade(self,before,bad)
+        for key in after[0]:
+            bad=deepcopy(after);del bad[0][key]
+            with self.subTest(missing=key),self.assertRaises(AssertionError):
+                assert_node_summary_upgrade(self,before,bad)
+        with self.assertRaises(AssertionError):assert_node_summary_upgrade(self,before,after+after)
+
     def test_configuration_requires_exact_runtime_transition_and_preserved_fields(self):
         old_release=Path('/var/lib/v-ui/releases/old-014')
         new_release=Path('/var/lib/v-ui/releases/candidate-015')

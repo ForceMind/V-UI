@@ -53,9 +53,9 @@ class InboundPolicyFrontendTests(unittest.TestCase):
     def test_create_edit_modes_cancel_reopen_and_missing_update_not_reset(self):
         self.run_js(r'''
 const h=harness(),s=h.state;
-await s.openAddInbound();assert.equal(s.newInbound.routing_mode,'inherit');
+await s.openAdvancedInbound();assert.equal(s.newInbound.routing_mode,'inherit');
 s.newInbound.routing_mode='relay';s.closeInboundEditor();assert.equal(h.writes.length,0);
-await s.openAddInbound();assert.equal(s.newInbound.routing_mode,'inherit');await s.saveInbound();
+await s.openAdvancedInbound();assert.equal(s.newInbound.routing_mode,'inherit');await s.saveInbound();
 assert.equal(h.writes[0].body.routing_mode,'inherit');
 for(const mode of ['inherit','direct','relay']){
  h.editors.set(7,node(7,mode));await s.openEditInbound({mutation_revision:'a'.repeat(64),id:7});assert.equal(s.newInbound.routing_mode,mode);
@@ -89,7 +89,7 @@ for(const mode of ['inherit','direct','relay']){
  row.routing_status.state='applied';row.routing_status.policy_identity=null;assert.match(s.inboundAppliedRouting(row),/未确认/);
 }
 for(const invalid of [null,'DIRECT','',{},42])assert.equal(s.inboundSavedRouting({routing_mode:invalid}),'策略未确认');
-await s.openAddInbound();s.newInbound.routing_mode='relay';assert.match(s.inboundRoutingHint.value,/服务器严格核验/);
+await s.openAdvancedInbound();s.newInbound.routing_mode='relay';assert.match(s.inboundRoutingHint.value,/服务器严格核验/);
 s.newInbound.core='sing-box';s.onCoreChanged();s.newInbound.profile.security='tls';
 assert.match(s.inboundRoutingHint.value,/先在代理与中转页选择并应用上游/);
 assert.match(s.inboundRoutingHint.value,/UDP/);s.newInbound.routing_mode='direct';assert.match(s.inboundRoutingHint.value,/既有/);
@@ -115,7 +115,7 @@ await s.openEditInbound({mutation_revision:'a'.repeat(64),id:5});assert.equal(s.
 
     def test_duplicate_save_saved_only_failure_and_page_exit_do_not_claim_applied(self):
         self.run_js(r'''
-const h=harness(),s=h.state;await s.openAddInbound();s.newInbound.routing_mode='relay';
+const h=harness(),s=h.state;await s.openAdvancedInbound();s.newInbound.routing_mode='relay';
 let release;h.holdWrite(new Promise(r=>release=r));const first=s.saveInbound(),second=s.saveInbound();
 assert.equal(h.writes.length,1);assert.equal(s.savingInbound.value,true);
 h.failWrite({response:{status:409,data:{detail:{saved:true,applied:false,message:'runtime rejected'}}}});
@@ -123,9 +123,9 @@ release();await Promise.all([first,second]);assert.equal(s.showAddInbound.value,
 assert.equal(h.messages.filter(v=>v[0]==='success').length,0);assert.match(h.messages.at(-1)[1],/已保存为期望状态/);
 await s.saveInbound();assert.equal(h.writes.length,1);
 h.holdWrite(null);h.failWrite({response:{status:422,data:{detail:'invalid routing'}}});
-await s.openAddInbound();s.newInbound.routing_mode='relay';await s.saveInbound();
+await s.openAdvancedInbound();s.newInbound.routing_mode='relay';await s.saveInbound();
 assert.equal(s.showAddInbound.value,true);assert.equal(s.newInbound.routing_mode,'relay');assert.equal(s.savingInbound.value,false);
-s.closeInboundEditor();await s.openAddInbound();assert.equal(s.newInbound.routing_mode,'inherit');
+s.closeInboundEditor();await s.openAdvancedInbound();assert.equal(s.newInbound.routing_mode,'inherit');
 h.failWrite(null);let exitRelease;h.holdWrite(new Promise(r=>exitRelease=r));const exiting=s.saveInbound();
 h.pagehide();exitRelease();await exiting;assert.equal(s.showAddInbound.value,false);
 assert.equal(h.messages.filter(v=>v[0]==='success').length,0);

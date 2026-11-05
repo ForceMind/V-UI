@@ -11,6 +11,8 @@
 
 **当前稳定版：[v0.4.17](https://github.com/ForceMind/V-UI/releases/tag/v0.4.17)**
 
+开发分支正在实现[简单节点向导](docs/SIMPLE_NODE_WIZARD_PROGRESS.md)：按用途新建，自动选推荐配置和适用证书，成功后直接分享或复制给另一台服务器。该批尚未合并或公开，不覆盖17；现有节点按原配置保留，浏览器未验证。
+
 临时远程维护、节点分享与中转入口、`v-ui` 在线升级已正常合并并公开。限时链接可授权可信维护者管理节点、分享、证书、中转、备份恢复与升级，支持撤销。[发布记录](docs/REMOTE_MAINTENANCE_PROGRESS.md)包含独审、Actions与旧版保数据升级的准确证据；浏览器未验证。
 
 新增TLS节点唯一适用证书默认选、多张手选；Xray VLESS RAW/TCP TLS支持托管证书绑定与续期，无需手填路径。相关错误中文化，原配置和数据保留；[发布记录](docs/TLS_CERTIFICATE_BINDING_FIX.md)包含独审、真实Xray及旧版升级验收。浏览器未验证。

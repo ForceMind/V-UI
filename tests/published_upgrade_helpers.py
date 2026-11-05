@@ -59,6 +59,22 @@ def assert_receipt_migration(test, before, after, old_version):
         test.assertEqual(after[field], before[field])
 
 
+def assert_node_summary_upgrade(test, before, after):
+    """Keep every historical field, permitting only the two derived booleans.
+
+    These are response capabilities, not a private-row/storage migration. The
+    separate database/material/subscription snapshots must remain byte-exact.
+    """
+    added = {'share_eligible', 'upstream_export_eligible'}
+    test.assertEqual(len(after), len(before))
+    for old, new in zip(before, after):
+        test.assertTrue(added.isdisjoint(old))
+        test.assertEqual(set(new), set(old) | added)
+        for key in added:
+            test.assertIs(type(new[key]), bool)
+        test.assertEqual({key: value for key, value in new.items() if key not in added}, old)
+
+
 def assert_upgrade_configuration(test, before, after, old_release, new_release):
     """Match the complete saved configuration and its exact runtime transition."""
     test.assertEqual(before['release_id'], old_release.name)
@@ -270,7 +286,7 @@ print('{}')
         self.test.assertEqual(manifest['version'], self.candidate['version'])
         assert_receipt_migration(self.test, self.old_receipt, self._receipt(), self.old_version)
         self.test.assertEqual(self._snapshot(release), self.data, 'Private DB rows and certificate bytes must survive')
-        self.test.assertEqual(json.loads(api('/api/inbounds')[1]), self.nodes)
+        assert_node_summary_upgrade(self.test, self.nodes, json.loads(api('/api/inbounds')[1]))
         if self.manual_editor is not None:
             status, raw = api('/api/inbounds/'+str(self.nodes[0]['id'])+'/editor')
             self.test.assertEqual(status, 200)

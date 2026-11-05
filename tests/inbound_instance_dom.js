@@ -265,7 +265,7 @@ test('an editor response for a different integer id cannot open despite a malfor
     assert.equal(f.state.showAddInbound.value, false); assert.equal(f.writes.length, 0); assertConflict(f);
 });
 test('save refuses an editing id without a verified editor snapshot', async () => {
-    const f = fixture(); await f.state.openAddInbound(); f.state.editingInboundId.value = 1;
+    const f = fixture(); await f.state.openAdvancedInbound(); f.state.editingInboundId.value = 1;
     f.state.newInbound.remark = 'Keep unverified draft'; await f.state.saveInbound();
     assert.equal(f.writes.length, 0); assert.equal(f.state.savingInbound.value, false);
     assert.equal(f.state.showAddInbound.value, true); assert.equal(f.state.newInbound.remark, 'Keep unverified draft');
@@ -293,7 +293,7 @@ for (const completion of ['success', 'conflict']) {
 }
 
 test('new-node creation remains unconditioned after an edit is closed', async () => {
-    const f = fixture(); await f.edit(); f.state.closeInboundEditor(); await f.state.openAddInbound(); await f.state.saveInbound();
+    const f = fixture(); await f.edit(); f.state.closeInboundEditor(); await f.state.openAdvancedInbound(); await f.state.saveInbound();
     assert.equal(f.writes.length, 1); assert.equal(f.writes[0].url, '/api/inbounds'); assert.equal(f.writes[0].method, 'POST');
     assert.equal('expected_instance_revision' in f.writes[0].body, false);
 });
