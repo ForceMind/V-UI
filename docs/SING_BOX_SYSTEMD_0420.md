@@ -29,10 +29,19 @@
 ## 当前进度
 
 - [x] 最小生产模板修复及隔离对照已实现、独审和单套准确Actions通过。
-- [ ] 20版本化、严格发布门禁与实装/公开19升级回归、最终完整hash及独审。
-- [ ] 准确候选/dev/main完整资格与四目标。
-- [ ] 公开20及匿名资产读回、旧资产保留。
+- [x] 20版本化、严格发布门禁与实装/公开19升级回归、最终完整hash及独审。
+- [x] 准确候选/dev/main完整资格与四目标。
+- [x] 公开20及匿名资产读回、旧资产保留。
 - [ ] 短入口独立合并及真实main URL验收。
 - [ ] 授权VPS备份升级与本机上游功能实测。
 
 构建和真实安装全部GitHub Actions，不本机下载产品ZIP/编译核心，不浏览器。根因/失败/复验与最终准确SHA/run/job/step在承载PR和Release集中保留，避免回写自身SHA循环提交；源码本页是提交时快照，不提前写通过或已发布。不得将真实维护链接、会话、用户名密码、节点UUID/私钥或生产配置写入源码、CI inputs或公开日志。
+
+## 已公开版本与短入口阶段
+
+- 产品修复冻结31e6ee9；发布准备7932bc58caac7957b697aecf70ad27d5fcb1e5e6经[PR128](https://github.com/ForceMind/V-UI/pull/128)/[PR130](https://github.com/ForceMind/V-UI/pull/130)普通合入dev c8ae32925a7bc9541a3fd785dcec6f95416fcba7，[PR129](https://github.com/ForceMind/V-UI/pull/129)普通合入main05173798de1baed5d67a866c4125e72f74fe3f4c。三者准确最新九组/12jobs全部非browser步骤attempt1成功，四目标及完整loopback通过；仅12个明列browser步骤skip。
+- 准确main实装[run42211705102](https://github.com/ForceMind/V-UI/actions/runs/42211705102)/job127871655730的新装和公开19升级均输出installed20成功marker，真实受管SingBox/Xray、非root/零能力、TLS TCP与实际URI/YAML均通过；全部原14/15/16/17及19保数据升级断言保留。
+- 历史3b77/a42分别run42194757607/42195191635在新增夹具误按订阅列表读单node YAML时失败；修正只加client外壳，不改exporter。dev98 run42201350949/job127837118241在菜单start后首GET拒绝连接；新增只读20秒单deadline实际owner就绪检查，TLS/超时/HTTP/JSON/身份错误仍立即失败。所有修正已独审；旧失败不删除、不计新资格。较早同SHA四个push重复run取消并回读cancelled，完整正式最新PR九组另行全部通过。
+- [发布run42215126417](https://github.com/ForceMind/V-UI/actions/runs/42215126417)只晋升main0517379已受验套件，公开[v0.4.20](https://github.com/ForceMind/V-UI/releases/tag/v0.4.20)，Release436455874。匿名tag/latest及19资产完整manifest对应digest、实际installer/RELEASE.json/清单小文件字节均已核，未本机下载bundle；旧19资产身份保持。
+- 真实installer SHA-256：`f6c135aabe340474478ad9630c609815eb569d0dbab2932699ec607a862b451b`；完整SHA256SUMS文件SHA-256：`977000d835e748d1f705fc99ed3409223f973d84d42baef439e66fc1f26d20b4`。
+- 当前提交只为短入口固定这些真实值及公开source0517379，入口候选/dev/main与实际mainURL尚待验收；不改公开20资产/发布器或重晋升。此后入口源码故意不满足20产品冻结scope，不能拿它重新发布20。授权VPS升级及真实公信certificate_id绑定仍待入口验收后执行；不将CI provided材料冒充生产公信链。
