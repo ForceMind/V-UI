@@ -170,6 +170,19 @@ SIMPLE_NODE_LOOPBACK_STEPS = {
     'Exercise standard-client per-inbound TCP routes and independent host switch',
 }
 SIMPLE_NODE_TEMPLATE_STEP = 'Compile shipped node templates in Node VM'
+MAINTENANCE_180_BASELINE = 'd297af43623e53d0f14ced48b705e04008775a5d'
+MAINTENANCE_180_VERSION = '0.4.19'
+# The approved 180-day maintenance product already carries its final version.
+# Publication may only add the named gate and documentation. Bootstrap pointers
+# are a separate, post-publication change and cannot alter the promoted suite.
+MAINTENANCE_180_FILES = {
+    'scripts/publish_release.py', 'tests/test_release_promotion.py',
+    '.github/workflows/publish.yml',
+    'README.md', 'CHANGELOG.md', 'AGENTS.md', 'docs/RELEASING.md',
+    'docs/README.md', 'docs/INSTALLATION.md',
+    'docs/RELEASE_NOTES.md', 'docs/DEVELOPMENT_HANDOFF.md',
+    'docs/LONG_MAINTENANCE_0419.md', 'docs/REMOTE_MAINTENANCE_CONTRACT.md',
+}
 BROWSER_SKIP_STEPS = {
     name: steps | {'Install explicit test browser'} for name, steps in REQUIRED_ACCEPTANCE_STEPS.items()
 }
@@ -569,10 +582,40 @@ def validate_simple_node_scope(commit, version):
         raise ReleaseGateError('Cannot prove Simple node release source ancestry/scope') from exc
 
 
-def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_trust_no_browser=False, install_interaction_no_browser=False, startup_no_browser=False, ui_redesign_no_browser=False, tls_certificate_no_browser=False, remote_maintenance_no_browser=False, simple_node_no_browser=False):
+def validate_maintenance_180_scope(commit, version):
+    """Only the frozen 0.4.19 180-day maintenance product and release preparation."""
+    if version != MAINTENANCE_180_VERSION:
+        raise ReleaseGateError('Non-browser 180-day maintenance exception is only approved for 0.4.19')
+    try:
+        subprocess.run(['git','merge-base','--is-ancestor',MAINTENANCE_180_BASELINE,commit],check=True,
+                       stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        changes=subprocess.check_output(
+            ['git','diff','--name-status','--no-renames',MAINTENANCE_180_BASELINE,commit],text=True)
+        for line in changes.splitlines():
+            fields=line.split('\t')
+            if len(fields)!=2 or fields[0] not in ('A','M'):
+                raise ReleaseGateError('180-day maintenance release scope refuses deletion, rename or type change')
+            name=fields[1]
+            if name not in MAINTENANCE_180_FILES:
+                raise ReleaseGateError('Changes exceed the approved 180-day maintenance release preparation: '+name)
+            entry=subprocess.check_output(['git','ls-tree',commit,'--',name],text=True)
+            if not re.fullmatch(r'100644 blob [a-f0-9]{40}\t'+re.escape(name)+r'\n',entry):
+                raise ReleaseGateError('180-day maintenance release exception refuses nonregular files or mode changes')
+        if subprocess.check_output(['git','show',commit+':VERSION'])!=b'0.4.19\n':
+            raise ReleaseGateError('180-day maintenance release version identity differs')
+        for name in ('main.py','install.sh'):
+            previous=subprocess.check_output(['git','show',MAINTENANCE_180_BASELINE+':'+name])
+            current=subprocess.check_output(['git','show',commit+':'+name])
+            if current!=previous:
+                raise ReleaseGateError('180-day maintenance frozen product bytes differ: '+name)
+    except subprocess.CalledProcessError as exc:
+        raise ReleaseGateError('Cannot prove 180-day maintenance release source ancestry/scope') from exc
+
+
+def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_trust_no_browser=False, install_interaction_no_browser=False, startup_no_browser=False, ui_redesign_no_browser=False, tls_certificate_no_browser=False, remote_maintenance_no_browser=False, simple_node_no_browser=False, maintenance_180_no_browser=False):
     """A green workflow with skipped acceptance is not release qualification."""
     if sum((installer_only_no_browser, ca_trust_no_browser, install_interaction_no_browser,
-            startup_no_browser, ui_redesign_no_browser, tls_certificate_no_browser, remote_maintenance_no_browser, simple_node_no_browser)) > 1:
+            startup_no_browser, ui_redesign_no_browser, tls_certificate_no_browser, remote_maintenance_no_browser, simple_node_no_browser, maintenance_180_no_browser)) > 1:
         raise ReleaseGateError('Non-browser scope exceptions are mutually exclusive')
     for path, run in sorted(checks.items()):
         attempt = run.get('run_attempt')
@@ -591,21 +634,21 @@ def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_tru
             raise ReleaseGateError('Missing or duplicated exact-attempt jobs: '+path)
         names={step.get('name') for job in jobs for step in job.get('steps', [])}
         required_steps = REQUIRED_ACCEPTANCE_STEPS.get(path,set())
-        if ui_redesign_no_browser or tls_certificate_no_browser or remote_maintenance_no_browser or simple_node_no_browser:
+        if ui_redesign_no_browser or tls_certificate_no_browser or remote_maintenance_no_browser or simple_node_no_browser or maintenance_180_no_browser:
             required_steps = required_steps | BROWSER_SKIP_STEPS.get(path,set())
             if path == 'oneclick.yml':
                 required_steps = required_steps | {UI_REDESIGN_UPGRADE_STEP}
-        if tls_certificate_no_browser or remote_maintenance_no_browser or simple_node_no_browser:
+        if tls_certificate_no_browser or remote_maintenance_no_browser or simple_node_no_browser or maintenance_180_no_browser:
             if path == 'oneclick.yml':
                 required_steps = required_steps | {TLS_CERTIFICATE_UPGRADE_STEP}
             if path == 'test.yml':
                 required_steps = required_steps | {TLS_CERTIFICATE_CORE_STEP}
-        if remote_maintenance_no_browser or simple_node_no_browser:
+        if remote_maintenance_no_browser or simple_node_no_browser or maintenance_180_no_browser:
             if path == 'oneclick.yml':
                 required_steps = required_steps | {REMOTE_MAINTENANCE_UPGRADE_STEP}
             if path == 'loopback.yml':
                 required_steps = required_steps | REMOTE_MAINTENANCE_LOOPBACK_STEPS
-        if simple_node_no_browser:
+        if simple_node_no_browser or maintenance_180_no_browser:
             if path == 'oneclick.yml':
                 required_steps = required_steps | {SIMPLE_NODE_UPGRADE_STEP}
             if path == 'test.yml':
@@ -620,7 +663,7 @@ def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_tru
             def accepted(step):
                 return (step.get('status') == 'completed' and
                         (step.get('conclusion') == 'success' or
-                         ((installer_only_no_browser or ca_trust_no_browser or install_interaction_no_browser or startup_no_browser or ui_redesign_no_browser or tls_certificate_no_browser or remote_maintenance_no_browser or simple_node_no_browser) and step.get('conclusion') == 'skipped'
+                         ((installer_only_no_browser or ca_trust_no_browser or install_interaction_no_browser or startup_no_browser or ui_redesign_no_browser or tls_certificate_no_browser or remote_maintenance_no_browser or simple_node_no_browser or maintenance_180_no_browser) and step.get('conclusion') == 'skipped'
                           and step.get('name') in BROWSER_SKIP_STEPS.get(path,set()))))
             if not steps or not all(accepted(step) for step in steps):
                 raise ReleaseGateError('Workflow has unverified, skipped or failed steps: '+path)
@@ -741,6 +784,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--commit',required=True);p.add_argument('--version',required=True)
     p.add_argument('--confirm',required=True);p.add_argument('--publish',action='store_true')
+    p.add_argument('--maintenance-180-no-browser',action='store_true',
+                   help='Approved frozen 0.4.19 180-day maintenance product; browsers remain unverified')
     p.add_argument('--simple-node-no-browser',action='store_true',
                    help='Approved frozen 0.4.18 simple-node product; browsers remain unverified')
     p.add_argument('--remote-maintenance-no-browser',action='store_true',
@@ -780,8 +825,10 @@ def main():
         if len(batch)<100:
             break
     checks=select_runs(runs,args.commit)
-    if sum((args.installer_only_no_browser, args.ca_trust_no_browser, args.install_interaction_no_browser, args.startup_no_browser, args.ui_redesign_no_browser, args.tls_certificate_no_browser, args.remote_maintenance_no_browser, args.simple_node_no_browser)) > 1:
+    if sum((args.installer_only_no_browser, args.ca_trust_no_browser, args.install_interaction_no_browser, args.startup_no_browser, args.ui_redesign_no_browser, args.tls_certificate_no_browser, args.remote_maintenance_no_browser, args.simple_node_no_browser, args.maintenance_180_no_browser)) > 1:
         raise ReleaseGateError('Non-browser scope exceptions are mutually exclusive')
+    if args.maintenance_180_no_browser:
+        validate_maintenance_180_scope(args.commit,args.version)
     if args.simple_node_no_browser:
         validate_simple_node_scope(args.commit,args.version)
     if args.remote_maintenance_no_browser:
@@ -804,7 +851,8 @@ def main():
                       ui_redesign_no_browser=args.ui_redesign_no_browser,
                       tls_certificate_no_browser=args.tls_certificate_no_browser,
                       remote_maintenance_no_browser=args.remote_maintenance_no_browser,
-                      simple_node_no_browser=args.simple_node_no_browser)
+                      simple_node_no_browser=args.simple_node_no_browser,
+                      maintenance_180_no_browser=args.maintenance_180_no_browser)
 
     tag='v'+args.version
     for path in ('git/ref/tags/'+tag,'releases/tags/'+tag):
@@ -862,6 +910,11 @@ def main():
               '固定核心真实Xray TLS/SNI、证书轮换与失败恢复测试必须成功；批准候选冻结为 `'+TLS_CERTIFICATE_BASELINE+'`；'+\
               '此后仅允许精确列明版本、发布门禁、升级验收和文档，main.py仅15→16版本替换，install.sh仅同一版本注释替换。'+\
               '其他UI、API、CoreRuntime、依赖、固定核心与短入口保持，不覆盖旧资产；此例外只适用0.4.16。\n'
+    if args.maintenance_180_no_browser:
+        body+='\n\n验收范围：用户明确批准本次0.4.19的180天维护授权采用非浏览器验收。浏览器未验证；'+\
+              '仅允许12个明列浏览器步骤跳过且必须存在，全部非浏览器jobs/steps、固定Vue诊断编译、固定核心、完整真实链路、四目标及真实安装/维护和公开14/15/16/17保数据升级门禁保持。'+\
+              '产品与版本冻结于 `'+MAINTENANCE_180_BASELINE+'`；其后仅允许严格列明发布门禁与直接文档，短入口在公开后独立更新。'+\
+              '原配置、凭据、节点、订阅、证书、既有授权截止和旧资产保留；构建与真实安装仅GitHub Actions，未操作用户VPS。此例外仅适用0.4.19。\n'
     if args.simple_node_no_browser:
         body+='\n\n验收范围：用户明确批准本次0.4.18简单节点向导采用非浏览器验收。浏览器未验证；'+\
               '要求全部非浏览器jobs/steps、固定Vue诊断编译、固定核心、完整真实链路与四目标、真实安装/维护及公开14/15/16/17保数据升级成功。'+\
