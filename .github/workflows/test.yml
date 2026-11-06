@@ -58,6 +58,12 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Fetch checksum-pinned real cores
         run: python scripts/fetch_test_cores.py /tmp/vui-test-cores
+      - name: Diagnose fixed sing-box address families on empty systemd runner
+        if: github.event_name == 'workflow_dispatch'
+        timeout-minutes: 3
+        run: |
+          probe_python="$(command -v python)"
+          sudo -n /usr/bin/env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_RUN_ID="$GITHUB_RUN_ID" "$probe_python" -B scripts/sing_box_systemd_probe.py --core /tmp/vui-test-cores/sing-box
       - name: Validate with pinned real cores
         env:
           VUI_TEST_CORES: /tmp/vui-test-cores
