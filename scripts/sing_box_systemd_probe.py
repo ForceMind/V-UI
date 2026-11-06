@@ -105,10 +105,14 @@ def netlink_reason(log):
             and re.search(r'not permitted|permission denied|address family not supported|protocol not supported', line, re.I)]
 
 
-def listener_owned(pid, port, uid):
+def listener_owned(pid, port, uid, expected_core):
     if pid <= 0:
         return False
     try:
+        # Type=simple may expose systemd-executor's PID before exec/drop-UID.
+        # It is not a core sample until the kernel reports our verified binary.
+        if Path(os.readlink('/proc/' + str(pid) + '/exe')) != expected_core:
+            return False
         status = Path('/proc/' + str(pid) + '/status').read_text()
         identity = next(line for line in status.splitlines() if line.startswith('Uid:'))
         if any(int(value) != uid for value in identity.split()[1:]):
@@ -156,7 +160,7 @@ def start_variant(unit, phase, properties, work, core, config, account):
     return run(command, check=False).returncode
 
 
-def observe(unit, phase, properties, port, account):
+def observe(unit, phase, properties, port, account, core):
     deadline = time.monotonic() + 10
     listening = False
     while True:
@@ -165,10 +169,10 @@ def observe(unit, phase, properties, port, account):
         if phase == 'check' and state.get('ActiveState') == 'active' and state.get('SubState') == 'exited':
             outcome = 'check_passed'
             break
-        if phase == 'run' and listener_owned(int(state.get('MainPID') or '0'), port, account.pw_uid):
+        if phase == 'run' and listener_owned(int(state.get('MainPID') or '0'), port, account.pw_uid, core):
             time.sleep(.3)
             state = show(unit)
-            listening = listener_owned(int(state.get('MainPID') or '0'), port, account.pw_uid)
+            listening = listener_owned(int(state.get('MainPID') or '0'), port, account.pw_uid, core)
             outcome = 'owned_loopback_listener' if listening else 'listener_disappeared'
             break
         if state.get('ActiveState') in {'failed', 'inactive'}:
@@ -183,10 +187,63 @@ def observe(unit, phase, properties, port, account):
             'explicit_netlink_reasons': netlink_reason(log), 'fake_fixture_log': log}
 
 
+def identity_self_tests():
+    """Pure mocked /proc regressions; no real process, file or systemd access."""
+    import unittest
+    from unittest.mock import patch
+
+    class IdentitySamplingTests(unittest.TestCase):
+        core = Path('/run/vui-fake/sing-box')
+        descriptor = Path('/proc/1234/fd/7')
+
+        def sample(self, executable, uid, inode='4242'):
+            def read(path, *args, **kwargs):
+                if path == Path('/proc/1234/status'):
+                    return 'Uid: ' + ' '.join([str(uid)] * 4) + '\n'
+                self.assertEqual(path, Path('/proc/net/tcp'))
+                return ('header\n0: 0100007F:28CB 00000000:0000 0A '
+                        '00000000:00000000 00:00000000 00000000 65534 0 ' + inode + '\n')
+            def link(path):
+                if str(path) == '/proc/1234/exe':
+                    return executable
+                self.assertEqual(path, self.descriptor)
+                return 'socket:[4242]'
+            with patch.object(Path, 'read_text', autospec=True, side_effect=read) as reads, \
+                    patch.object(Path, 'iterdir', return_value=iter([self.descriptor])), \
+                    patch.object(os, 'readlink', side_effect=link):
+                outcome = listener_owned(1234, 10443, 65534, self.core)
+                if executable != str(self.core):
+                    reads.assert_not_called()
+                return outcome
+
+        def test_pre_exec_root_executor_is_not_ready(self):
+            self.assertFalse(self.sample('/usr/lib/systemd/systemd-executor', 0))
+
+        def test_actual_core_running_as_root_is_rejected(self):
+            with self.assertRaisesRegex(RuntimeError, 'non-root identity'):
+                self.sample(str(self.core), 0)
+
+        def test_actual_nonroot_core_requires_its_owned_listener(self):
+            self.assertTrue(self.sample(str(self.core), 65534))
+            self.assertFalse(self.sample(str(self.core), 65534, inode='9999'))
+
+        def test_other_executable_with_matching_uid_is_not_ready(self):
+            self.assertFalse(self.sample('/usr/bin/unrelated', 65534))
+
+    result = unittest.TextTestRunner(verbosity=2).run(
+        unittest.defaultTestLoader.loadTestsFromTestCase(IdentitySamplingTests))
+    return 0 if result.wasSuccessful() else 1
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--core', type=Path, required=True)
+    parser.add_argument('--core', type=Path)
+    parser.add_argument('--self-test', action='store_true', help='Run only four pure mocked identity-sampling regressions')
     args = parser.parse_args()
+    if args.self_test:
+        return identity_self_tests()
+    if args.core is None:
+        parser.error('--core is required for the hosted systemd experiment')
     guard()
     canonical = canonical_sandbox()
     original = args.core.resolve(strict=True)
@@ -245,7 +302,7 @@ def main():
                 unit = work.name + '-' + name.replace('_', '-') + '-' + phase + '.service'
                 units.append(unit)
                 start_exit = start_variant(unit, phase, properties, work, core, config, account)
-                result = observe(unit, phase, properties, port, account)
+                result = observe(unit, phase, properties, port, account, core)
                 result['systemd_run_exit'] = start_exit
                 report['variants'].setdefault(name, {})[phase] = result
                 run(['systemctl', 'stop', unit], check=False)
