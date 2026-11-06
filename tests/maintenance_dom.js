@@ -61,12 +61,16 @@ async function admin() {
         h.el('maintenance-grant-form').fire('submit');await flush();
         let q=h.requests.at(-1);assert.equal(q.options.credentials,'same-origin');
         assert.equal(JSON.parse(q.options.body).scopes.join(','),'diagnose');
+        assert.equal(JSON.parse(q.options.body).expires_seconds,1800);
         const link='https://panel.example.test/maintenance#grant='+secret;
         await h.reply({id:3,link});await h.reply([]);
         assert.equal(h.el('maintenance-link').value,link);
         h.el('maintenance-copy').fire();await flush();assert.deepEqual(h.copies,[link]);
         h.el('maintenance-clear').fire();assert.equal(h.el('maintenance-link').value,'');assert(h.el('maintenance-issued').hidden);
+        h.el('maintenance-duration').value='15552000';
         h.el('maintenance-grant-form').fire('submit');await flush();
+        assert.equal(JSON.parse(h.requests.at(-1).options.body).expires_seconds,15552000);
+        assert.equal(JSON.parse(h.requests.at(-1).options.body).scopes.join(','),'diagnose');
         await h.reply({id:4,link:'https://evil.test/#grant='+secret});
         assert.equal(h.el('maintenance-link').value,'');assert(!h.el('maintenance-notice').textContent.includes(secret));
         h.el('maintenance-backup-id').value='/private/arbitrary';h.el('maintenance-restore').fire();await flush();

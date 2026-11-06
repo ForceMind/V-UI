@@ -14,7 +14,7 @@ router = APIRouter()
 class GrantPayload(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     scopes: list[str] = Field(default_factory=lambda: ['diagnose'], min_length=1, max_length=8)
-    expires_seconds: int = Field(default=1800, ge=60, le=7200)
+    expires_seconds: int = Field(default=auth.DEFAULT_SECONDS, ge=60, le=auth.MAX_SECONDS)
 
 
 class ExchangePayload(BaseModel):

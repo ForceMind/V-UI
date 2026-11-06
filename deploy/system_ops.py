@@ -942,9 +942,11 @@ def terminal_grants():
         choices = {'1': 'diagnose',
                    '2': 'diagnose,nodes,share,relay,certificates,operate,upgrade',
                    '3': 'diagnose,nodes,share,relay,certificates,operate,upgrade,destructive'}
-        minutes = read_input('有效分钟数 1–120（默认 30）: ', 3) or '30'
+        minutes = read_input('有效分钟数 1–259200，或输入180天/180d（默认30分钟）: ', 6) or '30'
+        if minutes in ('180天', '180d', '180D'):
+            minutes = '259200'
         if (preset not in choices or not minutes.isascii() or not minutes.isdecimal()
-                or not 1 <= int(minutes) <= 120):
+                or not 1 <= int(minutes) <= 259200):
             raise Refused('invalid grant input')
         arguments = ['create', choices[preset], str(int(minutes) * 60)]
     elif choice == '2':

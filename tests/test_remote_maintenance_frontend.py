@@ -19,6 +19,9 @@ class RemoteMaintenanceFrontendTests(unittest.TestCase):
         html = (ROOT/'web/maintenance.html').read_text()
         self.assertLess(html.index('/ui/js/maintenance.js'), html.index('/ui/js/navigation.js'))
         self.assertNotIn('onclick=',html)
+        self.assertIn('<option value="1800">30 分钟</option>', html)
+        self.assertIn('<option value="15552000">180 天</option>', html)
+        self.assertNotIn('value="15552000" selected', html)
         script = (ROOT/'web/js/maintenance.js').read_text()
         for forbidden in ('localStorage','sessionStorage','console.log','innerHTML','eval('):
             self.assertNotIn(forbidden,script)

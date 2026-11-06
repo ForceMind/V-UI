@@ -21,8 +21,8 @@ def arguments(args):
     if len(args) == 3 and args[0] == 'create':
         scopes = args[1].split(',')
         if (1 <= len(scopes) <= len(SCOPES) and len(set(scopes)) == len(scopes)
-                and set(scopes) <= SCOPES and re.fullmatch(r'[0-9]{1,4}', args[2])
-                and 60 <= int(args[2]) <= 7200):
+                and set(scopes) <= SCOPES and re.fullmatch(r'[0-9]{1,8}', args[2])
+                and 60 <= int(args[2]) <= 15552000):
             return ['create', '--scopes', args[1], '--seconds', args[2]]
     raise ValueError('fixed terminal grant input required')
 

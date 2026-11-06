@@ -1,4 +1,4 @@
-"""Short-lived, one-use maintenance grants. Stored authority is hash-only."""
+"""Expiring, one-use maintenance grants. Stored authority is hash-only."""
 from __future__ import annotations
 
 import hashlib
@@ -17,7 +17,7 @@ SCOPES = frozenset({'diagnose', 'nodes', 'share', 'relay', 'certificates', 'oper
 INVALID = '维护授权已失效，请联系管理员重新授权'
 TOKEN = re.compile(r'^vui_m[gs]_[A-Za-z0-9_-]{43}$')
 DEFAULT_SECONDS = 1800
-MAX_SECONDS = 7200
+MAX_SECONDS = 180 * 24 * 60 * 60
 
 
 class MaintenanceGrant(database.Base):
@@ -96,7 +96,7 @@ def _view(grant):
 def create_grant(owner_id, scopes=None, expires_seconds=DEFAULT_SECONDS):
     scopes = normalize_scopes(['diagnose'] if scopes is None else scopes)
     if type(expires_seconds) is not int or not 60 <= expires_seconds <= MAX_SECONDS:
-        raise HTTPException(422, '有效期须为 60 至 7200 秒')
+        raise HTTPException(422, '有效期须为 60 至 15552000 秒（最长 180 天）')
     now = int(time.time())
     with database.SessionLocal() as db:
         db.execute(text('BEGIN IMMEDIATE'))

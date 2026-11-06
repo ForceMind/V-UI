@@ -54,8 +54,8 @@ class MaintenanceAuthorizationTests(unittest.TestCase):
     def issue(self, scopes=None, seconds=1800):
         return maintenance.create_grant(self.owner, scopes or ['diagnose'], seconds)
 
-    def bearer(self, scopes=None):
-        record, grant = self.issue(scopes)
+    def bearer(self, scopes=None, seconds=1800):
+        record, grant = self.issue(scopes, seconds)
         exchanged = self.client.post('/api/maintenance/exchange', json={'grant': grant},
                                      headers={'X-VUI-Request': '1'})
         self.assertEqual(exchanged.status_code, 200, exchanged.text)
@@ -89,6 +89,44 @@ class MaintenanceAuthorizationTests(unittest.TestCase):
         self.assertNotIn(token, replay.text)
         self.assertIn('no-store', replay.headers['cache-control'])
 
+    def test_180_days_api_exchange_keeps_original_deadline(self):
+        start = int(time.time())
+        duration = 180 * 24 * 60 * 60
+        self.assertEqual(maintenance.MAX_SECONDS, duration)
+        with patch.object(maintenance.time, 'time', return_value=start):
+            response = self.client.post('/api/maintenance/grants', json={'expires_seconds': duration}, headers=BROWSER)
+        self.assertEqual(response.status_code, 201, response.text)
+        record = response.json()
+        self.assertEqual(record['expires_at'], start + duration)
+        self.assertEqual(record['scopes'], ['diagnose'])
+        token = record['link'].split('#grant=')[1]
+        with patch.object(maintenance.time, 'time', return_value=start + 179 * 86400):
+            exchanged = maintenance.exchange(token, 'long-duration-client')
+            self.assertEqual(exchanged['expires_at'], record['expires_at'])
+            session = exchanged['token']
+            self.assertEqual(maintenance.authenticate(session)['scopes'], ['diagnose'])
+            with self.assertRaises(HTTPException):maintenance.exchange(token, 'long-duration-client')
+        with patch.object(maintenance.time, 'time', return_value=start + duration - 1):
+            self.assertEqual(maintenance.authenticate(session)['expires_at'], record['expires_at'])
+        with patch.object(maintenance.time, 'time', return_value=start + duration):
+            self.assertIsNone(maintenance.authenticate(session))
+
+    def test_api_rejects_over_max_and_noninteger_lifetimes(self):
+        for seconds in (15552001, 59, True, '15552000', 15552000.0):
+            with self.subTest(seconds=seconds):
+                response = self.client.post('/api/maintenance/grants', json={'expires_seconds': seconds}, headers=BROWSER)
+                self.assertEqual(response.status_code, 422)
+
+    def test_new_max_does_not_extend_old_grants(self):
+        start = int(time.time())
+        with patch.object(maintenance.time, 'time', return_value=start):
+            record, token = self.issue(seconds=60)
+        with patch.object(maintenance.time, 'time', return_value=start + 60):
+            self.issue(seconds=maintenance.MAX_SECONDS)
+            with self.assertRaises(HTTPException):maintenance.exchange(token, 'old-short-grant')
+        with database.SessionLocal() as db:
+            self.assertEqual(db.get(maintenance.MaintenanceGrant, record['id']).expires_at, start + 60)
+
     def test_atomic_exchange_across_sessions(self):
         _, token = self.issue()
         def attempt(_):
@@ -104,7 +142,7 @@ class MaintenanceAuthorizationTests(unittest.TestCase):
     def test_revoke_expiry_password_reset_and_disabled_admin(self):
         for change in ['revoke', 'expiry', 'password', 'disabled']:
             with self.subTest(change=change):
-                record, headers = self.bearer()
+                record, headers = self.bearer(seconds=maintenance.MAX_SECONDS)
                 self.assertEqual(self.client.get('/api/maintenance/session', headers=headers).status_code, 200)
                 if change == 'revoke':
                     maintenance.revoke_grant(self.owner, record['id'])
@@ -124,7 +162,7 @@ class MaintenanceAuthorizationTests(unittest.TestCase):
                     db.commit()
 
     def test_grant_bounds_persistent_exchange_limit_and_safe_audit(self):
-        for seconds in [0, 59, 7201, True]:
+        for seconds in [0, 59, maintenance.MAX_SECONDS + 1, True, '15552000', 15552000.0]:
             with self.assertRaises(HTTPException):
                 self.issue(seconds=seconds)
         record, token = self.issue(seconds=7200)
