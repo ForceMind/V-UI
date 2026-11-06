@@ -67,6 +67,61 @@ class InstalledNetlinkFixtureTests(unittest.TestCase):
         with self.assertRaises(AssertionError):smoke.verified_upgrade_fixture_rows([original],[])
         with self.assertRaises(AssertionError):smoke.verified_upgrade_fixture_rows([], [original])
 
+    def test_post_menu_identity_wait_retries_only_refused_get_with_shared_budget(self):
+        from scripts import system_maintenance_smoke as smoke
+        identity={'id':1,'username':'owner_changed','role':'admin'}
+        api=Mock(side_effect=[ConnectionRefusedError(errno.ECONNREFUSED,'synthetic not bound'),
+                              (200,json.dumps(identity).encode())])
+        with patch.object(smoke.time,'monotonic',return_value=100),patch.object(smoke.time,'sleep') as sleep:
+            self.assertEqual(smoke.wait_installed_admin_identity(api,'owner_changed'),identity)
+        self.assertEqual(api.call_count,2)
+        for call in api.call_args_list:
+            self.assertEqual(call.args,('/api/auth/me',))
+            self.assertEqual(call.kwargs,{'method':'GET','timeout':5,'readiness':True})
+        sleep.assert_called_once_with(.1)
+
+    def test_post_menu_identity_wait_never_retries_tls_timeout_http_or_content_errors(self):
+        from scripts import system_maintenance_smoke as smoke
+        import ssl
+        identity={'id':1,'username':'owner_changed','role':'admin'}
+        cases=[(ssl.SSLCertVerificationError('synthetic TLS verification'),ssl.SSLCertVerificationError),
+               (TimeoutError('synthetic request timeout'),TimeoutError),
+               ((401,json.dumps(identity).encode()),AssertionError),
+               ((500,json.dumps(identity).encode()),AssertionError),
+               ((200,b'not-json'),ValueError),((200,b'[]'),AssertionError),
+               ((200,b'{"id":1,"username":"owner_changed"}'),AssertionError),
+               ((200,json.dumps({**identity,'id':True}).encode()),AssertionError),
+               ((200,json.dumps({**identity,'username':'different_owner'}).encode()),AssertionError),
+               ((200,json.dumps({**identity,'secret':'unexpected'}).encode()),AssertionError)]
+        for value,error in cases:
+            api=Mock(side_effect=value) if isinstance(value,Exception) else Mock(return_value=value)
+            with self.subTest(error=type(value).__name__),patch.object(smoke.time,'monotonic',return_value=100), \
+                 patch.object(smoke.time,'sleep') as sleep,self.assertRaises(error):
+                smoke.wait_installed_admin_identity(api,'owner_changed')
+            api.assert_called_once();sleep.assert_not_called()
+
+    def test_post_menu_identity_wait_cannot_extend_deadline_or_accept_late_success(self):
+        from scripts import system_maintenance_smoke as smoke
+        with patch.object(smoke.time,'monotonic',side_effect=[100,120]),patch.object(smoke.time,'sleep') as sleep:
+            api=Mock()
+            with self.assertRaisesRegex(AssertionError,'original deadline'):
+                smoke.wait_installed_admin_identity(api,'owner_changed')
+            api.assert_not_called();sleep.assert_not_called()
+        api=Mock(side_effect=ConnectionRefusedError(errno.ECONNREFUSED,'synthetic refused'))
+        with patch.object(smoke.time,'monotonic',side_effect=[100,100,119.95,120.01]),patch.object(smoke.time,'sleep') as sleep:
+            with self.assertRaisesRegex(AssertionError,'original deadline'):
+                smoke.wait_installed_admin_identity(api,'owner_changed')
+            api.assert_called_once()
+            self.assertAlmostEqual(sleep.call_args.args[0],.05)
+        api=Mock(return_value=(200,b'{"id":1,"username":"owner_changed","role":"admin"}'))
+        with patch.object(smoke.time,'monotonic',side_effect=[100,100,120.01]),patch.object(smoke.time,'sleep') as sleep:
+            with self.assertRaisesRegex(AssertionError,'after its original deadline'):
+                smoke.wait_installed_admin_identity(api,'owner_changed')
+            api.assert_called_once();sleep.assert_not_called()
+        for budget in (0,20.01,True,float('nan')):
+            with self.subTest(budget=budget),self.assertRaisesRegex(AssertionError,'budget'):
+                smoke.wait_installed_admin_identity(Mock(),'owner_changed',timeout=budget)
+
     def test_actual_tcp_upstream_yaml_is_wrapped_as_one_unchanged_client_node(self):
         # Use the real exporter and smoke's real YAML branch. No binary, socket,
         # service, database, trust store or external endpoint is involved.
@@ -111,13 +166,14 @@ class InstalledNetlinkFixtureTests(unittest.TestCase):
         from scripts import system_maintenance_smoke as smoke
         import inspect
         source=inspect.getsource(smoke.installed_netlink_smoke)
-        capture="admin_identity_before=request('/api/auth/me')"
+        capture="admin_identity_before=wait_installed_admin_identity(api,expected_username)"
         compare="check.assertEqual(request('/api/auth/me'),admin_identity_before)"
         self.assertEqual(source.count(capture),1)
         self.assertEqual(source.count(compare),1)
         self.assertLess(source.index(capture),source.index('for row in verified_upgrade_fixture_rows'))
         self.assertGreater(source.index(compare),source.index('service_python(user_program),users_before'))
         self.assertNotIn("config['admin']",source)
+        self.assertIn('expected_username=admin_username',(SOURCE/'tests/test_oneclick_system.py').read_text())
 
     def test_installed_success_marker_is_unique_and_emitted_only_after_finally_cleanup(self):
         from scripts import system_maintenance_smoke as smoke

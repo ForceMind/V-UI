@@ -330,7 +330,39 @@ def verified_upgrade_fixture_rows(actual, expected):
     return actual
 
 
-def installed_netlink_smoke(check, source, work, api, ca, cert, key, verified_old_nodes, private_values):
+def wait_installed_admin_identity(api, expected_username, *, timeout=20):
+    """Read-only post-menu readiness, within the original first-GET budget.
+
+    Type=simple active does not imply bind/TLS readiness. Only an actual refused
+    connect is retried. TLS, HTTP, JSON, identity and request timeouts fail closed.
+    """
+    assert type(timeout) in (int,float) and 0 < timeout <= 20, 'Invalid installed HTTPS readiness budget'
+    assert type(expected_username) is str and re.fullmatch(r'[A-Za-z0-9_.-]{3,64}',expected_username), 'Invalid expected fixture identity'
+    deadline=time.monotonic()+timeout
+    while True:
+        remaining=deadline-time.monotonic()
+        if remaining<=0:
+            raise AssertionError('Installed HTTPS identity was not ready within the original deadline')
+        try:
+            status,raw=api('/api/auth/me',method='GET',timeout=min(5,remaining),readiness=True)
+        except ConnectionRefusedError:
+            remaining=deadline-time.monotonic()
+            if remaining<=0:
+                raise AssertionError('Installed HTTPS listener remained refused until the original deadline') from None
+            time.sleep(min(.1,remaining))
+            continue
+        if status!=200:
+            raise AssertionError('Installed HTTPS must retain the authenticated identity; status='+str(status))
+        identity=json.loads(raw)
+        assert type(identity) is dict and set(identity)=={'id','username','role'}, 'Invalid installed public identity fields'
+        assert type(identity['id']) is int and identity['id']>0, 'Invalid installed public identity id'
+        assert identity['role']=='admin' and identity['username']==expected_username, 'Installed identity differs from the logged-in fixture owner'
+        if time.monotonic()>deadline:
+            raise AssertionError('Installed HTTPS identity arrived after its original deadline')
+        return identity
+
+
+def installed_netlink_smoke(check, source, work, api, ca, cert, key, verified_old_nodes, private_values, *, expected_username):
     """Run only after original data/upgrade assertions on an empty hosted runner.
 
     Existing invalid synthetic drafts are removed by exact guarded API revision,
@@ -352,7 +384,7 @@ def installed_netlink_smoke(check, source, work, api, ca, cert, key, verified_ol
         check.assertEqual(status,expected,'Installed netlink fixture API failed: '+path)
         return json.loads(raw)
 
-    admin_identity_before=request('/api/auth/me')
+    admin_identity_before=wait_installed_admin_identity(api,expected_username)
 
     def service_python(program):
         prefix = 'import sys;sys.path.insert(0,'+repr(str(release/'payload'))+');'

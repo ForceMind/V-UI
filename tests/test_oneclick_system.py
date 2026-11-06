@@ -668,7 +668,7 @@ class OneClickSystemTests(unittest.TestCase):
             if os.getenv('VUI_NETLINK_SYSTEMD_TEST') == '1':
                 from scripts.system_maintenance_smoke import installed_netlink_smoke
                 installed_netlink_smoke(self,source,work,api,ca,cert,key,
-                    published_upgrade.nodes if published_upgrade else [],private_values)
+                    published_upgrade.nodes if published_upgrade else [],private_values,expected_username=admin_username)
             if online:
                 print('Online managed installer transport: '+online['transport']+'; interactive domain/email/admin/ports, real global v-ui menu and stop/start passed')
             if domain_retry:

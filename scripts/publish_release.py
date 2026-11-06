@@ -189,12 +189,12 @@ NETLINK_SERVICE_VERSION = '0.4.20'
 # These reviewed CI bytes are the only new acceptance implementations permitted.
 NETLINK_SERVICE_CI_HASHES = {
     '.github/workflows/oneclick.yml': '889b9294f3186e7334b1810664d8147344f6e588ecb33015ffa8aab718db21f5',
-    'scripts/system_maintenance_smoke.py': 'cc6f8614ad0ecc1e1799b56b0157c278f047d419742087c0e7b739456385e13e',
-    'tests/test_system_maintenance.py': 'd95fdefa0d9ad6e05333e718f8426e6c7e250502808cf927cf81549980701ddd',
+    'scripts/system_maintenance_smoke.py': 'f4db677228fdf73c1da7425354592dc837173e30b942f7cbcd9afd9fd22be8a4',
+    'tests/test_system_maintenance.py': 'db56587f0bd048abb63784bd058400038e77b365f14ccef8c04bccbd32b7ef31',
     'tests/test_short_install_contract.py': '0092ac126332dba17b043f857222ca79812cb60bd155318431e211cdabc34dae',
     'tests/published_upgrade_helpers.py': '309418fcfadeb6f683059c0efb1d984e8a30850330c9565486f0cce6af744676',
     'tests/test_published_upgrade_helpers.py': '427e4fa356281963b7196a233e6283a6dbffd7e028cc5c5efa552fdb9282bc49',
-    'tests/test_oneclick_system.py': '5693df19826779a9c653b31b0999c65d2070a720415a0a8d013056f2026bbcb1',
+    'tests/test_oneclick_system.py': '99750e6d29beb5e79fc7be0167ab109b6fa364c49c2bb9ee65ca708bf63fbd7d',
 }
 NETLINK_SERVICE_FILES = {
     'VERSION', 'main.py', 'install.sh', 'scripts/publish_release.py',
