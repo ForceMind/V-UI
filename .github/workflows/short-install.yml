@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: a2b9c188658f082b189e77d237787a96eb9cf921
+          ref: 05173798de1baed5d67a866c4125e72f74fe3f4c
           path: .published-suite
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -32,8 +32,8 @@ jobs:
       - name: Install public stable suite through the actual short command
         env:
           VUI_SYSTEM_INSTALL_TEST: '1'
-          VUI_PUBLISHED_INSTALL_VERSION: '0.4.19'
-          VUI_RELEASE_COMMIT: a2b9c188658f082b189e77d237787a96eb9cf921
+          VUI_PUBLISHED_INSTALL_VERSION: '0.4.20'
+          VUI_RELEASE_COMMIT: 05173798de1baed5d67a866c4125e72f74fe3f4c
           VUI_SETUP_INSTALL: '1'
           VUI_INSTALLER_YN_TEST: '1'
           VUI_SETUP_RELEASE_SOURCE: ${{ github.workspace }}/.published-suite
