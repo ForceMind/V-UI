@@ -8,9 +8,17 @@
 
 - [x] d297产品及独立只读审查完成，无阻塞；本机33项纯检查通过，Actions完整单元报告2625项、按环境条件跳过232项，新增期限/权限边界均通过。
 - [x] d297准确候选九组Actions/12jobs全部attempt1成功，四目标、真实安装180天CLI签发/撤销及公开14/15/16/17保数据升级通过。准确run/job/step证据见PR #124。
-- [ ] 严格19发布门禁、文档及其独审；不继承18的发布例外。
-- [ ] 新准确候选、dev及main的全部非浏览器资格。
-- [ ] 人工晋升同提交受验套件，匿名核验tag/latest、19资产及真实小文件摘要，核旧18资产不变。
+- [x] 1ed461a严格19发布门禁及13文件准备独审，无阻塞；96项纯门禁测试通过，不继承18例外。
+- [x] 候选1ed461a、dev536bb7c最新PR及main a2b9c188658f082b189e77d237787a96eb9cf921分别九组/12jobs正式资格通过；main全部attempt1，仅12明列browser步骤skip。
+- [x] 人工run42153964824/job127683567729晋升同源受验套件公开Release436051562；匿名tag/latest、19资产、真实install.sh/SHA256SUMS/RELEASE.json核验，旧18身份与digest不变。
 - [ ] 发布后独立短入口更新、独审及准确候选/dev/main和真实main URL安装验收。
 
 本轮发布准备由主智能体更新直接说明，一名gpt-6.1-sol/high子智能体实现严格门禁，一名独立只读审查者复核最终差异；累计不超过5名，不递归。只允许既有12个明确浏览器步骤跳过，浏览器未验证；所有其他步骤必须成功。构建、四目标制品及真实安装只在GitHub Actions，本机仅轻量纯检查与必要文本证据。公开前短入口固定18，公开后读取真实19摘要才切入口，不重建或覆盖旧tag/Release/资产。准确SHA和最终run/job/step证据集中在承载PR与Release，不为回写自身SHA循环提交；准备不写已发布，失败与复验分别保留。
+
+## 公开后短入口阶段
+
+已公开源固定为main a2b9c188658f082b189e77d237787a96eb9cf921，Release436051562含19项资产。安装器实际SHA-256为ff3c53d739a7e7e2d89e07d2d0a484cea3c89382889d4a59eb153d4f9e0f41c1；完整SHA256SUMS文件本身SHA-256为1f417fde4374c718fce8dc65a803848cc9dad47675a1b4a24e8d9313c3a5e403。只在Actions处理产品制品，本机匿名读回小控制文件，未下载产品ZIP。
+
+当前复用版本分支从公开main正常fast-forward，改动仅setup版本/这两个真实pin、short-install冻结源、两项对应测试及直接说明。应用/安装器/VERSION/发布器/核心/CI安装助手和旧资产保持，不再次发布19。公开HTTPS安装与短入口自己的独审、准确候选/dev/main及真实main URL验收继续；最终SHA/run/job/step在承载PR集中记录，避免回写自身SHA循环提交。
+
+历史异常分开保留：候选1ed链路attempt1因同fixture主机端口和ordinary-direct重复取40983失败，原样attempt2通过，未修复随机取号缺陷。dev额外push/PR18事件观察有旧push loopback42147373358所有step成功但外层in_progress，正常cancel与force-cancel502、rerun403，观察窗口结束时17成功/1未结算；这条旧run未计通过。独审与主控原样调用正式select_runs，选同SHA每workflow较新PR，九组/12jobs/全部非浏览器步骤和准确attempt重验通过，正式合同未要求双事件各一套。原18事件观察器和证据保持，不把额外目标写成满足，不改发布器或断言。
