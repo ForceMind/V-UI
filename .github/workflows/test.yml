@@ -59,7 +59,6 @@ jobs:
       - name: Fetch checksum-pinned real cores
         run: python scripts/fetch_test_cores.py /tmp/vui-test-cores
       - name: Diagnose fixed sing-box address families on empty systemd runner
-        if: github.event_name == 'workflow_dispatch'
         timeout-minutes: 3
         run: |
           probe_python="$(command -v python)"

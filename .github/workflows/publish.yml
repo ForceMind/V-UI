@@ -24,6 +24,11 @@ on:
         required: true
         type: boolean
         default: false
+      netlink_service_no_browser:
+        description: Approved frozen 0.4.20 panel AF_NETLINK fix, browsers unverified
+        required: true
+        type: boolean
+        default: false
       maintenance_180_no_browser:
         description: Approved frozen 0.4.19 180-day maintenance product, browsers unverified
         required: true
@@ -87,6 +92,7 @@ jobs:
           VERSION: ${{ inputs.version }}
           CONFIRM: ${{ inputs.confirm }}
           PUBLISH: ${{ inputs.publish }}
+          NETLINK_SERVICE_NO_BROWSER: ${{ inputs.netlink_service_no_browser }}
           MAINTENANCE_180_NO_BROWSER: ${{ inputs.maintenance_180_no_browser }}
           SIMPLE_NODE_NO_BROWSER: ${{ inputs.simple_node_no_browser }}
           REMOTE_MAINTENANCE_NO_BROWSER: ${{ inputs.remote_maintenance_no_browser }}
@@ -103,6 +109,7 @@ jobs:
           if [[ "$INSTALLER_ONLY_NO_BROWSER" == 'true' ]]; then args+=(--installer-only-no-browser); fi
           if [[ "$CA_TRUST_NO_BROWSER" == 'true' ]]; then args+=(--ca-trust-no-browser); fi
           if [[ "$INSTALL_INTERACTION_NO_BROWSER" == 'true' ]]; then args+=(--install-interaction-no-browser); fi
+          if [[ "$NETLINK_SERVICE_NO_BROWSER" == 'true' ]]; then args+=(--netlink-service-no-browser); fi
           if [[ "$MAINTENANCE_180_NO_BROWSER" == 'true' ]]; then args+=(--maintenance-180-no-browser); fi
           if [[ "$SIMPLE_NODE_NO_BROWSER" == 'true' ]]; then args+=(--simple-node-no-browser); fi
           if [[ "$REMOTE_MAINTENANCE_NO_BROWSER" == 'true' ]]; then args+=(--remote-maintenance-no-browser); fi

@@ -1,5 +1,9 @@
 # V-UI 开发约束
 
+## 2026-11-06 v0.4.20 systemd / sing-box 修复（继续交付）
+
+用户在前述v0.4.20具体方案后清除旧Goal并人工回复“继续”；本轮按该最小方案开发、独审、准确Actions、正常dev→main、公开20和短入口更新，备份后用现有180天授权升级VPS并验证本机TCP上游。只为panel增加AF_NETLINK，User/Group/NoNewPrivileges/空capabilities及其他hardening保持，HTTP01/OpenRC字节不变；不改SSH/防火墙/全局代理开关或未知另一台中转机。原Xray8001、凭据、证书和数据保留，固定核心不变。产品冻结31e6ee921082a8fee98ba368942dadf712d751d3，其后仅严格版本/发布门禁/直接文档与固定完整hash的必要安装回归。仅20专用非浏览器例外；准确候选/dev/main各自每工作流最新资格、同提交四目标/真实受管Sing启动与公开19升级必须通过，不继承旧绿灯。构建安装只Actions，浏览器未验证，不本机产品构建。统一记录docs/SING_BOX_SYSTEMD_0420.md；下方19为历史。
+
 ## 2026-11-06 v0.4.19 已公开：仅切短入口
 
 用户对PR #124 Ready、正常dev→main、公开19和短入口更新的批准已沿用执行。准确发布源main a2b9c188658f082b189e77d237787a96eb9cf921已通过自身九组/12jobs全部attempt1；人工run42153964824公开Release436051562，匿名tag/latest、19资产digest与真实安装器/完整清单摘要均核验，旧18不变。产品冻结d297af4，其后的严格本版门禁独审与候选/dev/main资格记录于docs/LONG_MAINTENANCE_0419.md。当前只更新setup版本/真实pin、short-install冻结源、两项直接测试和说明；应用、安装器本体、VERSION、发布器、固定CI助手和旧tag/资产保持，不再次发布。复用release/v0.4.19与原两名子智能体，不递归。短入口候选/dev/main按正式每工作流最新运行各自验收，并验证实际main URL。额外双事件观察与未完成旧push另记，不计通过。构建安装只Actions，不browser、不改VPS或原配置数据。

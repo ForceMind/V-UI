@@ -1,3 +1,7 @@
+## v0.4.20 发布准备：sing-box 启动兼容
+
+当前分支准备20，尚未公开；手工--version示例随候选更新，不代表下载已存在。稳定版和短入口仍19。修复仅为受管panel服务增加网络接口监控必需AF_NETLINK，保留非root和其他安全限制，HTTP01服务不增加此地址族。安装及升级保留原账户、节点、证书、数据、代理/中转开关；不自动修改SSH或防火墙。准确验收及上线状态见[记录](SING_BOX_SYSTEMD_0420.md)。构建与实际安装只Actions，浏览器未验证。
+
 ## v0.4.19 安装与升级
 
 [v0.4.19已公开](https://github.com/ForceMind/V-UI/releases/tag/v0.4.19)，应用源固定a2b9c188658f082b189e77d237787a96eb9cf921。本分支短入口使用公开19安装器和完整清单的真实可信摘要；实际main入口上线与验收状态见[本批记录](LONG_MAINTENANCE_0419.md)和承载PR。构建安装只Actions，浏览器未验证。
@@ -232,7 +236,7 @@ root 只负责系统初始化和受管服务文件；应用、核心与 Certbot 
 
 ```sh
 # 按README完成固定入口校验/root私有副本及函数定义后：
-run_vui_installer --version v0.4.19
+run_vui_installer --version v0.4.20
 ```
 
 脚本先检测 `x86_64/aarch64 + gnu/musl`，再从该明确版本下载对应目标包、安装控制器和 `SHA256SUMS`，逐个验证摘要后执行。不会下载 `latest`，也不会在发布时重新构建包。

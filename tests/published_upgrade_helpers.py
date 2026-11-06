@@ -1,4 +1,4 @@
-"""Opt-in empty-host public 0.4.14/0.4.15/0.4.16/0.4.17 -> exact candidate upgrade observations.
+"""Opt-in empty-host public 0.4.14/0.4.15/0.4.16/0.4.17/0.4.19 -> exact candidate upgrade observations.
 
 The old installation uses anonymous published HTTPS. Only the unpublished new
 kit's download transport is adapted; neither installer nor root receipt is faked.
@@ -19,6 +19,7 @@ PUBLISHED_BASELINES = {
     '0.4.15': '65b1e75d90de733408101ec280a92be935731baa',
     '0.4.16': '18fe631bcf69b68425b454db1795a101e0378842',
     '0.4.17': '95c201c6e26ed54960f964c675e515890f2eea2a',
+    '0.4.19': 'a2b9c188658f082b189e77d237787a96eb9cf921',
 }
 CONTROL = Path('/usr/local/lib/v-ui')
 FIREWALL = str(CONTROL / 'firewall_support.py')
@@ -41,14 +42,14 @@ def assert_download_boundary(test, kit, log):
 
 def fixed_public_baseline(version, commit):
     if version not in PUBLISHED_BASELINES or PUBLISHED_BASELINES[version] != commit:
-        raise AssertionError('Fixed public 0.4.14, 0.4.15, 0.4.16 or 0.4.17 upgrade baseline required')
+        raise AssertionError('Fixed public 0.4.14, 0.4.15, 0.4.16, 0.4.17 or 0.4.19 upgrade baseline required')
     return version, commit
 
 
 def assert_receipt_migration(test, before, after, old_version):
     if old_version not in PUBLISHED_BASELINES:
         raise AssertionError('Unknown public upgrade receipt baseline')
-    if old_version == '0.4.17':
+    if old_version in ('0.4.17', '0.4.19'):
         test.assertTrue(MAINTENANCE_FILES <= set(before['files']))
         additions = set()
     else:
@@ -64,12 +65,16 @@ def assert_receipt_migration(test, before, after, old_version):
         test.assertEqual(after[field], before[field])
 
 
-def assert_node_summary_upgrade(test, before, after):
+def assert_node_summary_upgrade(test, before, after, old_version=None):
     """Keep every historical field, permitting only the two derived booleans.
 
     These are response capabilities, not a private-row/storage migration. The
     separate database/material/subscription snapshots must remain byte-exact.
     """
+    if old_version == '0.4.19':
+        # 19 already exposes both capability booleans; retain every old field.
+        test.assertEqual(after, before)
+        return
     added = {'share_eligible', 'upstream_export_eligible'}
     test.assertEqual(len(after), len(before))
     for old, new in zip(before, after):
@@ -236,7 +241,7 @@ with database.SessionLocal() as db:
 print('{}')
 ''')
         self.managed_xray = None
-        if self.old_version in ('0.4.16', '0.4.17'):
+        if self.old_version in ('0.4.16', '0.4.17', '0.4.19'):
             # The stored binding and its local fixture material are observed as
             # data only. No CA, certificate validation or business core is run.
             self.managed_xray = self._service_python(release, managed_xray_fixture_program())
@@ -291,7 +296,7 @@ print('{}')
         self.test.assertEqual(manifest['version'], self.candidate['version'])
         assert_receipt_migration(self.test, self.old_receipt, self._receipt(), self.old_version)
         self.test.assertEqual(self._snapshot(release), self.data, 'Private DB rows and certificate bytes must survive')
-        assert_node_summary_upgrade(self.test, self.nodes, json.loads(api('/api/inbounds')[1]))
+        assert_node_summary_upgrade(self.test, self.nodes, json.loads(api('/api/inbounds')[1]), self.old_version)
         if self.manual_editor is not None:
             status, raw = api('/api/inbounds/'+str(self.nodes[0]['id'])+'/editor')
             self.test.assertEqual(status, 200)

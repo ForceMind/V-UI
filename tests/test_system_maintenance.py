@@ -38,6 +38,44 @@ def no_lock(*args, **kwargs):
     yield
 
 
+class InstalledNetlinkFixtureTests(unittest.TestCase):
+    def test_real_installed_gate_requires_both_explicit_flag_and_actual_020(self):
+        from scripts import system_maintenance_smoke as smoke
+        for flag in ('', '0', '1'):
+            for version in ('0.4.14', '0.4.18', '0.4.19', '0.4.20'):
+                with self.subTest(flag=flag,version=version),patch.dict(os.environ,{'VUI_NETLINK_SYSTEMD_TEST':flag}):
+                    self.assertEqual(smoke.netlink_systemd_enabled(version+'-'+'a'*12),
+                                     flag=='1' and version=='0.4.20')
+
+    def test_019_and_020_keep_actual_180_day_cli_while_old_releases_keep_default(self):
+        from scripts import system_maintenance_smoke as smoke
+        for version,expected in (('0.4.14',False),('0.4.15',False),('0.4.16',False),
+                                 ('0.4.17',False),('0.4.18',False),('0.4.19',True),('0.4.20',True)):
+            with self.subTest(version=version):
+                self.assertIs(smoke.maintenance_long_duration(version+'-'+'a'*12),expected)
+
+    def test_only_exact_previously_verified_fixture_rows_can_be_cleaned(self):
+        from scripts import system_maintenance_smoke as smoke
+        original={'id':7,'tag':'sing-box-vless-19371','remark':'published-upgrade-synthetic-draft',
+                  'core':'sing-box','protocol':'vless','port':19371,'mutation_revision':'a'*64}
+        self.assertEqual(smoke.verified_upgrade_fixture_rows([dict(original)],[original]),[original])
+        self.assertEqual(smoke.verified_upgrade_fixture_rows([],[]),[])
+        for change in ({'id':8},{'tag':'unrelated'},{'remark':'unknown'},{'core':'xray'},
+                       {'port':19372},{'mutation_revision':'b'*64},{'mutation_revision':None}):
+            with self.subTest(change=change),self.assertRaises((AssertionError,TypeError)):
+                smoke.verified_upgrade_fixture_rows([{**original,**change}],[original])
+        with self.assertRaises(AssertionError):smoke.verified_upgrade_fixture_rows([original],[])
+        with self.assertRaises(AssertionError):smoke.verified_upgrade_fixture_rows([], [original])
+
+    def test_installed_success_marker_is_unique_and_emitted_only_after_finally_cleanup(self):
+        from scripts import system_maintenance_smoke as smoke
+        import inspect
+        source=inspect.getsource(smoke.installed_netlink_smoke)
+        self.assertEqual(source.count('print(NETLINK_SYSTEMD_MARKER)'),1)
+        self.assertGreater(source.index('print(NETLINK_SYSTEMD_MARKER)'),source.index('finally:'))
+        self.assertIn('installed20 panel-child TLS TCP URI/YAML passed',smoke.NETLINK_SYSTEMD_MARKER)
+
+
 class ProtocolTests(unittest.TestCase):
     def test_real_client_retries_only_observed_listener_syscalls(self):
         from scripts import system_maintenance_smoke as smoke
