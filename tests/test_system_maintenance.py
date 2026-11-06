@@ -67,6 +67,18 @@ class InstalledNetlinkFixtureTests(unittest.TestCase):
         with self.assertRaises(AssertionError):smoke.verified_upgrade_fixture_rows([original],[])
         with self.assertRaises(AssertionError):smoke.verified_upgrade_fixture_rows([], [original])
 
+    def test_installed_identity_uses_live_session_not_historical_install_metadata(self):
+        from scripts import system_maintenance_smoke as smoke
+        import inspect
+        source=inspect.getsource(smoke.installed_netlink_smoke)
+        capture="admin_identity_before=request('/api/auth/me')"
+        compare="check.assertEqual(request('/api/auth/me'),admin_identity_before)"
+        self.assertEqual(source.count(capture),1)
+        self.assertEqual(source.count(compare),1)
+        self.assertLess(source.index(capture),source.index('for row in verified_upgrade_fixture_rows'))
+        self.assertGreater(source.index(compare),source.index('service_python(user_program),users_before'))
+        self.assertNotIn("config['admin']",source)
+
     def test_installed_success_marker_is_unique_and_emitted_only_after_finally_cleanup(self):
         from scripts import system_maintenance_smoke as smoke
         import inspect

@@ -352,6 +352,8 @@ def installed_netlink_smoke(check, source, work, api, ca, cert, key, verified_ol
         check.assertEqual(status,expected,'Installed netlink fixture API failed: '+path)
         return json.loads(raw)
 
+    admin_identity_before=request('/api/auth/me')
+
     def service_python(program):
         prefix = 'import sys;sys.path.insert(0,'+repr(str(release/'payload'))+');'
         result = subprocess.run(['sudo','-u','v-ui','/usr/bin/env',
@@ -578,7 +580,7 @@ print(json.dumps({'pid':child.pid,'created':child.create_time(),'binary_sha256':
         check.assertEqual(current_proxy['active']['settings'],off_settings)
         check.assertIsNone(current_proxy['pending'])
         check.assertEqual(service_python(user_program),users_before)
-        check.assertEqual(request('/api/auth/me')['username'],config['admin'])
+        check.assertEqual(request('/api/auth/me'),admin_identity_before)
         print('Installed netlink evidence: '+json.dumps({'release_id':config['release_id'],
             'panel_pid':panel_pid,'xray':xray_witness,'sing-box':sing_witness,'artifacts':artifacts,
             'global_flags':'dual-OFF','account_and_xray_preserved':True,
