@@ -344,15 +344,23 @@ def nonroot_smoke(check, source, kit, api, expected_proxy):
     check.assertIn('/maintenance#grant=', grant['link'])
     check.assertTrue(any(row['id'] == grant['id'] for row in grants('list')))
     grants('revoke', str(grant['id']))
+    long_duration = status['release_id'].startswith('0.4.19-')
+    if long_duration:
+        long_grant = grants('create', 'diagnose', '15552000')
+        check.assertEqual(long_grant['expires_at'] - long_grant['created_at'], 15552000)
+        check.assertEqual(long_grant['scopes'], ['diagnose'])
+        grants('revoke', str(long_grant['id']))
     from online_install_helpers import PrivateMenuSession
     with PrivateMenuSession(['sudo', '/usr/local/sbin/v-ui'], cwd='/tmp', env=dict(os.environ), timeout=60) as terminal:
         terminal.expect('请选择: '); terminal.send('13\n')
         terminal.expect('请选择授权操作: '); terminal.send('1\n')
         terminal.expect('请选择权限 [1/2/3，默认 1]: '); terminal.send('\n')
-        terminal.expect('有效分钟数 1–120（默认 30）: '); terminal.send('\n')
+        terminal.expect('有效分钟数 1–259200，或输入180天/180d（默认30分钟）: ')
+        terminal.send('180天\n' if long_duration else '\n')
         issued = terminal.expect('请选择: ')
         records = [json.loads(line) for line in issued.splitlines() if line.startswith('{')]
         check.assertEqual(len(records), 1, 'Terminal grant result missing')
+        check.assertEqual(records[0]['expires_at'] - records[0]['created_at'], 15552000 if long_duration else 1800)
         check.assertEqual(records[0]['scopes'], ['diagnose'])
         terminal.send('12\n'); terminal.expect('确认下载官方稳定版本并沿用原配置升级 [y/N]: ')
         terminal.send('n\n'); cancelled = terminal.expect('请选择: ')

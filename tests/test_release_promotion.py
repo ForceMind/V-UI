@@ -29,6 +29,9 @@ from scripts.publish_release import (
     INSTALLER_ONLY_BASELINE,
     validate_ca_trust_scope,
     CA_TRUST_BASELINE,
+    MAINTENANCE_180_BASELINE,
+    MAINTENANCE_180_FILES,
+    validate_maintenance_180_scope,
     SIMPLE_NODE_CI_FIX_HASHES,
     SIMPLE_NODE_BASELINE,
     SIMPLE_NODE_FILES,
@@ -774,6 +777,138 @@ class SimpleNodeReleaseTests(unittest.TestCase):
             with self.subTest(name=name),patch('scripts.publish_release.request') as request,self.assertRaisesRegex(ReleaseGateError,'mutually exclusive'):
                 validate_run_jobs({},SHA,simple_node_no_browser=True,**{name:True})
             request.assert_not_called()
+
+
+class Maintenance180ReleaseTests(unittest.TestCase):
+    def scope(self, changes='M\tscripts/publish_release.py\n', mode='100644',
+              application_extra=b'', installer_extra=b'', version=b'0.4.19\n', ancestry=True):
+        app=b"app = FastAPI(version='0.4.19')\n"
+        installer=b'# install.sh --version v0.4.19\nactual_installer()\n'
+        def git(args, **kwargs):
+            if args[1:3]==['diff','--name-status']:
+                self.assertIn('--no-renames',args)
+                return changes
+            if args[1]=='ls-tree':return mode+' blob '+'f'*40+'\t'+args[-1]+'\n'
+            if args[1]=='show':
+                return {
+                    MAINTENANCE_180_BASELINE+':main.py': app,
+                    SHA+':main.py': app+application_extra,
+                    SHA+':VERSION': version,
+                    MAINTENANCE_180_BASELINE+':install.sh': installer,
+                    SHA+':install.sh': installer+installer_extra,
+                }[args[2]]
+            raise AssertionError(args)
+        failure=None if ancestry else subprocess.CalledProcessError(1,['git','merge-base'])
+        with patch('scripts.publish_release.subprocess.run',side_effect=failure) as ancestor, \
+                patch('scripts.publish_release.subprocess.check_output',side_effect=git):
+            validate_maintenance_180_scope(SHA,'0.4.19')
+            self.assertEqual(ancestor.call_args.args[0],
+                             ['git','merge-base','--is-ancestor',MAINTENANCE_180_BASELINE,SHA])
+
+    def test_frozen_candidate_and_exact_gate_and_document_paths_allowed(self):
+        self.scope(changes='')
+        self.scope(changes=''.join('M\t'+path+'\n' for path in sorted(MAINTENANCE_180_FILES)))
+        self.scope(changes='A\tdocs/LONG_MAINTENANCE_0419.md\n')
+
+    def test_exception_rejects_old_future_or_nonstable_versions_before_git(self):
+        for version in ('0.4.18','0.4.20','0.5.0','0.4.19-rc1'):
+            with self.subTest(version=version),patch('scripts.publish_release.subprocess.run') as git,self.assertRaises(ReleaseGateError):
+                validate_maintenance_180_scope(SHA,version)
+            git.assert_not_called()
+
+    def test_missing_approved_ancestor_is_rejected(self):
+        with self.assertRaisesRegex(ReleaseGateError,'ancestry'):self.scope(ancestry=False)
+
+    def test_frozen_product_other_paths_and_post_release_pointers_rejected(self):
+        for path in ('VERSION','main.py','install.sh','setup.sh','.github/workflows/short-install.yml',
+                     'app/api/maintenance.py','app/services/maintenance.py','scripts/system_launcher.py',
+                     'scripts/system_ops.py','web/maintenance.html','web/js/maintenance.js',
+                     'requirements-runtime.txt','scripts/build_bundle.py','scripts/install_system.py',
+                     '.github/workflows/test.yml','.github/workflows/oneclick.yml',
+                     'scripts/system_maintenance_smoke.py','tests/test_system_maintenance.py',
+                     'tests/test_oneclick_system.py','tests/unrelated.py','docs/unrelated.md'):
+            with self.subTest(path=path),self.assertRaises(ReleaseGateError):self.scope(changes='M\t'+path+'\n')
+
+    def test_rename_delete_type_change_and_nonregular_or_executable_modes_rejected(self):
+        for change in ('D\tREADME.md\n','R100\tREADME.md\tdocs/README.md\n',
+                       'T\tREADME.md\n','C100\tREADME.md\tdocs/README.md\n'):
+            with self.subTest(change=change),self.assertRaises(ReleaseGateError):self.scope(changes=change)
+        for mode in ('100755','120000','160000','040000'):
+            with self.subTest(mode=mode),self.assertRaises(ReleaseGateError):self.scope(mode=mode)
+
+    def test_frozen_app_installer_and_version_are_checked_without_version_rewrite(self):
+        for kwargs in ({'application_extra':b'new_logic()\n'}, {'installer_extra':b'new_logic()\n'},
+                       {'version':b'0.4.18\n'}, {'version':b'0.4.19 \n'}):
+            with self.subTest(kwargs=kwargs),self.assertRaises(ReleaseGateError):self.scope(**kwargs)
+
+    def test_only_twelve_explicit_browser_skips_are_accepted(self):
+        self.assertEqual(sum(map(len,BROWSER_SKIP_STEPS.values())),12)
+        for path, names in BROWSER_SKIP_STEPS.items():
+            run={'id':42,'run_attempt':1,'head_sha':SHA,'status':'completed','conclusion':'success'}
+            job={'id':7,'run_id':42,'head_sha':SHA,'status':'completed','conclusion':'success',
+                 'steps':[{'name':name,'status':'completed','conclusion':'skipped'} for name in names]}
+            if path=='test.yml':
+                job['steps'].extend({'name':name,'status':'completed','conclusion':'success'}
+                                    for name in (TLS_CERTIFICATE_CORE_STEP,SIMPLE_NODE_TEMPLATE_STEP))
+            with self.subTest(path=path),patch('scripts.publish_release.request',side_effect=[{'jobs':[job]},run]):
+                validate_run_jobs({path:run},SHA,maintenance_180_no_browser=True)
+            for invalid in ('missing','failure','cancelled','in_progress'):
+                bad={**job,'steps':[dict(step) for step in job['steps']]}
+                if invalid=='missing':bad['steps'].pop(0)
+                elif invalid=='in_progress':bad['steps'][0]['status']=invalid
+                else:bad['steps'][0]['conclusion']=invalid
+                with self.subTest(path=path,invalid=invalid),patch('scripts.publish_release.request',return_value={'jobs':[bad]}),self.assertRaises(ReleaseGateError):
+                    validate_run_jobs({path:run},SHA,maintenance_180_no_browser=True)
+
+    def test_nonbrowser_skips_remain_rejected(self):
+        run,job=ExactJobQualificationTests().fixtures()
+        job['steps']=[{'name':name,'status':'completed','conclusion':'skipped'} for name in BROWSER_SKIP_STEPS['test.yml']]
+        job['steps'].extend({'name':name,'status':'completed','conclusion':'success'}
+                            for name in (TLS_CERTIFICATE_CORE_STEP,SIMPLE_NODE_TEMPLATE_STEP))
+        job['steps'].append({'name':'Run tests','status':'completed','conclusion':'skipped'})
+        with patch('scripts.publish_release.request',return_value={'jobs':[job]}),self.assertRaises(ReleaseGateError):
+            validate_run_jobs({'test.yml':run},SHA,maintenance_180_no_browser=True)
+
+    def test_all_published_upgrades_real_core_template_and_full_loopback_must_succeed(self):
+        run,job=ExactJobQualificationTests().fixtures()
+        mandatory={'oneclick.yml':{UI_REDESIGN_UPGRADE_STEP,TLS_CERTIFICATE_UPGRADE_STEP,REMOTE_MAINTENANCE_UPGRADE_STEP,SIMPLE_NODE_UPGRADE_STEP},
+                   'test.yml':{TLS_CERTIFICATE_CORE_STEP,SIMPLE_NODE_TEMPLATE_STEP},
+                   'loopback.yml':SIMPLE_NODE_LOOPBACK_STEPS}
+        for path, required in mandatory.items():
+            names=required | BROWSER_SKIP_STEPS.get(path,set())
+            for name in required:
+                for state in ('success','missing','skipped','failure','cancelled','in_progress'):
+                    steps=[{'name':item,'status':'completed','conclusion':'success'} for item in names]
+                    target=next(step for step in steps if step['name']==name)
+                    if state=='missing':steps.remove(target)
+                    elif state=='in_progress':target['status']=state
+                    else:target['conclusion']=state
+                    with self.subTest(path=path,name=name,state=state),patch(
+                            'scripts.publish_release.request',side_effect=[{'jobs':[{**job,'steps':steps}]},run]):
+                        if state=='success':validate_run_jobs({path:run},SHA,maintenance_180_no_browser=True)
+                        else:
+                            with self.assertRaises(ReleaseGateError):
+                                validate_run_jobs({path:run},SHA,maintenance_180_no_browser=True)
+
+    def test_maintenance_exception_cannot_mix_with_any_previous_exception(self):
+        for name in ('installer_only_no_browser','ca_trust_no_browser','install_interaction_no_browser',
+                     'startup_no_browser','ui_redesign_no_browser','tls_certificate_no_browser',
+                     'remote_maintenance_no_browser','simple_node_no_browser'):
+            with self.subTest(name=name),patch('scripts.publish_release.request') as request,self.assertRaisesRegex(ReleaseGateError,'mutually exclusive'):
+                validate_run_jobs({},SHA,maintenance_180_no_browser=True,**{name:True})
+            request.assert_not_called()
+
+    def test_exception_retains_exact_attempt_job_and_reread_checks(self):
+        run,job=ExactJobQualificationTests().fixtures()
+        job['steps'].extend({'name':name,'status':'completed','conclusion':'success'}
+                            for name in BROWSER_SKIP_STEPS['test.yml']-{step['name'] for step in job['steps']})
+        job['steps'].extend({'name':name,'status':'completed','conclusion':'success'}
+                            for name in (TLS_CERTIFICATE_CORE_STEP,SIMPLE_NODE_TEMPLATE_STEP))
+        for bad in ({**job,'run_id':43},{**job,'head_sha':'b'*40}):
+            with self.subTest(bad=bad),patch('scripts.publish_release.request',return_value={'jobs':[bad]}),self.assertRaises(ReleaseGateError):
+                validate_run_jobs({'test.yml':run},SHA,maintenance_180_no_browser=True)
+        with patch('scripts.publish_release.request',side_effect=[{'jobs':[job]},{**run,'run_attempt':3}]),self.assertRaisesRegex(ReleaseGateError,'changed during'):
+            validate_run_jobs({'test.yml':run},SHA,maintenance_180_no_browser=True)
 
 
 class ExactJobQualificationTests(unittest.TestCase):
