@@ -189,8 +189,8 @@ NETLINK_SERVICE_VERSION = '0.4.20'
 # These reviewed CI bytes are the only new acceptance implementations permitted.
 NETLINK_SERVICE_CI_HASHES = {
     '.github/workflows/oneclick.yml': '889b9294f3186e7334b1810664d8147344f6e588ecb33015ffa8aab718db21f5',
-    'scripts/system_maintenance_smoke.py': '2f38ee4ab36e0740448312d9fe7c2d09634076ef58722adf982c726973c19224',
-    'tests/test_system_maintenance.py': '4d9664bac65496584a1286b4a447ec980f22d647c2a6c88031d16aa79193f023',
+    'scripts/system_maintenance_smoke.py': 'cc6f8614ad0ecc1e1799b56b0157c278f047d419742087c0e7b739456385e13e',
+    'tests/test_system_maintenance.py': 'd95fdefa0d9ad6e05333e718f8426e6c7e250502808cf927cf81549980701ddd',
     'tests/test_short_install_contract.py': '0092ac126332dba17b043f857222ca79812cb60bd155318431e211cdabc34dae',
     'tests/published_upgrade_helpers.py': '309418fcfadeb6f683059c0efb1d984e8a30850330c9565486f0cce6af744676',
     'tests/test_published_upgrade_helpers.py': '427e4fa356281963b7196a233e6283a6dbffd7e028cc5c5efa552fdb9282bc49',

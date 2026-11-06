@@ -556,10 +556,16 @@ print(json.dumps({'pid':child.pid,'created':child.create_time(),'binary_sha256':
                     provider=home/'upstream.txt';provider.write_bytes(raw);provider.chmod(0o600)
                     client_config=uri_client(provider,client_port,controller_port)
                 else:
-                    document=yaml.safe_load(raw)
-                    node=document['proxies'][0]
+                    # TCP-upstream YAML is one exported node, unlike an
+                    # ordinary subscription. Add only the client shell wrapper.
+                    node=yaml.safe_load(raw)
+                    check.assertIsInstance(node,dict)
+                    check.assertEqual(node['type'],'vless')
+                    check.assertEqual(node['network'],'tcp')
+                    check.assertIs(node['tls'],True)
+                    check.assertIs(node['skip-cert-verify'],False)
                     check.assertIs(node['udp'],False)
-                    client_config=yaml_client(document,[node['name']],client_port,controller_port)
+                    client_config=yaml_client({'proxies':[node]},[node['name']],client_port,controller_port)
                 check.assertNotIn('DIRECT',json.dumps(client_config))
                 path=home/(source_format+'.yaml');path.write_text(yaml.safe_dump(client_config));path.chmod(0o600)
                 process=ReadyMihomoProcess(stack,[str(client),'-d',str(home),'-f',str(path)],home/(source_format+'.log'),environment)

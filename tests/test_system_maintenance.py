@@ -67,6 +67,46 @@ class InstalledNetlinkFixtureTests(unittest.TestCase):
         with self.assertRaises(AssertionError):smoke.verified_upgrade_fixture_rows([original],[])
         with self.assertRaises(AssertionError):smoke.verified_upgrade_fixture_rows([], [original])
 
+    def test_actual_tcp_upstream_yaml_is_wrapped_as_one_unchanged_client_node(self):
+        # Use the real exporter and smoke's real YAML branch. No binary, socket,
+        # service, database, trust store or external endpoint is involved.
+        import ast
+        from copy import deepcopy
+        import inspect
+        import yaml
+        from app.services.tcp_upstream_export import export_tcp_upstream
+        from inbound_routing_real_helpers import yaml_client
+        from scripts import system_maintenance_smoke as smoke
+        item=types.SimpleNamespace(id=1,core='sing-box',protocol='vless',port=10443,
+            remark='installed-node',tag='installed-node',enable=True,expiry_time=0,
+            settings={'users':[{'uuid':'11111111-1111-4111-8111-111111111111'}]},
+            stream_settings={'tls':{'enabled':True,'server_name':'vpn.example.test',
+                'certificate_path':'/fake/cert.pem','key_path':'/fake/key.pem','alpn':['h2','http/1.1']},
+                '_vui':{'security':'tls','server_name':'vpn.example.test',
+                        'client_fingerprint':'chrome','skip_cert_verify':False}})
+        original=deepcopy(vars(item))
+        artifact=export_tcp_upstream(item,'127.0.0.1','clash-yaml')
+        node=yaml.safe_load(artifact.content)
+        self.assertNotIn('proxies',node)
+        self.assertIs(node['udp'],False)
+        tree=ast.parse(inspect.getsource(smoke.installed_netlink_smoke))
+        branch=next(n for n in ast.walk(tree) if isinstance(n,ast.If)
+                    and isinstance(n.test,ast.Compare) and isinstance(n.test.left,ast.Name)
+                    and n.test.left.id=='source_format')
+        program=compile(ast.Module(body=branch.orelse,type_ignores=[]),'<actual-smoke-upstream-yaml>','exec')
+        namespace={'yaml':yaml,'raw':artifact.content.encode(),'check':self,'yaml_client':yaml_client,
+                   'client_port':1234,'controller_port':1235}
+        exec(program,namespace)
+        self.assertEqual(namespace['node'],node)
+        self.assertEqual(namespace['client_config']['proxies'],[node])
+        self.assertEqual(vars(item),original)
+        self.assertNotIn('DIRECT',json.dumps(namespace['client_config']))
+        namespace['client_config']['proxies'][0]['alpn'].append('copy-only')
+        self.assertEqual(namespace['node'],node,'Client shell must not mutate exported fields')
+        for change in ({'udp':True},{'udp':0},{'tls':False},{'skip-cert-verify':True},{'network':'udp'}):
+            with self.subTest(change=change),patch.object(yaml,'safe_load',return_value={**node,**change}),self.assertRaises(AssertionError):
+                exec(program,namespace)
+
     def test_installed_identity_uses_live_session_not_historical_install_metadata(self):
         from scripts import system_maintenance_smoke as smoke
         import inspect
