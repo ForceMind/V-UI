@@ -38,6 +38,96 @@ def no_lock(*args, **kwargs):
     yield
 
 
+class InstalledNetlinkFixtureTests(unittest.TestCase):
+    def test_real_installed_gate_requires_both_explicit_flag_and_actual_020(self):
+        from scripts import system_maintenance_smoke as smoke
+        for flag in ('', '0', '1'):
+            for version in ('0.4.14', '0.4.18', '0.4.19', '0.4.20'):
+                with self.subTest(flag=flag,version=version),patch.dict(os.environ,{'VUI_NETLINK_SYSTEMD_TEST':flag}):
+                    self.assertEqual(smoke.netlink_systemd_enabled(version+'-'+'a'*12),
+                                     flag=='1' and version=='0.4.20')
+
+    def test_019_and_020_keep_actual_180_day_cli_while_old_releases_keep_default(self):
+        from scripts import system_maintenance_smoke as smoke
+        for version,expected in (('0.4.14',False),('0.4.15',False),('0.4.16',False),
+                                 ('0.4.17',False),('0.4.18',False),('0.4.19',True),('0.4.20',True)):
+            with self.subTest(version=version):
+                self.assertIs(smoke.maintenance_long_duration(version+'-'+'a'*12),expected)
+
+    def test_only_exact_previously_verified_fixture_rows_can_be_cleaned(self):
+        from scripts import system_maintenance_smoke as smoke
+        original={'id':7,'tag':'sing-box-vless-19371','remark':'published-upgrade-synthetic-draft',
+                  'core':'sing-box','protocol':'vless','port':19371,'mutation_revision':'a'*64}
+        self.assertEqual(smoke.verified_upgrade_fixture_rows([dict(original)],[original]),[original])
+        self.assertEqual(smoke.verified_upgrade_fixture_rows([],[]),[])
+        for change in ({'id':8},{'tag':'unrelated'},{'remark':'unknown'},{'core':'xray'},
+                       {'port':19372},{'mutation_revision':'b'*64},{'mutation_revision':None}):
+            with self.subTest(change=change),self.assertRaises((AssertionError,TypeError)):
+                smoke.verified_upgrade_fixture_rows([{**original,**change}],[original])
+        with self.assertRaises(AssertionError):smoke.verified_upgrade_fixture_rows([original],[])
+        with self.assertRaises(AssertionError):smoke.verified_upgrade_fixture_rows([], [original])
+
+    def test_actual_tcp_upstream_yaml_is_wrapped_as_one_unchanged_client_node(self):
+        # Use the real exporter and smoke's real YAML branch. No binary, socket,
+        # service, database, trust store or external endpoint is involved.
+        import ast
+        from copy import deepcopy
+        import inspect
+        import yaml
+        from app.services.tcp_upstream_export import export_tcp_upstream
+        from inbound_routing_real_helpers import yaml_client
+        from scripts import system_maintenance_smoke as smoke
+        item=types.SimpleNamespace(id=1,core='sing-box',protocol='vless',port=10443,
+            remark='installed-node',tag='installed-node',enable=True,expiry_time=0,
+            settings={'users':[{'uuid':'11111111-1111-4111-8111-111111111111'}]},
+            stream_settings={'tls':{'enabled':True,'server_name':'vpn.example.test',
+                'certificate_path':'/fake/cert.pem','key_path':'/fake/key.pem','alpn':['h2','http/1.1']},
+                '_vui':{'security':'tls','server_name':'vpn.example.test',
+                        'client_fingerprint':'chrome','skip_cert_verify':False}})
+        original=deepcopy(vars(item))
+        artifact=export_tcp_upstream(item,'127.0.0.1','clash-yaml')
+        node=yaml.safe_load(artifact.content)
+        self.assertNotIn('proxies',node)
+        self.assertIs(node['udp'],False)
+        tree=ast.parse(inspect.getsource(smoke.installed_netlink_smoke))
+        branch=next(n for n in ast.walk(tree) if isinstance(n,ast.If)
+                    and isinstance(n.test,ast.Compare) and isinstance(n.test.left,ast.Name)
+                    and n.test.left.id=='source_format')
+        program=compile(ast.Module(body=branch.orelse,type_ignores=[]),'<actual-smoke-upstream-yaml>','exec')
+        namespace={'yaml':yaml,'raw':artifact.content.encode(),'check':self,'yaml_client':yaml_client,
+                   'client_port':1234,'controller_port':1235}
+        exec(program,namespace)
+        self.assertEqual(namespace['node'],node)
+        self.assertEqual(namespace['client_config']['proxies'],[node])
+        self.assertEqual(vars(item),original)
+        self.assertNotIn('DIRECT',json.dumps(namespace['client_config']))
+        namespace['client_config']['proxies'][0]['alpn'].append('copy-only')
+        self.assertEqual(namespace['node'],node,'Client shell must not mutate exported fields')
+        for change in ({'udp':True},{'udp':0},{'tls':False},{'skip-cert-verify':True},{'network':'udp'}):
+            with self.subTest(change=change),patch.object(yaml,'safe_load',return_value={**node,**change}),self.assertRaises(AssertionError):
+                exec(program,namespace)
+
+    def test_installed_identity_uses_live_session_not_historical_install_metadata(self):
+        from scripts import system_maintenance_smoke as smoke
+        import inspect
+        source=inspect.getsource(smoke.installed_netlink_smoke)
+        capture="admin_identity_before=request('/api/auth/me')"
+        compare="check.assertEqual(request('/api/auth/me'),admin_identity_before)"
+        self.assertEqual(source.count(capture),1)
+        self.assertEqual(source.count(compare),1)
+        self.assertLess(source.index(capture),source.index('for row in verified_upgrade_fixture_rows'))
+        self.assertGreater(source.index(compare),source.index('service_python(user_program),users_before'))
+        self.assertNotIn("config['admin']",source)
+
+    def test_installed_success_marker_is_unique_and_emitted_only_after_finally_cleanup(self):
+        from scripts import system_maintenance_smoke as smoke
+        import inspect
+        source=inspect.getsource(smoke.installed_netlink_smoke)
+        self.assertEqual(source.count('print(NETLINK_SYSTEMD_MARKER)'),1)
+        self.assertGreater(source.index('print(NETLINK_SYSTEMD_MARKER)'),source.index('finally:'))
+        self.assertIn('installed20 panel-child TLS TCP URI/YAML passed',smoke.NETLINK_SYSTEMD_MARKER)
+
+
 class ProtocolTests(unittest.TestCase):
     def test_real_client_retries_only_observed_listener_syscalls(self):
         from scripts import system_maintenance_smoke as smoke

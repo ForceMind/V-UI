@@ -34,6 +34,14 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
                 assert_node_summary_upgrade(self,before,bad)
         with self.assertRaises(AssertionError):assert_node_summary_upgrade(self,before,after+after)
 
+    def test_019_summary_preserves_existing_capabilities_and_all_other_fields(self):
+        before=[{'id':1,'routing_mode':'inherit','share_eligible':True,'upstream_export_eligible':False,
+                 'mutation_revision':'a'*64}]
+        assert_node_summary_upgrade(self,before,deepcopy(before),'0.4.19')
+        for change in ({'share_eligible':False},{'routing_mode':'direct'},{'mutation_revision':'b'*64}):
+            with self.subTest(change=change),self.assertRaises(AssertionError):
+                assert_node_summary_upgrade(self,before,[{**before[0],**change}],'0.4.19')
+
     def test_configuration_requires_exact_runtime_transition_and_preserved_fields(self):
         old_release=Path('/var/lib/v-ui/releases/old-014')
         new_release=Path('/var/lib/v-ui/releases/candidate-015')
@@ -108,15 +116,16 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
         with self.assertRaises(AssertionError):assert_receipt_migration(self,after,after,'0.4.14')
 
 
-    def test_only_immutable_public_014_through_017_sources_are_accepted(self):
+    def test_only_immutable_public_014_through_017_and_019_sources_are_accepted(self):
         expected={'0.4.14':'b0cc174d04d05e61277075412586f0ba0dd231db',
                   '0.4.15':'65b1e75d90de733408101ec280a92be935731baa',
                   '0.4.16':'18fe631bcf69b68425b454db1795a101e0378842',
-                  '0.4.17':'95c201c6e26ed54960f964c675e515890f2eea2a'}
+                  '0.4.17':'95c201c6e26ed54960f964c675e515890f2eea2a',
+                  '0.4.19':'a2b9c188658f082b189e77d237787a96eb9cf921'}
         self.assertEqual(PUBLISHED_BASELINES,expected)
         for version,commit in expected.items():
             self.assertEqual(fixed_public_baseline(version,commit),(version,commit))
-        for version,commit in [('0.4.13','a'*40),('0.4.17',expected['0.4.16']),
+        for version,commit in [('0.4.13','a'*40),('0.4.18',expected['0.4.19']),('0.4.19','f'*40),('0.4.17',expected['0.4.16']),
                                ('0.4.16',expected['0.4.15']),('0.4.16','a'*40),
                                ('0.4.14',expected['0.4.15']),('0.4.15',expected['0.4.14']),
                                ('0.4.15','a'*40),(None,None)]:
@@ -156,6 +165,8 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
                         assert_receipt_migration(self,before,changed,version)
             legacy=deepcopy(before);del legacy['files'][FIREWALL]
             with self.assertRaises(AssertionError):assert_receipt_migration(self,legacy,after,version)
+        assert_receipt_migration(self,after,after,'0.4.19')
+        with self.assertRaises(AssertionError):assert_receipt_migration(self,before,after,'0.4.19')
         assert_receipt_migration(self,after,after,'0.4.17')
         with self.assertRaises(AssertionError):assert_receipt_migration(self,before,after,'0.4.17')
         missing=deepcopy(after);missing['files'].pop(next(iter(MAINTENANCE_FILES)))

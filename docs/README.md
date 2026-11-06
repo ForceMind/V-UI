@@ -1,3 +1,7 @@
+## **v0.4.20** systemd / sing-box 启动修复（发布准备）
+
+仅为panel放行AF_NETLINK，保持非root、NoNewPrivileges和空capabilities；HTTP01/OpenRC不变。新增真实受管服务Sing/Xray共存和公开19→候选升级回归。当前尚未公开20，稳定19与短入口不覆盖；[范围及准确证据](SING_BOX_SYSTEMD_0420.md)。构建和安装仅Actions，浏览器未验证。
+
 ## **v0.4.19** 长期维护授权
 
 [已公开发布](https://github.com/ForceMind/V-UI/releases/tag/v0.4.19)，发布源a2b9c18，19资产及真实摘要已匿名核验，旧18资产保持。网页可选180天，终端可输入180天或180d；默认30分钟、截止不续期和权限/撤销保护保持。短入口自己的上线与准确验收见[发布记录](LONG_MAINTENANCE_0419.md)。构建和安装仅Actions，浏览器未验证。
