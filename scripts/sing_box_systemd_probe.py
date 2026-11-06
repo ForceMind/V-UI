@@ -67,10 +67,26 @@ def canonical_sandbox():
         'ipv6': False}).items() if path.name == 'v-ui.service')
     values = dict(line.split('=', 1) for line in panel.splitlines() if '=' in line)
     selected = {key: values[key] for key in SANDBOX_KEYS}
-    if (set(selected['RestrictAddressFamilies'].split()) != {'AF_INET', 'AF_INET6', 'AF_UNIX'}
+    if (set(selected['RestrictAddressFamilies'].split()) != {'AF_INET', 'AF_INET6', 'AF_UNIX', 'AF_NETLINK'}
             or selected['CapabilityBoundingSet'] != '' or selected['NoNewPrivileges'] != 'true'):
         raise RuntimeError('Canonical sandbox changed; this experiment must be reviewed again')
     return selected
+
+
+def sandbox_variants(canonical):
+    legacy_families = ' '.join(value for value in canonical['RestrictAddressFamilies'].split()
+                               if value != 'AF_NETLINK')
+    return {'legacy_without_netlink': {**canonical, 'RestrictAddressFamilies': legacy_families},
+            'canonical': dict(canonical)}
+
+
+def classify_runs(legacy, canonical):
+    if (legacy['outcome'] == 'process_exited' and legacy['explicit_netlink_reasons']
+            and canonical['outcome'] == 'owned_loopback_listener'):
+        return 'supported_in_this_isolated_fixture_only'
+    if legacy['outcome'] == canonical['outcome'] == 'owned_loopback_listener':
+        return 'not_reproduced_for_same_direct_adapter_route'
+    return 'inconclusive: inspect explicit reasons; timeout is not a cause'
 
 
 def adapter_basis():
@@ -188,7 +204,7 @@ def observe(unit, phase, properties, port, account, core):
 
 
 def identity_self_tests():
-    """Pure mocked /proc regressions; no real process, file or systemd access."""
+    """Pure identity/sandbox/classification regressions; no systemd or core access."""
     import unittest
     from unittest.mock import patch
 
@@ -216,6 +232,30 @@ def identity_self_tests():
                     reads.assert_not_called()
                 return outcome
 
+        def test_legacy_differs_from_canonical_only_by_netlink(self):
+            canonical = canonical_sandbox()
+            variants = sandbox_variants(canonical)
+            legacy = variants['legacy_without_netlink']
+            self.assertEqual(variants['canonical'], canonical)
+            self.assertEqual({**legacy, 'RestrictAddressFamilies': canonical['RestrictAddressFamilies']}, canonical)
+            self.assertEqual(set(legacy['RestrictAddressFamilies'].split()), {'AF_INET', 'AF_INET6', 'AF_UNIX'})
+            self.assertEqual(set(canonical['RestrictAddressFamilies'].split()),
+                             {'AF_INET', 'AF_INET6', 'AF_UNIX', 'AF_NETLINK'})
+
+        def test_confirmation_requires_process_exit_and_explicit_netlink_reason(self):
+            ready = {'outcome': 'owned_loopback_listener', 'explicit_netlink_reasons': []}
+            reason = netlink_reason('FATAL create netlink socket: address family not supported by protocol')
+            self.assertTrue(reason)
+            failed = {'outcome': 'process_exited', 'explicit_netlink_reasons': reason}
+            self.assertEqual(classify_runs(failed, ready), 'supported_in_this_isolated_fixture_only')
+            for unproven in ({**failed, 'explicit_netlink_reasons': netlink_reason('fatal unrelated failure')},
+                             {**failed, 'outcome': 'unresolved_timeout'}):
+                self.assertTrue(classify_runs(unproven, ready).startswith('inconclusive'))
+
+        def test_both_listeners_do_not_confirm_netlink_cause(self):
+            ready = {'outcome': 'owned_loopback_listener', 'explicit_netlink_reasons': []}
+            self.assertEqual(classify_runs(ready, ready), 'not_reproduced_for_same_direct_adapter_route')
+
         def test_pre_exec_root_executor_is_not_ready(self):
             self.assertFalse(self.sample('/usr/lib/systemd/systemd-executor', 0))
 
@@ -238,7 +278,7 @@ def identity_self_tests():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--core', type=Path)
-    parser.add_argument('--self-test', action='store_true', help='Run only four pure mocked identity-sampling regressions')
+    parser.add_argument('--self-test', action='store_true', help='Run only pure identity, sandbox and classification regressions')
     args = parser.parse_args()
     if args.self_test:
         return identity_self_tests()
@@ -294,8 +334,7 @@ def main():
                       auto_detect_interface=basis['route'].get('auto_detect_interface', 'UNSET: identical to adapter'),
                       config_sha256=hashlib.sha256(config.read_bytes()).hexdigest(), loopback_port=port,
                       fixture_scope='Same direct dual-OFF adapter route/outbound; fake VLESS TLS, loopback-only inlet, debug log; no relay/upstream runtime claimed')
-        variants = {'canonical': canonical,
-                    'with_netlink': {**canonical, 'RestrictAddressFamilies': canonical['RestrictAddressFamilies'] + ' AF_NETLINK'}}
+        variants = sandbox_variants(canonical)
         # Both variants validate the exact same config before either run.
         for phase in ('check', 'run'):
             for name, properties in variants.items():
@@ -309,15 +348,8 @@ def main():
                 result['after_stop'] = show(unit)
                 if phase == 'check' and result['outcome'] != 'check_passed':
                     raise RuntimeError('Configuration check did not pass; startup comparison is inconclusive')
-        base = report['variants']['canonical']['run']
-        added = report['variants']['with_netlink']['run']
-        if (base['outcome'] == 'process_exited' and base['explicit_netlink_reasons']
-                and added['outcome'] == 'owned_loopback_listener'):
-            report['hypothesis'] = 'supported_in_this_isolated_fixture_only'
-        elif base['outcome'] == added['outcome'] == 'owned_loopback_listener':
-            report['hypothesis'] = 'not_reproduced_for_same_direct_adapter_route'
-        else:
-            report['hypothesis'] = 'inconclusive: inspect explicit reasons; timeout is not a cause'
+        report['hypothesis'] = classify_runs(report['variants']['legacy_without_netlink']['run'],
+                                             report['variants']['canonical']['run'])
     except Exception as exc:
         report['hypothesis'] = 'inconclusive'
         report['error'] = type(exc).__name__ + ': ' + str(exc)
