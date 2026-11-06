@@ -1,3 +1,9 @@
+## v0.4.20 发布准备：systemd / sing-box 网络监控
+
+本轮沿用用户在明确20最小修复、独审、正常dev→main、公开/短入口和备份后维护链接升级方案后的人工“继续”。产品冻结31e6ee921082a8fee98ba368942dadf712d751d3；panel只增加AF_NETLINK，非root/NoNewPrivileges/空能力集及HTTP01/OpenRC保持。其后仅严格版本替换、门禁、直接文档和完整hash固定的必要CI回归；netlink_service_no_browser仅适用20且与全部旧例外互斥，不能任意跳过非浏览器步骤。
+
+准确候选、dev和main各自按同SHA每workflow最新run/最新attempt/全部job和步骤核验；仅12个明列浏览器步骤可跳过，浏览器未验证。固定核心/模板/完整loopback、四目标、真实安装后的Sing/Xray共存和TLS/认证转发、不可变公开19及原14/15/16/17保数据升级全部必要。人工发布只晋升准确默认main已受验同源套件，不重建或覆盖旧tag/Release/资产。公开后匿名核19项资产和真实小文件摘要才切短入口，再验自身候选/dev/main与实际main URL；最后备份后通过已授予维护链接升级并实际验证。当前稳定仍19，尚未公开20。[统一记录](SING_BOX_SYSTEMD_0420.md)。
+
 ## v0.4.19 已公开：短入口切换
 
 用户已批准PR #124 Ready、正常dev→main、公开19及短入口更新。产品冻结d297af43623e53d0f14ced48b705e04008775a5d，严格maintenance_180_no_browser例外只适用19且保持全部旧门禁。准确main a2b9c188658f082b189e77d237787a96eb9cf921自身九组/12jobs全部attempt1后，人工run42153964824晋升同提交受验制品，公开Release436051562。已匿名核tag/latest、19资产、安装器及完整SHA256SUMS真实字节和摘要，旧18资产ID/大小/digest不变。
@@ -175,7 +181,7 @@ GitHub权限只在该人工工作流的发布job授予contents:write/actions:rea
 
 ## 公开后检查
 
-核对 Release 公开状态、tag 目标、下载文件摘要和文档链接。本版公开后手工套件入口为 `install.sh --version v0.4.19`，短入口仅使用核验后的真实摘要。每次仍须确认完整 19 项资产并核验。自动目标选择复核须使用独立临时 Linux 机器；版本字符串本身不证明下载存在，也不赋予后续未发布主线功能资格。发布源提交与后续 bootstrap/doc 提交分别记录，不能用当前 checkout 冒充冻结发布源。
+核对 Release 公开状态、tag 目标、下载文件摘要和文档链接。本版公开后手工套件入口为 `install.sh --version v0.4.20`，短入口仅使用核验后的真实摘要。每次仍须确认完整 19 项资产并核验。自动目标选择复核须使用独立临时 Linux 机器；版本字符串本身不证明下载存在，也不赋予后续未发布主线功能资格。发布源提交与后续 bootstrap/doc 提交分别记录，不能用当前 checkout 冒充冻结发布源。
 
 外部CA域名验证、云安全组和真实用户网络需要用户自己的配置，不属于维护者自动取得的授权。不要把发布流程顺手变成登录真实VPS部署。
 

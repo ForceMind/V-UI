@@ -303,6 +303,337 @@ def daemon_pid():
     return result
 
 
+NETLINK_SYSTEMD_MARKER = 'VUI_NETLINK_SYSTEMD_ACCEPTANCE: installed20 panel-child TLS TCP URI/YAML passed'
+
+
+def maintenance_long_duration(release_id):
+    return release_id.startswith(('0.4.19-', '0.4.20-'))
+
+
+def netlink_systemd_enabled(release_id):
+    return os.getenv('VUI_NETLINK_SYSTEMD_TEST') == '1' and release_id.startswith('0.4.20-')
+
+
+def verified_upgrade_fixture_rows(actual, expected):
+    """Only exact, previously snapshotted synthetic rows may be disposed here."""
+    known_remarks = {'published-upgrade-synthetic-draft',
+                     'published-upgrade-synthetic-managed-xray-draft'}
+    assert len(actual) == len(expected), 'Unknown CI node; installed-core fixture refuses cleanup'
+    by_id = {row['id']: row for row in expected}
+    assert len(by_id) == len(expected), 'Duplicate expected CI node IDs'
+    for row in actual:
+        old = by_id.get(row['id'])
+        assert old and old['remark'] in known_remarks, 'Unrecognized CI fixture node'
+        for key in ('id', 'tag', 'remark', 'core', 'protocol', 'port', 'mutation_revision'):
+            assert row[key] == old[key], 'CI fixture node changed before guarded cleanup'
+        assert re.fullmatch('[a-f0-9]{64}', row['mutation_revision']), 'Missing exact CI node revision'
+    return actual
+
+
+def wait_installed_admin_identity(api, expected_username, *, timeout=20):
+    """Read-only post-menu readiness, within the original first-GET budget.
+
+    Type=simple active does not imply bind/TLS readiness. Only an actual refused
+    connect is retried. TLS, HTTP, JSON, identity and request timeouts fail closed.
+    """
+    assert type(timeout) in (int,float) and 0 < timeout <= 20, 'Invalid installed HTTPS readiness budget'
+    assert type(expected_username) is str and re.fullmatch(r'[A-Za-z0-9_.-]{3,64}',expected_username), 'Invalid expected fixture identity'
+    deadline=time.monotonic()+timeout
+    while True:
+        remaining=deadline-time.monotonic()
+        if remaining<=0:
+            raise AssertionError('Installed HTTPS identity was not ready within the original deadline')
+        try:
+            status,raw=api('/api/auth/me',method='GET',timeout=min(5,remaining),readiness=True)
+        except ConnectionRefusedError:
+            remaining=deadline-time.monotonic()
+            if remaining<=0:
+                raise AssertionError('Installed HTTPS listener remained refused until the original deadline') from None
+            time.sleep(min(.1,remaining))
+            continue
+        if status!=200:
+            raise AssertionError('Installed HTTPS must retain the authenticated identity; status='+str(status))
+        identity=json.loads(raw)
+        assert type(identity) is dict and set(identity)=={'id','username','role'}, 'Invalid installed public identity fields'
+        assert type(identity['id']) is int and identity['id']>0, 'Invalid installed public identity id'
+        assert identity['role']=='admin' and identity['username']==expected_username, 'Installed identity differs from the logged-in fixture owner'
+        if time.monotonic()>deadline:
+            raise AssertionError('Installed HTTPS identity arrived after its original deadline')
+        return identity
+
+
+def installed_netlink_smoke(check, source, work, api, ca, cert, key, verified_old_nodes, private_values, *, expected_username):
+    """Run only after original data/upgrade assertions on an empty hosted runner.
+
+    Existing invalid synthetic drafts are removed by exact guarded API revision,
+    not repaired or hidden in snapshots. A new fake Xray and the first explicit
+    direct Sing-box node then run as real descendants of installed v-ui.service.
+    """
+    assert os.geteuid() != 0 and os.getenv('GITHUB_ACTIONS') == 'true'
+    assert os.getenv('RUNNER_ENVIRONMENT') == 'github-hosted'
+    assert os.getenv('GITHUB_REPOSITORY') == 'ForceMind/V-UI'
+    assert os.getenv('VUI_SYSTEM_INSTALL_TEST') == '1'
+    config = json.loads(Path('/etc/v-ui/service.json').read_bytes())
+    if not netlink_systemd_enabled(config['release_id']):
+        raise AssertionError('Installed netlink gate requires the opted-in actual 0.4.20 candidate')
+    release = Path('/var/lib/v-ui/releases') / config['release_id']
+    check.assertEqual((source/'VERSION').read_text().strip(), '0.4.20')
+
+    def request(path, body=None, *, method=None, extra_headers=(), expected=200):
+        status, raw = api(path,body,method=method,extra_headers=extra_headers,timeout=20)
+        check.assertEqual(status,expected,'Installed netlink fixture API failed: '+path)
+        return json.loads(raw)
+
+    admin_identity_before=wait_installed_admin_identity(api,expected_username)
+
+    def service_python(program):
+        prefix = 'import sys;sys.path.insert(0,'+repr(str(release/'payload'))+');'
+        result = subprocess.run(['sudo','-u','v-ui','/usr/bin/env',
+            'VUI_DATA_DIR=/var/lib/v-ui/data',str(release/'runtime/python/bin/python3'),
+            '-B','-I','-c',prefix+program],capture_output=True,text=True,timeout=30)
+        check.assertEqual(result.returncode,0,'Installed service-user netlink fixture failed; private output withheld')
+        return json.loads(result.stdout)
+
+    def delete_owned(row):
+        current = next((value for value in request('/api/inbounds') if value['id']==row['id']),None)
+        check.assertIsNotNone(current,'Owned CI node disappeared before cleanup')
+        for field in ('id','tag','mutation_revision'):
+            check.assertEqual(current[field],row[field],'Refusing to delete a changed CI node')
+        status, raw = api('/api/inbounds/'+str(row['id'])+'/delete',
+                         {'expected_instance_revision':row['mutation_revision']},timeout=20)
+        if status != 200:
+            check.assertEqual(status,409,'Guarded CI cleanup failed')
+            detail=json.loads(raw)['detail']
+            check.assertIs(detail.get('saved'),True)
+            check.assertIs(detail.get('applied'),False)
+        check.assertNotIn(row['id'],{value['id'] for value in request('/api/inbounds')})
+
+    for row in verified_upgrade_fixture_rows(request('/api/inbounds'),verified_old_nodes):
+        delete_owned(row)
+    check.assertEqual(request('/api/inbounds'),[])
+    prior_proxy=request('/api/proxy/settings')
+    check.assertIsNone(prior_proxy['pending'])
+    check.assertIsNone(prior_proxy['active'])
+    off={name:value for name,value in prior_proxy['settings'].items() if name!='local_password_set'}
+    off.update(local_proxy_enabled=False,relay_enabled=False,selected_upstream_id=None)
+    off_proxy=request('/api/proxy/settings',off,method='PUT',
+        extra_headers=['If-Match: '+prior_proxy['revision']])
+    off_settings=off_proxy['settings']
+    print('Installed netlink preflight: all prior data assertions complete; exact known CI drafts disposed via guarded API; draft dual-OFF selected through If-Match')
+
+    properties=subprocess.check_output(['systemctl','show','v-ui.service','--all',
+        '--property=MainPID,User,Group,NoNewPrivileges,CapabilityBoundingSet,AmbientCapabilities,RestrictAddressFamilies'],text=True)
+    properties=dict(line.split('=',1) for line in properties.splitlines() if '=' in line)
+    check.assertEqual(set(properties['RestrictAddressFamilies'].split()),{'AF_INET','AF_INET6','AF_UNIX','AF_NETLINK'})
+    check.assertEqual({name:properties[name] for name in ('User','Group','NoNewPrivileges','CapabilityBoundingSet','AmbientCapabilities')},
+                      {'User':'v-ui','Group':'v-ui','NoNewPrivileges':'yes','CapabilityBoundingSet':'','AmbientCapabilities':''})
+    panel_pid=int(properties['MainPID'])
+    user_program="""
+import hashlib,json,sqlite3
+with sqlite3.connect('file:/var/lib/v-ui/data/v-ui.db?mode=ro',uri=True) as db:
+ rows=db.execute('SELECT * FROM users ORDER BY 1').fetchall()
+print(json.dumps(hashlib.sha256(json.dumps(rows,sort_keys=True).encode()).hexdigest()))
+"""
+    users_before=service_python(user_program)
+    # Use the existing installer-provided fake material through the ordinary
+    # administrator API. This proves core TLS startup, not public CA trust or
+    # managed certificate_id deployment under the installed system trust store.
+    own_nodes=[]
+    maintenance_grant=None
+    def grant_cli(*arguments):
+        result=subprocess.run(['sudo','-u','v-ui','/usr/bin/python3','-B','-I','-S',
+            str(CONTROL/'maintenance_cli_worker.py'),*arguments],capture_output=True,text=True,timeout=60)
+        check.assertEqual(result.returncode,0,'Installed CLI grant operation failed; private output withheld')
+        return json.loads(result.stdout)
+    try:
+        from contextlib import ExitStack
+        from loopback_helpers import unused_port
+        from proxy_loopback_support import BODY, ReadyMihomoProcess, https_target, https_through
+        from inbound_routing_real_helpers import yaml_client, uri_client
+        from scripts.fetch_mihomo import PIN
+        import yaml
+        client=Path(os.environ['VUI_TEST_MIHOMO'])
+        provenance=json.loads(client.with_name('mihomo-provenance.json').read_text())
+        for field,value in PIN.items():check.assertEqual(provenance[field],value)
+        check.assertEqual(hashlib.sha256(client.read_bytes()).hexdigest(),provenance['binary_sha256'])
+        version=subprocess.run([str(client),'-v'],capture_output=True,text=True,timeout=15)
+        check.assertEqual(version.returncode,0)
+        check.assertTrue(version.stdout.startswith('Mihomo Meta v1.19.32 '))
+
+        def create(core,mode):
+            uid='22222222-2222-4222-8222-222222222222' if core=='xray' else '11111111-1111-4111-8111-111111111111'
+            private_values.append(uid)
+            payload={'core':core,'protocol':'vless','routing_mode':mode,'port':unused_port(),
+                'enable':True,'tag':'installed-netlink-'+core,'remark':'installed-netlink-'+core,
+                'settings':{'clients':[{'id':uid}]} if core=='xray' else {'users':[{'uuid':uid}]},
+                'profile':{'security':'tls','transport':'raw' if core=='xray' else 'direct',
+                           'server_name':'vpn.example.test','flow':'',
+                           'certificate_path':'/var/lib/v-ui/data/certs/provided-fullchain.pem',
+                           'key_path':'/var/lib/v-ui/data/certs/provided-privkey.pem'}}
+            before_ids={row['id'] for row in request('/api/inbounds')}
+            status,raw=api('/api/inbounds',payload,timeout=20)
+            if status==200:
+                row=json.loads(raw)['inbound']
+            else:
+                # Preserve exact ownership for cleanup after a saved/not-applied
+                # failure. The original failing status is still asserted below.
+                rows=[row for row in request('/api/inbounds') if row['id'] not in before_ids
+                      and all(row[field]==payload[field] for field in ('core','protocol','port','tag','remark'))]
+                if rows:
+                    check.assertEqual(len(rows),1,'Ambiguous failed-create ownership')
+                    own_nodes.append(rows[0])
+                check.assertEqual(status,200,'Installed node creation must save AND apply')
+            if status==200:own_nodes.append(row)
+            editor=request('/api/inbounds/'+str(row['id'])+'/editor')
+            check.assertIsNone(editor['certificate_id'])
+            check.assertEqual(editor['profile']['certificate_path'],payload['profile']['certificate_path'])
+            check.assertEqual(editor['profile']['key_path'],payload['profile']['key_path'])
+            return row
+
+        xray=create('xray','inherit')
+        xray_before=request('/api/cores/status')['xray']
+        check.assertTrue(xray_before['running'])
+        xray_row_before=next(row for row in request('/api/inbounds') if row['id']==xray['id'])
+        xray_digest_program=user_program.replace(
+            "SELECT * FROM users ORDER BY 1","SELECT * FROM inbounds WHERE id = "+str(xray['id']))
+        xray_digest_before=service_python(xray_digest_program)
+
+        # Explicit check/apply of unchanged OFF settings, with fresh source CAS.
+        revision=off_proxy['revision']
+        checked=request('/api/proxy/check',{'base_revision':revision})
+        check.assertTrue(checked['valid']);check.assertFalse(checked['applied'])
+        check.assertEqual(checked['snapshot']['settings'],off_settings)
+        applied=request('/api/proxy/apply',{'base_revision':revision,'source_fingerprint':checked['source_fingerprint']},
+            extra_headers=['Idempotency-Key: '+hashlib.sha256(uuid.uuid4().bytes).hexdigest()])
+        check.assertTrue(applied['applied']);check.assertEqual(applied['phase'],'committed')
+        check.assertIsNone(applied['pinned_address'])
+        sing=create('sing-box','direct')
+        maintenance_grant=grant_cli('create','diagnose,nodes,share,relay,certificates,operate,upgrade','600')
+        private_values.append(maintenance_grant['link'])
+        one_time=maintenance_grant['link'].split('#grant=',1)[1]
+        private_values.append(one_time)
+        exchanged=request('/api/maintenance/exchange',{'grant':one_time})
+        private_values.append(exchanged['token'])
+        bearer=['Authorization: Bearer '+exchanged['token']]
+        check.assertEqual(request('/api/maintenance/session',extra_headers=bearer)['grant_id'],maintenance_grant['id'])
+        summary=next(row for row in request('/api/inbounds',extra_headers=bearer) if row['id']==sing['id'])
+        check.assertTrue(summary['share_eligible']);check.assertTrue(summary['upstream_export_eligible'])
+        check.assertEqual(summary['routing_status']['state'],'applied')
+        shared_status,shared=api('/api/subscription/link/'+str(sing['id'])+'?host=127.0.0.1',extra_headers=bearer)
+        check.assertEqual(shared_status,200,'Ordinary share must remain usable')
+        check.assertTrue(shared.startswith(b'vless://'))
+        # Delegated edit sends no filesystem material. The guarded maintenance
+        # route must preserve the manually configured server-side TLS paths.
+        edit_status,edit_raw=api('/api/inbounds/'+str(sing['id']),{
+            'profile':{'security':'tls','transport':'direct','server_name':'vpn.example.test'},
+            'expected_instance_revision':summary['mutation_revision']},method='PUT',extra_headers=bearer,timeout=20)
+        current=next(row for row in request('/api/inbounds') if row['id']==sing['id'])
+        for field in ('id','tag','port','core','protocol'):
+            check.assertEqual(current[field],sing[field],'Delegated edit changed fixture identity')
+        own_nodes[-1]=current
+        check.assertEqual(edit_status,200,'Guarded no-path maintenance edit must apply')
+        editor=request('/api/inbounds/'+str(sing['id'])+'/editor',extra_headers=bearer)
+        check.assertNotIn('certificate_path',editor['profile'])
+        check.assertNotIn('key_path',editor['profile'])
+        state=request('/api/cores/status')
+        check.assertTrue(state['sing-box']['running']);check.assertFalse(state['sing-box']['dirty'])
+        check.assertEqual(state['sing-box']['version_required'],'1.14.2')
+
+        # Read-only witness from the installed service UID, using its pinned
+        # binary, actual watchdog child, /proc identity/cgroup/capabilities/FDs.
+        def witness(core,status,node):
+            return service_python('watchdog='+str(status['pid'])+';panel='+str(panel_pid)+';port='+str(node['port'])+';core='+repr(core)+';release='+repr(str(release))+';'+"""
+import hashlib,json,os
+from pathlib import Path
+import psutil
+root=Path(release)
+ready=json.loads((root/'READY.json').read_text())
+arch=ready['runtime_key'].split('-',1)[0]
+binary=root/'payload/cores'/arch/core
+manifest=json.loads((root/'payload/MANIFEST.json').read_text())
+assert hashlib.sha256(binary.read_bytes()).hexdigest()==manifest['files'][str(binary.relative_to(root/'payload'))]['sha256']
+children=[p for p in psutil.Process(watchdog).children(recursive=True) if Path(p.exe()).resolve()==binary.resolve()]
+assert len(children)==1
+child=children[0]
+assert panel in [p.pid for p in child.parents()]
+proc=Path('/proc')/str(child.pid)
+assert '/system.slice/v-ui.service' in (proc/'cgroup').read_text()
+props=dict(line.split(':',1) for line in (proc/'status').read_text().splitlines() if ':' in line)
+assert all(int(value)==os.geteuid()!=0 for value in props['Uid'].split())
+assert props['NoNewPrivs'].strip()=='1'
+assert all(int(props[key].strip(),16)==0 for key in ('CapEff','CapPrm','CapBnd','CapAmb'))
+listeners=[c for c in child.net_connections(kind='inet') if c.status==psutil.CONN_LISTEN]
+assert len(listeners)==1 and listeners[0].laddr.port==port
+print(json.dumps({'pid':child.pid,'created':child.create_time(),'binary_sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),'port':port,'unit':'v-ui.service','nonroot':True,'capabilities':0}))
+""")
+        xray_witness=witness('xray',xray_before,xray)
+        sing_witness=witness('sing-box',state['sing-box'],sing)
+        with ExitStack() as stack:
+            target_port,traffic=https_target(stack,'127.0.0.1',cert,key)
+            home=Path(work)/'installed-netlink-client'
+            home.mkdir()
+            empty_roots=home/'empty-roots';empty_roots.mkdir()
+            environment={**os.environ,'SSL_CERT_FILE':str(ca),'SSL_CERT_DIR':str(empty_roots)}
+            artifacts=[]
+            for source_format in ('uri','clash-yaml'):
+                status,raw=api('/api/subscription/upstream/'+str(sing['id']),
+                    {'format':source_format,'server':'127.0.0.1','acknowledge_tcp_only':True},extra_headers=bearer)
+                check.assertEqual(status,200,'TCP-only upstream export failed')
+                artifacts.append({'format':source_format,'sha256':hashlib.sha256(raw).hexdigest()})
+                import socket
+                with socket.socket() as local, socket.socket() as controller:
+                    local.bind(('127.0.0.1',0));controller.bind(('127.0.0.1',0))
+                    client_port,controller_port=local.getsockname()[1],controller.getsockname()[1]
+                if source_format=='uri':
+                    provider=home/'upstream.txt';provider.write_bytes(raw);provider.chmod(0o600)
+                    client_config=uri_client(provider,client_port,controller_port)
+                else:
+                    # TCP-upstream YAML is one exported node, unlike an
+                    # ordinary subscription. Add only the client shell wrapper.
+                    node=yaml.safe_load(raw)
+                    check.assertIsInstance(node,dict)
+                    check.assertEqual(node['type'],'vless')
+                    check.assertEqual(node['network'],'tcp')
+                    check.assertIs(node['tls'],True)
+                    check.assertIs(node['skip-cert-verify'],False)
+                    check.assertIs(node['udp'],False)
+                    client_config=yaml_client({'proxies':[node]},[node['name']],client_port,controller_port)
+                check.assertNotIn('DIRECT',json.dumps(client_config))
+                path=home/(source_format+'.yaml');path.write_text(yaml.safe_dump(client_config));path.chmod(0o600)
+                process=ReadyMihomoProcess(stack,[str(client),'-d',str(home),'-f',str(path)],home/(source_format+'.log'),environment)
+                process.start(client_port)
+                marker='installed-netlink-'+source_format
+                check.assertEqual(https_through(client_port,'127.0.0.1',target_port,ca,marker,protocol='socks5h'),(200,BODY))
+                process.stop()
+            check.assertEqual([path for _,_,path in traffic.snapshot()],['/installed-netlink-uri','/installed-netlink-clash-yaml'])
+        check.assertEqual(request('/api/cores/status')['xray'],xray_before)
+        check.assertEqual(witness('xray',xray_before,xray),xray_witness)
+        xray_after=next(row for row in request('/api/inbounds') if row['id']==xray['id'])
+        check.assertEqual({k:v for k,v in xray_after.items() if k!='routing_status'},
+                          {k:v for k,v in xray_row_before.items() if k!='routing_status'})
+        check.assertEqual(service_python(xray_digest_program),xray_digest_before)
+        current_proxy=request('/api/proxy/settings')
+        check.assertEqual(current_proxy['revision'],revision)
+        check.assertEqual(current_proxy['settings'],off_settings)
+        check.assertEqual(current_proxy['active']['settings'],off_settings)
+        check.assertIsNone(current_proxy['pending'])
+        check.assertEqual(service_python(user_program),users_before)
+        check.assertEqual(request('/api/auth/me'),admin_identity_before)
+        print('Installed netlink evidence: '+json.dumps({'release_id':config['release_id'],
+            'panel_pid':panel_pid,'xray':xray_witness,'sing-box':sing_witness,'artifacts':artifacts,
+            'global_flags':'dual-OFF','account_and_xray_preserved':True,
+            'material_mode':'admin-provided-paths','maintenance_bearer':True,
+            'source_case':os.getenv('VUI_PUBLISHED_INSTALL_VERSION','fresh-candidate')},sort_keys=True))
+    finally:
+        try:
+            if maintenance_grant is not None:grant_cli('revoke',str(maintenance_grant['id']))
+        finally:
+            for row in reversed(own_nodes):delete_owned(row)
+            check.assertEqual(request('/api/inbounds'),[])
+            check.assertEqual(service_python(user_program),users_before)
+    print(NETLINK_SYSTEMD_MARKER)
+
+
 def nonroot_smoke(check, source, kit, api, expected_proxy):
     assert os.geteuid() != 0
     assert os.getenv('GITHUB_ACTIONS') == 'true' and os.getenv('RUNNER_ENVIRONMENT') == 'github-hosted'
@@ -344,7 +675,7 @@ def nonroot_smoke(check, source, kit, api, expected_proxy):
     check.assertIn('/maintenance#grant=', grant['link'])
     check.assertTrue(any(row['id'] == grant['id'] for row in grants('list')))
     grants('revoke', str(grant['id']))
-    long_duration = status['release_id'].startswith('0.4.19-')
+    long_duration = maintenance_long_duration(status['release_id'])
     if long_duration:
         long_grant = grants('create', 'diagnose', '15552000')
         check.assertEqual(long_grant['expires_at'] - long_grant['created_at'], 15552000)
@@ -355,7 +686,8 @@ def nonroot_smoke(check, source, kit, api, expected_proxy):
         terminal.expect('请选择: '); terminal.send('13\n')
         terminal.expect('请选择授权操作: '); terminal.send('1\n')
         terminal.expect('请选择权限 [1/2/3，默认 1]: '); terminal.send('\n')
-        terminal.expect('有效分钟数 1–259200，或输入180天/180d（默认30分钟）: ')
+        terminal.expect('有效分钟数 1–259200，或输入180天/180d（默认30分钟）: ' if long_duration
+                        else '有效分钟数 1–120（默认 30）: ')
         terminal.send('180天\n' if long_duration else '\n')
         issued = terminal.expect('请选择: ')
         records = [json.loads(line) for line in issued.splitlines() if line.startswith('{')]

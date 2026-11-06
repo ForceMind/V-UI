@@ -22,13 +22,15 @@ def service_files(config: dict) -> dict:
     if manager=="systemd":
         common=("User=v-ui\nGroup=v-ui\nUMask=0077\nNoNewPrivileges=true\n"
                 "ProtectSystem=strict\nProtectHome=true\nPrivateTmp=true\nPrivateDevices=true\n"
-                "CapabilityBoundingSet=\nRestrictSUIDSGID=true\nRestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX\n")
+                "CapabilityBoundingSet=\nRestrictSUIDSGID=true\n")
+        families="AF_INET AF_INET6 AF_UNIX"
         panel=(MARKER+"[Unit]\nDescription=V-UI managed HTTPS panel\nAfter=network-online.target\nWants=network-online.target\n\n"
-               "[Service]\nType=simple\n"+common+"WorkingDirectory=/var/lib/v-ui\nReadWritePaths=/var/lib/v-ui\n"
+               "[Service]\nType=simple\n"+common+"RestrictAddressFamilies="+families+" AF_NETLINK\n"
+               "WorkingDirectory=/var/lib/v-ui\nReadWritePaths=/var/lib/v-ui\n"
                "ExecStart="+prefix+"panel\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=30\n\n"
                "[Install]\nWantedBy=multi-user.target\n")
         challenge=(MARKER+"[Unit]\nDescription=V-UI HTTP-01 challenge responder\nRequires=v-ui-http01.socket\n\n"
-                   "[Service]\nType=simple\n"+common+"WorkingDirectory=/var/lib/v-ui\n"
+                   "[Service]\nType=simple\n"+common+"RestrictAddressFamilies="+families+"\nWorkingDirectory=/var/lib/v-ui\n"
                    "ExecStart="+prefix+"http01\nTimeoutStopSec=15\n")
         socket=(MARKER+"[Unit]\nDescription=V-UI ACME validation socket (not panel HTTP)\n\n"
                 "[Socket]\nListenStream=0.0.0.0:80\n"+

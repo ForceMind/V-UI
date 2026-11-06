@@ -29,6 +29,13 @@ from scripts.publish_release import (
     INSTALLER_ONLY_BASELINE,
     validate_ca_trust_scope,
     CA_TRUST_BASELINE,
+    NETLINK_SERVICE_BASELINE,
+    NETLINK_SERVICE_FILES,
+    NETLINK_SERVICE_CI_HASHES,
+    NETLINK_SERVICE_DIAGNOSTIC_STEP,
+    NETLINK_SERVICE_UPGRADE_STEP,
+    NETLINK_SERVICE_MANUAL_IF,
+    validate_netlink_service_scope,
     MAINTENANCE_180_BASELINE,
     MAINTENANCE_180_FILES,
     validate_maintenance_180_scope,
@@ -909,6 +916,183 @@ class Maintenance180ReleaseTests(unittest.TestCase):
                 validate_run_jobs({'test.yml':run},SHA,maintenance_180_no_browser=True)
         with patch('scripts.publish_release.request',side_effect=[{'jobs':[job]},{**run,'run_attempt':3}]),self.assertRaisesRegex(ReleaseGateError,'changed during'):
             validate_run_jobs({'test.yml':run},SHA,maintenance_180_no_browser=True)
+
+
+class NetlinkServiceReleaseTests(unittest.TestCase):
+    def scope(self, changes='M\tscripts/publish_release.py\n', mode=None,
+              application_extra=b'', installer_extra=b'', version=b'0.4.20\n', ancestry=True,
+              workflow_extra=b'', workflow_condition=None, ci_tamper=None, baseline_app=None,
+              baseline_installer=None):
+        app=b"app = FastAPI(version='0.4.19')\n" if baseline_app is None else baseline_app
+        installer=b'# install.sh --version v0.4.19\nactual_installer()\n' if baseline_installer is None else baseline_installer
+        diagnostic=('      - name: '+NETLINK_SERVICE_DIAGNOSTIC_STEP+'\n').encode()
+        workflow=b'name: tests\n'+diagnostic+NETLINK_SERVICE_MANUAL_IF+b'        run: exact_probe\n'
+        current_workflow=workflow.replace(diagnostic+NETLINK_SERVICE_MANUAL_IF,diagnostic,1)
+        if workflow_condition is not None:current_workflow=workflow_condition
+        ci={name:('reviewed '+name+'\n').encode() for name in NETLINK_SERVICE_CI_HASHES}
+        hashes={name:hashlib.sha256(content).hexdigest() for name,content in ci.items()}
+        def git(args, **kwargs):
+            if args[1:3]==['diff','--name-status']:
+                self.assertIn('--no-renames',args)
+                return changes
+            if args[1]=='ls-tree':
+                actual_mode=mode or ('100755' if args[-1]=='install.sh' else '100644')
+                return actual_mode+' blob '+'f'*40+'\t'+args[-1]+'\n'
+            if args[1]=='show':
+                name=args[2].split(':',1)[1]
+                if args[2].startswith(SHA+':') and name in ci:
+                    return ci[name]+(b'weakened assertion\n' if name==ci_tamper else b'')
+                return {
+                    NETLINK_SERVICE_BASELINE+':main.py': app,
+                    SHA+':main.py': app.replace(b"version='0.4.19'",b"version='0.4.20'",1)+application_extra,
+                    SHA+':VERSION': version,
+                    NETLINK_SERVICE_BASELINE+':install.sh': installer,
+                    SHA+':install.sh': installer.replace(b'--version v0.4.19',b'--version v0.4.20',1)+installer_extra,
+                    NETLINK_SERVICE_BASELINE+':.github/workflows/test.yml':workflow,
+                    SHA+':.github/workflows/test.yml':current_workflow+workflow_extra,
+                }[args[2]]
+            raise AssertionError(args)
+        failure=None if ancestry else subprocess.CalledProcessError(1,['git','merge-base'])
+        with patch('scripts.publish_release.subprocess.run',side_effect=failure) as ancestor, \
+                patch('scripts.publish_release.subprocess.check_output',side_effect=git), \
+                patch.dict('scripts.publish_release.NETLINK_SERVICE_CI_HASHES',hashes,clear=True):
+            validate_netlink_service_scope(SHA,'0.4.20')
+            self.assertEqual(ancestor.call_args.args[0],
+                             ['git','merge-base','--is-ancestor',NETLINK_SERVICE_BASELINE,SHA])
+
+    def test_frozen_candidate_and_exact_gate_and_document_paths_allowed(self):
+        self.scope(changes='')
+        self.scope(changes=''.join('M\t'+path+'\n' for path in sorted(NETLINK_SERVICE_FILES)))
+        self.scope(changes='A\tdocs/SING_BOX_SYSTEMD_0420.md\n')
+
+    def test_exception_rejects_old_future_or_nonstable_versions_before_git(self):
+        for version in ('0.4.18','0.4.19','0.4.21','0.5.0','0.4.20-rc1'):
+            with self.subTest(version=version),patch('scripts.publish_release.subprocess.run') as git,self.assertRaises(ReleaseGateError):
+                validate_netlink_service_scope(SHA,version)
+            git.assert_not_called()
+
+    def test_missing_approved_ancestor_is_rejected(self):
+        with self.assertRaisesRegex(ReleaseGateError,'ancestry'):self.scope(ancestry=False)
+
+    def test_frozen_product_other_paths_and_post_release_pointers_rejected(self):
+        for path in ('setup.sh','.github/workflows/short-install.yml',
+                     'app/api/maintenance.py','app/services/maintenance.py','scripts/system_launcher.py',
+                     'scripts/system_ops.py','web/maintenance.html','web/js/maintenance.js',
+                     'requirements-runtime.txt','scripts/build_bundle.py','scripts/install_system.py',
+                     'scripts/service_support.py','scripts/sing_box_systemd_probe.py',
+                     'tests/unrelated.py','docs/unrelated.md',
+                     'docs/LONG_MAINTENANCE_0419.md','tests/published_upgrade_helpers_extra.py'):
+            with self.subTest(path=path),self.assertRaises(ReleaseGateError):self.scope(changes='M\t'+path+'\n')
+
+    def test_rename_delete_type_change_and_nonregular_or_executable_modes_rejected(self):
+        for change in ('D\tREADME.md\n','R100\tREADME.md\tdocs/README.md\n',
+                       'T\tREADME.md\n','C100\tREADME.md\tdocs/README.md\n'):
+            with self.subTest(change=change),self.assertRaises(ReleaseGateError):self.scope(changes=change)
+        for mode in ('100755','120000','160000','040000'):
+            with self.subTest(mode=mode),self.assertRaises(ReleaseGateError):self.scope(mode=mode)
+
+    def test_frozen_app_installer_accept_only_single_version_literal_rewrite(self):
+        for kwargs in ({'application_extra':b'new_logic()\n'}, {'installer_extra':b'new_logic()\n'},
+                       {'version':b'0.4.19\n'}, {'version':b'0.4.20 \n'},
+                       {'baseline_app':b"version='0.4.19' version='0.4.19'\n"},
+                       {'baseline_installer':b'--version v0.4.19 --version v0.4.19\n'}):
+            with self.subTest(kwargs=kwargs),self.assertRaises(ReleaseGateError):self.scope(**kwargs)
+
+    def test_only_twelve_explicit_browser_skips_are_accepted(self):
+        self.assertEqual(sum(map(len,BROWSER_SKIP_STEPS.values())),12)
+        for path, names in BROWSER_SKIP_STEPS.items():
+            run={'id':42,'run_attempt':1,'head_sha':SHA,'status':'completed','conclusion':'success'}
+            job={'id':7,'run_id':42,'head_sha':SHA,'status':'completed','conclusion':'success',
+                 'steps':[{'name':name,'status':'completed','conclusion':'skipped'} for name in names]}
+            if path=='test.yml':
+                job['steps'].extend({'name':name,'status':'completed','conclusion':'success'}
+                                    for name in (TLS_CERTIFICATE_CORE_STEP,SIMPLE_NODE_TEMPLATE_STEP,NETLINK_SERVICE_DIAGNOSTIC_STEP))
+            with self.subTest(path=path),patch('scripts.publish_release.request',side_effect=[{'jobs':[job]},run]):
+                validate_run_jobs({path:run},SHA,netlink_service_no_browser=True)
+            for invalid in ('missing','failure','cancelled','in_progress'):
+                bad={**job,'steps':[dict(step) for step in job['steps']]}
+                if invalid=='missing':bad['steps'].pop(0)
+                elif invalid=='in_progress':bad['steps'][0]['status']=invalid
+                else:bad['steps'][0]['conclusion']=invalid
+                with self.subTest(path=path,invalid=invalid),patch('scripts.publish_release.request',return_value={'jobs':[bad]}),self.assertRaises(ReleaseGateError):
+                    validate_run_jobs({path:run},SHA,netlink_service_no_browser=True)
+
+    def test_nonbrowser_skips_remain_rejected(self):
+        run,job=ExactJobQualificationTests().fixtures()
+        job['steps']=[{'name':name,'status':'completed','conclusion':'skipped'} for name in BROWSER_SKIP_STEPS['test.yml']]
+        job['steps'].extend({'name':name,'status':'completed','conclusion':'success'}
+                            for name in (TLS_CERTIFICATE_CORE_STEP,SIMPLE_NODE_TEMPLATE_STEP,NETLINK_SERVICE_DIAGNOSTIC_STEP))
+        for name in ('Run tests','Browser unapproved additional workflow'):
+            invalid={**job,'steps':job['steps']+[{'name':name,'status':'completed','conclusion':'skipped'}]}
+            with self.subTest(name=name),patch('scripts.publish_release.request',return_value={'jobs':[invalid]}),self.assertRaises(ReleaseGateError):
+                validate_run_jobs({'test.yml':run},SHA,netlink_service_no_browser=True)
+
+    def test_all_published_upgrades_real_core_template_and_full_loopback_must_succeed(self):
+        run,job=ExactJobQualificationTests().fixtures()
+        mandatory={'oneclick.yml':{UI_REDESIGN_UPGRADE_STEP,TLS_CERTIFICATE_UPGRADE_STEP,REMOTE_MAINTENANCE_UPGRADE_STEP,SIMPLE_NODE_UPGRADE_STEP,NETLINK_SERVICE_UPGRADE_STEP},
+                   'test.yml':{TLS_CERTIFICATE_CORE_STEP,SIMPLE_NODE_TEMPLATE_STEP,NETLINK_SERVICE_DIAGNOSTIC_STEP},
+                   'loopback.yml':SIMPLE_NODE_LOOPBACK_STEPS}
+        for path, required in mandatory.items():
+            names=required | BROWSER_SKIP_STEPS.get(path,set())
+            for name in required:
+                for state in ('success','missing','skipped','failure','cancelled','in_progress'):
+                    steps=[{'name':item,'status':'completed','conclusion':'success'} for item in names]
+                    target=next(step for step in steps if step['name']==name)
+                    if state=='missing':steps.remove(target)
+                    elif state=='in_progress':target['status']=state
+                    else:target['conclusion']=state
+                    with self.subTest(path=path,name=name,state=state),patch(
+                            'scripts.publish_release.request',side_effect=[{'jobs':[{**job,'steps':steps}]},run]):
+                        if state=='success':validate_run_jobs({path:run},SHA,netlink_service_no_browser=True)
+                        else:
+                            with self.assertRaises(ReleaseGateError):
+                                validate_run_jobs({path:run},SHA,netlink_service_no_browser=True)
+
+    def test_netlink_exception_cannot_mix_with_any_previous_exception(self):
+        for name in ('installer_only_no_browser','ca_trust_no_browser','install_interaction_no_browser',
+                     'startup_no_browser','ui_redesign_no_browser','tls_certificate_no_browser',
+                     'remote_maintenance_no_browser','simple_node_no_browser','maintenance_180_no_browser'):
+            with self.subTest(name=name),patch('scripts.publish_release.request') as request,self.assertRaisesRegex(ReleaseGateError,'mutually exclusive'):
+                validate_run_jobs({},SHA,netlink_service_no_browser=True,**{name:True})
+            request.assert_not_called()
+
+    def test_exception_retains_exact_attempt_job_and_reread_checks(self):
+        run,job=ExactJobQualificationTests().fixtures()
+        job['steps'].extend({'name':name,'status':'completed','conclusion':'success'}
+                            for name in BROWSER_SKIP_STEPS['test.yml']-{step['name'] for step in job['steps']})
+        job['steps'].extend({'name':name,'status':'completed','conclusion':'success'}
+                            for name in (TLS_CERTIFICATE_CORE_STEP,SIMPLE_NODE_TEMPLATE_STEP,NETLINK_SERVICE_DIAGNOSTIC_STEP))
+        for bad in ({**job,'run_id':43},{**job,'head_sha':'b'*40}):
+            with self.subTest(bad=bad),patch('scripts.publish_release.request',return_value={'jobs':[bad]}),self.assertRaises(ReleaseGateError):
+                validate_run_jobs({'test.yml':run},SHA,netlink_service_no_browser=True)
+        with patch('scripts.publish_release.request',side_effect=[{'jobs':[job]},{**run,'run_attempt':3}]),self.assertRaisesRegex(ReleaseGateError,'changed during'):
+            validate_run_jobs({'test.yml':run},SHA,netlink_service_no_browser=True)
+
+    def test_acceptance_helpers_have_fixed_full_sha256_and_reject_unreviewed_bytes(self):
+        self.assertEqual(set(NETLINK_SERVICE_CI_HASHES),{
+            '.github/workflows/oneclick.yml','scripts/system_maintenance_smoke.py',
+            'tests/test_system_maintenance.py','tests/test_short_install_contract.py',
+            'tests/test_oneclick_system.py','tests/published_upgrade_helpers.py',
+            'tests/test_published_upgrade_helpers.py'})
+        for digest in NETLINK_SERVICE_CI_HASHES.values():self.assertRegex(digest,r'^[a-f0-9]{64}$')
+        for name in NETLINK_SERVICE_CI_HASHES:
+            with self.subTest(name=name),self.assertRaisesRegex(ReleaseGateError,'reviewed CI bytes differ: '+name):
+                self.scope(changes='',ci_tamper=name)
+
+    def test_diagnostic_only_loses_its_one_manual_condition(self):
+        for kwargs in ({'workflow_extra':b'new_step\n'},
+                       {'workflow_condition':b'manual condition retained\n'}):
+            with self.subTest(kwargs=kwargs),self.assertRaisesRegex(ReleaseGateError,'manual-only condition'):
+                self.scope(**kwargs)
+
+    def test_installer_keeps_executable_mode(self):
+        with self.assertRaises(ReleaseGateError):self.scope(changes='M\tinstall.sh\n',mode='100644')
+
+    def test_workflow_dispatch_binds_new_boolean_and_cli(self):
+        workflow=Path('.github/workflows/publish.yml').read_text()
+        self.assertIn('      netlink_service_no_browser:\n',workflow)
+        self.assertIn('NETLINK_SERVICE_NO_BROWSER: ${{ inputs.netlink_service_no_browser }}',workflow)
+        self.assertIn('args+=(--netlink-service-no-browser)',workflow)
 
 
 class ExactJobQualificationTests(unittest.TestCase):

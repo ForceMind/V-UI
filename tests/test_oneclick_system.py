@@ -663,6 +663,12 @@ class OneClickSystemTests(unittest.TestCase):
                 check_uid('v-ui.service')
                 global_menu_check(self,{**os.environ,'PYTHONDONTWRITEBYTECODE':'1'},exercise_start_stop=True)
                 print('Existing installation: automatic saved configuration / cancel / upgrade / ready:false with absent units / email+HTTPS-port reconfigure / occupied port refusal / real TLS failure recovery / existing authenticated session and proxy state retained OK')
+            # Every historical upgrade/data/recovery assertion above completes
+            # before disposing only known CI drafts for the installed-core gate.
+            if os.getenv('VUI_NETLINK_SYSTEMD_TEST') == '1':
+                from scripts.system_maintenance_smoke import installed_netlink_smoke
+                installed_netlink_smoke(self,source,work,api,ca,cert,key,
+                    published_upgrade.nodes if published_upgrade else [],private_values,expected_username=admin_username)
             if online:
                 print('Online managed installer transport: '+online['transport']+'; interactive domain/email/admin/ports, real global v-ui menu and stop/start passed')
             if domain_retry:
