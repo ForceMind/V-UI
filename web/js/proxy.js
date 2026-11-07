@@ -680,6 +680,6 @@
         $('diagnostic-notice').textContent=capabilities.diagnostics_available===true?'每次诊断绑定一个已保存上游与修订，最长 30 秒；每管理员一次，启动间隔至少 30 秒。':'线路诊断暂不可用。';
         $('stage').textContent=capabilities.apply_available===true?'草稿与事务应用':'仅草稿';
         $('proxy-workspace').hidden=false;
-        notice('已读取草稿与活动快照；保存不等于应用，配置检查不等于线路通过。');
+        notice('高级工具已就绪。日常操作请使用上方的三个任务入口。');
     });
 })();

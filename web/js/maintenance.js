@@ -56,8 +56,8 @@
         const allowed = action => admin || scopes.includes(action === 'upgrade' ? 'upgrade' : action === 'status' ? 'diagnose' : 'operate');
         const sync = () => {
             el('maintenance-create').disabled = busy || ended;
-            el('maintenance-restore').disabled = busy || ended || taskSubmissionUncertain || !(admin || scopes.includes('destructive'));
-            el('maintenance-actions').querySelectorAll('button').forEach(button => { button.disabled = busy || ended || !allowed(button.dataset.task) || taskSubmissionUncertain&&button.dataset.task!=='status'; });
+            el('maintenance-restore').disabled = busy || ended || taskSubmissionUncertain || !!watchingTask || !(admin || scopes.includes('destructive'));
+            el('maintenance-actions').querySelectorAll('button').forEach(button => { button.disabled = busy || ended || !allowed(button.dataset.task) || (taskSubmissionUncertain||!!watchingTask)&&button.dataset.task!=='status'; });
         };
         const run = async operation => {
             if (busy || ended) return;
@@ -108,15 +108,15 @@
                 if(ended||epoch!==captured||watchingTask!==id)return;
                 const state=row.state||row.status;
                 if(['succeeded','failed','interrupted','success','completed'].includes(state)){
-                    watchingTask=null;await tasks();notice((actions[row.action]||'维护任务')+'：'+(phases[state]||'已结束')+'。请按结果核对服务状态。');return;
+                    watchingTask=null;sync();await tasks();notice((actions[row.action]||'维护任务')+'：'+(phases[state]||'已结束')+'。请按结果核对服务状态。');return;
                 }
                 notice('任务'+(phases[state]||'状态待确认')+'，正在自动读取进度；不要重复提交。');
             }catch(_){if(ended||epoch!==captured)return;notice('面板可能正在重启，正在重新读取已有任务；不会重复提交。');}
             if(attempt<59)taskTimer=setTimeout(()=>watchTask(id,attempt+1),5000);
-            else{watchingTask=null;notice('自动等待已结束，任务结果仍需核对。点击“刷新维护任务”，不要再次提交同一操作。');}
+            else{watchingTask=null;taskSubmissionUncertain=true;const ack=el('maintenance-task-ack');if(ack)ack.hidden=false;sync();notice('自动等待已结束，任务结果仍需核对。点击“刷新维护任务”，不要再次提交同一操作。');}
         };
         const submitTask=async body=>{
-            if(taskSubmissionUncertain)return;
+            if(taskSubmissionUncertain||watchingTask)return;
             // Mark before the POST; a lost reply is never retried automatically.
             taskSubmissionUncertain=true;sync();
             try{
@@ -197,6 +197,7 @@
         el('maintenance-actions').querySelectorAll('button').forEach(button => button.addEventListener('click', () => run(async () => {
             const action = button.dataset.task;
             if (!allowed(action)) return;
+            if(action==='status'){await installation();notice('已读取实际安装版本与服务状态。');return;}
             if (action !== 'status' && !confirm('确认执行“' + actions[action] + '”？这可能短暂中断服务。升级将保留原配置和数据。')) return;
             await submitTask({action});
         })));

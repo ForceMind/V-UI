@@ -348,3 +348,14 @@ test('simple operation dialog uses the actual navigation modal layer and Back cl
     f.history.forward();await flush();assert.equal(view.dialog.open,false);assert.equal(f.history.state.modal,undefined);
     view.destroy();
 });
+test('Back cancellation keeps the simple form and history layer; later confirmation clears it once',async()=>{
+    const f=environment();const {Document}=require('./fixtures/operation_dom.cjs');const document=new Document(),root=document.createElement('div');document.body.append(root);
+    f.sandbox.document=document;f.sandbox.removeEventListener=()=>{};f.sandbox.VUI_OPERATION_FLOW=require('../web/js/operation-flow.js');
+    f.sandbox.CustomEvent=class{constructor(type,options={}){this.type=type;this.detail=options.detail;}};
+    let accepted=false,questions=0;f.sandbox.confirm=()=>{questions++;return accepted;};
+    vm.runInContext(source('simple-operations.js'),f.context);
+    const backend=require('./fixtures/operation_http_fixture.cjs').fixture({active:true});const view=new f.sandbox.VUI_SIMPLE_OPERATIONS.View(root,{dialog:true,request:backend.api});
+    await view.open('direct');view.fields.name.value='保留输入';view.dirty=true;
+    f.history.back();await flush();assert.equal(view.dialog.open,true);assert.equal(f.position,1);assert.equal(view.fields.name.value,'保留输入');assert.equal(questions,1);
+    accepted=true;f.history.back();await flush();assert.equal(view.dialog.open,false);assert.equal(f.position,0);assert.equal(questions,2);assert.equal(Object.keys(view.fields).length,0);view.destroy();
+});

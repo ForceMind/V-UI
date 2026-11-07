@@ -217,7 +217,7 @@ for (const [first, other] of [['xray', 'sing-box'], ['sing-box', 'xray']]) {
         assert.equal(await f.click(other), true); f.pending(other);
         await f.rejectPost(1, {response: {data: {detail: 'Synthetic later failure'}}}); f.idle();
         assert.deepEqual(f.messages, [{kind: 'success', text: first + '节点组已重启，请查看实际运行状态'},
-            {kind: 'error', text: 'Synthetic later failure'}]);
+            {kind: 'error', text: other+'重启未完成，请刷新运行状态后核对。'}]);
     });
 }
 for (const [label, data, expected] of [

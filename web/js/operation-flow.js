@@ -146,7 +146,7 @@
                 this.baselineRevision = latest.revision; this.changed({applied:true}); return latest;
             } catch (error) {
                 if (error instanceof FlowError && ['ENDED','RUNTIME_CHANGED'].includes(error.code)) throw error;
-                a.state = !error.status || error.status >= 500 ? 'uncertain' : 'finished';
+                a.state = !Number.isInteger(error.status) || error.status < 400 || error.status >= 500 ? 'uncertain' : 'finished';
                 if (a.state === 'uncertain') fail('APPLY_UNCERTAIN', '操作已提交，结果暂未确认。点击“核对并继续”，不会创建新的应用任务。');
                 throw error;
             }

@@ -120,3 +120,12 @@ test('a truncated HTTP200 create reply is uncertain, never permits a second crea
     const result=await f.flow.resolve();assert.equal(result.kind,'node');assert.equal(f.nodes.length,1);
     assert.equal(f.calls.filter(c=>c.method==='POST'&&c.path==='/api/inbounds').length,1);
 });
+test('truncated HTTP200 apply response keeps exactly the original transaction key for recovery',async()=>{
+    const f=fixture();const api=f.flow.request;let lost=false;
+    f.flow.request=async(path,method,body,options)=>{const result=await api(path,method,body,options);if(path==='/api/proxy/apply'&&!lost){lost=true;throw Object.assign(new Error('Truncated apply reply'),{status:200});}return result;};
+    await f.flow.load();await assert.rejects(f.flow.run('direct',f.choice()),e=>e.code==='APPLY_UNCERTAIN');
+    const first=f.calls.find(c=>c.path==='/api/proxy/apply').headers['Idempotency-Key'];
+    await assert.rejects(f.flow.run('direct',f.choice()),e=>e.code==='APPLY_UNCERTAIN');
+    await f.flow.resolve();const keys=f.calls.filter(c=>c.path==='/api/proxy/apply').map(c=>c.headers['Idempotency-Key']);
+    assert.deepEqual([...new Set(keys)],[first]);assert.equal(f.nodes.length,1);
+});

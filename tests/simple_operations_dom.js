@@ -143,3 +143,9 @@ test('scope confirmations freeze the displayed list and are invalidated by same-
     f.view.changed({nodes:true});assert.equal(f.view.fields.impact.checked,false);assert.equal(f.view.choice().impactStamp,null);
     assert.ok(f.view.fields.impactList.textContent.includes('刚启用的节点'));assert.equal(f.view.submit.disabled,true);
 });
+test('same-instance content changes between list selection and opening share never read replacement credentials',async()=>{
+    const row={id:2,port:8001,core:'xray',mutation_revision:rev(90),content_revision:rev(92),share_eligible:true};
+    const f=screen({active:true,nodes:[row]});
+    await f.view.open('share',{id:2,revision:rev(90),contentRevision:rev(91)});await settle();
+    assert.ok(f.view.problem.textContent.includes('变化'));assert.equal(f.calls.some(c=>c.path.startsWith('/api/subscription')),false);
+});

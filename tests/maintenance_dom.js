@@ -4,7 +4,7 @@ const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:a
 const source = fs.readFileSync('web/js/maintenance.js', 'utf8');
 const flush = async () => { for (let i=0;i<30;i++) await Promise.resolve(); };
 const deferred = () => { let resolve, reject; const promise = new Promise((a,b) => {resolve=a;reject=b}); return {promise,resolve,reject}; };
-function boot(hash='') {
+function boot(hash='',options={}) {
     const nodes = new Map(), events = {}, requests=[], history=[], copies=[];
     class Element {
         constructor(){this.hidden=false;this.value='';this.textContent='';this.disabled=false;this.children=[];this.events={};this.dataset={};}
@@ -18,7 +18,7 @@ function boot(hash='') {
     for(const id of ['maintenance-admin','maintenance-remote','maintenance-tasks-panel','maintenance-audit-panel','maintenance-issued'])el(id).hidden=true;
     el('maintenance-duration').value='1800';
     el('maintenance-actions').buttons=['status','backup','restart','start','stop','upgrade'].map(action=>{const e=new Element();e.dataset.task=action;return e});
-    const c={console,AbortController,setTimeout,clearTimeout,URL,location:{hash,pathname:'/maintenance',origin:'https://panel.example.test'},
+    const c={console,AbortController,setTimeout:options.setTimeout||setTimeout,clearTimeout:options.clearTimeout||clearTimeout,URL,location:{hash,pathname:'/maintenance',origin:'https://panel.example.test'},
         history:{replaceState(...args){history.push(args)}},
         document:{readyState:'complete',getElementById:el,createElement:()=>new Element()},
         navigator:{clipboard:{async writeText(value){copies.push(value)}}},confirm:()=>true,
@@ -93,6 +93,25 @@ async function admin() {
         h.el('maintenance-refresh-status').fire();await flush();
         await h.reply({release_id:'0.4.16-'+'a'.repeat(12),services:{'v-ui.service':'active'}});
         assert(h.el('maintenance-installation').textContent.includes('0.4.16-'));assert(h.el('maintenance-installation').textContent.includes('运行中'));
+    }
+    {
+        const timers=new Map();let number=0;
+        const h=boot('',{setTimeout:(fn,ms)=>{const key=++number;timers.set(key,{fn,ms});return key;},clearTimeout:key=>timers.delete(key)});
+        await h.reply({id:1});await h.reply([]);await h.reply([]);
+        h.el('maintenance-actions').buttons.find(b=>b.dataset.task==='upgrade').fire();await flush();
+        const submitted=h.requests.at(-1);assert.equal(JSON.parse(submitted.options.body).action,'upgrade');
+        await h.reply({id:'c'.repeat(32),state:'queued'});await h.reply([]);
+        assert(h.el('maintenance-actions').buttons.find(b=>b.dataset.task==='upgrade').disabled);
+        const beforeStatus=h.requests.length;h.el('maintenance-actions').buttons.find(b=>b.dataset.task==='status').fire();await flush();
+        assert.equal(h.requests.length,beforeStatus+1);assert.equal(h.requests.at(-1).url,'/api/maintenance/status');
+        await h.reply({release_id:'0.4.21-'+'a'.repeat(12),services:{'v-ui.service':'active'}});
+        const tick=[...timers.values()].find(t=>t.ms===1000);assert(tick);tick.fn();await flush();
+        assert(h.requests.at(-1).url.endsWith('/'+'c'.repeat(32)));assert.equal(h.requests.at(-1).options.method,'GET');
+        await h.reply({id:'c'.repeat(32),action:'upgrade',state:'succeeded'});await h.reply([]);
+        assert(!h.el('maintenance-actions').buttons.find(b=>b.dataset.task==='upgrade').disabled);
+        assert(h.el('maintenance-notice').textContent.includes('成功'));
+        assert.equal(h.requests.filter(r=>r.options.method==='POST'&&r.url==='/api/maintenance/tasks').length,1);
+        h.event('pagehide');
     }
     process.stdout.write('Maintenance fragment/session/scope/cleanup/error/restore synthetic contracts passed\n');
 })().catch(error=>{console.error(error);process.exitCode=1});

@@ -24,7 +24,7 @@
         if (body !== null) allowed['Content-Type']='application/json';
         const controller = new AbortController(), timeout=setTimeout(()=>controller.abort(),20000);
         try {
-            const response=await fetch(path,{method,credentials:'same-origin',cache:'no-store',headers:allowed,
+            const response=await fetch(path,{method,credentials:'same-origin',cache:'no-store',redirect:'error',headers:allowed,
                 signal:controller.signal,body:body===null?undefined:JSON.stringify(body)});
             const type=response.headers.get('content-type')||'';
             let value;
@@ -48,7 +48,7 @@
                 this.dialog.addEventListener('close',()=>this.clear());
             }
             this.build();
-            this.guard=globalThis.VUI_NAV?.guard(()=>!this.uiBusy&&!this.flow.busy);
+            this.guard=globalThis.VUI_NAV?.guard(()=>this.canLeave());
             this.pagehide=()=>this.destroy();addEventListener('pagehide',this.pagehide);
             if (!options.dialog) void this.refresh();
         }
@@ -100,6 +100,7 @@
         clear() {
             clearTimeout(this.certificateTimer);this.certificateTimer=null;this.certificateSubmitted=false;this.savedForm=null;this.certificateJob=null;
             this.epoch++;this.flow.destroy();this.secret='';this.info=null;this.dirty=false;
+            this.fields={};this.form=null;this.editor=null;this.editing=null;this.leaveConfirmed=false;
             this.content.replaceChildren();this.problem.replaceChildren();
         }
         destroy() {
@@ -110,12 +111,17 @@
             this.destroy();this.options.expired?.();
             if(!this.options.remote)globalThis.VUI_NAV?.replaceLogin(location.pathname,location.hash);
         }
-        close() {
-            if(this.uiBusy||this.flow.busy)return;
+        canLeave() {
+            if(this.uiBusy||this.flow.busy)return false;
+            if(this.leaveConfirmed)return true;
             if(this.flow.attempt?.state==='uncertain'||this.flow.intent?.nodeSent&&!this.info){
-                if(!confirm('结果尚未确认。关闭不会撤销服务器操作；再次操作前请先查看现有节点。继续关闭？'))return;
-            }else if(this.dirty&&!this.info&&!confirm('放弃本次尚未提交的输入？'))return;
-            this.clear();if(this.dialog){this.dialog.close();globalThis.VUI_NAV?.modal.close(this.modalId);}
+                if(!confirm('结果尚未确认。离开不会撤销服务器操作；再次操作前请先查看现有节点。继续离开？'))return false;
+            }else if(this.dirty&&!this.info&&!confirm('放弃本次尚未提交的输入？'))return false;
+            this.leaveConfirmed=true;return true;
+        }
+        close() {
+            if(!this.canLeave())return;
+            this.returnEdit=null;this.clear();if(this.dialog){this.dialog.close();globalThis.VUI_NAV?.modal.close(this.modalId);}
         }
         async perform(action, success=null) {
             if(this.uiBusy||this.ended)return;const epoch=this.epoch;
@@ -148,7 +154,7 @@
             if(this.dirty&&!this.info&&!confirm('切换操作会清除本次未提交的连接内容，继续？'))return;
             if(this.flow.attempt?.state==='uncertain'||this.flow.intent?.nodeSent&&!this.info){this.showError({code:'PENDING',message:'请先核对上一操作的结果。'});return;}
             this.clear();this.task=task;this.target=target;
-            if(this.dialog&&!this.dialog.open){this.dialog.showModal();globalThis.VUI_NAV?.modal.open(this.modalId,()=>this.close(),()=>!this.uiBusy&&!this.flow.busy);}
+            if(this.dialog&&!this.dialog.open){this.dialog.showModal();globalThis.VUI_NAV?.modal.open(this.modalId,()=>this.close(),()=>this.canLeave());}
             return await this.perform(async()=>{
                 await this.flow.load();
                 if(task==='edit'){
@@ -156,7 +162,7 @@
                     this.editor=await this.flow.api('/api/inbounds/'+target.id+'/editor');
                     if(this.editor.mutation_revision&&this.editor.mutation_revision!==target.revision)throw new Error('Node changed');
                 }
-            },()=>{if(task==='share'){this.info={kind:'share'};this.content.replaceChildren();const row=this.flow.nodes.find(value=>value.id===target.id&&value.mutation_revision===target.revision);if(!row)throw new globalThis.VUI_OPERATION_FLOW.FlowError('NODE_CHANGED','节点已变化，请重新选择。');void this.delivery(row,target.server||location.hostname,!!target.upstream);}else this.renderForm();this.renderNodes();});
+            },()=>{if(task==='share'){this.info={kind:'share'};this.content.replaceChildren();const row=this.flow.nodes.find(value=>value.id===target.id&&value.mutation_revision===target.revision);if(!row||!globalThis.VUI_OPERATION_FLOW.REV.test(target.contentRevision||'')||row.content_revision!==target.contentRevision)throw new globalThis.VUI_OPERATION_FLOW.FlowError('NODE_CHANGED','节点已变化，请重新选择。');void this.delivery(row,target.server||location.hostname,!!target.upstream);}else this.renderForm();this.renderNodes();});
         }
         input(value='',type='text') { return element('input',null,{type,value:value??'',autocomplete:'off'}); }
         fillUpstreams(selected) {
@@ -176,8 +182,8 @@
             const diagram=this.task==='host'?'服务器上的程序 → 出口服务器 → 网站':this.task==='relay'?'手机 / 电脑 → 这台服务器 → 出口服务器 → 网站':this.task==='exit'?'为中转节点和服务器程序选择统一出口':'手机 / 电脑 → 这台服务器 → 网站';
             this.content.append(title,element('p',diagram,{class:'ops-route'}));
             const form=element('form');this.form=form;
-            form.addEventListener('input',()=>{this.dirty=true;this.updateForm();});
-            form.addEventListener('change',()=>{this.dirty=true;this.updateForm();});
+            form.addEventListener('input',()=>{this.leaveConfirmed=false;this.dirty=true;this.updateForm();});
+            form.addEventListener('change',()=>{this.leaveConfirmed=false;this.dirty=true;this.updateForm();});
             const nodeTask=['direct','relay'].includes(this.task), edit=this.task==='edit';
             if(nodeTask||edit){
                 const nextName=nodeTask?(this.task==='relay'?'中转节点 ':'直连节点 ')+(this.flow.nodes.length+1):this.editing.remark||'';
@@ -411,7 +417,7 @@
             if(this.uiBusy||this.flow.busy||this.ended)return;
             if(this.dirty&&!confirm('离开将清除尚未提交的节点输入，继续？'))return;
             this.clear();this.task='subscriptions';
-            if(this.dialog&&!this.dialog.open){this.dialog.showModal();globalThis.VUI_NAV?.modal.open(this.modalId,()=>this.close(),()=>!this.uiBusy&&!this.flow.busy);}
+            if(this.dialog&&!this.dialog.open){this.dialog.showModal();globalThis.VUI_NAV?.modal.open(this.modalId,()=>this.close(),()=>this.canLeave());}
             return this.perform(async()=>{
                 this.flow.require('share');
                 const [response,warnings,grants]=await Promise.all([
@@ -462,7 +468,7 @@
         async certificates() {
             if(this.uiBusy||this.flow.busy||this.ended)return;
             if(this.dirty&&!confirm('离开将清除尚未提交的节点输入，继续？'))return;
-            this.clear();this.task='certificates';if(this.dialog&&!this.dialog.open){this.dialog.showModal();globalThis.VUI_NAV?.modal.open(this.modalId,()=>this.close(),()=>!this.uiBusy&&!this.flow.busy);}
+            this.clear();this.task='certificates';if(this.dialog&&!this.dialog.open){this.dialog.showModal();globalThis.VUI_NAV?.modal.open(this.modalId,()=>this.close(),()=>this.canLeave());}
             return this.perform(async()=>{await this.flow.load();return await this.flow.api('/api/certificates');},rows=>{
                 this.content.replaceChildren(element('h3','连接域名与证书'),element('p','已有证书可直接用于新节点。续期保留原证书，已停止的节点组不会自动启动。'));
                 if(!this.options.remote)this.content.append(element('a','申请证书 / 更多管理',{href:'/certificates'}));

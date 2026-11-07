@@ -982,8 +982,8 @@ const app = createApp({
             void globalThis.VUI_SIMPLE_OPERATIONS?.open('edit',{id:row.id,revision:row.mutation_revision});
         };
         const openSimpleShare = row => {
-            if (!validInboundRevision(row.mutation_revision)) { ElMessage.error('请刷新节点后再分享。'); return; }
-            void globalThis.VUI_SIMPLE_OPERATIONS?.open('share',{id:row.id,revision:row.mutation_revision});
+            if (!validInboundRevision(row.mutation_revision)||!validInboundRevision(row.content_revision)) { ElMessage.error('请刷新节点后再分享。'); return; }
+            void globalThis.VUI_SIMPLE_OPERATIONS?.open('share',{id:row.id,revision:row.mutation_revision,contentRevision:row.content_revision});
         };
         addEventListener('vui:operations-changed', () => { if (!adminSessionEnded) { void fetchInbounds(); void fetchCoreStatus.fresh(); } });
         addEventListener('vui:advanced-node', event => {

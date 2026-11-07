@@ -30,14 +30,15 @@ class ShortInstallContractTests(unittest.TestCase):
             self.assertEqual(len(ordinary),1)
             self.assertEqual(ordinary[0].get('VUI_INSTALLER_YN_TEST'),'1')
             upgrades=[env for env in selected if env.get('VUI_PUBLISHED_UPGRADE_SOURCE')]
-            self.assertEqual(len(selected),6 if name=='oneclick.yml' else 1)
-            self.assertEqual(len(upgrades),5 if name=='oneclick.yml' else 0)
+            self.assertEqual(len(selected),7 if name=='oneclick.yml' else 1)
+            self.assertEqual(len(upgrades),6 if name=='oneclick.yml' else 0)
             if upgrades:
                 expected=[('0.4.14','b0cc174d04d05e61277075412586f0ba0dd231db','.published-v0414'),
                           ('0.4.15','65b1e75d90de733408101ec280a92be935731baa','.published-v0415'),
                           ('0.4.16','18fe631bcf69b68425b454db1795a101e0378842','.published-v0416'),
                           ('0.4.17','95c201c6e26ed54960f964c675e515890f2eea2a','.published-v0417'),
-                          ('0.4.19','a2b9c188658f082b189e77d237787a96eb9cf921','.published-v0419')]
+                          ('0.4.19','a2b9c188658f082b189e77d237787a96eb9cf921','.published-v0419'),
+                          ('0.4.20','05173798de1baed5d67a866c4125e72f74fe3f4c','.published-v0420')]
                 self.assertEqual([(env['VUI_PUBLISHED_INSTALL_VERSION'],env['VUI_RELEASE_COMMIT'],
                                    env['VUI_PUBLISHED_UPGRADE_SOURCE']) for env in upgrades],
                                  [(version,commit,'${{ github.workspace }}/'+path)
@@ -66,7 +67,8 @@ class ShortInstallContractTests(unittest.TestCase):
         selected=[step for step in steps if step.get('env',{}).get('VUI_NETLINK_SYSTEMD_TEST')=='1']
         self.assertEqual([step['name'] for step in selected],[
             'Test interactive installer and global v-ui on ephemeral systemd runner',
-            'Test published v0.4.19 to exact candidate upgrade on ephemeral systemd runner'])
+            'Test published v0.4.19 to exact candidate upgrade on ephemeral systemd runner',
+            'Test published v0.4.20 to exact candidate upgrade on ephemeral systemd runner'])
         for step in selected:
             self.assertNotIn('if',step,'Required installed-core acceptance cannot be skipped')
             self.assertEqual(step['env']['VUI_TEST_MIHOMO'],'/tmp/vui-oneclick/client/mihomo')
