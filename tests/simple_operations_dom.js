@@ -9,7 +9,7 @@ function screen(options={}){
     const backend=fixture(options),document=new Document(),root=document.createElement('div');document.body.append(root);
     const events={},clipboard=[],confirms=[];let fetches=0;
     const context={document,VUI_OPERATION_FLOW:api,location:{pathname:'/maintenance',hash:'',hostname:'panel.example.test'},
-        confirm:text=>{confirms.push(text);return true;},navigator:{clipboard:{writeText:async value=>{if(options.clipboardFailure)throw new Error('synthetic denied');clipboard.push(value);}}},
+        confirm:text=>{confirms.push(text);return options.confirm?options.confirm(text):true;},navigator:{clipboard:{writeText:async value=>{if(options.clipboardFailure)throw new Error('synthetic denied');clipboard.push(value);}}},
         addEventListener:(name,fn)=>{(events[name]??=[]).push(fn);},dispatchEvent:event=>{for(const fn of events[event.type]||[])fn(event);},removeEventListener:()=>{},
         CustomEvent:class{constructor(type,options={}){this.type=type;this.detail=options.detail;}},
         setTimeout,clearTimeout,AbortController,fetch:async()=>{fetches++;throw new Error('Unexpected cookie transport');},
@@ -148,4 +148,33 @@ test('same-instance content changes between list selection and opening share nev
     const f=screen({active:true,nodes:[row]});
     await f.view.open('share',{id:2,revision:rev(90),contentRevision:rev(91)});await settle();
     assert.ok(f.view.problem.textContent.includes('变化'));assert.equal(f.calls.some(c=>c.path.startsWith('/api/subscription')),false);
+});
+test('inline Share honours unsaved input cancellation, then shows completed status for the same selected content',async()=>{
+    let accept=false;const row={id:2,remark:'已有节点',port:8001,enable:true,core:'xray',protocol:'vless',mutation_revision:rev(90),content_revision:rev(91),share_eligible:true};
+    const f=screen({active:true,nodes:[row],confirm:()=>accept});
+    const root=f.document.createElement('div');f.document.body.append(root);const view=new f.view.constructor(root,{request:f.api,remote:true});await settle();
+    view.fields.name.value='还没有提交的名称';view.dirty=true;
+    const share=root.querySelectorAll('button').find(b=>b.textContent==='分享连接');assert.ok(share);share.click();await settle();
+    assert.equal(view.fields.name.value,'还没有提交的名称');assert.equal(f.calls.some(c=>c.path.startsWith('/api/subscription')),false);
+    accept=true;share.click();await settle();assert.ok(view.content.querySelector('.ops-delivery'));assert.ok(view.status.textContent.includes('已准备好'));assert.ok(!view.status.textContent.includes('正在读取'));view.destroy();
+});
+test('certificate maintenance reads back toggle and queued renewal before offering the next action',async()=>{
+    const f=screen({active:true});f.certs[0].auto_renew=true;
+    const api=f.api;let renews=0;
+    f.view.flow.request=async(path,method,body,options)=>{
+        if(path.endsWith('/auto-renew')){assert.equal(body.enabled,false);f.certs[0].auto_renew=false;return {auto_renew:false};}
+        if(path.endsWith('/renew')){renews++;f.certs[0].latest_job={state:'queued'};return {id:'c'.repeat(32),state:'queued'};}
+        return api(path,method,body,options);
+    };
+    await f.view.certificates();button(f,'暂停自动续期').click();await new Promise(resolve=>setTimeout(resolve,5));await settle();
+    assert.ok(button(f,'启用自动续期'));assert.equal(button(f,'暂停自动续期'),undefined);
+    button(f,'检查并续期').click();await new Promise(resolve=>setTimeout(resolve,5));await settle();
+    assert.equal(renews,1);assert.equal(button(f,'检查并续期').disabled,true);assert.ok(f.root.textContent.includes('排队中'));f.view.destroy();
+});
+test('management tabs cannot silently clear an unknown creation; cancellation keeps recovery and original input',async()=>{
+    const f=screen({active:true,loseCreate:true,confirm:()=>false});await f.view.open('direct');
+    f.view.form.dispatchEvent({type:'submit'});await settle();assert.equal(f.view.flow.intent.nodeSent,true);
+    await f.view.certificates();await f.view.subscriptions();
+    assert.equal(f.view.task,'direct');assert.equal(f.view.flow.intent.nodeSent,true);assert.ok(button(f,'核对并完成'));
+    assert.ok(f.confirms.every(text=>text.includes('结果尚未确认')));assert.equal(f.calls.filter(c=>c.path==='/api/inbounds'&&c.method==='POST').length,1);
 });

@@ -114,7 +114,7 @@
         canLeave() {
             if(this.uiBusy||this.flow.busy)return false;
             if(this.leaveConfirmed)return true;
-            if(this.flow.attempt?.state==='uncertain'||this.flow.intent?.nodeSent&&!this.info){
+            if(this.flow.attempt?.state==='uncertain'||this.flow.intent?.importUncertain||this.flow.intent?.saveUncertain||this.flow.intent?.nodeSent&&!this.info){
                 if(!confirm('结果尚未确认。离开不会撤销服务器操作；再次操作前请先查看现有节点。继续离开？'))return false;
             }else if(this.dirty&&!this.info&&!confirm('放弃本次尚未提交的输入？'))return false;
             this.leaveConfirmed=true;return true;
@@ -367,7 +367,8 @@
                     if(row.upstream_export_eligible===true)box.append(this.button('给中转服务器使用（仅TCP，含凭据）',()=>this.delivery(row,server,true)));
                 }
                 this.content.querySelector('.ops-delivery')?.remove();this.content.append(box);
-            }catch(error){if(epoch===this.epoch&&deliveryEpoch===this.deliveryEpoch&&!this.ended)this.showError(error);}
+                this.status.textContent=upstream?'TCP出口链接已准备好，仅供可信中转服务器使用。':'连接信息已准备好，可复制到客户端或显示二维码。';
+            }catch(error){if(epoch===this.epoch&&deliveryEpoch===this.deliveryEpoch&&!this.ended){this.status.textContent='连接信息未能读取，请核对提示后继续。';this.showError(error);}}
         }
         copy(value, field) {
             const epoch=this.epoch;
@@ -397,7 +398,7 @@
                 const card=element('article',null,{class:'ops-node'});
                 const live=this.flow.cores[row.core];const state=!row.enable?'已停用':nodeApplied(row)&&live?.running&&!live.dirty?'服务已启动':'已保存，运行待确认';
                 card.append(element('strong',row.remark||'节点 '+row.id),element('p','端口 '+row.port+' · '+state+' · '+(row.routing_mode==='relay'?'统一出口':row.routing_mode==='direct'?'本机出口':'跟随旧全局设置')));
-                card.append(this.button('分享连接',()=>{this.content.replaceChildren();void this.delivery(row,location.hostname,false);},{primary:true,disabled:!this.flow.has('share')||row.share_eligible!==true}),
+                card.append(this.button('分享连接',()=>this.open('share',{id:row.id,revision:row.mutation_revision,contentRevision:row.content_revision}),{primary:true,disabled:!this.flow.has('share')||row.share_eligible!==true}),
                     this.button('修改设置',()=>this.open('edit',{id:row.id,revision:row.mutation_revision}),{disabled:!this.flow.has('nodes')}),
                     this.button(row.enable?'停用节点':'启用节点',()=>{
                         if(row.enable&&!confirm('停用“'+(row.remark||'节点'+row.id)+'”？使用它的连接可能中断，配置和凭据保留。'))return;
@@ -415,7 +416,7 @@
         }
         async subscriptions() {
             if(this.uiBusy||this.flow.busy||this.ended)return;
-            if(this.dirty&&!confirm('离开将清除尚未提交的节点输入，继续？'))return;
+            if(!this.canLeave())return;
             this.clear();this.task='subscriptions';
             if(this.dialog&&!this.dialog.open){this.dialog.showModal();globalThis.VUI_NAV?.modal.open(this.modalId,()=>this.close(),()=>this.canLeave());}
             return this.perform(async()=>{
@@ -467,7 +468,7 @@
         }
         async certificates() {
             if(this.uiBusy||this.flow.busy||this.ended)return;
-            if(this.dirty&&!confirm('离开将清除尚未提交的节点输入，继续？'))return;
+            if(!this.canLeave())return;
             this.clear();this.task='certificates';if(this.dialog&&!this.dialog.open){this.dialog.showModal();globalThis.VUI_NAV?.modal.open(this.modalId,()=>this.close(),()=>this.canLeave());}
             return this.perform(async()=>{await this.flow.load();return await this.flow.api('/api/certificates');},rows=>{
                 this.content.replaceChildren(element('h3','连接域名与证书'),element('p','已有证书可直接用于新节点。续期保留原证书，已停止的节点组不会自动启动。'));
@@ -478,8 +479,8 @@
                     const card=element('article',null,{class:'ops-node'}),valid=globalThis.VUI_OPERATION_FLOW.usableCertificates([cert]).length===1;
                     card.append(element('strong',cert.domain),element('p',valid?'可用于节点 · 剩余'+cert.days_remaining+'天':cert.environment==='staging'?'测试证书，不能用于正式节点':'尚不可用，请查看证书任务'));
                     const state={queued:'排队中',running:'申请中',succeeded:'申请成功',failed:'申请失败',interrupted:'申请中断'}[cert.latest_job?.state];if(state)card.append(element('p','最近任务：'+state));
-                    card.append(this.button('检查并续期',()=>this.perform(()=>this.flow.api('/api/certificates/'+cert.id+'/renew','POST'),()=>{this.status.textContent='续期检查已提交，旧证书保持；稍后重新读取状态。';}),{disabled:!this.flow.has('certificates')||['queued','running'].includes(cert.latest_job?.state)}));
-                    card.append(this.button(cert.auto_renew?'暂停自动续期':'启用自动续期',()=>this.perform(()=>this.flow.api('/api/certificates/'+cert.id+'/auto-renew','PUT',{enabled:!cert.auto_renew}),()=>{this.status.textContent='自动续期设置已保存。';}),{disabled:!this.flow.has('certificates')}));
+                    card.append(this.button('检查并续期',()=>this.perform(()=>this.flow.api('/api/certificates/'+cert.id+'/renew','POST'),()=>{this.status.textContent='续期检查已提交，旧证书保持。';setTimeout(()=>{if(!this.ended)void this.certificates();},0);}),{disabled:!this.flow.has('certificates')||['queued','running'].includes(cert.latest_job?.state)}));
+                    card.append(this.button(cert.auto_renew?'暂停自动续期':'启用自动续期',()=>this.perform(()=>this.flow.api('/api/certificates/'+cert.id+'/auto-renew','PUT',{enabled:!cert.auto_renew}),()=>{this.status.textContent='自动续期设置已保存。';setTimeout(()=>{if(!this.ended)void this.certificates();},0);}),{disabled:!this.flow.has('certificates')}));
                     card.append(this.button('用于新直连节点',async()=>{await this.open('direct');if(this.fields.cert)this.fields.cert.value=cert.id;this.updateForm();},{disabled:!valid||!this.flow.has('nodes','relay','certificates')}));
                     this.content.append(card);
                 }
