@@ -158,8 +158,11 @@ class AdminAuthMiddleware:
                     or len(request.headers.getlist('origin')) > 1):
                 await reject(403, '维护请求来源无效')
                 return
-            # Only the existing non-auth host/core selectors can be queried.
+            # Keep revision queries confined to the existing single-link GET
+            # capability; other exports retain only their host/core selectors.
             allowed_query = {'core'} if path == '/api/inbounds' else {'core', 'host'} if path.startswith('/api/subscription/') else set()
+            if entry is not None and entry['method'] == 'GET' and entry['path'] == '/api/subscription/link/{inbound_id}':
+                allowed_query |= {'expected_instance_revision', 'expected_content_revision'}
             if (any(key not in allowed_query for key in request.query_params)
                     or any(len(request.query_params.getlist(key)) != 1 for key in request.query_params)):
                 await reject(422, '维护请求不能使用 query 凭据或未知参数')

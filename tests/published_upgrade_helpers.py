@@ -1,4 +1,4 @@
-"""Opt-in empty-host public 0.4.14/0.4.15/0.4.16/0.4.17/0.4.19/0.4.20 -> exact candidate upgrade observations.
+"""Opt-in empty-host public 0.4.14/0.4.15/0.4.16/0.4.17/0.4.19/0.4.20/0.4.21 -> exact candidate upgrade observations.
 
 The old installation uses anonymous published HTTPS. Only the unpublished new
 kit's download transport is adapted; neither installer nor root receipt is faked.
@@ -22,6 +22,7 @@ PUBLISHED_BASELINES = {
     '0.4.17': '95c201c6e26ed54960f964c675e515890f2eea2a',
     '0.4.19': 'a2b9c188658f082b189e77d237787a96eb9cf921',
     '0.4.20': '05173798de1baed5d67a866c4125e72f74fe3f4c',
+    '0.4.21': '2aa5e11e3f09c03d048018f033ae888e7c775604',
 }
 CONTROL = Path('/usr/local/lib/v-ui')
 FIREWALL = str(CONTROL / 'firewall_support.py')
@@ -44,14 +45,14 @@ def assert_download_boundary(test, kit, log):
 
 def fixed_public_baseline(version, commit):
     if version not in PUBLISHED_BASELINES or PUBLISHED_BASELINES[version] != commit:
-        raise AssertionError('Fixed public 0.4.14, 0.4.15, 0.4.16, 0.4.17, 0.4.19 or 0.4.20 upgrade baseline required')
+        raise AssertionError('Fixed public 0.4.14, 0.4.15, 0.4.16, 0.4.17, 0.4.19, 0.4.20 or 0.4.21 upgrade baseline required')
     return version, commit
 
 
 def assert_receipt_migration(test, before, after, old_version):
     if old_version not in PUBLISHED_BASELINES:
         raise AssertionError('Unknown public upgrade receipt baseline')
-    if old_version in ('0.4.17', '0.4.19', '0.4.20'):
+    if old_version in ('0.4.17', '0.4.19', '0.4.20', '0.4.21'):
         test.assertTrue(MAINTENANCE_FILES <= set(before['files']))
         additions = set()
     else:
@@ -73,6 +74,12 @@ def assert_editor_content_addition(test, before, after):
     The private DB and material snapshots are independently byte-exact below.
     No credential, identity or profile field is excused by this response check.
     """
+    if 'content_revision' in before:
+        # Published21 already carries the CAS; do not excuse any old field.
+        test.assertEqual(after,before)
+        test.assertIs(type(after['content_revision']),str)
+        test.assertIsNotNone(re.fullmatch('[a-f0-9]{64}',after['content_revision']))
+        return
     test.assertNotIn('content_revision', before)
     test.assertEqual(set(after), set(before) | {'content_revision'})
     token = after['content_revision']
@@ -83,6 +90,12 @@ def assert_editor_content_addition(test, before, after):
 
 def assert_node_summary_upgrade(test, before, after, old_version=None):
     """Permit only the declared capability/CAS response additions for 21."""
+    if old_version=='0.4.21':
+        test.assertEqual(after,before)
+        for row in after:
+            test.assertIs(type(row.get('content_revision')),str)
+            test.assertIsNotNone(re.fullmatch('[a-f0-9]{64}',row['content_revision']))
+        return
     added = set() if old_version in ('0.4.19','0.4.20') else {'share_eligible','upstream_export_eligible'}
     test.assertEqual(len(after), len(before))
     for old, new in zip(before, after):
@@ -251,7 +264,7 @@ with database.SessionLocal() as db:
 print('{}')
 ''')
         self.managed_xray = None
-        if self.old_version in ('0.4.16', '0.4.17', '0.4.19', '0.4.20'):
+        if self.old_version in ('0.4.16', '0.4.17', '0.4.19', '0.4.20', '0.4.21'):
             # The stored binding and its local fixture material are observed as
             # data only. No CA, certificate validation or business core is run.
             self.managed_xray = self._service_python(release, managed_xray_fixture_program())
@@ -320,7 +333,7 @@ print('{}')
         self.test.assertEqual(json.loads(api('/api/subscriptions')[1]), self.grants)
         self.public_subscription(api)
         assert_download_boundary(self.test, self.kit, self.new['download_log'])
-        print('Published upgrade: immutable public '+self.old_version+' source/assets -> exact candidate; exact historical root receipt closure; config, users/password hashes, node draft/manual TLS paths, live subscription, provided/managed fixture certificate bytes and managed certificate/binding metadata retained (synthetic un-applied Xray binding on 0.4.16/17/19/20; no CA/core qualification); candidate-only bounded downloads OK')
+        print('Published upgrade: immutable public '+self.old_version+' source/assets -> exact candidate; exact historical root receipt closure; config, users/password hashes, node draft/manual TLS paths, live subscription, provided/managed fixture certificate bytes and managed certificate/binding metadata retained (synthetic un-applied Xray binding on 0.4.16/17/19/20/21; no CA/core qualification); candidate-only bounded downloads OK')
 
     def public_subscription(self, api):
         status, raw = api(self.subscription)

@@ -1,3 +1,7 @@
+## v0.4.22 本分支说明
+
+本分支手工参数示例为22候选，尚未公开；main短入口仍固定已公开21，不提前换pin或覆盖旧资产。本轮只修维护分享参数，原配置数据与安装器逻辑保持。构建/安装仅Actions，浏览器未验证；[本批进度](MAINTENANCE_SHARE_0422.md)。
+
 ## v0.4.21正式应用与短入口
 
 v0.4.21已[公开](https://github.com/ForceMind/V-UI/releases/tag/v0.4.21)，正式应用源main2aa5e11、旧版资产保持；本次短入口正在独立切换并验收。下面的一行命令指向稳定main入口，目标以`setup.sh --help`为准；入口和发布应用的source SHA不同，不能混用。已有安装保留原配置/数据，选择升级才下载。构建与安装验收仅Actions，浏览器未验证；[进度](SIMPLE_OPERATIONS_PROGRESS.md)。下方“候选未公开”为历史。
@@ -244,7 +248,7 @@ root 只负责系统初始化和受管服务文件；应用、核心与 Certbot 
 
 ```sh
 # 按README完成固定入口校验/root私有副本及函数定义后：
-run_vui_installer --version v0.4.21
+run_vui_installer --version v0.4.22
 ```
 
 脚本先检测 `x86_64/aarch64 + gnu/musl`，再从该明确版本下载对应目标包、安装控制器和 `SHA256SUMS`，逐个验证摘要后执行。不会下载 `latest`，也不会在发布时重新构建包。

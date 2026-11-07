@@ -42,15 +42,15 @@ class InstalledNetlinkFixtureTests(unittest.TestCase):
     def test_real_installed_gate_requires_both_explicit_flag_and_actual_020(self):
         from scripts import system_maintenance_smoke as smoke
         for flag in ('', '0', '1'):
-            for version in ('0.4.14', '0.4.18', '0.4.19', '0.4.20', '0.4.21'):
+            for version in ('0.4.14', '0.4.18', '0.4.19', '0.4.20', '0.4.21', '0.4.22'):
                 with self.subTest(flag=flag,version=version),patch.dict(os.environ,{'VUI_NETLINK_SYSTEMD_TEST':flag}):
                     self.assertEqual(smoke.netlink_systemd_enabled(version+'-'+'a'*12),
-                                     flag=='1' and version in ('0.4.20','0.4.21'))
+                                     flag=='1' and version in ('0.4.20','0.4.21','0.4.22'))
 
     def test_019_and_020_keep_actual_180_day_cli_while_old_releases_keep_default(self):
         from scripts import system_maintenance_smoke as smoke
         for version,expected in (('0.4.14',False),('0.4.15',False),('0.4.16',False),
-                                 ('0.4.17',False),('0.4.18',False),('0.4.19',True),('0.4.20',True),('0.4.21',True)):
+                                 ('0.4.17',False),('0.4.18',False),('0.4.19',True),('0.4.20',True),('0.4.21',True),('0.4.22',True)):
             with self.subTest(version=version):
                 self.assertIs(smoke.maintenance_long_duration(version+'-'+'a'*12),expected)
 
