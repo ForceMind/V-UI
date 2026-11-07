@@ -30,8 +30,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'setup.sh'
 BASH = shutil.which('bash')
 PATH_VALUE = '/usr/sbin:/usr/bin:/sbin:/bin'
-INSTALLER_SHA = 'f6c135aabe340474478ad9630c609815eb569d0dbab2932699ec607a862b451b'
-KIT_SHA = '977000d835e748d1f705fc99ed3409223f973d84d42baef439e66fc1f26d20b4'
+INSTALLER_SHA = '76dd39f7c42d68fb51ba4943d2427a1d55f2ec58131610640ae17e0f61aa28ee'
+KIT_SHA = 'ca623bbe243c5ef051a80ee0bbf4d51495c719f29ef8f3c063b3c7492fb33c20'
 
 TOOL = r'''
 import hashlib, json, os, pathlib, shutil, signal, sys, tempfile
@@ -67,7 +67,7 @@ elif name == 'curl':
     assert '--proto' in args and args[args.index('--proto')+1] == '=https'
     assert args[args.index('--proto-redir')+1] == '=https'
     assert '--tlsv1.2' in args and '--fail' in args
-    assert 'https://github.com/ForceMind/V-UI/releases/download/v0.4.20/install.sh' in args
+    assert 'https://github.com/ForceMind/V-UI/releases/download/v0.4.21/install.sh' in args
     destination=owned(args[args.index('-o')+1])
     destination.write_bytes((root/'release-install.sh').read_bytes())
     if config.get('tamper'):destination.write_bytes(b'exit 0\n')
@@ -325,8 +325,8 @@ class SetupShellTests(unittest.TestCase):
         self.assertEqual(list((self.root/'temporary').iterdir()),[])
 
     def test_production_fixed_trust_and_environment(self):
-        self.assertIn('local version=v0.4.20 ',self.source)
-        self.assertIn('[[ "$version" == v0.4.20 ]]',self.source)
+        self.assertIn('local version=v0.4.21 ',self.source)
+        self.assertIn('[[ "$version" == v0.4.21 ]]',self.source)
         self.assertIn('local installer_sha='+INSTALLER_SHA,self.source)
         self.assertIn('local kit_sha='+KIT_SHA,self.source)
         self.assertIn('mktemp -d /root/vui-bootstrap.XXXXXXXX',self.source)
@@ -340,13 +340,13 @@ class SetupShellTests(unittest.TestCase):
         self.assertEqual(result.returncode,0,result.stderr)
 
     def test_root_flow_preserves_options_stdin_and_clean_environment(self):
-        values=['--version','v0.4.20','--domain','panel.example.test',
+        values=['--version','v0.4.21','--domain','panel.example.test',
                 '--cert','/path with spaces/$(touch never); cert.pem','--node-udp-port','18000',
                 '--node-udp-port=18001','--accept-terms','--upgrade']
         result=self.run_setup(*values)
         self.assertEqual(result.returncode,0,result.stderr)
         installer=self.logs('installer')[0]
-        self.assertEqual(installer['args'],['--version','v0.4.20','--with-global-cli',
+        self.assertEqual(installer['args'],['--version','v0.4.21','--with-global-cli',
                                          '--kit-sha256',KIT_SHA,'--interactive',*values[2:]])
         self.assertEqual(installer['stdin'],'fixture-password')
         self.assertNotIn('fixture-password',installer['args'])
@@ -361,13 +361,13 @@ class SetupShellTests(unittest.TestCase):
         result=self.run_setup('--port','12345',process_substitution=True)
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(len(self.logs('sudo')),1)
-        self.assertEqual(self.logs('installer')[0]['args'][:2],['--version','v0.4.20'])
+        self.assertEqual(self.logs('installer')[0]['args'][:2],['--version','v0.4.21'])
         self.assertEqual(self.logs('installer')[0]['args'][-2:],['--port','12345'])
         self.assert_clean()
 
     def test_rejects_untrusted_versions_and_managed_or_unknown_options(self):
-        cases=[['--version','v0.4.21'],['--version','v0.4.19'],['--version','v0.4.18'],['--version','v0.4.17'],['--version','v0.4.16'],['--version','v0.4.15'],['--version','v0.4.14'],['--version','v0.4.10'],['--version','v0.4.9'],['--version=v0.4.8'],['--version'],
-               ['--version','v0.4.20','--version','v0.4.20'],['--interactive'],
+        cases=[['--version','v0.4.22'],['--version=v0.4.22'],['--version','v0.4.20'],['--version=v0.4.20'],['--version','v0.4.19'],['--version','v0.4.18'],['--version','v0.4.17'],['--version','v0.4.16'],['--version','v0.4.15'],['--version','v0.4.14'],['--version','v0.4.10'],['--version','v0.4.9'],['--version=v0.4.8'],['--version'],
+               ['--version','v0.4.21','--version','v0.4.21'],['--interactive'],
                ['--with-global-cli'],['--kit-sha256','0'*64],['--kit-sha256='+'0'*64],
                ['--bundle','/untrusted.zip'],['--sha256','0'*64],['--dry-run'],
                ['--password','secret'],['--port'],['--domain','--upgrade'],['--unknown']]
@@ -381,7 +381,7 @@ class SetupShellTests(unittest.TestCase):
     def test_help_and_os_refusal_never_download_or_elevate(self):
         result=self.run_setup('--help')
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn('v0.4.20',result.stdout)
+        self.assertIn('v0.4.21',result.stdout)
         self.assertIn('用法：bash setup.sh',result.stdout)
         self.assertIn('域名每行最多 4096 个 UTF-8 字节',result.stdout)
         self.assertEqual([line['tool'] for line in self.logs()],['cat'])
