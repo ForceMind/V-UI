@@ -736,6 +736,25 @@ class ProxyStore:
         with self._locked(initialize=initialize) as (_, revisions, secrets, state, _):
             return self._snapshot(revisions, secrets, state)
 
+    def discard_draft(self, expected_revision: str, active_revision: str) -> dict:
+        """Explicitly restore the committed document, never the running process.
+
+        The active revision and draft are both CAS conditions. Copying public
+        settings through save_draft would accidentally retain a newer draft's
+        password; switching the immutable document retains the exact original
+        secret references. No revisions, profiles, secrets or history are erased.
+        """
+        if not isinstance(active_revision, str) or not _HEX.fullmatch(active_revision):
+            raise ProxyValidationError('An exact committed revision is required')
+        with self._locked() as (root, revisions, secrets, state, _):
+            self._editable(state, expected_revision)
+            self._snapshot(revisions, secrets, state)
+            if state['active_revision'] != active_revision:
+                raise ProxyConflict('Active revision changed before discarding draft')
+            changed = {**state, 'draft_revision': active_revision}
+            self._commit_state(root, state, changed)
+            return self._snapshot(revisions, secrets, changed)
+
     def _load(self, active: bool, *, reject_pending: bool = False) -> dict | None:
         with self._locked() as (_, revisions, secrets, state, _):
             # Validate both roots even when the requested one is absent.

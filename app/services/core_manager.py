@@ -219,6 +219,21 @@ class CoreManager:
         plan = policy_plan(rows, draft["settings"])
         self._check_relay_runtime_gate(draft["settings"]["relay_enabled"] or bool(plan.relay_ids))
 
+    def _runtime_fingerprint(self) -> str:
+        # Only non-secret committed revisions and enabled preferences. Bind a
+        # simple-flow confirmation to operator stop/start intent as well as DB
+        # ingress/source state; no PID timing or credential-bearing config.
+        return revision({name: self.get(name).runtime.state() for name in ('sing-box', 'xray')})
+
+    def require_proxy_revision(self, expected: str | None) -> None:
+        from app.services.proxy_store import ProxyConflict
+        if expected is None:
+            return
+        snapshot = self.proxy_coordinator.store.read_snapshot()
+        if (snapshot['pending'] is not None or snapshot['revision'] != expected
+                or snapshot['active'] is None or snapshot['active']['revision'] != expected):
+            raise ProxyConflict('Proxy selection changed before node operation')
+
     def check_proxy(self, expected_revision: str, expected_source_fingerprint: str | None = None) -> dict:
         from app.services.proxy_store import ProxyStorageError
         with self.lock:
@@ -227,20 +242,26 @@ class CoreManager:
                 rows = self._all_rows()
                 coordinator.validate_saved_source(rows)
                 self._check_proxy_runtime_gate(coordinator, expected_revision, rows)
-                return coordinator.check(expected_revision, rows,
-                                         expected_source_fingerprint=expected_source_fingerprint)
+                result = coordinator.check(expected_revision, rows,
+                                           expected_source_fingerprint=expected_source_fingerprint)
+                result['runtime_fingerprint'] = self._runtime_fingerprint()
+                return result
             except ProxyStorageError:
                 self._stop_untrusted("Proxy state is unavailable; core operations blocked")
                 raise
 
-    def apply_proxy(self, expected_revision: str, transaction_id: str, expected_source_fingerprint: str | None = None) -> dict:
-        from app.services.proxy_store import ProxyStorageError
+    def apply_proxy(self, expected_revision: str, transaction_id: str, expected_source_fingerprint: str | None = None,
+                    expected_runtime_fingerprint: str | None = None) -> dict:
+        from app.services.proxy_store import ProxyStorageError, ProxyConflict
         with self.lock:
             try:
                 coordinator = self.proxy_coordinator
                 rows = self._all_rows()
                 coordinator.validate_saved_source(rows)
                 if coordinator.store.transaction(transaction_id) is None:
+                    if (expected_runtime_fingerprint is not None
+                            and expected_runtime_fingerprint != self._runtime_fingerprint()):
+                        raise ProxyConflict('Runtime preferences changed after check')
                     self._check_proxy_runtime_gate(coordinator, expected_revision, rows)
                 # Existing IDs are resolved before draft inspection, preserving
                 # idempotent replay after a newer draft has been saved.
@@ -303,8 +324,10 @@ class CoreManager:
             rows = [item for item in self._all_rows() if item.core != core] + supplied
             return self._apply_rows(core, rows, activate=restart)
 
-    def apply_database(self, core: str, *, activate: bool = True, preserve_stopped: bool = True) -> dict:
+    def apply_database(self, core: str, *, activate: bool = True, preserve_stopped: bool = True,
+                       expected_proxy_revision: str | None = None) -> dict:
         with self.lock:
+            self.require_proxy_revision(expected_proxy_revision)
             return self._apply_rows(core, self._all_rows(), activate=activate, preserve_stopped=preserve_stopped)
 
     def status(self) -> dict:

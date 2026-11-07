@@ -9,7 +9,7 @@
             ['inbounds', '节点管理', '/ui/#inbounds'],
             ['routing', '分流配置', '/workspace#routing'],
             ['subscriptions', '订阅授权', '/workspace#subscriptions'],
-            ['proxy', '连接其他服务器', '/proxy'],
+            ['proxy', '中转与服务器代理', '/proxy'],
             ['certificates', '证书管理', '/certificates']
         ]],
         ['运行维护', [

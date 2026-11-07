@@ -86,7 +86,7 @@ function fixture(t) {
     const context = vm.createContext({
         console: {...console, error: (...args) => errors.push(args)},
         addEventListener() {}, location: {hash: ''},
-        document: {hidden: false, getElementById() {return null;}, addEventListener() {}, removeEventListener() {}},
+        confirm(){return true;},document: {hidden: false, getElementById() {return null;}, addEventListener() {}, removeEventListener() {}},
         setTimeout(fn, delay) {assert([3000, 10000].includes(delay)); const timer = {fn, delay}; timers.add(timer); return timer;},
         clearTimeout(timer) {timers.delete(timer);},
         Vue: {...V, createApp(value) {options = value; return appStub;}, onMounted(fn) {mounted = fn;}},
@@ -193,7 +193,7 @@ for (const [first, other] of [['xray', 'sing-box'], ['sing-box', 'xray']]) {
         }
         assert.equal(f.posts.length, 1);
         await f.resolvePost(0); f.pending(first);
-        assert.deepEqual(f.messages, [{kind: 'success', text: first + ' restarted'}]);
+        assert.deepEqual(f.messages, [{kind: 'success', text: first + '节点组已重启，请查看实际运行状态'}]);
         assert.equal(f.gets.length, 1); assert.equal(f.gets[0].settled, false);
         assert.equal(await f.click(other), false); assert.equal(f.posts.length, 1);
         await f.resolveGet(0); f.idle();
@@ -201,7 +201,7 @@ for (const [first, other] of [['xray', 'sing-box'], ['sing-box', 'xray']]) {
         assert.equal(await f.click(other), true); f.pending(other);
         assert.deepEqual(f.posts.map(request => request.url), [restartUrl(first), restartUrl(other)]);
         await f.resolvePost(1); f.pending(other); await f.resolveGet(1); f.idle();
-        assert.deepEqual(f.messages, [first, other].map(core => ({kind: 'success', text: core + ' restarted'})));
+        assert.deepEqual(f.messages, [first, other].map(core => ({kind: 'success', text: core + '节点组已重启，请查看实际运行状态'})));
     });
     test('direct controller same-tick admission guard preserves ' + first + ' before DOM flush', async t => {
         const f = fixture(t);
@@ -216,13 +216,13 @@ for (const [first, other] of [['xray', 'sing-box'], ['sing-box', 'xray']]) {
         await f.resolveGet(0); await owner; f.idle();
         assert.equal(await f.click(other), true); f.pending(other);
         await f.rejectPost(1, {response: {data: {detail: 'Synthetic later failure'}}}); f.idle();
-        assert.deepEqual(f.messages, [{kind: 'success', text: first + ' restarted'},
-            {kind: 'error', text: 'Synthetic later failure'}]);
+        assert.deepEqual(f.messages, [{kind: 'success', text: first + '节点组已重启，请查看实际运行状态'},
+            {kind: 'error', text: other+'重启未完成，请刷新运行状态后核对。'}]);
     });
 }
 for (const [label, data, expected] of [
-    ['explicit validation message', {valid: false, validation_output: 'Synthetic invalid config'}, 'Synthetic invalid config'],
-    ['fallback validation message', {valid: false}, 'xray config validation failed'],
+    ['explicit validation message', {valid: false, validation_output: 'Synthetic invalid config'}, 'xray配置检查未通过，运行配置保持，请查看节点设置。'],
+    ['fallback validation message', {valid: false}, 'xray配置检查未通过，运行配置保持，请查看节点设置。'],
 ]) {
     test(label + ' preserves existing notification and held status lifecycle', async t => {
         const f = fixture(t); await f.click('xray'); f.pending('xray');
@@ -237,8 +237,8 @@ for (const [label, data, expected] of [
     });
 }
 for (const [label, error, expected] of [
-    ['API detail', {response: {status: 409, data: {detail: 'Synthetic restart rejected'}}}, 'Synthetic restart rejected'],
-    ['network fallback', new Error('Synthetic network rejection'), 'Failed to restart sing-box'],
+    ['API detail', {response: {status: 409, data: {detail: 'Synthetic restart rejected'}}}, 'sing-box重启未完成，请刷新运行状态后核对。'],
+    ['network fallback', new Error('Synthetic network rejection'), 'sing-box重启未完成，请刷新运行状态后核对。'],
 ]) {
     test(label + ' releases both buttons without inventing a status read or retry', async t => {
         const f = fixture(t); await f.click('sing-box'); f.pending('sing-box');
@@ -267,7 +267,7 @@ test('fresh status rejection preserves existing Unknown handling and releases ad
     await f.resolvePost(0); f.pending('sing-box');
     await f.rejectGet(0, new Error('Synthetic status rejection')); f.idle();
     assert.equal(f.state.coreFieldKnown('sing-box', 'running'), false);
-    assert.deepEqual(f.messages, [{kind: 'success', text: 'sing-box restarted'}]);
+    assert.deepEqual(f.messages, [{kind: 'success', text: 'sing-box节点组已重启，请查看实际运行状态'}]);
     assert.equal(f.posts.length, 1); assert.equal(f.gets.length, 1);
     assert.equal(await f.click('xray'), true); f.pending('xray');
     await f.resolvePost(1); await f.resolveGet(1); f.idle();

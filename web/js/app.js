@@ -972,6 +972,27 @@ const app = createApp({
         addEventListener('pagehide', closeNodeWizard);
         if (!globalThis.VUI_NAV) addEventListener('popstate', closeNodeWizard);
         globalThis.VUI_NAV?.guard(canLeaveNodeWizard);
+        const openSimpleOperation = task => {
+            if (savingInbound.value || nodeWizard.busy || adminSessionEnded) return;
+            if (!globalThis.VUI_SIMPLE_OPERATIONS) { ElMessage.error('操作界面尚未加载，请刷新重试。'); return; }
+            void globalThis.VUI_SIMPLE_OPERATIONS.open(task).catch(()=>ElMessage.error('操作界面未能打开，请重试。'));
+        };
+        const openSimpleEdit = row => {
+            if (!validInboundRevision(row.mutation_revision)) { ElMessage.error('请刷新节点后再选择。'); return; }
+            void globalThis.VUI_SIMPLE_OPERATIONS?.open('edit',{id:row.id,revision:row.mutation_revision});
+        };
+        const openSimpleShare = row => {
+            if (!validInboundRevision(row.mutation_revision)||!validInboundRevision(row.content_revision)) { ElMessage.error('请刷新节点后再分享。'); return; }
+            void globalThis.VUI_SIMPLE_OPERATIONS?.open('share',{id:row.id,revision:row.mutation_revision,contentRevision:row.content_revision});
+        };
+        addEventListener('vui:operations-changed', () => { if (!adminSessionEnded) { void fetchInbounds(); void fetchCoreStatus.fresh(); } });
+        addEventListener('vui:advanced-node', event => {
+            if (adminSessionEnded || savingInbound.value) return;
+            if (!event.detail) { void openAdvancedInbound(); return; }
+            const row=inbounds.value.find(value=>value.id===event.detail.id && value.mutation_revision===event.detail.revision);
+            if (!row) { ElMessage.error('节点已变化，请刷新后重新选择。'); return; }
+            void openEditInbound(row);
+        });
         const togglingInbound = ref(null);
         const toggleInbound = async row => {
             if (togglingInbound.value !== null || savingInbound.value || adminSessionEnded) return;
@@ -1256,17 +1277,17 @@ const app = createApp({
             if (deletingInbound || adminSessionEnded) return;
             const deletingId = row.id, revision = row.mutation_revision;
             if (!validInboundRevision(revision)) {
-                ElMessage.error('Failed to delete inbound: ' + inboundInstanceUnknown);
+                ElMessage.error('删除节点未完成：' + inboundInstanceUnknown);
                 return;
             }
             deletingInbound = true;
             try {
                 await ElMessageBox.confirm(
-                    `Delete ${row.remark || row.protocol}:${row.port}?`,
-                    'Warning',
+                    `确认永久删除“${row.remark || row.protocol}”（端口${row.port}）？配置和此节点的连接将删除。`,
+                    '删除节点',
                     {
-                        confirmButtonText: 'OK',
-                        cancelButtonText: 'Cancel',
+                        confirmButtonText: '确认删除',
+                        cancelButtonText: '取消',
                         type: 'warning'
                     }
                 );
@@ -1275,26 +1296,26 @@ const app = createApp({
                 // a downlevel backend must reject, not ignore the condition.
                 await axios.post(`/api/inbounds/${deletingId}/delete`, {expected_instance_revision: revision});
                 if (adminSessionEnded) return;
-                ElMessage.success('Deleted successfully');
+                ElMessage.success('节点已删除');
                 await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
             } catch (error) {
                 if (error === 'cancel' || error === 'close' || adminSessionEnded || error.response?.status === 401) return;
                 const detail = error.response?.data?.detail;
                 if (error.response?.status === 409 && detail?.saved === true) {
-                    ElMessage.warning('节点删除已保存，但运行配置未更新，旧入口可能仍可用：' + (detail.message || 'validation failed'));
+                    ElMessage.warning('节点删除已保存，但运行配置未更新，旧入口可能仍可用：' + (detail.message || '运行验证未通过'));
                     // The database and runtime have separate commit points. Read
                     // authoritative rows/status; never remove a row locally or
                     // carry its previous applied badge forward as confirmation.
                     await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
                     return;
                 }
-                ElMessage.error('Failed to delete inbound: ' +
-                    (typeof detail === 'string' ? detail : detail?.message || error.message));
+                ElMessage.error((error.response?.status===409&&typeof detail==='string'&&detail===inboundInstanceChanged)?'节点已发生变化，请刷新后重新选择。':'删除节点未完成，请刷新节点和运行状态后核对。');
             } finally { deletingInbound = false; }
         };
 
         const restartCore = async (core) => {
             if (restartingCore.value) return;
+            if(!confirm('重启'+core+'节点组会短暂中断其中全部节点连接。确认重启？'))return;
             restartingCore.value = core;
             try {
                 const res = await axios.post(
@@ -1302,17 +1323,15 @@ const app = createApp({
                 );
                 if (res.data.valid === false) {
                     ElMessage.error(
-                        res.data.validation_output ||
-                        `${core} config validation failed`
+                        `${core}配置检查未通过，运行配置保持，请查看节点设置。`
                     );
                 } else {
-                    ElMessage.success(`${core} restarted`);
+                    ElMessage.success(`${core}节点组已重启，请查看实际运行状态`);
                 }
                 await fetchCoreStatus.fresh();
             } catch (error) {
                 ElMessage.error(
-                    error.response?.data?.detail ||
-                    `Failed to restart ${core}`
+                    `${core}重启未完成，请刷新运行状态后核对。`
                 );
             } finally {
                 restartingCore.value = '';
@@ -1414,7 +1433,7 @@ const app = createApp({
 
         const copySubscription = async (format) => {
             await navigator.clipboard.writeText(subscriptionUrl(format));
-            ElMessage.success('Subscription URL copied');
+            ElMessage.success('已复制配置下载地址；需要持续订阅请到订阅分享生成专用地址。');
         };
 
         const fetchSiteFiles = async () => {
@@ -1422,17 +1441,17 @@ const app = createApp({
                 const res = await axios.get('/api/files/list_files');
                 siteFiles.value = res.data;
             } catch (error) {
-                ElMessage.error('Failed to list files');
+                ElMessage.error('站点文件读取失败，请稍后重试。');
             }
         };
 
         const handleUploadSuccess = () => {
-            ElMessage.success('Site deployed successfully');
+            ElMessage.success('站点文件已上传。');
             fetchSiteFiles();
         };
 
         const handleUploadError = () => {
-            ElMessage.error('Upload failed');
+            ElMessage.error('上传未完成，请检查文件后重试。');
         };
 
         onMounted(async () => {
@@ -1526,6 +1545,9 @@ const app = createApp({
             addIntranetZone,
             removeIntranetZone,
             openAddInbound,
+            openSimpleOperation,
+            openSimpleEdit,
+            openSimpleShare,
             openAdvancedInbound,
             nodeWizard,
             wizardNameHint,

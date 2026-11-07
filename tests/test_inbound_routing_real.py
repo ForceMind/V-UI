@@ -585,6 +585,79 @@ class InboundRoutingRealTests(DoubleHopFixture):
             "events": [event for panel in self.panels.values() for event in panel.events]
         }, sort_keys=True)))
 
+    def run_simple_controller(self, task, **options):
+        """Execute shipped JS against actual authenticated HTTP and owned cores."""
+        import select
+        import sys
+        log = self.path('simple-controller', 'stderr')
+        with log.open('w') as stderr:
+            process = subprocess.Popen(['node', 'tests/operation_http_bridge.cjs'],
+                cwd=Path(__file__).resolve().parents[1], stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=stderr, bufsize=0, env=self.env)
+            try:
+                process.stdin.write((json.dumps({'task':task,**options})+'\n').encode());process.stdin.flush()
+                deadline=time.monotonic()+120
+                while time.monotonic()<deadline:
+                    ready,_,_=select.select([process.stdout],[],[],min(30,max(0,deadline-time.monotonic())))
+                    if not ready:continue
+                    line=process.stdout.readline()
+                    if not line:break
+                    message=json.loads(line)
+                    if 'error' in message:self.fail('Shipped simple controller refused real journey: '+json.dumps(message['error']))
+                    if 'result' in message:
+                        result=message['result'];process.stdin.close();process.wait(timeout=5)
+                        self.assertEqual(process.returncode,0);return result
+                    item=message['request'];self.assertTrue(item['path'].startswith('/api/'))
+                    self.assertNotIn('://',item['path'])
+                    response=self.destination.client.request(item['method'],item['path'],
+                        headers=item['headers'],**({'json':item['body']} if item['body'] is not None else {}))
+                    try:value=response.json()
+                    except ValueError:value=response.text
+                    process.stdin.write((json.dumps({'status':response.status_code,'value':value,
+                        'nodeRevision':response.headers.get('X-VUI-Node-Revision')})+'\n').encode());process.stdin.flush()
+                self.fail('Shipped simple controller did not finish its bounded real journey')
+            finally:
+                if process.poll() is None:process.kill();process.wait(timeout=5)
+                if not process.stdin.closed:process.stdin.close()
+                process.stdout.close()
+
+    def test_simple_operations_shipped_controller_direct_relay_and_host(self):
+        # Seed one temporary fake managed certificate, with a real trusted chain.
+        # There is no ACME request, real domain, browser or production data.
+        import sqlite3
+        import secrets
+        certificate_id=secrets.token_hex(16)
+        chain=self.cert.read_bytes();digest=hashlib.sha256(chain).hexdigest()
+        folder=self.destination.data/'certificates'/'revisions'/certificate_id/digest
+        folder.mkdir(parents=True,mode=0o700)
+        for name,content in [('fullchain.pem',chain),('privkey.pem',self.key.read_bytes())]:
+            path=folder/name;path.write_bytes(content);path.chmod(0o600)
+        with sqlite3.connect(self.destination.data/'v-ui.db') as db:
+            db.execute('INSERT INTO managed_certificates '
+                '(id,domain,email,environment,auto_renew,revision,not_before,not_after,renew_at,retry_at,last_attempt,failures,created_at) '
+                'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                (certificate_id,SNI,'fixture@example.test','production',0,digest,int(time.time())-60,
+                 int(time.time())+3600,0,0,0,0,int(time.time())))
+        direct=self.run_simple_controller('direct',port=listen_port())
+        self.assertEqual(direct['kind'],'node')
+        self.assertEqual(direct['node']['routing_mode'],'direct')
+        self.entries['direct']={'id':direct['node']['id'],'port':direct['node']['port'],
+            'name':direct['node']['remark'],'uuid':self.destination.node(direct['node']['id'])[0]['users'][0]['uuid']}
+        self.establish_upstream()
+        relay=self.run_simple_controller('relay',port=self.ingress_port,link=self.upstream_artifact)
+        self.assertEqual(relay['kind'],'node');self.assertEqual(relay['node']['routing_mode'],'relay')
+        self.entries['relay']={'id':relay['node']['id'],'port':relay['node']['port'],
+            'name':relay['node']['remark'],'uuid':self.destination.node(relay['node']['id'])[0]['users'][0]['uuid']}
+        host=self.run_simple_controller('host',localPort=self.local_port)
+        self.assertEqual(host['connection']['host'],'127.0.0.1')
+        self.assertEqual(host['connection']['username'],USERNAME)
+        self.assertEqual(host['connection']['password'],PASSWORD)
+        self.observe_ingress();self.start_ordinary_client('clash-yaml')
+        self.positive('direct');self.positive('relay')
+        self.current_state='10'  # local on, inherit relay off; explicit relay above stays on.
+        self.assert_host_switch()
+        self.finish_report('shipped-simple-operations',positives=3,ordinary_dns=2,protected_dns=4)
+
     def test_first_direct_at00_without_upstream_yaml_and_legacy_udp(self):
         self.create_entry("direct", first_saved_only=True)
         snapshot = self.destination.request("GET", "/api/proxy/settings").json()

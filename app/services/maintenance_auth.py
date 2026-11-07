@@ -240,6 +240,8 @@ for method, path, revision in [('POST', '/import/preview', None), ('POST', '/pro
         ('PUT', '/settings', 'If-Match'), ('POST', '/check', 'base_revision'), ('POST', '/apply', 'base_revision')]:
     _cap(method, '/api/proxy' + path, 'relay', '保存检查或应用代理中转策略', revision)
 _cap('PUT', '/api/routing/mihomo', 'relay', '保存路由规则', 'If-Match')
+_cap('POST', '/api/proxy/discard-draft', 'relay', '明确恢复已提交设置，不改变运行或删除历史', 'base_revision/active_revision')
+_cap('POST', '/api/proxy/local-connection', 'relay', '明确显示活动本机代理凭据，另需share权限', 'base_revision')
 for action in ['apply', 'restart', 'stop']:
     _cap('POST', '/api/cores/{core}/' + action, 'nodes', '固定核心操作')
 for method, path in [('POST', '/{certificate_id}/renew'), ('PUT', '/{certificate_id}/auto-renew'),
@@ -284,6 +286,8 @@ def authorize(principal, method, path, payload=None):
     if method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
         if type(payload) is not dict:
             raise HTTPException(422, '维护请求格式无效')
+        if path == '/api/proxy/local-connection' and 'share' not in scopes:
+            raise HTTPException(403, '显示本机代理连接信息还需要分享权限')
         if path.startswith('/api/inbounds'):
             if 'routing_mode' in payload and 'relay' not in scopes:
                 raise HTTPException(403, '修改入口出口需要中转权限')
