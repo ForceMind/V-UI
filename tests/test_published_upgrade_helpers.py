@@ -13,18 +13,18 @@ from unittest.mock import patch
 from published_upgrade_helpers import (FIREWALL, MAINTENANCE_FILES, PUBLISHED_BASELINES, PublishedUpgrade,
                                        assert_download_boundary, assert_receipt_migration,
                                        assert_upgrade_configuration, fixed_public_baseline,
-                                       managed_xray_fixture_program, assert_node_summary_upgrade)
+                                       managed_xray_fixture_program, assert_node_summary_upgrade, assert_editor_content_addition)
 
 
 class PublishedUpgradeBoundaryTests(unittest.TestCase):
     def test_summary_additions_are_only_strict_booleans_without_old_field_drift(self):
         before=[{'id':1,'core':'sing-box','port':10443,'remark':'preserve',
                  'enable':True,'routing_mode':'inherit','mutation_revision':'a'*64}]
-        after=[{**before[0],'share_eligible':True,'upstream_export_eligible':True}]
+        after=[{**before[0],'share_eligible':True,'upstream_export_eligible':True,'content_revision':'b'*64}]
         assert_node_summary_upgrade(self,before,after)
         for change in ({'share_eligible':1},{'upstream_export_eligible':None},
                        {'remark':'replaced'},{'routing_mode':'direct'},
-                       {'mutation_revision':'b'*64},{'raw_settings':{'secret':'fake'}}):
+                       {'mutation_revision':'b'*64},{'raw_settings':{'secret':'fake'}},{'content_revision':None},{'content_revision':'X'*64},{'content_revision':'b'*64+'\n'}):
             bad=[{**after[0],**change}]
             with self.subTest(change=change),self.assertRaises(AssertionError):
                 assert_node_summary_upgrade(self,before,bad)
@@ -37,10 +37,27 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
     def test_019_summary_preserves_existing_capabilities_and_all_other_fields(self):
         before=[{'id':1,'routing_mode':'inherit','share_eligible':True,'upstream_export_eligible':False,
                  'mutation_revision':'a'*64}]
-        assert_node_summary_upgrade(self,before,deepcopy(before),'0.4.19')
+        assert_node_summary_upgrade(self,before,[{**before[0],'content_revision':'c'*64}],'0.4.19')
         for change in ({'share_eligible':False},{'routing_mode':'direct'},{'mutation_revision':'b'*64}):
             with self.subTest(change=change),self.assertRaises(AssertionError):
-                assert_node_summary_upgrade(self,before,[{**before[0],**change}],'0.4.19')
+                assert_node_summary_upgrade(self,before,[{**before[0],'content_revision':'c'*64,**change}],'0.4.19')
+
+    def test_editor_addition_never_excuses_path_binding_credential_or_unknown_field_changes(self):
+        before={'id':1,'mutation_revision':'a'*64,'certificate_id':'b'*32,
+                'profile':{'certificate_path':'/synthetic/cert','key_path':'/synthetic/key'},
+                'credentials':{'has_uuid':True}}
+        after={**deepcopy(before),'content_revision':'c'*64}
+        assert_editor_content_addition(self,before,after)
+        for change in ({'id':2},{'mutation_revision':'d'*64},{'certificate_id':None},
+                       {'profile':{}},{'credentials':{}},{'extra':'secret'},
+                       {'content_revision':None},{'content_revision':'c'*63}):
+            with self.subTest(change=change),self.assertRaises(AssertionError):
+                assert_editor_content_addition(self,before,{**after,**change})
+        for version in ('0.4.19','0.4.20'):
+            row={'id':1,'share_eligible':True,'upstream_export_eligible':False,'mutation_revision':'a'*64}
+            assert_node_summary_upgrade(self,[row],[{**row,'content_revision':'c'*64}],version)
+            with self.assertRaises(AssertionError):
+                assert_node_summary_upgrade(self,[row],[{**row,'content_revision':'c'*64,'share_eligible':False}],version)
 
     def test_configuration_requires_exact_runtime_transition_and_preserved_fields(self):
         old_release=Path('/var/lib/v-ui/releases/old-014')
@@ -121,11 +138,12 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
                   '0.4.15':'65b1e75d90de733408101ec280a92be935731baa',
                   '0.4.16':'18fe631bcf69b68425b454db1795a101e0378842',
                   '0.4.17':'95c201c6e26ed54960f964c675e515890f2eea2a',
-                  '0.4.19':'a2b9c188658f082b189e77d237787a96eb9cf921'}
+                  '0.4.19':'a2b9c188658f082b189e77d237787a96eb9cf921',
+                  '0.4.20':'05173798de1baed5d67a866c4125e72f74fe3f4c'}
         self.assertEqual(PUBLISHED_BASELINES,expected)
         for version,commit in expected.items():
             self.assertEqual(fixed_public_baseline(version,commit),(version,commit))
-        for version,commit in [('0.4.13','a'*40),('0.4.18',expected['0.4.19']),('0.4.19','f'*40),('0.4.17',expected['0.4.16']),
+        for version,commit in [('0.4.20','f'*40),('0.4.13','a'*40),('0.4.18',expected['0.4.19']),('0.4.19','f'*40),('0.4.17',expected['0.4.16']),
                                ('0.4.16',expected['0.4.15']),('0.4.16','a'*40),
                                ('0.4.14',expected['0.4.15']),('0.4.15',expected['0.4.14']),
                                ('0.4.15','a'*40),(None,None)]:
@@ -165,6 +183,8 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
                         assert_receipt_migration(self,before,changed,version)
             legacy=deepcopy(before);del legacy['files'][FIREWALL]
             with self.assertRaises(AssertionError):assert_receipt_migration(self,legacy,after,version)
+        assert_receipt_migration(self,after,after,'0.4.20')
+        with self.assertRaises(AssertionError):assert_receipt_migration(self,before,after,'0.4.20')
         assert_receipt_migration(self,after,after,'0.4.19')
         with self.assertRaises(AssertionError):assert_receipt_migration(self,before,after,'0.4.19')
         assert_receipt_migration(self,after,after,'0.4.17')

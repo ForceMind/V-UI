@@ -618,6 +618,8 @@ class InboundRoutingRealTests(DoubleHopFixture):
                 self.fail('Shipped simple controller did not finish its bounded real journey')
             finally:
                 if process.poll() is None:process.kill();process.wait(timeout=5)
+                if not process.stdin.closed:process.stdin.close()
+                process.stdout.close()
 
     def test_simple_operations_shipped_controller_direct_relay_and_host(self):
         # Seed one temporary fake managed certificate, with a real trusted chain.
