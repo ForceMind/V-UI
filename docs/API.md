@@ -151,3 +151,7 @@ TUIC URI 是固定 Mihomo converter 的非官方客户端约定，不是官方�
 - `POST /api/proxy/local-connection`正文严格为`base_revision`。明确返回已验证运行的活动127.0.0.1入口地址、端口和独立本地账号密码，拒绝pending、停止、核心/文件/策略不一致；不返回上游UUID、不执行命令、不改系统代理。管理员或同时有relay和share的维护授权才能访问，禁止query和额外字段，no-store/no-referrer。普通状态摘要仍脱敏。
 
 维护Bearer仅保存在当前页闭包，通过同一来源受控transport转发，离开或401清除；新同页节点、订阅、证书和任务操作不跳转管理员cookie页面。所有新字段/接口为候选，实际资格以准确提交Actions记录为准。
+
+## v0.4.22维护普通分享query修复
+
+维护Bearer调用`GET /api/subscription/link/{inbound_id}`可使用已有`expected_instance_revision`、`expected_content_revision`条件；中间件仅在该已授权精确GET capability接受其名称，其他路径/方法和未知/query认证参数不扩大。重复任何参数仍422，参数值与配对仍由原严格schema/同ORM对象条件核对，旧实例或内容冲突409且不导出凭据。缺share仍403，Cookie不提升Bearer权限。仅修中间件漏配，不修改导出格式或业务数据；准确HTTP/安装证明见[进度](MAINTENANCE_SHARE_0422.md)。
