@@ -20,6 +20,7 @@ from app.services.grpc_profile import is_grpc_transport
 from app.services.hysteria2_profile import password_value
 from app.services import tuic_profile, reality_profile
 from app.services.node_selection_revision import node_selection_revision
+from app.services.inbound_instance_revision import content_revision
 from app.services.inbound_instance_revision import INSTANCE_CHANGED, REVISION_RE, mutation_revision
 from app.services.managed_tls import eligible as managed_certificate_eligible
 from app.services.inbound_export_eligibility import export_eligibility
@@ -193,6 +194,7 @@ def to_dict(item: Inbound) -> dict:
     return {
         "id": item.id,
         "mutation_revision": mutation_revision(item),
+        "content_revision": content_revision(item),
         "user_id": item.user_id,
         "core": item.core or "xray",
         "up": item.up or 0,
@@ -234,6 +236,7 @@ def editor_dict(item: Inbound) -> dict:
     result={
         "id":item.id,
         "mutation_revision":mutation_revision(item),
+        "content_revision":content_revision(item),
         "core":item.core or "xray",
         "protocol":item.protocol,
         "routing_mode":_routing_mode(item.routing_mode),
@@ -492,10 +495,22 @@ def _commit_inbound_change(db: Session) -> None:
     db.commit()
 
 
-def _mutate_inbound(db: Session, operation, *args):
+def _require_proxy_revision(expected):
+    if expected is None:
+        return
+    from app.services.core_manager import core_manager
+    from app.services.proxy_store import ProxyConflict
+    try:
+        core_manager.require_proxy_revision(expected)
+    except ProxyConflict:
+        raise HTTPException(409, {'saved': False, 'applied': False, 'code': 'PROXY_REVISION_CONFLICT'}) from None
+
+
+def _mutate_inbound(db: Session, operation, *args, expected_proxy_revision=None):
     from app.services.core_manager import core_manager
     with core_manager.lock:
         try:
+            _require_proxy_revision(expected_proxy_revision)
             return operation(db, *args)
         except Exception:
             # Roll back only the unfinished SQL transaction. This cannot
@@ -505,12 +520,12 @@ def _mutate_inbound(db: Session, operation, *args):
             raise
 
 
-def create_inbound(db: Session, payload: dict) -> Inbound:
-    return _mutate_inbound(db, _create_inbound, payload)
+def create_inbound(db: Session, payload: dict, *, expected_proxy_revision=None) -> Inbound:
+    return _mutate_inbound(db, _create_inbound, payload, expected_proxy_revision=expected_proxy_revision)
 
 
-def update_inbound(db: Session, inbound_id: int, payload: dict) -> Inbound:
-    return _mutate_inbound(db, _update_inbound, inbound_id, payload)
+def update_inbound(db: Session, inbound_id: int, payload: dict, *, expected_proxy_revision=None) -> Inbound:
+    return _mutate_inbound(db, _update_inbound, inbound_id, payload, expected_proxy_revision=expected_proxy_revision)
 
 
 def delete_inbound(db: Session, inbound_id: int) -> str:
@@ -553,8 +568,15 @@ def _guarded_inbound_change(db: Session, inbound_id: int, expected: str, operati
 
 
 def update_inbound_if_instance(db: Session, inbound_id: int, expected: str,
-                              prepare: Callable[[Inbound], tuple[dict, tuple]]) -> GuardedInboundUpdate:
+                              prepare: Callable[[Inbound], tuple[dict, tuple]], *, expected_proxy_revision=None,
+                              expected_content_revision=None) -> GuardedInboundUpdate:
     def stage(item):
+        if expected_content_revision is not None:
+            actual = content_revision(item)
+            if (type(expected_content_revision) is not str or not REVISION_RE.fullmatch(expected_content_revision)
+                    or actual is None or not hmac.compare_digest(actual, expected_content_revision)):
+                raise HTTPException(409, {'saved': False, 'applied': False, 'code': 'NODE_CONTENT_CHANGED'})
+        _require_proxy_revision(expected_proxy_revision)
         # Certificate/profile preparation is read-only and uses this checked
         # model. Certificate writes and runtime apply belong after we return.
         payload, certificate_plan = prepare(item)

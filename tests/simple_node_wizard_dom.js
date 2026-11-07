@@ -233,8 +233,8 @@ test('advanced creation stays independent and guarded enable only sends the requ
 
 test('shipped flow exposes three steps and existing secret-safe delivery without browser storage or hidden purpose fields',()=>{
     for(const text of ['1 选用途','2 确认信息','3 交付连接','给手机或电脑用','给另一台服务器用','外部连接未验证','服务启动不代表公网可达'])assert.ok(html.includes(text),text);
-    assert.match(html,/@click="openAddInbound"/);assert.match(html,/@click="wizardAdvanced"/);
-    assert.match(html,/scope.row.share_eligible === true/);assert.match(html,/scope.row.upstream_export_eligible === true/);
+    assert.match(html,/@click="openSimpleOperation\('direct'\)"/);assert.match(html,/@click="wizardAdvanced"/);
+    assert.match(html,/scope.row.share_eligible === true/);assert.match(fs.readFileSync(path.join(__dirname,'../web/js/simple-operations.js'),'utf8'),/row.upstream_export_eligible===true/);
     assert.match(html,/内容含连接凭据/);assert.match(html,/v-model="upstreamExport.acknowledged"/);
     assert.match(html,/<details class="node-more">[\s\S]*?@click="deleteInbound\(scope.row\)"/);
 });

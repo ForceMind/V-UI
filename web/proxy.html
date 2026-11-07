@@ -1,13 +1,16 @@
 <!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>V-UI · 连接其他服务器</title><link rel="icon" type="image/svg+xml" href="/ui/brand/vui-icon.svg"><link rel="stylesheet" href="/ui/css/workspace.css"><link rel="stylesheet" href="/ui/css/proxy.css"><script src="/ui/js/proxy.js" defer></script><script src="/ui/js/connection-guide.js" defer></script><script src="/ui/js/tailscale-status.js" defer></script><script src="/ui/js/mihomo-preview.js" defer></script><link rel="stylesheet" href="/ui/css/shell.css">
+<title>V-UI · 中转与服务器代理</title><link rel="icon" type="image/svg+xml" href="/ui/brand/vui-icon.svg"><link rel="stylesheet" href="/ui/css/workspace.css"><link rel="stylesheet" href="/ui/css/proxy.css"><script src="/ui/js/proxy.js" defer></script><script src="/ui/js/connection-guide.js" defer></script><script src="/ui/js/tailscale-status.js" defer></script><script src="/ui/js/mihomo-preview.js" defer></script><link rel="stylesheet" href="/ui/css/shell.css">
 <script src="/ui/js/navigation.js"></script>
 <script src="/ui/js/shell.js" defer></script>
+<link rel="stylesheet" href="/ui/css/simple-operations.css"><script src="/ui/js/operation-flow.js" defer></script><script src="/ui/js/simple-operations.js" defer></script><script src="/ui/vendor/qrcode.js" defer></script>
 </head>
 <body data-vui-page="proxy">
-<main class="vui-main" id="vui-main"><div class="page-title"><div><h1>连接其他服务器</h1><p>本机提供出口时，不需要填写另一台服务器。只有让本机向外转发时，才在这里添加目标连接。</p></div><span id="stage">正在读取</span></div>
+<main class="vui-main" id="vui-main"><div class="page-title"><div><h1>中转与服务器代理</h1><p>选择要做的事，按推荐设置完成。已有节点和凭据保持，影响旧设置时先由你确认。</p></div><span id="stage">正在读取</span></div>
 <p id="notice" role="status" aria-live="polite">正在读取服务器草稿与活动配置…</p>
+<section id="simple-connection-operations" data-simple-operations="inline" class="ops-inline"></section>
+<details id="connection-advanced"><summary>高级：原有全局策略与诊断工具</summary>
 <details class="connection-extra" id="connection-yaml-tools"><summary>高级：配置文件只读预览</summary><section aria-labelledby="yaml-preview-heading"><div class="section-head"><div><h2 id="yaml-preview-heading">YAML 只读预览</h2><p class="hint">检查候选配置的有限结构、引用冲突和可选基线差异；与“导入上游”独立，不保存、合并或应用。</p></div><button id="open-yaml-preview" type="button">打开只读预览</button></div></section></details>
 <div id="proxy-workspace" hidden>
 <section id="relay-quickstart" aria-labelledby="relay-quickstart-title"><h2 id="relay-quickstart-title">先确认连接方向</h2><div class="columns connection-directions"><div><h3>让另一台服务器使用本机出口</h3><p>另一台服务器 → 本机 → 网站</p><p>去节点管理选择“新建节点 → 给另一台服务器用”，创建后复制连接配置。本页无需填写上游。</p><a class="connection-link" href="/ui/#inbounds">去节点管理</a></div><div><h3>让本机通过另一台服务器转发</h3><p>手机 / 电脑 → 本机 → 目标服务器 → 网站</p><p>需要目标服务器的连接配置。先添加目标，再保存、检查并确认应用；现有节点的出口不会被自动改写。</p><button id="open-connection-setup" type="button">配置本机向外转发</button></div></div><p class="hint">服务器间转发目前仅 TCP，暂不支持 UDP；连接是否可用需要实际检测，创建或保存成功不能代替公网连接验证。</p></section>
@@ -70,4 +73,5 @@ curl --noproxy "" --proxy socks5h://127.0.0.1:7891 --proxy-user example-user 'ht
 <div class="actions"><button id="yaml-preview-submit" type="submit">生成只读报告</button><button id="clear-yaml-preview" type="button">清空输入与报告</button></div>
 <p id="yaml-preview-notice" role="status" aria-live="polite"></p><pre id="yaml-preview-result" aria-label="只读预览报告" tabindex="0" hidden></pre>
 </form></dialog>
+</details>
 </body></html>

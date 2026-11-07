@@ -13,36 +13,39 @@
             certificates:'证书管理',operate:'服务与备份',upgrade:'在线升级',destructive:'删除与恢复'};
         const actions = {status:'读取服务状态',start:'启动服务',stop:'停止服务',restart:'重启服务',backup:'私有备份',upgrade:'在线升级',restore:'停机恢复备份'};
         const phases = {queued:'排队中',running:'执行中',succeeded:'成功',success:'成功',failed:'失败',interrupted:'已中断',pending:'待执行',completed:'已完成'};
+        let operationView = null;
         let token = '', admin = false, ended = false, epoch = 0, busy = false, scopes = [], issuedID = '';
         const controllers = new Set();
         const notice = value => { el('maintenance-notice').textContent = value; };
         const clearLink = () => { el('maintenance-link').value = ''; el('maintenance-issued').hidden = true; issuedID = ''; };
         const end = () => {
-            epoch++; ended = true; token = ''; grant = ''; clearLink();
+            epoch++; ended = true; operationView?.destroy();operationView=null;token = ''; grant = ''; clearLink();
             controllers.forEach(controller => controller.abort()); controllers.clear();
-            ['maintenance-admin','maintenance-remote','maintenance-tasks-panel','maintenance-audit-panel','maintenance-logs-panel'].forEach(id => { el(id).hidden = true; });
+            ['maintenance-operations','maintenance-admin-links','maintenance-admin','maintenance-remote','maintenance-tasks-panel','maintenance-audit-panel','maintenance-logs-panel'].forEach(id => { el(id).hidden = true; });
             ['maintenance-grants','maintenance-tasks','maintenance-audit','maintenance-session','maintenance-logs'].forEach(id => { el(id).textContent = ''; });
             el('maintenance-installation').textContent = '';
             el('maintenance-backup-id').value = '';
         };
-        const request = async (path, method = 'GET', data, exchange = false) => {
+        const request = async (path, method = 'GET', data, exchange = false, extraHeaders = {}, fullResponse = false) => {
             if (ended) throw Object.assign(new Error('维护会话已结束，请重新获得授权。'), {status:401});
             const captured = epoch, controller = new AbortController(); controllers.add(controller);
             const timer = setTimeout(() => controller.abort(), 15000);
             try {
                 const headers = {'X-VUI-Request':'1'};
                 if (data !== undefined) headers['Content-Type'] = 'application/json';
+                for(const key of ['If-Match','Idempotency-Key'])if(extraHeaders[key])headers[key]=extraHeaders[key];
                 if (token && !exchange) headers.Authorization = 'Bearer ' + token;
                 const response = await fetch('/api/' + path, {method, headers, credentials: token || exchange ? 'omit' : 'same-origin',
                     cache:'no-store', redirect:'error', signal:controller.signal, ...(data !== undefined ? {body:JSON.stringify(data)} : {})});
-                const value = await response.json();
+                const type=response.headers?.get('content-type')||'application/json';
+                const value=type.includes('json')?await response.json():await response.text();
                 if (captured !== epoch) throw new Error('请求已取消。');
                 if (!response.ok) {
                     if (response.status === 401 && !exchange) { end(); notice('授权或登录已失效，请重新登录或获得维护授权。'); }
                     const labels = {401:'授权无效、已兑换、已撤销或已到期。',403:'本次授权没有这项操作权限。',409:'当前状态不允许操作，请核对配置或稍后刷新。',422:'输入无效，请核对权限与有效期。',429:'请求过于频繁，请稍后再试。',503:'系统维护组件暂不可用，请使用终端检查服务。'};
-                    throw Object.assign(new Error(labels[response.status] || '请求未完成，请检查服务后重试。'), {status:response.status});
+                    throw Object.assign(new Error(labels[response.status] || '请求未完成，请检查服务后重试。'), {status:response.status,detail:value?.detail});
                 }
-                return value;
+                return fullResponse?{value,nodeRevision:response.headers.get('X-VUI-Node-Revision')}:value;
             } finally { clearTimeout(timer); controllers.delete(controller); }
         };
         const time = value => Number.isFinite(value) ? new Date(value * 1000).toLocaleString('zh-CN') : '未确认';
@@ -117,6 +120,12 @@
             const state = value.services?.['v-ui.service'];
             el('maintenance-installation').textContent = identity + ' · ' + (state === 'active' ? '面板服务运行中' : state === 'inactive' ? '面板服务已停止' : '服务状态未确认');
         };
+        const preset=el('maintenance-permission-preset');
+        if(preset)preset.addEventListener('change',()=>{
+            if(preset.value==='custom')return;
+            const chosen=preset.value==='full'?['diagnose','nodes','share','relay','certificates','operate','upgrade','destructive']:preset.value==='daily'?['diagnose','nodes','share','relay','certificates','operate','upgrade']:['diagnose'];
+            el('maintenance-scopes').querySelectorAll('input').forEach(input=>{input.checked=chosen.includes(input.value);});
+        });
         el('maintenance-grant-form').addEventListener('submit', event => { event.preventDefault(); run(async () => {
             clearLink();
             const selected = [...el('maintenance-scopes').querySelectorAll('input:checked')].map(input => input.value);
@@ -169,6 +178,15 @@
             } else {
                 await request('auth/me'); admin = true; el('maintenance-admin').hidden = false; await grants(); notice('已验证管理员身份。默认只读，请按需选择维护权限。');
             }
+            if(globalThis.VUI_SIMPLE_OPERATIONS&&el('maintenance-operations')){
+                el('maintenance-operations').hidden=false;
+                operationView=globalThis.VUI_SIMPLE_OPERATIONS.mount(el('maintenance-operations'),{
+                    request:(path,method,body,{headers={},fullResponse=false}={})=>request(path.replace(/^\/api\//,''),method,body===null?undefined:body,false,headers,fullResponse),
+                    scopes:admin?null:scopes,remote:!admin,expired:()=>{end();notice('维护授权已失效，请重新获取授权。');}
+                });
+            }
+            el('maintenance-admin-links').hidden=!admin;
+            if(!admin){document.body?.classList?.add('vui-delegated');const brand=document.querySelector?.('.vui-shell-brand');if(brand)brand.href='#maintenance-remote';}
             el('maintenance-tasks-panel').hidden = false; el('maintenance-audit-panel').hidden = false;
             el('maintenance-logs-panel').hidden = !(admin || scopes.includes('diagnose'));
             await audit();

@@ -1,7 +1,7 @@
 import re
 from fastapi import APIRouter, HTTPException, Request
 from app.services.core_manager import CoreError, core_manager
-from app.services.proxy_store import ProxyCapacityError
+from app.services.proxy_store import ProxyCapacityError, ProxyConflict
 
 router = APIRouter()
 
@@ -40,11 +40,17 @@ def status(request: Request = None):
     return maintenance_result(request, core_manager.status())
 
 
-def apply_checked(core: str, activate=True, *, preserve_stopped=True):
+def apply_checked(core: str, activate=True, *, preserve_stopped=True, expected_proxy_revision=None):
     try:
+        if expected_proxy_revision is not None:
+            return core_manager.apply_database(core, activate=activate, preserve_stopped=preserve_stopped,
+                                               expected_proxy_revision=expected_proxy_revision)
         if preserve_stopped:
             return core_manager.apply_database(core, activate=activate)
         return core_manager.apply_database(core, activate=activate, preserve_stopped=False)
+    except ProxyConflict:
+        raise HTTPException(409, {'saved': True, 'applied': False, 'code': 'PROXY_REVISION_CONFLICT',
+                                  'message': '出口设置已变化，节点已保存，请核对后再完成应用。'}) from None
     except ProxyCapacityError:
         raise HTTPException(409, {"saved": True, "applied": False,
             "code": "PROXY_CAPACITY_EXHAUSTED",

@@ -18,3 +18,22 @@ def mutation_revision(item) -> str | None:
         return None
     value = json.dumps([identifier, instance], separators=(",", ":")).encode("ascii")
     return hashlib.sha256(b"vui:inbound-instance:v1\0" + value).hexdigest()
+
+
+def content_revision(item) -> str | None:
+    """Optional full-edit CAS, salted by the undisclosed instance identity.
+
+    The original mutation_revision remains an identity-only contract. This
+    separate token detects same-instance edits, including private TLS material
+    and credential changes, without returning those fields or counting traffic.
+    """
+    if mutation_revision(item) is None:
+        return None
+    fields = ('id', 'instance_id', 'user_id', 'core', 'protocol', 'remark', 'port',
+              'enable', 'expiry_time', 'total', 'tag', 'routing_mode', 'settings', 'stream_settings')
+    try:
+        raw = json.dumps({key: getattr(item, key, None) for key in fields}, sort_keys=True,
+                         separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode('utf-8')
+    except (ValueError, TypeError, UnicodeError):
+        return None
+    return hashlib.sha256(b'vui:inbound-content:v1\0' + raw).hexdigest()

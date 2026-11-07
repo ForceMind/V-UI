@@ -100,11 +100,11 @@ def certificates_page():
 
 @app.get('/proxy',include_in_schema=False)
 def proxy_page():
-    return FileResponse(os.path.join(get_web_path(),'proxy.html'),headers={'Content-Security-Policy':"default-src 'none'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
+    return FileResponse(os.path.join(get_web_path(),'proxy.html'),headers={'Content-Security-Policy':"default-src 'none'; img-src 'self' data:; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
 
 @app.get('/maintenance',include_in_schema=False)
 def maintenance_page():
-    return FileResponse(os.path.join(get_web_path(),'maintenance.html'),headers={'Content-Security-Policy':"default-src 'none'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
+    return FileResponse(os.path.join(get_web_path(),'maintenance.html'),headers={'Content-Security-Policy':"default-src 'none'; img-src 'self' data:; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
 
 @app.get('/workspace',include_in_schema=False)
 def workspace_page():

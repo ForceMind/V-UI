@@ -14,6 +14,7 @@
 <link rel="stylesheet" href="/ui/css/shell.css">
 <script src="/ui/js/navigation.js"></script>
 <script src="/ui/js/shell.js" defer></script>
+<link rel="stylesheet" href="/ui/css/simple-operations.css"><script src="/ui/js/operation-flow.js" defer></script><script src="/ui/js/simple-operations.js" defer></script><script src="/ui/vendor/qrcode.js" defer></script>
 </head>
 <body data-vui-page="dashboard">
 <div id="app">
@@ -134,7 +135,8 @@
                         <div>
                             <a href="/workspace#subscriptions">管理订阅分享</a> · <a href="/proxy">配置此机中转</a>
                             <el-button @click="fetchInbounds">刷新节点</el-button>
-                            <el-button type="primary" @click="openAddInbound">添加节点</el-button>
+                            <el-button type="primary" @click="openSimpleOperation('direct')">创建直连节点</el-button>
+                            <el-button @click="openSimpleOperation('relay')">创建中转节点</el-button>
                         </div>
                     </div>
                     <div class="inbound-search-toolbar" role="search" aria-label="筛选入站节点">
@@ -162,9 +164,9 @@
                         <el-table-column label="操作" min-width="370">
                             <template #default="scope">
                                 <div class="node-common-actions">
-                                    <el-button v-if="scope.row.share_eligible === true" size="small" type="primary" plain @click="showQrCode(scope.row)">分享给客户端</el-button>
-                                    <el-button v-if="scope.row.upstream_export_eligible === true" size="small" @click="openUpstreamExport(scope.row)">给另一台 V-UI</el-button>
-                                    <el-button size="small" @click="openEditInbound(scope.row)">编辑</el-button>
+                                    <el-button v-if="scope.row.share_eligible === true" size="small" type="primary" plain @click="openSimpleShare(scope.row)">分享连接</el-button>
+                                    
+                                    <el-button size="small" @click="openSimpleEdit(scope.row)">设置</el-button>
                                     <el-button size="small" :disabled="togglingInbound !== null" :loading="togglingInbound === scope.row.id" @click="toggleInbound(scope.row)">{{ scope.row.enable ? '停用' : '启用' }}</el-button>
                                 </div>
                                 <details class="node-more">
@@ -174,6 +176,7 @@
                                     <p>已应用出口 / 状态：{{ inboundAppliedRouting(scope.row) }}</p>
                                     <p v-if="scope.row.share_eligible !== true" class="stat-text">此配置暂不具备普通分享资格，原配置保留。</p>
                                     <p v-if="scope.row.upstream_export_eligible !== true" class="stat-text">此配置暂不具备另一台 V-UI 的 TCP 上游导出资格。</p>
+                                    <el-button size="small" @click="openEditInbound(scope.row)">完整高级编辑</el-button>
                                     <a href="/ui/#diagnostics">查看服务诊断</a>
                                     <p><el-button size="small" type="danger" plain @click="deleteInbound(scope.row)">删除节点</el-button></p>
                                 </details>
@@ -1017,6 +1020,7 @@
     </el-dialog>
 </div>
 
+<div id="simple-node-operations" data-simple-operations="dialog"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="js/app.js"></script>
 </body>

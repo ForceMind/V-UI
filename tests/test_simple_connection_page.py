@@ -47,8 +47,13 @@ class SimpleConnectionPageTests(unittest.TestCase):
                     'save','check','apply','confirm-apply','retry-apply','review-coverage'):
             self.assertIn(key, markup.ids)
             self.assertIn('connection-setup', markup.ids[key][2], key)
-        for key in ('notice','save-state','pending-state','conflict'):
-            self.assertEqual(markup.ids[key][2], (), key)
+        self.assertEqual(markup.ids['notice'][2], ())
+        self.assertEqual(markup.ids['simple-connection-operations'][2], ())
+        for key in ('save-state','pending-state','conflict'):
+            self.assertIn('connection-advanced', markup.ids[key][2], key)
+            self.assertNotIn('connection-setup', markup.ids[key][2], key)
+        self.assertIn('/ui/js/operation-flow.js', source)
+        self.assertIn('/ui/js/simple-operations.js', source)
 
     def test_advanced_tools_and_explicit_import_guards_not_removed(self):
         source = (ROOT/'web/proxy.html').read_text()

@@ -972,6 +972,27 @@ const app = createApp({
         addEventListener('pagehide', closeNodeWizard);
         if (!globalThis.VUI_NAV) addEventListener('popstate', closeNodeWizard);
         globalThis.VUI_NAV?.guard(canLeaveNodeWizard);
+        const openSimpleOperation = task => {
+            if (savingInbound.value || nodeWizard.busy || adminSessionEnded) return;
+            if (!globalThis.VUI_SIMPLE_OPERATIONS) { ElMessage.error('操作界面尚未加载，请刷新重试。'); return; }
+            void globalThis.VUI_SIMPLE_OPERATIONS.open(task).catch(()=>ElMessage.error('操作界面未能打开，请重试。'));
+        };
+        const openSimpleEdit = row => {
+            if (!validInboundRevision(row.mutation_revision)) { ElMessage.error('请刷新节点后再选择。'); return; }
+            void globalThis.VUI_SIMPLE_OPERATIONS?.open('edit',{id:row.id,revision:row.mutation_revision});
+        };
+        const openSimpleShare = row => {
+            if (!validInboundRevision(row.mutation_revision)) { ElMessage.error('请刷新节点后再分享。'); return; }
+            void globalThis.VUI_SIMPLE_OPERATIONS?.open('share',{id:row.id,revision:row.mutation_revision});
+        };
+        addEventListener('vui:operations-changed', () => { if (!adminSessionEnded) { void fetchInbounds(); void fetchCoreStatus.fresh(); } });
+        addEventListener('vui:advanced-node', event => {
+            if (adminSessionEnded || savingInbound.value) return;
+            if (!event.detail) { void openAdvancedInbound(); return; }
+            const row=inbounds.value.find(value=>value.id===event.detail.id && value.mutation_revision===event.detail.revision);
+            if (!row) { ElMessage.error('节点已变化，请刷新后重新选择。'); return; }
+            void openEditInbound(row);
+        });
         const togglingInbound = ref(null);
         const toggleInbound = async row => {
             if (togglingInbound.value !== null || savingInbound.value || adminSessionEnded) return;
@@ -1526,6 +1547,9 @@ const app = createApp({
             addIntranetZone,
             removeIntranetZone,
             openAddInbound,
+            openSimpleOperation,
+            openSimpleEdit,
+            openSimpleShare,
             openAdvancedInbound,
             nodeWizard,
             wizardNameHint,
