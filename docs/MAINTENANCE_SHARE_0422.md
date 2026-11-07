@@ -28,3 +28,7 @@ worker仅middleware及新增HTTP测试；root仅VERSION/main.py/install.sh严格
 本机仅AST/可行纯fixture检查，后端依赖/真实构建安装都在Actions。必要升级fixture12项纯测试通过，新增21字段不允许任意漂移；真实升级仍待准确Actions。22尚未发布，当前短入口和服务器均不能据此记录冒称已22。
 
 产品独审收口：精确capability追加两参数、原API/scope/来源/未知和重复参数拒绝保持；新增真实ASGI授权链未mock中间件；公开21响应全相等及原六版/私有数据保护保持。当前只做必要版本/CI/直接说明，不提前换入口；后端实际运行与真实资格待准确Actions。独审发现的计划中运维信息已在提交前通用化，具体记录仅私存。
+
+产品冻结点为72570cc449c2b4b8ac933588894360a5b284e329，之后仅3门禁文件及本记录/直接说明13项allowlist可变。22专属flag、旧flag互斥、七旧版/新装/真实HTTP所在Run tests/模板/netlink/fullchain/short、精确九组12jobs与12明列browser skip和同源四目标晋升已实现。133项纯门禁测试通过，AST/diff/冻结完整字节与步骤名称已核；最终独审及准确候选资格另行结算，不以本机fixture替代Actions。
+
+22门禁独审收口：三文件完整hash与worker值相同，独审者定向新增11项纯mock通过且未发现重要问题；产品725冻结与13项普通文件scope、旧21例外语义、互斥/CLI/workflow/正文、七旧版/九组12jobs及同源四目标保持。当前只完成源码与有限mock资格，最终候选Actions尚待，不能宣称已合并/发布22。所有公开记录仅产品/CI，不含具体运维数据或载荷。

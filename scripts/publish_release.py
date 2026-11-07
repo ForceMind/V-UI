@@ -225,6 +225,29 @@ SIMPLE_OPERATIONS_JOB_COUNTS = {
 }
 SIMPLE_OPERATIONS_UPGRADE_STEP = 'Test published v0.4.20 to exact candidate upgrade on ephemeral systemd runner'
 SIMPLE_OPERATIONS_INSTALL_STEP = 'Test interactive installer and global v-ui on ephemeral systemd runner'
+MAINTENANCE_SHARE_BASELINE = '72570cc449c2b4b8ac933588894360a5b284e329'
+MAINTENANCE_SHARE_VERSION = '0.4.22'
+# The reviewed HTTP maintenance-share fix, version and required CI are frozen.
+# Following commits may only prepare publication and the named direct docs.
+MAINTENANCE_SHARE_FILES = {
+    'scripts/publish_release.py', 'tests/test_release_promotion.py',
+    '.github/workflows/publish.yml',
+    'AGENTS.md', 'README.md', 'CHANGELOG.md',
+    'docs/MAINTENANCE_SHARE_0422.md', 'docs/DEVELOPMENT_HANDOFF.md',
+    'docs/README.md', 'docs/RELEASING.md', 'docs/RELEASE_NOTES.md',
+    'docs/INSTALLATION.md', 'docs/API.md',
+}
+MAINTENANCE_SHARE_REQUIRED = REQUIRED | {'short-install.yml'}
+MAINTENANCE_SHARE_JOB_COUNTS = {
+    path: 4 if path == 'portable.yml' else 1 for path in MAINTENANCE_SHARE_REQUIRED
+}
+MAINTENANCE_SHARE_UPGRADE_STEP = 'Test published v0.4.21 to exact candidate upgrade on ephemeral systemd runner'
+MAINTENANCE_SHARE_EXTRA_STEPS = {
+    'test.yml': {'Run tests'},  # Includes the real-Bearer HTTP regression.
+    'oneclick.yml': {MAINTENANCE_SHARE_UPGRADE_STEP},
+    'acme.yml': {'Test actual Certbot HTTP-01 issuance and failure'},
+    'short-install.yml': {'Install public stable suite through the actual short command'},
+}
 BROWSER_SKIP_STEPS = {
     name: steps | {'Install explicit test browser'} for name, steps in REQUIRED_ACCEPTANCE_STEPS.items()
 }
@@ -305,8 +328,11 @@ def request(path,method='GET',data=None,binary=False):
         return json.load(response)
 
 
-def select_runs(runs,commit, *, simple_operations_no_browser=False):
-    required = SIMPLE_OPERATIONS_REQUIRED if simple_operations_no_browser else REQUIRED
+def select_runs(runs,commit, *, simple_operations_no_browser=False, maintenance_share_no_browser=False):
+    if simple_operations_no_browser and maintenance_share_no_browser:
+        raise ReleaseGateError('Non-browser scope exceptions are mutually exclusive')
+    required = (MAINTENANCE_SHARE_REQUIRED if maintenance_share_no_browser else
+                SIMPLE_OPERATIONS_REQUIRED if simple_operations_no_browser else REQUIRED)
     latest={}
     for run in runs:
         if run.get('head_sha')!=commit:
@@ -729,11 +755,43 @@ def validate_simple_operations_scope(commit, version):
         raise ReleaseGateError('Cannot prove simple operations release source ancestry/scope') from exc
 
 
-def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_trust_no_browser=False, install_interaction_no_browser=False, startup_no_browser=False, ui_redesign_no_browser=False, tls_certificate_no_browser=False, remote_maintenance_no_browser=False, simple_node_no_browser=False, maintenance_180_no_browser=False, netlink_service_no_browser=False, simple_operations_no_browser=False):
+def validate_maintenance_share_scope(commit, version):
+    """Only the already versioned 0.4.22 product plus named release preparation."""
+    if version != MAINTENANCE_SHARE_VERSION:
+        raise ReleaseGateError('Non-browser maintenance share exception is only approved for 0.4.22')
+    try:
+        subprocess.run(['git','merge-base','--is-ancestor',MAINTENANCE_SHARE_BASELINE,commit],check=True,
+                       stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        changes=subprocess.check_output(
+            ['git','diff','--name-status','--no-renames',MAINTENANCE_SHARE_BASELINE,commit],text=True)
+        for line in changes.splitlines():
+            fields=line.split('\t')
+            if len(fields)!=2 or fields[0] not in ('A','M'):
+                raise ReleaseGateError('Maintenance share release scope refuses deletion, rename or type change')
+            name=fields[1]
+            if name not in MAINTENANCE_SHARE_FILES:
+                raise ReleaseGateError('Changes exceed the approved maintenance share release preparation: '+name)
+            entry=subprocess.check_output(['git','ls-tree',commit,'--',name],text=True)
+            if not re.fullmatch(r'100644 blob [a-f0-9]{40}\t'+re.escape(name)+r'\n',entry):
+                raise ReleaseGateError('Maintenance share release exception refuses nonregular files or mode changes')
+        if subprocess.check_output(['git','show',commit+':VERSION'])!=b'0.4.22\n':
+            raise ReleaseGateError('Maintenance share release version identity differs')
+        for name in ('VERSION','main.py','install.sh'):
+            previous=subprocess.check_output(['git','show',MAINTENANCE_SHARE_BASELINE+':'+name])
+            current=subprocess.check_output(['git','show',commit+':'+name])
+            if current!=previous:
+                raise ReleaseGateError('Maintenance share frozen product bytes differ: '+name)
+    except subprocess.CalledProcessError as exc:
+        raise ReleaseGateError('Cannot prove maintenance share release source ancestry/scope') from exc
+
+
+def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_trust_no_browser=False, install_interaction_no_browser=False, startup_no_browser=False, ui_redesign_no_browser=False, tls_certificate_no_browser=False, remote_maintenance_no_browser=False, simple_node_no_browser=False, maintenance_180_no_browser=False, netlink_service_no_browser=False, simple_operations_no_browser=False, maintenance_share_no_browser=False):
     """A green workflow with skipped acceptance is not release qualification."""
     if sum((installer_only_no_browser, ca_trust_no_browser, install_interaction_no_browser,
-            startup_no_browser, ui_redesign_no_browser, tls_certificate_no_browser, remote_maintenance_no_browser, simple_node_no_browser, maintenance_180_no_browser, netlink_service_no_browser, simple_operations_no_browser)) > 1:
+            startup_no_browser, ui_redesign_no_browser, tls_certificate_no_browser, remote_maintenance_no_browser, simple_node_no_browser, maintenance_180_no_browser, netlink_service_no_browser, simple_operations_no_browser, maintenance_share_no_browser)) > 1:
         raise ReleaseGateError('Non-browser scope exceptions are mutually exclusive')
+    if maintenance_share_no_browser and set(checks) != MAINTENANCE_SHARE_REQUIRED:
+        raise ReleaseGateError('Maintenance share release requires all nine exact-commit workflows')
     if simple_operations_no_browser and set(checks) != SIMPLE_OPERATIONS_REQUIRED:
         raise ReleaseGateError('Simple operations release requires all nine exact-commit workflows')
     for path, run in sorted(checks.items()):
@@ -751,36 +809,40 @@ def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_tru
             raise ReleaseGateError('Workflow job pagination exceeds bound: '+path)
         if not jobs or len({job['id'] for job in jobs}) != len(jobs):
             raise ReleaseGateError('Missing or duplicated exact-attempt jobs: '+path)
+        if maintenance_share_no_browser and len(jobs) != MAINTENANCE_SHARE_JOB_COUNTS[path]:
+            raise ReleaseGateError('Maintenance share release requires all twelve exact-attempt jobs: '+path)
         if simple_operations_no_browser and len(jobs) != SIMPLE_OPERATIONS_JOB_COUNTS[path]:
             raise ReleaseGateError('Simple operations release requires all twelve exact-attempt jobs: '+path)
         names={step.get('name') for job in jobs for step in job.get('steps', [])}
         required_steps = REQUIRED_ACCEPTANCE_STEPS.get(path,set())
-        if ui_redesign_no_browser or tls_certificate_no_browser or remote_maintenance_no_browser or simple_node_no_browser or maintenance_180_no_browser or netlink_service_no_browser or simple_operations_no_browser:
+        if ui_redesign_no_browser or tls_certificate_no_browser or remote_maintenance_no_browser or simple_node_no_browser or maintenance_180_no_browser or netlink_service_no_browser or simple_operations_no_browser or maintenance_share_no_browser:
             required_steps = required_steps | BROWSER_SKIP_STEPS.get(path,set())
             if path == 'oneclick.yml':
                 required_steps = required_steps | {UI_REDESIGN_UPGRADE_STEP}
-        if tls_certificate_no_browser or remote_maintenance_no_browser or simple_node_no_browser or maintenance_180_no_browser or netlink_service_no_browser or simple_operations_no_browser:
+        if tls_certificate_no_browser or remote_maintenance_no_browser or simple_node_no_browser or maintenance_180_no_browser or netlink_service_no_browser or simple_operations_no_browser or maintenance_share_no_browser:
             if path == 'oneclick.yml':
                 required_steps = required_steps | {TLS_CERTIFICATE_UPGRADE_STEP}
             if path == 'test.yml':
                 required_steps = required_steps | {TLS_CERTIFICATE_CORE_STEP}
-        if remote_maintenance_no_browser or simple_node_no_browser or maintenance_180_no_browser or netlink_service_no_browser or simple_operations_no_browser:
+        if remote_maintenance_no_browser or simple_node_no_browser or maintenance_180_no_browser or netlink_service_no_browser or simple_operations_no_browser or maintenance_share_no_browser:
             if path == 'oneclick.yml':
                 required_steps = required_steps | {REMOTE_MAINTENANCE_UPGRADE_STEP}
             if path == 'loopback.yml':
                 required_steps = required_steps | REMOTE_MAINTENANCE_LOOPBACK_STEPS
-        if simple_node_no_browser or maintenance_180_no_browser or netlink_service_no_browser or simple_operations_no_browser:
+        if simple_node_no_browser or maintenance_180_no_browser or netlink_service_no_browser or simple_operations_no_browser or maintenance_share_no_browser:
             if path == 'oneclick.yml':
                 required_steps = required_steps | {SIMPLE_NODE_UPGRADE_STEP}
             if path == 'test.yml':
                 required_steps = required_steps | {SIMPLE_NODE_TEMPLATE_STEP}
-        if netlink_service_no_browser or simple_operations_no_browser:
+        if netlink_service_no_browser or simple_operations_no_browser or maintenance_share_no_browser:
             if path == 'oneclick.yml':
                 required_steps = required_steps | {NETLINK_SERVICE_UPGRADE_STEP}
             if path == 'test.yml':
                 required_steps = required_steps | {NETLINK_SERVICE_DIAGNOSTIC_STEP}
-        if simple_operations_no_browser and path == 'oneclick.yml':
+        if (simple_operations_no_browser or maintenance_share_no_browser) and path == 'oneclick.yml':
             required_steps = required_steps | {SIMPLE_OPERATIONS_UPGRADE_STEP, SIMPLE_OPERATIONS_INSTALL_STEP}
+        if maintenance_share_no_browser:
+            required_steps = required_steps | MAINTENANCE_SHARE_EXTRA_STEPS.get(path, set())
         if not required_steps <= names:
             raise ReleaseGateError('Missing required acceptance steps: '+path)
         for job in jobs:
@@ -791,7 +853,7 @@ def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_tru
             def accepted(step):
                 return (step.get('status') == 'completed' and
                         (step.get('conclusion') == 'success' or
-                         ((installer_only_no_browser or ca_trust_no_browser or install_interaction_no_browser or startup_no_browser or ui_redesign_no_browser or tls_certificate_no_browser or remote_maintenance_no_browser or simple_node_no_browser or maintenance_180_no_browser or netlink_service_no_browser or simple_operations_no_browser) and step.get('conclusion') == 'skipped'
+                         ((installer_only_no_browser or ca_trust_no_browser or install_interaction_no_browser or startup_no_browser or ui_redesign_no_browser or tls_certificate_no_browser or remote_maintenance_no_browser or simple_node_no_browser or maintenance_180_no_browser or netlink_service_no_browser or simple_operations_no_browser or maintenance_share_no_browser) and step.get('conclusion') == 'skipped'
                           and step.get('name') in BROWSER_SKIP_STEPS.get(path,set()))))
             if not steps or not all(accepted(step) for step in steps):
                 raise ReleaseGateError('Workflow has unverified, skipped or failed steps: '+path)
@@ -912,6 +974,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--commit',required=True);p.add_argument('--version',required=True)
     p.add_argument('--confirm',required=True);p.add_argument('--publish',action='store_true')
+    p.add_argument('--maintenance-share-no-browser',action='store_true',
+                   help='Approved frozen 0.4.22 maintenance-share HTTP fix; browsers remain unverified')
     p.add_argument('--simple-operations-no-browser',action='store_true',
                    help='Approved frozen 0.4.21 simple operations product; browsers remain unverified')
     p.add_argument('--netlink-service-no-browser',action='store_true',
@@ -935,7 +999,7 @@ def main():
     p.add_argument('--installer-only-no-browser',action='store_true',
                    help='Explicitly approved 0.4.11 installer-only exception; browser evidence stays unverified')
     args=p.parse_args()
-    if sum((args.installer_only_no_browser, args.ca_trust_no_browser, args.install_interaction_no_browser, args.startup_no_browser, args.ui_redesign_no_browser, args.tls_certificate_no_browser, args.remote_maintenance_no_browser, args.simple_node_no_browser, args.maintenance_180_no_browser, args.netlink_service_no_browser, args.simple_operations_no_browser)) > 1:
+    if sum((args.installer_only_no_browser, args.ca_trust_no_browser, args.install_interaction_no_browser, args.startup_no_browser, args.ui_redesign_no_browser, args.tls_certificate_no_browser, args.remote_maintenance_no_browser, args.simple_node_no_browser, args.maintenance_180_no_browser, args.netlink_service_no_browser, args.simple_operations_no_browser, args.maintenance_share_no_browser)) > 1:
         raise ReleaseGateError('Non-browser scope exceptions are mutually exclusive')
     if not re.fullmatch(r'[a-f0-9]{40}',args.commit) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',args.version):
         raise ReleaseGateError('Exact commit and stable version required')
@@ -958,7 +1022,10 @@ def main():
         runs.extend(batch)
         if len(batch)<100:
             break
-    checks=select_runs(runs,args.commit,simple_operations_no_browser=args.simple_operations_no_browser)
+    checks=select_runs(runs,args.commit,simple_operations_no_browser=args.simple_operations_no_browser,
+                       maintenance_share_no_browser=args.maintenance_share_no_browser)
+    if args.maintenance_share_no_browser:
+        validate_maintenance_share_scope(args.commit,args.version)
     if args.simple_operations_no_browser:
         validate_simple_operations_scope(args.commit,args.version)
     if args.netlink_service_no_browser:
@@ -990,7 +1057,8 @@ def main():
                       simple_node_no_browser=args.simple_node_no_browser,
                       maintenance_180_no_browser=args.maintenance_180_no_browser,
                       netlink_service_no_browser=args.netlink_service_no_browser,
-                      simple_operations_no_browser=args.simple_operations_no_browser)
+                      simple_operations_no_browser=args.simple_operations_no_browser,
+                      maintenance_share_no_browser=args.maintenance_share_no_browser)
 
     tag='v'+args.version
     for path in ('git/ref/tags/'+tag,'releases/tags/'+tag):
@@ -1048,6 +1116,13 @@ def main():
               '固定核心真实Xray TLS/SNI、证书轮换与失败恢复测试必须成功；批准候选冻结为 `'+TLS_CERTIFICATE_BASELINE+'`；'+\
               '此后仅允许精确列明版本、发布门禁、升级验收和文档，main.py仅15→16版本替换，install.sh仅同一版本注释替换。'+\
               '其他UI、API、CoreRuntime、依赖、固定核心与短入口保持，不覆盖旧资产；此例外只适用0.4.16。\n'
+    if args.maintenance_share_no_browser:
+        body+='\n\n验收范围：用户明确批准本次0.4.22维护授权分享HTTP修复采用非浏览器验收。浏览器未验证；'+\
+              '仅允许原12个明列浏览器步骤跳过且必须存在，九组准确提交/最新attempt的12个jobs和其余steps全部成功。'+\
+              '真实Bearer HTTP回归、固定核心、模板编译、AF_NETLINK诊断、完整loopback及HTTP-01真实链路、新装和公开14/15/16/17/19/20/21保数据升级必须成功。'+\
+              '产品、版本、安装器及必要CI冻结于 `'+MAINTENANCE_SHARE_BASELINE+'`；其后仅允许精确13项发布门禁和直接文档。'+\
+              '应用、UI、root逻辑、依赖、固定核心、既有CI及验收源码保持；短入口在公开后独立更新。'+\
+              '仅晋升同一准确main提交的已验四目标套件，发布时不重建，不覆盖旧tag或资产，不操作用户VPS。此例外仅适用0.4.22。\n'
     if args.simple_operations_no_browser:
         body+='\n\n验收范围：用户明确批准本次0.4.21简单运维完整产品采用非浏览器验收。浏览器未验证；'+\
               '仅允许12个明列浏览器步骤跳过且必须存在，九组准确提交/最新attempt的12个jobs和其余steps全部成功。'+\
