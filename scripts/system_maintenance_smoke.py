@@ -307,11 +307,11 @@ NETLINK_SYSTEMD_MARKER = 'VUI_NETLINK_SYSTEMD_ACCEPTANCE: installed20 panel-chil
 
 
 def maintenance_long_duration(release_id):
-    return release_id.startswith(('0.4.19-', '0.4.20-', '0.4.21-'))
+    return release_id.startswith(('0.4.19-', '0.4.20-', '0.4.21-', '0.4.22-'))
 
 
 def netlink_systemd_enabled(release_id):
-    return os.getenv('VUI_NETLINK_SYSTEMD_TEST') == '1' and release_id.startswith(('0.4.20-', '0.4.21-'))
+    return os.getenv('VUI_NETLINK_SYSTEMD_TEST') == '1' and release_id.startswith(('0.4.20-', '0.4.21-', '0.4.22-'))
 
 
 def verified_upgrade_fixture_rows(actual, expected):
@@ -375,9 +375,9 @@ def installed_netlink_smoke(check, source, work, api, ca, cert, key, verified_ol
     assert os.getenv('VUI_SYSTEM_INSTALL_TEST') == '1'
     config = json.loads(Path('/etc/v-ui/service.json').read_bytes())
     if not netlink_systemd_enabled(config['release_id']):
-        raise AssertionError('Installed netlink gate requires the opted-in actual 0.4.20 or 0.4.21 candidate')
+        raise AssertionError('Installed netlink gate requires the opted-in actual 0.4.20, 0.4.21 or 0.4.22 candidate')
     release = Path('/var/lib/v-ui/releases') / config['release_id']
-    check.assertIn((source/'VERSION').read_text().strip(), ('0.4.20','0.4.21'))
+    check.assertIn((source/'VERSION').read_text().strip(), ('0.4.20','0.4.21','0.4.22'))
     check.assertTrue(config['release_id'].startswith((source/'VERSION').read_text().strip()+'-'))
 
     def request(path, body=None, *, method=None, extra_headers=(), expected=200):
@@ -634,8 +634,10 @@ print(json.dumps({'pid':child.pid,'created':child.create_time(),'binary_sha256':
             check.assertEqual(service_python(user_program),users_before)
     if config['release_id'].startswith('0.4.20-'):
         print(NETLINK_SYSTEMD_MARKER)
-    else:
+    elif config['release_id'].startswith('0.4.21-'):
         print('VUI_SIMPLE_OPERATIONS_INSTALLED_ACCEPTANCE: installed21 panel-child TLS TCP URI/YAML passed')
+    else:
+        print('VUI_MAINTENANCE_SHARE_INSTALLED_ACCEPTANCE: installed22 panel-child TLS TCP URI/YAML passed')
 
 
 def nonroot_smoke(check, source, kit, api, expected_proxy):

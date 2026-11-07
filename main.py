@@ -16,7 +16,7 @@ from app.services.log_redaction import install_log_redaction
 from app.services.validated_export import ExportError
 from app.services.routing_store import RoutingStorageError
 
-app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.4.21')
+app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.4.22')
 app.add_middleware(AdminAuthMiddleware)
 app.include_router(maintenance.router,prefix='/api/maintenance',tags=['Temporary maintenance'])
 app.include_router(certificates.router,prefix='/api/certificates',tags=['Certificates'])

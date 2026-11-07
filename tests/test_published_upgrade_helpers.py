@@ -59,6 +59,20 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 assert_node_summary_upgrade(self,[row],[{**row,'content_revision':'c'*64,'share_eligible':False}],version)
 
+    def test_public21_has_no_response_field_addition_or_content_cas_drift(self):
+        before={'id':1,'mutation_revision':'a'*64,'content_revision':'b'*64,
+                'share_eligible':True,'upstream_export_eligible':False,'remark':'preserve'}
+        assert_node_summary_upgrade(self,[before],[dict(before)],'0.4.21')
+        assert_editor_content_addition(self,before,dict(before))
+        for key,value in [('content_revision','c'*64),('content_revision',None),
+                          ('remark','changed'),('share_eligible',False),('unknown',1)]:
+            with self.subTest(key=key,value=value),self.assertRaises(AssertionError):
+                assert_node_summary_upgrade(self,[before],[{**before,key:value}],'0.4.21')
+            with self.subTest(editor_key=key),self.assertRaises(AssertionError):
+                assert_editor_content_addition(self,before,{**before,key:value})
+        missing=dict(before);del missing['content_revision']
+        with self.assertRaises(AssertionError):assert_node_summary_upgrade(self,[before],[missing],'0.4.21')
+
     def test_configuration_requires_exact_runtime_transition_and_preserved_fields(self):
         old_release=Path('/var/lib/v-ui/releases/old-014')
         new_release=Path('/var/lib/v-ui/releases/candidate-015')
@@ -139,11 +153,12 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
                   '0.4.16':'18fe631bcf69b68425b454db1795a101e0378842',
                   '0.4.17':'95c201c6e26ed54960f964c675e515890f2eea2a',
                   '0.4.19':'a2b9c188658f082b189e77d237787a96eb9cf921',
-                  '0.4.20':'05173798de1baed5d67a866c4125e72f74fe3f4c'}
+                  '0.4.20':'05173798de1baed5d67a866c4125e72f74fe3f4c',
+                  '0.4.21':'2aa5e11e3f09c03d048018f033ae888e7c775604'}
         self.assertEqual(PUBLISHED_BASELINES,expected)
         for version,commit in expected.items():
             self.assertEqual(fixed_public_baseline(version,commit),(version,commit))
-        for version,commit in [('0.4.20','f'*40),('0.4.13','a'*40),('0.4.18',expected['0.4.19']),('0.4.19','f'*40),('0.4.17',expected['0.4.16']),
+        for version,commit in [('0.4.21','f'*40),('0.4.20','f'*40),('0.4.13','a'*40),('0.4.18',expected['0.4.19']),('0.4.19','f'*40),('0.4.17',expected['0.4.16']),
                                ('0.4.16',expected['0.4.15']),('0.4.16','a'*40),
                                ('0.4.14',expected['0.4.15']),('0.4.15',expected['0.4.14']),
                                ('0.4.15','a'*40),(None,None)]:
@@ -183,6 +198,8 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
                         assert_receipt_migration(self,before,changed,version)
             legacy=deepcopy(before);del legacy['files'][FIREWALL]
             with self.assertRaises(AssertionError):assert_receipt_migration(self,legacy,after,version)
+        assert_receipt_migration(self,after,after,'0.4.21')
+        with self.assertRaises(AssertionError):assert_receipt_migration(self,before,after,'0.4.21')
         assert_receipt_migration(self,after,after,'0.4.20')
         with self.assertRaises(AssertionError):assert_receipt_migration(self,before,after,'0.4.20')
         assert_receipt_migration(self,after,after,'0.4.19')
