@@ -15,7 +15,7 @@
             else if (key in node) node[key] = value;
             else node.setAttribute(key, String(value));
         }
-        return node;
+        node._opsDisabled=!!attrs.disabled;return node;
     };
     async function cookieRequest(path, method='GET', body=null, {headers={},fullResponse=false}={}) {
         if (!path.startsWith('/api/') || path.includes('://')) throw new Error('Invalid API destination');
@@ -36,7 +36,7 @@
     }
     class View {
         constructor(root, options={}) {
-            this.root=root;this.options=options;this.id='ops-'+(++sequence);this.epoch=0;this.ended=false;
+            this.root=root;this.options=options;this.id='ops-'+(++sequence);this.modalId='simple-operations';this.epoch=0;this.ended=false;
             this.task='direct';this.uiBusy=false;this.fields={};this.secret='';this.info=null;this.dirty=false;this.deliveryEpoch=0;this.savedForm=null;this.certificateTimer=null;this.certificateSubmitted=false;
             this.flow=new Flow(options.request||cookieRequest,{scopes:options.scopes??null,
                 changed:event=>this.changed(event),expired:()=>this.expire()});
@@ -81,7 +81,14 @@
                 if(this.fields.link)this.fields.link.value='';
                 if(this.fields.upstream)this.fillUpstreams(this.flow.intent.choice.upstreamId);
             }
-            if(event.nodes){this.renderNodes();document.dispatchEvent(new CustomEvent('vui:operations-changed'));}
+            if(event.nodes||event.loaded){
+                if(this.form?.parentNode===this.content){
+                    if(this.fields.impact?.checked&&this.impactConsent!==this.flow.impactStamp()){this.fields.impact.checked=false;this.impactConsent=null;}
+                    if(this.fields.start?.checked&&this.startConsent!==this.flow.stoppedStamp()){this.fields.start.checked=false;this.startConsent=null;}
+                    this.updateForm();
+                }
+            }
+            if(event.nodes){this.renderNodes();globalThis.dispatchEvent(new CustomEvent('vui:operations-changed'));}
             this.lock();
         }
         lock() {
@@ -108,7 +115,7 @@
             if(this.flow.attempt?.state==='uncertain'||this.flow.intent?.nodeSent&&!this.info){
                 if(!confirm('结果尚未确认。关闭不会撤销服务器操作；再次操作前请先查看现有节点。继续关闭？'))return;
             }else if(this.dirty&&!this.info&&!confirm('放弃本次尚未提交的输入？'))return;
-            this.clear();if(this.dialog){this.dialog.close();globalThis.VUI_NAV?.modal.close(this.id);}
+            this.clear();if(this.dialog){this.dialog.close();globalThis.VUI_NAV?.modal.close(this.modalId);}
         }
         async perform(action, success=null) {
             if(this.uiBusy||this.ended)return;const epoch=this.epoch;
@@ -141,7 +148,7 @@
             if(this.dirty&&!this.info&&!confirm('切换操作会清除本次未提交的连接内容，继续？'))return;
             if(this.flow.attempt?.state==='uncertain'||this.flow.intent?.nodeSent&&!this.info){this.showError({code:'PENDING',message:'请先核对上一操作的结果。'});return;}
             this.clear();this.task=task;this.target=target;
-            if(this.dialog&&!this.dialog.open){this.dialog.showModal();globalThis.VUI_NAV?.modal.open(this.id,()=>this.close(),()=>!this.uiBusy&&!this.flow.busy);}
+            if(this.dialog&&!this.dialog.open){this.dialog.showModal();globalThis.VUI_NAV?.modal.open(this.modalId,()=>this.close(),()=>!this.uiBusy&&!this.flow.busy);}
             return await this.perform(async()=>{
                 await this.flow.load();
                 if(task==='edit'){
@@ -161,7 +168,7 @@
             this.fields.paste.hidden=select.value!=='new';
         }
         renderForm() {
-            this.secret='';this.info=null;this.fields={};this.content.replaceChildren();
+            this.secret='';this.info=null;this.fields={};this.impactConsent=null;this.startConsent=null;this.content.replaceChildren();
             const snapshot=this.flow.snapshot;if(!snapshot)return;
             this.revision=snapshot.revision;this.dirty=false;
             for(const button of this.tabs.children)button.setAttribute('aria-current',String(button.dataset.task===this.task));
@@ -190,6 +197,7 @@
                 this.fields.link.addEventListener('input',()=>{this.problem.replaceChildren();this.preview=null;this.candidateIndex=null;this.ignored=[];if(this.fields.impact)this.fields.impact.checked=false;});
                 this.fields.impactBox=element('div');this.fields.impact=element('input',null,{type:'checkbox'});
                 const confirmation=element('label',null,{class:'ops-check'});confirmation.append(this.fields.impact,element('span','我确认把下列对象统一切换到所选出口。'));
+                this.fields.impact.addEventListener('change',()=>{this.impactConsent=this.fields.impact.checked?this.displayedImpactStamp:null;});
                 this.fields.impactList=element('div');this.fields.impactBox.append(this.fields.impactList,confirmation);form.append(this.fields.impactBox);
                 form.append(element('small','当前中转节点和服务器程序代理共用一条出口。仅添加节点不会擅自切换其他出口。'));
             }
@@ -226,6 +234,7 @@
             form.append(advanced);
             this.fields.startBox=element('div');this.fields.start=element('input',null,{type:'checkbox'});
             const restore=element('label',null,{class:'ops-check'});restore.append(this.fields.start,element('span','我确认启动该节点组，并恢复下面已启用的节点。'));
+            this.fields.start.addEventListener('change',()=>{this.startConsent=this.fields.start.checked?this.displayedStartStamp:null;});
             this.fields.startList=element('div');this.fields.startBox.append(this.fields.startList,restore);form.append(this.fields.startBox);
             this.formWarning=element('div');form.append(this.formWarning);
             const actions=element('div',null,{class:'ops-actions'});
@@ -262,12 +271,13 @@
                 upstreamId:this.fields.upstream?.value==='new'?null:this.fields.upstream?.value,
                 link:this.fields.upstream?.value==='new'?this.fields.link.value:'',format:this.fields.format?.value||'uri',
                 candidateIndex:this.candidateIndex,ignored:this.ignored||[],
-                impactStamp:this.fields.impact?.checked?this.flow.impactStamp():null,
-                startStopped:this.fields.start?.checked||false,startStamp:this.fields.start?.checked?this.flow.stoppedStamp():null,
+                impactStamp:this.fields.impact?.checked?this.impactConsent:null,
+                startStopped:this.fields.start?.checked||false,startStamp:this.fields.start?.checked?this.startConsent:null,
                 localPort:this.fields.localPort?Number(this.fields.localPort.value):null};
         }
         updateForm() {
             if(!this.submit)return;const c=this.choice();this.formWarning.replaceChildren();
+            this.displayedImpactStamp=this.flow.impactStamp();this.displayedStartStamp=this.flow.stoppedStamp();
             const required=this.task==='edit'?['nodes']:['relay',...(['direct','relay'].includes(this.task)?['nodes','certificates']:[])];
             const missing=required.filter(scope=>!this.flow.has(scope));
             let reason=this.blockedByDraft?'请先处理上次尚未完成的设置。':missing.length?'当前授权缺少：'+missing.map(s=>scopeNames[s]).join('、'):'';
@@ -290,7 +300,7 @@
         }
         showError(error) {
             this.problem.replaceChildren(this.note(message(error),'ops-error'));
-            if(['NODE_UNCERTAIN','NODE_SAVED','APPLY_UNCERTAIN','IMPORT_UNCERTAIN','SETTINGS_UNCERTAIN'].includes(error.code))
+            if(['NODE_UNCERTAIN','NODE_SAVED','APPLY_UNCERTAIN','IMPORT_UNCERTAIN','SETTINGS_UNCERTAIN'].includes(error.code)||this.flow.intent?.importUncertain||this.flow.intent?.saveUncertain)
                 this.problem.append(this.button('核对并完成',()=>this.perform(()=>this.flow.resolve(),r=>this.renderResult(r)),{primary:true}));
             if(error.code==='BIND_CONFIRM_REQUIRED')this.problem.append(this.button('确认使用所选证书并完成绑定',()=>this.perform(()=>this.flow.confirmBinding(),r=>this.renderResult(r)),{primary:true}));
             if(['CHOOSE_CANDIDATE','ACK_SECTIONS'].includes(error.code)&&error.data){
@@ -339,7 +349,7 @@
         async delivery(row, server, upstream) {
             const epoch=this.epoch, deliveryEpoch=++this.deliveryEpoch;this.secret='';this.content.querySelector('.ops-delivery')?.remove();this.status.textContent='正在读取所选连接信息…';
             try {
-                const value=await this.flow.share(row.id,row.mutation_revision,server,upstream);
+                const value=await this.flow.share(row.id,row.mutation_revision,server,upstream,'uri',row.content_revision);
                 if(epoch!==this.epoch||deliveryEpoch!==this.deliveryEpoch||this.ended)return;
                 this.secret=value;const box=element('section',null,{class:'ops-delivery'});
                 box.append(element('h3',upstream?'给中转服务器使用（仅TCP）':'连接信息'),element('p','链接含访问凭据，只交给可信使用者。'));
@@ -401,7 +411,7 @@
             if(this.uiBusy||this.flow.busy||this.ended)return;
             if(this.dirty&&!confirm('离开将清除尚未提交的节点输入，继续？'))return;
             this.clear();this.task='subscriptions';
-            if(this.dialog&&!this.dialog.open)this.dialog.showModal();
+            if(this.dialog&&!this.dialog.open){this.dialog.showModal();globalThis.VUI_NAV?.modal.open(this.modalId,()=>this.close(),()=>!this.uiBusy&&!this.flow.busy);}
             return this.perform(async()=>{
                 this.flow.require('share');
                 const [response,warnings,grants]=await Promise.all([
@@ -432,7 +442,7 @@
                     const url=location.origin+path;this.secret=url;const field=element('textarea',null,{value:url,readOnly:true,rows:3});output.append(this.note('地址仅本次展示。遗失后请更换地址，旧地址随即失效。'),field,this.button('复制订阅地址',()=>this.copy(url,field)),this.button('清除地址显示',()=>{this.secret='';output.replaceChildren();}));
                 };
                 form.addEventListener('submit',event=>{event.preventDefault();if(submitted)return;void this.perform(async()=>{
-                    const selected=picks.filter(([input])=>input.checked&&!input.disabled).map(([,id])=>id);
+                    const selected=picks.filter(([input,id])=>input.checked&&eligible.some(node=>node.id===id)).map(([,id])=>id);
                     if(!name.value.trim()||!selected.length)throw new globalThis.VUI_OPERATION_FLOW.FlowError('SELECT_NODES','填写名称，并选择至少一个可分享节点。');
                     // The displayed inventory is the authoritative identity precondition.
                     submitted=true;submit._opsDisabled=true;
@@ -452,7 +462,7 @@
         async certificates() {
             if(this.uiBusy||this.flow.busy||this.ended)return;
             if(this.dirty&&!confirm('离开将清除尚未提交的节点输入，继续？'))return;
-            this.clear();this.task='certificates';if(this.dialog&&!this.dialog.open)this.dialog.showModal();
+            this.clear();this.task='certificates';if(this.dialog&&!this.dialog.open){this.dialog.showModal();globalThis.VUI_NAV?.modal.open(this.modalId,()=>this.close(),()=>!this.uiBusy&&!this.flow.busy);}
             return this.perform(async()=>{await this.flow.load();return await this.flow.api('/api/certificates');},rows=>{
                 this.content.replaceChildren(element('h3','连接域名与证书'),element('p','已有证书可直接用于新节点。续期保留原证书，已停止的节点组不会自动启动。'));
                 if(!this.options.remote)this.content.append(element('a','申请证书 / 更多管理',{href:'/certificates'}));
@@ -523,7 +533,7 @@
         open(task, target){const root=document.querySelector('[data-simple-operations="dialog"]');const view=root&&views.get(root);if(view)return view.open(task,target);return Promise.reject(new Error('Operation view unavailable'));}};
     const start=()=>{for(const root of document.querySelectorAll('[data-simple-operations]')){
         if(root.dataset.simpleOperations==='delegated')continue;
-        const dialog=root.dataset.simpleOperations==='dialog';mount(root,{dialog,advanced:dialog?row=>{const view=views.get(root);view?.close();if(view?.dialog?.open)return;document.dispatchEvent(new CustomEvent('vui:advanced-node',{detail:row?{id:row.id,revision:row.mutation_revision}:null}));}:null});
+        const dialog=root.dataset.simpleOperations==='dialog';mount(root,{dialog,advanced:dialog?row=>{const view=views.get(root);view?.close();if(view?.dialog?.open)return;globalThis.dispatchEvent(new CustomEvent('vui:advanced-node',{detail:row?{id:row.id,revision:row.mutation_revision}:null}));}:null});
     }};
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();

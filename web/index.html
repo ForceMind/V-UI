@@ -166,7 +166,7 @@
                                 <div class="node-common-actions">
                                     <el-button v-if="scope.row.share_eligible === true" size="small" type="primary" plain @click="openSimpleShare(scope.row)">分享连接</el-button>
 
-                                    <el-button size="small" @click="openSimpleEdit(scope.row)">设置</el-button>
+                                    <el-button size="small" @click="openSimpleEdit(scope.row)">修改设置</el-button>
                                     <el-button size="small" :disabled="togglingInbound !== null" :loading="togglingInbound === scope.row.id" @click="toggleInbound(scope.row)">{{ scope.row.enable ? '停用' : '启用' }}</el-button>
                                 </div>
                                 <details class="node-more">
@@ -292,13 +292,13 @@
                                             text
                                             size="small"
                                             @click="setCategoryEnabled(group.id, true)">
-                                            全开
+                                            勾选本组服务
                                         </el-button>
                                         <el-button
                                             text
                                             size="small"
                                             @click="setCategoryEnabled(group.id, false)">
-                                            全关
+                                            取消勾选本组服务
                                         </el-button>
                                     </div>
                                 </div>

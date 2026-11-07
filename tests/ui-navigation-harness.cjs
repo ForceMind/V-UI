@@ -333,3 +333,18 @@ test('address-bar hash navigation obeys real editor dirty guard and restores the
     env.history.forward(); await flush();
     assert.equal(state.currentView.value, 'cores'); assert.equal(state.showAddInbound.value, false);
 });
+test('simple operation dialog uses the actual navigation modal layer and Back clears delivered data',async()=>{
+    const f=environment();const {Document}=require('./fixtures/operation_dom.cjs');
+    const document=new Document(),root=document.createElement('div');document.body.append(root);
+    f.sandbox.document=document;f.sandbox.removeEventListener=()=>{};
+    f.sandbox.VUI_OPERATION_FLOW=require('../web/js/operation-flow.js');
+    f.sandbox.CustomEvent=class{constructor(type,options={}){this.type=type;this.detail=options.detail;}};
+    const backend=require('./fixtures/operation_http_fixture.cjs').fixture({active:true});
+    vm.runInContext(source('simple-operations.js'),f.context);
+    const view=new f.sandbox.VUI_SIMPLE_OPERATIONS.View(root,{dialog:true,request:backend.api});
+    await view.open('direct');assert.equal(f.history.state.modal,'simple-operations');assert.equal(f.position,1);
+    view.secret='fake-ephemeral-connection';view.info={kind:'share'};
+    f.history.back();await flush();assert.equal(view.dialog.open,false);assert.equal(view.secret,'');assert.equal(view.content.children.length,0);
+    f.history.forward();await flush();assert.equal(view.dialog.open,false);assert.equal(f.history.state.modal,undefined);
+    view.destroy();
+});

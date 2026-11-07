@@ -28,12 +28,133 @@
 ## 当前进度
 
 - [x] 代码审阅、交互线稿、用户完整范围确认、独立开发分支。
-- [ ] 共用任务控制器与三个主流程。
-- [ ] 节点编辑/两种交付/作用范围与异常。
-- [ ] 授权维护/证书/订阅/备份与按钮核对。
+- [x] 共用任务控制器与三个主流程（源码/合成，真实资格待Actions）。
+- [x] 节点编辑/两种交付/作用范围与异常（源码/合成）。
+- [x] 授权维护/证书/订阅/备份与按钮核对（源码层）。
 - [ ] 非浏览器定向检查、独审和修复。
 - [ ] 提交推送Draft PR、准确Actions四目标/真实安装/公开20保数据升级。
 
 阶段WIP：共用控制器和三个任务、基本编辑、两种交付、同页Bearer transport及新增后端CAS/显式本地凭据交付已实现；37项Node状态/合成DOM、维护会话旧契约与3项连接页检查通过。新增后端状态/密码引用/停止偏好回归仅AST已核，依赖完整运行放Actions。证书、订阅、任务及逐按钮核对仍在实施。
 
 当前实现未完成；尚未发布21、未改服务器。后续阶段继续更新本页，不把阶段样例或原20绿灯称作新候选验收。
+
+## 本批代码层按钮核对（尚非浏览器验收）
+
+原线稿96项静态模板，本批新增直连/中转入口和任务核对等后现有98项。以下逐项对应事件与处理归属；历史旧向导、旧嵌入分流/订阅及旧分享对话框作为兼容保留，不再作为默认新建/分享路径。动态按钮在表后单列。只核代码、权限、忙碌/异常/清除状态，未声称真实页面渲染通过。
+
+| 页面位置 | 按钮 | 实际事件或ID | 已核处理边界 |
+| --- | --- | --- | --- |
+| web/account.html:23 | 登录面板 | `submit` | 账户接口校验；改密/退出清除会话，失败保持输入 |
+| web/account.html:37 | 保存并退出全部会话 | `submit` | 账户接口校验；改密/退出清除会话，失败保持输入 |
+| web/account.html:39 | 退出登录 | `logout` | 账户接口校验；改密/退出清除会话，失败保持输入 |
+| web/certificates.html:18 | 申请证书 | `issue` | 本人CA确认后队列提交/只读刷新；旧材料保留，处理中不重复申请 |
+| web/certificates.html:19 | 刷新状态 | `refresh` | 本人CA确认后队列提交/只读刷新；旧材料保留，处理中不重复申请 |
+| web/index.html:43 | 重启 Xray | `restartCore('xray')` | 明确整组重启影响、单飞、重新读真实状态；中文错误 |
+| web/index.html:50 | 重启 sing-box | `restartCore('sing-box')` | 明确整组重启影响、单飞、重新读真实状态；中文错误 |
+| web/index.html:69 | 刷新状态 | `refreshStatus` | 只读刷新或页面草稿编辑；保存动作才提交，旧嵌入配置保持 |
+| web/index.html:137 | 刷新节点 | `fetchInbounds` | 只读刷新或页面草稿编辑；保存动作才提交，旧嵌入配置保持 |
+| web/index.html:138 | 创建直连节点 | `openSimpleOperation('direct')` | 默认共享操作组件；实例/内容/出口条件，失效阻止继续 |
+| web/index.html:139 | 创建中转节点 | `openSimpleOperation('relay')` | 默认共享操作组件；实例/内容/出口条件，失效阻止继续 |
+| web/index.html:146 | 清除 | `inboundSearch = ''` | 只读刷新或页面草稿编辑；保存动作才提交，旧嵌入配置保持 |
+| web/index.html:167 | 分享连接 | `openSimpleShare(scope.row)` | 默认共享操作组件；实例/内容/出口条件，失效阻止继续 |
+| web/index.html:169 | 设置 | `openSimpleEdit(scope.row)` | 默认共享操作组件；实例/内容/出口条件，失效阻止继续 |
+| web/index.html:170 | {{ scope.row.enable ? '停用' : '启用' }} | `toggleInbound(scope.row)` | 仅请求启停和实例条件；读取实际运行状态，不改凭据 |
+| web/index.html:179 | 完整高级编辑 | `openEditInbound(scope.row)` | 高级字段保留原协议/凭据；实例保护、证书选择、取消和失败保留 |
+| web/index.html:181 | 删除节点 | `deleteInbound(scope.row)` | 永久删除确认+实例条件，无旧DELETE兜底；已保存未应用分开 |
+| web/index.html:197 | 恢复默认 | `resetRoutingDefaults` | 只读刷新或页面草稿编辑；保存动作才提交，旧嵌入配置保持 |
+| web/index.html:198 | 保存并应用到订阅 | `saveRouting` | 只读刷新或页面草稿编辑；保存动作才提交，旧嵌入配置保持 |
+| web/index.html:291 | 全开 | `setCategoryEnabled(group.id, true)` | 只读刷新或页面草稿编辑；保存动作才提交，旧嵌入配置保持 |
+| web/index.html:297 | 全关 | `setCategoryEnabled(group.id, false)` | 只读刷新或页面草稿编辑；保存动作才提交，旧嵌入配置保持 |
+| web/index.html:332 | 添加区域 | `addIntranetZone` | 只读刷新或页面草稿编辑；保存动作才提交，旧嵌入配置保持 |
+| web/index.html:366 | 删除 | `removeIntranetZone(scope.$index)` | 只读刷新或页面草稿编辑；保存动作才提交，旧嵌入配置保持 |
+| web/index.html:442 | 复制 | `copySubscription(scope.row.format)` | 旧兼容显式交付；敏感响应只在本页，关闭/失效清除 |
+| web/index.html:453 | 刷新状态 | `refreshStatus` | 只读刷新或页面草稿编辑；保存动作才提交，旧嵌入配置保持 |
+| web/index.html:459 | 重启 {{ core === 'xray' ? 'Xray' : 'sing-box' }} | `restartCore(core)` | 明确整组重启影响、单飞、重新读真实状态；中文错误 |
+| web/index.html:479 | 上传站点（不可用） | `disabled` | 不可用操作明确禁用，不伪造上传成功 |
+| web/index.html:512 | 给手机或电脑用 手机 / 电脑 → 本机 → 网站 创建后获取连接链接或二维码。 | `nodeWizard.purpose = 'device'` | 旧兼容向导；原假凭据/取消/错误/生成/高级转入契约仍回归 |
+| web/index.html:515 | 给另一台服务器用 另一台服务器 → 本机 → 网站 本机提供出口，供另一台 V-UI 导入。 | `nodeWizard.purpose = 'server'` | 旧兼容向导；原假凭据/取消/错误/生成/高级转入契约仍回归 |
+| web/index.html:537 | 重试读取 | `loadWizardCertificates` | 旧兼容向导；原假凭据/取消/错误/生成/高级转入契约仍回归 |
+| web/index.html:538 | 重新读取 | `loadWizardCertificates` | 旧兼容向导；原假凭据/取消/错误/生成/高级转入契约仍回归 |
+| web/index.html:543 | 打开高级新建，选择其他协议或配置 | `wizardAdvanced` | 旧兼容向导；原假凭据/取消/错误/生成/高级转入契约仍回归 |
+| web/index.html:552 | {{ nodeWizard.purpose === 'device' ? '生成客户端链接 / 二维码' : '复制给另一台 V-UI' }} | `wizardDeliver` | 旧兼容向导；原假凭据/取消/错误/生成/高级转入契约仍回归 |
+| web/index.html:555 | 刷新节点列表和状态 | `refreshWizardResult` | 旧兼容向导；原假凭据/取消/错误/生成/高级转入契约仍回归 |
+| web/index.html:560 | 上一步 | `nodeWizard.step = 1` | 旧兼容向导；原假凭据/取消/错误/生成/高级转入契约仍回归 |
+| web/index.html:561 | {{ nodeWizard.step === 3 ? '返回节点列表' : '取消' }} | `closeNodeWizard` | 旧兼容向导；原假凭据/取消/错误/生成/高级转入契约仍回归 |
+| web/index.html:562 | 下一步 | `nodeWizard.step = 2` | 旧兼容向导；原假凭据/取消/错误/生成/高级转入契约仍回归 |
+| web/index.html:563 | 创建节点 | `createSimpleNode` | 旧兼容向导；原假凭据/取消/错误/生成/高级转入契约仍回归 |
+| web/index.html:699 | 重新读取证书 | `retryManagedCertificates` | 高级字段保留原协议/凭据；实例保护、证书选择、取消和失败保留 |
+| web/index.html:957 | 取消 | `beforeInboundEditorClose` | 高级字段保留原协议/凭据；实例保护、证书选择、取消和失败保留 |
+| web/index.html:958 | {{ editingInboundId ? '保存并应用' : '创建并应用' }} | `saveInbound` | 高级字段保留原协议/凭据；实例保护、证书选择、取消和失败保留 |
+| web/index.html:985 | 生成上游配置 | `requestUpstreamExport` | 旧兼容显式交付；敏感响应只在本页，关闭/失效清除 |
+| web/index.html:994 | 复制配置 | `copyUpstreamExport` | 旧兼容显式交付；敏感响应只在本页，关闭/失效清除 |
+| web/index.html:995 | 下载配置 | `downloadUpstreamExport` | 旧兼容显式交付；敏感响应只在本页，关闭/失效清除 |
+| web/index.html:1000 | 关闭并清除 | `closeUpstreamExport` | 旧兼容显式交付；敏感响应只在本页，关闭/失效清除 |
+| web/index.html:1013 | 复制链接 | `copyLink` | 旧兼容显式交付；敏感响应只在本页，关闭/失效清除 |
+| web/index.html:1014 | 重新获取 | `retryShare` | 旧兼容显式交付；敏感响应只在本页，关闭/失效清除 |
+| web/index.html:1018 | 关闭并清除 | `closeQrDialog` | 旧兼容显式交付；敏感响应只在本页，关闭/失效清除 |
+| web/maintenance.html:24 | 生成一次性维护链接 | `maintenance-create` | 三档预设仍需明确提交；默认只读30分钟，链接一次显示 |
+| web/maintenance.html:25 | 复制链接 | `maintenance-copy` | 仅本页凭据复制/清除，复制失败选中；结束中止读请求 |
+| web/maintenance.html:25 | 清除显示 | `maintenance-clear` | 仅本页凭据复制/清除，复制失败选中；结束中止读请求 |
+| web/maintenance.html:26 | 刷新授权 | `maintenance-refresh-grants` | 受scope限制的只读读取；失败不假称成功 |
+| web/maintenance.html:27 | 清除本页维护会话 | `maintenance-end` | 仅本页凭据复制/清除，复制失败选中；结束中止读请求 |
+| web/maintenance.html:30 | 读取安装版本与服务状态 | `maintenance-refresh-status` | 受scope限制的只读读取；失败不假称成功 |
+| web/maintenance.html:31 | 读取服务状态 | `status` | 受scope限制的只读读取；失败不假称成功 |
+| web/maintenance.html:31 | 创建私有备份 | `backup` | 固定动作、权限与影响确认；唯一任务提交，有界只读观察；恢复只选成功备份 |
+| web/maintenance.html:31 | 重启 V-UI | `restart` | 固定动作、权限与影响确认；唯一任务提交，有界只读观察；恢复只选成功备份 |
+| web/maintenance.html:31 | 启动 V-UI | `start` | 固定动作、权限与影响确认；唯一任务提交，有界只读观察；恢复只选成功备份 |
+| web/maintenance.html:31 | 停止 V-UI | `stop` | 固定动作、权限与影响确认；唯一任务提交，有界只读观察；恢复只选成功备份 |
+| web/maintenance.html:31 | 在线升级正式版 | `upgrade` | 固定动作、权限与影响确认；唯一任务提交，有界只读观察；恢复只选成功备份 |
+| web/maintenance.html:32 | 停机恢复该私有备份 | `maintenance-restore` | 固定动作、权限与影响确认；唯一任务提交，有界只读观察；恢复只选成功备份 |
+| web/maintenance.html:33 | 已核对任务记录，允许下一次操作 | `maintenance-task-ack` | 先读任务再明确确认结果，才解除未知写入锁 |
+| web/maintenance.html:34 | 刷新维护任务 | `maintenance-refresh-tasks` | 受scope限制的只读读取；失败不假称成功 |
+| web/maintenance.html:35 | 刷新记录 | `maintenance-refresh-audit` | 受scope限制的只读读取；失败不假称成功 |
+| web/maintenance.html:36 | 读取近期脱敏诊断 | `maintenance-refresh-logs` | 受scope限制的只读读取；失败不假称成功 |
+| web/proxy.html:14 | 打开只读预览 | `open-yaml-preview` | 高级只读或展开/关闭/清空操作，原接口权限和离开清理保持 |
+| web/proxy.html:16 | 配置本机向外转发 | `open-connection-setup` | 高级只读或展开/关闭/清空操作，原接口权限和离开清理保持 |
+| web/proxy.html:18 | 刷新服务器状态 | `refresh` | 高级只读或展开/关闭/清空操作，原接口权限和离开清理保持 |
+| web/proxy.html:22 | 核对后保留页面编辑 | `rebase` | 明确处理页面草稿冲突，不暗中应用服务器草稿 |
+| web/proxy.html:22 | 放弃编辑，载入服务器草稿 | `discard` | 明确处理页面草稿冲突，不暗中应用服务器草稿 |
+| web/proxy.html:25 | 刷新管理通道状态 | `tailscale-refresh` | 高级只读或展开/关闭/清空操作，原接口权限和离开清理保持 |
+| web/proxy.html:36 | 粘贴另一台服务器的连接配置 | `open-import` | 高级只读或展开/关闭/清空操作，原接口权限和离开清理保持 |
+| web/proxy.html:38 | 保存草稿 | `save` | 高级原始流程；CAS、源/事务键及明确核对保持，不成为默认步骤 |
+| web/proxy.html:38 | 检查已保存草稿 | `check` | 高级原始流程；CAS、源/事务键及明确核对保持，不成为默认步骤 |
+| web/proxy.html:38 | 应用已保存草稿 | `apply` | 高级原始流程；CAS、源/事务键及明确核对保持，不成为默认步骤 |
+| web/proxy.html:38 | 重试同一次应用 | `retry-apply` | 高级原始流程；CAS、源/事务键及明确核对保持，不成为默认步骤 |
+| web/proxy.html:41 | 确认以上内容并应用此修订 | `confirm-apply` | 高级原始流程；CAS、源/事务键及明确核对保持，不成为默认步骤 |
+| web/proxy.html:41 | 取消本次核对 | `cancel-apply-review` | 高级只读或展开/关闭/清空操作，原接口权限和离开清理保持 |
+| web/proxy.html:43 | 检查已保存上游线路 | `diagnostics` | 显式诊断服务同意、只操作自身有界任务 |
+| web/proxy.html:43 | 取消线路诊断 | `cancel-diagnostics` | 显式诊断服务同意、只操作自身有界任务 |
+| web/proxy.html:50 | 下载严格 Mihomo YAML | `export-mihomo` | 明确含凭据下载；活动修订/实际核心条件，失败不回退DIRECT |
+| web/proxy.html:50 | 下载严格 sing-box JSON | `export-singbox` | 明确含凭据下载；活动修订/实际核心条件，失败不回退DIRECT |
+| web/proxy.html:63 | 取消 | `close-import` | 高级只读或展开/关闭/清空操作，原接口权限和离开清理保持 |
+| web/proxy.html:64 | 预览可导入节点 | `preview-import` | 导入预览单独校验；保存确认候选/忽略项，保留严格字段 |
+| web/proxy.html:65 | 保存所选上游 | `save-import` | 导入预览单独校验；保存确认候选/忽略项，保留严格字段 |
+| web/proxy.html:67 | 关闭并清空 | `close-yaml-preview` | 高级只读或展开/关闭/清空操作，原接口权限和离开清理保持 |
+| web/proxy.html:73 | 生成只读报告 | `yaml-preview-submit` | 高级只读或展开/关闭/清空操作，原接口权限和离开清理保持 |
+| web/proxy.html:73 | 清空输入与报告 | `clear-yaml-preview` | 高级只读或展开/关闭/清空操作，原接口权限和离开清理保持 |
+| web/workspace.html:12 | 重试初次载入 | `initial-retry` | 只读重试或页面草稿编辑，刷新节点清旧选择，避免复用数字ID |
+| web/workspace.html:14 | 读取已保存设置 | `reload` | 客户端分流草稿/预览/保存边界，保留40项服务及修订冲突 |
+| web/workspace.html:14 | 预览草稿 | `preview` | 客户端分流草稿/预览/保存边界，保留40项服务及修订冲突 |
+| web/workspace.html:14 | 保存客户端分流 | `save` | 客户端分流草稿/预览/保存边界，保留40项服务及修订冲突 |
+| web/workspace.html:20 | 添加内网区域 | `add-zone` | 只读重试或页面草稿编辑，刷新节点清旧选择，避免复用数字ID |
+| web/workspace.html:24 | 刷新节点和订阅 | `refresh-grants` | 只读重试或页面草稿编辑，刷新节点清旧选择，避免复用数字ID |
+| web/workspace.html:30 | 生成订阅地址 | `create-grant` | 所显示完整节点身份修订、显式令牌交付；复制失败保留、离开清除 |
+| web/workspace.html:31 | 清除地址显示 | `forget` | 所显示完整节点身份修订、显式令牌交付；复制失败保留、离开清除 |
+| web/workspace.html:31 | 复制地址 | `copy` | 所显示完整节点身份修订、显式令牌交付；复制失败保留、离开清除 |
+| web/workspace.html:31 | 下载 Mihomo YAML | `download` | 所显示完整节点身份修订、显式令牌交付；复制失败保留、离开清除 |
+
+动态按钮核对：
+
+- `simple-operations.js`：三任务/基本编辑/统一出口返回、证书唯一/多选及本人申请、未知草稿继续/恢复、停止组/出口影响确认、创建与核对同一次请求、显式缺失绑定确认、普通/TCP交付/二维码/复制失败、局部启停/删除、订阅生成/轮换/撤销/清除、证书续期/自动续期状态、独立本地代理凭据交付。普通按钮不要求输入修订/任务ID/材料路径。
+- `maintenance.js`：动态撤销仅对应当前授权；任务列表只显示固定动作/状态/代码和时间；备份下拉仅接受真实成功备份ID。提交未知时需读取记录并显式解除，自动观察仅GET且有次数上限。
+- `certificates.js`：续期、自动续期、应用面板、选择并绑定已有节点、重试应用、下载公有证书链；既有停止偏好和失败旧材料保持；不提供私钥下载。
+- `workspace.js`：移除内网区为页面编辑；轮换明确旧地址失效、撤销明确客户端拉取后果；身份缺失/变化不允许轮换修复，必须重选创建。复制失败保留同一地址不重新颁发。
+- `proxy.js`：旧上游移除和诊断/导出动态控件仍留在高级区域，原CAS与pending恢复门禁保持。
+
+独审处理中；准确Actions与真实安装尚未完成。候选阶段不更改短入口20、不合并或发布21、不连接VPS。
+
+## 候选独审修复与本机有限检查
+
+唯一新增独审gpt-6.1-sol/high只读检查发现五项实际缺口：事件接收面、modal ID校验、分享GET→导出间实例竞态、同页确认范围漂移、HTTP200截断后可再次创建。已逐项修复，增加失败/恢复回归；审查者初步复核无其他确定阻断，最后差异待复核。本机184项Node合成状态/事件/导航/旧契约及维护会话、连接页3项和状态轮询3项通过；只涉及代码执行，不是浏览器渲染、真实核心或安装资格。新后端持久化/身份/实例导出回归须Actions。
+
+Actions历史：e84ad25的42343296288因模板检查按旧末尾div取范围失败；6dcb8b4的42343662389已执行约2700项单测但有五项失败（旧文案/旧入口/CSP假设及新测试重复no-store假设），没有宣称通过。已修正检查范围/新的明确文案与入口期望，保留原身份/权限/失败断言；核心与安装步骤尚无本批通过证据。新增Node真控制器→真实HTTP→固定核心的三任务端到端方法由既有loopback Actions运行；临时CA/假证书和账户，不连接生产或真实CA。

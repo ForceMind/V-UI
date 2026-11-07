@@ -31,6 +31,7 @@
     };
     const errors = {
         NODE_CONTENT_CHANGED:'节点设置已被其他操作修改，请刷新后重新选择，原配置保持。',
+        SHARE_NODE_CHANGED:'节点已变化，请重新读取后分享。',
         PROXY_REVISION_CONFLICT:'连接设置已被其他会话修改，请重新读取后确认。',
         PROXY_RECOVERY_REQUIRED:'服务器有待恢复操作，请先处理，当前运行设置不会被覆盖。',
         PROXY_RUNTIME_UNAVAILABLE:'服务器当前运行条件不满足，请重新检查节点组状态。',
@@ -181,7 +182,7 @@
             let value;
             try { value = await this.api('/api/proxy/profiles', 'POST', {format:choice.format || 'uri', content:choice.link,
                 candidate_index:choice.candidateIndex, acknowledged_ignored_sections:choice.ignored || []}, {'If-Match':'"'+this.snapshot.revision+'"'}); } catch(error) { if(this.intent&&error.status>=400&&error.status<500)this.intent.importUncertain=false;throw error; }
-            if (!value?.snapshot || !value.upstream_id || !REV.test(value.snapshot.revision)) fail('IMPORT_UNCONFIRMED', '出口保存结果未确认，请读取服务器状态，不要重复导入。');
+            if (!value?.snapshot || !value.upstream_id || !REV.test(value.snapshot.revision)) fail('IMPORT_UNCERTAIN', '出口保存结果未确认，请读取服务器状态，不要重复导入。');
             this.snapshot = value.snapshot; this.ownedRevision = value.snapshot.revision; this.intent.importUncertain=false;
             choice.upstreamId = value.upstream_id; choice.link = ''; this.changed({imported:true}); return value.upstream_id;
         }
@@ -192,8 +193,8 @@
             let next;
             try { next = await this.api('/api/proxy/settings', 'PUT', body, {'If-Match':'"'+this.snapshot.revision+'"'}); }
             catch(error) { if(this.intent&&error.status>=400&&error.status<500)this.intent.saveUncertain=false;throw error; }
-            if (this.intent) this.intent.saveUncertain=false;
-            if (!REV.test(next?.revision)) fail('SAVE_UNCONFIRMED', '设置保存结果未确认，请重新读取，不要重复提交。');
+            if (!REV.test(next?.revision)) fail('SETTINGS_UNCERTAIN', '设置保存结果未确认，请重新读取，不要重复提交。');
+            if(this.intent)this.intent.saveUncertain=false;
             this.snapshot = next; this.ownedRevision = next.revision;
         }
         stoppedStamp() {
@@ -277,7 +278,7 @@
                     if (!this.intent || error.status === 401 || error.code === 'ENDED') throw error;
                     this.changed({nodes:true});
                     if(error.detail?.saved===false){this.intent.nodeSent=false;throw error;}
-                    if (error.detail?.saved === true || !error.status || error.status >= 500 || error.status === 409)
+                    if (error.detail?.saved === true || !Number.isInteger(error.status) || error.status < 400 || error.status >= 500 || error.status === 409)
                         fail('NODE_UNCERTAIN', '节点可能已经保存。点击“核对并完成”，不会重复创建。');
                     this.intent.nodeSent = false; throw error;
                 }
@@ -409,12 +410,14 @@
                 this.changed({nodes:true}); return this.nodes.find(row => row.id === id);
             } finally { this.busy = false; }
         }
-        async share(id, expected, server, upstream = false, format = 'uri') {
-            this.require('share'); const row = await this.exactNode(id, expected);
+        async share(id, expected, server, upstream = false, format = 'uri', expectedContent = null) {
+            this.require('share'); const row = await this.exactNode(id, expected, expectedContent);
+            if(!REV.test(row.content_revision||''))fail('NODE_CHANGED','节点安全条件未确认，请刷新后重新分享。');
+            const conditions={expected_instance_revision:expected,expected_content_revision:row.content_revision};
             if (upstream ? row.upstream_export_eligible !== true : row.share_eligible !== true)
                 fail('SHARE_UNAVAILABLE', upstream ? '该旧节点不能作为TCP出口。可以另建兼容出口节点，原配置保持。' : '这个节点当前不具备分享资格，请先查看运行和配置状态。');
-            if (upstream) return await this.api('/api/subscription/upstream/'+id, 'POST', {format, server, acknowledge_tcp_only:true});
-            return await this.api('/api/subscription/link/'+id+'?host='+encodeURIComponent(server));
+            if (upstream) return await this.api('/api/subscription/upstream/'+id, 'POST', {format, server, acknowledge_tcp_only:true,...conditions});
+            return await this.api('/api/subscription/link/'+id+'?host='+encodeURIComponent(server)+'&expected_instance_revision='+expected+'&expected_content_revision='+row.content_revision);
         }
         async localConnection() {
             this.require('relay','share');

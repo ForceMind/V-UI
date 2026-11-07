@@ -169,14 +169,14 @@ test('same-instance UUID/password edits and unrelated inventory changes do not c
 });
 test('delete confirmation captures row identity before await and survives replacement/list refresh safely', async () => {
     const f = fixture(), row = await f.load(), deleting = f.state.deleteInbound(row);
-    assert.match(f.confirmations[0][0], /Original node:10443/);
+    assert.match(f.confirmations[0][0], /Original node.*10443/);
     const replacement = clone(f.replace()); await f.state.fetchInbounds();
     f.confirm(); await deleting;
     assert.deepEqual(f.writes, [{method:'POST', url:'/api/inbounds/1/delete', body:{expected_instance_revision:A}}]);
     assert.deepEqual(f.rows.get(1), replacement); assertConflict(f); assertNoSuccess(f);
     // A refreshed row must be selected and confirmed anew before replacement deletion.
     const next = f.state.deleteInbound(f.state.inbounds.value[0]); assert.equal(f.confirmations.length, 2);
-    assert.match(f.confirmations[1][0], /Replacement node:10444/); f.confirm(); await next;
+    assert.match(f.confirmations[1][0], /Replacement node.*10444/); f.confirm(); await next;
     assert.equal(f.rows.has(1), false); assert.equal(f.writes[1].body.expected_instance_revision, B);
 });
 for (const status of [401, 403, 404, 405, 422]) {

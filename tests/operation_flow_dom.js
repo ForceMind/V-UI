@@ -99,7 +99,7 @@ test('late page response cannot trigger subsequent writes or retained secrets',a
     await assert.rejects(run,e=>e.code==='ENDED');assert.equal(f.calls.some(c=>c.path==='/api/proxy/apply'),false);assert.equal(f.nodes.length,0);
 });
 test('share requires exact displayed instance and explicit secret-purpose call',async()=>{
-    const old={id:2,mutation_revision:rev(80),share_eligible:true};const f=fixture({active:true,nodes:[old]});await f.flow.load();
+    const old={id:2,mutation_revision:rev(80),content_revision:rev(81),share_eligible:true};const f=fixture({active:true,nodes:[old]});await f.flow.load();
     await assert.rejects(f.flow.share(2,rev(79),'vpn.example.test'),e=>e.code==='NODE_CHANGED');
     assert.equal(f.calls.some(c=>c.path.startsWith('/api/subscription')),false);
     assert.equal(await f.flow.share(2,rev(80),'vpn.example.test'),'vless://fake-owned-secret');
@@ -109,4 +109,14 @@ test('host disable uncertain retry never re-enables the proxy through an earlier
     f.flow.intent={task:'host',choice:f.choice(),nodeSent:false};
     await assert.rejects(f.flow.disableHost(),e=>e.code==='APPLY_UNCERTAIN');const result=await f.flow.resolve();
     assert.equal(result.kind,'host-off');assert.equal(f.state.settings.local_proxy_enabled,false);
+});
+test('a truncated HTTP200 create reply is uncertain, never permits a second creation',async()=>{
+    const f=fixture({active:true});const api=f.flow.request;let lost=false;
+    f.flow.request=async(path,method,body,options)=>{const result=await api(path,method,body,options);
+        if(path==='/api/inbounds'&&method==='POST'&&!lost){lost=true;throw Object.assign(new Error('Truncated real response'),{status:200});}return result;};
+    await f.flow.load();await assert.rejects(f.flow.run('direct',f.choice()),e=>e.code==='NODE_UNCERTAIN');
+    assert.equal(f.flow.intent.nodeSent,true);assert.equal(f.nodes.length,1);
+    await assert.rejects(f.flow.run('direct',{...f.choice(),port:11443}),e=>e.code==='NODE_UNCERTAIN');
+    const result=await f.flow.resolve();assert.equal(result.kind,'node');assert.equal(f.nodes.length,1);
+    assert.equal(f.calls.filter(c=>c.method==='POST'&&c.path==='/api/inbounds').length,1);
 });

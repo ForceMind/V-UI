@@ -140,3 +140,14 @@ TUIC URI 是固定 Mihomo converter 的非官方客户端约定，不是官方�
 
 
 现代 PUT 另有已复现的显式转换边界：已有 REALITY 节点仅提交 certificate_id（包括空 profile 或未指定 security）时，旧代码会合成 TLS 并改变节点/绑定。v0.4.7 要求明确 profile.security=tls 才能转换并绑定；未明确请求在读取证书材料前拒绝，节点/绑定保持不变。显式 REALITY→TLS 正向回归保留 UUID。此事实与上述旧绑定后续 reapply 未覆盖 REALITY 的复现是两个不同路径，均只使用隔离假数据。
+
+## v0.4.21 简单操作候选契约
+
+- 普通节点摘要和特权编辑器新增`content_revision`，与原`mutation_revision`区分。后者仍仅绑定实例，前者绑定同实例的配置（含隐含凭据、端口、启停等，不计流量）；只返回带私有实例随机盐的摘要。现代PUT可同时携带`expected_instance_revision`和`expected_content_revision`，同SQLite写事务核对；内容条件不接受单独无实例使用。省略新字段保留旧API语义，显式null无效。
+- 新节点POST/PUT可传`expected_proxy_revision`，约束代理草稿与活动修订一致且无待恢复事务。写前及运行应用前均核对；保存与应用分开提交，409的`saved`/`applied`不得忽略。绑定证书不持有跨层嵌套锁，不借此自动覆盖未知手工材料。
+- `GET /api/subscription/link/{id}`可带查询参数`expected_instance_revision`、`expected_content_revision`；`POST /api/subscription/upstream/{id}`接受同名可选正文条件。被核对的同一个ORM对象用于导出，无第二次按ID读取；条件失败409、无凭据返回。新简单操作始终携带，旧无条件调用兼容。
+- `POST /api/proxy/check`在真实检查结果中增加非敏感`runtime_fingerprint`；新`/apply`传回该字段与原`base_revision`/`source_fingerprint`及同一个`Idempotency-Key`。新事务在应用前核对停止/启用偏好；已提交同键重放只读原结果，不恢复后来手动停止的服务。前端另读回实际核心和当前活动修订。
+- `POST /api/proxy/discard-draft`正文严格为`base_revision`和`active_revision`，两者均64位十六进制，要求无pending。只把草稿指回既有活动不可变文档，包含其精确密码引用；不复制公开字段、不改变进程、不删除历史和秘密文件。需relay权限。
+- `POST /api/proxy/local-connection`正文严格为`base_revision`。明确返回已验证运行的活动127.0.0.1入口地址、端口和独立本地账号密码，拒绝pending、停止、核心/文件/策略不一致；不返回上游UUID、不执行命令、不改系统代理。管理员或同时有relay和share的维护授权才能访问，禁止query和额外字段，no-store/no-referrer。普通状态摘要仍脱敏。
+
+维护Bearer仅保存在当前页闭包，通过同一来源受控transport转发，离开或401清除；新同页节点、订阅、证书和任务操作不跳转管理员cookie页面。所有新字段/接口为候选，实际资格以准确提交Actions记录为准。

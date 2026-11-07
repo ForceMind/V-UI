@@ -141,8 +141,8 @@ class LocalConnectionApiTests(unittest.TestCase):
         response = self.post()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['password'], FAKE_PASSWORD)
-        self.assertEqual(response.headers['cache-control'], 'no-store')
-        self.assertEqual(response.headers['referrer-policy'], 'no-referrer')
+        self.assertEqual(set(v.strip() for v in response.headers['cache-control'].split(',')), {'no-store'})
+        self.assertEqual(set(v.strip() for v in response.headers['referrer-policy'].split(',')), {'no-referrer'})
         self.assertEqual(self.client.get('/api/proxy/local-connection').status_code, 405)
         self.local.reset_mock()
         for body in ({'base_revision':None}, {'base_revision':'a'*64,'password':'injected'}, {'base_revision':True}):
@@ -185,3 +185,52 @@ class NodeContentGuardTests(unittest.TestCase):
             'expected_content_revision':updated['content_revision']})
         self.assertEqual(status, 200, response)
         self.assertEqual(self.row(node)['settings'], before['settings'])
+
+
+class NodeShareConditionTests(NodeContentGuardTests):
+    # Override the inherited single test to avoid discovering it twice.
+    test_same_instance_concurrent_credentials_edit_blocks_stale_basic_save = None
+
+    def test_both_exports_reject_recycled_id_at_the_actual_export_read(self):
+        from fastapi import HTTPException
+        from starlette.requests import Request
+        from app.api import subscription
+        from app.models import database
+        node, _ = self.create()
+        before = self.editor(node)
+        self.assertEqual(self.request('DELETE', node)[0], 200)
+        replacement, _ = self.create('replacement',11443)
+        self.assertEqual(replacement,node)
+        request = Request({'type':'http','method':'POST','path':'/','headers':[],
+                           'scheme':'https','server':('panel.example.test',443)})
+        request.state.admin={'id':1}
+        conditions={'expected_instance_revision':before['mutation_revision'],
+                    'expected_content_revision':before['content_revision']}
+        with database.SessionLocal() as db, patch.object(subscription,'share_link') as ordinary, \
+                patch.object(subscription,'export_tcp_upstream') as upstream:
+            for kind in ('ordinary','upstream'):
+                with self.subTest(kind=kind),self.assertRaises(HTTPException) as rejected:
+                    if kind=='ordinary':subscription.inbound_share_link(node,request,host='vpn.example.test',db=db,**conditions)
+                    else:subscription.inbound_tcp_upstream_export(subscription.TCPUpstreamExportPayload(
+                        format='uri',server='vpn.example.test',acknowledge_tcp_only=True,**conditions),request,inbound_id=node,db=db)
+                self.assertEqual(rejected.exception.status_code,409)
+            ordinary.assert_not_called();upstream.assert_not_called()
+
+    def test_same_instance_content_change_rejects_old_delivery_and_legacy_omission_stays_supported(self):
+        from fastapi import HTTPException
+        from starlette.requests import Request
+        from app.api import subscription
+        from app.models import database
+        node,_=self.create();before=self.editor(node)
+        self.assertEqual(self.request('PUT',node,{'remark':'changed name'})[0],200)
+        request=Request({'type':'http','method':'GET','path':'/','headers':[],
+                         'scheme':'https','server':('panel.example.test',443)})
+        request.state.admin={'id':1}
+        conditions={'expected_instance_revision':before['mutation_revision'],
+                    'expected_content_revision':before['content_revision']}
+        with database.SessionLocal() as db,patch.object(subscription,'share_link',return_value='fake-legacy-link') as export:
+            with self.assertRaises(HTTPException) as rejected:
+                subscription.inbound_share_link(node,request,host='vpn.example.test',db=db,**conditions)
+            self.assertEqual(rejected.exception.status_code,409);export.assert_not_called()
+            self.assertEqual(subscription.inbound_share_link(node,request,host='vpn.example.test',db=db),'fake-legacy-link')
+            export.assert_called_once()

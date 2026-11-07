@@ -1,3 +1,7 @@
+## v0.4.21 简单操作完整改版（候选开发与验收）
+
+[唯一计划、按钮核对与证据](SIMPLE_OPERATIONS_PROGRESS.md)。三个任务预置、同页授权维护、节点设置/分享、证书/订阅/备份任务一并实施。原配置与数据保持；构建和安装只Actions，浏览器未验证。稳定版为已公开20，候选21未发布，短入口仍固定20。下方较早“发布准备/当前”按历史日期解释。
+
 ## **v0.4.20** systemd / sing-box 启动修复（发布准备）
 
 仅为panel放行AF_NETLINK，保持非root、NoNewPrivileges和空capabilities；HTTP01/OpenRC不变。新增真实受管服务Sing/Xray共存和公开19→候选升级回归。当前尚未公开20，稳定19与短入口不覆盖；[范围及准确证据](SING_BOX_SYSTEMD_0420.md)。构建和安装仅Actions，浏览器未验证。

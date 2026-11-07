@@ -10,7 +10,7 @@ function screen(options={}){
     const events={},clipboard=[],confirms=[];let fetches=0;
     const context={document,VUI_OPERATION_FLOW:api,location:{pathname:'/maintenance',hash:'',hostname:'panel.example.test'},
         confirm:text=>{confirms.push(text);return true;},navigator:{clipboard:{writeText:async value=>{if(options.clipboardFailure)throw new Error('synthetic denied');clipboard.push(value);}}},
-        addEventListener:(name,fn)=>{(events[name]??=[]).push(fn);},removeEventListener:()=>{},
+        addEventListener:(name,fn)=>{(events[name]??=[]).push(fn);},dispatchEvent:event=>{for(const fn of events[event.type]||[])fn(event);},removeEventListener:()=>{},
         CustomEvent:class{constructor(type,options={}){this.type=type;this.detail=options.detail;}},
         setTimeout,clearTimeout,AbortController,fetch:async()=>{fetches++;throw new Error('Unexpected cookie transport');},
         VUI_NAV:{guard:()=>()=>{},modal:{open(){},close(){}},replaceLogin(){throw new Error('Remote view must not use administrator-cookie redirect');}}};
@@ -83,4 +83,63 @@ test('rendered node names and imported labels are text, never interpreted HTML',
     const root=f.document.createElement('div');f.document.body.append(root);
     const view=new (f.view.constructor)(root,{request:f.api,remote:true});await settle();
     assert.ok(view.list.textContent.includes('<img src=x'));assert.equal(view.list.querySelector('img'),null);view.destroy();
+});
+test('refresh keeps current typed node settings without storing them or carrying confirmation',async()=>{
+    const f=screen({active:true,upstream:true});await f.view.open('relay');
+    f.view.fields.name.value='保留我的节点';f.view.fields.port.value='19443';f.view.dirty=true;
+    f.view.fields.upstream.value='new';f.view.fields.link.value='vless://fake-temporary-link';
+    await f.view.refresh();
+    assert.equal(f.view.fields.name.value,'保留我的节点');assert.equal(f.view.fields.port.value,'19443');
+    assert.equal(f.view.fields.link.value,'vless://fake-temporary-link');
+    assert.equal(f.view.fields.impact.checked,false);
+    f.view.close();assert.equal(f.view.secret,'');assert.equal(f.view.savedForm,null);
+});
+test('subscription presets use the exact displayed inventory condition and one explicit POST',async()=>{
+    const f=screen({active:true});let body;
+    f.view.flow.request=async(path,method='GET',data,options={})=>{
+        if(path==='/api/inbounds')return {value:[{id:4,remark:'我的节点',port:10443,enable:true,share_eligible:true}],nodeRevision:rev(904)};
+        if(path==='/api/subscription/mihomo-warnings')return [];
+        if(path==='/api/subscriptions'&&method==='GET')return [];
+        if(path==='/api/subscriptions'&&method==='POST'){assert.equal(body,undefined);body=data;return {id:1,paths:{'mihomo.yaml':'/sub/fake_token/mihomo.yaml'}};}
+        throw new Error('Unexpected subscription call');
+    };
+    await f.view.subscriptions();const form=f.view.content.querySelector('form');assert.ok(form);
+    assert.equal(form.querySelector('input[type=checkbox]').checked,true);
+    form.dispatchEvent({type:'submit'});await settle();
+    assert.equal(body.expected_node_revision,rev(904));assert.equal(body.inbound_ids.join(','),'4');
+    assert.equal(body.formats.join(','),'mihomo.yaml');assert.equal(body.expires_days,90);
+    assert.ok(button(f,'复制订阅地址'));form.dispatchEvent({type:'submit'});await settle();
+    button(f,'清除地址显示').click();assert.equal(f.view.secret,'');
+});
+test('missing inventory header blocks subscription creation, and scopes cannot be broadened by its tabs',async()=>{
+    const f=screen({active:true});f.view.flow.request=async path=>path==='/api/inbounds'?{value:[],nodeRevision:null}:[];
+    await f.view.subscriptions();assert.equal(button(f,'生成订阅地址'),undefined);
+    const r=screen({active:true,scopes:['diagnose']});assert.equal(button(r,'订阅分享').disabled,true);
+    await r.view.subscriptions();assert.ok(r.view.problem.textContent.includes('维护授权'));assert.equal(r.calls.some(c=>c.path==='/api/subscriptions'),false);
+});
+test('certificate setup submits once, follows existing job, then returns to the unchanged node inputs',async()=>{
+    const f=screen({active:true});f.certs.length=0;f.view.options.remote=false;await f.view.open('direct');
+    f.view.fields.name.value='证书后继续';f.view.fields.port.value='19443';f.view.dirty=true;
+    let submitted=0;
+    const original=f.view.flow.request;
+    f.view.flow.request=async(path,method,body,options)=>{
+        if(path==='/api/certificates'&&method==='POST'){submitted++;f.certs.push({id:'c'.repeat(32),domain:'vpn.example.test',environment:'production',revision:rev(999),days_remaining:90});return {id:'d'.repeat(32),state:'queued'};}
+        if(path.startsWith('/api/certificates/jobs/'))return {state:'succeeded'};
+        return original(path,method,body,options);
+    };
+    f.view.certificateSetup();f.view.certificateSetup();assert.equal(f.root.querySelectorAll('.ops-certificate').length,1);
+    const box=f.root.querySelector('.ops-certificate');box.querySelector('input[type=email]').value='fake@example.test';box.querySelector('input[type=checkbox]').checked=true;
+    button(f,'申请正式证书').click();await settle();
+    assert.equal(submitted,1);assert.equal(f.view.fields.name.value,'证书后继续');assert.equal(f.view.fields.port.value,'19443');
+    assert.equal(f.view.submit.disabled,false);assert.equal(f.root.querySelector('.ops-certificate'),null);
+});
+test('scope confirmations freeze the displayed list and are invalidated by same-page node changes',async()=>{
+    const f=screen({active:true,upstream:true,settings:{local_proxy_enabled:true,local_username:'old',local_password_set:true}});await f.view.open('host');
+    f.view.fields.upstream.value='new';f.view.fields.upstream.dispatchEvent({type:'change',bubbles:true});f.view.fields.link.value='vless://fake-new';f.view.fields.link.dispatchEvent({type:'input',bubbles:true});
+    f.view.fields.impact.checked=true;f.view.fields.impact.dispatchEvent({type:'change',bubbles:true});
+    const acknowledged=f.view.choice().impactStamp;assert.ok(acknowledged);
+    f.view.flow.nodes.push({id:9,remark:'刚启用的节点',core:'sing-box',enable:true,routing_mode:'relay',mutation_revision:rev(910),content_revision:rev(911)});
+    assert.equal(f.view.choice().impactStamp,acknowledged,'Reading choice cannot broaden the acknowledged scope');
+    f.view.changed({nodes:true});assert.equal(f.view.fields.impact.checked,false);assert.equal(f.view.choice().impactStamp,null);
+    assert.ok(f.view.fields.impactList.textContent.includes('刚启用的节点'));assert.equal(f.view.submit.disabled,true);
 });

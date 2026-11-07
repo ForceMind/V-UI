@@ -1309,7 +1309,7 @@ const app = createApp({
                     await Promise.all([fetchInbounds(), fetchCoreStatus.fresh()]);
                     return;
                 }
-                ElMessage.error('删除节点未完成，请刷新节点和运行状态后核对。');
+                ElMessage.error((error.response?.status===409&&typeof detail==='string'&&detail===inboundInstanceChanged)?'节点已发生变化，请刷新后重新选择。':'删除节点未完成，请刷新节点和运行状态后核对。');
             } finally { deletingInbound = false; }
         };
 

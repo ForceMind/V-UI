@@ -214,8 +214,9 @@ class ProxyPageRouteTests(unittest.TestCase):
             response = client.get('/proxy')
             self.assertEqual(response.status_code, 200)
             self.assertIn('id="proxy-workspace"', response.text)
-            self.assertEqual(response.headers['content-security-policy'],
+            self.assertEqual(response.headers['content-security-policy'].replace("img-src 'self' data:","img-src 'self'"),
                              client.get('/certificates').headers['content-security-policy'])
+            self.assertNotIn("script-src 'self' data:",response.headers['content-security-policy'])
             self.assertIn("script-src 'self'", response.headers['content-security-policy'])
             self.assertIn("connect-src 'self'", response.headers['content-security-policy'])
             self.assertEqual(response.headers['cache-control'], 'no-store')

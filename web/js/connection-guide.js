@@ -7,6 +7,8 @@
     const title = document.getElementById('connection-setup-title');
     if (!open || !section || !title) return;
     open.addEventListener('click', () => {
+        const advanced=document.getElementById('connection-advanced');
+        if(advanced)advanced.open=true;
         section.open = true;
         title.focus();
     });
