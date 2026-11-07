@@ -1,34 +1,54 @@
-# v0.4.22 维护分享查询修复：唯一计划与证据
+# v0.4.22 维护分享查询修复：计划与证据
 
-用户对明确的最小修复/独审/Actions非浏览器/正常合并公开22/入口/备份远程升级方案回复“是”。授权已完整取得，版本专属发布和后续入口无需重复确认；所有动作以其准确门禁成功为前提。原数据、凭据、证书、协议、路由、proxy开关、核心与旧资产保持，不browser、不本机构建安装，不源码热改/SSH/防火墙，不将运维或敏感载荷公开。私有本地敏感导出只沿用户已明确批准的目的地，不能猜测其他目的地许可。
+本轮最小修复、独审、Actions非浏览器验收、正常dev→main合并、公开22、独立短入口切换及私有备份后维护升级已获明确授权。配置、凭据、证书、协议、路由、代理开关、核心和旧资产保持。构建与安装仅在GitHub Actions执行，浏览器未验证；不源码热改、不修改SSH或防火墙。运维明细及敏感载荷仅私存，不进入公开记录。
 
-## 根因和边界
+## 根因与修复
 
-公开21的普通分享API已接受两个64hex可选条件，并在同ORM对象核对instance/content后导出；共用维护UI也已发送。但AdminAuthMiddleware在Bearer分支的subscription query白名单只有core/host，先返回422。TCP用途JSON POST不经过该query问题。修复只在现有精确GET capability模板`/api/subscription/link/{inbound_id}`增加这两个参数，保留同实例内容保护、旧无条件/instance-only兼容、重复/未知/token query拒绝、scope和来源校验；不全namespace放开，也不移除前端条件。
+v0.4.21的普通分享API已经接受实例和内容两个修订条件，并在同一ORM对象上原子核对；维护UI也已经发送它们。维护Bearer中间件的查询白名单仍仅接受`core`/`host`，请求因此提前返回422。TCP上游用途JSON POST不受此问题影响。
 
-私有验收记录不替代本批22准确资格；具体环境、载荷与比对结果仅私存，不写公开记录。
+仅对既有精确GET capability `/api/subscription/link/{inbound_id}`追加`expected_instance_revision`和`expected_content_revision`。未知、重复及凭据查询参数仍拒绝；scope、Origin及原API原子校验保持。旧无条件与仅实例条件调用保持兼容，内容条件仍必须伴随实例条件。其他导出路径和方法不开放这两个查询字段。
 
-## 当前交付与顺序
+新增七项真实ASGI/临时SQLite/grant/exchange/Bearer HTTP回归，覆盖成功分享、回收ID、同实例内容变化、非法/重复/未知参数、权限与来源。未mock中间件，使用假凭据，不运行浏览器或真实核心。
 
-1. app/middleware/auth.py最小白名单及tests/test_maintenance_share_query.py真实ASGI/SQLite/grant/exchange/Bearer回归；只假凭据、不核心/CA/browser。准确公共RPC正向必须覆盖真实中间件，不能仅调用API函数或mock掉鉴权。
-2. 版本22和必要的公开21→22真实保数据门槛。21已包含content_revision，所有旧字段必须完全一致；14-20的原新增派生字段契约保持，私有DB/材料/订阅快照比较不变。
-3. 产品/必要CI修复独审并冻结；其后仅22专属严格非browser发布门禁及直接文档。准确候选/dev/main各自九组12jobs、仅原12browser步骤可skip，同源4目标、新装和公开14/15/16/17/19/20/21升级全过才晋升，不继承21绿灯、不发布时重建。
-4. 匿名核tag/latest/19资产digest与真实installer/SHA256SUMS字节、旧21资产保持后独立切短入口，再核入口候选/dev/main准确九组及实际main URL。最后私有服务器备份、单次维护升级/GET观察、元数据与真实分享双CAS及静态served字节读回。
+## 已完成的应用验收
 
-## 文件责任与当前进度
+产品与必要升级检查冻结于`72570cc449c2b4b8ac933588894360a5b284e329`。其后应用发布准备仅允许三项门禁文件与直接文档共13项普通文件变化；22专属flag不能扩大旧21例外，所有旧flag互斥。
 
-worker仅middleware及新增HTTP测试；root仅VERSION/main.py/install.sh严格版本、必要安装CI/helper/合同、直接说明；发布门禁worker后续仅publisher/publish.yml/门禁测试；同一只读审查者复核各有界差异，不递归不超过5个新代理，旧WIP保留。
+| 阶段 | 准确提交 | 结果与安装证据 |
+| --- | --- | --- |
+| 候选 | `5d562529438bcbeabc562143ed747bfc772dce30` | 九组/12 jobs成功；[真实安装与七旧版升级](https://github.com/ForceMind/V-UI/actions/runs/42388410843) |
+| dev（PR137普通合并） | `70bf4a0dc4b894650b2178f67399ab0a142cf822` | 九组/12 jobs成功；[真实安装与七旧版升级](https://github.com/ForceMind/V-UI/actions/runs/42391924480) |
+| main（PR138普通合并） | `558687a76cd29f4e4735284926eb05bf6664472e` | 九组/12 jobs成功；[真实安装与七旧版升级](https://github.com/ForceMind/V-UI/actions/runs/42395305687) |
 
-- [x] 重新核main/dev/公开21，建立release/v0.4.22，未提交原xcrun_db保持。
-- [x] 最小修复与7方法真实Bearer HTTP回归源码完成，独审/AST/差异通过；后端实际运行留Actions。
-- [ ] 22专属严格发布准备及准确候选/dev/main Actions/四目标/真实安装和七旧版升级。
-- [ ] 正常公开22与独立短入口准确验收。
-- [ ] 服务器私有备份与单次远程升级/实际双CAS分享及配置健康读回。
+三个内容树均为`a9000284a7308fccee5ca795dca5dc5c5390dbc0`，两次合并的双父提交及树已回读。各阶段逐项核验最新九组、全部12 jobs和必要步骤，仅12个原有明列浏览器步骤未运行。新装、不可变公开14/15/16/17/19/20/21升级、固定核心、模板、netlink、完整链路和短入口均为必需。四目标只晋升同一main提交的已验制品，发布时不重建。
 
-本机仅AST/可行纯fixture检查，后端依赖/真实构建安装都在Actions。必要升级fixture12项纯测试通过，新增21字段不允许任意漂移；真实升级仍待准确Actions。22尚未发布，当前短入口和服务器均不能据此记录冒称已22。
+候选测试组实际执行2709项（233项按各自条件跳过），其中新增七项分享HTTP回归全部实际运行通过；固定核心校验另行通过。纯门禁133项、独审新增11项mock及公开升级fixture12项均通过，但不替代上述准确Actions与真实安装资格。
 
-产品独审收口：精确capability追加两参数、原API/scope/来源/未知和重复参数拒绝保持；新增真实ASGI授权链未mock中间件；公开21响应全相等及原六版/私有数据保护保持。当前只做必要版本/CI/直接说明，不提前换入口；后端实际运行与真实资格待准确Actions。独审发现的计划中运维信息已在提交前通用化，具体记录仅私存。
+公开21已包含`content_revision`，21→22必须保持完整响应字段相等，不能再作为新增字段放宽；14–20的原新增派生字段契约保持。数据库、证书材料与订阅快照比较未更改。
 
-产品冻结点为72570cc449c2b4b8ac933588894360a5b284e329，之后仅3门禁文件及本记录/直接说明13项allowlist可变。22专属flag、旧flag互斥、七旧版/新装/真实HTTP所在Run tests/模板/netlink/fullchain/short、精确九组12jobs与12明列browser skip和同源四目标晋升已实现。133项纯门禁测试通过，AST/diff/冻结完整字节与步骤名称已核；最终独审及准确候选资格另行结算，不以本机fixture替代Actions。
+### 保留的早期失败
 
-22门禁独审收口：三文件完整hash与worker值相同，独审者定向新增11项纯mock通过且未发现重要问题；产品725冻结与13项普通文件scope、旧21例外语义、互斥/CLI/workflow/正文、七旧版/九组12jobs及同源四目标保持。当前只完成源码与有限mock资格，最终候选Actions尚待，不能宣称已合并/发布22。所有公开记录仅产品/CI，不含具体运维数据或载荷。
+产品冻结点的[手动测试42387952171](https://github.com/ForceMind/V-UI/actions/runs/42387952171)失败：旧21发布测试直接读取新VERSION22，导致`VERSION differs`及后续scope调用断言失败。七项新HTTP回归在该次已全部通过。最终发布准备将旧21 fixture的版本输入明确固定为21，未放宽生产门禁；最终候选/dev/main重新各自完成上述准确验收。早期失败不计为成功。
+
+## 已公开的正式应用
+
+[官方发布流程42398527616](https://github.com/ForceMind/V-UI/actions/runs/42398527616)使用22专属`maintenance_share_no_browser`门禁，晋升main `558687a76cd29f4e4735284926eb05bf6664472e`的受验制品，公开[Release v0.4.22](https://github.com/ForceMind/V-UI/releases/tag/v0.4.22)，Release ID为437741132。
+
+匿名TLS读回确认tag/latest、19项资产集合、GitHub digest、真实`install.sh`/完整`SHA256SUMS`/`RELEASE.json`及source/version一致。旧21 Release ID及每项资产ID、大小、digest保持。
+
+- 安装器真实字节SHA-256：`a20cc30d156ddfb74f2a451cf3642d050a863267b2f9b76804ec3539db8f48eb`。
+- 完整SHA256SUMS真实字节SHA-256：`3401b6957bad51e6f129a97273c388a7657fd6b3bf939a2f2e4fa0f4e37475b4`。
+
+## 短入口与后续交付
+
+本提交复用本版本分支，仅切`setup.sh`版本与双摘要、`short-install.yml`冻结公开源及两项直接合同、直接说明。公开应用源固定为558687a，不能用后续入口SHA重标或重新发布22。保留已安装先本地菜单、管理/退出不下载、仅升级/修复下载以及原安全检查。拒绝旧21、未来23和重复22参数；历史七版升级fixture及其他CI/helper保持。
+
+- [x] 最小产品修复、真实HTTP回归及独审。
+- [x] 严格22门禁独审、准确候选/dev/main与同源四目标、新装及七旧版升级。
+- [x] 正常公开22、独立匿名资产/真实摘要核验，旧21资产保持。
+- [ ] 入口源码独审及其准确候选/dev/main九组验收，实际`main/setup.sh`公开URL安装验证。
+- [ ] 入口完成后，按授权服务器私有备份、单次维护升级、原配置数据及真实双CAS分享和健康读回；具体结果仅私存。
+
+入口与运维是应用公开后的独立阶段，未完成项不由应用发布的绿灯代替。阶段结果以相应PR/Actions及私有操作记录回读为准，不在此公开服务器标识、任务、凭据、导出内容或备份。
+
+入口源码独审完成，13项差异无阻断；20项非PTY纯夹具、AST、Bash语法、文档与差异检查通过。完整终端交互和实际安装留Actions，不新增依赖。入口setup字节SHA-256为`a33f3dcf5cc64ab97e7e33764f3847b86c9ed70d6d88fb6ed3aa357c8fa0951a`，应用与安装器等冻结字节和历史七版fixture保持。此时入口自身准确Actions和实际main URL仍待完成。
