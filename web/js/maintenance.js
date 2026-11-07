@@ -16,9 +16,11 @@
         let operationView = null;
         let token = '', admin = false, ended = false, epoch = 0, busy = false, scopes = [], issuedID = '';
         const controllers = new Set();
+        let taskTimer=null, taskSubmissionUncertain=false, watchingTask=null;
         const notice = value => { el('maintenance-notice').textContent = value; };
         const clearLink = () => { el('maintenance-link').value = ''; el('maintenance-issued').hidden = true; issuedID = ''; };
         const end = () => {
+            clearTimeout(taskTimer);watchingTask=null;taskSubmissionUncertain=false;
             epoch++; ended = true; operationView?.destroy();operationView=null;token = ''; grant = ''; clearLink();
             controllers.forEach(controller => controller.abort()); controllers.clear();
             ['maintenance-operations','maintenance-admin-links','maintenance-admin','maintenance-remote','maintenance-tasks-panel','maintenance-audit-panel','maintenance-logs-panel'].forEach(id => { el(id).hidden = true; });
@@ -54,8 +56,8 @@
         const allowed = action => admin || scopes.includes(action === 'upgrade' ? 'upgrade' : action === 'status' ? 'diagnose' : 'operate');
         const sync = () => {
             el('maintenance-create').disabled = busy || ended;
-            el('maintenance-restore').disabled = busy || ended || !(admin || scopes.includes('destructive'));
-            el('maintenance-actions').querySelectorAll('button').forEach(button => { button.disabled = busy || ended || !allowed(button.dataset.task); });
+            el('maintenance-restore').disabled = busy || ended || taskSubmissionUncertain || !(admin || scopes.includes('destructive'));
+            el('maintenance-actions').querySelectorAll('button').forEach(button => { button.disabled = busy || ended || !allowed(button.dataset.task) || taskSubmissionUncertain&&button.dataset.task!=='status'; });
         };
         const run = async operation => {
             if (busy || ended) return;
@@ -85,6 +87,10 @@
             const rows = Array.isArray(value) ? value : value.tasks || [];
             const box = el('maintenance-tasks'); box.textContent = '';
             if (!rows.length) text(box, '暂无维护任务。');
+            const select=el('maintenance-backup-id'),chosen=select.value;select.textContent='';
+            const empty=document.createElement('option');empty.value='';empty.textContent='选择一个成功完成的私有备份';select.append(empty);
+            rows.filter(row=>row.action==='backup'&&row.state==='succeeded'&&/^[a-f0-9]{32}$/.test(row.id)).forEach(row=>{const option=document.createElement('option');option.value=row.id;option.textContent=time(row.created_at)+' · 私有备份';select.append(option);});
+            if(rows.some(row=>row.id===chosen&&row.action==='backup'&&row.state==='succeeded'))select.value=chosen;
             rows.forEach(row => {
                 const entry = record(box);
                 text(entry, (actions[row.action] || '维护任务') + ' · ' + (phases[row.state || row.status] || '状态未确认'));
@@ -94,6 +100,40 @@
                 if (row.error || row.code) text(entry, '结果代码：' + String(row.error || row.code).replace(/[^A-Z0-9_-]/g, '').slice(0,80));
             });
         };
+        const watchTask=async(id,attempt=0)=>{
+            if(ended||watchingTask!==id)return;
+            const captured=epoch;
+            try{
+                const row=await request('maintenance/tasks/'+id);
+                if(ended||epoch!==captured||watchingTask!==id)return;
+                const state=row.state||row.status;
+                if(['succeeded','failed','interrupted','success','completed'].includes(state)){
+                    watchingTask=null;await tasks();notice((actions[row.action]||'维护任务')+'：'+(phases[state]||'已结束')+'。请按结果核对服务状态。');return;
+                }
+                notice('任务'+(phases[state]||'状态待确认')+'，正在自动读取进度；不要重复提交。');
+            }catch(_){if(ended||epoch!==captured)return;notice('面板可能正在重启，正在重新读取已有任务；不会重复提交。');}
+            if(attempt<59)taskTimer=setTimeout(()=>watchTask(id,attempt+1),5000);
+            else{watchingTask=null;notice('自动等待已结束，任务结果仍需核对。点击“刷新维护任务”，不要再次提交同一操作。');}
+        };
+        const submitTask=async body=>{
+            if(taskSubmissionUncertain)return;
+            // Mark before the POST; a lost reply is never retried automatically.
+            taskSubmissionUncertain=true;sync();
+            try{
+                const row=await request('maintenance/tasks','POST',body);
+                if(!/^[a-f0-9]{32}$/.test(row.id||''))throw new Error('Invalid task response');
+                taskSubmissionUncertain=false;watchingTask=row.id;notice('维护任务已登记，正在自动读取进度。');
+                clearTimeout(taskTimer);taskTimer=setTimeout(()=>watchTask(row.id),1000);await tasks();
+            }catch(error){
+                if([400,403,409,422,429].includes(error.status))taskSubmissionUncertain=false;
+                else{const ack=el('maintenance-task-ack');if(ack)ack.hidden=false;}
+                throw error;
+            }
+        };
+        const ack=el('maintenance-task-ack');if(ack)ack.addEventListener('click',()=>run(async()=>{
+            await tasks();if(!confirm('请确认已核对任务记录和实际服务状态。上次请求可能已执行，允许下一次操作并不会撤销它。继续？'))return;
+            taskSubmissionUncertain=false;ack.hidden=true;notice('已允许下一次维护操作。');
+        }));
         const audit = async () => {
             const rows = await request('maintenance/audit');
             const box = el('maintenance-audit'); box.textContent = '';
@@ -150,18 +190,15 @@
         el('maintenance-restore').addEventListener('click', () => run(async () => {
             if (!(admin || scopes.includes('destructive'))) return;
             const backupID = el('maintenance-backup-id').value;
-            if (!/^[a-f0-9]{32}$/.test(backupID)) { notice('请输入成功备份任务的 32 位 ID，不接受文件路径。'); return; }
+            if (!/^[a-f0-9]{32}$/.test(backupID)) { notice('请先读取任务列表，选择成功完成的私有备份。'); return; }
             if (!confirm('确认停机恢复所选备份？这会将业务数据恢复为备份时状态。当前数据会按现有恢复流程保留，失败后不会自动启动；请核对备份任务 ID。')) return;
-            const task = await request('maintenance/tasks', 'POST', {action:'restore', backup_id:backupID});
-            notice('恢复任务已提交：' + task.id + '。请刷新核对结果。'); await tasks();
+            await submitTask({action:'restore',backup_id:backupID});
         }));
         el('maintenance-actions').querySelectorAll('button').forEach(button => button.addEventListener('click', () => run(async () => {
             const action = button.dataset.task;
             if (!allowed(action)) return;
             if (action !== 'status' && !confirm('确认执行“' + actions[action] + '”？这可能短暂中断服务。升级将保留原配置和数据。')) return;
-            const task = await request('maintenance/tasks', 'POST', {action});
-            notice('任务已提交：' + task.id + '。请刷新查看结果；断线或超时不能视为失败，也不要重复提交。');
-            await tasks();
+            await submitTask({action});
         })));
         addEventListener('pagehide', end);
         try { const channel = new BroadcastChannel('vui-admin-session'); channel.onmessage = event => { if (event.data === 'session-ended') { end(); notice('管理员会话已变化，请重新核对授权。'); } }; } catch (_) {}

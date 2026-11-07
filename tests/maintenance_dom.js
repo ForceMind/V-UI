@@ -74,10 +74,10 @@ async function admin() {
         await h.reply({id:4,link:'https://evil.test/#grant='+secret});
         assert.equal(h.el('maintenance-link').value,'');assert(!h.el('maintenance-notice').textContent.includes(secret));
         h.el('maintenance-backup-id').value='/private/arbitrary';h.el('maintenance-restore').fire();await flush();
-        assert(h.el('maintenance-notice').textContent.includes('32 位 ID'));
+        assert(h.el('maintenance-notice').textContent.includes('选择成功完成的私有备份'));
         const before=h.requests.length;h.el('maintenance-backup-id').value='a'.repeat(32);h.el('maintenance-restore').fire();await flush();
         assert.equal(h.requests.length,before+1);q=h.requests.at(-1);assert.equal(JSON.parse(q.options.body).backup_id,'a'.repeat(32));
-        await h.reply({id:'b'.repeat(32)});await h.reply([]);
+        await h.reply({id:'b'.repeat(32)});await h.reply([]);h.event('pagehide');
     }
     {
         const h=await admin();h.el('maintenance-refresh-grants').fire();await flush();

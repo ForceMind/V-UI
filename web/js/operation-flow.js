@@ -57,10 +57,10 @@
         }
         has(...scopes) { return this.scopes === null || scopes.every(scope => this.scopes.includes(scope)); }
         require(...scopes) { if (!this.has(...scopes)) fail('PERMISSION', '这项操作需要：' + scopes.map(scope => ({nodes:'节点管理',relay:'出口配置',certificates:'证书管理',share:'分享连接',destructive:'删除与恢复'}[scope] || '对应操作权限')).join('、') + '。请联系管理员调整维护授权。'); }
-        async api(path, method = 'GET', body = null, headers = {}) {
+        async api(path, method = 'GET', body = null, headers = {}, fullResponse = false) {
             const generation = this.generation;
             try {
-                const value = await this.request(path, method, body, {headers});
+                const value = await this.request(path, method, body, {headers,fullResponse});
                 if (generation !== this.generation) fail('ENDED', '页面已离开，本次后续操作已停止。');
                 return value;
             } catch (error) {

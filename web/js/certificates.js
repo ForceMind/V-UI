@@ -18,7 +18,7 @@
         INVALID_CERTIFICATE_MATERIAL:'返回证书未通过域名、密钥、有效期或信任链检查。',
         WORKER_INTERRUPTED:'上次签发因进程退出而中断，稍后按退避计划重试。'
     };
-    const text = value => messages[value] || value || '无';
+    const text = value => messages[value] || (value?'操作未完成，请核对域名、端口及任务状态。':'无');
     const time = stamp => stamp ? new Date(stamp * 1000).toLocaleString() : '—';
     const notice = (message, error=false) => { if(!active)return; $('notice').textContent=message; $('notice').className=error?'error':''; };
     const element=(tag,content,attrs={}) => { const node=document.createElement(tag); if(content!==null)node.textContent=content; Object.entries(attrs).forEach(([k,v])=>node.setAttribute(k,v));return node; };
@@ -55,7 +55,7 @@
             card.append(element('p',status+(cert.days_remaining===null?'':' · 剩余 '+cert.days_remaining+' 天')));
             card.append(element('p','到期：'+time(cert.not_after)+'　续期窗口：'+time(cert.renew_at),{class:'hint'}));
             if(cert.error)card.append(element('p',text(cert.error)+' 下次重试：'+time(cert.retry_at),{class:'hint'}));
-            if(cert.latest_job)card.append(element('p','最近任务：'+cert.latest_job.state+'　'+time(cert.latest_job.finished_at||cert.latest_job.created_at),{class:'hint','data-job-state':cert.latest_job.state}));
+            if(cert.latest_job)card.append(element('p','最近任务：'+({queued:'排队中',running:'处理中',succeeded:'成功',failed:'失败',interrupted:'已中断'}[cert.latest_job.state]||'状态待确认')+'　'+time(cert.latest_job.finished_at||cert.latest_job.created_at),{class:'hint','data-job-state':cert.latest_job.state}));
             for(const binding of cert.bindings)card.append(element('p',binding.target+'：'+(binding.error?text(binding.error):binding.pending?'待应用':'已配置'),{class:'hint'}));
             const actions=element('div',null,{class:'actions'});
             actions.append(button('检查续期',async()=>{await api('/'+cert.id+'/renew','POST');notice('已进入续期队列。');},cert.status==='pending'));
@@ -64,7 +64,7 @@
             actions.append(button('应用到面板',async()=>{if(!confirm('确认将该证书用于当前面板域名？新连接将使用新证书。'))return;await api('/'+cert.id+'/bind-panel','POST');notice('面板证书已更新。');},!deployable||!capabilities.panel_hot_reload));
             const select=element('select',null,{'aria-label':'选择绑定节点','data-bind-select':cert.id});
             select.append(element('option','选择 TLS 节点',{value:''}));
-            nodes.filter(n=>n.managed_certificate_eligible===true).forEach(n=>select.append(element('option',n.remark||'节点 '+n.id,{value:String(n.id)})));
+            nodes.filter(n=>n.managed_certificate_eligible===true).forEach(n=>select.append(element('option',(n.remark||'节点 '+n.id)+' · 端口 '+n.port+' · '+n.core,{value:String(n.id)})));
             const choice=choices.get(String(cert.id));
             if(Array.from(select.options).some(option=>option.value===choice))select.value=choice;
             actions.append(select);
@@ -73,11 +73,11 @@
             if(cert.revision)actions.append(element('a','下载公有证书链',{href:'/api/certificates/'+cert.id+'/fullchain.pem',download:'fullchain.pem'}));
             card.append(actions);$('certificate-list').append(card);
         }
-        if(!certs.length)$('certificate-list').append(element('p','尚未申请证书。建议先测试签发以检查DNS与80端口。'));
+        if(!certs.length)$('certificate-list').append(element('p','尚未申请证书。填写自己的域名并申请正式证书，成功后即可在节点中选择。'));
     }
     $('request-certificate').addEventListener('submit',event=>{event.preventDefault();action(async()=>{
         await api('','POST',{domain:$('domain').value.trim(),email:$('email').value.trim(),environment:$('environment').value,auto_renew:$('auto-renew').checked,accept_terms:$('terms').checked});
-        notice('申请已排队。测试证书不会替换正式证书。');
+        notice($('environment').value==='production'?'正式证书申请已排队，正在自动读取进度；成功后到节点选择这个域名。':'测试申请已排队，测试证书不能用于正式连接。');
     });});
     $('refresh').addEventListener('click',()=>action(async()=>{}));
     addEventListener('pagehide',()=>{active=false;refreshGeneration++;clearInterval(timer);});

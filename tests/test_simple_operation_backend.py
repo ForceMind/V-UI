@@ -120,3 +120,68 @@ class ContentConditionTests(unittest.TestCase):
         self.assertEqual(content_revision(node), original)
         node.instance_id = None
         self.assertIsNone(content_revision(node))
+
+
+class LocalConnectionApiTests(unittest.TestCase):
+    def setUp(self):
+        from tests.test_proxy_exports import StrictExportApiTests
+        StrictExportApiTests.setUp(self)
+        from app.api import proxy_exports
+        from app.services.local_connection import LocalConnection
+        self.local = self.enterContext(patch.object(proxy_exports, 'get_local_exporter')).return_value
+        self.local.connection.return_value = LocalConnection(7891, 'test-local', FAKE_PASSWORD, 'a'*64)
+
+    def post(self, body=None, headers=None, query=''):
+        from tests.test_proxy_exports import HEADERS
+        return self.client.post('/api/proxy/local-connection'+query,
+            json={'base_revision':'a'*64} if body is None else body,
+            headers=HEADERS if headers is None else headers)
+
+    def test_explicit_authorized_post_only_and_never_cache(self):
+        response = self.post()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['password'], FAKE_PASSWORD)
+        self.assertEqual(response.headers['cache-control'], 'no-store')
+        self.assertEqual(response.headers['referrer-policy'], 'no-referrer')
+        self.assertEqual(self.client.get('/api/proxy/local-connection').status_code, 405)
+        self.local.reset_mock()
+        for body in ({'base_revision':None}, {'base_revision':'a'*64,'password':'injected'}, {'base_revision':True}):
+            self.assertEqual(self.post(body).status_code, 422)
+        self.assertEqual(self.post(query='?raw=1').status_code, 422)
+        self.local.connection.assert_not_called()
+        self.assertEqual(self.post(headers={}).status_code, 403)
+        self.auth.return_value = None
+        self.assertEqual(self.post().status_code, 401)
+
+
+class NodeContentGuardTests(unittest.TestCase):
+    # Reuse the isolated disk fixture only, not its unrelated test methods.
+    from tests.test_inbound_instance_preconditions import InboundInstancePreconditionTests as _Fixture
+    setUp = _Fixture.setUp
+    request = _Fixture.request
+    create = _Fixture.create
+    row = _Fixture.row
+    editor = _Fixture.editor
+
+    def test_same_instance_concurrent_credentials_edit_blocks_stale_basic_save(self):
+        from app.models import database
+        node, _ = self.create()
+        shown = self.editor(node)
+        with database.SessionLocal() as db:
+            current = db.get(database.Inbound, node)
+            current.settings = {'users':[{'uuid':'22222222-2222-4222-8222-222222222222'}]}
+            db.commit()
+        before = self.row(node)
+        self.apply.reset_mock()
+        status, response = self.request('PUT', node, {
+            'remark':'stale rename', 'expected_instance_revision':shown['mutation_revision'],
+            'expected_content_revision':shown['content_revision']})
+        self.assertEqual(status, 409, response)
+        self.assertEqual(self.row(node), before)
+        self.apply.assert_not_called()
+        updated = self.editor(node)
+        status, response = self.request('PUT', node, {
+            'remark':'new rename', 'expected_instance_revision':updated['mutation_revision'],
+            'expected_content_revision':updated['content_revision']})
+        self.assertEqual(status, 200, response)
+        self.assertEqual(self.row(node)['settings'], before['settings'])

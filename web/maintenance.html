@@ -26,10 +26,11 @@
 <h2>已有授权</h2><button id="maintenance-refresh-grants" type="button">刷新授权</button><div id="maintenance-grants" aria-live="polite"></div></section>
 <section id="maintenance-remote" hidden><h2>临时维护会话</h2><p id="maintenance-session"></p><p>维护者可通过授权 API 管理节点、分享与中转；权限以本次选择为准，不获得管理员密码或任意系统命令权限。</p><button id="maintenance-end" type="button">清除本页维护会话</button><p class="hint">清除仅结束本页使用，立即撤销整个授权请让管理员在授权列表操作。</p></section>
 <section id="maintenance-operations" data-simple-operations="delegated" class="ops-inline" hidden></section>
-<section id="maintenance-tasks-panel" hidden><h2>服务器维护任务</h2><p>任务由独立系统维护组件执行。升级会先备份、沿用原配置与数据；重启期间面板可能短暂不可达，恢复后点击刷新查看结果。</p>
+<section id="maintenance-tasks-panel" hidden><h2>服务器维护任务</h2><p>任务由独立系统维护组件执行。升级会先备份、沿用原配置与数据；重启期间面板可能短暂不可达，会自动读取任务进度；等待期间请勿重复提交。</p>
 <p id="maintenance-installation">安装版本与服务状态尚未核对。</p><button id="maintenance-refresh-status" type="button">读取安装版本与服务状态</button>
 <div id="maintenance-actions" class="actions"><button type="button" data-task="status">读取服务状态</button><button type="button" data-task="backup">创建私有备份</button><button type="button" data-task="restart">重启 V-UI</button><button type="button" data-task="start">启动 V-UI</button><button type="button" data-task="stop">停止 V-UI</button><button type="button" data-task="upgrade">在线升级正式版</button></div>
-<div class="actions"><label for="maintenance-backup-id">恢复备份的任务 ID（仅接受此组件创建的成功备份）</label><input id="maintenance-backup-id" type="text" maxlength="32" pattern="[a-f0-9]{32}" autocomplete="off" spellcheck="false"><button id="maintenance-restore" type="button" disabled>停机恢复该私有备份</button></div>
+<div class="actions"><label for="maintenance-backup-id">选择要恢复的私有备份（仅列出成功任务）</label><select id="maintenance-backup-id"><option value="">先读取维护任务，选择一个成功备份</option></select><button id="maintenance-restore" type="button" disabled>停机恢复该私有备份</button></div>
+<button id="maintenance-task-ack" type="button" hidden>已核对任务记录，允许下一次操作</button>
 <button id="maintenance-refresh-tasks" type="button">刷新维护任务</button><div id="maintenance-tasks" aria-live="polite"></div></section>
 <section id="maintenance-audit-panel" hidden><h2>操作记录</h2><button id="maintenance-refresh-audit" type="button">刷新记录</button><div id="maintenance-audit"></div></section>
 <section id="maintenance-logs-panel" hidden><h2>服务诊断</h2><p>仅显示 V-UI 服务日志的固定分类与时间，不展示原始凭据、路径或配置正文。</p><button id="maintenance-refresh-logs" type="button">读取近期脱敏诊断</button><div id="maintenance-logs"></div></section>

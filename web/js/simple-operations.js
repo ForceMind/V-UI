@@ -68,6 +68,7 @@
             head.append(this.button(this.options.dialog?'关闭':'重新读取',()=>this.options.dialog?this.close():this.refresh()));
             this.tabs=element('div',null,{class:'ops-tabs','aria-label':'常用操作'});
             for(const task of ['direct','relay','host'])this.tabs.append(this.button(labels[task],()=>this.open(task),{'data-task':task}));
+            this.tabs.append(this.button('订阅分享',()=>this.subscriptions(),{disabled:!this.flow.has('share')}),this.button('证书与域名',()=>this.certificates()));
             this.status=element('p','正在读取服务器实际状态…',{class:'ops-status',role:'status','aria-live':'polite'});
             this.problem=element('div',null,{class:'ops-problem','aria-live':'polite'});
             this.content=element('div');this.list=element('div',null,{class:'ops-nodes'});
@@ -395,6 +396,79 @@
                 },{disabled:!this.flow.has('destructive')}));card.append(more);this.list.append(card);
             }
             if(!this.flow.nodes.length)this.list.append(this.note('还没有节点，可先用上面的推荐设置创建。'));
+        }
+        async subscriptions() {
+            if(this.uiBusy||this.flow.busy||this.ended)return;
+            if(this.dirty&&!confirm('离开将清除尚未提交的节点输入，继续？'))return;
+            this.clear();this.task='subscriptions';
+            if(this.dialog&&!this.dialog.open)this.dialog.showModal();
+            return this.perform(async()=>{
+                this.flow.require('share');
+                const [response,warnings,grants]=await Promise.all([
+                    this.flow.api('/api/inbounds','GET',null,{},true),
+                    this.flow.api('/api/subscription/mihomo-warnings'),this.flow.api('/api/subscriptions')]);
+                if(!globalThis.VUI_OPERATION_FLOW.REV.test(response.nodeRevision)||!Array.isArray(response.value)||!Array.isArray(warnings)||!Array.isArray(grants))throw new Error('Invalid subscription state');
+                return {nodes:response.value,revision:response.nodeRevision,warnings,grants};
+            },data=>{
+                this.content.replaceChildren(element('h3','多个节点，一条订阅地址'),element('p','在客户端添加一次订阅地址，以后刷新即可取得所选节点。地址包含访问凭据，只交给可信使用者。'));
+                const form=element('form'),name=this.field(form,'订阅名称',this.input('我的节点'));
+                const eligible=data.nodes.filter(n=>n.enable&&n.share_eligible===true&&!data.warnings.some(w=>w.inbound_id===n.id));
+                const picks=[];for(const node of data.nodes){
+                    const input=element('input',null,{type:'checkbox',checked:eligible.length===1&&eligible[0].id===node.id,disabled:!eligible.includes(node)});
+                    const label=element('label',null,{class:'ops-check'});label.append(input,element('span',(node.remark||'节点'+node.id)+' · 端口 '+node.port+(!eligible.includes(node)?'（停用或暂不支持分享）':'')));form.append(label);picks.push([input,node.id]);
+                }
+                if(!data.nodes.length)form.append(this.note('还没有节点，请先创建节点。'));
+                const days=this.field(form,'有效期',element('select'));for(const [value,label]of[['90','90天（推荐）'],['30','30天'],['180','180天'],['365','1年']])days.append(element('option',label,{value}));
+                const advanced=element('details');advanced.append(element('summary','客户端与连接地址'));
+                const format=this.field(advanced,'客户端类型',element('select'));for(const [value,label]of[['mihomo.yaml','Clash / Mihomo（推荐）'],['raw','通用链接订阅'],['sing-box.json','sing-box']])format.append(element('option',label,{value}));
+                const server=this.field(advanced,'节点连接域名或IP',this.input(location.hostname),'不会改变服务器设置；请使用客户端能连接的地址。');form.append(advanced);
+                const submit=element('button','生成订阅地址',{type:'submit',class:'ops-primary',disabled:!eligible.length});form.append(submit);this.content.append(form);
+                const output=element('div');this.content.append(output);
+                let submitted=false;
+                const issued=value=>{
+                    this.secret='';output.replaceChildren();
+                    const path=value?.paths?.[format.value];
+                    if(typeof path!=='string'||!/^\/sub\/[A-Za-z0-9_-]+\/(mihomo\.yaml|raw|sing-box\.json)$/.test(path))throw new Error('Invalid subscription path');
+                    const url=location.origin+path;this.secret=url;const field=element('textarea',null,{value:url,readOnly:true,rows:3});output.append(this.note('地址仅本次展示。遗失后请更换地址，旧地址随即失效。'),field,this.button('复制订阅地址',()=>this.copy(url,field)),this.button('清除地址显示',()=>{this.secret='';output.replaceChildren();}));
+                };
+                form.addEventListener('submit',event=>{event.preventDefault();if(submitted)return;void this.perform(async()=>{
+                    const selected=picks.filter(([input])=>input.checked&&!input.disabled).map(([,id])=>id);
+                    if(!name.value.trim()||!selected.length)throw new globalThis.VUI_OPERATION_FLOW.FlowError('SELECT_NODES','填写名称，并选择至少一个可分享节点。');
+                    // The displayed inventory is the authoritative identity precondition.
+                    submitted=true;submit._opsDisabled=true;
+                    return await this.flow.api('/api/subscriptions','POST',{label:name.value.trim(),server:server.value.trim(),inbound_ids:selected,formats:[format.value],expires_days:Number(days.value),expected_node_revision:data.revision});
+                },issued);});
+                this.content.append(element('h3','已有订阅'));
+                if(!data.grants.length)this.content.append(this.note('暂无订阅。'));
+                for(const grant of data.grants){
+                    const row=element('article',null,{class:'ops-node'}),invalid=!!(grant.revoked||grant.expired||grant.invalidated);
+                    row.append(element('strong',grant.label),element('p',invalid?'已失效，请重新选择节点创建':'有效 · '+grant.inbound_ids.length+'个节点 · 截止 '+new Date(grant.expires_at*1000).toLocaleString('zh-CN')));
+                    row.append(this.button('更换订阅地址（旧地址失效）',()=>{if(!confirm('更换后旧订阅地址立即失效，需更新客户端。继续？'))return;void this.perform(()=>this.flow.api('/api/subscriptions/'+grant.id+'/rotate','POST',{expires_days:Number(days.value)}),value=>{format.value=grant.formats[0];issued(value);});},{disabled:invalid||!grant.formats?.length}));
+                    row.append(this.button('撤销订阅',()=>{if(!confirm('撤销后客户端不能再拉取此订阅，已导入客户端的节点仍需分别管理。确认撤销？'))return;void this.perform(()=>this.flow.api('/api/subscriptions/'+grant.id,'DELETE'),()=>{this.secret='';output.replaceChildren();row.replaceChildren(this.note('此订阅已撤销。'));});},{disabled:grant.revoked||!this.flow.has('destructive')}));this.content.append(row);
+                }
+                this.status.textContent='选择节点后生成，其他设置已有默认值。';
+            });
+        }
+        async certificates() {
+            if(this.uiBusy||this.flow.busy||this.ended)return;
+            if(this.dirty&&!confirm('离开将清除尚未提交的节点输入，继续？'))return;
+            this.clear();this.task='certificates';if(this.dialog&&!this.dialog.open)this.dialog.showModal();
+            return this.perform(async()=>{await this.flow.load();return await this.flow.api('/api/certificates');},rows=>{
+                this.content.replaceChildren(element('h3','连接域名与证书'),element('p','已有证书可直接用于新节点。续期保留原证书，已停止的节点组不会自动启动。'));
+                if(!this.options.remote)this.content.append(element('a','申请证书 / 更多管理',{href:'/certificates'}));
+                else this.content.append(this.note('首次申请及CA条款由管理员确认；本页可维护已有证书。'));
+                if(!rows.length)this.content.append(this.note('还没有证书，请让管理员先设置域名。'));
+                for(const cert of rows){
+                    const card=element('article',null,{class:'ops-node'}),valid=globalThis.VUI_OPERATION_FLOW.usableCertificates([cert]).length===1;
+                    card.append(element('strong',cert.domain),element('p',valid?'可用于节点 · 剩余'+cert.days_remaining+'天':cert.environment==='staging'?'测试证书，不能用于正式节点':'尚不可用，请查看证书任务'));
+                    const state={queued:'排队中',running:'申请中',succeeded:'申请成功',failed:'申请失败',interrupted:'申请中断'}[cert.latest_job?.state];if(state)card.append(element('p','最近任务：'+state));
+                    card.append(this.button('检查并续期',()=>this.perform(()=>this.flow.api('/api/certificates/'+cert.id+'/renew','POST'),()=>{this.status.textContent='续期检查已提交，旧证书保持；稍后重新读取状态。';}),{disabled:!this.flow.has('certificates')||['queued','running'].includes(cert.latest_job?.state)}));
+                    card.append(this.button(cert.auto_renew?'暂停自动续期':'启用自动续期',()=>this.perform(()=>this.flow.api('/api/certificates/'+cert.id+'/auto-renew','PUT',{enabled:!cert.auto_renew}),()=>{this.status.textContent='自动续期设置已保存。';}),{disabled:!this.flow.has('certificates')}));
+                    card.append(this.button('用于新直连节点',async()=>{await this.open('direct');if(this.fields.cert)this.fields.cert.value=cert.id;this.updateForm();},{disabled:!valid||!this.flow.has('nodes','relay','certificates')}));
+                    this.content.append(card);
+                }
+                this.content.append(this.button('重新读取证书状态',()=>this.certificates()));this.status.textContent='已读取已有域名和证书。';
+            });
         }
         certificateSetup() {
             if(this.options.remote){this.problem.replaceChildren(this.note('首次申请证书必须由管理员本人确认CA条款。请让管理员先设置，已有输入保持。'));return;}
