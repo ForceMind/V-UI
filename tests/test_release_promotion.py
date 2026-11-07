@@ -8,6 +8,8 @@ import shutil
 import shlex
 import subprocess
 import tempfile
+import urllib.error
+import urllib.parse
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -29,6 +31,13 @@ from scripts.publish_release import (
     INSTALLER_ONLY_BASELINE,
     validate_ca_trust_scope,
     CA_TRUST_BASELINE,
+    SIMPLE_OPERATIONS_BASELINE,
+    SIMPLE_OPERATIONS_FILES,
+    SIMPLE_OPERATIONS_REQUIRED,
+    SIMPLE_OPERATIONS_JOB_COUNTS,
+    SIMPLE_OPERATIONS_UPGRADE_STEP,
+    SIMPLE_OPERATIONS_INSTALL_STEP,
+    validate_simple_operations_scope,
     NETLINK_SERVICE_BASELINE,
     NETLINK_SERVICE_FILES,
     NETLINK_SERVICE_CI_HASHES,
@@ -1093,6 +1102,256 @@ class NetlinkServiceReleaseTests(unittest.TestCase):
         self.assertIn('      netlink_service_no_browser:\n',workflow)
         self.assertIn('NETLINK_SERVICE_NO_BROWSER: ${{ inputs.netlink_service_no_browser }}',workflow)
         self.assertIn('args+=(--netlink-service-no-browser)',workflow)
+
+
+class SimpleOperationsReleaseTests(unittest.TestCase):
+    FLAGS = ('installer_only_no_browser','ca_trust_no_browser','install_interaction_no_browser',
+             'startup_no_browser','ui_redesign_no_browser','tls_certificate_no_browser',
+             'remote_maintenance_no_browser','simple_node_no_browser','maintenance_180_no_browser',
+             'netlink_service_no_browser')
+    MANDATORY = {
+        'test.yml': {TLS_CERTIFICATE_CORE_STEP,SIMPLE_NODE_TEMPLATE_STEP,NETLINK_SERVICE_DIAGNOSTIC_STEP},
+        'oneclick.yml': {UI_REDESIGN_UPGRADE_STEP,TLS_CERTIFICATE_UPGRADE_STEP,
+                         REMOTE_MAINTENANCE_UPGRADE_STEP,SIMPLE_NODE_UPGRADE_STEP,
+                         NETLINK_SERVICE_UPGRADE_STEP,SIMPLE_OPERATIONS_UPGRADE_STEP,
+                         SIMPLE_OPERATIONS_INSTALL_STEP},
+        'loopback.yml': SIMPLE_NODE_LOOPBACK_STEPS,
+    }
+
+    def scope(self, changes='M\tscripts/publish_release.py\n', mode='100644',
+              ancestry=True, version=b'0.4.21\n', tamper=None):
+        content={'VERSION':b'0.4.21\n','main.py':b"app = FastAPI(version='0.4.21')\n",
+                 'install.sh':b'# install.sh --version v0.4.21\nactual_installer()\n'}
+        def git(args, **kwargs):
+            if args[1:3]==['diff','--name-status']:
+                self.assertIn('--no-renames',args)
+                return changes
+            if args[1]=='ls-tree':return mode+' blob '+'f'*40+'\t'+args[-1]+'\n'
+            if args[1]=='show':
+                revision,name=args[2].split(':',1)
+                if revision==SHA and name=='VERSION':return version
+                return content[name]+(b'changed\n' if revision==SHA and name==tamper else b'')
+            raise AssertionError(args)
+        failure=None if ancestry else subprocess.CalledProcessError(1,['git','merge-base'])
+        with patch('scripts.publish_release.subprocess.run',side_effect=failure) as ancestor, \
+                patch('scripts.publish_release.subprocess.check_output',side_effect=git):
+            validate_simple_operations_scope(SHA,'0.4.21')
+            self.assertEqual(ancestor.call_args.args[0],
+                             ['git','merge-base','--is-ancestor',SIMPLE_OPERATIONS_BASELINE,SHA])
+
+    def fixtures(self):
+        runs={};jobs={}
+        for index,path in enumerate(sorted(SIMPLE_OPERATIONS_REQUIRED),1):
+            run={'id':index,'run_attempt':2,'head_sha':SHA,'status':'completed',
+                 'conclusion':'success','path':'.github/workflows/'+path,'html_url':'https://example.test/'+path}
+            runs[path]=run
+            names=self.MANDATORY.get(path,set()) | BROWSER_SKIP_STEPS.get(path,set()) | {'Required nonbrowser work'}
+            jobs[index]=[{'id':index*10+number,'run_id':index,'head_sha':SHA,
+                          'status':'completed','conclusion':'success',
+                          'steps':[{'name':name,'status':'completed',
+                                    'conclusion':'skipped' if name in BROWSER_SKIP_STEPS.get(path,set()) else 'success'}
+                                   for name in sorted(names)]}
+                         for number in range(SIMPLE_OPERATIONS_JOB_COUNTS[path])]
+        return runs,jobs
+
+    def qualify(self, runs, jobs, reread=None):
+        def request(path):
+            run_id=int(path.split('/')[2])
+            if '/jobs?' in path:return {'jobs':jobs[run_id]}
+            return (reread or {}).get(run_id,next(run for run in runs.values() if run['id']==run_id))
+        with patch('scripts.publish_release.request',side_effect=request):
+            validate_run_jobs(runs,SHA,simple_operations_no_browser=True)
+
+    def test_only_frozen_product_and_exact_release_documents_are_allowed(self):
+        self.assertEqual(SIMPLE_OPERATIONS_BASELINE,'0a133205bb7a1f1d0deabd28eb4fffe77625fd44')
+        self.assertEqual(SIMPLE_OPERATIONS_FILES,{
+            'scripts/publish_release.py','tests/test_release_promotion.py','.github/workflows/publish.yml',
+            'AGENTS.md','README.md','CHANGELOG.md','docs/SIMPLE_OPERATIONS_PROGRESS.md',
+            'docs/DEVELOPMENT_HANDOFF.md','docs/README.md','docs/RELEASING.md',
+            'docs/RELEASE_NOTES.md','docs/INSTALLATION.md','docs/API.md'})
+        self.scope(changes='')
+        self.scope(changes=''.join('M\t'+name+'\n' for name in sorted(SIMPLE_OPERATIONS_FILES)))
+        self.scope(changes='A\tdocs/SIMPLE_OPERATIONS_PROGRESS.md\n')
+
+    def test_scope_cannot_change_app_installer_ci_helpers_or_bootstrap(self):
+        for name in ('VERSION','main.py','install.sh','setup.sh','.github/workflows/short-install.yml',
+                     'app/api/maintenance.py','app/services/simple_operations.py','web/nodes.html',
+                     'scripts/system_ops.py','scripts/install_system.py','scripts/build_bundle.py',
+                     'requirements-runtime.txt','scripts/core_runtime.py','scripts/fetch_test_cores.py',
+                     '.github/workflows/oneclick.yml','.github/workflows/test.yml',
+                     '.github/workflows/loopback.yml','tests/test_oneclick_system.py',
+                     'tests/published_upgrade_helpers.py','scripts/system_maintenance_smoke.py',
+                     'tests/unrelated.py','docs/unrelated.md'):
+            with self.subTest(name=name),self.assertRaises(ReleaseGateError):self.scope(changes='M\t'+name+'\n')
+        for name in ('main.py','install.sh'):
+            with self.subTest(name=name),self.assertRaisesRegex(ReleaseGateError,'frozen product bytes'):
+                self.scope(changes='',tamper=name)
+
+    def test_wrong_version_ancestry_and_file_shapes_are_rejected(self):
+        for version in ('0.4.19','0.4.20','0.4.22','0.5.0','0.4.21-rc1'):
+            with self.subTest(version=version),patch('scripts.publish_release.subprocess.run') as git,self.assertRaises(ReleaseGateError):
+                validate_simple_operations_scope(SHA,version)
+            git.assert_not_called()
+        with self.assertRaisesRegex(ReleaseGateError,'ancestry'):self.scope(ancestry=False)
+        for version in (b'0.4.20\n',b'0.4.21 \n',b'0.4.21'):
+            with self.subTest(version=version),self.assertRaisesRegex(ReleaseGateError,'version identity'):self.scope(version=version)
+        for change in ('D\tREADME.md\n','R100\tREADME.md\tdocs/README.md\n','T\tREADME.md\n',
+                       'C100\tREADME.md\tdocs/README.md\n'):
+            with self.subTest(change=change),self.assertRaises(ReleaseGateError):self.scope(changes=change)
+        for mode in ('100755','120000','160000','040000'):
+            with self.subTest(mode=mode),self.assertRaises(ReleaseGateError):self.scope(mode=mode)
+
+    def test_nine_workflows_and_all_twelve_jobs_with_only_twelve_browser_skips(self):
+        runs,jobs=self.fixtures()
+        self.assertEqual(len(runs),9)
+        self.assertEqual(sum(map(len,jobs.values())),12)
+        self.assertEqual(sum(map(len,BROWSER_SKIP_STEPS.values())),12)
+        self.qualify(runs,jobs)
+        self.assertEqual(set(select_runs(list(runs.values()),SHA,simple_operations_no_browser=True)),SIMPLE_OPERATIONS_REQUIRED)
+        for path in SIMPLE_OPERATIONS_REQUIRED:
+            reduced={name:run for name,run in runs.items() if name!=path}
+            with self.subTest(path=path),self.assertRaises(ReleaseGateError):self.qualify(reduced,jobs)
+            with self.subTest(path=path),self.assertRaises(ReleaseGateError):
+                select_runs(list(reduced.values()),SHA,simple_operations_no_browser=True)
+        with self.assertRaises(ReleaseGateError):self.qualify({**runs,'unexpected.yml':runs['test.yml']},jobs)
+        for path in runs:
+            for change in ('missing','extra','duplicate'):
+                altered={key:list(value) for key,value in jobs.items()}
+                target=altered[runs[path]['id']]
+                if change=='missing':target.pop()
+                elif change=='duplicate':target.append(target[0])
+                else:target.append({**target[0],'id':9999})
+                with self.subTest(path=path,change=change),self.assertRaises(ReleaseGateError):self.qualify(runs,altered)
+
+    def test_latest_ninth_workflow_cannot_use_stale_wrong_revision_or_unsuccessful_evidence(self):
+        runs,_=self.fixtures()
+        for mutation in ('wrong_sha','failure','queued','newer_failed'):
+            candidate=[dict(run) for run in runs.values()]
+            short=next(run for run in candidate if run['path'].endswith('/short-install.yml'))
+            if mutation=='wrong_sha':short['head_sha']='b'*40
+            elif mutation=='failure':short['conclusion']='failure'
+            elif mutation=='queued':short['status']='queued'
+            else:candidate.append({**short,'id':999,'conclusion':'failure'})
+            with self.subTest(mutation=mutation),self.assertRaises(ReleaseGateError):
+                select_runs(candidate,SHA,simple_operations_no_browser=True)
+
+    def test_required_installer_six_upgrades_core_template_diagnostic_and_loopback_cannot_skip(self):
+        for path in set(self.MANDATORY) | set(BROWSER_SKIP_STEPS):
+            for name in self.MANDATORY.get(path,set()) | BROWSER_SKIP_STEPS.get(path,set()):
+                for state in ('missing','failure','cancelled','in_progress','skipped'):
+                    if state=='skipped' and name in BROWSER_SKIP_STEPS.get(path,set()):continue
+                    runs,jobs=self.fixtures();steps=jobs[runs[path]['id']][0]['steps']
+                    target=next(step for step in steps if step['name']==name)
+                    if state=='missing':steps.remove(target)
+                    elif state=='in_progress':target['status']=state
+                    else:target['conclusion']=state
+                    with self.subTest(path=path,name=name,state=state),self.assertRaises(ReleaseGateError):self.qualify(runs,jobs)
+        for path in SIMPLE_OPERATIONS_REQUIRED:
+            for name in ('Required nonbrowser work','Browser unapproved extra step'):
+                runs,jobs=self.fixtures()
+                jobs[runs[path]['id']][0]['steps'].append({'name':name,'status':'completed','conclusion':'skipped'})
+                with self.subTest(path=path,name=name),self.assertRaises(ReleaseGateError):self.qualify(runs,jobs)
+
+    def test_all_jobs_and_latest_attempt_are_bound_to_exact_commit(self):
+        for path in SIMPLE_OPERATIONS_REQUIRED:
+            for key,value in (('head_sha','b'*40),('run_id',999),('conclusion','failure'),('status','in_progress')):
+                runs,jobs=self.fixtures();jobs[runs[path]['id']][-1][key]=value
+                with self.subTest(path=path,key=key),self.assertRaises(ReleaseGateError):self.qualify(runs,jobs)
+            runs,jobs=self.fixtures();run=runs[path]
+            with self.subTest(path=path),self.assertRaisesRegex(ReleaseGateError,'changed during'):
+                self.qualify(runs,jobs,reread={run['id']:{**run,'run_attempt':3}})
+
+    def test_exception_and_cli_cannot_mix_with_previous_flags(self):
+        from scripts import publish_release
+        argv=['publish_release.py','--commit',SHA,'--version','0.4.21',
+              '--confirm','RELEASE 0.4.21 '+SHA,'--simple-operations-no-browser']
+        for name in self.FLAGS:
+            with self.subTest(name=name),patch('scripts.publish_release.request') as request,self.assertRaisesRegex(ReleaseGateError,'mutually exclusive'):
+                validate_run_jobs({},SHA,simple_operations_no_browser=True,**{name:True})
+            request.assert_not_called()
+            with self.subTest(cli=name),patch('sys.argv',argv+['--'+name.replace('_','-')]), \
+                    patch('scripts.publish_release.request') as request,self.assertRaisesRegex(ReleaseGateError,'mutually exclusive'):
+                publish_release.main()
+            request.assert_not_called()
+
+    def promotion(self, tamper_target=None):
+        from scripts import publish_release
+        runs,jobs=self.fixtures();writes=[];downloads=[]
+        fixtures=ReleasePromotionTests()
+        kit_name='vui-release-kit-'+SHA
+        portable_names={'vui-linux-'+target+'-'+SHA:target for target in TARGETS[1:]}
+        release={'id':900,'upload_url':'https://uploads.github.com/repos/ForceMind/V-UI/releases/900/assets{?name,label}',
+                 'html_url':'https://example.test/release/900','draft':True}
+        def artifact(name):return {'id':name,'name':name,'expired':False}
+        def request(path,method='GET',data=None,binary=False):
+            if method!='GET':
+                writes.append((path,method,data))
+                if path=='releases':return release
+                if path.startswith('https://uploads.github.com/'):
+                    return {'digest':'sha256:'+hashlib.sha256(data).hexdigest()}
+                raise AssertionError((path,method))
+            if path=='':return {'default_branch':'main'}
+            if path=='git/ref/heads/main':return {'object':{'sha':SHA}}
+            if path.startswith('actions/runs?'):return {'workflow_runs':list(runs.values())}
+            if path.startswith(('git/ref/tags/','releases/tags/')):
+                raise urllib.error.HTTPError(path,404,'absent',{},None)
+            run_id=int(path.split('/')[2])
+            if '/jobs?' in path:return {'jobs':jobs[run_id]}
+            if '/artifacts?' in path:
+                names=[kit_name] if run_id==runs['oneclick.yml']['id'] else list(portable_names)
+                self.assertIn(run_id,(runs['oneclick.yml']['id'],runs['portable.yml']['id']))
+                return {'artifacts':[artifact(name) for name in names]}
+            return next(run for run in runs.values() if run['id']==run_id)
+        def download(item):
+            downloads.append(item['name'])
+            if item['name']==kit_name:
+                return fixtures.kit(commit='b'*40 if tamper_target==TARGETS[0] else SHA,version='0.4.21')
+            target=portable_names[item['name']]
+            return fixtures.portable(target,commit='b'*40 if target==tamper_target else SHA,version='0.4.21')
+        argv=['publish_release.py','--commit',SHA,'--version','0.4.21',
+              '--confirm','RELEASE 0.4.21 '+SHA,'--simple-operations-no-browser']
+        with patch('sys.argv',argv),patch.dict('os.environ',{'GITHUB_REPOSITORY':'ForceMind/V-UI','GITHUB_EVENT_NAME':'workflow_dispatch'}), \
+                patch('scripts.publish_release.subprocess.check_output',return_value=SHA+'\n'), \
+                patch('scripts.publish_release.subprocess.run',side_effect=AssertionError('Publication must never build')), \
+                patch('scripts.publish_release.validate_simple_operations_scope') as scope, \
+                patch('scripts.publish_release.request',side_effect=request), \
+                patch('scripts.publish_release.download_artifact',side_effect=download),patch('builtins.print'):
+            if tamper_target:
+                with self.assertRaises(ReleaseGateError):publish_release.main()
+                self.assertEqual(writes,[])
+            else:
+                publish_release.main()
+            scope.assert_called_once_with(SHA,'0.4.21')
+        return writes,downloads,runs
+
+    def test_cli_qualifies_nine_workflows_and_promotes_same_commit_four_targets_without_building(self):
+        writes,downloads,runs=self.promotion()
+        self.assertEqual(len(downloads),4)
+        self.assertEqual(set(downloads),{'vui-release-kit-'+SHA} | {'vui-linux-'+target+'-'+SHA for target in TARGETS[1:]})
+        path,method,release=writes[0]
+        self.assertEqual((path,method),('releases','POST'))
+        self.assertEqual(release['target_commitish'],SHA)
+        self.assertTrue(release['draft'])
+        for text in ('0.4.21','浏览器未验证',SIMPLE_OPERATIONS_BASELINE,'14/15/16/17/19/20','发布时不重建'):
+            self.assertIn(text,release['body'])
+        for run in runs.values():self.assertIn(run['html_url'],release['body'])
+        uploaded={urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)['name'][0]:data
+                  for path,method,data in writes[1:]}
+        self.assertEqual(set(uploaded),ASSETS)
+        for target in TARGETS:
+            with zipfile.ZipFile(io.BytesIO(uploaded['vui-linux-'+target+'.zip'])) as archive:
+                manifest=json.loads(archive.read('MANIFEST.json'))
+            self.assertEqual((manifest['source_commit'],manifest['version'],manifest['targets']),(SHA,'0.4.21',[target]))
+
+    def test_new_flag_cannot_promote_any_target_from_another_commit(self):
+        for target in TARGETS:
+            with self.subTest(target=target):self.promotion(tamper_target=target)
+
+    def test_workflow_dispatch_binds_new_boolean_and_cli(self):
+        workflow=Path('.github/workflows/publish.yml').read_text()
+        self.assertIn('      simple_operations_no_browser:\n',workflow)
+        self.assertIn('SIMPLE_OPERATIONS_NO_BROWSER: ${{ inputs.simple_operations_no_browser }}',workflow)
+        self.assertIn("if [[ \"$SIMPLE_OPERATIONS_NO_BROWSER\" == 'true' ]]; then args+=(--simple-operations-no-browser); fi",workflow)
 
 
 class ExactJobQualificationTests(unittest.TestCase):

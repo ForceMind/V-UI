@@ -275,10 +275,13 @@ class TCPUpstreamExportStaticTests(unittest.TestCase):
             self.assertIn(required, section)
         self.assertIn('clearAdminSecrets.forEach(clear => clear());', script)
         html = (ROOT / 'web/index.html').read_text()
-        self.assertIn('@click="openUpstreamExport(scope.row)"', html)
+        self.assertIn('@click="openSimpleShare(scope.row)"', html)
+        shared=(ROOT/'web/js/simple-operations.js').read_text()
+        self.assertIn('给中转服务器使用（仅TCP，含凭据）',shared)
+        self.assertIn('row.upstream_export_eligible===true',shared)
         self.assertIn(':value="upstreamExport.content" readonly', html)
         self.assertNotIn('v-html="upstreamExport', html)
-        self.assertIn('@click="showQrCode(scope.row)"', html)
+        self.assertIn('@click="openSimpleShare(scope.row)"', html)
         self.assertEqual(len(re.findall(r'id="upstream-export-content"', html)), 1)
 
     def test_actual_pinned_vue_controller_secret_lifecycle(self):

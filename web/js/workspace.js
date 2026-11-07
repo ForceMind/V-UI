@@ -25,6 +25,9 @@
     const nodeRefreshGuidance = '请点击“刷新节点和订阅”，重新选择节点后创建订阅。';
     const nodeSelectionConflict = 'Subscription node selection changed; refresh nodes and select them again';
     const notice = (text, error = false) => { $('notice').textContent = text; $('notice').className = error ? 'error' : ''; };
+    // Safe defaults are suggestions only; existing saved routing remains authoritative.
+    if(!$('label').value)$('label').value='我的节点';
+    if(!$('server').value)$('server').value=location.hostname;
     const element = (tag, text, attrs = {}) => {
         const node = document.createElement(tag);
         if (text !== null) node.textContent = text;
@@ -159,7 +162,7 @@
             const status = identityInvalid ? reasons[value.invalidation_reason] : value.revoked ? '已撤销' : value.expired ? '已过期'
                 : value.invalidated ? (Object.hasOwn(reasons, value.invalidation_reason) ? reasons[value.invalidation_reason] : '授权失效，请重新创建订阅') : '有效';
             const actions = element('td', null);
-            const rotate = element('button', '轮换', {type:'button', 'data-rotate':String(value.id)});
+            const rotate = element('button', '更换地址（旧地址失效）', {type:'button', 'data-rotate':String(value.id)});
             rotate.disabled = identityInvalid || value.invalidation_reason === 'nodes_unavailable';
             if (identityInvalid) rotate.title = '轮换不能恢复旧节点授权，请重新选择节点并创建订阅';
             rotate.addEventListener('click', () => operation(async () => {
@@ -171,7 +174,7 @@
                 await refreshGrants();
                 if (number === issuedNumber) notice('已轮换，旧地址失效。新地址仅本次显示。');
             }));
-            const revoke = element('button', '撤销', {type:'button', 'data-revoke':String(value.id)}); revoke.disabled = value.revoked;
+            const revoke = element('button', '撤销订阅', {type:'button', 'data-revoke':String(value.id)}); revoke.disabled = value.revoked;
             revoke.addEventListener('click', () => operation(async () => {
                 if (!confirm('撤销该订阅？客户端将不能继续拉取配置。')) return;
                 await json(`/api/subscriptions/${value.id}`, {method:'DELETE'});

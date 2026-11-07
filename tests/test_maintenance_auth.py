@@ -241,6 +241,18 @@ class MaintenanceAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/inbounds', json={}, headers=destructive).status_code, 403)
         self.assertEqual(self.client.post('/api/inbounds/1/delete', json={}, headers=destructive).status_code, 428)
 
+    def test_local_password_delivery_requires_both_share_and_relay(self):
+        from app.api import proxy_exports
+        from app.services.local_connection import LocalConnection
+        with patch.object(proxy_exports, 'get_local_exporter') as factory:
+            factory.return_value.connection.return_value=LocalConnection(7891,'test-user','fake-long-private-password','a'*64)
+            for scopes,expected in [(['diagnose'],403),(['relay'],403),(['share'],403),(['relay','share'],200)]:
+                _,headers=self.bearer(scopes)
+                response=self.client.post('/api/proxy/local-connection',json={'base_revision':'a'*64},headers=headers)
+                self.assertEqual(response.status_code,expected,response.text)
+                if expected==403:self.assertNotIn('fake-long-private-password',response.text)
+            self.assertEqual(factory.return_value.connection.call_count,1)
+
     def test_task_actions_are_separate_scopes_and_payload_is_fixed(self):
         from app.services import maintenance_tasks
         with patch.object(maintenance_tasks, 'submit_task', return_value={'id': 'mt_fake', 'state': 'queued'}) as submit:

@@ -43,6 +43,8 @@ class InboundPayload(BaseModel):
     tag: str | None = None
     user_id: int | None = None
     certificate_id: str | None = None
+    expected_proxy_revision: str = Field(default=None, strict=True, min_length=64,
+        max_length=64, pattern=r'^[0-9a-f]{64}$')
 
 
 class InboundUpdatePayload(BaseModel):
@@ -54,6 +56,10 @@ class InboundUpdatePayload(BaseModel):
     expiry_time: int | None = None
     tag: str | None = None
     certificate_id: str | None = None
+    expected_proxy_revision: str = Field(default=None, strict=True, min_length=64,
+        max_length=64, pattern=r'^[0-9a-f]{64}$')
+    expected_content_revision: str = Field(default=None, strict=True, min_length=64,
+        max_length=64, pattern=r'^[0-9a-f]{64}$')
     routing_mode: Literal["inherit", "direct", "relay"] | None = None
     # Only omission selects legacy current-ID behavior. An explicit null is
     # invalid, and old servers' extra=forbid rejects this new JSON condition.
@@ -138,15 +144,17 @@ def get_inbound_editor(inbound_id: int, request: Request = None, db: Session = D
 @router.post("")
 @router.post("/")
 def add_inbound(payload: InboundPayload, request: Request = None, db: Session = Depends(get_db)):
-    data = payload.model_dump()
+    expected_proxy = payload.expected_proxy_revision
+    conditions = {} if expected_proxy is None else {'expected_proxy_revision': expected_proxy}
+    data = payload.model_dump(exclude={'expected_proxy_revision'})
     if payload.certificate_id:
         if has_reality(normalize_mapping(payload.stream_settings)):
             raise HTTPException(409, "REALITY 不能绑定托管证书")
         data["profile"] = _managed_certificate(
             payload.profile, payload.certificate_id, payload.core, payload.protocol
         )
-    item = create_inbound(db, data)
-    core_status = apply_checked(item.core)
+    item = create_inbound(db, data, **conditions)
+    core_status = apply_checked(item.core, **conditions)
     if payload.certificate_id:
         from app.certificates.manager import get_manager
         from app.api.certificates import perform
@@ -222,7 +230,7 @@ def _prepare_inbound_edit(item, data: dict, *, allow_certificate_changes=True, p
     return data, (certificate_changed, certificate_id, previous_certificate)
 
 
-def _finish_inbound_edit(inbound_id: int, core: str, certificate_plan: tuple):
+def _finish_inbound_edit(inbound_id: int, core: str, certificate_plan: tuple, *, expected_proxy_revision=None):
     # Keep the established post-commit boundary. Certificate methods have
     # their own write transactions and acquire binding_lock before core.lock;
     # neither the guarded SQLite transaction nor core.lock may span this work.
@@ -233,7 +241,8 @@ def _finish_inbound_edit(inbound_id: int, core: str, certificate_plan: tuple):
         from app.certificates.manager import get_manager
         from app.api.certificates import perform
         perform(lambda: get_manager().unbind("inbound:" + str(inbound_id)))
-    result = apply_checked(core)
+    conditions = {} if expected_proxy_revision is None else {'expected_proxy_revision': expected_proxy_revision}
+    result = apply_checked(core, **conditions)
 
     if certificate_changed and certificate_id:
         from app.certificates.manager import get_manager
@@ -251,23 +260,29 @@ def edit_inbound(
     db: Session = Depends(get_db),
 ):
     data = payload.model_dump(exclude_unset=True)
+    expected_proxy = data.pop('expected_proxy_revision', None)
+    conditions = {} if expected_proxy is None else {'expected_proxy_revision': expected_proxy}
     guarded = "expected_instance_revision" in data
     expected = data.pop("expected_instance_revision", None)
+    content_condition = data.pop('expected_content_revision', None)
+    if content_condition is not None and not guarded:
+        raise HTTPException(422, 'Content condition requires an instance condition')
+    guard_conditions = {**conditions, **({} if content_condition is None else {'expected_content_revision': content_condition})}
     principal = getattr(getattr(request, 'state', None), 'maintenance', None)
     allow_certificates = principal is None or 'certificates' in principal['scopes']
     if guarded:
         updated = update_inbound_if_instance(db, inbound_id, expected,
             lambda item: _prepare_inbound_edit(item, data, allow_certificate_changes=allow_certificates,
-                preserve_material_paths=principal is not None))
-        result = _finish_inbound_edit(inbound_id, updated.core, updated.certificate_plan)
+                preserve_material_paths=principal is not None), **guard_conditions)
+        result = _finish_inbound_edit(inbound_id, updated.core, updated.certificate_plan, **conditions)
         value = json.loads(updated.inbound_json)
     else:
         # Preserve legacy callers' current-ID behavior and transaction shape.
         item = get_inbound(db, inbound_id)
         data, certificate_plan = _prepare_inbound_edit(item, data, allow_certificate_changes=allow_certificates,
             preserve_material_paths=principal is not None)
-        updated = update_inbound(db, inbound_id, data)
-        result = _finish_inbound_edit(inbound_id, updated.core, certificate_plan)
+        updated = update_inbound(db, inbound_id, data, **conditions)
+        result = _finish_inbound_edit(inbound_id, updated.core, certificate_plan, **conditions)
         value = to_dict(updated)
 
     return {

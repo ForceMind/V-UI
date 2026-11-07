@@ -34,9 +34,18 @@ class ProfilePayload(ImportPayload):
     acknowledged_ignored_sections: list[str] = Field(default_factory=list, max_length=128)
 
 
-class ApplyPayload(StrictPayload):
+class CheckPayload(StrictPayload):
     base_revision: str = Field(pattern=r'^[0-9a-f]{64}$', min_length=64, max_length=64)
     source_fingerprint: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$', min_length=64, max_length=64)
+
+
+class ApplyPayload(CheckPayload):
+    runtime_fingerprint: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$', min_length=64, max_length=64)
+
+
+class DiscardDraftPayload(StrictPayload):
+    base_revision: str = Field(pattern=r'^[0-9a-f]{64}$', min_length=64, max_length=64)
+    active_revision: str = Field(pattern=r'^[0-9a-f]{64}$', min_length=64, max_length=64)
 
 
 class SettingsPayload(StrictPayload):
@@ -166,6 +175,15 @@ def create_profile(payload: ProfilePayload, response: Response, request: Request
         raise safe_error(exc) from None
 
 
+@router.post('/discard-draft')
+def discard_draft(payload: DiscardDraftPayload, response: Response):
+    try:
+        result = get_store().discard_draft(payload.base_revision, payload.active_revision)
+        return snapshot_response(result, response)
+    except (ProxyCapacityError, ProxyStorageError, ProxyConflict, ProxyValidationError) as exc:
+        raise safe_error(exc) from None
+
+
 def get_core_manager():
     from app.services.core_manager import core_manager
     return core_manager
@@ -190,7 +208,7 @@ def runtime_error(exc: Exception) -> HTTPException:
 
 
 @router.post('/check')
-def check_candidate(payload: ApplyPayload, response: Response):
+def check_candidate(payload: CheckPayload, response: Response):
     from app.services.core_runtime import CoreError
     from app.services.proxy_policy import PolicyError
     from app.services.proxy_resolution import ResolutionError
@@ -223,7 +241,12 @@ def apply_candidate(payload: ApplyPayload, response: Response, request: Request,
     try:
         # Manager additionally gates stale enabled runtimes from other cores;
         # directly calling the coordinator would omit that global ingress gate.
-        result = (get_core_manager().apply_proxy(payload.base_revision, idempotency_key)
+        if payload.runtime_fingerprint is not None:
+            result = get_core_manager().apply_proxy(payload.base_revision, idempotency_key,
+                expected_source_fingerprint=payload.source_fingerprint,
+                expected_runtime_fingerprint=payload.runtime_fingerprint)
+        else:
+            result = (get_core_manager().apply_proxy(payload.base_revision, idempotency_key)
                   if payload.source_fingerprint is None else
                   get_core_manager().apply_proxy(payload.base_revision, idempotency_key,
                                                  expected_source_fingerprint=payload.source_fingerprint))

@@ -43,6 +43,9 @@ SITES = {
 # launch implementations, fake unit processes, and non-core app/worker/benchmark
 # subprocesses. These entries do not grant Mihomo permission to use the old gate.
 OTHER_CONSTRUCTIONS = {
+    # Shipped JS controller only: pipe transport to the fixture's authenticated
+    # HTTP client; 120s bound with finally kill/reap. It launches no client core.
+    ('test_inbound_routing_real.py', 'InboundRoutingRealTests.run_simple_controller', 'Popen'),
     ('acme_helpers.py', 'PebbleFixture.__init__', 'Popen'),
     ('benchmark_archive_memory.py', 'main', 'Popen'),
     ('benchmark_panel_allocator.py', 'run', 'Popen'),

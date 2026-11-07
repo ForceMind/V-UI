@@ -20,7 +20,7 @@ class Channel {
 }
 function context(ChannelType){
  let errorHandler;
- const c={addEventListener(){},location:{hash:'',replace(value){c.redirects.push(value)}},redirects:[],stops:0,authStatus:401,authChecks:0,
+ const c={confirm(){return true;},addEventListener(){},location:{hash:'',replace(value){c.redirects.push(value)}},redirects:[],stops:0,authStatus:401,authChecks:0,
   Vue:{createApp(options){c.setup=options.setup;return {component(){},use(){},mount(){}}},ref:v=>({value:v}),reactive:v=>v,computed:f=>({get value(){return f()}}),watch(){},onMounted(fn){c.mounted=fn}},ElementPlus:{ElMessage:{success(){},error(){}},ElMessageBox:{}},ElementPlusIconsVue:{},
   axios:{defaults:{headers:{common:{}}},interceptors:{response:{use(ok,bad){errorHandler=bad}}},get:async(url,options)=>{assert.equal(url,'/api/auth/me');assert.equal(options.timeout,5000);assert.equal(options.validateStatus(401),true);assert.equal(options.validateStatus(500),false);c.authChecks++;return {status:c.authStatus,data:{username:'fresh'}}}},console};
  if(ChannelType)c.BroadcastChannel=ChannelType;
@@ -141,7 +141,7 @@ function make(timed=false){
  const ids=new Map(),pending=[],timers=new Map();let channel,nextTimer=0;
  const element=id=>{if(!ids.has(id))ids.set(id,{value:'draft',hidden:id==='account-panel'||id==='login-form',textContent:'',events:{},addEventListener(n,fn){this.events[n]=fn}});return ids.get(id)};
  class Channel{constructor(){channel=this}postMessage(){}}
- const c={BroadcastChannel:Channel,addEventListener(){},document:{getElementById:element,querySelectorAll(){return []}},location:{replace(){}},
+ const c={confirm(){return true;},BroadcastChannel:Channel,addEventListener(){},document:{getElementById:element,querySelectorAll(){return []}},location:{replace(){}},
   fetch:(url,options)=>new Promise((resolve,reject)=>{pending.push({url,options,resolve,reject});options.signal?.addEventListener('abort',()=>reject(Error('synthetic timeout')))})};
  if(timed){c.AbortController=AbortController;c.setTimeout=fn=>{const id=++nextTimer;timers.set(id,fn);return id};c.clearTimeout=id=>timers.delete(id)}
  vm.createContext(c);vm.runInContext(source,c);

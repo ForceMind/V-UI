@@ -56,9 +56,10 @@ for (const [template, expected] of [
     assert.ok(reported, 'negative control must reach the compiler error hook');
 }
 const html = fs.readFileSync(path.join(root, 'web/index.html'), 'utf8');
-const marker = '<div id="app">', start = html.indexOf(marker), end = html.lastIndexOf('</div>');
+const marker = '<div id="app">', start = html.indexOf(marker), boundary = html.indexOf('<div id="simple-node-operations"'), end = html.lastIndexOf('</div>', boundary);
 assert(start >= 0 && start === html.lastIndexOf(marker) && end > start, 'one shipped #app root');
-assert.match(html.slice(end + '</div>'.length), /^\s*<script\b[\s\S]*<\/html>\s*$/);
+assert(boundary > end && boundary === html.lastIndexOf('<div id="simple-node-operations"'), 'one vanilla operations root outside Vue');
+assert.match(html.slice(end + '</div>'.length), /^\s*<div id="simple-node-operations"[^>]*><\/div>\s*<script\b[\s\S]*<\/html>\s*$/);
 const render = V.compile(html.slice(start + marker.length, end), options);
 assert.equal(typeof render, 'function');
 console.log('Compiled shipped #app with pinned diagnostic Vue ' + V.version + '; no mount, render or browser.');

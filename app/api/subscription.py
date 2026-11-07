@@ -2,7 +2,8 @@
 from __future__ import annotations
 import asyncio
 import json
-from typing import Literal
+import hmac
+from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import PlainTextResponse, Response
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.models.database import get_db
 from app.services.validated_export import ExportError, base64_subscription, export_warnings, share_link, singbox_client_config
 from app.services.inbound_service import get_inbound, list_inbounds
+from app.services.inbound_instance_revision import mutation_revision, content_revision
 from app.services.routing_store import load_routing
 from app.services.mihomo_subscription import mihomo_config
 from app.services.tcp_upstream_export import (
@@ -48,9 +50,28 @@ def singbox_subscription(request: Request, host: str | None = Query(default=None
     return Response(content=json.dumps(singbox_client_config(list_inbounds(db,core=core),_host(request,host)),ensure_ascii=False),media_type='application/json')
 
 
+ShareRevision = Annotated[str | None, Query(min_length=64, max_length=64, pattern=r'^[0-9a-f]{64}$')]
+
+
+def _share_condition(item, expected_instance=None, expected_content=None):
+    # The exact ORM object that passes these conditions is exported below.
+    # There is no second ID lookup that could select a replacement row.
+    if expected_content is not None and expected_instance is None:
+        raise HTTPException(422, 'SHARE_INSTANCE_REQUIRED')
+    for expected, actual in ((expected_instance, mutation_revision(item)),
+                             (expected_content, content_revision(item))):
+        if expected is not None and (type(expected) is not str or type(actual) is not str
+                                     or not hmac.compare_digest(expected, actual)):
+            raise HTTPException(409, {'code':'SHARE_NODE_CHANGED',
+                'message':'节点已变化，请刷新列表后重新分享。'})
+
+
 @router.get('/link/{inbound_id}', response_class=PlainTextResponse)
-def inbound_share_link(inbound_id: int, request: Request, host: str | None = Query(default=None), db: Session = Depends(get_db)):
+def inbound_share_link(inbound_id: int, request: Request, host: str | None = Query(default=None),
+                       expected_instance_revision: ShareRevision = None,
+                       expected_content_revision: ShareRevision = None, db: Session = Depends(get_db)):
     item = get_inbound(db, inbound_id)
+    _share_condition(item, expected_instance_revision, expected_content_revision)
     if not item.enable or getattr(item, 'expiry_time', 0):
         raise HTTPException(409, {'code': 'SHARE_NODE_INELIGIBLE',
             'message': '此节点已停用或设置了到期时间，暂不符合当前分享格式要求，请编辑节点后重试。'})
@@ -114,6 +135,8 @@ class TCPUpstreamExportPayload(BaseModel):
     format: Literal["uri", "clash-yaml"]
     server: str = Field(min_length=1, max_length=253)
     acknowledge_tcp_only: bool
+    expected_instance_revision: str = Field(default=None, strict=True, min_length=64, max_length=64, pattern=r'^[0-9a-f]{64}$')
+    expected_content_revision: str = Field(default=None, strict=True, min_length=64, max_length=64, pattern=r'^[0-9a-f]{64}$')
 
 
 @upstream_router.post("/upstream/{inbound_id}")
@@ -137,7 +160,10 @@ def inbound_tcp_upstream_export(
     except Exception:
         raise HTTPException(503, "TCP_UPSTREAM_EXPORT_UNAVAILABLE") from None
     try:
+        _share_condition(item, payload.expected_instance_revision, payload.expected_content_revision)
         result = export_tcp_upstream(item, payload.server, payload.format)
+    except HTTPException:
+        raise
     except TCPUpstreamExportError as error:
         raise HTTPException(422 if error.code == INVALID_REQUEST else 409, error.code) from None
     except Exception:

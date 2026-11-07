@@ -16,7 +16,7 @@ from app.services.log_redaction import install_log_redaction
 from app.services.validated_export import ExportError
 from app.services.routing_store import RoutingStorageError
 
-app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.4.20')
+app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.4.21')
 app.add_middleware(AdminAuthMiddleware)
 app.include_router(maintenance.router,prefix='/api/maintenance',tags=['Temporary maintenance'])
 app.include_router(certificates.router,prefix='/api/certificates',tags=['Certificates'])
@@ -100,11 +100,11 @@ def certificates_page():
 
 @app.get('/proxy',include_in_schema=False)
 def proxy_page():
-    return FileResponse(os.path.join(get_web_path(),'proxy.html'),headers={'Content-Security-Policy':"default-src 'none'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
+    return FileResponse(os.path.join(get_web_path(),'proxy.html'),headers={'Content-Security-Policy':"default-src 'none'; img-src 'self' data:; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
 
 @app.get('/maintenance',include_in_schema=False)
 def maintenance_page():
-    return FileResponse(os.path.join(get_web_path(),'maintenance.html'),headers={'Content-Security-Policy':"default-src 'none'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
+    return FileResponse(os.path.join(get_web_path(),'maintenance.html'),headers={'Content-Security-Policy':"default-src 'none'; img-src 'self' data:; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"})
 
 @app.get('/workspace',include_in_schema=False)
 def workspace_page():
