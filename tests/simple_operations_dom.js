@@ -12,7 +12,7 @@ function screen(options={}){
         confirm:text=>{confirms.push(text);return options.confirm?options.confirm(text):true;},navigator:{clipboard:{writeText:async value=>{if(options.clipboardFailure)throw new Error('synthetic denied');clipboard.push(value);}}},
         addEventListener:(name,fn)=>{(events[name]??=[]).push(fn);},dispatchEvent:event=>{for(const fn of events[event.type]||[])fn(event);},removeEventListener:()=>{},
         CustomEvent:class{constructor(type,options={}){this.type=type;this.detail=options.detail;}},
-        setTimeout,clearTimeout,AbortController,fetch:async()=>{fetches++;throw new Error('Unexpected cookie transport');},
+        setTimeout:options.setTimeout||setTimeout,clearTimeout,AbortController,fetch:async()=>{fetches++;throw new Error('Unexpected cookie transport');},
         VUI_NAV:{guard:()=>()=>{},modal:{open(){},close(){}},replaceLogin(){throw new Error('Remote view must not use administrator-cookie redirect');}}};
     context.globalThis=context;vm.runInNewContext(source,context);
     const view=context.VUI_SIMPLE_OPERATIONS.mount(root,{dialog:true,request:backend.api,remote:true,scopes:options.scopes??null});
@@ -177,4 +177,17 @@ test('management tabs cannot silently clear an unknown creation; cancellation ke
     await f.view.certificates();await f.view.subscriptions();
     assert.equal(f.view.task,'direct');assert.equal(f.view.flow.intent.nodeSent,true);assert.ok(button(f,'核对并完成'));
     assert.ok(f.confirms.every(text=>text.includes('结果尚未确认')));assert.equal(f.calls.filter(c=>c.path==='/api/inbounds'&&c.method==='POST').length,1);
+});
+test('certificate readback scheduled before close or task switch cannot reopen the dialog or replace new input',async()=>{
+    for(const leave of ['close','switch']){
+        const timers=[];const f=screen({active:true,setTimeout:(fn,delay)=>{timers.push({fn,delay});return timers.length;}});
+        f.certs[0].auto_renew=true;const api=f.api;
+        f.view.flow.request=async(path,method,body,options)=>path.endsWith('/auto-renew')?{}:api(path,method,body,options);
+        await f.view.certificates();button(f,'暂停自动续期').click();await settle();
+        const pending=timers.find(t=>t.delay===0);assert.ok(pending);
+        if(leave==='close')f.view.close();else{await f.view.open('direct');f.view.fields.name.value='保留新任务输入';f.view.dirty=true;}
+        const before=f.calls.length;pending.fn();await settle();assert.equal(f.calls.length,before);
+        if(leave==='close')assert.equal(f.view.dialog.open,false);else{assert.equal(f.view.task,'direct');assert.equal(f.view.fields.name.value,'保留新任务输入');}
+        f.view.destroy();
+    }
 });
