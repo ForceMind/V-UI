@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import ctypes
+from contextlib import ExitStack
 import http.client
 import io
 import ipaddress
@@ -35,6 +36,9 @@ from app.services.proxy_policy import (
 )
 from app.services.proxy_resolution import _decode_worker_output, _panel_host, self_address_snapshot
 from app.services.upstream_profile import UpstreamProfile
+from app.core_updates.binary import (RuntimeArtifact, RuntimeArtifactError, open_runtime_artifact,
+                                     verify_runtime_artifact_fd)
+from app.core_updates.selection import CoreSelectionError, _decode_reference
 
 _CHILDREN = []
 
@@ -194,7 +198,36 @@ def _write_config(directory, config):
     return path
 
 
-def _validate_core(binary, config_path):
+def _check_material(binary, artifact, fd):
+    if artifact is None:
+        if fd is not None:
+            raise DiagnosticsError("CORE_UNAVAILABLE")
+        return
+    if (type(artifact) is not RuntimeArtifact or artifact.core != 'sing-box'
+            or type(fd) is not int or fd < 0 or binary != f'/proc/{os.getpid()}/fd/{fd}'):
+        raise DiagnosticsError("CORE_UNAVAILABLE")
+    try:
+        verify_runtime_artifact_fd(fd, artifact)
+    except RuntimeArtifactError:
+        raise DiagnosticsError("CORE_UNAVAILABLE") from None
+
+
+def _decode_artifact(value):
+    # The private parent pipe carries a server-created snapshot, not authority
+    # supplied by an API client. Production paths always use the fixed / anchor.
+    if type(value) is not dict or set(value) != {'reference', 'path', 'owner', 'mode'}:
+        raise DiagnosticsError("INVALID_DIAGNOSTIC_REQUEST")
+    try:
+        reference = _decode_reference(value['reference'])
+        if reference.core != 'sing-box' or value['owner'] not in (0, os.geteuid()):
+            raise ValueError()
+        return RuntimeArtifact(reference, Path(value['path']), owner=value['owner'], mode=value['mode'])
+    except (ValueError, TypeError, CoreSelectionError, RuntimeArtifactError):
+        raise DiagnosticsError("INVALID_DIAGNOSTIC_REQUEST") from None
+
+
+def _validate_core(binary, config_path, *, artifact=None, fd=None):
+    _check_material(binary, artifact, fd)
     path = Path(binary)
     if not path.is_file() or not os.access(path, os.X_OK):
         raise DiagnosticsError("CORE_UNAVAILABLE")
@@ -203,8 +236,10 @@ def _validate_core(binary, config_path):
     except DiagnosticsError:
         raise DiagnosticsError("CORE_UNAVAILABLE") from None
     first = output.splitlines()[0] if output else b""
-    if status or first.split()[:3] != [b"sing-box", b"version", b"1.14.2"]:
+    expected = artifact.version.encode('ascii') if artifact is not None else b"1.14.2"
+    if status or first.split()[:3] != [b"sing-box", b"version", expected]:
         raise DiagnosticsError("CORE_VERSION_MISMATCH")
+    _check_material(binary, artifact, fd)
     child = _spawn([binary, "check", "-c", str(config_path)], stdout=subprocess.DEVNULL)
     try:
         if child.wait(timeout=4):
@@ -380,7 +415,7 @@ def _https_exit(port, username, password):
         raise DiagnosticsError("HTTPS_FAILED") from None
 
 
-def _run(request, directory):
+def _run(request, directory, *, artifact=None, fd=None):
     if (type(request) is not dict or set(request) != {"profile", "profile_id", "revision", "panel_origin", "binary"}
             or type(request["profile_id"]) is not str or not re.fullmatch(r"up_[0-9a-f]{32}", request["profile_id"])
             or type(request["revision"]) is not str or not re.fullmatch(r"[0-9a-f]{64}", request["revision"])
@@ -393,12 +428,16 @@ def _run(request, directory):
     config = _diagnostic_config(profile, request["profile_id"], request["revision"], endpoint, own, port, username, password)
     path = _write_config(directory, config)
     try:
-        _validate_core(request["binary"], path)
+        if artifact is None:
+            _validate_core(request["binary"], path)
+        else:
+            _validate_core(request["binary"], path, artifact=artifact, fd=fd)
     except DiagnosticsError as error:
         _stage("configuration", "failed", error.code)
         raise
     _stage("configuration", "passed", "CORE_CONFIG_VALID")
     _tcp_tls(profile, endpoint.addresses[0])
+    _check_material(request["binary"], artifact, fd)
     core = _start_core(request["binary"], path, port)
     try:
         exit_ip = _https_exit(port, username, password)
@@ -427,16 +466,28 @@ def _install_limits(parent):
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_OUTPUT_BYTES, MAX_OUTPUT_BYTES))
     resource.setrlimit(resource.RLIMIT_NOFILE, (128, 128))
-    if not sys.platform.startswith("linux") or ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGTERM, 0, 0, 0) != 0:
+    if (not sys.platform.startswith("linux") or os.getpgrp() != os.getpid()
+            or ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGTERM, 0, 0, 0) != 0):
         raise DiagnosticsError("DIAGNOSTIC_RESOURCE_LIMIT")
     if os.getppid() != parent:
         raise _Cancelled()
+
+
+def _abort_unreaped():
+    """Keep material FDs until whole-group death; never kill an unrelated group."""
+    try:
+        if os.getpgrp() == os.getpid():
+            os.killpg(os.getpid(), signal.SIGKILL)
+    finally:
+        # No Python unwinding/FD-context cleanup if a signal syscall fails.
+        os._exit(70)
 
 
 def main():
     if len(sys.argv) != 3:
         return 64
     code, exit_ip = "DIAGNOSTIC_WORKER_FAILED", None
+    material = ExitStack()
     def stop(*_):
         raise _Cancelled()
     signal.signal(signal.SIGTERM, stop)
@@ -447,7 +498,18 @@ def main():
         if len(raw) > MAX_INPUT_BYTES:
             raise DiagnosticsError("INVALID_DIAGNOSTIC_REQUEST")
         request = json.loads(raw, object_pairs_hook=_strict_object)
-        exit_ip = _run(request, sys.argv[2])
+        artifact, fd = None, None
+        if type(request) is dict and 'artifact' in request:
+            if set(request) != {'profile', 'profile_id', 'revision', 'panel_origin', 'artifact'}:
+                raise DiagnosticsError("INVALID_DIAGNOSTIC_REQUEST")
+            artifact = _decode_artifact(request['artifact'])
+            try:
+                fd = material.enter_context(open_runtime_artifact(artifact))
+            except RuntimeArtifactError:
+                raise DiagnosticsError("CORE_UNAVAILABLE") from None
+            request = {key: value for key, value in request.items() if key != 'artifact'}
+            request['binary'] = f'/proc/{os.getpid()}/fd/{fd}'
+        exit_ip = _run(request, sys.argv[2], artifact=artifact, fd=fd)
         code = "DIAGNOSTIC_COMPLETE"
     except _Cancelled:
         code = "DIAGNOSTIC_CANCELLED"
@@ -459,8 +521,36 @@ def main():
     finally:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         signal.signal(signal.SIGINT, signal.SIG_IGN)
-        for child in list(reversed(_CHILDREN)):
-            _reap(child)
+        children, cleanup_failed = list(reversed(_CHILDREN)), False
+        for child in children:
+            try:
+                _reap(child)
+            except BaseException:
+                cleanup_failed = True
+        unconfirmed = False
+        for child in children:
+            try:
+                dead = child.poll() is not None
+            except BaseException:
+                dead = False
+            if not dead:
+                unconfirmed = True
+            elif child in _CHILDREN:
+                _CHILDREN.remove(child)
+        if unconfirmed:
+            # No explicit close or result while any child may still execute.
+            # The isolated group dies together; the original parent reaps its
+            # failed worker using the unchanged bounded cleanup path.
+            _abort_unreaped()
+            return 70  # Defensive only: the production abort cannot return.
+        if cleanup_failed:
+            code, exit_ip = "DIAGNOSTIC_WORKER_FAILED", None
+        # Keep the verified inode until every diagnostic child is confirmed
+        # dead, even after request failure or cancellation during startup.
+        try:
+            material.close()
+        except (RuntimeArtifactError, OSError):
+            code, exit_ip = "CORE_UNAVAILABLE", None
     _emit({"event": "result", "code": code, "exit_ip": exit_ip})
     return 0
 

@@ -348,8 +348,23 @@ def _stop_process(process, deadline=None):
 
 
 def _run_worker(payload, deadline, cancelled, emit, directory):
-    from app.services.core_manager import BIN_DIR
-    request = {**payload, "binary": str((BIN_DIR / "sing-box").resolve())}
+    if cancelled.is_set():
+        raise DiagnosticsError("DIAGNOSTIC_CANCELLED")
+    if time.monotonic() >= deadline - 0.8:
+        raise DiagnosticsError("DIAGNOSTIC_TIMEOUT")
+    from app.services.core_manager import BIN_DIR, core_manager
+    from app.core_updates.binary import RuntimeArtifact
+    from app.core_updates.selection import _reference_map
+    artifact = core_manager.runtime_artifact('sing-box')
+    if artifact is None:
+        request = {**payload, "binary": str((BIN_DIR / "sing-box").resolve())}
+    else:
+        # Internal frozen boot snapshot only, never HTTP/URL/profile input.
+        # Hashing/opening stays inside the killable worker's 30 s lifecycle.
+        if type(artifact) is not RuntimeArtifact or artifact.core != 'sing-box' or artifact.anchor != Path('/'):
+            raise DiagnosticsError("CORE_UNAVAILABLE")
+        request = {**payload, "artifact": {"reference": _reference_map(artifact.reference),
+                   "path": str(artifact.path), "owner": artifact.owner, "mode": artifact.mode}}
     raw = json.dumps(request, ensure_ascii=True, separators=(",", ":"), allow_nan=False).encode("ascii")
     if len(raw) > MAX_INPUT_BYTES:
         raise DiagnosticsError("INVALID_DIAGNOSTIC_REQUEST")

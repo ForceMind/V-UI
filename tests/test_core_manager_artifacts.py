@@ -135,5 +135,19 @@ class CoreManagerArtifactTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'Unsupported core'):
             manager.runtime_artifact('unknown')
 
+    def test_diagnostic_snapshot_never_waits_for_shared_apply_or_recovery_lock(self):
+        manager=self.m.CoreManager(artifacts=self.map)
+        done=threading.Event();values=[]
+        def read():
+            values.append(manager.runtime_artifact('sing-box'));done.set()
+        with manager.lock:
+            thread=threading.Thread(target=read);thread.start()
+            completed_under_lock=done.wait(1)
+        thread.join(timeout=1)
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(completed_under_lock)
+        self.assertEqual(values,[self.map['sing-box']])
+        self.assertFalse(self.runtime.calls)
+
 
 if __name__=='__main__':unittest.main()

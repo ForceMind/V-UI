@@ -8,7 +8,7 @@ import ssl
 import sys
 from urllib.parse import urlsplit
 from app.data_owner import data_owner
-from app.release_tools import ReleaseError, active, lease, private_root, supported_environment, target_arch
+from app.release_tools import ReleaseError, active_verified, lease, private_root, supported_environment, target_arch
 
 
 def private_file(value: str) -> Path:
@@ -39,13 +39,20 @@ def run() -> None:
     if not origin.startswith('https://') or (urlsplit(origin).port or 443) != args.port:
         raise ReleaseError('Direct HTTPS origin and listening port must match')
     with lease(root/'.panel.lease'), data_owner(root/'data'):
-        release,_=active(root); payload=release/'payload'
+        release,_,manifest,ready=active_verified(root); payload=release/'payload'
         if Path(__file__).resolve().parents[1] != payload.resolve():
             raise ReleaseError('Selected release changed; rerun the active release command')
         data=root/'data'
         if not data.is_dir() or data.is_symlink() or data.stat().st_uid != os.geteuid() or data.stat().st_mode & 0o077:
             raise ReleaseError('Data directory must be owned by service user with mode 0700')
         os.environ.update(VUI_DATA_DIR=str(data),VUI_BIN_DIR=str(payload/'cores'/target_arch()),VUI_RELEASE_ROOT=str(root))
+        # Selection and material failures must stop boot before a runtime,
+        # certificate worker, database initialization or main import can act.
+        from app.core_updates.boot import configure_boot
+        from app.services.core_manager import core_manager
+        from app.services.core_runtime import VERSIONS
+        configure_boot(core_manager, payload=payload, manifest=manifest, ready=ready,
+                       data=data, versions=VERSIONS)
         # Only initialize the data store after taking the instance lease and
         # verifying the selected release. Bootstrap paths are not API inputs.
         from app.certificates.manager import get_manager

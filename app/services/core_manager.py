@@ -184,9 +184,15 @@ class CoreManager:
             self._artifact_snapshot = snapshot
 
     def runtime_artifact(self, core: str) -> RuntimeArtifact | None:
-        """Internal production/diagnostic snapshot; does not instantiate a core."""
-        with self.lock:
-            return self.get(core).artifact
+        """Read the immutable boot snapshot without waiting for a core action.
+
+        configure_artifacts publishes this tuple once, after validating and
+        installing both adapters. Diagnostic cancellation must not wait for
+        the shared apply/recovery lock. There is no mutable path/runtime read.
+        """
+        self.get(core)  # Preserve the fixed unsupported-core error.
+        snapshot = self._artifact_snapshot
+        return None if snapshot is None else next(value for name, value in snapshot if name == core)
 
     def get(self, core: str) -> BaseCoreAdapter:
         if core not in self.adapters:

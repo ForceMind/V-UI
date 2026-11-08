@@ -1,6 +1,6 @@
 # P3 核心独立升级与回滚契约草案
 
-状态：设计独审通过；当前完成制品校验、不可变准备/读取、官方组件客户端、纯选择计划与离线受信缓存源码及合成回归，完整核心升级/回退尚未实现或验收。代码事实核对基线为4bd1d9a648a8096fbf2fa05314e35049a2408e7c。它不属于当前DNS候选PR145，不改变当前公开22、23发布门禁、核心pin或服务器。
+状态：设计独审通过；当前完成M0–M7制品/来源、选择恢复元数据、已确认选择的只读启动及诊断接线，完整受管核心升级/回退尚未实现或验收。代码事实核对基线为4bd1d9a648a8096fbf2fa05314e35049a2408e7c。它不属于当前DNS候选PR145，不改变当前公开22、23发布门禁、核心pin或服务器。
 
 本阶段来自ROADMAP的已批准P3；Go迁移继续暂缓。契约已完成独审，制品校验作为独立实现首块；后续选择、备份闭包、切换和RPC继续分块实现与审查。首测版本已列明，仅核元数据；制品和兼容资格尚未取得，不能把本草案称为核心已可升级。
 
@@ -94,7 +94,7 @@ OpenRC明确仅状态/准备；不提供未经资格的自动切换/回退，不
 
 ## 当前状态与下一步
 
-以上选择已完成设计独审。M0制品校验23项、M1不可变准备/读取25项、M2官方客户端29项、M3纯选择计划17项、M4受信catalog缓存24项合成回归均通过实际Python3.9.6/3.12检查及增量独审；初轮macOS临时目录别名和归档成员卷号漏检均已修正并定点复核。已实现的存储仅准备/回读制品及曾认证的受信上下文，客户端只由虚构传输测试，选择模型只产出计划；root选择持久化、运行时接入、受管切换、备份闭包和RPC仍未实现，真实网络/核心与四目标资格及公共组件Release未取得，不能把这些原语称为完整核心升级。P2的准确提交资格与外部下载失败仍独立记录，不能用P3结果补齐。
+设计及M0–M7当前源码已分块独审：制品库/官方客户端/独立catalog、选择恢复元数据、离线resolver、Manager冻结快照、活动bundle转换及confirmed启动/诊断接线均已实现。初轮M0–M4的118项合成检查和macOS临时目录别名、归档成员卷号漏检失败保留；后续e6f5eb2自身九组/21 jobs及原生三环境各184项契约、staged Python32项假执行器绑定无skip，属于该提交的基础资格。新增boot/diag在本机假材料/AST中验证，仍须其自身Actions。host停止/独占、真实备份闭包、trial/confirm/recovery协调器、迁移及RPC/终端/面板入口尚未实现；真实不同组件版本、四目标切换及公共组件Release尚无资格。P2的104f8c8自身已完整验收但等待单独合并发布批准，不用P3证据替代它或推断发布权限。
 
 受保护分支合并、组件或应用tag/Release公开发行、短入口变更和真实主机部署均须在具体成果可审阅后取得对应明确授权；当前没有这些P3授权，也未执行。新签名密钥、Secrets或额外权限不能从普通开发授权推断。
 
@@ -358,7 +358,7 @@ backup恢复缺独立live catalog时，上层必须在停止或替换data前明�
 
 ## M5 root选择与恢复元数据事务（仅元数据）
 
-`app/core_updates/selection_files.py`提供`SelectionFiles`。本块不调用systemd、data_owner、核心、安装器、RPC、网络或实际备份；所有停止、writer独占、备份完成及健康验证参数都只是受信协调器提供的观察记录，不是本机证明，不授予root权限或材料执行资格。M0–M4 authority/store验证、整应用payload验证、Runtime descriptor、实际worker握手和本块尚未接通，不能称完整独立核心升级已实现。
+`app/core_updates/selection_files.py`提供`SelectionFiles`。本块不调用systemd、data_owner、核心、安装器、RPC、网络或实际备份；所有停止、writer独占、备份完成及健康验证参数都只是受信协调器提供的观察记录，不是本机证明，不授予root权限或材料执行资格。M7已把已确认选择接到整应用验证后的只读boot/resolver；实际worker握手、受管切换和本块元数据事务仍未接通，不能称完整独立核心升级已实现。
 
 生产只用默认`Layout(root=/etc/v-ui, owner=0, anchor=/)`，写方法先要求实际UID0。显式`Layout/owner/anchor`仅供受信Python临时目录测试，不增加用户路径、环境或CLI选项。目录从可信anchor逐层no-follow打开并绑定父FD；生产祖先root所有且组/其他不可写，`/etc/v-ui`为0755。元数据文件严格regular、单link、精确owner/mode、有界读取、严格JSON及读前后FD/路径身份；沿用M1的Scope和原生no-replace，不改M1原语。
 
@@ -428,10 +428,22 @@ M5仅覆盖上述元数据状态机和临时目录故障逻辑。真实准入还
 
 `CoreManager.configure_artifacts`只在受信启动阶段一次性安装两核心完整快照，必须在任何 runtime 或 proxy coordinator 创建之前调用。映射先整体验证，之后固定；相同快照重入无副作用，快照变化或旧 runtime 已创建时要求受管停止及新进程，不在状态查询中热换。Adapter 通过同一个 manager 锁建立唯一 runtime，并把同一 descriptor 传给 `CoreRuntime`。没有 descriptor 的旧调用仍保留原来三个位置参数和固定核心行为。内部 `runtime_artifact(core)`读取快照不创建 runtime，供后续诊断接同一材料。
 
-这两块尚未接入实际 `serve`、独立诊断子进程、root 受管切换或备份闭包。临时假材料和 AST FakeRuntime 测试只能证明引用拒绝、映射完整性及缓存边界，不证明真实 ELF、新版本兼容、服务切换或生产升级。分支 `6c7ccaa` 的九组 Actions 已成功；原生 ARM64 glibc 与两种 musl 的 121 项基础契约及 staged Python 的 32 项 Linux 假执行器绑定均无 skip。该证据属于先前提交，不冒充 M5/M6 新增文件或真实组件升级验收；新增契约须在其自身提交重新跑 Actions。
+本段交付时尚未接入实际 `serve`、独立诊断子进程、root 受管切换或备份闭包，后续只读接线见 M7。临时假材料和 AST FakeRuntime 测试只能证明引用拒绝、映射完整性及缓存边界，不证明真实 ELF、新版本兼容、服务切换或生产升级。分支 `6c7ccaa` 的九组 Actions 已成功；原生 ARM64 glibc 与两种 musl 的 121 项基础契约及 staged Python 的 32 项 Linux 假执行器绑定均无 skip。该证据属于先前提交，不冒充 M5/M6 新增文件或真实组件升级验收；新增契约须在其自身提交重新跑 Actions。
 
 ### 活动 bundle 事实转换
 
 `active_verified(root)`保留原活动应用校验流程，返回`release,current,manifest,ready`；原`active(root)`仍返回前两项。只有一遍完整 payload/runtime 校验，旧manifest与READY绑定及release_id错误继续拒绝。返回字典只是这次受信校验的观察，不是可转交的authority token，也不封住其所有者后续写入。
 
-`bundle_artifacts(payload,manifest,ready,versions=...,owner=...)`只转换这些已验事实。严格核schema1/release/platform、完整source40、实际完整target包含于manifest、两个固定core成员的摘要/size/0700，版本来自已验应用的`CoreRuntime.VERSIONS`常量，不能取顶层应用version或用户latest。owner来自整包已核的服务UID；不假设root/0755。不读文件、不再次全包hash，实际文件由resolver/runtime在各自边界复核。接口仍未接入serve或数据迁移，旧legacy runtime不能无条件换成schema2。
+`bundle_artifacts(payload,manifest,ready,versions=...,owner=...)`只转换这些已验事实。严格核schema1/release/platform、完整source40、实际完整target包含于manifest、两个固定core成员的摘要/size/0700，版本来自已验应用的`CoreRuntime.VERSIONS`常量，不能取顶层应用version或用户latest。owner来自整包已核的服务UID；不假设root/0755。不读文件、不再次全包hash，实际文件由resolver/runtime在各自边界复核。与serve的只读接线见M7；数据迁移仍未接入，旧legacy runtime不能无条件换成schema2。
+
+## M7 已确认选择的启动与诊断接线
+
+`serve`在panel/data_owner租约中复用`active_verified`单遍结果。固定VUI路径后、证书manager/DB初始化/main及任何runtime建立前，`configure_boot`读取root选择并一次性配置现有全局CoreManager。只接受stable confirmed，不从private journal阶段猜trial许可，也没有新增env、CLI、HTTP路径或版本输入。
+
+`SelectionFiles.read_boot`仅在六类初始化痕迹（selector、fence、pending、active、history、lock）全部缺失时返回None；整个末级root目录缺失须先验证现有可信祖先，并在退出scope时重核缺失。未知稳定读取错误、孤立锁/历史、任意损坏或pending都不是“未安装”。不建目录、锁、selector或数据；原read_stable/write的缺失语义保持，write不得使用allow_missing。
+
+持data_owner只读扫描两core实际state：逐层no-follow，私有owner/mode、单link、state≤4KiB且严格JSON，对应配置≤16MiB流式SHA及FD/路径绑定。未初始化只容missing或真实旧二键`revision/enabled`状态；schema2缺root选择拒绝。已确认选择只容missing unused或artifact_id完全匹配的schema2；既有legacy状态需要外部显式迁移。完整双核心材料解析成功且重读同选择后才configure，不能部分注入或自动回bundle。扫描只证明已保存字节，不替代新版本的配置检查/监听/健康验收。
+
+诊断parent在检查取消/原deadline后，从同一Manager一次性发布的不可变快照直接取得sing-box descriptor，不取全局apply/recovery锁、不创建runtime；快照发布发生在受信启动完整配置两adapter之后，HTTP诊断只在启动完成后准入。既有legacy消息仍用固定核心；已选核心通过私有stdin管道发送严格内部artifact DTO，路径/引用/owner/mode由服务器快照提供，不接HTTP或profile中的任意代码来源。worker在原30秒可终止/回收生命周期内打开并复核材料，持FD经`/proc/<worker-pid>/fd/N`用于version/check/run；版本来自该材料引用，不回退1.14.2。每个执行边界重核FD，逐一尝试回收所有诊断子进程并确认死亡之后才关闭材料；取消与错误也遵循该顺序。死亡已确认但pipe清理异常仍返回失败；若任何子进程存活或无法确认，不显式close、不发成功结果，立即终止经双重校验的自身独立进程组，由原父端回收失败worker，不误杀其他进程组。关闭失败输出固定CORE_UNAVAILABLE并清空exit_ip，原父端输出allowlist不放宽。无parent进程内大文件hash、无runtime或node状态写入。
+
+本块19项boot临时目录/AST与17项诊断纯mock覆盖源码边界，未执行真实核心或server。真实组件发布、不同新版本原生诊断/配置与固定客户端、受管stop/backup/trial/confirm/recover、全部writer准入、完整备份恢复、终端/面板/维护入口均仍待完成；只读接线不取得这些资格。所有构建、安装和后续真实执行继续仅在GitHub Actions，浏览器未验证。

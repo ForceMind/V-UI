@@ -121,7 +121,7 @@ def _rebind_intents(intents, state):
 
 
 @contextmanager
-def _root(layout, *, create=False):
+def _root(layout, *, create=False, allow_missing=False):
     scope = fs._Scope(layout.owner)
     try:
         root, anchor = layout.root, layout.anchor
@@ -138,9 +138,16 @@ def _root(layout, *, create=False):
         fs._directory(info, 0 if anchor == Path('/') else layout.owner,
                       None if anchor == Path('/') else 0o700)
         anchor_identity = fs._dir_identity(info)
+        missing = None
         for index, name in enumerate(relative.parts):
             if index == len(relative.parts) - 1:
-                fd = scope.directory(fd, name, create=create)
+                try:
+                    fd = scope.directory(fd, name, create=create)
+                except FileNotFoundError:
+                    if not allow_missing or create:
+                        raise
+                    missing = (fd, name)
+                    fd = None
             else:
                 child = scope.own(os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd))
                 info = os.fstat(child)
@@ -148,6 +155,8 @@ def _root(layout, *, create=False):
                 scope.directories.append((fd, name, child, fs._dir_identity(info)))
                 fd = child
         yield scope, fd
+        if missing is not None:
+            _need(not _exists(*missing), 'DIRECTORY_CHANGED')
         _need(fs._dir_identity(os.fstat(scope.fds[0])) == anchor_identity
               and fs._dir_identity(os.stat(anchor, follow_symlinks=False)) == anchor_identity, 'ANCHOR_CHANGED')
         scope.stable()
@@ -386,11 +395,12 @@ class SelectionFiles:
         self.layout = layout
 
     @contextmanager
-    def _io(self, *, write=False, create=False):
+    def _io(self, *, write=False, create=False, allow_missing=False):
+        _need(not (write and allow_missing), 'LAYOUT')
         if write:
             _need(os.geteuid() == (0 if self.layout.anchor == Path('/') else self.layout.owner), 'ROOT_REQUIRED')
         try:
-            with _root(self.layout, create=create) as (scope, root):
+            with _root(self.layout, create=create, allow_missing=allow_missing) as (scope, root):
                 if write:
                     _lock(scope, root)
                 yield scope, root
@@ -411,6 +421,23 @@ class SelectionFiles:
         # transaction; parent/file FD bindings are checked again on scope exit.
         _need(not _exists(root, PENDING) and not _exists(root, ACTIVE), 'RECOVERY_REQUIRED')
         return (state, dict(selection=selection_record, fence=fence_record)) if with_records else state
+
+    def read_boot(self, *, app_source, target):
+        """Return None only for explicitly absent initialization metadata.
+
+        This read never creates a lock/root or interprets a failed stable read
+        as legacy. Even a lone lock/history is an initialization trace. Missing
+        production /etc/v-ui is accepted only after checking trusted ancestors.
+        """
+        with self._io(allow_missing=True) as (scope, root):
+            if root is None:
+                return None
+            names = (SELECTION, FENCE, PENDING, ACTIVE, HISTORY, LOCK)
+            if not any(_exists(root, name) for name in names):
+                # Verify absence again before leaving the held directory scope.
+                _need(not any(_exists(root, name) for name in names), 'RECOVERY_REQUIRED')
+                return None
+            return self._stable(scope, root, app_source, target)
 
     def read_stable(self, *, app_source, target):
         with self._io() as (scope, root):
