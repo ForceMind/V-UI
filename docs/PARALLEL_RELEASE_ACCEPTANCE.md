@@ -1,6 +1,6 @@
 # 并行安装验收与制品身份契约
 
-状态：P1准备中，尚未接入现有工作流或发布器。当前只实现离线kit/receipt校验核心及假数据边界测试；不提升应用VERSION，不发布应用、不修改生产实例。上一个文档批次[PR141](https://github.com/ForceMind/V-UI/pull/141)已获明确普通dev→main合并授权并合入dev，[PR142](https://github.com/ForceMind/V-UI/pull/142)负责main同步；本P1代码不混入该纯文档批次，也不继承其合并许可。当前总顺序见[路线图](../ROADMAP.md)。
+状态：P1核心已完成源码审查，准备Actions真实producer兼容检查；尚未接入并行矩阵或发布器。当前实现离线kit/receipt校验核心及假数据边界测试，并在既有oneclick构建后增加真实kit形状/复制smoke；不提升应用VERSION，不发布应用、不修改生产实例。上一个文档批次[PR141](https://github.com/ForceMind/V-UI/pull/141)已获明确普通dev→main合并授权并合入dev，[PR142](https://github.com/ForceMind/V-UI/pull/142)负责main同步；本P1代码不混入该纯文档批次，也不继承其合并许可。当前总顺序见[路线图](../ROADMAP.md)。
 
 ## 目标与分期
 
@@ -69,7 +69,7 @@ receipt不得含“安装已通过”或“job已成功”的假标志。它不�
 
 ## 工作流与发布器接线前的硬边界
 
-当前阶段不修改oneclick、publish、安装器或旧发布器。实际接线前须完成独审及定向失败控制：
+当前仅在oneclick组装kit后增加同job真实形状与隔离复制smoke；原新装、七旧版、环境、上传和安装断言逐字保持，不改publish、安装器或旧发布器。smoke不验证跨runner传输、不产生实际job/step资格receipt，也不等于并行矩阵已实现。实际并行接线前须完成独审及定向失败控制：
 
 - producer artifact名称/身份绑定repository、run_id、run_attempt、SHA；consumer各有唯一角色和日志，消费同一套已验字节，不各自build。
 - 新装和19/20/21的netlink、Mihomo及installed-core环境逐一保留；14–17保留各自原配方，不把它们扩大称为相同后置核心验证。
@@ -86,7 +86,7 @@ PR141的原安装job总览success，但GitHub的步骤API一度返回空列表�
 
 ## 验收与仍需外部条件的项目
 
-独审初轮复现最终路径竞争删除、copy期间源变化漏检和清理短路三项异常路径；修复后28项假包测试及原三个独立对抗场景复测通过，三项阻断关闭。核心当前仅获源码与假数据资格，真实producer制品兼容尚待Actions。
+独审初轮复现最终路径竞争删除、copy期间源变化漏检和清理短路三项异常路径；修复后28项假包测试及原三个独立对抗场景复测通过，三项阻断关闭。核心当前仅获源码与假数据资格，真实producer制品兼容尚待Actions；新增smoke将校验真实manifest/source控制文件及复制原字节，不在开发电脑下载包。
 
 本阶段只运行假文件/ZIP/JSON和临时目录的有意义边界单测及相关静态检查；产品构建、真实安装和并行矩阵资格只在Actions。浏览器不运行，Go迁移暂缓，不新增Secrets、OIDC、签名证书或网络权限。
 

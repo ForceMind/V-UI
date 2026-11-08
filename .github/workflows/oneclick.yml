@@ -29,6 +29,27 @@ jobs:
         env:
           SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python scripts/build_release_kit.py /tmp/vui-oneclick/vui-linux.zip /tmp/vui-oneclick/kit "$SOURCE"
+      - name: Verify real producer kit and isolated candidate copy
+        env:
+          SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          VUI_CANDIDATE_VERSION="$(cat VERSION)"
+          python -B -m scripts.release_acceptance inspect-producer \
+            --kit /tmp/vui-oneclick/kit --source "$SOURCE" --version "$VUI_CANDIDATE_VERSION" \
+            | tee /tmp/vui-oneclick/producer-identity.log
+          VUI_PRODUCER_CHECKSUMS_SHA="$(python -c 'import json; print(json.load(open("/tmp/vui-oneclick/producer-identity.log"))["checksums_sha256"])')"
+          mkdir -m 700 /tmp/vui-oneclick/validated-copy
+          python -B -m scripts.release_acceptance verify-kit \
+            --kit /tmp/vui-oneclick/kit --source "$SOURCE" --version "$VUI_CANDIDATE_VERSION" \
+            --expected-checksums-sha256 "$VUI_PRODUCER_CHECKSUMS_SHA" \
+            --bundle-output /tmp/vui-oneclick/validated-copy/vui-linux.zip \
+            | tee /tmp/vui-oneclick/consumer-identity.log
+          cmp /tmp/vui-oneclick/kit/vui-linux-x86_64-gnu.zip /tmp/vui-oneclick/validated-copy/vui-linux.zip
+          (
+            cd /tmp/vui-oneclick/validated-copy
+            sha256sum -c vui-linux.zip.sha256
+          )
       - name: Fetch fixed client for installed service TCP acceptance
         run: python scripts/fetch_mihomo.py /tmp/vui-oneclick/client
       - name: Test interactive installer and global v-ui on ephemeral systemd runner
