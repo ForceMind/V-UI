@@ -355,3 +355,83 @@ native primitive缺失或FS不支持时固定UNSUPPORTED，不回退覆盖式ren
 `Layout/owner/anchor`复用M1的受信内部临时测试seam，不成为用户/env参数；生产入口使用固定默认路径。standalone根控制加载仍须显式预载pathless受信namespace中的M0/M1/M2/catalog，不从cwd、data或用户payload查找模块，无ImportError fallback。
 
 backup恢复缺独立live catalog时，上层必须在停止或替换data前明确从固定官方API重新认证并record，或拒绝并提示先准备所需核心。M4不把备份内CONTEXT/manifest/table复制成live authority，也不恢复旧任务权限或generation。本块仅puretemp/M2 fake与实际Python解释器测试；Linux/musl原生发布、真实官方组件、独立worker硬预算，以及选择/启动/回退/备份/RPC集成仍待各自Actions资格。
+
+## M5 root选择与恢复元数据事务（仅元数据）
+
+`app/core_updates/selection_files.py`提供`SelectionFiles`。本块不调用systemd、data_owner、核心、安装器、RPC、网络或实际备份；所有停止、writer独占、备份完成及健康验证参数都只是受信协调器提供的观察记录，不是本机证明，不授予root权限或材料执行资格。M0–M4 authority/store验证、整应用payload验证、Runtime descriptor、实际worker握手和本块尚未接通，不能称完整独立核心升级已实现。
+
+生产只用默认`Layout(root=/etc/v-ui, owner=0, anchor=/)`，写方法先要求实际UID0。显式`Layout/owner/anchor`仅供受信Python临时目录测试，不增加用户路径、环境或CLI选项。目录从可信anchor逐层no-follow打开并绑定父FD；生产祖先root所有且组/其他不可写，`/etc/v-ui`为0755。元数据文件严格regular、单link、精确owner/mode、有界读取、严格JSON及读前后FD/路径身份；沿用M1的Scope和原生no-replace，不改M1原语。
+
+### 固定文件与准入
+
+- `core-selection.json`：root 0644，M3的完整已确认选择结构。
+- `core-selection.fence.json`：root 0644，永久初始化及最高generation栅栏，精确字段为`schema=1, initialized=true, highest_generation, confirmed_revision, settled, transaction`。`transaction`为本次32位小写hex随机事务ID，非权限nonce。
+- `CORE_UPDATE_PENDING.json`：root 0644，精确`schema=1, kind=core-update-pending-v1, transaction`；一段事务的公共pending字节和inode不随phase变化。
+- `core-selection.lock`：root 0600、单link空文件，非阻塞flock，不自动重试。
+- `.core-update-active/`：root 0700；`journal-NNN.json`是root 0600的连续不可覆盖快照，含前一文件原字节SHA、before/after完整引用、首次停止前的panel运行状态和两core预停意图，以及后续最终意图、备份绑定、验证与发布动作。最多96份，每份≤64,000字节。 journal先写随机0600私有stage，完整fsync后NOREPLACE发布到连续名称，短写不会制造坏的已发布尾journal。候选新文件也用随机私有slot；未被journal绑定的半写stage只作为有界opaque恢复材料保留，不能授权执行、采用为新计划或被重试清理。
+- `.core-update-history/<transaction>/`：root 0700，保留完成事务的原journal及所有parked原件，不自动GC。原先公开0644的selector/fence/pending被park后保持原mode与字节；私有目录限制访问。原件不属于可清除临时文件。
+
+`read_stable(app_source=...,target=...)`及普通`backup_stable`要求无pending、无active，且selector与`settled=true`的fence具有完全一致的generation/revision。缺损、冲突和未完成清理一律拒绝，不默认退回bundle。必要的公共读取不需要writer UID或访问0700私有journal；它不证明引用材料的authority，resolver还须独立验证。
+
+显式`bootstrap(initial,writer_observation=...,service_snapshot=...)`只接受generation0的双bundle基线，且selector/fence/pending/active/history全部缺失。`writer_observation`恰含两core，每项恰为`schema,revision,enabled`：缺state为`None,None,false`，合法legacy为`1,<完整revision>,<bool>`；schema2、坏/未知结构拒绝。caller须先真正扫描所有writer；这里只核观察结构及与snapshot的一致性，不扫描宿主。初始化中断或存在任何初始化残留，禁止重bootstrap；缺可信journal的初始损失需受信离线恢复处理，不能靠本层猜测重建。
+
+### 有界事务接口
+
+```python
+files = SelectionFiles()  # 生产固定路径
+before = files.read_stable(app_source=exact_source, target=trusted_target)
+tx = files.begin(m3_plan, expected_revision=before.revision,
+                 service_snapshot=pre_stop_observation)
+# tx为None仅表示准确CAS后确认同ID无需变化；无裸commit(plan)接口。
+files.record_quiesced(tx, final_stop_and_writer_observation,
+                     app_source=exact_source, target=trusted_target)
+old = files.backup_snapshot(tx, app_source=exact_source, target=trusted_target)
+files.record_backup(tx, backup_receipt, app_source=exact_source, target=trusted_target)
+trial = files.provision(tx, app_source=exact_source, target=trusted_target)
+# trial_view只给root协调器私有提案，不发布after，不启动/恢复进程。
+files.record_validation(tx, health_observation,
+                        app_source=exact_source, target=trusted_target)
+files.confirm(tx, app_source=exact_source, target=trusted_target)
+```
+
+`service_snapshot`精确为`panel_running`和两core的`artifact_id/revision/enabled`；artifact ID绑定完整M3 reference。`begin`在首次自动停止之前先durable pending，再durable admitting/prepared journal。快照capture与CAS读到的原selector/fence FD身份和raw SHA再次比较，不能把期间出现的foreign文件晋升为原件。普通实现不能仅持有plan就声称已完成停止或已选择运行中的新核心。
+
+`record_quiesced`仅在prepared后记录外层真实停机且取得全部writer/data_owner独占后的最终已提交意图，允许纳入停机前已准入并完成的最后一次配置/停止。`backup_snapshot`只提供原confirmed选择、该最终意图及原panel是否运行，永不提供after作为可恢复选择。`record_backup`精确绑定`kind=backup-components-v1`、有界摘要ID、备份SHA、before revision及最终意图规范字节SHA；本块不生成或检查实际备份闭包。
+
+`provision`仅在backed_up后进入trial，`record_validation`仅在trial后记录after revision、原panel拓扑、每core完整artifact ID/预期binary SHA、最终配置revision/停止意图及所属监听观察。原panel停止时不要求也不声称核心实际运行，`owned_listeners_verified`仅在原panel运行且该core enabled时要求为true；材料字段只是协调器已校验选择的绑定，停止core不因此取得native运行资格。原panel运行才要求`panel_health_verified=true`。这些字段须由后续真实协调器从实际descriptor、配置、所属监听及HTTPS独立取得，不能由desired元数据自填并当验收。
+
+journal只允许`admitting→prepared→quiesced→backed_up→trial→validated→confirming→confirmed→cleanup`，以及显式`rollback_required/recovery`分支。连续journal不得改写原snapshot/plan/文件身份，已记录观察不可改写；候选确认前必须同时存在最终意图、绑定before的备份receipt及对应after的validation。失败或中断不自动重试candidate。`mark_failed`仅留恢复需求；`recovery_view`给事实，不启动进程。确认前缺件/损坏/foreign无法确定时保留材料并拒绝自动恢复。
+
+### 发布、连续屏障与恢复
+
+每个selector/fence替换动作先保存新私有文件，journal durable记录旧FD精确身份及raw SHA、新FD身份与raw SHA，再以原生NOREPLACE把旧公开文件park到私有固定槽。移后核原inode、owner/mode、size/mtime与字节摘要；native rename引起的ctime变化单独允许。只有核对成功才NOREPLACE发布新文件并fsync双方父目录。foreign现名、碰撞或unknown内容从不覆盖或删除；stat与rename之间的特权竞态仍可能移动foreign，检测后仅用NOREPLACE尝试归还原名，不能归还则保存私有原件并拒绝。此操作不是内核inode-conditional CAS，也不能声称阻挡恶意root绕过锁。
+
+after selector与`settled=false` fence发布后，confirmed journal必须先持久化，after才是确认选择。之后active整体归archive，静态pending最后安全park到同archive并fsync双方父目录，cleanup journal durable后才安全替换为`settled=true` fence。因此pending已离开现名但清除fsync/确认失败时，公共read仍因false或缺失fence拒绝。`finish_cleanup`只能显式完成已有durable confirmed/cleanup journal的元数据清理，不能从trial/confirming继续候选。所有自有FD关闭均attempt；首个close失败不短路其它FD，不重试可能已释放并被复用的数字。任何关闭/写入/fsync/确认失败不返回成功，已发布或parked材料仍保留。
+
+`rollback_metadata(tx,observed_old_topology,known_generations=...,final_intents=...)`只在外层已经停止候选、重新取得writers并实际恢复原descriptor/配置/停止意图后记录元数据。若quiesced journal尚未durable（包括最终意图写入短写），强制caller重新扫描并提供`final_intents`，写入recovery快照；缺该观察即拒绝，绝不退用较早pre_stop意图复活最后已停core。已有durable quiesced时该参数若提供必须一致。它不操作进程或data，恢复before的current及previous原值，失败candidate不会塞入previous。generation高于live selector、fence、before/after及caller所知输入值；同一已持久恢复动作可重入，但发现新的更高输入值时拒绝复用旧generation。`begin_restore(snapshot,...)`同样生成高于live/fence/输入snapshot和已知值的新generation/revision及事务ID，不复制备份revision或旧nonce；实际data/闭包恢复还未接入。
+
+M5仅覆盖上述元数据状态机和临时目录故障逻辑。真实准入还必须把所有writer检查接到pending与完整稳定选择规则，并实现Root installation锁→worker operation→pending/原意图fsync→stop/prove→全部writer独占→最终意图/重验→备份闭包→trial→放writer保留operation→恢复原拓扑/核实际artifact/config/listeners/HTTPS→确认/clear→finish。独立v-ui子进程握手、release_writers后重新取得writers、受信trial resolver通道、完整备份恢复、权限授权及四目标实际核心/服务资格均未由本块取得；不root直接import用户session，不以假观察替代宿主验收。
+
+### M5 独审P2：写前阶段图与confirmed边界
+
+每次journal append在创建新stage前，重新读取上一份durable原字节，严格验证`previous→next`阶段图及不可改写字段；非法迁移在任何新journal/publication之前拒绝，不能等下一次reader才发现链损坏。
+
+普通事务在`admitting`已durable但`prepared`写入失败时，可由受信协调器重新停/取得writers、扫描最终意图并显式调用`rollback_metadata(...,final_intents=...)`恢复；允许`admitting→recovery`，没有最终观察仍拒绝，不能自动续candidate或退用pre_stop意图。bootstrap没有可信before的早期残留仍不猜测恢复。
+
+`confirmed`一经durable，同一事务不再允许`rollback_metadata`，即使active/pending尚在、归档或清理失败也必须先显式`finish_cleanup`。确需再回退时，在清理完成后的stable选择上创建新计划/新事务，保留已确认选择的current/previous、停止意图和新备份门槛；不把`confirmed→recovery`写入旧journal。
+
+## M6 共享只读材料解析与 Manager 启动快照
+
+`CoreResolver`接收受信调用方已验证的活动应用 `app_source`、实际平台 `target` 和完整的两核心 bundle descriptor。它固定调用方映射快照；bundle 引用必须与该活动应用的完整引用相同，不能按版本号猜测或退回另一个包。组件引用从独立 live `CoreCatalog` 取得 authority/tag source，再由 `CoreArtifactStore.read` 验完整材料、当前应用兼容性和引用身份，最后复核实际二进制。没有网络、写入、缺失修复或 TRUST/备份信任后备。
+
+`current(state,core)`只做已验证选择的材料解析；`SelectionState`类型、checksum 或传入 trial 不能自行授予选择和执行权限。上层仍须认证稳定 root 选择或明确获准的受管 trial。resolver 不把引用来源、用户动作授权和实际执行结果混为一件事。
+
+`CoreManager.configure_artifacts`只在受信启动阶段一次性安装两核心完整快照，必须在任何 runtime 或 proxy coordinator 创建之前调用。映射先整体验证，之后固定；相同快照重入无副作用，快照变化或旧 runtime 已创建时要求受管停止及新进程，不在状态查询中热换。Adapter 通过同一个 manager 锁建立唯一 runtime，并把同一 descriptor 传给 `CoreRuntime`。没有 descriptor 的旧调用仍保留原来三个位置参数和固定核心行为。内部 `runtime_artifact(core)`读取快照不创建 runtime，供后续诊断接同一材料。
+
+这两块尚未接入实际 `serve`、独立诊断子进程、root 受管切换或备份闭包。临时假材料和 AST FakeRuntime 测试只能证明引用拒绝、映射完整性及缓存边界，不证明真实 ELF、新版本兼容、服务切换或生产升级。分支 `6c7ccaa` 的九组 Actions 已成功；原生 ARM64 glibc 与两种 musl 的 121 项基础契约及 staged Python 的 32 项 Linux 假执行器绑定均无 skip。该证据属于先前提交，不冒充 M5/M6 新增文件或真实组件升级验收；新增契约须在其自身提交重新跑 Actions。
+
+### 活动 bundle 事实转换
+
+`active_verified(root)`保留原活动应用校验流程，返回`release,current,manifest,ready`；原`active(root)`仍返回前两项。只有一遍完整 payload/runtime 校验，旧manifest与READY绑定及release_id错误继续拒绝。返回字典只是这次受信校验的观察，不是可转交的authority token，也不封住其所有者后续写入。
+
+`bundle_artifacts(payload,manifest,ready,versions=...,owner=...)`只转换这些已验事实。严格核schema1/release/platform、完整source40、实际完整target包含于manifest、两个固定core成员的摘要/size/0700，版本来自已验应用的`CoreRuntime.VERSIONS`常量，不能取顶层应用version或用户latest。owner来自整包已核的服务UID；不假设root/0755。不读文件、不再次全包hash，实际文件由resolver/runtime在各自边界复核。接口仍未接入serve或数据迁移，旧legacy runtime不能无条件换成schema2。

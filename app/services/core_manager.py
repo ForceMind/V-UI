@@ -7,6 +7,7 @@ from typing import Iterable
 
 from app.models.database import Inbound
 from app.services.core_runtime import CoreRuntime, CoreError, revision
+from app.core_updates.binary import RuntimeArtifact
 from app.services.inbound_policy import policy_plan, row_mode
 
 DATA_DIR = Path(os.getenv("VUI_DATA_DIR", "data"))
@@ -40,18 +41,33 @@ class BaseCoreAdapter:
     binary_name = ""
     config_filename = ""
 
-    def __init__(self) -> None:
+    def __init__(self, artifact: RuntimeArtifact | None = None, *, runtime_lock=None) -> None:
+        if artifact is not None and (type(artifact) is not RuntimeArtifact or artifact.core != self.name):
+            raise CoreError("Verified core snapshot is invalid")
         self._runtime = None
+        self._runtime_created = False
+        self._artifact = artifact
+        self._runtime_lock = runtime_lock if runtime_lock is not None else threading.RLock()
 
     @property
     def runtime(self) -> CoreRuntime:
-        if self._runtime is None:
-            self._runtime = CoreRuntime(self.name, self.binary_path, DATA_DIR / "runtime" / self.name)
-        return self._runtime
+        with self._runtime_lock:
+            if self._runtime is None:
+                if self._artifact is None:
+                    self._runtime = CoreRuntime(self.name, self.binary_path, DATA_DIR / "runtime" / self.name)
+                else:
+                    self._runtime = CoreRuntime(self.name, self.binary_path, DATA_DIR / "runtime" / self.name,
+                                                artifact=self._artifact)
+                self._runtime_created = True
+            return self._runtime
 
     @property
     def binary_path(self) -> Path:
-        return BIN_DIR / self.binary_name
+        return self._artifact.path if self._artifact is not None else BIN_DIR / self.binary_name
+
+    @property
+    def artifact(self) -> RuntimeArtifact | None:
+        return self._artifact
 
     @property
     def config_path(self) -> Path | None:
@@ -128,13 +144,49 @@ class SingBoxAdapter(BaseCoreAdapter):
 
 
 class CoreManager:
-    def __init__(self) -> None:
-        self.adapters = {"xray": XrayAdapter(), "sing-box": SingBoxAdapter()}
+    def __init__(self, *, artifacts: dict | None = None) -> None:
         # All panel-mediated ingress mutations, proxy transitions and core
         # operations share this process lock. SQLite and the runtime journal
         # remain separate commit domains; a saved row is not an applied row.
         self.lock = threading.RLock()
+        self.adapters = {"xray": XrayAdapter(runtime_lock=self.lock),
+                         "sing-box": SingBoxAdapter(runtime_lock=self.lock)}
         self._proxy_coordinator = None
+        self._artifact_snapshot = None
+        if artifacts is not None:
+            self.configure_artifacts(artifacts)
+
+    def configure_artifacts(self, artifacts: dict) -> None:
+        """Install an already resolved trusted boot snapshot, never a UI refresh.
+
+        The resolver and root selection/managed trial authenticate this choice.
+        This method grants no action permission and does not change processes,
+        persistent state, or node data. A different snapshot requires a managed
+        stop/new manager; cached runtimes/coordinators must never be hot-swapped.
+        """
+        with self.lock:
+            if (type(artifacts) is not dict or set(artifacts) != set(self.adapters)
+                    or any(type(value) is not RuntimeArtifact or value.core != name
+                           for name, value in artifacts.items())
+                    or len({value.reference.target for value in artifacts.values()}) != 1):
+                raise CoreError("Verified core snapshot is invalid")
+            snapshot = tuple((name, artifacts[name]) for name in sorted(self.adapters))
+            if self._artifact_snapshot is not None:
+                if snapshot != self._artifact_snapshot:
+                    raise CoreError("Core snapshot changed; coordinated restart is required")
+                return
+            if self._proxy_coordinator is not None or any(
+                    adapter._runtime_created for adapter in self.adapters.values()):
+                raise CoreError("Core snapshot changed; coordinated restart is required")
+            # Validate the whole map before changing either adapter.
+            for name, value in snapshot:
+                self.adapters[name]._artifact = value
+            self._artifact_snapshot = snapshot
+
+    def runtime_artifact(self, core: str) -> RuntimeArtifact | None:
+        """Internal production/diagnostic snapshot; does not instantiate a core."""
+        with self.lock:
+            return self.get(core).artifact
 
     def get(self, core: str) -> BaseCoreAdapter:
         if core not in self.adapters:

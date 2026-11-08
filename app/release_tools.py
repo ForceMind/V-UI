@@ -698,7 +698,12 @@ def _stage_locked(guard: _OperationGuard, archive: Path, expected_sha: str) -> s
         except Exception:
             shutil.rmtree(final); raise
 
-def active(root: Path) -> tuple[Path,dict]:
+def active_verified(root: Path) -> tuple[Path,dict,dict,dict]:
+    """Reuse the full active verification result inside trusted boot code.
+
+    The returned dictionaries are observations of this verification, not a
+    transferable authority token or a seal against subsequent owner writes.
+    """
     try:
         current=json.loads((root/'CURRENT.json').read_text()); identity=release_id(current['release_id'])
         release=root/'releases'/identity
@@ -707,8 +712,12 @@ def active(root: Path) -> tuple[Path,dict]:
         if digest((release/'payload'/MANIFEST).read_bytes()) != ready['manifest_sha256']:
             raise ReleaseError('Release manifest changed after health check')
         if meta['release_id'] != identity: raise ReleaseError('Release identity mismatch')
-        return release,current
+        return release,current,meta,ready
     except (OSError,ValueError,KeyError,TypeError): raise ReleaseError('No verified active release') from None
+
+def active(root: Path) -> tuple[Path,dict]:
+    release,current,_,_=active_verified(root)
+    return release,current
 
 def activate(root: Path, identity: str):
     root=private_root(root); identity=release_id(identity)
