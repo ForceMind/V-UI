@@ -73,6 +73,21 @@ class ServiceIdentityTests(unittest.TestCase):
         path.write_text(('Uid:\t'+'\t'.join([str(UID)]*4)+'\n')*2)
         with self.assertRaises(ops.Refused):self.services.managed_identity(UID)
 
+    def test_only_exact_cgroup_root_credentials_are_a_startup_transient(self):
+        original=os.fstat
+        inode=self.directory.stat().st_ino
+        def fstat(fd):
+            info=original(fd)
+            if info.st_ino==inode:
+                return SimpleNamespace(st_mode=info.st_mode,st_uid=0,st_dev=info.st_dev,st_ino=info.st_ino)
+            return info
+        (self.directory/'status').write_bytes(b'Uid:\t0\t0\t0\t0\n')
+        with patch.object(ops.os,'fstat',side_effect=fstat):
+            with self.assertRaises(ops.IdentityStarting):self.services.managed_identity(UID)
+            (self.directory/'cgroup').write_bytes(b'0::/system.slice/other.service\n')
+            with self.assertRaises(ops.Refused) as error:self.services.managed_identity(UID)
+            self.assertNotIsInstance(error.exception,ops.IdentityStarting)
+
     def test_cgroup_mismatch_hybrid_or_missing_records_are_rejected(self):
         path=self.directory/'cgroup'
         for raw in (b'0::/system.slice/other.service\n',b'1:cpu:/system.slice/v-ui.service\n',

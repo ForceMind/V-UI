@@ -141,6 +141,18 @@ class WorkerCycleProtocolTests(unittest.TestCase):
         status,events,trace,_=self.run_worker([command('proceed'),command('release_writers_for_trial')]+
             [command('prove_operation')]*8+[command('finish')],slow=True,timeout=0.07)
         self.assertEqual(status,1);self.assertLess(trace.count('proof'),8)
+    def test_late_alarm_during_fixed_error_does_not_escape_cleanup(self):
+        original=w._Channel.send
+        def late(channel,event,**values):
+            if event=='error':signal.getsignal(signal.SIGALRM)(signal.SIGALRM,None)
+            return original(channel,event,**values)
+        with patch.object(w._Channel,'send',new=late):
+            status,events,trace,sessions=self.run_worker(
+                [command('proceed'),command('release_writers_for_trial')])
+        self.assertEqual(status,1)
+        self.assertEqual(events[-1],dict(event='error',code='MAINTENANCE_REFUSED'))
+        self.assertEqual(sessions[0].closed,1)
+
     def test_root_new_action_stage_cycle_and_duplicate_fields_do_not_extend_public_actions(self):
         status,events,trace,sessions=self.run_worker([],uid=0)
         self.assertEqual(status,1);self.assertEqual(sessions,[])

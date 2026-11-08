@@ -35,6 +35,14 @@ MAINTENANCE_FILES = frozenset({
 })
 DNS_FILES = frozenset(str(CONTROL / name) for name in (
     'certificate_errors.py', 'dns_store.py', 'cloudflare.py', 'dns_journal.py', 'dns_backup.py'))
+# The P3 development source uses the 23 application schema while its
+# independent core feature is being qualified. Its test profile requires this
+# exact additional group; the original frozen 23 profile remains DNS-only.
+CORE_FILES = frozenset(str(CONTROL / name) for name in (
+    'core_artifacts.py','core_selection.py','core_binary.py','core_store.py',
+    'core_github.py','core_catalog.py','core_resolver.py','core_application.py',
+    'core_selection_files.py','core_boot.py','core_backup.py','core_backup_archive.py',
+    'core_maintenance.py','core_boot_broker.py','core_maintenance_control.py'))
 CERTIFICATE_COLUMNS = ('id', 'domain', 'email', 'environment', 'auto_renew', 'revision',
     'not_before', 'not_after', 'renew_at', 'retry_at', 'last_attempt', 'failures', 'error', 'created_at')
 BINDING_COLUMNS = ('target', 'certificate_id', 'applied_certificate_id', 'applied_revision', 'error')
@@ -63,10 +71,13 @@ def fixed_public_baseline(version, commit):
     return version, commit
 
 
-def assert_receipt_migration(test, before, after, old_version, candidate_version='0.4.22'):
+def assert_receipt_migration(test, before, after, old_version, candidate_version='0.4.22', *, core_control=False):
     if old_version not in PUBLISHED_BASELINES:
         raise AssertionError('Unknown public upgrade receipt baseline')
     _target_contract(candidate_version)
+    if type(core_control) is not bool or core_control and candidate_version != '0.4.23':
+        raise AssertionError('Explicit P3 development control profile required')
+    test.assertTrue(CORE_FILES.isdisjoint(before['files']), 'Historical receipt must not pre-contain core helpers')
     test.assertTrue(DNS_FILES.isdisjoint(before['files']), 'Historical receipt must not pre-contain DNS helpers')
     if old_version in ('0.4.17', '0.4.19', '0.4.20', '0.4.21', '0.4.22'):
         test.assertTrue(MAINTENANCE_FILES <= set(before['files']))
@@ -76,6 +87,8 @@ def assert_receipt_migration(test, before, after, old_version, candidate_version
         additions = MAINTENANCE_FILES | ({FIREWALL} if old_version == '0.4.14' else set())
     if candidate_version == '0.4.23':
         additions = additions | DNS_FILES
+    if core_control:
+        additions = additions | CORE_FILES
     test.assertEqual(set(after['files']) - set(before['files']), additions)
     if old_version == '0.4.14':
         test.assertNotIn(FIREWALL, before['files'])
@@ -389,7 +402,8 @@ print('{}')
         manifest = self._manifest(release)
         self.test.assertEqual(manifest['source_commit'], self.candidate['source_commit'])
         self.test.assertEqual(manifest['version'], self.candidate['version'])
-        assert_receipt_migration(self.test, self.old_receipt, self._receipt(), self.old_version, self.candidate['version'])
+        assert_receipt_migration(self.test, self.old_receipt, self._receipt(), self.old_version, self.candidate['version'],
+                                 core_control=True)
         self.test.assertEqual(self._snapshot(release,after=True), self.data, 'Private DB rows and certificate bytes must survive')
         assert_node_summary_upgrade(self.test, self.nodes, json.loads(api('/api/inbounds')[1]), self.old_version)
         if self.manual_editor is not None:

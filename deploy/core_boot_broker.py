@@ -634,15 +634,28 @@ class CoreBootBroker:
         if failed:
             with self._lock: self._cleanup_failed = True
         return failed
-    def close(self):
+    @property
+    def callbacks_finished(self):
+        thread = self._thread
+        return thread is None or not thread.is_alive()
+
+    def close(self, *, _join_timeout=1):
         self._owner()
+        _need(type(_join_timeout) in (int, float) and 0 < _join_timeout <= 15, 'BROKER_CONTEXT')
         self.revoke('broker_closed')
         thread = self._thread
         if thread is not None and thread is not threading.current_thread():
             # start() can fail before the thread has an identity. Such a failure
             # still owns the listener/parent FDs and must not skip their cleanup.
-            if thread.ident is not None: thread.join(timeout=1)
+            if thread.ident is not None: thread.join(timeout=_join_timeout)
             _need(not thread.is_alive(), 'THREAD_STILL_RUNNING')
+        self._finish_close()
+
+    def _finish_close(self):
+        # No join/retry of a released FD; this is the final owned-endpoint
+        # cleanup after a thread that cannot be restarted has actually ended.
+        self._owner()
+        _need(self.callbacks_finished, 'THREAD_STILL_RUNNING')
         failed = self._close_sockets() or self._cleanup_failed
         try:
             if self._owned_inode is not None and self._parent is not None:

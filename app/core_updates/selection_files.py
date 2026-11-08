@@ -77,6 +77,21 @@ def _selection_map(state):
     return a._json(s.encode_selection(state))
 
 
+def _bundle_baseline(state):
+    return (type(state) is s.SelectionState and state.generation == 0
+            and all(type(slot.current) is s.BundleReference and slot.previous is None for slot in state.slots))
+
+
+def _first_component_change(before, after):
+    if not _bundle_baseline(before) or after.generation != 1:
+        return False
+    changed = [core for core in s.CORES if before.slot(core) != after.slot(core)]
+    if len(changed) != 1:
+        return False
+    old, new = before.slot(changed[0]), after.slot(changed[0])
+    return type(new.current) is s.ComponentReference and new.previous == old.current
+
+
 def _intent(value, state):
     _keys(value, s.CORES)
     for core in s.CORES:
@@ -245,7 +260,7 @@ def _new(scope, parent, name, raw, *, mode=0o600):
     return dict(identity=list(a._file_identity(info)), sha256=_digest(raw), mode=mode)
 
 
-def _lock(scope, root):
+def _lock(scope, root, *, require_new=False):
     try:
         fd = scope.own(os.open(LOCK, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                0o600, dir_fd=root))
@@ -253,6 +268,7 @@ def _lock(scope, root):
         os.fsync(fd)
         os.fsync(root)
     except FileExistsError:
+        _need(not require_new, 'RECOVERY_REQUIRED')
         fd = scope.own(os.open(LOCK, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=root))
     info = os.fstat(fd)
     fs._regular(info, scope.owner, 0o600, 0)
@@ -296,10 +312,13 @@ def _journal(value, app_source, target):
           and type(value['sequence']) is int and 0 <= value['sequence'] < MAX_JOURNALS
           and (value['previous_sha256'] is None or a._hex(value['previous_sha256']))
           and value['phase'] in PHASES
-          and value['operation'] in ('bootstrap', 'component', 'bundle', 'rollback', 'restore'), 'JOURNAL')
+          and value['operation'] in ('bootstrap', 'initial_component', 'component', 'bundle', 'rollback', 'restore'), 'JOURNAL')
     before = None if value['before'] is None else _selection(value['before'], app_source, target)
     after = _selection(value['after'], app_source, target)
     _need((before is None) == (value['operation'] == 'bootstrap'), 'JOURNAL_BASELINE')
+    first_switch = value['operation'] == 'initial_component'
+    if first_switch:
+        _need(_first_component_change(before, after), 'JOURNAL_BASELINE')
     _snapshot(value['pre_stop'], after if before is None else before)
     if value['operation'] == 'restore':
         _keys(value['restore_target'], ('kind', 'source_backup_sha256', 'intents'))
@@ -310,10 +329,11 @@ def _journal(value, app_source, target):
         _need(value['restore_target'] is None, 'RESTORE_TARGET')
     _keys(value['original_files'], ('selection', 'fence', 'pending'))
     for key, record in value['original_files'].items():
+        # The first actual switch has a logical bundle baseline for recovery,
+        # but both original public records really were absent on disk.
+        _need((record is None) == (key != 'pending' and (before is None or first_switch)), 'JOURNAL_BASELINE')
         if record is not None:
             _record(record)
-        else:
-            _need(key != 'pending' and before is None, 'JOURNAL_BASELINE')
     if value['quiesced'] is not None:
         _keys(value['quiesced'], ('panel_stopped', 'writers_exclusive', 'cores'))
         _need(value['quiesced']['panel_stopped'] is True and value['quiesced']['writers_exclusive'] is True,
@@ -412,14 +432,14 @@ class SelectionFiles:
         self.layout = layout
 
     @contextmanager
-    def _io(self, *, write=False, create=False, allow_missing=False):
-        _need(not (write and allow_missing), 'LAYOUT')
+    def _io(self, *, write=False, create=False, allow_missing=False, new_lock=False):
+        _need(not (write and allow_missing) and (not new_lock or write and create), 'LAYOUT')
         if write:
             _need(os.geteuid() == (0 if self.layout.anchor == Path('/') else self.layout.owner), 'ROOT_REQUIRED')
         try:
             with _root(self.layout, create=create, allow_missing=allow_missing) as (scope, root):
                 if write:
-                    _lock(scope, root)
+                    _lock(scope, root, require_new=new_lock)
                 yield scope, root
         except (fs.CoreStoreError, a.CoreArtifactError, s.CoreSelectionError) as exc:
             raise CoreSelectionFilesError(exc.code) from None
@@ -562,10 +582,11 @@ class SelectionFiles:
         os.fsync(root)
         originals = {'pending': pending_record}
         for key, name in (('selection', SELECTION), ('fence', FENCE)):
-            result = _read(scope, root, name, optional=before is None)
-            if before is not None:
-                _need(expected_files is not None and result[1] == expected_files[key], 'PUBLIC_CHANGED')
-            originals[key] = None if result is None else result[1]
+            expected = None if before is None else expected_files[key]
+            result = _read(scope, root, name, optional=expected is None)
+            observed = None if result is None else result[1]
+            _need(observed == expected, 'PUBLIC_CHANGED')
+            originals[key] = observed
         journal = dict(schema=1, kind='core-selection-journal-v1', transaction=transaction,
             sequence=0, previous_sha256=None, phase='admitting', operation=operation,
             before=None if before is None else _selection_map(before), after=_selection_map(after),
@@ -603,7 +624,13 @@ class SelectionFiles:
             self._publish_confirmed(scope, root, directory, journal, initial)
             return initial
 
-    def begin(self, plan, *, expected_revision, service_snapshot):
+    def begin(self, plan, *, expected_revision, service_snapshot, initial_schemas=None):
+        """Begin an ordinary switch, or the first component switch from legacy bundles.
+
+        The supplied schemas are observations from the live private worker,
+        not proof of service stop or writers. Nothing publishes a selection
+        until the same backup/validation/confirmation gates as later switches.
+        """
         _need(type(plan) is s.SelectionPlan, 'PLAN')
         _validate_state(plan.before)
         _validate_state(plan.after)
@@ -624,6 +651,22 @@ class SelectionFiles:
                 _need(type(plan.after.slot(plan.core).current) is kind, 'PLAN')
         else:
             _need(plan.after == plan.before, 'PLAN')
+        if initial_schemas is not None:
+            _need(plan.operation == 'component' and plan.changed and _first_component_change(plan.before, plan.after),
+                  'BOOTSTRAP_BASELINE')
+            _keys(initial_schemas, s.CORES)
+            for core in s.CORES:
+                schema = initial_schemas[core]
+                revision = service_snapshot['cores'][core]['revision']
+                _need(schema is None and revision is None
+                      or type(schema) is int and schema == 1 and revision is not None, 'WRITER_OBSERVATION')
+            with self._io(write=True, create=True, new_lock=True) as (scope, root):
+                _need(not any(_exists(root, name) for name in (SELECTION, FENCE, PENDING, ACTIVE, HISTORY)),
+                      'ALREADY_INITIALIZED_OR_DAMAGED')
+                _, journal = self._new_transaction(scope, root, before=plan.before, after=plan.after,
+                    operation='initial_component', snapshot=service_snapshot, known_generations=[],
+                    expected_files=dict(selection=None, fence=None))
+                return journal['transaction']
         with self._io(write=True) as (scope, root):
             current, expected_files = self._stable(scope, root, plan.before.app_source, plan.before.target,
                                                    with_records=True)

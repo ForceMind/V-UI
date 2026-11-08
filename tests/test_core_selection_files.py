@@ -79,6 +79,57 @@ class SelectionFilesTests(unittest.TestCase):
         self.files.record_validation(tx, self.validation(after), **self.context)
         return tx, after
 
+    def initial_switch(self):
+        plan=s.plan_component(self.before,core='sing-box',identity=material(),expected_revision=self.before.revision)
+        tx=self.files.begin(plan,expected_revision=self.before.revision,service_snapshot=self.pre,
+                            initial_schemas={'sing-box':1,'xray':None})
+        return tx,plan.after
+
+    def test_first_component_switch_binds_absent_public_metadata_until_validated(self):
+        self.assertIsNone(self.files.read_boot(**self.context))
+        tx,after=self.initial_switch();root=self.layout.root
+        self.assertFalse((root/m.SELECTION).exists());self.assertFalse((root/m.FENCE).exists())
+        with self.assertRaises(m.CoreSelectionFilesError):self.files.read_boot(**self.context)
+        self.quiesce(tx);self.assertEqual(self.backup(tx)['selection'],self.before)
+        self.assertEqual(self.files.provision(tx,**self.context),after)
+        self.assertFalse((root/m.SELECTION).exists())
+        with self.assertRaises(m.CoreSelectionFilesError):self.files.confirm(tx,**self.context)
+        self.files.record_validation(tx,self.validation(after),**self.context)
+        self.assertEqual(self.files.confirm(tx,**self.context),after)
+        self.assertEqual(self.files.read_stable(**self.context),after)
+
+    def test_failed_first_component_trial_recovers_the_logical_old_bundle_at_new_generation(self):
+        tx,after=self.initial_switch();self.quiesce(tx);self.backup(tx);self.files.provision(tx,**self.context)
+        self.files.mark_failed(tx,**self.context)
+        old=s._build(APP,TARGET,after.generation+1,self.before.slots)
+        self.assertEqual(self.files.rollback_metadata(tx,self.validation(old),**self.context),old)
+        self.assertEqual(self.files.read_stable(**self.context),old)
+        self.assertEqual(self.files.recovery_view(**self.context)['before'],m._selection_map(self.before))
+
+    def test_initial_switch_does_not_adopt_missing_schema_or_existing_lock_trace(self):
+        plan=s.plan_component(self.before,core='sing-box',identity=material(),expected_revision=self.before.revision)
+        for schemas in ({'sing-box':2,'xray':None},{'sing-box':True,'xray':None},
+                        {'sing-box':None,'xray':None},{'sing-box':1,'xray':1},{'sing-box':1}):
+            with self.subTest(schemas=schemas),self.assertRaises(m.CoreSelectionFilesError):
+                self.files.begin(plan,expected_revision=self.before.revision,service_snapshot=self.pre,initial_schemas=schemas)
+            self.assertFalse(self.layout.root.exists())
+        self.layout.root.mkdir(mode=0o755);self.layout.root.chmod(0o755)
+        lock=self.layout.root/m.LOCK;lock.touch(mode=0o600)
+        with self.assertRaisesRegex(m.CoreSelectionFilesError,'RECOVERY_REQUIRED'):self.initial_switch()
+        self.assertTrue(lock.exists());self.assertFalse((self.layout.root/m.PENDING).exists())
+
+    def test_initial_switch_preserves_foreign_selection_inserted_during_admission(self):
+        original=m._new
+        def insert(scope,root,name,raw,**kwargs):
+            result=original(scope,root,name,raw,**kwargs)
+            if name==m.PENDING:original(scope,root,m.SELECTION,b'foreign initial selection',mode=0o644)
+            return result
+        with patch.object(m,'_new',side_effect=insert),self.assertRaisesRegex(m.CoreSelectionFilesError,'PUBLIC_CHANGED'):
+            self.initial_switch()
+        self.assertEqual((self.layout.root/m.SELECTION).read_bytes(),b'foreign initial selection')
+        self.assertTrue((self.layout.root/m.PENDING).exists())
+        with self.assertRaises(m.CoreSelectionFilesError):self.files.read_boot(**self.context)
+
     def test_explicit_bootstrap_closed_layout_and_nonroot_public_read(self):
         self.bootstrap()
         root = self.layout.root

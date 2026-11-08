@@ -59,6 +59,10 @@ class Refused(RuntimeError):
     """A bounded, intentionally non-sensitive failure."""
 
 
+class IdentityStarting(Refused):
+    """Exact systemd executor exists but has not dropped its root UID yet."""
+
+
 class InputInterrupted(BaseException):
     def __init__(self, number):
         self.number = number
@@ -191,6 +195,11 @@ def fixed_files(manager):
     base = {CONFIG, CONTROL / 'launcher.py', CONTROL / 'system_ops.py', WORKER,
             CONTROL / 'release_tools.py', CONTROL / 'data_owner.py', CONTROL / 'proxy_store.py',
             CONTROL / 'upstream_profile.py', CONTROL / 'inbound_policy.py', CONTROL / 'firewall_support.py', WRAPPER,
+            *(CONTROL / name for name in (
+                'core_artifacts.py', 'core_selection.py', 'core_binary.py', 'core_store.py',
+                'core_github.py', 'core_catalog.py', 'core_resolver.py', 'core_application.py',
+                'core_selection_files.py', 'core_boot.py', 'core_backup.py', 'core_backup_archive.py',
+                'core_maintenance.py', 'core_boot_broker.py', 'core_maintenance_control.py')),
             *(CONTROL / name for name in ('certificate_errors.py', 'dns_store.py', 'cloudflare.py',
                                           'dns_journal.py', 'dns_backup.py')),
             *(CONTROL / name for name in ('maintenance_daemon.py', 'maintenance_upgrade.py',
@@ -620,11 +629,15 @@ def _service_process_identity(pid, service_uid):
             if len(uid_lines) != 1:
                 raise Refused('invalid managed process uid')
             values = uid_lines[0].split()[1:]
-            if (len(values) != 4 or any(re.fullmatch(b'0|[1-9][0-9]{0,9}', value) is None for value in values)
-                    or any(int(value) != service_uid for value in values)):
+            if len(values) != 4 or any(re.fullmatch(b'0|[1-9][0-9]{0,9}', value) is None for value in values):
                 raise Refused('managed process uid mismatch')
             if read('cgroup', 4096) != b'0::/system.slice/v-ui.service\n':
                 raise Refused('managed process cgroup mismatch')
+            uids = tuple(int(value) for value in values)
+            if uids == (0, 0, 0, 0) and info.st_uid == 0:
+                raise IdentityStarting('managed executor has not dropped privileges')
+            if uids != (service_uid,) * 4:
+                raise Refused('managed process uid mismatch')
             return dict(pid=pid, uid=service_uid, start_identity=fields[19].decode('ascii'),
                         cgroup='/system.slice/v-ui.service')
 
@@ -972,7 +985,7 @@ def local_tcp_listener(port):
     return False if readable else None
 
 
-def local_panel_tls(config):
+def local_panel_tls(config, *, require_login=False):
     """Check local panel TLS with system CA and hostname validation enabled."""
     context = ssl.create_default_context()
     port = config.get('port')
@@ -981,9 +994,33 @@ def local_panel_tls(config):
     if type(port) is not int or not 1 <= port <= 65535 or not isinstance(domain, str):
         raise Refused('invalid panel endpoint')
     host = '127.0.0.1' if bind == '0.0.0.0' else '::1' if bind == '::' else bind
+    if require_login:
+        from ipaddress import ip_address
+        try: ip_address(host)
+        except ValueError: raise Refused('invalid local panel bind') from None
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]{0,252}', domain):
+            raise Refused('invalid panel host')
     try:
         with socket.create_connection((host, port), timeout=3) as connection:
-            with context.wrap_socket(connection, server_hostname=domain):
+            with context.wrap_socket(connection, server_hostname=domain) as tls:
+                if require_login:
+                    tls.sendall(('GET /login HTTP/1.1\r\nHost: '+domain+':'+str(port)
+                                 +'\r\nConnection: close\r\n\r\n').encode('ascii'))
+                    deadline = time.monotonic() + 3
+                    first = b''
+                    while b'\r\n' not in first and len(first) < 256:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0: raise TimeoutError('panel response timeout')
+                        tls.settimeout(remaining)
+                        chunk = tls.recv(256-len(first))
+                        if not chunk: break
+                        first += chunk
+                    line, separator, _ = first.partition(b'\r\n')
+                    if not separator or not re.fullmatch(rb'HTTP/1\.[01] [0-9]{3}(?: [^\r\n]*)?', line):
+                        return 'unknown（面板 HTTP 响应无效）'
+                    status = line.split()[1]
+                    if status == b'503': return 'pending（面板仍在维护）'
+                    if status != b'200': return 'unknown（面板登录页未就绪）'
                 return 'ready（本机握手、系统 CA 与域名校验通过）'
     except ssl.SSLCertVerificationError:
         return 'unknown（本机系统 CA 或域名校验未通过）'

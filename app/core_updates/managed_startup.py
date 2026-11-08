@@ -265,12 +265,26 @@ class ManagedStartup:
         self._state='starting'
     def ready(self,loop):
         self._check_initial();self._loop=loop;self._state='gated_ready';self._main_ready.set()
+    def _panel_listener_ready(self):
+        # Uvicorn fires ASGI lifespan startup before it binds its socket.
+        # A Root TLS connection must never qualify somebody else's listener.
+        server = self._server
+        if server is None or not server.started or server.should_exit:
+            return False
+        try:
+            return any(bound.is_serving() and any(
+                sock.getsockname()[1] == server.config.port for sock in (bound.sockets or ()))
+                for bound in server.servers)
+        except (AttributeError, IndexError, OSError, TypeError):
+            return False
+
     def _configured_revision(self):
         state=self.connection.selection
         slots=tuple(s.CoreSlot(core,self._manager.runtime_artifact(core).reference,state.slot(core).previous) for core in s.CORES)
         return s._build(state.app_source,state.target,state.generation,slots).revision
     def probe(self):
         with self.scope(), self._manager.lock:
+            _need(self._panel_listener_ready(),'STARTUP_PANEL_LISTENER')
             facts=self._check_initial()
             observed={key:deepcopy(facts[key]) for key in ('app_source','target','data_generation','application','barriers')}
             observed['selection_revision']=self._configured_revision();observed['cores']={};ok=True
@@ -285,8 +299,10 @@ class ManagedStartup:
                         children=psutil.Process(runtime.process.pid).children()
                         sockets=[item for child in children for item in child.net_connections(kind='inet')]
                         if core=='xray':sockets=runtime._xray_ipv4_wildcard_sockets(value,sockets,children,time.monotonic()+0.2)
-                        ports=[row.get('listen_port',row.get('port',0)) for row in value.get('inbounds',[])]
-                        listeners=bool(children) and any(type(port) is int and port>0 for port in ports) and runtime._listeners_ready(value,sockets)
+                        # Match the existing runtime's expected listener set.
+                        # A running core with no expected ports can still have
+                        # a verified child and binary identity.
+                        listeners=bool(children) and runtime._listeners_ready(value,sockets)
                     except (psutil.NoSuchProcess,psutil.AccessDenied):listeners=False
                 actual=execution['running']
                 observed['cores'][core]=dict(artifact_id=actual['artifact_id'] if actual else None,
@@ -298,6 +314,7 @@ class ManagedStartup:
             self._check_initial()
             return observed,bool(ok)
     def _settled_facts(self,final_barriers):
+        _need(self._panel_listener_ready(),'STARTUP_PANEL_LISTENER')
         facts=observe(self.root,self.release)
         _need(all(facts[key]==self._facts[key] for key in ('app_source','target','application','application_identity',
             'root_identity','data_generation')),'STARTUP_FACTS_CHANGED')
@@ -339,13 +356,19 @@ class ManagedStartup:
             try:self._certificates.stop()
             except BaseException:self.cleanup_failed=True
         self._stop_cores()
+    def _starting_control(self):
+        self.connection._check('claimed')
+        if select.select([self.connection._connection],[],[],0)[0]:
+            self.connection._receive()
+            raise ManagedStartupError('STARTUP_UNEXPECTED_CONTROL')
+
     def _controls(self):
         try:
             while not self._main_ready.wait(0.05):
-                self.connection._check('claimed')
-                if select.select([self.connection._connection],[],[],0)[0]:
-                    self.connection._receive()
-                    raise ManagedStartupError('STARTUP_UNEXPECTED_CONTROL')
+                self._starting_control()
+            while not self._panel_listener_ready():
+                self._starting_control()
+                self._cancel.wait(0.05)
             self.connection.startup_ready()
             self.connection.run_controls(probe=self.probe,settle=self.settle,on_released=self._released,on_revoked=self._revoke)
         except BaseException:self._revoke()

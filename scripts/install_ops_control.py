@@ -81,7 +81,25 @@ DNS_SOURCE_DEPENDENCIES = {
     'dns_journal.py': 'app/certificates/dns_journal.py',
     'dns_backup.py': 'app/certificates/dns_backup.py',
 }
-SOURCE_DEPENDENCIES = PRE_DNS_SOURCE_DEPENDENCIES | DNS_SOURCE_DEPENDENCIES
+# Keep both historical closures fixed. Core helpers are one complete new group.
+CORE_SOURCE_DEPENDENCIES = {
+    'core_artifacts.py': 'app/core_updates/artifacts.py',
+    'core_selection.py': 'app/core_updates/selection.py',
+    'core_binary.py': 'app/core_updates/binary.py',
+    'core_store.py': 'app/core_updates/store.py',
+    'core_github.py': 'app/core_updates/github.py',
+    'core_catalog.py': 'app/core_updates/catalog.py',
+    'core_resolver.py': 'app/core_updates/resolver.py',
+    'core_application.py': 'app/core_updates/application.py',
+    'core_selection_files.py': 'app/core_updates/selection_files.py',
+    'core_boot.py': 'app/core_updates/boot.py',
+    'core_backup.py': 'app/core_updates/backup.py',
+    'core_backup_archive.py': 'app/core_updates/backup_archive.py',
+    'core_maintenance.py': 'app/core_updates/maintenance.py',
+    'core_boot_broker.py': 'deploy/core_boot_broker.py',
+    'core_maintenance_control.py': 'deploy/core_maintenance_control.py',
+}
+SOURCE_DEPENDENCIES = PRE_DNS_SOURCE_DEPENDENCIES | DNS_SOURCE_DEPENDENCIES | CORE_SOURCE_DEPENDENCIES
 RECEIPT_KEYS = {'schema', 'service_manager', 'system_python', 'interpreter_resolved',
                 'interpreter_sha256', 'files'}
 MAX_CODE = 4_000_000
@@ -483,6 +501,7 @@ def validate_existing(hashes, interpreter, manager, refresh, verified, *, missin
     expected = set(hashes) | {str(path) for path in paths} | set(missing_instance)
     dependencies = {str(CONTROL / name) for name in PRE_DNS_SOURCE_DEPENDENCIES}
     dns_dependencies = {str(CONTROL / name) for name in DNS_SOURCE_DEPENDENCIES}
+    core_dependencies = {str(CONTROL / name) for name in CORE_SOURCE_DEPENDENCIES}
     # Explicit refresh migrates only known complete historical closures. The
     # pre-network controller lacks firewall_support; older closures may also
     # lack the proxy dependencies or data-owner helper. Existing bytes must all
@@ -499,7 +518,11 @@ def validate_existing(hashes, interpreter, manager, refresh, verified, *, missin
     pre_dns_missing = (set(),) + historical + (maintenance,) + tuple(item | maintenance for item in historical)
     # Every historical shape predates all five DNS helpers. Mixed partial DNS
     # closures were never published and must not be accepted as legacy.
-    known_missing = tuple(dns_dependencies | item for item in pre_dns_missing)
+    # Published pre-core DNS closures have every DNS helper, and no core helper.
+    # Older closures lack all DNS and all core helpers. Never accept a partial
+    # core group or derive old shapes by subtracting arbitrary current files.
+    known_missing = (core_dependencies,) + tuple(core_dependencies | dns_dependencies | item
+                                                 for item in pre_dns_missing)
     missing = (expected - set(receipt['files']) if isinstance(receipt, dict)
                and isinstance(receipt.get('files'), dict) else set())
     legacy = (refresh and isinstance(receipt, dict) and isinstance(receipt.get('files'), dict)

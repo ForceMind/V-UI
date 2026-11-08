@@ -725,13 +725,29 @@ def activate(root: Path, identity: str):
         _activate_locked(guard, identity)
 
 
-def _database_mode_fence(data: Path):
+def _readonly_proxy_store_type():
+    """Private offline checker reader, retaining normal ownership and flock."""
+    from app.services.proxy_store import ProxyStore
+    class ExistingProxyStore(ProxyStore):
+        def _locked(self, allow_uncertain=False, initialize=True):
+            return super()._locked(allow_uncertain=allow_uncertain, initialize=False)
+    return ExistingProxyStore
+
+
+def _policy_store(data, existing_type=None):
+    from app.services.proxy_store import ProxyStore
+    if existing_type is not None and (not isinstance(existing_type, type) or not issubclass(existing_type, ProxyStore)):
+        raise ReleaseError('Invalid private policy reader')
+    return (ProxyStore if existing_type is None else existing_type)(data)
+
+
+def _database_mode_fence(data: Path, *, _existing_store_type=None):
     """Minimal stdlib controller gate; never invent a missing proxy store."""
     from app.services.proxy_store import ProxyStore
     from app.services.inbound_policy import MODES
     data = Path(data)
     names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
-    schema = (ProxyStore(data).policy_schema_version()
+    schema = (_policy_store(data, _existing_store_type).policy_schema_version()
               if any(os.path.lexists(data / name) for name in names) else 1)
     with sqlite3.connect((data / 'v-ui.db').as_uri() + '?mode=ro', uri=True) as db:
         columns = {row[1] for row in db.execute('PRAGMA table_info(inbounds)')}
@@ -802,7 +818,7 @@ def _policy_runtime(data: Path, core: str, *, _expected_artifact_id=None):
     return state, config
 
 
-def _committed_policy_protection(data: Path, *, _artifact_ids=None):
+def _committed_policy_protection(data: Path, *, _artifact_ids=None, _existing_store_type=None):
     """Protected IDs and exact inbound bindings from immutable runtime bytes.
 
     The controller deliberately does not import the ORM or compiler. Reading
@@ -810,7 +826,7 @@ def _committed_policy_protection(data: Path, *, _artifact_ids=None):
     """
     from app.services.proxy_store import ProxyStore
     _check_policy_artifact_ids(_artifact_ids)
-    store = ProxyStore(data)
+    store = _policy_store(data, _existing_store_type)
     active = store.load_active(reject_pending=True)
     if active is None:
         return {'local': False, 'global': False, 'bindings': []}
@@ -859,12 +875,12 @@ def _committed_policy_protection(data: Path, *, _artifact_ids=None):
             'bindings': sorted(bindings, key=lambda item: item['id'])}
 
 
-def _validate_restore_policy(data: Path, *, _artifact_ids=None):
+def _validate_restore_policy(data: Path, *, _artifact_ids=None, _existing_store_type=None):
     """Exact v2 source check without starting cores or importing runtime deps."""
     from app.services.proxy_store import ProxyStore
     _check_policy_artifact_ids(_artifact_ids)
-    explicit = _database_mode_fence(data)
-    store = ProxyStore(data)
+    explicit = _database_mode_fence(data, _existing_store_type=_existing_store_type)
+    store = _policy_store(data, _existing_store_type)
     active = store.load_active(reject_pending=True)
     if active is None:
         if explicit:
@@ -882,7 +898,8 @@ def _validate_restore_policy(data: Path, *, _artifact_ids=None):
             raise ReleaseError('Backup rows differ from their committed inbound policy')
     elif explicit:
         raise ReleaseError('Backup contains unapplied inbound modes; dedicated recovery is required')
-    protection = _committed_policy_protection(data, _artifact_ids=_artifact_ids)
+    protection = _committed_policy_protection(data, _artifact_ids=_artifact_ids,
+        _existing_store_type=_existing_store_type)
     if protection['global'] or protection['bindings']:
         xray, _ = _policy_runtime(data, 'xray',
             _expected_artifact_id=_artifact_ids['xray'] if _artifact_ids is not None else None)
@@ -1579,7 +1596,9 @@ class _MaintenanceSession(_StoppedGuard):
             if action not in ('stop', 'recover-restore'):
                 with _maintenance_directory(self.root / 'data'): pass
             if action not in ('stop', 'recover-restore'):
-                _, self._selection = active(self.root)
+                application = active_verified(self.root)
+                self._selection = application[1]
+                self._active_application = application
                 self._anchor = _maintenance_anchor(self.root)
             if action == 'recover-restore':
                 self._recovery_snapshot = _maintenance_recovery_snapshot(self.root)

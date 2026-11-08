@@ -345,6 +345,26 @@ class PublishedDNSMigrationTests(unittest.TestCase):
             with self.subTest(target=version),self.assertRaises(AssertionError):
                 assert_receipt_migration(self,before,after,'0.4.22',version)
 
+    def test_p3_profile_requires_all_and_only_the_fixed_core_receipt_additions(self):
+        from published_upgrade_helpers import CORE_FILES
+        for version in PUBLISHED_BASELINES:
+            before,after=self.receipt(version)
+            after['files'].update({path:'6'*64 for path in CORE_FILES})
+            assert_receipt_migration(self,before,after,version,'0.4.23',core_control=True)
+            with self.assertRaises(AssertionError):
+                assert_receipt_migration(self,before,after,version,'0.4.23')
+            for name in CORE_FILES:
+                missing=deepcopy(after);missing['files'].pop(name)
+                with self.subTest(version=version,missing=name),self.assertRaises(AssertionError):
+                    assert_receipt_migration(self,before,missing,version,'0.4.23',core_control=True)
+            contaminated=deepcopy(before);contaminated['files'][next(iter(CORE_FILES))]='6'*64
+            with self.assertRaises(AssertionError):
+                assert_receipt_migration(self,contaminated,after,version,'0.4.23',core_control=True)
+        tree=ast.parse((Path(__file__).resolve().parents[1]/'scripts/install_ops_control.py').read_text())
+        literal=next(node.value for node in tree.body if isinstance(node,ast.Assign)
+            and any(isinstance(target,ast.Name) and target.id=='CORE_SOURCE_DEPENDENCIES' for target in node.targets))
+        self.assertEqual(CORE_FILES,{'/usr/local/lib/v-ui/'+name for name in ast.literal_eval(literal)})
+
     def test_literal_dns_closure_and_snapshot_columns_match_reviewed_production_constants(self):
         source=Path(__file__).resolve().parents[1]
         tree=ast.parse((source/'scripts/install_ops_control.py').read_text())

@@ -563,3 +563,18 @@ managed路径要求现有SQLite文件和精确state2/config/选择意图，不�
 d128a58自身[主单元42528797556](https://github.com/ForceMind/V-UI/actions/runs/42528797556)的3410项出现1fail/1error（原239skip）：普通启动把active_verified放到data_owner前，破坏两条既有早期排他断言。现普通路径先取得真实SH再校验；只有入口已pending才走verify→Root claim→私有SH，普通验证期间新pending不提升为managed，初始pending消失也不回落。旧test_data_owner断言原样保留，新增四项实际serve/tempflock负例在本机验证，但旧两项的完整Linux回归须新源Actions；不以本机模拟替代。
 
 新增准入十一项、启动负例四项，连同M15十项与既有合同，当前完整driver为406项，两Python实际执行无skip。首次整组曾因原AST夹具未注入新只读helper、Root元数据夹具将真实/tmp1777带入非writable生产前提而失败，3.12错误打印另缺st_mtime；现仅补正常无pending的AST依赖、完整stat属性及fixture外祖先的明确fake Root/nonwritable元数据。fixture内真实bad mode/owner/link断言及生产Root规则保持，原失败保留。真正Root固定socket/systemd、不同核心切换与故障恢复仍待后续Actions。
+
+
+## M17–M20 私有核心切换、首次事务与固定安装闭包
+
+私有nonroot worker以同一实际operation完成 `core_context → check_core → prepared → proceed → core_quiesced → backup_core → core_backed_up → bind_core_ids → core_ids_bound`，随后接原单次writer试跑周期。Root先由实际worker取当前source/target，不从调用者自报或Root读取用户CURRENT推断相容性；候选在停服前核官方材料、现有只读policy及同FD的固定版本/config检查。最终EX下再次验证；只在M5记录quiesced、M13备份外部SHA应答后迁移state2，保持配置、revision和最后enabled，缺状态不建。已重取writers时只修复已保留的before/after身份，不接受任意恢复路径、callback或目标，不回滚DB。两份state文件未声称跨文件原子；部分写失效保留备份和pending。
+
+独审实际复现冷检返回时同组后代仍活、以及慢应用校验中释放五writer后仍写state2。现冷检在既有隔离worker组，以Linux子回收者/内核ECHILD确认空子树，未知活后代不返回干净结果；writer在慢读后、每个写边界及完成后复核原真实generation、PID与operation。只读proxy checker强制不初始化，M13私有暂存同样复用；应用MANIFEST仍使用自身4MB严格JSON/重复键拒绝，与组件64KB预算分开。新进程位点是 `app/core_updates/maintenance.py::_command` 固定native Popen、`_abort_command_group` 仅自身已验证组的SIGKILL，及 `tests/test_core_cold_check_linux.py` 隔离假Python后代；生产代码不启独立逃逸组、不向协议或日志透传原配置。Linux用例加入staged强制52项，macOS未执行该内核用例。
+
+安装器从已验同提交source ZIP复制精确15份内部core helper，和Root运行receipt/worker pathless闭包相符，不增顶层公开kit资产。刷新只接纳完整当前、完整pre-core DNS、完整历史pre-DNS等精确整组形状；部分core和无收据已有文件拒绝。P3开发候选仍用23应用schema，Actions历史升级fixture明确选独立P3闭包配置，要求全15项增量；原23默认DNS-only断言保持。未据此修改冻结PR145、VERSION或公开入口。
+
+首次切换在一笔M5事务中保留逻辑旧bundle基线、实际原selector/fence均缺席；没有先发布一个尚未绑定state2的稳定选择。拒已有锁或其它初始化trace，pending先持久化，按同样备份与健康证据确认；首次失败允许恢复旧bundle到更高generation。Root私有协调器已消费实际worker协议、组合安装/operation证明、串行整个pipe往返、精确Systemd身份与M5/barrier；同会话已释放writers后的试跑失败可按旧ID重取、旧启动和恢复确认。已开始确认后不假报回退，未知早阶段/进程中断保留恢复义务。
+
+独审另复现Type=simple降权前PID、lifespan早于bind、空预期监听、broker join超时尾窗。现仅arm前对已核cgroup的全UID0有界等待，并把局部预算传到实际查询；app自己的Uvicorn listener开始服务后才发私有ready，probe/settle与最终释放再次核，空预期集合不冒称有端口，仍核实际核心child与FD。Root独立核TLS，终帧后还核同一面板实际提供200登录页。join与结束后owned endpoint清理分开；停止回调后才退出锁与固定模块，仍不能证明时仅隔离任务自身退出，不报告成功。Root成功前留一代回退空间。
+
+当前本机两Python各456项合成合同无skip、安装闭包fixture各48项，另历史升级helper23项。以上不是实际Root跨UID、systemd、新核心/固定客户端或生产验收。私有协调器尚未接daemon公开action；原停止面板保持停止。停机后、绑定前的失败恢复与断电重入、保留旧自带私有CA的独立健康验证、完整data/选择双域恢复、所有离线入口守卫、终端/面板/远程权限与四目标真实新核心资格仍需完成。当前OS CA校验不过会在停服前拒绝，未关闭TLS检查。

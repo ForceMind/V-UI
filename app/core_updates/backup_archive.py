@@ -86,9 +86,9 @@ def _data_format(data, kind):
             for _ in entries:
                 pass
         _need(ProxyStore(data).read_snapshot(initialize=False)['pending'] is None)
-        tools._database_mode_fence(data)
+        tools._database_mode_fence(data, _existing_store_type=tools._readonly_proxy_store_type())
     else:
-        tools._database_mode_fence(data)
+        tools._database_mode_fence(data, _existing_store_type=tools._readonly_proxy_store_type())
 
 
 
@@ -102,7 +102,8 @@ def _validate_data(data, kind, closure, *, anchor):
         _data_format(data, kind)
         migration = _data_bindings(data, closure, anchor=anchor)
         if (data/'.proxy-state-initialized').exists():
-            tools._validate_restore_policy(data, _artifact_ids={core:closure.intents[core]['artifact_id'] for core in s.CORES})
+            tools._validate_restore_policy(data, _artifact_ids={core:closure.intents[core]['artifact_id'] for core in s.CORES},
+                                           _existing_store_type=tools._readonly_proxy_store_type())
             # The shared old checker owns this newly created private staging lock.
             (data/'.proxy-state.lock').unlink()
         return migration

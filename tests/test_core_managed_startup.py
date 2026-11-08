@@ -239,10 +239,32 @@ def source_session(namespace_extra=None):
     facts.update(root_identity=(1,2),application_identity=('observed',))
     namespace['observe']=lambda root,release:deepcopy(facts)
     session=namespace['ManagedStartup'](namespace['_TOKEN'],connection,Path('/private-fixture'),Path('/private-fixture/old'),facts,threading.Event())
+    listener=types.SimpleNamespace(getsockname=lambda:('127.0.0.1',8443))
+    bound=types.SimpleNamespace(is_serving=lambda:True,sockets=(listener,))
+    session._server=types.SimpleNamespace(started=True,should_exit=False,servers=[bound],
+                                         config=types.SimpleNamespace(port=8443))
     return session,namespace,facts
 
 
 class LifecycleSourceTests(unittest.TestCase):
+    def test_lifespan_ready_alone_does_not_send_private_startup_ready(self):
+        session,namespace,_=source_session();session._main_ready.set()
+        session._server.started=False
+        events=[]
+        session.connection._check=lambda *states:events.append('still-claimed')
+        session.connection._connection=object()
+        namespace['select']=types.SimpleNamespace(select=lambda *args:([],[],[]))
+        session.connection.startup_ready=lambda:events.append('sent-ready')
+        session.connection.run_controls=lambda **kwargs:events.append('monitoring')
+        def became_bound(_):
+            self.assertEqual(events,['still-claimed'])
+            session._server.started=True
+        session._cancel=types.SimpleNamespace(wait=became_bound)
+        session._controls()
+        self.assertEqual(events,['still-claimed','sent-ready','monitoring'])
+        session._server.servers[0].sockets=()
+        self.assertFalse(session._panel_listener_ready())
+
     def test_release_ack_still_gated_and_queued_release_loses_to_revoke(self):
         session,namespace,facts=source_session();callbacks=[]
         session._certificates=types.SimpleNamespace(start=Mock(),stop=Mock())
@@ -338,6 +360,13 @@ class LifecycleSourceTests(unittest.TestCase):
         self.assertNotEqual(observed['cores']['sing-box']['artifact_id'],session.connection.context['intents']['sing-box']['artifact_id'])
         self.assertTrue(observed['cores']['sing-box']['owned_listeners_ready'])
         self.assertIsNone(observed['cores']['xray']['artifact_id'])
+        adapters['sing-box'].runtime.active_config=lambda:dict(inbounds=[])
+        child.net_connections=lambda **kwargs:[]
+        with patch.dict(sys.modules,{'psutil':fake_ps}):empty,_=session.probe()
+        self.assertTrue(empty['cores']['sing-box']['owned_listeners_ready'])
+        fake_ps.Process=lambda pid:types.SimpleNamespace(children=lambda:[])
+        with patch.dict(sys.modules,{'psutil':fake_ps}):missing,_=session.probe()
+        self.assertFalse(missing['cores']['sing-box']['owned_listeners_ready'])
 
 
 class MainSourceTests(unittest.TestCase):
