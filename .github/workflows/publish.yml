@@ -29,6 +29,11 @@ on:
         required: true
         type: boolean
         default: false
+      parallel_acceptance_no_browser:
+        description: Future version with reviewed parallel-v1 policy; never republish 0.4.22
+        required: true
+        type: boolean
+        default: false
       simple_operations_no_browser:
         description: Approved frozen 0.4.21 simple operations product, browsers unverified
         required: true
@@ -103,6 +108,7 @@ jobs:
           CONFIRM: ${{ inputs.confirm }}
           PUBLISH: ${{ inputs.publish }}
           MAINTENANCE_SHARE_NO_BROWSER: ${{ inputs.maintenance_share_no_browser }}
+          PARALLEL_ACCEPTANCE_NO_BROWSER: ${{ inputs.parallel_acceptance_no_browser }}
           SIMPLE_OPERATIONS_NO_BROWSER: ${{ inputs.simple_operations_no_browser }}
           NETLINK_SERVICE_NO_BROWSER: ${{ inputs.netlink_service_no_browser }}
           MAINTENANCE_180_NO_BROWSER: ${{ inputs.maintenance_180_no_browser }}
@@ -122,6 +128,7 @@ jobs:
           if [[ "$CA_TRUST_NO_BROWSER" == 'true' ]]; then args+=(--ca-trust-no-browser); fi
           if [[ "$INSTALL_INTERACTION_NO_BROWSER" == 'true' ]]; then args+=(--install-interaction-no-browser); fi
           if [[ "$MAINTENANCE_SHARE_NO_BROWSER" == 'true' ]]; then args+=(--maintenance-share-no-browser); fi
+          if [[ "$PARALLEL_ACCEPTANCE_NO_BROWSER" == 'true' ]]; then args+=(--parallel-acceptance-no-browser); fi
           if [[ "$SIMPLE_OPERATIONS_NO_BROWSER" == 'true' ]]; then args+=(--simple-operations-no-browser); fi
           if [[ "$NETLINK_SERVICE_NO_BROWSER" == 'true' ]]; then args+=(--netlink-service-no-browser); fi
           if [[ "$MAINTENANCE_180_NO_BROWSER" == 'true' ]]; then args+=(--maintenance-180-no-browser); fi

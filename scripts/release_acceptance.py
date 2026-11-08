@@ -41,6 +41,7 @@ BASELINES = {
     '0.4.19': 'a2b9c188658f082b189e77d237787a96eb9cf921',
     '0.4.20': '05173798de1baed5d67a866c4125e72f74fe3f4c',
     '0.4.21': '2aa5e11e3f09c03d048018f033ae888e7c775604',
+    '0.4.22': '558687a76cd29f4e4735284926eb05bf6664472e',
 }
 ROLES = frozenset({'build', 'fresh'} | {'upgrade-' + version for version in BASELINES})
 PRODUCER_SCOPE = 'producer-inspection'
@@ -386,7 +387,7 @@ def _copy_bundle(source_fd, output, expected_sha, kit_identity):
             raise operation_error
 
 
-def _verify(kit, source, version, expected_table, scope, output):
+def _verify(kit, source, version, expected_table, scope, output, expected_bundle=None):
     _source_version(source, version)
     try:
         with _directory(kit) as directory, ExitStack() as stack:
@@ -399,6 +400,7 @@ def _verify(kit, source, version, expected_table, scope, output):
             table_sha = hashlib.sha256(raw).hexdigest()
             _need(expected_table is None or table_sha == expected_table, 'TRUSTED_CHECKSUM_TABLE_MISMATCH')
             values = _table(raw)
+            _need(expected_bundle is None or values[BUNDLE] == expected_bundle, 'EXPECTED_BUNDLE_DIGEST_MISMATCH')
             for name, expected in values.items():
                 _need(_digest(members[name][0], limits.get(name, MAX_CODE)) == expected, 'KIT_FILE_DIGEST_MISMATCH')
             record = _json(_read(members['RELEASE.json'][0], MAX_JSON), MAX_JSON)
@@ -422,10 +424,11 @@ def _verify(kit, source, version, expected_table, scope, output):
         raise ReleaseAcceptanceError('KIT_OR_OUTPUT_UNAVAILABLE_OR_INVALID') from error
 
 
-def verify_kit(kit, *, expected_source, candidate_version, expected_checksums_sha256, bundle_output=None):
+def verify_kit(kit, *, expected_source, candidate_version, expected_checksums_sha256, bundle_output=None, expected_bundle_sha256=None):
     """Verify file identity against an external table digest; never run a test."""
     _need(_hex(expected_checksums_sha256, 64), 'EXTERNAL_CHECKSUM_TABLE_DIGEST_REQUIRED')
-    return _verify(kit, expected_source, candidate_version, expected_checksums_sha256, CONSUMER_SCOPE, bundle_output)
+    _need(expected_bundle_sha256 is None or _hex(expected_bundle_sha256, 64), 'EXPECTED_BUNDLE_DIGEST_REQUIRED')
+    return _verify(kit, expected_source, candidate_version, expected_checksums_sha256, CONSUMER_SCOPE, bundle_output, expected_bundle_sha256)
 
 
 def inspect_producer_kit(kit, *, expected_source, candidate_version):
@@ -440,6 +443,13 @@ def _identity(value):
           and value['target'] == TARGET and value['release_id'] == value['version'] + '-' + value['source_sha'][:12]
           and _hex(value['checksums_sha256'], 64) and _hex(value['bundle_sha256'], 64)
           and value['validation_scope'] in (PRODUCER_SCOPE, CONSUMER_SCOPE), 'IDENTITY_FIELDS')
+
+
+def load_identity(raw):
+    """Strict-decode producer/consumer identity bytes without losing duplicate keys."""
+    value = _json(raw, MAX_JSON)
+    _identity(value)
+    return value
 
 
 def _positive(value):

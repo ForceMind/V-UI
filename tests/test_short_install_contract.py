@@ -16,65 +16,186 @@ class ShortInstallContractTests(unittest.TestCase):
     stable = 'a' * 40
     checkout = 'b' * 40
 
+    def oneclick_contract(self, version=None):
+        from scripts import acceptance_job
+        root=Path(__file__).resolve().parents[1]
+        workflow=yaml.load((root/'.github/workflows/oneclick.yml').read_text(),Loader=yaml.BaseLoader)
+        version=version or (root/'VERSION').read_text().strip()
+        matrix=acceptance_job.matrix_for_version(version)
+        return root,workflow,version,matrix['include']
+
+    def expected_upgrade_baselines(self, version):
+        # Independent pre-parallelization source/path literals, not helper output.
+        expected=[('0.4.14','b0cc174d04d05e61277075412586f0ba0dd231db','.published-v0414',False),
+                  ('0.4.15','65b1e75d90de733408101ec280a92be935731baa','.published-v0415',False),
+                  ('0.4.16','18fe631bcf69b68425b454db1795a101e0378842','.published-v0416',False),
+                  ('0.4.17','95c201c6e26ed54960f964c675e515890f2eea2a','.published-v0417',False),
+                  ('0.4.19','a2b9c188658f082b189e77d237787a96eb9cf921','.published-v0419',True),
+                  ('0.4.20','05173798de1baed5d67a866c4125e72f74fe3f4c','.published-v0420',True),
+                  ('0.4.21','2aa5e11e3f09c03d048018f033ae888e7c775604','.published-v0421',True)]
+        if tuple(map(int,version.split('.'))) > (0,4,22):
+            expected.append(('0.4.22','558687a76cd29f4e4735284926eb05bf6664472e','.published-v0422',True))
+        return expected
+
     def test_installer_language_identity_does_not_depend_on_consent_test_opt_in(self):
         from test_oneclick_system import installer_has_chinese_prompts
+        from scripts import acceptance_job
         self.assertFalse(installer_has_chinese_prompts('0.4.9'))
         self.assertTrue(installer_has_chinese_prompts('0.4.10'))
         self.assertTrue(installer_has_chinese_prompts('0.4.11'))
         root=Path(__file__).resolve().parents[1]
-        for name in ('oneclick.yml','short-install.yml','online-release-acceptance.yml'):
+        for name in ('short-install.yml','online-release-acceptance.yml'):
             workflow=yaml.load((root/'.github/workflows'/name).read_text(),Loader=yaml.BaseLoader)
             envs=[step.get('env',{}) for job in workflow['jobs'].values() for step in job['steps']]
             selected=[env for env in envs if env.get('VUI_SYSTEM_INSTALL_TEST')=='1']
             ordinary=[env for env in selected if not env.get('VUI_PUBLISHED_UPGRADE_SOURCE')]
             self.assertEqual(len(ordinary),1)
             self.assertEqual(ordinary[0].get('VUI_INSTALLER_YN_TEST'),'1')
-            upgrades=[env for env in selected if env.get('VUI_PUBLISHED_UPGRADE_SOURCE')]
-            self.assertEqual(len(selected),8 if name=='oneclick.yml' else 1)
-            self.assertEqual(len(upgrades),7 if name=='oneclick.yml' else 0)
-            if upgrades:
-                expected=[('0.4.14','b0cc174d04d05e61277075412586f0ba0dd231db','.published-v0414'),
-                          ('0.4.15','65b1e75d90de733408101ec280a92be935731baa','.published-v0415'),
-                          ('0.4.16','18fe631bcf69b68425b454db1795a101e0378842','.published-v0416'),
-                          ('0.4.17','95c201c6e26ed54960f964c675e515890f2eea2a','.published-v0417'),
-                          ('0.4.19','a2b9c188658f082b189e77d237787a96eb9cf921','.published-v0419'),
-                          ('0.4.20','05173798de1baed5d67a866c4125e72f74fe3f4c','.published-v0420'),
-                          ('0.4.21','2aa5e11e3f09c03d048018f033ae888e7c775604','.published-v0421')]
-                self.assertEqual([(env['VUI_PUBLISHED_INSTALL_VERSION'],env['VUI_RELEASE_COMMIT'],
-                                   env['VUI_PUBLISHED_UPGRADE_SOURCE']) for env in upgrades],
-                                 [(version,commit,'${{ github.workspace }}/'+path)
-                                  for version,commit,path in expected])
-                for env in upgrades:
-                    self.assertNotIn('VUI_EXISTING_INSTALL_TEST',env)
-                    self.assertNotIn('VUI_SETUP_INSTALL',env)
-                    self.assertEqual(env['VUI_REMOTE_MAINTENANCE_TEST'],'1')
-                    self.assertEqual(env['VUI_RELEASE_KIT'],'/tmp/vui-oneclick/kit')
-                    self.assertEqual(env['VUI_RELEASE_BUNDLE'],'/tmp/vui-oneclick/vui-linux.zip')
-                steps=workflow['jobs']['system-install']['steps']
-                self.assertEqual(sum('scripts/build_bundle.py ' in s.get('run','') for s in steps),1)
-                self.assertEqual(sum('scripts/build_release_kit.py ' in s.get('run','') for s in steps),1)
-                for version,commit,path in expected:
-                    checkout=next(s for s in steps if s.get('with',{}).get('path')==path)
-                    self.assertEqual(checkout['with']['ref'],commit)
-                    self.assertEqual(checkout['with']['persist-credentials'],'false')
-                    accepted=next(s for s in steps if s.get('env',{}).get('VUI_PUBLISHED_INSTALL_VERSION')==version)
-                    self.assertEqual(accepted['name'],f'Test published v{version} to exact candidate upgrade on ephemeral systemd runner')
-                    self.assertLess(steps.index(checkout),steps.index(accepted))
+            self.assertEqual(len(selected),1)
+            self.assertEqual([env for env in selected if env.get('VUI_PUBLISHED_UPGRADE_SOURCE')],[])
 
-    def test_installed_netlink_gate_is_required_only_for_fresh_and_public_019(self):
-        root=Path(__file__).resolve().parents[1]
-        workflow=yaml.load((root/'.github/workflows/oneclick.yml').read_text(),Loader=yaml.BaseLoader)
-        steps=workflow['jobs']['system-install']['steps']
-        selected=[step for step in steps if step.get('env',{}).get('VUI_NETLINK_SYSTEMD_TEST')=='1']
-        self.assertEqual([step['name'] for step in selected],[
-            'Test interactive installer and global v-ui on ephemeral systemd runner',
-            'Test published v0.4.19 to exact candidate upgrade on ephemeral systemd runner',
-            'Test published v0.4.20 to exact candidate upgrade on ephemeral systemd runner',
-            'Test published v0.4.21 to exact candidate upgrade on ephemeral systemd runner'])
-        for step in selected:
-            self.assertNotIn('if',step,'Required installed-core acceptance cannot be skipped')
-            self.assertEqual(step['env']['VUI_TEST_MIHOMO'],'/tmp/vui-oneclick/client/mihomo')
-        self.assertEqual(sum('scripts/fetch_mihomo.py ' in step.get('run','') for step in steps),1)
+        root,workflow,version,rows=self.oneclick_contract()
+        expected=self.expected_upgrade_baselines(version)
+        self.assertEqual(rows,[dict(version=v,source=sha,path=path,netlink=netlink)
+                               for v,sha,path,netlink in expected])
+        for candidate,count in [('0.4.22',7),('0.4.23',8)]:
+            actual=acceptance_job.matrix_for_version(candidate)['include']
+            self.assertEqual(len(actual),count)
+            self.assertEqual(actual,[dict(version=v,source=sha,path=path,netlink=netlink)
+                                    for v,sha,path,netlink in self.expected_upgrade_baselines(candidate)])
+        fresh=acceptance_job.role_recipe(version,'fresh')['env']
+        self.assertEqual(fresh,{
+            'VUI_NETLINK_SYSTEMD_TEST':'1',
+            'VUI_TEST_MIHOMO':'/tmp/vui-oneclick/client/mihomo',
+            'VUI_SYSTEM_INSTALL_TEST':'1',
+            'VUI_REMOTE_MAINTENANCE_TEST':'1',
+            'VUI_DOMAIN_RETRY_TEST':'1',
+            'VUI_INSTALLER_YN_TEST':'1',
+            'VUI_EXISTING_INSTALL_TEST':'1',
+            'VUI_RELEASE_BUNDLE':'/tmp/vui-oneclick/vui-linux.zip',
+            'VUI_RELEASE_KIT':'/tmp/vui-oneclick/kit'})
+        upgrade_steps=workflow['jobs']['published-upgrade']['steps']
+        checkout=next(step for step in upgrade_steps if step.get('with',{}).get('path')=='${{ matrix.path }}')
+        self.assertEqual(checkout['with'],{'persist-credentials':'false','ref':'${{ matrix.source }}','path':'${{ matrix.path }}'})
+        accepted=next(step for step in upgrade_steps if 'acceptance_job run-test' in step.get('run',''))
+        self.assertEqual(accepted['name'],'Test published v${{ matrix.version }} to exact candidate upgrade on ephemeral systemd runner')
+        self.assertEqual(accepted['env']['ACCEPTANCE_ROLE'],'upgrade-${{ matrix.version }}')
+        self.assertEqual(accepted['env']['OLD_SOURCE'],'${{ github.workspace }}/${{ matrix.path }}')
+        self.assertIn('--old-source "$OLD_SOURCE"',accepted['run'])
+        self.assertLess(upgrade_steps.index(checkout),upgrade_steps.index(accepted))
+        for old_version,commit,path,netlink in expected:
+            old_source=str(root/path)
+            env=acceptance_job.role_recipe(version,'upgrade-'+old_version,old_source=old_source)['env']
+            fixed={'VUI_SYSTEM_INSTALL_TEST':'1','VUI_PUBLISHED_INSTALL_VERSION':old_version,
+                   'VUI_REMOTE_MAINTENANCE_TEST':'1','VUI_RELEASE_COMMIT':commit,
+                   'VUI_PUBLISHED_UPGRADE_SOURCE':old_source,
+                   'VUI_RELEASE_KIT':'/tmp/vui-oneclick/kit',
+                   'VUI_RELEASE_BUNDLE':'/tmp/vui-oneclick/vui-linux.zip'}
+            if netlink:
+                fixed.update(VUI_NETLINK_SYSTEMD_TEST='1',VUI_TEST_MIHOMO='/tmp/vui-oneclick/client/mihomo')
+            self.assertEqual(env,fixed,(old_version,'must preserve every original role flag'))
+            self.assertNotIn('VUI_EXISTING_INSTALL_TEST',env)
+            self.assertNotIn('VUI_SETUP_INSTALL',env)
+
+    def test_installed_netlink_gate_is_required_only_for_fresh_and_public_019_onward(self):
+        from scripts import acceptance_job
+        root,workflow,version,rows=self.oneclick_contract()
+        recipes=[('fresh',acceptance_job.role_recipe(version,'fresh'))]
+        recipes.extend(('upgrade-'+row['version'],acceptance_job.role_recipe(
+            version,'upgrade-'+row['version'],old_source=str(root/row['path']))) for row in rows)
+        selected=[role for role,recipe in recipes if recipe['env'].get('VUI_NETLINK_SYSTEMD_TEST')=='1']
+        expected=['fresh','upgrade-0.4.19','upgrade-0.4.20','upgrade-0.4.21']
+        if tuple(map(int,version.split('.'))) > (0,4,22):expected.append('upgrade-0.4.22')
+        self.assertEqual(selected,expected)
+        for role,recipe in recipes:
+            commands=recipe['commands']
+            self.assertEqual(commands[-1][1:],['-B','-m','unittest','discover','-s','tests','-p','test_oneclick_system.py','-v'])
+            fetches=[command for command in commands if 'scripts/fetch_mihomo.py' in command]
+            self.assertEqual(len(fetches),1 if role in expected else 0)
+            if role in expected:
+                self.assertEqual(recipe['env']['VUI_TEST_MIHOMO'],'/tmp/vui-oneclick/client/mihomo')
+                self.assertEqual(fetches[0][1:],['-B','scripts/fetch_mihomo.py','/tmp/vui-oneclick/client'])
+            else:
+                self.assertNotIn('VUI_NETLINK_SYSTEMD_TEST',recipe['env'])
+                self.assertNotIn('VUI_TEST_MIHOMO',recipe['env'])
+        for job_id in ('system-install','published-upgrade'):
+            job=workflow['jobs'][job_id]
+            self.assertNotIn('if',job,'Required installed-core job cannot be skipped')
+            for step in job['steps']:
+                if 'acceptance_job run-test' in step.get('run',''):
+                    self.assertNotIn('if',step,'Required installed-core acceptance cannot be skipped')
+                    self.assertNotIn('continue-on-error',step)
+            self.assertFalse(any('scripts/fetch_mihomo.py' in step.get('run','') for step in job['steps']),
+                             'Role helper fetches fixed client without creating skipped workflow steps')
+
+    def test_parallel_oneclick_builds_once_and_consumes_same_run_artifact_by_id(self):
+        _,workflow,_,_=self.oneclick_contract()
+        jobs=workflow['jobs']
+        self.assertEqual(set(jobs),{'build-kit','system-install','published-upgrade'})
+        self.assertEqual(workflow['permissions'],{'contents':'read'})
+        steps=[step for job in jobs.values() for step in job['steps']]
+        self.assertEqual(sum('scripts/build_bundle.py ' in step.get('run','') for step in steps),1)
+        self.assertEqual(sum('scripts/build_release_kit.py ' in step.get('run','') for step in steps),1)
+        producer=jobs['build-kit']
+        self.assertFalse(any('acceptance_job run-test' in step.get('run','') for step in producer['steps']))
+        inspected=next(step for step in producer['steps'] if step.get('name')=='Inspect producer candidate kit')
+        self.assertIn('acceptance_job producer',inspected['run'])
+        self.assertIn('acceptance_job matrix --version "$VUI_CANDIDATE_VERSION"',inspected['run'])
+        uploaded=next(step for step in producer['steps'] if step.get('name')=='Upload release kit')
+        self.assertEqual(uploaded['id'],'upload-kit')
+        self.assertEqual(uploaded['with']['path'],'/tmp/vui-oneclick/kit')
+        self.assertEqual(producer['outputs']['artifact-id'],'${{ steps.upload-kit.outputs.artifact-id }}')
+        self.assertEqual(producer['outputs']['artifact-digest'],'${{ steps.artifact-identity.outputs.artifact-digest }}')
+        recorded=next(step for step in producer['steps'] if step.get('name')=='Record producer receipt')
+        self.assertIn('--role build',recorded['run'])
+        self.assertNotIn('--test-log',recorded['run'])
+        self.assertNotIn('if',recorded)
+        self.assertEqual(jobs['published-upgrade']['name'],'published-upgrade-${{ matrix.version }}')
+        self.assertEqual(jobs['published-upgrade']['strategy'],{
+            'fail-fast':'false','max-parallel':'3',
+            'matrix':'${{ fromJSON(needs.build-kit.outputs.upgrade-matrix) }}'})
+        for job_id in ('build-kit','system-install','published-upgrade'):
+            job=jobs[job_id]
+            self.assertEqual(job['runs-on'],'ubuntu-24.04')
+            first=job['steps'][0]
+            self.assertEqual(first['uses'],'actions/checkout@11d5960a326750d5838078e36cf38b85af677262')
+            self.assertEqual(first['with'],{'persist-credentials':'false','ref':'${{ github.event.pull_request.head.sha || github.sha }}'})
+            for step in job['steps']:
+                if step.get('uses','').startswith('actions/upload-artifact@'):
+                    name=step['with']['name']
+                    self.assertIn('${{ github.event.pull_request.head.sha || github.sha }}',name)
+                    self.assertTrue(name.endswith('-${{ github.run_id }}-${{ github.run_attempt }}'))
+            logs=next(step for step in job['steps'] if step.get('name')=='Upload acceptance logs')
+            self.assertEqual(logs['if'],'always()')
+            if job_id=='build-kit':continue
+            self.assertEqual(job['needs'],'build-kit')
+            self.assertFalse(any('scripts/build_bundle.py ' in step.get('run','') or
+                                 'scripts/build_release_kit.py ' in step.get('run','') for step in job['steps']))
+            downloaded=next(step for step in job['steps'] if step.get('name')=='Download exact candidate kit')
+            self.assertEqual(downloaded['uses'],'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093')
+            # By-ID downloads use artifact-name subdirectories unless explicitly merged.
+            self.assertEqual(downloaded['with'],{'artifact-ids':'${{ needs.build-kit.outputs.artifact-id }}',
+                                                 'merge-multiple':'true','path':'/tmp/vui-oneclick/kit'})
+            prepared=next(step for step in job['steps'] if step.get('name')=='Prepare verified candidate kit')
+            for fragment in ('acceptance_job prepare','--expected-checksums-sha256 "$EXPECTED_CHECKSUMS_SHA256"',
+                             '--expected-bundle-sha256 "$EXPECTED_BUNDLE_SHA256"',
+                             '--bundle-output /tmp/vui-oneclick/vui-linux.zip',
+                             'cmp /tmp/vui-oneclick/kit/vui-linux-x86_64-gnu.zip /tmp/vui-oneclick/vui-linux.zip',
+                             'sha256sum -c vui-linux.zip.sha256'):
+                self.assertIn(fragment,prepared['run'])
+            self.assertEqual(prepared['env']['EXPECTED_CHECKSUMS_SHA256'],'${{ needs.build-kit.outputs.checksums-sha256 }}')
+            self.assertEqual(prepared['env']['EXPECTED_BUNDLE_SHA256'],'${{ needs.build-kit.outputs.bundle-sha256 }}')
+            tested=next(step for step in job['steps'] if 'acceptance_job run-test' in step.get('run',''))
+            receipt=next(step for step in job['steps'] if step.get('name')=='Record acceptance receipt')
+            upload=next(step for step in job['steps'] if step.get('name')=='Upload acceptance receipt')
+            self.assertIn('--test-log /tmp/vui-oneclick/acceptance.log',receipt['run'])
+            for step in (downloaded,prepared,tested,receipt,upload):
+                self.assertNotIn('if',step)
+                self.assertNotIn('continue-on-error',step)
+            self.assertLess(job['steps'].index(downloaded),job['steps'].index(prepared))
+            self.assertLess(job['steps'].index(prepared),job['steps'].index(tested))
+            self.assertLess(job['steps'].index(tested),job['steps'].index(receipt))
+            self.assertLess(job['steps'].index(receipt),job['steps'].index(upload))
 
     def test_existing_browser_steps_remain_explicit_manual_opt_in(self):
         root=Path(__file__).resolve().parents[1]

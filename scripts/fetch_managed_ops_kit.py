@@ -16,6 +16,7 @@ import re
 import subprocess
 
 from scripts import publish_release as artifacts
+from scripts import acceptance_job as parallel
 
 REPO = 'ForceMind/V-UI'
 LABEL = 'run-managed-system-control'
@@ -86,8 +87,10 @@ def current_attempt_artifact(artifact, run, commit):
         raise AdmissionError('artifact_attempt_time_unconfirmed') from None
 
 
-def prepare(event, environment, destination, source, *, api=artifacts.request,
+def prepare(event, environment, destination, source, *, layout='legacy', api=artifacts.request,
             download=artifacts.download_artifact):
+    if layout not in ('legacy', 'parallel-v1'):
+        raise AdmissionError('unknown_artifact_layout')
     if os.geteuid() == 0:
         raise AdmissionError('artifact_admission_must_be_nonroot')
     number, commit = event_head(event, environment)
@@ -108,13 +111,24 @@ def prepare(event, environment, destination, source, *, api=artifacts.request,
             raise AdmissionError('untrusted_workflow_source')
     run = selected['oneclick.yml']
     items = pages(api, 'actions/runs/' + str(run['id']) + '/artifacts', 'artifacts')
-    artifact = artifacts.unique_artifact(items, 'vui-release-kit-' + commit)
+    expected_version = None
+    name = 'vui-release-kit-' + commit
+    if layout == 'parallel-v1':
+        expected_version = (source / 'VERSION').read_text().strip()
+        try:
+            name = parallel.artifact_name('kit', source=commit, version=expected_version,
+                                          run_id=run['id'], run_attempt=run.get('run_attempt'), role='build')
+        except ValueError as error:
+            raise AdmissionError('parallel_artifact_identity_invalid') from error
+    artifact = artifacts.unique_artifact(items, name)
     current_attempt_artifact(artifact, run, commit)
     raw = download(artifact)
     if (len(raw) != artifact['size_in_bytes']
             or 'sha256:' + hashlib.sha256(raw).hexdigest() != artifact['digest']):
         raise AdmissionError('artifact_transport_mismatch')
     version = (source / 'VERSION').read_text().strip()
+    if expected_version is not None and version != expected_version:
+        raise AdmissionError('parallel_source_version_changed')
     files = artifacts.validate_kit(raw, commit, version)
     # A newer PR update while downloading cannot silently change the target.
     live_head(api, number, commit)
@@ -141,12 +155,13 @@ def prepare(event, environment, destination, source, *, api=artifacts.request,
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--destination', type=Path, required=True)
+    parser.add_argument('--layout', choices=('legacy', 'parallel-v1'), default='legacy')
     args = parser.parse_args()
     event_path = Path(os.environ['GITHUB_EVENT_PATH'])
     if event_path.stat().st_size > 1_000_000:
         raise AdmissionError('event_too_large')
     event = json.loads(event_path.read_text())
-    prepare(event, os.environ, args.destination, Path(__file__).resolve().parents[1])
+    prepare(event, os.environ, args.destination, Path(__file__).resolve().parents[1], layout=args.layout)
     print('Exact-head successful kit admitted; no privileged operation executed.')
 
 

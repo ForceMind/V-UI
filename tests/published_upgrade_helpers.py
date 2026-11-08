@@ -1,4 +1,4 @@
-"""Opt-in empty-host public 0.4.14/0.4.15/0.4.16/0.4.17/0.4.19/0.4.20/0.4.21 -> exact candidate upgrade observations.
+"""Opt-in empty-host public 0.4.14/0.4.15/0.4.16/0.4.17/0.4.19/0.4.20/0.4.21/0.4.22 -> exact candidate upgrade observations.
 
 The old installation uses anonymous published HTTPS. Only the unpublished new
 kit's download transport is adapted; neither installer nor root receipt is faked.
@@ -23,6 +23,7 @@ PUBLISHED_BASELINES = {
     '0.4.19': 'a2b9c188658f082b189e77d237787a96eb9cf921',
     '0.4.20': '05173798de1baed5d67a866c4125e72f74fe3f4c',
     '0.4.21': '2aa5e11e3f09c03d048018f033ae888e7c775604',
+    '0.4.22': '558687a76cd29f4e4735284926eb05bf6664472e',
 }
 CONTROL = Path('/usr/local/lib/v-ui')
 FIREWALL = str(CONTROL / 'firewall_support.py')
@@ -45,14 +46,14 @@ def assert_download_boundary(test, kit, log):
 
 def fixed_public_baseline(version, commit):
     if version not in PUBLISHED_BASELINES or PUBLISHED_BASELINES[version] != commit:
-        raise AssertionError('Fixed public 0.4.14, 0.4.15, 0.4.16, 0.4.17, 0.4.19, 0.4.20 or 0.4.21 upgrade baseline required')
+        raise AssertionError('Fixed public 0.4.14, 0.4.15, 0.4.16, 0.4.17, 0.4.19, 0.4.20, 0.4.21 or 0.4.22 upgrade baseline required')
     return version, commit
 
 
 def assert_receipt_migration(test, before, after, old_version):
     if old_version not in PUBLISHED_BASELINES:
         raise AssertionError('Unknown public upgrade receipt baseline')
-    if old_version in ('0.4.17', '0.4.19', '0.4.20', '0.4.21'):
+    if old_version in ('0.4.17', '0.4.19', '0.4.20', '0.4.21', '0.4.22'):
         test.assertTrue(MAINTENANCE_FILES <= set(before['files']))
         additions = set()
     else:
@@ -75,7 +76,7 @@ def assert_editor_content_addition(test, before, after):
     No credential, identity or profile field is excused by this response check.
     """
     if 'content_revision' in before:
-        # Published21 already carries the CAS; do not excuse any old field.
+        # Published21/22 already carry the CAS; do not excuse any old field.
         test.assertEqual(after,before)
         test.assertIs(type(after['content_revision']),str)
         test.assertIsNotNone(re.fullmatch('[a-f0-9]{64}',after['content_revision']))
@@ -90,7 +91,7 @@ def assert_editor_content_addition(test, before, after):
 
 def assert_node_summary_upgrade(test, before, after, old_version=None):
     """Permit only the declared capability/CAS response additions for 21."""
-    if old_version=='0.4.21':
+    if old_version in ('0.4.21', '0.4.22'):
         test.assertEqual(after,before)
         for row in after:
             test.assertIs(type(row.get('content_revision')),str)

@@ -1920,5 +1920,130 @@ class ReleasePromotionTests(unittest.TestCase):
             self.assertFalse((work/'old-source/SHA256SUMS').exists())
 
 
+
+class ParallelPublisherAdapterTests(unittest.TestCase):
+    def test_current_022_parallel_mode_refuses_before_network(self):
+        from scripts import publish_release as p
+        argv=['publish_release.py','--commit',SHA,'--version','0.4.22',
+              '--confirm','RELEASE 0.4.22 '+SHA,'--parallel-acceptance-no-browser']
+        with patch('sys.argv',argv),patch.object(p,'request') as request,self.assertRaisesRegex(p.ReleaseGateError,'after 0.4.22'):
+            p.main()
+        request.assert_not_called()
+
+    def test_parallel_mode_is_exclusive_with_every_legacy_exception(self):
+        from scripts import publish_release as p
+        flags=('installer-only','ca-trust','install-interaction','startup','ui-redesign',
+               'tls-certificate','remote-maintenance','simple-node','maintenance-180',
+               'netlink-service','simple-operations','maintenance-share')
+        for flag in flags:
+            argv=['publish_release.py','--commit',SHA,'--version','0.4.23',
+                  '--confirm','RELEASE 0.4.23 '+SHA,'--parallel-acceptance-no-browser','--'+flag+'-no-browser']
+            with self.subTest(flag=flag),patch('sys.argv',argv),patch.object(p,'request') as request,\
+                    self.assertRaisesRegex(p.ReleaseGateError,'mutually exclusive'):
+                p.main()
+            request.assert_not_called()
+
+    def test_parallel_selection_requires_short_install_workflow(self):
+        from scripts import publish_release as p
+        rows=[{'id':i+1,'path':'.github/workflows/'+name,'head_sha':SHA,
+               'status':'completed','conclusion':'success'}for i,name in enumerate(sorted(p.REQUIRED))]
+        with self.assertRaisesRegex(p.ReleaseGateError,'short-install.yml'):
+            p.select_runs(rows,SHA,parallel_acceptance_no_browser=True)
+        rows.append({'id':99,'path':'.github/workflows/short-install.yml','head_sha':SHA,
+                     'status':'completed','conclusion':'success'})
+        self.assertEqual(set(p.select_runs(rows,SHA,parallel_acceptance_no_browser=True)),p.REQUIRED|{'short-install.yml'})
+        with self.assertRaisesRegex(p.ReleaseGateError,'mutually exclusive'):
+            p.select_runs(rows,SHA,parallel_acceptance_no_browser=True,maintenance_share_no_browser=True)
+
+    def test_parallel_job_validation_delegates_fixed_contract(self):
+        from scripts import publish_release as p, parallel_release_policy as policy
+        sentinel={'kit_files':{},'portable_bundles':{},'evidence':{}}
+        with patch.object(policy,'validate_parallel_runs',return_value=sentinel) as validate:
+            self.assertIs(p.validate_run_jobs({},SHA,parallel_acceptance_no_browser=True,parallel_version='0.4.23'),sentinel)
+        args,kwargs=validate.call_args
+        self.assertEqual(args,({},SHA,'0.4.23'))
+        self.assertIs(kwargs['api'],p.request)
+        self.assertIs(kwargs['download'],p.download_artifact)
+        self.assertIs(kwargs['browser_skip_steps'],p.BROWSER_SKIP_STEPS)
+        self.assertIn('Verify actual bundle under one CPU and 320 MiB cgroup',kwargs['required_other_steps']['release.yml'])
+        self.assertIn('Run tests',kwargs['required_other_steps']['test.yml'])
+
+    def promotion(self, existing=False):
+        from scripts import publish_release as p, parallel_release_policy as policy
+        fixture=ReleasePromotionTests();version='0.4.23'
+        files=p.validate_kit(fixture.kit(commit=SHA,version=version),SHA,version)
+        bundles={target:p.validate_target_artifact(fixture.portable(target,commit=SHA,version=version),SHA,version,target)
+                 for target in TARGETS[1:]}
+        checks={name:{'id':i+1,'path':'.github/workflows/'+name,'head_sha':SHA,'run_attempt':1,
+                     'status':'completed','conclusion':'success','html_url':'https://example.test/run/'+str(i+1)}
+                for i,name in enumerate(sorted(p.REQUIRED|{'short-install.yml'}))}
+        writes=[];events=[]
+        release={'id':990,'draft':True,'html_url':'https://example.test/release/990',
+                 'upload_url':'https://uploads.github.com/repos/ForceMind/V-UI/releases/990/assets{?name,label}'}
+        def request(path,method='GET',data=None,binary=False):
+            if method!='GET':
+                events.append('write');writes.append((path,method,data))
+                if path=='releases':return release
+                if path.startswith('https://uploads.github.com/'):
+                    return {'digest':'sha256:'+hashlib.sha256(data).hexdigest()}
+                raise AssertionError((path,method))
+            if path=='':return {'default_branch':'main'}
+            if path=='git/ref/heads/main':return {'object':{'sha':SHA}}
+            if path.startswith('actions/runs?'):return {'workflow_runs':list(checks.values())}
+            if path.startswith(('git/ref/tags/','releases/tags/')):
+                if existing:return {'already_exists':True}
+                raise urllib.error.HTTPError(path,404,'absent',{},None)
+            raise AssertionError(path)
+        argv=['publish_release.py','--commit',SHA,'--version',version,'--confirm','RELEASE '+version+' '+SHA,
+              '--parallel-acceptance-no-browser']
+        result={'kit_files':files,'portable_bundles':bundles,'evidence':{}}
+        with patch('sys.argv',argv),patch.dict('os.environ',{'GITHUB_REPOSITORY':'ForceMind/V-UI','GITHUB_EVENT_NAME':'workflow_dispatch'}),\
+                patch.object(p.Path,'read_text',return_value=version+'\n'),\
+                patch.object(p.subprocess,'check_output',return_value=SHA+'\n'),\
+                patch.object(p.subprocess,'run',side_effect=AssertionError('Promotion must never build')),\
+                patch.object(policy,'validate_source_scope',return_value={'product_commit':'b'*40}) as scope,\
+                patch.object(policy,'validate_latest_published') as latest,\
+                patch.object(p,'validate_run_jobs',return_value=result) as jobs,\
+                patch.object(policy,'revalidate_runs',side_effect=lambda *a:events.append('revalidate')) as recheck,\
+                patch.object(p,'download_artifact',side_effect=AssertionError('Validated material must not be redownloaded')),\
+                patch.object(p,'request',side_effect=request),patch('builtins.print'):
+            if existing:
+                with self.assertRaisesRegex(p.ReleaseGateError,'overwrite'):p.main()
+            else:p.main()
+            scope.assert_called_once_with(SHA,version);latest.assert_called_once_with(version,p.request)
+            self.assertTrue(jobs.call_args.kwargs['parallel_acceptance_no_browser'])
+            self.assertEqual(jobs.call_args.kwargs['parallel_version'],version)
+        return writes,events
+
+    def test_future_parallel_cli_promotes_only_verified_four_targets_without_build(self):
+        writes,events=self.promotion()
+        self.assertEqual(events[0],'revalidate')
+        self.assertEqual(events[-1],'revalidate')
+        self.assertEqual(events.count('revalidate'),2)
+        self.assertEqual(writes[0][0:2],('releases','POST'))
+        self.assertEqual(writes[0][2]['target_commitish'],SHA)
+        self.assertIn('浏览器未验证',writes[0][2]['body'])
+        uploaded={urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)['name'][0]:body
+                  for path,method,body in writes[1:]}
+        self.assertEqual(set(uploaded),ASSETS)
+        for target in TARGETS:
+            with zipfile.ZipFile(io.BytesIO(uploaded['vui-linux-'+target+'.zip']))as archive:
+                manifest=json.loads(archive.read('MANIFEST.json'))
+            self.assertEqual((manifest['source_commit'],manifest['version'],manifest['targets']),(SHA,'0.4.23',[target]))
+
+    def test_existing_parallel_version_never_writes_a_release(self):
+        writes,events=self.promotion(existing=True)
+        self.assertEqual(writes,[])
+        self.assertEqual(events,[])
+
+    def test_workflow_binds_parallel_flag_and_defaults_closed(self):
+        text=Path('.github/workflows/publish.yml').read_text()
+        self.assertIn('      parallel_acceptance_no_browser:\n',text)
+        self.assertIn('          PARALLEL_ACCEPTANCE_NO_BROWSER: ${{ inputs.parallel_acceptance_no_browser }}',text)
+        self.assertIn('args+=(--parallel-acceptance-no-browser)',text)
+        section=text.split('      parallel_acceptance_no_browser:\n',1)[1].split('      simple_operations_no_browser:',1)[0]
+        self.assertIn('        default: false',section)
+
+
 if __name__=='__main__':
     unittest.main()

@@ -1,14 +1,14 @@
 # 并行安装验收与制品身份契约
 
-状态：P1核心已完成源码审查，准备Actions真实producer兼容检查；尚未接入并行矩阵或发布器。当前实现离线kit/receipt校验核心及假数据边界测试，并在既有oneclick构建后增加真实kit形状/复制smoke；不提升应用VERSION，不发布应用、不修改生产实例。上一个文档批次已经按明确授权经[PR141](https://github.com/ForceMind/V-UI/pull/141)/[PR142](https://github.com/ForceMind/V-UI/pull/142)普通合入main59fc1cc，线上29文件读回一致，main自身Actions另行跟进；本P1代码不混入该纯文档批次，也不继承其合并许可。当前总顺序见[路线图](../ROADMAP.md)。
+状态：P1并行接线与未来发布policy源码已实现，正在独审和假数据/静态整合检查，尚未取得新矩阵的准确Actions资格。工具维护不提升应用VERSION、不发布应用、不修改生产实例。上一个文档批次已按明确授权经[PR141](https://github.com/ForceMind/V-UI/pull/141)/[PR142](https://github.com/ForceMind/V-UI/pull/142)普通合入main59fc1cc，29个线上文件读回及main自身九组/12 jobs已验证；此权限不扩大为P1代码合并或发布许可。当前总顺序见[路线图](../ROADMAP.md)。
 
 ## 目标与分期
 
 减少串行重复等待，同时保留现有新装和公开14/15/16/17/19/20/21升级的全部真实断言。同一准确SHA的kit只构建一次，之后由独立空白Actions runner消费，不在开发电脑运行产品构建或安装。
 
 1. 当前交付：标准库实现的只读制品身份验证器、严格receipt数据契约和假包测试。可以检查已有kit、在显式指定的新路径准备相同字节的测试bundle/sidecar；不能据此声称安装测试成功。
-2. 后续接线：一个build、新装和七个公开基线消费者，共九个oneclick job；相同输入在独立主机运行，fail-fast关闭、并行上限保守。不能把多个安装测试放在同一runner后台执行。
-3. 后续发布资格：按角色逐项核对producer/consumer和实际检查，另立未来版本policy。旧v0.4.22例外保持，不能只改job数量、复用旧flag或重新发布22。
+2. 当前接线源码：一个build、新装和七个公开基线消费者，共九个oneclick job；相同输入在独立主机运行，fail-fast关闭、并行上限保守。不能把多个安装测试放在同一runner后台执行。
+3. 未来发布资格源码：按角色逐项核对producer/consumer和实际检查，独立的声明式未来版本policy。旧v0.4.22例外保持，不能只改job数量、复用旧flag或重新发布22。
 
 ## 既有制品，保持原字节
 
@@ -69,7 +69,7 @@ receipt不得含“安装已通过”或“job已成功”的假标志。它不�
 
 ## 工作流与发布器接线前的硬边界
 
-当前仅在oneclick组装kit后增加同job真实形状与隔离复制smoke；原新装、七旧版、环境、上传和安装断言逐字保持，不改publish、安装器或旧发布器。smoke不验证跨runner传输、不产生实际job/step资格receipt，也不等于并行矩阵已实现。实际并行接线前须完成独审及定向失败控制：
+现有phaseA的同job真实kit/隔离复制smoke已在准确fdd87c6候选Actions通过。phaseB将相同校验放入各独立真实消费者，保留原字节cmp和sidecar检查；旧八个安装/升级场景及环境语义不减。源码接线与未来policy仍须独审和自己的准确Actions，不继承phaseA结果：
 
 - producer artifact名称/身份绑定repository、run_id、run_attempt、SHA；consumer各有唯一角色和日志，消费同一套已验字节，不各自build。
 - 新装和19/20/21的netlink、Mihomo及installed-core环境逐一保留；14–17保留各自原配方，不把它们扩大称为相同后置核心验证。
@@ -88,6 +88,34 @@ PR141的原安装job总览success，但GitHub的步骤API一度返回空列表�
 
 独审初轮复现最终路径竞争删除、copy期间源变化漏检和清理短路三项异常路径；修复后28项假包测试及原三个独立对抗场景复测通过，三项阻断关闭。核心当前仅获源码与假数据资格，真实producer制品兼容尚待Actions；新增smoke将校验真实manifest/source控制文件及复制原字节，不在开发电脑下载包。
 
-本阶段只运行假文件/ZIP/JSON和临时目录的有意义边界单测及相关静态检查；产品构建、真实安装和并行矩阵资格只在Actions。浏览器不运行，Go迁移暂缓，不新增Secrets、OIDC、签名证书或网络权限。
+本机只运行假文件/ZIP/JSON和临时目录的有意义边界单测及相关静态检查；真实producer已在phaseA Actions验证，新并行矩阵、实际传输和角色资格仍只在其准确Actions验收。浏览器不运行，Go迁移暂缓，不新增Secrets、OIDC、签名证书或网络权限。
 
 当前组件通过不代表整个P1完成。接线及未来发布policy另有准确候选/主线资格；真实512MiB整机与24小时、手机及Tailscale接入仍需独立授权环境，不能用cgroup或短测代替。
+
+
+## 当前接线与命名
+
+oneclick声明build-kit、system-install及published-upgrade三类job。matrix当前22展开七个旧版，连同build/fresh共九个；未来候选高于22时另含已公开22来源，禁止同版本假升级。published-upgrade的实际job名为`published-upgrade-<version>`，各自独立空白Ubuntu runner，max-parallel为3，fail-fast关闭。
+
+- kit：`vui-release-kit-<SHA>-<run_id>-<attempt>`。
+- receipt：`vui-oneclick-receipt-<role>-<SHA>-<run_id>-<attempt>`。
+- logs：`vui-oneclick-evidence-<role>-<SHA>-<run_id>-<attempt>`。
+- 其它原生目标：`vui-linux-<target>-<SHA>-<run_id>-<attempt>`。
+
+producer只构建一次并导出两个实际文件摘要及artifact ID/digest。消费者使用固定官方download-artifact按同run artifact ID下载，不添加PAT、Secrets或新的写权限；再以外部producer输出校验实际kit并准备相同字节的bundle。消费者没有重算外层传输ZIP的资格声明；publisher另行下载并严格核外层digest。
+
+每角色执行固定原测试命令，不接受任意命令或参数化假root。helper仅在fresh/19及之后的相应角色固定fetch Mihomo，再执行原unittest；legacy14–17不设置netlink/Mihomo环境，也不新增可跳过的fetch步骤。日志由helper独占创建，绑定当前repository/run/attempt/role/身份；receipt只有在日志完整Ran1/OK、无skip/错误且退出码0后才写入。CI的真实job/step资格仍单独核验。
+
+当前attempt材料必须完整。API列表里可忽略同run/SHA、格式精确且更早attempt的历史材料，但不能下载、计资格或删除它们；未知extra、未来attempt或缺少当前producer/consumer材料一律拒绝。不能把partial rerun和旧成功任务拼成新矩阵。
+
+既有受管专项的只读admission现在通过显式`--layout parallel-v1`选择当前run/attempt kit；默认legacy留给旧调用。PR活头、nonroot、来源、时间、外层digest和精确kit等原检查保持，不回退到旧attempt或旧layout，也不把admission称为系统资格成功。
+
+## 未来发布policy
+
+新`--parallel-acceptance-no-browser`仅用于高于0.4.22的未来正式版本；当前工具仍22，不能借新模式重发22。CLI flag与所有旧例外互斥，旧flags、冻结点和拒绝测试保持。
+
+未来产品完成独审并冻结后，才在`.github/release-acceptance.json`提交精确schema1元数据：version、product_commit、install_contract=`parallel-v1`、browser_policy=`unverified-non-browser-v1`。product_commit必须为不同的真实祖先且其VERSION已匹配；之后仅该声明和受限普通Markdown说明可变，代码、CI、测试、依赖及安装器不能在发布准备中混入。
+
+publisher要求当前已知公开稳定基线与标签来源匹配，并确认它被真实升级矩阵覆盖。新公开基线需要独立数据和fixture资格，不能靠通用flag猜测兼容。逐角色job/步骤、固定12个浏览器skip、四目标、真实材料与所有receipt必须同源且属于当前attempt；缺失元数据继续拒绝，不采用PR141的诊断记录作为发布豁免。
+
+晋升只使用验证返回的原kit和其它三原生目标，不重下载拼装另一套包、不重建。创建Release前和上传后再次确认workflow/attempt与默认主线未变。已有tag/Release不覆盖，publish=false仍会创建草稿并上传，不是无写入dry-run。新的公开版本仍需对应明确授权。

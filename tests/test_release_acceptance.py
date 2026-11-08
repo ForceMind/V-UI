@@ -113,6 +113,14 @@ class KitTests(unittest.TestCase):
         self.assertEqual(inspected['validation_scope'], 'producer-inspection')
         self.assertEqual(inspected['checksums_sha256'], self.anchor)
 
+    def test_external_bundle_digest_is_checked_before_any_copy(self):
+        output = self.root / 'not-created.zip'
+        for invalid in ('0' * 64, 'A' * 64, True):
+            with self.subTest(invalid=invalid), self.assertRaises(acceptance.ReleaseAcceptanceError):
+                self.verify(expected_bundle_sha256=invalid, bundle_output=output)
+            self.assertFalse(output.exists())
+        self.verify(expected_bundle_sha256=digest((self.kit / acceptance.BUNDLE).read_bytes()))
+
     def test_input_source_and_canonical_stable_version(self):
         for source in ('b' * 40, 'A' * 40, 'a' * 39, None, True):
             with self.subTest(source=source), self.assertRaises(acceptance.ReleaseAcceptanceError):
@@ -489,12 +497,15 @@ class ReceiptTests(unittest.TestCase):
             '0.4.17': '95c201c6e26ed54960f964c675e515890f2eea2a',
             '0.4.19': 'a2b9c188658f082b189e77d237787a96eb9cf921',
             '0.4.20': '05173798de1baed5d67a866c4125e72f74fe3f4c',
-            '0.4.21': '2aa5e11e3f09c03d048018f033ae888e7c775604'})
+            '0.4.21': '2aa5e11e3f09c03d048018f033ae888e7c775604',
+            '0.4.22': '558687a76cd29f4e4735284926eb05bf6664472e'})
         for version, source in acceptance.BASELINES.items():
             role = 'upgrade-' + version
-            result = self.create(role=role)
+            candidate = '0.4.23' if version == '0.4.22' else VERSION
+            identity = {**self.identity, 'version': candidate, 'release_id': candidate + '-' + SHA[:12]}
+            result = self.create(role=role, identity=identity)
             self.assertEqual((result['old_version'], result['old_source_sha']), (version, source))
-            acceptance.validate_receipt(result, **{**self.expected, 'role': role})
+            acceptance.validate_receipt(result, **{**self.expected, 'role': role, 'candidate_version': candidate})
             with self.assertRaises(acceptance.ReleaseAcceptanceError): self.create(role=role, old_source_sha='f' * 40)
 
     def test_role_scope_cannot_substitute_producer_inspection_for_consumer_anchor(self):

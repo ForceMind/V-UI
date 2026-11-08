@@ -328,10 +328,11 @@ def request(path,method='GET',data=None,binary=False):
         return json.load(response)
 
 
-def select_runs(runs,commit, *, simple_operations_no_browser=False, maintenance_share_no_browser=False):
-    if simple_operations_no_browser and maintenance_share_no_browser:
+def select_runs(runs,commit, *, simple_operations_no_browser=False, maintenance_share_no_browser=False, parallel_acceptance_no_browser=False):
+    if sum((simple_operations_no_browser, maintenance_share_no_browser, parallel_acceptance_no_browser)) > 1:
         raise ReleaseGateError('Non-browser scope exceptions are mutually exclusive')
-    required = (MAINTENANCE_SHARE_REQUIRED if maintenance_share_no_browser else
+    required = (REQUIRED | {'short-install.yml'} if parallel_acceptance_no_browser else
+                MAINTENANCE_SHARE_REQUIRED if maintenance_share_no_browser else
                 SIMPLE_OPERATIONS_REQUIRED if simple_operations_no_browser else REQUIRED)
     latest={}
     for run in runs:
@@ -785,11 +786,36 @@ def validate_maintenance_share_scope(commit, version):
         raise ReleaseGateError('Cannot prove maintenance share release source ancestry/scope') from exc
 
 
-def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_trust_no_browser=False, install_interaction_no_browser=False, startup_no_browser=False, ui_redesign_no_browser=False, tls_certificate_no_browser=False, remote_maintenance_no_browser=False, simple_node_no_browser=False, maintenance_180_no_browser=False, netlink_service_no_browser=False, simple_operations_no_browser=False, maintenance_share_no_browser=False):
+def _parallel_other_steps():
+    # Fixed in reviewed code; the release policy cannot supply weaker steps.
+    return {
+        'test.yml': {'Run tests', TLS_CERTIFICATE_CORE_STEP, SIMPLE_NODE_TEMPLATE_STEP,
+                     NETLINK_SERVICE_DIAGNOSTIC_STEP},
+        'loopback.yml': REMOTE_MAINTENANCE_LOOPBACK_STEPS | {
+            'Exercise actual TLS proxy and local DNS paths',
+            'Exercise standard-client per-inbound TCP routes and independent host switch'},
+        'release.yml': {'Build version-pinned offline candidate from exact head', *{
+            'Verify actual bundle under one CPU and ' + size + ' MiB cgroup'
+            for size in ('512', '384', '320')}},
+        'acme.yml': {'Test actual Certbot HTTP-01 issuance and failure'},
+        'short-install.yml': {'Install public stable suite through the actual short command'},
+    }
+
+
+def validate_run_jobs(checks, commit, *, installer_only_no_browser=False, ca_trust_no_browser=False, install_interaction_no_browser=False, startup_no_browser=False, ui_redesign_no_browser=False, tls_certificate_no_browser=False, remote_maintenance_no_browser=False, simple_node_no_browser=False, maintenance_180_no_browser=False, netlink_service_no_browser=False, simple_operations_no_browser=False, maintenance_share_no_browser=False, parallel_acceptance_no_browser=False, parallel_version=None):
     """A green workflow with skipped acceptance is not release qualification."""
     if sum((installer_only_no_browser, ca_trust_no_browser, install_interaction_no_browser,
-            startup_no_browser, ui_redesign_no_browser, tls_certificate_no_browser, remote_maintenance_no_browser, simple_node_no_browser, maintenance_180_no_browser, netlink_service_no_browser, simple_operations_no_browser, maintenance_share_no_browser)) > 1:
+            startup_no_browser, ui_redesign_no_browser, tls_certificate_no_browser, remote_maintenance_no_browser, simple_node_no_browser, maintenance_180_no_browser, netlink_service_no_browser, simple_operations_no_browser, maintenance_share_no_browser, parallel_acceptance_no_browser)) > 1:
         raise ReleaseGateError('Non-browser scope exceptions are mutually exclusive')
+    if parallel_acceptance_no_browser:
+        from scripts import parallel_release_policy
+        try:
+            return parallel_release_policy.validate_parallel_runs(
+                checks, commit, parallel_version, api=request, download=download_artifact,
+                validate_kit=validate_kit, validate_target_artifact=validate_target_artifact,
+                browser_skip_steps=BROWSER_SKIP_STEPS, required_other_steps=_parallel_other_steps())
+        except parallel_release_policy.ParallelPolicyError as error:
+            raise ReleaseGateError('Parallel acceptance refused: ' + str(error)) from error
     if maintenance_share_no_browser and set(checks) != MAINTENANCE_SHARE_REQUIRED:
         raise ReleaseGateError('Maintenance share release requires all nine exact-commit workflows')
     if simple_operations_no_browser and set(checks) != SIMPLE_OPERATIONS_REQUIRED:
@@ -974,6 +1000,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--commit',required=True);p.add_argument('--version',required=True)
     p.add_argument('--confirm',required=True);p.add_argument('--publish',action='store_true')
+    p.add_argument('--parallel-acceptance-no-browser',action='store_true',
+                   help='Future scoped parallel acceptance policy; never reuses the 0.4.22 exception')
     p.add_argument('--maintenance-share-no-browser',action='store_true',
                    help='Approved frozen 0.4.22 maintenance-share HTTP fix; browsers remain unverified')
     p.add_argument('--simple-operations-no-browser',action='store_true',
@@ -999,10 +1027,12 @@ def main():
     p.add_argument('--installer-only-no-browser',action='store_true',
                    help='Explicitly approved 0.4.11 installer-only exception; browser evidence stays unverified')
     args=p.parse_args()
-    if sum((args.installer_only_no_browser, args.ca_trust_no_browser, args.install_interaction_no_browser, args.startup_no_browser, args.ui_redesign_no_browser, args.tls_certificate_no_browser, args.remote_maintenance_no_browser, args.simple_node_no_browser, args.maintenance_180_no_browser, args.netlink_service_no_browser, args.simple_operations_no_browser, args.maintenance_share_no_browser)) > 1:
+    if sum((args.installer_only_no_browser, args.ca_trust_no_browser, args.install_interaction_no_browser, args.startup_no_browser, args.ui_redesign_no_browser, args.tls_certificate_no_browser, args.remote_maintenance_no_browser, args.simple_node_no_browser, args.maintenance_180_no_browser, args.netlink_service_no_browser, args.simple_operations_no_browser, args.maintenance_share_no_browser, args.parallel_acceptance_no_browser)) > 1:
         raise ReleaseGateError('Non-browser scope exceptions are mutually exclusive')
     if not re.fullmatch(r'[a-f0-9]{40}',args.commit) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',args.version):
         raise ReleaseGateError('Exact commit and stable version required')
+    if args.parallel_acceptance_no_browser and tuple(map(int, args.version.split('.'))) <= (0, 4, 22):
+        raise ReleaseGateError('Parallel release policy is only for new versions after 0.4.22')
     if args.confirm!='RELEASE '+args.version+' '+args.commit:
         raise ReleaseGateError('Explicit release confirmation does not match')
     if os.environ.get('GITHUB_REPOSITORY')!=REPO or os.environ.get('GITHUB_EVENT_NAME')!='workflow_dispatch':
@@ -1016,14 +1046,24 @@ def main():
     if Path('VERSION').read_text().strip()!=args.version:
         raise ReleaseGateError('VERSION differs')
 
+    parallel_policy = None
+    if args.parallel_acceptance_no_browser:
+        from scripts import parallel_release_policy
+        try:
+            parallel_policy = parallel_release_policy.validate_source_scope(args.commit, args.version)
+            parallel_release_policy.validate_latest_published(args.version, request)
+        except parallel_release_policy.ParallelPolicyError as error:
+            raise ReleaseGateError('Parallel release scope refused: ' + str(error)) from error
+
     runs=[]
     for page in range(1,11):
         batch=request('actions/runs?head_sha='+args.commit+'&per_page=100&page='+str(page))['workflow_runs']
         runs.extend(batch)
         if len(batch)<100:
             break
+    selection_options = {'parallel_acceptance_no_browser': True} if args.parallel_acceptance_no_browser else {}
     checks=select_runs(runs,args.commit,simple_operations_no_browser=args.simple_operations_no_browser,
-                       maintenance_share_no_browser=args.maintenance_share_no_browser)
+                       maintenance_share_no_browser=args.maintenance_share_no_browser, **selection_options)
     if args.maintenance_share_no_browser:
         validate_maintenance_share_scope(args.commit,args.version)
     if args.simple_operations_no_browser:
@@ -1048,7 +1088,9 @@ def main():
         validate_ca_trust_scope(args.commit,args.version)
     if args.installer_only_no_browser:
         validate_installer_only_scope(args.commit,args.version)
-    validate_run_jobs(checks,args.commit,installer_only_no_browser=args.installer_only_no_browser,
+    parallel_options = ({'parallel_acceptance_no_browser': True, 'parallel_version': args.version}
+                        if args.parallel_acceptance_no_browser else {})
+    parallel_result = validate_run_jobs(checks,args.commit,installer_only_no_browser=args.installer_only_no_browser,
                       ca_trust_no_browser=args.ca_trust_no_browser,
                       install_interaction_no_browser=args.install_interaction_no_browser, startup_no_browser=args.startup_no_browser,
                       ui_redesign_no_browser=args.ui_redesign_no_browser,
@@ -1058,7 +1100,7 @@ def main():
                       maintenance_180_no_browser=args.maintenance_180_no_browser,
                       netlink_service_no_browser=args.netlink_service_no_browser,
                       simple_operations_no_browser=args.simple_operations_no_browser,
-                      maintenance_share_no_browser=args.maintenance_share_no_browser)
+                      maintenance_share_no_browser=args.maintenance_share_no_browser, **parallel_options)
 
     tag='v'+args.version
     for path in ('git/ref/tags/'+tag,'releases/tags/'+tag):
@@ -1070,17 +1112,22 @@ def main():
         else:
             raise ReleaseGateError('Refusing to overwrite an existing tag or release')
 
-    oneclick=request('actions/runs/'+str(checks['oneclick.yml']['id'])+'/artifacts?per_page=100')['artifacts']
-    kit=unique_artifact(oneclick,'vui-release-kit-'+args.commit)
-    files=validate_kit(download_artifact(kit),args.commit,args.version)
+    if args.parallel_acceptance_no_browser:
+        files = parallel_result['kit_files']
+        for target in TARGETS[1:]:
+            files['vui-linux-' + target + '.zip'] = parallel_result['portable_bundles'][target]
+    else:
+        oneclick=request('actions/runs/'+str(checks['oneclick.yml']['id'])+'/artifacts?per_page=100')['artifacts']
+        kit=unique_artifact(oneclick,'vui-release-kit-'+args.commit)
+        files=validate_kit(download_artifact(kit),args.commit,args.version)
 
-    portable=request('actions/runs/'+str(checks['portable.yml']['id'])+'/artifacts?per_page=100')['artifacts']
-    for target in TARGETS[1:]:
-        name='vui-linux-'+target+'-'+args.commit
-        artifact=unique_artifact(portable,name)
-        files['vui-linux-'+target+'.zip']=validate_target_artifact(
-            download_artifact(artifact),args.commit,args.version,target
-        )
+        portable=request('actions/runs/'+str(checks['portable.yml']['id'])+'/artifacts?per_page=100')['artifacts']
+        for target in TARGETS[1:]:
+            name='vui-linux-'+target+'-'+args.commit
+            artifact=unique_artifact(portable,name)
+            files['vui-linux-'+target+'.zip']=validate_target_artifact(
+                download_artifact(artifact),args.commit,args.version,target
+            )
 
     files=finalize_assets(files,args.commit,args.version)
 
@@ -1153,8 +1200,17 @@ def main():
               '产品冻结于 `'+REMOTE_MAINTENANCE_BASELINE+'`，此后仅允许列明版本、发布门禁、升级验收、文档和发布后短入口指针。'+\
               'main.py仅16→17版本替换，install.sh仅同一版本注释替换；其他应用、UI、root/runtime逻辑、依赖和固定核心保持。'+\
               '构建与真实安装仅在GitHub Actions临时runner执行，未操作用户真实VPS；不覆盖旧资产，此例外仅适用0.4.17。\n'
+    if args.parallel_acceptance_no_browser:
+        body += ('\n\n验收契约：parallel-v1；浏览器未验证。准确main的九组工作流、'
+                 '逐角色构建/新装/公开旧版升级、当前attempt及四目标同源制品已核验；'
+                 '消费receipt只绑定来源与字节，不替代实际job/step成功。产品冻结点：`'
+                 + parallel_policy['product_commit'] + '`。发布时不重建，不覆盖旧资产。\n')
     body+='\n\n## 一行交互安装并注册 v-ui\n\n```sh\n'+installation_command(files,args.version)+'\n```\n'
     body+='\n安装成功后输入 `v-ui`。普通管理员按已有 sudo 策略认证；不增加免密 sudoers。\n'
+    if args.parallel_acceptance_no_browser:
+        parallel_release_policy.revalidate_runs(checks, args.commit, request)
+        if request('git/ref/heads/' + urllib.parse.quote(default, safe=''))['object']['sha'] != args.commit:
+            raise ReleaseGateError('Default branch changed before release creation')
     release=request('releases','POST',{'tag_name':tag,'target_commitish':args.commit,'name':'V-UI '+tag,
                                       'body':body,'draft':True,'prerelease':False})
     upload=release['upload_url'].split('{')[0]
@@ -1164,6 +1220,10 @@ def main():
         asset=request(upload+'?name='+urllib.parse.quote(name),'POST',files[name],True)
         if asset.get('digest')!='sha256:'+hashlib.sha256(files[name]).hexdigest():
             raise ReleaseGateError('Uploaded asset digest mismatch; release remains draft')
+    if args.parallel_acceptance_no_browser:
+        parallel_release_policy.revalidate_runs(checks, args.commit, request)
+        if request('git/ref/heads/' + urllib.parse.quote(default, safe=''))['object']['sha'] != args.commit:
+            raise ReleaseGateError('Default branch changed after upload; draft retained')
     if args.publish:
         release=request('releases/'+str(release['id']),'PATCH',{'draft':False,'make_latest':'true'})
     print(json.dumps({'release':release['html_url'],'draft':release['draft'],

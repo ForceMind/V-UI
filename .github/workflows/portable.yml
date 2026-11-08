@@ -29,7 +29,7 @@ jobs:
           python scripts/portable_stage_smoke.py --bundle /tmp/vui-portable/vui-linux-aarch64-gnu.zip --sha256 "$SHA" --root "$ROOT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: vui-linux-aarch64-gnu-${{ github.event.pull_request.head.sha || github.sha }}
+          name: vui-linux-aarch64-gnu-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             /tmp/vui-portable/vui-linux-aarch64-gnu.zip
             /tmp/vui-portable/vui-linux-aarch64-gnu.zip.sha256
@@ -72,7 +72,7 @@ jobs:
             '
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: vui-linux-${{ matrix.arch }}-musl-${{ github.event.pull_request.head.sha || github.sha }}
+          name: vui-linux-${{ matrix.arch }}-musl-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             /tmp/vui-portable/vui-linux-${{ matrix.arch }}-musl.zip
             /tmp/vui-portable/vui-linux-${{ matrix.arch }}-musl.zip.sha256
