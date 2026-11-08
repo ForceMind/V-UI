@@ -21,6 +21,8 @@ import uuid
 import psutil
 
 from app.data_owner import DataOwnerError, data_owner
+from app.core_updates.binary import (RuntimeArtifact, RuntimeArtifactError, open_runtime_artifact,
+                                     verify_runtime_artifact_fd)
 
 VERSIONS = {"xray": "26.3.27", "sing-box": "1.14.2"}
 
@@ -228,9 +230,14 @@ def atomic_write(path: Path, content: bytes) -> None:
 
 
 class CoreRuntime:
-    def __init__(self, name: str, binary: Path, root: Path):
+    def __init__(self, name: str, binary: Path, root: Path, *, artifact: RuntimeArtifact | None = None):
         # abspath is lexical: resolving would hide an unsafe symlink ancestor.
-        self.name, self.binary, self.root = name, binary.resolve(), Path(os.path.abspath(root))
+        if artifact is not None and (type(artifact) is not RuntimeArtifact
+                or artifact.core != name or Path(os.path.abspath(binary)) != artifact.path):
+            raise CoreError("Runtime core artifact does not match the selected core")
+        self._artifact = artifact
+        self.name, self.binary, self.root = (name, binary.resolve() if artifact is None else artifact.path,
+                                             Path(os.path.abspath(root)))
         self.state_file = self.root / "state.json"
         self.process: subprocess.Popen | None = None
         self.lock = threading.RLock()
@@ -238,7 +245,84 @@ class CoreRuntime:
         self._data_owner = None
         self._root_fd = None
         self._config_fd = None
+        self._binary_fd = None
+        self._operation_binary_fd = None
+        self._generation_artifact = None
+        self._generation_binary_identity = None
         self.last_error = None
+
+    @property
+    def artifact(self):
+        return self._artifact
+
+    @staticmethod
+    def _execution_inode(fd):
+        info = os.fstat(fd)
+        # Renaming/unlinking a path can change ctime/nlink without changing the
+        # held executable bytes. Content, inode and owner/mode changes fail closed.
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+                info.st_mode, info.st_uid, info.st_gid)
+
+    def execution_identity(self) -> dict:
+        """Internal health evidence, not a public API or a trust resolver.
+
+        Selected metadata is separate from a live generation launched from a
+        verified FD. Legacy bundled runtimes have no descriptor proof here.
+        No path, configuration or credentials leave this snapshot.
+        """
+        with self.lock:
+            selected = (None if self._artifact is None else {
+                "artifact_id": self._artifact.artifact_id,
+                "binary_sha256": self._artifact.reference.binary_sha256})
+            running = None
+            alive = self.process is not None and self.process.poll() is None
+            if not alive and self._binary_fd is not None:
+                self._terminate()
+            if alive and self._binary_fd is not None and self._generation_artifact is not None:
+                try:
+                    verify_runtime_artifact_fd(self._binary_fd, self._generation_artifact)
+                    verified = self._execution_inode(self._binary_fd) == self._generation_binary_identity
+                except (OSError, RuntimeArtifactError):
+                    verified = False
+                if verified:
+                    running = {"artifact_id": self._generation_artifact.artifact_id,
+                               "binary_sha256": self._generation_artifact.reference.binary_sha256}
+            return {"selected": selected, "running": running}
+
+    def _persistent_state(self, state):
+        if self._artifact is None:
+            return {"revision": state["revision"], "enabled": state["enabled"]}
+        return {"schema": 2, "revision": state["revision"], "enabled": state["enabled"],
+                "artifact_id": self._artifact.artifact_id}
+
+    def _verify_operation_binary(self):
+        if self._artifact is not None:
+            try:
+                verify_runtime_artifact_fd(self._operation_binary_fd, self._artifact)
+            except RuntimeArtifactError as exc:
+                raise CoreError(str(exc)) from None
+
+    @contextmanager
+    def _binary_operation(self):
+        # One operation FD covers version, configuration check, launch and any
+        # same-artifact rollback. The generation keeps its own dup until exit.
+        if self._artifact is None:
+            yield str(self.binary)
+            return
+        if self.binary != self._artifact.path:
+            raise CoreError("Runtime core artifact does not match the selected core")
+        if self._operation_binary_fd is not None:
+            yield f"/proc/{os.getpid()}/fd/{self._operation_binary_fd}"
+            return
+        try:
+            with open_runtime_artifact(self._artifact) as fd:
+                self._operation_binary_fd = fd
+                try:
+                    yield f"/proc/{os.getpid()}/fd/{fd}"
+                finally:
+                    self._operation_binary_fd = None
+        except RuntimeArtifactError as exc:
+            raise CoreError(str(exc)) from None
 
     @contextmanager
     def _directory(self, *, create: bool = False):
@@ -359,12 +443,21 @@ class CoreRuntime:
                         return {"revision": None, "enabled": False}
                     state = json.loads(raw, object_pairs_hook=_state_object,
                                        parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
-                    if (not isinstance(state, dict) or set(state) != {"revision", "enabled"}
+                    expected = {"revision", "enabled"} if self._artifact is None else {
+                        "schema", "revision", "enabled", "artifact_id"}
+                    if (not isinstance(state, dict) or set(state) != expected
                             or type(state.get("enabled")) is not bool
-                            or not re.fullmatch(r"[a-f0-9]{64}", state.get("revision", ""))):
+                            or type(state.get("revision")) is not str
+                            or not re.fullmatch(r"[a-f0-9]{64}", state["revision"])):
+                        raise ValueError()
+                    if self._artifact is not None and (
+                            type(state["schema"]) is not int or state["schema"] != 2
+                            or state["artifact_id"] != self._artifact.artifact_id):
                         raise ValueError()
                     self._read_config(directory, state["revision"])
-                    return state
+                    # Public callers retain the legacy two-key view; all writes
+                    # reconstruct the appropriate strict persistent schema.
+                    return {"revision": state["revision"], "enabled": state["enabled"]}
             except (OSError, ValueError, TypeError, RecursionError):
                 raise CoreError("Applied state is damaged; restore a verified backup") from None
 
@@ -391,22 +484,26 @@ class CoreRuntime:
                     raise CoreError("Applied state is damaged; restore a verified backup") from None
 
     def check(self, path: Path):
-        with self.lock, self._config(path, allow_external=True) as (fd, _):
-            if not self.binary.is_file() or not os.access(self.binary, os.X_OK):
+        with self.lock, self._binary_operation() as binary, self._config(path, allow_external=True) as (fd, _):
+            if self._artifact is None and (not self.binary.is_file() or not os.access(self.binary, os.X_OK)):
                 raise CoreError("Pinned core binary is missing or not executable")
             try:
-                result = subprocess.run([str(self.binary), "version"], capture_output=True, timeout=5)
-                expected = VERSIONS[self.name].encode()
+                self._verify_operation_binary()
+                result = subprocess.run([binary, "version"], capture_output=True, timeout=5)
+                self._verify_operation_binary()
+                expected = (self._artifact.version if self._artifact is not None else VERSIONS[self.name]).encode()
                 first = result.stdout.splitlines()[0] if result.stdout else b""
                 if result.returncode or expected not in first.split():
                     raise CoreError("Core version does not match the tested version lock")
                 config = f"/proc/{os.getpid()}/fd/{fd}"
-                command = ([str(self.binary), "run", "-test", "-format=json", "-c", config] if self.name == "xray"
-                           else [str(self.binary), "check", "-c", config])
+                command = ([binary, "run", "-test", "-format=json", "-c", config] if self.name == "xray"
+                           else [binary, "check", "-c", config])
                 # Malformed configs may echo secrets: discard output, including
                 # from successful checks, rather than writing it to /tmp.
+                self._verify_operation_binary()
                 result = subprocess.run(command, stdout=subprocess.DEVNULL,
                                         stderr=subprocess.DEVNULL, timeout=15)
+                self._verify_operation_binary()
                 if result.returncode:
                     raise CoreError("Candidate configuration was rejected by the pinned core")
             except (OSError, subprocess.TimeoutExpired):
@@ -422,11 +519,40 @@ class CoreRuntime:
                     os.killpg(self.process.pid, signal.SIGKILL)
                     self.process.wait(timeout=3)
             self.process = None
-        if self._config_fd is not None:
-            os.close(self._config_fd)
-            self._config_fd = None
+        config_fd, self._config_fd = self._config_fd, None
+        binary_fd, self._binary_fd = self._binary_fd, None
+        self._generation_artifact = None
+        self._generation_binary_identity = None
+        failed = False
+        for fd in (config_fd, binary_fd):
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    failed = True
+        if failed:
+            raise CoreError("Runtime descriptor cleanup failed; core stopped")
 
     def _launch(self, path: Path):
+        # Preserve the existing subclass seam and watchdog inheritance protocol.
+        # proc/<panel-pid>, rather than proc/self, survives both watchdog execs.
+        with self._binary_operation() as binary:
+            self._verify_operation_binary()
+            if self._artifact is not None:
+                _require_private(self._binary_fd is None)
+                self._binary_fd = os.dup(self._operation_binary_fd)
+                binary = f"/proc/{os.getpid()}/fd/{self._binary_fd}"
+            try:
+                if self._artifact is not None:
+                    self._generation_artifact = self._artifact
+                    self._generation_binary_identity = self._execution_inode(self._binary_fd)
+                self._launch_binary(path, binary)
+                self._verify_operation_binary()
+            except BaseException:
+                self._terminate()
+                raise
+
+    def _launch_binary(self, path: Path, binary: str):
         """Readiness means the child owns its listeners, not end-to-end reachability."""
         with self._config(path) as (fd, raw):
             value = json.loads(raw)
@@ -435,7 +561,7 @@ class CoreRuntime:
             # closes inherited fds, so use the panel's proc entry explicitly.
             self._config_fd = os.dup(fd)
         launcher = Path(__file__).with_name("core_child.py")
-        command = [str(self.binary), "run"]
+        command = [binary, "run"]
         if self.name == "xray":
             command.append("-format=json")
         command += ["-c", f"/proc/{os.getpid()}/fd/{self._config_fd}"]
@@ -443,8 +569,10 @@ class CoreRuntime:
             self.process = subprocess.Popen([sys.executable, str(launcher), str(os.getpid()), *command],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         except BaseException:
-            os.close(self._config_fd)
-            self._config_fd = None
+            # A failed close may already have released the FD. Relinquish its
+            # number first so outer termination never closes a foreign reuse.
+            config_fd, self._config_fd = self._config_fd, None
+            os.close(config_fd)
             raise
         deadline = time.monotonic() + 5
         ready_since = None
@@ -584,19 +712,21 @@ class CoreRuntime:
                         or revision is not None and (
                             type(revision) is not str or not re.fullmatch(r"[a-f0-9]{64}", revision))):
                     raise CoreError("Saved runtime revision is invalid")
-                path = None
-                if revision is not None:
-                    path = self.root / (revision + ".json")
-                    with self._directory() as directory:
-                        self._read_config(directory, revision)
-                    self.check(path)
-                self._terminate()
-                if enabled:
-                    self._launch(path)
+                with ExitStack() as stack:
+                    path = None
+                    if revision is not None:
+                        stack.enter_context(self._binary_operation())
+                        path = self.root / (revision + ".json")
+                        with self._directory() as directory:
+                            self._read_config(directory, revision)
+                        self.check(path)
+                    self._terminate()
+                    if enabled:
+                        self._launch(path)
                 if revision is None:
                     self._remove_state()
                 else:
-                    self._write(self.state_file, encode({"revision": revision, "enabled": enabled}))
+                    self._write(self.state_file, encode(self._persistent_state({"revision": revision, "enabled": enabled})))
                 self.last_error = None
             except BaseException as exc:
                 self._terminate()
@@ -606,7 +736,7 @@ class CoreRuntime:
                 raise CoreError(self.last_error) from None
 
     def apply(self, config: dict, *, activate: bool = True, rollback_on_failure: bool = True) -> dict:
-        with self.lock:
+        with self.lock, self._binary_operation():
             self._claim()
             previous = self.state()
             rev = revision(config)
@@ -627,14 +757,14 @@ class CoreRuntime:
                 if enabled:
                     self._launch(path)
                 # Sole commit record. Earlier crashes recover the prior revision.
-                self._write(self.state_file, encode({"revision": rev, "enabled": enabled}))
+                self._write(self.state_file, encode(self._persistent_state({"revision": rev, "enabled": enabled})))
                 self.last_error = None
             except (CoreError, OSError, ValueError):
                 self._terminate()
                 rollback_ok = True
                 try:
                     if previous["revision"]:
-                        self._write(self.state_file, encode(previous))
+                        self._write(self.state_file, encode(self._persistent_state(previous)))
                     else:
                         self._remove_state()
                 except (CoreError, OSError):
@@ -670,8 +800,9 @@ class CoreRuntime:
                 state = self.state()
                 if state["enabled"]:
                     path = self.root / (state["revision"] + ".json")
-                    self.check(path)
-                    self._launch(path)
+                    with self._binary_operation():
+                        self.check(path)
+                        self._launch(path)
             except BaseException:
                 self._terminate()
                 raise
@@ -683,23 +814,30 @@ class CoreRuntime:
                     self._claim()
                     state = self.state()
                     if state["revision"]:
-                        self._write(self.state_file, encode({**state, "enabled": False}))
+                        self._write(self.state_file, encode(self._persistent_state({**state, "enabled": False})))
             finally:
                 # A damaged state path must not prevent a requested stop.
                 self._terminate()
 
     def close(self):
         with self.lock:
-            self.stop(persist=False)
-            if self.lease is not None:
-                self.lease.close()
-                self.lease = None
-            if self._root_fd is not None:
-                os.close(self._root_fd)
-                self._root_fd = None
-            owner, self._data_owner = self._data_owner, None
-            if owner is not None:
-                owner.__exit__(None, None, None)
+            try:
+                self.stop(persist=False)
+            finally:
+                # Preserve ownership if termination itself failed while a child
+                # may still live. Once stopped, attempt every independent close
+                # even if a descriptor cleanup reports failure.
+                if self.process is None:
+                    with ExitStack() as stack:
+                        owner, self._data_owner = self._data_owner, None
+                        if owner is not None:
+                            stack.callback(owner.__exit__, None, None, None)
+                        root_fd, self._root_fd = self._root_fd, None
+                        if root_fd is not None:
+                            stack.callback(os.close, root_fd)
+                        lease, self.lease = self.lease, None
+                        if lease is not None:
+                            stack.callback(lease.close)
 
     def status(self) -> dict:
         try:
@@ -708,7 +846,7 @@ class CoreRuntime:
             self.last_error = str(exc)
             state = {"revision": None, "enabled": False}
         running = self.process is not None and self.process.poll() is None
-        return {"name": self.name, "version_required": VERSIONS[self.name],
+        return {"name": self.name, "version_required": self._artifact.version if self._artifact is not None else VERSIONS[self.name],
             "binary_exists": self.binary.is_file(), "running": running,
             "pid": self.process.pid if running else None,
             "applied_revision": state["revision"], "enabled": state["enabled"],

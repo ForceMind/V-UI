@@ -14,7 +14,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = {
     'test_core_artifacts.py': 23,
-    'test_core_store.py': 25,
+    'test_core_store.py': 28,
     'test_core_github.py': 29,
     'test_core_selection.py': 17,
     'test_core_catalog.py': 24,

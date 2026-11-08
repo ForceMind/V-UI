@@ -16,6 +16,7 @@ from unittest.mock import patch
 from app.core_updates import artifacts as a,store as fs,github as g,catalog as c
 from test_core_github import Transport,Response
 from test_core_artifacts import APP,BUILD,Fixture
+from test_core_store import publisher_ready_marker
 
 
 def snapshot(root):
@@ -333,7 +334,7 @@ except c.CoreCatalogError as error:print(json.dumps({'ok':False,'code':error.cod
             children=[]
             try:
                 for _ in range(2):children.append(subprocess.Popen([sys.executable,'-B','-I','-S','-c',code,str(repo),str(anchor)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True))
-                for child in children:self.assertEqual(child.stdout.readline(),'ready\n')
+                for child in children:self.assertEqual(publisher_ready_marker(child.stdout),b'ready\n')
                 for child in children:child.stdin.write('go\n');child.stdin.flush()
                 outcomes=[]
                 for child in children:

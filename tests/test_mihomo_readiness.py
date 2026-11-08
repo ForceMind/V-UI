@@ -46,6 +46,11 @@ SITES = {
 # launch implementations, fake unit processes, and non-core app/worker/benchmark
 # subprocesses. These entries do not grant Mihomo permission to use the old gate.
 OTHER_CONSTRUCTIONS = {
+    # Two bounded synthetic store/catalog publishers: isolated stdlib Python,
+    # fake material/transport only, stdin barrier, 15s communicate and finally
+    # kill/wait/close. No proxy core or readiness qualification is involved.
+    ('test_core_store.py', 'CoreStoreTests.test_two_processes_same_id_publish_only_once_and_keep_one_complete_artifact', 'Popen'),
+    ('test_core_catalog.py', 'CoreCatalogTests.test_two_processes_same_id_use_real_m2_fake_io_and_publish_only_one_context', 'Popen'),
     # Shipped JS controller only: pipe transport to the fixture's authenticated
     # HTTP client; 120s bound with finally kill/reap. It launches no client core.
     ('test_inbound_routing_real.py', 'InboundRoutingRealTests.run_simple_controller', 'Popen'),

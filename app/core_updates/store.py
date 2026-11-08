@@ -200,16 +200,38 @@ def _lock(scope, root):
 def _rename_new(parent, name, destination, identity):
     """Native atomic no-replace rename only; never an overwrite-style fallback."""
     library = ctypes.CDLL(None, use_errno=True)
+    arguments = (parent, os.fsencode(name), destination, os.fsencode(identity))
     if sys.platform.startswith('linux'):
         function = getattr(library, 'renameat2', None); flag = 1  # RENAME_NOREPLACE
+        if function is None:
+            # musl need not export a renameat2 wrapper. Invoke the SAME Linux
+            # kernel operation, with unchanged no-replace semantics, on the two
+            # supported 64-bit ABIs only. Linux v6.6 UAPI: x86 syscall_64.tbl
+            # assigns 316; asm-generic/unistd.h assigns 276 (aarch64).
+            number = {'x86_64': 316, 'aarch64': 276}.get(os.uname().machine)
+            syscall = getattr(library, 'syscall', None)
+            _need(number is not None and syscall is not None
+                  and ctypes.sizeof(ctypes.c_void_p) == 8
+                  and ctypes.sizeof(ctypes.c_long) == 8, 'UNSUPPORTED')
+            syscall.argtypes = (ctypes.c_long, ctypes.c_int, ctypes.c_char_p,
+                               ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+            syscall.restype = ctypes.c_long
+            result = syscall(number, *arguments, flag)
+        else:
+            function.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                                 ctypes.c_char_p, ctypes.c_uint)
+            function.restype = ctypes.c_int
+            result = function(*arguments, flag)
     elif sys.platform == 'darwin':
         function = getattr(library, 'renameatx_np', None); flag = 4  # RENAME_EXCL
+        _need(function is not None, 'UNSUPPORTED')
+        function.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                             ctypes.c_char_p, ctypes.c_uint)
+        function.restype = ctypes.c_int
+        result = function(*arguments, flag)
     else:
-        function = None; flag = 0
-    _need(function is not None, 'UNSUPPORTED')
-    function.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
-    function.restype = ctypes.c_int
-    if function(parent, os.fsencode(name), destination, os.fsencode(identity), flag) != 0:
+        raise CoreStoreError('UNSUPPORTED')
+    if result != 0:
         code = ctypes.get_errno()
         if code == errno.EEXIST:
             raise CoreStoreError('DESTINATION_EXISTS')

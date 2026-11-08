@@ -6,10 +6,13 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import select
 import stat
 import subprocess
 import sys
 import tempfile
+import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -20,6 +23,19 @@ from test_core_artifacts import Fixture, APP, BUILD
 def snapshot(root):
     return {str(p.relative_to(root)):(p.read_bytes(),stat.S_IMODE(p.stat().st_mode),p.stat().st_ino)
             for p in root.rglob('*') if p.is_file() and not p.is_symlink()}
+
+
+def publisher_ready_marker(stream, timeout=15):
+    """Bound the synthetic child handshake, including partial-line stalls."""
+    deadline=time.monotonic()+timeout;raw=b''
+    while len(raw)<6:
+        remaining=deadline-time.monotonic()
+        if remaining<=0 or not select.select([stream],[],[],remaining)[0]:
+            raise TimeoutError('Synthetic publisher startup timed out')
+        block=os.read(stream.fileno(),6-len(raw))
+        if not block:raise RuntimeError('Synthetic publisher exited before its marker')
+        raw+=block
+    return raw
 
 
 class CoreStoreTests(unittest.TestCase):
@@ -343,6 +359,42 @@ class CoreStoreTests(unittest.TestCase):
                 with self.assertRaisesRegex(s.CoreStoreError,'UNSUPPORTED'):s._rename_new(0,'owned',0,'new')
                 rename.assert_not_called()
 
+    def test_linux_without_libc_wrapper_uses_exact_supported_64bit_kernel_operation(self):
+        for arch, number in (('x86_64',316), ('aarch64',276)):
+            syscall=Mock(return_value=0);library=SimpleNamespace(syscall=syscall)
+            with self.subTest(arch=arch),patch.object(s.sys,'platform','linux'), \
+                    patch.object(s.ctypes,'CDLL',return_value=library), \
+                    patch.object(s.os,'uname',return_value=SimpleNamespace(machine=arch)), \
+                    patch.object(s.os,'rename') as unsafe:
+                s._rename_new(7,'owned',8,'new')
+                syscall.assert_called_once_with(number,7,b'owned',8,b'new',1)
+                self.assertEqual(syscall.restype,s.ctypes.c_long)
+                self.assertEqual(syscall.argtypes,(s.ctypes.c_long,s.ctypes.c_int,s.ctypes.c_char_p,
+                                                   s.ctypes.c_int,s.ctypes.c_char_p,s.ctypes.c_uint))
+                unsafe.assert_not_called()
+
+    def test_linux_syscall_fallback_rejects_unknown_abi_and_preserves_no_replace_errors(self):
+        for error, expected in ((errno.EEXIST,'DESTINATION_EXISTS'),
+                                (errno.ENOSYS,'UNSUPPORTED'),(errno.EOPNOTSUPP,'UNSUPPORTED'),
+                                (errno.EIO,'PUBLISH_FAILED')):
+            syscall=Mock(return_value=-1);library=SimpleNamespace(syscall=syscall)
+            with self.subTest(errno=error),patch.object(s.sys,'platform','linux'), \
+                    patch.object(s.ctypes,'CDLL',return_value=library), \
+                    patch.object(s.os,'uname',return_value=SimpleNamespace(machine='x86_64')), \
+                    patch.object(s.ctypes,'get_errno',return_value=error),patch.object(s.os,'rename') as unsafe:
+                with self.assertRaisesRegex(s.CoreStoreError,'^'+expected+'$'):
+                    s._rename_new(7,'owned',8,'new')
+                self.assertEqual(syscall.call_count,1);unsafe.assert_not_called()
+        for arch, size in (('riscv64',8),('x86_64',4),('aarch64',4)):
+            syscall=Mock(return_value=0);library=SimpleNamespace(syscall=syscall)
+            with self.subTest(arch=arch,bits=size*8),patch.object(s.sys,'platform','linux'), \
+                    patch.object(s.ctypes,'CDLL',return_value=library), \
+                    patch.object(s.os,'uname',return_value=SimpleNamespace(machine=arch)), \
+                    patch.object(s.ctypes,'sizeof',return_value=size),patch.object(s.os,'rename') as unsafe:
+                with self.assertRaisesRegex(s.CoreStoreError,'^UNSUPPORTED$'):
+                    s._rename_new(7,'owned',8,'new')
+                syscall.assert_not_called();unsafe.assert_not_called()
+
     def test_two_processes_same_id_publish_only_once_and_keep_one_complete_artifact(self):
         with self.fixture() as (anchor,f,pack,store,args):
             # Infrastructure initialized once; candidate is still absent.
@@ -366,7 +418,7 @@ except s.CoreStoreError as error:print(json.dumps({'ok':False,'code':error.code}
             children=[]
             try:
                 for _ in range(2):children.append(subprocess.Popen([sys.executable,'-B','-I','-S','-c',code,str(repo),str(anchor)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True))
-                for child in children:self.assertEqual(child.stdout.readline(),'ready\n')
+                for child in children:self.assertEqual(publisher_ready_marker(child.stdout),b'ready\n')
                 for child in children:child.stdin.write('go\n');child.stdin.flush()
                 results=[]
                 for child in children:
@@ -380,6 +432,17 @@ except s.CoreStoreError as error:print(json.dumps({'ok':False,'code':error.code}
                 for child in children:
                     if child.poll() is None:child.kill();child.wait(timeout=5)
                     for stream in (child.stdin,child.stdout,child.stderr):stream.close()
+
+    def test_publisher_marker_refuses_eof_and_partial_line_at_deadline(self):
+        r,w=os.pipe()
+        with os.fdopen(r,'rb',buffering=0) as stream:
+            try:
+                os.write(w,b'rea')
+                with patch.object(time,'monotonic',side_effect=[0,0,16]):
+                    with self.assertRaises(TimeoutError):publisher_ready_marker(stream)
+            finally:os.close(w)
+            with self.assertRaisesRegex(RuntimeError,'exited before'):
+                publisher_ready_marker(stream)
 
     def test_flat_trusted_namespace_import_is_stdlib_only_without_payload_on_sys_path(self):
         repo=Path(__file__).resolve().parents[1]
