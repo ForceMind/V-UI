@@ -2,7 +2,7 @@
 // One DOM view for the administrator and delegated maintenance transports.
 // All untrusted names/links use textContent/value; secrets live only in this view.
 (() => {
-    const {Flow, message, suggestedPort} = globalThis.VUI_OPERATION_FLOW;
+    const {Flow, message, suggestedPort, connectionDomain, certificateLabel} = globalThis.VUI_OPERATION_FLOW;
     let sequence = 0;
     const views = new Map();
     const labels = {direct:'创建直连节点',relay:'创建中转节点',host:'服务器程序代理',exit:'设置出口服务器',edit:'修改节点设置'};
@@ -209,10 +209,10 @@
             }
             if(nodeTask){
                 const certs=this.flow.certificates;
-                if(certs.length===1){this.certificateId=certs[0].id;form.append(this.note('连接域名：'+certs[0].domain+'（已自动采用已有证书）'));}
+                if(certs.length===1){this.certificateId=certs[0].id;form.append(this.note(certs[0].method==='dns-01'?'已选证书：'+certificateLabel(certs[0])+'；请确认下面的实际连接域名。':'连接域名：'+certs[0].domain+'（已自动采用已有证书）'));}
                 else if(certs.length>1){
                     this.fields.cert=this.field(form,'要使用哪个域名？',element('select'));this.fields.cert.append(element('option','请选择连接域名',{value:''}));
-                    for(const cert of certs)this.fields.cert.append(element('option',cert.domain,{value:cert.id}));this.certificateId=null;
+                    for(const cert of certs)this.fields.cert.append(element('option',certificateLabel(cert),{value:cert.id}));this.certificateId=null;
                 }else{
                     this.certificateId=null;form.append(this.note('还没有可用的正式证书。先设置域名和证书，完成后再继续；本次输入保留。'));
                     form.append(this.button('设置域名和证书',()=>this.certificateSetup()));
@@ -223,7 +223,7 @@
                 if(this.editor.profile?.security==='tls'){
                     this.fields.cert=this.field(form,'使用证书（默认保持）',element('select'));
                     this.fields.cert.append(element('option','保持原证书设置',{value:''}));
-                    for(const c of this.flow.certificates)this.fields.cert.append(element('option',c.domain,{value:c.id}));
+                    for(const c of this.flow.certificates)this.fields.cert.append(element('option',certificateLabel(c),{value:c.id}));
                 }
                 this.fields.route=this.field(form,'节点出口（默认保持）',element('select'));
                 this.fields.route.append(element('option','保持当前出口设置',{value:''}),element('option','本机直接出口',{value:'direct'}));
@@ -232,6 +232,12 @@
                 if(!this.flow.has('relay')){this.fields.route._opsDisabled=true;form.append(element('small','更改节点出口需要出口配置权限。'));}
             }
             if(this.task==='host')form.append(this.note('本机指这台服务器。仅监听127.0.0.1，供明确配置代理的服务器程序使用，不接管Linux全部流量。首次自动生成独立账号和强密码；已有凭据保留。'));
+            if(nodeTask||edit&&this.fields.cert){
+                this.fields.connectionBox=element('div');
+                this.fields.connection=this.field(this.fields.connectionBox,'实际连接域名',this.input(edit?this.editor.profile?.server_name||'':''),
+                    '例如node.example.com。请将其A/AAAA记录指向本机；DNS签发不会自动修改这些记录。不要填写通配符。');
+                this.fields.connectionSummary=element('small');this.fields.connectionBox.append(this.fields.connectionSummary);form.append(this.fields.connectionBox);
+            }
             const advanced=element('details');advanced.append(element('summary','更多设置'));
             if(nodeTask||edit)this.fields.port=this.field(advanced,'连接端口',this.input(edit?this.editing.port:suggestedPort(this.flow.nodes),'number'),'自动建议避开已有节点；系统占用和公网放行仍需实际核对。');
             if(this.task==='host')this.fields.localPort=this.field(advanced,'服务器本地代理端口',this.input(snapshot.settings.local_port,'number'),'只在服务器127.0.0.1提供入口，不公开监听。');
@@ -254,7 +260,10 @@
                 if(edit){
                     const changes={};if(choice.name!==this.editing.remark)changes.remark=choice.name;
                     if(choice.port!==this.editing.port){if(!Number.isInteger(choice.port)||choice.port<1024||choice.port>65535||this.flow.nodes.some(row=>row.id!==this.editing.id&&row.port===choice.port))throw new globalThis.VUI_OPERATION_FLOW.FlowError('PORT_INVALID','请使用未被节点占用的1024–65535整数端口。');changes.port=choice.port;}
-                    if(this.fields.cert?.value)changes.certificate_id=this.fields.cert.value;
+                    if(this.fields.cert?.value){
+                        changes.certificate_id=this.fields.cert.value;
+                        if(this.flow.certificates.find(cert=>cert.id===changes.certificate_id)?.method==='dns-01')changes.profile={server_name:choice.connectionDomain};
+                    }
                     if(this.fields.route.value){
                         await this.flow.load();this.flow.clean();if(this.flow.snapshot.revision!==this.revision)throw new globalThis.VUI_OPERATION_FLOW.FlowError('CHANGED','出口设置已变化，请重新确认。');
                         if(this.fields.route.value==='relay'){
@@ -272,8 +281,10 @@
             this.updateForm();
         }
         choice() {
+            const selected=this.flow.certificates.find(cert=>cert.id===(this.fields.cert?.value||this.certificateId));
             return {revision:this.revision,name:this.fields.name?.value||'',port:Number(this.fields.port?.value),
                 certificateId:this.fields.cert?.value||this.certificateId,
+                connectionDomain:selected?.method==='dns-01'?this.fields.connection?.value.trim()||'':undefined,
                 upstreamId:this.fields.upstream?.value==='new'?null:this.fields.upstream?.value,
                 link:this.fields.upstream?.value==='new'?this.fields.link.value:'',format:this.fields.format?.value||'uri',
                 candidateIndex:this.candidateIndex,ignored:this.ignored||[],
@@ -288,6 +299,23 @@
             const missing=required.filter(scope=>!this.flow.has(scope));
             let reason=this.blockedByDraft?'请先处理上次尚未完成的设置。':missing.length?'当前授权缺少：'+missing.map(s=>scopeNames[s]).join('、'):'';
             if(!reason&&['direct','relay'].includes(this.task)&&!c.certificateId)reason='先选择可用的正式证书域名。';
+            const cert=this.flow.certificates.find(row=>row.id===(this.task==='edit'?this.fields.cert?.value:c.certificateId));
+            const dns=cert?.method==='dns-01';
+            if(this.fields.connectionBox){
+                this.fields.connectionBox.hidden=!dns;this.fields.connection.required=!!dns;
+                if(dns){
+                    if(this.fields.connection._opsSeededFor!==cert.id){
+                        if(!this.fields.connection.value){
+                            const candidate=this.editor?.profile?.server_name||location.hostname;
+                            try{this.fields.connection.value=connectionDomain(cert,candidate);}catch(_){}
+                        }
+                        this.fields.connection._opsSeededFor=cert.id;
+                    }
+                    c.connectionDomain=this.fields.connection.value.trim();
+                    try{const host=connectionDomain(cert,c.connectionDomain);this.fields.connectionSummary.textContent='连接地址与SNI：'+host;}
+                    catch(error){this.fields.connectionSummary.textContent=error.message;if(!reason)reason=error.message;}
+                }
+            }
             if(!reason&&this.task==='relay'&&(this.flow.cores.xray?.enabled||this.flow.cores.xray?.running))reason='现有Xray节点组启用或运行中，本版本不能同时开启中转。旧节点不会自动停止。';
             if(!reason&&['host','relay','exit'].includes(this.task)&&!c.upstreamId&&!c.link)reason='选择出口，或粘贴对端的TCP出口链接。';
             if(this.flow.snapshot.pending)reason='有未结束的操作，请先核对结果。';
@@ -477,7 +505,7 @@
                 if(!rows.length)this.content.append(this.note('还没有证书，请让管理员先设置域名。'));
                 for(const cert of rows){
                     const card=element('article',null,{class:'ops-node'}),valid=globalThis.VUI_OPERATION_FLOW.usableCertificates([cert]).length===1;
-                    card.append(element('strong',cert.domain),element('p',valid?'可用于节点 · 剩余'+cert.days_remaining+'天':cert.environment==='staging'?'测试证书，不能用于正式节点':'尚不可用，请查看证书任务'));
+                    card.append(element('strong',certificateLabel(cert)),element('p',valid?'可用于节点 · 剩余'+cert.days_remaining+'天':cert.environment==='staging'?'测试证书，不能用于正式节点':'尚不可用，请查看证书任务'));
                     const state={queued:'排队中',running:'申请中',succeeded:'申请成功',failed:'申请失败',interrupted:'申请中断'}[cert.latest_job?.state];if(state)card.append(element('p','最近任务：'+state));
                     card.append(this.button('检查并续期',()=>this.perform(()=>this.flow.api('/api/certificates/'+cert.id+'/renew','POST'),()=>{this.status.textContent='续期检查已提交，旧证书保持。';const epoch=this.epoch;setTimeout(()=>{if(!this.ended&&epoch===this.epoch&&this.task==='certificates')void this.certificates();},0);}),{disabled:!this.flow.has('certificates')||['queued','running'].includes(cert.latest_job?.state)}));
                     card.append(this.button(cert.auto_renew?'暂停自动续期':'启用自动续期',()=>this.perform(()=>this.flow.api('/api/certificates/'+cert.id+'/auto-renew','PUT',{enabled:!cert.auto_renew}),()=>{this.status.textContent='自动续期设置已保存。';const epoch=this.epoch;setTimeout(()=>{if(!this.ended&&epoch===this.epoch&&this.task==='certificates')void this.certificates();},0);}),{disabled:!this.flow.has('certificates')}));

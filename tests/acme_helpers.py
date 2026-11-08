@@ -36,7 +36,7 @@ def start_dual_dns(stack, answers):
                 return value
             try:
                 size = struct.unpack('!H', read(2))[0]
-                answer = answers.answer(read(size))
+                answer = getattr(answers, 'answer_tcp', answers.answer)(read(size))
                 self.request.sendall(struct.pack('!H', len(answer)) + answer)
             except (OSError, EOFError, ValueError, IndexError, UnicodeError):
                 pass
@@ -45,7 +45,7 @@ def start_dual_dns(stack, answers):
         def handle(self):
             packet, transport = self.request
             try:
-                transport.sendto(answers.answer(packet), self.client_address)
+                transport.sendto(getattr(answers, 'answer_udp', answers.answer)(packet), self.client_address)
             except (ValueError, IndexError, UnicodeError):
                 pass
 
@@ -80,7 +80,7 @@ def start_dual_dns(stack, answers):
 
 
 class PebbleFixture:
-    def __init__(self, stack, root: Path, webroot: Path, domain='panel.example.test', *, http_port=None, authz_reuse_percent=0):
+    def __init__(self, stack, root: Path, webroot: Path, domain='panel.example.test', *, http_port=None, authz_reuse_percent=0, dns_answers=None):
         if type(authz_reuse_percent) is not int or not 0 <= authz_reuse_percent <= 100:
             raise ValueError("Invalid fake CA authorization reuse percentage")
         self.root, self.webroot, self.domain = root, webroot, domain
@@ -95,7 +95,10 @@ class PebbleFixture:
             http_port = self.http.server_port
         elif type(http_port) is not int or not 1024 <= http_port <= 65535:
             raise ValueError('Explicit loopback HTTP-01 responder port required')
-        dns=DnsAnswers('PEBBLE_DNS',{domain:'127.0.0.1'})
+        if dns_answers is not None and not callable(getattr(dns_answers, 'answer', None)):
+            raise ValueError('Explicit local DNS answers must provide answer(packet)')
+        dns=dns_answers if dns_answers is not None else DnsAnswers('PEBBLE_DNS',{domain:'127.0.0.1'})
+        self.dns_answers = dns
         dns_port=start_dual_dns(stack,dns)
         port,management=unused_port(),unused_port()
         config={'pebble':{'listenAddress':f'127.0.0.1:{port}',

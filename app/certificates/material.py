@@ -13,12 +13,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from cryptography.x509.verification import PolicyBuilder, Store, VerificationError
-
-
-class CertificateError(ValueError):
-    def __init__(self, code: str):
-        self.code = code
-        super().__init__(code)
+from app.certificates.errors import CertificateError
 
 
 _MAX_CA_BYTES = 4 * 1024 * 1024
@@ -151,19 +146,72 @@ def email_address(value: str) -> str:
     return local + '@' + domain_name(host)
 
 
-def make_csr(domain: str) -> tuple[bytes, bytes]:
+def certificate_names(domain: str, wildcard: bool = False) -> list[str]:
+    """Canonical identity order: literal root first, then its one-label wildcard."""
+    if type(wildcard) is not bool:
+        raise CertificateError('INVALID_WILDCARD')
+    root = domain_name(domain)
+    return [root, '*.' + root] if wildcard else [root]
+
+
+def _certificate_name(value: str) -> str:
+    if type(value) is not str:
+        raise CertificateError('INVALID_CERTIFICATE_NAMES')
+    return '*.' + domain_name(value[2:]) if value.startswith('*.') else domain_name(value)
+
+
+def _expected_names(domain: str, names) -> list[str]:
+    ordinary = certificate_names(domain)
+    if names is None:
+        return ordinary
+    if not isinstance(names, (list, tuple)) or len(names) not in (1, 2):
+        raise CertificateError('INVALID_CERTIFICATE_NAMES')
+    try:
+        actual = [_certificate_name(name) for name in names]
+    except CertificateError:
+        raise CertificateError('INVALID_CERTIFICATE_NAMES') from None
+    if len(set(actual)) != len(actual):
+        raise CertificateError('INVALID_CERTIFICATE_NAMES')
+    for expected in (ordinary, certificate_names(domain, True)):
+        if set(actual) == set(expected):
+            return expected
+    raise CertificateError('INVALID_CERTIFICATE_NAMES')
+
+
+def covers_domain(names, host: str) -> bool:
+    """Match literal DNS SNI only; a wildcard covers exactly one extra label."""
+    try:
+        host = domain_name(host)
+        if not isinstance(names, (list, tuple)) or not names:
+            return False
+        canonical = [_certificate_name(name) for name in names]
+        if len(set(canonical)) != len(canonical):
+            return False
+        return any(host == name if not name.startswith('*.') else (
+            host.endswith('.' + name[2:]) and len(host.split('.')) == len(name[2:].split('.')) + 1
+        ) for name in canonical)
+    except CertificateError:
+        return False
+
+
+def make_csr(domain: str, *, names=None) -> tuple[bytes, bytes]:
+    domain = domain_name(domain)
+    expected = _expected_names(domain, names)
     key = ec.generate_private_key(ec.SECP256R1())
     csr = (x509.CertificateSigningRequestBuilder()
            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, domain)] if len(domain) <= 64 else []))
-           .add_extension(x509.SubjectAlternativeName([x509.DNSName(domain)]), critical=False)
+           .add_extension(x509.SubjectAlternativeName([x509.DNSName(name) for name in expected]), critical=False)
            .sign(key, hashes.SHA256()))
     return (key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                               serialization.NoEncryption()), csr.public_bytes(serialization.Encoding.PEM))
 
 
 def validate_material(chain_pem: bytes, key_pem: bytes, domain: str, *,
-                      trusted_roots: bytes | None = None, verify_chain: bool = True) -> dict:
+                      trusted_roots: bytes | None = None, verify_chain: bool = True,
+                      expected_names=None) -> dict:
     try:
+        domain = domain_name(domain)
+        expected = _expected_names(domain, expected_names)
         if len(chain_pem) > 131072 or len(key_pem) > 16384:
             raise ValueError()
         chain = x509.load_pem_x509_certificates(chain_pem)
@@ -172,8 +220,14 @@ def validate_material(chain_pem: bytes, key_pem: bytes, domain: str, *,
         encode = lambda k: k.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
         if encode(key.public_key()) != encode(leaf.public_key()):
             raise CertificateError('KEY_MISMATCH')
-        names = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(x509.DNSName)
-        if names != [domain]:
+        san = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        if any(not isinstance(name, x509.DNSName) for name in san):
+            raise CertificateError('DOMAIN_MISMATCH')
+        try:
+            actual = [_certificate_name(name.value) for name in san]
+        except CertificateError:
+            raise CertificateError('DOMAIN_MISMATCH') from None
+        if len(actual) != len(set(actual)) or set(actual) != set(expected):
             raise CertificateError('DOMAIN_MISMATCH')
         now = datetime.now(timezone.utc)
         if not leaf.not_valid_before_utc <= now < leaf.not_valid_after_utc:
@@ -181,6 +235,8 @@ def validate_material(chain_pem: bytes, key_pem: bytes, domain: str, *,
         if verify_chain:
             store = _certificate_trust_store(trusted_roots)
             try:
+                # Both allowed SAN shapes include this literal root. Preserve
+                # production chain/hostname verification independently of SNI coverage.
                 PolicyBuilder().store(store).time(now).build_server_verifier(x509.DNSName(domain)).verify(leaf, chain[1:])
             except VerificationError:
                 raise CertificateError('CERTIFICATE_CHAIN_VERIFICATION_FAILED') from None

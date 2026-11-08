@@ -14,11 +14,17 @@ permissions:
 jobs:
   certificates:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Check out immutable public v0.4.22 for DNS backup reader refusal
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 558687a76cd29f4e4735284926eb05bf6664472e
+          path: .published-v0422
           persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -34,6 +40,40 @@ jobs:
           set -euo pipefail
           export VUI_DATA_DIR="$(mktemp -d)"
           python -m unittest discover -s tests -p test_acme_real.py -v 2>&1 | tee /tmp/vui-pebble/acme.log
+      - name: Test actual Certbot DNS-01 wildcard renewal and legacy-reader refusal
+        timeout-minutes: 15
+        env:
+          VUI_TEST_PEBBLE: /tmp/vui-pebble/pebble
+          VUI_TEST_DNS_ACME: '1'
+          VUI_TEST_LEGACY22_SOURCE: ${{ github.workspace }}/.published-v0422
+        run: |
+          set -euo pipefail
+          export VUI_DATA_DIR="$(mktemp -d)"
+          python -B - <<'PYDNS' 2>&1 | tee /tmp/vui-pebble/dns-acme.log
+          import os, unittest
+          from pathlib import Path
+          assert os.environ.get('VUI_TEST_DNS_ACME') == '1', 'Strict DNS ACME opt-in missing'
+          assert Path(os.environ['VUI_TEST_PEBBLE']).is_file(), 'Fixed Pebble binary missing'
+          assert Path(os.environ['VUI_TEST_LEGACY22_SOURCE']).is_dir(), 'Immutable legacy source missing'
+          suite = unittest.defaultTestLoader.discover('tests', pattern='test_acme_dns_real.py')
+          def identifiers(value):
+              if isinstance(value, unittest.TestSuite):
+                  return {name for child in value for name in identifiers(child)}
+              return {value.id()}
+          required = {
+              'test_acme_dns_real.RealDNSACMETests.test_real_root_wildcard_and_fresh_account_renewal',
+              'test_acme_dns_real.RealDNSACMETests.test_nonpropagation_failure_retains_previous_material',
+              'test_acme_dns_real.RealDNSACMETests.test_wrong_fake_cf_tls_ca_never_publishes_material',
+              'test_acme_dns_real.Legacy22DNSReaderTests.test_real_published_22_reader_refuses_new_dns_backup_before_replacement',
+          }
+          assert identifiers(suite) == required, 'Required DNS/legacy reader cases are missing or duplicated'
+          class StrictResult(unittest.TextTestResult):
+              def wasSuccessful(self):
+                  return super().wasSuccessful() and self.testsRun == len(required) and not self.skipped
+          result = unittest.TextTestRunner(verbosity=2, resultclass=StrictResult).run(suite)
+          if result.testsRun != len(required) or result.skipped or not result.wasSuccessful():
+              raise SystemExit('Strict DNS/legacy reader acceptance did not complete all four cases without skips')
+          PYDNS
       - name: Install explicit test browser
         if: github.event_name == 'workflow_dispatch' && inputs.run_browser == true
         run: python -m playwright install --with-deps chromium

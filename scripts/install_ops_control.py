@@ -60,7 +60,7 @@ SOURCE_MEMBERS = {
 }
 # Internal controller dependencies are authenticated by the complete source ZIP
 # digest and commit binding above; they are not additional top-level kit assets.
-SOURCE_DEPENDENCIES = {
+PRE_DNS_SOURCE_DEPENDENCIES = {
     'data_owner.py': 'app/data_owner.py',
     'proxy_store.py': 'app/services/proxy_store.py',
     'upstream_profile.py': 'app/services/upstream_profile.py',
@@ -72,6 +72,16 @@ SOURCE_DEPENDENCIES = {
     'install_control_verifier.py': 'scripts/install_ops_control.py',
     'v-ui-maintenance.service': 'deploy/v-ui-maintenance.service',
 }
+# Exact pre-DNS closure, including the published v0.4.22 controller. Do not
+# derive historical shapes from the expanded current dependency set.
+DNS_SOURCE_DEPENDENCIES = {
+    'certificate_errors.py': 'app/certificates/errors.py',
+    'dns_store.py': 'app/certificates/dns_store.py',
+    'cloudflare.py': 'app/certificates/cloudflare.py',
+    'dns_journal.py': 'app/certificates/dns_journal.py',
+    'dns_backup.py': 'app/certificates/dns_backup.py',
+}
+SOURCE_DEPENDENCIES = PRE_DNS_SOURCE_DEPENDENCIES | DNS_SOURCE_DEPENDENCIES
 RECEIPT_KEYS = {'schema', 'service_manager', 'system_python', 'interpreter_resolved',
                 'interpreter_sha256', 'files'}
 MAX_CODE = 4_000_000
@@ -471,7 +481,8 @@ def validate_existing(hashes, interpreter, manager, refresh, verified, *, missin
         return
     receipt = load_json(read_file(RECEIPT, root=True, mode=0o644, limit=MAX_JSON)[0])
     expected = set(hashes) | {str(path) for path in paths} | set(missing_instance)
-    dependencies = {str(CONTROL / name) for name in SOURCE_DEPENDENCIES}
+    dependencies = {str(CONTROL / name) for name in PRE_DNS_SOURCE_DEPENDENCIES}
+    dns_dependencies = {str(CONTROL / name) for name in DNS_SOURCE_DEPENDENCIES}
     # Explicit refresh migrates only known complete historical closures. The
     # pre-network controller lacks firewall_support; older closures may also
     # lack the proxy dependencies or data-owner helper. Existing bytes must all
@@ -480,12 +491,15 @@ def validate_existing(hashes, interpreter, manager, refresh, verified, *, missin
     historical = (dependencies, {str(CONTROL / 'data_owner.py')}, firewall_dependency,
                      dependencies | firewall_dependency,
                      {str(CONTROL / 'data_owner.py')} | firewall_dependency)
-    maintenance = {str(CONTROL / name) for name in SOURCE_DEPENDENCIES
+    maintenance = {str(CONTROL / name) for name in PRE_DNS_SOURCE_DEPENDENCIES
                    if name.startswith('maintenance_') or name in ('install_control_verifier.py', 'v-ui-maintenance.service')}
     if manager == 'systemd':
         maintenance.add(str(SYSTEMD_DIR / 'v-ui-maintenance.service'))
     # Permit only complete historical closures plus the whole new closure.
-    known_missing = historical + (maintenance,) + tuple(item | maintenance for item in historical)
+    pre_dns_missing = (set(),) + historical + (maintenance,) + tuple(item | maintenance for item in historical)
+    # Every historical shape predates all five DNS helpers. Mixed partial DNS
+    # closures were never published and must not be accepted as legacy.
+    known_missing = tuple(dns_dependencies | item for item in pre_dns_missing)
     missing = (expected - set(receipt['files']) if isinstance(receipt, dict)
                and isinstance(receipt.get('files'), dict) else set())
     legacy = (refresh and isinstance(receipt, dict) and isinstance(receipt.get('files'), dict)
