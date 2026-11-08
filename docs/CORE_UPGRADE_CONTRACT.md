@@ -1,6 +1,6 @@
 # P3 核心独立升级与回滚契约草案
 
-状态：设计独审通过；当前完成制品校验、不可变制品准备/读取源码及纯假包回归，完整核心升级/回退尚未实现或验收。代码事实核对基线为4bd1d9a648a8096fbf2fa05314e35049a2408e7c。它不属于当前DNS候选PR145，不改变当前公开22、23发布门禁、核心pin或服务器。
+状态：设计独审通过；当前完成制品校验、不可变准备/读取、官方组件客户端与纯选择计划源码及合成回归，完整核心升级/回退尚未实现或验收。代码事实核对基线为4bd1d9a648a8096fbf2fa05314e35049a2408e7c。它不属于当前DNS候选PR145，不改变当前公开22、23发布门禁、核心pin或服务器。
 
 本阶段来自ROADMAP的已批准P3；Go迁移继续暂缓。契约已完成独审，制品校验作为独立实现首块；后续选择、备份闭包、切换和RPC继续分块实现与审查。首测版本已列明，仅核元数据；制品和兼容资格尚未取得，不能把本草案称为核心已可升级。
 
@@ -94,7 +94,7 @@ OpenRC明确仅状态/准备；不提供未经资格的自动切换/回退，不
 
 ## 当前状态与下一步
 
-以上选择已完成设计独审。首个源码块完成标准库制品验证（23项纯假包回归），第二块完成不可变制品准备/读取（25项纯假包回归），均通过增量独审及实际Python3.9.6/3.12检查；初轮macOS临时目录别名和归档成员卷号漏检均已修正并定点复核。已实现的存储仅准备和回读制品；active选择、受管安装/切换、备份闭包、RPC、网络检索、真实核心运行与四目标新核心资格及公共组件Release仍未实现或取得，不能把这些原语称为完整核心升级。P2的准确提交资格与外部下载失败仍独立记录，不能用P3结果补齐。
+以上选择已完成设计独审。M0制品校验23项、M1不可变准备/读取25项、M2官方客户端29项、M3纯选择计划17项合成回归均通过实际Python3.9.6/3.12检查及增量独审；初轮macOS临时目录别名和归档成员卷号漏检均已修正并定点复核。已实现的存储仅准备和回读制品，客户端只由虚构传输测试，选择模型只产出计划；root选择持久化、运行时接入、受管切换、备份闭包和RPC仍未实现，真实网络/核心与四目标资格及公共组件Release未取得，不能把这些原语称为完整核心升级。P2的准确提交资格与外部下载失败仍独立记录，不能用P3结果补齐。
 
 受保护分支合并、组件或应用tag/Release公开发行、短入口变更和真实主机部署均须在具体成果可审阅后取得对应明确授权；当前没有这些P3授权，也未执行。新签名密钥、Secrets或额外权限不能从普通开发授权推断。
 
@@ -236,3 +236,64 @@ prepare在触及store前通过M0验证完整候选及外部metadata。随后取�
 受信`Layout(root,owner,anchor)`仅为Python测试/内部注入seam：测试明确提供自有0700临时anchor及真实测试UID，跳过的是anchor之外的测试环境，不是生产权限规则。它不成为用户参数、CLI或环境开关；生产入口只构造默认root Layout。root standalone加载仍通过受信pathless package namespace显式加载M0/store，不从cwd、user data或payload查找模块，也没有ImportError fallback。
 
 当前Mac假包测试只证明上述实现逻辑与Darwin原子语义；Linux/glibc/musl原生符号与文件系统支持、四目标真实核心资格、store与后续选择/备份/运行时集成仍须各自Actions验收。
+
+## M2固定官方组件客户端接口
+
+`app/core_updates/github.py`仅提供匿名官方组件API读取及显式私有FD下载，不写store、可信缓存、active选择、用户data、全局网络配置或Release，不执行二进制。生产只构造默认`GitHubCoreClient()`；`opener=`是受信Python假transport注入，不是URL、HTTP、token或环境开关。
+
+```python
+client = GitHubCoreClient()
+discovery = client.discover('sing-box', deadline=monotonic_deadline,
+                            stop=cancel_event.is_set)
+candidate = client.inspect(known_release_id, app_source=exact_app_source,
+                           deadline=monotonic_deadline, stop=cancel_event.is_set)
+client.recheck(candidate, deadline=monotonic_deadline, stop=cancel_event.is_set)
+# 仅此显式方法写入caller独占新建的空私有FD，不接收输出路径。
+identity = client.download_pack(candidate, detected_target, new_private_rw_fd,
+                               deadline=monotonic_deadline, stop=cancel_event.is_set)
+```
+
+### 发现、检查与复核结果
+
+- `discover(core)`返回`Discovery(hints,truncated,pages,examined)`。每条ReleaseHint精确含`release_id,tag,core,version,revision,published_at`，仅为固定官方仓库stable组件tag提示，未经过manifest的app-source资格检查。API每页20条、最多5页/100行、最多32条hint；触限必须`truncated=true`，即使hints为空也不能表述“没有更新”或“已知全部历史”。每个已取页面的必要字段、Link与重复ID/tag仍严格校验；HTTP/分页/格式错误直接固定错误，不伪装成partial成功。API分页自然结束才返回`truncated=false`；无论哪种结果都不是当前版本已最新/可运行的证明。
+- UI后续仅展示近期发现且逐条inspect成功的候选；已记录current/previous按已知release ID直接inspect，不要求用户手填历史版本，也不为历史索引新建缓存框架。
+- `inspect(release_id, app_source=...)`返回Candidate，字段为`authority,verified_release,tag_source,manifest,checksums,repository_metadata,release_metadata,ref_metadata`。后三类原始metadata和小文件原字节均从repr中隐藏，不作终端输出；错误不包含body、令牌、signed URL或任意上游消息。调用者不得把原metadata作为页面HTML渲染或当成命令。
+- `recheck(candidate)`重新从固定API取得完整上下文，只在repository/Release/tag/所有asset ID、size、digest、stable状态及独立tag source仍一致、M0重新验证小文件仍同一VerifiedRelease时返回。JSON key及asset列表的纯序列化顺序不算身份变化。它没有跨任务持久状态，也不自动替换原任务上下文。
+
+inspect与recheck先GET固定`/repos/ForceMind/V-UI`，实际核repository ID=1110299182、full_name及public状态，不从常量假造API身份。再GET固定`/releases/<id>`，核Release ID、组件tag/stable/published状态及精确六资产；每资产必须uploaded、API URL与同repo/ID一致，browser URL与固定repo/tag/文件名一致，但下载实际只走asset API/id。`target_commitish`即使存在也完全不作builder source。
+
+独立builder source来自`/git/ref/tags/<组件tag>`，要求ref精确一致。轻量tag直接要求commit40；annotated tag最多剥4层，逐层核固定同repo git tag/object URL、SHA与类型，拒绝cycle/tree/blob/坏SHA，最终只能到commit。两份小asset均先核外部API size/SHA，再复用M0的完整table、精确appsource及四目标合同检查。inspect返回前再独立recheck，不能将下载前的旧API上下文冒充操作结束时仍有效。
+
+### 网络与失败边界
+
+所有请求由固定repository、ID、规范组件tag/commit构造，不接受任意baseURL或raw URL，不查询/改变应用latest，也不追随上游latest。默认urllib使用验证TLS、`ProxyHandler({})`禁代理继承，未读取/发送GITHUB_TOKEN、面板令牌或其他凭据。只设置固定User-Agent、Accept与GitHub API版本头，不安装全局opener。
+
+metadata的任何redirect均拒绝；asset仅可从固定同repo/ID API跳到HTTPS官方release-assets/objects主机。每个逻辑GET两次尝试合计最多3个redirect，重试不重置跳数，所有redirect/error/partial response均关闭且不drain未知body。固定API之外的API资产ID、userinfo、端口、控制字符、非HTTPS或其他主机全部拒绝；signed query仅为传输位置，不是授权依据，也不进入错误文本。
+
+仅502/503/504或明确`TimeoutError/socket.timeout/URLError.reason`为timeout时允许同原URL一次重试。403/404/429、SSL、泛URL/OS错误、破损HTTP、schema或digest失败不盲重试。metadata JSON≤2,000,000字节，严格UTF-8、重复key、非有限数、整数/嵌套界限；未知API字段只按协议取必要allowlist，正常有限浮点未知字段不进入闭合M0输出。必要M0字段仍保持其严格类型和64KB小文件上限。Link只允许固定repo/releases及唯一page/per_page参数，不能跟随任意分页URL。
+
+优先使用read1；没有read1时使用≤64KiB的小块read，任何块均≤1MiB。单次socket timeout≤10秒，可由调用者绝对monotonic deadline进一步缩短；请求及每块前后检查deadline/stop。**这些检查不构成slowloris硬墙钟预算**：一个阻塞open/read期间的慢速报文可能持续超过模块检查点。上层独立worker仍必须实现有限总生命周期、取消后的kill/reap并通过故障验收；本模块不暗建线程、信号或通用任务框架来假称已完成硬预算。
+
+### 显式pack FD下载
+
+caller必须先以O_EXCL独占新建空0600、regular单link、owner=euid的私有O_RDWR非append FD，并保证整个调用期间独占使用。模块检查可观察的空/类型/mode/owner/link/offset/flags；仅凭FD不能证明先前的O_EXCL创建历史或父目录权限，这些仍由caller保证。下载不接收任意输出path。
+
+模块dup自身FD，使用pwrite/pread保持caller FD及offset；开始写前先fresh recheck。原pack≤100MB，按外部asset size/SHA流式读取，重试前只把本次新私有sink截为0，丢弃partial后从原asset API重新GET，绝不append旧bytes。local sink写错不是网络timeout，不触发GET重试。完成后fsync、M0 verify_pack，再fresh recheck和最终FD字节身份稳定性检查，才返回M0 PackIdentity。
+
+任何最终网络/校验/取消/本地写或关闭失败都不返回成功。sink可能保留partial或完整但未确认的bytes；caller负责按自己的临时文件所有权安全close/unlink，不得消费这些失败输出，模块不会自动删pathname或关闭caller原FD。它不发布store、不切换core，也不以文件下载成功代替ELF/native/configuration/service资格。
+
+本块仅假transport、metadata与stream/FD故障测试；真实官方API互操作、实际组件Release、独立worker硬预算，以及后续store/selection/RPC/native集成仍分别待验。
+
+## 已确认核心选择模型（M3）
+
+此块只定义纯数据编码与切换计划，不读写选择文件、不切换核心或服务、不授予权限，也不验证本机可执行或网络资格。结构合法、修订摘要正确都不是材料真实性证明。调用者必须先验证root所属的选择文件、实际应用与bundle材料，以及组件catalog/store与当前配置兼容，再通过受管备份/停机/恢复事务持久化计划。
+
+- schema1完整字段为schema、app_source（实际应用40位source）、target、generation、revision、cores；cores恰为sing-box和xray，每项恰含current与previous，previous可为空。不存裸路径、URL、authority、approved、pending/candidate或用户启动偏好。
+- bundle引用绑定core/version/target、原应用source、payload manifest及二进制摘要/大小；component引用绑定固定仓库、release ID/tag、builder source、发布manifest/清单/pack/内manifest及二进制摘要/大小。component的稳定材料身份不含调用时app_source；提出切换时仍须M0材料结果的app_source与当前应用相同，不能凭稳定身份绕过兼容。
+- revision是排序规范JSON的公开SHA256，排除revision自身但包括generation。generation由0开始，每次实际选择变化递增，防止更新/回退后相同内容重新接受旧CAS；上限到达拒绝继续变更。它不是MAC或签名，不替代root所有权及独立材料验证。
+- 后续root文件/恢复层必须保留代次连续性：initial_selection只用于经确认的首次初始化，不能拿它掩盖损坏或丢失的选择文件；恢复备份不能原样复用备份generation/revision，应从当前live及输入快照推进新代次并撤销旧授权。发现运行时schema2或未解决journal而选择丢失时须进入恢复，不能静默重建为bundle。这些文件与恢复约束尚待实际集成验收。
+- 所有计划先核expected_revision，即使请求材料已经是current也不能跳过旧请求冲突检查。同一current无操作、不改generation或previous；真正更新仅改变指定core，并保留原current为previous，另一个core不变。
+- 回退必须由调用者重新提供已核上一材料的身份，按全部字段精确匹配previous，不以名字/版本字符串替代；成功计划交换current/previous。历史旧app的bundle引用可作为previous保留，但不能静默重绑或在新app下执行。完整软件升级与跨app兼容处理仍需后续实现。
+- 计划包装与选择结构分离；encode拒绝直接编码SelectionPlan，但其after值可为journal编码。结构或编码本身不证明已提交，备份必须读取实际最后确认的live值或prepared journal的原确认快照，不能把plan.after或pending当成已确认备份。CoreRuntime的revision/enabled与停止意图仍归原运行时和后续独占停机快照管理，本模型不写这些偏好。
+
+代码入口：app/core_updates/selection.py；初始纯数据规则在实际Python3.9.6与3.12各17项回归通过，覆盖CAS/ABA、无操作、双core隔离、上一材料精确性、应用/目标/引用字段与无自授信。新app/root文件与运行时集成、真实切换和恢复尚未由此得到资格。
