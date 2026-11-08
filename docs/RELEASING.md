@@ -1,210 +1,71 @@
-## v0.4.22 已公开：不再晋升，仅切入口
+# 发布规范
 
-v0.4.22已从准确main `558687a76cd29f4e4735284926eb05bf6664472e` 公开（PR137→dev、PR138→main）。候选/dev/main各自九组12 jobs、同源四目标、新装及公开14/15/16/17/19/20/21保数据升级全部通过；publish run42398527616晋升已验制品，Release437741132的tag/latest、19资产digest和真实小文件已匿名核验，旧21资产ID/大小/digest保持。浏览器未验证。
+## 当前稳定版
 
-本提交复用release/v0.4.22，只更新短入口版本/真实摘要、short-install冻结公开应用源、两项直接合同与说明；不改应用、VERSION、安装器、发布器或其他CI，不再次发布22。入口候选/dev/main及实际main URL须各自验收，不能把入口SHA当作公开应用source。用户的正常合并、入口及私有备份后远程升级授权沿用；操作记录仅私存，不源码热改/SSH/防火墙，不本机构建安装。22专属`maintenance_share_no_browser`只授权已验冻结应用源，不适用于入口改动后的新构建，不覆盖旧tag/资产。[唯一记录](MAINTENANCE_SHARE_0422.md)。下方21为历史。
+[v0.4.22](https://github.com/ForceMind/V-UI/releases/tag/v0.4.22) 已公开，正式应用源为 `558687a76cd29f4e4735284926eb05bf6664472e`，Release ID为437741132。[发布流程42398527616](https://github.com/ForceMind/V-UI/actions/runs/42398527616)晋升该提交的已验制品；公开19项资产、真实小文件字节和摘要已匿名核验，旧21资产保持。
 
-## v0.4.21已公开：不再晋升，仅切入口
+短入口随后经 PR139→dev、PR140→main 合入 `39181e0cdb9643422a19049df942b208f876faf4`。入口候选/dev/main各自完成九组/12 jobs；[实际 main 短命令验收42405651147](https://github.com/ForceMind/V-UI/actions/runs/42405651147)和[公开完整安装验收42405651162](https://github.com/ForceMind/V-UI/actions/runs/42405651162)分别通过。入口 SHA 不是应用发布源，不重新生成或重标22资产。完整版本证据见[本版记录](MAINTENANCE_SHARE_0422.md)。浏览器未验证。
 
-main2aa5e11与tag/source一一匹配，run42363209517已从同源受验制品公开Release437495658（19资产）；匿名tag/latest/服务器digest及真实安装器/完整SHA256SUMS已核，旧20资产保持。当前只更新入口真实pin及冻结发布源、两项测试和直接说明，准确候选/dev/main各自九组及实际main URL另验，不覆盖已公开套件、不复用入口构建重发21。用户的正常合并/入口与备份远程更新授权沿用；生产操作不进入公开记录。浏览器未验证。[统一记录](SIMPLE_OPERATIONS_PROGRESS.md)。下方发布准备与未授权文字保留历史。
+## 版本、说明和兼容
 
-## v0.4.21 本轮发布准备
+纯文档、协作模板及不改变产品行为的说明更正不提升应用版本。用户可见修复、API/数据契约或协议行为变化需要独立评估版本和迁移范围；在现有 `0.x.y` 体系内保持 `VERSION`、应用版本、安装器的当前版本示例和发布说明一致。不能以改文档版本代替真实产品发布。
 
-已验产品冻结于0a133205bb7a1f1d0deabd28eb4fffe77625fd44，本轮仅`simple_operations_no_browser`版本专属门禁、严格测试及直接文档。禁止改冻结应用/UI/root/依赖/核心/已有CI与安装器；不得复用旧20例外。合并/公开与入口切换须对应明确授权；精确候选、dev、main各自最新九组/全部job及步骤成功，仅原12明列browser步骤允许skip。新装、不可变公开14/15/16/17/19/20升级、固定核心真实三任务和同源四目标保持必需。发布仅晋升main准确同源受验套件，不重建；匿名核tag/latest/19资产digest和真实安装器/SHA256SUMS后才切短入口，入口自己的准确资格及实际main URL另验。最后通过现有维护会话私有备份再升级服务器，保留原配置数据和节点。浏览器未验证；[统一记录](SIMPLE_OPERATIONS_PROGRESS.md)。下方“仅开发/尚未授权远程”是上一阶段，不覆盖本次远程更新要求。
+每次发行说明应写清用户改变、升级建议、兼容/迁移边界、已知限制和实际验证。涉及持久化或认证变化时说明原数据、会话、凭据、订阅和证书的保留或失效条件，以及恢复的前置要求。不能把回滚程序等同于可安全回滚已迁移数据。
 
-## v0.4.21 简单操作：仅开发候选验收
+固定核心和依赖仍按既有 pin 与来源校验；改变 pin、协议支持或目标平台须独立审查和准确提交验收。发行包保留项目 [MIT License](../LICENSE)及[第三方许可证和来源](../third_party/NOTICE.md)，不能删除声明或将第三方许可改称项目自己的许可。
 
-当前用户授权实现、独审、Draft PR和准确Actions，不包含受保护分支合并、公开Release或生产升级。短入口继续固定已公开20，不复用20冻结发布例外，也不改变发布器。21需单独取得发布与严格非浏览器例外授权后才能准备相应发布门禁；浏览器未验证。候选包含三个真实任务、同页授权维护、节点编辑/分享和证书/订阅/备份任务，要求准确全套Actions、四目标、真实链路、安装及不可变公开20保数据升级。[唯一进度与证据](SIMPLE_OPERATIONS_PROGRESS.md)。下方旧版本“当前/尚未公开”按历史批次解释。
+## 从候选到 main
 
-## v0.4.20 发布准备：systemd / sing-box 网络监控
+1. 版本分支从 `dev` 开始，冻结本次范围和验收要求。实现、必要回归和说明接受独立审查后，通过正常 PR 合入 `dev`，再通过 PR 合入 `main`，保留历史和并发修改。
+2. 候选、dev与最终main分别核对完整 SHA、实际内容树、每个 workflow 的最新 run/attempt、全部 job 和必要 step。不继承其他提交的绿灯；失败及同字节重跑原因保留。
+3. 产品构建、制品处理、固定核心和真实系统安装/升级均在 GitHub Actions 的空白临时 Linux runner 执行。确认准确main的四目标包、新装、当前要求的不可变公开旧版升级及数据/恢复门槛，不能以 parser 或合成测试替代真实链路。
+4. 人工发布只晋升这个准确main已受验的同一套件，发布时不重新构建。公开、实际部署和生产数据写入均需要对应明确授权。
 
-本轮沿用用户在明确20最小修复、独审、正常dev→main、公开/短入口和备份后维护链接升级方案后的人工“继续”。产品冻结31e6ee921082a8fee98ba368942dadf712d751d3；panel只增加AF_NETLINK，非root/NoNewPrivileges/空能力集及HTTP01/OpenRC保持。其后仅严格版本替换、门禁、直接文档和完整hash固定的必要CI回归；netlink_service_no_browser仅适用20且与全部旧例外互斥，不能任意跳过非浏览器步骤。
+文档或模板 PR 按改动核验内容、链接、版本和格式，既有 Actions 继续按事件执行；不额外要求每个文档 PR 手动构建全平台或运行无关测试。发布候选仍须满足完整实际门禁，不能因为文档流程较轻而跳过发行资格。
 
-准确候选、dev和main各自按同SHA每workflow最新run/最新attempt/全部job和步骤核验；仅12个明列浏览器步骤可跳过，浏览器未验证。固定核心/模板/完整loopback、四目标、真实安装后的Sing/Xray共存和TLS/认证转发、不可变公开19及原14/15/16/17保数据升级全部必要。人工发布只晋升准确默认main已受验同源套件，不重建或覆盖旧tag/Release/资产。公开后匿名核19项资产和真实小文件摘要才切短入口，再验自身候选/dev/main与实际main URL；最后备份后通过已授予维护链接升级并实际验证。当前稳定仍19，尚未公开20。[统一记录](SING_BOX_SYSTEMD_0420.md)。
+### 浏览器与版本专属例外
 
-## v0.4.19 已公开：短入口切换
+浏览器测试默认不运行，须有具体场景的明确授权；未运行即写明“浏览器未验证”。v0.4.22 的 `maintenance_share_no_browser` 是固定于该版已审产品的历史例外：九组/12 jobs及其余步骤全部成功，仅原12个明列浏览器步骤可跳过且必须存在，强制模板编译、netlink、固定核心、完整链路、短入口、新装及公开14/15/16/17/19/20/21保数据升级。
 
-用户已批准PR #124 Ready、正常dev→main、公开19及短入口更新。产品冻结d297af43623e53d0f14ced48b705e04008775a5d，严格maintenance_180_no_browser例外只适用19且保持全部旧门禁。准确main a2b9c188658f082b189e77d237787a96eb9cf921自身九组/12jobs全部attempt1后，人工run42153964824晋升同提交受验制品，公开Release436051562。已匿名核tag/latest、19资产、安装器及完整SHA256SUMS真实字节和摘要，旧18资产ID/大小/digest不变。
-
-当前只更新短入口版本/真实摘要、冻结验收源a2b9c18、两项测试和直接说明，不改应用、安装器、VERSION、发布器或旧资产，不再次公开19。短入口候选/dev/main仍各自通过准确资格及实际main URL安装验收；正式规则为同SHA每工作流最新run，不按event各要求一套。额外双事件观察及较早未结算push留档，不计通过。构建安装仅Actions，浏览器未验证，不操作VPS。[统一记录](LONG_MAINTENANCE_0419.md)。
-
-## v0.4.18 已公开：短入口切换（历史）
-
-准确main27862759d0d73a36fa1a7bdccf165d35a3b851b5已从同源受验制品公开（run42006251492，Release435022725，19资产）。匿名tag/latest、每项服务端digest和真实安装器/完整SHA256SUMS已核验，安装器字节等于发布源，旧17资产不变。当前只切setup.sh真实版本/摘要、short-install冻结源和对应测试/说明，应用、安装器、版本、发布器、两份固定CI同步助手和旧tag/资产保持冻结，不再次发布。本批另验准确候选/dev/main以及实际main短入口URL，公开HTTPS安装验收另行记录。构建安装只Actions，浏览器未验证，不改用户VPS。统一证据见[记录](SIMPLE_NODE_WIZARD_PROGRESS.md)和承载PR/Release；下方为已执行的发布契约及历史。
-
-## v0.4.18 发布准备（历史批准）
-
-用户批准PR119 Ready、正常dev→main、公开18及短入口更新。批准产品冻结于85bc22d92696bb51a5eb71c1827838d0e0a05a54；其后严格限定版本、发布门禁、公开17升级、说明和发布后短入口指针，应用/UI/root/依赖/核心保持。专用 simple_node_no_browser=true 仅适用0.4.18，不能混用旧例外；main.py及install.sh只允许17→18对应字节替换，路径/文件模式/祖先均须核对。
-
-候选、dev与最终main各自要求全部非浏览器jobs/steps、固定Vue诊断编译/核心、完整真实双跳/中转及四目标、真实安装/维护和公开14/15/16/17保数据升级成功。浏览器未验证；既有浏览器步骤仅按批准门禁跳过，其他步骤不得省略。人工发布仅晋升准确默认main已受验同源套件，不重建或覆盖旧tag/资产；公开后匿名核对19资产及实际摘要，再独立核验短入口候选/dev/main与真实main URL。发布结果见上段、[统一记录](SIMPLE_NODE_WIZARD_PROGRESS.md)及承载PR；下方17内容为历史。
-
-## v0.4.17 已公开，短入口后续
-
-准确main95c201c6e26ed54960f964c675e515890f2eea2a已从受验同源制品公开（run41876406580，19资产）。匿名tag、每项digest和installer/完整清单真实字节已核验，旧16资产ID/大小/digest未变。当前仅切真实短入口pin与冻结应用源95c、相关测试和说明；不重新发布或覆盖资产。引导候选/dev/main及实际main URL继续验自己的资格，浏览器未验证。下方门禁是本版已执行的契约，最终结果仍在[统一记录](REMOTE_MAINTENANCE_PROGRESS.md)及承载PR/Release。
-
-用户已批准PR115 Ready、正常dev→main、公开v0.4.17与短入口更新；产品冻结于629d44c7e0acf2f9aebdfdac765522cc93f9af22。专用 `remote_maintenance_no_browser=true` 只适用0.4.17、固定祖先及严格枚举的版本/门禁/旧版升级验收/文档路径，不能与旧例外混用。main.py和install.sh仅16→17字节替换，其他app/UI/root/依赖/core逻辑不得再改，拒绝删除、rename、链接、类型和mode变化。
-
-仅明列12个浏览器步骤可跳过且必须存在；浏览器未验证。固定真实核心、完整loopback、公开14/15/16三个真实保数据升级都必须success。准确候选、dev和main各自最新attempt/全部jobs及其他steps必须成功，同提交四目标和真实安装不能借旧绿灯。全部构建和真实安装只Actions，不触碰用户VPS或新CA条款。
-
-人工发布只晋升准确默认main已受验同源资产，不重建、不覆盖旧tag/Release/文件。公开后匿名核对19资产、tag目标与真实installer/完整SHA256SUMS摘要，再通过独立PR切setup.sh及short-install冻结源，并验自身候选/dev/main和真实main URL。统一证据见[本批记录](REMOTE_MAINTENANCE_PROGRESS.md)，最终结果由承载PR/Release记录，避免回写自身SHA循环提交。
-
-## 2026-11-04 v0.4.16 已公开，短入口切换验收中
-
-准确发布源 `18fe631bcf69b68425b454db1795a101e0378842` 已公开，19资产、tag及真实摘要已匿名核验，旧15资产保持。当前只更新短入口版本/pin和冻结验收源，仍需自己的候选/dev/main与实际main短命令验收；应用、发布器、VERSION及tag资产不重建覆盖，浏览器未验证。下方为本版已执行的发布门禁契约。
-
-用户明确批准PR111转Ready、正常dev→main合并、公开v0.4.16以及公开后的短入口切换，保留原数据，继续仅Actions构建/实际安装且不运行浏览器。本版使用 `tls_certificate_no_browser=true`，仅适用0.4.16，与所有旧版例外互斥。已独审和Actions验证的候选 `26e7bdd7f258f6ddf025291d5b6d86b71efebbe5` 为固定祖先；其后的改动只能是发布器精确枚举的发布门禁、旧版升级验收、文档与版本准备。main.py仅15→16版本字符串替换，install.sh仅同一版本头注释替换；其他UI、API、CoreRuntime、依赖及固定核心保持。拒绝删除、rename、类型、链接或mode变化，不允许任意docs或tests扩围。
-
-仅原有12个明列浏览器步骤可跳过，且必须存在；浏览器未验证。准确默认main HEAD、最新run_attempt、全部jobs及其余steps成功、同提交四目标与真实安装仍是必要门禁。`Validate with pinned real cores` 必须成功，包含固定Xray真实TLS/SNI、证书轮换、失败保旧、停止待应用与恢复；oneclick必须同时成功完成 `Test published v0.4.14 to exact candidate upgrade on ephemeral systemd runner` 和 `Test published v0.4.15 to exact candidate upgrade on ephemeral systemd runner`，核对账号、数据、配置及恢复。候选、dev、main和公开后资格分别记录在[本批记录](TLS_CERTIFICATE_BINDING_FIX.md)，未运行项不称通过。
-
-发布器只晋升准确同提交受验资产，不重新构建，不覆盖旧tag、Release或资产。发布前不改setup.sh或短入口冻结源；公开后先核验19项资产、tag目标与真实摘要，再通过独立PR更新短入口版本、摘要和冻结源，并在准确候选/dev/main及真实main短命令复验。
-
-## 2026-11-03 v0.4.15 已公开，短入口切换验收中
-
-v0.4.15已从准确main `65b1e75d90de733408101ec280a92be935731baa` 公开（19资产），用户批准的PR107/dev→main正常合并与准确候选/dev/main验收已完成。当前只切公开后短入口真实摘要与冻结验收源，随后另验候选/dev/main及实际main短命令；旧tag/资产不覆盖。使用 `ui_redesign_no_browser=true`，仅适用0.4.15、固定已批准UI候选 `7726c44d16fd88a8dfc7a4ffd404de88942da4ad`，不得与旧版例外混用。基线后严格枚举版本、发布门禁、旧版升级验收与相关说明文件；main.py仅14→15版本替换，install.sh仅同一版本注释替换；其他生产UI、后端、依赖、固定核心与短入口不得变化。rename、删除、链接与mode变化均拒绝。
-
-只允许原有12个明列浏览器步骤跳过，且这些步骤必须存在；浏览器未验证。准确默认分支HEAD、最新run_attempt、全部jobs/其他steps成功、同提交四目标和真实安装保持门禁；额外要求从已公开v0.4.14真实安装升级到本候选并核对账号、数据、配置及恢复。构建与实际安装全部在Actions。发布器只晋升同提交受验制品，不重新构建、不覆盖旧tag/Release/资产。公开后核验19项资产、tag目标及真实摘要，才单独修改setup.sh和短入口冻结源。准确候选、dev、main与公开后结果分别记录在[本批记录](UI_REDESIGN_PROGRESS.md)，未运行项不称通过。
-
-> v0.4.14已从准确main公开，19项资产和真实摘要已核验；后续短入口与冻结应用源分别记录，不覆盖旧tag或资产。[本版证据](STARTUP_READINESS_0414.md)。
-
-> v0.4.13 已从准确主线公开，19项资产已核验；后续短入口提交与冻结应用源码分别记录。发布和验收见[本批记录](INSTALLER_AUTOMATION_0413.md)。旧版范围例外不能复用。
-
-## 2026-11-03 v0.4.13 账号与安装检查（已批准）
-
-本版使用 `install_interaction_no_browser=true`，仅适用0.4.13、固定main基线4fc66de1dbb9d9b9a9edec6845609fd32e99e9cc；不能同时选择旧版例外。精确允许安装器、只读防火墙检查、本地管理员初始化和对应测试/文档/版本；main.py和install.sh仅版本替换，deploy.py仅两条正常提示翻译，builder不变。Web认证API、证书验证逻辑、前端、依赖和固定核心变化拒绝。仅原有明列浏览器步骤可skip，准确主线/attempt/jobs/steps、四目标和实际安装门槛不变；浏览器未验证。
-
-## 2026-11-02 v0.4.12 系统CA兼容修复（已批准）
-
-本版使用 `ca_trust_no_browser=true`，仅适用0.4.12、固定基线4f24e4ce12a5dbe4fbd2da745a936734f82121f6；不能同时选择旧installer_only_no_browser。只允许证书材料根加载/固定错误分类、对应测试、版本及发布说明，其他应用/前端/依赖/核心拒绝，builder保持逐字节不变。main.py和install.sh只允许严格版本替换。其余准确主线HEAD、最新成功attempt/全部非浏览器jobs和steps、四目标制品及实际安装不放宽。历史版本 `--version=v0.4.12` 已公开，短入口仅在公开摘要核验后切换。浏览器未验证；范围和证据见[本版账本](CERTIFICATE_SYSTEM_CA_0412.md)。下方旧例外按各自版本保留，不可泛用。
-
-# 正式发布流程
-
-正式Release是一次明确的公开写操作，不等同于PR、版本字符串或Actions候选附件。此流程只晋升经过验收的完整套件，不在发布时重新构建“另一份看似相同的包”。
-
-## 当前分支与短入口（v0.4.9 维护记录）
-
-正式发布从默认 `main` 的准确 HEAD 执行；`dev` 用于集成，每版在 `release/vX.Y.Z` 独立开发并依次通过 PR 合入 dev/main。历史记录中的 master 名称和准确提交保持原文。`setup.sh` 当前只内置已公开 v0.4.9 安装器与整套 checksum 文件的可信摘要；本次维护不创建新应用版本、不覆盖旧资产。后续稳定版需先完成自己的发布资格及公开发布，再显式更新短入口的版本和摘要。
-
-构建、四目标制品处理和实际安装验收放在 Actions，本地只保存必要文本证据。新增 `short-install.yml` 通过匿名公网读取确切源码的短入口并安装冻结正式套件；main 上使用 README 中的真实 main URL，核对入口字节与准确 checkout，复用真实 systemd/交互配置/全局菜单/重复拒绝/升级及恢复检查。
-
-浏览器步骤默认保留但不执行，须按 CONTRIBUTING 的显式 opt-in 取得具体授权。本次发现原发布器仅检查 workflow 总结论，已补充准确 run_attempt 的全部 jobs/steps 成功校验、分页和重跑状态复核；任何 skip、缺项或失败都会阻止晋升。跳过浏览器的常规 CI 不替代完整发布资格。本次不会触发 publish.yml。
-
-## 2026-10-29 v0.4.11 已有安装交互修复（已批准）
-
-用户明确批准转 Ready、dev→main 正常合并、公开发布 v0.4.11 和短入口切换，继续 Actions 非浏览器验收。当前发布器的 installer_only_no_browser=true 仅接受 0.4.11，固定基线为 `586d8a2dbd0be6d7ba8d5c5823df8fe9a1f73c95`。main.py 仅允许版本常量替换，build_bundle.py 仅允许新增恢复 helper 白名单行；不允许改应用、前端、依赖、固定核心或借 builder 改写包。其余准确提交、准确 attempt、同源四目标、全部非浏览器 jobs/steps 与旧资产不可覆盖门槛保持。详细证据见[本版账本](INSTALLER_EXISTING_0411.md)。下方 v0.4.10 为历史批准事实，不表示当前发布器可再次发布旧版本。
-
-## 2026-10-28 v0.4.10 安装交互修复（历史批准）
-
-用户明确批准正常合并及公开发布 v0.4.10，采用非浏览器构建/实际安装资格，旧 v0.4.9 不覆盖。使用 publish.yml 的 installer_only_no_browser=true 必须同时满足版本恰为 0.4.10、相对固定基线 c138d0062619d498d711e17f86a58a5e8f61a1cf 仅安装器/测试/文档与发布流程文件变化、main.py 仅版本常量变化、无前端/应用/运行依赖/固定核心变更。仅允许明列的浏览器步骤 skip，缺项、失败、取消和其他 skip 仍拒绝；Release 正文明确浏览器未验证。该例外不能用于其他版本。
-
-先验准确候选、dev/main 自身非浏览器门槛和同源四目标，发布器只晋升已验制品。正式公开后读取真实 installer/SHA256SUMS 摘要，才更新 setup.sh 默认版本与可信摘要、short-install.yml 冻结发布源码及文档；随后复验实际 main 短命令。进度集中于[本批账本](INSTALLER_INTERACTION_0410.md)。
-
-## 2026-10-27 v0.4.9 已批准发布批次
-
-用户已批准实现、独审、正常合并和公开发布新 v0.4.9，旧标签与资产保持。执行记录集中在[一行安装计划](ONE_LINE_INSTALL_049.md)。
-准确候选与正常主线均需自己的既定八组/四目标验收。发布器只晋升同提交受验资产，生成带脚本及完整 kit 摘要的一行命令，上传校验完成后才公开。
-公开后派发 `online-release-acceptance.yml`，输入发布的完整 commit 和 `0.4.9`；在空白 Ubuntu runner 使用匿名公网资产、临时提供证书及真实交互安装/全局菜单复验。
-该验收不修改生产主机或系统信任库；临时证书的端到端结果与既有 ACME 验收各自记录，不称真实域名签发。
-
-
-## 2026-10-16 历史状态：0.4.8 已发布
-
-[官方 v0.4.8 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8) 于 2026-10-15 10:57:29 UTC 公开，tag 准确指向 `a9f9b5d9c0dd2aada5e8f5f2270b2ce93440d5ff`；2026-10-16 只读复核为非 draft、非 prerelease、19 项资产。该版本仅包含安装器修复；其后双开关准确主线 `9a97ad13` 的 CI/四目标候选已验收，但没有新版本或公开 Release。源码 `VERSION` 仍为 0.4.8 不授权覆盖旧 tag/资产，也不代表这些功能已发布。下一次发布须独立冻结新版本、准确 CI/同源制品及明确发布授权；`publish=false` 仍是发布写操作。当时开发没有触发它。
-
-## 0.4.8 发布前快照（历史保留）
-
-[官方 v0.4.7 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.7) 于 2026-10-13 01:26:40 UTC 公开，tag 指向主线 `c5d50ee14b08da57bdc13c150b4ed501e9484023`；2026-10-15 只读核对为非 draft、非 prerelease，元数据列有 19 项资产。该只读状态核对不重做包字节验收，也不表示部署到用户主机。已发布 tag 和资产保持不变。
-
-当前 `VERSION`/应用版本为 **0.4.8（UNRELEASED）**，仅[安装入口退出状态、清理和引导失败修复](INSTALLER_EXIT_STATUS_048.md)。本次不执行 tag、Draft Release、Release 附件上传/晋升、公开发布或生产部署；`publish=false` 仍是创建草稿和上传的发布写操作。准确候选、主线 CI 与同提交制品必须重新验收，不能借用 0.4.7 的旧包或旧成功记录。0.4.8 未来若获发布授权，仍须满足下方完整人工门禁。
-
-该历史分支的 0.4.8 安装示例仅供当时正式发布之后使用，**现在不要执行**；必须先核对正式公开状态和完整 19 项资产。需要正式版的用户请使用[固定 v0.4.7 文档](https://github.com/ForceMind/V-UI/blob/v0.4.7/docs/INSTALLATION.md)，并先阅读[旧安装器的问题和排错边界](INSTALLER_EXIT_STATUS_048.md)。
-
-## 0.4.7 制品来源与交付边界（历史准备记录）
-
-产品代码集成基线02d8见[主线收口](MAINLINE_OPERATIONS_CLOSURE_20261012.md)，其后93c8的准确主线CI与同源四目标/19资产验收见[PR #36](https://github.com/ForceMind/V-UI/pull/36)。后续README或其他文档提交同样必须完成自己的候选、正常合并、准确主线及新制品验收；不能晋升旧基线包冒充新头。
-
-以下保留 0.4.7 发布前的来源约束及准备背景；当时“待验/未发布”不覆盖上方已核实的公开状态。最终结果记录在承载 PR/Release 账本，不为把自身 SHA 写回文档再创建循环提交。部署到用户主机是单独的操作。
-
-实际受管root/systemd资格只属于f509原run；普通包消费、整机/24h及其他未验边界保持。原始oneclick kit16成员、发布19资产/18校验行、Actions artifact数量是不同计数。下面的准确HEAD/最新八组/同来源/不得覆盖门禁始终适用，不能因已有发布意向跳过。
-
-## 2026-10-12 合并前集成候选状态（历史，未发布）
-
-以下“未合并/master a6aa/新head待验”保留候选形成时的事实，不替代上方当前交付准备和固定已验代码基线。
-
-- 同一候选沿历史继承 PR #28–33 的低资源软件修复、后台安全中心说明、非 root 服务用户菜单、可信候选准备和全局受管菜单，见[完成矩阵](INTEGRATED_OPERATIONS_CANDIDATE.md)。`VERSION` 保持 `0.4.7`；PR #28–33 尚未合并，主线仍为 `a6aa84d`。本次未合并 master 或创建 tag/Draft Release/公开 Release，未向 Release 上传或晋升资产，也未操作用户主机
-- 全局 `sudo /usr/local/sbin/v-ui` 需要从完整独立可信 kit [显式安装 root-owned 组件](MANAGED_OPERATIONS.md)，默认 `install.sh` 不添加它。systemd 提供服务控制和依赖停服的数据事务；OpenRC 仅查询与纯候选准备，拒绝服务启停及依赖停服的数据写动作。单独选择 CURRENT 不升级 root-owned 控制源码、launcher、安装记录或服务模板，不能把候选准备当作完整系统升级
-- [PR #33](https://github.com/ForceMind/V-UI/pull/33) 的文档基线 `09f2cf4ec39adfbb345d8aa40b94558c64c93936` 已完成普通八组/11 jobs/119 steps 全部 attempt 1 与 9 个原始 artifact 核验。真实 root/systemd 资格只属于 `f50942f` 的 [run 38203515936](https://github.com/ForceMind/V-UI/actions/runs/38203515936)，11 个必需阶段含 cleanup、自有资源清理确认；没有 09f2 root 重验。源码、普通 CI/包消费、root/init 资格与公开发布不得互相替代
-- 本次新候选另含 VMess CA/SNI 负向的有界证据收集修复，移除被动 2 秒轮询，保留新日志行上的真实 x509/指定原因、零送达、无 DIRECT、清理及停进程后的送达检查。本地合成 RED 说明契约缺口，不证明历史真实网络失败的唯一原因。新 head 尚待自己的独立审查、普通八组 CI 和同提交原件核验；不预填自身 SHA 或未来成功，也不能晋升 09f2/f509 的旧包冒充它
-- [受管候选历史](MANAGED_OPERATIONS_CLOSURE_20261012.md)与[低资源失败记录](LOW_RESOURCE_CLOSURE_20261011.md)保留。真实 1 vCPU/512 MiB 整机、24 小时完整负载、160/320 MiB 工程预算、其他平台真实 root/init、跨版本/schema 迁移与真实断电恢复尚未获资格。既有协议、核心 pin、SNI 与网络范围不扩展，UDP/DNS 等未来阶段不纳入本次，XHTTP/HTTPUpgrade 公开导出仍阻断
-- 当前发布脚本的完整聚合是下文所列 19 项资产，与 oneclick 原始 kit 的 16 个成员及 Actions artifact 数量不同。`publish=false` 会创建 Draft Release 并上传，仍是发布写操作，绝非 dry-run；须在下述人工门槛及明确授权下执行。候选通过不解除发布或主机权限边界
-
-## 2026-10-06 发布准备背景（历史）
-
-以下至“前置条件”前保留当时的状态、旧套件核验和后续要求；不把旧记录的待验收项或通过结论移植给上述新候选。
-
-当前 v0.4.7 [REALITY/Vision 已完成主线收口](REALITY_VISION_CLOSURE_047.md)：独立审查、准确候选八组和正常合并后的准确主线八组已验收。首次 REALITY 前置 HEADERS 断言失败、最终 master 继承 VMess/Mihomo CA 被动轮询缺少 x509 原因的首次失败及 unchanged-code attempt 2 通过均保留；重跑不表示旧轮询问题永久修复。[PR #25 XHTTP 刻画](XHTTP_CHARACTERIZATION_CLOSURE_048.md)已正常合并至签名 master `66dbe70cfa86fe140fa1b69d3896244ab17a0e3c`，与候选 `f7996c579418d1ffe5df06fc12677cf22a42e034` 的 tree 相同，独立审查及两端各八组/11 jobs/全部步骤 attempt 1 成功。仅测试/文档，产品 VERSION 仍为 0.4.7，公开 XHTTP/HTTPUpgrade 支持保持阻断。产品范围冻结，先完成本版发布准备和交付决定，再推进独立 UDP/DNS 实现；现有只读审计不构成实现验收。
-
-截至 2026-10-06 本次检查，未晋升附件、创建 Draft Release 或执行新建 tag/公开 Release/生产部署；源码、原始 CI artifact、已核验附件与公开发布分别记录。完成代码、PR、CI 或发布准备不等于获准创建发布草稿或公开发布；任何发布操作仍受下述人工门槛与明确授权边界约束。
-
-## 0.4.7 准备状态（2026-10-06 历史）
-
-- v0.4.2、WS 0.4.3、gRPC 0.4.4、HY2 0.4.5、TUIC 0.4.6、REALITY/Vision 0.4.7 与 PR #25 刻画均有各自准确主线验收；这些历史阶段未因此成为正式 Release。当前准备一个累计产品 0.4.7，不回填旧阶段发布、不将刻画称为产品 0.4.8。
-- 本次只读检查的 [Releases API](https://api.github.com/repos/ForceMind/V-UI/releases?per_page=100) 返回空列表；已存在历史 tag `v1.0.0` → `196c9b97ded5ef2391e01cefff408f516fbac508`，保持不动，不能据此推导本轮已发布。未发现 v0.4.x tag；本轮未创建 tag/Draft Release/公开 Release 或晋升附件。
-- 此最终状态文档自身的候选审查、准确候选八组、正常合并和准确主线八组必须独立完成。本文不预先宣称自身未来提交通过，也不填入未知 SHA；结果记录在对应 PR/发布准备证据中，不为回写自身验收再滚动产生新提交。
-- 文档收口后的最终当前 master 通过八组后，才选择它自己的一键套件和三份 portable artifact，核验完整四目标资产。旧 `6b049262` 的套件 metadata 只证明当时来源/大小/过期时间，未证明归档字节、内部 MANIFEST、许可证或聚合摘要；它不是最终套件验收。PR 候选或 `66dbe70c` 的包也不能冒充后续文档收口 master 的包。
-- 最终准备检查须下载同一准确 master 的已验收附件，逐项核对 Actions archive digest、包内源码/版本/target MANIFEST、第三方许可证/来源、安装器与 helper/source/说明资产、RELEASE.json 和最终完整 SHA256SUMS；不得发布时重建替代。四目标 package 验收、附件晋升与公开发布分别记录。
-- 到上述核验完成前，只能报告“范围冻结、发布准备中”，不能报告完整套件已核验或已发布。完成准备仍不授权创建 Draft Release、tag、上传/晋升或公开发布；保留下面的人工明确确认与真实发布后核验边界。
-
-## 0.4.7 打包范围说明更正（2026-10-06）
-
-[PR #26](https://github.com/ForceMind/V-UI/pull/26) 的候选 `0171f1f010f63bf73fde54c330309274e3d40f2b` 与正常合并 master `a21e31e1df4fd36a6994da780c29d051374279a9` 已分别完成八组/11 jobs/全部步骤验收。候选各组 attempt 1；主线除链路外七组 attempt 1，链路首次继承 GeoSite 下载连接重置后 unchanged-code [attempt 2](https://github.com/ForceMind/V-UI/actions/runs/37494753598/attempts/2) 成功。首次失败记录保留，不把重跑当作外部下载问题永久修复。
-
-该 master 的 13 项最终资产已做独立字节/来源核验：四个目标 ZIP 合计 376,881,626 字节，Actions archive 摘要、包内源码/版本/target MANIFEST、许可证/来源、源码包、安装器/helper、RELEASE.json 和 SHA256SUMS 一致。此结论仍作为旧套件完整性证据保留；未执行包内软件，也未上传、晋升或发布。
-
-核验同时发现打包 UI 在 `core === 'xray'` 警告中使用了全局“REALITY 未验收”的过时说法，MANIFEST 也仍只描述 VLESS/TCP/TLS。旧套件因此被后续修正候选取代，原因是发布展示质量，不是摘要不符或源码替换。修正仅明确 Xray REALITY 未验收/公开拒绝、保留 sing-box REALITY/Vision 有界验收及成功分支，并把累计导出范围指向 [COMPATIBILITY.md](COMPATIBILITY.md)。协议/编辑/导出行为、版本、核心 pin、应用 UDP 范围及 XHTTP/HTTPUpgrade 阻断均不改变。
-
-本次修正仍须独立审查、准确候选八组、正常合并后的准确主线八组，以及该新主线自己的四目标最终套件核验。新增单元回归读取真实 `prepare()` 结果与合成构建 ZIP 的实际 MANIFEST；deployment 门槛也检查实际安装包清单。合成夹具不等于四目标真实包验收，旧通过不能冒充新通过；结果记录在对应 PR/发布准备证据中，不预填未来 SHA 或递归回写成功声明。上述新验收完成前仍为发布准备中，任何 tag、Draft Release、上传、晋升、公开发布或部署均须另行明确授权。
-
-## 前置条件
-
-1. 按依赖顺序审阅并合并前置PR；目标必须是当前默认分支的**准确40位HEAD提交**，不能给一个旧测试结果配新源码。
-2. VERSION与main.py版本一致，CHANGELOG、兼容矩阵、证书和安装文档已更新。
-3. 默认分支push会触发全部门槛。相同提交必须完成test、toclash、loopback、release、acme、oneclick、portable和docs八组工作流，**每组最新一次**都为completed/success。失败、取消、缺失或排队一律阻断。
-4. One-command 任务生成 x86_64/glibc 发布套件；portable matrix 生成 ARM64/glibc 与两套 musl artifact。发布脚本只聚合同一 exact-head 提交且已通过验收的这些附件，不在发布时重建。
-5. 检查原有tag/Release不存在；正式版本不覆盖、不悄悄替换已发布资产。
-
-## 人工触发
-
-在默认分支选择 `Publish verified V-UI release` 工作流，填写commit、version与完全匹配的 `RELEASE <version> <sha>` 确认文字。
-
-`publish=false`为默认值：完成校验和资产上传后保留草稿；只有操作者明确设为true才公开。发布脚本先创建draft，上传全部资产并验证各自服务端digest，全部成功后才允许公开。中途失败保留草稿供审查，不误报已完成。
-
-GitHub权限只在该人工工作流的发布job授予contents:write/actions:read；PR测试没有发布权限。输入经环境变量和参数校验，不拼接为任意shell代码。
+该例外不能用于未来版本、任意测试/工作流修改或扩大 skip 范围。未来发行须先明确自身验收要求并经审查，不复用22许可或降低现有门槛。queued、running、cancelled或未经允许的 skipped 不计成功。当前文档整理不改变 CLI flag、工作流或发布器算法。
 
 ## 发布资产
 
-发布脚本 `scripts/publish_release.py` 的 `ASSETS` 精确包含以下 **19 项**；四目标包之外的入口与控制 helper 也必须来自同一准确提交，须完整提供每个固定文件。
+当前发布器的固定集合共 **19项**，来源、版本及完整性均绑定同一准确应用提交：
 
-- vui-linux-x86_64-gnu.zip：经过同提交 one-click/systemd 验收的固定离线包。
-- vui-linux-aarch64-gnu.zip：经过同提交 ARM64 原生 portable 验收的固定离线包。
-- vui-linux-x86_64-musl.zip：经过同提交 Alpine/musl 原生 portable 验收的固定离线包。
-- vui-linux-aarch64-musl.zip：经过同提交 ARM64 Alpine/musl 原生 portable 验收的固定离线包。
-- install.sh、install_system.py、platform_support.py、firewall_support.py、service_support.py、system_launcher.py：6 个同提交安装入口、平台/防火墙/服务 helper 与 canonical launcher。
-- install_ops_control.py、system_ops.py、ops_worker.py、release_tools.py、v-ui：5 个同提交显式受管控制安装器、控制器、降权 worker、发布工具与全局入口。
-- vui-source.zip：准确提交的源码。
-- SHA256SUMS：全部固定资产的整文件摘要。
-- RELEASE.json：版本、源码提交、release_id和平台元数据。
-- RELEASE_NOTES.md：功能、安装、已知限制和运维说明。
+| 类别 | 文件 |
+| --- | --- |
+| 四目标离线包 | `vui-linux-x86_64-gnu.zip`、`vui-linux-aarch64-gnu.zip`、`vui-linux-x86_64-musl.zip`、`vui-linux-aarch64-musl.zip` |
+| 安装和系统 helper | `install.sh`、`install_system.py`、`platform_support.py`、`firewall_support.py`、`service_support.py`、`system_launcher.py` |
+| 受管控制入口 | `install_ops_control.py`、`system_ops.py`、`ops_worker.py`、`release_tools.py`、`v-ui` |
+| 源码与元数据 | `vui-source.zip`、`RELEASE.json`、`RELEASE_NOTES.md`、`SHA256SUMS` |
 
-发布脚本也验证包内manifest的源码与版本。远端artifact由签名下载URL取得，下载时不把GitHub授权头带给对象存储；完整artifact的digest必须与Actions元数据一致。
+包内 manifest、`RELEASE.json`、Actions artifact身份及摘要要与准确 SHA/version/target一致。源码、安装和控制 helper不能从新入口或本地WIP拼装。签名下载URL的目标不得继承GitHub授权头；摘要校验失败立即停止，不通过跳过TLS或摘要继续。
 
-## 公开后检查
+先上传草稿并逐项验证资产字节/摘要，再按明确批准公开。已有 tag、Release或资产不覆盖；发现问题以新版本修复，保留旧资产及原失败记录。
 
-核对 Release 公开状态、tag 目标、下载文件摘要和文档链接。本版公开后手工套件入口为 `install.sh --version v0.4.22`，短入口仅使用核验后的真实摘要。每次仍须确认完整 19 项资产并核验。自动目标选择复核须使用独立临时 Linux 机器；版本字符串本身不证明下载存在，也不赋予后续未发布主线功能资格。发布源提交与后续 bootstrap/doc 提交分别记录，不能用当前 checkout 冒充冻结发布源。
+## 公开核验后再切短入口
 
-外部CA域名验证、云安全组和真实用户网络需要用户自己的配置，不属于维护者自动取得的授权。不要把发布流程顺手变成登录真实VPS部署。
+公开后独立匿名核对tag目标、latest、公开状态、完整资产集合、每项digest与实际小文件字节，核对`RELEASE.json.source_commit`，并确认旧版资产ID/大小/digest保持。
 
-## 故障与撤回
+只有这些检查成功后，才通过独立PR更新`setup.sh`的版本、真实`install.sh`字节SHA-256、完整`SHA256SUMS`字节SHA-256，以及`short-install.yml`的冻结公开产品源和直接合同。清单整文件摘要不等于某个ZIP或清单中一行的摘要。
 
-上传失败时不直接重跑覆盖已有Release；先检查草稿，决定由操作者清理还是继续人工修复。已公开且有问题的版本应公开说明并发布新修订版本，不能偷偷改同一版本二进制。
+入口候选/dev/main须独立验收；PR和dev使用准确提交URL，main合并后另验实际可变的`main/setup.sh` URL。应用源与入口源分别记录，不因入口或文档推进而重建已公开套件。安装指南中的当前版本参数示例为：
 
-默认分支变化会使目标提交检查失配，需明确选择新HEAD并等待它自己的全套测试。候选artifact过期则重新运行同提交的一键门槛，并核对其他最新结果；不能从未知备份恢复一个未验证的包。
+```sh
+bash install.sh --version v0.4.22 --with-global-cli --interactive
+```
+
+这用于已明确授权的安装目标；贡献和发布准备不在本机执行安装。参数、已有安装和离线操作见[安装指南](INSTALLATION.md)。
+
+## 升级和恢复边界
+
+生产升级前在获准的私有位置备份并确认可用，保护当前配置、数据库、凭据、节点、订阅、证书及恢复材料。真实证书首次签发或新增CA条款须由有权的人明确确认；签发成功、服务TLS/主机名/HTTP健康和节点实际转发分别核验，不能互相替代。
+
+维护任务提交一次后保存ID，只查询原任务；响应丢失属于结果未知，先读回任务与服务状态，不自动重发。任务成功后还需确认worker不忙、安装ready及实际版本/服务正常，失败不自动start或restore。具体操作和秘密只在授权私有记录保存，不进入公开Issue、PR、日志或发布附件。详见[受管操作](MANAGED_OPERATIONS.md)和[维护权限契约](REMOTE_MAINTENANCE_CONTRACT.md)。
+
+<a id="047-打包范围说明更正2026-10-06"></a>
+
+## 0.4.7 打包范围说明更正（2026-10-06）
+
+旧深链保留。该阶段原始套件说明、失败和验收边界见[固定提交39181e0的原段](https://github.com/ForceMind/V-UI/blob/39181e0cdb9643422a19049df942b208f876faf4/docs/RELEASING.md#L157)；其他阶段见[历史索引](history/README.md)。历史结论只对应原版本与原提交，不授予未来发行资格。
