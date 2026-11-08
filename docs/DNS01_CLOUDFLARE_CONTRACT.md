@@ -93,6 +93,8 @@ auth/cleanup hook共用持久化journal。正常完成、验证失败、取消�
 
 下面是已有提交的实际记录，不授予当前新候选资格。源码版本升为23后，需在新的准确source重跑完整九组/21 jobs；oneclick为一个构建、一个新装及公开14/15/16/17/19/20/21/22的八个升级角色，共10角色。所有role必须拥有自己的真实成功步骤和同producer/source/run/attempt收据，不能用步骤并集、旧skip或旧材料补齐。
 
+产品冻结点为`4bd1d9a648a8096fbf2fa05314e35049a2408e7c`，其源码与最终迁移夹具已独审。发布准备声明采用`parallel-v1`及`unverified-non-browser-v1`，只记录合同，不是公开发布授权或CI成功声明；冻结之后仅政策文件和普通Markdown可变。准确发布准备HEAD仍须自己的完整九组/21 jobs、10角色同源收据及四目标资格，不能继承冻结点的成功片段；若再需改变代码/CI/测试，应更新冻结点并重新审验。
+
 - [x] 设计、身份/材料/迁移、私有凭据、CF/journal、API/UI/绑定/备份及安装控制闭包源码完成。
 - [x] 应用三块及最终CLI/snapshot/安装控制兼容独审收口；早期夹具/allocator/安装错误及错误DNS传输假设已针对性修正并审查。
 - [ ] 新候选准确九组/21 jobs及每个必要step、依赖与真实固定核心资格。
@@ -108,6 +110,8 @@ auth/cleanup hook共用持久化journal。正常完成、验证失败、取消�
 | 同提交：[链路42474830751](https://github.com/ForceMind/V-UI/actions/runs/42474830751) | 整组成功，含实际controller的11项及新增两后端DNS通配符TLS轮换/深层域名拒绝2项，无跳过。使用临时CA与固定官方sing-box/Xray，不代表公网、手机或浏览器资格 |
 | 同提交：[短入口42474830488](https://github.com/ForceMind/V-UI/actions/runs/42474830488)、[安装42474830643](https://github.com/ForceMind/V-UI/actions/runs/42474830643) | 短入口attempt1停于稳定22元数据HTTP504/502，原入口不改的attempt2成功，安装的是公开22；oneclick实际23新装成功。旧14/22已完成真实升级，但after断言仍按旧控制文件集合，因新增恰5个DNS控制文件而失败；正在补严格版本化迁移检查，不把失败改判成功 |
 | 同提交：[原生42474830397](https://github.com/ForceMind/V-UI/actions/runs/42474830397)、[部署42474830543](https://github.com/ForceMind/V-UI/actions/runs/42474830543) | 初轮分别在固定tag元数据HTTP503、固定官方资产API的HTTP503处失败；原生整组attempt2仍有HTTP500。各次成功片段不能合成同attempt矩阵资格；未开始的步骤不算通过 |
+| `4bd1d9a648a8096fbf2fa05314e35049a2408e7c`：[安装42476468258](https://github.com/ForceMind/V-UI/actions/runs/42476468258) | attempt1实际新装和六旧版升级通过，旧15安装curl超时、旧19公开资产读取超时/API503失败；attempt2的producer遇官方核心API504，消费者未执行。冷却后attempt3实际10角色全部通过，十份小ZIP收据的外层大小/摘要、source/run/attempt/producer及清单/bundle双摘要已核，producer为13616872596。不将前两轮失败改判；后续准备提交不能复用这些材料授资格 |
+| 同提交：[原生42476468236](https://github.com/ForceMind/V-UI/actions/runs/42476468236) | ARM glibc的attempt1遇固定tag元数据503，attempt2/3遇固定官方核心资产API503，候选未建成。两musl与distro成功，但整组仍失败。该源其他八组成功不补原生缺口，真实Cloudflare账号/浏览器/物理整机仍未验 |
 
 固定官方Pebble2.10.1的custom resolver[明确使用TCP](https://github.com/letsencrypt/pebble/blob/v2.10.1/va/va.go#L128-L132)。本地夹具同时监听TCP/UDP不等于CA使用两种传输。修正后的实CA断言要求UDP=0、TCP至少4次且issue/renewal各至少2次；同owner双TXT、新账户重新认证、精确SAN和仅清理own ID均保留。上述9b提交已实际通过这些断言，不称UDP回退；后续源码仍需自己的准确验收。
 
