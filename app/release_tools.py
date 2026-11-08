@@ -758,8 +758,19 @@ def _migrate_legacy_modes(data: Path):
     with (data / 'v-ui.db').open('rb') as handle: os.fsync(handle.fileno())
 
 
-def _policy_runtime(data: Path, core: str):
+
+def _check_policy_artifact_ids(value):
+    if value is not None and (type(value) is not dict or set(value) != {'sing-box', 'xray'}
+            or any(type(identity) is not str or not re.fullmatch('[0-9a-f]{64}', identity)
+                   for identity in value.values())):
+        raise ReleaseError('Runtime artifact bindings are invalid')
+
+
+def _policy_runtime(data: Path, core: str, *, _expected_artifact_id=None):
     """Strict saved runtime bytes for an offline controller, without launch."""
+    if _expected_artifact_id is not None and (type(_expected_artifact_id) is not str
+            or not re.fullmatch('[0-9a-f]{64}', _expected_artifact_id)):
+        raise ReleaseError('Runtime artifact binding is invalid')
     directory = data / 'runtime' / core
     if not os.path.lexists(directory) or not os.path.lexists(directory / 'state.json'):
         return {'revision': None, 'enabled': False}, None
@@ -774,9 +785,13 @@ def _policy_runtime(data: Path, core: str):
                 with os.fdopen(os.dup(descriptor), 'rb') as handle: return handle.read(limit + 1)
             finally: os.close(descriptor)
         state = json.loads(read('state.json', 4096))
-        if (type(state) is not dict or set(state) != {'revision', 'enabled'}
-                or type(state['revision']) is not str or not re.fullmatch('[0-9a-f]{64}', state['revision'])
-                or type(state['enabled']) is not bool):
+        legacy = type(state) is dict and set(state) == {'revision', 'enabled'}
+        modern = (type(_expected_artifact_id) is str and re.fullmatch('[0-9a-f]{64}', _expected_artifact_id)
+                  and type(state) is dict and set(state) == {'schema', 'revision', 'enabled', 'artifact_id'}
+                  and type(state['schema']) is int and state['schema'] == 2
+                  and state['artifact_id'] == _expected_artifact_id)
+        if (not (legacy or modern) or type(state.get('revision')) is not str
+                or not re.fullmatch('[0-9a-f]{64}', state['revision']) or type(state.get('enabled')) is not bool):
             raise ReleaseError('Committed proxy runtime state is invalid')
         raw = read(state['revision'] + '.json', 16 * 1024 * 1024)
     if digest(raw) != state['revision']:
@@ -787,13 +802,14 @@ def _policy_runtime(data: Path, core: str):
     return state, config
 
 
-def _committed_policy_protection(data: Path):
+def _committed_policy_protection(data: Path, *, _artifact_ids=None):
     """Protected IDs and exact inbound bindings from immutable runtime bytes.
 
     The controller deliberately does not import the ORM or compiler. Reading
     current SQL here would let an unapplied edit erase committed protection.
     """
     from app.services.proxy_store import ProxyStore
+    _check_policy_artifact_ids(_artifact_ids)
     store = ProxyStore(data)
     active = store.load_active(reject_pending=True)
     if active is None:
@@ -807,7 +823,8 @@ def _committed_policy_protection(data: Path):
     revision = active['core_revision']
     if context['candidate_core_revision'] != revision or not re.fullmatch('[0-9a-f]{64}', revision):
         raise ReleaseError('Committed proxy runtime identity is invalid')
-    state, config = _policy_runtime(data, 'sing-box')
+    state, config = _policy_runtime(data, 'sing-box',
+        _expected_artifact_id=_artifact_ids['sing-box'] if _artifact_ids is not None else None)
     if state['revision'] != revision or config is None:
         raise ReleaseError('Committed proxy runtime files disagree')
     plan = store.context_plan(context, flags)
@@ -842,9 +859,10 @@ def _committed_policy_protection(data: Path):
             'bindings': sorted(bindings, key=lambda item: item['id'])}
 
 
-def _validate_restore_policy(data: Path):
+def _validate_restore_policy(data: Path, *, _artifact_ids=None):
     """Exact v2 source check without starting cores or importing runtime deps."""
     from app.services.proxy_store import ProxyStore
+    _check_policy_artifact_ids(_artifact_ids)
     explicit = _database_mode_fence(data)
     store = ProxyStore(data)
     active = store.load_active(reject_pending=True)
@@ -864,9 +882,10 @@ def _validate_restore_policy(data: Path):
             raise ReleaseError('Backup rows differ from their committed inbound policy')
     elif explicit:
         raise ReleaseError('Backup contains unapplied inbound modes; dedicated recovery is required')
-    protection = _committed_policy_protection(data)
+    protection = _committed_policy_protection(data, _artifact_ids=_artifact_ids)
     if protection['global'] or protection['bindings']:
-        xray, _ = _policy_runtime(data, 'xray')
+        xray, _ = _policy_runtime(data, 'xray',
+            _expected_artifact_id=_artifact_ids['xray'] if _artifact_ids is not None else None)
         if xray['enabled']:
             raise ReleaseError('Backup has incompatible active Xray and relay runtimes')
 
@@ -928,55 +947,62 @@ def backup(root: Path, destination: Path) -> str:
         return _backup_locked(guard, destination)
 
 
+def _copy_backup_data(guard: _StoppedGuard, work: Path):
+    """Copy a stopped private data snapshot; old/new archive layouts share it."""
+    guard._check(); data=guard.root/'data'
+    private_files = set()
+    if not data.is_dir(): raise ReleaseError('No data directory to back up')
+    from app.certificates.dns_backup import DNSBackupError, validate_dns_snapshot, prepare_dns_staging
+    try:
+        source_dns = validate_dns_snapshot(data)
+    except DNSBackupError:
+        raise ReleaseError('DNS state is unsafe or incomplete; no backup was created') from None
+    # The initialized marker is required to distinguish saved state from a
+    # never-applied installation. Copy it only as part of a validated,
+    # locked proxy snapshot; do not broaden the general hidden-file rule.
+    proxy_names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
+    if any(os.path.lexists(data / name) for name in proxy_names):
+        from app.services.proxy_store import ProxyStore, ProxyStorageError
+        try:
+            with ProxyStore(data).backup_snapshot() as entries:
+                for name, content in entries:
+                    target = work / name
+                    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    with target.open('xb') as output:
+                        output.write(content); output.flush(); os.fsync(output.fileno())
+                    target.chmod(0o600); private_files.add(name)
+        except ProxyStorageError:
+            raise ReleaseError('Proxy state is unsafe or incomplete; no backup was created') from None
+    for name in files_in(data, excluded=proxy_names):
+        if name.endswith(('owner.lock','.db-wal','.db-shm')) or name.startswith('.'): continue
+        if name=='v-ui.db': continue
+        target=work/name; target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+        with (data/name).open('rb') as source, target.open('xb') as output:
+            writer = _PrivateArchiveFile(output)
+            shutil.copyfileobj(source, writer, STREAM_CHUNK)
+            writer.finish_writes()
+        target.chmod(0o600); private_files.add(name)
+    if (data/'v-ui.db').is_file():
+        with sqlite3.connect(f'file:{data / "v-ui.db"}?mode=ro',uri=True) as src, sqlite3.connect(work/'v-ui.db') as dst:
+            src.backup(dst)
+            if dst.execute('PRAGMA integrity_check').fetchone()[0] != 'ok': raise ReleaseError('Database integrity check failed')
+    # SQLite retains its existing backup/transaction path and is not cooled.
+    try:
+        prepare_dns_staging(work)
+        copied_dns = validate_dns_snapshot(work)
+        if copied_dns != source_dns:
+            raise DNSBackupError()
+    except DNSBackupError:
+        raise ReleaseError('DNS backup reference closure is incomplete; no backup was created') from None
+    kind = 'backup-dns01-v1' if copied_dns else 'backup'
+    return private_files, kind
+
+
 def _backup_locked(guard: _StoppedGuard, destination: Path) -> str:
     guard._check(); root=guard.root
     with tempfile.TemporaryDirectory(prefix='.backup-',dir=root) as temporary:
         data=root/'data'; work=Path(temporary)/'data'; work.mkdir(mode=0o700)
-        private_files = set()
-        if not data.is_dir(): raise ReleaseError('No data directory to back up')
-        from app.certificates.dns_backup import DNSBackupError, validate_dns_snapshot, prepare_dns_staging
-        try:
-            source_dns = validate_dns_snapshot(data)
-        except DNSBackupError:
-            raise ReleaseError('DNS state is unsafe or incomplete; no backup was created') from None
-        # The initialized marker is required to distinguish saved state from a
-        # never-applied installation. Copy it only as part of a validated,
-        # locked proxy snapshot; do not broaden the general hidden-file rule.
-        proxy_names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
-        if any(os.path.lexists(data / name) for name in proxy_names):
-            from app.services.proxy_store import ProxyStore, ProxyStorageError
-            try:
-                with ProxyStore(data).backup_snapshot() as entries:
-                    for name, content in entries:
-                        target = work / name
-                        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                        with target.open('xb') as output:
-                            output.write(content); output.flush(); os.fsync(output.fileno())
-                        target.chmod(0o600); private_files.add(name)
-            except ProxyStorageError:
-                raise ReleaseError('Proxy state is unsafe or incomplete; no backup was created') from None
-        for name in files_in(data, excluded=proxy_names):
-            if name.endswith(('owner.lock','.db-wal','.db-shm')) or name.startswith('.'): continue
-            if name=='v-ui.db': continue
-            target=work/name; target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
-            with (data/name).open('rb') as source, target.open('xb') as output:
-                writer = _PrivateArchiveFile(output)
-                shutil.copyfileobj(source, writer, STREAM_CHUNK)
-                writer.finish_writes()
-            target.chmod(0o600); private_files.add(name)
-        if (data/'v-ui.db').is_file():
-            with sqlite3.connect(f'file:{data / "v-ui.db"}?mode=ro',uri=True) as src, sqlite3.connect(work/'v-ui.db') as dst:
-                src.backup(dst)
-                if dst.execute('PRAGMA integrity_check').fetchone()[0] != 'ok': raise ReleaseError('Database integrity check failed')
-        # SQLite retains its existing backup/transaction path and is not cooled.
-        try:
-            prepare_dns_staging(work)
-            copied_dns = validate_dns_snapshot(work)
-            if copied_dns != source_dns:
-                raise DNSBackupError()
-        except DNSBackupError:
-            raise ReleaseError('DNS backup reference closure is incomplete; no backup was created') from None
-        kind = 'backup-dns01-v1' if copied_dns else 'backup'
+        private_files,kind=_copy_backup_data(guard,work)
         return create_archive(work,destination,{'kind':kind,'data_path':str(data),'platform':PLATFORM},
                               private_files=private_files)
 

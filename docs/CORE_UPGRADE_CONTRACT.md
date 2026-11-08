@@ -519,3 +519,14 @@ M11本机验证范围：应用client16项与服务身份11项双Python纯假/临
 整个worker仍同一总deadline，不因heartbeat延长；EOF、未知/错阶段/重复/extra字段及guard失败均固定error/非零并关闭session。session.close即使在finish之后失败也仍是失败，不被早先成功返回掩盖；signal handlers恢复保持。九项纯fake/临时真实pipe/flock测试双Python通过，尚未把此握手接到新的Root核心任务或实际服务/数据恢复。
 
 1e01224自身主单元3365项有一处新fixture错误：预建broker父目录0750受前序umask077变0700，生产正确报PARENT_UNSAFE。只对自建测试目录显式chmod0750，保留Root门禁、foreign碰撞/替换不得删除及原模式断言；双Python在umask077下18pass/1Linux case未本机执行。该提交ARM64 GNU原生required Build已通过，不能据此覆盖其他目标或新fixture修正提交；Linux kernel与完整准确源码资格继续分别核。
+
+
+## M13 完整私有备份容器与输入预检（不执行恢复）
+
+新私有容器 `backup-components-v1` 包含原格式 `data/snapshot.zip` 与M10的 `core/` 闭包。原备份writer只抽出共用data快照helper，旧格式与默认restore白名单保持；新容器没有加入普通restore。内层沿用原 `backup` / `backup-dns01-v1`、隐藏文件精确名单、SQLite快照、DNS私有引用与proxy快照规则。分层预算保留：data ZIP≤850MB、含MANIFEST展开≤1.1GB/最多10000成员；核心最多四份原ZIP/合计400MB，metadata另有界；外层最多15成员与固定总预算。内层writer完成后按原reader口径再核预算，不能产生自己无法预检的公开备份。
+
+writer要求实际stopped guard，私有暂存和流式归档完成后以NOREPLACE公开；caller仍须证明selection来自M5稳定/before状态及最终停止意图，不能用参数自证。preflight将备份视为不可信：冷副本核外部SHA、严格namespace/manifest/分层预算、独立live catalog核核心闭包，再用原reader展开data。只有本次新暂存目录会规范化权限；不改live data、Root store/catalog/选择、不撤销授权、不暂停DNS、不交换data。实际runtime配置摘要、state2 ID/原停止意图、数据库路由fence及既有committed/protected policy均须一致。旧policy checker新增内部可选精确双核心ID，仅用于已经检查闭包的state2；默认仍只接受旧二键。legacy bundle state原bytes保留，返回显式迁移清单，组件current不能借此采用legacy状态。
+
+二十项假材料/临时文件测试覆盖完整四份组件闭包（两核心current/previous）、DNS profile/挑战及零字节私有fragment、proxy marker/空secret/active relay、默认旧reader与错误ID拒绝、节点/会话数据原样、篡改后重哈希输入拒绝、预算含MANIFEST、独立catalog缺失、symlink/hardlink和旧普通restore拒绝。此处没有Root双域交换、撤销授权、受管恢复启动或实际系统服务，不能称完整核心升级可用。真正原23工具负向与四目标完整链路仍须Actions。
+
+db0f64a自身九组中八组及额外候选材料四job成功；原生ARM GNU和distro成功，两个musl在严格默认345合同因真实service-user case于root容器被skip而失败（[原始运行42524739739](https://github.com/ForceMind/V-UI/actions/runs/42524739739)，ARM job128865731750/x64 job128865731707）。不是下载失败，也未取得整个矩阵资格。修复只将既有smoke用户创建提前，以实际非root身份执行合同；root构建和后续staged验证保持，仍要求所有合同零skip。新源码须自己的Actions，不把这次修复或前置成功泛化成准确新候选资格。
