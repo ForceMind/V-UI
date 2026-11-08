@@ -6,6 +6,8 @@ from unittest.mock import patch
 from fastapi import HTTPException
 from app.models import database
 from app.api import inbounds as inbound_api
+from app.certificates.errors import CertificateError
+from app.certificates.material import domain_name
 import test_auth as auth_tests
 
 
@@ -22,11 +24,17 @@ class BindingManager:
         self.material_calls += 1
         return (Path('/managed/cert.pem'), Path('/managed/key.pem')), 'vpn.example.test', 'b' * 64
 
+    def connection_domain(self, identity, server_name=None):
+        host = domain_name(server_name) if server_name else 'vpn.example.test'
+        if host != 'vpn.example.test':
+            raise CertificateError('CERTIFICATE_DOMAIN_MISMATCH')
+        return host
+
     def unbind(self, target):
         self.unbound.append(target)
         self.bound = None
 
-    def bind(self, identity, target):
+    def bind(self, identity, target, *, server_name=None):
         self.bound = identity
 
 

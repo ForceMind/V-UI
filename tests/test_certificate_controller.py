@@ -12,7 +12,7 @@ class CertificateControllerTests(unittest.TestCase):
             cwd=root, capture_output=True, text=True, timeout=15,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        for expected in ("tests 13", "pass 13", "fail 0", "cancelled 0", "skipped 0", "todo 0"):
+        for expected in ("tests 22", "pass 22", "fail 0", "cancelled 0", "skipped 0", "todo 0"):
             self.assertRegex(result.stdout, r"(?m)^# " + expected + r"$", result.stdout)
 
 

@@ -110,7 +110,8 @@ class CertbotProvider:
         # Neither HTTP nor DNS tasks inherit tokens, arbitrary proxies, Python
         # injection, hook configuration or credential environment variables.
         env = {name: os.environ[name] for name in (
-            'PATH', 'HOME', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'SSL_CERT_FILE', 'SSL_CERT_DIR') if name in os.environ}
+            'PATH', 'HOME', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+            'MALLOC_ARENA_MAX', 'MALLOC_TRIM_THRESHOLD_', 'MALLOC_MMAP_THRESHOLD_') if name in os.environ}
         if self.test_ca:
             env['REQUESTS_CA_BUNDLE'] = str(self.test_ca)
         # stderr stays off the HTTP response. Certbot's bounded local logs are owner-only.

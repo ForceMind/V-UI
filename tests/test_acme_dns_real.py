@@ -213,11 +213,16 @@ class RealDNSACMETests(unittest.TestCase):
         self.assertEqual(first[0][0].read_bytes(), old_chain)
         summary = self.assert_cleanup()
         self.assertEqual(summary['max_owned_same_owner'], 2); self.assertEqual(summary['created'], 4)
-        self.assertGreater(summary['udp_queries'], 0); self.assertGreater(summary['tcp_queries'], 0)
+        # Pinned Pebble 2.10.1 deliberately sets dnsClient.Net="tcp" for a
+        # custom resolver (official va/va.go:128-132); it never tries UDP.
+        # https://github.com/letsencrypt/pebble/blob/v2.10.1/va/va.go#L128-L132
+        self.assertEqual(summary['udp_queries'], 0)
+        self.assertGreaterEqual(summary['tcp_queries'], 4)
+        self.assertGreaterEqual(summary['queries_by_phase'].get('issue', 0), 2)
         self.assertGreater(summary['returned_owned'], 0)
-        self.assertGreater(summary['queries_by_phase'].get('renewal', 0), 0)
+        self.assertGreaterEqual(summary['queries_by_phase'].get('renewal', 0), 2)
         keys = self.assert_hook_environment(4)
-        print('Pinned DNS ACME: exact root/wildcard CSR+SAN; two own TXT coexist; real UDP/TCP DNS; '
+        print('Pinned DNS ACME: exact root/wildcard CSR+SAN; two own TXT coexist; real fixed-CA TCP DNS; '
               'fresh-account renewal; only own IDs cleaned; hook identifiers=' + ','.join(keys))
 
     def test_nonpropagation_failure_retains_previous_material(self):
