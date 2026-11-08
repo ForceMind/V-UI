@@ -1,6 +1,6 @@
 # 并行安装验收与制品身份契约
 
-状态：P1核心已完成源码审查，准备Actions真实producer兼容检查；尚未接入并行矩阵或发布器。当前实现离线kit/receipt校验核心及假数据边界测试，并在既有oneclick构建后增加真实kit形状/复制smoke；不提升应用VERSION，不发布应用、不修改生产实例。上一个文档批次[PR141](https://github.com/ForceMind/V-UI/pull/141)已获明确普通dev→main合并授权并合入dev，[PR142](https://github.com/ForceMind/V-UI/pull/142)负责main同步；本P1代码不混入该纯文档批次，也不继承其合并许可。当前总顺序见[路线图](../ROADMAP.md)。
+状态：P1核心已完成源码审查，准备Actions真实producer兼容检查；尚未接入并行矩阵或发布器。当前实现离线kit/receipt校验核心及假数据边界测试，并在既有oneclick构建后增加真实kit形状/复制smoke；不提升应用VERSION，不发布应用、不修改生产实例。上一个文档批次已经按明确授权经[PR141](https://github.com/ForceMind/V-UI/pull/141)/[PR142](https://github.com/ForceMind/V-UI/pull/142)普通合入main59fc1cc，线上29文件读回一致，main自身Actions另行跟进；本P1代码不混入该纯文档批次，也不继承其合并许可。当前总顺序见[路线图](../ROADMAP.md)。
 
 ## 目标与分期
 

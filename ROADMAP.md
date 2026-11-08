@@ -32,7 +32,7 @@
 
 ## P1 独立准备：制品身份校验核心
 
-P0文档源码与协作模板[PR141](https://github.com/ForceMind/V-UI/pull/141)已获明确正常dev→main合并授权，普通合入dev `f8b78b3e77cf57798b4f0eb5149e1beb6f3c0f65`；[PR142](https://github.com/ForceMind/V-UI/pull/142)待准确验证后同步main，当前默认分支尚未改变。其CI总览九组成功，其余八组步骤已核验；安装job步骤元数据曾缺失，原始日志及匹配摘要经独审证明八个实际用例通过；后续元数据恢复状态须由原严格检查器确认，不能补造或放宽断言。
+P0文档源码与协作模板已按明确授权经[PR141](https://github.com/ForceMind/V-UI/pull/141)/[PR142](https://github.com/ForceMind/V-UI/pull/142)普通合入main `59fc1cce15df8da850dd0a13d58b4efe6879a6be`，29个线上文件逐一读回匹配。dev自身九组/12 jobs及全部必要步骤已严格通过；main自身Actions仍另行执行，不继承dev结果。其CI总览九组成功，其余八组步骤已核验；安装job步骤元数据曾缺失，原始日志及匹配摘要经独审证明八个实际用例通过；后续元数据恢复状态须由原严格检查器确认，不能补造或放宽断言。
 
 在独立分支准备[制品身份契约](docs/PARALLEL_RELEASE_ACCEPTANCE.md)与离线验证器，不改变P0候选或操作生产；只在现有oneclick构建后增加真实kit兼容/原字节复制smoke，原安装升级配方不变，尚未接入并行矩阵或publisher。该组件是后续同一制品并行消费的前置，不是整个发布流水线改造已完成。
 
