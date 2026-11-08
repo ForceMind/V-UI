@@ -5,6 +5,7 @@ does not download, install, execute or qualify an upstream core or a component
 Release. No browser is started. The actual producer/runtime suites remain
 separate mandatory acceptance.
 """
+import argparse
 import json
 import os
 from pathlib import Path
@@ -22,21 +23,29 @@ CONTRACTS = {
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--runtime', action='store_true',
+                        help='Run Linux-only fake-executable runtime binding contracts')
+    args = parser.parse_args()
+    if args.runtime and not sys.platform.startswith('linux'):
+        raise SystemExit('Runtime binding contracts require native Linux acceptance')
+    contracts = {'test_core_runtime_artifact.py': 32} if args.runtime else CONTRACTS
     os.chdir(ROOT)
     sys.path.insert(0, str(ROOT))
     suite = unittest.TestSuite()
-    for pattern, expected in CONTRACTS.items():
+    for pattern, expected in contracts.items():
         part = unittest.TestLoader().discover(str(ROOT / 'tests'), pattern=pattern)
         if part.countTestCases() != expected:
             raise SystemExit('Core update contract count differs: ' + pattern)
         suite.addTests(part)
     result = unittest.TextTestRunner(verbosity=2).run(suite)
-    total = sum(CONTRACTS.values())
+    total = sum(contracts.values())
     if (not result.wasSuccessful() or result.testsRun != total or result.skipped
             or result.expectedFailures or result.unexpectedSuccesses):
         raise SystemExit('Core update contracts must all execute without skips or expected failures')
-    print(json.dumps({'scope': 'synthetic-core-update-contracts-native-os-filesystem',
-        'contracts': CONTRACTS, 'tests': total, 'skips': 0,
+    print(json.dumps({'scope': ('linux-fake-executable-runtime-binding' if args.runtime
+                              else 'synthetic-core-update-contracts-native-os-filesystem'),
+        'contracts': contracts, 'tests': total, 'skips': 0,
         'real_core_or_component_qualified': False}))
 
 
