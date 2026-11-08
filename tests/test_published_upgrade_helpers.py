@@ -147,6 +147,34 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
         with self.assertRaises(AssertionError):assert_receipt_migration(self,after,after,'0.4.14')
 
 
+    def test_published22_requires_the_same_complete_response_as21(self):
+        before = {'id': 1, 'mutation_revision': 'a' * 64, 'content_revision': 'b' * 64,
+                  'share_eligible': True, 'upstream_export_eligible': True, 'remark': 'retained'}
+        assert_node_summary_upgrade(self, [before], [dict(before)], '0.4.22')
+        for key in before:
+            changed = dict(before); changed[key] = 'changed'
+            with self.subTest(key=key), self.assertRaises(AssertionError):
+                assert_node_summary_upgrade(self, [before], [changed], '0.4.22')
+        with self.assertRaises(AssertionError):
+            assert_node_summary_upgrade(self, [before], [{**before, 'unknown': True}], '0.4.22')
+        with self.assertRaises(AssertionError): fixed_public_baseline('0.4.22', 'f' * 40)
+
+    def test_public22_to_same_candidate22_is_refused_before_public_downloads(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); source = root / 'source'; source.mkdir()
+            (source / 'VERSION').write_text('0.4.22')
+            kit = root / 'kit'; kit.mkdir()
+            (kit / 'RELEASE.json').write_text(json.dumps({'version': '0.4.22', 'source_commit': 'a' * 40}))
+            env = {'VUI_PUBLISHED_INSTALL_VERSION': '0.4.22',
+                   'VUI_RELEASE_COMMIT': '558687a76cd29f4e4735284926eb05bf6664472e',
+                   'VUI_RELEASE_KIT': str(kit)}
+            with patch.dict('os.environ', env, clear=True), \
+                    patch('published_upgrade_helpers.subprocess.check_output', return_value='a' * 40 + '\n'), \
+                    patch('published_upgrade_helpers.published_commands') as public, \
+                    patch('published_upgrade_helpers.fixture_commands') as fixture, self.assertRaises(AssertionError):
+                PublishedUpgrade(self, source, root, [], [])
+            public.assert_not_called(); fixture.assert_not_called()
+
     def test_only_immutable_public_014_through_017_and_019_sources_are_accepted(self):
         expected={'0.4.14':'b0cc174d04d05e61277075412586f0ba0dd231db',
                   '0.4.15':'65b1e75d90de733408101ec280a92be935731baa',
@@ -154,7 +182,8 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
                   '0.4.17':'95c201c6e26ed54960f964c675e515890f2eea2a',
                   '0.4.19':'a2b9c188658f082b189e77d237787a96eb9cf921',
                   '0.4.20':'05173798de1baed5d67a866c4125e72f74fe3f4c',
-                  '0.4.21':'2aa5e11e3f09c03d048018f033ae888e7c775604'}
+                  '0.4.21':'2aa5e11e3f09c03d048018f033ae888e7c775604',
+                  '0.4.22':'558687a76cd29f4e4735284926eb05bf6664472e'}
         self.assertEqual(PUBLISHED_BASELINES,expected)
         for version,commit in expected.items():
             self.assertEqual(fixed_public_baseline(version,commit),(version,commit))
@@ -198,6 +227,8 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
                         assert_receipt_migration(self,before,changed,version)
             legacy=deepcopy(before);del legacy['files'][FIREWALL]
             with self.assertRaises(AssertionError):assert_receipt_migration(self,legacy,after,version)
+        assert_receipt_migration(self,after,after,'0.4.22')
+        with self.assertRaises(AssertionError):assert_receipt_migration(self,before,after,'0.4.22')
         assert_receipt_migration(self,after,after,'0.4.21')
         with self.assertRaises(AssertionError):assert_receipt_migration(self,before,after,'0.4.21')
         assert_receipt_migration(self,after,after,'0.4.20')

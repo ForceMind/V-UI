@@ -38,7 +38,7 @@ jobs:
       - name: Admit original kit from exact-head successful ordinary CI
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python -B -m scripts.fetch_managed_ops_kit --destination /tmp/vui-managed-admission
+        run: python -B -m scripts.fetch_managed_ops_kit --destination /tmp/vui-managed-admission --layout parallel-v1
       - name: Explicit new-component install and real systemd qualification
         env:
           SOURCE: ${{ github.event.pull_request.head.sha }}
