@@ -130,6 +130,100 @@ class SelectionFilesTests(unittest.TestCase):
         self.assertTrue((self.layout.root/m.PENDING).exists())
         with self.assertRaises(m.CoreSelectionFilesError):self.files.read_boot(**self.context)
 
+    def durable_switch(self):
+        self.bootstrap()
+        plan=s.plan_component(self.before,core='sing-box',identity=material(),expected_revision=self.before.revision)
+        context=dict(application=dict(**self.context, release_id='fixture',
+            current_sha256='1'*64,manifest_sha256='2'*64,ready_sha256='3'*64),
+            data_generation=dict(dev=0,ino=19),
+            services={'v-ui.service':'active','v-ui-http01.service':'inactive','v-ui-http01.socket':'active'},
+            config_sha256='4'*64,certificate_mode='provided',trust_sha256='5'*64)
+        tx=self.files.begin(plan,expected_revision=self.before.revision,service_snapshot=self.pre,switch_context=context)
+        return tx,plan.after,context
+
+    def test_switch_recovery_reads_immutable_context_and_refuses_foreign_selector(self):
+        tx,after,context=self.durable_switch()
+        recovered=self.files.read_switch_recovery()
+        self.assertEqual(recovered['switch_context'],context)
+        self.assertEqual(recovered['transaction'],tx)
+        self.assertEqual(recovered['recovery_selection'],m._selection_map(
+            s._build(APP,TARGET,after.generation+1,self.before.slots)))
+        wrong=deepcopy(recovered);wrong['switch_context']['trust_sha256']='6'*64
+        with self.assertRaisesRegex(m.CoreSelectionFilesError,'JOURNAL_REWRITTEN'):
+            m._follows(recovered,wrong)
+        path=self.layout.root/m.SELECTION;path.write_bytes(s.encode_selection(after))
+        with self.assertRaisesRegex(m.CoreSelectionFilesError,'PUBLIC_CHANGED'):
+            self.files.read_switch_recovery()
+
+    def test_recovery_rechecks_the_public_records_before_writing_rollback(self):
+        tx,after,context=self.durable_switch()
+        restored=s.decode_selection(m._raw(self.files.read_switch_recovery()['recovery_selection']),**self.context)
+        (self.layout.root/m.FENCE).unlink()
+        with self.assertRaisesRegex(m.CoreSelectionFilesError,'PUBLIC_CHANGED'):
+            self.files.rollback_metadata(tx,self.validation(restored),final_intents=self.pre['cores'],
+                                         **self.context)
+        self.assertTrue((self.layout.root/m.PENDING).exists())
+        self.assertFalse((self.layout.root/m.FENCE).exists())
+
+    def test_consumed_staging_and_old_park_do_not_explain_a_missing_public_fence(self):
+        tx,after,_=self.durable_switch()
+        self.quiesce(tx)
+        name='core-maintenance-'+'a'*32+'.zip';digest='b'*64
+        self.files.record_backup(tx,dict(kind='backup-components-v1',name=name,sha256=digest,
+            backup_id=m._digest((name+':'+digest).encode()), selection_revision=self.before.revision,
+            intents_sha256=m._digest(m._raw(self.pre['cores']))),**self.context)
+        self.files.provision(tx,**self.context)
+        self.files.record_validation(tx,self.validation(after),**self.context)
+        rename=m.fs._rename_new
+        def lose_ack(parent,name,destination,target):
+            rename(parent,name,destination,target)
+            if name.startswith('confirm-fence.new-'):
+                raise OSError('synthetic fence publish acknowledgement loss')
+        with patch.object(m.fs,'_rename_new',side_effect=lose_ack),self.assertRaises(m.CoreSelectionFilesError):
+            self.files.confirm(tx,**self.context)
+        root=self.layout.root
+        self.assertTrue((root/m.ACTIVE/'confirm-fence.old').exists())
+        (root/m.FENCE).unlink()
+        with self.assertRaisesRegex(m.CoreSelectionFilesError,'PUBLIC_CHANGED'):
+            self.files.read_switch_recovery()
+        self.assertTrue((root/m.PENDING).exists())
+
+    def test_switch_cleanup_keeps_pending_through_fence_rename_and_rejects_missing_archive(self):
+        tx,after,context=self.durable_switch()
+        self.quiesce(tx)
+        name='core-maintenance-'+'a'*32+'.zip';digest='b'*64
+        self.files.record_backup(tx,dict(kind='backup-components-v1',name=name,sha256=digest,
+            backup_id=m._digest((name+':'+digest).encode()), selection_revision=self.before.revision,
+            intents_sha256=m._digest(m._raw(self.pre['cores']))),**self.context)
+        self.files.provision(tx,**self.context)
+        self.files.record_validation(tx,self.validation(after),**self.context)
+        rename=m.fs._rename_new
+        fired=False
+        def interrupt(parent,name,destination,identity):
+            nonlocal fired
+            rename(parent,name,destination,identity)
+            if name==m.FENCE and identity=='settle-fence.old' and not fired:
+                fired=True
+                raise OSError('synthetic fence park failure')
+        with patch.object(m.fs,'_rename_new',side_effect=interrupt),self.assertRaises(m.CoreSelectionFilesError):
+            self.files.confirm(tx,**self.context)
+        self.assertTrue(fired)
+        root=self.layout.root
+        self.assertTrue((root/m.PENDING).exists())
+        self.assertFalse((root/m.FENCE).exists())
+        self.assertEqual(self.files.read_switch_recovery()['transaction'],tx)
+        # An absent public marker cannot justify finalizing when its owned
+        # archived inode is also missing.
+        pending=root/m.PENDING;saved=self.anchor/'detached-pending'
+        pending.rename(saved)
+        with self.assertRaises(m.CoreSelectionFilesError):
+            self.files.finish_cleanup(tx,**self.context)
+        self.assertFalse((root/m.FENCE).exists())
+        saved.rename(pending)
+        self.assertEqual(self.files.finish_cleanup(tx,**self.context),after)
+        with self.assertRaisesRegex(m.CoreSelectionFilesError,'NO_SWITCH_RECOVERY'):
+            self.files.read_switch_recovery()
+
     def test_explicit_bootstrap_closed_layout_and_nonroot_public_read(self):
         self.bootstrap()
         root = self.layout.root

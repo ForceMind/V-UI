@@ -98,6 +98,8 @@ class _Worker:
 
     def close(self):
         with self._mutex:
+            if self._closed:
+                return
             self._closed = True
             self.child.close()
 
@@ -119,6 +121,7 @@ class _Switch:
         self.confirming = False
         self.broker_closed = True
         self.broker = None
+        self.trust_sha256 = None
 
     def _time(self):
         remaining = self.deadline - time.monotonic()
@@ -249,12 +252,27 @@ class _Switch:
         while time.monotonic() < deadline:
             self._time()
             _need(self._identity() == identity, 'CORE_PANEL_IDENTITY_CHANGED')
-            result = self.ops.local_panel_tls(self.config, require_login=login)
-            if result.startswith('ready（'):
+            if self.config.get('certificate_mode') == 'provided':
+                response = self.worker.command('probe_panel_tls', 'panel_tls',
+                                               ('status', 'trust_sha256'), require_login=login)
+                status = response['status']
+                if status == 'ready':
+                    digest = response['trust_sha256']
+                    _need(self.a._hex(digest) and self.trust_sha256 in (None, digest),
+                          'CORE_PANEL_TRUST_CHANGED')
+                    self.trust_sha256 = digest
+                else:
+                    _need(status in ('retry', 'pending'), 'CORE_PANEL_TLS_REJECTED')
+            else:
+                result = self.ops.local_panel_tls(self.config, require_login=login)
+                status = 'ready' if result.startswith('ready（') else 'retry'
+                _need(status == 'ready' or result in (
+                    'unknown（本机 TLS 握手未完成）', 'pending（面板仍在维护）'), 'CORE_PANEL_TLS_REJECTED')
+            if status == 'ready':
                 _need(self._identity() == identity, 'CORE_PANEL_IDENTITY_CHANGED')
+                _need(time.monotonic() < deadline, 'CORE_PANEL_TLS_TIMEOUT')
+                self._time()
                 return
-            _need(result in ('unknown（本机 TLS 握手未完成）', 'pending（面板仍在维护）'),
-                  'CORE_PANEL_TLS_REJECTED')
             time.sleep(.1)
         raise CoreControlError('CORE_PANEL_TLS_TIMEOUT')
 
@@ -348,7 +366,8 @@ class _Switch:
             self._proof()
             if recovery:
                 self.confirming = True
-                confirmed = self.files.rollback_metadata(self.transaction, observation, **self.source)
+                confirmed = self.files.rollback_metadata(self.transaction, observation,
+                                                         final_intents=self.final, **self.source)
             else:
                 self.files.record_validation(self.transaction, observation, **self.source)
                 self.confirming = True
@@ -381,6 +400,60 @@ class _Switch:
                     panel_running=self.initial['v-ui.service'] == 'active',
                     backup_name=self.backup['backup_name'], backup_sha256=self.backup['backup_sha256'])
 
+    def run_recovery(self):
+        journal = self.files.read_switch_recovery()
+        _need('recovery_selection' in journal, 'CORE_CONFIRMED_CLEANUP_REQUIRED')
+        context = journal['switch_context']
+        self.application = context['application']
+        self.source = {key:self.application[key] for key in ('app_source', 'target')}
+        _need(self.config.get('target') == self.source['target']
+              and self.m._digest(self.m._raw(self.config)) == context['config_sha256'],
+              'CORE_RECOVERY_CONFIG_CHANGED')
+        self.generation = context['data_generation']
+        self.initial = context['services']
+        self.trust_sha256 = context['trust_sha256']
+        self.transaction = journal['transaction']
+        self.before = self._state(journal['before'])
+        self.after = self._state(journal['after'])
+        restored = self._state(journal['recovery_selection'])
+        saved_intents = (journal['rollback']['intents'] if journal['rollback'] is not None else
+                         journal['quiesced']['cores'] if journal['quiesced'] is not None else None)
+        backup = journal['backup']
+        allow_after = backup is not None and journal['phase'] in (
+            'trial', 'validated', 'confirming', 'rollback_required', 'recovery')
+        ready = self.worker.exchange(dict(protocol=1, action='core_recover', transaction=self.transaction,
+            context=context, before=journal['before'], after=journal['after'], final_intents=saved_intents,
+            backup=backup, allow_after_ids=allow_after), 'core_recovery_prepared',
+            ('transaction', 'application', 'data_generation'))
+        _need(ready['transaction'] == self.transaction and ready['application'] == self.application
+              and ready['data_generation'] == self.generation, 'CORE_RECOVERY_CONTEXT')
+        self._time()
+        _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+        self.stop_attempted = True
+        try:
+            self.services.stop_all()
+            result = self.worker.command('proceed', 'core_recovery_bound',
+                                         ('selection', 'final_intents', 'changed_cores'))
+            self.final = self._intents(result['final_intents'], self.before)
+            _need(self._state(result['selection']) == self.before
+                  and (saved_intents is None or self.final == saved_intents)
+                  and type(result['changed_cores']) is list
+                  and len(result['changed_cores']) == len(set(result['changed_cores']))
+                  and all(core in self.s.CORES for core in result['changed_cores']),
+                  'CORE_RECOVERY_CONTEXT')
+            self.services.prove_stopped()
+            self.worker.command('release_recovery_writers', 'recovery_writers_released')
+            self._activate(restored, self.final, recovery=True)
+            self.worker.finish()
+            result = dict(outcome='restored_previous', selection_revision=restored.revision,
+                          panel_running=self.initial['v-ui.service'] == 'active')
+            if backup is not None:
+                result.update(backup_name=backup['name'], backup_sha256=backup['sha256'])
+            return result
+        except BaseException:
+            self.services.stop_all(emergency=True)
+            raise CoreControlError('CORE_RECOVERY_REQUIRED') from None
+
     def run(self, core, action, expected_revision, release_id):
         try:
             self._context(core, expected_revision)
@@ -405,7 +478,11 @@ class _Switch:
             _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
             self.transaction = self.files.begin(plan, expected_revision=self.before.revision,
                 service_snapshot=dict(panel_running=self.initial['v-ui.service'] == 'active', cores=pre),
-                initial_schemas=None if self.initialized else self.initial_schemas)
+                initial_schemas=None if self.initialized else self.initial_schemas,
+                switch_context=dict(application=self.application, data_generation=self.generation,
+                    services=self.initial, config_sha256=self.m._digest(self.m._raw(self.config)),
+                    certificate_mode=self.config.get('certificate_mode', 'managed'),
+                    trust_sha256=self.trust_sha256))
             _need(self.a._hex(self.transaction, 32), 'CORE_TRANSACTION')
             self.stop_attempted = True
             self.services.stop_all()
@@ -427,7 +504,7 @@ class _Switch:
                   and self.a._hex(digest) and self.backup['snapshot_sha256'] ==
                       hashlib.sha256(self.modules.store._canonical(snapshot)).hexdigest(), 'CORE_BACKUP_RECEIPT')
             self.files.record_backup(self.transaction, dict(kind='backup-components-v1',
-                backup_id=hashlib.sha256((name+':'+digest).encode()).hexdigest(), sha256=digest,
+                backup_id=hashlib.sha256((name+':'+digest).encode()).hexdigest(), sha256=digest, name=name,
                 selection_revision=self.before.revision,
                 intents_sha256=self.m._digest(self.m._raw(self.final))), **self.source)
             _need(self.files.provision(self.transaction, **self.source) == self.after, 'CORE_TRIAL_CHANGED')
@@ -462,6 +539,17 @@ def switch(ops, *, core, action, expected_revision, release_id=None, cancelled=N
           and (expected_revision is None or type(expected_revision) is str and ops.HEX.fullmatch(expected_revision))
           and (action == 'rollback' and release_id is None
                or action == 'update' and type(release_id) is int and 0 < release_id < 2**63), 'CORE_REQUEST')
+    return _run_task(ops, cancelled, (core, action, expected_revision, release_id))
+
+
+def recover(ops, *, cancelled=None):
+    """Explicit Root-only recovery of the retained transaction."""
+    _need(os.geteuid() == 0, 'ROOT_REQUIRED')
+    _need(os.getpid() == os.getpgrp() == os.getsid(0), 'CORE_TASK_ISOLATION')
+    return _run_task(ops, cancelled, None)
+
+
+def _run_task(ops, cancelled, request):
     cancelled = [] if cancelled is None else cancelled
     deadline = time.monotonic() + ops.TIMEOUT
     with ops.installation_lock(_proof=True) as proof:
@@ -471,15 +559,28 @@ def switch(ops, *, core, action, expected_revision, release_id=None, cancelled=N
         services = ops.Services(manager, cancelled)
         services.deadline = deadline
         with _modules(ops) as modules:
-            child = ops.Child([str(ops.PYTHON), '-B', '-I', '-S', str(ops.WORKER)],
-                              max(0, deadline-time.monotonic()), account=account, cancelled=cancelled)
-            worker = _Worker(child)
-            task = _Switch(ops, modules, services, account, worker, proof, config,
-                           deadline=deadline, cancelled=cancelled)
+            def new_task():
+                child = ops.Child([str(ops.PYTHON), '-B', '-I', '-S', str(ops.WORKER)],
+                                  max(0, deadline-time.monotonic()), account=account, cancelled=cancelled)
+                return _Switch(ops, modules, services, account, _Worker(child), proof, config,
+                               deadline=deadline, cancelled=cancelled)
+
+            task = new_task()
             try:
-                return task.run(core, action, expected_revision, release_id)
+                if request is None:
+                    return task.run_recovery()
+                try:
+                    return task.run(*request)
+                except CoreControlError as error:
+                    if (str(error) != 'CORE_RECOVERY_REQUIRED' or not task.stop_attempted
+                            or task.released or task.confirming or cancelled):
+                        raise
+                    services.prove_stopped()
+                    task.worker.close()
+                    task = new_task()
+                    return task.run_recovery()
             finally:
                 try:
                     task._close_broker()
                 finally:
-                    worker.close()
+                    task.worker.close()

@@ -23,6 +23,7 @@ import types
 ROOT = Path('/var/lib/v-ui')
 TIMEOUT = 600
 LINE_LIMIT = 8192
+RECOVERY_REQUEST_LIMIT = 16384  # Two full selections plus the retained switch context.
 PATH_LIMIT = 4096
 
 
@@ -48,7 +49,8 @@ class _Channel:
         self.input_fd, self.output, self.deadline = input_fd, output, deadline
         self.buffer = bytearray()
 
-    def read(self):
+    def read(self, *, initial=False):
+        limit = RECOVERY_REQUEST_LIMIT if initial else LINE_LIMIT
         while b'\n' not in self.buffer:
             remaining = self.deadline - time.monotonic()
             if remaining <= 0:
@@ -57,17 +59,21 @@ class _Channel:
                 selector.register(self.input_fd, selectors.EVENT_READ)
                 if not selector.select(remaining):
                     raise WorkerError('Worker deadline reached')
-            part = os.read(self.input_fd, LINE_LIMIT + 1 - len(self.buffer))
+            part = os.read(self.input_fd, limit + 1 - len(self.buffer))
             if not part:
                 raise WorkerError('Controller disconnected')
             self.buffer.extend(part)
-            if len(self.buffer) > LINE_LIMIT:
+            if len(self.buffer) > limit and b'\n' not in self.buffer:
                 raise WorkerError('Protocol line exceeded limit')
         line, _, rest = self.buffer.partition(b'\n')
+        if len(line) + 1 > limit:
+            raise WorkerError('Protocol line exceeded limit')
         self.buffer = bytearray(rest)
         value = json.loads(line.decode('utf-8'), object_pairs_hook=_object)
         if not isinstance(value, dict):
             raise WorkerError('Protocol object required')
+        if initial and len(line) + 1 > LINE_LIMIT and value.get('action') != 'core_recover':
+            raise WorkerError('Protocol line exceeded limit')
         return value
 
     def expect(self, command):
@@ -80,8 +86,7 @@ class _Channel:
 
 
 
-def _command(channel, allowed):
-    value = channel.read()
+def _command(value, allowed):
     if (set(value) != {'command'} or type(value.get('command')) is not str
             or value['command'] not in allowed):
         raise WorkerError('Unexpected controller command')
@@ -100,7 +105,7 @@ def _complete_writer_handshake(channel, session, action):
     if action == 'stage':
         channel.expect('finish')
         return
-    command = _command(channel, ('release_writers', 'release_writers_for_trial'))
+    command = _command(channel.read(), ('release_writers', 'release_writers_for_trial'))
     if command == 'release_writers':
         session.release_writers()
         channel.send('writers_released')
@@ -113,7 +118,7 @@ def _complete_writer_handshake(channel, session, action):
         allowed = (('prove_operation', 'reacquire_writers', 'finish') if phase == 'trial_writers_released'
                    else ('release_reacquired_writers',) if phase == 'writers_reacquired'
                    else ('prove_operation', 'finish'))
-        command = _command(channel, allowed)
+        command = _command(channel.read(), allowed)
         if command == 'finish':
             # Root must have independently confirmed stable files/managed
             # released before this internal cleanup. finish grants nothing.
@@ -147,10 +152,11 @@ CORE_IMPLEMENTATIONS = (
     ('app.core_updates.backup', 'core_backup.py'),
     ('app.core_updates.backup_archive', 'core_backup_archive.py'),
     ('app.core_updates.maintenance', 'core_maintenance.py'),
+    ('app.core_updates.maintenance_recovery', 'core_maintenance_recovery.py'),
 )
 
 
-def _load_core_session(release_tools):
+def _load_core_session(release_tools, *, recovery=False):
     """Only private requests need this fixed CONTROL closure, never payload."""
     directory = Path(__file__).resolve().parent
     names = ('app.core_updates', 'app.release_tools') + tuple(name for name, _ in CORE_IMPLEMENTATIONS)
@@ -170,7 +176,9 @@ def _load_core_session(release_tools):
                 raise WorkerError('Core maintenance implementation unavailable')
             module = importlib.util.module_from_spec(spec); sys.modules[name] = module; loaded.append(name)
             spec.loader.exec_module(module)
-        return module.CoreMaintenanceSession
+        if recovery:
+            return sys.modules['app.core_updates.maintenance_recovery'].CoreRecoverySession
+        return sys.modules['app.core_updates.maintenance'].CoreMaintenanceSession
     except BaseException:
         for name in reversed(loaded):sys.modules.pop(name, None)
         raise
@@ -186,11 +194,41 @@ def _core_request(value):
     return dict(core=value['core'], expected_selection_revision=value['expected_selection_revision'])
 
 
+def _core_recovery_request(value):
+    fields = ('transaction', 'context', 'before', 'after', 'final_intents', 'backup', 'allow_after_ids')
+    if (set(value) != {'protocol', 'action', *fields}
+            or type(value.get('protocol')) is not int or value['protocol'] != 1
+            or value['action'] != 'core_recover'
+            or type(value['transaction']) is not str or not re.fullmatch('[a-f0-9]{32}', value['transaction'])
+            or any(type(value[key]) is not dict for key in ('context', 'before', 'after'))
+            or value['final_intents'] is not None and type(value['final_intents']) is not dict
+            or type(value['allow_after_ids']) is not bool
+            or value['allow_after_ids'] and (value['backup'] is None or value['final_intents'] is None)):
+        raise WorkerError('Invalid private core recovery request')
+    backup = value['backup']
+    if backup is not None:
+        digests = ('backup_id', 'sha256', 'selection_revision', 'intents_sha256')
+        if (type(backup) is not dict or set(backup) != {'kind', 'name', *digests}
+                or backup['kind'] != 'backup-components-v1'
+                or type(backup['name']) is not str or not re.fullmatch(r'core-maintenance-[a-f0-9]{32}\.zip', backup['name'])
+                or any(type(backup[key]) is not str or not re.fullmatch('[a-f0-9]{64}', backup[key]) for key in digests)):
+            raise WorkerError('Invalid private core recovery receipt')
+    return {key: value[key] for key in fields}
+
+
 def _core_fields(channel, command, fields=()):
     value = channel.read()
     if set(value) != {'command', *fields} or value.get('command') != command:
         raise WorkerError('Unexpected private core command')
     return value
+
+
+def _probe_panel_tls(channel, session, value, *, before_stop=False):
+    if (set(value) != {'command', 'require_login'} or value['command'] != 'probe_panel_tls'
+            or type(value['require_login']) is not bool or before_stop and not value['require_login']):
+        raise WorkerError('Unexpected private panel probe command')
+    result = session.probe_panel_tls(require_login=value['require_login'])
+    channel.send('panel_tls', status=result['status'], trust_sha256=result['trust_sha256'])
 
 
 def _complete_core_handshake(channel, session):
@@ -202,7 +240,11 @@ def _complete_core_handshake(channel, session):
         raise WorkerError('Unexpected private core command')
     with _quiet_candidate_io():facts = session.check_core(value['candidate'])
     channel.send('prepared', **facts)
-    channel.expect('proceed')
+    while True:
+        value = channel.read()
+        if value == {'command': 'proceed'}:
+            break
+        _probe_panel_tls(channel, session, value, before_stop=True)
     with _quiet_candidate_io():facts = session.execute()
     channel.send('core_quiesced', **facts)
     value = _core_fields(channel, 'backup_core', ('snapshot',))
@@ -219,7 +261,11 @@ def _complete_core_handshake(channel, session):
                    else ('restore_core_ids',) if phase == 'writers_reacquired'
                    else ('release_reacquired_writers',) if phase == 'core_ids_restored'
                    else ('prove_operation', 'finish'))
-        command = _command(channel, allowed)
+        value = channel.read()
+        if value.get('command') == 'probe_panel_tls' and phase in ('trial_writers_released', 'recovery_writers_released'):
+            _probe_panel_tls(channel, session, value)
+            continue
+        command = _command(value, allowed)
         if command == 'finish':return
         if command == 'prove_operation':
             _prove_released_operation(session);channel.send('operation_held')
@@ -231,6 +277,28 @@ def _complete_core_handshake(channel, session):
             phase = 'core_ids_restored';channel.send(phase, **facts)
         else:
             session.release_reacquired_writers();phase = 'recovery_writers_released';channel.send(phase)
+
+
+def _complete_core_recovery_handshake(channel, session):
+    with _quiet_candidate_io():
+        prepared = session.prepare()
+    channel.send('core_recovery_prepared', **prepared)
+    channel.expect('proceed')
+    with _quiet_candidate_io():
+        bound = session.execute()
+    channel.send('core_recovery_bound', **bound)
+    channel.expect('release_recovery_writers')
+    session.release_recovery_writers()
+    channel.send('recovery_writers_released')
+    while True:
+        value = channel.read()
+        if value.get('command') == 'probe_panel_tls':
+            _probe_panel_tls(channel, session, value)
+            continue
+        if _command(value, ('prove_operation', 'finish')) == 'finish':
+            return
+        _prove_released_operation(session)
+        channel.send('operation_held')
 
 
 def _request(value):
@@ -306,12 +374,17 @@ def _run(root, release_tools, input_fd, output, *, timeout=TIMEOUT):
             if os.geteuid() == 0:
                 raise WorkerError('Worker must run as the service user')
             os.umask(0o077)
-            request = channel.read()
+            request = channel.read(initial=True)
             if request.get('action') == 'core_prepare':
                 arguments = _core_request(request)
                 implementation = _load_core_session(release_tools)
                 session = implementation(root, **arguments)
                 _complete_core_handshake(channel, session)
+            elif request.get('action') == 'core_recover':
+                arguments = _core_recovery_request(request)
+                implementation = _load_core_session(release_tools, recovery=True)
+                session = implementation(root, **arguments)
+                _complete_core_recovery_handshake(channel, session)
             else:
                 action, arguments = _request(request)
                 session = release_tools._MaintenanceSession(root)

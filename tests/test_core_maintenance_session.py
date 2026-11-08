@@ -16,13 +16,16 @@ import sys
 import tempfile
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, Mock, patch
 import zipfile
 
 from app import release_tools as tools
 from app.core_updates import maintenance as m, selection as s, selection_files as sf
 import test_core_maintenance_cycle as cycle
 import test_core_backup as materials
+
+
+PUBLIC_CHAIN = b'-----BEGIN CERTIFICATE-----\nY2VydA==\n-----END CERTIFICATE-----\n'
 
 
 class CoreMaintenanceTests(unittest.TestCase):
@@ -77,6 +80,106 @@ class CoreMaintenanceTests(unittest.TestCase):
         snapshot=dict(schema=1,kind='core-backup-closure-v1',selection=context['selection'],
                       intents=final['final_intents'],panel_was_running=True)
         result=session.backup_core(snapshot);return session,context,result
+
+    def tls_fixture(self, mode='provided'):
+        config = dict(certificate_mode=mode, bind='0.0.0.0', domain='panel.example.test', port=3215)
+        original = tools._maintenance_cycle_file
+
+        def read(path, **options):
+            if path == tools._MAINTENANCE_CONFIG:
+                self.assertEqual(options, dict(limit=16384, owner=0, private=False))
+                return ('fixture root config identity',), json.dumps(config).encode()
+            return original(path, **options)
+
+        patches = (patch.object(tools, '_maintenance_cycle_file', side_effect=read),
+                   patch.object(tools, '_maintenance_read_config', side_effect=lambda: dict(config)))
+        for override in patches:
+            override.start()
+            self.addCleanup(override.stop)
+        certs = self.data/'certs'
+        certs.mkdir(mode=0o700)
+        chain = certs/'provided-fullchain.pem'
+        if mode == 'provided':
+            self.cycle.write(chain, PUBLIC_CHAIN)
+            # The probe neither needs nor opens the separate private key.
+            self.cycle.write(certs/'provided-privkey.pem', b'not a private key')
+        return config, chain
+
+    def test_provided_tls_uses_same_public_chain_before_stop_during_trial_and_after_recovery(self):
+        self.tls_fixture()
+        session, context, _ = self.checked()
+        with self.assertRaises(m.CoreMaintenanceError):
+            session.probe_panel_tls(require_login=False)
+        digest = hashlib.sha256(PUBLIC_CHAIN).hexdigest()
+        ready = dict(status='ready', trust_sha256=digest)
+        with patch.object(m, '_panel_ssl_context', return_value=('tls-context', b'leaf')) as load, \
+                patch.object(m, '_panel_tls_exchange', side_effect=['ready','ready','pending','ready','ready','ready']) as probe:
+            self.assertEqual(session.probe_panel_tls(require_login=True), ready)
+            final = session.execute()
+            with self.assertRaises(m.CoreMaintenanceError):
+                session.probe_panel_tls(require_login=True)
+            backup = session.backup_core(dict(schema=1, kind='core-backup-closure-v1',
+                selection=context['selection'], intents=final['final_intents'], panel_was_running=True))
+            session.bind_core_ids(backup['backup_sha256'])
+            session.release_writers_for_trial()
+            self.assertEqual(session.probe_panel_tls(require_login=False), ready)
+            self.assertEqual(session.probe_panel_tls(require_login=True), dict(status='pending', trust_sha256=digest))
+            self.assertEqual(session.probe_panel_tls(require_login=True), ready)
+            session.reacquire_writers()
+            session.restore_core_ids()
+            session.release_reacquired_writers()
+            self.assertEqual(session.probe_panel_tls(require_login=False), ready)
+            self.assertEqual(session.probe_panel_tls(require_login=True), ready)
+        self.assertEqual(load.call_count, 6)
+        self.assertTrue(all(args.args == (PUBLIC_CHAIN,) for args in load.call_args_list))
+        self.assertEqual(probe.call_args.args, (m.ipaddress.ip_address('127.0.0.1'),3215,'panel.example.test','tls-context',b'leaf'))
+
+    def test_missing_symlink_or_replaced_public_chain_never_reaches_tls(self):
+        _, chain = self.tls_fixture()
+        session, _, _ = self.checked()
+        rejected = dict(status='rejected', trust_sha256=None)
+        retained = chain.with_name('retained.pem')
+        chain.rename(retained)
+        with patch.object(m, '_panel_ssl_context', return_value=(object(), b'leaf')), \
+                patch.object(m, '_panel_tls_exchange', return_value='ready') as probe:
+            self.assertEqual(session.probe_panel_tls(require_login=True), rejected)
+            chain.symlink_to(retained)
+            self.assertEqual(session.probe_panel_tls(require_login=True), rejected)
+            probe.assert_not_called()
+            chain.unlink()
+            retained.rename(chain)
+            self.assertEqual(session.probe_panel_tls(require_login=True)['status'], 'ready')
+            chain.rename(retained)
+            self.cycle.write(chain, PUBLIC_CHAIN)
+            self.assertEqual(session.probe_panel_tls(require_login=True), rejected)
+            self.assertEqual(probe.call_count, 1)
+
+    def test_configuration_or_public_chain_drift_during_probe_refuses_ready(self):
+        for changed in ('chain', 'config'):
+            with self.subTest(changed=changed):
+                if changed == 'chain':
+                    config, chain = self.tls_fixture()
+                else:
+                    self.cycle.write(chain, PUBLIC_CHAIN)
+                session, _, _ = self.checked()
+                def mutate(*args, **kwargs):
+                    if changed == 'chain':
+                        self.cycle.write(chain, PUBLIC_CHAIN+b'\n')
+                    else:
+                        config['port'] += 1
+                    return 'ready'
+                with patch.object(m, '_panel_ssl_context', return_value=(object(), b'leaf')), \
+                        patch.object(m, '_panel_tls_exchange', side_effect=mutate):
+                    self.assertEqual(session.probe_panel_tls(require_login=True), dict(status='rejected', trust_sha256=None))
+                session.close()
+
+    def test_managed_probe_does_not_load_provided_chain_or_return_digest(self):
+        self.tls_fixture(mode='managed')
+        session, _, _ = self.checked()
+        with patch.object(m, '_panel_ssl_context', return_value=(object(), None)) as load, \
+                patch.object(m, '_panel_tls_exchange', return_value='ready'):
+            self.assertEqual(session.probe_panel_tls(require_login=True), dict(status='ready', trust_sha256=None))
+        load.assert_called_once_with(None)
     def test_real_leases_cold_fd_backup_bind_and_one_recovery_cycle_preserve_config_and_stop(self):
         session,context,prepared=self.checked()
         self.assertFalse(context['selection_initialized']);self.assertEqual(len(self.calls),2)
@@ -335,6 +438,75 @@ class CoreMaintenanceTests(unittest.TestCase):
         self.assertEqual(self.read_state('sing-box')['artifact_id'],s.reference_identity(self.candidate))
 
 
+
+
+class PrivatePanelTLSTests(unittest.TestCase):
+    def test_public_chain_enables_partial_chain_without_default_trust_and_rejects_other_pem(self):
+        context = Mock(verify_flags=0)
+        with patch.object(m.ssl, 'SSLContext', return_value=context) as create, \
+                patch.object(m.ssl, 'create_default_context') as defaults, \
+                patch.object(m.ssl, 'VERIFY_X509_PARTIAL_CHAIN', 0x80000, create=True):
+            installed, leaf = m._panel_ssl_context(PUBLIC_CHAIN)
+            self.assertIs(installed, context)
+            self.assertEqual(leaf, b'cert')
+            self.assertEqual(context.verify_flags, 0x80000)
+            create.assert_called_once_with(m.ssl.PROTOCOL_TLS_CLIENT)
+            context.load_verify_locations.assert_called_once_with(cadata=PUBLIC_CHAIN.decode('ascii'))
+            defaults.assert_not_called()
+            for invalid in (b'', PUBLIC_CHAIN+b'-----BEGIN PRIVATE KEY-----\nYQ==\n-----END PRIVATE KEY-----\n',
+                            PUBLIC_CHAIN.replace(b'Y2VydA==', b'Y2VydA=')):
+                with self.assertRaises(ValueError):
+                    m._panel_ssl_context(invalid)
+
+    def exchange(self, *, status_line=b'HTTP/1.1 200 OK\r\n', leaf=b'cert',
+                 bind_error=None, handshake_error=None, require_login=True):
+        endpoint = ('::1',3215,0,0)
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        connection.getsockname.return_value = ('::1',54321,0,0)
+        connection.getpeername.return_value = endpoint
+        connection.bind.side_effect = bind_error
+        tls = MagicMock()
+        tls.__enter__.return_value = tls
+        tls.getpeercert.return_value = leaf
+        tls.recv.side_effect = [status_line,b'']
+        context = Mock()
+        context.wrap_socket.return_value = tls
+        context.wrap_socket.side_effect = handshake_error
+        with patch.object(m.socket, 'socket', return_value=connection), \
+                patch.object(m.socket, 'getaddrinfo', return_value=[(None,None,None,None,endpoint)]) as lookup:
+            result = m._panel_tls_exchange(m.ipaddress.ip_address('::1'),3215,'panel.example.test',
+                context,b'cert',require_login=require_login)
+        self.assertEqual(lookup.call_args.args[-1],m.socket.AI_NUMERICHOST)
+        connection.bind.assert_called_once_with(('::1',0,0,0))
+        return result, connection, context, tls
+
+    def test_pinned_leaf_and_hostname_checked_before_fixed_login_request(self):
+        result, connection, context, tls = self.exchange()
+        self.assertEqual(result,'ready')
+        connection.connect.assert_called_once_with(('::1',3215,0,0))
+        context.wrap_socket.assert_called_once_with(connection, server_hostname='panel.example.test')
+        tls.getpeercert.assert_called_once_with(binary_form=True)
+        tls.sendall.assert_called_once_with(b'GET /login HTTP/1.1\r\nHost: panel.example.test:3215\r\nConnection: close\r\n\r\n')
+        result, _, _, tls = self.exchange(leaf=b'other otherwise-valid leaf')
+        self.assertEqual(result,'rejected')
+        tls.sendall.assert_not_called()
+
+    def test_nonlocal_address_certificate_failure_timeout_and_login_status_fail_closed(self):
+        result, connection, _, _ = self.exchange(bind_error=OSError('address is not local'))
+        self.assertEqual(result,'rejected')
+        connection.connect.assert_not_called()
+        result, _, _, _ = self.exchange(handshake_error=m.ssl.SSLCertVerificationError('hostname mismatch'))
+        self.assertEqual(result,'rejected')
+        result, _, _, _ = self.exchange(handshake_error=TimeoutError('handshake timed out'))
+        self.assertEqual(result,'retry')
+        for line, expected in ((b'HTTP/1.1 503 Service Unavailable\r\n','pending'),
+                               (b'HTTP/1.1 302 Found\r\n','rejected'),(b'malformed','rejected')):
+            with self.subTest(line=line):
+                self.assertEqual(self.exchange(status_line=line)[0],expected)
+        result, _, _, tls = self.exchange(require_login=False)
+        self.assertEqual(result,'ready')
+        tls.sendall.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()

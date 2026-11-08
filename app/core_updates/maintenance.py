@@ -5,14 +5,19 @@ Root catalog/store/selection/pending is written, and no service is controlled.
 The caller Root coordinator owns M5 journals and proof of actual service stop.
 """
 import ast
+import base64
 from copy import deepcopy
 import ctypes
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
+import re
 import selectors
 import signal
+import socket
+import ssl
 import stat
 import subprocess
 import sys
@@ -71,6 +76,111 @@ def _versions(payload,manifest):
         _need(len(values)==1 and type(values[0]) is dict and set(values[0])==set(s.CORES),'APPLICATION_CODE')
         scope.stable()
         return values[0]
+
+
+_CERTIFICATE = re.compile(rb'-----BEGIN CERTIFICATE-----\r?\n'
+                          rb'([A-Za-z0-9+/=\r\n]+)\r?\n-----END CERTIFICATE-----')
+_PANEL_CERT_LIMIT = 128 * 1024
+_PANEL_TLS_TIMEOUT = 3
+
+
+def _panel_endpoint(config):
+    mode, port, domain, bind = (config.get(field) for field in ('certificate_mode', 'port', 'domain', 'bind'))
+    _need(mode in ('provided', 'managed') and type(port) is int and 1 <= port <= 65535
+          and type(domain) is str and 0 < len(domain) <= 253
+          and type(bind) is str, 'PANEL_TLS_CONFIG')
+    labels = domain.split('.')
+    _need(len(labels) >= 2 and not labels[-1].isdigit()
+          and all(re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?', label) for label in labels),
+          'PANEL_TLS_CONFIG')
+    address = ipaddress.ip_address(bind)
+    if address.is_unspecified:
+        address = ipaddress.ip_address('127.0.0.1' if address.version == 4 else '::1')
+    _need(not address.is_multicast and address != ipaddress.ip_address('255.255.255.255'), 'PANEL_TLS_CONFIG')
+    return mode, address, port, domain
+
+
+def _panel_ssl_context(pem):
+    if pem is None:
+        return ssl.create_default_context(), None
+
+    # The saved file contains public certificate blocks only. Use its first
+    # certificate as the expected live leaf, and trust only this saved chain.
+    leaf = None
+    remaining = pem.strip(b' \t\r\n')
+    while remaining:
+        match = _CERTIFICATE.match(remaining)
+        _need(match is not None, 'PANEL_TLS_CHAIN')
+        encoded = b''.join(match[1].splitlines())
+        der = base64.b64decode(encoded, validate=True)
+        _need(bool(der), 'PANEL_TLS_CHAIN')
+        if leaf is None:
+            leaf = der
+        remaining = remaining[match.end():].lstrip(b' \t\r\n')
+    _need(leaf is not None, 'PANEL_TLS_CHAIN')
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    partial_chain = getattr(ssl, 'VERIFY_X509_PARTIAL_CHAIN', None)
+    if partial_chain is None:
+        # Python 3.9 lacks the enum on OpenSSL, where the flag is stable.
+        _need(ssl.OPENSSL_VERSION.startswith('OpenSSL ') and ssl.OPENSSL_VERSION_INFO >= (1, 0, 2),
+              'PANEL_TLS_CHAIN')
+        partial_chain = 0x80000
+    context.verify_flags |= partial_chain
+    context.load_verify_locations(cadata=pem.decode('ascii'))
+    return context, leaf
+
+
+def _panel_tls_exchange(address, port, domain, context, leaf, *, require_login):
+    deadline = time.monotonic() + _PANEL_TLS_TIMEOUT
+
+    def remaining():
+        timeout = deadline - time.monotonic()
+        if timeout <= 0:
+            raise TimeoutError('panel TLS timeout')
+        return timeout
+
+    family = socket.AF_INET if address.version == 4 else socket.AF_INET6
+    endpoints = socket.getaddrinfo(str(address), port, family, socket.SOCK_STREAM,
+                                   socket.IPPROTO_TCP, socket.AI_NUMERICHOST)
+    _need(len(endpoints) == 1, 'PANEL_TLS_CONFIG')
+    endpoint = endpoints[0][4]
+    try:
+        with socket.socket(family, socket.SOCK_STREAM, socket.IPPROTO_TCP) as connection:
+            connection.settimeout(remaining())
+            try:
+                connection.bind((endpoint[0], 0, *endpoint[2:]))
+            except OSError:
+                return 'rejected'
+            connection.connect(endpoint)
+            local = connection.getsockname()
+            _need(connection.getpeername() == endpoint
+                  and local[0] == endpoint[0] and local[2:] == endpoint[2:], 'PANEL_TLS_ADDRESS')
+            connection.settimeout(remaining())
+            with context.wrap_socket(connection, server_hostname=domain) as tls:
+                if leaf is not None and tls.getpeercert(binary_form=True) != leaf:
+                    return 'rejected'
+                remaining()
+                if not require_login:
+                    return 'ready'
+                tls.settimeout(remaining())
+                tls.sendall(('GET /login HTTP/1.1\r\nHost: '+domain+':'+str(port)
+                             +'\r\nConnection: close\r\n\r\n').encode('ascii'))
+                response = b''
+                while b'\r\n' not in response and len(response) < 256:
+                    tls.settimeout(remaining())
+                    chunk = tls.recv(256-len(response))
+                    if not chunk:
+                        break
+                    response += chunk
+                remaining()
+                line, separator, _ = response.partition(b'\r\n')
+                if not separator or not re.fullmatch(rb'HTTP/1\.[01] [0-9]{3}(?: [^\r\n]*)?', line):
+                    return 'rejected'
+                return {b'200': 'ready', b'503': 'pending'}.get(line.split()[1], 'rejected')
+    except ssl.SSLCertVerificationError:
+        return 'rejected'
+    except OSError:
+        return 'retry'
 
 
 def _require_clean_subtree():
@@ -158,6 +268,61 @@ class CoreMaintenanceSession(tools._MaintenanceSession):
         self._bundle_anchor=_bundle_anchor
         self._core_phase='new';self._backup_sha=None;self._candidate=None
         self._before=None;self._after=None;self._prepared_states=None;self._final_intents=None
+        self._panel_tls_material = None
+
+    def _read_panel_tls_material(self):
+        config_file = tools._maintenance_cycle_file(tools._MAINTENANCE_CONFIG, limit=16384,
+                                                   owner=0, private=False)
+        config = _application_json(config_file[1])
+        # The existing bootstrap reader additionally requires root-owned
+        # ancestors. Compare its strict read with our exact identity snapshot.
+        _need(config == tools._maintenance_read_config(), 'PANEL_TLS_CONFIG')
+        endpoint = _panel_endpoint(config)
+        material = None
+        with _data_root(self.root/'data', os.geteuid(), Path('/')) as (scope, data):
+            info = os.fstat(data)
+            _need(dict(dev=info.st_dev, ino=info.st_ino) == self._data_generation, 'DATA_GENERATION_CHANGED')
+            if endpoint[0] == 'provided':
+                certs = scope.directory(data, 'certs', mode=0o700)
+                fd, size = scope.file(certs, 'provided-fullchain.pem', mode=0o600, limit=_PANEL_CERT_LIMIT)
+                raw = os.pread(fd, size+1, 0)
+                _need(len(raw) == size, 'PANEL_TLS_CHAIN')
+                material = a._file_identity(os.fstat(fd)), raw
+        return config_file, endpoint, material
+
+    def probe_panel_tls(self, *, require_login):
+        phase = self._state
+        _need(os.geteuid() != 0 and type(require_login) is bool
+              and (phase == 'prepared' and self._core_phase == 'checked' and require_login
+                   or phase in ('trial_writers_released', 'recovery_writers_released')), 'PANEL_TLS_PHASE')
+
+        def proof():
+            self._state_is(phase)
+            _need(self._operation_active and callable(self._operation_proof)
+                  and self._operation_proof() is None, 'PANEL_TLS_OPERATION')
+            self._state_is(phase)
+
+        proof()
+        trust_sha256 = None
+        try:
+            self._journal_clear()
+            material = self._read_panel_tls_material()
+            if self._panel_tls_material is None:
+                self._panel_tls_material = material
+            _need(self._panel_tls_material == material, 'PANEL_TLS_CHANGED')
+            _, (_, address, port, domain), certificate = material
+            pem = certificate[1] if certificate is not None else None
+            context, leaf = _panel_ssl_context(pem)
+            trust_sha256 = hashlib.sha256(pem).hexdigest() if pem is not None else None
+            proof()
+            status = _panel_tls_exchange(address, port, domain, context, leaf, require_login=require_login)
+            _need(self._read_panel_tls_material() == material, 'PANEL_TLS_CHANGED')
+            self._journal_clear()
+        except (OSError, ValueError, tools.ReleaseError):
+            status, trust_sha256 = 'rejected', None
+        proof()
+        return dict(status=status, trust_sha256=trust_sha256)
+
     def _observe_states(self):
         return _runtime_states(self.root/'data',owner=os.geteuid(),anchor=Path('/'))
     def _intents(self,states,state):

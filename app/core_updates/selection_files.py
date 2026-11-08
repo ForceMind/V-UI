@@ -110,6 +110,34 @@ def _snapshot(value, state):
     return dict(panel_running=value['panel_running'], cores=_intent(value['cores'], state))
 
 
+def _switch_context(value, state, panel_running):
+    """Durable observations for explicit recovery, never a writer permit."""
+    _keys(value, ('application', 'data_generation', 'services', 'config_sha256',
+                  'certificate_mode', 'trust_sha256'))
+    app = value['application']
+    _keys(app, ('app_source', 'target', 'release_id', 'current_sha256',
+                'manifest_sha256', 'ready_sha256'))
+    _need(app['app_source'] == state.app_source and app['target'] == state.target
+          and type(app['release_id']) is str
+          and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,100}', app['release_id'])
+          and all(a._hex(app[key]) for key in ('current_sha256', 'manifest_sha256', 'ready_sha256')),
+          'SWITCH_APPLICATION')
+    generation = value['data_generation']
+    _keys(generation, ('dev', 'ino'))
+    _need(all(type(number) is int and 0 <= number < 2**64 for number in generation.values())
+          and generation['ino'] > 0, 'SWITCH_DATA')
+    services = value['services']
+    _keys(services, ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket'))
+    _need(all(status in ('active', 'inactive') for status in services.values())
+          and (services['v-ui.service'] == 'active') == panel_running, 'SWITCH_SERVICES')
+    _need(a._hex(value['config_sha256']) and value['certificate_mode'] in ('managed', 'provided'),
+          'SWITCH_CONFIG')
+    requires_trust = value['certificate_mode'] == 'provided' and panel_running
+    _need(a._hex(value['trust_sha256']) if requires_trust else value['trust_sha256'] is None,
+          'SWITCH_TRUST')
+    return deepcopy(value)
+
+
 def _validation(value, state, intents, panel_running):
     _keys(value, ('selection_revision', 'panel_running', 'panel_health_verified', 'cores'))
     _need(value['selection_revision'] == state.revision
@@ -304,9 +332,10 @@ def _pending(raw):
 
 
 def _journal(value, app_source, target):
-    _keys(value, ('schema', 'kind', 'transaction', 'sequence', 'previous_sha256', 'phase', 'operation',
-                  'before', 'after', 'pre_stop', 'quiesced', 'backup', 'validation', 'original_files',
-                  'actions', 'rollback', 'known_generations', 'restore_target'))
+    fields = ('schema', 'kind', 'transaction', 'sequence', 'previous_sha256', 'phase', 'operation',
+              'before', 'after', 'pre_stop', 'quiesced', 'backup', 'validation', 'original_files',
+              'actions', 'rollback', 'known_generations', 'restore_target')
+    _keys(value, (*fields, 'switch_context') if type(value) is dict and 'switch_context' in value else fields)
     _need(type(value['schema']) is int and value['schema'] == 1
           and value['kind'] == 'core-selection-journal-v1' and a._hex(value['transaction'], 32)
           and type(value['sequence']) is int and 0 <= value['sequence'] < MAX_JOURNALS
@@ -320,6 +349,10 @@ def _journal(value, app_source, target):
     if first_switch:
         _need(_first_component_change(before, after), 'JOURNAL_BASELINE')
     _snapshot(value['pre_stop'], after if before is None else before)
+    if 'switch_context' in value:
+        _need(value['operation'] in ('initial_component', 'component', 'bundle', 'rollback'),
+              'SWITCH_CONTEXT')
+        _switch_context(value['switch_context'], before, value['pre_stop']['panel_running'])
     if value['operation'] == 'restore':
         _keys(value['restore_target'], ('kind', 'source_backup_sha256', 'intents'))
         _need(value['restore_target']['kind'] == 'core-restore-target-v1'
@@ -340,7 +373,14 @@ def _journal(value, app_source, target):
               'QUIESCENCE')
         _intent(value['quiesced']['cores'], before)
     if value['backup'] is not None:
-        _keys(value['backup'], ('kind', 'backup_id', 'sha256', 'selection_revision', 'intents_sha256'))
+        backup_fields = ('kind', 'backup_id', 'sha256', 'selection_revision', 'intents_sha256')
+        _keys(value['backup'], (*backup_fields, 'name') if 'switch_context' in value else backup_fields)
+        if 'switch_context' in value:
+            name = value['backup']['name']
+            digest = value['backup']['sha256']
+            _need(type(name) is str and re.fullmatch(r'core-maintenance-[a-f0-9]{32}\.zip', name)
+                  and a._hex(digest) and value['backup']['backup_id'] == _digest((name+':'+digest).encode()),
+                  'BACKUP')
         _need(value['backup']['kind'] == 'backup-components-v1' and before is not None
               and value['quiesced'] is not None and a._hex(value['backup']['backup_id'])
               and a._hex(value['backup']['sha256'])
@@ -405,6 +445,7 @@ def _follows(previous, current):
     for key in ('schema', 'kind', 'transaction', 'operation', 'before', 'after', 'pre_stop', 'original_files',
                 'restore_target'):
         _need(previous[key] == current[key], 'JOURNAL_REWRITTEN')
+    _need(previous.get('switch_context') == current.get('switch_context'), 'JOURNAL_REWRITTEN')
     transitions = {
         'admitting': ('prepared', 'recovery'), 'prepared': ('quiesced', 'rollback_required', 'recovery'),
         'quiesced': ('backed_up', 'rollback_required', 'recovery'),
@@ -570,7 +611,7 @@ class SelectionFiles:
         return directory, latest, location
 
     def _new_transaction(self, scope, root, *, before, after, operation, snapshot, known_generations,
-                         expected_files=None, restore_target=None):
+                         expected_files=None, restore_target=None, switch_context=None):
         _need(not any(_exists(root, name) for name in (PENDING, ACTIVE)), 'RECOVERY_REQUIRED')
         transaction = secrets.token_hex(16)
         pending_raw = _raw(dict(schema=1, kind='core-update-pending-v1', transaction=transaction))
@@ -593,6 +634,8 @@ class SelectionFiles:
             pre_stop=_snapshot(snapshot, after if before is None else before), quiesced=None,
             backup=None, validation=None, original_files=originals, actions=[], rollback=None,
             known_generations=list(known_generations), restore_target=deepcopy(restore_target))
+        if switch_context is not None:
+            journal['switch_context'] = deepcopy(switch_context)
         _journal(journal, after.app_source, after.target)
         self._publish_journal(scope, directory, 'journal-000.json', _raw(journal))
         self._append(scope, directory, journal, phase='prepared')
@@ -624,7 +667,7 @@ class SelectionFiles:
             self._publish_confirmed(scope, root, directory, journal, initial)
             return initial
 
-    def begin(self, plan, *, expected_revision, service_snapshot, initial_schemas=None):
+    def begin(self, plan, *, expected_revision, service_snapshot, initial_schemas=None, switch_context=None):
         """Begin an ordinary switch, or the first component switch from legacy bundles.
 
         The supplied schemas are observations from the live private worker,
@@ -636,6 +679,8 @@ class SelectionFiles:
         _validate_state(plan.after)
         _need(expected_revision == plan.before.revision and a._hex(expected_revision), 'SELECTION_CONFLICT')
         _snapshot(service_snapshot, plan.before)
+        if switch_context is not None:
+            switch_context = _switch_context(switch_context, plan.before, service_snapshot['panel_running'])
         _need(plan.operation in ('component', 'bundle', 'rollback') and plan.core in s.CORES
               and type(plan.changed) is bool, 'PLAN')
         if plan.changed:
@@ -665,7 +710,7 @@ class SelectionFiles:
                       'ALREADY_INITIALIZED_OR_DAMAGED')
                 _, journal = self._new_transaction(scope, root, before=plan.before, after=plan.after,
                     operation='initial_component', snapshot=service_snapshot, known_generations=[],
-                    expected_files=dict(selection=None, fence=None))
+                    expected_files=dict(selection=None, fence=None), switch_context=switch_context)
                 return journal['transaction']
         with self._io(write=True) as (scope, root):
             current, expected_files = self._stable(scope, root, plan.before.app_source, plan.before.target,
@@ -674,7 +719,8 @@ class SelectionFiles:
             if not plan.changed:
                 return None
             _, journal = self._new_transaction(scope, root, before=current, after=plan.after,
-                operation=plan.operation, snapshot=service_snapshot, known_generations=[], expected_files=expected_files)
+                operation=plan.operation, snapshot=service_snapshot, known_generations=[], expected_files=expected_files,
+                switch_context=switch_context)
             return journal['transaction']
 
     def begin_restore(self, snapshot, *, app_source, target, expected_revision,
@@ -809,6 +855,16 @@ class SelectionFiles:
         os.fsync(directory)
         os.fsync(root)
 
+    def _settle_fence(self, scope, root, directory, journal, state):
+        if journal['phase'] != 'cleanup':
+            self._append(scope, directory, journal, phase='cleanup')
+        current = _read(scope, root, FENCE, optional=True)
+        planned = [action['new'] for action in journal['actions'] if action['public'] == FENCE]
+        _need(current is None or any(_matches(current[1], record) for record in planned), 'PUBLIC_CHANGED')
+        self._replace(scope, root, directory, journal, key='settle-fence', name=FENCE,
+                      expected=None if current is None else current[1],
+                      raw=_raw(_fence_for(state, journal['transaction'], settled=True)))
+
     def _archive_and_clear(self, scope, root, directory, journal, state):
         transaction = journal['transaction']
         history = scope.directory(root, HISTORY, mode=0o700, create=True)
@@ -830,6 +886,15 @@ class SelectionFiles:
         pending = _read(scope, root, PENDING, optional=True)
         if pending is not None:
             _need(_matches(pending[1], journal['original_files']['pending']), 'PENDING_CHANGED')
+        if 'switch_context' in journal:
+            if pending is None:
+                archived_pending = _read(scope, directory, 'public-pending.json')
+                _need(_matches(archived_pending[1], journal['original_files']['pending']), 'PENDING_CHANGED')
+            # Retain the transaction locator and admission barrier throughout
+            # the two-renames fence publication. Older journals keep their
+            # original cleanup order for replay compatibility.
+            self._settle_fence(scope, root, directory, journal, state)
+        if pending is not None:
             scope.stable()
             _detach(scope, root, PENDING)
             fs._rename_new(root, PENDING, directory, 'public-pending.json')
@@ -839,14 +904,8 @@ class SelectionFiles:
             raise CoreSelectionFilesError('PENDING_CHANGED')
         os.fsync(directory)
         os.fsync(root)
-        if journal['phase'] != 'cleanup':
-            self._append(scope, directory, journal, phase='cleanup')
-        current = _read(scope, root, FENCE, optional=True)
-        planned = [action['new'] for action in journal['actions'] if action['public'] == FENCE]
-        _need(current is None or any(_matches(current[1], record) for record in planned), 'PUBLIC_CHANGED')
-        self._replace(scope, root, directory, journal, key='settle-fence', name=FENCE,
-                      expected=None if current is None else current[1],
-                      raw=_raw(_fence_for(state, transaction, settled=True)))
+        if 'switch_context' not in journal:
+            self._settle_fence(scope, root, directory, journal, state)
 
     def finish_cleanup(self, transaction, *, app_source, target):
         """Explicitly finish metadata of an already durably confirmed journal.
@@ -886,6 +945,74 @@ class SelectionFiles:
             self._append(scope, directory, journal, phase='confirming')
             self._publish_confirmed(scope, root, directory, journal, after)
             return after
+
+    def _rollback_highwater(self, scope, root, directory, journal, before, after, known):
+        maximum = max([before.generation, after.generation] + journal['known_generations'] + list(known))
+        for key, name in (('selection', SELECTION), ('fence', FENCE)):
+            current = _read(scope, root, name, optional=True)
+            original = journal['original_files'][key]
+            actions = [action for action in journal['actions'] if action['public'] == name]
+            if current is not None:
+                allowed = [original, *(action['new'] for action in actions)]
+                _need(any(record is not None and _matches(current[1], record) for record in allowed),
+                      'PUBLIC_CHANGED')
+                generation = (s.decode_selection(current[0], app_source=after.app_source,
+                              target=after.target).generation if key == 'selection'
+                              else _fence(current[0])['highest_generation'])
+                maximum = max(maximum, generation)
+            elif 'switch_context' in journal:
+                # _load already checked the identity of every present private
+                # slot. A missing original without a parked inode is drift.
+                gap = any(_exists(directory, action['new_slot']) and
+                          (action['old'] is None and original is None or
+                           action['old'] is not None and _exists(directory, action['old_slot']))
+                          for action in actions)
+                _need(gap or original is None and not actions, 'PUBLIC_CHANGED')
+        return maximum
+
+    def read_switch_recovery(self):
+        """Read durable switch facts without creating or clearing any barrier."""
+        with self._io() as (scope, root):
+            pending = _read(scope, root, PENDING, optional=True)
+            fence = _read(scope, root, FENCE, optional=True)
+            if pending is not None:
+                transaction = _pending(pending[0])['transaction']
+            elif fence is not None:
+                transaction = _fence(fence[0])['transaction']
+            else:
+                raise CoreSelectionFilesError('RECOVERY_IDENTITY_MISSING')
+            if _exists(root, ACTIVE):
+                directory = scope.directory(root, ACTIVE, mode=0o700)
+            else:
+                history = scope.directory(root, HISTORY, mode=0o700)
+                directory = scope.directory(history, transaction, mode=0o700)
+            first, _ = _read(scope, directory, 'journal-000.json', mode=0o600)
+            after = a._json(first).get('after')
+            _need(type(after) is dict and a._hex(after.get('app_source'), 40)
+                  and type(after.get('target')) is str and after['target'] in a.TARGETS,
+                  'SWITCH_CONTEXT')
+            directory, journal, location = self._load(scope, root, transaction, after['app_source'], after['target'])
+            _need('switch_context' in journal, 'SWITCH_CONTEXT_REQUIRED')
+            if pending is not None:
+                _need(_matches(pending[1], journal['original_files']['pending']), 'PENDING_CHANGED')
+            elif location == 'archive' and fence is not None and _fence(fence[0])['settled']:
+                # The latest completed history is evidence, not a recovery task.
+                raise CoreSelectionFilesError('NO_SWITCH_RECOVERY')
+            else:
+                _need(journal['phase'] in ('confirmed', 'cleanup'), 'RECOVERY_REQUIRED')
+            result = deepcopy(journal)
+            if journal['phase'] not in ('confirmed', 'cleanup'):
+                before = _selection(journal['before'], after['app_source'], after['target'])
+                proposed = _selection(journal['after'], after['app_source'], after['target'])
+                maximum = self._rollback_highwater(scope, root, directory, journal, before, proposed, ())
+                if journal['rollback'] is None:
+                    _need(maximum < s.MAX_GENERATION, 'GENERATION_EXHAUSTED')
+                    restored = s._build(before.app_source, before.target, maximum + 1, before.slots)
+                else:
+                    restored = _selection(journal['rollback']['selection'], after['app_source'], after['target'])
+                    _need(maximum <= restored.generation, 'RECOVERY_CONFLICT')
+                result['recovery_selection'] = _selection_map(restored)
+            return result
 
     def recovery_view(self, *, app_source, target):
         """Facts only. Never continue a trial, start a process or infer success."""
@@ -935,22 +1062,7 @@ class SelectionFiles:
             known = list(known_generations)
             _need(len(known) <= 14 and all(type(item) is int and 0 <= item <= s.MAX_GENERATION for item in known),
                   'GENERATION')
-            actual = {}
-            maximum = max([before.generation, after.generation] + journal['known_generations'] + known)
-            for name in (SELECTION, FENCE):
-                result = _read(scope, root, name, optional=True)
-                actual[name] = result
-                if result is not None:
-                    if name == SELECTION:
-                        current = s.decode_selection(result[0], app_source=app_source, target=target)
-                        maximum = max(maximum, current.generation)
-                    else:
-                        maximum = max(maximum, _fence(result[0])['highest_generation'])
-                    # Only our original or journal-planned publications may be
-                    # parked. A structurally valid foreign file is still foreign.
-                    allowed = [journal['original_files']['selection' if name == SELECTION else 'fence']]
-                    allowed += [action['new'] for action in journal['actions'] if action['public'] == name]
-                    _need(any(record is not None and _matches(result[1], record) for record in allowed), 'PUBLIC_CHANGED')
+            maximum = self._rollback_highwater(scope, root, directory, journal, before, after, known)
             if journal['rollback'] is None:
                 _need(maximum < s.MAX_GENERATION, 'GENERATION_EXHAUSTED')
                 restored = s._build(app_source, target, maximum + 1, before.slots)

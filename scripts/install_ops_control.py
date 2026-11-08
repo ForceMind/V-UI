@@ -96,6 +96,7 @@ CORE_SOURCE_DEPENDENCIES = {
     'core_backup.py': 'app/core_updates/backup.py',
     'core_backup_archive.py': 'app/core_updates/backup_archive.py',
     'core_maintenance.py': 'app/core_updates/maintenance.py',
+    'core_maintenance_recovery.py': 'app/core_updates/maintenance_recovery.py',
     'core_boot_broker.py': 'deploy/core_boot_broker.py',
     'core_maintenance_control.py': 'deploy/core_maintenance_control.py',
 }

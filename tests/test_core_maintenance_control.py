@@ -78,6 +78,7 @@ class FixtureChild:
         self.finished = False
         self.snapshot = None
         self.backup_ack = None
+        self.recovering = False
 
     def send(self, request):
         case = self.case
@@ -91,6 +92,15 @@ class FixtureChild:
                 result['application']['target'] = 'aarch64-gnu'
             elif case.fault == 'worker-extra-field':
                 result['unchecked'] = True
+        elif command == 'core_recover':
+            self.recovering = True
+            result = dict(event='core_recovery_prepared', transaction=request['transaction'],
+                          application=case.context['application'], data_generation=case.context['data_generation'])
+        elif command == 'probe_panel_tls':
+            digest = 'b'*64
+            if case.fault == 'provided-ca-drift' and case.brokers and case.brokers[-1].purpose == 'trial':
+                digest = 'c'*64
+            result = dict(event='panel_tls', status='ready', trust_sha256=digest)
         elif command == 'check_core':
             if case.fault == 'cold-check':
                 result = dict(event='error', code='MAINTENANCE_REFUSED')
@@ -101,7 +111,11 @@ class FixtureChild:
         elif command == 'proceed':
             if case.services.state(PANEL) != 'inactive':
                 raise AssertionError('proceed before stop')
-            result = dict(event='core_quiesced', final_intents=case.final_intents, source_token=TOKEN)
+            if self.recovering:
+                result = dict(event='core_recovery_bound', selection=case.context['selection'],
+                              final_intents=case.final_intents, changed_cores=[])
+            else:
+                result = dict(event='core_quiesced', final_intents=case.final_intents, source_token=TOKEN)
         elif command == 'backup_core':
             self.snapshot = request['snapshot']
             result = dict(event='core_backed_up', backup_name=ARCHIVE,
@@ -126,7 +140,7 @@ class FixtureChild:
             result = dict(event='writers_reacquired')
         elif command == 'restore_core_ids':
             result = dict(event='core_ids_restored', selection=case.context['selection'], intents=case.final_intents)
-        elif command == 'release_reacquired_writers':
+        elif command in ('release_reacquired_writers', 'release_recovery_writers'):
             result = dict(event='recovery_writers_released')
         elif command == 'finish':
             self.finished = True
@@ -371,6 +385,40 @@ class CoreMaintenanceControlTests(unittest.TestCase):
     def run_switch(self):
         with patch.object(self.switch, '_plan', side_effect=self.candidate):
             return self.switch.run(CORE, 'update', None, 123)
+
+    def test_private_ca_uses_worker_and_keeps_the_saved_trust_on_trial_drift(self):
+        self.switch.config['certificate_mode']='provided'
+        self.switch.ops.local_panel_tls=lambda *args,**kwargs:self.fail('private CA bypassed worker')
+        self.fault='provided-ca-drift'
+        result=self.run_switch()
+        self.assertEqual(result['outcome'],'restored_previous')
+        self.assertEqual(self.switch.trust_sha256,'b'*64)
+        self.assert_order('probe_panel_tls','stop','probe:trial','probe_panel_tls','close:trial',
+                          'reacquire_writers','probe:old_recovery','probe_panel_tls','release:old_recovery')
+
+    def test_fresh_root_recovery_reuses_saved_topology_and_refuses_changed_config(self):
+        scan={core:dict(schema=1 if row['revision'] else None, revision=row['revision'], enabled=row['enabled'])
+              for core,row in self.initial_intents.items()}
+        service=dict(panel_running=True,cores=self.initial_intents)
+        self.files.bootstrap(self.before,writer_observation=scan,service_snapshot=service)
+        context=dict(application=self.context['application'],data_generation=self.context['data_generation'],
+            services=dict(self.services.current),config_sha256=selection_files._digest(selection_files._raw(self.switch.config)),
+            certificate_mode='managed',trust_sha256=None)
+        tx=self.files.begin(self.plan,expected_revision=self.before.revision,
+                            service_snapshot=service,switch_context=context)
+        self.switch.config['port']=9443
+        with self.assertRaisesRegex(control.CoreControlError,'CORE_RECOVERY_CONFIG_CHANGED'):
+            self.switch.run_recovery()
+        self.assertNotIn('stop',self.trace);self.assertNotIn('core_recover',self.trace)
+        self.switch.config.pop('port')
+        self.services.current[SOCKET]='inactive'
+        result=self.switch.run_recovery()
+        self.assertEqual(result['outcome'],'restored_previous')
+        self.assertEqual(self.services.current,context['services'])
+        self.assertEqual(self.files.read_stable(**SOURCE).slots,self.before.slots)
+        self.assertEqual(self.files.recovery_view(**SOURCE)['transaction'],tx)
+        self.assert_order('core_recover','stop','proceed','release_recovery_writers','probe:old_recovery',
+                          'release:old_recovery','finish')
 
     def assert_order(self, *events):
         index = 0

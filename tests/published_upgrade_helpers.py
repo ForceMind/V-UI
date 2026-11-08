@@ -42,7 +42,7 @@ CORE_FILES = frozenset(str(CONTROL / name) for name in (
     'core_artifacts.py','core_selection.py','core_binary.py','core_store.py',
     'core_github.py','core_catalog.py','core_resolver.py','core_application.py',
     'core_selection_files.py','core_boot.py','core_backup.py','core_backup_archive.py',
-    'core_maintenance.py','core_boot_broker.py','core_maintenance_control.py'))
+    'core_maintenance.py','core_maintenance_recovery.py','core_boot_broker.py','core_maintenance_control.py'))
 CERTIFICATE_COLUMNS = ('id', 'domain', 'email', 'environment', 'auto_renew', 'revision',
     'not_before', 'not_after', 'renew_at', 'retry_at', 'last_attempt', 'failures', 'error', 'created_at')
 BINDING_COLUMNS = ('target', 'certificate_id', 'applied_certificate_id', 'applied_revision', 'error')

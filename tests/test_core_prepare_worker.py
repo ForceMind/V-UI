@@ -4,14 +4,17 @@ The isolated loader test only imports copied stdlib Python sources. No core,
 service, product install, network, Root metadata or candidate execution occurs.
 """
 from contextlib import contextmanager
+from dataclasses import replace
 import io
 import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 from unittest.mock import patch
@@ -35,7 +38,28 @@ class FakeCoreSession:
     def _check_reacquired_writers(self):self.trace.append('writer_guard')
     def restore_core_ids(self):self.trace.append('repair');return dict(selection={})
     def release_reacquired_writers(self):self.trace.append('recovery_release')
+    def probe_panel_tls(self, *, require_login):
+        self.trace.append('tls-login' if require_login else 'tls-handshake')
+        return dict(status='ready', trust_sha256='d'*64)
     def close(self):self.trace.append('close');self.closed+=1
+
+
+class FakeRecoverySession(FakeCoreSession):
+    def __init__(self, root, trace, **arguments):
+        super().__init__(root, trace)
+        self.arguments = arguments
+
+    def prepare(self):
+        self.trace.append('recovery_prepare')
+        return dict(transaction=self.arguments['transaction'], application=dict(app_source='a'*40),
+                    data_generation=dict(dev=1, ino=2))
+
+    def execute(self):
+        self.trace.append('recovery_bind')
+        return dict(selection=self.arguments['before'], final_intents={}, changed_cores=['sing-box'])
+
+    def release_recovery_writers(self):
+        self.trace.append('recovery_release')
 
 
 class CorePrepareWorkerTests(unittest.TestCase):
@@ -44,10 +68,15 @@ class CorePrepareWorkerTests(unittest.TestCase):
         command('backup_core',snapshot={'kind':'fake-snapshot'}),command('bind_core_ids',backup_sha256='a'*64),
         command('release_writers_for_trial')]
     def run_worker(self,commands,*,request=None,close_error=False,guard_error=False,proof_result=None,uid=501,
-                   timeout=1,hold=False):
+                   timeout=1,hold=False,session_type=FakeCoreSession,prepare_error=False):
         trace=[];sessions=[];read,write=os.pipe();output=io.StringIO()
         def factory(root,**kwargs):
-            instance=FakeCoreSession(root,trace,**kwargs)
+            instance=session_type(root,trace,**kwargs)
+            if prepare_error:
+                def prepare():
+                    trace.append('prepare-refused')
+                    raise ValueError('private failure context')
+                instance.prepare=prepare
             if close_error:
                 def close():instance.closed+=1;trace.append('close');raise RuntimeError('close lost ack')
                 instance.close=close
@@ -68,6 +97,125 @@ class CorePrepareWorkerTests(unittest.TestCase):
             os.close(read)
             if write is not None:os.close(write)
         return status,[json.loads(line) for line in output.getvalue().splitlines()],trace,sessions
+
+    def recovery_request(self, **overrides):
+        request = dict(protocol=1, action='core_recover', transaction='a'*32, context={}, before={},
+                       after={}, final_intents=None, backup=None, allow_after_ids=False)
+        return dict(request, **overrides)
+
+    def run_recovery_worker(self, commands, *, request=None, **options):
+        return self.run_worker(commands, request=self.recovery_request() if request is None else request,
+                               session_type=FakeRecoverySession, **options)
+
+    def test_private_recovery_releases_writers_before_serial_proof_and_tls(self):
+        request = self.recovery_request(before={'fixture': 'old-selection'})
+        status, events, trace, sessions = self.run_recovery_worker([
+            command('proceed'), command('release_recovery_writers'), command('prove_operation'),
+            command('probe_panel_tls', require_login=False), command('probe_panel_tls', require_login=True),
+            command('prove_operation'), command('finish')], request=request)
+        self.assertEqual(status, 0)
+        self.assertEqual(events, [
+            dict(event='core_recovery_prepared', transaction='a'*32, application=dict(app_source='a'*40),
+                 data_generation=dict(dev=1, ino=2)),
+            dict(event='core_recovery_bound', selection=request['before'], final_intents={}, changed_cores=['sing-box']),
+            dict(event='recovery_writers_released'), dict(event='operation_held'),
+            dict(event='panel_tls', status='ready', trust_sha256='d'*64),
+            dict(event='panel_tls', status='ready', trust_sha256='d'*64), dict(event='operation_held')])
+        self.assertEqual(trace, ['recovery_prepare', 'recovery_bind', 'recovery_release',
+                                 'proof', 'tls-handshake', 'tls-login', 'proof', 'close'])
+        self.assertEqual(sessions[0].arguments, {k:v for k,v in request.items() if k not in ('action','protocol')})
+
+    def test_recovery_rejects_invalid_request_and_unproven_prepare_before_writers(self):
+        from app import release_tools
+        self.assertNotIn('core_recover', release_tools._MaintenanceSession.ACTIONS)
+        with self.assertRaises(w.WorkerError):
+            w._request(self.recovery_request())
+        for changes in (dict(protocol=True),dict(transaction='BAD'),dict(context=[]),dict(before=None),
+                        dict(final_intents=[]),dict(allow_after_ids=1),dict(allow_after_ids=True),
+                        dict(backup={'path':'/untrusted.zip'}),dict(path='/untrusted'),dict(_bundle_anchor='/')):
+            with self.subTest(changes=changes):
+                status, events, trace, sessions = self.run_recovery_worker(
+                    [command('proceed')], request=self.recovery_request(**changes))
+                self.assertEqual((status, trace, sessions), (1, [], []))
+                self.assertEqual(events, [dict(event='error',code='MAINTENANCE_REFUSED')])
+        status, events, trace, _ = self.run_recovery_worker([command('proceed')], prepare_error=True)
+        self.assertEqual(status, 1)
+        self.assertEqual(trace, ['prepare-refused', 'close'])
+        self.assertEqual(events, [dict(event='error',code='MAINTENANCE_REFUSED')])
+
+    def test_recovery_phase_command_set_never_reacquires_or_runs_update(self):
+        proceed, release = command('proceed'), command('release_recovery_writers')
+        tls = command('probe_panel_tls', require_login=True)
+        for commands in ([tls], [command('prove_operation')], [command('proceed', approved=True)],
+                         [proceed,tls], [proceed,command('finish')],
+                         [proceed,release,command('reacquire_writers')],
+                         [proceed,release,command('restore_core_ids')],
+                         [proceed,release,command('backup_core', snapshot={})],
+                         [proceed,release,command('prove_operation', path='/unsafe')],
+                         [proceed,release,dict(tls, host='127.0.0.1')]):
+            with self.subTest(commands=commands):
+                status, events, trace, sessions = self.run_recovery_worker(commands)
+                self.assertEqual(status, 1)
+                self.assertEqual(events[-1], dict(event='error',code='MAINTENANCE_REFUSED'))
+                self.assertFalse(set(trace) & {'reacquire', 'repair', 'backup', 'proof', 'tls-login'})
+                self.assertEqual(sessions[0].closed, 1)
+        status, events, trace, _ = self.run_recovery_worker(
+            [proceed, release, command('prove_operation')], proof_result=True)
+        self.assertEqual(status, 1)
+        self.assertNotIn('operation_held', [event['event'] for event in events])
+
+    def test_recovery_only_initial_frame_can_hold_two_full_selections(self):
+        from app.core_updates import artifacts, selection, selection_files
+        import test_core_selection as fixture
+
+        def reference(core, seed):
+            prefix, suffix = f'core-{core}-v', '-r123456789'
+            version = '1'*(100-len(prefix)-len(suffix)-4)+'.1.1'
+            material = replace(fixture.material(core, version=version, target='aarch64-musl', seed=seed),
+                tag=prefix+version+suffix, release_id=2**63-1, binary_size=artifacts.MAX_EXPANDED)
+            return selection.component_reference(material)
+
+        before = selection._build(fixture.APP, 'aarch64-musl', selection.MAX_GENERATION-1,
+            tuple(selection.CoreSlot(core, reference(core,core+'1'), reference(core,core+'2'))
+                  for core in selection.CORES))
+        after = selection._next(before, 'sing-box', reference('sing-box','candidate'),
+                                before.slot('sing-box').current, 'component').after
+        digest = 'b'*64
+        context = dict(application=dict(app_source=fixture.APP,target=before.target,release_id='r'*101,
+                current_sha256=digest,manifest_sha256=digest,ready_sha256=digest),
+            data_generation=dict(dev=2**64-1,ino=2**64-1),
+            services={'v-ui.service':'active','v-ui-http01.service':'inactive','v-ui-http01.socket':'inactive'},
+            config_sha256=digest,certificate_mode='provided',trust_sha256=digest)
+        self.assertEqual(selection_files._switch_context(context,before,True), context)
+        intents = {core:dict(artifact_id=selection.reference_identity(before.slot(core).current),
+                             revision=digest,enabled=True) for core in selection.CORES}
+        receipt = dict(kind='backup-components-v1', name='core-maintenance-'+'1'*32+'.zip',
+                       backup_id=digest, sha256=digest, selection_revision=before.revision, intents_sha256=digest)
+        request = self.recovery_request(context=context, before=fixture.raw(before), after=fixture.raw(after),
+                                        final_intents=intents, backup=receipt, allow_after_ids=True)
+        raw = json.dumps(request,separators=(',',':')).encode()+b'\n'
+        self.assertGreater(len(raw), w.LINE_LIMIT)
+        self.assertLessEqual(len(raw), w.RECOVERY_REQUEST_LIMIT)
+        left, right = socket.socketpair()
+        with left, right:
+            right.settimeout(1)
+            right.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, w.RECOVERY_REQUEST_LIMIT*2)
+            right.sendall(raw+b'{"command":"proceed"}\n')
+            channel = w._Channel(left.fileno(),io.StringIO(),time.monotonic()+1)
+            self.assertEqual(channel.read(initial=True),request)
+            self.assertEqual(w._core_recovery_request(request)['backup'],receipt)
+            channel.expect('proceed')
+        for value, initial in ((raw,False),(raw.replace(b'core_recover',b'core_prepare'),True),
+                               (raw[:-1]+b' '*w.RECOVERY_REQUEST_LIMIT+b'\n',True)):
+            with self.subTest(initial=initial, length=len(value)):
+                left, right = socket.socketpair()
+                with left, right:
+                    right.settimeout(1)
+                    right.setsockopt(socket.SOL_SOCKET,socket.SO_SNDBUF,w.RECOVERY_REQUEST_LIMIT*2)
+                    right.sendall(value)
+                    channel = w._Channel(left.fileno(),io.StringIO(),time.monotonic()+1)
+                    with self.assertRaisesRegex(w.WorkerError,'Protocol line exceeded limit'):
+                        channel.read(initial=initial)
     def test_two_step_source_context_precedes_candidate_and_success_finish(self):
         status,events,trace,sessions=self.run_worker(self.prefix()+[command('prove_operation'),command('finish')])
         self.assertEqual(status,0)
@@ -88,6 +236,43 @@ class CorePrepareWorkerTests(unittest.TestCase):
         self.assertEqual(trace.count('execute'),1)
         self.assertLess(trace.index('writer_guard'),trace.index('repair'))
         self.assertLess(trace.index('repair'),trace.index('recovery_release'))
+
+    def test_panel_tls_stays_on_private_serial_pipe_before_stop_during_trial_and_after_recovery(self):
+        login = command('probe_panel_tls', require_login=True)
+        handshake = command('probe_panel_tls', require_login=False)
+        commands = self.prefix()
+        commands.insert(1, login)
+        commands += [handshake, command('prove_operation'), login, command('reacquire_writers'),
+                     command('restore_core_ids'), command('release_reacquired_writers'), handshake,
+                     command('prove_operation'), login, command('finish')]
+        status, events, trace, _ = self.run_worker(commands)
+        self.assertEqual(status, 0)
+        replies = [reply for reply in events if reply['event'] == 'panel_tls']
+        self.assertEqual(replies, [dict(event='panel_tls', status='ready', trust_sha256='d'*64)]*5)
+        checks = [step for step in trace if step in {'tls-login', 'tls-handshake', 'execute', 'trial_release',
+                                                     'proof', 'reacquire', 'repair', 'recovery_release'}]
+        self.assertEqual(checks, ['tls-login', 'execute', 'trial_release', 'tls-handshake', 'proof',
+                                  'tls-login', 'reacquire', 'repair', 'recovery_release',
+                                  'tls-handshake', 'proof', 'tls-login'])
+
+    def test_panel_tls_rejects_endpoints_material_wrong_types_and_writer_phases(self):
+        probe = command('probe_panel_tls', require_login=True)
+        attempts = [
+            [probe],
+            self.prefix()[:1]+[command('probe_panel_tls', require_login=False)],
+            self.prefix()[:2]+[probe],
+            self.prefix()+[command('reacquire_writers'), probe],
+            self.prefix()+[command('reacquire_writers'), command('restore_core_ids'), probe],
+        ]
+        attempts += [self.prefix()+[dict(probe, **extra)] for extra in (
+            dict(path='/fake.pem'), dict(url='https://example.invalid'), dict(certificate='fake'),
+            dict(require_login=1), dict(host='127.0.0.1'))]
+        for commands in attempts:
+            with self.subTest(commands=commands):
+                status, events, trace, _ = self.run_worker(commands)
+                self.assertEqual(status, 1)
+                self.assertEqual(events[-1], dict(event='error', code='MAINTENANCE_REFUSED'))
+                self.assertFalse(any(step.startswith('tls-') for step in trace))
     def test_request_is_pathless_closed_and_not_a_public_action(self):
         from app import release_tools
         self.assertNotIn('core_prepare',release_tools._MaintenanceSession.ACTIONS)
@@ -139,17 +324,19 @@ class CorePrepareWorkerTests(unittest.TestCase):
             for name,path in source.items():shutil.copyfile(path,directory/name)
             script="""import importlib.util,sys
 spec=importlib.util.spec_from_file_location('fixed_worker',sys.argv[1]);w=importlib.util.module_from_spec(spec);spec.loader.exec_module(w)
-t=w._load_release_tools();cls=w._load_core_session(t)
-assert cls.__module__=='app.core_updates.maintenance'
+t=w._load_release_tools(); recovery=sys.argv[2]=='recovery'; cls=w._load_core_session(t,recovery=recovery)
+assert cls.__module__==('app.core_updates.maintenance_recovery' if recovery else 'app.core_updates.maintenance')
 assert all(sys.modules[n].__path__==[] for n in ('app','app.services','app.certificates','app.core_updates'))
 assert not any(n in sys.modules for n in ('psutil','main','app.services.core_runtime'))
 try:w._load_core_session(t)
 except w.WorkerError:pass
 else:raise AssertionError('namespace reuse accepted')
 """
-            result=subprocess.run([sys.executable,'-I','-S','-c',script,str(directory/'ops_worker.py')],
-                                  stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=10)
-            self.assertEqual(result.returncode,0,result.stderr.decode())
+            for action in ('prepare','recovery'):
+                with self.subTest(action=action):
+                    result=subprocess.run([sys.executable,'-I','-S','-c',script,str(directory/'ops_worker.py'),action],
+                                          stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=10)
+                    self.assertEqual(result.returncode,0,result.stderr.decode())
     def test_actual_session_end_to_end_pipe_backup_binding_and_repair(self):
         # App/bootstrap/native execution remain explicit fake boundaries; all
         # leases, source observations, M13 archive and state-ID writes are real.

@@ -49,6 +49,9 @@ OTHER_CONSTRUCTIONS = {
     # Two bounded synthetic store/catalog publishers: isolated stdlib Python,
     # fake material/transport only, stdin barrier, 15s communicate and finally
     # kill/wait/close. No proxy core or readiness qualification is involved.
+    # Synthetic Linux group fixture. The Python child is an isolated session
+    # leader retained with WNOWAIT until final SIGKILL/reap. No proxy core runs.
+    ('test_core_cold_check_linux.py', 'NativeCheckProcessGroupTests.test_python_fixture_descendant_forces_group_abort_before_clean_return', 'Popen'),
     ('test_core_store.py', 'CoreStoreTests.test_two_processes_same_id_publish_only_once_and_keep_one_complete_artifact', 'Popen'),
     ('test_core_catalog.py', 'CoreCatalogTests.test_two_processes_same_id_use_real_m2_fake_io_and_publish_only_one_context', 'Popen'),
     # Shipped JS controller only: pipe transport to the fixture's authenticated
