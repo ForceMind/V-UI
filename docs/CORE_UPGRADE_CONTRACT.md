@@ -509,3 +509,11 @@ Root任务内临时broker使用固定`/run/v-ui-maintenance/core-boot.sock`，Ro
 `Services.managed_identity(nonrootUID)`固定观察v-ui.service，复用原systemd配置漂移守卫，核实际proc四UID、start ticks及精确cgroup，前后重读身份；state原active/inactive/unknown语义保持。当前Type=simple可在app启动完成前取得active MainPID供arm，但这不是健康验证，transitional/不明身份继续拒绝。只读取stat/status/cgroup，不读cmdline/environ。
 
 M11本机验证范围：应用client16项与服务身份11项双Python纯假/临时文件通过；既有ServiceTests11项另回归通过。broker十九项在macOS为18pass+1个Linux kernel case未执行，本机AF_UNIX bind遭sandbox EPERM后，仅非Linux使用fake监听/节点及socketpair，不将此称Root、systemd或真实Unix监听资格。Linux Actions必须实际bind及SO_PEERCRED，不能按本机能力跳过；staged运行时合同保留原32项并新增broker19项，合计51项全部强制执行无skip，默认纯合同加client/身份为336项。idle撤销原定点红例保留：有context但无startup_ready、ready空闲时proof/身份失效原本等到总deadline；现0.25秒调度live核验，并保留typed proof错误而非吞为取消。调度仍不能抢占阻塞Root callback，回调本身须遵守Root总deadline。
+
+## M12 私有worker保留operation握手（尚无核心动作）
+
+`ops_worker`原prepared/proceed/done及普通release_writers/finish往返保持。仅Root私有stdin可显式选择`release_writers_for_trial`，进入trial_writers_released后只接受prove_operation、一次reacquire_writers或finish；重取后必须实际专用writer guard通过才能发事件，随后仅release_reacquired_writers；terminal recovery_writers_released只可prove或finish。所有命令精确只有command键，不接受Root对象、PID、路径、URL、callback或新公开action，旧execute只运行一次且quiet块保持。
+
+`prove_operation`实际调用M9 held-FD/closed-latch/PID闭包且返回必须None，不能以alive、bool或marker授证明；它只证明该worker内operation仍保持，不证明Root installation锁、Root核心事务、旧descriptor或停机。Root协调器必须将这些独立事实共同绑定到broker，且在稳定文件与managed released完成后才发成功finish。循环不开放任意恢复执行命令。
+
+整个worker仍同一总deadline，不因heartbeat延长；EOF、未知/错阶段/重复/extra字段及guard失败均固定error/非零并关闭session。session.close即使在finish之后失败也仍是失败，不被早先成功返回掩盖；signal handlers恢复保持。九项纯fake/临时真实pipe/flock测试双Python通过，尚未把此握手接到新的Root核心任务或实际服务/数据恢复。

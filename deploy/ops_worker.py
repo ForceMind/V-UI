@@ -79,6 +79,59 @@ class _Channel:
         self.output.flush()
 
 
+
+def _command(channel, allowed):
+    value = channel.read()
+    if (set(value) != {'command'} or type(value.get('command')) is not str
+            or value['command'] not in allowed):
+        raise WorkerError('Unexpected controller command')
+    return value['command']
+
+
+def _prove_released_operation(session):
+    # The phase is enforced by the private wire state machine. This is M9's
+    # actual held-FD/closed-latch/PID proof, never an alive/approved bool.
+    proof = getattr(session, '_operation_proof', None)
+    if not callable(proof) or proof() is not None:
+        raise WorkerError('Maintenance operation proof unavailable')
+
+
+def _complete_writer_handshake(channel, session, action):
+    if action == 'stage':
+        channel.expect('finish')
+        return
+    command = _command(channel, ('release_writers', 'release_writers_for_trial'))
+    if command == 'release_writers':
+        session.release_writers()
+        channel.send('writers_released')
+        channel.expect('finish')
+        return
+    session.release_writers_for_trial()
+    channel.send('trial_writers_released')
+    phase = 'trial_writers_released'
+    while True:
+        allowed = (('prove_operation', 'reacquire_writers', 'finish') if phase == 'trial_writers_released'
+                   else ('release_reacquired_writers',) if phase == 'writers_reacquired'
+                   else ('prove_operation', 'finish'))
+        command = _command(channel, allowed)
+        if command == 'finish':
+            # Root must have independently confirmed stable files/managed
+            # released before this internal cleanup. finish grants nothing.
+            return
+        if command == 'prove_operation':
+            _prove_released_operation(session)
+            channel.send('operation_held')
+        elif command == 'reacquire_writers':
+            session.reacquire_writers()
+            session._check_reacquired_writers()
+            phase = 'writers_reacquired'
+            channel.send(phase)
+        else:
+            session.release_reacquired_writers()
+            phase = 'recovery_writers_released'
+            channel.send(phase)
+
+
 def _request(value):
     action = value.get('action')
     if type(value.get('protocol')) is not int or value['protocol'] != 1 or not isinstance(action, str):
@@ -156,25 +209,28 @@ def _run(root, release_tools, input_fd, output, *, timeout=TIMEOUT):
         with _quiet_candidate_io():
             result = session.execute()
         channel.send('done', ok=True, **result)
-        if action != 'stage':
-            channel.expect('release_writers')
-            session.release_writers()
-            channel.send('writers_released')
-        channel.expect('finish')
-        return 0
+        _complete_writer_handshake(channel, session, action)
+        status = 0
     except (Exception, _Deadline):
         try: channel.send('error', code='MAINTENANCE_REFUSED')
         except (OSError, ValueError): pass
-        return 1
+        status = 1
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         try:
             if session is not None:
                 session.close()
+        except (Exception, _Deadline):
+            # A cleanup failure is still a failed worker transaction, including
+            # after finish; do not override it with an earlier success return.
+            try: channel.send('error', code='MAINTENANCE_REFUSED')
+            except (OSError, ValueError): pass
+            status = 1
         finally:
             signal.signal(signal.SIGALRM, previous_alarm)
             signal.signal(signal.SIGTERM, previous_term)
             signal.signal(signal.SIGINT, previous_int)
+    return status
 
 
 def _load_release_tools():
