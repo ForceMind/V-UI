@@ -447,3 +447,21 @@ M5仅覆盖上述元数据状态机和临时目录故障逻辑。真实准入还
 诊断parent在检查取消/原deadline后，从同一Manager一次性发布的不可变快照直接取得sing-box descriptor，不取全局apply/recovery锁、不创建runtime；快照发布发生在受信启动完整配置两adapter之后，HTTP诊断只在启动完成后准入。既有legacy消息仍用固定核心；已选核心通过私有stdin管道发送严格内部artifact DTO，路径/引用/owner/mode由服务器快照提供，不接HTTP或profile中的任意代码来源。worker在原30秒可终止/回收生命周期内打开并复核材料，持FD经`/proc/<worker-pid>/fd/N`用于version/check/run；版本来自该材料引用，不回退1.14.2。每个执行边界重核FD，逐一尝试回收所有诊断子进程并确认死亡之后才关闭材料；取消与错误也遵循该顺序。死亡已确认但pipe清理异常仍返回失败；若任何子进程存活或无法确认，不显式close、不发成功结果，立即终止经双重校验的自身独立进程组，由原父端回收失败worker，不误杀其他进程组。关闭失败输出固定CORE_UNAVAILABLE并清空exit_ip，原父端输出allowlist不放宽。无parent进程内大文件hash、无runtime或node状态写入。
 
 本块19项boot临时目录/AST与17项诊断纯mock覆盖源码边界，未执行真实核心或server。真实组件发布、不同新版本原生诊断/配置与固定客户端、受管stop/backup/trial/confirm/recover、全部writer准入、完整备份恢复、终端/面板/维护入口均仍待完成；只读接线不取得这些资格。所有构建、安装和后续真实执行继续仅在GitHub Actions，浏览器未验证。
+
+### 恢复目标意图与原 live 意图分离
+
+完整数据恢复可带回另一份配置revision及启停意图。`begin_restore`因此明确要求`source_backup_sha256`与`restored_intents`，由受信协调器在核实际incoming备份、state2、配置SHA和材料闭包后提供。方法先按incoming选择核双core artifact_id、revision/停止意图及来源SHA格式，再建立pending；这些观察不授材料、备份或执行权。
+
+初始private journal将`restore_target={kind:core-restore-target-v1,source_backup_sha256,intents}`永久绑定，阶段转移不准改写。restore的after健康验证使用此incoming目标；quiesced仍是停止并独占后的原live-final，`backup_snapshot`和失败rollback继续使用它。普通核心更新仍保持原配置/停止意图。既有新generation、高水位、fresh事务和不恢复旧nonce的规则不变；本块只元数据，不交换实际data或启动服务。
+
+## M8 Actions候选组件生产（尚无发行或原生资格）
+
+`scripts/fetch_core_candidate_inputs.py`固定首轮sing-box1.14.3和Xray26.10.21的官方Release/asset ID、外部digest及完整tag-source；不改现有应用PINS/VERSIONS或旧下载注册表。实际HEAD核验后，前后复核官方repo/release/所选资产/完整tag peel身份，从固定官方API资产及codeload commit URL流式获取原材料。API与source禁redirect，资产限官方CDN及总三跳；只有typed502/503/504或timeout允许同URL第二次尝试，403/429、TLS、长度/摘要/结构或close失败不重试。不读取token/proxy环境，不把socket timeout称为硬墙钟；Actions另有25分钟任务上限。
+
+SOURCE gzip的size/SHA是本次固定commit、已验证HTTPS响应的观察，receipt明确`independently_published_digest=false`；它不是官方另外公布的digest，也不因写进候选metadata而自授来源。archive则同时绑定已审pin和官方API外部digest。所有素材仅落在自有private workspace/stage，流式有界、失败响应关闭，输出原子NOREPLACE；不覆盖或清理其他输出。
+
+`scripts/build_core_component.py build-target`核原archive/source大小与SHA，扫描安全成员，取唯一准确binary及canonical`<repo短名>-<commit>/LICENSE`，保留binary、完整SOURCE及license原bytes，不strip/重编译/换行。`assemble`复核四目标M0闭包、来源上下文、SOURCE中实际license原字节和Xray共用原asset的binary一致性，产生四ZIP、CORE-RELEASE及不含自身hash的五行SHA表。严格COMMON比较区分JSON boolean与integer，拒绝Python `True==1`产生的schema/revision假等值。aggregate不持原archive，不能单靠pack自hash重演历史提取；后续资格必须绑定实际生产过程及不可变artifact receipt。
+
+新增`core-component-candidate.yml`仅read权限、PR/manual候选生产，使用项目既有固定Action SHA及Ubuntu24.04。纯fixture双Python后，两个core各下载原材料、构建四包及汇总，上传六文件及小receipt；production receipt带repo/run/attempt/source上下文，artifact名称也绑定本次run/attempt。`compatibility.app_sources=[准确HEAD]`在这里是候选待验声明。全部输出明确`qualified=false,published=false`，不生成Authority、tag/Release、catalog或安装选择，不执行新核心。真实下载、原source结构及完整性、四目标新版本native/固定客户端、实际切换及发行门禁均待其各自Actions，不得把格式生产当兼容资格。
+
+9b02fc3首次全套单元3231项中7fail/5error的原记录保留：新boot夹具受前序umask077影响、旧active mock名及旧诊断harness未独立session。e902cd6只修三个测试，原mode/PGID/journal零调用等断言未放宽；umask077下双Python19项通过，后续Actions主单元已通过，完整自身资格另核。新M5/M8改动仍须自身提交验收；浏览器与生产未验证。

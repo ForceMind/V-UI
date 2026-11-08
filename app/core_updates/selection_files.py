@@ -120,6 +120,15 @@ def _rebind_intents(intents, state):
             for core in s.CORES}
 
 
+def _after_intents(journal):
+    # Updating a binary preserves the final live configuration/stop intent.
+    # Restoring data instead adopts the independently checked incoming state,
+    # while quiesced remains the original live intent for backup and rollback.
+    if journal['operation'] == 'restore':
+        return journal['restore_target']['intents']
+    return journal['quiesced']['cores']
+
+
 @contextmanager
 def _root(layout, *, create=False, allow_missing=False):
     scope = fs._Scope(layout.owner)
@@ -281,7 +290,7 @@ def _pending(raw):
 def _journal(value, app_source, target):
     _keys(value, ('schema', 'kind', 'transaction', 'sequence', 'previous_sha256', 'phase', 'operation',
                   'before', 'after', 'pre_stop', 'quiesced', 'backup', 'validation', 'original_files',
-                  'actions', 'rollback', 'known_generations'))
+                  'actions', 'rollback', 'known_generations', 'restore_target'))
     _need(type(value['schema']) is int and value['schema'] == 1
           and value['kind'] == 'core-selection-journal-v1' and a._hex(value['transaction'], 32)
           and type(value['sequence']) is int and 0 <= value['sequence'] < MAX_JOURNALS
@@ -292,6 +301,13 @@ def _journal(value, app_source, target):
     after = _selection(value['after'], app_source, target)
     _need((before is None) == (value['operation'] == 'bootstrap'), 'JOURNAL_BASELINE')
     _snapshot(value['pre_stop'], after if before is None else before)
+    if value['operation'] == 'restore':
+        _keys(value['restore_target'], ('kind', 'source_backup_sha256', 'intents'))
+        _need(value['restore_target']['kind'] == 'core-restore-target-v1'
+              and a._hex(value['restore_target']['source_backup_sha256']), 'RESTORE_TARGET')
+        _intent(value['restore_target']['intents'], after)
+    else:
+        _need(value['restore_target'] is None, 'RESTORE_TARGET')
     _keys(value['original_files'], ('selection', 'fence', 'pending'))
     for key, record in value['original_files'].items():
         if record is not None:
@@ -312,7 +328,7 @@ def _journal(value, app_source, target):
               and value['backup']['intents_sha256'] == _digest(_raw(value['quiesced']['cores'])), 'BACKUP')
     if value['validation'] is not None:
         _need(value['quiesced'] is not None and value['backup'] is not None, 'VALIDATION')
-        _validation(value['validation'], after, value['quiesced']['cores'], value['pre_stop']['panel_running'])
+        _validation(value['validation'], after, _after_intents(value), value['pre_stop']['panel_running'])
     _need(type(value['actions']) is list and len(value['actions']) <= 12, 'ACTIONS')
     names = set()
     for action in value['actions']:
@@ -366,7 +382,8 @@ def _journal(value, app_source, target):
 
 
 def _follows(previous, current):
-    for key in ('schema', 'kind', 'transaction', 'operation', 'before', 'after', 'pre_stop', 'original_files'):
+    for key in ('schema', 'kind', 'transaction', 'operation', 'before', 'after', 'pre_stop', 'original_files',
+                'restore_target'):
         _need(previous[key] == current[key], 'JOURNAL_REWRITTEN')
     transitions = {
         'admitting': ('prepared', 'recovery'), 'prepared': ('quiesced', 'rollback_required', 'recovery'),
@@ -532,7 +549,8 @@ class SelectionFiles:
         _need(set(os.listdir(directory)) == set(names), 'PRIVATE_CHANGED')
         return directory, latest, location
 
-    def _new_transaction(self, scope, root, *, before, after, operation, snapshot, known_generations, expected_files=None):
+    def _new_transaction(self, scope, root, *, before, after, operation, snapshot, known_generations,
+                         expected_files=None, restore_target=None):
         _need(not any(_exists(root, name) for name in (PENDING, ACTIVE)), 'RECOVERY_REQUIRED')
         transaction = secrets.token_hex(16)
         pending_raw = _raw(dict(schema=1, kind='core-update-pending-v1', transaction=transaction))
@@ -553,7 +571,7 @@ class SelectionFiles:
             before=None if before is None else _selection_map(before), after=_selection_map(after),
             pre_stop=_snapshot(snapshot, after if before is None else before), quiesced=None,
             backup=None, validation=None, original_files=originals, actions=[], rollback=None,
-            known_generations=list(known_generations))
+            known_generations=list(known_generations), restore_target=deepcopy(restore_target))
         _journal(journal, after.app_source, after.target)
         self._publish_journal(scope, directory, 'journal-000.json', _raw(journal))
         self._append(scope, directory, journal, phase='prepared')
@@ -617,10 +635,18 @@ class SelectionFiles:
             return journal['transaction']
 
     def begin_restore(self, snapshot, *, app_source, target, expected_revision,
-                      service_snapshot, known_generations=()):
-        """Plan metadata restore with fresh generation; no data restore occurs."""
+                      service_snapshot, source_backup_sha256, restored_intents, known_generations=()):
+        """Bind separately checked incoming intents; no data restore occurs.
+
+        Source SHA and intents are trusted coordinator observations after its
+        backup/material/state2/config checks, never authority from this API.
+        The live quiesced intent remains separate for backup/failure rollback.
+        """
         _validate_state(snapshot)
         _need(snapshot.app_source == app_source and snapshot.target == target, 'RESTORE_CONTEXT')
+        _need(a._hex(source_backup_sha256), 'RESTORE_TARGET')
+        restore_target = dict(kind='core-restore-target-v1', source_backup_sha256=source_backup_sha256,
+                              intents=_intent(restored_intents, snapshot))
         known = list(known_generations)
         _need(len(known) <= 14 and all(type(item) is int and 0 <= item <= s.MAX_GENERATION for item in known),
               'GENERATION')
@@ -633,7 +659,8 @@ class SelectionFiles:
             after = s._build(app_source, target, maximum + 1, snapshot.slots)
             _, journal = self._new_transaction(scope, root, before=before, after=after,
                 operation='restore', snapshot=service_snapshot,
-                known_generations=known + [snapshot.generation], expected_files=expected_files)
+                known_generations=known + [snapshot.generation], expected_files=expected_files,
+                restore_target=restore_target)
             return journal['transaction']
 
     def _active(self, scope, root, transaction, app_source, target, phases):
@@ -684,7 +711,7 @@ class SelectionFiles:
         with self._io(write=True) as (scope, root):
             directory, journal = self._active(scope, root, transaction, app_source, target, ('trial',))
             after = _selection(journal['after'], app_source, target)
-            _validation(observation, after, journal['quiesced']['cores'], journal['pre_stop']['panel_running'])
+            _validation(observation, after, _after_intents(journal), journal['pre_stop']['panel_running'])
             journal['validation'] = deepcopy(observation)
             self._append(scope, directory, journal, phase='validated')
 
@@ -838,6 +865,7 @@ class SelectionFiles:
                         pending=pending is not None, before=deepcopy(journal['before']),
                         after=deepcopy(journal['after']), rollback=deepcopy(journal['rollback']),
                         pre_stop=deepcopy(journal['pre_stop']), quiesced=deepcopy(journal['quiesced']),
+                        restore_target=deepcopy(journal['restore_target']),
                         backup=deepcopy(journal['backup']), actual_files=files,
                         requires_recovery=pending is not None or location == 'active'
                             or fence is None or not _fence(fence[0])['settled'])

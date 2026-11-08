@@ -173,11 +173,60 @@ class SelectionFilesTests(unittest.TestCase):
         self.bootstrap()
         snapshot = s._build(APP, TARGET, 70, self.before.slots)
         tx = self.files.begin_restore(snapshot, expected_revision=self.before.revision,
-            service_snapshot=self.pre, known_generations=(90,), **self.context)
+            service_snapshot=self.pre, source_backup_sha256='a'*64,
+            restored_intents=self.pre['cores'], known_generations=(90,), **self.context)
         view = self.files.recovery_view(**self.context)
         self.assertEqual(view['after']['generation'], 91)
         self.assertNotEqual(view['after']['revision'], snapshot.revision)
         self.assertNotEqual(tx, self.files.recovery_view(**self.context)['before']['revision'][:32])
+
+    def restore_trial(self):
+        self.bootstrap()
+        incoming=self.snapshot(self.before,enabled=(False,True))
+        incoming['cores']['sing-box']['revision']='d'*64
+        incoming['cores']['xray']['revision']='e'*64
+        tx=self.files.begin_restore(self.before,expected_revision=self.before.revision,
+            service_snapshot=self.pre,source_backup_sha256='a'*64,
+            restored_intents=incoming['cores'],**self.context)
+        self.quiesce(tx)
+        saved=self.backup(tx)
+        trial=self.files.provision(tx,**self.context)
+        return tx,trial,incoming,saved
+
+    def test_restore_validates_incoming_configuration_and_stop_intents_without_changing_backup_before(self):
+        tx,trial,incoming,saved=self.restore_trial()
+        self.assertEqual(saved['selection'],self.before)
+        self.assertEqual(saved['intents'],self.pre['cores'])
+        with self.assertRaisesRegex(m.CoreSelectionFilesError,'VALIDATION'):
+            self.files.record_validation(tx,self.validation(trial,self.pre),**self.context)
+        self.files.record_validation(tx,self.validation(trial,incoming),**self.context)
+        after=self.files.confirm(tx,**self.context)
+        view=self.files.recovery_view(**self.context)
+        self.assertEqual(after.slots,self.before.slots)
+        self.assertGreater(after.generation,self.before.generation)
+        self.assertEqual(view['quiesced']['cores'],self.pre['cores'])
+        self.assertEqual(view['restore_target'],dict(kind='core-restore-target-v1',
+            source_backup_sha256='a'*64,intents=incoming['cores']))
+
+    def test_failed_restore_rolls_back_using_live_final_intents_rather_than_incoming_intents(self):
+        tx,trial,incoming,_=self.restore_trial()
+        self.files.mark_failed(tx,**self.context)
+        restored=s._build(APP,TARGET,trial.generation+1,self.before.slots)
+        with self.assertRaisesRegex(m.CoreSelectionFilesError,'VALIDATION'):
+            self.files.rollback_metadata(tx,self.validation(restored,incoming),**self.context)
+        actual=self.files.rollback_metadata(tx,self.validation(restored,self.pre),**self.context)
+        self.assertEqual(actual,restored)
+        self.assertEqual(self.files.read_stable(**self.context),restored)
+
+    def test_restore_target_missing_wrong_artifact_or_bad_source_sha_refused_before_new_pending(self):
+        self.bootstrap()
+        bad=deepcopy(self.pre['cores']);bad['sing-box']['artifact_id']='0'*64
+        for checksum,intents in (('not-a-sha',self.pre['cores']),('a'*64,bad),('a'*64,{})):
+            with self.subTest(checksum=checksum,intents=intents),self.assertRaises(m.CoreSelectionFilesError):
+                self.files.begin_restore(self.before,expected_revision=self.before.revision,
+                    service_snapshot=self.pre,source_backup_sha256=checksum,restored_intents=intents,**self.context)
+            self.assertFalse((self.layout.root/m.PENDING).exists())
+            self.assertFalse((self.layout.root/m.ACTIVE).exists())
 
     def test_bootstrap_refuses_runtime2_bad_unknown_scan_and_first_loss(self):
         stopped = self.snapshot(self.before, panel=False, enabled=(False, False))
