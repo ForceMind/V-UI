@@ -71,7 +71,7 @@ Actions非浏览器验收须覆盖：四目标身份/摘要与安全解包；错
 - CoreRuntime schema2精确绑定revision、enabled及已验core_artifact身份；原schema仅用于bundle选择的显式迁移。主运行时、proxy协调、诊断统一resolver，不允许不同路径各自选择。恢复旧配置必须同时恢复其匹配binary身份，不把配置恢复冒称binary回退。
 - 私有backup-components-v1采用最后确认的稳定快照：包含原data、已确认current/previous选择与停止意图，以及这两类引用的原组件ZIP和已验清单闭包。自动升级前备份从prepared journal中的原已确认选择和停机后最终意图生成；候选/pending仅可保留为有界脱敏审计，不属于可恢复执行状态，不携带旧nonce/权限或要求candidate制品。恢复创建自己的新事务，绝不恢复旧CORE_UPDATE_PENDING到live或自动续做原切换；旧pending审计不得触发下载/执行/写DNS/旧授权。普通手动备份遇未恢复的核心事务应拒，不能抓取半提交状态。bundle基线仍由原应用release外部恢复合同管理，不复制整个应用runtime入core备份。只显式纳入这些文件，不放宽普通隐藏文件或整个/etc目录。
 - 备份流式复制和有界校验，每组件原ZIP上限100MB、最多两core各current/previous四份，拒绝超限/重名/额外制品；保留既有用户data独立大小保护，不能先整包read进512MiB内存。保留所有既有备份与旧组件，不在本阶段自动清理历史。
-- 恢复时，备份中的ZIP/manifest/选择仍是输入，不能自授执行权。须匹配本机独立可信catalog或重新从固定官方API核authority，且与目标应用精确兼容；缺可信清单/制品或离线无法确认时，在停止/替换data前拒绝并提示先准备。暂存好全部闭包后才按租约/journal交换data与选择；失败保留原两者，不能只恢复一半。DNS冻结和旧授权撤销保持。
+- 恢复时，备份中的ZIP/manifest/选择仍是输入，不能自授执行权。须匹配本机独立可信catalog或重新从固定官方API核authority；将成为current或执行的材料必须与目标应用精确兼容，历史previous只作归档保留时另走来源/字节验证，不因此取得当前资格。缺可信清单/制品或离线无法确认时，在停止/替换data前拒绝并提示先准备。暂存好全部闭包后才按租约/journal交换data与选择；失败保留原两者，不能只恢复一半。DNS冻结和旧授权撤销保持。
 
 ## 原23工具的明确边界
 
@@ -471,3 +471,17 @@ SOURCE gzip的size/SHA是本次固定commit、已验证HTTPS响应的观察，re
 修正后的474e6e7在[候选42512335279](https://github.com/ForceMind/V-UI/actions/runs/42512335279)完成两个Python pure job及两个实际素材/打包job；sing-box和Xray各四目标候选均产出。它只证明本次真实来源获取和格式生产，仍未执行不同新核心、验证native兼容或受管切换。同源默认应用包的oneclick42512335118在`core_sources`读取GitHub元信息时遇403限流，producer未完成，安装角色未执行；原日志及失败保留，不改认证/核心pin或断言绕过。
 
 候选大artifact之后另生成小evidence artifact：绑定实际上传返回的producer artifact ID/name/digest、repo/run/attempt/source和真实acquisition/production/expected收据，严格核三类kind/schema、来源SHA与同源context。单独的小ZIP便于只读取元数据证据、不下载产品包；它不包含自引用hash，也不授来源或native资格。consumer仍须将其中artifact身份与独立GitHub API元数据核对，不能相信小收据自述。只有完整生产和大artifact上传成功才发小证据，缺件或跨run/摘要格式错误拒，已有证据文件不覆盖。
+
+## M9 writer循环与历史制品归档前置
+
+`_MaintenanceSession.release_writers_for_trial()`是显式私有入口，普通`release_writers`不新增全包校验成本。它只在可验证应用/data的done状态建立绑定本session/PID、不可复制序列化的checkpoint：Root/CURRENT原bytes和身份、活动manifest/READY、独立bootstrap及data代次。writer仍持有时捕获，再释放writer保留实际operation锁。此checkpoint不是Root核心事务、试跑授权、旧descriptor或实际停机的证明。
+
+`reacquire_writers()`只允许同checkpoint的一轮重取，按panel→data_owner独占→双core owner/cert worker取锁，前后重验上下文；漂移、忙或部分获取失败进入failed，清理所取writers但operation保留到close。成功使用专用guard，不能重新execute旧action。writer栈每代有生命周期token，栈关闭立即撤销guard；operation/lease proof也绑定PID及关闭latch，FD号复用不能复活。`release_reacquired_writers()`在后续明确协调器恢复工作后核guard，先撤销valid/token/checkpoint再放writers，进入terminal状态，operation仍保留，供外层恢复/验证旧拓扑后close；不自动启动服务，也不能借此开始第二轮。
+
+`close`即使writer关闭失败仍尝试operation关闭并终态closed。相邻`_maintenance_directory`的early-close丢ack可漏child并重关复用FD，已用真实纯临时red复现并改为按所有权保留所有ancestor FD、各尝试关闭一次，正常yield/mode/owner/no-follow语义保持；成本为每目录context额外O(path depth)个FD。旧`_maintenance_open_archive`的相似walk不由本块宣称已修；新增checkpoint不调用它，完整恢复接入该路径时仍须有针对性资格。
+
+历史previous可保存而在当前应用上不可执行，因此新增`CoreCatalog.read_archive`：从独立live root catalog先验证manifest/table外部size/SHA，再用已认证声明的历史source内部复核完整M0。返回独立ArchiveCatalogEntry，声明来源列表不表示当前app资格，不返回VerifiedRelease/app_source/binary路径。不能从backup或TRUST挑source补建信任。
+
+`CoreArtifactStore.open_archive(ref,target=...,catalog=...)`自行读取独立catalog，验证全部9文件及完整Ref、独立host target，提供仅context内可用的ZIP chunks/size/ref；流拒复制/序列化、跨PID与退出后读取，正常退出还须摘要及FD/路径稳定。调用方必须等整个with成功退出才确认备份完成。`prepare_archive`在Root UID和完整来源/原FD/Ref预验后复用NOREPLACE准备，仅返回归档结果；不暴露普通PackIdentity/binary_path，也不扩大普通read/prepare/resolver的当前app兼容门槛。缺独立catalog仍在变更前拒绝，previous bundle仅保留完整Ref及原应用外部恢复依赖，不复制runtime或静默重绑。
+
+两块分别18项writer实际flock/fake上下文与14项归档假包测试，属于源码/临时文件前置。受信Root pending/stop绑定、IPC握手、旧descriptor及真实服务健康、完整backup-components-v1数据与选择双域事务、全部入口和真实不同版本native资格仍未接通，不把这些私有原语称完整可用的核心升级。

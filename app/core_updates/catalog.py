@@ -13,6 +13,7 @@ service, artifact-store, user-data, GC or runtime operations are implemented.
 """
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+import hashlib
 import os
 from pathlib import Path
 
@@ -89,6 +90,39 @@ class CatalogEntry:
         return self.verified_release.manifest_sha256
 
 
+@dataclass(frozen=True)
+class ArchiveCatalogEntry:
+    """Authenticated historical metadata, never current-application eligibility."""
+    authority: a.Authority
+    tag_source: str
+    manifest_sha256: str
+    checksums_sha256: str
+    declared_app_sources: tuple
+    manifest: bytes = field(repr=False)
+    checksums: bytes = field(repr=False)
+
+
+def _archive_release(authority, tag_source, manifest, checksums):
+    # Authenticate both complete small files BEFORE taking a source from their
+    # declaration. Only the independent live catalog supplies this authority;
+    # backup/TRUST declarations are never a fallback or catalog import.
+    assets = {item.name: item for item in authority.assets}
+    for name, raw in (('CORE-RELEASE.json', manifest), ('SHA256SUMS', checksums)):
+        _need(type(raw) is bytes and 0 < len(raw) <= a.MAX_JSON
+              and len(raw) == assets[name].size
+              and hashlib.sha256(raw).hexdigest() == assets[name].sha256, 'EXTERNAL_DIGEST')
+    record = a._json(manifest)
+    compatibility = record.get('compatibility')
+    _need(type(compatibility) is dict and type(compatibility.get('app_sources')) is list
+          and 0 < len(compatibility['app_sources']) <= 64
+          and a._hex(compatibility['app_sources'][0], 40), 'ARCHIVE_COMPATIBILITY')
+    # M0 still validates all schema/identity/source/table/four-target fields.
+    # This context is used ONLY inside archival validation, never returned as
+    # a VerifiedRelease, PackIdentity, runtime descriptor or current app proof.
+    return a.verify_release(manifest, checksums, authority=authority, expected_tag=authority.tag,
+        expected_builder_source=tag_source, app_source=compatibility['app_sources'][0])
+
+
 class CoreCatalog:
     def __init__(self, layout=PRODUCTION_LAYOUT):
         _need(type(layout) is fs.Layout, 'LAYOUT')
@@ -125,6 +159,43 @@ class CoreCatalog:
             with _root(self.layout) as (scope, root):
                 directory = scope.directory(root, manifest_sha)
                 return self._read_at(scope, directory, manifest_sha, app_source)
+        except CoreCatalogError:
+            raise
+        except FileNotFoundError:
+            raise CoreCatalogError('CATALOG_MISSING') from None
+        except a.CoreArtifactError:
+            raise CoreCatalogError('METADATA_REJECTED') from None
+        except fs.CoreStoreError as error:
+            raise CoreCatalogError(error.code) from None
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, RuntimeError):
+            raise CoreCatalogError('CATALOG_INVALID') from None
+
+    def read_archive(self, manifest_sha):
+        """Offline origin/format read for preserving historical references.
+
+        A previous component may be ineligible for the active app. Its bytes
+        can still be preserved, without widening read()/resolver eligibility.
+        Missing independent live context remains a hard failure.
+        """
+        _need(a._hex(manifest_sha), 'INPUT')
+        try:
+            with _root(self.layout) as (scope, root):
+                directory = scope.directory(root, manifest_sha)
+                fs._directory(os.fstat(directory), self.layout.owner, 0o755)
+                _need(set(os.listdir(directory)) == FILES, 'CATALOG_MEMBERS')
+                value = a._json(scope.bytes(directory, 'CONTEXT.json'))
+                a._keys(value, {'schema', 'kind', 'authority', 'tag_source'})
+                _need(type(value['schema']) is int and value['schema'] == 1
+                      and value['kind'] == 'core-catalog-v1' and a._hex(value['tag_source'], 40), 'CATALOG_CONTEXT')
+                authority = a.decode_authority(fs._canonical(value['authority']))
+                manifest = scope.bytes(directory, 'CORE-RELEASE.json')
+                checksums = scope.bytes(directory, 'SHA256SUMS')
+                verified = _archive_release(authority, value['tag_source'], manifest, checksums)
+                _need(verified.manifest_sha256 == manifest_sha, 'CATALOG_ID')
+                _need(set(os.listdir(directory)) == FILES, 'CATALOG_MEMBERS')
+                scope.stable()
+                return ArchiveCatalogEntry(authority, value['tag_source'], manifest_sha,
+                    verified.checksums_sha256, verified.app_sources, manifest, checksums)
         except CoreCatalogError:
             raise
         except FileNotFoundError:

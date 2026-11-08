@@ -347,6 +347,47 @@ class StoredArtifact:
     reused: bool
 
 
+@dataclass(frozen=True)
+class ArchivedArtifact:
+    """Preserved historical bytes, without an executable path or identity."""
+    reference: object
+    reused: bool
+
+
+class _ArchiveStream:
+    """Borrowed context-bound ZIP stream; never a binary/runtime descriptor."""
+    def __init__(self, reference, fd, size):
+        self._reference, self._fd, self._size = reference, fd, size
+        self._active, self._pid = True, os.getpid()
+
+    def __copy__(self):
+        raise CoreStoreError('ARCHIVE_CONTEXT')
+
+    def __deepcopy__(self, memo):
+        raise CoreStoreError('ARCHIVE_CONTEXT')
+
+    def __reduce__(self):
+        raise CoreStoreError('ARCHIVE_CONTEXT')
+
+    @property
+    def reference(self):
+        return self._reference
+
+    @property
+    def size(self):
+        return self._size
+
+    def chunks(self):
+        _need(self._active and self._pid == os.getpid(), 'ARCHIVE_CLOSED')
+        offset = 0
+        while offset < self._size:
+            _need(self._active and self._pid == os.getpid(), 'ARCHIVE_CLOSED')
+            raw = os.pread(self._fd, min(a.CHUNK, self._size - offset), offset)
+            _need(bool(raw), 'ARCHIVE_CHANGED')
+            offset += len(raw)
+            yield raw
+
+
 class CoreArtifactStore:
     def __init__(self, layout=PRODUCTION_LAYOUT):
         _need(type(layout) is Layout, 'LAYOUT')
@@ -391,6 +432,99 @@ class CoreArtifactStore:
                 return self._read(scope, directory, artifact_id, manifest, checksums, release, target, reused=True)
         except CoreStoreError:
             raise
+        except a.CoreArtifactError:
+            raise CoreStoreError('ARTIFACT_REJECTED') from None
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, RuntimeError, EOFError, zlib.error):
+            raise CoreStoreError('STORE_INVALID') from None
+
+    def _archive_context(self, reference, target, catalog):
+        # Lazy import avoids the catalog->store module dependency cycle. The
+        # caller cannot replace independent live catalog trust with a bare
+        # archive entry, backup/TRUST JSON or claimed compatibility flag.
+        from .catalog import CoreCatalog, ArchiveCatalogEntry, _archive_release
+        from .selection import ComponentReference, CoreSelectionError, reference_identity
+        _need(type(reference) is ComponentReference and type(target) is str
+              and target in a.TARGETS and reference.target == target, 'ARCHIVE_REFERENCE')
+        try:
+            reference_identity(reference)
+        except CoreSelectionError:
+            raise CoreStoreError('ARCHIVE_REFERENCE') from None
+        catalog = CoreCatalog() if catalog is None else catalog
+        _need(type(catalog) is CoreCatalog, 'ARCHIVE_CATALOG')
+        entry = catalog.read_archive(reference.release_manifest_sha256)
+        _need(type(entry) is ArchiveCatalogEntry and entry.authority.release_id == reference.release_id
+              and entry.authority.tag == reference.tag and entry.tag_source == reference.builder_source
+              and entry.manifest_sha256 == reference.release_manifest_sha256
+              and entry.checksums_sha256 == reference.checksums_sha256, 'ARCHIVE_CATALOG')
+        release = _archive_release(entry.authority, entry.tag_source, entry.manifest, entry.checksums)
+        _need(release.app_sources == entry.declared_app_sources, 'ARCHIVE_CATALOG')
+        return entry, release
+
+    @contextmanager
+    def open_archive(self, reference, *, target, catalog=None):
+        """Stream a complete historical original ZIP with independent origin.
+
+        target is the independently known host target. This checks all nine
+        stored files, not just the ZIP, and grants no current app eligibility.
+        The yielded object has no binary_path/PackIdentity or public raw FD.
+        """
+        from .catalog import CoreCatalogError
+        from .selection import component_reference
+        reader = None
+        try:
+            entry, release = self._archive_context(reference, target, catalog)
+            with _root(self.layout) as (scope, _, artifacts):
+                directory = scope.directory(artifacts, reference.release_manifest_sha256)
+                stored = self._read(scope, directory, reference.release_manifest_sha256,
+                    entry.manifest, entry.checksums, release, target, reused=True)
+                _need(component_reference(stored.identity) == reference, 'ARCHIVE_REFERENCE')
+                expected = next(pack for pack in release.packs if pack.target == target)
+                fd, size = scope.file(directory, expected.name, limit=a.MAX_PACK)
+                _need(size == expected.size, 'ARCHIVE_REFERENCE')
+                reader = _ArchiveStream(reference, fd, size)
+                try:
+                    yield reader
+                finally:
+                    reader._active = False
+                _need(a._digest_fd(fd, size) == reference.pack_sha256, 'ARCHIVE_CHANGED')
+                scope.stable()
+        except CoreStoreError:
+            raise
+        except CoreCatalogError:
+            raise CoreStoreError('ARCHIVE_AUTHORITY_UNAVAILABLE') from None
+        except a.CoreArtifactError:
+            raise CoreStoreError('ARTIFACT_REJECTED') from None
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, RuntimeError, EOFError, zlib.error):
+            raise CoreStoreError('STORE_INVALID') from None
+        finally:
+            if reader is not None:
+                reader._active = False
+
+    def prepare_archive(self, pack, reference, *, target, catalog=None):
+        """Root-only preservation for restore, never selection or execution.
+
+        Only the independent live catalog supplies origin. M0/ref matching is
+        complete before normal immutable preparation can create a store. The
+        historical validation context never escapes as ordinary PackIdentity.
+        """
+        _need(os.geteuid() == self.layout.owner, 'ROOT_REQUIRED')
+        from .catalog import CoreCatalogError
+        from .selection import component_reference
+        try:
+            entry, release = self._archive_context(reference, target, catalog)
+            with a._opened(pack) as (fd, _, stable):
+                identity = a.verify_pack(fd, release, target=target)
+                _need(component_reference(identity) == reference, 'ARCHIVE_REFERENCE')
+                result = self.prepare(fd, entry.manifest, entry.checksums, authority=entry.authority,
+                    expected_tag=entry.authority.tag, expected_builder_source=entry.tag_source,
+                    app_source=release.app_source, target=target)
+                stable()
+                _need(component_reference(result.identity) == reference, 'ARCHIVE_REFERENCE')
+                return ArchivedArtifact(reference, result.reused)
+        except CoreStoreError:
+            raise
+        except CoreCatalogError:
+            raise CoreStoreError('ARCHIVE_AUTHORITY_UNAVAILABLE') from None
         except a.CoreArtifactError:
             raise CoreStoreError('ARTIFACT_REJECTED') from None
         except (OSError, ValueError, KeyError, TypeError, AttributeError, RuntimeError, EOFError, zlib.error):

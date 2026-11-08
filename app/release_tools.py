@@ -1150,28 +1150,31 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
 
 @contextmanager
 def _maintenance_directory(path: Path, *, create=False):
-    """Open a private service-owned directory without following any path links."""
+    """Open a private service-owned directory without following any path links.
+
+    Retain ancestor FDs until exit so a close failure cannot leak a just-opened
+    child or cause retry of an already released/reused descriptor number.
+    """
     path = Path(path).absolute()
     if '..' in path.parts:
         raise ReleaseError('Unsafe maintenance directory')
-    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
-    try:
+    with ExitStack() as stack:
+        fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+        stack.callback(os.close, fd)
         for index, part in enumerate(path.parts[1:]):
             if create and index == len(path.parts) - 2:
                 try: os.mkdir(part, 0o700, dir_fd=fd)
                 except FileExistsError: pass
-            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-            os.close(fd); fd = next_fd
+            fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            stack.callback(os.close, fd)
         info = os.fstat(fd)
         if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700:
             raise ReleaseError('Maintenance directory must be private and owned by the service user')
         yield fd
-    finally:
-        os.close(fd)
 
 
 @contextmanager
-def _maintenance_lease(directory: Path, name: str):
+def _maintenance_lease(directory: Path, name: str, *, _proof=False):
     with _maintenance_directory(directory) as parent:
         fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
                      0o600, dir_fd=parent)
@@ -1191,8 +1194,18 @@ def _maintenance_lease(directory: Path, name: str):
             except BlockingIOError:
                 raise ReleaseError('Service or another operation is active; stop it first') from None
             verify()
-            try: yield
-            finally: verify()
+            proof_active = True
+            proof_pid = os.getpid() if _proof else None
+            def proof():
+                if not proof_active or proof_pid != os.getpid():
+                    raise ReleaseError('Maintenance lease proof is no longer active')
+                verify()
+            try: yield proof if _proof else None
+            finally:
+                # Revoke before closing: descriptor numbers may immediately be
+                # reused even when close later reports failure.
+                proof_active = False
+                verify()
         finally:
             os.close(fd)
 
@@ -1346,6 +1359,124 @@ def _maintenance_existing_data(path: Path):
     return True
 
 
+@contextmanager
+def _maintenance_cycle_directory(path):
+    """Checkpoint-only walk; every owned FD is closed once, even on failure."""
+    path = Path(path)
+    if not path.is_absolute() or '..' in path.parts:
+        raise ReleaseError('Unsafe maintenance cycle directory')
+    with ExitStack() as stack:
+        fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        stack.callback(os.close, fd)
+        bindings = []
+        for part in path.parts[1:]:
+            parent = os.fstat(fd)
+            if (parent.st_uid not in (0, os.geteuid()) or not stat.S_ISDIR(parent.st_mode)
+                    or parent.st_mode & 0o022 and not parent.st_mode & stat.S_ISVTX):
+                raise ReleaseError('Unsafe maintenance cycle ancestor')
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            stack.callback(os.close, child)
+            info = os.fstat(child)
+            identity = (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid)
+            bindings.append((fd, part, child, identity))
+            fd = child
+        info = os.fstat(fd)
+        if info.st_uid not in (0, os.geteuid()) or info.st_mode & 0o022:
+            raise ReleaseError('Unsafe maintenance cycle directory')
+        def verify():
+            for parent, name, child, expected in bindings:
+                signature = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid)
+                if (signature(os.fstat(child)) != expected
+                        or signature(os.stat(name, dir_fd=parent, follow_symlinks=False)) != expected):
+                    raise ReleaseError('Maintenance cycle directory changed')
+        verify()
+        yield fd, verify
+        verify()
+
+
+def _maintenance_cycle_file(path, *, limit, owner, private=True):
+    """Bounded no-follow FD/path identity and original-byte observation."""
+    with _maintenance_cycle_directory(path.parent) as (parent, verify), ExitStack() as stack:
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        stack.callback(os.close, fd)
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_uid != owner
+                or before.st_mode & (0o077 if private else 0o022) or before.st_size > limit):
+            raise ReleaseError('Unsafe maintenance cycle material')
+        raw = os.pread(fd, before.st_size + 1, 0)
+        signature = lambda info: (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        identity = signature(before)
+        if (len(raw) != before.st_size or signature(os.fstat(fd)) != identity
+                or signature(os.stat(path.name, dir_fd=parent, follow_symlinks=False)) != identity):
+            raise ReleaseError('Maintenance cycle material changed')
+        verify()
+        return identity, raw
+
+
+def _maintenance_cycle_bootstrap(root):
+    before = _maintenance_cycle_file(_MAINTENANCE_CONFIG, limit=16384, owner=0, private=False)
+    anchor = _maintenance_anchor(root)
+    if _maintenance_cycle_file(_MAINTENANCE_CONFIG, limit=16384, owner=0, private=False) != before:
+        raise ReleaseError('Bootstrap changed during maintenance cycle')
+    return before, anchor
+
+
+def _maintenance_cycle_snapshot(root):
+    """Existing app/data/lease facts only, never root-core transaction proof."""
+    def directory(path):
+        with _maintenance_cycle_directory(path) as (fd, _):
+            info = os.fstat(fd)
+            if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700:
+                raise ReleaseError('Unsafe maintenance cycle root or data')
+            return info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid
+    root_identity = directory(root)
+    current = _maintenance_cycle_file(root / 'CURRENT.json', limit=16384, owner=os.geteuid())
+    release, pointer, manifest, ready = active_verified(root)
+    material_paths = ((release / 'payload' / MANIFEST, 4_000_000), (release / 'READY.json', 64000))
+    materials = tuple(_maintenance_cycle_file(path, limit=limit, owner=os.geteuid())
+                      for path, limit in material_paths)
+    def parsed(raw):
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result: raise ReleaseError('Duplicate maintenance cycle material field')
+                result[key] = value
+            return result
+        return json.loads(raw, object_pairs_hook=unique,
+                          parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+    canonical = lambda value: json.dumps(value, sort_keys=True, ensure_ascii=True,
+                                         separators=(',', ':'), allow_nan=False).encode()
+    if (canonical(parsed(current[1])) != canonical(pointer)
+            or canonical(parsed(materials[0][1])) != canonical(manifest)
+            or canonical(parsed(materials[1][1])) != canonical(ready)
+            or digest(materials[0][1]) != ready.get('manifest_sha256')):
+        raise ReleaseError('Active application changed during maintenance cycle')
+    bootstrap = _maintenance_cycle_bootstrap(root)
+    data_identity = directory(root / 'data')
+    leases = tuple(_maintenance_cycle_file(root / name, limit=16384, owner=os.geteuid(), private=False)
+        for name in ('.panel.lease', '.data.owner.lease', 'data/runtime/xray/owner.lock',
+                     'data/runtime/sing-box/owner.lock', 'data/certificates/.worker.lock'))
+    if (directory(root) != root_identity or directory(root / 'data') != data_identity
+            or _maintenance_cycle_file(root / 'CURRENT.json', limit=16384, owner=os.geteuid()) != current
+            or tuple(_maintenance_cycle_file(path, limit=limit, owner=os.geteuid())
+                     for path, limit in material_paths) != materials):
+        raise ReleaseError('Installation changed during maintenance cycle')
+    return root_identity, current, str(release), materials, bootstrap, data_identity, leases
+
+
+class _MaintenanceWriterCheckpoint:
+    __slots__ = ('owner', 'pid', 'facts')
+    def __init__(self, owner, facts):
+        self.owner, self.pid, self.facts = owner, os.getpid(), facts
+    def __reduce__(self):
+        raise ReleaseError('Maintenance cycle checkpoint cannot be transferred')
+    def __copy__(self):
+        raise ReleaseError('Maintenance cycle checkpoint cannot be transferred')
+    def __deepcopy__(self, memo):
+        raise ReleaseError('Maintenance cycle checkpoint cannot be transferred')
+
+
 class _MaintenanceSession(_StoppedGuard):
     """Private managed-worker transaction; root never imports or calls this API.
 
@@ -1366,6 +1497,30 @@ class _MaintenanceSession(_StoppedGuard):
         self._action = None
         self._selection = None
         self._operation_active = False
+        self._operation_proof = None
+        self._writer_checkpoint = None
+        self._writer_cycle_used = False
+        self._writer_generation = None
+
+    def __copy__(self):
+        raise ReleaseError('Maintenance session cannot be transferred')
+
+    def __deepcopy__(self, memo):
+        raise ReleaseError('Maintenance session cannot be transferred')
+
+    def __reduce__(self):
+        raise ReleaseError('Maintenance session cannot be transferred')
+
+    def _mark_writers_live(self):
+        token = object()
+        self._writer_generation = token
+        # Registered after acquisitions, so raw ExitStack.close revokes first.
+        self._writers.callback(self._revoke_writer_guard, token)
+
+    def _revoke_writer_guard(self, token):
+        if self._writer_generation is token:
+            self._writer_generation = None
+            self._valid = False
 
     def _state_is(self, expected):
         if self._pid != os.getpid() or self._state != expected:
@@ -1391,7 +1546,8 @@ class _MaintenanceSession(_StoppedGuard):
             with _maintenance_directory(self.root): pass
             self.root = private_root(self.root)
             self._action = action
-            self._operation.enter_context(_maintenance_lease(self.root, '.operation.lock'))
+            self._operation_proof = self._operation.enter_context(
+                _maintenance_lease(self.root, '.operation.lock', _proof=True))
             self._operation_active = True
             self._journal_clear()
             if action not in ('stop', 'recover-restore'):
@@ -1543,6 +1699,7 @@ class _MaintenanceSession(_StoppedGuard):
                     self._lock_data(data, stable=data != self.root / 'data', create=not fingerprinted)
             else:
                 self._lock_data(self.root / 'data')
+            self._mark_writers_live()
             self._valid = True
             self._state = 'executing'
             self._check()
@@ -1574,6 +1731,96 @@ class _MaintenanceSession(_StoppedGuard):
             self._state = 'failed'
             raise
 
+    def release_writers_for_trial(self):
+        """One private writer cycle; not a new action or root-core trial grant."""
+        self._state_is('done')
+        if (self._action in ('stop', 'stage') or not self._valid or not self._operation_active
+                or self._operation_proof is None or self._writer_generation is None or self._writer_cycle_used):
+            raise ReleaseError('Maintenance writer cycle is unavailable')
+        try:
+            self._journal_clear()
+            self._operation_proof()
+            checkpoint = _MaintenanceWriterCheckpoint(self, _maintenance_cycle_snapshot(self.root))
+            self._operation_proof()
+            self._writer_cycle_used = True
+            self._writer_checkpoint = checkpoint
+            self._valid = False
+            self._writers.close()
+            self._state = 'trial_writers_released'
+        except BaseException:
+            self._valid = False
+            self._state = 'failed'
+            try: self._writers.close()
+            finally: self._writer_checkpoint = None
+            raise
+
+    def _check_cycle_checkpoint(self):
+        checkpoint = self._writer_checkpoint
+        if (checkpoint is None or checkpoint.owner is not self or checkpoint.pid != os.getpid()
+                or not self._operation_active or self._operation_proof is None):
+            raise ReleaseError('Maintenance writer checkpoint is unavailable')
+        self._operation_proof()
+        self._journal_clear()
+        if _maintenance_cycle_snapshot(self.root) != checkpoint.facts:
+            raise ReleaseError('Installation changed during maintenance writer cycle')
+        self._operation_proof()
+
+    def reacquire_writers(self):
+        """Reacquire existing writers only; never execute the previous action."""
+        self._state_is('trial_writers_released')
+        self._valid = False
+        try:
+            self._check_cycle_checkpoint()
+            self._writers.enter_context(_maintenance_lease(self.root, '.panel.lease'))
+            self._lock_data(self.root / 'data', create=False)
+            self._check_cycle_checkpoint()
+            self._mark_writers_live()
+            self._state = 'writers_reacquired'
+            self._valid = True
+        except BaseException:
+            self._valid = False
+            self._state = 'failed'
+            try: self._writers.close()
+            finally: self._writer_checkpoint = None
+            raise
+
+    def _check_reacquired_writers(self):
+        """Narrow internal guard; ordinary executing/done checks do not apply."""
+        self._state_is('writers_reacquired')
+        token = self._writer_generation
+        if not self._valid or token is None:
+            raise ReleaseError('Maintenance writers are not locked')
+        self._check_cycle_checkpoint()
+        if not self._valid or self._writer_generation is not token:
+            raise ReleaseError('Maintenance writers are not locked')
+
+    def release_reacquired_writers(self):
+        """Terminal private exit before external old-topology recovery.
+
+        Releases only these writer leases; operation remains held until close.
+        No service/core action or second writer cycle is granted here.
+        """
+        self._state_is('writers_reacquired')
+        try:
+            self._check_reacquired_writers()
+        except BaseException:
+            self._valid = False
+            self._writer_generation = None
+            self._writer_checkpoint = None
+            self._state = 'failed'
+            self._writers.close()
+            raise
+        # Revoke before any close callback, including a lost acknowledgement.
+        self._valid = False
+        self._writer_generation = None
+        self._writer_checkpoint = None
+        try:
+            self._writers.close()
+        except BaseException:
+            self._state = 'failed'
+            raise
+        self._state = 'recovery_writers_released'
+
     def release_writers(self):
         self._state_is('done')
         if self._action == 'stage':
@@ -1590,10 +1837,17 @@ class _MaintenanceSession(_StoppedGuard):
         if self._pid != os.getpid():
             raise ReleaseError('Maintenance session belongs to another process')
         self._valid = False
-        self._writers.close()
-        self._operation.close()
-        self._operation_active = False
-        self._state = 'closed'
+        self._writer_checkpoint = None
+        self._writer_generation = None
+        try:
+            self._writers.close()
+        finally:
+            try:
+                self._operation.close()
+            finally:
+                self._operation_active = False
+                self._operation_proof = None
+                self._state = 'closed'
 
 
 _RECOVERY_LOCKS = {'.proxy-state.lock', 'runtime/xray/owner.lock',
