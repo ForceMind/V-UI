@@ -279,7 +279,7 @@ class BrokerTests(unittest.TestCase):
         with patch.object(b.os,'geteuid',return_value=501),patch.object(b.os,'open') as opened:
             with self.assertRaisesRegex(b.CoreBootBrokerError,'ROOT_REQUIRED'):production.listen()
         opened.assert_not_called()
-        directory=self.root/'broker';directory.mkdir(mode=0o750);os.chown(directory,os.geteuid(),self.gid)
+        directory=self.root/'broker';directory.mkdir(mode=0o750);os.chown(directory,os.geteuid(),self.gid);directory.chmod(0o750)
         foreign=directory/'core-boot.sock';foreign.write_bytes(b'preserve foreign')
         with self.assertRaises(b.CoreBootBrokerError):self.broker()
         self.assertEqual(foreign.read_bytes(),b'preserve foreign');foreign.unlink()

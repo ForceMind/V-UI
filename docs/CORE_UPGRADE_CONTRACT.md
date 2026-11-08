@@ -517,3 +517,5 @@ M11本机验证范围：应用client16项与服务身份11项双Python纯假/临
 `prove_operation`实际调用M9 held-FD/closed-latch/PID闭包且返回必须None，不能以alive、bool或marker授证明；它只证明该worker内operation仍保持，不证明Root installation锁、Root核心事务、旧descriptor或停机。Root协调器必须将这些独立事实共同绑定到broker，且在稳定文件与managed released完成后才发成功finish。循环不开放任意恢复执行命令。
 
 整个worker仍同一总deadline，不因heartbeat延长；EOF、未知/错阶段/重复/extra字段及guard失败均固定error/非零并关闭session。session.close即使在finish之后失败也仍是失败，不被早先成功返回掩盖；signal handlers恢复保持。九项纯fake/临时真实pipe/flock测试双Python通过，尚未把此握手接到新的Root核心任务或实际服务/数据恢复。
+
+1e01224自身主单元3365项有一处新fixture错误：预建broker父目录0750受前序umask077变0700，生产正确报PARENT_UNSAFE。只对自建测试目录显式chmod0750，保留Root门禁、foreign碰撞/替换不得删除及原模式断言；双Python在umask077下18pass/1Linux case未本机执行。该提交ARM64 GNU原生required Build已通过，不能据此覆盖其他目标或新fixture修正提交；Linux kernel与完整准确源码资格继续分别核。
