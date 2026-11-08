@@ -1,8 +1,8 @@
 # P3 核心独立升级与回滚契约草案
 
-状态：设计草案，尚未实现或验收。代码事实核对基线为4bd1d9a648a8096fbf2fa05314e35049a2408e7c。它不属于当前DNS候选PR145，不改变当前公开22、23发布门禁、核心pin或服务器。
+状态：设计独审通过；当前仅完成只读制品验证及纯假包回归，完整核心升级/回退尚未实现或验收。代码事实核对基线为4bd1d9a648a8096fbf2fa05314e35049a2408e7c。它不属于当前DNS候选PR145，不改变当前公开22、23发布门禁、核心pin或服务器。
 
-本阶段来自ROADMAP的已批准P3；Go迁移继续暂缓。先把契约独审完成，正式实现保持独立分支/PR。首测版本已列明，仅核元数据；制品和兼容资格尚未取得，不能把本草案称为核心已可升级。
+本阶段来自ROADMAP的已批准P3；Go迁移继续暂缓。契约已完成独审，制品校验作为独立实现首块；后续选择、备份闭包、切换和RPC继续分块实现与审查。首测版本已列明，仅核元数据；制品和兼容资格尚未取得，不能把本草案称为核心已可升级。
 
 ## 可观察交付
 
@@ -94,6 +94,86 @@ OpenRC明确仅状态/准备；不提供未经资格的自动切换/回退，不
 
 ## 当前状态与下一步
 
-以上选择须再做设计独审，尤其catalog独立信任、准入竞态、备份与选择双状态恢复及旧工具边界。现只有代码事实/元数据与契约草案，尚无P3实现、实际核心升级、四目标新核心资格或公共组件Release。P2的官方资产下载失败仍独立记录，不能用该草案补齐P2门禁。
+以上选择已完成设计独审。首个源码块只实现标准库制品验证，并经增量独审及实际Python3.9.6/3.12各23项纯假包回归；初轮macOS临时目录别名和归档成员卷号漏检均已修正并定点复核。存储、选择、安装、备份闭包、RPC、实际核心切换、四目标新核心资格及公共组件Release仍未实现或取得；不能把此验证器称为完整核心升级。P2的准确提交资格与外部下载失败仍独立记录，不能用P3结果补齐。
 
 受保护分支合并、组件或应用tag/Release公开发行、短入口变更和真实主机部署均须在具体成果可审阅后取得对应明确授权；当前没有这些P3授权，也未执行。新签名密钥、Secrets或额外权限不能从普通开发授权推断。
+
+## schema1 字段定稿：首个只读验证块
+
+本节仅定义 `app/core_updates/artifacts.py` 的输入与验证结果，不表示选择、安装、运行兼容或完整P3已经完成。`decode_authority(raw)`只严格解析调用者从固定官方API或独立可信缓存取得的规范上下文；它不能证明JSON的获取来源。ZIP、备份或上传内容自带的同形JSON不能用作authority。`expected_builder_source`必须由可信组件tag ref解析到完整commit，不使用Release的自由文本`target_commitish`。
+
+调用关系为：
+
+```python
+authority = decode_authority(trusted_api_context_bytes)
+release = verify_release(manifest_bytes, checksums_bytes,
+    authority=authority, expected_tag=trusted_component_tag,
+    expected_builder_source=trusted_tag_commit, app_source=exact_running_app_source)
+identity = verify_pack(local_archive_path_or_fd, release, target=detected_target)
+```
+
+所有JSON对象都拒绝未知/重复key、坏UTF-8/孤立surrogate、浮点数、NaN/Infinity、超界整数与过深结构。下面列出的key集合为精确集合，没有`approved`、URL、版本范围或可选解释器/命令入口。
+
+### 官方API规范上下文
+
+顶层精确字段为`schema=1`、`repository="ForceMind/V-UI"`、`repository_id=1110299182`、正整数`release_id`、`tag`、`draft=false`、`prerelease=false`、非空有效UTC `published_at`（`YYYY-MM-DDTHH:MM:SSZ`）和`assets`。每条asset恰为`{id,name,size,digest}`，ID为正整数，size为正整数字节数，digest为`sha256:<64小写hex>`；资产名称和ID均不重复，集合必须是CORE-RELEASE.json、SHA256SUMS及四目标ZIP。API原始字段由调用者有界读取后明确规范化，不能默认JSON解码后丢失重复字段。调用者在任务复核时必须比较原Release ID、tag、完整asset ID/digest集合和tag-ref source，不得把变化后的authority悄悄替换为原任务资格。
+
+### CORE-RELEASE.json
+
+结构样例如下，数字/摘要/source仅为结构占位，**不是已公开或可信的制品**；实际四个pack必须填满全部字段并匹配外部API。
+
+```json
+{
+  "schema": 1,
+  "kind": "core-release-v1",
+  "repository": "ForceMind/V-UI",
+  "tag": "core-sing-box-v1.14.3-r1",
+  "core": "sing-box",
+  "version": "1.14.3",
+  "revision": 1,
+  "builder_source": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "compatibility": {
+    "contract": "core-selection-v1",
+    "app_sources": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
+  },
+  "packs": [
+    {"target":"x86_64-gnu","name":"vui-core-sing-box-1.14.3-x86_64-gnu.zip","size":1,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","manifest_sha256":"0000000000000000000000000000000000000000000000000000000000000000"},
+    {"target":"x86_64-musl","name":"vui-core-sing-box-1.14.3-x86_64-musl.zip","size":1,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","manifest_sha256":"0000000000000000000000000000000000000000000000000000000000000000"},
+    {"target":"aarch64-gnu","name":"vui-core-sing-box-1.14.3-aarch64-gnu.zip","size":1,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","manifest_sha256":"0000000000000000000000000000000000000000000000000000000000000000"},
+    {"target":"aarch64-musl","name":"vui-core-sing-box-1.14.3-aarch64-musl.zip","size":1,"sha256":"0000000000000000000000000000000000000000000000000000000000000000","manifest_sha256":"0000000000000000000000000000000000000000000000000000000000000000"}
+  ]
+}
+```
+
+`app_sources`为1–64个去重、排序后的完整小写SHA40；调用者当前精确应用source必须在其中。core只允许sing-box/Xray的固定官方repository及archive/member模板；version为与可信组件tag完全一致的规范三段数字，revision对应tag的正整数r值。decoder不硬编码首测两个版本，未来同contract候选仍须新的publisher资格与官方组件Release；格式可表达不等于运行兼容。
+
+SHA256SUMS恰有5条`<64小写hex><两个空格><文件名>`：CORE-RELEASE.json及四个ZIP，禁止列自身。先用API的外部digest和size核两份小文件，再让table、Release pack descriptor及API的ZIP摘要/size完全一致。CORE-RELEASE只记录ZIP及其内部CORE-PACK.json的摘要，不记录SHA256SUMS摘要，避免自引用。
+
+### 每目标pack与provenance
+
+每ZIP精确5个regular成员，禁止目录、符号链接、重复/未知/路径截断、加密及未声明成员：
+
+| 成员 | ZIP内Unix mode | 内容 |
+| --- | --- | --- |
+| `bin/<core>` | 0555 | 对应目标的实际二进制字节 |
+| `LICENSE` | 0644 | 官方source内LICENSE原文 |
+| `SOURCE.tar.gz` | 0644 | 该上游source commit的原源码分发归档 |
+| `PROVENANCE.json` | 0644 | 下述闭合来源记录 |
+| `CORE-PACK.json` | 0644 | 内部manifest |
+
+CORE-PACK.json精确复用CORE-RELEASE的`schema,repository,tag,core,version,revision,builder_source,compatibility`，另有`kind="core-pack-v1"`、`target`、`files`。files精确列前四个材料成员，每项恰为`{size,mode,sha256}`；mode使用JSON十进制365或420。它不列自身摘要，也不列外层ZIP或table摘要；自身字节摘要由CORE-RELEASE的`manifest_sha256`约束。
+
+PROVENANCE.json精确为`schema=1,upstream,binary_sha256,license_sha256,source_sha256`。upstream精确为`repository,tag,archive_name,archive_size,archive_sha256,member,source_commit,source_size,source_sha256,license_member`。binary/license/source摘要及source大小必须对应CORE-PACK中实际材料；source_commit为完整SHA40，license_member固定`<repo短名>-<source_commit>/LICENSE`，不得伪造其他许可来源。
+
+- sing-box固定SagerNet/sing-box、tag `v<version>`；archive为`sing-box-<version>-linux-<amd64|arm64>-<glibc|musl>.tar.gz`，member为相同目录下`sing-box`。
+- Xray固定XTLS/Xray-core、tag `v<version>`；archive为`Xray-linux-64.zip`或`Xray-linux-arm64-v8a.zip`，member为`xray`。同架构两个libc目标引用同官方归档这一格式关系，不授予跨libc运行资格。
+
+本机consumer不包含原binary上游归档，不重建源码，也不重新证明上游提取。它验证既有官方V-UI组件publisher的外部authority及pack字节/来源声明一致；原官方binary归档的实际下载、SHA、提取成员到binary，以及源码归档与LICENSE原文关系，必须由未来Actions producer实际验证并留下资格证据。若上游许可证文件名/归档模板改变，producer资格应失败，再明确修订合同；不能把元数据声明当作许可证字节证明。
+
+### 读取与稳定性边界
+
+每pack≤100,000,000字节；JSON/table各≤64,000字节，固定5个ZIP成员，中央目录≤16,000字节，全部展开≤256,000,000字节，SOURCE≤128,000,000字节，LICENSE≤1,000,000字节。先检查EOCD/中央目录边界再构造ZipFile；禁止多卷/ZIP64中央目录/额外comment或extra，支持正常local force_zip64和有界streaming data descriptor。local records必须完整覆盖中央目录之前的区域，不接纳前缀或隐藏记录。只允许stored/deflated，不提取到磁盘。
+
+外层摘要和成员摘要均以≤1MiB块流式读取。path入口逐层no-follow打开目录，要求原ZIP是regular单link，验证前后核文件FD/路径与父目录inode身份，并再次核完整外层摘要。FD入口dup自身句柄、使用pread保持调用者offset/FD，不声称能证明原path或父目录权限。所有自有FD关闭均需尝试，清理失败不返回成功身份。root属主、不可变store发布和选择事务属于后续模块，本只读parser不把输入ZIP所在位置冒称受信store。
+
+结果仅为制品身份/摘要，不含“安装通过”“job成功”或可执行命令；实际binary/ELF/目标兼容必须由后续非root preflight和准确Actions资格验证。
