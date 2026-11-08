@@ -197,6 +197,7 @@ def published_commands(source, version, commit, certificate_args, configured_arg
         raise AssertionError('Published version differs from checked out source')
     if subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip() != commit:
         raise AssertionError('Published acceptance checkout is not exact')
+    metadata_url = 'https://api.github.com/repos/ForceMind/V-UI/releases/tags/v' + version
     def asset_target(url, expected):
         target = urlsplit(url)
         return target.scheme == 'https' and not target.fragment and (url in expected or
@@ -238,8 +239,14 @@ def published_commands(source, version, commit, certificate_args, configured_arg
             timeout = isinstance(error, (TimeoutError, socket.timeout)) or (
                 isinstance(error, URLError) and isinstance(error.reason, (TimeoutError, socket.timeout)))
             eligible = error.code in (502, 503, 504) if isinstance(error, HTTPError) else timeout
-            if not eligible or asset is None:
+            if not eligible:
                 raise
+            if asset is None:
+                if url != metadata_url:
+                    raise
+                # Metadata has no alternate source: retry this same fixed tag
+                # URL once, using a fresh request and discarding partial bytes.
+                return attempt(Request(metadata_url, headers={'User-Agent': 'V-UI-public-install-acceptance'}), limit)
             prefix = 'https://github.com/ForceMind/V-UI/releases/download/v' + version + '/'
             if (type(asset) is not dict or type(asset.get('id')) is not int or not 0 < asset['id'] < 2**63
                     or asset.get('name') not in ASSETS or asset.get('browser_download_url') != url
@@ -251,7 +258,7 @@ def published_commands(source, version, commit, certificate_args, configured_arg
                                                'Accept': 'application/octet-stream'})
             request._verified_asset_urls = (url, api_url)
             return attempt(request, limit)  # One fresh alternate read; no third call or partial-byte reuse.
-    release = json.loads(read('https://api.github.com/repos/ForceMind/V-UI/releases/tags/v' + version, 1_000_000))
+    release = json.loads(read(metadata_url, 1_000_000))
     if release.get('draft') or release.get('prerelease') or release.get('tag_name') != 'v' + version:
         raise AssertionError('Stable public release is required')
     assets = {item['name']: item for item in release['assets']}

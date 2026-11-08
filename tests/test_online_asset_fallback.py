@@ -53,7 +53,7 @@ class OnlineAssetFallbackTests(unittest.TestCase):
         self.release = {'tag_name': 'v' + VERSION, 'draft': False, 'prerelease': False,
             'assets': list(self.assets.values()), 'body': helpers.installation_command(self.files, VERSION)}
         self.failures = {}; self.primary = {}; self.alternate = {}; self.requests = []; self.responses = []; self.error_bodies = []
-        self.metadata_raw = None; self.metadata_response = None
+        self.metadata_raw = None; self.metadata_response = None; self.plans = {}
 
     def gateway(self, url, status=504):
         body = io.BytesIO(b'synthetic gateway failure'); self.error_bodies.append(body)
@@ -62,6 +62,11 @@ class OnlineAssetFallbackTests(unittest.TestCase):
     def open(self, request, timeout):
         self.assertEqual(timeout, 60); self.requests.append(request)
         url = request.full_url
+        if url in self.plans:
+            self.assertTrue(self.plans[url], 'No unplanned third metadata request is permitted')
+            outcome = self.plans[url].pop(0)
+            if isinstance(outcome, Exception): raise outcome
+            self.responses.append(outcome); return outcome
         if url in self.failures: raise self.failures[url]
         if url == METADATA:
             raw = self.metadata_raw if self.metadata_raw is not None else json.dumps(self.release).encode()
@@ -138,7 +143,7 @@ class OnlineAssetFallbackTests(unittest.TestCase):
                     self.failures[url] = self.gateway(url, 504 if fault == 'metadata-504' else fault)
                 with self.assertRaises((HTTPError, ssl.SSLError, ValueError)): self.invoke()
                 self.assertEqual(self.api_requests(), [])
-                self.assertEqual(sum(request.full_url == url for request in self.requests), 1)
+                self.assertEqual(sum(request.full_url == url for request in self.requests), 2 if fault == 'metadata-504' else 1)
                 self.assertTrue(all(body.closed for body in self.error_bodies))
 
     def test_byte_digest_source_complete_asset_set_and_command_checks_are_not_relaxed(self):
@@ -250,7 +255,8 @@ class OnlineAssetFallbackTests(unittest.TestCase):
                     self.metadata_response = Response(METADATA, json.dumps(self.release).encode(),
                                                        read_error=URLError(socket.timeout('metadata body timeout')))
                 with self.assertRaises((TimeoutError, URLError)): self.invoke()
-                self.assertEqual(self.api_requests(), []); self.assertEqual(len(self.requests), 1)
+                self.assertEqual(self.api_requests(), []); self.assertEqual(len(self.requests), 2)
+                self.assertTrue(all(request.full_url == METADATA for request in self.requests))
                 if boundary == 'body': self.assertTrue(self.metadata_response.closed)
 
     def test_raw_setup_timeout_still_has_no_alternate_transport(self):
@@ -264,6 +270,78 @@ class OnlineAssetFallbackTests(unittest.TestCase):
                 helpers.setup_commands(self.source, VERSION, COMMIT, COMMIT, 'main', [], [], release_source=self.source)
         self.assertEqual(self.api_requests(), [])
         self.assertEqual(sum(request.full_url == url for request in self.requests), 1)
+
+
+
+    def test_fixed_metadata_transient_gateway_or_typed_timeout_retries_same_url_once(self):
+        for fault in (502, 503, 504, 'timeout', 'socket', 'wrapped-timeout', 'wrapped-socket'):
+            with self.subTest(fault=fault):
+                self.setUp()
+                if isinstance(fault, int): error = self.gateway(METADATA, fault)
+                elif fault == 'timeout': error = TimeoutError('metadata status timeout')
+                elif fault == 'socket': error = socket.timeout('metadata socket timeout')
+                elif fault == 'wrapped-timeout': error = URLError(TimeoutError('metadata wrapped timeout'))
+                else: error = URLError(socket.timeout('metadata wrapped socket timeout'))
+                success = Response(METADATA, json.dumps(self.release).encode())
+                self.plans[METADATA] = [error, success]
+                result = self.invoke()
+                metadata = [request for request in self.requests if request.full_url == METADATA]
+                self.assertEqual(len(metadata), 2); self.assertEqual(self.api_requests(), [])
+                self.assertTrue(all(request.get_header('Accept') is None for request in metadata),
+                                'A same-URL metadata retry must not become an octet-stream asset fallback')
+                self.assertTrue(all(request.get_header('Authorization') is None for request in metadata))
+                self.assertTrue(all(body.closed for body in self.error_bodies))
+                self.assertEqual(result['canonical'], helpers.installation_command(self.files, VERSION))
+
+    def test_metadata_partial_status_or_body_timeout_closes_and_uses_fresh_complete_metadata(self):
+        for boundary in ('status', 'body'):
+            with self.subTest(boundary=boundary):
+                self.setUp(); raw = json.dumps(self.release).encode()
+                failed = Response(METADATA, raw,
+                    url_error=socket.timeout('metadata status timeout') if boundary == 'status' else None,
+                    read_error=URLError(socket.timeout('metadata body timeout')) if boundary == 'body' else None)
+                success = Response(METADATA, raw)
+                self.plans[METADATA] = [failed, success]
+                result = self.invoke()
+                self.assertTrue(failed.closed); self.assertTrue(success.closed)
+                self.assertEqual(success.read_limits, [1000001])
+                if boundary == 'body': self.assertTrue(failed.partial); self.assertEqual(failed.read_limits, [1000001])
+                self.assertEqual(self.api_requests(), [])
+                self.assertEqual(sum(request.full_url == METADATA for request in self.requests), 2)
+                self.assertEqual(result['canonical'], helpers.installation_command(self.files, VERSION))
+
+    def test_persistent_metadata_failure_is_two_same_url_calls_and_never_a_third(self):
+        for boundary in ('gateway', 'timeout', 'body'):
+            with self.subTest(boundary=boundary):
+                self.setUp()
+                if boundary == 'gateway':
+                    outcomes = [self.gateway(METADATA, 504), self.gateway(METADATA, 503)]
+                elif boundary == 'timeout':
+                    outcomes = [socket.timeout('first metadata timeout'), URLError(socket.timeout('second metadata timeout'))]
+                else:
+                    outcomes = [Response(METADATA, json.dumps(self.release).encode(), read_error=socket.timeout('body timeout'))
+                                for _ in range(2)]
+                self.plans[METADATA] = outcomes.copy()
+                with self.assertRaises((HTTPError, TimeoutError, socket.timeout, URLError)): self.invoke()
+                self.assertEqual(len(self.requests), 2); self.assertEqual(self.api_requests(), [])
+                self.assertTrue(all(request.full_url == METADATA for request in self.requests))
+                self.assertTrue(all(body.closed for body in self.error_bodies))
+                if boundary == 'body': self.assertTrue(all(response.closed for response in outcomes))
+
+    def test_metadata_bad_shape_403_404_ssl_and_generic_url_error_never_retry(self):
+        for fault in ('json', 'shape', 'tag', 403, 404, 'ssl', 'url', 'string-timeout'):
+            with self.subTest(fault=fault):
+                self.setUp()
+                if fault == 'json': self.metadata_raw = b'{invalid JSON'
+                elif fault == 'shape': self.metadata_raw = b'[]'
+                elif fault == 'tag': self.release['tag_name'] = 'v0.4.21'
+                elif fault in (403, 404): self.failures[METADATA] = self.gateway(METADATA, fault)
+                elif fault == 'ssl': self.failures[METADATA] = ssl.SSLCertVerificationError('metadata TLS rejected')
+                elif fault == 'url': self.failures[METADATA] = URLError(ConnectionResetError('metadata reset'))
+                else: self.failures[METADATA] = URLError('timed out')
+                with self.assertRaises((HTTPError, ssl.SSLError, URLError, ValueError, AttributeError, AssertionError)): self.invoke()
+                self.assertEqual(len(self.requests), 1); self.assertEqual(self.api_requests(), [])
+                self.assertTrue(all(body.closed for body in self.error_bodies))
 
 
 
