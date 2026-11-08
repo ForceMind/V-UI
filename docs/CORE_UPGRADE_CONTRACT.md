@@ -1,6 +1,6 @@
 # P3 核心独立升级与回滚契约草案
 
-状态：设计独审通过；当前完成M0–M7制品/来源、选择恢复元数据、已确认选择的只读启动及诊断接线，完整受管核心升级/回退尚未实现或验收。代码事实核对基线为4bd1d9a648a8096fbf2fa05314e35049a2408e7c。它不属于当前DNS候选PR145，不改变当前公开22、23发布门禁、核心pin或服务器。
+状态：设计及已实现前置分块独审通过；当前具备制品/来源、选择恢复元数据、confirmed启动/诊断、私有完整备份预检及Root鉴别的managed启动接线，完整受管核心升级/回退尚未实现或验收。代码事实核对基线为4bd1d9a648a8096fbf2fa05314e35049a2408e7c。它不属于当前DNS候选PR145，不改变当前公开22、23发布门禁、核心pin或服务器。
 
 本阶段来自ROADMAP的已批准P3；Go迁移继续暂缓。契约已完成独审，制品校验作为独立实现首块；后续选择、备份闭包、切换和RPC继续分块实现与审查。首测版本已列明，仅核元数据；制品和兼容资格尚未取得，不能把本草案称为核心已可升级。
 
@@ -530,3 +530,16 @@ writer要求实际stopped guard，私有暂存和流式归档完成后以NOREPLA
 二十项假材料/临时文件测试覆盖完整四份组件闭包（两核心current/previous）、DNS profile/挑战及零字节私有fragment、proxy marker/空secret/active relay、默认旧reader与错误ID拒绝、节点/会话数据原样、篡改后重哈希输入拒绝、预算含MANIFEST、独立catalog缺失、symlink/hardlink和旧普通restore拒绝。此处没有Root双域交换、撤销授权、受管恢复启动或实际系统服务，不能称完整核心升级可用。真正原23工具负向与四目标完整链路仍须Actions。
 
 db0f64a自身九组中八组及额外候选材料四job成功；原生ARM GNU和distro成功，两个musl在严格默认345合同因真实service-user case于root容器被skip而失败（[原始运行42524739739](https://github.com/ForceMind/V-UI/actions/runs/42524739739)，ARM job128865731750/x64 job128865731707）。不是下载失败，也未取得整个矩阵资格。修复只将既有smoke用户创建提前，以实际非root身份执行合同；root构建和后续staged验证保持，仍要求所有合同零skip。新源码须自己的Actions，不把这次修复或前置成功泛化成准确新候选资格。
+
+
+## M14 实际受管启动接线（尚无Root核心任务）
+
+`serve`在持panel lease并完成活动应用完整校验后，遇core/restore pending只向固定Root broker申请一次claim；无pending仍走原confirmed启动。假的连接、JSON/phase/env、替代地址/owner/socket factory或失败claim均不能获得data_owner恢复例外，也不会回落普通启动。只有真实native socket、固定生产路径及直接kernel UID0凭据支持本进程短期scope；普通真实flock仍先取得，例外只限启动线程和同一控制线程，不能传到HTTP线程池、fork或序列化。
+
+managed路径要求现有SQLite文件和精确state2/config/选择意图，不运行init_db、迁移、apply/restore或普通可写恢复。既有proxy的每次继承读取都显式禁止初始化，并在启动前复用现有编译/地址安全恢复guard；原revision、凭据、停止意图不改。全部HTTP/WS（包括登录、订阅、导出）先被外层gate挡住，503中文；证书worker暂停。Root仍须独立核TLS与实际核心资格，不能把client ready/ok当健康。
+
+同一Root连接监控启动期间EOF/撤销，实际probe读取运行FD身份、状态/配置revision和所属监听；selection revision从已配置snapshot重算。释放时实际检查原应用、data代次、pending清除和stable selection/fence；release_ack仍gated，只有Root最终released且再次核完磁盘事实才启动证书worker和开放HTTP。排队回调前撤销仍拒绝；撤销停止每个已创建核心并请求uvicorn退出，任何cleanup失败继续报错而非干净成功。
+
+新增十六项文件/真实临时flock、fake transport、ASGI、AST及只读SQLite检查，两Python均通过；既有client16与boot19另回归通过。主智能体对实际七文件独审并复查上述边界，不以源码/合成检查冒称固定Root socket跨UID、systemd、新核心或公网测试。最初新case因macOS的/etc符号路径、错误fake stopped identity失败，测试明确fake Root缺席并修fixture，生产noFollow/身份门禁未放宽。
+
+当前仍缺真正Root安装/操作锁与worker存活组合证明、停止后最终意图握手、切换/失败/中断恢复协调器及双域恢复。普通运行进程在Root CORE_UPDATE_PENDING出现时的新writer准入也尚未接通；本节完成的是pending启动后的私有scope/gate，不能称全部writer已挡住。完整四目标、不同核心版本、保数据切换与安装资格须后续Actions。

@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import asyncio
 import sys
 os.umask(0o077)
 from fastapi import FastAPI, Request
@@ -9,6 +10,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.staticfiles import StaticFiles
 from app.api import auth, maintenance, certificates, cores, files, inbounds, management, mihomo_preview, proxy, proxy_diagnostics, proxy_exports, routing, security, singbox, subscription, subscriptions, system, xray
 from app.data_owner import data_owner
+from app.core_updates import managed_startup
 from app.models.database import DB_PATH, init_db
 from app.middleware.auth import AdminAuthMiddleware, configured_origin
 from app.services.core_manager import core_manager
@@ -18,6 +20,7 @@ from app.services.routing_store import RoutingStorageError
 
 app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.4.23')
 app.add_middleware(AdminAuthMiddleware)
+app.add_middleware(managed_startup.ManagedHTTPGate)
 app.include_router(maintenance.router,prefix='/api/maintenance',tags=['Temporary maintenance'])
 app.include_router(certificates.router,prefix='/api/certificates',tags=['Certificates'])
 app.include_router(system.router,prefix='/api/system',tags=['System'])
@@ -54,6 +57,18 @@ async def validation_error(request: Request,exc: RequestValidationError):
 
 @app.on_event('startup')
 async def startup_event():
+    managed=managed_startup.current()
+    if managed is not None:
+        try:
+            with managed.scope():
+                owner=data_owner(DB_PATH.parent);owner.__enter__();app.state.data_owner=owner
+                configured_origin();install_log_redaction()
+                managed.recover(core_manager)
+                managed.ready(asyncio.get_running_loop())
+            return
+        except BaseException:
+            await shutdown_event()
+            raise
     owner = data_owner(DB_PATH.parent)
     owner.__enter__()
     app.state.data_owner = owner
@@ -71,6 +86,13 @@ async def startup_event():
 
 @app.on_event('shutdown')
 async def shutdown_event():
+    managed=managed_startup.current()
+    try:
+        if managed is not None:managed.close()
+    finally:
+        await _shutdown_ordinary_resources()
+
+async def _shutdown_ordinary_resources():
     try:
         proxy_diagnostics.close_diagnostics_if_created()
     finally:

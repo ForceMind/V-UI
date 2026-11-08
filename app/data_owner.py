@@ -87,6 +87,17 @@ def _check_pending_restore(parent: int) -> None:
         os.stat("RESTORE_PENDING.json", dir_fd=parent, follow_symlinks=False)
     except FileNotFoundError:
         return
+    # Ordinary calls retain the same barrier. The only exception is a narrow
+    # in-process startup/probe scope backed by the fixed authenticated Root
+    # socket; it still acquires and verifies this real shared flock first.
+    try:
+        from app.core_updates.managed_startup import _pending_permitted
+    except ImportError:
+        # The isolated maintenance CONTROL closure intentionally has no app
+        # startup package. Its ordinary shared callers remain refused here.
+        _pending_permitted = None
+    if _pending_permitted is not None and _pending_permitted(parent):
+        return
     raise DataOwnerError("Interrupted restore requires offline recovery before data can be used")
 
 

@@ -180,3 +180,37 @@ def configure_boot(manager, *, payload, manifest, ready, data, versions,
         raise CoreBootError('CORE_MATERIAL_UNAVAILABLE') from None
     except (fs.CoreStoreError, a.CoreArtifactError, OSError):
         raise CoreBootError('RUNTIME_STATE_UNAVAILABLE') from None
+
+
+def configure_managed(manager, *, session, payload, manifest, ready, data, versions):
+    """Only an authenticated production startup scope may select a trial map.
+
+    The supplied state2/config must already match Root's intent. This never
+    migrates or rewrites state, changes stop intent, or accepts a test locator.
+    """
+    from app.data_owner import data_owner
+    from . import managed_startup, managed_boot
+    _need(type(session) is managed_startup.ManagedStartup
+          and getattr(managed_startup._LOCAL, 'session', None) is session, 'MANAGED_SCOPE_REQUIRED')
+    managed_boot.require_native_connection(session.connection)
+    session._check_initial()
+    _need(data == session.root / 'data' and payload == session.release / 'payload', 'MANAGED_CONTEXT_CHANGED')
+    state, context = session.connection.selection, session.connection.context
+    _need(state.app_source == manifest.get('source_commit') and state.target == ready.get('runtime_key'),
+          'MANAGED_CONTEXT_CHANGED')
+    with data_owner(data):
+        committed = _runtime_states(data, owner=os.geteuid(), anchor=Path('/'))
+        for core in s.CORES:
+            actual, intent = committed.get(core), context['intents'][core]
+            if actual is None:
+                _need(intent['revision'] is None and not intent['enabled'], 'MANAGED_STATE_REQUIRED')
+            else:
+                _need(actual['_schema'] == 2 and actual['artifact_id'] == intent['artifact_id']
+                      and actual['revision'] == intent['revision'] and actual['enabled'] == intent['enabled'],
+                      'MANAGED_STATE_CHANGED')
+        bundles = bundle_artifacts(payload, manifest, ready, versions=versions, owner=os.geteuid())
+        resolver = CoreResolver(app_source=state.app_source, target=state.target, bundles=bundles)
+        snapshot = {core: resolver.current(state, core) for core in s.CORES}
+        session._check_initial()
+        manager.configure_artifacts(snapshot)
+        return snapshot

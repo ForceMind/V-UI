@@ -11,6 +11,8 @@ from copy import deepcopy
 import os
 from pathlib import Path
 import socket
+import select
+import struct
 import stat
 import threading
 import time
@@ -49,6 +51,46 @@ def _socket_path(path, owner, anchor):
 
 
 _CONNECTION = object()
+_NATIVE_ORIGIN = object()
+_NATIVE_SOCKET = socket.socket
+_FIXED_ADDRESS = Path('/run/v-ui-maintenance/core-boot.sock')
+
+
+def _kernel_peer(connection):
+    _need(type(connection) is _NATIVE_SOCKET and hasattr(socket, 'SO_PEERCRED'), 'NATIVE_ROOT_REQUIRED')
+    try:
+        return struct.unpack('=iII', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+    except (OSError, struct.error):
+        raise ManagedBootError('NATIVE_ROOT_REQUIRED') from None
+
+
+def require_native_connection(connection):
+    """Private production boundary: fixture owners/paths/factories never pass."""
+    _need(type(connection) is ManagedBootConnection and connection._native_origin is _NATIVE_ORIGIN,
+          'NATIVE_ROOT_REQUIRED')
+    connection._check('claimed', 'ready', 'release_acknowledged')
+    peer = _kernel_peer(connection._connection)
+    _need(peer == connection._peer and peer[1] == 0, 'NATIVE_ROOT_REQUIRED')
+    # The control reader consumes messages. A queued EOF or complete revoke is
+    # already a dead scope even if that reader has not yet been scheduled.
+    try:
+        if select.select([connection._connection], [], [], 0)[0]:
+            raw = connection._connection.recv(wire.MAX_FRAME + 4, socket.MSG_PEEK | socket.MSG_DONTWAIT)
+            _need(bool(raw), 'ROOT_DISCONNECTED')
+            if len(raw) >= 4:
+                size = int.from_bytes(raw[:4], 'big')
+                _need(0 < size <= wire.MAX_FRAME, 'ROOT_PROTOCOL')
+                if len(raw) >= size+4:
+                    _need(wire.decode_frame(raw[:size+4])['op'] != 'revoke', 'ROOT_REVOKED')
+    except (OSError, wire.CoreBootBrokerError):
+        raise ManagedBootError('ROOT_DISCONNECTED') from None
+
+
+def is_native_released(connection):
+    """Completed production Root transcript, never a fixture's released flag."""
+    return (type(connection) is ManagedBootConnection and connection._native_origin is _NATIVE_ORIGIN
+            and connection._pid == os.getpid() and connection.released and not connection.revoked
+            and type(connection._peer) is tuple and connection._peer[1] == 0)
 
 
 class ManagedBootConnection:
@@ -60,6 +102,7 @@ class ManagedBootConnection:
         self._deadline, self._stop = deadline, stop
         self._pid, self._state = os.getpid(), 'claimed'
         self._revoked = threading.Event()
+        self._native_origin = None
 
     def __copy__(self):
         raise ManagedBootError('CONNECTION_REQUIRED')
@@ -207,6 +250,13 @@ def claim(*, app_source, target, data_generation, application, barriers, timeout
             _need(intent['artifact_id'] == s.reference_identity(selection.slot(core).current), 'BOOT_INTENT_CHANGED')
         _need(wire.peer_credentials(connection) == peer, 'ROOT_PEER_CHANGED')
         result = ManagedBootConnection(_CONNECTION, connection, peer, response, selection, deadline, _stop)
+        # These are necessary provenance conditions, not caller-approved flags.
+        # Direct kernel credentials are checked independently of test seams.
+        if (_address is None and address == _FIXED_ADDRESS and _owner == 0 and _anchor == Path('/')
+                and _socket_factory is None and type(connection) is _NATIVE_SOCKET):
+            native = _kernel_peer(connection)
+            _need(native == peer and native[1] == 0, 'NATIVE_ROOT_REQUIRED')
+            result._native_origin = _NATIVE_ORIGIN
         connection = None
         return result
     except ManagedBootError:
