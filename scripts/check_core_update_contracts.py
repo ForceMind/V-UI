@@ -34,6 +34,7 @@ CONTRACTS = {
     'test_core_managed_boot.py': 16,
     'test_core_managed_startup.py': 16,
     'test_core_service_identity.py': 11,
+    'test_core_installation_lock.py': 10,
     'test_core_worker_cycle.py': 9,
 }
 

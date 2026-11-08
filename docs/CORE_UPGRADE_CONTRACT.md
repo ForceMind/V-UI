@@ -543,3 +543,12 @@ managed路径要求现有SQLite文件和精确state2/config/选择意图，不�
 新增十六项文件/真实临时flock、fake transport、ASGI、AST及只读SQLite检查，两Python均通过；既有client16与boot19另回归通过。主智能体对实际七文件独审并复查上述边界，不以源码/合成检查冒称固定Root socket跨UID、systemd、新核心或公网测试。最初新case因macOS的/etc符号路径、错误fake stopped identity失败，测试明确fake Root缺席并修fixture，生产noFollow/身份门禁未放宽。
 
 当前仍缺真正Root安装/操作锁与worker存活组合证明、停止后最终意图握手、切换/失败/中断恢复协调器及双域恢复。普通运行进程在Root CORE_UPDATE_PENDING出现时的新writer准入也尚未接通；本节完成的是pending启动后的私有scope/gate，不能称全部writer已挡住。完整四目标、不同核心版本、保数据切换与安装资格须后续Actions。
+
+
+## M15 Root安装锁的私有持续证明（尚未组合任务）
+
+`installation_lock()`默认仍走旧分支并yield None。新私有 `_proof=True` 仅在实际flock已取得后yield callable：核调用PID、active/closed latch、原held FD完整身份、Root/600/regular/单link、名字与固定parent路径绑定；不以bool或marker作证明，不重新获取flock掩盖持有中断。broker线程可调用，fork不可继承授权。新分支单独保全部祖先FD并逐层noFollow核Root/sticky精确规则，不复用旧walk的提前close；旧helper的同类失ack缺口仍是既有待办，不声称一并修复。
+
+作用域退出先失效再关FD，丢close ack和FD数复用不能复活旧proof。独审复现过inflight缺陷：验证线程在祖先FD清理时暂停，owner退出并释放锁后仍返回成功。现验证结束后再核latch/PID，将最后生命周期读定义为线性化点，原回归已从实际红例转绿；不承诺返回后的未来持有，Root协调器必须先结束并join全部broker回调，再退出此scope。
+
+十项临时文件/实际flock与明确fake Root metadata测试在两Python通过；默认旧锁回归另验。当前仅提供安装锁这一份实际证明，还未接daemon核心任务，不能代替worker的operation proof、服务quiescence、三阶段释放或真实Root安装验收。

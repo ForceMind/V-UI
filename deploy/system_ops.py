@@ -239,27 +239,110 @@ def verify_installation():
 
 
 @contextmanager
-def installation_lock():
-    with trusted_directory(INSTALL_LOCK.parent, lock_parent=True) as directory:
+def installation_lock(*, _proof=False):
+    """Retain installer exclusion; optional proof is private and PID-scoped.
+
+    The default branch preserves its original yield and cost. Proof users keep
+    ancestor FDs until scope exit to avoid the legacy walk's early-close window.
+    The proof never re-locks: it observes the original continuously held flock.
+    """
+    if type(_proof) is not bool:
+        raise Refused('invalid installation proof request')
+    if not _proof:
+        with trusted_directory(INSTALL_LOCK.parent, lock_parent=True) as directory:
+            fd = os.open(INSTALL_LOCK.name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                         0o600, dir_fd=directory)
+            try:
+                before = os.fstat(fd)
+                if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0
+                        or stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1):
+                    raise Refused('invalid installation lock')
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise Refused('another installer or maintenance operation is running') from None
+                after = os.stat(INSTALL_LOCK.name, dir_fd=directory, follow_symlinks=False)
+                if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+                    raise Refused('installation lock replaced')
+                yield
+                after = os.stat(INSTALL_LOCK.name, dir_fd=directory, follow_symlinks=False)
+                if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+                    raise Refused('installation lock replaced')
+            finally:
+                os.close(fd)
+        return
+
+    @contextmanager
+    def parent_scope():
+        pieces = _parts(INSTALL_LOCK.parent)
+        with ExitStack() as owned:
+            parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            owned.callback(os.close, parent)
+            _root_owned(os.fstat(parent), directory=True)
+            bindings = []
+            for index, part in enumerate(pieces):
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                owned.callback(os.close, child)
+                info = os.fstat(child)
+                _root_owned(info, directory=True, sticky=index == len(pieces)-1
+                            and str(INSTALL_LOCK.parent) == '/run/lock')
+                bindings.append((parent, part, child, directory_id(info)))
+                parent = child
+            yield parent
+            for ancestor, name, child, expected in bindings:
+                if (directory_id(os.fstat(child)) != expected
+                        or directory_id(os.stat(name, dir_fd=ancestor, follow_symlinks=False)) != expected):
+                    raise Refused('installation lock parent changed')
+
+    def directory_id(info):
+        return info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid
+
+    with parent_scope() as directory:
+        parent_identity = directory_id(os.fstat(directory))
         fd = os.open(INSTALL_LOCK.name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
                      0o600, dir_fd=directory)
+        active = False
+        pid = os.getpid()
         try:
             before = os.fstat(fd)
             if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0
                     or stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1):
                 raise Refused('invalid installation lock')
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            original = _identity(before)
+            try: fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise Refused('another installer or maintenance operation is running') from None
-            after = os.stat(INSTALL_LOCK.name, dir_fd=directory, follow_symlinks=False)
-            if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
-                raise Refused('installation lock replaced')
-            yield
-            after = os.stat(INSTALL_LOCK.name, dir_fd=directory, follow_symlinks=False)
-            if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
-                raise Refused('installation lock replaced')
+            def verify():
+                opened = os.fstat(fd)
+                named = os.stat(INSTALL_LOCK.name, dir_fd=directory, follow_symlinks=False)
+                if (_identity(opened) != original or _identity(named) != original
+                        or not stat.S_ISREG(opened.st_mode) or opened.st_uid != 0
+                        or stat.S_IMODE(opened.st_mode) != 0o600 or opened.st_nlink != 1):
+                    raise Refused('installation lock changed')
+                with parent_scope() as current:
+                    if (directory_id(os.fstat(directory)) != parent_identity
+                            or directory_id(os.fstat(current)) != parent_identity):
+                        raise Refused('installation lock parent changed')
+            verify()
+            active = True
+            def proof():
+                if not active or os.getpid() != pid:
+                    raise Refused('installation proof is no longer active')
+                verify()
+                # The proof linearizes at this final lifecycle observation.
+                # A concurrent scope exit revokes before closing the real FD;
+                # completed filesystem checks cannot revive a revoked proof.
+                # Callers keep this scope until all broker callbacks are joined.
+                if not active or os.getpid() != pid:
+                    raise Refused('installation proof is no longer active')
+            try:
+                yield proof
+            finally:
+                # Closed latch precedes verification/close, including lost ack.
+                active = False
+            verify()
         finally:
+            active = False
             os.close(fd)
 
 
