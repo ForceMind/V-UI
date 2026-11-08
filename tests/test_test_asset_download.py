@@ -3,6 +3,7 @@ from contextlib import redirect_stderr
 import io
 from pathlib import Path
 import ssl
+import socket
 import subprocess
 import sys
 import tempfile
@@ -67,6 +68,10 @@ class DownloadTests(unittest.TestCase):
 
     def test_404_403_tls_and_unknown_errors_never_fallback(self):
         failures = [http_error(404)[0], http_error(403)[0], ssl.SSLCertVerificationError('fake TLS failure'),
+                    ssl.SSLError('fake SSL failure'),
+                    urllib.error.URLError(ssl.SSLCertVerificationError('fake wrapped TLS failure')),
+                    urllib.error.URLError(OSError('fake network failure')),
+                    urllib.error.URLError('timed out'), OSError('fake OS failure'),
                     urllib.error.URLError('fake transport failure'), RuntimeError('unexpected failure')]
         for failure in failures:
             opener = Mock(); opener.open.side_effect = failure
@@ -74,6 +79,69 @@ class DownloadTests(unittest.TestCase):
                 download.download_pinned(URL, max_bytes=100, opener=opener)
             self.assertEqual(opener.open.call_count, 1)
             if isinstance(failure, urllib.error.HTTPError): self.assertTrue(failure.fp.closed)
+
+    def test_explicit_open_timeouts_get_one_exact_anonymous_api_attempt(self):
+        failures=(TimeoutError('fake open timeout'),socket.timeout('fake socket timeout'),
+                  urllib.error.URLError(TimeoutError('fake wrapped timeout')))
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                response=Response(raw=b'complete fallback bytes',url=API)
+                opener=Mock(); opener.open.side_effect=[failure,response]
+                with redirect_stderr(io.StringIO()):
+                    raw=download.download_pinned(URL,max_bytes=100,opener=opener)
+                self.assertEqual(raw,b'complete fallback bytes')
+                self.assertEqual(opener.open.call_count,2)
+                request=opener.open.call_args.args[0]
+                self.assertEqual(request.full_url,API); self.assertEqual(request.get_method(),'GET')
+                self.assertEqual(dict(request.header_items()),{'Accept':'application/octet-stream'})
+                self.assertTrue(response.stream.closed)
+
+    def test_partial_body_timeout_closes_before_fallback_and_discards_partial_bytes(self):
+        for failure in (socket.timeout('fake partial timeout'),
+                        urllib.error.URLError(socket.timeout('fake wrapped body timeout'))):
+            first=Response(raw=b'partial original bytes')
+            def partial_read(size):
+                first.reads.append(size); first.stream.read(7)
+                raise failure
+            first.read=partial_read
+            second=Response(raw=b'whole fallback body',url=API)
+            calls=[]
+            def open_(request,**kwargs):
+                calls.append(request)
+                if len(calls)==1: return first
+                self.assertTrue(first.stream.closed)
+                return second
+            opener=Mock(); opener.open.side_effect=open_
+            with self.subTest(failure=type(failure).__name__),redirect_stderr(io.StringIO()):
+                raw=download.download_pinned(URL,max_bytes=100,opener=opener)
+            self.assertEqual(raw,b'whole fallback body'); self.assertEqual(len(calls),2)
+            self.assertEqual(first.reads,[101]); self.assertEqual(second.reads,[101])
+            self.assertTrue(second.stream.closed)
+
+    def test_timeout_on_api_never_creates_a_third_attempt_and_closes_body(self):
+        for body_timeout in (False,True):
+            response=Response(url=API)
+            def failed_read(size):
+                response.stream.read(4)
+                raise TimeoutError('fake API body timeout')
+            response.read=failed_read
+            opener=Mock(); opener.open.side_effect=[TimeoutError('fake original timeout'),
+                                                    response if body_timeout else TimeoutError('fake API open timeout')]
+            with self.subTest(body_timeout=body_timeout),redirect_stderr(io.StringIO()),self.assertRaises(TimeoutError):
+                download.download_pinned(URL,max_bytes=100,opener=opener)
+            self.assertEqual(opener.open.call_count,2)
+            if body_timeout: self.assertTrue(response.stream.closed)
+
+    def test_timeout_fallback_bad_runtime_bytes_still_cannot_write_an_archive(self):
+        pin=runtimes.PINS['x86_64-gnu']
+        response=Response(raw=b'untrusted fallback archive',url=download.ASSET_API[pin['url']])
+        opener=Mock(); opener.open.side_effect=[TimeoutError('fake original timeout'),response]
+        def fake_download(url,**kwargs): return download.download_pinned(url,opener=opener,**kwargs)
+        with tempfile.TemporaryDirectory() as folder,patch.object(runtimes,'download_pinned',side_effect=fake_download), \
+                patch.object(Path,'write_bytes') as write,redirect_stderr(io.StringIO()),self.assertRaisesRegex(ValueError,'Portable Python checksum mismatch'):
+            runtimes.fetch(Path(folder),['x86_64-gnu'])
+        write.assert_not_called(); self.assertTrue(response.stream.closed)
+        self.assertEqual(opener.open.call_count,2)
 
     def test_second_5xx_does_not_retry_and_both_error_responses_close(self):
         first, fp1 = http_error(504); second, fp2 = http_error(503, API)

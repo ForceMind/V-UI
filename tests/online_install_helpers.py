@@ -13,13 +13,14 @@ import platform
 from pathlib import Path
 import re
 import select
+import socket
 import shlex
 import stat
 import subprocess
 import time
 from contextlib import contextmanager
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 
 from scripts.publish_release import ASSETS, installation_command
@@ -216,12 +217,28 @@ def published_commands(source, version, commit, certificate_args, configured_arg
         except HTTPError as error:
             error.close()
             raise
+    def attempt(request, limit):
+        # A read timeout can follow partial internal buffering. Publish no bytes
+        # until this complete bounded read succeeds; the context always closes.
+        with open_response(request) as response:
+            if urlsplit(response.geturl()).scheme != 'https':
+                raise AssertionError('Public acceptance must retain HTTPS')
+            expected = getattr(request, '_verified_asset_urls', None)
+            if expected is not None and not asset_target(response.geturl(), expected):
+                raise AssertionError('Unexpected public asset API response URL')
+            data = response.read(limit + 1)
+        if len(data) > limit:
+            raise AssertionError('Public acceptance metadata exceeds bound')
+        return data
     def read(url, limit, asset=None):
         request = Request(url, headers={'User-Agent': 'V-UI-public-install-acceptance'})
         try:
-            response = open_response(request)
-        except HTTPError as error:
-            if error.code not in (502, 503, 504) or asset is None:
+            return attempt(request, limit)
+        except (HTTPError, TimeoutError, socket.timeout, URLError) as error:
+            timeout = isinstance(error, (TimeoutError, socket.timeout)) or (
+                isinstance(error, URLError) and isinstance(error.reason, (TimeoutError, socket.timeout)))
+            eligible = error.code in (502, 503, 504) if isinstance(error, HTTPError) else timeout
+            if not eligible or asset is None:
                 raise
             prefix = 'https://github.com/ForceMind/V-UI/releases/download/v' + version + '/'
             if (type(asset) is not dict or type(asset.get('id')) is not int or not 0 < asset['id'] < 2**63
@@ -233,17 +250,7 @@ def published_commands(source, version, commit, certificate_args, configured_arg
             request = Request(api_url, headers={'User-Agent': 'V-UI-public-install-acceptance',
                                                'Accept': 'application/octet-stream'})
             request._verified_asset_urls = (url, api_url)
-            response = open_response(request)  # One anonymous alternate transport, never a retry loop.
-        with response:
-            if urlsplit(response.geturl()).scheme != 'https':
-                raise AssertionError('Public acceptance must retain HTTPS')
-            expected = getattr(request, '_verified_asset_urls', None)
-            if expected is not None and not asset_target(response.geturl(), expected):
-                raise AssertionError('Unexpected public asset API response URL')
-            data = response.read(limit + 1)
-        if len(data) > limit:
-            raise AssertionError('Public acceptance metadata exceeds bound')
-        return data
+            return attempt(request, limit)  # One fresh alternate read; no third call or partial-byte reuse.
     release = json.loads(read('https://api.github.com/repos/ForceMind/V-UI/releases/tags/v' + version, 1_000_000))
     if release.get('draft') or release.get('prerelease') or release.get('tag_name') != 'v' + version:
         raise AssertionError('Stable public release is required')

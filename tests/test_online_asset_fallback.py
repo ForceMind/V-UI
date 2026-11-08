@@ -4,10 +4,11 @@ import io
 import json
 from pathlib import Path
 import ssl
+import socket
 import tempfile
 import unittest
 from unittest.mock import patch
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request
 
 import online_install_helpers as helpers
@@ -21,12 +22,20 @@ SMALL = ('install.sh', 'SHA256SUMS', 'RELEASE.json')
 
 
 class Response:
-    def __init__(self, url, raw):
+    def __init__(self, url, raw, *, url_error=None, read_error=None):
         self.url = url; self.raw = raw; self.closed = False; self.read_limits = []
+        self.url_error = url_error; self.read_error = read_error; self.partial = b''
     def __enter__(self): return self
     def __exit__(self, *args): self.closed = True
-    def geturl(self): return self.url
-    def read(self, limit): self.read_limits.append(limit); return self.raw[:limit]
+    def geturl(self):
+        if self.url_error is not None: raise self.url_error
+        return self.url
+    def read(self, limit):
+        self.read_limits.append(limit)
+        if self.read_error is not None:
+            self.partial = self.raw[:7]  # Simulate bytes buffered before the socket failed.
+            raise self.read_error
+        return self.raw[:limit]
 
 
 class OnlineAssetFallbackTests(unittest.TestCase):
@@ -43,8 +52,8 @@ class OnlineAssetFallbackTests(unittest.TestCase):
             for number, name in enumerate(sorted(helpers.ASSETS), 1000)}
         self.release = {'tag_name': 'v' + VERSION, 'draft': False, 'prerelease': False,
             'assets': list(self.assets.values()), 'body': helpers.installation_command(self.files, VERSION)}
-        self.failures = {}; self.alternate = {}; self.requests = []; self.responses = []; self.error_bodies = []
-        self.metadata_raw = None
+        self.failures = {}; self.primary = {}; self.alternate = {}; self.requests = []; self.responses = []; self.error_bodies = []
+        self.metadata_raw = None; self.metadata_response = None
 
     def gateway(self, url, status=504):
         body = io.BytesIO(b'synthetic gateway failure'); self.error_bodies.append(body)
@@ -56,9 +65,9 @@ class OnlineAssetFallbackTests(unittest.TestCase):
         if url in self.failures: raise self.failures[url]
         if url == METADATA:
             raw = self.metadata_raw if self.metadata_raw is not None else json.dumps(self.release).encode()
-            result = Response(url, raw)
+            result = self.metadata_response or Response(url, raw)
         elif url.startswith(PREFIX):
-            result = Response(url, self.files[url[len(PREFIX):]])
+            result = self.primary.get(url[len(PREFIX):]) or Response(url, self.files[url[len(PREFIX):]])
         elif url.startswith(API):
             selected = next(item['name'] for item in self.assets.values() if API + str(item.get('id')) == url)
             result = self.alternate.get(selected) or Response(url, self.files[selected])
@@ -183,6 +192,79 @@ class OnlineAssetFallbackTests(unittest.TestCase):
                        'https://api.github.com/repos/Other/V-UI/releases/assets/1000', API + '999999999'):
             with self.subTest(target=target), self.assertRaisesRegex(AssertionError, 'Unexpected public asset API redirect'):
                 handler.redirect_request(redirected, None, 302, 'Found', {}, target)
+
+
+    def test_typed_open_timeouts_get_one_same_id_fallback_without_changing_success_bytes(self):
+        for error in (TimeoutError('open status timed out'), socket.timeout('socket status timed out'),
+                      URLError(TimeoutError('wrapped timeout')), URLError(socket.timeout('wrapped socket timeout'))):
+            with self.subTest(kind=type(error).__name__):
+                self.setUp(); self.failures[PREFIX + 'install.sh'] = error
+                result = self.invoke()
+                self.assertEqual(result['canonical'], helpers.installation_command(self.files, VERSION))
+                self.assertEqual(len(self.api_requests()), 1)
+                self.assertEqual(self.api_requests()[0].full_url, API + str(self.assets['install.sh']['id']))
+                self.assertEqual(sum(request.full_url == PREFIX + 'install.sh' for request in self.requests), 1)
+
+    def test_response_status_and_partial_body_timeout_close_and_discard_original_stream(self):
+        for boundary in ('status', 'body'):
+            with self.subTest(boundary=boundary):
+                self.setUp()
+                original = Response(PREFIX + 'install.sh', self.files['install.sh'],
+                    url_error=TimeoutError('status timeout') if boundary == 'status' else None,
+                    read_error=socket.timeout('partial body timeout') if boundary == 'body' else None)
+                self.primary['install.sh'] = original
+                result = self.invoke()
+                self.assertTrue(original.closed)
+                if boundary == 'body':
+                    self.assertTrue(original.partial); self.assertEqual(original.read_limits, [100001])
+                self.assertEqual(len(self.api_requests()), 1)
+                self.assertEqual(result['canonical'], helpers.installation_command(self.files, VERSION),
+                                 'Fallback must validate complete fresh bytes, never append a partial prefix')
+
+    def test_api_timeout_has_no_third_call_and_its_response_stream_is_closed(self):
+        for boundary in ('open', 'status', 'body'):
+            with self.subTest(boundary=boundary):
+                self.setUp(); self.failures[PREFIX + 'install.sh'] = TimeoutError('first open timeout')
+                url = API + str(self.assets['install.sh']['id'])
+                if boundary == 'open': self.failures[url] = URLError(socket.timeout('API timeout'))
+                else:
+                    self.alternate['install.sh'] = Response(url, self.files['install.sh'],
+                        url_error=TimeoutError('API status timeout') if boundary == 'status' else None,
+                        read_error=TimeoutError('API body timeout') if boundary == 'body' else None)
+                with self.assertRaises((TimeoutError, socket.timeout, URLError)): self.invoke()
+                self.assertEqual(len(self.requests), 3); self.assertEqual(len(self.api_requests()), 1)
+                if boundary != 'open': self.assertTrue(self.alternate['install.sh'].closed)
+
+    def test_non_timeout_url_errors_and_metadata_timeouts_never_fallback(self):
+        for error in (URLError('timed out'), URLError(ConnectionResetError('reset')),
+                      URLError(ssl.SSLCertVerificationError('TLS timed out')), URLError('generic network error')):
+            with self.subTest(reason=type(error.reason).__name__):
+                self.setUp(); self.failures[PREFIX + 'install.sh'] = error
+                with self.assertRaises(URLError): self.invoke()
+                self.assertEqual(self.api_requests(), []); self.assertEqual(len(self.requests), 2)
+        for boundary in ('open', 'body'):
+            with self.subTest(metadata=boundary):
+                self.setUp()
+                if boundary == 'open': self.failures[METADATA] = TimeoutError('metadata timeout')
+                else:
+                    self.metadata_response = Response(METADATA, json.dumps(self.release).encode(),
+                                                       read_error=URLError(socket.timeout('metadata body timeout')))
+                with self.assertRaises((TimeoutError, URLError)): self.invoke()
+                self.assertEqual(self.api_requests(), []); self.assertEqual(len(self.requests), 1)
+                if boundary == 'body': self.assertTrue(self.metadata_response.closed)
+
+    def test_raw_setup_timeout_still_has_no_alternate_transport(self):
+        (self.source / 'setup.sh').write_bytes(b'synthetic actual bootstrap')
+        url = 'https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh'
+        self.failures[url] = TimeoutError('raw bootstrap timeout')
+        opener = type('MockOpener', (), {'open': lambda unused, request, timeout: self.open(request, timeout)})()
+        with patch.object(helpers, 'build_opener', return_value=opener), \
+                patch.object(helpers.subprocess, 'check_output', return_value=COMMIT + '\n'):
+            with self.assertRaises(TimeoutError):
+                helpers.setup_commands(self.source, VERSION, COMMIT, COMMIT, 'main', [], [], release_source=self.source)
+        self.assertEqual(self.api_requests(), [])
+        self.assertEqual(sum(request.full_url == url for request in self.requests), 1)
+
 
 
 if __name__ == '__main__':

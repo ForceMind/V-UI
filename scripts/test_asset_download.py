@@ -1,11 +1,13 @@
 """Anonymous, bounded download of fixed CI/build assets, never runtime code.
 
 The original immutable release URL is attempted once. Only its HTTP502/503/504
-permits one fixed official asset-API attempt. Caller size/hash/format checks
+or explicit transport timeout permits one fixed official asset-API attempt.
+Caller size/hash/format checks
 remain mandatory: this helper never trusts or interprets GitHub metadata JSON.
 """
 from __future__ import annotations
 import ssl
+import socket
 import sys
 import urllib.error
 import urllib.request
@@ -145,6 +147,13 @@ def download_pinned(original, *, max_bytes, timeout=90, opener=None):
                         original, api, max_bytes, timeout)
     except urllib.error.HTTPError as error:
         if error.code not in TRANSIENT:
+            raise
+    except (TimeoutError, socket.timeout):
+        # Python 3.9 keeps socket.timeout distinct. Any partial response was
+        # closed by _attempt; never concatenate it with the new response.
+        pass
+    except urllib.error.URLError as error:
+        if not isinstance(error.reason, (TimeoutError, socket.timeout)):
             raise
     print(FALLBACK_MESSAGE, file=sys.stderr)
     request = urllib.request.Request(api, headers={'Accept': 'application/octet-stream'}, method='GET')
