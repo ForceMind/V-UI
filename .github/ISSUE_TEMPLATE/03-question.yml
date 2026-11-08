@@ -1,0 +1,25 @@
+name: 安装或使用问题
+description: 查询说明后仍有卡点时，提供具体问题和已尝试的步骤。
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先查[安装指南](https://github.com/ForceMind/V-UI/blob/main/docs/INSTALLATION.md)、[常见问题与排查](https://github.com/ForceMind/V-UI/blob/main/docs/TROUBLESHOOTING.md)和[支持指南](https://github.com/ForceMind/V-UI/blob/main/SUPPORT.md)。
+        疑似漏洞按[安全政策](https://github.com/ForceMind/V-UI/security/policy)处理。没有私密联络方式时，可以创建仅请求联络的 Issue，勿附利用细节或秘密。
+  - type: textarea
+    id: question
+    attributes:
+      label: 具体问题
+      description: 写清目标和卡点；请移除真实服务器信息、密码/token、维护链接、订阅和证书材料。
+    validations:
+      required: true
+  - type: input
+    id: version_environment
+    attributes:
+      label: 版本与平台（可选）
+      placeholder: v0.4.22 / Ubuntu / aarch64 / glibc / systemd
+  - type: textarea
+    id: documentation_attempts
+    attributes:
+      label: 已查说明和尝试（可选）
+      description: 附说明页链接及必要的脱敏错误即可，无需完整配置、全盘日志或浏览器测试。

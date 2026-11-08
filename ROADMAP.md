@@ -1,196 +1,67 @@
-# V-UI 开发路线
+# 开发路线与当前进度
 
-## 2026-10-28 v0.4.10 当前修复
+更新：2026-11-08。此文件是当前开发顺序与阶段状态的唯一清单；使用方法见[文档首页](docs/README.md)，准确发布证据见[版本记录](docs/MAINTENANCE_SHARE_0422.md)，旧路线和阶段原文见[历史索引](docs/history/README.md)。
 
-安装交互修复 v0.4.10 已公开：域名原地重输、中文提示、短写确认；短入口正在按已核验真实摘要完成准确提交验收。构建和实际安装全部放在 Actions，不运行浏览器；旧 v0.4.9 保留。仅本次纯安装器补丁采用显式非浏览器发布例外，进度见[执行账本](docs/INSTALLER_INTERACTION_0410.md)。
+## 已交付：v0.4.22
 
-## 2026-10-28 当前状态：main/dev 与短安装入口维护
+| 项目 | 状态 |
+| --- | --- |
+| 正式应用 | [v0.4.22](https://github.com/ForceMind/V-UI/releases/tag/v0.4.22)，源提交 `558687a76cd29f4e4735284926eb05bf6664472e` |
+| 一行安装入口 | 已上线并验收，入口提交 `39181e0cdb9643422a19049df942b208f876faf4`；应用与入口源不能混用 |
+| 简单操作 | 直连节点、中转节点、服务器程序代理三个预设任务；创建、设置、分享、证书和订阅流程已实现 |
+| 终端与维护 | `v-ui` 在线升级、限时可撤销维护授权；默认30分钟、最长180天 |
+| 维护分享修复 | v0.4.22 修复维护请求被旧查询白名单拒绝；修订条件和权限校验保持 |
+| 构建与安装 | 应用及入口各自候选/dev/main九组、12 jobs通过；四目标、新装和公开七旧版升级通过 |
+| 已授权实例更新 | 私有备份、正式版升级和配置读回完成；运维明细只私存，不代表其他主机验收 |
+| 浏览器 | 未验证；当前开发与验收不运行浏览器 |
 
-已发布稳定版为 [v0.4.9](https://github.com/ForceMind/V-UI/releases/tag/v0.4.9)，来自 `a39b6e009829dd7f1be772fd3454474903b9858a`。用户批准先归档后清理，18 个未合并分支已保存到归档标签，93 个旧分支已清理，五个旧 Draft PR 归档关闭；长期分支为 `main` / `dev`。恢复索引与本批入口、独审和验收记录见[维护账本](docs/REPOSITORY_MAINTENANCE_20261028.md)。
+短入口打开本地菜单或退出不下载；显式升级/修复才下载。已有账户、节点、证书、订阅及代理设置沿用。固定官方核心、单一共享出口和现有协议资格保持；没有开放未验证的 UDP 中转或 XHTTP/HTTPUpgrade 公共导出。
 
-每个版本从 dev 创建 `release/vX.Y.Z`，按[贡献流程](CONTRIBUTING.md)审查后依次合入 dev/main，再以 tag/Release 发布。当前维护重写 README、增加安装冻结 v0.4.9 的 `setup.sh`，不创建新应用版本或覆盖旧资产。构建和真实安装在 Actions，不做浏览器测试。Go 迁移仍仅保留备选计划，等待用户测试当前版本；下方带日期记录为对应阶段历史。
+## 当前迭代：开源文档与仓库规范
 
-## 2026-10-19 当前状态：每入口 TCP 已收口
+本批是文档、协作入口及现有离线文档检查整理，不升级应用版本，不改安装器、产品、核心、生产配置或既有发布资产。
 
-[PR49](https://github.com/ForceMind/V-UI/pull/49) 已正常合并至 `0962f0c4995b3b7606652027f2330285e4dea1f7`，每入口 inherit/direct/relay 的 P0–P5、准确候选/主线八组及四目标验收已完成，见[收口记录](docs/PER_INBOUND_ROUTING_CLOSURE_20261018.md)。[PR50](https://github.com/ForceMind/V-UI/pull/50) 随后将交接及使用文档合并至 `1489bf5218fced9b42c57e06715478dc323dc782`。无需从旧 a98 基线重新实现本轮 TCP 功能；接手先读[开发交接](docs/DEVELOPMENT_HANDOFF.md)，并核对远端 master 与后续提交。
+- [x] 核对当前main/dev、公开v0.4.22、入口与已完成部署的独立证据。
+- [x] 将README、用户手册与索引整理为当前使用说明，历史完整原文固定归档。
+- [x] 同步完成记录，区分当前状态、阶段快照与真正未完成项。
+- [x] 完善贡献、安全、支持、社区交流与Issue/PR模板，不虚构已启用功能或维护承诺。
+- [x] 整理版本、变更说明、制品、发布与入口的维护流程，保持原有安全门槛。
+- [ ] 完成独审、静态链接/版本检查和准确Actions，提交可审阅PR并回读同步结果。
 
-上述主线功能**已合并、尚未正式发布**；正式 v0.4.8 仍仅包含 `a9f9b5d9` 安装器修复。TCP 收口不授予中转 UDP、手机真机、公网线路或低资源整机长期运行资格，也不授权发布或部署。下方带日期的实施状态保留为历史快照，不覆盖本段，旧失败不改判。
-
-## 2026-10-18 执行顺序（历史快照）
-
-[开发与接手入口](docs/DEVELOPMENT_HANDOFF.md)汇总已完成产品、未合并实验、所有剩余计划和运行命令。当前优先从 `a98da9af` 独立实现[每入口 inherit/direct/relay](docs/PER_INBOUND_ROUTING_CONTRACT.md)：现成客户端、标准 VLESS、单一上游与 host 独立，先 TCP。D1 已进入该产品主线；下方 D1“正在实现”是旧快照。D2实验有阶段成果与原失败，不能替代产品资格或推出所有客户端需定制；[兼容审查与后续 UDP 最小门槛](docs/STANDARD_CLIENT_COMPATIBILITY.md)另列。三态实现已进入 [PR49](https://github.com/ForceMind/V-UI/pull/49) Draft，首轮准确候选仍有失败，尚未验收、合并或发布。
-
-## 2026-10-16 D1 当前开发目标
-
-D0 已由 [PR #45/#46](https://github.com/ForceMind/V-UI/pull/46)在准确 master `13c884a0539cf9822fca2fe2db58325fa4644048` 完成八工作流 / 11 jobs / 122 steps 全部 attempt 1 成功与同提交四目标 19 项资产核验；原失败保留在 PR，旧候选成功不替代主线结果。新有界功能为 [D1：显式 TCP-only 中转上游导出](docs/TCP_UPSTREAM_EXPORT_CONTRACT.md)，让本项目节点通过专用 URI / 单节点 Clash YAML 直接进入另一实例的既有上游导入，须经真实双实例 API、浏览器及 TLS/REALITY 双跳验收。普通导出和严格导入保持；UDP 双跳尚未开放。本期仍在实现，准确资格以其承载 PR 为准。
-
-以下 D0 立项时状态保留为历史，不覆盖本段；正式 v0.4.8 仍仅包含 a9f9b5d9 安装器基线，不因开发完成自动发布。
-
-## 2026-10-16 当前阶段
-
-双开关 M0–M4 已正常合并至 `9a97ad13aae2fabb5ed969fdc0f930c36fdc55b7`；准确主线八工作流 / 11 jobs / 122 steps 全部 attempt 1 成功，四目标 19 项资产完成独立完整性校验，见 [PR #44](https://github.com/ForceMind/V-UI/pull/44)及[进度账本](docs/DUAL_PROXY_RELAY_PROGRESS.md)。真实外部设备/海外线路、小 VPS/24 小时及新功能正式发布仍独立待办。
-
-下一有界交付为 [D0：UDP / DNS 能力门槛与导入保真](docs/UDP_DNS_CAPABILITY_GATES.md)：明确 UDP/packet encoding 导入拒绝诊断，真实普通导出→导入回归，固定核心的普通 Shadowsocks UDP/DNS 与双开关 UDP 拒绝实验。新增实现和门槛须核自己的准确候选/主线，不将配置字段、DNS listener 或 QUIC 传输误报成通用应用 UDP 支持。
-
-当前正式版 [v0.4.8](https://github.com/ForceMind/V-UI/releases/tag/v0.4.8)已于 2026-10-15 10:57 UTC 从 `a9f9b5d9c0dd2aada5e8f5f2270b2ce93440d5ff` 发布（19 项资产）；仅含安装器修复。后续主线虽然 `VERSION` 保持 0.4.8，双开关和 D0 不在该公开版本内，不能覆盖旧 tag/资产或声称已经发布。以下旧快照保持原文和日期。
-
-## 2026-10-15 新增当前开发目标
-
-双开关代理与中转已获准按[一期契约](docs/DUAL_PROXY_RELAY_CONTRACT.md)持续开发，M0–M4 分别独立 PR。当前首个收口目标为 M0 合同冻结；最终软件目标为四状态、12 条有向切换、严格导入、失败关闭、面板诊断与同提交四目标验收。实际进度及准确候选/主线证据见[进度账本](docs/DUAL_PROXY_RELAY_PROGRESS.md)，不预称实现或通过。
-
-新开发范围取代下方安装器阶段的当时范围；下方版本/发布准备文字保留原历史，不用于判断新功能已发布。既有普通节点/导出、固定核心、四目标和历史失败保留；版本、公开发布与真实部署仍分别决定。本阶段不改 `VERSION` 或旧资产。
-
-## 当前状态
-
-**正式发布：0.4.7；开发版本：0.4.8（UNRELEASED）。** [v0.4.7](https://github.com/ForceMind/V-UI/releases/tag/v0.4.7) 已于 2026-10-13 从主线 `c5d50ee14b08da57bdc13c150b4ed501e9484023` 公开发布，tag 和 19 项资产元数据已于 2026-10-15 只读复核；公开发布不等于用户主机部署。
-
-当前独立 0.4.8 仅修复安装入口的退出状态、临时目录清理和引导失败拦截，见[安装器修复契约](docs/INSTALLER_EXIT_STATUS_048.md)。新候选须有自己的独立审查、准确提交 CI 和正常合并后验收；本次不创建新 tag/Release、不替换 0.4.7 资产、不部署。旧 `048` XHTTP 刻画文档的编号不代表本次开放该协议，公开导出仍阻断。
-
-0.4.7 的低资源、后台、完整运维软件及 VMess/HTTPUpgrade 证据质量修复已由 [PR #35](https://github.com/ForceMind/V-UI/pull/35) 正常进入主线。固定产品代码基线 `02d8038d5c06301cd81fb5ee1c776ce53b8bd4b7` 的准确八组与新四目标制品已验，见[主线收口](docs/MAINLINE_OPERATIONS_CLOSURE_20261012.md)。八个软件工作包不等于整个路线完成；后续六主题、真实小型 VPS/24 小时及其他未获资格项保留。后续新提交的 CI/制品结果以承载 PR 账本为准，不在文档中预填未来 SHA。
-
-### 协议阶段记录（历史）
-
-以下保留2026-10-05至10-06各协议阶段的当时状态；其中“当前/本次待验”指对应阶段，不覆盖上方已验集成代码基线。
-
-v0.4.2 已在 2026-10-05 以 16 个正常 merge commit 收口到 `master` 的 `0225ce4`，PR #14 明确排除。准确主线的八组工作流、11 个 job 和四目标 Linux 附件均已核验；当时未创建 Draft Release、版本 tag、公开 Release 或部署。完整提交、tree 和验收链接见[主线收口记录](docs/MAINLINE_CLOSURE_20261005.md)。
-
-v0.4.3 由 [PR #18](https://github.com/ForceMind/V-UI/pull/18) 正常合并至 `1b3ec40cd3bb640246d12afa104db0aec08ce336`，八组工作流、11 个 job 和每一步均成功，成为已验证 WS 基线；见[WS 收口记录](docs/VLESS_WS_CLOSURE_043.md)。该阶段未创建 tag/Release/部署，也未晋升 WS 候选附件。
-
-v0.4.4 由 [PR #19](https://github.com/ForceMind/V-UI/pull/19) 正常合并至 `84729dfc53165003e7d459a5d56621ce89ba497c`，候选 `240edf23af8a12b2cbd71114fe65c693290e39f2` 与合并 tree 均为 `200f8b61ac6decc4fb11384c5d8d162f1f1bdcdc`；独立审查、八组 exact-head 与八组 exact-master 已完成，最终主线 11 个 job/全部步骤成功。它是 gRPC Lite 已验证基线，详见[gRPC 收口](docs/VLESS_GRPC_CLOSURE_044.md)。
-
-v0.4.5 由 [PR #20/#21](docs/HYSTERIA2_CLOSURE_045.md) 正常合并收口到 `838c66d9974dd9f3a944641a2e9e03cc200e0bbe`，tree `e12287d8ebbea233142d58191ee5141a0a49a17a`；最终八组/11 jobs/全部步骤 attempt 1 成功。[PR #23 普通响应安全修复](docs/INBOUND_RESPONSE_CLOSURE_20261006.md)随后正常合并至 `8e0d07463e59b52856f55fa33346a760a38b4705`，准确候选/主线验收完成。历史失败分别保留。
-
-TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合并至 `df8a980beb682a981d72e42760705f1831cacf9b`，候选/主线 tree `f68098e398cb7ac29e2e1e809b8f741bb3c30533` 相同。准确候选八组/11 jobs/全部步骤 attempt 1 成功；准确主线八组/11 jobs/全部步骤成功，其中 deployment 首次上游 403 后 unchanged-code attempt 2 通过，其余七组 attempt 1。真实链路 75 项、独立 HY2 8/TUIC 8 与 Chromium 完整流程分别通过，详见[收口记录](docs/TUIC_CLOSURE_046.md)。
-
-REALITY/Vision v0.4.7 已由 [PR #24](https://github.com/ForceMind/V-UI/pull/24) 正常合并至签名 master `6b049262457b259c602c5e74be296ef52780c462`，最终候选 `70cc2f4f7dc4349c7ecffbc33fc088f51b8651fa` 与主线 tree 均为 `316f0159e3ae3d7362022d9c9ac61bc0afa867c1`。独立审查完成，准确候选八组/11 jobs/全部步骤 attempt 1 成功；准确主线八组/11 个最新 jobs/全部步骤成功，其中链路首次继承 VMess/Mihomo CA 用例缺少必需 x509 日志，unchanged-code attempt 2 取得真实原因后通过，其余七组 attempt 1。该重跑不表示旧被动日志轮询不稳定性已永久修复。真实链路 89 项、独立 HY2 8/TUIC 8 和 Chromium 完整流程已分别验收，详见[收口记录](docs/REALITY_VISION_CLOSURE_047.md)。
-
-[PR #25 XHTTP 刻画](docs/XHTTP_CHARACTERIZATION_CLOSURE_048.md)已正常合并至签名 master `66dbe70cfa86fe140fa1b69d3896244ab17a0e3c`；最终候选 `f7996c579418d1ffe5df06fc12677cf22a42e034` 与主线 tree 均为 `80ad474cfdd159dcc603a14b4a1c9d24427494e7`，独立审查、候选/主线各八组、11 jobs、全部步骤 attempt 1 成功。仅测试/文档刻画，产品 `VERSION` 保持 `0.4.7`；sing-box 1.14.2 不支持 XHTTP，固定 Mihomo HTTPUpgrade URI 有传输缺口，公开 XHTTP/HTTPUpgrade 导出仍阻断。最终链路 101 项、独立 HY2 8/TUIC 8、真实核心与 Chromium 分别验收；首次 CI 和本地失败完整保留。
-
-产品 0.4.7 范围已冻结，当前进入[发布准备](docs/RELEASING.md)。本次最终文档提交的准确 CI 与同提交四目标附件核验以对应 PR/发布准备证据为准，本文不预先声明通过。截至 2026-10-06 本次检查，未新建 tag/Draft Release/公开 Release、晋升附件或生产部署；先完成 0.4.7 交付决定，再进入独立 UDP/DNS 实现阶段。
-
-## 1 vCPU / 512 MiB 性能目标（2026-10-07 新增）
-
-安装和运行均以 1 vCPU、512 MiB 总内存及低空载开销为目标，详见[资源验收合同](docs/LOW_RESOURCE_TARGET.md)。先解决整包驻留内存与峰值测量，再按证据优化运行时；目前未完成真实小型 VPS 验收。使用独立性能 PR，不改写冻结 0.4.7 制品，不改变协议范围、人工发布或真实部署边界。
-
-## v0.3.0 基线
-
-认证、只读订阅、安全核心应用/恢复、ToClash 分流、真实 VLESS/TCP/TLS 链路、Certbot HTTP-01 生命周期和首版 systemd 一键安装已经形成基线。
-
-## v0.3.1 — Linux 可移植安装与发布
-
-PR #12。
-
-交付门槛：
-
-1. 发行版、CPU、libc、init、package manager 自动检测。
-2. x86_64/ARM64 × glibc/musl 四目标固定运行包。
-3. sing-box/Xray 按目标选择固定官方二进制。
-4. systemd/OpenRC 服务后端。
-5. TCP 80、面板、默认节点端口占用检查。
-6. UFW/firewalld 仅在用户明确 `yes` 后开放；自定义 nftables/iptables 与云安全组等待人工确认。
-7. Ubuntu/systemd 真实 sudo 一键安装与升级回归。
-8. ARM64、musl 原生构建/启动，Debian/Fedora/Arch/openSUSE/Alpine 代表性探测。
-9. 正式 Release 聚合同一 exact-head 已验收的四个目标包；在线安装脚本自动选择 target。
-
-## v0.3.2 — 节点完整编辑与回填
-
-PR #13。
-
-- 从现有 `settings / stream_settings / _vui` 反解统一 visual profile。
-- 新建/编辑共用 schema 与编译器。
-- UUID、密码、Reality 私钥、Obfs 密码等秘密不因编辑而重新生成，也不为编辑便利回传浏览器。
-- 核心/协议迁移与普通编辑分离。
-- 证书绑定状态回填。
-- 浏览器验收覆盖：创建 → 编辑 → 刷新 → 再编辑 → 导出。
-
-## v0.4.x — 协议矩阵逐项完成
-
-顺序：
-
-1. Trojan + TLS — **v0.4.0 / PR #15**：sing-box TCP/TLS strict export、真实 Mihomo/sing-box 链路与证书续期；
-2. Shadowsocks — **v0.4.1 / PR #16（已合并至 v0.4.2 主线）**：三种 AEAD 导出/真实配置检查，逐 cipher 双客户端 TCP/UDP 链路与负向拒绝；
-3. VMess + TLS — **v0.4.2 / PR #17（主线验收已完成）**：strict export、真实 Mihomo/sing-box 链路、错误 UUID/CA/SNI；
-4. VLESS WebSocket — **v0.4.3 / PR #18（主线验收已完成）**；
-5. VLESS gRPC — **v0.4.4 / PR #19（主线验收已完成）**；
-6. Hysteria2 — **v0.4.5 / PR #20/#21（主线验收已完成）**；
-7. TUIC — **v0.4.6 / PR #22（主线验收已完成）**；
-8. REALITY / Vision — **v0.4.7 / PR #24（主线验收已完成）**；
-9. XHTTP — **v0.4.8 刻画前置 / PR #25（主线验收已完成；VERSION 仍为 0.4.7，公开导出阻断）**；HTTPUpgrade 的独立能力与 URI 缺口另行记录；
-10. 累计产品 0.4.7 已正式发布；历史准备、失败和准确验收记录分别保留；
-11. 0.4.8 安装器修复（UNRELEASED），仅退出码、临时资源与引导失败门禁；不开放 XHTTP/HTTPUpgrade；
-12. UDP / DNS 专项仍待独立阶段；现有只读审计不构成实现，新发布动作仍须明确授权。
-
-每个公开协议支持版本都必须同时完成服务端、编辑 UI、URI/Mihomo/sing-box 导出、真实核心检查、真实客户端检查、正向连接和错误凭据/TLS/参数失败路径。固定核心无法表达完整契约时只做明确标记的刻画，不静默删掉客户端/格式门槛或换协议。
-
-### v0.4.3 已验收 WS 基线的保留边界
-
-- 固定 sing-box 1.14.2 服务端，Mihomo 1.19.32 / sing-box 1.14.2 客户端；VLESS、单 UUID、空 flow、TLS、明确 SNI、正常证书校验。
-- WebSocket path 为 1–256 个 ASCII 字符、以 `/` 开头，只接受字母、数字、`.`、`_`、`~`、`/`、`-`；禁止 `.` / `..` 路径段、query、fragment、百分号转义、空白与 early data。
-- Host 可省略；填写时只接受最长 253 字符、每段最长 63 字符的 ASCII DNS-style 名称，不含 scheme、port 或尾随点。它是保存在 `transport.headers.Host` 的客户端路由信息，生成实际 sing-box 服务端配置时去除；服务端不校验请求 Host。TLS SNI/证书验证保持独立。
-- ALPN 省略或仅 `http/1.1`，可选 Chrome fingerprint；只新增 HTTP/TCP 验证，不扩大 UDP。
-- 三格式保留 WS/TLS/凭据；未知字段、early data、不支持 profile 明确拒绝，不能静默 DIRECT 或泄露私钥/服务端材料路径。
-- 双客户端分别验正确链路与错误 UUID/CA/SNI/path 拒绝；不同合法 Host 可连通是实际核心行为，不能把它写成拒绝用例；非法 Host 应在输入/导出校验阶段拒绝。
-- 浏览器覆盖创建、取消、编辑回填、刷新、再编辑、恢复及 UUID 不变；证书覆盖绑定、续期、失败保留旧材料和 `CORE_STOPPED_PENDING_APPLY`。既有 FastAPI/SQLite、40 项 ToClash、四目标 Linux 与发布边界保留。
-- Xray WS、gRPC、Hysteria2、TUIC、REALITY/Vision 等不纳入 WS 基线。后续修改仍需在自己的准确提交重验。
-
-### v0.4.4 已验收 gRPC 基线的保留边界
-
-- 沿用 sing-box 1.14.2 / Mihomo 1.19.32 固定官方二进制与摘要；sing-box 无 `with_grpc`，使用实际 gRPC Lite，不重编译、不替换 pin。
-- 仅 sing-box / VLESS / gRPC / TLS、单 UUID、空 flow、明确 SNI 和正常证书校验；ALPN 省略或恰为 `["h2"]`，Chrome fingerprint 独立可选。四种组合必须分别配置检查及双客户端真实转发。
-- `service_name` 必须是 `[A-Za-z0-9._-]{1,128}` 字面字符串，保留大小写，`.` / `..` 亦为合法字面 service；不 trim/强转，不允许 leading slash、path/query、百分号转义、Unicode、authority/header、health timer 或 multi-mode。
-- URI `type=grpc` / `serviceName`、Mihomo `grpc-opts.grpc-service-name`、sing-box `transport.service_name` 无损对应。仅 HTTP/TCP，Mihomo `udp: false`、sing-box `network: tcp`，不扩展 UDP。
-- 正向 HTTP/2/h2、边界 service name、错误 UUID/CA/SNI/service name 及大小写差异均需真实双客户端证据。失败目标无请求，不退 DIRECT。Lite 错误 CA/SNI 可能是调用者超时；测试专用 HTTP/2 诊断可证明真实 x509 拒绝，不承诺及时 TLS 错误传播。
-- 共用编译器、编辑器与托管证书；未知导入字段不因编辑而消失，UUID 隐藏且不变，创建/取消/编辑/刷新/再打开/恢复和 `CORE_STOPPED_PENDING_APPLY` 继续验收。
-- 不新增依赖、后端、迁移、反向代理或 authority/Host 白名单；Xray gRPC、h2c、HY2/TUIC 等仍排除。前置通过与候选审查、准确候选八组 CI、正常合并、准确主线八组 CI 已分别记录于[主线收口](docs/VLESS_GRPC_CLOSURE_044.md)。首次失败和当时候选历史完整保留于[阶段契约](docs/VLESS_GRPC_044.md)，后续修改仍须重验。
-
-### v0.4.5 已验收 HY2 基线的保留边界
-
-- sing-box 1.14.2 / Mihomo 1.19.32 固定官方二进制，单密码、明确验证 SNI、原生 QUIC 默认值；不含 obfs、hopping、带宽/拥塞、ALPN/uTLS 覆盖、多用户或 TUIC。
-- 标准 `hysteria2://` URI 编码密码并写明 `sni` / `insecure=0`，完整 Mihomo YAML 与 sing-box JSON 保留密码/TLS；服务端材料不导出，未知字段拒绝，不退 DIRECT。
-- 仅真实 HTTP/TCP 负载；Mihomo `udp: false`、sing-box `network: tcp`。QUIC 必须有节点 UDP 通行，但不宣称应用 UDP 通过。
-- 新建不注入带宽/Chrome；密码输入留空新建生成、编辑保留，已有秘密不回传。高级/obfs 草稿保留或不可表达时拒绝，不能借编辑静默变成公开可用配置。
-- 复用托管证书；绑定/续期/失败保留材料与 `CORE_STOPPED_PENDING_APPLY`，真实浏览器创建/取消/编辑/刷新/再打开/导出/损坏后停机恢复分别验收。
-- 安装器可重复 `--node-udp-port`（1024–65535），TCP/UDP 独立，新安装 IPv4/可用 IPv6 探测，升级提示人工核对所有权；精确端口/协议确认，不自动启用防火墙，声明不持久保存且不创建节点。
-- 首次前置失败、第二次真实链路 58 项通过及 ACME DNS 端口碰撞失败均保留；PR #20 首次 master 的继承 TLS 日志失败及 PR #21 portable 首次限流也保留。最终独立审查和准确候选/主线验收已完成，详见[HY2 收口](docs/HYSTERIA2_CLOSURE_045.md)；后续修改仍须重验。
-
-### v0.4.6 TUIC 已验收边界
-
-- 固定官方 sing-box 1.14.2 / Mihomo 1.19.32、单 UUID/密码对、明确验证 SNI、服务端 ALPN 恰为 h3（不允许省略）、原生 QUIC/默认拥塞、零 RTT 关闭
-- 固定客户端非官方 TUIC URI 约定、Mihomo YAML、sing-box JSON 无损保留凭据/TLS；不称官方通用 URI 标准，不含服务端材料，不退 DIRECT
-- 仅 HTTP/TCP，sing-box `network: tcp`；Mihomo TUIC adapter 硬编码 UDP 能力，省略无效 `udp: false`，不得称已禁用 UDP。QUIC 要求节点 UDP 通行，应用 UDP 未验收
-- 独立 UUID/密码输入留空新建生成、编辑保留；继承 PR #23 普通响应允许列表，特权 `/editor` 手工证书路径例外与明确授权客户端导出分开。高级草稿保留或拒绝，不能被编辑静默转换成可公开配置
-- 三格式与实际 URI provider 导入、公开订阅双客户端链路/分别错误 UUID/密码/CA/SNI、证书绑定/续期/失败/停止待应用、Chromium 创建/取消/编辑/刷新/导出/损坏后停机恢复已在上述准确主线分别验收
-- 四目标 Linux、40 项 ToClash 和协议区分 UDP 安装器保持；独立审查、八组 exact-head、正常合并及八组 exact-master 已完成，首次 deployment 限流失败保留。无 tag/Release/部署/附件晋升/真实 CA/实际防火墙变更
-
-### v0.4.7 REALITY / Vision 已验收边界
-
-- 固定官方 sing-box 1.14.2 / Mihomo 1.19.32，单 UUID、精确 Vision flow、direct TCP、显式 SNI、Chrome、一个规范 16 位 hex short ID、匹配的 X25519 密钥对
-- 三格式保留客户端凭据/公钥/short ID/SNI/flow；服务端私钥与握手参考地址不导出。无 ALPN 覆盖、托管证书绑定、额外传输/核心、多用户或应用 UDP 扩围
-- UUID/private key/short ID 编辑不回显，空输入保持；导入未知或不支持字段拒绝，不能借无关编辑解锁公开支持
-- REALITY 参考握手/伪装流量与应用目标分别计数。五类负向要求真实 UUID/flow/REALITY 错误、应用零送达与无 DIRECT；异步伪装 GET 不能强求每次发生
-- 最终集成独立审查、准确候选八组、正常合并和准确主线八组已完成，见[主线收口](docs/REALITY_VISION_CLOSURE_047.md)。首次伪装 HEADERS 断言失败、集成审查阻断与首次主线 VMess 被动日志轮询失败保留；unchanged-code 重跑通过不表示轮询问题永久修复
-
-### v0.4.8 XHTTP 已验收刻画边界
-
-- 从上述准确 REALITY master 独立分支完成 PR #25，仅测试/文档；候选/主线各八组验收见[收口记录](docs/XHTTP_CHARACTERIZATION_CLOSURE_048.md)，产品版本不提升，公开 XHTTP/HTTPUpgrade 导出仍拒绝
-- Xray 26.3.27 → Mihomo 1.19.32 YAML 与实际 URI provider，固定单假 UUID、空 flow、TLS/h2/Chrome、`stream-one`、显式 SNI/Host/path，仅 HTTP/TCP
-- sing-box 1.14.2 parser 明确拒绝 `unknown transport type: xhttp`，不改 pin/构建，也不替换为 HTTPUpgrade/WS/HTTP/h2
-- 两条路径的正向与 UUID/CA/SNI/path/Host/mode 负向均有准确候选/主线真实 CI；配置检查不替代 provider payload 或转发证据，真实拒绝原因、零应用送达和无 DIRECT 均保留
-- Xray path 为规范化后的前缀匹配、Host 忽略大小写并去请求端口、mode 为有方向的兼容关系；不能泛称任意不同值均拒绝
-- HTTPUpgrade 的 sing-box JSON/Mihomo 原生 `ws`+upgrade 可表达；固定 Mihomo URI `type=httpupgrade` 缺少 normalization/upgrade flag 而落入普通 TCP，独立缺口不绕过，详见[刻画契约](docs/XHTTP_CHARACTERIZATION_048.md)
+仓库设置或新公开版本需要对应的明确操作授权。纯文档不创建新tag，也不重新发布或覆盖v0.4.22。当前仓库未开启Discussions和GitHub私密漏洞报告；支持方式以[安全政策](SECURITY.md)和[支持指南](SUPPORT.md)为准。
 
 ## 后续
 
-### 2026-10-28 Go 后端迁移备选（暂缓，待用户测试当前版本）
+下表是获准继续开发的优先顺序，不等于已实现或已具备发布资格。每阶段先明确可观察交付、数据/权限契约和最小验收，再独立实现、审查与验证；完成后继续下一阶段。新生产部署、凭据、网络权限或付费资源不从开发授权推断。
 
-用户先测试已发布的 [v0.4.9](https://github.com/ForceMind/V-UI/releases/tag/v0.4.9)。当前仅保留迁移计划，不启动 Go/Rust 实现、原型、基准测试或新发布；后续根据用户反馈另行决定。
+| 优先级 | 工作 | 当前状态 | 交付与必要依赖 |
+| --- | --- | --- | --- |
+| P1 | 可持续发布流程与现有运行稳定性 | 既有门禁和软件优化已实现；仍需持续维护 | 整理准确源/同源制品/变更与升级说明；复核现有受限资源、长负载与恢复Actions，保留全部安全/失败断言。流程改动另开有界契约，不复用历史版本例外放行新版本 |
+| P2 | DNS-01 与通配符证书 | 未开发 | 先确定支持的DNS提供商、凭据存放与最小权限；实现申请/续期/绑定/失败保留，使用假凭据与CI测试CA；真实DNS凭据及CA条款由使用者明确授权 |
+| P3 | 核心独立升级与回滚 | 未开发；面板版本升级已经交付 | 固定可信来源、目标、摘要与兼容矩阵；先备份和校验候选，原子切换与失败恢复；保留核心停止意图、节点凭据和配置，不任意追随上游latest |
+| P4 | 完整YAML导入、合并与应用 | 已有受限导入和只读结构/差异预览 | 先定义可表达范围、未知字段保留、冲突与差异确认、事务及恢复；不能把当前只读预览当成可应用或完整兼容 |
+| P5 | 协议公开支持与UDP双跳 | XHTTP/HTTPUpgrade仅刻画；D2仅部分独立实验 | 先固定官方客户端兼容与可达控制，再补拒绝原因、大包、同一应用关联及恢复；现有失败不改判，未获资格前继续拒绝UDP中转，不要求定制手机App |
+| P6 | Tailscale私有管理 | 默认关闭的只读状态已有；完整私有模式未开发/验收 | 先确定面板和订阅的可达范围、启停/升级健康屏障及锁出恢复；不把只读状态当成安装、登录或私有接入能力 |
+| P7 | 容器与声明式部署 | 尚未提供专用正式部署方案 | Docker、NixOS等各自独立合同和环境矩阵；明确存储、权限、证书、网络及恢复，不能拿现有Linux系统安装资格替代 |
 
-- 目标：评估 Go 后端能否降低常驻内存、安装峰值和包体，并简化安装及升级。
-- 如获批准，先做有界同功能对照，在相同环境、数据、代理核心及负载下比较压缩包/安装后体积、面板与完整服务组内存、安装峰值和恢复行为；未测量前不承诺节省比例。
-- 先梳理 Python 的完整依赖边界，包括 Certbot、安装器和终端管理工具；仅替换 API 不等于可以移除 Python。
-- 迁移需保留数据库及用户数据兼容、鉴权、密码哈希安全参数、证书管理、配置校验、失败保护、备份恢复与 `v-ui` 菜单；现有固定核心和协议范围保持。
-- 确认收益及兼容方案后再决定是否分阶段迁移。构建及制品处理优先在 GitHub Actions，浏览器验证另按用户明确授权执行。
+### 外部环境验收
 
-DNS-01/通配符、核心自动升级/回滚、任意 YAML 导入合并、容器专用部署、NixOS/其他声明式系统专用模块继续作为独立版本。
+以下不是已经完成的开发成果，也不通过扩大功能绕过：
 
-所有状态继续区分：代码已写、单测通过、真实二进制通过、真实链路通过、已发布、已部署。
+- 真实1 vCPU / 512 MiB整机安装、运行和至少24小时稳定性，见[资源合同](docs/LOW_RESOURCE_TARGET.md)。Actions cgroup受限回归不等于整台512 MiB主机；没有明确授权的空白专用主机时保持待验，不修改生产机或要求租新服务器。
+- 手机真机、不同客户端/运营商、移动网络切换及恢复。现有核心loopback和个别实际连接结果不代表完整手机/TUN/公网矩阵。
+- 真实Tailscale接入、共存与私有通道的退出/锁出恢复，见[验收合同](docs/TAILSCALE_MANAGEMENT_ACCEPTANCE.md)。
+
+可独立推进的开发和CI不因上述环境缺失全部停工；完成状态仍须分别记录。
+
+### 暂缓：Go 后端迁移
+
+按当前要求不启动Go/Rust重写、原型或迁移基准。现有Python/FastAPI/SQLite、Certbot、安装器和终端工具继续维护。未来若重新决定迁移，先做同数据/核心/负载的体积、完整服务组内存、安装峰值与恢复对照；未测量前不承诺节省比例。
+
+### 当前范围以外
+
+多出口/每入口独立上游尚未获批为交付项。当前所有中转入口共用一个已选上游，本机程序代理开关独立；不能把这个明确边界列成遗漏的已承诺功能。
+
+## 记录与退出条件
+
+每个迭代在本页更新源码完成、独审、准确CI、发布、部署五种状态，互不替代。公开页面只放产品与资格信息；真实域名、凭据、节点导出、备份和运维任务记录只保存在授权私有位置。当前阶段通过后提供入口和证据，下一阶段沿既定优先级继续；遇到必须补充的权限或外部条件，先完成其余可独立工作，再说明具体恢复条件。

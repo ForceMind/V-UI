@@ -1,0 +1,50 @@
+name: 报告错误
+description: 用最小复现说明一个可观察的错误，不上传真实数据或完整配置。
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请查阅[安装指南](https://github.com/ForceMind/V-UI/blob/main/docs/INSTALLATION.md)和[故障排查](https://github.com/ForceMind/V-UI/blob/main/docs/TROUBLESHOOTING.md)。
+        **潜在漏洞请先读[安全政策](https://github.com/ForceMind/V-UI/security/policy)，不要在这里公开利用细节。**
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私检查
+      options:
+        - label: 我已移除真实服务器标识、密码/token、分享与订阅链接、证书材料、完整配置和用户数据。
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: 实际版本或源码提交
+      description: 写实际安装版本和来源；源码运行时给出准确提交，不要只写“最新版”。
+      placeholder: v0.4.22，官方 Release
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 系统、架构、libc 与 init
+      description: 只提供平台信息，不提供真实主机、域名/IP或端口组合。
+      placeholder: Ubuntu / x86_64 / glibc / systemd；未知项可写未知
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 最小复现步骤
+      description: 使用假节点和示例域名。不要在生产环境清库、运行安装测试或关闭TLS校验。
+    validations:
+      required: true
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: 预期和实际结果
+      description: 分别说明希望发生什么、实际看到什么；若不能复现，请写发生条件。
+    validations:
+      required: true
+  - type: textarea
+    id: redacted_error
+    attributes:
+      label: 必要的脱敏错误与已做检查（可选）
+      description: 只贴相关状态码或短错误片段。无需全盘日志、真实证书、敏感导出或额外浏览器测试。
