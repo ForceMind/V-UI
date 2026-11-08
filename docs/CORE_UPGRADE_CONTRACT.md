@@ -1,6 +1,6 @@
 # P3 核心独立升级与回滚契约草案
 
-状态：设计独审通过；当前仅完成只读制品验证及纯假包回归，完整核心升级/回退尚未实现或验收。代码事实核对基线为4bd1d9a648a8096fbf2fa05314e35049a2408e7c。它不属于当前DNS候选PR145，不改变当前公开22、23发布门禁、核心pin或服务器。
+状态：设计独审通过；当前完成制品校验、不可变制品准备/读取源码及纯假包回归，完整核心升级/回退尚未实现或验收。代码事实核对基线为4bd1d9a648a8096fbf2fa05314e35049a2408e7c。它不属于当前DNS候选PR145，不改变当前公开22、23发布门禁、核心pin或服务器。
 
 本阶段来自ROADMAP的已批准P3；Go迁移继续暂缓。契约已完成独审，制品校验作为独立实现首块；后续选择、备份闭包、切换和RPC继续分块实现与审查。首测版本已列明，仅核元数据；制品和兼容资格尚未取得，不能把本草案称为核心已可升级。
 
@@ -94,7 +94,7 @@ OpenRC明确仅状态/准备；不提供未经资格的自动切换/回退，不
 
 ## 当前状态与下一步
 
-以上选择已完成设计独审。首个源码块只实现标准库制品验证，并经增量独审及实际Python3.9.6/3.12各23项纯假包回归；初轮macOS临时目录别名和归档成员卷号漏检均已修正并定点复核。存储、选择、安装、备份闭包、RPC、实际核心切换、四目标新核心资格及公共组件Release仍未实现或取得；不能把此验证器称为完整核心升级。P2的准确提交资格与外部下载失败仍独立记录，不能用P3结果补齐。
+以上选择已完成设计独审。首个源码块完成标准库制品验证（23项纯假包回归），第二块完成不可变制品准备/读取（25项纯假包回归），均通过增量独审及实际Python3.9.6/3.12检查；初轮macOS临时目录别名和归档成员卷号漏检均已修正并定点复核。已实现的存储仅准备和回读制品；active选择、受管安装/切换、备份闭包、RPC、网络检索、真实核心运行与四目标新核心资格及公共组件Release仍未实现或取得，不能把这些原语称为完整核心升级。P2的准确提交资格与外部下载失败仍独立记录，不能用P3结果补齐。
 
 受保护分支合并、组件或应用tag/Release公开发行、短入口变更和真实主机部署均须在具体成果可审阅后取得对应明确授权；当前没有这些P3授权，也未执行。新签名密钥、Secrets或额外权限不能从普通开发授权推断。
 
@@ -177,3 +177,62 @@ PROVENANCE.json精确为`schema=1,upstream,binary_sha256,license_sha256,source_s
 外层摘要和成员摘要均以≤1MiB块流式读取。path入口逐层no-follow打开目录，要求原ZIP是regular单link，验证前后核文件FD/路径与父目录inode身份，并再次核完整外层摘要。FD入口dup自身句柄、使用pread保持调用者offset/FD，不声称能证明原path或父目录权限。所有自有FD关闭均需尝试，清理失败不返回成功身份。root属主、不可变store发布和选择事务属于后续模块，本只读parser不把输入ZIP所在位置冒称受信store。
 
 结果仅为制品身份/摘要，不含“安装通过”“job成功”或可执行命令；实际binary/ELF/目标兼容必须由后续非root preflight和准确Actions资格验证。
+
+## M1不可变制品准备与回读接口
+
+M1仅增加`app/core_updates/store.py`的prepare/read，不增加active选择、安装、进程启动、服务切换、网络、RPC、GC或备份恢复。验证结果仍不表示native/configuration/service就绪。
+
+```python
+store = CoreArtifactStore()  # 固定生产Layout，prepare要求实际euid==0
+stored = store.prepare(pack_path_or_fd, manifest_bytes, checksums_bytes,
+    authority=independently_trusted_authority, expected_tag=trusted_component_tag,
+    expected_builder_source=trusted_tag_ref_source, app_source=exact_app_source,
+    target=trusted_detected_host_target)
+checked = store.read(stored.identity.release_manifest_sha256,
+    authority=independently_trusted_authority, expected_tag=trusted_component_tag,
+    expected_builder_source=trusted_tag_ref_source, app_source=exact_app_source,
+    target=trusted_detected_host_target)
+```
+
+`target`由受信本机adapter提供，后续复用既有platform_support；store不猜libc，不读取环境变量，也不把用户输入或pack自述当本机目标。返回`StoredArtifact(identity,binary_path,reused)`，其中identity为M0的PackIdentity；没有“已激活”“已安装”或“服务健康”字段。
+
+### 固定闭包与信任缓存
+
+生产根固定`/var/lib/v-ui-core`。root、`artifacts/`、成品目录及其中`bin/`均为root所有0755；`.staging/`为root所有0700；全局`prepare.lock`为root所有0600、regular单link空文件。生产从`/`逐层以dirfd/no-follow打开并检查祖先root属主且不可由组/其他人写；read允许非root执行，但不能改变这些属主/权限条件。
+
+`artifacts/<CORE-RELEASE.json完整SHA256>/`精确含9个regular单link文件和一个`bin/`目录：原目标pack的规范ZIP文件名、原字节CORE-RELEASE.json、原字节SHA256SUMS、TRUST.json，加上M0固定的5个解出成员。binary为0555，其余文件0644。每机器仅保存该manifest下本机target；相同manifest ID已有其他target的目录时明确拒绝，不加文件、不覆盖。
+
+TRUST.json精确结构为：
+
+```json
+{
+  "schema": 1,
+  "kind": "core-trust-cache-v1",
+  "authority": {
+    "schema": 1,
+    "repository": "ForceMind/V-UI",
+    "repository_id": 1110299182,
+    "release_id": 31,
+    "tag": "core-sing-box-v1.14.3-r1",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-11-08T00:00:00Z",
+    "assets": []
+  },
+  "tag_source": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}
+```
+
+该例只展示字段，空assets故意不满足真实M0验证，不能作为可信制品输入。实际authority须为前节完整六资产；写入按asset name排序。读取忽略JSON key/asset列表的纯序列化顺序，但ID、tag、size、digest、published_at、tag_source等任何身份变化均不被同一上下文接受。tag_source来自调用者独立解析的可信tag ref；TRUST记录它而不自授信。read每次仍要求调用者提供独立authority/tag/source/app-source，不从本成品或备份自动生成expected值，也不做offline fallback。无额外STORE自hash表；ZIP/metadata来自外部authority，解出成员来自其绑定的CORE-PACK，TRUST与外部上下文逐项匹配，因此没有摘要自引用。
+
+### 准备、发布和故障语义
+
+prepare在触及store前通过M0验证完整候选及外部metadata。随后取得非阻塞独占flock；并发遇锁返回固定STORE_BUSY，不自动重试。输入FD继续保持，源路径/FD稳定性最终再次核验。只向随机、独占新建的私有staging namespace写入，原ZIP及每个固定成员都用O_EXCL/no-follow、≤1MiB流式复制/摘要核验，并校owner/mode/size、逐文件fsync。staged ZIP再经M0验证，解出与metadata全部完成read-back后fsync目录，才尝试发布。
+
+发布使用带dirfd的原生原子no-replace：Linux libc `renameat2(RENAME_NOREPLACE)`；Darwin假包测试用`renameatx_np(RENAME_EXCL)`。符号或文件系统不支持时固定UNSUPPORTED，绝不改用可覆盖的rename。发布后fsync目标/来源父目录，并重新验证公共成品、文件/FD/父目录身份及完整闭包，成功后才返回。相同ID重入必须完整校验已有成品、外部上下文及本机target，再确认目录持久化后返回reused；缺件、篡改、额外文件或错target均拒绝，不修复、不覆盖、不删除已有成品。
+
+公共名称一旦发布，后续fsync、回读或确认失败均报失败并保留成品，不能因“不确定”自动删除公共路径。若rename实际上成功却确认丢失，私有原名称已不存在，不得通过仍指向公共目录的FD执行清理。只清理本次独占创建且仍在私有namespace中核对到同一inode的临时对象；碰撞/被替换对象不采用、不删除。首项关闭/清理失败不短路其余自有对象处理；最后仍报告固定失败，并保留原异常关系。遗留私有内容不在此阶段自动GC。
+
+受信`Layout(root,owner,anchor)`仅为Python测试/内部注入seam：测试明确提供自有0700临时anchor及真实测试UID，跳过的是anchor之外的测试环境，不是生产权限规则。它不成为用户参数、CLI或环境开关；生产入口只构造默认root Layout。root standalone加载仍通过受信pathless package namespace显式加载M0/store，不从cwd、user data或payload查找模块，也没有ImportError fallback。
+
+当前Mac假包测试只证明上述实现逻辑与Darwin原子语义；Linux/glibc/musl原生符号与文件系统支持、四目标真实核心资格、store与后续选择/备份/运行时集成仍须各自Actions验收。
