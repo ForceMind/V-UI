@@ -661,10 +661,10 @@ run()
         argv = ['serve', '--root', str(self.parent), '--origin', 'https://panel.example.test:8443']
         with patch.object(sys, 'argv', argv), patch.dict(os.environ), \
              patch.object(serve, 'lease', side_effect=crash_after_precheck), \
-             patch.object(serve, 'active') as active:
+             patch.object(serve, 'active_verified') as verified_active:
             with self.assertRaises(DataOwnerError):
                 serve.run()
-            active.assert_not_called()
+            verified_active.assert_not_called()
         self.assertEqual(list(self.data.iterdir()), [])
 
 

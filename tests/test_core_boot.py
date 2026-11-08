@@ -34,6 +34,9 @@ class CoreBootTests(unittest.TestCase):
         self.data.mkdir(mode=0o700)
         self.meta_root = self.anchor / 'metadata'
         self.meta_root.mkdir(mode=0o755)
+        # Match the actual root metadata contract regardless of a previous
+        # test's owner-only umask; do not weaken the production mode check.
+        self.meta_root.chmod(0o755)
         self.files = sf.SelectionFiles(sf.Layout(self.meta_root, os.geteuid(), self.anchor))
         files = {}
         for core in s.CORES:

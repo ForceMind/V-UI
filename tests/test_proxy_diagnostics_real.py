@@ -381,7 +381,7 @@ class DiagnosticFixtureHarnessTests(unittest.TestCase):
                        str(os.getpid()), directory, str(path)]
             # Malformed shape is rejected before context, sockets or core spawn.
             result = subprocess.run(command, input=b'{"url":"must-not-connect"}', capture_output=True,
-                                    timeout=5, env={**os.environ, "VUI_PROXY_LOOPBACK": "1"})
+                                    timeout=5, env={**os.environ, "VUI_PROXY_LOOPBACK": "1"}, start_new_session=True)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
             self.assertEqual(json.loads(result.stdout), {"event": "result", "code": "INVALID_DIAGNOSTIC_REQUEST", "exit_ip": None})
             self.assertFalse((root / "children").exists())
