@@ -104,8 +104,12 @@ auth/cleanup hook共用持久化journal。正常完成、验证失败、取消�
 | `7e418b6e10587e61efcecae290302dfd440a0b6a`：[单元42463373691](https://github.com/ForceMind/V-UI/actions/runs/42463373691/job/128677267825) | 2903项、21个error、237个skip。旧夹具/allocator/安装兼容问题已修正并独审，历史失败不改判，不能称当前全组通过 |
 | 同提交：[ACME42463376913](https://github.com/ForceMind/V-UI/actions/runs/42463376913/job/128677277078) | 4case中3过：负向保留旧材料、错TLS/未知写不晋升及真实旧22 reader拒绝分别有证据。正向签发与新账户续期实际完成，但该case因错误UDP假设断言失败，整个运行仍失败 |
 | `d7073b8e7b39d0124e9d69c720cdc15331ca2c2e`：[ACME42465018106](https://github.com/ForceMind/V-UI/actions/runs/42465018106)、[loopback42465021149](https://github.com/ForceMind/V-UI/actions/runs/42465021149) | attempt1/2均在固定工具下载遇HTTP504，未进入新测试；不计真实CA、核心或整套资格通过 |
+| `9b699b68c7ac4883c1a34faa80b5862f01ea5b83`：[单元42474830641](https://github.com/ForceMind/V-UI/actions/runs/42474830641)、[ACME42474830550](https://github.com/ForceMind/V-UI/actions/runs/42474830550) | 单元2970项通过，239项按既定条件跳过；独立真实核心2项通过。固定Certbot/Pebble的原HTTP 5例及DNS/旧22 reader 4例均实际通过且无跳过；真实Cloudflare账号未验证 |
+| 同提交：[链路42474830751](https://github.com/ForceMind/V-UI/actions/runs/42474830751) | 整组成功，含实际controller的11项及新增两后端DNS通配符TLS轮换/深层域名拒绝2项，无跳过。使用临时CA与固定官方sing-box/Xray，不代表公网、手机或浏览器资格 |
+| 同提交：[短入口42474830488](https://github.com/ForceMind/V-UI/actions/runs/42474830488)、[安装42474830643](https://github.com/ForceMind/V-UI/actions/runs/42474830643) | 短入口attempt1停于稳定22元数据HTTP504/502，原入口不改的attempt2成功，安装的是公开22；oneclick实际23新装成功。旧14/22已完成真实升级，但after断言仍按旧控制文件集合，因新增恰5个DNS控制文件而失败；正在补严格版本化迁移检查，不把失败改判成功 |
+| 同提交：[原生42474830397](https://github.com/ForceMind/V-UI/actions/runs/42474830397)、[部署42474830543](https://github.com/ForceMind/V-UI/actions/runs/42474830543) | 初轮分别在固定tag元数据HTTP503、固定官方资产API的HTTP503处失败；原生整组attempt2仍有HTTP500。各次成功片段不能合成同attempt矩阵资格；未开始的步骤不算通过 |
 
-固定官方Pebble2.10.1的custom resolver[明确使用TCP](https://github.com/letsencrypt/pebble/blob/v2.10.1/va/va.go#L128-L132)。本地夹具同时监听TCP/UDP不等于CA使用两种传输。修正后的实CA断言要求UDP=0、TCP至少4次且issue/renewal各至少2次；同owner双TXT、新账户重新认证、精确SAN和仅清理own ID均保留。此修正仍需新source实际运行，不冒称UDP回退或新case已通过。
+固定官方Pebble2.10.1的custom resolver[明确使用TCP](https://github.com/letsencrypt/pebble/blob/v2.10.1/va/va.go#L128-L132)。本地夹具同时监听TCP/UDP不等于CA使用两种传输。修正后的实CA断言要求UDP=0、TCP至少4次且issue/renewal各至少2次；同owner双TXT、新账户重新认证、精确SAN和仅清理own ID均保留。上述9b提交已实际通过这些断言，不称UDP回退；后续源码仍需自己的准确验收。
 
 P1完成状态与90分钟受限回归是独立旧证据：main3606cad自身九组/20 jobs与九份同producer收据、22个线上文件读回完成；[安装42457488310](https://github.com/ForceMind/V-UI/actions/runs/42457488310)首次旧19元数据HTTP403后同源码整组attempt2通过，原失败保留。准确dev2bd6ed3的[90分钟回归42455561022](https://github.com/ForceMind/V-UI/actions/runs/42455561022)含面板/单核心各30分钟idle及1/10/50连接各10分钟，36,600请求零错误/无DIRECT，服务cgroup peak291,479,552字节（约278MiB）、无OOM；发生器/持续客户端/目标在cgroup外。这不是160MiB空闲RSS、物理512MiB整机或24小时资格，也不授予23资格。
 

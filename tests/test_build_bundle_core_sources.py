@@ -75,7 +75,7 @@ class CoreSourceReadTests(unittest.TestCase):
         self.assertEqual(calls[1].kwargs,{'timeout':90}); self.assertEqual(calls[3].kwargs,{'timeout':90})
 
     def test_each_transient_status_closes_error_then_retries_same_request_once(self):
-        for status in (502,503,504):
+        for status in (500,502,503,504):
             failure, stream = error(status)
             original_load = json.load
             def load(response):
@@ -94,7 +94,7 @@ class CoreSourceReadTests(unittest.TestCase):
             self.assertEqual(calls[1].kwargs,{'timeout':30})
 
     def test_second_transient_or_timeout_fails_without_third_call(self):
-        for failures in ((error(503)[0],error(504)[0]),(TimeoutError('one'),TimeoutError('two')),
+        for failures in ((error(500)[0],error(500)[0]),(error(503)[0],error(504)[0]),(TimeoutError('one'),TimeoutError('two')),
                          (urllib.error.URLError(socket.timeout('one')),urllib.error.URLError(socket.timeout('two')))):
             with self.subTest(failures=tuple(type(item).__name__ for item in failures)), tempfile.TemporaryDirectory() as temporary, patch.object(
                     urllib.request,'urlopen',side_effect=failures) as get:
@@ -122,7 +122,7 @@ class CoreSourceReadTests(unittest.TestCase):
         self.assertTrue(partial.closed); self.assertEqual(len(calls),5)
 
     def test_403_404_ssl_generic_url_and_os_errors_never_retry(self):
-        for failure in (error(403)[0],error(404)[0],ssl.SSLCertVerificationError('synthetic'),
+        for failure in (error(403)[0],error(404)[0],error(501)[0],ssl.SSLCertVerificationError('synthetic'),
                         urllib.error.URLError(ssl.SSLCertVerificationError('synthetic')),
                         urllib.error.URLError('timed out'),urllib.error.URLError(OSError('synthetic')),
                         OSError('synthetic')):

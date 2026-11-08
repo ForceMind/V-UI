@@ -33,6 +33,19 @@ MAINTENANCE_FILES = frozenset({
     str(CONTROL / 'install_control_verifier.py'), str(CONTROL / 'v-ui-maintenance.service'),
     '/etc/systemd/system/v-ui-maintenance.service',
 })
+DNS_FILES = frozenset(str(CONTROL / name) for name in (
+    'certificate_errors.py', 'dns_store.py', 'cloudflare.py', 'dns_journal.py', 'dns_backup.py'))
+CERTIFICATE_COLUMNS = ('id', 'domain', 'email', 'environment', 'auto_renew', 'revision',
+    'not_before', 'not_after', 'renew_at', 'retry_at', 'last_attempt', 'failures', 'error', 'created_at')
+BINDING_COLUMNS = ('target', 'certificate_id', 'applied_certificate_id', 'applied_revision', 'error')
+DNS_CERTIFICATE_COLUMNS = CERTIFICATE_COLUMNS[:4] + ('method', 'wildcard', 'credential_id') + CERTIFICATE_COLUMNS[4:]
+DNS_BINDING_LAYOUTS = (BINDING_COLUMNS + ('server_name',), BINDING_COLUMNS[:4] + ('server_name', 'error'))
+
+
+def _target_contract(candidate_version):
+    if candidate_version not in ('0.4.22', '0.4.23'):
+        raise AssertionError('Explicit reviewed 0.4.22 or 0.4.23 upgrade target required')
+    return candidate_version
 
 
 def assert_download_boundary(test, kit, log):
@@ -50,15 +63,19 @@ def fixed_public_baseline(version, commit):
     return version, commit
 
 
-def assert_receipt_migration(test, before, after, old_version):
+def assert_receipt_migration(test, before, after, old_version, candidate_version='0.4.22'):
     if old_version not in PUBLISHED_BASELINES:
         raise AssertionError('Unknown public upgrade receipt baseline')
+    _target_contract(candidate_version)
+    test.assertTrue(DNS_FILES.isdisjoint(before['files']), 'Historical receipt must not pre-contain DNS helpers')
     if old_version in ('0.4.17', '0.4.19', '0.4.20', '0.4.21', '0.4.22'):
         test.assertTrue(MAINTENANCE_FILES <= set(before['files']))
         additions = set()
     else:
         test.assertTrue(MAINTENANCE_FILES.isdisjoint(before['files']))
         additions = MAINTENANCE_FILES | ({FIREWALL} if old_version == '0.4.14' else set())
+    if candidate_version == '0.4.23':
+        additions = additions | DNS_FILES
     test.assertEqual(set(after['files']) - set(before['files']), additions)
     if old_version == '0.4.14':
         test.assertNotIn(FIREWALL, before['files'])
@@ -67,6 +84,72 @@ def assert_receipt_migration(test, before, after, old_version):
     test.assertFalse(set(before['files']) - set(after['files']))
     for field in ('schema', 'service_manager', 'system_python', 'interpreter_resolved', 'interpreter_sha256'):
         test.assertEqual(after[field], before[field])
+
+
+def snapshot_program(old_version, candidate_version, *, after=False, data_root='/var/lib/v-ui/data'):
+    """Hash every old value; validate the exact declared DNS migration separately.
+
+    Only hashes/counts/column names leave the read-only service process. A 23
+    after snapshot projects all old certificate columns by name after proving
+    the new columns and every migrated default, never silently dropping columns.
+    """
+    if old_version not in PUBLISHED_BASELINES or type(after) is not bool:
+        raise AssertionError('Known historical snapshot and explicit phase required')
+    _target_contract(candidate_version)
+    modern = after and candidate_version == '0.4.23'
+    return ('data_root=' + repr(str(data_root)) + '\nmodern=' + repr(modern)
+        + '\ncertificate_columns=' + repr(CERTIFICATE_COLUMNS)
+        + '\nbinding_columns=' + repr(BINDING_COLUMNS)
+        + '\ndns_certificate_columns=' + repr(DNS_CERTIFICATE_COLUMNS)
+        + '\ndns_binding_layouts=' + repr(DNS_BINDING_LAYOUTS) + '\n' + '''
+import hashlib,json,sqlite3
+from pathlib import Path
+result={}
+def need(condition):
+ if not condition: raise AssertionError('Unexpected published-upgrade certificate schema or migrated defaults')
+with sqlite3.connect((Path(data_root)/'v-ui.db').as_uri()+'?mode=ro',uri=True) as db:
+ for table in ('users','inbounds','subscription_grants','managed_certificates','certificate_bindings'):
+  info=list(db.execute('PRAGMA table_xinfo('+table+')'))
+  need(info and all(row[6]==0 for row in info))
+  columns=tuple(row[1] for row in info)
+  selected=columns
+  if table=='managed_certificates':
+   need(columns==(dns_certificate_columns if modern else certificate_columns))
+   selected=certificate_columns
+   if modern:
+    fields={row[1]:row for row in info}
+    need(fields['method'][2].upper()=='VARCHAR(16)' and fields['method'][3]==1
+         and fields['method'][4] in ("'http-01'","('http-01')")
+         and fields['wildcard'][2].upper()=='BOOLEAN' and fields['wildcard'][3]==1
+         and fields['wildcard'][4] in ('0','(0)')
+         and fields['credential_id'][2].upper()=='VARCHAR(32)'
+         and fields['credential_id'][3]==0 and fields['credential_id'][4] is None)
+    for method,wildcard,credential in db.execute('SELECT method,wildcard,credential_id FROM managed_certificates'):
+     need(method=='http-01' and type(wildcard) is int and wildcard==0 and credential is None)
+  elif table=='certificate_bindings':
+   need(columns in dns_binding_layouts if modern else columns==binding_columns)
+   selected=binding_columns
+   if modern:
+    field=next(row for row in info if row[1]=='server_name')
+    need(field[2].upper()=='VARCHAR(253)' and field[3]==0 and field[4] is None)
+    need(all(row[0] is None for row in db.execute('SELECT server_name FROM certificate_bindings')))
+  quoted=','.join('"'+column.replace('"','""')+'"' for column in selected)
+  rows=db.execute('SELECT '+quoted+' FROM '+table+' ORDER BY 1').fetchall()
+  result[table]={'columns':list(selected),'count':len(rows),'sha256':hashlib.sha256(json.dumps(rows,sort_keys=True).encode()).hexdigest()}
+ marker=list(db.execute("SELECT type FROM sqlite_master WHERE name='certificate_identity_schema'"))
+ if modern:
+  need(marker==[('table',)])
+  info=list(db.execute('PRAGMA table_xinfo(certificate_identity_schema)'))
+  need(len(info)==1 and info[0][1]=='version' and info[0][2].upper()=='INTEGER'
+       and info[0][3]==1 and info[0][4] is None and info[0][5]==0 and info[0][6]==0)
+  need(list(db.execute('SELECT typeof(version),version FROM certificate_identity_schema'))==[('integer',1)])
+ else: need(not marker)
+for field,directory in (('certificate_material','certs'),('managed_certificate_material','certificates/revisions')):
+ root=Path(data_root)/directory
+ result[field]={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()
+  for p in sorted(root.rglob('*')) if p.is_file()}
+print(json.dumps(result,sort_keys=True))
+''')
 
 
 def assert_editor_content_addition(test, before, after):
@@ -173,6 +256,7 @@ class PublishedUpgrade:
         test.assertEqual(self.candidate['source_commit'], commit)
         test.assertEqual(self.candidate['version'], (source / 'VERSION').read_text().strip())
         test.assertNotEqual(self.candidate['version'], self.old_version)
+        _target_contract(self.candidate['version'])
         self.old = published_commands(Path(os.environ['VUI_PUBLISHED_UPGRADE_SOURCE']), self.old_version,
                                       self.old_commit, certificate_args, configured_args)
         self.new = fixture_commands(source, work, self.kit, certificate_args, configured_args)
@@ -201,23 +285,10 @@ class PublishedUpgrade:
                                   'Installed root receipt must match every live file: '+name)
         return receipt
 
-    def _snapshot(self, release):
+    def _snapshot(self, release, *, after=False):
         # Only counts and hashes leave the service process. No DB credentials,
         # password hashes, token hashes or certificate private bytes are printed.
-        return self._service_python(release, '''
-import hashlib,json,sqlite3
-from pathlib import Path
-result={}
-with sqlite3.connect('file:/var/lib/v-ui/data/v-ui.db?mode=ro',uri=True) as db:
- for table in ('users','inbounds','subscription_grants','managed_certificates','certificate_bindings'):
-  rows=db.execute('SELECT * FROM '+table+' ORDER BY 1').fetchall()
-  result[table]={'count':len(rows),'sha256':hashlib.sha256(json.dumps(rows,sort_keys=True).encode()).hexdigest()}
-for field,directory in (('certificate_material','certs'),('managed_certificate_material','certificates/revisions')):
- root=Path('/var/lib/v-ui/data')/directory
- result[field]={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()
-  for p in sorted(root.rglob('*')) if p.is_file()}
-print(json.dumps(result,sort_keys=True))
-''')
+        return self._service_python(release, snapshot_program(self.old_version,self.candidate['version'],after=after))
 
     def _manifest(self, release):
         return self._service_python(release, 'import json;from pathlib import Path;print((Path('+repr(str(release / 'payload' / 'MANIFEST.json'))+')).read_text())')
@@ -318,8 +389,8 @@ print('{}')
         manifest = self._manifest(release)
         self.test.assertEqual(manifest['source_commit'], self.candidate['source_commit'])
         self.test.assertEqual(manifest['version'], self.candidate['version'])
-        assert_receipt_migration(self.test, self.old_receipt, self._receipt(), self.old_version)
-        self.test.assertEqual(self._snapshot(release), self.data, 'Private DB rows and certificate bytes must survive')
+        assert_receipt_migration(self.test, self.old_receipt, self._receipt(), self.old_version, self.candidate['version'])
+        self.test.assertEqual(self._snapshot(release,after=True), self.data, 'Private DB rows and certificate bytes must survive')
         assert_node_summary_upgrade(self.test, self.nodes, json.loads(api('/api/inbounds')[1]), self.old_version)
         if self.manual_editor is not None:
             status, raw = api('/api/inbounds/'+str(self.nodes[0]['id'])+'/editor')

@@ -43,7 +43,7 @@ def core_sources(payload: Path):
                 break
             except urllib.error.HTTPError as error:
                 error.close()
-                if error.code not in (502,503,504) or attempt:
+                if error.code not in (500,502,503,504) or attempt:
                     raise
             except (TimeoutError,socket.timeout):
                 if attempt:
