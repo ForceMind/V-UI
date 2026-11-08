@@ -13,6 +13,7 @@ import urllib.request
 
 from scripts import test_asset_download as download
 from scripts import fetch_pebble as pebble, fetch_test_cores as cores
+from scripts import fetch_mihomo as mihomo, fetch_portable_runtimes as runtimes
 
 URL = pebble.URL
 API = download.ASSET_API[URL]
@@ -171,7 +172,7 @@ class DownloadTests(unittest.TestCase):
 
     def test_script_and_package_import_modes_use_same_stdlib_helper_without_executing_fetch(self):
         root = Path(__file__).resolve().parents[1]
-        code = "import sys;sys.path[:0]=[sys.argv[1]+'/scripts',sys.argv[1]];import fetch_test_cores,fetch_pebble;from scripts import fetch_test_cores as m;assert fetch_test_cores.PINS==m.PINS;assert callable(fetch_pebble.download_pinned);print('safe imports')"
+        code = "import sys;sys.path[:0]=[sys.argv[1]+'/scripts',sys.argv[1]];import fetch_test_cores,fetch_pebble,fetch_mihomo,fetch_portable_runtimes;from scripts import fetch_test_cores as m,fetch_mihomo as h,fetch_portable_runtimes as r;assert fetch_test_cores.PINS==m.PINS;assert fetch_mihomo.PIN==h.PIN;assert fetch_portable_runtimes.PINS==r.PINS;assert all(callable(x.download_pinned) for x in (fetch_pebble,fetch_mihomo,fetch_portable_runtimes));print('safe imports')"
         result = subprocess.run([sys.executable,'-B','-I','-S','-c',code,str(root)],capture_output=True,text=True,timeout=10)
         self.assertEqual(result.returncode,0,result.stderr); self.assertEqual(result.stdout.strip(),'safe imports')
 
@@ -193,10 +194,88 @@ class DownloadTests(unittest.TestCase):
         ids={'sing-box-1.14.2-linux-amd64-glibc.tar.gz':'585840737','sing-box-1.14.2-linux-amd64-musl.tar.gz':'585840769',
              'sing-box-1.14.2-linux-arm64-glibc.tar.gz':'585840820','sing-box-1.14.2-linux-arm64-musl.tar.gz':'585840822',
              'Xray-linux-64.zip':'383041956','Xray-linux-arm64-v8a.zip':'383041834','pebble-linux-amd64.tar.gz':'401025613'}
-        self.assertEqual(set(download.ASSET_API),{pin['url'] for group in cores.PINS.values() for pin in group.values()}|{URL})
+        self.assertEqual(mihomo.PIN, {'version':'1.19.32',
+            'url':'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-linux-amd64-v1.19.32.gz',
+            'sha256':'8451100836c9eda194331c2babfad490b2faf30cebc1a04b0e76fd8ac2d35d10',
+            'source':'https://api.github.com/repos/MetaCubeX/mihomo/releases/assets/601415750'})
+        python_pins = {
+            'x86_64-gnu':('x86_64-unknown-linux-gnu','72748da13197c1fb161e3afeef20a6a385ff24f2165e6e2758e47008e7faba4c','539916161'),
+            'x86_64-musl':('x86_64-unknown-linux-musl','1f37044c8cdbd74d5ee112a753c65ef209fedd169c98f3e4e748a93e27eb27a4','539916184'),
+            'aarch64-gnu':('aarch64-unknown-linux-gnu','577b4bec0793ad1ff0cbff9adbd0df078eddde38a4c41bf5d83ad381a85ee39d','539915928'),
+            'aarch64-musl':('aarch64-unknown-linux-musl','a0ad6f01b9204eba573a08927097b78143c564f98bea68a41ea1e172f041da3a','539915949')}
+        self.assertEqual(set(runtimes.PINS),set(python_pins))
+        for target,(platform,checksum,asset_id) in python_pins.items():
+            filename='cpython-3.12.14%2B20260901-'+platform+'-install_only_stripped.tar.gz'
+            self.assertEqual(runtimes.PINS[target],{'url':'https://github.com/astral-sh/python-build-standalone/releases/download/20260901/'+filename,'sha256':checksum})
+            ids[filename]=asset_id
+        ids['mihomo-linux-amd64-v1.19.32.gz']='601415750'
+        self.assertEqual(len(download.ASSET_API),12)
+        self.assertEqual(set(download.ASSET_API),{pin['url'] for group in cores.PINS.values() for pin in group.values()}|{URL,mihomo.PIN['url']}|{pin['url'] for pin in runtimes.PINS.values()})
         for original,api in download.ASSET_API.items():
             download.validate_pair(original,api)
             self.assertEqual(api.rsplit('/',1)[1],ids[original.rsplit('/',1)[1]])
+
+    def test_new_assets_preserve_original_one_call_and_only_transient_api_fallback(self):
+        for original in [mihomo.PIN['url']] + [pin['url'] for pin in runtimes.PINS.values()]:
+            runtime = original != mihomo.PIN['url']
+            maximum, timeout = (160_000_000,120) if runtime else (100_000_000,90)
+            for transient in (None,502,503,504):
+                with self.subTest(original=original,transient=transient):
+                    api=download.ASSET_API[original]
+                    response=Response(url=api if transient else original)
+                    opener=Mock()
+                    opener.open.side_effect=([http_error(transient,original)[0],response] if transient else [response])
+                    with redirect_stderr(io.StringIO()):
+                        result=download.download_pinned(original,max_bytes=maximum,timeout=timeout,opener=opener)
+                    self.assertEqual(result,b'fake archive bytes')
+                    self.assertEqual(response.reads,[maximum+1]); self.assertTrue(response.stream.closed)
+                    self.assertEqual(opener.open.call_count,2 if transient else 1)
+                    self.assertEqual(opener.open.call_args_list[0].args,(original,))
+                    self.assertEqual(opener.open.call_args_list[0].kwargs,{'timeout':timeout})
+                    if transient:
+                        request=opener.open.call_args.args[0]
+                        self.assertEqual(request.full_url,api)
+                        self.assertEqual(dict(request.header_items()),{'Accept':'application/octet-stream'})
+
+    def test_runtime_budget_cannot_raise_existing_other_asset_limits(self):
+        opener=Mock()
+        runtime=next(iter(runtimes.PINS.values()))['url']
+        for original,maximum,timeout in ((runtime,160_000_001,120),(runtime,160_000_000,121),
+                                         (mihomo.PIN['url'],160_000_000,90),(mihomo.PIN['url'],100_000_000,120)):
+            with self.subTest(original=original,maximum=maximum,timeout=timeout), self.assertRaises(ValueError):
+                download.download_pinned(original,max_bytes=maximum,timeout=timeout,opener=opener)
+        opener.open.assert_not_called()
+
+    def test_bad_runtime_bytes_do_not_write_new_or_existing_archive(self):
+        for target,pin in runtimes.PINS.items():
+            for fallback in (False,True):
+                original=pin['url']; response=Response(raw=b'{"untrusted":"metadata, not pinned archive"}',url=download.ASSET_API[original] if fallback else original)
+                opener=Mock(); opener.open.side_effect=([http_error(504,original)[0],response] if fallback else [response])
+                def fake_download(url,**kwargs): return download.download_pinned(url,opener=opener,**kwargs)
+                with self.subTest(target=target,fallback=fallback), tempfile.TemporaryDirectory() as folder:
+                    destination=Path(folder)/'runtimes'; destination.mkdir()
+                    retained=destination/(target+'.tar.gz'); retained.write_bytes(b'original local fixture')
+                    with patch.object(runtimes,'download_pinned',side_effect=fake_download), \
+                            patch.object(Path,'write_bytes') as write, redirect_stderr(io.StringIO()), self.assertRaisesRegex(ValueError,'Portable Python checksum mismatch'):
+                        runtimes.fetch(destination,[target])
+                    write.assert_not_called(); self.assertEqual(retained.read_bytes(),b'original local fixture')
+                    self.assertEqual(list(destination.iterdir()),[retained])
+                    self.assertEqual(response.reads,[160_000_001]); self.assertTrue(response.stream.closed)
+                    self.assertEqual(opener.open.call_count,2 if fallback else 1)
+
+    def test_bad_mihomo_sha_never_decompresses_or_creates_destination(self):
+        for fallback in (False,True):
+            original=mihomo.PIN['url']; response=Response(raw=b'untrusted gzip bytes',url=download.ASSET_API[original] if fallback else original)
+            opener=Mock(); opener.open.side_effect=([http_error(504,original)[0],response] if fallback else [response])
+            def fake_download(url,**kwargs): return download.download_pinned(url,opener=opener,**kwargs)
+            with self.subTest(fallback=fallback), tempfile.TemporaryDirectory() as folder:
+                destination=Path(folder)/'uncreated'
+                with patch.object(mihomo,'download_pinned',side_effect=fake_download), \
+                        patch.object(mihomo.gzip,'decompress') as decompress, \
+                        patch.object(Path,'write_bytes') as write, redirect_stderr(io.StringIO()), self.assertRaisesRegex(ValueError,'Mihomo archive checksum mismatch'):
+                    mihomo.fetch(destination)
+                decompress.assert_not_called(); write.assert_not_called(); self.assertFalse(destination.exists())
+                self.assertEqual(opener.open.call_count,2 if fallback else 1); self.assertTrue(response.stream.closed)
 
 
 if __name__=='__main__': unittest.main()

@@ -26,6 +26,16 @@ ASSET_API = {
         'https://api.github.com/repos/XTLS/Xray-core/releases/assets/383041834',
     'https://github.com/letsencrypt/pebble/releases/download/v2.10.1/pebble-linux-amd64.tar.gz':
         'https://api.github.com/repos/letsencrypt/pebble/releases/assets/401025613',
+    'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-linux-amd64-v1.19.32.gz':
+        'https://api.github.com/repos/MetaCubeX/mihomo/releases/assets/601415750',
+    'https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz':
+        'https://api.github.com/repos/astral-sh/python-build-standalone/releases/assets/539916161',
+    'https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-x86_64-unknown-linux-musl-install_only_stripped.tar.gz':
+        'https://api.github.com/repos/astral-sh/python-build-standalone/releases/assets/539916184',
+    'https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz':
+        'https://api.github.com/repos/astral-sh/python-build-standalone/releases/assets/539915928',
+    'https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-aarch64-unknown-linux-musl-install_only_stripped.tar.gz':
+        'https://api.github.com/repos/astral-sh/python-build-standalone/releases/assets/539915949',
 }
 TRANSIENT = frozenset({502, 503, 504})
 ASSET_HOSTS = frozenset({'release-assets.githubusercontent.com', 'objects.githubusercontent.com'})
@@ -126,8 +136,10 @@ def download_pinned(original, *, max_bytes, timeout=90, opener=None):
     _need(type(original) is str and original in ASSET_API, 'Unknown immutable test asset')
     api = ASSET_API[original]
     validate_pair(original, api)
-    _need(type(max_bytes) is int and 0 < max_bytes <= 100_000_000)
-    _need(type(timeout) in (int, float) and 0 < timeout <= 90)
+    # Only the four registered Python archives retain their original larger budget.
+    runtime = api.startswith('https://api.github.com/repos/astral-sh/python-build-standalone/releases/assets/')
+    _need(type(max_bytes) is int and 0 < max_bytes <= (160_000_000 if runtime else 100_000_000))
+    _need(type(timeout) in (int, float) and 0 < timeout <= (120 if runtime else 90))
     try:
         return _attempt(_opener(original, api) if opener is None else opener, original,
                         original, api, max_bytes, timeout)

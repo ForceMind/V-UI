@@ -18,7 +18,8 @@ import stat
 import subprocess
 import time
 from contextlib import contextmanager
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
 
 from scripts.publish_release import ASSETS, installation_command
@@ -195,12 +196,50 @@ def published_commands(source, version, commit, certificate_args, configured_arg
         raise AssertionError('Published version differs from checked out source')
     if subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip() != commit:
         raise AssertionError('Published acceptance checkout is not exact')
-    opener = build_opener(ProxyHandler({}))
-    def read(url, limit):
+    def asset_target(url, expected):
+        target = urlsplit(url)
+        return target.scheme == 'https' and not target.fragment and (url in expected or
+            target.netloc in ('release-assets.githubusercontent.com', 'objects.githubusercontent.com'))
+    class AssetRedirect(HTTPRedirectHandler):
+        def redirect_request(self, request, fp, code, message, headers, newurl):
+            expected = getattr(request, '_verified_asset_urls', None)
+            if expected is not None and not asset_target(newurl, expected):
+                raise AssertionError('Unexpected public asset API redirect')
+            result = super().redirect_request(request, fp, code, message, headers, newurl)
+            if result is not None and expected is not None:
+                result._verified_asset_urls = expected
+            return result
+    opener = build_opener(ProxyHandler({}), AssetRedirect())
+    def open_response(request):
+        try:
+            return opener.open(request, timeout=60)
+        except HTTPError as error:
+            error.close()
+            raise
+    def read(url, limit, asset=None):
         request = Request(url, headers={'User-Agent': 'V-UI-public-install-acceptance'})
-        with opener.open(request, timeout=60) as response:
+        try:
+            response = open_response(request)
+        except HTTPError as error:
+            if error.code not in (502, 503, 504) or asset is None:
+                raise
+            prefix = 'https://github.com/ForceMind/V-UI/releases/download/v' + version + '/'
+            if (type(asset) is not dict or type(asset.get('id')) is not int or not 0 < asset['id'] < 2**63
+                    or asset.get('name') not in ASSETS or asset.get('browser_download_url') != url
+                    or url != prefix + asset['name'] or type(asset.get('digest')) is not str
+                    or not re.fullmatch('sha256:[a-f0-9]{64}', asset['digest'])):
+                raise AssertionError('Verified public asset ID and identity required for fallback') from None
+            api_url = 'https://api.github.com/repos/ForceMind/V-UI/releases/assets/' + str(asset['id'])
+            request = Request(api_url, headers={'User-Agent': 'V-UI-public-install-acceptance',
+                                               'Accept': 'application/octet-stream'})
+            request._verified_asset_urls = (url, api_url)
+            response = open_response(request)  # One anonymous alternate transport, never a retry loop.
+        with response:
             if urlsplit(response.geturl()).scheme != 'https':
                 raise AssertionError('Public acceptance must retain HTTPS')
+            expected = getattr(request, '_verified_asset_urls', None)
+            if expected is not None and not asset_target(response.geturl(), expected):
+                raise AssertionError('Unexpected public asset API response URL')
             data = response.read(limit + 1)
         if len(data) > limit:
             raise AssertionError('Public acceptance metadata exceeds bound')
@@ -217,7 +256,7 @@ def published_commands(source, version, commit, certificate_args, configured_arg
         expected = 'https://github.com/ForceMind/V-UI/releases/download/v' + version + '/' + name
         if item['browser_download_url'] != expected:
             raise AssertionError('Unexpected public asset URL')
-        raw = read(expected, limit)
+        raw = read(expected, limit, asset=item)
         if item.get('digest') != 'sha256:' + hashlib.sha256(raw).hexdigest():
             raise AssertionError('Public asset metadata/digest mismatch')
         files[name] = raw
