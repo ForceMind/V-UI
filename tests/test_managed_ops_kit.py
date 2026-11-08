@@ -1,5 +1,8 @@
 """Artifact admission only: synthetic API/archives, no network or sudo."""
+import contextlib
 import copy
+import os
+import sys
 import hashlib
 import io
 import json
@@ -57,12 +60,12 @@ class KitAdmissionTests(unittest.TestCase):
             return {'artifacts':[self.artifact]}
         raise AssertionError('Unexpected API path: '+path)
 
-    def prepare(self, value=None, environment=None):
+    def prepare(self, value=None, environment=None, **kwargs):
         with patch.object(gate.os,'geteuid',return_value=1000), \
                 patch.object(gate.subprocess,'check_output',return_value=COMMIT+'\n'), \
                 patch.object(gate.subprocess,'run'):
             return gate.prepare(value or event(),environment or ENV,self.root/'output',self.root,
-                                api=self.api,download=self.download)
+                                api=self.api,download=self.download,**kwargs)
 
     def test_exact_same_head_successful_original_kit_is_written_without_execution(self):
         row=self.prepare()
@@ -72,6 +75,74 @@ class KitAdmissionTests(unittest.TestCase):
         self.assertEqual(sum(call.args[0]=='pulls/33' for call in self.api.call_args_list),2)
         self.assertTrue(all(len(call.args)==1 and not call.kwargs for call in self.api.call_args_list))
         self.assertEqual((self.root/'output/kit/install_ops_control.py').stat().st_mode & 0o777,0o600)
+
+    def parallel_fixture(self):
+        # Keep the old legacy 0.4.7 fixture untouched; this layout starts at22.
+        (self.root / 'VERSION').write_text('0.4.22\n')
+        with zipfile.ZipFile(io.BytesIO(self.raw)) as archive:
+            files = {name: archive.read(name) for name in archive.namelist()}
+        record = json.loads(files['RELEASE.json']); record['version'] = '0.4.22'
+        files['RELEASE.json'] = json.dumps(record).encode()
+        files['vui-linux-x86_64-gnu.zip'] = zipped({'MANIFEST.json': json.dumps(record).encode()})
+        files['SHA256SUMS'] = ''.join(hashlib.sha256(value).hexdigest()+'  '+name+'\n'
+                                     for name,value in sorted(files.items()) if name!='SHA256SUMS').encode()
+        self.raw = zipped(files)
+        self.run['run_attempt'] = 2
+        self.artifact.update(name=gate.parallel.artifact_name('kit', source=COMMIT, version='0.4.22',
+                             run_id=self.run['id'], run_attempt=2, role='build'),
+                             size_in_bytes=len(self.raw), digest='sha256:'+hashlib.sha256(self.raw).hexdigest())
+
+    def test_parallel_layout_selects_only_exact_current_run_attempt_artifact(self):
+        self.parallel_fixture()
+        row = self.prepare(layout='parallel-v1')
+        self.assertEqual(row['oneclick_run_id'], self.run['id'])
+        self.assertEqual(row['oneclick_run_attempt'], 2)
+        self.assertFalse(row['qualification_executed'])
+        self.download.assert_called_once_with(self.artifact)
+        self.assertEqual(set(path.name for path in (self.root/'output/kit').iterdir()), artifacts.KIT_ASSETS)
+        self.assertEqual(json.loads((self.root/'output/kit/RELEASE.json').read_bytes())['version'], '0.4.22')
+
+    def test_parallel_layout_never_falls_back_to_other_attempt_run_or_legacy(self):
+        self.parallel_fixture(); original = self.artifact['name']
+        names = ['vui-release-kit-' + COMMIT,
+                 gate.parallel.artifact_name('kit', source=COMMIT, version='0.4.22',
+                                             run_id=self.run['id'], run_attempt=1, role='build'),
+                 gate.parallel.artifact_name('kit', source=COMMIT, version='0.4.22',
+                                             run_id=self.run['id']+1, run_attempt=2, role='build')]
+        for name in names:
+            self.artifact['name'] = name
+            with self.subTest(name=name), self.assertRaises(artifacts.ReleaseGateError): self.prepare(layout='parallel-v1')
+            self.assertFalse((self.root/'output').exists())
+        self.artifact['name'] = original
+        for attempt in (True, 0, None, '2'):
+            self.run['run_attempt'] = attempt
+            with self.subTest(attempt=attempt), self.assertRaises(gate.AdmissionError): self.prepare(layout='parallel-v1')
+        self.download.assert_not_called()
+
+    def test_unknown_layout_refuses_before_api_or_download(self):
+        for layout in ('parallel', '', None, True):
+            with self.subTest(layout=layout), self.assertRaisesRegex(gate.AdmissionError, 'unknown_artifact_layout'):
+                self.prepare(layout=layout)
+        self.api.assert_not_called(); self.download.assert_not_called()
+
+    def test_parallel_version_change_during_download_still_refuses_before_writes(self):
+        self.parallel_fixture()
+        def changed(_):
+            (self.root/'VERSION').write_text('0.4.23\n')
+            return self.raw
+        self.download.side_effect = changed
+        with self.assertRaisesRegex(gate.AdmissionError, 'parallel_source_version_changed'):
+            self.prepare(layout='parallel-v1')
+        self.assertFalse((self.root/'output').exists())
+
+    def test_cli_preserves_legacy_default_and_explicit_parallel_flag(self):
+        event_file = self.root/'event.json'; event_file.write_text(json.dumps(event()))
+        for extra, expected in (([], 'legacy'), (['--layout', 'parallel-v1'], 'parallel-v1')):
+            with self.subTest(layout=expected), patch.dict(os.environ, {**ENV, 'GITHUB_EVENT_PATH':str(event_file)}, clear=True), \
+                    patch.object(sys, 'argv', ['fetch_managed_ops_kit.py', '--destination', str(self.root/'output'), *extra]), \
+                    patch.object(gate, 'prepare') as prepare, contextlib.redirect_stdout(io.StringIO()):
+                gate.main()
+            self.assertEqual(prepare.call_args.kwargs['layout'], expected)
 
     def test_fork_wrong_event_label_repository_and_closed_pr_reject_before_api(self):
         cases=[]
