@@ -45,7 +45,6 @@ jobs:
     env:
       CORE: ${{ matrix.core }}
       EXPECTED_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
-      CANDIDATE_WORK: ${{ runner.temp }}/vui-core-${{ matrix.core }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -59,6 +58,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
           git diff --quiet HEAD --
           umask 077
+          CANDIDATE_WORK="$RUNNER_TEMP/vui-core-$CORE"
+          printf 'CANDIDATE_WORK=%s\n' "$CANDIDATE_WORK" >> "$GITHUB_ENV"
           mkdir -m 700 "$CANDIDATE_WORK"
       - name: Acquire pinned official materials (not native qualification)
         run: |

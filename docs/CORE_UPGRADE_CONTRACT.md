@@ -465,3 +465,5 @@ SOURCE gzip的size/SHA是本次固定commit、已验证HTTPS响应的观察，re
 新增`core-component-candidate.yml`仅read权限、PR/manual候选生产，使用项目既有固定Action SHA及Ubuntu24.04。纯fixture双Python后，两个core各下载原材料、构建四包及汇总，上传六文件及小receipt；production receipt带repo/run/attempt/source上下文，artifact名称也绑定本次run/attempt。`compatibility.app_sources=[准确HEAD]`在这里是候选待验声明。全部输出明确`qualified=false,published=false`，不生成Authority、tag/Release、catalog或安装选择，不执行新核心。真实下载、原source结构及完整性、四目标新版本native/固定客户端、实际切换及发行门禁均待其各自Actions，不得把格式生产当兼容资格。
 
 9b02fc3首次全套单元3231项中7fail/5error的原记录保留：新boot夹具受前序umask077影响、旧active mock名及旧诊断harness未独立session。e902cd6只修三个测试，原mode/PGID/journal零调用等断言未放宽；umask077下双Python19项通过，后续Actions主单元已通过，完整自身资格另核。新M5/M8改动仍须自身提交验收；浏览器与生产未验证。
+
+候选workflow首次63d7ce0的[42511635640](https://github.com/ForceMind/V-UI/actions/runs/42511635640)在job建立前被GitHub解析拒绝，原注释为`Unrecognized named-value: 'runner'`（48行job级env）；尚未下载或打包材料。按[GitHub context可用范围](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#context-availability)，改为runner实际执行的首个step用`RUNNER_TEMP`生成私有工作路径，并经`GITHUB_ENV`传给后续step，不扩大权限或变更来源门禁。修正必须以自己的实际Actions运行证明，不能将本地Python语法检查当workflow验证。
