@@ -6,7 +6,7 @@ import application code, select CURRENT, or open service-user data as root.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import fcntl
 import hashlib
 import json
@@ -33,6 +33,7 @@ PYTHON = Path('/usr/bin/python3')
 WORKER = CONTROL / 'ops_worker.py'
 INSTALL_LOCK = Path('/run/lock/v-ui-install.lock')
 CGROUP_ROOT = Path('/sys/fs/cgroup')
+PROC_ROOT = Path('/proc')
 SYSTEMCTL = Path('/usr/bin/systemctl')
 RC_SERVICE = Path('/sbin/rc-service')
 MAX_JSON = 16384
@@ -492,6 +493,65 @@ def cgroup_empty(unit):
                 os.close(fd)
 
 
+def _service_process_identity(pid, service_uid):
+    """Fixed /proc identity observation; no cmdline/environ or service action."""
+    if (type(pid) is not int or not 0 < pid <= 2**31-1 or type(service_uid) is not int
+            or not 0 < service_uid <= 2**32-1):
+        raise Refused('invalid managed service identity')
+    with ExitStack() as owned:
+        root = os.open(PROC_ROOT, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        owned.callback(os.close, root)
+        _root_owned(os.fstat(root), directory=True)
+        directory = os.open(str(pid), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root)
+        owned.callback(os.close, directory)
+        info = os.fstat(directory)
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid not in (0, service_uid) or info.st_mode & 0o022:
+            raise Refused('unsafe managed process directory')
+        directory_id = info.st_dev, info.st_ino
+
+        def read(name, limit):
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+            owned.callback(os.close, fd)
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise Refused('unsafe managed process record')
+            result = bytearray()
+            while len(result) <= limit:
+                part = os.read(fd, min(4096, limit + 1 - len(result)))
+                if not part:
+                    break
+                result.extend(part)
+            if not result or len(result) > limit:
+                raise Refused('invalid managed process record')
+            return bytes(result)
+
+        def snapshot():
+            raw = read('stat', 8192)
+            prefix = str(pid).encode('ascii') + b' ('
+            if not raw.startswith(prefix) or b')' not in raw:
+                raise Refused('invalid managed process stat')
+            fields = raw.rsplit(b')', 1)[1].split()
+            if (len(fields) < 20 or fields[0] not in (b'R', b'S', b'D', b'I')
+                    or re.fullmatch(b'[1-9][0-9]{0,19}', fields[19]) is None):
+                raise Refused('invalid managed process start identity')
+            uid_lines = [line for line in read('status', 16384).splitlines() if line.startswith(b'Uid:')]
+            if len(uid_lines) != 1:
+                raise Refused('invalid managed process uid')
+            values = uid_lines[0].split()[1:]
+            if (len(values) != 4 or any(re.fullmatch(b'0|[1-9][0-9]{0,9}', value) is None for value in values)
+                    or any(int(value) != service_uid for value in values)):
+                raise Refused('managed process uid mismatch')
+            if read('cgroup', 4096) != b'0::/system.slice/v-ui.service\n':
+                raise Refused('managed process cgroup mismatch')
+            return dict(pid=pid, uid=service_uid, start_identity=fields[19].decode('ascii'),
+                        cgroup='/system.slice/v-ui.service')
+
+        before, after = snapshot(), snapshot()
+        linked = os.stat(str(pid), dir_fd=root, follow_symlinks=False)
+        if before != after or not stat.S_ISDIR(linked.st_mode) or (linked.st_dev, linked.st_ino) != directory_id:
+            raise Refused('managed process identity changed')
+        return after
+
+
 class Services:
     def __init__(self, manager, cancelled=None):
         if manager not in ('systemd', 'openrc'):
@@ -521,6 +581,21 @@ class Services:
             if code == 3:
                 return 'inactive'
             raise Refused('unknown OpenRC state')
+        fields = self._systemd_properties(unit)
+        socket = unit.endswith('.socket')
+        state = (fields['ActiveState'], fields['SubState'])
+        active_states = {('active', 'listening'), ('active', 'running')} if socket else {('active', 'running')}
+        if state in active_states:
+            if not socket and (fields['MainPID'] == '0' or fields['ControlGroup'] != '/system.slice/' + unit):
+                raise Refused('active service missing process identity')
+            return 'active'
+        if state == ('inactive', 'dead') and (socket or fields['MainPID'] == '0'):
+            return 'inactive'
+        raise Refused('service is not in a stable supported state')
+
+    def _systemd_properties(self, unit):
+        if self.manager != 'systemd' or unit not in self.units:
+            raise Refused('unknown systemd service')
         code, output = self._run(['show', '--no-pager', '--all', '--property=' + ','.join(PROPERTIES), unit])
         if code:
             raise Refused('systemd query failed')
@@ -558,15 +633,27 @@ class Services:
                     or not re.fullmatch(r'0|[1-9][0-9]{0,9}', fields['MainPID'])
                     or fields['ControlGroup'] not in ('', '/system.slice/' + unit)):
                 raise Refused('unsafe service process properties')
-        state = (fields['ActiveState'], fields['SubState'])
-        active_states = {('active', 'listening'), ('active', 'running')} if socket else {('active', 'running')}
-        if state in active_states:
-            if not socket and (fields['MainPID'] == '0' or fields['ControlGroup'] != '/system.slice/' + unit):
-                raise Refused('active service missing process identity')
-            return 'active'
-        if state == ('inactive', 'dead') and (socket or fields['MainPID'] == '0'):
-            return 'inactive'
-        raise Refused('service is not in a stable supported state')
+        return fields
+
+    def managed_identity(self, service_uid):
+        """Observe the exact supported panel process; this is not health/grant.
+
+        The fixed deployment uses Type=simple: it becomes active before app
+        startup finishes, allowing Root to arm a waiting broker. Transitional
+        or unknown states remain unqualified rather than widening state().
+        """
+        if self.manager != 'systemd' or type(service_uid) is not int or not 0 < service_uid <= 2**32-1:
+            raise Refused('managed process identity unavailable')
+        before = self._systemd_properties('v-ui.service')
+        if ((before['ActiveState'], before['SubState']) != ('active', 'running')
+                or before['MainPID'] == '0' or before['ControlGroup'] != '/system.slice/v-ui.service'):
+            raise Refused('managed panel process not ready for identity')
+        pid = int(before['MainPID'])
+        identity = _service_process_identity(pid, service_uid)
+        after = self._systemd_properties('v-ui.service')
+        if before != after or _service_process_identity(pid, service_uid) != identity:
+            raise Refused('managed panel process identity changed')
+        return identity
 
     def snapshot(self):
         return {unit: self.state(unit) for unit in self.units}

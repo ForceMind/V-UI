@@ -495,3 +495,17 @@ stage先用普通resolver验证两current在实际app/host可用；历史previou
 inspect将闭包视为不可信，从strict Snapshot导出精确文件集合，核父FD/owner/mode/no-follow/单link、大小和预算，再与独立live catalog原metadata比对、M0验证每个原ZIP全Ref。current component额外经过普通catalog.read(actualapp_source)及M0，current bundle严格匹配已整应用校验的活动descriptor；历史bundle只作为原应用外部依赖。缺Root store也能完成输入检查，返回的ArchivePackFact仅供后续Root prepare_archive，不能当PackIdentity或RuntimeArtifact，不从备份seed信任、不写Root store或data。
 
 十五项纯假包/临时文件测试验证上述前置；完整backup-components-v1归档组装、旧reader拒绝、Root双域恢复/中断握手、授权Root试跑启动及真正不同版本native仍未接通。819d9c9自身主单元3304项首次有一个夹具失败：前序umask077将用于拒绝检查的0755目录建成0700；仅给自建坏夹具显式chmod0755，双Python18项在umask077下通过，不放宽生产模式检查。x64 musl当时294契约已通过，但随后默认bundle的core_sources API GET被403限流中断；原失败不抹除，不等同源码回归或整套成功。
+
+## M11 一次性managed启动传输与进程身份（尚无启动permit）
+
+Root任务内临时broker使用固定`/run/v-ui-maintenance/core-boot.sock`，Root目录0750/service gid、socket0660；先listen再由实际Root协调器arm精确MainPID/UID/start/cgroup，一次claim只服务这个进程。Root必须持续提供实际installation/operation/worker生命周期proof；journal phase、磁盘task状态、env或请求布尔不授权。模块只做通道，不能替Root协调器确认锁/停机、读用户payload作代码或运行服务。
+
+协议采用4字节长度与≤64KiB strict JSON，claim只带观察到的app_source、host target和data代次，不接受选择、PID或路径。Root响应选择trial或old_recovery、完整selection/intents、应用CURRENT/manifest/READY摘要，以及core pending/selector/fence和RESTORE_PENDING的精确身份+原bytes/absence摘要。相同已鉴别连接用于startup_ready、request_probe/result和释放；Root仍须自行核TLS/核心与所属监听，不能用client ok代替实际资格。
+
+释放为三阶段：Root发送选定revision和最终barrier事实，client在实际磁盘检查成功后回release_ack但仍gated；Root再核live proof/精确身份后发released终帧，client才调用释放回调。此前EOF、超时、Root撤销、worker或身份失效均关闭上下文，不能自动续candidate；最终已确认文件与分布式结果不确定由协调器另做读回/恢复，通道不伪称原子性。socket碰撞不自动覆盖/删除，失效endpoint的恢复也须明确Root停机证明后处理。
+
+应用侧`managed_boot`只固定地址核Root peer、观察事实和完整M3选择，封闭session/PID/生命周期并拒复制或序列化。它明确不是data_owner permit，不放宽M7 `read_boot`或普通RESTORE_PENDING拒绝，也未接serve/main的生命周期、HTTP gate、证书调度或实际启动。trusted probe/settle回调不得拿期望值冒实际观察，解封需后续实际接线。
+
+`Services.managed_identity(nonrootUID)`固定观察v-ui.service，复用原systemd配置漂移守卫，核实际proc四UID、start ticks及精确cgroup，前后重读身份；state原active/inactive/unknown语义保持。当前Type=simple可在app启动完成前取得active MainPID供arm，但这不是健康验证，transitional/不明身份继续拒绝。只读取stat/status/cgroup，不读cmdline/environ。
+
+M11本机验证范围：应用client16项与服务身份11项双Python纯假/临时文件通过；既有ServiceTests11项另回归通过。broker十九项在macOS为18pass+1个Linux kernel case未执行，本机AF_UNIX bind遭sandbox EPERM后，仅非Linux使用fake监听/节点及socketpair，不将此称Root、systemd或真实Unix监听资格。Linux Actions必须实际bind及SO_PEERCRED，不能按本机能力跳过；staged运行时合同保留原32项并新增broker19项，合计51项全部强制执行无skip，默认纯合同加client/身份为336项。idle撤销原定点红例保留：有context但无startup_ready、ready空闲时proof/身份失效原本等到总deadline；现0.25秒调度live核验，并保留typed proof错误而非吞为取消。调度仍不能抢占阻塞Root callback，回调本身须遵守Root总deadline。
