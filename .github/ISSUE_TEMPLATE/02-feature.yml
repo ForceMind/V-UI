@@ -1,0 +1,27 @@
+name: 提出改进
+description: 从用户问题说明期望行为，帮助评估范围和维护成本。
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先查看[路线图](https://github.com/ForceMind/V-UI/blob/main/ROADMAP.md)和已有 Issues，避免重复。
+        建议会经过范围、兼容和维护成本评估，提交不表示已承诺实现或排期。不要附带真实配置或敏感数据。
+  - type: textarea
+    id: user_problem
+    attributes:
+      label: 用户遇到什么问题
+      description: 描述具体场景、目前的阻碍和受影响的人，不必先提出技术实现。
+    validations:
+      required: true
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: 期望行为与完成条件
+      description: 改进后用户可以看到或完成什么？哪些范围可以明确排除？
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 已尝试的方式及兼容影响（可选）
+      description: 可说明现有替代方案、旧数据或权限影响；使用假数据，不上传私有载荷。

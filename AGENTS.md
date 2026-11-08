@@ -1,177 +1,38 @@
 # V-UI 开发约束
 
-## 2026-11-08 v0.4.22已公开：仅切短入口
+当前正式版为v0.4.22。用户和开发入口分别是[README](README.md)、[贡献指南](CONTRIBUTING.md)、[路线图](ROADMAP.md)与[当前交接](docs/DEVELOPMENT_HANDOFF.md)。旧版本的批准范围、阶段冻结与失败记录见[历史索引](docs/history/README.md)，不能作为新版本授权或新提交资格。
 
-v0.4.22已从准确main `558687a76cd29f4e4735284926eb05bf6664472e` 公开（PR137→dev、PR138→main）。候选/dev/main各自九组12 jobs、同源四目标、新装及公开14/15/16/17/19/20/21保数据升级全部通过；publish run42398527616晋升已验制品，Release437741132的tag/latest、19资产digest和真实小文件已匿名核验，旧21资产ID/大小/digest保持。浏览器未验证。
+## 当前工作
 
-本提交复用release/v0.4.22，只更新短入口版本/真实摘要、short-install冻结公开应用源、两项直接合同与说明；不改应用、VERSION、安装器、发布器或其他CI，不再次发布22。入口候选/dev/main及实际main URL须各自验收，不能把入口SHA当作公开应用source。用户的正常合并、入口及私有备份后远程升级授权沿用；操作记录仅私存，不源码热改/SSH/防火墙，不本机构建安装。唯一记录docs/MAINTENANCE_SHARE_0422.md；下方21按历史解释。
+先同步v0.4.22文档与进度、完善开源协作和发布规范，再按路线图优先级继续。Go迁移暂缓。当前迭代仅文档、仓库协作模板及其现有离线文档检查，不改应用版本、安装器、核心、生产配置或既有发布资产；后续产品迭代单独落实契约与验收。
 
-## 2026-11-07 v0.4.21已公开：仅切短入口
+- 保留原配置、数据库、用户、节点、订阅、证书与未提交工作。不用reset、stash、clean或覆盖操作掩盖故障。
+- 构建、四目标制品和真实系统安装验收全部在GitHub Actions的空白临时主机执行；不在开发电脑下载发行ZIP或运行安装验收，不在生产机运行测试。
+- 当前不做浏览器测试。单元、合成DOM、源码检查、真实核心、安装与实际部署分别报告；缺失、skip和旧结果不能冒充通过。
+- 历史真实512 MiB整机/24小时、手机、Tailscale与UDP专项缺口保持，不把cgroup或局部实验扩大成资格。
 
-应用源main `2aa5e11e3f09c03d048018f033ae888e7c775604`（PR134，dev4901d5b/PR133）已独审并完成候选/dev/main各自准确九组12jobs与四目标、真实新装和公开14/15/16/17/19/20保数据升级。官方publish run42363209517晋升同源受验制品公开Release437495658；匿名tag/latest、19资产digest及真实install.sh/SHA256SUMS/RELEASE.json字节已核，旧20资产ID/大小/digest不变。产品和版本/安装器/发布器/既有CI保持，不再次发布21。
+## 分支与审查
 
-当前复用release/v0.4.21仅更新setup真实21版本/摘要、short-install冻结产品源2aa5e11、两项直接合同与直接说明。候选/dev/main各自准确九组及实际main URL入口安装资格仍须独立完成；不能把入口新SHA当作已公开应用source。已获得正常合并/入口和远程更新明确授权，入口完成后按私有备份、固定维护任务、健康/原配置读回推进。运维快照只私存；不浏览器、不本机产品构建安装、不源码热改/SSH/防火墙，不覆盖旧资产。统一进度docs/SIMPLE_OPERATIONS_PROGRESS.md。下方此前“未公开/未授权”均为历史阶段。
+- 长期分支为main和dev。版本从dev建立release/vX.Y.Z；纯文档或其他独立任务使用职责清晰的短期分支。先核对准确main/dev和未提交差异，正常PR依次集成，不强推或改写历史。
+- 按任务命名分支，不添加代理前缀、代理署名或生成标记。只提交本任务负责文件，保护凭据、个人信息和并发修改。
+- 已批准范围内直接推进必要实现、修正和验证。新增目标、受保护分支合并、公开版本、真实部署、网络/敏感权限与费用须有对应明确授权；不能从旧版本许可推断。
+- 需要独审时，由未参与本批实现的审查者核对实际差异与资格。子任务不得递归派工；数量、模型和权限沿会话中用户的最新工作约定。
+- 新源码以其准确提交的检查为准。既有输入、环境与代码未变时复用有效证据，不为每份文档重复构建产品。
 
+## 数据、权限与运行不变量
 
-## 2026-11-07 继续交付：v0.4.21发布准备与远程更新
+- 普通响应坚持allowlist，不回传原始配置、节点凭据、REALITY私钥或服务端材料路径；显式客户端导出和备份仍按敏感数据处理。
+- 鉴权、精确Origin、自定义请求头、实例/内容修订、If-Match、幂等与未知写入核对不得绕过。失败不能静默替换配置、回退DIRECT或自动重试可能已成功的写入。
+- 固定官方Xray/sing-box等核心及已验协议参数；未经独立资格不换pin、重编译核心、开放新协议或UDP/TUN。
+- 保持单一selected_upstream、每入口inherit/direct/relay和独立本机代理开关。有效中转UDP继续拒绝；普通直连既有能力不被笼统关闭。
+- 安装器只初始化和管理其自有组件；面板、核心和证书工具以专用非root用户运行，不擅改SSH、云安全组、未知防火墙或无关网站。
+- 证书签发、绑定、核心应用、TLS健康和客户端连通分别验证；失败保留旧材料和已应用版本，不关闭TLS校验。
+- 新功能使用临时目录、假凭据、临时CA和明确空白的CI环境。真实DNS、主机、账号、网络或凭据操作另核授权。
 
-用户要求继续，并通过现有远程维护更新服务器。已验产品冻结于`0a133205bb7a1f1d0deabd28eb4fffe77625fd44`，之后仅本版严格发布门禁、对应门禁测试和直接文档；不再追加应用/UI/root/依赖/核心或安装器变更。远程只读预检已完成；具体运行版本、节点、证书与代理状态仅保存在私有运维快照中。本轮准备仅21专属非浏览器例外，构建和安装仍全部Actions；浏览器未验证，不本机产品构建，不源码热改、不改SSH/防火墙。正式Ready、dev→main普通合并、公开21和短入口切换须有对应明确授权；公开后真实摘要核验才切入口，随后按本次远程更新授权私有备份并升级及读回。沿用唯一进度`docs/SIMPLE_OPERATIONS_PROGRESS.md`，旧“尚无生产升级授权”已由本次更新要求取代，合并/公开边界仍保留。
+## 发布与文档
 
-## 2026-11-07 已批准：简单操作完整改版
-
-用户确认普通/中转节点、服务器程序代理及相关节点分享/编辑、证书、维护工作区、订阅和备份按钮完整线稿范围；在release/v0.4.21开发，保留原配置数据。先共用受控流程，再完成相关页面；实现后独审，准确构建/核心/四目标/真实安装升级全部Actions，不浏览器、不本机产品构建安装。单一出口、Xray中转门禁、手动停止意图、未知草稿/CAS/幂等/不回退DIRECT和凭据保护保持；不修改SSH/防火墙/线上VPS。允许本批源码/测试/直接文档、提交推送Draft PR；新保护分支合并、公开发布与生产升级尚未授权，不覆盖20。唯一计划/进度docs/SIMPLE_OPERATIONS_PROGRESS.md；下方20记录为历史，不限制本次已批准的新功能源码范围。
-
-## 2026-11-06 v0.4.20 已公开：短入口独立切换
-
-应用发布源main `05173798de1baed5d67a866c4125e72f74fe3f4c`（PR129，dev经PR128/130为c8ae329），与独审候选7932bc5树相同；各自正式最新九组/12jobs、四目标、新装与公开14/15/16/17/19升级均通过，12明列browser步骤skip。人工发布run42215126417晋升同源受验套件公开Release436455874；匿名tag/latest、19资产digest和真实installer/完整清单字节摘要已核，旧19资产保持。历史夹具失败和较早重复push取消另记，不称全部历史运行成功。
-
-当前复用release/v0.4.20仅切setup真实版本/摘要、short-install冻结源0517379、对应contract与直接说明；应用、安装器本体、VERSION、发布器、其他冻结CI助手及公开资产不改，不再次晋升20。先独审入口并核其准确候选/dev/main最新九组及实际main URL安装，再按既有授权通过180天维护会话私有备份升级VPS，核原节点及本机真实托管证书TCP上游；此提交尚未上机。构建安装均Actions，浏览器未验证。统一记录：docs/SING_BOX_SYSTEMD_0420.md。
-
-## 2026-11-06 v0.4.20 systemd / sing-box 修复（继续交付）
-
-用户在前述v0.4.20具体方案后清除旧Goal并人工回复“继续”；本轮按该最小方案开发、独审、准确Actions、正常dev→main、公开20和短入口更新，备份后用现有180天授权升级VPS并验证本机TCP上游。只为panel增加AF_NETLINK，User/Group/NoNewPrivileges/空capabilities及其他hardening保持，HTTP01/OpenRC字节不变；不改SSH/防火墙/全局代理开关或未知另一台中转机。原Xray8001、凭据、证书和数据保留，固定核心不变。产品冻结31e6ee921082a8fee98ba368942dadf712d751d3，其后仅严格版本/发布门禁/直接文档与固定完整hash的必要安装回归。仅20专用非浏览器例外；准确候选/dev/main各自每工作流最新资格、同提交四目标/真实受管Sing启动与公开19升级必须通过，不继承旧绿灯。构建安装只Actions，浏览器未验证，不本机产品构建。统一记录docs/SING_BOX_SYSTEMD_0420.md；下方19为历史。
-
-## 2026-11-06 v0.4.19 已公开：仅切短入口
-
-用户对PR #124 Ready、正常dev→main、公开19和短入口更新的批准已沿用执行。准确发布源main a2b9c188658f082b189e77d237787a96eb9cf921已通过自身九组/12jobs全部attempt1；人工run42153964824公开Release436051562，匿名tag/latest、19资产digest与真实安装器/完整清单摘要均核验，旧18不变。产品冻结d297af4，其后的严格本版门禁独审与候选/dev/main资格记录于docs/LONG_MAINTENANCE_0419.md。当前只更新setup版本/真实pin、short-install冻结源、两项直接测试和说明；应用、安装器本体、VERSION、发布器、固定CI助手和旧tag/资产保持，不再次发布。复用release/v0.4.19与原两名子智能体，不递归。短入口候选/dev/main按正式每工作流最新运行各自验收，并验证实际main URL。额外双事件观察与未完成旧push另记，不计通过。构建安装只Actions，不browser、不改VPS或原配置数据。
-
-## v0.4.18 已公开：仅切短入口
-
-v0.4.18已从准确main27862759d0d73a36fa1a7bdccf165d35a3b851b5公开（人工run42006251492，19资产）；匿名tag/latest、全部资产digest及安装器/完整清单真实摘要已核，旧17不变。用户对发布与短入口更新的授权保持。本批仅setup版本/真实pin、short-install冻结源27862759、配套测试和说明，不改应用、install.sh、VERSION、发布器、两份固定CI助手或旧tag/资产，不重新发布。独审复用同一临时只读会话，累计最多5，不递归；准确候选/dev/main及实际main URL仍各自验收，构建安装只Actions，浏览器未验证，不改VPS。状态沿用docs/SIMPLE_NODE_WIZARD_PROGRESS.md，下方阶段文字保留历史。
-
-## v0.4.18 安装验收同步（当前必要修正）
-
-准确dev安装验收出现维护监听尚未就绪、成功任务子进程尚未回收时紧接提交被拒绝的两类同步问题。为满足原验收，仅调整两个CI助手文件的只读就绪及busy=false等待，保持变更操作只提交一次、原请求/任务成功期限和全部安全/数据断言；发布门禁将这两个文件按完整SHA-256固定，不开放任意CI变更。应用/UI/root/依赖/核心仍冻结85bc22d。此必要修正须自己的独审、准确候选/dev/main Actions后才能晋升，不继承f72的部分绿灯；旧失败保留，进度沿用docs/SIMPLE_NODE_WIZARD_PROGRESS.md。
-
-## 2026-11-05 v0.4.18 发布（已批准）
-
-用户已批准 PR119 Ready、正常 dev→main 合并、公开 v0.4.18 及更新短入口。批准产品冻结于85bc22d92696bb51a5eb71c1827838d0e0a05a54（独审，九组/12 jobs及四目标、真实安装/维护与公开14/15/16升级成功）。其后只补版本、严格 simple_node_no_browser 门禁、公开17保数据升级和相应说明，不追加应用/UI/root/依赖/核心逻辑。保留旧资产及配置数据；准确候选/dev/main各自全部非浏览器验收后，仅晋升同源制品。公开后核匿名资产摘要才更新短入口，并另验实际main URL。构建和真实安装仅Actions，不做浏览器测试、不改用户VPS。统一证据继续 docs/SIMPLE_NODE_WIZARD_PROGRESS.md；下方仅开发/未授权发布是阶段历史。
-
-
-## 2026-11-05 简单节点向导（已批准开发）
-
-用户已确认“按线稿开发”，依据 docs/SIMPLE_NODE_WIZARD_CONTRACT.md 实现用途→简短信息→明确交付三步流程。两个默认用途为设备直连和供另一V-UI使用，推荐已支持sing-box/VLESS/TCP TLS；用途不冒充运行模式，不写隐藏用途标记、不迁移旧节点。保留实例修订/If-Match、证书、导出及中转资格、原配置凭据，未知高级字段仍保留或拒绝。公开17与其资产不覆盖；新批分支release/v0.4.18暂保持VERSION17，当前仅开发/独审/准确候选PR验收，不含保护分支合并、新版发布或VPS升级。构建/真实核心/安装仅Actions，不browser；源码变化不通过维护API热改VPS。状态统一见docs/SIMPLE_NODE_WIZARD_PROGRESS.md。
-
-## v0.4.17 已公开：短入口切换
-
-v0.4.17已从准确main95c201c6e26ed54960f964c675e515890f2eea2a公开（19资产）；候选A9、dev A008/PR116、准确main各自全部非浏览器checks与四目标、14/15/16真实保数据升级成功，人工发布run41876406580成功。匿名tag/所有asset digest及installer/完整清单真实摘要已核验，旧16资产ID/大小/digest未变。当前只切setup.sh真实pin与short-install冻结源95c，配套测试和说明；应用、install.sh、VERSION、发布器、旧tag/资产保持冻结，不重发覆盖。本批仍需自己的独审、准确候选/dev/main与实际main URL验收，浏览器未验证，不修改用户VPS。统一记录沿用docs/REMOTE_MAINTENANCE_PROGRESS.md。
-
-## 2026-11-04 v0.4.17 发布（已批准）
-
-用户明确批准发布准备、PR115 Ready、正常 dev→main 合并、公开 v0.4.17 及短入口更新。产品冻结基线为 629d44c7e0acf2f9aebdfdac765522cc93f9af22，已独审并通过自身九组/12jobs/全部非浏览器steps及四目标、真实维护与旧14/15保数据升级；此前失败保留。其后只补版本、严格本版 remote_maintenance_no_browser 门禁、公开16保数据升级验收与说明；不追加应用/UI/root/依赖/核心逻辑。保留14/15检查、旧资产与原配置数据。准确候选/dev/main各自通过后只晋升同源受验套件，公开后核真实摘要才切短入口并验实际main URL。构建/真实核心/安装只Actions，浏览器未验证，不进入用户VPS或代同意新CA条款。统一记录继续 docs/REMOTE_MAINTENANCE_PROGRESS.md；下方旧“未授权发布”是阶段历史。
-
-## 2026-11-04 临时远程维护与节点管理（已批准开发）
-
-用户确认先线稿/权限契约，再实现、独审：临时远程授权可创建维护节点、分享、配置中转和执行正式在线升级；同时补齐全局 v-ui 在线升级。范围/状态与准确证据统一见 [本批记录](docs/REMOTE_MAINTENANCE_PROGRESS.md)，权限契约见 docs/REMOTE_MAINTENANCE_CONTRACT.md。保留既有配置数据；构建、真实核心、安装只 Actions，不 browser，不访问用户 VPS。原公开16及短入口保持；本批只开发 PR，不含保护分支合并或公开新版本。临时权限不开放任意 root 命令/文件路径/下载 URL，默认拒绝未列明 API；当前资格不能继承旧版本绿灯。
-
-## 2026-11-04 v0.4.16 发布（已批准）
-
-v0.4.16现已从准确main `18fe631bcf69b68425b454db1795a101e0378842` 公开（19资产），匿名tag/所有asset digest及installer/完整SHA256SUMS真实摘要已核；旧15资产ID/大小/digest未变。当前只切setup和short-install冻结源并验自己的候选/dev/main与真实main URL，应用/版本/发布器/旧tag资产保持冻结，不重新发布覆盖。浏览器未验证，不改用户VPS；最终资格见承载PR和统一记录。
-
-用户明确批准PR111转Ready、正常dev→main合并、公开v0.4.16及更新短入口。冻结产品批准基线26e7bdd7f258f6ddf025291d5b6d86b71efebbe5（独审、九组/12jobs及实际Xray TLS生命周期通过）；其后仅本版版本/严格发布门禁/公开15保数据升级验收与说明。保留原14升级检查和已公开资产。所有构建/真实核心/安装只Actions、不browser，不修改用户VPS或真实CA授权；准确候选/dev/main各自验收后仅晋升同源受验制品。公开后核真实摘要才另切短入口，应用/旧tag/资产不可覆盖。统一记录沿用docs/TLS_CERTIFICATE_BINDING_FIX.md，下方旧“未授权发布”仅此前阶段快照。
-
-## 2026-11-04 TLS 已有证书自动绑定修复
-
-用户批准新增TLS节点自动选择唯一可用正式证书、多张手选、Xray支持及相关中文错误，保留原配置数据。独立fix/tls-certificate-binding候选，先完成后端新建/编辑/续期和前端选择状态一致性；Xray限VLESS RAW/TCP TLS无flow，未验传输与REALITY资格保持。构建/安装及固定真实核心只Actions，不browser，不覆盖公开15，不修改用户VPS。范围和证据见docs/TLS_CERTIFICATE_BINDING_FIX.md；新发布须自己的明确授权。
-
-## 2026-11-03 v0.4.15 正式发布（已批准）
-
-v0.4.15现已从准确main `65b1e75d90de733408101ec280a92be935731baa` 公开，19资产、tag目标及匿名installer/完整SHA256SUMS摘要已核。候选/dev/main各自非浏览器、四目标与真实旧014保数据升级均通过；当前仅切短入口到真实新摘要及冻结验收源，并另验准确候选/dev/main。应用、安装器、版本和Release保持冻结，不覆盖旧资产；浏览器未验证。实际结果仍以承载PR与统一账本为准。
-
-用户明确批准PR107转Ready、正常dev→main合并、公开v0.4.15并更新短入口。批准产品候选为7726c44d16fd88a8dfc7a4ffd404de88942da4ad；发布准备只补版本、严格本版非浏览器门禁、公开014→新候选真实升级验收和对应说明。构建与真实安装全部Actions，浏览器未验证；旧配置、账号、节点、订阅、证书及旧发布资产保持。不修改用户VPS、不代同意真实CA、不自动改SSH/云防火墙。独审及准确候选/dev/main自己的全部非浏览器jobs/steps、四目标、真实旧014升级通过后才晋升同源制品。公开后先核真实资产摘要，再切setup.sh与冻结验收源，另验短入口；不预填公开状态。统一记录沿用docs/UI_REDESIGN_PROGRESS.md，下方旧范围按日期解释。
-
-## 2026-11-03 正式UI制作（线稿已确认）
-
-用户已确认全站线稿并要求开始正式制作，沿release/v0.4.15和Draft PR107增量实现统一壳/导航/返回/弹窗与安全登录恢复，保留既有API、业务DOM、权限、敏感信息及不可用能力边界。无main合并/公开发布授权。非浏览器验收，构建与真实安装仅Actions，详见docs/UI_REDESIGN_PROGRESS.md；已发布014保持。
-
-## 2026-11-03 全站线稿与防火墙重整（已授权开发）
-
-用户要求普通安装收敛防火墙提示、诊断/主动精准开端口放独立菜单，并全站统一低保真线稿供审阅。候选留release/v0.4.15，VERSION暂14、非已发布15；本批不合main或公开新版本，不改线上UI/用户VPS/旧资产。线稿只示例数据、无API，浏览器未验证；代码构建与真实安装仅Actions。进度与静态导航依据见[本批记录](docs/UI_REDESIGN_PROGRESS.md)，线稿入口[离线HTML](docs/ui-wireframes/index.html)。
-
-## 2026-11-03 v0.4.14 启动等待修复（已批准）
-
-用户批准最长120秒启动就绪等待、明确退出快失败及回滚前有界脱敏诊断，保留配置/账号/证书/数据与TLS及完整性检查；独审、正常dev→main、公开v0.4.14与发布后短入口切换。全部构建和真实慢启动/失败恢复安装仅Actions，不做浏览器测试。本版严格startup_no_browser范围例外固定main f81ce5e，不复用旧例外，不覆盖旧资产，见[统一计划与证据](docs/STARTUP_READINESS_0414.md)。不触碰用户VPS/安全策略/真实CA同意。 v0.4.14现已从准确main `b0cc174d04d05e61277075412586f0ba0dd231db` 公开并核验19资产；后续只切短入口真实摘要和冻结源，准确最终资格见承载PR，应用/tag/资产保持冻结。
-
-## 2026-11-03 v0.4.13 自动账号与网络检查（已批准）
-
-用户批准新安装随机用户名/强密码并在终端显示，已有账号数据保留；取消本机及云防火墙重复确认，自动只读检测并准确提示，首次CA明确授权保留。独审后正常dev→main合并、公开v0.4.13、发布后切短入口。构建及真实安装仅Actions，不做浏览器测试。仅本版严格非浏览器范围例外，其他门禁不放宽，见[本版计划与证据](docs/INSTALLER_AUTOMATION_0413.md)。不触碰用户VPS、安全策略、真实CA同意或旧发布资产。 v0.4.13现已从准确main `89e5c8912ff685b27006a4e91c487dbdfffd0e74` 公开并核验19项资产，短入口后续pin真实摘要及冻结该源，最终准确资格见承载PR；不重新构建或覆盖该发布套件。
-
-## 2026-11-02 v0.4.12 系统 CA 兼容修复（已批准）
-
-用户明确批准系统CA加载/错误分类修复并公开发布v0.4.12，独审后正常dev→main合并、公开后更新短入口真实摘要、保留原配置数据及旧资产。构建和真实安装均在Actions，不做浏览器测试。本版需要自己的严格CA-fix非浏览器例外，不能沿用仅installer-only的0.4.11例外；其他验收门槛保持。范围/版本/状态与准确证据见[本版账本](docs/CERTIFICATE_SYSTEM_CA_0412.md)。不登录用户VPS、不替真实域名同意CA、不改主机安全策略。 v0.4.12现已从准确main `dacaa7c26bbadf3ba6e7a4e2cc36f7c85a38d7cf` 公开，短入口后续使用核验后的真实新摘要；最终引导入口提交及实际公网验收见承载PR，旧资产不覆盖。
-
-## 2026-10-28 v0.4.10 安装交互修复（已批准）
-
-用户明确批准实现中文安装提示、y/n/yes/no（默认否、非法重问）及域名原地重输，独审、正常 dev/main 合并、Actions 非浏览器构建和真实安装后公开发布新 v0.4.10。旧 v0.4.9 标签和资产不得覆盖。本次仅 installer-only 的 0.4.10 明确例外可跳过列明浏览器步骤，并须固定基线源差分证明无前端/应用逻辑/依赖/核心变化；其余关键门禁保持，Release 标注浏览器未验证。短入口只在公开后更新真实可信摘要。当前版本分支 release/v0.4.10；执行记录见 docs/INSTALLER_INTERACTION_0410.md。Go 迁移、真实 VPS、安全设置和 CA 代同意仍不包含。
-
-## 2026-10-28 当前维护与开发流程
-
-用户批准归档旧工作、清理分支、长期保留 `main` / `dev`、重写 README 并上线 `setup.sh` 短安装入口。每个新版本从 `dev` 建 `release/vX.Y.Z`，经审查与测试后 PR 合入 `dev`，再 PR 合入稳定 `main`；完成后删除临时版本分支。分支不用代理前缀，提交不加代理署名。归档标签只保全历史，不授予未完成实验产品资格；PR #14 仍不得混入产品。
-
-v0.4.9 已由 PR #80 正常合并到 `a39b6e009829dd7f1be772fd3454474903b9858a` 并公开发布。本次仓库引导入口安装该冻结稳定套件，不覆盖其 tag、Release 或资产，不启动 Go 迁移。历史段落里的版本/分支名称保持当时事实。
-
-本批构建与真实安装验收全部在 GitHub Actions 空白临时 Linux 执行，本机不下载发行包，不做浏览器测试。既有浏览器检查保留为明确授权后的 opt-in；不能将 skip 描述为通过，也不放宽正式发布门禁。用户 VPS、CA 条款代确认和主机安全设置不在本批范围。
-
-## 2026-10-27 v0.4.9 在线一键安装（已批准）
-
-用户已明确批准本批开发、1 个 gpt-6.1-sol / medium 只读独审、正常合并及公开发布新 v0.4.9。
-交付按 [一键安装计划与证据](docs/ONE_LINE_INSTALL_049.md)执行：一行公网命令自动下载并校验、控制终端交互配置、自动安装全局 `v-ui`，随后可随时输入该命令打开菜单。
-正常管理员沿用既有 sudo 策略，不添加免密 sudoers/SUID； root 控制代码仍来自精确受验 kit 和固定 OS Python。
-本批获准更新 VERSION 至 0.4.9，不换固定核心或扩大协议/UDP、用户 VPS、真实 CA 同意及生产部署范围。
-准确候选、正常主线和最终公网安装分别验收；旧 v0.4.8 标签/资产、历史 PTY 首败及其他实验保持。
-下方按日期保留此前范围与状态，不覆盖本次明确批准。
-
-## 2026-10-19 当前接手：每入口 TCP 已收口
-
-[PR49](https://github.com/ForceMind/V-UI/pull/49) 已正常合并至 `0962f0c4995b3b7606652027f2330285e4dea1f7`，P0–P5 及准确候选/主线八组、四目标验收已完成，见[收口记录](docs/PER_INBOUND_ROUTING_CLOSURE_20261018.md)。[PR50](https://github.com/ForceMind/V-UI/pull/50) 的交接文档已合并至 `1489bf5218fced9b42c57e06715478dc323dc782`。接手先读[开发交接](docs/DEVELOPMENT_HANDOFF.md)，核对远端 master 与后续提交；不要从旧 a98 基线重新实现已完成的 inherit/direct/relay。
-
-每入口 TCP 功能已合并、尚未正式发布；正式 v0.4.8 仍是安装器修复基线。固定核心、单 selected_upstream、host 开关独立及有效中转 UDP 拒绝等边界不变，不扩大手机/公网/低资源整机资格。后续计划内修改仍须自己的独立审查与准确提交验收，发布、部署和敏感权限另行批准。下方旧阶段文字保留历史，不覆盖本段。
-
-## 2026-10-18 标准客户端与每入口 TCP 路由（历史快照）
-
-先读[当前开发交接](docs/DEVELOPMENT_HANDOFF.md)与[每入口三态契约](docs/PER_INBOUND_ROUTING_CONTRACT.md)。用户已确认现成客户端导入不同 VLESS 节点，分别直连/中转；从准确产品 master `a98da9afbbf58a54f4f102cccec2f26b6e07d2ee` 独立开发 inherit/direct/relay，复用单 selected_upstream，host 代理开关独立。先设计独审，再做迁移/事务/API/UI/导出与 stock Mihomo TCP 同实例验收。有效中转 UDP 仍拒绝，普通直连既有能力保留；不迁入八个实验核心补丁、不改 pin/VERSION、不要求自研手机 App。所有尚未完成计划和准确证据必须更新项目文档并及时提交可恢复 WIP；WIP不代表验收，准确候选/主线/四目标及发布边界保持。下方旧阶段文字按日期保留。
-
-## 2026-10-16 D1 显式 TCP-only 上游导出
-
-D0 已在准确 master `13c884a0539cf9822fca2fe2db58325fa4644048` 收口，见 PR #46；用户持续开发授权下，下一有界实际功能为 [D1 契约](docs/TCP_UPSTREAM_EXPORT_CONTRACT.md)。单独的管理员“导出为中转上游（仅 TCP）”用途 profile，URI 与单节点 Clash YAML，必须完成真实双实例 API 导出→导入及固定 TLS/REALITY 双跳。普通导出/订阅保持，导入仍严格拒绝 UDP 选项，默认双关和已验运行策略不变。D2 UDP 双跳暂不启动。只在准确候选/主线与四目标验收后正常合并，不发布或部署。
-
-## 2026-10-16 UDP / DNS 门槛与导入保真
-
-用户已要求继续已定开发计划；M0–M4 已于准确 master `9a97ad13aae2fabb5ed969fdc0f930c36fdc55b7` 收口，最终证据在 PR #44。下一有界阶段按 [UDP / DNS 能力门槛](docs/UDP_DNS_CAPABILITY_GATES.md)推进：明确拒绝尚未获资格的上游 UDP/packet encoding、真实导出→导入保真回归、既有 Shadowsocks UDP/DNS 实验和双开关拒绝门槛。不静默丢字段，不改普通节点默认、不扩大双跳 UDP/TUN、不换固定核心或 VERSION。正常开发/独立 PR/准确候选与主线验收边界沿用；新发布、真实部署、网络安全设置和凭据仍不包含在开发授权内。
-
-2026-10-15 发布的 v0.4.8 是安装器修复基线 `a9f9b5d9`；其后双开关主线功能尚未正式发布。下方旧范围和失败证据按日期保留，不能把旧“当前/未发布”文字覆盖此状态，也不能继承旧绿灯授予新候选资格。
-
-## 2026-10-15 双开关开发范围更新
-
-已批准按[双开关代理与中转契约](docs/DUAL_PROXY_RELAY_CONTRACT.md)持续开发，M0–M4 各自独立 PR；[进度与证据账本](docs/DUAL_PROXY_RELAY_PROGRESS.md)区分草稿、实现和准确验收。本次新范围取代下方仅限安装器/发布准备的历史范围，不修改历史事实。两个独立开关必须覆盖四状态和 12 条切换；首期 sing-box/VLESS/TCP/TLS 接入，任何启用且未获资格的入口阻止整体中转，不得静默直出。未完成 M2 前不得开放应用，秘密不得进入普通响应。
-
-计划内正常开发、修复、测试、文档、提交、推送和独立 PR 按批准范围推进；准确候选验收后正常合并，再核准确 master。保留历史，不强推；不含发布、生产部署、历史资产删除、费用、凭据或安全敏感权限变更。`VERSION`、固定核心和既有发布边界保持；后续历史条目继续按各自日期解释。
-
-## 既有约束与历史证据
-
-先读ROADMAP.md、docs/README.md和最近PR。用户已授权完善正式发布、所有文档、一键部署与图形化自动证书；仍不等于授权登录真实VPS、替实际域名同意CA条款或跳过验收公开Release。
-
-- 保持每个阶段独立 PR；PR #14 仍排除。v0.4.2、WS v0.4.3、gRPC v0.4.4 和 HY2 v0.4.5 已正常合并收口。HY2 最终 master 838c66d9974dd9f3a944641a2e9e03cc200e0bbe/tree e12287d8ebbea233142d58191ee5141a0a49a17a；PR #23 安全修复最终 master 8e0d07463e59b52856f55fa33346a760a38b4705/tree fda9f9d8a26dd21bdf0e441ab5d9bbc7ec0dbdd8，两者最终八组/11 jobs/全部步骤 attempt 1 成功。详见 docs/HYSTERIA2_CLOSURE_045.md、docs/INBOUND_RESPONSE_CLOSURE_20261006.md；历史失败保留。
-- TUIC v0.4.6 / PR #22 已正常合并至签名 master df8a980beb682a981d72e42760705f1831cacf9b/tree f68098e398cb7ac29e2e1e809b8f741bb3c30533。候选 14f570e8406098aa7570f2daaf24bdbe550a1858 八组/11 jobs/全部步骤 attempt 1 成功；最终 master 八组/11 个最新 jobs/全部步骤成功，其中 deployment 首次上游 GitHub 403 后以不改代码/pin/凭据的 attempt 2 通过，其余七组 attempt 1。链路 75 项、独立 HY2 8 项/TUIC 8 项和 Chromium 完整流程已验收；历史失败及本地 EPERM 保留，见 docs/TUIC_CLOSURE_046.md。
-- REALITY/Vision v0.4.7 / PR #24 已正常合并至签名 master 6b049262457b259c602c5e74be296ef52780c462，最终候选 70cc2f4f7dc4349c7ecffbc33fc088f51b8651fa 与主线 tree 316f0159e3ae3d7362022d9c9ac61bc0afa867c1 相同。独立审查及候选八组/11 jobs/全部步骤 attempt 1 完成；主线八组/11 个最新 jobs/全部步骤成功，链路首次继承 VMess/Mihomo CA 被动 2 秒轮询缺少必需 x509 原因，unchanged-code attempt 2 成功，其余七组 attempt 1。重跑不表示轮询不稳定性永久修复；链路 89 项、独立 HY2 8/TUIC 8 与 Chromium 分别验收，见 docs/REALITY_VISION_CLOSURE_047.md。
-- PR #25 XHTTP 刻画已正常合并至签名 master 66dbe70cfa86fe140fa1b69d3896244ab17a0e3c，候选 f7996c579418d1ffe5df06fc12677cf22a42e034 与主线 tree 80ad474cfdd159dcc603a14b4a1c9d24427494e7 相同；独立审查、候选/主线各八组/11 jobs/全部步骤 attempt 1 成功，链路 101 项及独立 HY2 8/TUIC 8 与 Chromium 分别验收。仅测试/文档，VERSION 仍为 0.4.7，公开 XHTTP/HTTPUpgrade 导出保持阻断；详见 docs/XHTTP_CHARACTERIZATION_CLOSURE_048.md。
-- 当前批准范围是冻结累计产品 0.4.7 并完成最终文档、准确提交 CI 与同提交四目标附件的发布准备。最终文档变更须独立审查、exact-head/正常合并/exact-master，再核验该 master 的实际套件；不继承旧包或预先声称通过。先完成 0.4.7 交付决定，再推进独立 UDP/DNS 实现。未授权或执行新建 tag、Draft Release、晋升/公开发布或生产部署，人工发布边界不变。
-- XHTTP 固定 Xray 26.3.27 → Mihomo 1.19.32 原生 YAML/真实 URI provider；单假 UUID、空 flow、stream-one/验证 TLS/h2/Chrome/显式 SNI/Host/path，仅 HTTP/TCP，sing-box 1.14.2 parser 明确拒绝 XHTTP。准确候选/主线的正向及 UUID/CA/SNI/path/Host/mode 六类负向已有真实原因、零应用送达、无 DIRECT。parser 不替代 provider/runtime，TLS 1.3/h2 独立服务端探测不称客户端抓包；path 前缀、Host 大小写/端口与 mode 方向边界见 docs/XHTTP_CHARACTERIZATION_048.md。
-- HTTPUpgrade canonical YAML 真实转发、原样 type=httpupgrade URI 对实际服务端失败/零应用送达、独立验证 TLS recorder 的 GET Upgrade 与 raw VLESS、同 bytes 验证 TLS replay 的实际 HTTP400/正文、普通 TCP 错误传输对照须分别记录，不能构造格式等价或公开支持。首次 77c264a CI 100 项仅因固定 Mihomo 不输出晚期协议日志失败，及本地 11/12 方法整组各两个 netlink EPERM 子测试失败均保留；最终 CI 成功不抹去失败，也不泛化历史 EPERM。
-- 所有最终功能在准确提交重新验证。queued/running/skip不算通过；单元、真实二进制、浏览器、systemd/安装与实际部署必须分开描述。
-- 保留用户数据，不删除/改名数据库掩盖升级问题，不回退到无鉴权旧版继续在线运行。
-- 当前 TUIC 只使用未改变的官方 sing-box 1.14.2 与 Mihomo 1.19.32、单 UUID/密码对、明确验证 SNI、原生 QUIC/默认拥塞、零 RTT 关闭；服务端 TLS ALPN 必须恰为 h3，不能省略。TUIC 本身不扩大多用户、v4/token 或调优/指纹；REALITY/Vision 仅按独立 v0.4.7 契约推进，不扩大 DNS-01/通配符或容器部署，不改变四目标 Linux、40 项 ToClash；不换 pin、重编译核心或加反代。
-- TUIC 三格式为固定客户端支持的非官方 URI 约定、Mihomo YAML、sing-box JSON，不称官方通用 URI 标准。只验 HTTP/TCP；sing-box network:tcp。Mihomo TUIC adapter 硬编码 UDP 能力，省略无效 udp:false，不能宣称它关闭 UDP；QUIC 节点 UDP 通行不等于应用 UDP 验收。
-- TUIC UUID/密码各自空输入新建生成、编辑保留，非空仅替换对应项。普通响应必须沿用 PR #23 allowlist，不回传凭据、原始配置或材料路径；特权 /editor 只保留手工证书路径字符串，明确授权导出保留客户端凭据但无服务端材料。高级导入草稿保留或拒绝不可表达项，不静默清除后公开导出。
-- REALITY/Vision 仅固定官方 sing-box 1.14.2 服务端/客户端与 Mihomo 1.19.32、VLESS 直连 TCP、精确 xtls-rprx-vision、单 UUID、单规范 16 位 hex short ID、显式字面 SNI、强制 Chrome。X25519 公私钥为解码后 32 字节的无 padding base64url，校验配对并保留；私钥只留服务端。无 ALPN 覆盖、托管证书绑定、额外传输/核心或应用 UDP 扩围。URI importer 硬编码 udp=true，不声称 URI 禁用 UDP。
-- REALITY 测试的本地 TLS 1.3/X25519/h2 参考握手端与 HTTP 应用目标必须独立。失败认证允许参考握手/伪装 GET，只断言应用目标零送达且无 DIRECT。假参考证书同时覆盖允许/不允许 SNI；临时 CA 仅经测试子进程 SSL_CERT_FILE 与指向空临时目录的 SSL_CERT_DIR 使用，不改主机信任、不用外部真实站点。错误 UUID/缺 flow 要求真实 unknown UUID/flow mismatch，错误合法公钥/short ID/SNI 要求真实 REALITY verification/authentication 错误，超时不够。
-- REALITY 服务端 trace 可能包含派生密钥字节；默认 debug，若诊断确需 trace，仅限假凭据测试且输出须脱敏。普通响应继承 allowlist；编辑器 UUID/私钥/short ID 隐藏、空输入保留，已有未知/高级字段保留或拒绝，不静默清除后解锁公开导出。
-- 首次 HY2 6daff89e 日志不足、e1800367 链路 58 项通过但 ACME DNS 端口碰撞、dbf1cfbe 首次 master 的继承 Trojan/gRPC 原因日志失败，以及 PR #21 portable 首次 API 限流/attempt 2 成功全部保留。认证/x509 真实原因、零目标请求、无 DIRECT 断言不得削弱，超时不等于拒绝证据。
-- 安装器 --node-udp-port 为显式可重复的 1024–65535 UDP 声明，与 TCP 独立；仅新安装双栈 bind 探测，升级提示人工核对所有权；精确协议/端口确认、不自动启用防火墙。标志不创建节点、不持久保存，后续运行须重传。
-- 客户端配置不丢关键字段，不泄露私钥，不在失败/无节点时悄悄改成DIRECT。gRPC service_name 只接受 [A-Za-z0-9._-]{1,128} 字面字符串，不 trim/强转；ALPN 省略或仅 h2，Chrome 独立可选，仅 HTTP/TCP。导入的不支持字段编辑时拒绝，不静默清除。
-- gRPC Lite 错误 CA/SNI 可能让调用者超时；测试中仅 sing-box 负向子进程开启 GODEBUG=http2debug=1 取得真实 x509 证据，不宣称及时错误传播，不改生产诊断默认值或 TLS 验证。
-- 新证书与应用结果分开，失败保留旧材料；不以跳过TLS校验解决签发/测试错误。
-- root安装器只初始化系统，包内程序以非root用户运行；不得擅自停止原网站、修改SSH或防火墙。
-- 测试只能使用假凭据、临时目录、临时CA和明确为空的CI主机。真实systemd测试不能在生产实例运行。
-- 文件包不得含用户数据、token、私钥、测试CA或字体；第三方许可证和来源随包保留。
-- 正式发布走人工gated workflow，精确default HEAD、八组CI最新success、已验收同一套件、无覆盖tag/Release。未实际公开就写“发布准备完成/候选”，不写“已发布”。
+- 正式应用source、入口source和运行实例release_id分开记录。v0.4.22应用源558687a76cd29f4e4735284926eb05bf6664472e，已验入口源39181e0cdb9643422a19049df942b208f876faf4。
+- 发布只晋升同提交已验收制品，不在发布阶段重建；完整性、来源、四目标和许可证随包保留。旧tag/Release/资产不可覆盖。
+- 当前版本的严格非浏览器例外不适用于新版本。不得为了发布删除功能、放宽关键断言、隐藏错误或继承旧绿灯。
+- 纯文档修改不升级VERSION、不重发应用包。当前用户手册只描述可用行为；原阶段全文和失败证据固定归档，避免把旧“当前”铺在新手入口。
+- 具体生产域名、端口、身份、维护链接、导出、备份及运维任务只私存，不能写入公开文档、PR或Actions。交付只报告已证实范围及尚缺条件。

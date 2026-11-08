@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全政策与私密联络说明
+    url: https://github.com/ForceMind/V-UI/security/policy
+    about: 潜在漏洞先阅读政策；未显示私密报告入口时，仅用无细节的Issue请求联络方式。
+  - name: 安装与常见问题
+    url: https://github.com/ForceMind/V-UI/blob/main/docs/INSTALLATION.md
+    about: 先查安装说明、受支持环境与升级边界，再提交必要的脱敏问题。

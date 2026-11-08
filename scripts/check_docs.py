@@ -4,7 +4,10 @@ import re
 import subprocess
 
 ROOT=Path(__file__).resolve().parents[1]
-REQUIRED=['README.md','CHANGELOG.md','SECURITY.md','CONTRIBUTING.md','LICENSE','VERSION','setup.sh',
+REQUIRED=['README.md','CHANGELOG.md','SECURITY.md','CONTRIBUTING.md','SUPPORT.md','CODE_OF_CONDUCT.md',
+          'ROADMAP.md','AGENTS.md','LICENSE','VERSION','setup.sh','docs/history/README.md',
+          '.github/PULL_REQUEST_TEMPLATE.md',
+          *['.github/ISSUE_TEMPLATE/'+name for name in ('01-bug.yml','02-feature.yml','03-question.yml','config.yml')],
           *['docs/'+name+'.md' for name in ('README','INSTALLATION','CERTIFICATES','CONFIGURATION',
                     'OPERATIONS','TROUBLESHOOTING','COMPATIBILITY','API','RELEASING','RELEASE_NOTES')]]
 
@@ -31,7 +34,7 @@ def check():
     if not re.fullmatch(r'\d+\.\d+\.\d+',version):raise ValueError('Invalid VERSION')
     if "version='"+version+"'" not in (ROOT/'main.py').read_text():raise ValueError('Application version mismatch')
     check_current_versions(ROOT, version)
-    for path in [ROOT/name for name in REQUIRED if name.endswith('.md')]+list((ROOT/'docs').glob('*.md')):
+    for path in {ROOT/name for name in REQUIRED if name.endswith('.md')} | set((ROOT/'docs').rglob('*.md')):
         content=path.read_text()
         for target in re.findall(r'\[[^\]]*\]\(([^)\s]+)\)',content):
             if '://' in target or target.startswith(('#','mailto:')):continue
