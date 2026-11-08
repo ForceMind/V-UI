@@ -29,6 +29,7 @@ CONTRACTS = {
     'test_core_candidate_inputs.py': 18,
     'test_core_maintenance_cycle.py': 18,
     'test_core_archives.py': 14,
+    'test_core_backup.py': 15,
 }
 
 

@@ -180,7 +180,7 @@ class MaintenanceCycleTests(unittest.TestCase):
         with t._maintenance_directory(path,create=True) as fd:
             self.assertEqual(os.fstat(fd).st_ino,path.stat().st_ino)
             self.assertEqual(path.stat().st_mode&0o777,0o700)
-        bad=self.root/'unsafe';bad.mkdir(mode=0o755)
+        bad=self.root/'unsafe';bad.mkdir(mode=0o755);bad.chmod(0o755)
         with self.assertRaises(t.ReleaseError):
             with t._maintenance_directory(bad):pass
         link=self.root/'linked';link.symlink_to(path,target_is_directory=True)

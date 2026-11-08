@@ -485,3 +485,13 @@ SOURCE gzip的size/SHA是本次固定commit、已验证HTTPS响应的观察，re
 `CoreArtifactStore.open_archive(ref,target=...,catalog=...)`自行读取独立catalog，验证全部9文件及完整Ref、独立host target，提供仅context内可用的ZIP chunks/size/ref；流拒复制/序列化、跨PID与退出后读取，正常退出还须摘要及FD/路径稳定。调用方必须等整个with成功退出才确认备份完成。`prepare_archive`在Root UID和完整来源/原FD/Ref预验后复用NOREPLACE准备，仅返回归档结果；不暴露普通PackIdentity/binary_path，也不扩大普通read/prepare/resolver的当前app兼容门槛。缺独立catalog仍在变更前拒绝，previous bundle仅保留完整Ref及原应用外部恢复依赖，不复制runtime或静默重绑。
 
 两块分别18项writer实际flock/fake上下文与14项归档假包测试，属于源码/临时文件前置。受信Root pending/stop绑定、IPC握手、旧descriptor及真实服务健康、完整backup-components-v1数据与选择双域事务、全部入口和真实不同版本native资格仍未接通，不把这些私有原语称完整可用的核心升级。
+
+## M10 component私有闭包stage与inspect（尚未交换data）
+
+`CoreBackup.stage`只在受信调用方指定的现有0700私有workspace下创建新闭包，flat `SNAPSHOT.json`及每个唯一manifest完整SHA前缀的原ZIP/CORE-RELEASE/SHA256SUMS，文件600、目录700；最多四组件、总ZIP≤400MB，保留原bytes，不加入TRUST/authority/pending/旧nonce或整个应用runtime。Snapshot保存完整M3选择、双current artifact_id/revision/enabled和原panel状态；它是否确为M5稳定或before/quiesced最终意图，仍由外层真实Root协调器和整个备份外部SHA绑定，对象、flag及本模块不自证confirmed。
+
+stage先用普通resolver验证两current在实际app/host可用；历史previous仅走独立catalog/archive来源和完整9文件验证，流式复制且必须等open_archive成功退出后才发布。随后对整个闭包再inspect，fsync和NOREPLACE完成后才返回，不采纳既有残缺或清理foreign；发布后失ack/close失败保留完整公开闭包并报错。
+
+inspect将闭包视为不可信，从strict Snapshot导出精确文件集合，核父FD/owner/mode/no-follow/单link、大小和预算，再与独立live catalog原metadata比对、M0验证每个原ZIP全Ref。current component额外经过普通catalog.read(actualapp_source)及M0，current bundle严格匹配已整应用校验的活动descriptor；历史bundle只作为原应用外部依赖。缺Root store也能完成输入检查，返回的ArchivePackFact仅供后续Root prepare_archive，不能当PackIdentity或RuntimeArtifact，不从备份seed信任、不写Root store或data。
+
+十五项纯假包/临时文件测试验证上述前置；完整backup-components-v1归档组装、旧reader拒绝、Root双域恢复/中断握手、授权Root试跑启动及真正不同版本native仍未接通。819d9c9自身主单元3304项首次有一个夹具失败：前序umask077将用于拒绝检查的0755目录建成0700；仅给自建坏夹具显式chmod0755，双Python18项在umask077下通过，不放宽生产模式检查。x64 musl当时294契约已通过，但随后默认bundle的core_sources API GET被403限流中断；原失败不抹除，不等同源码回归或整套成功。
