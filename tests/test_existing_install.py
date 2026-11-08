@@ -260,13 +260,16 @@ class ExistingInstallTests(unittest.TestCase):
 
     def test_managed_install_failure_or_signal_restores_binding_contact_pointer_and_service(self):
         from sqlalchemy import create_engine
-        from app.certificates.models import Certificate, CertificateBinding
+        from app.certificates.models import Certificate, CertificateBinding, CertificateJob
         from scripts.installer_certificate_state import run as panel_state
         folder=self.data/'data'; folder.mkdir(mode=0o700)
         db_path=folder/'v-ui.db'
         engine=create_engine('sqlite:///'+str(db_path))
-        Certificate.__table__.create(engine); CertificateBinding.__table__.create(engine)
+        Certificate.__table__.create(engine); CertificateBinding.__table__.create(engine); CertificateJob.__table__.create(engine)
         engine.dispose()
+        with sqlite3.connect(db_path) as db:
+            db.execute('CREATE TABLE certificate_identity_schema (version INTEGER NOT NULL)')
+            db.execute('INSERT INTO certificate_identity_schema VALUES (1)')
         old_id='a'*32; new_id='b'*32
         self.saved['ready']=True; self.save()
         original=self.config.read_bytes()
@@ -295,7 +298,7 @@ class ExistingInstallTests(unittest.TestCase):
                     db.execute('DELETE FROM preservation'); db.execute("INSERT INTO preservation VALUES ('session-grant-user-node')")
                     certificate(db,old_id,self.saved['domain'],self.saved['email'])
                     certificate(db,new_id,'changed.example.test','before-change@example.test')
-                    db.execute('INSERT INTO certificate_bindings VALUES (?,?,?,?,?)',('panel',old_id,old_id,'a'*64,None))
+                    db.execute('INSERT INTO certificate_bindings (target,certificate_id,applied_certificate_id,applied_revision,error) VALUES (?,?,?,?,?)',('panel',old_id,old_id,'a'*64,None))
                 args=self.args(domain='changed.example.test',email='after-change@example.test',
                     admin=self.saved['admin'],port=3220,bind='0.0.0.0',node_port=10443,
                     accept_terms=True,upgrade=True,sha256='0'*64)

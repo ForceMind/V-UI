@@ -1,5 +1,6 @@
 """Synthetic signed materials and database bindings; no real cores or DNS."""
 from copy import deepcopy
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -129,6 +130,81 @@ class DNSCertificateLifecycleTests(unittest.TestCase):
             self.assertEqual(row.stream_settings, stream, 'Preparation never changes the saved node before guarded update')
             self.assertEqual(row.settings, settings)
             self.assertTrue(binding[0]); self.assertEqual(binding[1], identity)
+
+    def test_http_certificate_only_edits_preserve_ws_grpc_credentials_and_unknown_fields(self):
+        from app.api.inbounds import _prepare_inbound_edit
+        identity = self.issue_http(domain='node.example.test')
+        for index, (transport, profile) in enumerate((
+                ({'type': 'ws', 'path': '/existing', 'headers': {'Host': 'front.example.test'}}, None),
+                ({'type': 'ws', 'path': '/existing', 'headers': {'Host': 'front.example.test'}}, {}),
+                ({'type': 'grpc', 'service_name': 'Existing.Service'}, None),
+                ({'type': 'grpc', 'service_name': 'Existing.Service'}, {}))):
+            with self.subTest(transport=transport['type'], profile=profile), database.SessionLocal() as db:
+                stream = {'tls': {'enabled': True, 'server_name': 'node.example.test', 'alpn': ['h2']},
+                          'transport': deepcopy(transport), 'saved_unknown': {'keep': True}}
+                settings = {'users': [{'uuid': '11111111-1111-1111-1111-111111111111'}]}
+                row = database.Inbound(id=800 + index, core='sing-box', protocol='vless', port=11800 + index,
+                    settings=deepcopy(settings), stream_settings=deepcopy(stream), enable=True)
+                db.add(row); db.commit()
+                payload = {'certificate_id': identity}
+                if profile is not None:
+                    payload['profile'] = profile
+                prepared, binding = _prepare_inbound_edit(row, payload)
+                self.assertNotIn('profile', prepared)
+                self.assertEqual(prepared['stream_settings']['transport'], transport)
+                self.assertEqual(prepared['stream_settings']['saved_unknown'], {'keep': True})
+                self.assertEqual(prepared['stream_settings']['tls']['alpn'], ['h2'])
+                self.assertEqual(row.settings, settings)
+                self.assertEqual(row.stream_settings, stream)
+                self.assertTrue(binding[0])
+
+    def test_real_worker_loop_keeps_dns_cleanup_pending_until_recovery_succeeds(self):
+        for raises in (False, True):
+            with self.subTest(raises=raises):
+                reached_wait = threading.Event()
+                manager = self.manager
+                class Wakeup:
+                    def wait(self, timeout=None):
+                        reached_wait.set()
+                        return manager.stop_event.wait(5)
+                    def set(self): pass
+                    def clear(self): pass
+                def recover(stop):
+                    if raises:
+                        raise CertificateError('DNS_PROVIDER_FORBIDDEN')
+                    return False
+                self.provider.recover_dns = recover
+                self.manager.wakeup = Wakeup()
+                self.manager.request_dns_cleanup()
+                self.manager.start()
+                try:
+                    self.assertTrue(reached_wait.wait(5), 'Actual worker loop did not reach its post-processing wait')
+                    self.assertEqual(self.manager.capabilities()['worker_error'], 'DNS_CLEANUP_PENDING')
+                finally:
+                    self.manager.stop()
+
+    def test_delegated_trojan_certificate_edit_stays_narrow_after_private_path_injection(self):
+        from app.api.inbounds import _prepare_inbound_edit
+        dns = self.issue_dns()
+        http = self.issue_http(domain='node.example.test')
+        for index, (identity, profile) in enumerate(((http, {}), (dns, {'server_name': 'node.example.test'}))):
+            with self.subTest(profile=profile), database.SessionLocal() as db:
+                stream = {'tls': {'enabled': True, 'server_name': 'node.example.test',
+                                  'certificate_path': '/private/old-cert', 'key_path': '/private/old-key'},
+                          'transport': {'type': 'ws', 'path': '/keep', 'headers': {'Host': 'front.example.test'}},
+                          'advanced_keep': {'literal': True}}
+                settings = {'users': [{'password': 'synthetic-trojan-secret'}]}
+                row = database.Inbound(id=900 + index, core='sing-box', protocol='trojan', port=11900 + index,
+                    settings=deepcopy(settings), stream_settings=deepcopy(stream), enable=True)
+                db.add(row); db.commit()
+                prepared, _ = _prepare_inbound_edit(row, {'certificate_id': identity, 'profile': profile},
+                                                     preserve_material_paths=True)
+                self.assertNotIn('profile', prepared)
+                self.assertEqual(prepared['stream_settings']['transport'], stream['transport'])
+                self.assertEqual(prepared['stream_settings']['advanced_keep'], {'literal': True})
+                self.assertEqual(prepared['stream_settings']['tls']['server_name'], 'node.example.test')
+                self.assertEqual(row.settings, settings)
+                self.assertEqual(row.stream_settings, stream)
 
 
 if __name__ == '__main__':

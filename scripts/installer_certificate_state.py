@@ -22,9 +22,12 @@ MAX_JSON = 65536
 MAX_CERTIFICATES = 512
 BINDING_COLUMNS = ('target', 'certificate_id', 'applied_certificate_id',
                    'applied_revision', 'error')
+BINDING_COLUMNS_V2 = BINDING_COLUMNS + ('server_name',)
 CERTIFICATE_COLUMNS = ('id', 'domain', 'email', 'environment', 'auto_renew',
     'revision', 'not_before', 'not_after', 'renew_at', 'retry_at',
     'last_attempt', 'failures', 'error', 'created_at')
+MODERN_CERTIFICATE_COLUMNS = CERTIFICATE_COLUMNS[:4] + ('method', 'wildcard', 'credential_id') + CERTIFICATE_COLUMNS[4:]
+MODERN_BINDING_LAYOUTS = (BINDING_COLUMNS_V2, BINDING_COLUMNS[:4] + ('server_name', 'error'))
 
 
 def require(condition, message='Invalid installer certificate state'):
@@ -42,7 +45,8 @@ def unique_object(pairs):
 
 def bounded_json(raw):
     require(type(raw) is str and len(raw.encode('utf-8')) <= MAX_JSON)
-    return json.loads(raw, object_pairs_hook=unique_object)
+    return json.loads(raw, object_pairs_hook=unique_object,
+        parse_constant=lambda _: require(False))
 
 
 def pointer_value(value):
@@ -52,7 +56,7 @@ def pointer_value(value):
     release_id(value['release_id'])
     if value['previous_id'] is not None:
         release_id(value['previous_id'])
-    require(len(json.dumps(value).encode('utf-8')) <= 16384)
+    require(len(json.dumps(value, allow_nan=False).encode('utf-8')) <= 16384)
     return value
 
 
@@ -90,7 +94,7 @@ def short_text(value, maximum, *, nullable=False):
 def state_value(value):
     require(type(value) is dict and set(value) == {
         'version', 'db_exists', 'ready', 'panel_binding', 'certificates', 'current_pointer'})
-    require(type(value['version']) is int and value['version'] == 1)
+    require(type(value['version']) is int and value['version'] in (1, 2))
     require(type(value['db_exists']) is bool and type(value['ready']) is bool)
     require(not value['ready'] or value['db_exists'])
     pointer_value(value['current_pointer'])
@@ -105,11 +109,14 @@ def state_value(value):
         seen.add(row[0])
     binding = value['panel_binding']
     if binding is not None:
-        require(type(binding) is list and len(binding) == 5 and binding[0] == 'panel')
+        require(type(binding) is list and len(binding) == (5 if value['version'] == 1 else 6) and binding[0] == 'panel')
         short_text(binding[1], 32)
         short_text(binding[2], 32, nullable=True)
         short_text(binding[3], 64, nullable=True)
         short_text(binding[4], 64, nullable=True)
+        if value['version'] == 2 and binding[5] is not None:
+            short_text(binding[5], 253)
+            require(domain_name(binding[5]) == binding[5])
         require(binding[1] in seen and (binding[2] is None or binding[2] in seen))
     require(value['ready'] or (binding is None and not certificates))
     return value
@@ -136,28 +143,78 @@ def email_address(value):
 
 
 def schema_ready(db):
-    objects = list(db.execute(
-        "SELECT name,type FROM sqlite_schema WHERE name IN (?,?)",
-        ('managed_certificates', 'certificate_bindings')))
-    if not objects:
+    objects = dict(db.execute("SELECT name,type FROM sqlite_schema WHERE name IN (?,?,?,?)",
+        ('managed_certificates', 'certificate_bindings', 'certificate_jobs', 'certificate_identity_schema')))
+    tables = ('managed_certificates', 'certificate_bindings')
+    if not any(name in objects for name in tables):
+        require('certificate_identity_schema' not in objects, 'Incomplete certificate database schema')
         return False
-    require(len(objects) == 2 and all(row[1] == 'table' for row in objects),
-            'Incomplete certificate database schema')
-    for table, expected in (('managed_certificates', CERTIFICATE_COLUMNS),
-                            ('certificate_bindings', BINDING_COLUMNS)):
-        columns = list(db.execute('PRAGMA table_info(' + table + ')'))
-        integers = {'not_before', 'not_after', 'renew_at', 'retry_at', 'last_attempt',
-                    'failures', 'created_at'}
-        require(tuple(row[1] for row in columns) == expected and columns[0][5] == 1
-                and all(row[2].upper().startswith(
-                    ('INTEGER',) if row[1] in integers else
-                    ('BOOLEAN',) if row[1] == 'auto_renew' else ('VARCHAR', 'TEXT'))
+    require(all(objects.get(name) == 'table' for name in tables), 'Incomplete certificate database schema')
+    layouts = {}
+    for table in tables:
+        columns = list(db.execute('PRAGMA table_xinfo(' + table + ')'))
+        names = tuple(row[1] for row in columns)
+        permitted = ((CERTIFICATE_COLUMNS, MODERN_CERTIFICATE_COLUMNS) if table == 'managed_certificates'
+                     else (BINDING_COLUMNS,) + MODERN_BINDING_LAYOUTS)
+        require(names in permitted and all(row[6] == 0 for row in columns)
+                and columns[0][5] == 1 and all(row[5] == 0 for row in columns[1:]),
+                'Unsupported certificate database schema')
+        integers = {'not_before', 'not_after', 'renew_at', 'retry_at', 'last_attempt', 'failures', 'created_at'}
+        require(all(row[2].upper().startswith(('INTEGER',) if row[1] in integers else
+                    ('BOOLEAN',) if row[1] in ('auto_renew', 'wildcard') else ('VARCHAR', 'TEXT'))
                     for row in columns), 'Unsupported certificate database schema')
         require(not list(db.execute('PRAGMA foreign_key_list(' + table + ')')),
                 'Unsupported certificate database foreign key')
         require(db.execute("SELECT count(*) FROM sqlite_schema WHERE type='trigger' AND tbl_name=?",
                            (table,)).fetchone()[0] == 0, 'Unsupported certificate database trigger')
+        layouts[table] = names
+    modern = layouts['managed_certificates'] == MODERN_CERTIFICATE_COLUMNS
+    require((layouts['certificate_bindings'] in MODERN_BINDING_LAYOUTS) == modern,
+            'Incomplete certificate database schema')
+    marked = 'certificate_identity_schema' in objects
+    require(marked == modern, 'Certificate identity schema marker mismatch')
+    if modern:
+        require(objects['certificate_identity_schema'] == 'table' and objects.get('certificate_jobs') == 'table')
+        marker = list(db.execute('PRAGMA table_xinfo(certificate_identity_schema)'))
+        require(len(marker) == 1 and marker[0][1] == 'version' and marker[0][2].upper() == 'INTEGER'
+                and marker[0][3] == 1 and marker[0][4] is None and marker[0][5] == 0 and marker[0][6] == 0
+                and list(db.execute('SELECT typeof(version),version FROM certificate_identity_schema')) == [('integer', 1)],
+                'Certificate identity schema marker mismatch')
+        marker_sql = db.execute("SELECT sql FROM sqlite_schema WHERE name='certificate_identity_schema'").fetchone()[0]
+        require(type(marker_sql) is str and not re.search(r'\bCHECK\s*\(', marker_sql, re.IGNORECASE),
+                'Certificate identity schema marker mismatch')
+        require(not list(db.execute('PRAGMA foreign_key_list(certificate_identity_schema)'))
+                and not list(db.execute('PRAGMA index_list(certificate_identity_schema)'))
+                and db.execute("SELECT count(*) FROM sqlite_schema WHERE type='trigger' AND tbl_name='certificate_identity_schema'").fetchone()[0] == 0)
+        rows = db.execute('SELECT id,domain,environment,method,wildcard,credential_id FROM managed_certificates').fetchmany(MAX_CERTIFICATES + 1)
+        require(len(rows) <= MAX_CERTIFICATES)
+        identities, ids = set(), set()
+        for identifier, domain, environment, method, wildcard, credential in rows:
+            require(type(identifier) is str and re.fullmatch('[a-f0-9]{32}', identifier)
+                    and identifier not in ids and domain_name(domain) == domain and environment in ('production', 'staging')
+                    and method in ('http-01', 'dns-01') and type(wildcard) is int and wildcard in (0, 1)
+                    and (method == 'http-01' and wildcard == 0 and credential is None
+                         or method == 'dns-01' and type(credential) is str and re.fullmatch('[a-f0-9]{32}', credential)))
+            identity = domain, environment, method, wildcard
+            require(identity not in identities); identities.add(identity); ids.add(identifier)
+        for target, desired, applied, sni in db.execute('SELECT target,certificate_id,applied_certificate_id,server_name FROM certificate_bindings'):
+            require(desired in ids and (applied is None or applied in ids))
+            require(sni is None or domain_name(sni) == sni)
+    # A rollback DELETE/UPSERT must not cascade into unrelated business rows.
+    # These are metadata reads only; never initialize or alter another table.
+    all_tables = db.execute("SELECT name FROM sqlite_schema WHERE type='table'").fetchmany(513)
+    require(len(all_tables) <= 512)
+    for (table,) in all_tables:
+        require(type(table) is str and len(table) <= 1024)
+        quoted = '"' + table.replace('"', '""') + '"'
+        require(not any(row[2] in ('managed_certificates', 'certificate_bindings', 'certificate_identity_schema')
+                        for row in db.execute('PRAGMA foreign_key_list(' + quoted + ')')),
+                'Unsupported certificate database foreign key')
     return True
+
+
+def has_server_name(db):
+    return any(row[1] == 'server_name' for row in db.execute('PRAGMA table_xinfo(certificate_bindings)'))
 
 
 @contextmanager
@@ -196,7 +253,7 @@ def run(command, root, *arguments):
         domain, email = domain_name(arguments[0]), email_address(arguments[1])
     with _maintenance_directory(root), stopped(root):
         pointer = current_pointer(root)  # Also reject unsafe current pointers before a write.
-        result = {'version': 1, 'db_exists': False, 'ready': False,
+        result = {'version': 2, 'db_exists': False, 'ready': False,
                   'panel_binding': None, 'certificates': [], 'current_pointer': pointer}
         with database(root, write=command != 'snapshot') as db:
             result['db_exists'] = db is not None
@@ -206,6 +263,7 @@ def run(command, root, *arguments):
                 require(len(rows) <= MAX_CERTIFICATES, 'Too many certificates for installer snapshot')
                 result['certificates'] = [list(row) for row in rows]
                 binding = db.execute('SELECT ' + ','.join(BINDING_COLUMNS)
+                    + (',server_name' if has_server_name(db) else ',NULL AS server_name')
                     + " FROM certificate_bindings WHERE target='panel'").fetchone()
                 result['panel_binding'] = list(binding) if binding is not None else None
             elif command == 'contact':
@@ -213,7 +271,8 @@ def run(command, root, *arguments):
                 result = {'updated': 0}
                 if ready:
                     result['updated'] = db.execute('UPDATE managed_certificates SET email=? '
-                        "WHERE domain=? AND environment='production'", (email, domain)).rowcount
+                        "WHERE domain=? AND environment='production'" +
+                        (" AND method='http-01' AND wildcard=0" if has_server_name(db) else ''), (email, domain)).rowcount
             elif command == 'restore' and state['ready']:
                 require(result['ready'], 'Certificate database unavailable for rollback')
                 for identifier, email in state['certificates']:
@@ -223,9 +282,22 @@ def run(command, root, *arguments):
                 if binding is None:
                     db.execute("DELETE FROM certificate_bindings WHERE target='panel'")
                 else:
-                    db.execute('INSERT INTO certificate_bindings (' + ','.join(BINDING_COLUMNS)
-                        + ') VALUES (?,?,?,?,?) ON CONFLICT(target) DO UPDATE SET '
-                        + ','.join(name + '=excluded.' + name for name in BINDING_COLUMNS[1:]), binding)
+                    columns = BINDING_COLUMNS_V2 if has_server_name(db) else BINDING_COLUMNS
+                    restored = list(binding)
+                    if state['version'] == 1 and len(columns) == 6:
+                        # v1 only described legacy HTTP identities; never erase
+                        # the literal SNI of a DNS certificate by guessing NULL.
+                        for identifier in (binding[1], binding[2]):
+                            if identifier is not None:
+                                row = db.execute('SELECT method,wildcard FROM managed_certificates WHERE id=?', (identifier,)).fetchone()
+                                require(row == ('http-01', 0), 'Legacy rollback cannot restore a DNS binding')
+                        restored.append(None)
+                    if state['version'] == 2 and len(columns) == 5:
+                        require(restored[5] is None, 'Legacy schema cannot preserve certificate SNI')
+                        restored = restored[:5]
+                    db.execute('INSERT INTO certificate_bindings (' + ','.join(columns)
+                        + ') VALUES (' + ','.join('?' for _ in columns) + ') ON CONFLICT(target) DO UPDATE SET '
+                        + ','.join(name + '=excluded.' + name for name in columns[1:]), restored)
             elif command == 'restore' and result['ready']:
                 # A first/unfinished install had no binding to preserve. Its
                 # failed bootstrap must not bind the restored configuration to

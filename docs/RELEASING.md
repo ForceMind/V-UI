@@ -6,6 +6,12 @@
 
 短入口随后经 PR139→dev、PR140→main 合入 `39181e0cdb9643422a19049df942b208f876faf4`。入口候选/dev/main各自完成九组/12 jobs；[实际 main 短命令验收42405651147](https://github.com/ForceMind/V-UI/actions/runs/42405651147)和[公开完整安装验收42405651162](https://github.com/ForceMind/V-UI/actions/runs/42405651162)分别通过。入口 SHA 不是应用发布源，不重新生成或重标22资产。完整版本证据见[本版记录](MAINTENANCE_SHARE_0422.md)。浏览器未验证。
 
+## v0.4.23候选状态
+
+当前源码候选为 **v0.4.23**，Cloudflare DNS-01、通配符、绑定与私有备份兼容源码及独立审查已收口。准确候选完整Actions、四目标、新装与所有旧版升级尚未收口；没有受保护分支合并、公开23、切换入口或生产升级授权。失败与未开始的运行记录见[候选契约](DNS01_CLOUDFLARE_CONTRACT.md#候选与验收状态)。
+
+此轮要求九组工作流、21个job：oneclick为一个producer、一个新装和八个公开旧版升级角色，共10个；每个角色与四目标材料必须属于同一准确source及当前run/attempt，不能借旧22的12-job例外或P1工具批次20-job绿灯取得资格。浏览器仍未验证，仅原固定浏览器步骤按已审策略保留明确skip。
+
 ## 版本、说明和兼容
 
 纯文档、协作模板及不改变产品行为的说明更正不提升应用版本。用户可见修复、API/数据契约或协议行为变化需要独立评估版本和迁移范围；在现有 `0.x.y` 体系内保持 `VERSION`、应用版本、安装器的当前版本示例和发布说明一致。不能以改文档版本代替真实产品发布。
@@ -31,9 +37,9 @@
 
 ## 开发中的并行验收模式
 
-P1源码提供一次构建、独立角色消费及attempt绑定，当前尚在其自身独审/Actions，不改变已公开22资格。详细[契约](PARALLEL_RELEASE_ACCEPTANCE.md)将文件身份和真实job/step分开；旧版本flag继续按原固定scope处理。
+P1提供一次构建、独立角色消费及attempt绑定，已在main `3606cad`完成自身九组/20 jobs、九份同producer收据和22个线上文件读回；应用版本没有因此重发，公开22资格与资产保持。安装[42457488310](https://github.com/ForceMind/V-UI/actions/runs/42457488310)的attempt1因旧19发布元数据HTTP403在安装前失败，整组同源码attempt2通过；不表示上游故障永久解决。详细[契约](PARALLEL_RELEASE_ACCEPTANCE.md)将文件身份和真实job/step分开；旧版本flag继续按原固定scope处理。
 
-未来新版本使用`--parallel-acceptance-no-browser`前，必须先完成产品冻结并提交`.github/release-acceptance.json`；该模式拒绝0.4.22及更早版本，不能重发22。已知公开稳定基线必须被真实升级矩阵覆盖，源码准备仅允许受限元数据/说明，所有角色、步骤、同源材料和四目标必须成功。通用flag不自动授予合并、公开或生产部署授权。
+23候选及后续版本使用`--parallel-acceptance-no-browser`前，必须先完成产品冻结并提交`.github/release-acceptance.json`；该模式拒绝0.4.22及更早版本，不能重发22。已知公开稳定基线必须被真实升级矩阵覆盖，源码准备仅允许受限元数据/说明，所有角色、步骤、同源材料和四目标必须成功。通用flag不自动授予合并、公开或生产部署授权。
 
 ## 发布资产
 
@@ -56,13 +62,20 @@ P1源码提供一次构建、独立角色消费及attempt绑定，当前尚在�
 
 只有这些检查成功后，才通过独立PR更新`setup.sh`的版本、真实`install.sh`字节SHA-256、完整`SHA256SUMS`字节SHA-256，以及`short-install.yml`的冻结公开产品源和直接合同。清单整文件摘要不等于某个ZIP或清单中一行的摘要。
 
-入口候选/dev/main须独立验收；PR和dev使用准确提交URL，main合并后另验实际可变的`main/setup.sh` URL。应用源与入口源分别记录，不因入口或文档推进而重建已公开套件。安装指南中的当前版本参数示例为：
+入口候选/dev/main须独立验收；PR和dev使用准确提交URL，main合并后另验实际可变的`main/setup.sh` URL。应用源与入口源分别记录，不因入口或文档推进而重建已公开套件。以下参数模板仅在**v0.4.23正式发布、完整资产和真实摘要均已核验后**使用，当前候选不要执行；摘要占位符必须换成该版独立核验的SHA256SUMS整文件摘要。目前的`main/setup.sh`仍锁定22，不能提前传入23参数：
 
 ```sh
-bash install.sh --version v0.4.22 --with-global-cli --interactive
+bash install.sh --version v0.4.23 --with-global-cli \
+  --kit-sha256 '<独立核验的SHA256SUMS整文件SHA-256>' --interactive
 ```
 
-这用于已明确授权的安装目标；贡献和发布准备不在本机执行安装。参数、已有安装和离线操作见[安装指南](INSTALLATION.md)。
+这需要先取得并核验该版受信安装器，且只用于已明确授权的安装目标；贡献和发布准备不在本机执行安装。参数、已有安装和离线操作见[安装指南](INSTALLATION.md)。
+
+## DNS数据的发行兼容门槛
+
+23不能仅凭普通TLS测试获得DNS资格：还需精确SAN/原子迁移、管理员与维护授权分界、冻结凭据修订及own-TXT清理、未知写入/人工确认、私有备份闭包和恢复后禁用、真实旧22 reader拒绝新kind、固定Certbot与Pebble双挑战，以及安装控制层的stdlib依赖闭包与旧DNS已应用材料复用。
+
+含DNS数据的备份为`backup-dns01-v1`、0600且未加密，旧22 reader在替换数据前拒绝。新restore保留auto_renew偏好但将profile禁用并标记待确认；不支持用不声明DNS读取能力的旧候选切换或回退。签发、材料/身份一致性、SNI、应用和公网连通分别取证，详见[DNS指南](DNS01_CLOUDFLARE.md)。
 
 ## 升级和恢复边界
 

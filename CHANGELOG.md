@@ -1,16 +1,21 @@
 # 变更日志
 
-## 未发布 — 文档与发布维护
+## 0.4.23 — Cloudflare DNS-01与通配符（源码候选，未发布）
 
-- 将当前用户手册、路线图、开发交接和完成记录同步至v0.4.22，旧阶段全文固定归档。
-- 完善贡献、安全、支持、社区交流和Issue/PR入口，整理发布与同源制品规则。
-- 纯文档批次，不改VERSION、安装器、应用、核心、生产配置或已有tag/资产；此批源码审查和Actions资格单独记录。
+- 新增管理员Cloudflare凭据、DNS单域/根域+一级通配符申请与续期，保存仅作Zone只读核对；实际连接域名/SNI显式填写。
+- 保留旧HTTP记录及全部ID/材料，三类身份同根共存。只换证书不改变协议、传输、UUID或未知字段，停止核心不自动启动。
+- 新增持久挑战清理、未知写入恢复及明确人工无残留确认，仅处理own TXT；维护授权不扩大DNS写权限。
+- DNS私有备份使用`backup-dns01-v1`（0600 ZIP、未加密），旧22 reader拒绝；恢复profile待管理员验证，auto_renew偏好保持，含DNS数据拒绝旧运行时回退。
+- 受支持升级复用有效DNS面板绑定的已应用旧revision；同ID待应用保留desired/error，不提升为生效；ID冲突或坏材料拒绝混用、不重签或改联系人。
+- 应用与安装兼容实现及独审已收口；当前准确候选的完整九组/21 jobs、四目标、新装和旧版升级资格待Actions。早期失败和未开始测试的下载504见[契约记录](docs/DNS01_CLOUDFLARE_CONTRACT.md#候选与验收状态)，不补记成功。
+- 当前公开稳定版、19项资产和短入口仍为22；未发布或部署23，Go迁移继续暂缓。
 
-### P1 并行验收与发布维护（开发中）
+## 开源与发布维护（已集成主线，不单独发布应用）
 
-- 新增仅标准库的kit身份校验、严格receipt及可选安全复制；不执行制品，不将文件身份等同于安装成功。
-- 核心及异常回归通过，phaseA真实producer兼容/隔离复制已在Actions验证；并行矩阵、逐角色收据、future policy与受管下游已实现源码，整合独审及其准确Actions待完成。
-- 当前22仍不创建新Release；未来policy不能复用旧22许可或覆盖旧资产，应用版本和生产配置保持。
+- P0整理用户入口、历史归档、贡献/安全/支持和协作模板；经PR141/142合入准确main59fc1cc，29线上文件读回匹配。
+- P1一次构建/独立安装角色、同source/run/attempt收据、四目标与未来policy已在main3606cad按九组/20 jobs收口，22个线上文件读回一致；不重发或覆盖公开22。
+- [oneclick42457488310](https://github.com/ForceMind/V-UI/actions/runs/42457488310)的attempt1因旧19元数据HTTP403在安装前失败，同源码整组attempt2通过；失败保留，不称限流永久修复。准确dev2bd6ed3的[90分钟受限回归](https://github.com/ForceMind/V-UI/actions/runs/42455561022)另验通过，不扩大为物理整机或24小时资格。
+- P0/P1阶段原文与边界分别保留在[固定文档提交](https://github.com/ForceMind/V-UI/blob/59fc1cce15df8da850dd0a13d58b4efe6879a6be/CHANGELOG.md)、[固定P1主线](https://github.com/ForceMind/V-UI/blob/3606cad/CHANGELOG.md)及[历史索引](docs/history/README.md)。
 
 ## 0.4.22 — 维护普通分享查询参数修复
 

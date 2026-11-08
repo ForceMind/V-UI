@@ -1,33 +1,30 @@
-# V-UI 0.4.22
+# V-UI 0.4.23
 
-## 用户改变
+**源码候选，未公开、未部署。** 当前公开稳定版仍是[v0.4.22](https://github.com/ForceMind/V-UI/releases/tag/v0.4.22)，应用源`558687a76cd29f4e4735284926eb05bf6664472e`、19项资产与短入口保持。23实现及独审已收口，准确候选的完整九组/21 jobs、四目标、新装和旧版保数据升级资格仍待完成。
 
-修复维护授权页面的普通分享请求带实例/内容修订条件时，被查询参数白名单错误拒绝为422的问题。既有分享端点现在接受这两个已支持的条件，继续在同一节点对象上核对实例及内容；旧无条件和仅实例条件调用保持兼容。
+## 候选用户改变
 
-未知、重复和含凭据的查询参数、权限不足及来源不匹配仍会拒绝。节点协议、UUID/密码、账户、订阅、证书、代理/中转开关、固定核心和安装器行为保持。
+- 证书页新增管理员Cloudflare DNS-01凭据、单域名或根域+一级通配符申请、续期与具体连接域名绑定。Token只写不显示，保存只核对Zone，不证明写权限。
+- 旧HTTP、DNS单域和DNS通配符可同根共存；证书身份/profile关联不可静默改变，续期保留具体SNI，换证书保留原协议、UUID、传输及未知字段，停止核心不自动启动。
+- 遗留验证记录可仅清理own TXT；未知写入不靠一次空查询假判成功，显式无残留核对记录为人工确认，不重签。
+- DNS私有备份含凭据、历史修订和journal，使用新kind`backup-dns01-v1`；0600 ZIP没有加密。恢复后profile禁用待验证，auto_renew偏好保持，旧会话/订阅/维护授权撤销规则保持。
 
-## 升级建议
+## 安装、升级和回退
 
-当前稳定版为[v0.4.22](https://github.com/ForceMind/V-UI/releases/tag/v0.4.22)。从旧版升级前先在授权的私有位置备份并核对恢复条件；沿用已有受管安装的升级入口，不删除数据库、材料或重新初始化账号。操作方法见[安装指南](INSTALLATION.md)和[受管操作](MANAGED_OPERATIONS.md)。
+DNS配置从已经安装、可管理员登录的面板开始。初装仍默认HTTP-01，需要80端口条件；本候选不提供绕过首次安装的新入口。通俗步骤见[DNS-01指南](DNS01_CLOUDFLARE.md)。
 
-本次没有新增产品数据迁移；既有迁移及恢复规则继续适用。真实安装已验证公开14/15/16/17/19/20/21到22的保数据升级，21已有的内容修订字段保持，较旧版本按原契约补齐派生字段。不能据此推断任意未知安装、损坏数据或任意更旧版本都已验收。
+受支持升级会复用有效DNS面板绑定的已应用旧revision，不重签或改联系人；同ID待应用状态保留期望值和错误，不晋升为已应用。期望/已应用ID冲突或材料损坏时拒绝混用。旧用户、节点、订阅、证书和代理设置保护继续保留。
 
-## 发布和入口证据
+含DNS数据不能使用旧运行时回退，真实旧22 reader会拒绝DNS新备份kind；受支持activate/restore/在线维护在切换前核对读取能力。不要改kind、删除数据库或移除材料来绕过。原维护授权可使用既有材料，未扩大为DNS凭据、签发/续期设置或清理权限。
 
-| 对象 | 准确身份和证据 |
-| --- | --- |
-| 正式应用 | source `558687a76cd29f4e4735284926eb05bf6664472e`；[发布流程42398527616](https://github.com/ForceMind/V-UI/actions/runs/42398527616)；[Release v0.4.22](https://github.com/ForceMind/V-UI/releases/tag/v0.4.22)，ID437741132 |
-| 应用验收 | 候选/dev/main各自九组/12 jobs、同源四目标、新装和七旧版升级通过；[main实际安装与升级42395305687](https://github.com/ForceMind/V-UI/actions/runs/42395305687) |
-| 短入口 | PR139→dev、PR140→main；入口main `39181e0cdb9643422a19049df942b208f876faf4` 自身及候选/dev九组/12 jobs通过，应用source保持558687a |
-| 公开入口安装 | [实际main短命令42405651147](https://github.com/ForceMind/V-UI/actions/runs/42405651147)；[完整安装42405651162](https://github.com/ForceMind/V-UI/actions/runs/42405651162) |
+## 实际证据与未完成项
 
-匿名读回已核tag/latest、19项资产digest、真实安装器/完整校验清单/发布元数据，旧21资产保持。全部产品构建与真实安装验收在GitHub Actions完成；新增回归经过实际维护授权/Bearer与ASGI/临时SQLite链路，没有以中间件mock代替授权检查。完整证据及早期失败保留在[本版记录](MAINTENANCE_SHARE_0422.md)。
+源码实现、三块应用及安装控制兼容独审已收口。早期单元/夹具错误和固定Pebble DNS传输假设失败均保留，工具下载HTTP504的两次运行未进入测试，不能补记通过。局部真实CA成功、失败流和旧reader拒绝也不能代替新版本准确全量资格。来源与运行链接集中在[契约记录](DNS01_CLOUDFLARE_CONTRACT.md#候选与验收状态)和[路线图](../ROADMAP.md)。
 
-## 已知限制
+候选、dev、最终main需各自重新核准确source、每workflow最新run/attempt、每job/step及同源材料。23尚未获公开发布、受保护分支合并或生产升级授权；短入口保持22，发布资格完整通过且获批准后才独立切换。
 
-- 浏览器未验证；非浏览器、合成、真实核心和安装结果不能替代视觉/交互或手机实机验收。
-- 有效中转仍按既有TCP边界执行，未扩大应用UDP/TUN或新增协议/平台支持，详见[兼容矩阵](COMPATIBILITY.md)。
-- 发布应用source与后续入口/文档提交不同；不要用入口SHA重新标记或覆盖22资产。
-- 服务或网络完全不可达时，远程维护API不能替代已授权的本机终端恢复；未知提交不自动重试。
+浏览器、真实Cloudflare账号、手机、物理512MiB整机与24小时稳定性未验证。有效中转UDP、XHTTP/HTTPUpgrade公开导出、固定核心和单上游边界不扩大，Go迁移继续暂缓。
 
-旧版本说明与当时的验收边界见[历史索引](history/README.md)，原发布说明可从[固定提交39181e0的全文](https://github.com/ForceMind/V-UI/blob/39181e0cdb9643422a19049df942b208f876faf4/docs/RELEASE_NOTES.md)读取。
+## v0.4.22历史全文
+
+上一版完整说明保留在[已收口文档提交59fc1cc](https://github.com/ForceMind/V-UI/blob/59fc1cce15df8da850dd0a13d58b4efe6879a6be/docs/RELEASE_NOTES.md)，原发布源说明见[固定应用提交558687a](https://github.com/ForceMind/V-UI/blob/558687a76cd29f4e4735284926eb05bf6664472e/docs/RELEASE_NOTES.md)。[维护分享发布记录](MAINTENANCE_SHARE_0422.md)保留其独立发布、入口与升级证据，旧资产不覆盖。

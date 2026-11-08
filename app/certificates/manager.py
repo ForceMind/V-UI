@@ -424,7 +424,9 @@ class CertificateManager:
         def loop():
             while not self.stop_event.is_set():
                 try:
-                    worked = self.process_once(); self.worker_error = None
+                    worked = self.process_once()
+                    if self.worker_error == 'WORKER_STORAGE_UNAVAILABLE':
+                        self.worker_error = None
                 except Exception:
                     worked = False; self.worker_error = 'WORKER_STORAGE_UNAVAILABLE'
                     logging.getLogger('vui.certificates').warning('Certificate worker storage unavailable')

@@ -1,5 +1,6 @@
 """Execute the real workflow gate against fake Git trees; never build or run root."""
 import contextlib
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -8,6 +9,9 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
+
+from scripts import low_resource_install_trace as install_trace
 
 
 SOURCE = Path(__file__).resolve().parents[1]
@@ -21,7 +25,7 @@ PROTECTED_PATHS = (
     'app', 'web', 'deploy', 'third_party', 'main.py', 'VERSION', 'install.sh',
     'requirements-runtime.txt', 'scripts/deploy.py', 'scripts/install_system.py',
     'scripts/build_bundle.py', 'scripts/platform_support.py',
-    'scripts/fetch_portable_runtimes.py', 'scripts/fetch_test_cores.py',
+    'scripts/fetch_portable_runtimes.py', 'scripts/fetch_test_cores.py', 'scripts/test_asset_download.py',
     'scripts/prepare_frontend.py', 'scripts/vendor_frontend.py',
 )
 PROTECTED_FILES = tuple(
@@ -369,6 +373,38 @@ class RootProvenanceTests(unittest.TestCase):
             self.assertEqual(fixture.python_calls()[0][0], 'scripts/build_bundle.py')
             self.assertIn('actual_product_delta:', fixture.log())
             self.assertIn('fixture builder stderr', fixture.log())
+
+
+class DownloadHelperProvenanceTests(unittest.TestCase):
+    """Synthetic Git command results only: never create or inspect a repository."""
+
+    def test_helper_is_in_workflow_and_trace_source_fingerprint(self):
+        helper = 'scripts/test_asset_download.py'
+        self.assertIn(helper, install_trace.PRODUCT_PATHS)
+        self.assertEqual(install_trace.PRODUCT_PATHS, PROTECTED_PATHS)
+        commit = 'a' * 40
+        tree = (b'100644 blob ' + b'b' * 40 + b'\t' + helper.encode() + b'\n')
+        with patch.object(install_trace.subprocess, 'check_output',
+                          side_effect=[commit.encode(), tree, tree, b'']) as command:
+            result = install_trace.product_provenance(Path('/synthetic-source'), commit)
+        self.assertEqual(result['product_git_entries_sha256'], hashlib.sha256(tree).hexdigest())
+        self.assertEqual(result['baseline_product_git_entries_sha256'], hashlib.sha256(tree).hexdigest())
+        self.assertEqual(result['tracked_file_count'], 1)
+        for call in command.call_args_list[1:]:
+            self.assertIn(helper, call.args[0])
+
+    def test_changed_or_missing_helper_cannot_receive_frozen_source_qualification(self):
+        commit = 'a' * 40
+        helper = b'\tscripts/test_asset_download.py\n'
+        original = b'100644 blob ' + b'b' * 40 + helper
+        unrelated = b'100644 blob ' + b'd' * 40 + b'\tmain.py\n'
+        for changed in (b'100644 blob ' + b'c' * 40 + helper, b''):
+            with self.subTest(changed=bool(changed)), patch.object(
+                    install_trace.subprocess, 'check_output',
+                    side_effect=[commit.encode(), original + unrelated, changed + unrelated]) as command:
+                with self.assertRaisesRegex(RuntimeError, 'outside the candidate scope'):
+                    install_trace.product_provenance(Path('/synthetic-source'), commit)
+                self.assertEqual(command.call_count, 3)
 
 
 class RootWorkflowSafetyTests(unittest.TestCase):

@@ -1,6 +1,8 @@
 # Cloudflare DNS-01 与通配符证书契约
 
-状态：2026-11-08设计草案；用户已选择Cloudflare首轮开发，尚未实现或取得签发资格。正式应用仍是v0.4.22。本阶段只开发、独审并在Actions使用假凭据/临时CA验收；不访问真实账号、修改真实DNS、替用户同意CA条款或部署生产。
+状态：2026-11-08，源码已进入 **v0.4.23** 候选。设计、应用三块及CLI/snapshot/安装控制兼容实现与独立审查已收口；准确新提交的完整九组/21 jobs、四目标、新装与全部公开旧版升级资格仍待Actions。公开稳定应用、19项资产与短入口仍是v0.4.22，不访问真实账号、修改真实DNS、替用户同意CA条款或部署生产。23未公开/未部署，受保护分支合并、发布与生产升级尚未授权。
+
+用户操作见[候选DNS指南](DNS01_CLOUDFLARE.md)。[首实现提交7e418b6的设计全文](https://github.com/ForceMind/V-UI/blob/7e418b6e10587e61efcecae290302dfd440a0b6a/docs/DNS01_CLOUDFLARE_CONTRACT.md)固定保留原阶段措辞；当前进度以[路线图](../ROADMAP.md)为准。
 
 ## 用户能做什么
 
@@ -46,7 +48,8 @@ DNS方式：
 | `PUT /api/certificates/dns-credentials/{id}` | 仅管理员；显式expected_revision与新api_token；原Zone身份保持，竞争修改拒绝，空值不删除；正在运行的任务使用原修订 |
 | `POST /api/certificates/dns-credentials/{id}/disable` | 仅管理员；expected_revision；禁用后拒绝新签发/续期，不删除材料、历史修订或已创建挑战的清理能力 |
 | `POST /api/certificates/dns-credentials/{id}/enable` | 仅管理员；expected_revision及显式确认，重新只读验证后启用；用于恢复后确认，不发起签发；替换Token本身不能隐式清除禁用/待恢复状态 |
-| `POST /api/certificates/dns-challenges/{id}/cleanup` | 仅管理员；expected journal/profile revision及明确cleanup-only确认；可选择同Zone当前修订，只清理原任务记录，不授予新签发 |
+| `POST /api/certificates/dns-challenges/{id}/cleanup` | 仅管理员；expected journal/profile revision及明确cleanup-only确认；可选择同Zone当前修订，返回202并由后台处理，只清理原任务记录，不授予新签发 |
+| `POST /api/certificates/dns-challenges/{id}/confirm-absence` | 仅管理员；相同修订条件及明确人工确认；有界只读核对后记录manual_confirmed，不当作自动清理或新签发 |
 | 原`POST /api/certificates` | 兼容旧payload，默认`method=http-01,wildcard=false`；DNS显式`method=dns-01,wildcard,credential_id`；HTTP带DNS字段或wildcard拒绝；首次申请仍需管理员本人接受条款 |
 
 首轮维护授权可读脱敏DNS证书状态、使用已签发材料和绑定。旧`certificates`授权不自动包含DNS写入：DNS证书的手动renew和auto-renew设置仅管理员可操作，HTTP维护行为保持；管理员明确开启的后台自动续期照常执行。不新增读取Token的API。未来委派DNS写入须另立scope和授权，不能静默扩展长期链接。
@@ -59,6 +62,7 @@ DNS方式：
 - 旧HTTP根域证书、新DNS单域、新DNS根域+通配符允许共存，各有ID；唯一身份为规范`domain/environment/method/SAN集合`，重复新建仍明确拒绝，不能原地转换旧ID。单个记录的method/SAN身份创建后不可变，旧revision按原身份验证。
 - SAN首轮只允许`[domain]`或`[domain,*.domain]`，规范排序/去重规则明确；接收证书的DNS SAN必须精确相同，重复、额外/缺失或其他类型SAN拒绝。CSR使用同一精确集合。仍检查密钥、时间和生产信任链，不关闭TLS验证。
 - 绑定保存literal SNI，校验SAN覆盖；面板只检查原origin的hostname受覆盖，不改origin/Host白名单/URL。续期保留具体节点SNI、desired/applied分离、手工材料路径保护及核心停止意图。
+- 安装升级遇到有效DNS面板绑定时复用已应用旧revision，不重签、不修改联系人。same-ID pending保留期望值、错误及已应用材料，不提升待应用版本；desired/applied证书ID冲突或坏材料拒绝混用。仅换证书保留原协议、传输、UUID与未知字段，停止核心不复活。
 - 任务开始冻结method、SAN、profile ID、凭据revision与job ID。保持原单worker/cross-process lease、队列上限、退避和签发/应用分离。DNS失败不回退HTTP、不选其他账号，不覆盖旧材料或applied版本。
 
 ## Cloudflare与挑战生命周期
@@ -85,9 +89,29 @@ auth/cleanup hook共用持久化journal。正常完成、验证失败、取消�
 
 恢复保留auto_renew偏好，但所有恢复的DNS profile进入“待管理员重新验证并启用”；避免备份复活曾禁用的旧Token并自动写DNS。待确认期间不签发/续期；仍保留旧证书/节点运行材料。恢复不会让已在Cloudflare撤销的Token重新有效，界面清楚说明；恢复后清理待办也先等待确认，不能先写远端再提示。
 
+## 候选与验收状态
+
+下面是已有提交的实际记录，不授予当前新候选资格。源码版本升为23后，需在新的准确source重跑完整九组/21 jobs；oneclick为一个构建、一个新装及公开14/15/16/17/19/20/21/22的八个升级角色，共10角色。所有role必须拥有自己的真实成功步骤和同producer/source/run/attempt收据，不能用步骤并集、旧skip或旧材料补齐。
+
+- [x] 设计、身份/材料/迁移、私有凭据、CF/journal、API/UI/绑定/备份及安装控制闭包源码完成。
+- [x] 应用三块及最终CLI/snapshot/安装控制兼容独审收口；早期夹具/allocator/安装错误及错误DNS传输假设已针对性修正并审查。
+- [ ] 新候选准确九组/21 jobs及每个必要step、依赖与真实固定核心资格。
+- [ ] 同提交四目标、新装、八旧版保数据升级和完整固定Certbot/Pebble/旧22 reader资格。
+- [ ] 受保护分支集成、公开23、独立短入口切换和生产升级；尚未取得相应授权。
+
+| 提交/运行 | 实际结果与边界 |
+| --- | --- |
+| `7e418b6e10587e61efcecae290302dfd440a0b6a`：[单元42463373691](https://github.com/ForceMind/V-UI/actions/runs/42463373691/job/128677267825) | 2903项、21个error、237个skip。旧夹具/allocator/安装兼容问题已修正并独审，历史失败不改判，不能称当前全组通过 |
+| 同提交：[ACME42463376913](https://github.com/ForceMind/V-UI/actions/runs/42463376913/job/128677277078) | 4case中3过：负向保留旧材料、错TLS/未知写不晋升及真实旧22 reader拒绝分别有证据。正向签发与新账户续期实际完成，但该case因错误UDP假设断言失败，整个运行仍失败 |
+| `d7073b8e7b39d0124e9d69c720cdc15331ca2c2e`：[ACME42465018106](https://github.com/ForceMind/V-UI/actions/runs/42465018106)、[loopback42465021149](https://github.com/ForceMind/V-UI/actions/runs/42465021149) | attempt1/2均在固定工具下载遇HTTP504，未进入新测试；不计真实CA、核心或整套资格通过 |
+
+固定官方Pebble2.10.1的custom resolver[明确使用TCP](https://github.com/letsencrypt/pebble/blob/v2.10.1/va/va.go#L128-L132)。本地夹具同时监听TCP/UDP不等于CA使用两种传输。修正后的实CA断言要求UDP=0、TCP至少4次且issue/renewal各至少2次；同owner双TXT、新账户重新认证、精确SAN和仅清理own ID均保留。此修正仍需新source实际运行，不冒称UDP回退或新case已通过。
+
+P1完成状态与90分钟受限回归是独立旧证据：main3606cad自身九组/20 jobs与九份同producer收据、22个线上文件读回完成；[安装42457488310](https://github.com/ForceMind/V-UI/actions/runs/42457488310)首次旧19元数据HTTP403后同源码整组attempt2通过，原失败保留。准确dev2bd6ed3的[90分钟回归42455561022](https://github.com/ForceMind/V-UI/actions/runs/42455561022)含面板/单核心各30分钟idle及1/10/50连接各10分钟，36,600请求零错误/无DIRECT，服务cgroup peak291,479,552字节（约278MiB）、无OOM；发生器/持续客户端/目标在cgroup外。这不是160MiB空闲RSS、物理512MiB整机或24小时资格，也不授予23资格。
+
 ## 分工与必要验收
 
-实现按三个相接模块推进：身份/迁移/材料、凭据/Cloudflare/journal、API/UI/任务与绑定/备份集成；后由未参与实现者独审。只提交本批文件，不升级Go、核心pin或任意协议能力。
+实现按三个相接模块完成并已由未参与实现者独审：身份/迁移/材料、凭据/Cloudflare/journal、API/UI/任务与绑定/备份集成；安装控制兼容另审。只提交本批文件，不升级Go、核心pin或任意协议能力。
 
 Actions的最小证据：旧HTTP fixture迁移及重复/损坏/失败回滚；同根三类证书共存；根域+通配符精确SAN/错误SAN/错误CA/错误key；sing-box及Xray具体子域绑定与续期SNI不变/停止核心不启动；假Cloudflare多TXT共存、错归属、创建结果未知、删除失败、取消和重启清理、轮换冻结；Token不出API/argv/日志/普通导出；管理员/维护者/混合认证边界；私有备份恢复和恢复后禁用；固定Certbot通过本地CA实际双挑战；四目标构建、新装及所有旧版保数据升级。无真实Cloudflare签发、无浏览器、无真实512MiB整机/24小时结论。公开发布、入口切换及生产升级另核明确授权。
 
