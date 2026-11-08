@@ -383,7 +383,7 @@ class ServeBootOrderTests(unittest.TestCase):
             namespace = dict(argparse=argparse, Path=Path, os=fake_os, ipaddress=__import__('ipaddress'),
                 urlsplit=__import__('urllib.parse', fromlist=['urlsplit']).urlsplit,
                 supported_environment=lambda: None, private_root=lambda value: root,
-                lease=held, data_owner=held, active_verified=active, target_arch=lambda: 'x86_64',
+                lease=held, data_owner=held, core_update_pending=lambda: False, active_verified=active, target_arch=lambda: 'x86_64',
                 private_file=lambda value: Path(value), ReleaseError=ValueError,
                 __file__=str(payload / 'app/serve.py'), __builtins__=builtins)
             exec(compile(ast.Module(body=[function], type_ignores=[]), str(SOURCE), 'exec'), namespace)

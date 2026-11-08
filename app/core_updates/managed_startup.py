@@ -157,10 +157,19 @@ class ManagedHTTPGate:
     """No public/Root HTTP exception: independent Root TLS plus private probe."""
     def __init__(self,app):self.app=app
     async def __call__(self,scope,receive,send):
-        session=current()
-        if session is not None and not (type(session) is ManagedStartup and session.released):
+        if scope['type'] not in ('http','websocket'):
+            await self.app(scope,receive,send)
+            return
+        from app.data_owner import core_update_pending
+        try:
+            pending=core_update_pending()
+            session=current()
+            blocked=pending or session is not None and not (type(session) is ManagedStartup and session.released)
+        except Exception:
+            blocked=True
+        if blocked:
             if scope['type']=='http':
-                body=json.dumps({'detail':'受管启动正在等待验证完成'},ensure_ascii=False,separators=(',',':')).encode()
+                body=json.dumps({'detail':'核心维护或受管启动正在等待验证完成'},ensure_ascii=False,separators=(',',':')).encode()
                 await send(dict(type='http.response.start',status=503,headers=[
                     (b'content-type',b'application/json'),(b'content-length',str(len(body)).encode()),(b'cache-control',b'no-store')]))
                 await send(dict(type='http.response.body',body=body));return

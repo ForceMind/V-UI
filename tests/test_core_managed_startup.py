@@ -150,6 +150,64 @@ class ManagedScopeNegativeTests(unittest.TestCase):
             self.assertIsNone(m.current())
 
 
+class ServeOwnershipTests(unittest.TestCase):
+    def setUp(self):
+        from app import serve
+        self.serve=serve;self.stack=__import__('contextlib').ExitStack();self.addCleanup(self.stack.close)
+        root=Path(self.stack.enter_context(tempfile.TemporaryDirectory(prefix='vui-serve-gate-'))).resolve()
+        self.root=root;self.data=root/'data';self.data.mkdir(mode=0o700)
+        argv=['serve','--root',str(root),'--origin','https://panel.example.test:8443']
+        self.stack.enter_context(patch.object(sys,'argv',argv))
+        self.stack.enter_context(patch.dict(os.environ))
+        self.stack.enter_context(patch.object(serve,'supported_environment'))
+        self.stack.enter_context(patch.object(serve,'target_arch',return_value='x86_64'))
+        auth=types.SimpleNamespace(configured_origin=lambda:'https://panel.example.test:8443')
+        self.stack.enter_context(patch.dict(sys.modules,{'app.middleware.auth':auth}))
+        self.verified=self.stack.enter_context(patch.object(serve,'active_verified'))
+    def test_ordinary_serve_refuses_real_offline_lease_before_verifying_payload(self):
+        errors=[]
+        def attempt():
+            try:self.serve.run()
+            except BaseException as error:errors.append(error)
+        with owners.data_owner(self.data,exclusive=True):
+            thread=threading.Thread(target=attempt);thread.start();thread.join(timeout=3)
+        self.assertFalse(thread.is_alive());self.assertEqual(len(errors),1)
+        self.assertIsInstance(errors[0],owners.DataOwnerError);self.verified.assert_not_called()
+        self.assertEqual(list(self.data.iterdir()),[])
+    def test_restore_marker_created_inside_panel_lease_refuses_before_verifying(self):
+        original=self.serve.lease
+        @contextmanager
+        def lease(path):
+            with original(path):
+                (self.root/'RESTORE_PENDING.json').write_bytes(b'crash marker')
+                yield
+        with patch.object(self.serve,'lease',side_effect=lease),self.assertRaises(owners.DataOwnerError):
+            self.serve.run()
+        self.verified.assert_not_called();self.assertEqual(list(self.data.iterdir()),[])
+    def test_core_pending_during_verification_does_not_promote_ordinary_startup(self):
+        release=self.root/'releases/fake';(release/'payload/app').mkdir(parents=True,mode=0o700)
+        pending=self.root/'CORE_UPDATE_PENDING.json'
+        def verified(root):
+            pending.write_bytes(b'late Root marker')
+            return release,{},dict(source_commit=APP),dict(runtime_key=TARGET)
+        self.verified.side_effect=verified
+        with patch.object(owners,'_CORE_UPDATE_PENDING',pending), \
+                patch.object(self.serve,'__file__',str(release/'payload/app/serve.py')), \
+                patch.object(m,'try_claim') as claim, \
+                self.assertRaisesRegex(self.serve.ReleaseError,'Maintenance began'):
+            self.serve.run()
+        claim.assert_not_called();self.assertTrue(pending.exists());self.assertEqual(list(self.data.iterdir()),[])
+    def test_initially_pending_startup_cannot_fall_back_if_root_claim_disappears(self):
+        release=self.root/'releases/fake';(release/'payload/app').mkdir(parents=True,mode=0o700)
+        self.verified.return_value=(release,{},dict(source_commit=APP),dict(runtime_key=TARGET))
+        (self.root/'RESTORE_PENDING.json').write_bytes(b'pending marker')
+        with patch.object(self.serve,'__file__',str(release/'payload/app/serve.py')), \
+                patch.object(m,'try_claim',return_value=None), \
+                patch.object(self.serve,'data_owner',side_effect=AssertionError('no ordinary fallback')), \
+                self.assertRaisesRegex(self.serve.ReleaseError,'Maintenance state changed'):
+            self.serve.run()
+
+
 class GateTests(unittest.TestCase):
     def test_all_http_routes_stay_closed_for_unreleased_or_forged_flag_and_websockets(self):
         async def call(scope,receive,send):await send(dict(type='http.response.start',status=204,headers=[]))

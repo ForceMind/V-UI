@@ -7,7 +7,7 @@ from pathlib import Path
 import ssl
 import sys
 from urllib.parse import urlsplit
-from app.data_owner import data_owner
+from app.data_owner import data_owner, core_update_pending
 from app.release_tools import ReleaseError, active_verified, lease, private_root, supported_environment, target_arch
 
 
@@ -38,7 +38,12 @@ def run() -> None:
     origin=configured_origin()
     if not origin.startswith('https://') or (urlsplit(origin).port or 443) != args.port:
         raise ReleaseError('Direct HTTPS origin and listening port must match')
+    # Ordinary startup keeps its early real ownership barrier. Only an
+    # already-pending startup may postpone that lease for a native Root claim.
+    pending_on_entry = os.path.lexists(root/'RESTORE_PENDING.json') or core_update_pending()
     with lease(root/'.panel.lease'), ExitStack() as lifetime:
+        if not pending_on_entry:
+            lifetime.enter_context(data_owner(root/'data'))
         release,_,manifest,ready=active_verified(root); payload=release/'payload'
         if Path(__file__).resolve().parents[1] != payload.resolve():
             raise ReleaseError('Selected release changed; rerun the active release command')
@@ -47,12 +52,14 @@ def run() -> None:
             raise ReleaseError('Data directory must be owned by service user with mode 0700')
         os.environ.update(VUI_DATA_DIR=str(data),VUI_BIN_DIR=str(payload/'cores'/target_arch()),VUI_RELEASE_ROOT=str(root))
         from app.core_updates import managed_startup
-        managed=managed_startup.try_claim(root,release,manifest,ready)
-        if managed is None:
-            if os.path.lexists(root/'RESTORE_PENDING.json'):
-                raise ReleaseError('Interrupted restore requires recover-restore')
-            lifetime.enter_context(data_owner(data))
+        managed=None
+        if not pending_on_entry:
+            if os.path.lexists(root/'RESTORE_PENDING.json') or core_update_pending():
+                raise ReleaseError('Maintenance began during ordinary startup; restart through the managed controller')
         else:
+            managed=managed_startup.try_claim(root,release,manifest,ready)
+            if managed is None:
+                raise ReleaseError('Maintenance state changed before authorization; restart through the managed controller')
             lifetime.callback(managed_startup.clear,managed)
             data_lifetime=lifetime.enter_context(ExitStack())
             lifetime.callback(managed.close)

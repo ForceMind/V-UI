@@ -552,3 +552,14 @@ managed路径要求现有SQLite文件和精确state2/config/选择意图，不�
 作用域退出先失效再关FD，丢close ack和FD数复用不能复活旧proof。独审复现过inflight缺陷：验证线程在祖先FD清理时暂停，owner退出并释放锁后仍返回成功。现验证结束后再核latch/PID，将最后生命周期读定义为线性化点，原回归已从实际红例转绿；不承诺返回后的未来持有，Root协调器必须先结束并join全部broker回调，再退出此scope。
 
 十项临时文件/实际flock与明确fake Root metadata测试在两Python通过；默认旧锁回归另验。当前仅提供安装锁这一份实际证明，还未接daemon核心任务，不能代替worker的operation proof、服务quiescence、三阶段释放或真实Root安装验收。
+
+
+## M16 普通运行准入与启动互斥回归
+
+固定 `/etc/v-ui/CORE_UPDATE_PENDING.json` 只要存在（含无效内容、目录、断链）或检查失败，就在取得真实SH后拒绝新的普通data_owner；不读取phase或把env/布尔当许可。已准入操作可完成，真实EX及同PID/线程借用保持；private native scope仍是唯一受管SH例外。所有HTTP/WS即使尚无managed上下文或上轮已released也会在新pending时关闭，检查异常failclosed，lifespan直通。准入竞态的DataOwnerError统一中文503，无私密异常回显。普通离线Root管理入口的全量pending/兼容守卫仍须接后续任务，不能从本节推定所有入口已完成。
+
+新私有data staging在M13 `_validate_data` 整段持真实EX，DNS/proxy共享读取只借其实际open-file description；sibling lease位于data外，不入ZIP，source live data仍需调用方实际EX。CORE pending下仅传fake stopped flag的live快照会拒绝；实际EX下DNS/active proxy/state2容器创建、预检和原bytes保持已作临时文件验证，未向调用者留下SH绕过能力。
+
+d128a58自身[主单元42528797556](https://github.com/ForceMind/V-UI/actions/runs/42528797556)的3410项出现1fail/1error（原239skip）：普通启动把active_verified放到data_owner前，破坏两条既有早期排他断言。现普通路径先取得真实SH再校验；只有入口已pending才走verify→Root claim→私有SH，普通验证期间新pending不提升为managed，初始pending消失也不回落。旧test_data_owner断言原样保留，新增四项实际serve/tempflock负例在本机验证，但旧两项的完整Linux回归须新源Actions；不以本机模拟替代。
+
+新增准入十一项、启动负例四项，连同M15十项与既有合同，当前完整driver为406项，两Python实际执行无skip。首次整组曾因原AST夹具未注入新只读helper、Root元数据夹具将真实/tmp1777带入非writable生产前提而失败，3.12错误打印另缺st_mtime；现仅补正常无pending的AST依赖、完整stat属性及fixture外祖先的明确fake Root/nonwritable元数据。fixture内真实bad mode/owner/link断言及生产Root规则保持，原失败保留。真正Root固定socket/systemd、不同核心切换与故障恢复仍待后续Actions。

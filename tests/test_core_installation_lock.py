@@ -22,13 +22,20 @@ class InstallationLockProofTests(unittest.TestCase):
         self.root.chmod(0o700);self.parent=self.root/'locks';self.parent.mkdir(mode=0o700)
         self.path=self.parent/'install.lock';self.path.write_bytes(b'unchanged original lock');self.path.chmod(0o600)
         self.bad_owner=set();self.fstat=os.fstat;self.stat=os.stat
+        ancestors={(p.stat().st_dev,p.stat().st_ino) for p in self.root.parents}
         def fake_root(info):
-            fields=('st_dev','st_ino','st_mode','st_uid','st_gid','st_nlink','st_size','st_mtime_ns','st_ctime_ns')
-            values={name:getattr(info,name) for name in fields}
-            values['st_uid']=99 if (info.st_dev,info.st_ino) in self.bad_owner else 0
+            values={name:getattr(info,name) for name in dir(info) if name.startswith('st_')}
+            identity=(info.st_dev,info.st_ino)
+            values['st_uid']=99 if identity in self.bad_owner else 0
+            if identity in ancestors:
+                # Simulate the non-writable fixed production ancestors even
+                # when the host temporary directory itself is /tmp (1777).
+                # Modes inside this test-owned tree remain actual, including
+                # the deliberately unsafe parent/file mode negative cases.
+                values['st_mode'] &= ~0o022
             return types.SimpleNamespace(**values)
-        # This is only metadata simulation; all open/noFollow/flock/close calls
-        # remain actual kernel operations on these private unprivileged files.
+        # Root ownership / outer ancestor modes are explicit fake metadata;
+        # open/noFollow/flock/close and all modes in the fixture remain real.
         stack.enter_context(patch.object(ops,'INSTALL_LOCK',self.path))
         stack.enter_context(patch.object(ops.os,'fstat',side_effect=lambda fd:fake_root(self.fstat(fd))))
         stack.enter_context(patch.object(ops.os,'stat',side_effect=lambda *args,**kwargs:fake_root(self.stat(*args,**kwargs))))

@@ -93,13 +93,19 @@ def _data_format(data, kind):
 
 
 def _validate_data(data, kind, closure, *, anchor):
-    _data_format(data, kind)
-    migration = _data_bindings(data, closure, anchor=anchor)
-    if (data/'.proxy-state-initialized').exists():
-        tools._validate_restore_policy(data, _artifact_ids={core:closure.intents[core]['artifact_id'] for core in s.CORES})
-        # The shared old checker owns this newly created private staging lock.
-        (data/'.proxy-state.lock').unlink()
-    return migration
+    from app.data_owner import data_owner
+    # Only this newly created private staging tree is leased here. Shared DNS/
+    # proxy reads borrow its actual EX open-file description in this thread;
+    # ordinary live SH callers stay blocked by CORE/RESTORE pending. The sibling
+    # lease is outside data/ and therefore never part of the data snapshot ZIP.
+    with data_owner(data, exclusive=True):
+        _data_format(data, kind)
+        migration = _data_bindings(data, closure, anchor=anchor)
+        if (data/'.proxy-state-initialized').exists():
+            tools._validate_restore_policy(data, _artifact_ids={core:closure.intents[core]['artifact_id'] for core in s.CORES})
+            # The shared old checker owns this newly created private staging lock.
+            (data/'.proxy-state.lock').unlink()
+        return migration
 
 
 def create(guard, destination, *, core_backup, selection, intents, panel_was_running):

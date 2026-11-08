@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.staticfiles import StaticFiles
 from app.api import auth, maintenance, certificates, cores, files, inbounds, management, mihomo_preview, proxy, proxy_diagnostics, proxy_exports, routing, security, singbox, subscription, subscriptions, system, xray
-from app.data_owner import data_owner
+from app.data_owner import DataOwnerError, data_owner
 from app.core_updates import managed_startup
 from app.models.database import DB_PATH, init_db
 from app.middleware.auth import AdminAuthMiddleware, configured_origin
@@ -40,6 +40,11 @@ app.include_router(singbox.router,prefix='/api/singbox',tags=['Sing-box'])
 app.include_router(auth.router,prefix='/api/auth',tags=['Auth'])
 app.include_router(security.router,prefix='/api/security',tags=['Security'])
 app.include_router(files.router,prefix='/api/files',tags=['Files'])
+
+@app.exception_handler(DataOwnerError)
+async def data_admission_refused(request: Request,exc: DataOwnerError):
+    return JSONResponse({'detail':'数据正在维护或恢复中，请稍后重试'},status_code=503,
+                        headers={'Cache-Control':'no-store'})
 
 @app.exception_handler(RoutingStorageError)
 async def invalid_routing_storage(request: Request,exc: RoutingStorageError):
