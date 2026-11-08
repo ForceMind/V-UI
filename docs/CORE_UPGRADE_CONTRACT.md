@@ -1,6 +1,6 @@
 # P3 核心独立升级与回滚契约草案
 
-状态：设计独审通过；当前完成制品校验、不可变准备/读取、官方组件客户端与纯选择计划源码及合成回归，完整核心升级/回退尚未实现或验收。代码事实核对基线为4bd1d9a648a8096fbf2fa05314e35049a2408e7c。它不属于当前DNS候选PR145，不改变当前公开22、23发布门禁、核心pin或服务器。
+状态：设计独审通过；当前完成制品校验、不可变准备/读取、官方组件客户端、纯选择计划与离线受信缓存源码及合成回归，完整核心升级/回退尚未实现或验收。代码事实核对基线为4bd1d9a648a8096fbf2fa05314e35049a2408e7c。它不属于当前DNS候选PR145，不改变当前公开22、23发布门禁、核心pin或服务器。
 
 本阶段来自ROADMAP的已批准P3；Go迁移继续暂缓。契约已完成独审，制品校验作为独立实现首块；后续选择、备份闭包、切换和RPC继续分块实现与审查。首测版本已列明，仅核元数据；制品和兼容资格尚未取得，不能把本草案称为核心已可升级。
 
@@ -94,7 +94,7 @@ OpenRC明确仅状态/准备；不提供未经资格的自动切换/回退，不
 
 ## 当前状态与下一步
 
-以上选择已完成设计独审。M0制品校验23项、M1不可变准备/读取25项、M2官方客户端29项、M3纯选择计划17项合成回归均通过实际Python3.9.6/3.12检查及增量独审；初轮macOS临时目录别名和归档成员卷号漏检均已修正并定点复核。已实现的存储仅准备和回读制品，客户端只由虚构传输测试，选择模型只产出计划；root选择持久化、运行时接入、受管切换、备份闭包和RPC仍未实现，真实网络/核心与四目标资格及公共组件Release未取得，不能把这些原语称为完整核心升级。P2的准确提交资格与外部下载失败仍独立记录，不能用P3结果补齐。
+以上选择已完成设计独审。M0制品校验23项、M1不可变准备/读取25项、M2官方客户端29项、M3纯选择计划17项、M4受信catalog缓存24项合成回归均通过实际Python3.9.6/3.12检查及增量独审；初轮macOS临时目录别名和归档成员卷号漏检均已修正并定点复核。已实现的存储仅准备/回读制品及曾认证的受信上下文，客户端只由虚构传输测试，选择模型只产出计划；root选择持久化、运行时接入、受管切换、备份闭包和RPC仍未实现，真实网络/核心与四目标资格及公共组件Release未取得，不能把这些原语称为完整核心升级。P2的准确提交资格与外部下载失败仍独立记录，不能用P3结果补齐。
 
 受保护分支合并、组件或应用tag/Release公开发行、短入口变更和真实主机部署均须在具体成果可审阅后取得对应明确授权；当前没有这些P3授权，也未执行。新签名密钥、Secrets或额外权限不能从普通开发授权推断。
 
@@ -297,3 +297,61 @@ caller必须先以O_EXCL独占新建空0600、regular单link、owner=euid的私�
 - 计划包装与选择结构分离；encode拒绝直接编码SelectionPlan，但其after值可为journal编码。结构或编码本身不证明已提交，备份必须读取实际最后确认的live值或prepared journal的原确认快照，不能把plan.after或pending当成已确认备份。CoreRuntime的revision/enabled与停止意图仍归原运行时和后续独占停机快照管理，本模型不写这些偏好。
 
 代码入口：app/core_updates/selection.py；初始纯数据规则在实际Python3.9.6与3.12各17项回归通过，覆盖CAS/ABA、无操作、双core隔离、上一材料精确性、应用/目标/引用字段与无自授信。新app/root文件与运行时集成、真实切换和恢复尚未由此得到资格。
+
+## M4独立可信catalog：离线读与fresh来源持久化
+
+`app/core_updates/catalog.py`只持久化曾经独立认证的组件上下文，供离线启动/回退给M1.read提供authority与tag_source。它不写artifact store、selection、服务、用户data、备份或运行时，不含GC、用户action授权、token、nonce、approved/fresh布尔。缓存也不是官方状态实时未撤销的证明。
+
+```python
+catalog = CoreCatalog()  # 生产固定 /etc/v-ui/core-catalog
+# record写门禁在网络client构造和一切FS创建之前；生产须实际euid0。
+recorded = catalog.record(candidate, app_source=exact_app_source,
+                          deadline=monotonic_deadline, stop=cancel_event.is_set)
+# 可复用受信caller已有的默认M2 client；测试仅注入真实M2+fake opener。
+recorded = catalog.record(candidate, app_source=exact_app_source, client=trusted_m2_client)
+# read没有client参数、不会初始化client，也不会触发网络或缺失记录初始化。
+entry = catalog.read(manifest_sha256, app_source=exact_app_source)
+# 返回字段可作为M1.read的独立预期，不能从待验artifact/TRUST取得这些值。
+artifact = artifact_store.read(entry.manifest_sha256,
+    authority=entry.authority, expected_tag=entry.authority.tag,
+    expected_builder_source=entry.tag_source, app_source=exact_app_source,
+    target=trusted_host_target)
+```
+
+返回`CatalogEntry(authority,tag_source,verified_release,manifest,checksums,reused)`，`manifest_sha256`从VerifiedRelease得到。小材料原字节不在repr中显示。caller必须从已验应用release取得当前精确app_source，而非从备份或用户输入猜测。
+
+### 来源门禁不是对象类型声明
+
+Candidate是公开dataclass，类型、字段或M0格式正确不能证明其来自刚完成的官方API。record默认在UID门禁之后才创建安全的M2 GitHubCoreClient；传入client也必须是真实M2类，生产受信caller不提供用户transport/URL/token。每次record包括same-ID重入均强制M2 fresh recheck，并重新M0验证**本次给定**app_source，不能只相信candidate.verified_release。普通JSON、backup字典、任意回调、`fresh=True`不是合法入口。真实M2复核失败时在任何catalog创建之前拒绝，原live记录也不改变。
+
+如果备份携带的字节在调用者明确执行官方fresh复核后恰好匹配，它们已被重新认证，而非以备份自授信；没有fresh API或独立既有live记录时不得seed。record没有离线跳过门禁或自动导入功能。deadline/stop转交M2做其已声明的IO/检查点控制；它仍不替代上层独立worker对网络和FS阻塞的硬生命周期预算。
+
+root本来具有任意文件写入与Python对象修改能力，本模块不声称防御恶意root。live信任入口由固定root路径、受信代码、fresh record流程和文件权限共同保护，不能用一个包内checksum、自签对象或来源布尔替代它；动作是否获用户授权仍由独立上层授权检查决定。
+
+### 三文件不可变目录
+
+固定布局为`/etc/v-ui/core-catalog/<CORE-RELEASE.json完整SHA256>/`，精确含：
+
+| 文件 | mode/owner | 校验与含义 |
+| --- | --- | --- |
+| CONTEXT.json | 0644/root | 严格schema1/kind=core-catalog-v1、normalized六资产authority和独立tag_source40 |
+| CORE-RELEASE.json | 0644/root | 原API asset digest绑定字节，拒绝重序列化改变外部摘要 |
+| SHA256SUMS | 0644/root | 原完整table字节及M0精确五行关系 |
+
+CONTEXT.json精确为`{schema:1,kind:"core-catalog-v1",authority:<M0规范上下文>,tag_source:<可信tag-ref commit40>}`，不存原API任意body或artifact里的TRUST。每文件≤64,000字节，总材料≤192,000字节，无base64、额外自hash表或摘要循环。normalized authority写入时按asset name排序；读取可容忍JSON key/asset纯序列化顺序，但same-ID record的实际authority/tag_source/原材料身份漂移必须拒绝覆盖。
+
+父目录、catalog根及每记录目录为root所有0755；逐层dirfd/no-follow核祖先root所有且不可由组/其他人写，文件regular单link，模式/大小/FD与路径身份前后稳定。read完全offline、不打开0600写锁或0700 staging，允许非root读取这些root-owned0644材料。它从这个独立live目录取得authority/tag_source，再M0重验当前app_source、manifest ID及四目标；不读取data、artifact/TRUST或backup作为信任后备。缺失返回固定CATALOG_MISSING，坏/未知闭包拒绝，不创建或修复。
+
+此处选择小闭合目录而非单个base64 JSON：两份64KB材料base64会使单JSON约175KB并需要新的大JSON decoder；三文件可直接复用M0小JSON边界和M1整目录原子语义，避免新增不必要的编码/发布框架。
+
+### 发布、回读与失败
+
+独立`prepare.lock`为root0600空regular单link，非阻塞独占flock；`.staging/`为root0700。仅在fresh认证与M0验证完成后才建立必要路径，复用已审M1 `_Scope`、`_Stage`、`_rename_new`，不重构M1。随机自建private namespace中写三文件、校大小/摘要/mode/owner并逐项fsync，经完整M0/闭包read-back后以native no-replace原子发布整目录，fsync父目录并公共回读后返回。
+
+同manifest ID已存在时只完整验证并复用；残缺、篡改、额外文件、错误mode/owner/link或身份变化都拒绝，不采用空目录、不覆盖修复、不删旧记录。同ID并发最多一次新发布，另一个只能完整复用或固定busy失败；它不是selection CAS。
+
+native primitive缺失或FS不支持时固定UNSUPPORTED，不回退覆盖式rename。发布后fsync/回读/确认失败保留公共记录并报失败，绝不借已移动的FD删除公共目录；caller下次必须显式完整复核。只清理本次确知自建private对象，碰撞/外来对象不删除；首项清理或close失败仍尝试其余自有对象，所有异常不返回成功。只读/写入错误均固定诊断，不echo任意body/URL/path。
+
+`Layout/owner/anchor`复用M1的受信内部临时测试seam，不成为用户/env参数；生产入口使用固定默认路径。standalone根控制加载仍须显式预载pathless受信namespace中的M0/M1/M2/catalog，不从cwd、data或用户payload查找模块，无ImportError fallback。
+
+backup恢复缺独立live catalog时，上层必须在停止或替换data前明确从固定官方API重新认证并record，或拒绝并提示先准备所需核心。M4不把备份内CONTEXT/manifest/table复制成live authority，也不恢复旧任务权限或generation。本块仅puretemp/M2 fake与实际Python解释器测试；Linux/musl原生发布、真实官方组件、独立worker硬预算，以及选择/启动/回退/备份/RPC集成仍待各自Actions资格。

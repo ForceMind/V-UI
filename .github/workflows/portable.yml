@@ -22,6 +22,7 @@ jobs:
           SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
+          python -B scripts/check_core_update_contracts.py
           mkdir -p /tmp/vui-portable
           python scripts/build_bundle.py /tmp/vui-portable/vui-linux-aarch64-gnu.zip --source-commit "$SOURCE" --target aarch64-gnu
           SHA="$(cut -d' ' -f1 /tmp/vui-portable/vui-linux-aarch64-gnu.zip.sha256)"
@@ -62,6 +63,7 @@ jobs:
               apk add --no-cache python3 python3-dev py3-pip git cargo rust build-base libffi-dev openssl-dev ca-certificates
               git config --global --add safe.directory /src
               cd /src
+              python3 -B scripts/check_core_update_contracts.py
               python3 scripts/build_bundle.py "/out/vui-linux-${ARCH}-musl.zip" --source-commit "$SOURCE" --target "${ARCH}-musl"
               adduser -D smoke
               mkdir -p /tmp/vui-stage && chown smoke:smoke /tmp/vui-stage && chmod 700 /tmp/vui-stage
