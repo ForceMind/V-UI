@@ -258,5 +258,47 @@ class CandidateInputTests(unittest.TestCase):
         self.assertEqual(result,1)
         self.assertEqual(error.getvalue(),'Candidate acquisition rejected: CLI_ARGUMENTS\n')
 
+    def test_small_evidence_binds_run_and_uploaded_digest_without_overwriting_existing_receipt(self):
+        source,pin,transport,_,_=self.fixture()
+        self.acquire(pin,transport)
+        raw_expected=(self.root/'inputs/expected.json').read_bytes()
+        raw_acquisition=(self.root/'inputs/acquisition-receipt.json').read_bytes()
+        context=dict(repository=a.REPOSITORY,repository_id=a.REPOSITORY_ID,run_id=123,run_attempt=1)
+        production=dict(schema=1,kind='core-candidate-production-v1',qualified=False,published=False,
+                        builder_source=SOURCE,core='sing-box',context=context,
+                        expected_sha256=sha(raw_expected),acquisition_receipt_sha256=sha(raw_acquisition))
+        target=self.root/'production-receipt.json'
+        workflow=(Path(__file__).resolve().parents[1]/'.github/workflows/core-component-candidate.yml').read_text()
+        import textwrap
+        code=compile(textwrap.dedent(workflow.split("python - <<'PY_EVIDENCE'",1)[1]
+                     .split('\n          PY_EVIDENCE',1)[0]),'<workflow-small-evidence>','exec')
+        env=dict(CANDIDATE_WORK=str(self.root),EXPECTED_SOURCE=SOURCE,CORE='sing-box',
+                 GITHUB_REPOSITORY=a.REPOSITORY,GITHUB_REPOSITORY_ID=str(a.REPOSITORY_ID),
+                 GITHUB_RUN_ID='123',GITHUB_RUN_ATTEMPT='1',CANDIDATE_ARTIFACT_ID='71',
+                 CANDIDATE_ARTIFACT_DIGEST='sha256:'+'b'*64,
+                 CANDIDATE_ARTIFACT_NAME='core-candidate-sing-box-'+SOURCE+'-123-1')
+        evidence=self.root/'candidate-evidence.json'
+        with patch.dict(os.environ,env),redirect_stdout(io.StringIO()):
+            bad=dict(production,schema=True)
+            target.write_text(json.dumps(bad))
+            with self.assertRaises(AssertionError):exec(code,{})
+            self.assertFalse(evidence.exists())
+            bad=deepcopy(production);bad['context']['run_attempt']=2
+            target.write_text(json.dumps(bad))
+            with self.assertRaises(AssertionError):exec(code,{})
+            self.assertFalse(evidence.exists())
+            target.write_text(json.dumps(production))
+            with patch.dict(os.environ,{'CANDIDATE_ARTIFACT_DIGEST':'invalid'}),self.assertRaises(AssertionError):
+                exec(code,{})
+            self.assertFalse(evidence.exists())
+            exec(code,{})
+            raw=evidence.read_bytes();value=json.loads(raw)
+            self.assertEqual(value['context'],context)
+            self.assertEqual(value['producer_artifact'],dict(id=71,name=env['CANDIDATE_ARTIFACT_NAME'],digest='sha256:'+'b'*64))
+            self.assertIs(value['qualified'],False)
+            self.assertFalse(value['acquisition']['source']['independently_published_digest'])
+            with self.assertRaises(FileExistsError):exec(code,{})
+            self.assertEqual(evidence.read_bytes(),raw)
+
 
 if __name__=='__main__':unittest.main()

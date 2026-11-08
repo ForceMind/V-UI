@@ -26,7 +26,7 @@ CONTRACTS = {
     'test_core_boot.py': 19,
     'test_core_diagnostics_artifact.py': 17,
     'test_core_component_builder.py': 20,
-    'test_core_candidate_inputs.py': 17,
+    'test_core_candidate_inputs.py': 18,
 }
 
 

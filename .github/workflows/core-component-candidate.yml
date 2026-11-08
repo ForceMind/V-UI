@@ -102,6 +102,7 @@ jobs:
           print('Candidate artifacts produced; qualified=false, published=false. No core was executed.')
           PY
       - name: Preserve candidate files and bounded acquisition/production evidence
+        id: candidate-artifact
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -114,3 +115,63 @@ jobs:
             ${{ env.CANDIDATE_WORK }}/production-receipt.json
           if-no-files-found: warn
           retention-days: 7
+      - name: Bind small evidence to the completed immutable candidate artifact
+        if: success()
+        env:
+          CANDIDATE_ARTIFACT_ID: ${{ steps.candidate-artifact.outputs.artifact-id }}
+          CANDIDATE_ARTIFACT_DIGEST: ${{ steps.candidate-artifact.outputs.artifact-digest }}
+          CANDIDATE_ARTIFACT_NAME: core-candidate-${{ matrix.core }}-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          umask 077
+          python - <<'PY_EVIDENCE'
+          import hashlib
+          import json
+          import os
+          import re
+          from pathlib import Path
+          workspace = Path(os.environ['CANDIDATE_WORK'])
+          raws = {key: (workspace / name).read_bytes() for key, name in (
+              ('expected', 'inputs/expected.json'), ('acquisition', 'inputs/acquisition-receipt.json'),
+              ('production', 'production-receipt.json'))}
+          assert all(0 < len(raw) <= 64_000 for raw in raws.values())
+          records = {key: json.loads(raw) for key, raw in raws.items()}
+          source, core = os.environ['EXPECTED_SOURCE'], os.environ['CORE']
+          context = dict(repository=os.environ['GITHUB_REPOSITORY'], repository_id=int(os.environ['GITHUB_REPOSITORY_ID']),
+              run_id=int(os.environ['GITHUB_RUN_ID']), run_attempt=int(os.environ['GITHUB_RUN_ATTEMPT']))
+          assert re.fullmatch('[0-9a-f]{40}', source) and core in ('sing-box', 'xray')
+          assert all(type(context[key]) is int and context[key] > 0 for key in ('repository_id', 'run_id', 'run_attempt'))
+          production, acquisition, expected = records['production'], records['acquisition'], records['expected']
+          for key, kind in (('production', 'core-candidate-production-v1'), ('acquisition', 'core-candidate-acquisition-v1'),
+                            ('expected', 'core-component-build-input-v1')):
+              assert type(records[key]['schema']) is int and records[key]['schema'] == 1 and records[key]['kind'] == kind
+          assert production['context'] == context and production['builder_source'] == source and production['core'] == core
+          assert acquisition['builder_source'] == source and expected['builder_source'] == source and expected['core'] == core
+          assert expected['compatibility']['app_sources'] == [source]
+          assert all(record['qualified'] is False and record['published'] is False for record in (production, acquisition))
+          assert production['expected_sha256'] == hashlib.sha256(raws['expected']).hexdigest()
+          assert production['acquisition_receipt_sha256'] == hashlib.sha256(raws['acquisition']).hexdigest()
+          artifact_id = os.environ['CANDIDATE_ARTIFACT_ID']
+          digest = os.environ['CANDIDATE_ARTIFACT_DIGEST']
+          if digest.startswith('sha256:'):
+              digest = digest[7:]
+          assert re.fullmatch('[1-9][0-9]{0,19}', artifact_id) and re.fullmatch('[0-9a-f]{64}', digest)
+          name = 'core-candidate-' + core + '-' + source + '-' + str(context['run_id']) + '-' + str(context['run_attempt'])
+          assert os.environ['CANDIDATE_ARTIFACT_NAME'] == name
+          evidence = dict(schema=1, kind='core-candidate-evidence-v1', qualified=False, published=False,
+              core=core, builder_source=source, context=context,
+              producer_artifact=dict(id=int(artifact_id), name=name, digest='sha256:' + digest),
+              **records)
+          raw = json.dumps(evidence, sort_keys=True, separators=(',', ':')).encode('ascii')
+          assert len(raw) <= 200_000
+          with (workspace / 'candidate-evidence.json').open('xb') as output:
+              output.write(raw)
+          print('Bounded candidate evidence recorded; no publication/native qualification granted.')
+          PY_EVIDENCE
+      - name: Preserve small candidate evidence separately from product ZIPs
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: core-candidate-evidence-${{ matrix.core }}-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.CANDIDATE_WORK }}/candidate-evidence.json
+          if-no-files-found: error
+          retention-days: 14

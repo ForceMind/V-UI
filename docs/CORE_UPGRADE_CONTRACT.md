@@ -467,3 +467,7 @@ SOURCE gzip的size/SHA是本次固定commit、已验证HTTPS响应的观察，re
 9b02fc3首次全套单元3231项中7fail/5error的原记录保留：新boot夹具受前序umask077影响、旧active mock名及旧诊断harness未独立session。e902cd6只修三个测试，原mode/PGID/journal零调用等断言未放宽；umask077下双Python19项通过，后续Actions主单元已通过，完整自身资格另核。新M5/M8改动仍须自身提交验收；浏览器与生产未验证。
 
 候选workflow首次63d7ce0的[42511635640](https://github.com/ForceMind/V-UI/actions/runs/42511635640)在job建立前被GitHub解析拒绝，原注释为`Unrecognized named-value: 'runner'`（48行job级env）；尚未下载或打包材料。按[GitHub context可用范围](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#context-availability)，改为runner实际执行的首个step用`RUNNER_TEMP`生成私有工作路径，并经`GITHUB_ENV`传给后续step，不扩大权限或变更来源门禁。修正必须以自己的实际Actions运行证明，不能将本地Python语法检查当workflow验证。
+
+修正后的474e6e7在[候选42512335279](https://github.com/ForceMind/V-UI/actions/runs/42512335279)完成两个Python pure job及两个实际素材/打包job；sing-box和Xray各四目标候选均产出。它只证明本次真实来源获取和格式生产，仍未执行不同新核心、验证native兼容或受管切换。同源默认应用包的oneclick42512335118在`core_sources`读取GitHub元信息时遇403限流，producer未完成，安装角色未执行；原日志及失败保留，不改认证/核心pin或断言绕过。
+
+候选大artifact之后另生成小evidence artifact：绑定实际上传返回的producer artifact ID/name/digest、repo/run/attempt/source和真实acquisition/production/expected收据，严格核三类kind/schema、来源SHA与同源context。单独的小ZIP便于只读取元数据证据、不下载产品包；它不包含自引用hash，也不授来源或native资格。consumer仍须将其中artifact身份与独立GitHub API元数据核对，不能相信小收据自述。只有完整生产和大artifact上传成功才发小证据，缺件或跨run/摘要格式错误拒，已有证据文件不覆盖。
