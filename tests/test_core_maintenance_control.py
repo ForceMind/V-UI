@@ -141,6 +141,8 @@ class FixtureChild:
         elif command == 'core_restore_observe':
             journal = ops_worker._restore_observer_request(request)
             result = dict(event='restore_observer_ready', transaction=journal['transaction'])
+            if case.fault == 'restore-observer-ready-tx':
+                result['transaction'] = '0'*32
         elif command == 'observe_restore_data':
             frames = []
             with patch('app.core_updates.backup_archive.observe_restore_trial', return_value=self.restore_data):
@@ -583,6 +585,36 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.assertEqual(self.trace.count('observe_restore_data'), 4)
         self.assertEqual(self.brokers[0].context['data_generation'], incoming)
         self.assertEqual(self.files.read_stable(**SOURCE), state)
+
+    def test_restore_handoff_finishes_writer_before_creating_observer(self):
+        receipt, trial, incoming = self.restore_trial_fixture()
+        observer = FixtureChild(self)
+        observer.restore_data = trial
+        def new_worker():
+            self.assertTrue(self.child.finished)
+            self.assertTrue(self.worker._closed)
+            self.trace.append('new-observer')
+            return control._Worker(observer)
+        with self.assertRaisesRegex(selection_files.CoreSelectionFilesError, 'RESTORE_RECEIPT'):
+            self.switch._handoff_restore_trial(dict(receipt, sequence=0), _new_worker=new_worker)
+        self.assertFalse(self.child.finished)
+        state = self.switch._handoff_restore_trial(receipt, _new_worker=new_worker)
+        self.assert_order('worker-exit-zero', 'worker-close', 'new-observer',
+                          'core_restore_observe', 'start-panel', 'release:trial')
+        self.assertTrue(observer.finished)
+        self.assertEqual(self.brokers[0].context['data_generation'], incoming)
+        self.assertEqual(self.files.read_stable(**SOURCE), state)
+
+    def test_restore_handoff_closes_failed_observer_without_starting_service(self):
+        receipt, _, _ = self.restore_trial_fixture()
+        self.fault = 'restore-observer-ready-tx'
+        observer = control._Worker(FixtureChild(self))
+        with self.assertRaisesRegex(control.CoreControlError, 'CORE_RESTORE_CONTEXT'):
+            self.switch._handoff_restore_trial(receipt, _new_worker=lambda: observer)
+        self.assertTrue(observer._closed)
+        self.assertEqual(self.services.state(PANEL), 'inactive')
+        self.assertEqual(self.files.read_restore_recovery()['phase'], 'backed_up')
+        self.assertFalse(self.brokers)
 
     def test_restore_trial_cancelled_during_last_observation_retains_pending(self):
         receipt, trial, _ = self.restore_trial_fixture()

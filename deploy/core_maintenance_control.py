@@ -104,6 +104,12 @@ class _Worker:
             self.child.close()
 
 
+def _start_worker(ops, account, deadline, cancelled):
+    child = ops.Child([str(ops.PYTHON), '-B', '-I', '-S', str(ops.WORKER)],
+                      max(0, deadline-time.monotonic()), account=account, cancelled=cancelled)
+    return _Worker(child)
+
+
 class _Switch:
     def __init__(self, ops, modules, services, account, worker, installation_proof,
                  config, *, deadline, cancelled):
@@ -333,14 +339,26 @@ class _Switch:
         self.broker = None
         self.broker_closed = True
 
+    def _restore_trial_journal(self):
+        journal = self.files.read_restore_recovery()
+        target = journal['restore_target']
+        context = journal['switch_context']
+        _need(journal['transaction'] == self.transaction and journal['phase'] == 'backed_up'
+              and target['kind'] == 'core-restore-target-v2'
+              and context['application'] == self.application
+              and context['services'] == self.initial
+              and self.m._digest(self.m._raw(self.config)) == context['config_sha256']
+              and self.config.get('certificate_mode', 'managed') == context['certificate_mode'],
+              'CORE_RESTORE_CONTEXT')
+        _need(context['certificate_mode'] != 'provided', 'CORE_RESTORE_TLS_PROBE_REQUIRED')
+        return journal
+
     def _start_restore_observer(self):
         """Hand a stopped, exchanged restore to its read-only worker."""
         self.services.prove_stopped()
         _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
-        journal = self.files.read_restore_recovery()
+        journal = self._restore_trial_journal()
         target = journal['restore_target']
-        _need(journal['transaction'] == self.transaction and journal['phase'] == 'backed_up'
-              and target['kind'] == 'core-restore-target-v2', 'CORE_RESTORE_CONTEXT')
         plan = target['data']
         response = self.worker.exchange(dict(protocol=1, action='core_restore_observe',
             transaction=self.transaction, slot=plan['slot'], pending=journal['original_files']['pending'],
@@ -349,20 +367,35 @@ class _Switch:
         _need(response['transaction'] == self.transaction, 'CORE_RESTORE_CONTEXT')
         self._proof()
 
+    def _handoff_restore_trial(self, receipt, *, _new_worker=None):
+        """Finish the writer before starting the observer under the same Root lock."""
+        self._proof()
+        self.services.prove_stopped()
+        journal = self._restore_trial_journal()
+        self.files._require_trial_receipt(journal, receipt)
+        self.worker.finish()
+        self.worker.close()
+        self._time()
+        _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+        self.services.prove_stopped()
+        self._time()
+        _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+        self.worker = (_start_worker(self.ops, self.account, self.deadline, self.cancelled)
+                       if _new_worker is None else _new_worker())
+        try:
+            self._start_restore_observer()
+            state = self._activate_restore_trial(receipt)
+            self.worker.finish()
+            return state
+        finally:
+            self.worker.close()
+
     def _activate_restore_trial(self, receipt, observe=None):
         """Start a private restore trial after the worker exchanged the data."""
         self._proof()
-        journal = self.files.read_restore_recovery()
-        context = journal['switch_context']
+        journal = self._restore_trial_journal()
         target = journal['restore_target']
-        _need(journal['transaction'] == self.transaction and journal['phase'] == 'backed_up'
-              and target['kind'] == 'core-restore-target-v2'
-              and context['application'] == self.application
-              and context['services'] == self.initial
-              and self.m._digest(self.m._raw(self.config)) == context['config_sha256']
-              and self.config.get('certificate_mode', 'managed') == context['certificate_mode']
-              and (observe is None or callable(observe)), 'CORE_RESTORE_CONTEXT')
-        _need(context['certificate_mode'] != 'provided', 'CORE_RESTORE_TLS_PROBE_REQUIRED')
+        _need(observe is None or callable(observe), 'CORE_RESTORE_CONTEXT')
         self.services.prove_stopped()
 
         def current_data():
@@ -630,9 +663,8 @@ def _run_task(ops, cancelled, request):
         services.deadline = deadline
         with _modules(ops) as modules:
             def new_task():
-                child = ops.Child([str(ops.PYTHON), '-B', '-I', '-S', str(ops.WORKER)],
-                                  max(0, deadline-time.monotonic()), account=account, cancelled=cancelled)
-                return _Switch(ops, modules, services, account, _Worker(child), proof, config,
+                worker = _start_worker(ops, account, deadline, cancelled)
+                return _Switch(ops, modules, services, account, worker, proof, config,
                                deadline=deadline, cancelled=cancelled)
 
             task = new_task()

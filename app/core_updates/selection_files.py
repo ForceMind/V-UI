@@ -872,19 +872,23 @@ class SelectionFiles:
             journal['backup'] = deepcopy(receipt)
             self._append(scope, directory, journal, phase='backed_up')
 
+    @staticmethod
+    def _require_trial_receipt(journal, restore_receipt):
+        expected_digest = journal['quiesced'].get('prepared_tree_sha256')
+        if expected_digest is None:
+            _need(restore_receipt is None, 'RESTORE_DATA_PLAN')
+            return
+        _keys(restore_receipt, ('transaction', 'sequence', 'data', 'tree_sha256'))
+        _need(restore_receipt['transaction'] == journal['transaction']
+              and type(restore_receipt['sequence']) is int
+              and restore_receipt['sequence'] == journal['sequence'], 'RESTORE_RECEIPT')
+        _require_restore_data(journal, restore_receipt['data'], ('trial',))
+        _need(restore_receipt['tree_sha256'] == expected_digest, 'RESTORE_DATA_DIGEST')
+
     def provision(self, transaction, *, app_source, target, restore_receipt=None):
         with self._io(write=True) as (scope, root):
             directory, journal = self._active(scope, root, transaction, app_source, target, ('backed_up',))
-            expected_digest = journal['quiesced'].get('prepared_tree_sha256')
-            if expected_digest is None:
-                _need(restore_receipt is None, 'RESTORE_DATA_PLAN')
-            else:
-                _keys(restore_receipt, ('transaction', 'sequence', 'data', 'tree_sha256'))
-                _need(restore_receipt['transaction'] == transaction
-                      and type(restore_receipt['sequence']) is int
-                      and restore_receipt['sequence'] == journal['sequence'], 'RESTORE_RECEIPT')
-                _require_restore_data(journal, restore_receipt['data'], ('trial',))
-                _need(restore_receipt['tree_sha256'] == expected_digest, 'RESTORE_DATA_DIGEST')
+            self._require_trial_receipt(journal, restore_receipt)
             self._append(scope, directory, journal, phase='trial')
             return _selection(journal['after'], app_source, target)
 
