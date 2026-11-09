@@ -85,3 +85,5 @@ Actions 验收需要真实规则对照、重叠规则首条命中、多个明确
 准确候选 `1c09330` 的 [Linux 主测试](https://github.com/ForceMind/V-UI/actions/runs/42589702878)通过；[四目标流程](https://github.com/ForceMind/V-UI/actions/runs/42589702887)在打包前因新增管理器测试后固定计数仍为 10 而失败，现按实际 11 项修正，完整 546 项严格合成契约无跳过通过。该修正不替代真实构建与安装验收。
 
 同提交的[真实链路](https://github.com/ForceMind/V-UI/actions/runs/42589702908)在 Mihomo 的无效 TLS 上游比较中得到客户端三秒握手超时，未满足原“不接受超时”断言。夹具原先只读取一个请求字节就关闭，可能在未读完 ClientHello 时触发 TCP 重置；这是待验证的夹具解释。夹具现在消费完整首条 TLS 记录后发送无效响应并半关闭，客户端仅该失败请求采用十秒上限；仍拒绝超时，并新增检查本轮真实 `first record does not look like a TLS handshake` 原因，零目标送达、无 DIRECT 和后续正向流量断言保持。准确新源必须再经真实核心验证，不能继承旧绿灯。
+
+准确候选 `63e396b` 的[主测试](https://github.com/ForceMind/V-UI/actions/runs/42591402463)执行 3,664 项，因既有 `test_openrc_main_serves_both_families_before_clean_shutdown` 的 IPv6 临时绑定出现 `EADDRINUSE` 而失败，242 项按条件跳过。定位到正向用例持有 IPv6 可用性探针直到清理，随后 IPv4 选择的临时端口可能与其相撞。现仅让两个正向用例用完即关闭探针；刻意保留占用端口的负向用例不变，生产 HTTP-01 监听及断言不变。准确新提交的 Actions 结果另验。
