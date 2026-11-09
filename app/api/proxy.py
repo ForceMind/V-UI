@@ -60,6 +60,15 @@ class SettingsPayload(StrictPayload):
     deny_policy_version: int = Field(default=1, ge=1, le=1, strict=True)
 
 
+class YamlDraftPayload(StrictPayload):
+    baseline: str = Field(min_length=1, max_length=1_048_576)
+    candidate: str = Field(min_length=1, max_length=1_048_576)
+    fingerprint: str = Field(pattern=r'^[a-f0-9]{64}$', min_length=64, max_length=64)
+    selections: list[Literal['baseline', 'candidate']] = Field(max_length=256)
+    group_members: dict[str, str] = Field(max_length=128)
+    dns_upstream: str | None = Field(default=None, max_length=128)
+
+
 def get_store() -> ProxyStore:
     return ProxyStore()
 
@@ -173,6 +182,40 @@ def create_profile(payload: ProfilePayload, response: Response, request: Request
         return result
     except (ValueError, UnicodeError) as exc:
         raise safe_error(exc) from None
+
+
+@router.post('/yaml/draft')
+def save_yaml_draft(payload: YamlDraftPayload, request: Request, response: Response,
+                    if_match: str | None = Header(default=None)):
+    if getattr(request.state, 'admin', None) is None or getattr(request.state, 'maintenance', None) is not None:
+        raise HTTPException(403, 'ADMIN_REQUIRED')
+    revision = expected_revision(single_header(request, 'if-match', if_match))
+    from app.services.mihomo_merge import MihomoMergeError
+    from app.services.mihomo_merge_download import prepare_mihomo_draft
+    from app.services.mihomo_preview import MihomoPreviewError
+    from app.api.mihomo_preview import _parser_error
+    try:
+        raw, sources = prepare_mihomo_draft(payload.baseline, payload.candidate, payload.fingerprint,
+                                           payload.selections, payload.group_members, payload.dns_upstream)
+        result = get_store().save_yaml_plan(raw, sources, revision)
+        return snapshot_response(result, response)
+    except MihomoPreviewError as error:
+        raise _parser_error(error) from None
+    except MihomoMergeError as error:
+        raise HTTPException(422, {'code': error.code}) from None
+    except (ProxyCapacityError, ProxyConflict, ProxyStorageError, ProxyValidationError) as error:
+        raise safe_error(error) from None
+
+
+@router.delete('/yaml/draft')
+def clear_yaml_draft(request: Request, response: Response, if_match: str | None = Header(default=None)):
+    if getattr(request.state, 'admin', None) is None or getattr(request.state, 'maintenance', None) is not None:
+        raise HTTPException(403, 'ADMIN_REQUIRED')
+    revision = expected_revision(single_header(request, 'if-match', if_match))
+    try:
+        return snapshot_response(get_store().clear_yaml_plan(revision), response)
+    except (ProxyCapacityError, ProxyConflict, ProxyStorageError, ProxyValidationError) as error:
+        raise safe_error(error) from None
 
 
 @router.post('/discard-draft')

@@ -65,3 +65,12 @@ class MergeReviewTransportTests(unittest.TestCase):
         with patch.object(transport, '_request', return_value=raw):
             with self.assertRaisesRegex(MihomoPreviewError, '^PARSER_FAILED$'):
                 transport.review_mihomo_download('x: 1', 'x: 2')
+
+    def test_prepared_record_response_requires_exact_framing_and_source_hashes(self):
+        from test_mihomo_plan_record import MihomoPlanRecordTests
+        raw = MihomoPlanRecordTests().record()
+        wrong_sources = (str(len(raw)) + ' 2\n').encode() + raw + b'{}'
+        for response in (b'0 2\n{}', b'9999999 2\n{}', b'2 2\n{}', wrong_sources):
+            with self.subTest(size=len(response)), patch.object(transport, '_request', return_value=response):
+                with self.assertRaisesRegex(MihomoPreviewError, '^PARSER_FAILED$'):
+                    transport.prepare_mihomo_draft('{}', '{}', 'a'*64, [], {}, None)
