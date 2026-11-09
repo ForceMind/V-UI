@@ -223,6 +223,12 @@ class CompleteBackupTests(unittest.TestCase):
         self.assertEqual((self.data/'v-ui.db').read_bytes(), before)
         self.assertTrue((self.root/'recovery'/('core-restore-'+slot+'-rejected')/'v-ui.db').is_file())
         self.assertTrue((files.layout.root/sf.PENDING).exists())
+        old = ops_worker._restore_observer_request({key: value for key, value in
+            dict(request, action='core_restore_observe_old').items()
+            if key not in ('sequence', 'original_tree_sha256', 'prepared_tree_sha256')})
+        with tools._maintenance_lease(self.root, '.operation.lock', _proof=True) as verify:
+            self.assertEqual(full.observe_restore_trial(self.root, old, verify, _selection_files=files),
+                             frames[0][1]['receipt']['data'])
 
     def state(self,components=True,legacy=False):
         state=self.fixture.state() if components else self.fixture.initial

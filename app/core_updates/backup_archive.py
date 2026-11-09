@@ -455,7 +455,7 @@ def _inspect_restore_slots(root, journal, names, parents, root_fd, recovery_fd):
 
 def observe_restore_trial(root, journal, verify_operation, *, _selection_files=None):
     """Read slot identities while the worker retains its operation lease."""
-    _need(journal['phase'] in ('backed_up', 'trial', 'validated') and
+    _need(journal['phase'] in ('backed_up', 'trial', 'validated', 'rollback_required') and
           journal['restore_target']['kind'] == 'core-restore-target-v2')
     slot = journal['restore_target']['data']['slot']
     _need(a._hex(slot, 32))
@@ -468,7 +468,8 @@ def observe_restore_trial(root, journal, verify_operation, *, _selection_files=N
         parents = {key: recovery_fd for key in names}
         parents['live'] = root_fd
         position, observed = _inspect_restore_slots(root, journal, names, parents, root_fd, recovery_fd)
-        _need(position == 'trial', 'Restore trial data changed')
+        positions = ('staged', 'restored') if journal['phase'] == 'rollback_required' else ('trial',)
+        _need(position in positions, 'Restore trial data changed')
         verify_operation()
         pending()
         _need(_inspect_restore_slots(root, journal, names, parents, root_fd, recovery_fd) ==

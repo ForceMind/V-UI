@@ -492,6 +492,16 @@ class _Switch:
         self.services.prove_stopped()
         journal = self._restore_trial_journal()
         self.files._require_trial_receipt(journal, receipt)
+        self._replace_restore_worker(_new_worker)
+        try:
+            self._start_restore_observer()
+            state = self._activate_restore_trial(receipt)
+            self.worker.finish()
+            return state
+        finally:
+            self.worker.close()
+
+    def _replace_restore_worker(self, new_worker=None):
         self.worker.finish()
         self.worker.close()
         self._time()
@@ -500,12 +510,49 @@ class _Switch:
         self._time()
         _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
         self.worker = (_start_worker(self.ops, self.account, self.deadline, self.cancelled)
-                       if _new_worker is None else _new_worker())
+                       if new_worker is None else new_worker())
+
+    def _resume_restore_original(self, *, _new_worker=None):
+        journal = self.files.read_restore_recovery()
+        context = journal['switch_context']
+        _need(journal['quiesced'] is not None and context['certificate_mode'] == 'managed'
+              and context['services']['v-ui.service'] == 'active'
+              and self.config.get('certificate_mode', 'managed') == 'managed',
+              'CORE_RESTORE_RECOVERY_BOOT_REQUIRED')
+        receipt = self._recover_restore_data()
+        _need(self.files.read_restore_recovery() == journal, 'CORE_RESTORE_CONTEXT')
+        self.application = context['application']
+        self.source = {key: self.application[key] for key in ('app_source', 'target')}
+        self.generation = context['data_generation']
+        self.initial = context['services']
+        self.trust_sha256 = None
+        state = self._state(journal['recovery_selection'])
+        self.final = self._intents(journal['quiesced']['cores'], state)
+        self._replace_restore_worker(_new_worker)
         try:
-            self._start_restore_observer()
-            state = self._activate_restore_trial(receipt)
+            _need(self.files.read_restore_recovery() == journal, 'CORE_RESTORE_CONTEXT')
+            response = self.worker.exchange(self._restore_worker_request(journal, 'core_restore_observe_old'),
+                                            'restore_observer_ready', ('transaction',))
+            _need(response['transaction'] == self.transaction, 'CORE_RESTORE_CONTEXT')
+            def observe():
+                result = self.worker.command('observe_restore_data', 'restore_data_observed',
+                                             ('transaction', 'data'), transaction=self.transaction)
+                _need(result['transaction'] == self.transaction
+                      and self.m.restore_data_position(journal, result['data']) in ('staged', 'restored'),
+                      'CORE_RESTORE_DATA_CHANGED')
+                self._proof()
+                return result['data']
+            observe()
+            self._activate(state, self.final, recovery=True, restore_observe=observe,
+                           restore_original_sha256=receipt['tree_sha256'])
             self.worker.finish()
-            return state
+            result = dict(outcome='restored_previous', selection_revision=state.revision, panel_running=True)
+            if journal['backup'] is not None:
+                result.update(backup_name=journal['backup']['name'], backup_sha256=journal['backup']['sha256'])
+            return result
+        except BaseException:
+            self.services.stop_all(emergency=True)
+            raise
         finally:
             self.worker.close()
 
@@ -541,7 +588,8 @@ class _Switch:
             raise
         return state
 
-    def _activate(self, state, intents, *, recovery, cleanup=False, restore_observe=None):
+    def _activate(self, state, intents, *, recovery, cleanup=False, restore_observe=None,
+                  restore_original_sha256=None):
         self.services.prove_stopped()
         self._proof()
         broker = None
@@ -577,9 +625,11 @@ class _Switch:
                 self.confirming = True
                 confirmed = self.files.finish_cleanup(self.transaction, **self.source)
             elif recovery:
+                restore = {} if restore_observe is None else dict(
+                    restore_data=restore_observe(), original_tree_sha256=restore_original_sha256)
                 self.confirming = True
                 confirmed = self.files.rollback_metadata(self.transaction, observation,
-                                                         final_intents=self.final, **self.source)
+                                                         final_intents=self.final, **self.source, **restore)
             else:
                 restore = {} if restore_observe is None else {'restore_data': restore_observe()}
                 self.files.record_validation(self.transaction, observation, **self.source, **restore)
@@ -769,7 +819,14 @@ def restore_backup(ops, *, archive_name, archive_sha256, expected_revision, canc
     return _run_task(ops, cancelled, (archive_name, archive_sha256, expected_revision), restore=True)
 
 
-def _run_task(ops, cancelled, request, *, restore=False):
+def recover_restore_backup(ops, *, cancelled=None):
+    """Private recovery entry for an interrupted dual-domain restore."""
+    _need(os.geteuid() == 0, 'ROOT_REQUIRED')
+    _need(os.getpid() == os.getpgrp() == os.getsid(0), 'CORE_TASK_ISOLATION')
+    return _run_task(ops, cancelled, None, restore_recovery=True)
+
+
+def _run_task(ops, cancelled, request, *, restore=False, restore_recovery=False):
     cancelled = [] if cancelled is None else cancelled
     deadline = time.monotonic() + ops.TIMEOUT
     with ops.installation_lock(_proof=True) as proof:
@@ -786,6 +843,8 @@ def _run_task(ops, cancelled, request, *, restore=False):
 
             task = new_task()
             try:
+                if restore_recovery:
+                    return task._resume_restore_original()
                 if restore:
                     return task.run_restore(*request)
                 if request is None:

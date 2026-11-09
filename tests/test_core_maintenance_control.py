@@ -138,7 +138,7 @@ class FixtureChild:
             result = dict(event='trial_writers_released')
         elif command == 'prove_operation':
             result = dict(event='operation_held')
-        elif command == 'core_restore_observe':
+        elif command in ('core_restore_observe', 'core_restore_observe_old'):
             journal = ops_worker._restore_observer_request(request)
             result = dict(event='restore_observer_ready', transaction=journal['transaction'])
             if case.fault == 'restore-observer-ready-tx':
@@ -170,7 +170,8 @@ class FixtureChild:
                     types.SimpleNamespace(root=case.root, _operation_proof=lambda: None),
                     case.files.read_restore_recovery(), request)
             result, = frames
-            if case.fault == 'restore-observation-tx':
+            if (case.fault == 'restore-observation-tx' or case.fault == 'restore-late-observation'
+                    and case.trace.count('observe_restore_data') == 2):
                 result['transaction'] = '0'*32
         elif command == 'reacquire_writers':
             if case.services.state(PANEL) != 'inactive' or case.brokers[-1].state != 'closed':
@@ -634,6 +635,36 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.assertEqual(self.files.read_restore_recovery()['phase'], 'backed_up')
         self.assertTrue((self.root/selection_files.PENDING).exists())
         self.assertFalse(self.brokers)
+
+    def restore_original_fixture(self):
+        receipt, trial, _ = self.restore_trial_fixture()
+        data = dict(live=trial['original'], original=None, incoming=None, rejected=trial['live'])
+        self.child.restore_receipt = dict(receipt, data=data, tree_sha256='d'*64)
+        observer = FixtureChild(self)
+        observer.restore_data = data
+        return observer, trial
+
+    def test_restore_recovery_boots_original_generation_before_clearing_pending(self):
+        observer, trial = self.restore_original_fixture()
+        result = self.switch._resume_restore_original(_new_worker=lambda: control._Worker(observer))
+        self.assertEqual(result['outcome'], 'restored_previous')
+        broker, = self.brokers
+        self.assertEqual(broker.context['data_generation'], trial['original'])
+        self.assertEqual(broker.purpose, 'old_recovery')
+        self.assert_order('core_restore_rollback', 'worker-exit-zero', 'core_restore_observe_old',
+                          'start-panel', 'probe:old_recovery', 'release:old_recovery')
+        self.assertFalse((self.root/selection_files.PENDING).exists())
+        self.assertEqual(self.files.read_stable(**SOURCE).revision, result['selection_revision'])
+
+    def test_restore_recovery_late_observation_failure_stops_and_keeps_pending(self):
+        observer, _ = self.restore_original_fixture()
+        self.fault = 'restore-late-observation'
+        with self.assertRaisesRegex(control.CoreControlError, 'CORE_RESTORE_DATA_CHANGED'):
+            self.switch._resume_restore_original(_new_worker=lambda: control._Worker(observer))
+        self.assertIn('probe:old_recovery', self.trace)
+        self.assertNotIn('release:old_recovery', self.trace)
+        self.assertEqual(self.services.state(PANEL), 'inactive')
+        self.assertTrue((self.root/selection_files.PENDING).exists())
 
     def test_restore_handoff_finishes_writer_before_creating_observer(self):
         receipt, trial, incoming = self.restore_trial_fixture()

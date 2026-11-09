@@ -249,7 +249,7 @@ def _restore_observer_request(value):
     from app.core_updates import selection_files as files
     fields = {'protocol', 'action', 'transaction', 'slot', 'pending', 'original', 'incoming'}
     if (set(value) != fields or type(value['protocol']) is not int or value['protocol'] != 1
-            or value['action'] != 'core_restore_observe'
+            or value['action'] not in ('core_restore_observe', 'core_restore_observe_old')
             or any(type(value[key]) is not str or not re.fullmatch('[a-f0-9]{32}', value[key])
                    for key in ('transaction', 'slot'))):
         raise WorkerError('Invalid private restore observer request')
@@ -260,7 +260,8 @@ def _restore_observer_request(value):
         raise WorkerError('Invalid private restore observer identity')
     # The Root controller checks the durable phase and complete journal. This
     # projection grants only read-only observations against the pinned marker.
-    return dict(operation='restore', phase='backed_up', transaction=value['transaction'],
+    phase = 'rollback_required' if value['action'] == 'core_restore_observe_old' else 'backed_up'
+    return dict(operation='restore', phase=phase, transaction=value['transaction'],
                 original_files=dict(pending=value['pending']),
                 switch_context=dict(data_generation=original),
                 restore_target=dict(kind='core-restore-target-v2',
@@ -531,7 +532,7 @@ def _run(root, release_tools, input_fd, output, *, timeout=TIMEOUT):
                 implementation = _load_core_session(release_tools, recovery=True)
                 session = implementation(root, **arguments)
                 _complete_core_recovery_handshake(channel, session)
-            elif request.get('action') == 'core_restore_observe':
+            elif request.get('action') in ('core_restore_observe', 'core_restore_observe_old'):
                 _load_core_session(release_tools)
                 journal = _restore_observer_request(request)
                 _complete_restore_observer(channel, root, release_tools, journal)
