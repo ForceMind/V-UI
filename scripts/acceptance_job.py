@@ -32,6 +32,7 @@ FOOTER = 'VUI_ACCEPTANCE_EXIT '
 CORE_SWITCH_FIXTURE = WORK / 'core-switch-fixture'
 CORE_SWITCH_CORES = ('sing-box', 'xray')
 CORE_SWITCH_MARKER = b'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE:'
+CORE_RESTORE_MARKER = b'VUI_INSTALLED_CORE_RESTORE_ACCEPTANCE:'
 
 def matrix_for_version(version):
     number = core._version(version)
@@ -244,6 +245,12 @@ def run_test(source, version, role, identity_path, log, *, old_source=None, envi
                        and all(line.startswith(prefix) and line[len(prefix):].strip()
                                for line, prefix in zip(markers, expected)),
                        'CORE_SWITCH_EVIDENCE_REQUIRED')
+            restored = [line for line in raw_log.splitlines() if CORE_RESTORE_MARKER in line]
+            core._need(len(restored) == raw_log.count(CORE_RESTORE_MARKER) == 1
+                       and restored[0].startswith(CORE_RESTORE_MARKER + b' ')
+                       and restored[0][len(CORE_RESTORE_MARKER):].strip()
+                       and raw_log.find(CORE_RESTORE_MARKER) > raw_log.rfind(CORE_SWITCH_MARKER),
+                       'CORE_RESTORE_EVIDENCE_REQUIRED')
     return code
 
 

@@ -673,8 +673,11 @@ class OneClickSystemTests(unittest.TestCase):
             # before disposing only known CI drafts for the installed-core gate.
             if os.getenv('VUI_NETLINK_SYSTEMD_TEST') == '1':
                 from scripts.system_maintenance_smoke import installed_netlink_smoke
+                def login_after_restore():
+                    self.assertEqual(api('/api/auth/login', {'username': admin_username, 'password': password})[0], 200)
                 installed_netlink_smoke(self,source,work,api,ca,cert,key,
-                    published_upgrade.nodes if published_upgrade else [],private_values,expected_username=admin_username)
+                    published_upgrade.nodes if published_upgrade else [],private_values,
+                    expected_username=admin_username, login_again=login_after_restore)
             if online:
                 print('Online managed installer transport: '+online['transport']+'; interactive domain/email/admin/ports, real global v-ui menu and stop/start passed')
             if domain_retry:

@@ -362,7 +362,8 @@ def wait_installed_admin_identity(api, expected_username, *, timeout=20):
         return identity
 
 
-def installed_netlink_smoke(check, source, work, api, ca, cert, key, verified_old_nodes, private_values, *, expected_username):
+def installed_netlink_smoke(check, source, work, api, ca, cert, key, verified_old_nodes, private_values, *,
+                            expected_username, login_again=None):
     """Run only after original data/upgrade assertions on an empty hosted runner.
 
     Existing invalid synthetic drafts are removed by exact guarded API revision,
@@ -509,7 +510,8 @@ print(json.dumps(hashlib.sha256(json.dumps(rows,sort_keys=True).encode()).hexdig
         check.assertTrue(applied['applied']);check.assertEqual(applied['phase'],'committed')
         check.assertIsNone(applied['pinned_address'])
         sing=create('sing-box','direct')
-        maintenance_grant=grant_cli('create','diagnose,nodes,share,relay,certificates,operate,upgrade','600')
+        grant_ttl = '3600' if os.getenv('VUI_CORE_SWITCH_FIXTURE') else '600'
+        maintenance_grant=grant_cli('create','diagnose,nodes,share,relay,certificates,operate,upgrade',grant_ttl)
         private_values.append(maintenance_grant['link'])
         one_time=maintenance_grant['link'].split('#grant=',1)[1]
         private_values.append(one_time)
@@ -627,8 +629,27 @@ print(json.dumps({'pid':child.pid,'created':child.create_time(),'binary_sha256':
             'source_case':os.getenv('VUI_PUBLISHED_INSTALL_VERSION','fresh-candidate')},sort_keys=True))
         if os.getenv('VUI_CORE_SWITCH_FIXTURE'):
             from core_switch_systemd import installed_core_switch
+            login_started = int(time.time())
+            login_again()
+            def before_restore():
+                identity = request('/api/maintenance/session', extra_headers=bearer)
+                check.assertEqual(identity['grant_id'], maintenance_grant['id'])
+                check.assertGreater(identity['expires_at'], time.time())
+
+            def after_restore():
+                nonlocal maintenance_grant
+                old_login = api('/api/auth/me')[0]
+                old_bearer = api('/api/maintenance/session', extra_headers=bearer)[0]
+                checked_at = time.time()
+                if old_bearer == 401:
+                    maintenance_grant = None
+                login_again()
+                check.assertGreater(exchanged['expires_at'], checked_at)
+                check.assertGreater(login_started + 3600, checked_at)
+                check.assertEqual(old_login, 401, 'Restore must revoke the old login')
+                check.assertEqual(old_bearer, 401, 'Restore must revoke the archived maintenance grant')
             installed_core_switch(check, source, work, api, service_python, ca, cert, key, client,
-                                  {'sing-box': sing, 'xray': xray})
+                                  {'sing-box': sing, 'xray': xray}, before_restore, after_restore)
 
     finally:
         try:

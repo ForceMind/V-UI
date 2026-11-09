@@ -20,7 +20,8 @@ VERSIONS = {'sing-box': ('1.14.2', '1.14.3'), 'xray': ('26.3.27', '26.10.21')}
 TARGETS = {'x86_64-gnu', 'x86_64-musl', 'aarch64-gnu', 'aarch64-musl'}
 
 
-def installed_core_switch(check, source, work, api, service_python, ca, cert, key, client, nodes):
+def installed_core_switch(check, source, work, api, service_python, ca, cert, key, client, nodes,
+                          before_restore, after_restore):
     # This helper shares the actual fresh install and its authenticated session.
     assert os.geteuid() != 0 and os.getenv('GITHUB_ACTIONS') == 'true'
     assert os.getenv('RUNNER_ENVIRONMENT') == 'github-hosted'
@@ -117,8 +118,11 @@ def installed_core_switch(check, source, work, api, service_python, ca, cert, ke
                 process = ReadyMihomoProcess(client_stack, [str(client), '-d', str(home), '-f', str(path)],
                                              home/(label+'.log'), env)
                 process.start(local_port)
-                check.assertEqual(https_through(local_port, '127.0.0.1', target_port, ca, label,
-                                                protocol='socks5h'), (200, BODY))
+                try:
+                    response = https_through(local_port, '127.0.0.1', target_port, ca, label, protocol='socks5h')
+                except TimeoutError:
+                    check.fail('Installed TCP fixture timed out for ' + core + ' ' + label)
+                check.assertEqual(response, (200, BODY), core + ' ' + label)
             markers.append('/'+label)
             return hashlib.sha256(raw).hexdigest()
 
@@ -178,11 +182,13 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
                 check.assertEqual(status_by_core[core]['applied_revision'], witness['cores'][core]['intent'][0])
             return witness
 
-        def task(core, action, revision, *, rejected=False):
+        def task(core, action, revision, *, rejected=False, backup=()):
             case = core + ' ' + action
             args = [core, action, source_sha, revision or 'none']
             if action == 'port-conflict':
                 args.append(str(nodes[core]['port']))
+            if action == 'restore-backup':
+                args.extend(backup)
             output = subprocess.run(['sudo', '--preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_REPOSITORY',
                 '/usr/bin/setsid', '--wait', '/usr/bin/python3', '-B', '-I', '-S', str(runner), *args],
                 capture_output=True, text=True, timeout=650)
@@ -200,7 +206,12 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
                 check.assertEqual(set(result), {'ok', 'error'})
                 check.assertEqual(code, 'ASSET_DIGEST')
             else:
-                check.assertEqual(set(result), {'ok', 'outcome', 'selection_revision', 'panel_running'})
+                fields = {'ok', 'outcome', 'selection_revision', 'panel_running'}
+                if action == 'update':
+                    fields.update(('backup_name', 'backup_sha256'))
+                    check.assertRegex(result['backup_name'], r'^core-maintenance-[a-f0-9]{32}\.zip$')
+                    check.assertRegex(result['backup_sha256'], r'^[a-f0-9]{64}$')
+                check.assertEqual(set(result), fields)
                 check.assertIs(result['panel_running'], True)
                 check.assertRegex(result['selection_revision'], r'^[a-f0-9]{64}$')
                 check.assertNotEqual(result['selection_revision'], revision)
@@ -220,6 +231,7 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
         check.assertEqual(status, 200)
         original_identity = json.loads(raw_identity)
         revision = None
+        restore_backup = None
         for core, (bundle_version, candidate_version) in VERSIONS.items():
             peer = 'xray' if core == 'sing-box' else 'sing-box'
             prefix = 'core-switch' if core == 'sing-box' else 'xray-core-switch'
@@ -245,6 +257,9 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
                     ('update', 'updated', 'switched', new_digests[core], candidate_version),
                     ('rollback', 'rolled-back', 'switched', installed['binary'], bundle_version)):
                 receipt = task(core, action, revision)
+                if core == 'sing-box' and action == 'update':
+                    restore_backup = (receipt['backup_name'], receipt['backup_sha256'])
+                    restore_selection = previous['cores']
                 check.assertEqual(receipt['outcome'], outcome)
                 revision = receipt['selection_revision']
                 state = snapshot()
@@ -275,3 +290,24 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
             print(f'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: {core} live systemd private CA, actual '
                   f'{candidate_version} and bundle {bundle_version}, bad digest, failed startup recovery, '
                   'both stock TCP paths and retained data')
+
+        check.assertIsNotNone(restore_backup)
+        before_restore()
+        prior = snapshot()
+        result = task('sing-box', 'restore-backup', revision, backup=restore_backup)
+        check.assertEqual(result['outcome'], 'restored_backup')
+        after_restore()
+        status, raw = api('/api/auth/me')
+        check.assertEqual(status, 200)
+        check.assertEqual(json.loads(raw), original_identity)
+        restored = snapshot()
+        check.assertNotEqual(restored['data'], prior['data'])
+        check.assertEqual(selected(result['selection_revision'])['cores'], restore_selection)
+        for field in ('current', 'users'):
+            check.assertEqual(restored[field], prior[field])
+        for name in nodes:
+            for field in ('node', 'intent', 'binary'):
+                check.assertEqual(restored['cores'][name][field], prior['cores'][name][field])
+            through(name, 'backup-restored-'+name)
+        check.assertEqual([path for _, _, path in traffic.snapshot()], markers)
+        print('VUI_INSTALLED_CORE_RESTORE_ACCEPTANCE: real systemd provided TLS, retained node data, revoked access and both stock TCP paths')

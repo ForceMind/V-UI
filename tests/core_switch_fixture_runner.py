@@ -321,9 +321,9 @@ def trace_switch(control):
             trace[0] = event.upper()
         return exchange(worker, request, event, fields)
 
-    def traced_activate(task, state, intents, *, recovery, cleanup=False):
+    def traced_activate(task, state, intents, *, recovery, cleanup=False, **options):
         trace[0] = 'CLEANUP' if cleanup else ('RESTORE_BEFORE' if recovery else 'TRIAL')
-        return activate(task, state, intents, recovery=recovery, cleanup=cleanup)
+        return activate(task, state, intents, recovery=recovery, cleanup=cleanup, **options)
 
     control._Worker.exchange = traced_exchange
     control._Switch._activate = traced_activate
@@ -373,11 +373,35 @@ def run(arguments):
             and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted'
             and os.environ.get('GITHUB_REPOSITORY') == REPOSITORY
             and Path(__file__) == FIXTURE/'runner.py', 'FIXTURE_SCOPE')
-    core, action, source, revision, port = parse(arguments)
+    restoring = len(arguments) == 6 and arguments[1] == 'restore-backup'
+    if restoring:
+        core, action, source, revision, name, digest = arguments
+        require(core == 'sing-box' and re.fullmatch('[a-f0-9]{40}', source)
+                and re.fullmatch('[a-f0-9]{64}', revision)
+                and re.fullmatch(r'core-maintenance-[a-f0-9]{32}\.zip', name)
+                and re.fullmatch('[a-f0-9]{64}', digest), 'FIXTURE_INPUT')
+    else:
+        core, action, source, revision, port = parse(arguments)
     with ExitStack() as stack:
         folder = fixed_directory(stack, FIXTURE, private=True)
         File(stack, folder, 'runner.py', 4_000_000, fixture=True).stable()
         ops, control = installed_modules(stack)
+        if restoring:
+            accept = control._Switch._accept_context
+            def exact_context(task, facts, selected, expected):
+                accept(task, facts, selected, expected)
+                require(task.source['app_source'] == source, 'FIXTURE_SOURCE')
+            control._Switch._accept_context = exact_context
+            trace = trace_switch(control)
+            try:
+                result = control.restore_backup(ops, archive_name=name, archive_sha256=digest,
+                                                expected_revision=revision)
+            except Exception as error:
+                raise Refused(switch_error_code(error, ops, control, trace[0])) from None
+            require(result.get('outcome') == 'restored_backup' and result.get('panel_running') is True
+                    and re.fullmatch('[a-f0-9]{64}', result.get('selection_revision', '')), 'FIXTURE_OUTCOME')
+            return dict(ok=True, outcome=result['outcome'], selection_revision=result['selection_revision'],
+                        panel_running=True)
         opener = FixtureOpener(stack, folder, source, core=core, bad_digest=action == 'bad-digest')
         inject_transport(control, opener)
         conflicts = inject_assertions(control, source, opener.core, port)
@@ -397,8 +421,14 @@ def run(arguments):
                 and type(result.get('selection_revision')) is str
                 and re.fullmatch('[a-f0-9]{64}', result['selection_revision'])
                 and (port is None or conflicts == [port]), 'FIXTURE_OUTCOME')
-        return dict(ok=True, outcome=expected, selection_revision=result['selection_revision'],
-                    panel_running=result['panel_running'])
+        answer = dict(ok=True, outcome=expected, selection_revision=result['selection_revision'],
+                      panel_running=result['panel_running'])
+        if action == 'update':
+            name, digest = result.get('backup_name'), result.get('backup_sha256')
+            require(type(name) is str and re.fullmatch(r'core-maintenance-[a-f0-9]{32}\.zip', name)
+                    and type(digest) is str and re.fullmatch('[a-f0-9]{64}', digest), 'FIXTURE_BACKUP')
+            answer.update(backup_name=name, backup_sha256=digest)
+        return answer
 
 
 def main():
