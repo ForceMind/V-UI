@@ -143,7 +143,7 @@ class FixtureChild:
             result = dict(event='restore_observer_ready', transaction=journal['transaction'])
             if case.fault == 'restore-observer-ready-tx':
                 result['transaction'] = '0'*32
-        elif command == 'core_restore_exchange':
+        elif command in ('core_restore_exchange', 'core_restore_rollback'):
             journal = ops_worker._restore_exchange_request(request)
             receipt = getattr(self, 'restore_receipt', None)
             if receipt is None:
@@ -623,6 +623,17 @@ class CoreMaintenanceControlTests(unittest.TestCase):
                           'core_restore_exchange', 'core_restore_observe', 'start-panel', 'release:trial')
         self.assertEqual(self.files.read_stable(**SOURCE).revision, result['selection_revision'])
         self.assertTrue(all(child.finished for child in (self.child, exchange, observer)))
+
+    def test_restore_recovery_moves_data_without_confirming_or_starting_service(self):
+        receipt, trial, _ = self.restore_trial_fixture()
+        data = dict(live=trial['original'], original=None, incoming=None, rejected=trial['live'])
+        self.child.restore_receipt = dict(receipt, data=data, tree_sha256='d'*64)
+        result = self.switch._recover_restore_data()
+        self.assertEqual(result, self.child.restore_receipt)
+        self.assertEqual(self.services.state(PANEL), 'inactive')
+        self.assertEqual(self.files.read_restore_recovery()['phase'], 'backed_up')
+        self.assertTrue((self.root/selection_files.PENDING).exists())
+        self.assertFalse(self.brokers)
 
     def test_restore_handoff_finishes_writer_before_creating_observer(self):
         receipt, trial, incoming = self.restore_trial_fixture()

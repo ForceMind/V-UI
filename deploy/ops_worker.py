@@ -271,16 +271,22 @@ def _restore_exchange_request(value):
     from app.core_updates import artifacts
     from app.core_updates.selection_files import MAX_JOURNALS
     fields = {'sequence', 'original_tree_sha256', 'prepared_tree_sha256'}
-    if (value.get('action') != 'core_restore_exchange'
+    rollback = value.get('action') == 'core_restore_rollback'
+    digests = fields - {'sequence'}
+    if (value.get('action') not in ('core_restore_exchange', 'core_restore_rollback')
             or not fields <= set(value) or type(value['sequence']) is not int
             or not 0 <= value['sequence'] < MAX_JOURNALS
-            or any(not artifacts._hex(value[key]) for key in fields - {'sequence'})):
+            or not (all(artifacts._hex(value[key]) for key in digests)
+                    or rollback and all(value[key] is None for key in digests))):
         raise WorkerError('Invalid private restore exchange request')
     projection = {key: item for key, item in value.items() if key not in fields}
     projection['action'] = 'core_restore_observe'
     journal = _restore_observer_request(projection)
     journal['sequence'] = value['sequence']
-    journal['quiesced'] = {key: value[key] for key in fields - {'sequence'}}
+    journal['quiesced'] = ({key: value[key] for key in digests}
+                           if value['original_tree_sha256'] is not None else None)
+    if rollback:
+        journal['phase'] = 'rollback_required'
     return journal
 
 
@@ -298,13 +304,23 @@ def _complete_restore_exchange(channel, root, release_tools, journal):
         pending = leases.enter_context(files.hold_restore_pending(journal))
         names = _restore_slot_names(journal['restore_target']['data']['slot'])
         recovery = root/'recovery'
-        with release_tools._maintenance_directory(root) as root_fd, \
-                release_tools._maintenance_directory(recovery) as recovery_fd:
+        rollback = journal['phase'] == 'rollback_required'
+        try:
+            recovery_fd = leases.enter_context(release_tools._maintenance_directory(recovery))
+        except FileNotFoundError:
+            if not rollback or journal['quiesced'] is not None:
+                raise
+            recovery_fd = None
+        if recovery_fd is not None:
+            root_fd = leases.enter_context(release_tools._maintenance_directory(root))
             parents = {key: root_fd if key == 'live' else recovery_fd for key in names}
             position, observed = _inspect_restore_slots(root, journal, names, parents, root_fd, recovery_fd)
-            if position not in ('staged', 'parked', 'trial'):
+            allowed = (('unplaced', 'staged') if journal['quiesced'] is None else
+                       ('staged', 'parked', 'trial', 'rollback_gap', 'restored') if rollback else
+                       ('staged', 'parked', 'trial'))
+            if position not in allowed:
                 raise WorkerError('Unexpected private restore exchange layout')
-            for key in ('live', 'incoming', 'original'):
+            for key in ('live', 'incoming', 'original', 'rejected'):
                 if observed[key] is not None:
                     pending()
                     path = root/names[key] if key == 'live' else recovery/names[key]
@@ -313,7 +329,7 @@ def _complete_restore_exchange(channel, root, release_tools, journal):
         guard = release_tools._StoppedGuard(root)
         try:
             _prove_released_operation(session)
-            receipt = exchange_restore_data(guard, journal, _selection_files=files)
+            receipt = exchange_restore_data(guard, journal, rollback=rollback, _selection_files=files)
             _prove_released_operation(session)
             channel.send('restore_data_exchanged', receipt=receipt)
             while _command(channel.read(), ('prove_operation', 'finish')) != 'finish':
@@ -519,7 +535,7 @@ def _run(root, release_tools, input_fd, output, *, timeout=TIMEOUT):
                 _load_core_session(release_tools)
                 journal = _restore_observer_request(request)
                 _complete_restore_observer(channel, root, release_tools, journal)
-            elif request.get('action') == 'core_restore_exchange':
+            elif request.get('action') in ('core_restore_exchange', 'core_restore_rollback'):
                 _load_core_session(release_tools)
                 journal = _restore_exchange_request(request)
                 _complete_restore_exchange(channel, root, release_tools, journal)

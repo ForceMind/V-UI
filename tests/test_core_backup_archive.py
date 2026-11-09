@@ -214,6 +214,15 @@ class CompleteBackupTests(unittest.TestCase):
         self.assertEqual([event for event, _ in frames], ['restore_data_exchanged', 'operation_held'])
         self.assertEqual(frames[0][1]['receipt']['data']['live'], prepared.data_generation)
         self.assertEqual((self.root/'recovery'/('core-restore-'+slot+'-original')/'v-ui.db').read_bytes(), before)
+        rollback = ops_worker._restore_exchange_request(dict(request, action='core_restore_rollback'))
+        frames.clear()
+        commands = iter((dict(command='finish'),))
+        with patch.object(full, 'SelectionFiles', return_value=files):
+            ops_worker._complete_restore_exchange(channel, self.root, tools, rollback)
+        self.assertEqual(frames[0][1]['receipt']['data']['live'], original['data_generation'])
+        self.assertEqual((self.data/'v-ui.db').read_bytes(), before)
+        self.assertTrue((self.root/'recovery'/('core-restore-'+slot+'-rejected')/'v-ui.db').is_file())
+        self.assertTrue((files.layout.root/sf.PENDING).exists())
 
     def state(self,components=True,legacy=False):
         state=self.fixture.state() if components else self.fixture.initial

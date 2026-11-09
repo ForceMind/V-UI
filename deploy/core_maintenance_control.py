@@ -453,6 +453,39 @@ class _Switch:
         response = self.worker.exchange(request, 'restore_data_exchanged', ('receipt',))
         return self._handoff_restore_trial(response['receipt'], _new_worker=_new_worker)
 
+    def _recover_restore_data(self):
+        """Recover the original data only, retaining pending for verified old boot."""
+        self._time()
+        _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+        journal = self.files.read_restore_recovery()
+        context = journal['switch_context']
+        _need(journal['restore_target']['kind'] == 'core-restore-target-v2'
+              and journal['data_disposition'] == 'restore_original'
+              and journal['phase'] not in ('confirmed', 'cleanup')
+              and self.m._digest(self.m._raw(self.config)) == context['config_sha256'],
+              'CORE_RESTORE_CONTEXT')
+        self.transaction = journal['transaction']
+        self.services.stop_all(emergency=True)
+        self.services.prove_stopped()
+        self._time()
+        _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+        request = self._restore_worker_request(journal, 'core_restore_rollback')
+        quiesced = journal['quiesced'] or {}
+        expected_digest = quiesced.get('original_tree_sha256')
+        request.update(sequence=journal['sequence'], original_tree_sha256=expected_digest,
+                       prepared_tree_sha256=quiesced.get('prepared_tree_sha256'))
+        response = self.worker.exchange(request, 'restore_data_exchanged', ('receipt',))
+        receipt = response['receipt']
+        _need(type(receipt) is dict and set(receipt) == {'transaction', 'sequence', 'data', 'tree_sha256'}
+              and receipt['transaction'] == self.transaction
+              and type(receipt['sequence']) is int and receipt['sequence'] == journal['sequence']
+              and receipt['tree_sha256'] == expected_digest, 'CORE_RESTORE_RECEIPT')
+        allowed = ('unplaced', 'staged') if not quiesced else ('staged', 'restored')
+        _need(self.m.restore_data_position(journal, receipt['data']) in allowed, 'CORE_RESTORE_DATA_CHANGED')
+        self._proof()
+        self.services.prove_stopped()
+        return receipt
+
     def _handoff_restore_trial(self, receipt, *, _new_worker=None):
         """Finish the writer before starting the observer under the same Root lock."""
         self._proof()

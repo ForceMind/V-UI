@@ -105,7 +105,10 @@ class CorePrepareWorkerTests(unittest.TestCase):
             original=dict(dev=1, ino=2), incoming=dict(dev=1, ino=3))
         exchange = dict(request, action='core_restore_exchange', sequence=3,
                         original_tree_sha256='d'*64, prepared_tree_sha256='e'*64)
-        for value, handler in ((request, '_complete_restore_observer'), (exchange, '_complete_restore_exchange')):
+        rollback = dict(exchange, action='core_restore_rollback',
+                        original_tree_sha256=None, prepared_tree_sha256=None)
+        for value, handler in ((request, '_complete_restore_observer'), (exchange, '_complete_restore_exchange'),
+                               (rollback, '_complete_restore_exchange')):
             with self.subTest(action=value['action']), patch.object(w, handler) as complete:
                 status, _, _, sessions = self.run_worker([], request=value)
                 self.assertEqual(status, 0)
