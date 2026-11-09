@@ -1,6 +1,6 @@
 # Cloudflare DNS-01 与通配符证书契约
 
-状态：2026-11-09，**v0.4.23已公开**，正式应用源`be5d8459cdd3eeedce73f2ff6e4663e5eb781e42`，19项资产/tag/清单摘要已独立读回，匿名公共安装通过。短入口在独立批次固定23与公开摘要，应用及历史资产不改写。真实Cloudflare账号签发、浏览器、物理512MiB整机/24小时未验证，本批没有生产升级或真实DNS写入。
+状态：2026-11-09，**v0.4.23已公开**，正式应用源`be5d8459cdd3eeedce73f2ff6e4663e5eb781e42`，19项资产/tag/清单摘要已独立读回，匿名公共安装通过。短入口已独立固定23与公开摘要，候选/主线及实际main URL验收通过；应用及历史资产不改写。真实Cloudflare账号签发、浏览器、物理512MiB整机/24小时未验证，本批没有生产升级或真实DNS写入。
 
 用户操作见[候选DNS指南](DNS01_CLOUDFLARE.md)。[首实现提交7e418b6的设计全文](https://github.com/ForceMind/V-UI/blob/7e418b6e10587e61efcecae290302dfd440a0b6a/docs/DNS01_CLOUDFLARE_CONTRACT.md)固定保留原阶段措辞；当前进度以[路线图](../ROADMAP.md)为准。
 
@@ -91,6 +91,8 @@ auth/cleanup hook共用持久化journal。正常完成、验证失败、取消�
 
 ## 候选与验收状态
 
+以下为发布前候选阶段的历史快照；当前完成状态以[公开发布与短入口](#公开发布与短入口)节为准。原候选清单与失败判定保留，不代表当前仍未发布。
+
 下面是已有提交的实际记录，不授予当前新候选资格。源码版本升为23后，需在新的准确source重跑完整九组/21 jobs；oneclick为一个构建、一个新装及公开14/15/16/17/19/20/21/22的八个升级角色，共10角色。所有role必须拥有自己的真实成功步骤和同producer/source/run/attempt收据，不能用步骤并集、旧skip或旧材料补齐。
 
 原Cloudflare应用冻结点为`4bd1d9a648a8096fbf2fa05314e35049a2408e7c`，其源码与最终迁移夹具已独审。发布准备声明采用`parallel-v1`及`unverified-non-browser-v1`，只记录合同，不是公开发布授权或CI成功声明；冻结之后仅政策文件和普通Markdown可变。准确发布准备HEAD仍须自己的完整九组/21 jobs、10角色同源收据及四目标资格，不能继承冻结点的成功片段；若再需改变代码/CI/测试，应更新冻结点并重新审验。
@@ -142,5 +144,7 @@ Actions的最小证据：旧HTTP fixture迁移及重复/损坏/失败回滚；�
 - [正式晋升42612414262](https://github.com/ForceMind/V-UI/actions/runs/42612414262)完整验证并晋升同源字节，不重建。旧启动失败42604920601及候选3a6ba6d的上游403/同源attempt2记录保留，不称永久修复限流。
 - 独立匿名HTTPS读取install.sh、SHA256SUMS与RELEASE.json，三个小文件的实际摘要匹配上传元数据，18项清单逐项匹配其余公开资产digest；tag指向正式源。未在本机下载产品包或执行安装。
 - 安装器SHA-256：`82dd8ac84f6a7117762359916769a28f6aa505a6e64607d9edda67b56d5e40e3`；完整SHA256SUMS文件SHA-256：`61d6fba8f3d1c5fb6ae39a890db06e8b44e2afa165d1e13451d450a27e583a30`。
-- [匿名公共安装42613270949](https://github.com/ForceMind/V-UI/actions/runs/42613270949)成功。本批短入口固定23，使用不可变正式应用源进行自身候选/主线与实际main URL验收，完成后记录入口身份。
+- [匿名公共安装42613270949](https://github.com/ForceMind/V-UI/actions/runs/42613270949)成功。短入口代码源`414472ffaa872bc1212a1cc5ff0fd741bdadf1e8`，候选d864ee0和主线414472f各九组21jobs及全部必要step通过；[实际main URL安装42619332425](https://github.com/ForceMind/V-UI/actions/runs/42619332425)成功，使用的不可变正式应用源为`be5d8459cdd3eeedce73f2ff6e4663e5eb781e42`。
 - 原配置、账户、节点、订阅、证书及代理设置的升级保护保持；没有访问或升级生产实例。真实Cloudflare账号签发和浏览器未验证。
+
+入口匿名HTTPS字节读回与Git对象一致，SHA-256：`20421be76bf0ba7e3224620fd9c073d597e0f9afd62200ec9ba86ad228e137d4`。本次收口只改Markdown，入口代码、安装器信任锚、正式应用及19资产保持；文档提交不重新授予应用发布资格。浏览器、真实Cloudflare账号签发及生产升级边界保持。
