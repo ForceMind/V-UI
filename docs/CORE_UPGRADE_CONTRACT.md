@@ -891,3 +891,5 @@ SDK `85426a3` 的主测试42665205127在3668项中唯一失败为shell能力检�
 新增stage10项、loader5项与旧事务13项，两Python版本各28项通过；独审无剩余阻断。既有真实非Root worker协议fixture继续在Linux运行，本机因Linux平台门槛未验，不回退生产约束。CI-only probe增加真实Root快照/来源登记/交接和真实降权读取进程；使用惰性协议读者，单独marker明确不冒充完整产品prepare。本机未执行Root或产品安装。
 
 SDK与受管stage两个来源producer、锁内实际事实consumer现在源码均已接通，仍须本批准确Actions与小日志回读资格。旧准备版本不自动授信，重验原包后可有accepted来源；stage失败保留accepted记录不代表prepared/active/healthy。远程Root凭据发放、持久核心任务、备份映射及完整用户界面仍未完成。
+
+f205efe原生矩阵42669763135首次失败：合成stage夹具继承umask077，mkdir(0755)实际变为0700，触发生产可穿越父目录拒绝。夹具现显式chmod(0755)，只落实原夹具契约，不改生产权限规则；原10项在umask077下复验通过，独审无阻断。原失败保留，准确新源码CI另验。

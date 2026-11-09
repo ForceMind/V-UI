@@ -22,7 +22,7 @@ def load(name):
 class StageOriginTests(unittest.TestCase):
     def setUp(self):
         temporary=tempfile.TemporaryDirectory(prefix='vui-stage-origin-');self.addCleanup(temporary.cleanup)
-        self.anchor=Path(temporary.name);self.parent=self.anchor/'stages';self.parent.mkdir(mode=0o755)
+        self.anchor=Path(temporary.name);self.parent=self.anchor/'stages';self.parent.mkdir(mode=0o755);self.parent.chmod(0o755)
         self.ops=load('system_ops');self.authority=load('core_authority')
         self.account=SimpleNamespace(pw_uid=os.geteuid(),pw_gid=os.getegid())
         self.source=self.anchor/'candidate.zip'
