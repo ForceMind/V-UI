@@ -156,7 +156,7 @@ CORE_IMPLEMENTATIONS = (
 )
 
 
-def _load_core_session(release_tools, *, recovery=False, restore=False):
+def _load_core_session(release_tools, *, recovery=False, restore=False, backup=False):
     """Only private requests need this fixed CONTROL closure, never payload."""
     directory = Path(__file__).resolve().parent
     names = ('app.core_updates', 'app.release_tools') + tuple(name for name, _ in CORE_IMPLEMENTATIONS)
@@ -180,6 +180,8 @@ def _load_core_session(release_tools, *, recovery=False, restore=False):
             return sys.modules['app.core_updates.maintenance_recovery'].CoreRecoverySession
         if restore:
             return sys.modules['app.core_updates.maintenance'].CoreRestorePreparation
+        if backup:
+            return sys.modules['app.core_updates.maintenance'].CoreBackupSession
         return sys.modules['app.core_updates.maintenance'].CoreMaintenanceSession
     except BaseException:
         for name in reversed(loaded):sys.modules.pop(name, None)
@@ -414,6 +416,36 @@ def _complete_restore_observer(channel, root, release_tools, journal):
             channel.send('operation_held')
 
 
+def _complete_core_backup(channel, session):
+    with _quiet_candidate_io():
+        context = session.prepare()
+    channel.send('core_context', **context)
+    while True:
+        value = channel.read()
+        if value == {'command': 'proceed'}:
+            break
+        _probe_panel_tls(channel, session, value, before_stop=True)
+    with _quiet_candidate_io():
+        quiesced = session.execute()
+    channel.send('core_quiesced', **quiesced)
+    value = _core_fields(channel, 'backup_core', ('snapshot',))
+    with _quiet_candidate_io():
+        backup = session.backup_core(value['snapshot'])
+    channel.send('core_backed_up', **backup)
+    channel.expect('release_backup_writers')
+    session.release_backup_writers()
+    channel.send('backup_writers_released')
+    while True:
+        value = channel.read()
+        if value.get('command') == 'probe_panel_tls':
+            _probe_panel_tls(channel, session, value)
+        elif _command(value, ('prove_operation', 'finish')) == 'finish':
+            return
+        else:
+            _prove_released_operation(session)
+            channel.send('operation_held')
+
+
 def _complete_restore_preparation(channel, session):
     with _quiet_candidate_io():
         prepared = session.prepare()
@@ -603,6 +635,13 @@ def _run(root, release_tools, input_fd, output, *, timeout=TIMEOUT):
                 implementation = _load_core_session(release_tools, restore=True)
                 session = implementation(root, **{key: request[key] for key in fields})
                 _complete_restore_preparation(channel, session)
+            elif request.get('action') == 'core_backup':
+                if (set(request) != {'protocol', 'action', 'expected_selection_revision'}
+                        or type(request['protocol']) is not int or request['protocol'] != 1):
+                    raise WorkerError('Invalid private core backup request')
+                implementation = _load_core_session(release_tools, backup=True)
+                session = implementation(root, expected_selection_revision=request['expected_selection_revision'])
+                _complete_core_backup(channel, session)
             else:
                 action, arguments = _request(request)
                 if action in ('start', 'restart'):

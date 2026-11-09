@@ -367,7 +367,7 @@ class CoreMaintenanceSession(tools._MaintenanceSession):
     def probe_panel_tls(self, *, require_login):
         phase = self._state
         _need(os.geteuid() != 0 and type(require_login) is bool
-              and (phase == 'prepared' and self._core_phase == 'checked' and require_login
+              and (phase == 'prepared' and self._core_phase in ('checked', 'backup_checked') and require_login
                    or phase in ('trial_writers_released', 'recovery_writers_released')), 'PANEL_TLS_PHASE')
 
         def proof():
@@ -601,6 +601,42 @@ class CoreMaintenanceSession(tools._MaintenanceSession):
         return self._bind(self._before,restore=True)
     def release_writers_for_trial(self):
         _need(self._core_phase=='bound','CORE_PHASE');return super().release_writers_for_trial()
+
+
+class CoreBackupSession(CoreMaintenanceSession):
+    """Back up a settled core selection without changing either domain."""
+
+    def __init__(self, root, *, expected_selection_revision, **layout):
+        _need(a._hex(expected_selection_revision), 'SELECTION_REQUIRED')
+        super().__init__(root, core='sing-box', expected_selection_revision=expected_selection_revision, **layout)
+
+    def prepare(self):
+        try:
+            result = super().prepare()
+            _need(self._initialized and all(value in (None, 2) for value in result['runtime_schemas'].values()),
+                  'BACKUP_RUNTIME_NOT_BOOTABLE')
+            self._core_phase = 'backup_checked'
+            return result
+        except BaseException:
+            self.close()
+            raise
+
+    def execute(self):
+        _need(self._core_phase == 'backup_checked', 'CORE_PHASE')
+        tools._MaintenanceSession.execute(self)
+        self._unchanged_application()
+        states = self._observe_states()
+        _need(all(row['_schema'] == 2 for row in states.values()), 'BACKUP_RUNTIME_NOT_BOOTABLE')
+        self._final_intents = self._intents(states, self._before)
+        for core in s.CORES:
+            self._resolver.current(self._before, core)
+        self._policy()
+        self._core_phase = 'quiesced'
+        return dict(final_intents=deepcopy(self._final_intents))
+
+    def release_backup_writers(self):
+        _need(self._core_phase == 'backed_up', 'CORE_PHASE')
+        tools._MaintenanceSession.release_writers_for_trial(self)
 
 
 class CoreRestorePreparation(CoreMaintenanceSession):

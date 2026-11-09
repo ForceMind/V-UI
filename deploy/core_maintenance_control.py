@@ -396,6 +396,14 @@ class _Switch:
 
     def _backup_before(self):
         snapshot = self.files.backup_snapshot(self.transaction, **self.source)
+        name, digest = self._write_backup(snapshot)
+        self.files.record_backup(self.transaction, dict(kind='backup-components-v1',
+            backup_id=hashlib.sha256((name+':'+digest).encode()).hexdigest(), sha256=digest, name=name,
+            selection_revision=self.before.revision,
+            intents_sha256=self.m._digest(self.m._raw(self.final))), **self.source)
+        return digest
+
+    def _write_backup(self, snapshot):
         snapshot = dict(snapshot, schema=1, kind='core-backup-closure-v1',
                         selection=self.m._selection_map(snapshot['selection']))
         self.backup = self.worker.command('backup_core', 'core_backed_up',
@@ -404,11 +412,43 @@ class _Switch:
         _need(type(name) is str and re.fullmatch(r'core-maintenance-[a-f0-9]{32}\.zip', name)
               and self.a._hex(digest) and self.backup['snapshot_sha256'] ==
                   hashlib.sha256(self.modules.store._canonical(snapshot)).hexdigest(), 'CORE_BACKUP_RECEIPT')
-        self.files.record_backup(self.transaction, dict(kind='backup-components-v1',
-            backup_id=hashlib.sha256((name+':'+digest).encode()).hexdigest(), sha256=digest, name=name,
-            selection_revision=self.before.revision,
-            intents_sha256=self.m._digest(self.m._raw(self.final))), **self.source)
-        return digest
+        return name, digest
+
+    def run_backup(self, expected_revision):
+        facts = self.worker.exchange(dict(protocol=1, action='core_backup',
+            expected_selection_revision=expected_revision), 'core_context',
+            ('application', 'data_generation', 'selection', 'selection_initialized',
+             'bundles', 'intents', 'runtime_schemas'))
+        self._accept_context(facts, 'sing-box', expected_revision)
+        _need(self.initialized, 'CORE_SELECTION_CONTEXT')
+        self.initial = self.services.snapshot()
+        running = self.initial['v-ui.service'] == 'active'
+        if running:
+            self._tls(self._identity(), login=True)
+        self._time()
+        _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+        try:
+            self.services.stop_all()
+            self.services.prove_stopped()
+            response = self.worker.command('proceed', 'core_quiesced', ('final_intents',))
+            self.final = self._intents(response['final_intents'], self.before)
+            name, digest = self._write_backup(dict(selection=self.before, intents=self.final,
+                                                   panel_was_running=running))
+            self.worker.command('release_backup_writers', 'backup_writers_released')
+            self._proof()
+            _need(self.files.read_stable(**self.source) == self.before, 'CORE_SELECTION_CONTEXT')
+            self.services.prove_stopped()
+            self._proof()
+            self.services.restore(self.initial)
+            if running:
+                self._tls(self._await_identity(), login=True)
+            self._proof()
+            self.worker.finish()
+            return dict(outcome='backup_created', backup_name=name, backup_sha256=digest,
+                        panel_running=running)
+        except BaseException:
+            self.services.stop_all(emergency=True)
+            raise
 
     def run_restore(self, archive_name, archive_sha256, expected_revision):
         """Private restore. The caller owns the Root installation lock."""
@@ -906,7 +946,16 @@ def recover_restore_backup(ops, *, cancelled=None, _receipt_sha256=None):
     return _run_task(ops, cancelled, None, restore_recovery=True, receipt_sha256=_receipt_sha256)
 
 
-def _run_task(ops, cancelled, request, *, restore=False, restore_recovery=False, receipt_sha256=None):
+def backup_components(ops, *, expected_revision, cancelled=None, _receipt_sha256=None):
+    """Private backup entry for a settled component selection."""
+    _need(os.geteuid() == 0, 'ROOT_REQUIRED')
+    _need(os.getpid() == os.getpgrp() == os.getsid(0), 'CORE_TASK_ISOLATION')
+    _need(type(expected_revision) is str and ops.HEX.fullmatch(expected_revision), 'CORE_BACKUP_REQUEST')
+    return _run_task(ops, cancelled, (expected_revision,), backup=True, receipt_sha256=_receipt_sha256)
+
+
+def _run_task(ops, cancelled, request, *, restore=False, restore_recovery=False, backup=False,
+              receipt_sha256=None):
     cancelled = [] if cancelled is None else cancelled
     deadline = time.monotonic() + ops.TIMEOUT
     with ops.installation_lock(_proof=True) as proof:
@@ -926,6 +975,8 @@ def _run_task(ops, cancelled, request, *, restore=False, restore_recovery=False,
 
             task = new_task()
             try:
+                if backup:
+                    return task.run_backup(*request)
                 if restore_recovery:
                     journal = task.files.read_restore_recovery()
                     if 'confirmed_selection' in journal:

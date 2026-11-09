@@ -1153,13 +1153,15 @@ HELP = ('V-UI 受管维护菜单\n'
         '16 / update-core 更新指定核心\n'
         '17 / rollback-core 回退指定核心\n'
         '18 / recover-core 恢复中断的核心切换\n'
+        '19 / backup-components 备份节点数据及核心版本\n'
         'h            帮助\n'
         '0            退出\n'
         '操作失败后不会自动恢复启动。OpenRC 当前仅支持状态查询与候选准备。')
 CHOICES = {'1': 'status', '2': 'start', '3': 'stop', '4': 'restart',
            '5': 'backup', '6': 'restore', '7': 'activate', '8': 'stage', '9': 'recover-restore', '10': 'network', '11': 'open-port', '12': 'upgrade', '13': 'grants'}
-CORE_TASKS = ('restore-components', 'recover-components', 'update-core', 'rollback-core', 'recover-core')
-CHOICES.update(zip(('14', '15', '16', '17', '18'), CORE_TASKS))
+CORE_TASKS = ('restore-components', 'recover-components', 'update-core', 'rollback-core', 'recover-core',
+              'backup-components')
+CHOICES.update(zip(('14', '15', '16', '17', '18', '19'), CORE_TASKS))
 CORE_RESTORE_ARCHIVE = re.compile(r'core-maintenance-[a-f0-9]{32}\.zip\Z')
 CORE_RESTORE_BOOTSTRAP = """import hashlib, os, sys, types
 if len(sys.argv) not in (4, 5, 6) or os.getuid() != 0 or os.geteuid() != 0:
@@ -1280,6 +1282,10 @@ def _core_terminal_task(ops, arguments, cancelled, expected_receipt):
         result = module.recover_restore_backup(ops, cancelled=cancelled, _receipt_sha256=expected_receipt)
     elif arguments == ['recover-core']:
         result = module.recover(ops, cancelled=cancelled, _receipt_sha256=expected_receipt)
+    elif arguments == ['backup-components']:
+        selection = decode_json(trusted_bytes(CONFIG.parent/'core-selection.json', MAX_JSON))
+        result = module.backup_components(ops, expected_revision=selection['revision'],
+                                          cancelled=cancelled, _receipt_sha256=expected_receipt)
     elif len(arguments) == 3 and arguments[0] == 'restore-components':
         selection = decode_json(trusted_bytes(CONFIG.parent/'core-selection.json', MAX_JSON))
         result = module.restore_backup(ops, archive_name=arguments[1], archive_sha256=arguments[2],
@@ -1331,6 +1337,8 @@ def terminal_core_action(action):
         print('操作会短暂停服并创建当前数据备份。')
     elif action == 'recover-core':
         print('按中断记录核验并恢复核心选择及服务状态。')
+    elif action == 'backup-components':
+        print('短暂停服后备份节点数据及核心版本，完成后恢复原服务状态。')
     else:
         print('按中断记录恢复已确认代次或原数据，保留失败副本。')
     answer = read_input('确认执行 [y/N]: ', 16)
@@ -1363,6 +1371,9 @@ def terminal_core_action(action):
         needs_backup = outcome != 'already_current'
     elif action == 'restore-components':
         messages = {'restored_backup': '恢复完成，已核对数据与服务状态。'}
+    elif action == 'backup-components':
+        messages = {'backup_created': '双域备份完成，已核对服务状态。'}
+        needs_backup = True
     else:
         messages = {key: '恢复完成，已核对数据与服务状态。'
                     for key in ('restored_previous', 'resumed_confirmed')}

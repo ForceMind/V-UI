@@ -988,7 +988,8 @@ class MenuTests(unittest.TestCase):
                 ('15', 'recover-components', [], 'resumed_confirmed', '恢复完成'),
                 ('16', 'update-core', ['sing-box', '42'], 'switched', '核心切换完成'),
                 ('17', 'rollback-core', ['xray'], 'restored_previous', '核心试跑失败'),
-                ('18', 'recover-core', [], 'restored_previous', '恢复完成')):
+                ('18', 'recover-core', [], 'restored_previous', '恢复完成'),
+                ('19', 'backup-components', [], 'backup_created', '双域备份完成')):
             with self.subTest(action=action), patch.object(ops, 'verify_installation', return_value=('systemd', None)), \
                     patch.object(ops, 'trusted_bytes', return_value=receipt), \
                     patch.object(ops, 'run_command', return_value=(0, json.dumps(

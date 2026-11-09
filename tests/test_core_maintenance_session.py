@@ -81,6 +81,39 @@ class CoreMaintenanceTests(unittest.TestCase):
                       intents=final['final_intents'],panel_was_running=True)
         result=session.backup_core(snapshot);return session,context,result
 
+    def test_backup_only_session_writes_archive_without_changing_current_state(self):
+        original = self.session()
+        context = original.prepare()
+        original.close()
+        source = dict(app_source=materials.NEW_APP, target=materials.TARGET)
+        before = s.decode_selection(sf._raw(context['selection']), **source)
+        self.files.bootstrap(before, writer_observation={
+            core: dict(schema=context['runtime_schemas'][core], revision=row['revision'], enabled=row['enabled'])
+            for core, row in context['intents'].items()},
+            service_snapshot=dict(panel_running=True, cores=context['intents']))
+        session = m.CoreBackupSession(self.root, expected_selection_revision=before.revision,
+            _selection_files=self.files, _catalog=self.material.catalog, _store=self.material.store,
+            _bundle_anchor=self.cycle.base)
+        self.addCleanup(session.close)
+        with self.assertRaisesRegex(m.CoreMaintenanceError, 'BACKUP_RUNTIME_NOT_BOOTABLE'):
+            session.prepare()
+        for core, intent in context['intents'].items():
+            self.write_state(core, dict(schema=2, **intent))
+        session = m.CoreBackupSession(self.root, expected_selection_revision=before.revision,
+            _selection_files=self.files, _catalog=self.material.catalog, _store=self.material.store,
+            _bundle_anchor=self.cycle.base)
+        self.addCleanup(session.close)
+        states = {core: self.read_state(core) for core in s.CORES}
+        session.prepare()
+        quiesced = session.execute()
+        receipt = session.backup_core(dict(schema=1, kind='core-backup-closure-v1',
+            selection=context['selection'], intents=quiesced['final_intents'], panel_was_running=True))
+        session.release_backup_writers()
+        session.close()
+        self.assertEqual(tools.file_digest(self.root/'backups'/receipt['backup_name']), receipt['backup_sha256'])
+        self.assertEqual({core: self.read_state(core) for core in s.CORES}, states)
+        self.assertEqual(self.files.read_stable(**source), before)
+
     def test_restore_session_preflights_and_stages_verified_archive_under_real_leases(self):
         config, chain = self.tls_fixture()
         writer, context, backup = self.backed()

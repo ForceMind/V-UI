@@ -95,6 +95,9 @@ class FixtureChild:
                 result['application']['target'] = 'aarch64-gnu'
             elif case.fault == 'worker-extra-field':
                 result['unchecked'] = True
+        elif command == 'core_backup':
+            self.backup_only = True
+            result = dict(event='core_context', **dict(case.context, selection_initialized=True))
         elif command == 'core_recover':
             self.recovering = True
             self.confirmed_selection = request.get('confirmed_selection')
@@ -120,6 +123,8 @@ class FixtureChild:
                          if self.confirmed_selection is not None else case.before)
                 result = dict(event='core_recovery_bound', selection=selection_files._selection_map(state),
                               final_intents=case.intents_for(state), changed_cores=[])
+            elif getattr(self, 'backup_only', False):
+                result = dict(event='core_quiesced', final_intents=case.final_intents)
             else:
                 result = dict(event='core_quiesced', final_intents=case.final_intents, source_token=TOKEN)
         elif command == 'backup_core':
@@ -137,6 +142,8 @@ class FixtureChild:
                           intents=case.intents_for(case.plan.after))
         elif command == 'release_writers_for_trial':
             result = dict(event='trial_writers_released')
+        elif command == 'release_backup_writers':
+            result = dict(event='backup_writers_released')
         elif command == 'prove_operation':
             result = dict(event='operation_held')
         elif command in ('core_restore_observe', 'core_restore_observe_old', 'core_restore_observe_early'):
@@ -626,6 +633,21 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.assertEqual(self.trace.count('observe_restore_data'), 4)
         self.assertEqual(self.brokers[0].context['data_generation'], incoming)
         self.assertEqual(self.files.read_stable(**SOURCE), state)
+
+    def test_private_backup_keeps_selection_and_restores_topology(self):
+        self.files.bootstrap(self.before, writer_observation={
+            name: dict(schema=1, revision=row['revision'], enabled=row['enabled'])
+            if row['revision'] is not None else dict(schema=None, revision=None, enabled=False)
+            for name, row in self.initial_intents.items()},
+            service_snapshot=dict(panel_running=True, cores=self.initial_intents))
+        result = self.switch.run_backup(self.before.revision)
+        self.assertEqual(result, dict(outcome='backup_created', backup_name=ARCHIVE,
+                                     backup_sha256=BACKUP_SHA, panel_running=True))
+        self.assert_order('core_backup', 'stop', 'proceed', 'backup_core',
+                          'release_backup_writers', 'start-panel', 'finish')
+        self.assertEqual(self.files.read_stable(**SOURCE), self.before)
+        self.assertFalse((self.root/selection_files.PENDING).exists())
+        self.assertFalse(self.brokers)
 
     def test_private_restore_coordinates_preflight_before_stop_and_trial_after_backup(self):
         before = self.context['data_generation']
