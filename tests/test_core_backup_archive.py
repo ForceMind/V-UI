@@ -1,5 +1,6 @@
 """Complete fake data+component archive checks; no restore/service/native run."""
 from copy import deepcopy
+from dataclasses import replace
 import hashlib
 import io
 import json
@@ -7,6 +8,7 @@ import os
 from pathlib import Path
 import sqlite3
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -35,6 +37,8 @@ class CompleteBackupTests(unittest.TestCase):
         (self.data/'v-ui.db').chmod(0o600)
         (self.data/'hidden-keep.json').write_bytes(b'private original')
         (self.data/'.unapproved-hidden').write_bytes(b'must not broaden hidden copy')
+        for name in ('hidden-keep.json', '.unapproved-hidden'):
+            (self.data/name).chmod(0o600)
         self.archive=self.root/'complete.zip'
 
     def state(self,components=True,legacy=False):
@@ -60,6 +64,13 @@ class CompleteBackupTests(unittest.TestCase):
     def preflight(self,checksum,tool=None):
         return full.preflight(self.archive,checksum,self.fixture.workspace,
             core_backup=self.fixture.tool if tool is None else tool,expected_data_path=self.data)
+
+    def prepare(self, guard, checked, state):
+        return full.prepare_restore(guard, checked, core_backup=self.fixture.tool, current_selection=state)
+
+    def validate_prepared(self, guard, prepared, state):
+        return full.validate_restore_against_current(guard, prepared,
+            core_backup=self.fixture.tool, current_selection=state)
 
     def dns_fixture(self):
         from app.certificates.dns_store import DNSCredentialStore
@@ -327,6 +338,275 @@ class CompleteBackupTests(unittest.TestCase):
         alias.unlink()
         with patch.object(full,'MAX_ARCHIVE',10),self.assertRaises(tools.ReleaseError):
             with self.preflight(checksum):pass
+
+    def test_prepare_revokes_private_authority_suspends_dns_and_preserves_config_and_missing_core(self):
+        state, intents = self.state(components=False, legacy=True)
+        xray = self.data/'runtime/xray'
+        for path in xray.iterdir():
+            path.unlink()
+        xray.rmdir()
+        intents['xray'].update(revision=None, enabled=False)
+        _, profile = self.dns_fixture()
+        for name in ('parent', 'parent/child', 'parent/child/leaf'):
+            (self.data/name).mkdir(mode=0o700)
+        payload = self.data/'parent/child/leaf/original.json'
+        payload.write_bytes(b'preserved');payload.chmod(0o600)
+        with sqlite3.connect(self.data/'v-ui.db') as db:
+            db.executescript("CREATE TABLE maintenance_sessions(id TEXT);"
+                "CREATE TABLE maintenance_grants(id TEXT); INSERT INTO maintenance_sessions VALUES('fake');"
+                "INSERT INTO maintenance_grants VALUES('fake');")
+        live_db = (self.data/'v-ui.db').read_bytes()
+        config = self.data/'runtime/sing-box'/(intents['sing-box']['revision']+'.json')
+        profile_name = Path('certificates/dns-credentials')/profile['id']/'state.json'
+        live_dns = (self.data/profile_name).read_bytes()
+        checksum = self.create(state, intents)
+        with self.preflight(checksum) as checked:
+            self.archive.rename(self.root/'retained.zip')  # Preparation consumes the open preflight, not the ZIP.
+            self.assertEqual(checked.data_sha256, tools.recovery_tree_digest(checked.data_path))
+            self.assertEqual(checked.data_generation, dict(dev=checked.data_path.stat().st_dev,
+                                                          ino=checked.data_path.stat().st_ino))
+            with tools.stopped(self.root) as guard, self.prepare(guard, checked, state) as prepared:
+                stage = prepared.data_path
+                self.assertEqual(prepared.archive_sha256, checksum)
+                self.assertEqual(prepared.migrated_cores, ('sing-box',))
+                self.assertEqual(prepared.data_generation, dict(dev=stage.stat().st_dev, ino=stage.stat().st_ino))
+                self.assertEqual((stage/'parent').stat().st_mode & 0o777, 0o700)
+                self.assertEqual((stage/payload.relative_to(self.data)).read_bytes(), b'preserved')
+                self.assertEqual((stage/config.relative_to(self.data)).read_bytes(), config.read_bytes())
+                self.assertFalse((stage/'runtime/xray').exists())
+                self.assertEqual(json.loads((stage/'runtime/sing-box/state.json').read_bytes()),
+                                 dict(schema=2, **intents['sing-box']))
+                dns = json.loads((stage/profile_name).read_bytes())
+                self.assertFalse(dns['enabled']);self.assertTrue(dns['restore_pending'])
+                with sqlite3.connect(stage/'v-ui.db') as db:
+                    for table in ('admin_sessions', 'maintenance_sessions', 'maintenance_grants'):
+                        self.assertEqual(db.execute('SELECT count(*) FROM '+table).fetchone(), (0,))
+                    self.assertEqual(db.execute('SELECT revoked FROM subscription_grants').fetchone(), (1,))
+                    self.assertEqual(db.execute('SELECT raw_config FROM inbounds').fetchone(), ('original node bytes',))
+                    self.assertEqual(db.execute('SELECT username FROM users').fetchone(), ('fake-user',))
+                    self.assertEqual(db.execute('SELECT auto_renew FROM managed_certificates').fetchone(), (1,))
+                self.assertEqual(tools.recovery_tree_digest(stage), prepared.data_sha256)
+                self.assertNotEqual(prepared.data_sha256, checked.data_sha256)
+                old = self.validate_prepared(guard, prepared, state)
+                self.assertEqual(old['data_sha256'], tools.recovery_tree_digest(self.data))
+                self.assertEqual(old['data_generation'], dict(dev=self.data.stat().st_dev, ino=self.data.stat().st_ino))
+                with self.assertRaises(tools.ReleaseError):
+                    with self.prepare(guard, checked, state):pass
+        self.assertFalse(stage.exists())
+        self.assertEqual((self.data/'v-ui.db').read_bytes(), live_db)
+        self.assertEqual((self.data/profile_name).read_bytes(), live_dns)
+        self.assertFalse((self.root/'RESTORE_PENDING.json').exists())
+
+    def test_prepare_requires_unmodified_preflight_and_cannot_be_forged_or_reused(self):
+        state, intents = self.state(components=False)
+        checksum = self.create(state, intents)
+        original = (self.data/'v-ui.db').read_bytes()
+        with self.preflight(checksum) as checked, tools.stopped(self.root) as guard:
+            with self.assertRaises(tools.ReleaseError):
+                with self.prepare(guard, replace(checked, data_path=self.data), state):pass
+            (checked.data_path/'hidden-keep.json').write_bytes(b'private tamper')
+            with self.assertRaisesRegex(tools.ReleaseError, 'staging changed after preflight'):
+                with self.prepare(guard, checked, state):pass
+        with self.assertRaises(tools.ReleaseError):
+            with self.prepare(self.guard, checked, state):pass
+        self.assertEqual((self.data/'v-ui.db').read_bytes(), original)
+
+    def test_prepare_without_live_exclusive_refuses_before_any_stage_mutation(self):
+        state, intents = self.state(components=False, legacy=True)
+        self.dns_fixture()
+        checksum = self.create(state, intents)
+        live_db = (self.data/'v-ui.db').read_bytes()
+        with self.preflight(checksum) as checked:
+            stage_db = (checked.data_path/'v-ui.db').read_bytes()
+            stage_runtime = (checked.data_path/'runtime/sing-box/state.json').read_bytes()
+            with patch.object(full, '_migrate_stage_runtime') as migrate, \
+                    patch.object(tools, '_suspend_restore_dns') as suspend, \
+                    patch.object(tools, '_revoke_restore_access') as revoke:
+                with self.assertRaisesRegex(tools.ReleaseError, 'requires exclusive data ownership'):
+                    with self.prepare(self.guard, checked, state):pass
+                for operation in (migrate, suspend, revoke):
+                    operation.assert_not_called()
+            self.assertEqual((checked.data_path/'v-ui.db').read_bytes(), stage_db)
+            self.assertEqual((checked.data_path/'runtime/sing-box/state.json').read_bytes(), stage_runtime)
+        self.assertEqual((self.data/'v-ui.db').read_bytes(), live_db)
+
+    def test_sqlite_open_time_symlink_to_live_is_refused_before_any_dml(self):
+        state, intents = self.state(components=False)
+        checksum = self.create(state, intents)
+        live = self.data/'v-ui.db'
+        before = live.read_bytes()
+        with self.preflight(checksum) as checked, tools.stopped(self.root) as guard:
+            staged = checked.data_path/'v-ui.db'
+            retained = staged.with_name('retained-original.db')
+            connect = sqlite3.connect
+            statements = []
+
+            def redirected(location, *args, **kwargs):
+                self.assertIn(str(location), (str(staged), staged.as_uri()+'?mode=rw'))
+                staged.rename(retained)
+                staged.symlink_to(live)
+                try:
+                    connection = connect(location, *args, **kwargs)
+                    connection.set_trace_callback(statements.append)
+                    return connection
+                finally:
+                    staged.unlink()
+                    retained.rename(staged)
+
+            with patch.object(tools.sqlite3, 'connect', side_effect=redirected):
+                with self.assertRaisesRegex(tools.ReleaseError, 'Restored database changed'):
+                    with self.prepare(guard, checked, state):pass
+            self.assertEqual(statements, [])
+        self.assertEqual(live.read_bytes(), before)
+
+    def test_strict_cleanup_refuses_an_unmatched_connection_inode(self):
+        state, intents = self.state(components=False)
+        checksum = self.create(state, intents)
+        with self.preflight(checksum) as checked, tools.stopped(self.root) as guard:
+            db = checked.data_path/'v-ui.db'
+            before = db.read_bytes()
+            original = tools._writable_regular_fds()
+            unexpected = {**original, max(original, default=2)+1: (0, 1)}
+            with patch.object(tools, '_writable_regular_fds', side_effect=[original, unexpected]):
+                with self.assertRaisesRegex(tools.ReleaseError, 'Restored database changed'):
+                    with self.prepare(guard, checked, state):pass
+            self.assertEqual(db.read_bytes(), before)
+
+    def test_stage_runtime_parent_replacement_never_writes_through_live_symlink(self):
+        state, intents = self.state(components=False, legacy=True)
+        checksum = self.create(state, intents)
+        live = self.data/'runtime/sing-box'
+        before = (live/'state.json').read_bytes()
+        with self.preflight(checksum) as checked, tools.stopped(self.root) as guard:
+            staged = checked.data_path/'runtime/sing-box'
+            retained = staged.with_name('retained-sing-box')
+            replace_entry = os.replace
+            swaps = []
+
+            def redirected(source, destination, **options):
+                self.assertEqual(destination, 'state.json')
+                self.assertEqual(options['src_dir_fd'], options['dst_dir_fd'])
+                staged.rename(retained)
+                staged.symlink_to(live, target_is_directory=True)
+                swaps.append(True)
+                return replace_entry(source, destination, **options)
+
+            with patch.object(full.os, 'replace', side_effect=redirected):
+                with self.assertRaises(tools.ReleaseError):
+                    with self.prepare(guard, checked, state):pass
+            self.assertEqual(swaps, [True])
+            self.assertEqual(json.loads((retained/'state.json').read_bytes()), dict(schema=2, **intents['sing-box']))
+        self.assertEqual((live/'state.json').read_bytes(), before)
+
+    def test_validate_requires_real_live_exclusive_lease_and_unmodified_prepared_bytes(self):
+        state, intents = self.state(components=False)
+        checksum = self.create(state, intents)
+        with self.preflight(checksum) as checked, tools.stopped(self.root) as guard, \
+                self.prepare(guard, checked, state) as prepared:
+            errors = []
+
+            def other_thread():
+                try:
+                    self.validate_prepared(guard, prepared, state)
+                except Exception as error:
+                    errors.append(error)
+
+            thread = threading.Thread(target=other_thread)
+            thread.start()
+            thread.join(3)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(len(errors), 1)
+            self.assertIsInstance(errors[0], tools.ReleaseError)
+            self.assertIn('requires exclusive data ownership', str(errors[0]))
+            (prepared.data_path/'hidden-keep.json').write_bytes(b'private tamper')
+            with self.assertRaisesRegex(tools.ReleaseError, 'Prepared component restore data changed'):
+                self.validate_prepared(guard, prepared, state)
+
+    def test_validate_requires_actual_current_core_ids_even_without_proxy(self):
+        state, intents = self.state()
+        checksum = self.create(state, intents)
+        path = self.data/'runtime/sing-box/state.json'
+        value = json.loads(path.read_bytes());value['artifact_id'] = 'f'*64
+        path.write_text(json.dumps(value))
+        with self.preflight(checksum) as checked, tools.stopped(self.root) as guard, \
+                self.prepare(guard, checked, state) as prepared:
+            with self.assertRaisesRegex(tools.ReleaseError, 'Current runtime artifact binding differs'):
+                self.validate_prepared(guard, prepared, state)
+        self.assertEqual(json.loads(path.read_bytes()), value)
+
+    def test_validate_refuses_turning_off_committed_proxy(self):
+        state, intents = self.state(components=False)
+        checksum = self.create(state, intents)
+        store = self.active_proxy(state, intents)
+        active = store.load_active()
+        with self.preflight(checksum) as checked, tools.stopped(self.root) as guard, \
+                self.prepare(guard, checked, state) as prepared:
+            with self.assertRaisesRegex(tools.ReleaseError, 'turn off an active proxy'):
+                self.validate_prepared(guard, prepared, state)
+        self.assertEqual(store.load_active(), active)
+
+    def test_validate_preserves_exact_protected_bindings_and_never_creates_live_proxy_lock(self):
+        state, intents = self.state()
+        store = self.active_proxy(state, intents)
+        checksum = self.create(state, intents)
+        active = store.load_active()
+        lock = self.data/'.proxy-state.lock'
+        lock.unlink()
+        with self.preflight(checksum) as checked, tools.stopped(self.root) as guard, \
+                self.prepare(guard, checked, state) as prepared:
+            self.validate_prepared(guard, prepared, state)
+            self.assertFalse(lock.exists())
+            self.assertFalse((prepared.data_path/'.proxy-state.lock').exists())
+            directory = self.data/'runtime/sing-box'
+            raw = (directory/(intents['sing-box']['revision']+'.json')).read_bytes().replace(b'24443',b'24444')
+            revision = hashlib.sha256(raw).hexdigest()
+            changed = directory/(revision+'.json')
+            changed.write_bytes(raw);changed.chmod(0o600)
+            store.begin_apply(active['revision'], 'new-binding',
+                runtime_context=dict(active['runtime_context'], candidate_core_revision=revision,
+                                     previous_core_revision=active['core_revision'], previous_enabled=True))
+            store.commit_apply('new-binding', revision)
+            (directory/'state.json').write_text(json.dumps(dict(schema=2, **dict(intents['sing-box'], revision=revision))))
+            with self.assertRaisesRegex(tools.ReleaseError, 'changes committed protected inbound bindings'):
+                self.validate_prepared(guard, prepared, state)
+
+    def test_validate_refuses_proxy_fence_downgrade_without_migrating_sqlite(self):
+        state, intents = self.state(components=False)
+        checksum = self.create(state, intents)
+        with sqlite3.connect(self.data/'v-ui.db') as db:
+            db.execute("ALTER TABLE inbounds ADD COLUMN routing_mode TEXT NOT NULL DEFAULT 'inherit'")
+        store = ProxyStoreForTest(self.data)
+        store.ensure_policy_v2()
+        with self.preflight(checksum) as checked, tools.stopped(self.root) as guard, \
+                self.prepare(guard, checked, state) as prepared:
+            original = (prepared.data_path/'v-ui.db').read_bytes()
+            with self.assertRaisesRegex(tools.ReleaseError, 'downgrade the current proxy capability fence'):
+                self.validate_prepared(guard, prepared, state)
+            self.assertEqual((prepared.data_path/'v-ui.db').read_bytes(), original)
+            self.assertFalse((prepared.data_path/'.proxy-state-initialized').exists())
+        self.assertEqual(store.policy_schema_version(), 2)
+
+    def test_authorization_triggers_and_unhandled_foreign_keys_fail_closed(self):
+        state, intents = self.state(components=False)
+        for kind, sql, error in (
+                ('trigger', "CREATE TRIGGER auth_mutation AFTER DELETE ON admin_sessions "
+                            "BEGIN UPDATE inbounds SET raw_config='unexpected'; END", 'unexpected trigger'),
+                ('foreign', "CREATE UNIQUE INDEX session_token ON admin_sessions(token_hash);"
+                            "CREATE TABLE business_ref(token TEXT REFERENCES admin_sessions(token_hash));"
+                            "INSERT INTO business_ref VALUES('fake-session');", 'invalid database references')):
+            with self.subTest(kind=kind):
+                self.archive = self.root/(kind+'.zip')
+                with sqlite3.connect(self.data/'v-ui.db') as db:
+                    if kind == 'foreign':
+                        db.execute('DROP TRIGGER auth_mutation')
+                    db.executescript(sql)
+                checksum = self.create(state, intents)
+                with self.preflight(checksum) as checked, tools.stopped(self.root) as guard:
+                    with self.assertRaisesRegex(tools.ReleaseError, error):
+                        with self.prepare(guard, checked, state):pass
+                    with sqlite3.connect(checked.data_path/'v-ui.db') as db:
+                        self.assertEqual(db.execute('SELECT count(*) FROM admin_sessions').fetchone(), (1,))
+                        self.assertEqual(db.execute('SELECT raw_config FROM inbounds').fetchone(), ('original node bytes',))
 
 
 if __name__=='__main__':unittest.main()

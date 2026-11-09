@@ -1,11 +1,11 @@
 """Private complete backup container: original data ZIP plus component closure.
 
-Writer requires the caller's actual stopped guard. Preflight is read-only with
-respect to live data/Root state and does not authorize restore or execution.
-No Root store/selection write, DNS suspension, revocation or data swap occurs.
+Writer requires the caller's actual stopped guard. Preflight and restore
+preparation never modify live data or Root state. Authorization clearing and
+DNS suspension affect only the private incoming tree. No exchange occurs here.
 """
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
@@ -13,12 +13,14 @@ import re
 import sqlite3
 import stat
 import tempfile
+import uuid
 import zipfile
 
 from app import release_tools as tools
 from . import artifacts as a, selection as s
-from .backup import CoreBackup
-from .boot import _runtime_states
+from .backup import CoreBackup, _intents
+from .boot import _data_root, _runtime_states
+from .selection_files import _new
 
 KIND = 'backup-components-v1'
 MAX_MEMBERS = 15
@@ -218,13 +220,57 @@ class ComponentsBackupInput:
     archive_sha256: str
     data_kind: str
     requires_legacy_migration: tuple
+    _proof: object = field(default=None, repr=False, compare=False)
+
+    @property
+    def data_generation(self):
+        return dict(dev=self._proof.generation[0], ino=self._proof.generation[1])
+
+    @property
+    def data_sha256(self):
+        return self._proof.digest
+
+
+class _RestoreProof:
+    def __init__(self, core_backup, live, generation, digest):
+        self.core_backup = core_backup
+        self.live = live
+        self.generation = generation
+        self.digest = digest
+        self.pid = os.getpid()
+        self.checked = self.prepared = None
+        self.used = False
+        self.current = None
+
+
+def _generation(data):
+    with tools._maintenance_directory(data) as descriptor:
+        info = os.fstat(descriptor)
+        return info.st_dev, info.st_ino
+
+
+def _private_extraction_dirs(data):
+    # Recursive mkdir can apply a caller's umask to intermediate directories.
+    # Normalize only the newly extracted tree, anchored to its private FD.
+    def fail(error):
+        raise error
+
+    with tools._maintenance_directory(data) as root:
+        for _, _, _, directory in os.fwalk('.', dir_fd=root, follow_symlinks=False, onerror=fail):
+            _need(os.fstat(directory).st_uid == os.geteuid())
+            os.fchmod(directory, 0o700)
 
 
 @contextmanager
 def preflight(archive_path, expected_sha, workspace, *, core_backup, expected_data_path):
     """Check untrusted input; never swap live data or prepare the Root store."""
     _need(type(core_backup) is CoreBackup)
+    workspace, live = Path(workspace), Path(expected_data_path)
+    _need(workspace.is_absolute() and live.is_absolute() and '..' not in workspace.parts
+          and '..' not in live.parts and workspace != live and live not in workspace.parents)
     try:
+        with tools._maintenance_directory(workspace):
+            pass
         with tempfile.TemporaryDirectory(prefix='.restore-components-', dir=workspace) as temporary:
             work=Path(temporary);work.chmod(0o700);container=work/'container'
             with _snapshot(Path(archive_path),expected_sha,work) as snapshot, zipfile.ZipFile(snapshot) as archive:
@@ -235,11 +281,213 @@ def preflight(archive_path, expected_sha, workspace, *, core_backup, expected_da
             _need(inner_meta.get('kind') == meta['data_kind']
                   and inner_meta.get('data_path') == str(expected_data_path) and inner_meta.get('platform') == tools.PLATFORM)
             (data/tools.MANIFEST).unlink()
+            _private_extraction_dirs(data)
             from app.certificates.dns_backup import prepare_dns_staging
             prepare_dns_staging(data)
             migration=_validate_data(data,meta['data_kind'],closure,anchor=work)
-            yield ComponentsBackupInput(data,closure,expected_sha,meta['data_kind'],migration)
+            from app.data_owner import data_owner
+            with data_owner(data, exclusive=True):
+                generation = _generation(data)
+                digest = tools.recovery_tree_digest(data)
+                _need(_generation(data) == generation)
+            proof = _RestoreProof(core_backup, live, generation, digest)
+            checked = ComponentsBackupInput(data, closure, expected_sha, meta['data_kind'], migration, proof)
+            proof.checked = checked
+            try:
+                yield checked
+            finally:
+                proof.checked = proof.prepared = None
     except tools.ReleaseError:
         raise
     except Exception:
         raise tools.ReleaseError('Component backup preflight failed; original data was not changed') from None
+
+
+@dataclass(frozen=True)
+class PreparedComponentsRestore:
+    data_path: Path
+    core_closure: object
+    archive_sha256: str
+    data_kind: str
+    migrated_cores: tuple
+    data_sha256: str
+    _generation: tuple = field(repr=False)
+    _proof: object = field(repr=False, compare=False)
+
+    @property
+    def data_generation(self):
+        return dict(dev=self._generation[0], ino=self._generation[1])
+
+
+_PROXY_NAMES = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
+
+
+def _has_proxy(data):
+    return any(os.path.lexists(data/name) for name in _PROXY_NAMES)
+
+
+def _check_restore_selection(current, core_backup):
+    _need(type(current) is s.SelectionState and current.app_source == core_backup.app_source
+          and current.target == core_backup.target, 'Current core selection does not match the restore context')
+    return s.encode_selection(current)
+
+
+def _remove_stage_proxy_lock(data):
+    path = data/'.proxy-state.lock'
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    _need(stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid() and info.st_nlink == 1
+          and info.st_size == 0 and stat.S_IMODE(info.st_mode) == 0o600)
+    path.unlink()
+
+
+@contextmanager
+def _live_restore_scope(guard, live):
+    from app.data_owner import _EXCLUSIVE, data_owner
+    _need(isinstance(guard, tools._StoppedGuard) and guard.root/'data' == live,
+          'Current restore policy requires the stopped guard')
+    guard._check()
+    held = getattr(_EXCLUSIVE, 'held', {})
+    owner = held.get(str(live))
+    _need(owner is not None and owner[0] == os.getpid(), 'Current restore policy requires exclusive data ownership')
+    with data_owner(live):
+        def verify():
+            guard._check()
+            _need(held.get(str(live)) == owner, 'Restore data ownership changed')
+        verify()
+        yield verify
+        verify()
+
+
+def _migrate_stage_runtime(data, closure, migration):
+    if not migration:
+        return
+    with _data_root(data, os.geteuid(), data.parent) as (scope, directory):
+        runtime = scope.directory(directory, 'runtime', mode=0o700)
+        for core in migration:
+            target = scope.directory(runtime, core, mode=0o700)
+            old_fd, size = scope.file(target, 'state.json', mode=0o600, limit=4096)
+            expected = closure.intents[core]
+            _need(a._json(os.pread(old_fd, size+1, 0)) ==
+                  dict(revision=expected['revision'], enabled=expected['enabled']))
+            name = '.restore-state-' + uuid.uuid4().hex
+            raw = json.dumps(dict(schema=2, **expected), sort_keys=True, indent=2).encode()
+            _new(scope, target, name, raw)
+            scope.stable()
+            os.replace(name, 'state.json', src_dir_fd=target, dst_dir_fd=target)
+            scope.files[:] = [row for row in scope.files if row[:2] not in
+                              ((target, name), (target, 'state.json'))]
+            fd, size = scope.file(target, 'state.json', mode=0o600, limit=4096)
+            _need(os.pread(fd, size+1, 0) == raw)
+            os.fsync(target)
+
+
+@contextmanager
+def prepare_restore(guard, checked, *, core_backup, current_selection):
+    """Modify only the private data after the existing live stopped EX is held."""
+    from app.data_owner import data_owner
+    _need(type(checked) is ComponentsBackupInput and type(checked._proof) is _RestoreProof)
+    proof = checked._proof
+    _need(proof.checked is checked and proof.pid == os.getpid() and not proof.used
+          and proof.core_backup is core_backup)
+    data = checked.data_path
+    with _live_restore_scope(guard, proof.live) as verify_live, data_owner(data, exclusive=True):
+        proof.current = _check_restore_selection(current_selection, core_backup)
+        proof.used = True
+        try:
+            _need(_generation(data) == proof.generation and tools.recovery_tree_digest(data) == proof.digest,
+                  'Component restore staging changed after preflight')
+            closure = checked.core_closure
+            _intents(closure.intents, closure.selection)
+            migration = _data_bindings(data, closure, anchor=data.parent)
+            _need(migration == checked.requires_legacy_migration)
+            verify_live()
+            _migrate_stage_runtime(data, closure, migration)
+            if checked.data_kind == 'backup-dns01-v1':
+                tools._suspend_restore_dns(data)
+            tools._revoke_restore_access(data, _strict_staging=True)
+            _need(not _data_bindings(data, closure, anchor=data.parent))
+            if _has_proxy(data):
+                reader = tools._readonly_proxy_store_type()
+                tools._validate_restore_policy(data, _artifact_ids={
+                    core:closure.intents[core]['artifact_id'] for core in s.CORES}, _existing_store_type=reader)
+                _remove_stage_proxy_lock(data)
+            digest = tools.recovery_tree_digest(data, _sync_source=True)
+            _need(_generation(data) == proof.generation)
+            verify_live()
+            prepared = PreparedComponentsRestore(data, closure, checked.archive_sha256, checked.data_kind,
+                                                  migration, digest, proof.generation, proof)
+        except tools.ReleaseError:
+            raise
+        except Exception:
+            raise tools.ReleaseError('Component restore preparation failed; original data was not changed') from None
+        proof.prepared = prepared
+        try:
+            yield prepared
+        finally:
+            proof.prepared = None
+
+
+def validate_restore_against_current(guard, prepared, *, core_backup, current_selection):
+    """Check the old domain under its existing real EX; return old tree facts.
+
+    A bounded private copy allows SQLite and proxy readers to create their
+    temporary sidecars/locks without touching the live data tree. This copies
+    at most the existing recovery tree budget once, alongside incoming staging.
+    """
+    from app.data_owner import data_owner
+    _need(type(prepared) is PreparedComponentsRestore and type(prepared._proof) is _RestoreProof)
+    proof = prepared._proof
+    live, stage = guard.root/'data', prepared.data_path
+    _need(proof.prepared is prepared and proof.checked is not None and proof.pid == os.getpid()
+          and proof.live == live and proof.core_backup is core_backup
+          and proof.current == _check_restore_selection(current_selection, core_backup))
+    try:
+        with _live_restore_scope(guard, live) as verify_live, data_owner(stage):
+            _need(_generation(stage) == prepared._generation
+                  and tools.recovery_tree_digest(stage) == prepared.data_sha256,
+                  'Prepared component restore data changed')
+            _intents(prepared.core_closure.intents, prepared.core_closure.selection)
+            _need(not _data_bindings(stage, prepared.core_closure, anchor=stage.parent))
+            generation = _generation(live)
+            _need(generation[0] == prepared._generation[0], 'Prepared data is on a different filesystem')
+            with tempfile.TemporaryDirectory(prefix='.restore-policy-', dir=stage.parent) as temporary:
+                workspace = Path(temporary)
+                old = workspace/'data'
+                has_proxy = _has_proxy(live)
+                checksum = tools.recovery_tree_digest(live, copy_to=old)
+                # The copy omits transient locks. A live lock with no store
+                # remains unknown and cannot silently become a clean OFF.
+                _need(has_proxy == _has_proxy(old), 'Current proxy policy is unknown')
+                old_ids = {core:s.reference_identity(current_selection.slot(core).current) for core in s.CORES}
+                for core, observed in _runtime_states(old, owner=os.geteuid(), anchor=workspace).items():
+                    _need(observed['_schema'] == 2 and observed['artifact_id'] == old_ids[core]
+                          or observed['_schema'] == 1
+                          and type(current_selection.slot(core).current) is s.BundleReference,
+                          'Current runtime artifact binding differs from restore selection')
+                new_ids = {core:prepared.core_closure.intents[core]['artifact_id'] for core in s.CORES}
+                reader = tools._readonly_proxy_store_type()
+                with data_owner(old, exclusive=True):
+                    if has_proxy:
+                        tools._validate_restore_policy(old, _artifact_ids=old_ids, _existing_store_type=reader)
+                    else:
+                        tools._database_mode_fence(old, _existing_store_type=reader)
+                    try:
+                        incoming = reader(stage).read_snapshot(initialize=False) if _has_proxy(stage) else None
+                        incoming_schema = reader(stage).policy_schema_version() if incoming is not None else 1
+                        current_schema = tools._restore_policy_floor(old, stage, incoming,
+                            _current_artifact_ids=old_ids, _incoming_artifact_ids=new_ids, _existing_store_type=reader)
+                        _need(incoming_schema >= current_schema,
+                              'Backup would downgrade the current proxy capability fence')
+                    finally:
+                        _remove_stage_proxy_lock(stage)
+            verify_live()
+            _need(_generation(live) == generation
+                  and _generation(stage) == prepared._generation, 'Restore data ownership changed')
+        return dict(data_generation=dict(dev=generation[0], ino=generation[1]), data_sha256=checksum)
+    except tools.ReleaseError:
+        raise
+    except Exception:
+        raise tools.ReleaseError('Current restore policy could not be verified; original data was not changed') from None

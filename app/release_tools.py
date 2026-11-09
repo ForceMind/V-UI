@@ -1,6 +1,7 @@
 """Offline, per-user release control. No root, daemon installation, or network calls."""
 from __future__ import annotations
-from contextlib import contextmanager, ExitStack, nullcontext
+from contextlib import closing, contextmanager, ExitStack, nullcontext
+import errno
 import fcntl
 import hashlib
 import json
@@ -1175,6 +1176,154 @@ def restore(root: Path, archive: Path, expected_sha: str):
         _restore_locked(guard, archive, expected_sha)
 
 
+def _restore_policy_floor(current_data, incoming_data, incoming_proxy, *,
+                          _current_artifact_ids=None, _incoming_artifact_ids=None, _existing_store_type=None):
+    """Compare the committed runtime protection, never the uncommitted draft."""
+    proxy_names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
+    if not any(os.path.lexists(current_data/name) for name in proxy_names):
+        return 1
+    from app.services.proxy_store import ProxyStorageError
+    try:
+        current_store = _policy_store(current_data, _existing_store_type)
+        current = current_store.read_snapshot(initialize=False)
+        current_schema = current_store.policy_schema_version()
+    except ProxyStorageError:
+        raise ReleaseError('Current proxy policy is unknown; dedicated recovery is required') from None
+    if current['pending'] is not None:
+        raise ReleaseError('Current proxy apply is unresolved; dedicated recovery is required')
+    current_active = current['active']
+    incoming_active = incoming_proxy['active'] if incoming_proxy is not None else None
+    if current_active and any(current_active['settings'][key] and (
+            incoming_active is None or not incoming_active['settings'][key])
+            for key in ('local_proxy_enabled', 'relay_enabled')):
+        raise ReleaseError('Backup would turn off an active proxy; explicitly disable and commit those settings before restoring it')
+    protected = _committed_policy_protection(current_data, _artifact_ids=_current_artifact_ids,
+                                             _existing_store_type=_existing_store_type)
+    incoming_protected = (_committed_policy_protection(incoming_data, _artifact_ids=_incoming_artifact_ids,
+                             _existing_store_type=_existing_store_type) if incoming_proxy is not None
+                          else {'local': False, 'global': False, 'bindings': []})
+    if protected['bindings'] and protected['bindings'] != incoming_protected['bindings']:
+        raise ReleaseError('Backup changes committed protected inbound bindings; dedicated recovery is required')
+    return current_schema
+
+
+def _suspend_restore_dns(data):
+    from app.certificates.dns_backup import DNSBackupError, suspend_restored_dns
+    try:
+        suspend_restored_dns(data)
+    except DNSBackupError:
+        raise ReleaseError('Restored DNS authority could not be suspended; existing data was not replaced') from None
+
+
+def _writable_regular_fds():
+    """Observe actual file handles in the single-thread restore worker."""
+    root = '/proc/self/fd' if sys.platform.startswith('linux') else '/dev/fd'
+    result = {}
+    for name in os.listdir(root):
+        if not name.isdecimal():
+            continue
+        number = int(name)
+        try:
+            info = os.fstat(number)
+            flags = fcntl.fcntl(number, fcntl.F_GETFL)
+        except OSError as error:
+            if error.errno == errno.EBADF:  # listdir's descriptor has closed.
+                continue
+            raise
+        if stat.S_ISREG(info.st_mode) and (flags & os.O_ACCMODE) == os.O_RDWR:
+            result[number] = (info.st_dev, info.st_ino)
+    return result
+
+
+@contextmanager
+def _private_restore_database(data):
+    db_path = data/'v-ui.db'
+    with _maintenance_directory(data) as parent:
+        fd = os.open(db_path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        try:
+            before = os.fstat(fd)
+            if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                    or before.st_uid != os.geteuid() or stat.S_IMODE(before.st_mode) != 0o600):
+                raise ReleaseError('Unsafe restored database')
+            canonical = db_path.resolve(strict=True)
+            if canonical != db_path:
+                raise ReleaseError('Unsafe restored database')
+            previous_fds = _writable_regular_fds()
+            sqlite_fd = None
+
+            def verify(connection, *, changed=False):
+                nonlocal sqlite_fd
+                def signature(info):
+                    identity = (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid, info.st_nlink)
+                    return identity if changed else identity+(info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+                expected = signature(before)
+                opened = os.fstat(fd)
+                named = os.stat(db_path.name, dir_fd=parent, follow_symlinks=False)
+                if sqlite_fd is None:
+                    created = {number: identity for number, identity in _writable_regular_fds().items()
+                               if previous_fds.get(number) != identity}
+                    if len(created) != 1 or next(iter(created.values())) != (before.st_dev, before.st_ino):
+                        raise ReleaseError('Restored database changed during authorization cleanup')
+                    sqlite_fd = next(iter(created))
+                connected = os.fstat(sqlite_fd)
+                main = [name for _, key, name in connection.execute('PRAGMA database_list') if key == 'main']
+                if (main != [str(canonical)] or signature(opened) != expected
+                        or signature(named) != expected or signature(connected) != expected
+                        or db_path.resolve(strict=True) != canonical):
+                    raise ReleaseError('Restored database changed during authorization cleanup')
+
+            yield canonical.as_uri()+'?mode=rw', verify, fd
+        finally:
+            os.close(fd)
+
+
+def _revoke_restore_access(data, *, _strict_staging=False):
+    """Clear only restored authority in a caller-owned private extraction."""
+    db_path = data/'v-ui.db'
+    if not db_path.is_file() or (_strict_staging and db_path.is_symlink()):
+        raise ReleaseError('Backup has no database')
+    authority = {'admin_sessions', 'maintenance_sessions', 'maintenance_grants', 'subscription_grants'}
+    scope = _private_restore_database(data) if _strict_staging else nullcontext((db_path, None, None))
+    with scope as (location, verify, descriptor):
+        connection = sqlite3.connect(location, uri=True) if verify is not None else sqlite3.connect(location)
+        with closing(connection) as db:
+            if verify is not None:
+                verify(db)
+            if _strict_staging:
+                db.execute('PRAGMA foreign_keys=OFF')
+                db.execute('PRAGMA trusted_schema=OFF')
+                entries = db.execute("SELECT name,type,sql FROM sqlite_master WHERE type IN ('table','view')")
+                for name, kind, sql in entries:
+                    if name.lower() in authority and (name not in authority or kind != 'table'
+                            or not isinstance(sql, str) or not re.match(r'CREATE\s+TABLE\b', sql, re.I)):
+                        raise ReleaseError('Unsupported restored authorization schema')
+                targets = db.execute("SELECT tbl_name FROM sqlite_master WHERE type='trigger'")
+                if any(name.lower() in authority for name, in targets):
+                    raise ReleaseError('Restored authorization table has an unexpected trigger')
+            if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+                raise ReleaseError('Backup database is damaged')
+            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if not {'users', 'inbounds', 'admin_sessions', 'subscription_grants'} <= tables:
+                raise ReleaseError('Unsupported backup database schema')
+            db.execute('DELETE FROM admin_sessions')
+            if 'maintenance_sessions' in tables:
+                db.execute('DELETE FROM maintenance_sessions')
+            if 'maintenance_grants' in tables:
+                db.execute('DELETE FROM maintenance_grants')
+            db.execute('UPDATE subscription_grants SET revoked=1')
+            if _strict_staging and db.execute('PRAGMA foreign_key_check').fetchone() is not None:
+                raise ReleaseError('Restored authorization cleanup would leave invalid database references')
+            if verify is not None:
+                verify(db, changed=True)
+            db.commit()
+        if descriptor is not None:
+            os.fsync(descriptor)
+        else:
+            with db_path.open('rb') as handle:
+                os.fsync(handle.fileno())
+
+
 def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
     guard._check(); root=guard.root
     with tempfile.TemporaryDirectory(prefix='.restore-',dir=root) as temporary:
@@ -1182,8 +1331,7 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
         _check_legacy_backup_format(meta, root / 'data')
         (work/MANIFEST).unlink()
         _require_legacy_runtime_states(work)
-        from app.certificates.dns_backup import (DNSBackupError, validate_dns_snapshot,
-                                                prepare_dns_staging, suspend_restored_dns)
+        from app.certificates.dns_backup import DNSBackupError, validate_dns_snapshot, prepare_dns_staging
         try:
             prepare_dns_staging(work)
             incoming_dns = validate_dns_snapshot(work)
@@ -1193,7 +1341,6 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
             raise ReleaseError('Backup DNS format or reference closure is invalid; existing data was not replaced') from None
         proxy_names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
         incoming_proxy = None
-        current_schema = 1
         if any(os.path.lexists(work / name) for name in proxy_names):
             from app.services.proxy_store import ProxyStore, ProxyStorageError
             try:
@@ -1225,61 +1372,20 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
                     raise ReleaseError('Backup contains an unresolved proxy apply; dedicated recovery is required')
             except (ProxyStorageError, OSError):
                 raise ReleaseError('Backup proxy state is unsafe or incomplete; existing data was not replaced') from None
-        if any(os.path.lexists(root / 'data' / name) for name in proxy_names):
-            # Restore is not a mode-decrease confirmation. Neither legacy nor
-            # proxy-bearing backups may silently replace an ON policy with OFF.
-            from app.services.proxy_store import ProxyStore, ProxyStorageError
-            try:
-                current_store = ProxyStore(root / 'data')
-                current = current_store.read_snapshot(initialize=False)
-                current_schema = current_store.policy_schema_version()
-            except ProxyStorageError:
-                raise ReleaseError('Current proxy policy is unknown; dedicated recovery is required') from None
-            if current['pending'] is not None:
-                raise ReleaseError('Current proxy apply is unresolved; dedicated recovery is required')
-            current_active = current['active']
-            incoming_active = incoming_proxy['active'] if incoming_proxy is not None else None
-            if current_active and any(current_active['settings'][key] and (
-                    incoming_active is None or not incoming_active['settings'][key])
-                    for key in ('local_proxy_enabled', 'relay_enabled')):
-                raise ReleaseError('Backup would turn off an active proxy; explicitly disable and commit those settings before restoring it')
-            protected = _committed_policy_protection(root / 'data')
-            incoming_protected = (_committed_policy_protection(work) if incoming_proxy is not None
-                                  else {'local': False, 'global': False, 'bindings': []})
-            if protected['bindings'] and protected['bindings'] != incoming_protected['bindings']:
-                raise ReleaseError('Backup changes committed protected inbound bindings; dedicated recovery is required')
+        current_schema = _restore_policy_floor(root/'data', work, incoming_proxy)
         _database_mode_fence(work)
         if incoming_proxy is not None:
             _validate_restore_policy(work)
         if current_schema == 2:
             # Ordinary restore cannot undo an already durable capability fence.
+            from app.services.proxy_store import ProxyStore
             _migrate_legacy_modes(work)
             ProxyStore(work).ensure_policy_v2()
         if (root / 'CURRENT.json').exists():
             _policy_release_compatible(work, active(root)[0] / 'payload')
         if incoming_dns:
-            try:
-                suspend_restored_dns(work)
-            except DNSBackupError:
-                raise ReleaseError('Restored DNS authority could not be suspended; existing data was not replaced') from None
-        db_path=work/'v-ui.db'
-        if not db_path.is_file(): raise ReleaseError('Backup has no database')
-        with sqlite3.connect(db_path) as db:
-            if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok': raise ReleaseError('Backup database is damaged')
-            tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            if not {'users','inbounds','admin_sessions','subscription_grants'} <= tables:
-                raise ReleaseError('Unsupported backup database schema')
-            # Restoring must never resurrect previously revoked access tokens.
-            db.execute('DELETE FROM admin_sessions')
-            # Restoring an old backup must not resurrect a revoked temporary
-            # maintenance link/session. Legacy archives may lack these tables.
-            if 'maintenance_sessions' in tables:
-                db.execute('DELETE FROM maintenance_sessions')
-            if 'maintenance_grants' in tables:
-                db.execute('DELETE FROM maintenance_grants')
-            db.execute('UPDATE subscription_grants SET revoked=1')
-            db.commit()
-        with db_path.open('rb') as handle: os.fsync(handle.fileno())
+            _suspend_restore_dns(work)
+        _revoke_restore_access(work)
         if not (root/'data').is_dir() or (root/'data').is_symlink():
             raise ReleaseError('Existing data directory is required for a reversible restore')
         # A managed transaction locks both inode generations before either rename.
@@ -2040,12 +2146,13 @@ _RECOVERY_LOCKS = {'.proxy-state.lock', 'runtime/xray/owner.lock',
                    'runtime/sing-box/owner.lock', 'certificates/.worker.lock'}
 
 
-def recovery_tree_digest(data: Path, *, copy_to: Path | None = None) -> str:
+def recovery_tree_digest(data: Path, *, copy_to: Path | None = None, _sync_source=False) -> str:
     """Bounded descriptor-based fingerprint/copy; excludes only transient leases.
 
     This intentionally accepts corrupt bytes, never unsafe file ownership or
     links. It can preserve an unknown policy without interpreting it as OFF.
-    Caller holds the stable exclusive data-owner lease throughout.
+    Caller holds the stable exclusive data-owner lease throughout. Only a
+    caller-owned private prepared tree may request source fsync.
     """
     records = []; total = 0; count = 0
     with _maintenance_directory(data) as root:
@@ -2094,12 +2201,18 @@ def recovery_tree_digest(data: Path, *, copy_to: Path | None = None) -> str:
                     if (size != entry.st_size or signature(entry) != signature(os.fstat(fd))
                             or signature(entry) != signature(os.stat(name, dir_fd=directory, follow_symlinks=False))):
                         raise ReleaseError('Recovery source changed while reading')
+                    if _sync_source:
+                        os.fsync(fd)
                     records.append([path, stat.S_IMODE(entry.st_mode), size, checksum])
                 finally:
                     os.close(fd)
+            if _sync_source:
+                os.fsync(directory)
         named = data.lstat()
         if (identity.st_dev, identity.st_ino) != (named.st_dev, named.st_ino):
             raise ReleaseError('Recovery data directory changed')
     if copy_to is not None:
         for current, _, _ in os.walk(copy_to, topdown=False): sync_directory(Path(current))
+    if _sync_source:
+        sync_directory(data.parent)
     return digest(json.dumps(sorted(records), sort_keys=True, separators=(',', ':')).encode())

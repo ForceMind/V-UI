@@ -373,6 +373,155 @@ class SelectionFilesTests(unittest.TestCase):
             self.assertFalse((self.layout.root/m.PENDING).exists())
             self.assertFalse((self.layout.root/m.ACTIVE).exists())
 
+    def dual_restore_inputs(self):
+        before, incoming = {'dev': 3, 'ino': 7}, {'dev': 3, 'ino': 11}
+        return dict(service_snapshot=self.pre, source_backup_sha256='a'*64,
+            restored_intents=self.pre['cores'], expected_revision=self.before.revision,
+            switch_context=dict(application=dict(**self.context, release_id='fixture-release',
+                current_sha256='1'*64, manifest_sha256='2'*64, ready_sha256='3'*64),
+                data_generation=before, config_sha256='4'*64, certificate_mode='managed', trust_sha256=None,
+                services={'v-ui.service':'active', 'v-ui-http01.service':'inactive',
+                          'v-ui-http01.socket':'active'}),
+            data_plan=dict(slot='b'*32, incoming_generation=incoming, preflight_tree_sha256='c'*64,
+                           incoming_trust_sha256=None))
+
+    def dual_restore(self):
+        self.bootstrap()
+        inputs = self.dual_restore_inputs()
+        tx = self.files.begin_restore(self.before, **inputs, **self.context)
+        before = inputs['switch_context']['data_generation']
+        incoming = inputs['data_plan']['incoming_generation']
+        positions = dict(
+            staged=dict(live=before, original=None, incoming=incoming, rejected=None),
+            parked=dict(live=None, original=before, incoming=incoming, rejected=None),
+            trial=dict(live=incoming, original=before, incoming=None, rejected=None),
+            rollback_gap=dict(live=None, original=before, incoming=None, rejected=incoming),
+            restored=dict(live=before, original=None, incoming=None, rejected=incoming))
+        return tx, inputs, positions
+
+    def dual_quiesce_and_backup(self, tx, staged):
+        self.files.record_quiesced(tx, dict(panel_stopped=True, writers_exclusive=True,
+            cores=self.pre['cores']), restore_data=staged, original_tree_sha256='7'*64,
+            prepared_tree_sha256='6'*64, **self.context)
+        name = 'core-maintenance-'+'a'*32+'.zip'
+        digest = 'e'*64
+        receipt = dict(kind='backup-components-v1', name=name, sha256=digest,
+            backup_id=m._digest((name+':'+digest).encode()), selection_revision=self.before.revision,
+            intents_sha256=m._digest(m._raw(self.pre['cores'])))
+        self.files.record_backup(tx, receipt, **self.context)
+
+    def test_dual_restore_refuses_cross_device_same_inode_and_unsafe_slot_before_barrier(self):
+        self.bootstrap()
+        for change in ({'slot':'../data'}, {'incoming_generation':{'dev':4,'ino':11}},
+                       {'incoming_generation':{'dev':3,'ino':7}}, {'preflight_tree_sha256':None}):
+            inputs = self.dual_restore_inputs()
+            inputs['data_plan'].update(change)
+            with self.subTest(change=change), self.assertRaises(m.CoreSelectionFilesError):
+                self.files.begin_restore(self.before, **inputs, **self.context)
+            self.assertFalse((self.layout.root/m.PENDING).exists())
+            self.assertFalse((self.layout.root/m.ACTIVE).exists())
+
+    def test_dual_restore_reserves_generation_for_original_recovery(self):
+        self.bootstrap()
+        inputs = self.dual_restore_inputs()
+        with self.assertRaisesRegex(m.CoreSelectionFilesError, 'GENERATION_EXHAUSTED'):
+            self.files.begin_restore(self.before, known_generations=(s.MAX_GENERATION-1,),
+                                     **inputs, **self.context)
+        self.assertFalse((self.layout.root/m.PENDING).exists())
+        self.files.begin_restore(self.before, known_generations=(s.MAX_GENERATION-2,),
+                                 **inputs, **self.context)
+        journal = self.files.read_restore_recovery()
+        self.assertEqual(journal['after']['generation'], s.MAX_GENERATION-1)
+        self.assertEqual(journal['recovery_selection']['generation'], s.MAX_GENERATION)
+
+    def test_dual_restore_binds_independent_old_and_incoming_public_chain(self):
+        self.bootstrap()
+        inputs = self.dual_restore_inputs()
+        inputs['switch_context'].update(certificate_mode='provided', trust_sha256='8'*64)
+        with self.assertRaisesRegex(m.CoreSelectionFilesError, 'RESTORE_TRUST'):
+            self.files.begin_restore(self.before, **inputs, **self.context)
+        self.assertFalse((self.layout.root/m.PENDING).exists())
+        inputs['data_plan']['incoming_trust_sha256'] = '9'*64
+        self.files.begin_restore(self.before, **inputs, **self.context)
+        journal = self.files.read_restore_recovery()
+        self.assertEqual(journal['switch_context']['trust_sha256'], '8'*64)
+        self.assertEqual(journal['restore_target']['data']['incoming_trust_sha256'], '9'*64)
+
+    def test_dual_restore_recognizes_only_exact_data_locations_and_separates_switch_recovery(self):
+        tx, inputs, positions = self.dual_restore()
+        journal = self.files.read_restore_recovery()
+        self.assertEqual(journal['transaction'], tx)
+        self.assertEqual(journal['restore_target']['data'], inputs['data_plan'])
+        self.assertEqual(journal['data_disposition'], 'restore_original')
+        with self.assertRaisesRegex(m.CoreSelectionFilesError, 'RECOVERY_OPERATION'):
+            self.files.read_switch_recovery()
+        for position, observed in positions.items():
+            self.assertEqual(m.restore_data_position(journal, observed), position)
+        for invalid in (dict(positions['staged'], live={'dev':3,'ino':99}),
+                        dict(positions['staged'], original=positions['staged']['live']),
+                        dict(positions['trial'], original=None), dict(positions['parked'], incoming=None),
+                        dict(positions['staged'], extra=None)):
+            with self.subTest(invalid=invalid), self.assertRaises(m.CoreSelectionFilesError):
+                m.restore_data_position(journal, invalid)
+
+    def test_dual_restore_requires_matching_data_and_digest_before_trial_and_commit(self):
+        tx, inputs, positions = self.dual_restore()
+        with self.assertRaises(m.CoreSelectionFilesError):
+            self.dual_quiesce_and_backup(tx, positions['parked'])
+        self.dual_quiesce_and_backup(tx, positions['staged'])
+        digest = '6'*64
+        for observed, content in ((None, None), (positions['staged'], digest),
+                                  (positions['trial'], inputs['data_plan']['preflight_tree_sha256'])):
+            with self.subTest(observed=observed), self.assertRaises(m.CoreSelectionFilesError):
+                self.files.provision(tx, restore_data=observed, restore_tree_sha256=content, **self.context)
+        trial = self.files.provision(tx, restore_data=positions['trial'],
+                                     restore_tree_sha256=digest, **self.context)
+        with self.assertRaises(m.CoreSelectionFilesError):
+            self.files.record_validation(tx, self.validation(trial), **self.context)
+        self.files.record_validation(tx, self.validation(trial), restore_data=positions['trial'], **self.context)
+        with self.assertRaises(m.CoreSelectionFilesError):
+            self.files.confirm(tx, restore_data=positions['restored'], **self.context)
+        with patch.object(self.files, '_archive_and_clear', side_effect=OSError('synthetic interruption')):
+            with self.assertRaises(m.CoreSelectionFilesError):
+                self.files.confirm(tx, restore_data=positions['trial'], **self.context)
+        journal = self.files.read_restore_recovery()
+        self.assertEqual(journal['data_disposition'], 'retain_incoming')
+        self.assertEqual(journal['confirmed_selection'], m._selection_map(trial))
+        with self.assertRaises(m.CoreSelectionFilesError):
+            self.files.finish_cleanup(tx, restore_data=positions['restored'], **self.context)
+        self.assertTrue((self.layout.root/m.PENDING).exists())
+        self.assertEqual(self.files.finish_cleanup(tx, restore_data=positions['trial'], **self.context), trial)
+
+    def test_dual_restore_unconfirmed_keeps_original_and_rejects_rollback_gap(self):
+        tx, _, positions = self.dual_restore()
+        early = self.files.read_restore_recovery()
+        early_selection = s.decode_selection(m._raw(early['recovery_selection']), **self.context)
+        with self.assertRaisesRegex(m.CoreSelectionFilesError, 'RESTORE_DATA_POSITION'):
+            self.files.rollback_metadata(tx, self.validation(early_selection), restore_data=positions['restored'],
+                                         final_intents=self.pre['cores'], **self.context)
+        self.dual_quiesce_and_backup(tx, positions['staged'])
+        self.files.provision(tx, restore_data=positions['trial'],
+            restore_tree_sha256='6'*64, **self.context)
+        journal = self.files.read_restore_recovery()
+        self.assertEqual(journal['data_disposition'], 'restore_original')
+        self.assertEqual(journal['quiesced']['original_tree_sha256'], '7'*64)
+        restored = s.decode_selection(m._raw(journal['recovery_selection']), **self.context)
+        for observed in (positions['trial'], positions['rollback_gap']):
+            with self.assertRaises(m.CoreSelectionFilesError):
+                self.files.rollback_metadata(tx, self.validation(restored), restore_data=observed,
+                                             original_tree_sha256='7'*64, **self.context)
+        with self.assertRaisesRegex(m.CoreSelectionFilesError, 'RESTORE_DATA_DIGEST'):
+            self.files.rollback_metadata(tx, self.validation(restored), restore_data=positions['restored'],
+                                         original_tree_sha256='8'*64, **self.context)
+        with patch.object(self.files, '_archive_and_clear', side_effect=OSError('synthetic interruption')):
+            with self.assertRaises(m.CoreSelectionFilesError):
+                self.files.rollback_metadata(tx, self.validation(restored),
+                    restore_data=positions['restored'], original_tree_sha256='7'*64, **self.context)
+        journal = self.files.read_restore_recovery()
+        self.assertEqual(journal['data_disposition'], 'restore_original')
+        self.assertEqual(journal['confirmed_selection'], m._selection_map(restored))
+        self.assertEqual(self.files.finish_cleanup(tx, restore_data=positions['restored'], **self.context), restored)
+
     def test_bootstrap_refuses_runtime2_bad_unknown_scan_and_first_loss(self):
         stopped = self.snapshot(self.before, panel=False, enabled=(False, False))
         for fault in ('runtime2', 'unknown', 'bad', 'legacy-missing-revision'):
