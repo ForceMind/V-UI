@@ -79,6 +79,18 @@ class SelectionFilesTests(unittest.TestCase):
         self.files.record_validation(tx, self.validation(after), **self.context)
         return tx, after
 
+    def test_status_reports_only_verified_selection_or_pending(self):
+        self.assertEqual(self.files.read_status(), {'outcome': 'bundle_default'})
+        tx, after = self.validated()
+        self.assertEqual(self.files.read_status(), {'outcome': 'core_pending'})
+        self.files.confirm(tx, **self.context)
+        status = self.files.read_status()
+        self.assertEqual(status['outcome'], 'core_selected')
+        self.assertEqual(status['cores']['sing-box'], dict(
+            current=after.slot('sing-box').current.version,
+            previous=self.before.slot('sing-box').current.version))
+        self.assertIsNone(status['cores']['xray']['previous'])
+
     def initial_switch(self):
         plan=s.plan_component(self.before,core='sing-box',identity=material(),expected_revision=self.before.revision)
         tx=self.files.begin(plan,expected_revision=self.before.revision,service_snapshot=self.pre,

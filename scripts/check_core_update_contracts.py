@@ -19,7 +19,7 @@ CONTRACTS = {
     'test_core_github.py': 29,
     'test_core_selection.py': 17,
     'test_core_catalog.py': 24,
-    'test_core_selection_files.py': 53,
+    'test_core_selection_files.py': 54,
     'test_core_resolver.py': 8,
     'test_core_manager_artifacts.py': 10,
     'test_core_application.py': 11,

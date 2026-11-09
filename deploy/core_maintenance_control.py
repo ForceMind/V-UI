@@ -946,6 +946,18 @@ def recover_restore_backup(ops, *, cancelled=None, _receipt_sha256=None):
     return _run_task(ops, cancelled, None, restore_recovery=True, receipt_sha256=_receipt_sha256)
 
 
+def inspect_core_selection(ops, *, _receipt_sha256):
+    """Read only the locally verified selector, under the installation lock."""
+    _need(os.geteuid() == 0, 'ROOT_REQUIRED')
+    with ops.installation_lock(_readonly=True):
+        _need(hashlib.sha256(ops.trusted_bytes(ops.RECEIPT, ops.MAX_JSON)).hexdigest() == _receipt_sha256,
+              'CORE_CONTROL_CHANGED')
+        manager, _ = ops.verify_installation()
+        _need(manager == 'systemd', 'CORE_SYSTEMD_REQUIRED')
+        with _modules(ops) as modules:
+            return modules.selection_files.SelectionFiles().read_status()
+
+
 def backup_components(ops, *, expected_revision, cancelled=None, _receipt_sha256=None):
     """Private backup entry for a settled component selection."""
     _need(os.geteuid() == 0, 'ROOT_REQUIRED')

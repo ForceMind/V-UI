@@ -256,19 +256,30 @@ def verify_installation():
 
 
 @contextmanager
-def installation_lock(*, _proof=False):
+def installation_lock(*, _proof=False, _readonly=False):
     """Retain installer exclusion; optional proof is private and PID-scoped.
 
     The default branch preserves its original yield and cost. Proof users keep
     ancestor FDs until scope exit to avoid the legacy walk's early-close window.
     The proof never re-locks: it observes the original continuously held flock.
     """
-    if type(_proof) is not bool:
+    if type(_proof) is not bool or type(_readonly) is not bool or _proof and _readonly:
         raise Refused('invalid installation proof request')
     if not _proof:
         with trusted_directory(INSTALL_LOCK.parent, lock_parent=True) as directory:
-            fd = os.open(INSTALL_LOCK.name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
-                         0o600, dir_fd=directory)
+            flags = os.O_RDONLY if _readonly else os.O_RDWR | os.O_CREAT
+            try:
+                fd = os.open(INSTALL_LOCK.name, flags | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             0o600, dir_fd=directory)
+            except FileNotFoundError:
+                if not _readonly:
+                    raise
+                yield
+                try:
+                    os.stat(INSTALL_LOCK.name, dir_fd=directory, follow_symlinks=False)
+                except FileNotFoundError:
+                    return
+                raise Refused('installation lock appeared during inspection')
             try:
                 before = os.fstat(fd)
                 if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0
@@ -1154,14 +1165,15 @@ HELP = ('V-UI 受管维护菜单\n'
         '17 / rollback-core 回退指定核心\n'
         '18 / recover-core 恢复中断的核心切换\n'
         '19 / backup-components 备份节点数据及核心版本\n'
+        '20 / core-status 查看已选择的核心版本（只读）\n'
         'h            帮助\n'
         '0            退出\n'
         '操作失败后不会自动恢复启动。OpenRC 当前仅支持状态查询与候选准备。')
 CHOICES = {'1': 'status', '2': 'start', '3': 'stop', '4': 'restart',
            '5': 'backup', '6': 'restore', '7': 'activate', '8': 'stage', '9': 'recover-restore', '10': 'network', '11': 'open-port', '12': 'upgrade', '13': 'grants'}
 CORE_TASKS = ('restore-components', 'recover-components', 'update-core', 'rollback-core', 'recover-core',
-              'backup-components')
-CHOICES.update(zip(('14', '15', '16', '17', '18', '19'), CORE_TASKS))
+              'backup-components', 'core-status')
+CHOICES.update(zip(('14', '15', '16', '17', '18', '19', '20'), CORE_TASKS))
 CORE_RESTORE_ARCHIVE = re.compile(r'core-maintenance-[a-f0-9]{32}\.zip\Z')
 CORE_RESTORE_BOOTSTRAP = """import hashlib, os, sys, types
 if len(sys.argv) not in (4, 5, 6) or os.getuid() != 0 or os.geteuid() != 0:
@@ -1282,6 +1294,8 @@ def _core_terminal_task(ops, arguments, cancelled, expected_receipt):
         result = module.recover_restore_backup(ops, cancelled=cancelled, _receipt_sha256=expected_receipt)
     elif arguments == ['recover-core']:
         result = module.recover(ops, cancelled=cancelled, _receipt_sha256=expected_receipt)
+    elif arguments == ['core-status']:
+        result = module.inspect_core_selection(ops, _receipt_sha256=expected_receipt)
     elif arguments == ['backup-components']:
         selection = decode_json(trusted_bytes(CONFIG.parent/'core-selection.json', MAX_JSON))
         result = module.backup_components(ops, expected_revision=selection['revision'],
@@ -1339,12 +1353,13 @@ def terminal_core_action(action):
         print('按中断记录核验并恢复核心选择及服务状态。')
     elif action == 'backup-components':
         print('短暂停服后备份节点数据及核心版本，完成后恢复原服务状态。')
-    else:
+    elif action != 'core-status':
         print('按中断记录恢复已确认代次或原数据，保留失败副本。')
-    answer = read_input('确认执行 [y/N]: ', 16)
-    if answer is None or answer.strip().lower() not in ('y', 'yes'):
-        print('已取消，未执行操作。')
-        return
+    if action != 'core-status':
+        answer = read_input('确认执行 [y/N]: ', 16)
+        if answer is None or answer.strip().lower() not in ('y', 'yes'):
+            print('已取消，未执行操作。')
+            return
     manager, _ = verify_installation()
     if manager != 'systemd':
         raise Refused('core restore requires systemd')
@@ -1363,6 +1378,9 @@ def terminal_core_action(action):
     if type(result) is not dict or type(result.get('outcome')) is not str:
         raise Refused('unexpected core task result')
     outcome = result.get('outcome')
+    if action == 'core-status':
+        show_core_selection(result)
+        return
     needs_backup = action == 'restore-components'
     if action in ('update-core', 'rollback-core'):
         messages = {'already_current': '核心已是所选版本。',
@@ -1387,6 +1405,31 @@ def terminal_core_action(action):
         print('原数据备份文件 ' + name)
         print('SHA-256 ' + digest)
     print(messages[outcome])
+
+
+def show_core_selection(result):
+    if result == {'outcome': 'bundle_default'}:
+        print('未发现独立核心选择记录。')
+        return
+    if result == {'outcome': 'core_pending'}:
+        print('有待恢复的核心事务，当前选择待确认。')
+        return
+    cores = result.get('cores')
+    if (set(result) != {'outcome', 'cores'} or result['outcome'] != 'core_selected'
+            or type(cores) is not dict or set(cores) != {'sing-box', 'xray'}):
+        raise Refused('invalid core selection summary')
+    version = re.compile(r'(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}\Z')
+    def valid_version(value):
+        return type(value) is str and len(value) <= 100 and version.fullmatch(value)
+    for core in ('sing-box', 'xray'):
+        row = cores[core]
+        if (type(row) is not dict or set(row) != {'current', 'previous'}
+                or not valid_version(row['current'])
+                or row['previous'] is not None and not valid_version(row['previous'])):
+            raise Refused('invalid core selection version')
+    for core in ('sing-box', 'xray'):
+        row = cores[core]
+        print(core + ' 已选择 ' + row['current'] + '，上一个版本 ' + (row['previous'] or '无'))
 
 
 def menu():

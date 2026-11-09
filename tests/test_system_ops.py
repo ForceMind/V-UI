@@ -176,6 +176,16 @@ class TrustTests(unittest.TestCase):
             with self.assertRaises(ops.Refused):
                 self.verify(receipt, payloads, python)
 
+    def test_read_only_installation_lock_does_not_create_missing_file(self):
+        lock = self.temp/'lock'
+        with patch.object(ops, 'INSTALL_LOCK', lock), patch.object(ops, 'trusted_directory', plain_directory):
+            with ops.installation_lock(_readonly=True):
+                self.assertFalse(lock.exists())
+            self.assertFalse(lock.exists())
+            with self.assertRaisesRegex(ops.Refused, 'appeared'):
+                with ops.installation_lock(_readonly=True):
+                    lock.touch()
+
     def test_lock_checks_type_owner_mode_links_and_inode_and_preserves_contents(self):
         lock = self.temp / 'lock'
         lock.write_bytes(b'existing lock bytes')
@@ -1003,6 +1013,21 @@ class MenuTests(unittest.TestCase):
                 self.assertEqual(args[1:6], ['-B', '-I', '-S', '-c', ops.CORE_RESTORE_BOOTSTRAP])
                 self.assertEqual(args[6:], [digest, hashlib.sha256(receipt).hexdigest(), action, *values])
                 compile(args[5], '<fixture bootstrap>', 'exec')
+
+    def test_core_status_is_read_only_and_shows_current_and_previous(self):
+        digest = 'b'*64
+        receipt = json.dumps({'files': {str(ops.CONTROL/'system_ops.py'): digest}}).encode()
+        summary = dict(outcome='core_selected', cores={
+            'sing-box': dict(current='1.14.3', previous='1.14.2'),
+            'xray': dict(current='26.3.27', previous=None)})
+        with patch.object(ops, 'verify_installation', return_value=('systemd', None)), \
+                patch.object(ops, 'trusted_bytes', return_value=receipt), \
+                patch.object(ops, 'run_command', return_value=(0, json.dumps(summary).encode())) as run:
+            code, output = self.run_menu('20\n0\n')
+        self.assertEqual(code, 0)
+        self.assertNotIn('确认执行', output)
+        self.assertIn('sing-box 已选择 1.14.3，上一个版本 1.14.2', output)
+        self.assertEqual(run.call_args.args[0][-1], 'core-status')
 
     def test_core_restore_cancel_keeps_a_bounded_child_cleanup_window(self):
         child = unittest.mock.Mock()

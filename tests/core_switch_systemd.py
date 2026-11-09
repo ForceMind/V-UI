@@ -19,6 +19,7 @@ from online_install_helpers import PrivateMenuSession
 
 VERSIONS = {'sing-box': ('1.14.2', '1.14.3'), 'xray': ('26.3.27', '26.10.21')}
 TARGETS = {'x86_64-gnu', 'x86_64-musl', 'aarch64-gnu', 'aarch64-musl'}
+APPLICATION_TARGET = '2001:db8::114'
 
 
 def installed_core_switch(check, source, work, api, service_python, ca, cert, key, client, nodes,
@@ -78,7 +79,20 @@ def installed_core_switch(check, source, work, api, service_python, ca, cert, ke
                 subprocess.run(['sudo', 'install', '-o', 'root', '-g', 'root', '-m', '0600',
                                 str(candidate/name), str(runner_root/core/'candidate'/name)], check=True)
 
-        target_port, traffic = https_target(stack, '127.0.0.1', cert, key)
+        # Xray 26.10.21 blocks private IPv4 egress by default. A documentation
+        # IPv6 address is outside that matcher and stays local to this runner.
+        ip = '/usr/sbin/ip'
+        address = APPLICATION_TARGET + '/128'
+        subprocess.run(['sudo', ip, '-6', 'addr', 'add', address, 'dev', 'lo', 'nodad'],
+                       check=True, timeout=10)
+        stack.callback(subprocess.run, ['sudo', ip, '-6', 'addr', 'del', address, 'dev', 'lo'],
+                       check=True, timeout=10)
+        route = subprocess.check_output([ip, '-6', 'route', 'get', APPLICATION_TARGET], text=True, timeout=10)
+        fields = route.split()
+        check.assertEqual(fields[:2], ['local', APPLICATION_TARGET])
+        check.assertIn('dev', fields)
+        check.assertEqual(fields[fields.index('dev')+1], 'lo')
+        target_port, traffic = https_target(stack, APPLICATION_TARGET, cert, key)
         home = Path(work)/'installed-core-switch-client'
         home.mkdir(mode=0o700)
         roots = home/'empty-roots'
@@ -111,6 +125,7 @@ def installed_core_switch(check, source, work, api, service_python, ca, cert, ke
                 controller.bind(('127.0.0.1', 0))
                 local_port, controller_port = local.getsockname()[1], controller.getsockname()[1]
             configuration = yaml_client({'proxies':[profile]}, [profile['name']], local_port, controller_port)
+            configuration['ipv6'] = True  # Fixture destination only. The exported node stays byte-equivalent.
             check.assertNotIn('DIRECT', json.dumps(configuration))
             path = home/(label+'.yaml')
             path.write_text(yaml.safe_dump(configuration))
@@ -120,7 +135,7 @@ def installed_core_switch(check, source, work, api, service_python, ca, cert, ke
                                              home/(label+'.log'), env)
                 process.start(local_port)
                 try:
-                    response = https_through(local_port, '127.0.0.1', target_port, ca, label, protocol='socks5h')
+                    response = https_through(local_port, APPLICATION_TARGET, target_port, ca, label, protocol='socks5h')
                 except TimeoutError:
                     check.fail('Installed TCP fixture timed out for ' + core + ' ' + label)
                 check.assertEqual(response, (200, BODY), core + ' ' + label)
