@@ -139,6 +139,9 @@ class CoreMaintenanceTests(unittest.TestCase):
             self.write_state(core, dict(schema=2, **row))
         m.verify_stopped_restore(self.root, context['data_generation'], plan, session._operation_proof,
                                  _bundle_anchor=self.cycle.base)
+        discovered = m.verify_stopped_restore(self.root, context['data_generation'],
+            dict(plan, intents=None), session._operation_proof, _bundle_anchor=self.cycle.base)
+        self.assertEqual(discovered, plan['intents'])
         with self.assertRaisesRegex(ValueError, 'DATA_GENERATION_CHANGED'):
             m.verify_stopped_restore(self.root, dict(context['data_generation'], ino=0), plan,
                                      session._operation_proof, _bundle_anchor=self.cycle.base)

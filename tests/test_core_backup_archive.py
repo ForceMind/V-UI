@@ -175,6 +175,21 @@ class CompleteBackupTests(unittest.TestCase):
             receipt = full.exchange_restore_data(guard, journal, rollback=True, _selection_files=files)
             self.assertIsNone(receipt['data']['incoming'])
             self.assertIsNone(receipt['tree_sha256'])
+            self.assertEqual(full.observe_restore_trial(self.root, dict(journal, early=True,
+                phase='rollback_required'), guard._check, _selection_files=files), receipt['data'])
+            original_stat = os.stat
+            recovery = self.root/'recovery'
+            appeared = []
+            def create_recovery(name, *args, **kwargs):
+                if name == 'data' and kwargs.get('dir_fd') is not None and not appeared:
+                    recovery.mkdir(mode=0o700)
+                    appeared.append(True)
+                return original_stat(name, *args, **kwargs)
+            with patch.object(full.os, 'stat', side_effect=create_recovery):
+                with self.assertRaisesRegex(tools.ReleaseError, 'recovery directory appeared'):
+                    full.observe_restore_trial(self.root, dict(journal, early=True,
+                        phase='rollback_required'), guard._check, _selection_files=files)
+            recovery.rmdir()
             wrong = deepcopy(journal)
             wrong['restore_target']['intents']['sing-box']['enabled'] = False
             with self.assertRaisesRegex(tools.ReleaseError, 'selection or intents'):

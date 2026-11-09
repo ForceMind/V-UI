@@ -252,17 +252,23 @@ def _restore_observer_request(value):
     fields = {'protocol', 'action', 'transaction', 'slot', 'pending', 'original', 'incoming'}
     tls = {'trust_sha256', 'config_sha256'}
     has_tls = bool(tls & set(value))
+    early = value.get('action') == 'core_restore_observe_early'
     if has_tls:
         fields |= tls
     if 'offline' in value:
         fields.add('offline')
+    if early:
+        fields.add('panel_running')
     if (set(value) != fields or type(value['protocol']) is not int or value['protocol'] != 1
-            or value['action'] not in ('core_restore_observe', 'core_restore_observe_old')
+            or value['action'] not in ('core_restore_observe', 'core_restore_observe_old', 'core_restore_observe_early')
             or any(type(value[key]) is not str or not re.fullmatch('[a-f0-9]{32}', value[key])
                    for key in ('transaction', 'slot'))
             or has_tls and any(not artifacts._hex(value[key]) for key in tls)
-            or 'offline' in value and (has_tls or type(value['offline']) is not dict
-                or set(value['offline']) != {'application', 'selection', 'intents'})):
+            or 'offline' in value and (type(value['offline']) is not dict
+                or set(value['offline']) != {'application', 'selection', 'intents'}
+                or not early and (has_tls or value['offline']['intents'] is None))
+            or early and ('offline' not in value or type(value['panel_running']) is not bool
+                          or has_tls and not value['panel_running'])):
         raise WorkerError('Invalid private restore observer request')
     files._record(value['pending'])
     original = files._data_generation(value['original'])
@@ -271,7 +277,7 @@ def _restore_observer_request(value):
         raise WorkerError('Invalid private restore observer identity')
     # The Root controller checks the durable phase and complete journal. This
     # projection grants only read-only observations against the pinned marker.
-    phase = 'rollback_required' if value['action'] == 'core_restore_observe_old' else 'backed_up'
+    phase = 'rollback_required' if value['action'] != 'core_restore_observe' else 'backed_up'
     result = dict(operation='restore', phase=phase, transaction=value['transaction'],
                 original_files=dict(pending=value['pending']),
                 switch_context=dict(data_generation=original),
@@ -281,6 +287,8 @@ def _restore_observer_request(value):
         result['tls'] = {key: value[key] for key in tls}
     if 'offline' in value:
         result['offline'] = value['offline']
+    if early:
+        result.update(early=True, panel_running=value['panel_running'])
     return result
 
 
@@ -297,7 +305,7 @@ def _restore_exchange_request(value):
                     or rollback and all(value[key] is None for key in digests))):
         raise WorkerError('Invalid private restore exchange request')
     projection = {key: item for key, item in value.items() if key not in fields}
-    if {'trust_sha256', 'config_sha256', 'offline'} & set(projection):
+    if {'trust_sha256', 'config_sha256', 'offline', 'panel_running'} & set(projection):
         raise WorkerError('Unexpected private restore exchange fields')
     projection['action'] = 'core_restore_observe'
     journal = _restore_observer_request(projection)
@@ -364,8 +372,8 @@ def _verify_restore_offline(session, journal):
     from app.core_updates.maintenance import verify_stopped_restore
     generation = (journal['switch_context']['data_generation'] if journal['phase'] == 'rollback_required'
                   else journal['restore_target']['data']['incoming_generation'])
-    verify_stopped_restore(session.root, generation, journal['offline'],
-                           lambda: _prove_released_operation(session))
+    return verify_stopped_restore(session.root, generation, journal['offline'],
+                                  lambda: _prove_released_operation(session))
 
 
 def _complete_restore_observer(channel, root, release_tools, journal):
@@ -375,7 +383,7 @@ def _complete_restore_observer(channel, root, release_tools, journal):
     with release_tools._maintenance_lease(root, '.operation.lock', _proof=True) as proof:
         session = types.SimpleNamespace(root=root, _operation_proof=proof)
         observe_restore_trial(root, journal, lambda: _prove_released_operation(session))
-        _verify_restore_offline(session, journal)
+        intents = _verify_restore_offline(session, journal)
         if 'tls' in journal:
             from app.core_updates.maintenance import RestorePanelProbe
             generation = (journal['switch_context']['data_generation']
@@ -383,7 +391,15 @@ def _complete_restore_observer(channel, root, release_tools, journal):
                           journal['restore_target']['data']['incoming_generation'])
             session.probe_panel_tls = RestorePanelProbe(root, generation, journal['tls']['trust_sha256'],
                 journal['tls']['config_sha256'], lambda: _prove_released_operation(session))
-        channel.send('restore_observer_ready', transaction=journal['transaction'])
+        ready = dict(transaction=journal['transaction'])
+        if journal.get('early'):
+            ready['final_intents'] = intents
+            if journal['panel_running']:
+                journal.pop('offline')
+            else:
+                journal['offline'] = dict(journal['offline'], intents=intents)
+            observe_restore_trial(root, journal, lambda: _prove_released_operation(session))
+        channel.send('restore_observer_ready', **ready)
         while True:
             value = channel.read()
             if value.get('command') == 'probe_panel_tls' and 'tls' in journal:
@@ -571,7 +587,7 @@ def _run(root, release_tools, input_fd, output, *, timeout=TIMEOUT):
                 implementation = _load_core_session(release_tools, recovery=True)
                 session = implementation(root, **arguments)
                 _complete_core_recovery_handshake(channel, session)
-            elif request.get('action') in ('core_restore_observe', 'core_restore_observe_old'):
+            elif request.get('action') in ('core_restore_observe', 'core_restore_observe_old', 'core_restore_observe_early'):
                 _load_core_session(release_tools)
                 journal = _restore_observer_request(request)
                 _complete_restore_observer(channel, root, release_tools, journal)

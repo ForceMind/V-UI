@@ -293,22 +293,25 @@ def verify_stopped_restore(root, generation, plan, proof, *, _bundle_anchor=Path
                         manifest_sha256=tools.digest(raw[1]), ready_sha256=tools.digest(raw[2]))
         _need(observed == plan['application'], 'APPLICATION_CHANGED')
         state = s.decode_selection(_raw(plan['selection']), **source)
-        intents = _intent(plan['intents'], state)
         payload = release/'payload'
         resolver = CoreResolver(**source, bundles=bundle_artifacts(
             payload, manifest, ready, versions=_versions(payload, manifest), owner=os.geteuid(),
             anchor=_bundle_anchor))
         runtime = _runtime_states(root/'data', owner=os.geteuid(), anchor=Path('/'),
                                   expected_generation=generation)
+        actual = {}
         for core in s.CORES:
             resolver.current(state, core)
             row = runtime.get(core)
-            expected = intents[core]
-            _need((row is None and expected['revision'] is None and not expected['enabled'])
-                  or (row is not None and row['_schema'] == 2
-                      and all(row[key] == value for key, value in expected.items())),
+            artifact_id = s.reference_identity(state.slot(core).current)
+            _need(row is None or row['_schema'] == 2 and row['artifact_id'] == artifact_id,
                   'RESTORE_RUNTIME_CHANGED')
+            actual[core] = dict(artifact_id=artifact_id, revision=row['revision'] if row else None,
+                                enabled=row['enabled'] if row else False)
+        _need(plan['intents'] is None or _intent(plan['intents'], state) == actual,
+              'RESTORE_RUNTIME_CHANGED')
         proof()
+        return actual
 
 
 class RestorePanelProbe:

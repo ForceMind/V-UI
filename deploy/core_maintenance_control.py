@@ -364,21 +364,24 @@ class _Switch:
                     pending=journal['original_files']['pending'],
                     original=journal['switch_context']['data_generation'],
                     incoming=plan['incoming_generation'])
-        if action in ('core_restore_observe', 'core_restore_observe_old'):
+        if action in ('core_restore_observe', 'core_restore_observe_old', 'core_restore_observe_early'):
             context = journal['switch_context']
-            original = action.endswith('_old')
+            early = action == 'core_restore_observe_early'
+            original = action != 'core_restore_observe'
             trust = context['trust_sha256'] if original else plan['incoming_trust_sha256']
             if trust is not None:
                 request.update(trust_sha256=trust, config_sha256=context['config_sha256'])
-            if context['services']['v-ui.service'] == 'inactive':
+            if early or context['services']['v-ui.service'] == 'inactive':
                 if original:
                     selected = journal.get('confirmed_selection', journal.get('recovery_selection'))
                     intents = (journal['rollback']['intents'] if journal['rollback'] is not None else
-                               journal['quiesced']['cores'])
+                               journal['quiesced']['cores'] if journal['quiesced'] is not None else None)
                 else:
                     selected = journal.get('confirmed_selection', journal['after'])
                     intents = journal['restore_target']['intents']
                 request['offline'] = dict(application=context['application'], selection=selected, intents=intents)
+            if early:
+                request['panel_running'] = context['services']['v-ui.service'] == 'active'
         return request
 
     def _start_restore_observer(self):
@@ -537,8 +540,7 @@ class _Switch:
     def _resume_restore_original(self, *, _new_worker=None):
         journal = self.files.read_restore_recovery()
         context = journal['switch_context']
-        _need(journal['quiesced'] is not None
-              and self.config.get('certificate_mode', 'managed') == context['certificate_mode'],
+        _need(self.config.get('certificate_mode', 'managed') == context['certificate_mode'],
               'CORE_RESTORE_RECOVERY_BOOT_REQUIRED')
         receipt = self._recover_restore_data()
         _need(self.files.read_restore_recovery() == journal, 'CORE_RESTORE_CONTEXT')
@@ -548,7 +550,7 @@ class _Switch:
         self.initial = context['services']
         self.trust_sha256 = context['trust_sha256']
         state = self._state(journal['recovery_selection'])
-        self.final = self._intents(journal['quiesced']['cores'], state)
+        self.final = self._intents(journal['quiesced']['cores'], state) if journal['quiesced'] is not None else None
         self._replace_restore_worker(_new_worker)
         try:
             _need(self.files.read_restore_recovery() == journal, 'CORE_RESTORE_CONTEXT')
@@ -569,15 +571,23 @@ class _Switch:
             self.worker.close()
 
     def _restore_recovery_observer(self, journal, *, original):
-        action = 'core_restore_observe_old' if original else 'core_restore_observe'
+        early = original and journal['quiesced'] is None
+        action = ('core_restore_observe_early' if early else
+                  'core_restore_observe_old' if original else 'core_restore_observe')
+        fields = ('transaction', 'final_intents') if early else ('transaction',)
         response = self.worker.exchange(self._restore_worker_request(journal, action),
-                                        'restore_observer_ready', ('transaction',))
+                                        'restore_observer_ready', fields)
         _need(response['transaction'] == self.transaction, 'CORE_RESTORE_CONTEXT')
+        if early:
+            state = self._state(journal.get('confirmed_selection', journal.get('recovery_selection')))
+            self.final = self._intents(response['final_intents'], state)
+            _need(journal['rollback'] is None or self.final == journal['rollback']['intents'],
+                  'CORE_RESTORE_CONTEXT')
 
         def observe():
             result = self.worker.command('observe_restore_data', 'restore_data_observed',
                                          ('transaction', 'data'), transaction=self.transaction)
-            positions = ('staged', 'restored') if original else ('trial',)
+            positions = ('unplaced', 'staged') if early else ('staged', 'restored') if original else ('trial',)
             _need(result['transaction'] == self.transaction
                   and self.m.restore_data_position(journal, result['data']) in positions,
                   'CORE_RESTORE_DATA_CHANGED')
@@ -591,7 +601,8 @@ class _Switch:
         context = journal['switch_context']
         target = journal['restore_target']
         _need(journal['phase'] in ('confirmed', 'cleanup') and 'confirmed_selection' in journal
-              and target['kind'] == 'core-restore-target-v2' and journal['quiesced'] is not None
+              and target['kind'] == 'core-restore-target-v2'
+              and (journal['quiesced'] is not None or journal['rollback'] is not None)
               and context['certificate_mode'] == self.config.get('certificate_mode', 'managed')
               and self.m._digest(self.m._raw(self.config)) == context['config_sha256'],
               'CORE_RESTORE_RECOVERY_BOOT_REQUIRED')

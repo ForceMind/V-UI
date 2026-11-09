@@ -453,6 +453,30 @@ def _inspect_restore_slots(root, journal, names, parents, root_fd, recovery_fd):
     return restore_data_position(journal, observed), observed
 
 
+def _observe_unplaced_restore(root, journal):
+    with tools._maintenance_directory(root) as directory:
+        def require_absent():
+            try:
+                os.stat('recovery', dir_fd=directory, follow_symlinks=False)
+            except FileNotFoundError:
+                return
+            raise tools.ReleaseError('Restore recovery directory appeared')
+
+        require_absent()
+        info = os.stat('data', dir_fd=directory, follow_symlinks=False)
+        _need(stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid()
+              and stat.S_IMODE(info.st_mode) == 0o700, 'Unsafe restore data slot')
+        observed = dict(live=dict(dev=info.st_dev, ino=info.st_ino), original=None, incoming=None, rejected=None)
+        _need(restore_data_position(journal, observed) == 'unplaced')
+        held = os.fstat(directory)
+        _need(_generation(root) == (held.st_dev, held.st_ino), 'Restore directory changed')
+        linked = os.stat('data', dir_fd=directory, follow_symlinks=False)
+        _need((linked.st_dev, linked.st_ino, linked.st_mode, linked.st_uid) ==
+              (info.st_dev, info.st_ino, info.st_mode, info.st_uid), 'Restore data changed')
+        require_absent()
+        return observed
+
+
 def observe_restore_trial(root, journal, verify_operation, *, _selection_files=None):
     """Read slot identities while the worker retains its operation lease."""
     _need(journal['phase'] in ('backed_up', 'trial', 'validated', 'rollback_required') and
@@ -462,6 +486,14 @@ def observe_restore_trial(root, journal, verify_operation, *, _selection_files=N
     names = _restore_slot_names(slot)
     files = SelectionFiles() if _selection_files is None else _selection_files
     verify_operation()
+    if journal.get('early'):
+        try:
+            (root/'recovery').lstat()
+        except FileNotFoundError:
+            with files.hold_restore_pending(journal):
+                observed = _observe_unplaced_restore(root, journal)
+            verify_operation()
+            return observed
     with files.hold_restore_pending(journal) as pending, \
             tools._maintenance_directory(root) as root_fd, \
             tools._maintenance_directory(root/'recovery') as recovery_fd:
@@ -469,6 +501,8 @@ def observe_restore_trial(root, journal, verify_operation, *, _selection_files=N
         parents['live'] = root_fd
         position, observed = _inspect_restore_slots(root, journal, names, parents, root_fd, recovery_fd)
         positions = ('staged', 'restored') if journal['phase'] == 'rollback_required' else ('trial',)
+        if journal.get('early'):
+            positions = ('unplaced', 'staged')
         _need(position in positions, 'Restore trial data changed')
         verify_operation()
         pending()
@@ -504,10 +538,7 @@ def exchange_restore_data(guard, journal, *, rollback=False, _selection_files=No
             recovery.lstat()
         except FileNotFoundError:
             with files.hold_restore_pending(journal), _live_restore_scope(guard, live):
-                dev, ino = _generation(live)
-                observed = dict(live=dict(dev=dev, ino=ino), original=None, incoming=None, rejected=None)
-                _need(restore_data_position(journal, observed) == 'unplaced')
-                return receipt(observed)
+                return receipt(_observe_unplaced_restore(guard.root, journal))
     names = _restore_slot_names(slot)
 
     with files.hold_restore_pending(journal) as pending, _live_restore_scope(guard, live) as verify, \

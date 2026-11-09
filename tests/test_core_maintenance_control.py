@@ -138,12 +138,14 @@ class FixtureChild:
             result = dict(event='trial_writers_released')
         elif command == 'prove_operation':
             result = dict(event='operation_held')
-        elif command in ('core_restore_observe', 'core_restore_observe_old'):
+        elif command in ('core_restore_observe', 'core_restore_observe_old', 'core_restore_observe_early'):
             journal = ops_worker._restore_observer_request(request)
             self.restore_observer_request = journal
             if 'tls' in journal:
                 self.restore_trust = journal['tls']['trust_sha256']
             result = dict(event='restore_observer_ready', transaction=journal['transaction'])
+            if journal.get('early'):
+                result['final_intents'] = self.final_restore_intents
             if case.fault == 'restore-observer-ready-tx':
                 result['transaction'] = '0'*32
         elif command in ('core_restore_exchange', 'core_restore_rollback'):
@@ -555,7 +557,7 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.assertFalse(rows['xray']['enabled'])
         self.assertFalse(rows['xray']['owned_listeners_verified'])
 
-    def restore_trial_fixture(self, *, provided=False, panel_running=True):
+    def restore_trial_fixture(self, *, provided=False, panel_running=True, quiesced=True):
         switch = self.switch
         if not panel_running:
             self.services.current[PANEL] = 'inactive'
@@ -582,6 +584,10 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.services.stop_all()
         staged = dict(live=before, original=None, incoming=incoming, rejected=None)
         trial = dict(live=incoming, original=before, incoming=None, rejected=None)
+        if not quiesced:
+            journal = self.files.read_restore_recovery()
+            return dict(transaction=switch.transaction, sequence=journal['sequence'],
+                        data=dict(staged, incoming=None), tree_sha256=None), trial, incoming
         self.files.record_quiesced(switch.transaction, dict(panel_stopped=True,
             writers_exclusive=True, cores=self.initial_intents), restore_data=staged,
             original_tree_sha256='d'*64, prepared_tree_sha256='e'*64, **SOURCE)
@@ -661,6 +667,21 @@ class CoreMaintenanceControlTests(unittest.TestCase):
                           'start-panel', 'probe:old_recovery', 'release:old_recovery')
         self.assertFalse((self.root/selection_files.PENDING).exists())
         self.assertEqual(self.files.read_stable(**SOURCE).revision, result['selection_revision'])
+
+    def test_early_restore_recovery_uses_observed_intent_instead_of_pre_stop_snapshot(self):
+        receipt, trial, _ = self.restore_trial_fixture(quiesced=False)
+        self.child.restore_receipt = receipt
+        observer = FixtureChild(self)
+        observer.restore_data = receipt['data']
+        observer.final_restore_intents = deepcopy(self.initial_intents)
+        observer.final_restore_intents[CORE]['enabled'] = False
+        result = self.switch._resume_restore_original(_new_worker=lambda: control._Worker(observer))
+        self.assertEqual(result['outcome'], 'restored_previous')
+        broker, = self.brokers
+        self.assertEqual(broker.context['data_generation'], trial['original'])
+        self.assertFalse(broker.context['intents'][CORE]['enabled'])
+        self.assertNotIn('core_restore_exchange', self.trace)
+        self.assertFalse((self.root/selection_files.PENDING).exists())
 
     def test_restore_recovery_keeps_originally_stopped_panel_stopped(self):
         observer, _ = self.restore_original_fixture(panel_running=False)
