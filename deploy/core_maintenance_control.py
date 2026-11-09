@@ -366,9 +366,19 @@ class _Switch:
                     incoming=plan['incoming_generation'])
         if action in ('core_restore_observe', 'core_restore_observe_old'):
             context = journal['switch_context']
-            trust = context['trust_sha256'] if action.endswith('_old') else plan['incoming_trust_sha256']
+            original = action.endswith('_old')
+            trust = context['trust_sha256'] if original else plan['incoming_trust_sha256']
             if trust is not None:
                 request.update(trust_sha256=trust, config_sha256=context['config_sha256'])
+            if context['services']['v-ui.service'] == 'inactive':
+                if original:
+                    selected = journal.get('confirmed_selection', journal.get('recovery_selection'))
+                    intents = (journal['rollback']['intents'] if journal['rollback'] is not None else
+                               journal['quiesced']['cores'])
+                else:
+                    selected = journal.get('confirmed_selection', journal['after'])
+                    intents = journal['restore_target']['intents']
+                request['offline'] = dict(application=context['application'], selection=selected, intents=intents)
         return request
 
     def _start_restore_observer(self):
@@ -528,7 +538,6 @@ class _Switch:
         journal = self.files.read_restore_recovery()
         context = journal['switch_context']
         _need(journal['quiesced'] is not None
-              and context['services']['v-ui.service'] == 'active'
               and self.config.get('certificate_mode', 'managed') == context['certificate_mode'],
               'CORE_RESTORE_RECOVERY_BOOT_REQUIRED')
         receipt = self._recover_restore_data()
@@ -548,7 +557,8 @@ class _Switch:
             self._activate(state, self.final, recovery=True, restore_observe=observe,
                            restore_original_sha256=receipt['tree_sha256'])
             self.worker.finish()
-            result = dict(outcome='restored_previous', selection_revision=state.revision, panel_running=True)
+            result = dict(outcome='restored_previous', selection_revision=state.revision,
+                          panel_running=self.initial['v-ui.service'] == 'active')
             if journal['backup'] is not None:
                 result.update(backup_name=journal['backup']['name'], backup_sha256=journal['backup']['sha256'])
             return result
@@ -582,7 +592,6 @@ class _Switch:
         target = journal['restore_target']
         _need(journal['phase'] in ('confirmed', 'cleanup') and 'confirmed_selection' in journal
               and target['kind'] == 'core-restore-target-v2' and journal['quiesced'] is not None
-              and context['services']['v-ui.service'] == 'active'
               and context['certificate_mode'] == self.config.get('certificate_mode', 'managed')
               and self.m._digest(self.m._raw(self.config)) == context['config_sha256'],
               'CORE_RESTORE_RECOVERY_BOOT_REQUIRED')
@@ -607,7 +616,8 @@ class _Switch:
             observe()
             self._activate(state, intents, recovery=True, cleanup=True, restore_observe=observe)
             self.worker.finish()
-            return dict(outcome='resumed_confirmed', selection_revision=state.revision, panel_running=True)
+            return dict(outcome='resumed_confirmed', selection_revision=state.revision,
+                        panel_running=self.initial['v-ui.service'] == 'active')
         except BaseException:
             self.services.stop_all(emergency=True)
             raise

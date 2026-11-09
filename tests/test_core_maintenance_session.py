@@ -131,6 +131,24 @@ class CoreMaintenanceTests(unittest.TestCase):
         self.assertTrue((self.root/'recovery'/('core-restore-'+slot+'-incoming')/'v-ui.db').is_file())
         self.assertTrue((self.data/'v-ui.db').is_file())
 
+    def test_stopped_restore_verifies_saved_intent_without_launching_core(self):
+        session = self.session()
+        context = session.prepare()
+        plan = {key: context[key] for key in ('application', 'selection', 'intents')}
+        for core, row in plan['intents'].items():
+            self.write_state(core, dict(schema=2, **row))
+        m.verify_stopped_restore(self.root, context['data_generation'], plan, session._operation_proof,
+                                 _bundle_anchor=self.cycle.base)
+        with self.assertRaisesRegex(ValueError, 'DATA_GENERATION_CHANGED'):
+            m.verify_stopped_restore(self.root, dict(context['data_generation'], ino=0), plan,
+                                     session._operation_proof, _bundle_anchor=self.cycle.base)
+        bad = dict(plan, intents=deepcopy(plan['intents']))
+        bad['intents']['sing-box']['enabled'] = False
+        with self.assertRaisesRegex(m.CoreMaintenanceError, 'RESTORE_RUNTIME_CHANGED'):
+            m.verify_stopped_restore(self.root, context['data_generation'], bad, session._operation_proof,
+                                     _bundle_anchor=self.cycle.base)
+        self.assertEqual(self.calls, [])
+
     def test_restore_probe_requires_pinned_generation_and_chain_identity(self):
         config, chain = self.tls_fixture()
         info = self.data.stat()

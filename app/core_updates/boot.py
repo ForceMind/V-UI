@@ -101,9 +101,12 @@ def _config(scope, directory, revision):
     scope.stable()
 
 
-def _runtime_states(data, *, owner, anchor):
+def _runtime_states(data, *, owner, anchor, expected_generation=None):
     missing, result = [], {}
     with _data_root(data, owner, anchor) as (scope, directory):
+        if expected_generation is not None:
+            info = os.fstat(directory)
+            _need(dict(dev=info.st_dev, ino=info.st_ino) == expected_generation, 'DATA_GENERATION_CHANGED')
         if not _exists(directory, 'runtime'):
             missing.append((directory, 'runtime'))
         else:

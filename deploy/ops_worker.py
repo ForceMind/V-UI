@@ -241,6 +241,7 @@ def _observe_restore_data(channel, session, journal, value):
     if value != {'command': 'observe_restore_data', 'transaction': journal['transaction']}:
         raise WorkerError('Unexpected private restore observation command')
     from app.core_updates.backup_archive import observe_restore_trial
+    _verify_restore_offline(session, journal)
     data = observe_restore_trial(session.root, journal, lambda: _prove_released_operation(session))
     channel.send('restore_data_observed', transaction=journal['transaction'], data=data)
 
@@ -253,11 +254,15 @@ def _restore_observer_request(value):
     has_tls = bool(tls & set(value))
     if has_tls:
         fields |= tls
+    if 'offline' in value:
+        fields.add('offline')
     if (set(value) != fields or type(value['protocol']) is not int or value['protocol'] != 1
             or value['action'] not in ('core_restore_observe', 'core_restore_observe_old')
             or any(type(value[key]) is not str or not re.fullmatch('[a-f0-9]{32}', value[key])
                    for key in ('transaction', 'slot'))
-            or has_tls and any(not artifacts._hex(value[key]) for key in tls)):
+            or has_tls and any(not artifacts._hex(value[key]) for key in tls)
+            or 'offline' in value and (has_tls or type(value['offline']) is not dict
+                or set(value['offline']) != {'application', 'selection', 'intents'})):
         raise WorkerError('Invalid private restore observer request')
     files._record(value['pending'])
     original = files._data_generation(value['original'])
@@ -274,6 +279,8 @@ def _restore_observer_request(value):
                     data=dict(slot=value['slot'], incoming_generation=incoming)))
     if has_tls:
         result['tls'] = {key: value[key] for key in tls}
+    if 'offline' in value:
+        result['offline'] = value['offline']
     return result
 
 
@@ -290,7 +297,7 @@ def _restore_exchange_request(value):
                     or rollback and all(value[key] is None for key in digests))):
         raise WorkerError('Invalid private restore exchange request')
     projection = {key: item for key, item in value.items() if key not in fields}
-    if {'trust_sha256', 'config_sha256'} & set(projection):
+    if {'trust_sha256', 'config_sha256', 'offline'} & set(projection):
         raise WorkerError('Unexpected private restore exchange fields')
     projection['action'] = 'core_restore_observe'
     journal = _restore_observer_request(projection)
@@ -351,6 +358,16 @@ def _complete_restore_exchange(channel, root, release_tools, journal):
             guard._valid = False
 
 
+def _verify_restore_offline(session, journal):
+    if 'offline' not in journal:
+        return
+    from app.core_updates.maintenance import verify_stopped_restore
+    generation = (journal['switch_context']['data_generation'] if journal['phase'] == 'rollback_required'
+                  else journal['restore_target']['data']['incoming_generation'])
+    verify_stopped_restore(session.root, generation, journal['offline'],
+                           lambda: _prove_released_operation(session))
+
+
 def _complete_restore_observer(channel, root, release_tools, journal):
     from app.core_updates.backup_archive import observe_restore_trial
     with release_tools._maintenance_directory(root):
@@ -358,6 +375,7 @@ def _complete_restore_observer(channel, root, release_tools, journal):
     with release_tools._maintenance_lease(root, '.operation.lock', _proof=True) as proof:
         session = types.SimpleNamespace(root=root, _operation_proof=proof)
         observe_restore_trial(root, journal, lambda: _prove_released_operation(session))
+        _verify_restore_offline(session, journal)
         if 'tls' in journal:
             from app.core_updates.maintenance import RestorePanelProbe
             generation = (journal['switch_context']['data_generation']

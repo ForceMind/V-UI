@@ -140,6 +140,7 @@ class FixtureChild:
             result = dict(event='operation_held')
         elif command in ('core_restore_observe', 'core_restore_observe_old'):
             journal = ops_worker._restore_observer_request(request)
+            self.restore_observer_request = journal
             if 'tls' in journal:
                 self.restore_trust = journal['tls']['trust_sha256']
             result = dict(event='restore_observer_ready', transaction=journal['transaction'])
@@ -554,14 +555,16 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.assertFalse(rows['xray']['enabled'])
         self.assertFalse(rows['xray']['owned_listeners_verified'])
 
-    def restore_trial_fixture(self, *, provided=False):
+    def restore_trial_fixture(self, *, provided=False, panel_running=True):
         switch = self.switch
+        if not panel_running:
+            self.services.current[PANEL] = 'inactive'
         switch.source = SOURCE
         switch.application = self.context['application']
         switch.initial = self.services.snapshot()
         before = self.context['data_generation']
         incoming = dict(dev=before['dev'], ino=before['ino']+1)
-        snapshot = dict(panel_running=True, cores=self.initial_intents)
+        snapshot = dict(panel_running=panel_running, cores=self.initial_intents)
         if provided:
             switch.config['certificate_mode'] = 'provided'
         self.files.bootstrap(self.before, writer_observation={
@@ -639,8 +642,8 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.assertTrue((self.root/selection_files.PENDING).exists())
         self.assertFalse(self.brokers)
 
-    def restore_original_fixture(self):
-        receipt, trial, _ = self.restore_trial_fixture()
+    def restore_original_fixture(self, *, panel_running=True):
+        receipt, trial, _ = self.restore_trial_fixture(panel_running=panel_running)
         data = dict(live=trial['original'], original=None, incoming=None, rejected=trial['live'])
         self.child.restore_receipt = dict(receipt, data=data, tree_sha256='d'*64)
         observer = FixtureChild(self)
@@ -657,6 +660,32 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.assert_order('core_restore_rollback', 'worker-exit-zero', 'core_restore_observe_old',
                           'start-panel', 'probe:old_recovery', 'release:old_recovery')
         self.assertFalse((self.root/selection_files.PENDING).exists())
+        self.assertEqual(self.files.read_stable(**SOURCE).revision, result['selection_revision'])
+
+    def test_restore_recovery_keeps_originally_stopped_panel_stopped(self):
+        observer, _ = self.restore_original_fixture(panel_running=False)
+        result = self.switch._resume_restore_original(_new_worker=lambda: control._Worker(observer))
+        self.assertFalse(result['panel_running'])
+        self.assertEqual(self.services.state(PANEL), 'inactive')
+        self.assertFalse(self.brokers)
+        self.assertIn('offline', observer.restore_observer_request)
+        self.assertEqual(self.files.read_stable(**SOURCE).revision, result['selection_revision'])
+
+    def test_confirmed_stopped_restore_cleanup_does_not_start_panel(self):
+        receipt, trial, _ = self.restore_trial_fixture(panel_running=False)
+        self.child.restore_data = trial
+        self.switch._start_restore_observer()
+        with patch.object(self.files, '_archive_and_clear', side_effect=OSError('fixture interruption')):
+            with self.assertRaises(selection_files.CoreSelectionFilesError):
+                self.switch._activate_restore_trial(receipt)
+        journal = self.files.read_restore_recovery()
+        observer = FixtureChild(self)
+        observer.restore_data = trial
+        self.switch.worker = control._Worker(observer)
+        result = self.switch._resume_confirmed_restore(journal)
+        self.assertFalse(result['panel_running'])
+        self.assertFalse(self.brokers)
+        self.assertIn('offline', observer.restore_observer_request)
         self.assertEqual(self.files.read_stable(**SOURCE).revision, result['selection_revision'])
 
     def test_confirmed_restore_cleanup_keeps_incoming_generation_without_exchange(self):

@@ -34,7 +34,7 @@ from .backup_archive import (create as create_backup, MAX_ARCHIVE as MAX_BACKUP,
 from .binary import open_runtime_artifact, verify_runtime_artifact_fd
 from .boot import _runtime_states, _data_root
 from .resolver import CoreResolver
-from .selection_files import SelectionFiles, _journal, _raw
+from .selection_files import SelectionFiles, _intent, _journal, _raw
 
 
 class CoreMaintenanceError(ValueError):
@@ -274,6 +274,41 @@ def _read_panel_tls_material(data_path, generation):
             _need(len(raw) == size, 'PANEL_TLS_CHAIN')
             material = a._file_identity(os.fstat(fd)), raw
     return config_file, endpoint, material
+
+
+def verify_stopped_restore(root, generation, plan, proof, *, _bundle_anchor=Path('/')):
+    """Prove the selected materials and saved intent without starting cores."""
+    _need(type(plan) is dict and set(plan) == {'application', 'selection', 'intents'}, 'RESTORE_OFFLINE_CONTEXT')
+    with data_owner(root/'data', exclusive=True):
+        proof()
+        release, pointer, manifest, ready = tools.active_verified(root)
+        paths = ((root/'CURRENT.json', 16384), (release/'payload'/tools.MANIFEST, 4_000_000),
+                 (release/'READY.json', 16384))
+        raw = [tools._maintenance_cycle_file(path, limit=limit, owner=os.geteuid())[1]
+               for path, limit in paths]
+        _need([_application_json(value) for value in raw] == [pointer, manifest, ready],
+              'APPLICATION_CHANGED')
+        source = dict(app_source=manifest['source_commit'], target=ready['runtime_key'])
+        observed = dict(**source, release_id=release.name, current_sha256=tools.digest(raw[0]),
+                        manifest_sha256=tools.digest(raw[1]), ready_sha256=tools.digest(raw[2]))
+        _need(observed == plan['application'], 'APPLICATION_CHANGED')
+        state = s.decode_selection(_raw(plan['selection']), **source)
+        intents = _intent(plan['intents'], state)
+        payload = release/'payload'
+        resolver = CoreResolver(**source, bundles=bundle_artifacts(
+            payload, manifest, ready, versions=_versions(payload, manifest), owner=os.geteuid(),
+            anchor=_bundle_anchor))
+        runtime = _runtime_states(root/'data', owner=os.geteuid(), anchor=Path('/'),
+                                  expected_generation=generation)
+        for core in s.CORES:
+            resolver.current(state, core)
+            row = runtime.get(core)
+            expected = intents[core]
+            _need((row is None and expected['revision'] is None and not expected['enabled'])
+                  or (row is not None and row['_schema'] == 2
+                      and all(row[key] == value for key, value in expected.items())),
+                  'RESTORE_RUNTIME_CHANGED')
+        proof()
 
 
 class RestorePanelProbe:
