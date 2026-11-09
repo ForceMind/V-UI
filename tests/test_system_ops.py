@@ -2,7 +2,7 @@
 
 No test invokes a real system service command, installs a kit, or changes users.
 """
-from contextlib import ExitStack, contextmanager, redirect_stdout
+from contextlib import ExitStack, contextmanager, redirect_stdout, nullcontext
 import hashlib
 import importlib.util
 import io
@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 from unittest.mock import patch
@@ -525,6 +526,13 @@ class TransactionTests(unittest.TestCase):
         worker = FakeWorker(events, request, responses, fail_exit, fail_close)
         factory = unittest.mock.Mock(return_value=worker)
         def run():
+            if action=='stage':
+                # Wire/order fixture only. Real snapshot/Root origin/cleanup
+                # are covered by test_stage_origin and installed Actions.
+                material=types.SimpleNamespace(path=Path(request['path']),origin={'release_id':'candidate-123'},
+                    deadline=time.monotonic()+10,retain=False,check=lambda:None)
+                with patch.object(ops,'accepted_stage',return_value=nullcontext(material)):
+                    return ops.operate(request,services,ACCOUNT,[] if cancelled is None else cancelled,factory)
             return ops.operate(request, services, ACCOUNT, [] if cancelled is None else cancelled, factory)
         return run, events, services, factory, request
 
@@ -793,6 +801,13 @@ class IntegratedWorkerTests(unittest.TestCase):
         self.factory = FixtureChild
 
     def execute(self, action, **values):
+        if action=='stage':
+            # Preserve the real demoted consumer protocol independently from
+            # the Root producer's isolated filesystem tests.
+            material=types.SimpleNamespace(path=Path(values['path']),origin={'release_id':'integrated-stage'},
+                deadline=time.monotonic()+10,retain=False,check=lambda:None)
+            with patch.object(ops,'accepted_stage',return_value=nullcontext(material)):
+                return ops.operate({'protocol':1,'action':action,**values},self.services,ACCOUNT,[],self.factory)
         return ops.operate({'protocol': 1, 'action': action, **values}, self.services,
                            ACCOUNT, [], self.factory)
 

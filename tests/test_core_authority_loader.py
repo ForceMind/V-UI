@@ -52,3 +52,10 @@ class CoreAuthorityLoaderTests(unittest.TestCase):
                 with self.subTest(release=release,target=target),self.assertRaises(self.ops.Refused):
                     self.ops.application_origin(release,target)
             read.assert_not_called()
+
+    def test_openrc_origin_loader_does_not_enable_core_operation_loader(self):
+        with patch.object(self.ops,'verify_installation',return_value=('openrc',None)),patch.object(self.ops,'trusted_bytes',side_effect=self.read):
+            self.assertEqual(self.ops._load_core_authority(self.expected,_origin_only=True).CoreAuthority().marker,
+                             'fixed-private-authority')
+            with self.assertRaises(self.ops.Refused):self.ops._load_core_authority(self.expected)
+            with self.assertRaises(self.ops.Refused):self.ops._load_core_authority(self.expected,_origin_only=1)

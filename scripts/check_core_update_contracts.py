@@ -43,8 +43,9 @@ CONTRACTS = {
     'test_core_maintenance_recovery.py': 9,
     'test_core_offline_guards.py': 11,
     'test_core_authority.py': 33,
-    'test_core_authority_loader.py': 4,
+    'test_core_authority_loader.py': 5,
     'test_installer_origin.py': 7,
+    'test_stage_origin.py': 10,
 }
 
 

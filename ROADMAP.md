@@ -174,3 +174,5 @@ M46D cd8deb8十组Actions成功，新装/八旧版升级及四目标/ARM64完成
 M46E SDK producer源码已独审：短入口／受管升级显式传已核SDK pin，原包snapshot FD与匿名代码FD交固定OS校验器，固定sourceZIP helper认证后记录原始manifestSHA；新装Root私有目录引导、多目标SDK/单目标bundle与旧SDK/旧Bash兼容均覆盖。两版各104项针对性纯测及脚本47项通过，实际Root SDK来源探针只交Actions。Rootstage原包快照及事实consumer仍未接，来源资格缺口不算整体修复，远程核心写仍关闭。
 
 M46E SDK正常路径已接事实consumer：固定Root来源表lookup，候选/stop前精确核release/target/source40/原manifestSHA；两版各41项独立回归及独审通过。85426a3主测唯一失败为marker整文件读取触发流式保护，改有界512001读取，原防篡改断言不变并已单独复验；完整Linuxarchive套件仍交Actions。Rootstage来源producer、持久核心任务/权限发放/面板流程继续，未开放远程写或发布24。
+
+M46E本地stage来源接线已独审：Root匿名原包快照/摘要/原清单记录、Root-owned组只读交接、prepared ID精确匹配、FD绑定精确清理/foreign保留/关闭失ack不重关。两版各28项回归通过，真实Root+降权读者仅交Actions，不称产品prepare已验。两个producer与事实consumer源码接通，本批准确CI待验；远程Root凭据/任务/UI仍需完成。

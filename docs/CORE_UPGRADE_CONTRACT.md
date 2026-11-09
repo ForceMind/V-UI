@@ -881,3 +881,13 @@ SDK verifier的固定record-origin-fd模式重新verify_kit，绑定source ZIP�
 Root事实consumer已接固定authority查询：在已有安装锁内，收据绑定helper只按release_id/target查Root记录，controller把worker实测的release、target、完整source与manifestSHA逐项比对；缺失/冲突/私有额外字段均在候选下载与stop之前拒绝。不以旧config.release_id限制合法activate，也不通过CURRENT/READY自动补锚。37项controller与4项loader纯回归在Py3.9/3.12均通过，含缺锚和各字段冲突。
 
 SDK `85426a3` 的主测试42665205127在3668项中唯一失败为shell能力检测的新read_bytes触发既有Whole-file read断言。现改为open/read最多512001字节，原streaming/checksum/tamper断言保留并在独立临时夹具执行通过。本机完整11项archive suite因Linux平台门槛未运行资格成立，继续交Actions，原失败保留。当前小批独审无剩余阻断，两版独立复验各41项通过，准确Actions待验；Rootstage的原包快照producer与旧准备版本重新授予来源仍待实现，实际远程核心任务/UI也未接，不宣称P3完成。
+
+### M46E 受管stage来源生产（源码候选）
+
+本地stage已改为Root原包快照→独立SHA→原清单来源记录→相同字节交接。Root使用固定收据helper，OpenRC仅允许来源登记，核心操作仍限systemd。原输入路径只读一次，后续全部使用Root持有快照；交接为Root拥有0750服务组可读/穿越而不可写的随机目录、服务UID拥有的0600单归档，复制后核SHA。服务worker保持原协议，prepared_release须精确匹配Root接受的release_id。
+
+清理保留父/目录/叶FD与身份，仅unlink匹配的固定归档并rmdir匹配空目录，不Root递归删除。foreign inode/目录保留；worker构造或关闭不确定时保留交接；自身FD失去close确认不重试关闭复用编号。原包损坏、ZIP/JSON失败在登记前映射固定拒绝，不让交互菜单traceback退出。私有快照及复制归档按需丢弃干净页缓存；不改变用户数据、CURRENT或服务拓扑。
+
+新增stage10项、loader5项与旧事务13项，两Python版本各28项通过；独审无剩余阻断。既有真实非Root worker协议fixture继续在Linux运行，本机因Linux平台门槛未验，不回退生产约束。CI-only probe增加真实Root快照/来源登记/交接和真实降权读取进程；使用惰性协议读者，单独marker明确不冒充完整产品prepare。本机未执行Root或产品安装。
+
+SDK与受管stage两个来源producer、锁内实际事实consumer现在源码均已接通，仍须本批准确Actions与小日志回读资格。旧准备版本不自动授信，重验原包后可有accepted来源；stage失败保留accepted记录不代表prepared/active/healthy。远程Root凭据发放、持久核心任务、备份映射及完整用户界面仍未完成。

@@ -23,6 +23,9 @@ import stat
 import subprocess
 import sys
 import termios
+import tempfile
+import uuid
+import zipfile
 import time
 
 CONFIG = Path('/etc/v-ui/service.json')
@@ -986,22 +989,171 @@ def operate(request, services, account, cancelled, worker_factory=None):
             worker.close()
 
 
-def prepare_candidate(request, account, cancelled, worker_factory):
-    worker = worker_factory([str(PYTHON), '-B', '-I', '-S', str(WORKER)], TIMEOUT,
-                            account=account, cancelled=cancelled)
+class _StageArchive:
+    """One explicit Root stage input. The handoff directory remains owned by
+    Root; service group can traverse/read, never replace directory entries.
+    Private test layout injection is not a protocol/path option.
+    """
+    def __init__(self, request, account, cancelled, *, _parent=Path('/var/tmp'), _anchor=Path('/'), _owner=0):
+        self.request,self.account,self.cancelled=request,account,cancelled
+        self.parent,self.anchor,self.owner=_parent,_anchor,_owner
+        self.retain=False;self.path=None;self.snapshot=None
+        self.deadline=time.monotonic()+TIMEOUT
+    @staticmethod
+    def discard(fd, offset=0, size=0):
+        if hasattr(os,'posix_fadvise') and hasattr(os,'POSIX_FADV_DONTNEED'):
+            try:os.posix_fadvise(fd,offset,size,os.POSIX_FADV_DONTNEED)
+            except OSError:pass
+    def check(self):
+        if self.cancelled or time.monotonic()>=self.deadline:raise Refused('stage interrupted or timed out')
+    @contextmanager
+    def material(self):
+        if os.geteuid()!=self.owner or not self.parent.is_absolute() or '..' in self.parent.parts:
+            raise Refused('invalid stage owner or layout')
+        try:parts=self.parent.relative_to(self.anchor).parts
+        except ValueError:raise Refused('invalid stage anchor') from None
+        with ExitStack() as stack:
+            bindings=[]
+            parent=os.open(self.anchor,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW);stack.callback(os.close,parent)
+            initial=os.fstat(parent)
+            if initial.st_uid!=(0 if self.anchor==Path('/') else self.owner) or initial.st_mode&0o022:
+                raise Refused('untrusted stage anchor')
+            def directory_id(info):return info.st_dev,info.st_ino,info.st_mode,info.st_uid,info.st_gid
+            for index,name in enumerate(parts):
+                child=os.open(name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent);stack.callback(os.close,child)
+                info=os.fstat(child)
+                if (info.st_uid!=self.owner or info.st_mode&0o022 and not
+                        (index==len(parts)-1 and stat.S_IMODE(info.st_mode)==0o1777)):
+                    raise Refused('untrusted stage parent')
+                bindings.append((parent,name,child,directory_id(info)));parent=child
+            if not os.fstat(parent).st_mode&0o001:raise Refused('stage parent not traversable')
+            def proof():
+                if directory_id(os.stat(self.anchor,follow_symlinks=False))!=directory_id(initial):
+                    raise Refused('stage anchor changed')
+                for outer,name,inner,expected in bindings:
+                    if (directory_id(os.fstat(inner))!=expected or
+                            directory_id(os.stat(name,dir_fd=outer,follow_symlinks=False))!=expected):
+                        raise Refused('stage parent changed')
+            name='vui-stage-'+uuid.uuid4().hex
+            os.mkdir(name,0o700,dir_fd=parent)
+            folder=os.open(name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent);stack.callback(os.close,folder)
+            os.fchown(folder,self.owner,self.account.pw_gid);os.fchmod(folder,0o750)
+            folder_id=directory_id(os.fstat(folder));file_fd=None;file_id=None
+            self.path=self.parent/name/'bundle.zip'
+            try:
+                with tempfile.TemporaryFile(prefix='vui-stage-original-',dir=self.parent) as snapshot:
+                    self.snapshot=snapshot;checksum=hashlib.sha256();size=0
+                    original=os.open(self.request['path'],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+                    try:
+                        info=os.fstat(original)
+                        if not stat.S_ISREG(info.st_mode) or not 0<info.st_size<=850000000:
+                            raise Refused('invalid stage archive')
+                        while True:
+                            self.check();chunk=os.read(original,min(1024*1024,850000001-size))
+                            if not chunk:break
+                            size+=len(chunk)
+                            if size>850000000:raise Refused('stage archive too large')
+                            checksum.update(chunk);snapshot.write(chunk)
+                    finally:os.close(original)
+                    snapshot.flush();os.fsync(snapshot.fileno());self.discard(snapshot.fileno())
+                    if checksum.hexdigest()!=self.request['sha256']:raise Refused('stage archive digest mismatch')
+                    snapshot.seek(0)
+                    file_fd=os.open('bundle.zip',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=folder)
+                    copied=hashlib.sha256();count=0
+                    while True:
+                        self.check();chunk=snapshot.read(1024*1024)
+                        if not chunk:break
+                        copied.update(chunk);count+=len(chunk);remaining=memoryview(chunk)
+                        while remaining:
+                            written=os.write(file_fd,remaining)
+                            if not written:raise Refused('stage handoff write failed')
+                            remaining=remaining[written:]
+                        self.discard(snapshot.fileno(),count-len(chunk),len(chunk))
+                    os.fsync(file_fd);self.discard(file_fd);os.fchown(file_fd,self.account.pw_uid,self.account.pw_gid);os.fchmod(file_fd,0o600)
+                    file_id=os.fstat(file_fd)
+                    if count!=size or copied.hexdigest()!=checksum.hexdigest():raise Refused('stage handoff digest mismatch')
+                    proof();snapshot.seek(0)
+                    yield self
+                    proof()
+            finally:
+                # Never recursively remove a service-readable namespace. Keep
+                # every unknown inode or unconfirmed worker lifetime for review.
+                try:
+                    proof()
+                    named=os.stat(name,dir_fd=parent,follow_symlinks=False)
+                    if directory_id(named)!=folder_id:raise Refused('stage handoff directory changed')
+                    if not self.retain and file_fd is not None and file_id is not None:
+                        current=os.fstat(file_fd);leaf=os.stat('bundle.zip',dir_fd=folder,follow_symlinks=False)
+                        if ((leaf.st_dev,leaf.st_ino)!=(file_id.st_dev,file_id.st_ino)
+                                or (current.st_dev,current.st_ino)!=(file_id.st_dev,file_id.st_ino)
+                                or current.st_nlink!=1 or not stat.S_ISREG(current.st_mode)
+                                or current.st_uid!=self.account.pw_uid or stat.S_IMODE(current.st_mode)!=0o600):
+                            raise Refused('stage handoff file changed')
+                        os.unlink('bundle.zip',dir_fd=folder)
+                    if not self.retain:
+                        os.rmdir(name,dir_fd=parent)
+                finally:
+                    if file_fd is not None:os.close(file_fd)  # Exactly once, even on close failure.
+
+
+def _stage_origin(material, target, helper):
     try:
-        worker.send(request)
-        if worker.receive() != {'event': 'prepared'}:
-            raise Refused('candidate preparation preflight failed')
-        if cancelled:
-            raise Refused('operation interrupted')
-        worker.send({'command': 'proceed'})
-        result = validate_done(worker.receive(), request)
-        worker.send({'command': 'finish'})
-        worker.exit_zero()
-        return result
-    finally:
-        worker.close()
+        with zipfile.ZipFile(material.snapshot) as archive:
+            entries=archive.infolist()
+            if len(entries)>10000 or len({row.filename for row in entries})!=len(entries):raise Refused('stage archive members refused')
+            item=archive.getinfo('MANIFEST.json')
+            if (item.is_dir() or item.flag_bits&1 or not 0<item.file_size<=4000000
+                    or stat.S_IFMT(item.external_attr>>16) not in (0,stat.S_IFREG)):raise Refused('stage manifest refused')
+            raw=archive.read(item)
+    except (zipfile.BadZipFile,KeyError,RuntimeError,NotImplementedError):
+        raise Refused('stage archive metadata refused') from None
+    try:
+        meta=json.loads(raw,object_pairs_hook=helper._pairs,parse_int=helper._json_integer,
+                        parse_float=helper._number,parse_constant=helper._number)
+    except (ValueError,TypeError,UnicodeError,RecursionError):
+        raise Refused('stage manifest JSON refused') from None
+    if (type(meta) is not dict or type(meta.get('schema')) is not int or meta['schema']!=1
+            or meta.get('kind')!='release' or meta.get('platform')!='linux-multi-cpython312'
+            or type(meta.get('targets')) is not list or target not in meta['targets']):
+        raise Refused('stage manifest identity refused')
+    record=helper._application(dict(release_id=meta['release_id'],target=target,app_source=meta['source_commit'],
+        manifest_sha256=hashlib.sha256(raw).hexdigest(),archive_sha256=material.request['sha256']))
+    helper.CoreAuthority().record_application(record)
+    return record
+
+
+@contextmanager
+def accepted_stage(request, account, cancelled):
+    expected=hashlib.sha256(trusted_bytes(RECEIPT,MAX_JSON)).hexdigest()
+    helper=_load_core_authority(expected,_origin_only=True)
+    config=decode_json(trusted_bytes(CONFIG,MAX_JSON))
+    with _StageArchive(request,account,cancelled).material() as material:
+        material.origin=_stage_origin(material,config['target'],helper)
+        yield material
+
+
+def prepare_candidate(request, account, cancelled, worker_factory):
+    with accepted_stage(request,account,cancelled) as material:
+        record=material.origin
+        handed={**request,'path':str(material.path)}
+        material.retain=True  # Constructor failure may leave an unconfirmed child.
+        worker=worker_factory([str(PYTHON),'-B','-I','-S',str(WORKER)],
+                              max(0,material.deadline-time.monotonic()),account=account,cancelled=cancelled)
+        material.retain=False
+        try:
+            worker.send(handed)
+            if worker.receive()!={'event':'prepared'}:raise Refused('candidate preparation preflight failed')
+            material.check()
+            worker.send({'command':'proceed'})
+            result=validate_done(worker.receive(),handed)
+            if result['prepared_release']!=record['release_id']:raise Refused('candidate preparation origin mismatch')
+            worker.send({'command':'finish'});worker.exit_zero()
+            return result
+        finally:
+            try:worker.close()
+            except BaseException:
+                material.retain=True
+                raise
 
 
 FIREWALL_PROGRAMS = ('ufw', 'firewall-cmd', 'nft', 'iptables-save')
@@ -1294,14 +1446,14 @@ def _load_core_controller(expected_receipt):
     return module
 
 
-def _load_core_authority(expected_receipt):
+def _load_core_authority(expected_receipt, *, _origin_only=False):
     """Load the single fixed Root helper only after the complete receipt check.
 
     No caller-selected module, source path or service-owned code is compiled.
     Constructing the class does not create authority state or mint a grant.
     """
     manager, _ = verify_installation()
-    if manager != 'systemd':
+    if type(_origin_only) is not bool or manager not in ('systemd','openrc') or manager!='systemd' and not _origin_only:
         raise Refused('core authority requires systemd')
     path = CONTROL / 'core_authority.py'
     raw = trusted_bytes(path)

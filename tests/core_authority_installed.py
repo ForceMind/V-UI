@@ -5,11 +5,14 @@ remote-write API. Called as Root only by the installed core-switch CI fixture.
 """
 from contextlib import ExitStack
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
 import stat
 import subprocess
+import tempfile
+import zipfile
 import sys
 import types
 
@@ -115,6 +118,36 @@ print('OWNER_DENIED')
         user=account.pw_uid,group=account.pw_gid,extra_groups=[],cwd='/',env=ops.ENV,
         stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=15)
     require(child.returncode==0 and child.stdout==b'OWNER_DENIED\n')
+    # This is a real Root snapshot/registry/handoff and a real demoted reader.
+    # The reader is an inert CI protocol fixture, not product preparation.
+    with tempfile.TemporaryDirectory(prefix='vui-stage-origin-ci-',dir='/var/tmp') as work:
+        source=Path(work)/'private-original.zip'
+        stage_id='authority-stage-fixture'
+        manifest=json.dumps(dict(schema=1,kind='release',platform='linux-multi-cpython312',
+            source_commit=sys.argv[2],release_id=stage_id,targets=[config['target']]),indent=4).encode()
+        with zipfile.ZipFile(source,'w') as archive:archive.writestr('MANIFEST.json',manifest)
+        source.chmod(0o600)
+        checksum=hashlib.sha256(source.read_bytes()).hexdigest()
+        reader="""import hashlib,json,os,sys
+assert os.geteuid()!=0
+request=json.loads(sys.stdin.readline())
+with open(request['path'],'rb') as source:
+ raw=source.read()
+assert hashlib.sha256(raw).hexdigest()==request['sha256']
+print(json.dumps({'event':'prepared'}),flush=True)
+assert json.loads(sys.stdin.readline())=={'command':'proceed'}
+print(json.dumps({'event':'done','ok':True,'prepared_release':'authority-stage-fixture'}),flush=True)
+assert json.loads(sys.stdin.readline())=={'command':'finish'}
+"""
+        def factory(command,timeout,*,account,cancelled):
+            return ops.Child([str(ops.PYTHON),'-B','-I','-S','-c',reader],timeout,account=account,cancelled=cancelled)
+        with ops.installation_lock():
+            result=ops.prepare_candidate({'protocol':1,'action':'stage','path':str(source),'sha256':checksum},account,[],factory)
+        require(result['prepared_release']==stage_id)
+        observed=authority.application(release_id=stage_id,target=config['target'])
+        require(observed is not None and observed['manifest_sha256']==hashlib.sha256(manifest).hexdigest()
+                and observed['archive_sha256']==checksum and source.exists())
+    print('VUI_ROOT_STAGE_ORIGIN_HANDOFF_ACCEPTANCE: Root snapshot, original manifest origin, real service-UID archive reader and fixed prepared identity passed; product preparation remains separate')
     print('VUI_CORE_AUTHORITY_INSTALLED_ACCEPTANCE: Root receipt, accepted SDK app origin, private modes, real service-UID denial, durable replay, single consumption and revoke/late-issue refusal passed')
 
 
