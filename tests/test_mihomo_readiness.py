@@ -17,6 +17,8 @@ from test_proxy_double_hop import DoubleHopFixture
 # and the HY2/TUIC sing-box-only UDP-server Popen paths are intentionally absent.
 SITES = {
     ('test_mihomo_merge_plan_loopback.py',
+     'MihomoMergePlanLoopbackTests.test_protected_dns_does_not_change_prior_no_resolve_selection'): 'direct',
+    ('test_mihomo_merge_plan_loopback.py',
      'MihomoMergePlanLoopbackTests.test_same_explicit_decisions_and_failed_upstream_cannot_go_direct'): 'direct',
     ('core_switch_systemd.py', 'installed_core_switch.through'): 'direct',
     # Wildcard fixture: shared post-up/PID barrier before HTTP, ExitStack reap;
