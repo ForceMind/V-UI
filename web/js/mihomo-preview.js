@@ -36,11 +36,18 @@
         NUMBER_LIMIT: '数值超过解析限制。',
         INVALID_STRING: '输入含不支持的控制字符或字符串。',
         UNSUPPORTED_VALUE: '输入包含本工具不支持的值。',
-        INVALID_INPUT: '输入不符合预览要求。'
+        INVALID_INPUT: '输入不符合预览要求。',
+        MERGE_CHOICES_REQUIRED: '两份 YAML 有冲突。请先在两份输入中统一冲突值，再下载。',
+        MERGE_INVALID_REFERENCES: '合并结果包含悬空引用、分组循环或无效规则顺序。',
+        MERGE_NAME_COLLISION: '合并结果包含重复或保留的节点、分组名称。',
+        MERGE_RESULT_LIMIT: '合并结果超出限制，请缩小输入。',
+        MERGE_SERIALIZATION_REJECTED: '合并结果无法安全重新导入，请检查格式与大小。'
     };
     const notice = text => { $('yaml-preview-notice').textContent = text; };
     function controls() {
-        $('yaml-preview-submit').disabled = !active || busy || roles.some(role => reading[role] || invalidFile[role]);
+        const blocked = !active || busy || roles.some(role => reading[role] || invalidFile[role]);
+        $('yaml-preview-submit').disabled = blocked;
+        $('yaml-merge-download').disabled = blocked || !roles.every(role => $('yaml-' + role).value.trim());
     }
     function invalidate() {
         epoch++;
@@ -107,7 +114,9 @@
         event.preventDefault();
         if (!active || !dialog.open || busy || roles.some(role => reading[role] || invalidFile[role])) return;
         invalidate();
+        const download = event.submitter?.id === 'yaml-merge-download';
         const candidate = $('yaml-candidate').value, baseline = $('yaml-baseline').value;
+        if (download && !baseline.trim()) { notice('合并下载需要提供基线 YAML。'); return; }
         if (!candidate.trim()) { notice('请提供候选 YAML；可选基线留空表示不比较。'); return; }
         if (encoder.encode(candidate).length > LIMIT || encoder.encode(baseline).length > LIMIT) {
             notice('每份输入最多 1 MiB UTF-8 字节；请缩小输入。'); return;
@@ -120,11 +129,14 @@
         controller = new AbortController();
         busy = true;
         controls();
-        notice('正在由面板服务器只读解析；不会保存或应用配置。');
+        notice(download ? '正在合并两份 YAML，完成后会下载附件。' :
+               '正在由面板服务器只读解析；不会保存或应用配置。');
         try {
-            const response = await fetch('/api/proxy/yaml/preview', {
+            const endpoint = download ? '/api/proxy/yaml/merge/download' : '/api/proxy/yaml/preview';
+            const response = await fetch(endpoint, {
                 method: 'POST', credentials: 'same-origin', cache: 'no-store',
                 headers: {'Content-Type': 'application/json', 'X-VUI-Request': '1'},
+                ...(download ? {redirect: 'error'} : {}),
                 body, signal: controller.signal
             });
             if (!live(token)) return;
@@ -135,6 +147,28 @@
                 globalThis.VUI_NAV ? VUI_NAV.replaceLogin() : location.replace('/login');
                 return;
             }
+            if (download && response.ok) {
+                const length = response.headers.get('content-length');
+                if (response.status !== 200 || typeof length !== 'string' || !/^[1-9]\d{0,6}$/.test(length) || Number(length) > LIMIT ||
+                    response.headers.get('content-type') !== 'application/yaml' ||
+                    response.headers.get('content-disposition') !== 'attachment; filename="vui-merged.yaml"') throw Error();
+                const blob = await response.blob();
+                if (!live(token)) return;
+                if (blob.size !== Number(length)) throw Error();
+                const link = document.createElement('a');
+                const url = URL.createObjectURL(blob);
+                try {
+                    link.href = url;
+                    link.download = 'vui-merged.yaml';
+                    document.body.append(link);
+                    link.click();
+                } finally {
+                    link.remove();
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                }
+                notice('合并 YAML 已交给浏览器下载。');
+                return;
+            }
             const result = await response.json();
             if (!live(token)) return;
             if (!response.ok) {
@@ -142,7 +176,7 @@
                 const labels = {candidate: '候选：', baseline: '基线：', pair: '整体：'};
                 const label = typeof source === 'string' && Object.hasOwn(labels, source) ? labels[source] : '';
                 notice(typeof code === 'string' && Object.hasOwn(notices, code) ? label + notices[code] :
-                       response.status === 413 ? '请求超过 2 MiB，请缩小输入。' : '预览请求未完成，请检查输入或稍后手动重试。');
+                       response.status === 413 ? '请求超过 2 MiB，请缩小输入。' : (download ? '合并请求未完成，请检查输入或稍后手动重试。' : '预览请求未完成，请检查输入或稍后手动重试。'));
                 return;
             }
             if (!result || typeof result !== 'object' || Array.isArray(result) ||
@@ -153,7 +187,8 @@
             $('yaml-preview-result').hidden = false;
             notice('只读报告已生成。报告不是兼容证明，也不能用于应用配置。');
         } catch (_) {
-            if (live(token)) notice('无法取得有效报告；输入保留，可手动重试。');
+            if (live(token)) notice(download ? '无法取得有效附件；输入保留，可手动重试。' :
+                                    '无法取得有效报告；输入保留，可手动重试。');
         } finally {
             if (live(token)) { controller = null; busy = false; controls(); }
         }

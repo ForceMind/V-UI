@@ -26,7 +26,7 @@ class Element {
     set innerHTML(_) {assert.fail('Unsafe HTML sink');}
 }
 function fixture() {
-    const ids=new Map(), globals=new Map(), requests=[], queued=[], redirects=[];
+    const ids=new Map(), globals=new Map(), requests=[], queued=[], redirects=[], downloads=[], revoked=[];
     for(const match of html.matchAll(/<([\w-]+)\b[^>]*\bid="([^"]+)"[^>]*>/g)) {
         assert(!ids.has(match[2]), 'actual template IDs are unique');
         const element=new Element(match[2],match[1]);
@@ -35,11 +35,15 @@ function fixture() {
     }
     const get=id=>{assert(ids.has(id),'actual template contains '+id);return ids.get(id);};
     vm.runInNewContext(script, {
-        document:{getElementById:get}, TextEncoder, TextDecoder, AbortController,
+        document:{getElementById:get, body:{append(){}},
+            createElement:tag=>{assert.equal(tag,'a');return {remove(){},click(){downloads.push(this);}};}},
+        TextEncoder, TextDecoder, AbortController,
+        URL:{createObjectURL:()=> 'blob:private-fixture', revokeObjectURL:url=>revoked.push(url)},
+        setTimeout:fn=>fn(),
         addEventListener:(name,fn)=>globals.set(name,[...(globals.get(name)||[]),fn]),
         location:{replace:url=>redirects.push(url)},
         fetch:async(url,options)=>{
-            assert.equal(url,'/api/proxy/yaml/preview');assert.equal(options.method,'POST');
+            assert(['/api/proxy/yaml/preview','/api/proxy/yaml/merge/download'].includes(url));assert.equal(options.method,'POST');
             assert.equal(options.credentials,'same-origin');assert.equal(options.cache,'no-store');
             assert.equal(options.headers['X-VUI-Request'],'1');assert.equal(options.headers['Content-Type'],'application/json');
             requests.push({url,options});
@@ -52,9 +56,11 @@ function fixture() {
     const emit=async(name,event={})=>{for(const fn of globals.get(name)||[])await fn(event);};
     const input=async(role,value)=>{get('yaml-'+role).value=value;await get('yaml-'+role).emit('input');};
     const select=async(role,file)=>{get('yaml-'+role+'-file').files=[file];get('yaml-'+role+'-file').value='fake-name';await get('yaml-'+role+'-file').emit('change');};
-    return {get,requests,queued,redirects,emit,input,select,
+    return {get,requests,queued,redirects,downloads,revoked,emit,input,select,
         open:()=>get('open-yaml-preview').click(), close:()=>get('close-yaml-preview').click(),
         submit:()=>get('yaml-preview-form').emit('submit'),
+        download:()=>get('yaml-preview-form').emit('submit',
+            {preventDefault(){},submitter:get('yaml-merge-download')}),
         clear:()=>get('clear-yaml-preview').click(),
         notice:()=>get('yaml-preview-notice').textContent, report:()=>get('yaml-preview-result').textContent};
 }
@@ -227,4 +233,53 @@ test('queued native close from previous session cannot clear reopened inputs or 
     assert.equal(f.get('yaml-candidate').value,'mode: direct');
     assert(f.get('yaml-preview-submit').disabled);assert(!f.requests[0].options.signal.aborted);
     wait.resolve(reply());await pending;assert.equal(f.report(),REPORT);
+});
+
+const attachment = (blob=async()=>({size:64})) => ({
+    status:200, ok:true, blob,
+    headers:{get:name=>({'content-type':'application/yaml','content-length':'64',
+        'content-disposition':'attachment; filename="vui-merged.yaml"'})[name]},
+});
+
+test('private merge needs both inputs and downloads only the fixed attachment',async()=>{
+    const f=await ready();assert(f.get('yaml-merge-download').disabled);
+    await f.download();assert.equal(f.requests.length,0);
+    await f.input('baseline','rules: ["MATCH,REJECT"]');
+    assert(!f.get('yaml-merge-download').disabled);
+    f.queued.push(()=>attachment());
+    await f.download();
+    assert.equal(f.requests[0].url,'/api/proxy/yaml/merge/download');
+    assert.equal(f.requests[0].options.redirect,'error');
+    assert.deepEqual(JSON.parse(f.requests[0].options.body),
+        {candidate:'{}',baseline:'rules: ["MATCH,REJECT"]'});
+    assert.equal(f.downloads.length,1);
+    assert.equal(f.downloads[0].download,'vui-merged.yaml');
+    assert.deepEqual(f.revoked,['blob:private-fixture']);
+    assert.equal(f.report(),'');
+});
+
+test('merge conflicts and stale attachment reads never download',async()=>{
+    const f=await ready();await f.input('baseline','{}');
+    f.queued.push(()=>({status:422,ok:false,json:async()=>({detail:{code:'MERGE_CHOICES_REQUIRED', path:SECRET}})}));
+    await f.download();assert(f.notice().includes('冲突'));assert(!f.notice().includes(SECRET));
+    const reading=deferred();
+    f.queued.push(()=>attachment(()=>reading.promise));
+    const work=f.download();await flush();
+    await f.input('baseline','mode: rule');
+    reading.resolve({size:64});await work;
+    assert.equal(f.downloads.length,0);
+    assert(f.requests[1].options.signal.aborted);
+});
+
+test('unexpected merge attachment length is rejected before reading bytes',async()=>{
+    const f=await ready();await f.input('baseline','{}');
+    let reads=0;
+    const response=attachment(async()=>{reads++;return {size:1048577};});
+    const header=response.headers.get;
+    response.headers.get=name=>name==='content-length'?'1048577':header(name);
+    f.queued.push(()=>response);
+    await f.download();
+    assert.equal(f.downloads.length,0);
+    assert(f.notice().includes('无法取得有效附件'));
+    assert.equal(reads,0);
 });
