@@ -12,6 +12,8 @@ import zipfile
 
 import yaml
 
+from app.release_tools import target_key
+
 from inbound_routing_real_helpers import yaml_client
 from proxy_loopback_support import BODY, ReadyMihomoProcess, https_target, https_through
 from online_install_helpers import PrivateMenuSession
@@ -36,6 +38,9 @@ def installed_core_switch(check, source, work, api, service_python, ca, cert, ke
     check.assertNotEqual(nodes['sing-box']['port'], nodes['xray']['port'])
     source_sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip()
     assert re.fullmatch('[a-f0-9]{40}', source_sha)
+    host_target = target_key()
+    check.assertIn(host_target, ('x86_64-gnu', 'aarch64-gnu'))
+    host_arch = host_target.split('-')[0]
     candidates, new_digests = {}, {}
     for core, (_, candidate_version) in VERSIONS.items():
         candidate = fixture/core/'candidate'
@@ -49,7 +54,7 @@ def installed_core_switch(check, source, work, api, service_python, ca, cert, ke
             check.assertEqual(row['name'], f"vui-core-{core}-{candidate_version}-{row['target']}.zip")
         expected = {'CORE-RELEASE.json', 'SHA256SUMS', *(row['name'] for row in manifest['packs'])}
         check.assertEqual({path.name for path in candidate.iterdir()}, expected)
-        target = next(row for row in manifest['packs'] if row['target'] == 'x86_64-gnu')
+        target = next(row for row in manifest['packs'] if row['target'] == host_target)
         with zipfile.ZipFile(candidate/target['name']) as archive:
             pack = archive.read('CORE-PACK.json')
         check.assertEqual(hashlib.sha256(pack).hexdigest(), target['manifest_sha256'])
@@ -154,7 +159,7 @@ def installed_core_switch(check, source, work, api, service_python, ca, cert, ke
                 running[core] = (node['id'], node['port'], observed['pid'])
             panel = int(subprocess.check_output(['systemctl', 'show', 'v-ui.service', '-p', 'MainPID',
                                                  '--value'], text=True).strip())
-            witness = service_python('nodes='+repr(running)+';panel='+repr(panel)+';'+"""
+            witness = service_python('nodes='+repr(running)+';panel='+repr(panel)+';arch='+repr(host_arch)+';'+"""
 import hashlib,json,os,sqlite3
 from pathlib import Path
 import psutil
@@ -187,7 +192,7 @@ with sqlite3.connect((data/'v-ui.db').as_uri()+'?mode=ro',uri=True) as database:
   assert intent['enabled'] is True
   cores[core]={'watchdog':watchdog,'watchdog_created':parent.create_time(),
     'pid':child.pid,'created':child.create_time(),'binary':digest.hexdigest(),
-    'bundle':manifest['files']['cores/x86_64/'+core]['sha256'],
+    'bundle':manifest['files']['cores/'+arch+'/'+core]['sha256'],
     'node':hashlib.sha256(json.dumps(row).encode()).hexdigest(),
     'intent':[intent['revision'],intent['enabled']]}
 print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
@@ -238,7 +243,7 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
                 return None
             state = json.loads((metadata/'core-selection.json').read_bytes())
             check.assertEqual((state['revision'], state['app_source'], state['target']),
-                              (revision, source_sha, 'x86_64-gnu'))
+                              (revision, source_sha, host_target))
             return state
 
         status, raw_identity = api('/api/auth/me')

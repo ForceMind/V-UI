@@ -452,11 +452,11 @@ print(json.dumps(hashlib.sha256(json.dumps(rows,sort_keys=True).encode()).hexdig
         from loopback_helpers import unused_port
         from proxy_loopback_support import BODY, ReadyMihomoProcess, https_target, https_through
         from inbound_routing_real_helpers import yaml_client, uri_client
-        from scripts.fetch_mihomo import PIN
+        from scripts.fetch_mihomo import native_pin
         import yaml
         client=Path(os.environ['VUI_TEST_MIHOMO'])
         provenance=json.loads(client.with_name('mihomo-provenance.json').read_text())
-        for field,value in PIN.items():check.assertEqual(provenance[field],value)
+        for field,value in native_pin().items():check.assertEqual(provenance[field],value)
         check.assertEqual(hashlib.sha256(client.read_bytes()).hexdigest(),provenance['binary_sha256'])
         version=subprocess.run([str(client),'-v'],capture_output=True,text=True,timeout=15)
         check.assertEqual(version.returncode,0)

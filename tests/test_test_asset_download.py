@@ -277,15 +277,17 @@ class DownloadTests(unittest.TestCase):
             self.assertEqual(runtimes.PINS[target],{'url':'https://github.com/astral-sh/python-build-standalone/releases/download/20260901/'+filename,'sha256':checksum})
             ids[filename]=asset_id
         ids['mihomo-linux-amd64-v1.19.32.gz']='601415750'
-        self.assertEqual(len(download.ASSET_API),12)
-        self.assertEqual(set(download.ASSET_API),{pin['url'] for group in cores.PINS.values() for pin in group.values()}|{URL,mihomo.PIN['url']}|{pin['url'] for pin in runtimes.PINS.values()})
+        ids['mihomo-linux-arm64-v1.19.32.gz']='601415736'
+        self.assertEqual(len(download.ASSET_API),13)
+        self.assertEqual(set(download.ASSET_API),{pin['url'] for group in cores.PINS.values() for pin in group.values()}|{URL,mihomo.PIN['url'],mihomo.ARM64_PIN['url']}|{pin['url'] for pin in runtimes.PINS.values()})
         for original,api in download.ASSET_API.items():
             download.validate_pair(original,api)
             self.assertEqual(api.rsplit('/',1)[1],ids[original.rsplit('/',1)[1]])
 
     def test_new_assets_preserve_original_one_call_and_only_transient_api_fallback(self):
-        for original in [mihomo.PIN['url']] + [pin['url'] for pin in runtimes.PINS.values()]:
-            runtime = original != mihomo.PIN['url']
+        clients = [mihomo.PIN['url'], mihomo.ARM64_PIN['url']]
+        for original in clients + [pin['url'] for pin in runtimes.PINS.values()]:
+            runtime = original not in clients
             maximum, timeout = (160_000_000,120) if runtime else (100_000_000,90)
             for transient in (None,502,503,504):
                 with self.subTest(original=original,transient=transient):
@@ -338,7 +340,8 @@ class DownloadTests(unittest.TestCase):
             def fake_download(url,**kwargs): return download.download_pinned(url,opener=opener,**kwargs)
             with self.subTest(fallback=fallback), tempfile.TemporaryDirectory() as folder:
                 destination=Path(folder)/'uncreated'
-                with patch.object(mihomo,'download_pinned',side_effect=fake_download), \
+                with patch.object(mihomo.platform,'machine',return_value='x86_64'), \
+                        patch.object(mihomo,'download_pinned',side_effect=fake_download), \
                         patch.object(mihomo.gzip,'decompress') as decompress, \
                         patch.object(Path,'write_bytes') as write, redirect_stderr(io.StringIO()), self.assertRaisesRegex(ValueError,'Mihomo archive checksum mismatch'):
                     mihomo.fetch(destination)

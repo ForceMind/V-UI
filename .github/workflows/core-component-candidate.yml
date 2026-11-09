@@ -4,6 +4,12 @@ on:
     paths:
       - 'scripts/build_core_component.py'
       - 'scripts/check_core_candidate_native.py'
+      - 'scripts/fetch_mihomo.py'
+      - 'scripts/test_asset_download.py'
+      - 'scripts/system_maintenance_smoke.py'
+      - 'tests/core_switch_systemd.py'
+      - 'tests/core_switch_fixture_runner.py'
+      - 'tests/test_oneclick_system.py'
       - 'scripts/fetch_core_candidate_inputs.py'
       - 'tests/test_core_component_builder.py'
       - 'tests/test_core_candidate_inputs.py'
@@ -237,4 +243,71 @@ jobs:
           name: core-native-tcp-${{ matrix.target }}-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/native-tcp.json
           if-no-files-found: error
+          retention-days: 14
+
+  managed-arm64:
+    needs: native-tcp
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    env:
+      EXPECTED_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-test.txt
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: core-candidate-[sx]*-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/vui-managed-inputs
+      - name: Build exact ARM64 GNU bundle and stage same-run core fixture
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          git diff --quiet HEAD --
+          test "$(uname -m)" = aarch64
+          work=/tmp/vui-oneclick
+          mkdir "$work" "$work/core-switch-fixture"
+          for core in sing-box xray; do
+            artifact="$RUNNER_TEMP/vui-managed-inputs/core-candidate-$core-$EXPECTED_SOURCE-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+            mkdir "$work/core-switch-fixture/$core"
+            cp -R "$artifact/candidate" "$work/core-switch-fixture/$core/candidate"
+          done
+          python -B scripts/build_bundle.py "$work/vui-linux.zip" --source-commit "$EXPECTED_SOURCE" --target aarch64-gnu
+          python -B scripts/build_release_kit.py "$work/vui-linux.zip" "$work/kit" "$EXPECTED_SOURCE"
+          python -B scripts/fetch_mihomo.py "$work/client"
+      - name: Run installed ARM64 systemd core switch and restore
+        env:
+          VUI_SYSTEM_INSTALL_TEST: '1'
+          VUI_REMOTE_MAINTENANCE_TEST: '1'
+          VUI_EXISTING_INSTALL_TEST: '1'
+          VUI_DOMAIN_RETRY_TEST: '1'
+          VUI_INSTALLER_YN_TEST: '1'
+          VUI_NETLINK_SYSTEMD_TEST: '1'
+          VUI_CORE_SWITCH_FIXTURE: /tmp/vui-oneclick/core-switch-fixture
+          VUI_RELEASE_BUNDLE: /tmp/vui-oneclick/vui-linux.zip
+          VUI_RELEASE_KIT: /tmp/vui-oneclick/kit
+          VUI_TEST_MIHOMO: /tmp/vui-oneclick/client/mihomo
+        run: |
+          set -euo pipefail
+          log=/tmp/vui-oneclick/managed-arm64.log
+          python -B -m unittest discover -s tests -p test_oneclick_system.py -v 2>&1 | tee "$log"
+          test "$(grep -Ec '^Ran 1 test in ' "$log")" = 1
+          test "$(grep -cx OK "$log")" = 1
+          test "$(grep -c '^VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE:' "$log")" = 2
+          test "$(grep -c '^VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: sing-box ' "$log")" = 1
+          test "$(grep -c '^VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: xray ' "$log")" = 1
+          test "$(grep -c '^VUI_INSTALLED_CORE_RESTORE_ACCEPTANCE:' "$log")" = 1
+      - name: Preserve ARM64 systemd evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: core-managed-arm64-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/vui-oneclick/managed-arm64.log
+          if-no-files-found: warn
           retention-days: 14

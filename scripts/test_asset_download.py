@@ -30,6 +30,8 @@ ASSET_API = {
         'https://api.github.com/repos/letsencrypt/pebble/releases/assets/401025613',
     'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-linux-amd64-v1.19.32.gz':
         'https://api.github.com/repos/MetaCubeX/mihomo/releases/assets/601415750',
+    'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-linux-arm64-v1.19.32.gz':
+        'https://api.github.com/repos/MetaCubeX/mihomo/releases/assets/601415736',
     'https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz':
         'https://api.github.com/repos/astral-sh/python-build-standalone/releases/assets/539916161',
     'https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-x86_64-unknown-linux-musl-install_only_stripped.tar.gz':
