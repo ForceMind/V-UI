@@ -1,4 +1,8 @@
 import unittest
+from unittest.mock import patch
+
+from app.services import mihomo_merge_download as transport
+from app.services.mihomo_preview import MihomoPreviewError
 
 from app.services.mihomo_merge import MihomoMergeError, merge_mihomo
 from app.services.mihomo_merge_review import review_mihomo_merge, serialize_reviewed_mihomo_merge
@@ -35,3 +39,29 @@ class MihomoMergeReviewTests(unittest.TestCase):
         right = '\n'.join(f'key-{i}: true' for i in range(257))
         with self.assertRaisesRegex(MihomoMergeError, '^MERGE_REVIEW_LIMIT$'):
             review_mihomo_merge(left, right)
+
+
+class MergeReviewTransportTests(unittest.TestCase):
+    def test_parent_rejects_unknown_fields_types_and_arbitrary_text(self):
+        valid = {'fingerprint': 'a'*64, 'conflicts': [
+            {'index': 0, 'section': 'other', 'baseline': [1, 1], 'candidate': [1, 1]}]}
+        import json
+        invalid = [
+            {**valid, 'extra': 'private'},
+            {**valid, 'fingerprint': 'private'},
+            {**valid, 'conflicts': [{**valid['conflicts'][0], 'section': 'private'}]},
+            {**valid, 'conflicts': [{**valid['conflicts'][0], 'baseline': [True, 1]}]},
+            {**valid, 'conflicts': [{**valid['conflicts'][0], 'candidate': [99, 1]}]},
+        ]
+        for report in invalid:
+            with self.subTest(report=report), patch.object(transport, '_request', return_value=json.dumps(report).encode()):
+                with self.assertRaisesRegex(MihomoPreviewError, '^PARSER_FAILED$'):
+                    transport.review_mihomo_download('x: 1', 'x: 2')
+        with patch.object(transport, '_request', return_value=json.dumps(valid).encode()):
+            self.assertEqual(transport.review_mihomo_download('x: 1', 'x: 2'), valid)
+
+    def test_parent_rejects_excessively_nested_worker_json(self):
+        raw = b'[' * 2000 + b'0' + b']' * 2000
+        with patch.object(transport, '_request', return_value=raw):
+            with self.assertRaisesRegex(MihomoPreviewError, '^PARSER_FAILED$'):
+                transport.review_mihomo_download('x: 1', 'x: 2')

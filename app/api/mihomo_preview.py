@@ -9,7 +9,9 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.mihomo_merge import MihomoMergeError
-from app.services.mihomo_merge_download import download_mihomo_merge
+from app.services.mihomo_merge_download import (
+    download_mihomo_merge, review_mihomo_download, reviewed_mihomo_download,
+)
 from app.services.mihomo_preview import MihomoPreviewError, preview_mihomo
 from app.services.mihomo_preview_report import render_preview_text
 
@@ -45,8 +47,13 @@ class MergeChoice(BaseModel):
     side: Literal['baseline', 'candidate']
 
 
-class MergeDownloadPayload(PreviewPayload):
+class MergeReviewPayload(PreviewPayload):
     baseline: str = Field(min_length=1, max_length=1_048_576)
+
+
+class MergeDownloadPayload(MergeReviewPayload):
+    fingerprint: str | None = Field(default=None, pattern='^[a-f0-9]{64}$')
+    selections: list[Literal['baseline', 'candidate']] | None = Field(default=None, max_length=256)
     choices: list[MergeChoice] = Field(default_factory=list, max_length=256)
 
 
@@ -58,7 +65,13 @@ def download_yaml(payload: MergeDownloadPayload, request: Request):
     if len(choices) != len(payload.choices):
         raise HTTPException(422, {'code': 'MERGE_INVALID_CHOICES'})
     try:
-        raw = download_mihomo_merge(payload.baseline, payload.candidate, choices)
+        if payload.fingerprint is not None or payload.selections is not None:
+            if payload.fingerprint is None or payload.selections is None or choices:
+                raise MihomoMergeError('MERGE_INVALID_CHOICES')
+            raw = reviewed_mihomo_download(payload.baseline, payload.candidate,
+                                           payload.fingerprint, payload.selections)
+        else:
+            raw = download_mihomo_merge(payload.baseline, payload.candidate, choices)
     except MihomoPreviewError as error:
         raise _parser_error(error) from None
     except MihomoMergeError as error:
@@ -66,3 +79,15 @@ def download_yaml(payload: MergeDownloadPayload, request: Request):
     return Response(raw, media_type='application/yaml', headers={
         'Content-Disposition': 'attachment; filename="vui-merged.yaml"',
     })
+
+
+@router.post('/yaml/merge/review')
+def review_yaml_merge(payload: MergeReviewPayload, request: Request):
+    if getattr(request.state, 'admin', None) is None or getattr(request.state, 'maintenance', None) is not None:
+        raise HTTPException(403, {'code': 'ADMIN_REQUIRED'})
+    try:
+        return review_mihomo_download(payload.baseline, payload.candidate)
+    except MihomoPreviewError as error:
+        raise _parser_error(error) from None
+    except MihomoMergeError as error:
+        raise HTTPException(422, {'code': error.code}) from None

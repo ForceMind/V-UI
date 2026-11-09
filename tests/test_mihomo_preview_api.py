@@ -160,6 +160,25 @@ class MihomoPreviewApiTests(unittest.TestCase):
         self.assertEqual(response.json(), {'detail': 'Invalid request'})
         merge.assert_not_called()
 
+    def test_merge_review_is_private_positions_and_choices_require_fresh_inputs(self):
+        payload = {'baseline': SECRET + ': false', 'candidate': SECRET + ': 0'}
+        reviewed = self.client.post('/api/proxy/yaml/merge/review', json=payload, headers=HEADERS)
+        self.assertEqual(reviewed.status_code, 200, reviewed.text)
+        self.assertNotIn(SECRET, reviewed.text)
+        report = reviewed.json()
+        self.assertEqual(report['conflicts'][0]['section'], 'other')
+        path = '/api/proxy/yaml/merge/download'
+        selection = {'fingerprint': report['fingerprint'], 'selections': ['candidate']}
+        downloaded = self.client.post(path, json={**payload, **selection}, headers=HEADERS)
+        self.assertEqual(downloaded.status_code, 200, downloaded.text)
+        self.assertIn(SECRET + ': 0', downloaded.text)
+        stale = self.client.post(path, json={**payload, 'candidate': SECRET + ': 1', **selection}, headers=HEADERS)
+        self.assertEqual(stale.json(), {'detail': {'code': 'MERGE_REVIEW_STALE'}})
+        missing = self.client.post(path, json={**payload, 'fingerprint': report['fingerprint']}, headers=HEADERS)
+        self.assertEqual(missing.status_code, 422)
+        self.store.assert_not_called()
+        self.apply.assert_not_called()
+
     def test_actual_body_limit_includes_json_escaping_and_rejects_before_parser(self):
         with patch.object(endpoint, 'preview_mihomo') as parser:
             response = self.client.post(URL, content=b' ' * (2097152 + 1),
