@@ -14,6 +14,7 @@ import yaml
 
 from inbound_routing_real_helpers import yaml_client
 from proxy_loopback_support import BODY, ReadyMihomoProcess, https_target, https_through
+from online_install_helpers import PrivateMenuSession
 
 
 VERSIONS = {'sing-box': ('1.14.2', '1.14.3'), 'xray': ('26.3.27', '26.10.21')}
@@ -182,13 +183,11 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
                 check.assertEqual(status_by_core[core]['applied_revision'], witness['cores'][core]['intent'][0])
             return witness
 
-        def task(core, action, revision, *, rejected=False, backup=()):
+        def task(core, action, revision, *, rejected=False):
             case = core + ' ' + action
             args = [core, action, source_sha, revision or 'none']
             if action == 'port-conflict':
                 args.append(str(nodes[core]['port']))
-            if action == 'restore-backup':
-                args.extend(backup)
             output = subprocess.run(['sudo', '--preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_REPOSITORY',
                 '/usr/bin/setsid', '--wait', '/usr/bin/python3', '-B', '-I', '-S', str(runner), *args],
                 capture_output=True, text=True, timeout=650)
@@ -294,15 +293,36 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
         check.assertIsNotNone(restore_backup)
         before_restore()
         prior = snapshot()
-        result = task('sing-box', 'restore-backup', revision, backup=restore_backup)
-        check.assertEqual(result['outcome'], 'restored_backup')
+        prior_selection = selected(revision)
+        with PrivateMenuSession(['sudo', '/usr/local/sbin/v-ui'], cwd='/tmp', env=dict(os.environ),
+                                timeout=850, private_values=restore_backup) as terminal:
+            terminal.expect('请选择: ')
+            terminal.send('15\n')
+            terminal.expect('确认执行 [y/N]: ')
+            terminal.send('n\n')
+            terminal.expect('已取消，未执行操作。')
+            terminal.expect('请选择: ')
+            check.assertEqual(selected(revision), prior_selection)
+            terminal.send('14\n')
+            terminal.expect('受管备份文件名（留空取消）: ')
+            terminal.send(restore_backup[0]+'\n')
+            terminal.expect('备份 SHA-256（留空取消）: ')
+            terminal.send(restore_backup[1]+'\n')
+            terminal.expect('确认执行 [y/N]: ')
+            terminal.send('y\n')
+            check.assertIn('恢复完成，已核对数据与服务状态。', terminal.expect('请选择: '))
+            terminal.send('0\n')
+            terminal.finish()
         after_restore()
         status, raw = api('/api/auth/me')
         check.assertEqual(status, 200)
         check.assertEqual(json.loads(raw), original_identity)
         restored = snapshot()
         check.assertNotEqual(restored['data'], prior['data'])
-        check.assertEqual(selected(result['selection_revision'])['cores'], restore_selection)
+        restored_revision = json.loads((metadata/'core-selection.json').read_bytes())['revision']
+        restored_selection = selected(restored_revision)
+        check.assertGreater(restored_selection['generation'], prior_selection['generation'])
+        check.assertEqual(restored_selection['cores'], restore_selection)
         for field in ('current', 'users'):
             check.assertEqual(restored[field], prior[field])
         for name in nodes:

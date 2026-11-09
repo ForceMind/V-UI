@@ -971,11 +971,37 @@ class MenuTests(unittest.TestCase):
     def test_menu_first_screen_unknown_help_cancel_and_eof_no_external_action(self):
         with patch.object(ops, 'installation_lock', side_effect=AssertionError('host lock')), \
                 patch.object(ops, 'verify_installation', side_effect=AssertionError('host reads')):
-            for data in ('0\n', '', 'h\ninvalid\n0\n', '2\nno\n0\n', '2\n', '6\n\n0\n', '7\n\n0\n', '12\nn\n0\n', '12\n\n0\n', '13\n0\n0\n'):
+            for data in ('0\n', '', 'h\ninvalid\n0\n', '2\nno\n0\n', '2\n', '6\n\n0\n', '7\n\n0\n', '12\nn\n0\n',
+                         '12\n\n0\n', '13\n0\n0\n', '14\n\n0\n', '15\nn\n0\n'):
                 code, text = self.run_menu(data)
                 self.assertEqual(code, 0, text)
                 self.assertIn('V-UI 受管维护菜单', text)
                 self.assertNotIn('操作完成', text)
+
+    def test_core_restore_menu_only_runs_fixed_child_after_confirmation(self):
+        digest = 'b'*64
+        name = 'core-maintenance-'+'a'*32+'.zip'
+        receipt = json.dumps({'files': {str(ops.CONTROL/'system_ops.py'): digest}}).encode()
+        for choice, action, values in (('14', 'restore-components', [name, digest]),
+                                       ('15', 'recover-components', [])):
+            with self.subTest(action=action), patch.object(ops, 'verify_installation', return_value=('systemd', None)), \
+                    patch.object(ops, 'trusted_bytes', return_value=receipt), \
+                    patch.object(ops, 'run_command', return_value=(0, b'')) as run:
+                code, output = self.run_menu('\n'.join([choice, *values, 'y', '0', '']))
+                self.assertEqual(code, 0)
+                self.assertIn('恢复完成', output)
+                args = run.call_args.args[0]
+                self.assertEqual(args[1:6], ['-B', '-I', '-S', '-c', ops.CORE_RESTORE_BOOTSTRAP])
+                self.assertEqual(args[6:], [digest, hashlib.sha256(receipt).hexdigest(), action, *values])
+                compile(args[5], '<fixture bootstrap>', 'exec')
+
+    def test_core_restore_cancel_keeps_a_bounded_child_cleanup_window(self):
+        child = unittest.mock.Mock()
+        child._check.side_effect = ops.Refused('operation interrupted')
+        with patch.object(ops, 'Child', return_value=child):
+            with self.assertRaisesRegex(ops.Refused, 'operation interrupted'):
+                ops.run_command(['/fixed'], [2], cleanup_grace=180)
+        child.close.assert_called_once_with(grace=180)
 
     def test_online_upgrade_accepts_y_and_yes_without_other_confirmation(self):
         client = types.SimpleNamespace(request=lambda request: {'id': 'a' * 32, 'state': 'succeeded', 'result': {'upgraded': False}})

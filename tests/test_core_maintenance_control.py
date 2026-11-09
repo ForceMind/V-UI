@@ -4,6 +4,7 @@ Candidate provenance, worker pipes, systemd, native execution and broker I/O
 are fixtures. The broker schema and both public metadata transitions are real.
 """
 from copy import deepcopy
+from contextlib import nullcontext
 import hashlib
 import json
 import sys
@@ -319,6 +320,14 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.switch = control._Switch(ops, modules, self.services, types.SimpleNamespace(pw_uid=501, pw_gid=501),
             self.worker, self.installation_proof, dict(target=fixtures.TARGET),
             deadline=time.monotonic()+10, cancelled=[])
+
+    def test_restore_task_rejects_changed_receipt_under_installation_lock(self):
+        ops = types.SimpleNamespace(TIMEOUT=1, MAX_JSON=16384, RECEIPT=self.root/'receipt',
+            installation_lock=lambda **_: nullcontext(lambda: None),
+            trusted_bytes=lambda *args: b'refreshed receipt',
+            verify_installation=lambda: self.fail('must reject before controller dispatch'))
+        with self.assertRaisesRegex(control.CoreControlError, 'CORE_CONTROL_CHANGED'):
+            control._run_task(ops, [], None, restore_recovery=True, receipt_sha256='a'*64)
 
     def test_only_typed_uid_drop_waits_before_arming(self):
         from deploy import system_ops

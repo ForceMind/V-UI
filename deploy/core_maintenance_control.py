@@ -887,27 +887,31 @@ def recover(ops, *, cancelled=None):
     return _run_task(ops, cancelled, None)
 
 
-def restore_backup(ops, *, archive_name, archive_sha256, expected_revision, cancelled=None):
+def restore_backup(ops, *, archive_name, archive_sha256, expected_revision, cancelled=None, _receipt_sha256=None):
     """Fixed private restore entry for a scoped caller in an isolated session."""
     _need(os.geteuid() == 0, 'ROOT_REQUIRED')
     _need(os.getpid() == os.getpgrp() == os.getsid(0), 'CORE_TASK_ISOLATION')
     _need(type(archive_name) is str and re.fullmatch(r'core-maintenance-[a-f0-9]{32}\.zip', archive_name)
           and all(type(value) is str and ops.HEX.fullmatch(value)
                   for value in (archive_sha256, expected_revision)), 'CORE_RESTORE_REQUEST')
-    return _run_task(ops, cancelled, (archive_name, archive_sha256, expected_revision), restore=True)
+    return _run_task(ops, cancelled, (archive_name, archive_sha256, expected_revision), restore=True,
+                     receipt_sha256=_receipt_sha256)
 
 
-def recover_restore_backup(ops, *, cancelled=None):
+def recover_restore_backup(ops, *, cancelled=None, _receipt_sha256=None):
     """Private recovery entry for an interrupted dual-domain restore."""
     _need(os.geteuid() == 0, 'ROOT_REQUIRED')
     _need(os.getpid() == os.getpgrp() == os.getsid(0), 'CORE_TASK_ISOLATION')
-    return _run_task(ops, cancelled, None, restore_recovery=True)
+    return _run_task(ops, cancelled, None, restore_recovery=True, receipt_sha256=_receipt_sha256)
 
 
-def _run_task(ops, cancelled, request, *, restore=False, restore_recovery=False):
+def _run_task(ops, cancelled, request, *, restore=False, restore_recovery=False, receipt_sha256=None):
     cancelled = [] if cancelled is None else cancelled
     deadline = time.monotonic() + ops.TIMEOUT
     with ops.installation_lock(_proof=True) as proof:
+        if receipt_sha256 is not None:
+            _need(hashlib.sha256(ops.trusted_bytes(ops.RECEIPT, ops.MAX_JSON)).hexdigest() == receipt_sha256,
+                  'CORE_CONTROL_CHANGED')
         manager, account = ops.verify_installation()
         _need(manager == 'systemd', 'CORE_SYSTEMD_REQUIRED')
         config = ops.decode_json(ops.trusted_bytes(ops.CONFIG, ops.MAX_JSON))
