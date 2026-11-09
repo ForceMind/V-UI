@@ -411,3 +411,47 @@ class MaintenanceAuthorizationTests(unittest.TestCase):
                         self.assertEqual(cert['certificateFile' if core == 'xray' else 'certificate_path'], '/private/fake/cert.pem')
                         self.assertEqual(cert['keyFile' if core == 'xray' else 'key_path'], '/private/fake/key.pem')
                         self.assertEqual(tls['serverName' if core == 'xray' else 'server_name'], 'new.example.test')
+
+    def test_core_selection_requires_new_explicit_scope(self):
+        legacy = ['diagnose','nodes','share','relay','certificates','operate','upgrade','destructive']
+        remote = TestClient(main.app, base_url=ORIGIN, client=('127.0.0.1',55002))
+        self.addCleanup(remote.close)
+        with patch('app.services.maintenance_tasks.core_selection_status', return_value={'outcome':'bundle_default'}) as read:
+            for scopes in (['diagnose'], ['upgrade','destructive'], legacy):
+                _, headers = self.bearer(scopes)
+                self.assertEqual(remote.get('/api/maintenance/core-selection',headers=headers).status_code,403)
+            read.assert_not_called()
+            record, headers = self.bearer(['core_read'])
+            response = remote.get('/api/maintenance/core-selection',headers=headers)
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual(response.json(),{'outcome':'bundle_default'})
+            self.assertEqual(remote.get('/api/maintenance/tasks',headers=headers).status_code,403)
+            before = read.call_count
+            self.assertEqual(remote.get('/api/maintenance/core-selection?source=untrusted',headers=headers).status_code,422)
+            maintenance.revoke_grant(self.owner,record['id'])
+            self.assertEqual(remote.get('/api/maintenance/core-selection',headers=headers).status_code,401)
+            self.assertEqual(read.call_count,before)
+
+    def test_core_selection_admin_and_expiry_keep_fixed_failure_boundary(self):
+        with patch('app.services.maintenance_tasks.core_selection_status', side_effect=RuntimeError('/private/token/path')):
+            response=self.client.get('/api/maintenance/core-selection')
+            self.assertEqual(response.status_code,503)
+            self.assertNotIn('/private',response.text)
+        record,headers=self.bearer(['core_read'])
+        with database.SessionLocal() as db:
+            db.get(maintenance.MaintenanceGrant,record['id']).expires_at=int(time.time())-1
+            db.commit()
+        remote=TestClient(main.app,base_url=ORIGIN,client=('127.0.0.1',55003));self.addCleanup(remote.close)
+        with patch('app.services.maintenance_tasks.core_selection_status') as read:
+            self.assertEqual(remote.get('/api/maintenance/core-selection',headers=headers).status_code,401)
+            read.assert_not_called()
+
+    def test_all_nine_scopes_require_an_explicit_new_grant_payload(self):
+        response=self.client.post('/api/maintenance/grants',json={'scopes':sorted(maintenance.SCOPES)},headers=BROWSER)
+        self.assertEqual(response.status_code,201,response.text)
+        self.assertIn('core_read',response.json()['scopes'])
+        _,headers=self.bearer(['core_read'])
+        remote=TestClient(main.app,base_url=ORIGIN);self.addCleanup(remote.close)
+        catalog=remote.get('/api/maintenance/catalog',headers=headers).json()['operations']
+        self.assertIn('/api/maintenance/core-selection',{row['path'] for row in catalog})
+        self.assertNotIn('/api/maintenance/tasks',{row['path'] for row in catalog})

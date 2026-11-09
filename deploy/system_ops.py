@@ -1248,11 +1248,12 @@ def terminal_grants():
     if choice == '1':
         print('1 只读（默认）：诊断、状态与脱敏日志\n'
               '2 日常维护：另含节点、分享、中转、证书、服务操作与升级\n'
-              '3 完整维护：另含删除与备份恢复，可能永久改变业务数据')
-        preset = read_input('请选择权限 [1/2/3，默认 1]: ', 1) or '1'
+              '3 完整维护：另含删除与备份恢复，可能永久改变业务数据\n4 代理核心只读：查看选择，不含更新、回退或恢复')
+        preset = read_input('请选择权限 [1/2/3/4，默认 1]: ', 1) or '1'
         choices = {'1': 'diagnose',
                    '2': 'diagnose,nodes,share,relay,certificates,operate,upgrade',
-                   '3': 'diagnose,nodes,share,relay,certificates,operate,upgrade,destructive'}
+                   '3': 'diagnose,nodes,share,relay,certificates,operate,upgrade,destructive',
+                   '4': 'diagnose,core_read'}
         minutes = read_input('有效分钟数 1–259200，或输入180天/180d（默认30分钟）: ', 6) or '30'
         if minutes in ('180天', '180d', '180D'):
             minutes = '259200'
@@ -1276,7 +1277,7 @@ def terminal_grants():
                    stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, check=True)
 
 
-def _core_terminal_task(ops, arguments, cancelled, expected_receipt):
+def _load_core_controller(expected_receipt):
     manager, _ = verify_installation()
     if manager != 'systemd':
         raise Refused('core restore requires systemd')
@@ -1290,6 +1291,18 @@ def _core_terminal_task(ops, arguments, cancelled, expected_receipt):
         raise Refused('core controller changed')
     module = types.ModuleType('_vui_terminal_core_restore')
     exec(compile(raw, str(path), 'exec'), module.__dict__)
+    return module
+
+
+def core_selection_status(ops):
+    """Root-only read; the controller rechecks receipt under a readonly lock."""
+    expected = hashlib.sha256(trusted_bytes(RECEIPT, MAX_JSON)).hexdigest()
+    module = _load_core_controller(expected)
+    return module.inspect_core_selection(ops, _receipt_sha256=expected)
+
+
+def _core_terminal_task(ops, arguments, cancelled, expected_receipt):
+    module = _load_core_controller(expected_receipt)
     if arguments == ['recover-components']:
         result = module.recover_restore_backup(ops, cancelled=cancelled, _receipt_sha256=expected_receipt)
     elif arguments == ['recover-core']:

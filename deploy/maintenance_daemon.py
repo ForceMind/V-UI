@@ -50,7 +50,7 @@ def validate(value):
             expected.add('backup_id')
     elif operation == 'get':
         expected.add('task_id')
-    elif operation not in ('list', 'status', 'logs'):
+    elif operation not in ('list', 'status', 'logs', 'core_status'):
         raise ValueError('operation')
     if set(value) != expected:
         raise ValueError('fields')
@@ -178,6 +178,32 @@ class Store:
 
 def public(row):
     return {key: row[key] for key in ('id', 'action', 'state', 'created_at', 'updated_at', 'result', 'error') if key in row}
+
+
+def public_core_selection(value):
+    """Only selection metadata; never paths, backup names or source material."""
+    if type(value) is not dict:
+        raise ValueError('core status')
+    outcome = value.get('outcome')
+    if outcome in ('bundle_default', 'core_pending') and set(value) == {'outcome'}:
+        return {'outcome': outcome}
+    if outcome != 'core_selected' or set(value) != {'outcome', 'cores'}:
+        raise ValueError('core status')
+    cores = value['cores']
+    if type(cores) is not dict or set(cores) != {'sing-box', 'xray'}:
+        raise ValueError('core status')
+    result = {}
+    for name, row in cores.items():
+        if type(row) is not dict or set(row) != {'current', 'previous'}:
+            raise ValueError('core status')
+        for key in ('current', 'previous'):
+            version = row[key]
+            if key == 'previous' and version is None:
+                continue
+            if type(version) is not str or not 1 <= len(version) <= 64 or not re.fullmatch(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)', version):
+                raise ValueError('core status')
+        result[name] = {'current': row['current'], 'previous': row['previous']}
+    return {'outcome': outcome, 'cores': result}
 
 
 def install_summary(ops):
@@ -373,6 +399,8 @@ def serve(ops):
                         services = ops.Services(manager, [])
                         services.deadline = time.monotonic() + 3
                         result = {'services': services.snapshot(), 'busy': active is not None, **install_summary(ops)}
+                    elif operation == 'core_status':
+                        result = public_core_selection(ops.core_selection_status(ops))
                     elif operation == 'logs':
                         result = logs(ops)
                     else:

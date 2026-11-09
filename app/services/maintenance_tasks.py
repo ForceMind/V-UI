@@ -32,3 +32,7 @@ def system_status():
 
 def system_logs():
     return _client.request({'protocol': 1, 'operation': 'logs'})
+
+
+def core_selection_status():
+    return _client.request({'protocol': 1, 'operation': 'core_status'})

@@ -13,7 +13,7 @@ from sqlalchemy import Boolean, Column, Integer, String, Text, text
 
 from app.models import database
 
-SCOPES = frozenset({'diagnose', 'nodes', 'share', 'relay', 'certificates', 'operate', 'upgrade', 'destructive'})
+SCOPES = frozenset({'diagnose', 'nodes', 'share', 'relay', 'certificates', 'operate', 'upgrade', 'destructive', 'core_read'})
 INVALID = '维护授权已失效，请联系管理员重新授权'
 TOKEN = re.compile(r'^vui_m[gs]_[A-Za-z0-9_-]{43}$')
 DEFAULT_SECONDS = 1800
@@ -211,6 +211,8 @@ def _cap(method, path, scope, purpose, revision=None):
     CAPABILITIES.append({'method': method, 'path': path, 'scope': scope,
                          'purpose': purpose, 'revision': revision})
 
+
+_cap('GET', '/api/maintenance/core-selection', 'core_read', '查看代理核心选择（不含更新与回退）')
 
 for path, purpose in [('/api/maintenance/session', '当前维护权限'), ('/api/maintenance/catalog', '维护操作目录'),
         ('/api/maintenance/audit', '脱敏审计'), ('/api/maintenance/tasks', '维护任务列表'),

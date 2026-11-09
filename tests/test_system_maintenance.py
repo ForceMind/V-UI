@@ -641,7 +641,8 @@ class ProtocolTests(unittest.TestCase):
                 (['1', '3', '60'], 'diagnose,nodes,share,relay,certificates,operate,upgrade,destructive', '3600'),
                 (['1', '2', '180天'], 'diagnose,nodes,share,relay,certificates,operate,upgrade', '15552000'),
                 (['1', '1', '180d'], 'diagnose', '15552000'),
-                (['1', '1', '259200'], 'diagnose', '15552000')):
+                (['1', '1', '259200'], 'diagnose', '15552000'),
+                (['1', '4', '30'], 'diagnose,core_read', '1800')):
             with self.subTest(answers=answers), patch.object(ops, 'read_input', side_effect=answers), patch.object(ops, 'verify_installation', return_value=('systemd', account)), patch.object(ops.subprocess, 'run') as run:
                 ops.terminal_grants()
                 self.assertEqual(run.call_args.args[0][-3:], ['create', scopes, seconds])

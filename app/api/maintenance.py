@@ -13,7 +13,7 @@ router = APIRouter()
 
 class GrantPayload(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
-    scopes: list[str] = Field(default_factory=lambda: ['diagnose'], min_length=1, max_length=8)
+    scopes: list[str] = Field(default_factory=lambda: ['diagnose'], min_length=1, max_length=len(auth.SCOPES))
     expires_seconds: int = Field(default=auth.DEFAULT_SECONDS, ge=60, le=auth.MAX_SECONDS)
 
 
@@ -123,6 +123,18 @@ def _bridge(operation, *args, **kwargs):
 @router.get('/status')
 def status():
     return _bridge('system_status')
+
+
+@router.get('/core-selection')
+def core_selection(request: Request):
+    if request.query_params:
+        raise HTTPException(422, '核心选择查询不接受额外参数')
+    principal = getattr(request.state, 'maintenance', None)
+    if principal is None:
+        _admin(request)
+    else:
+        auth.authorize(principal, 'GET', '/api/maintenance/core-selection')
+    return _bridge('core_selection_status')
 
 
 @router.get('/logs')

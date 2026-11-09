@@ -113,5 +113,21 @@ async function admin() {
         assert.equal(h.requests.filter(r=>r.options.method==='POST'&&r.url==='/api/maintenance/tasks').length,1);
         h.event('pagehide');
     }
+    {
+        const h=boot('#grant='+secret);
+        await h.reply({token:session,scopes:['core_read'],expires_at:Date.now()/1000+100});
+        assert.equal(h.requests.length,1);assert.equal(h.el('maintenance-core-panel').hidden,false);
+        assert.equal(h.el('maintenance-tasks-panel').hidden,true);assert.equal(h.el('maintenance-audit-panel').hidden,true);
+        h.el('maintenance-core-refresh').fire();await flush();assert.equal(h.requests.at(-1).url,'/api/maintenance/core-selection');
+        await h.reply({outcome:'bundle_default'});
+        assert(h.el('maintenance-core-selection').children.some(row=>row.textContent.includes('随面板套件')));
+        h.event('pagehide');assert.equal(h.el('maintenance-core-panel').hidden,true);assert.equal(h.el('maintenance-core-selection').textContent,'');
+    }
+    {
+        const h=await admin();
+        const check={value:'core_read',checked:true};h.el('maintenance-scopes').buttons=[check];
+        h.el('maintenance-permission-preset').value='full';h.el('maintenance-permission-preset').fire('change');
+        assert.equal(check.checked,false);
+    }
     process.stdout.write('Maintenance fragment/session/scope/cleanup/error/restore synthetic contracts passed\n');
 })().catch(error=>{console.error(error);process.exitCode=1});

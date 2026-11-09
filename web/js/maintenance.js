@@ -10,7 +10,7 @@
     const start = () => {
         const el = id => document.getElementById(id);
         const names = {diagnose:'只读诊断',nodes:'节点管理',share:'节点与订阅分享',relay:'中转配置',
-            certificates:'证书管理',operate:'服务与备份',upgrade:'在线升级',destructive:'删除与恢复'};
+            certificates:'证书管理',operate:'服务与备份',upgrade:'在线升级',destructive:'删除与恢复',core_read:'代理核心只读'};
         const actions = {status:'读取服务状态',start:'启动服务',stop:'停止服务',restart:'重启服务',backup:'私有备份',upgrade:'在线升级',restore:'停机恢复备份'};
         const phases = {queued:'排队中',running:'执行中',succeeded:'成功',success:'成功',failed:'失败',interrupted:'已中断',pending:'待执行',completed:'已完成'};
         let operationView = null;
@@ -21,6 +21,8 @@
         const clearLink = () => { el('maintenance-link').value = ''; el('maintenance-issued').hidden = true; issuedID = ''; };
         const end = () => {
             clearTimeout(taskTimer);watchingTask=null;taskSubmissionUncertain=false;
+            const corePanel=el('maintenance-core-panel');if(corePanel)corePanel.hidden=true;
+            const coreBox=el('maintenance-core-selection');if(coreBox)coreBox.textContent='';
             epoch++; ended = true; operationView?.destroy();operationView=null;token = ''; grant = ''; clearLink();
             controllers.forEach(controller => controller.abort()); controllers.clear();
             ['maintenance-operations','maintenance-admin-links','maintenance-admin','maintenance-remote','maintenance-tasks-panel','maintenance-audit-panel','maintenance-logs-panel'].forEach(id => { el(id).hidden = true; });
@@ -55,6 +57,7 @@
         const record = parent => { const row = document.createElement('div'); row.className = 'maintenance-record'; parent.append(row); return row; };
         const allowed = action => admin || scopes.includes(action === 'upgrade' ? 'upgrade' : action === 'status' ? 'diagnose' : 'operate');
         const sync = () => {
+            const coreButton=el('maintenance-core-refresh');if(coreButton)coreButton.disabled=busy||ended||!(admin||scopes.includes('core_read'));
             el('maintenance-create').disabled = busy || ended;
             el('maintenance-restore').disabled = busy || ended || taskSubmissionUncertain || !!watchingTask || !(admin || scopes.includes('destructive'));
             el('maintenance-actions').querySelectorAll('button').forEach(button => { button.disabled = busy || ended || !allowed(button.dataset.task) || (taskSubmissionUncertain||!!watchingTask)&&button.dataset.task!=='status'; });
@@ -140,6 +143,31 @@
             if (!rows.length) text(box, '暂无操作记录。');
             rows.forEach(row => { const entry = record(box); text(entry, time(row.created_at) + ' · ' + row.operation + ' · 状态 ' + row.status); });
         };
+        const coreSelection = async () => {
+            if (!(admin || scopes.includes('core_read'))) throw new Error('本次授权未开放代理核心信息。');
+            const value = await request('maintenance/core-selection');
+            if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('核心选择响应无效，请稍后刷新。');
+            const box = el('maintenance-core-selection');
+            if (!box) return;
+            box.textContent = '';
+            if (value.outcome === 'bundle_default') {
+                text(box, '当前选择：随面板套件，未配置独立核心。');
+            } else if (value.outcome === 'core_pending') {
+                text(box, '有未完成的核心操作，请使用本机终端核对并恢复。');
+            } else if (value.outcome === 'core_selected' && value.cores) {
+                for (const name of ['sing-box', 'xray']) {
+                    const row = value.cores[name];
+                    if (!row || typeof row.current !== 'string' || !(row.previous === null || typeof row.previous === 'string')) {
+                        throw new Error('核心选择响应无效，请稍后刷新。');
+                    }
+                    text(box, (name === 'xray' ? 'Xray' : 'sing-box') + ' · 当前选择：' + row.current + ' · 上一选择：' + (row.previous || '无'));
+                }
+            } else {
+                throw new Error('核心选择响应无效，请稍后刷新。');
+            }
+        };
+        const coreRefresh = el('maintenance-core-refresh');
+        if (coreRefresh) coreRefresh.addEventListener('click', () => run(coreSelection));
         const logs = async () => {
             const value = await request('maintenance/logs');
             const rows = Array.isArray(value) ? value : value.entries || [];
@@ -216,7 +244,9 @@
             } else {
                 await request('auth/me'); admin = true; el('maintenance-admin').hidden = false; await grants(); notice('已验证管理员身份。默认只读，请按需选择维护权限。');
             }
-            if(globalThis.VUI_SIMPLE_OPERATIONS&&el('maintenance-operations')){
+            const coreOnly = !admin && scopes.length > 0 && scopes.every(scope => scope === 'core_read');
+            const corePanel=el('maintenance-core-panel');if(corePanel)corePanel.hidden=!(admin||scopes.includes('core_read'));
+            if(!coreOnly&&globalThis.VUI_SIMPLE_OPERATIONS&&el('maintenance-operations')){
                 el('maintenance-operations').hidden=false;
                 operationView=globalThis.VUI_SIMPLE_OPERATIONS.mount(el('maintenance-operations'),{
                     request:(path,method,body,{headers={},fullResponse=false}={})=>request(path.replace(/^\/api\//,''),method,body===null?undefined:body,false,headers,fullResponse),
@@ -225,9 +255,9 @@
             }
             el('maintenance-admin-links').hidden=!admin;
             if(!admin){document.body?.classList?.add('vui-delegated');const brand=document.querySelector?.('.vui-shell-brand');if(brand)brand.href='#maintenance-remote';}
-            el('maintenance-tasks-panel').hidden = false; el('maintenance-audit-panel').hidden = false;
+            el('maintenance-tasks-panel').hidden = coreOnly; el('maintenance-audit-panel').hidden = !(admin || scopes.includes('diagnose'));
             el('maintenance-logs-panel').hidden = !(admin || scopes.includes('diagnose'));
-            await audit();
+            if (admin || scopes.includes('diagnose')) await audit();
         });
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, {once:true}); else start();
