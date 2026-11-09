@@ -34,7 +34,7 @@ from .backup_archive import (create as create_backup, MAX_ARCHIVE as MAX_BACKUP,
 from .binary import open_runtime_artifact, verify_runtime_artifact_fd
 from .boot import _runtime_states, _data_root
 from .resolver import CoreResolver
-from .selection_files import SelectionFiles, _journal
+from .selection_files import SelectionFiles, _journal, _raw
 
 
 class CoreMaintenanceError(ValueError):
@@ -255,6 +255,58 @@ def _command(command,*,timeout,expected_version=None):
                 process.stdout.close()
 
 
+def _read_panel_tls_material(data_path, generation):
+    config_file = tools._maintenance_cycle_file(tools._MAINTENANCE_CONFIG, limit=16384,
+                                               owner=0, private=False)
+    config = _application_json(config_file[1])
+    # The existing bootstrap reader additionally requires root-owned
+    # ancestors. Compare its strict read with our exact identity snapshot.
+    _need(config == tools._maintenance_read_config(), 'PANEL_TLS_CONFIG')
+    endpoint = _panel_endpoint(config)
+    material = None
+    with _data_root(data_path, os.geteuid(), Path('/')) as (scope, data):
+        info = os.fstat(data)
+        _need(dict(dev=info.st_dev, ino=info.st_ino) == generation, 'DATA_GENERATION_CHANGED')
+        if endpoint[0] == 'provided':
+            certs = scope.directory(data, 'certs', mode=0o700)
+            fd, size = scope.file(certs, 'provided-fullchain.pem', mode=0o600, limit=_PANEL_CERT_LIMIT)
+            raw = os.pread(fd, size+1, 0)
+            _need(len(raw) == size, 'PANEL_TLS_CHAIN')
+            material = a._file_identity(os.fstat(fd)), raw
+    return config_file, endpoint, material
+
+
+class RestorePanelProbe:
+    """Pin the provided chain on the exact data generation selected for startup."""
+
+    def __init__(self, root, generation, trust, config_sha256, proof):
+        self.data = root/'data'
+        self.generation = generation
+        self.proof = proof
+        self.proof()
+        self.material = _read_panel_tls_material(self.data, generation)
+        config, endpoint, certificate = self.material
+        _need(endpoint[0] == 'provided' and certificate is not None
+              and hashlib.sha256(certificate[1]).hexdigest() == trust
+              and hashlib.sha256(_raw(_application_json(config[1]))).hexdigest() == config_sha256,
+              'RESTORE_TLS_CONTEXT')
+        self.trust = trust
+        self.proof()
+
+    def __call__(self, *, require_login):
+        self.proof()
+        try:
+            _need(_read_panel_tls_material(self.data, self.generation) == self.material, 'PANEL_TLS_CHANGED')
+            _, (_, address, port, domain), certificate = self.material
+            context, leaf = _panel_ssl_context(certificate[1])
+            status = _panel_tls_exchange(address, port, domain, context, leaf, require_login=require_login)
+            _need(_read_panel_tls_material(self.data, self.generation) == self.material, 'PANEL_TLS_CHANGED')
+        except (OSError, ValueError, tools.ReleaseError):
+            status = 'rejected'
+        self.proof()
+        return dict(status=status, trust_sha256=self.trust if status != 'rejected' else None)
+
+
 class CoreMaintenanceSession(tools._MaintenanceSession):
     """One real base-session operation/writer lifetime; not a public action."""
     ACTIONS=frozenset(('core_prepare',))
@@ -272,24 +324,7 @@ class CoreMaintenanceSession(tools._MaintenanceSession):
         self._panel_tls_material = None
 
     def _read_panel_tls_material(self):
-        config_file = tools._maintenance_cycle_file(tools._MAINTENANCE_CONFIG, limit=16384,
-                                                   owner=0, private=False)
-        config = _application_json(config_file[1])
-        # The existing bootstrap reader additionally requires root-owned
-        # ancestors. Compare its strict read with our exact identity snapshot.
-        _need(config == tools._maintenance_read_config(), 'PANEL_TLS_CONFIG')
-        endpoint = _panel_endpoint(config)
-        material = None
-        with _data_root(self.root/'data', os.geteuid(), Path('/')) as (scope, data):
-            info = os.fstat(data)
-            _need(dict(dev=info.st_dev, ino=info.st_ino) == self._data_generation, 'DATA_GENERATION_CHANGED')
-            if endpoint[0] == 'provided':
-                certs = scope.directory(data, 'certs', mode=0o700)
-                fd, size = scope.file(certs, 'provided-fullchain.pem', mode=0o600, limit=_PANEL_CERT_LIMIT)
-                raw = os.pread(fd, size+1, 0)
-                _need(len(raw) == size, 'PANEL_TLS_CHAIN')
-                material = a._file_identity(os.fstat(fd)), raw
-        return config_file, endpoint, material
+        return _read_panel_tls_material(self.root/'data', self._data_generation)
 
     def probe_panel_tls(self, *, require_login):
         phase = self._state
@@ -551,12 +586,21 @@ class CoreRestorePreparation(CoreMaintenanceSession):
                 core_backup=backup, expected_data_path=self.root/'data', _managed=True))
             for core in s.CORES:
                 self._resolver.current(checked.core_closure.selection, core)
-            self._unchanged_application()
             self._restore_backup, self._restore_input = backup, checked
+            _, endpoint, certificate = self._read_panel_tls_material()
+            original_trust = incoming_trust = None
+            if endpoint[0] == 'provided':
+                _, _, incoming_certificate = _read_panel_tls_material(checked.data_path, checked.data_generation)
+                for chain in (certificate[1], incoming_certificate[1]):
+                    _panel_ssl_context(chain)
+                original_trust = hashlib.sha256(certificate[1]).hexdigest()
+                incoming_trust = hashlib.sha256(incoming_certificate[1]).hexdigest()
+            self._unchanged_application()
             self._core_phase = 'restore_preflight'
             return dict(context=facts, incoming_selection=_state_map(checked.core_closure.selection),
                         incoming_intents=checked.core_closure.intents,
-                        incoming_generation=checked.data_generation, preflight_tree_sha256=checked.data_sha256)
+                        incoming_generation=checked.data_generation, preflight_tree_sha256=checked.data_sha256,
+                        original_trust_sha256=original_trust, incoming_trust_sha256=incoming_trust)
         except BaseException:
             self.close()
             raise
@@ -572,6 +616,11 @@ class CoreRestorePreparation(CoreMaintenanceSession):
         with self._files.hold_restore_pending(journal):
             tools._MaintenanceSession.execute(self)
             self._check()
+            trust = journal['switch_context']['trust_sha256']
+            if trust is not None:
+                _, _, certificate = self._read_panel_tls_material()
+                _need(certificate is not None and hashlib.sha256(certificate[1]).hexdigest() == trust,
+                      'RESTORE_TLS_CONTEXT')
             self._final_intents = self._intents(self._observe_states(), self._before)
             self._policy()
             for core in s.CORES:

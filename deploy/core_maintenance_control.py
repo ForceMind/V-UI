@@ -356,15 +356,20 @@ class _Switch:
               and self.m._digest(self.m._raw(self.config)) == context['config_sha256']
               and self.config.get('certificate_mode', 'managed') == context['certificate_mode'],
               'CORE_RESTORE_CONTEXT')
-        _need(context['certificate_mode'] != 'provided', 'CORE_RESTORE_TLS_PROBE_REQUIRED')
         return journal
 
     def _restore_worker_request(self, journal, action):
         plan = journal['restore_target']['data']
-        return dict(protocol=1, action=action, transaction=self.transaction, slot=plan['slot'],
+        request = dict(protocol=1, action=action, transaction=self.transaction, slot=plan['slot'],
                     pending=journal['original_files']['pending'],
                     original=journal['switch_context']['data_generation'],
                     incoming=plan['incoming_generation'])
+        if action in ('core_restore_observe', 'core_restore_observe_old'):
+            context = journal['switch_context']
+            trust = context['trust_sha256'] if action.endswith('_old') else plan['incoming_trust_sha256']
+            if trust is not None:
+                request.update(trust_sha256=trust, config_sha256=context['config_sha256'])
+        return request
 
     def _start_restore_observer(self):
         """Hand a stopped, exchanged restore to its read-only worker."""
@@ -393,18 +398,25 @@ class _Switch:
         return digest
 
     def run_restore(self, archive_name, archive_sha256, expected_revision):
-        """Private managed-certificate restore. The caller owns the Root installation lock."""
-        _need(self.config.get('certificate_mode', 'managed') != 'provided', 'CORE_RESTORE_TLS_PROBE_REQUIRED')
+        """Private restore. The caller owns the Root installation lock."""
+        mode = self.config.get('certificate_mode', 'managed')
         prepared = self.worker.exchange(dict(protocol=1, action='core_restore_prepare', archive_name=archive_name,
             archive_sha256=archive_sha256, expected_selection_revision=expected_revision),
             'restore_preflight', ('context', 'incoming_selection', 'incoming_intents',
-                                  'incoming_generation', 'preflight_tree_sha256'))
+                                  'incoming_generation', 'preflight_tree_sha256',
+                                  'original_trust_sha256', 'incoming_trust_sha256'))
         facts = prepared['context']
         self._accept_context(facts, 'sing-box', expected_revision)
         _need(self.initialized, 'CORE_RESTORE_CONTEXT')
         incoming = self._state(prepared['incoming_selection'])
         incoming_intents = self._intents(prepared['incoming_intents'], incoming)
         self.initial = self.services.snapshot()
+        trust = prepared['original_trust_sha256']
+        incoming_trust = prepared['incoming_trust_sha256']
+        _need(all(self.a._hex(value) if mode == 'provided' else value is None
+                  for value in (trust, incoming_trust)), 'CORE_RESTORE_TLS_CONTEXT')
+        if self.initial['v-ui.service'] != 'active':
+            trust = incoming_trust = None
         self._time()
         _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
         self.transaction = self.files.begin_restore(incoming, expected_revision=expected_revision,
@@ -412,9 +424,9 @@ class _Switch:
             source_backup_sha256=archive_sha256, restored_intents=incoming_intents,
             switch_context=dict(application=self.application, data_generation=self.generation,
                 services=self.initial, config_sha256=self.m._digest(self.m._raw(self.config)),
-                certificate_mode='managed', trust_sha256=None),
+                certificate_mode=mode, trust_sha256=trust),
             data_plan=dict(slot=uuid.uuid4().hex, incoming_generation=prepared['incoming_generation'],
-                preflight_tree_sha256=prepared['preflight_tree_sha256'], incoming_trust_sha256=None), **self.source)
+                preflight_tree_sha256=prepared['preflight_tree_sha256'], incoming_trust_sha256=incoming_trust), **self.source)
         try:
             self.services.stop_all()
             self.services.prove_stopped()
@@ -515,9 +527,9 @@ class _Switch:
     def _resume_restore_original(self, *, _new_worker=None):
         journal = self.files.read_restore_recovery()
         context = journal['switch_context']
-        _need(journal['quiesced'] is not None and context['certificate_mode'] == 'managed'
+        _need(journal['quiesced'] is not None
               and context['services']['v-ui.service'] == 'active'
-              and self.config.get('certificate_mode', 'managed') == 'managed',
+              and self.config.get('certificate_mode', 'managed') == context['certificate_mode'],
               'CORE_RESTORE_RECOVERY_BOOT_REQUIRED')
         receipt = self._recover_restore_data()
         _need(self.files.read_restore_recovery() == journal, 'CORE_RESTORE_CONTEXT')
@@ -525,7 +537,7 @@ class _Switch:
         self.source = {key: self.application[key] for key in ('app_source', 'target')}
         self.generation = context['data_generation']
         self.initial = context['services']
-        self.trust_sha256 = None
+        self.trust_sha256 = context['trust_sha256']
         state = self._state(journal['recovery_selection'])
         self.final = self._intents(journal['quiesced']['cores'], state)
         self._replace_restore_worker(_new_worker)
@@ -571,7 +583,7 @@ class _Switch:
         _need(journal['phase'] in ('confirmed', 'cleanup') and 'confirmed_selection' in journal
               and target['kind'] == 'core-restore-target-v2' and journal['quiesced'] is not None
               and context['services']['v-ui.service'] == 'active'
-              and context['certificate_mode'] == self.config.get('certificate_mode', 'managed') == 'managed'
+              and context['certificate_mode'] == self.config.get('certificate_mode', 'managed')
               and self.m._digest(self.m._raw(self.config)) == context['config_sha256'],
               'CORE_RESTORE_RECOVERY_BOOT_REQUIRED')
         self.transaction = journal['transaction']
@@ -581,6 +593,7 @@ class _Switch:
         original = journal['rollback'] is not None
         self.generation = (context['data_generation'] if original else
                            target['data']['incoming_generation'])
+        self.trust_sha256 = context['trust_sha256'] if original else target['data']['incoming_trust_sha256']
         state = self._state(journal['confirmed_selection'])
         intents = self._intents(journal['rollback']['intents'] if original else target['intents'], state)
         self._time()

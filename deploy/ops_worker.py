@@ -247,11 +247,17 @@ def _observe_restore_data(channel, session, journal, value):
 
 def _restore_observer_request(value):
     from app.core_updates import selection_files as files
+    from app.core_updates import artifacts
     fields = {'protocol', 'action', 'transaction', 'slot', 'pending', 'original', 'incoming'}
+    tls = {'trust_sha256', 'config_sha256'}
+    has_tls = bool(tls & set(value))
+    if has_tls:
+        fields |= tls
     if (set(value) != fields or type(value['protocol']) is not int or value['protocol'] != 1
             or value['action'] not in ('core_restore_observe', 'core_restore_observe_old')
             or any(type(value[key]) is not str or not re.fullmatch('[a-f0-9]{32}', value[key])
-                   for key in ('transaction', 'slot'))):
+                   for key in ('transaction', 'slot'))
+            or has_tls and any(not artifacts._hex(value[key]) for key in tls)):
         raise WorkerError('Invalid private restore observer request')
     files._record(value['pending'])
     original = files._data_generation(value['original'])
@@ -261,11 +267,14 @@ def _restore_observer_request(value):
     # The Root controller checks the durable phase and complete journal. This
     # projection grants only read-only observations against the pinned marker.
     phase = 'rollback_required' if value['action'] == 'core_restore_observe_old' else 'backed_up'
-    return dict(operation='restore', phase=phase, transaction=value['transaction'],
+    result = dict(operation='restore', phase=phase, transaction=value['transaction'],
                 original_files=dict(pending=value['pending']),
                 switch_context=dict(data_generation=original),
                 restore_target=dict(kind='core-restore-target-v2',
                     data=dict(slot=value['slot'], incoming_generation=incoming)))
+    if has_tls:
+        result['tls'] = {key: value[key] for key in tls}
+    return result
 
 
 def _restore_exchange_request(value):
@@ -281,6 +290,8 @@ def _restore_exchange_request(value):
                     or rollback and all(value[key] is None for key in digests))):
         raise WorkerError('Invalid private restore exchange request')
     projection = {key: item for key, item in value.items() if key not in fields}
+    if {'trust_sha256', 'config_sha256'} & set(projection):
+        raise WorkerError('Unexpected private restore exchange fields')
     projection['action'] = 'core_restore_observe'
     journal = _restore_observer_request(projection)
     journal['sequence'] = value['sequence']
@@ -347,9 +358,19 @@ def _complete_restore_observer(channel, root, release_tools, journal):
     with release_tools._maintenance_lease(root, '.operation.lock', _proof=True) as proof:
         session = types.SimpleNamespace(root=root, _operation_proof=proof)
         observe_restore_trial(root, journal, lambda: _prove_released_operation(session))
+        if 'tls' in journal:
+            from app.core_updates.maintenance import RestorePanelProbe
+            generation = (journal['switch_context']['data_generation']
+                          if journal['phase'] == 'rollback_required' else
+                          journal['restore_target']['data']['incoming_generation'])
+            session.probe_panel_tls = RestorePanelProbe(root, generation, journal['tls']['trust_sha256'],
+                journal['tls']['config_sha256'], lambda: _prove_released_operation(session))
         channel.send('restore_observer_ready', transaction=journal['transaction'])
         while True:
             value = channel.read()
+            if value.get('command') == 'probe_panel_tls' and 'tls' in journal:
+                _probe_panel_tls(channel, session, value)
+                continue
             if value.get('command') == 'observe_restore_data':
                 _observe_restore_data(channel, session, journal, value)
                 continue

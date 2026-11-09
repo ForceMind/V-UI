@@ -82,6 +82,7 @@ class CoreMaintenanceTests(unittest.TestCase):
         result=session.backup_core(snapshot);return session,context,result
 
     def test_restore_session_preflights_and_stages_verified_archive_under_real_leases(self):
+        config, chain = self.tls_fixture()
         writer, context, backup = self.backed()
         writer.close()
         source = dict(app_source=materials.NEW_APP, target=materials.TARGET)
@@ -107,7 +108,10 @@ class CoreMaintenanceTests(unittest.TestCase):
         backups.unlink()
         retained.rename(backups)
         session = new_session()
-        prepared = session.prepare()
+        with patch.object(m, '_panel_ssl_context', return_value=('tls-context', b'leaf')):
+            prepared = session.prepare()
+        trust = hashlib.sha256(chain.read_bytes()).hexdigest()
+        self.assertEqual((prepared['original_trust_sha256'], prepared['incoming_trust_sha256']), (trust, trust))
         incoming = s.decode_selection(sf._raw(prepared['incoming_selection']), **source)
         slot = 'c'*32
         tx = self.files.begin_restore(incoming, expected_revision=before.revision,
@@ -115,9 +119,9 @@ class CoreMaintenanceTests(unittest.TestCase):
             restored_intents=prepared['incoming_intents'], switch_context=dict(
                 application=context['application'], data_generation=context['data_generation'],
                 services={'v-ui.service':'active','v-ui-http01.socket':'active','v-ui-http01.service':'inactive'},
-                config_sha256='d'*64, certificate_mode='managed', trust_sha256=None),
+                config_sha256=sf._digest(sf._raw(config)), certificate_mode='provided', trust_sha256=trust),
             data_plan=dict(slot=slot, incoming_generation=prepared['incoming_generation'],
-                preflight_tree_sha256=prepared['preflight_tree_sha256'], incoming_trust_sha256=None), **source)
+                preflight_tree_sha256=prepared['preflight_tree_sha256'], incoming_trust_sha256=trust), **source)
         with self.files._io() as (scope, root):
             _, journal = self.files._active(scope, root, tx, phases=('prepared',), **source)
         staged = session.stage_restore(journal)
@@ -126,6 +130,26 @@ class CoreMaintenanceTests(unittest.TestCase):
         session.close()
         self.assertTrue((self.root/'recovery'/('core-restore-'+slot+'-incoming')/'v-ui.db').is_file())
         self.assertTrue((self.data/'v-ui.db').is_file())
+
+    def test_restore_probe_requires_pinned_generation_and_chain_identity(self):
+        config, chain = self.tls_fixture()
+        info = self.data.stat()
+        generation = dict(dev=info.st_dev, ino=info.st_ino)
+        trust = hashlib.sha256(PUBLIC_CHAIN).hexdigest()
+        digest = sf._digest(sf._raw(config))
+        with self.assertRaisesRegex(m.CoreMaintenanceError, 'DATA_GENERATION_CHANGED'):
+            m.RestorePanelProbe(self.root, dict(generation, ino=0), trust, digest, lambda: None)
+        with self.assertRaisesRegex(m.CoreMaintenanceError, 'RESTORE_TLS_CONTEXT'):
+            m.RestorePanelProbe(self.root, generation, '0'*64, digest, lambda: None)
+        probe = m.RestorePanelProbe(self.root, generation, trust, digest, lambda: None)
+        with patch.object(m, '_panel_ssl_context', return_value=('tls-context', b'leaf')), \
+                patch.object(m, '_panel_tls_exchange', return_value='ready') as exchange:
+            self.assertEqual(probe(require_login=False), dict(status='ready', trust_sha256=trust))
+            new_chain = chain.with_suffix('.new')
+            self.cycle.write(new_chain, PUBLIC_CHAIN)
+            os.replace(new_chain, chain)
+            self.assertEqual(probe(require_login=True), dict(status='rejected', trust_sha256=None))
+        exchange.assert_called_once()
 
     def tls_fixture(self, mode='provided'):
         config = dict(certificate_mode=mode, bind='0.0.0.0', domain='panel.example.test', port=3215)

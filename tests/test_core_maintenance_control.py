@@ -100,7 +100,7 @@ class FixtureChild:
             result = dict(event='core_recovery_prepared', transaction=request['transaction'],
                           application=case.context['application'], data_generation=case.context['data_generation'])
         elif command == 'probe_panel_tls':
-            digest = 'b'*64
+            digest = getattr(self, 'restore_trust', 'b'*64)
             if case.fault == 'provided-ca-drift' and case.brokers and case.brokers[-1].purpose == 'trial':
                 digest = 'c'*64
             result = dict(event='panel_tls', status='ready', trust_sha256=digest)
@@ -140,6 +140,8 @@ class FixtureChild:
             result = dict(event='operation_held')
         elif command in ('core_restore_observe', 'core_restore_observe_old'):
             journal = ops_worker._restore_observer_request(request)
+            if 'tls' in journal:
+                self.restore_trust = journal['tls']['trust_sha256']
             result = dict(event='restore_observer_ready', transaction=journal['transaction'])
             if case.fault == 'restore-observer-ready-tx':
                 result['transaction'] = '0'*32
@@ -154,7 +156,8 @@ class FixtureChild:
         elif command == 'core_restore_prepare':
             result = dict(event='restore_preflight', context=dict(case.context, selection_initialized=True),
                 incoming_selection=fixtures.raw(case.before), incoming_intents=case.initial_intents,
-                incoming_generation=case.restore_trial_data['live'], preflight_tree_sha256='b'*64)
+                incoming_generation=case.restore_trial_data['live'], preflight_tree_sha256='b'*64,
+                original_trust_sha256=None, incoming_trust_sha256=None)
         elif command == 'stage_restore':
             case.services.prove_stopped()
             case.assertEqual(request['journal']['phase'], 'prepared')
@@ -747,12 +750,14 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.assertNotIn('release:trial', self.trace)
         self.assertEqual(self.services.state(PANEL), 'inactive')
 
-    def test_restore_trial_provided_requires_separate_probe_before_provision(self):
+    def test_restore_trial_provided_observer_pins_incoming_trust(self):
         receipt, trial, _ = self.restore_trial_fixture(provided=True)
-        with self.assertRaisesRegex(control.CoreControlError, 'CORE_RESTORE_TLS_PROBE_REQUIRED'):
-            self.switch._activate_restore_trial(receipt, lambda: trial)
-        self.assertEqual(self.files.read_restore_recovery()['phase'], 'backed_up')
-        self.assertFalse(self.brokers)
+        self.child.restore_data = trial
+        self.switch._start_restore_observer()
+        state = self.switch._activate_restore_trial(receipt)
+        self.assertEqual(self.child.restore_trust, 'e'*64)
+        self.assertEqual(self.trace.count('probe_panel_tls'), 2)
+        self.assertEqual(self.files.read_stable(**SOURCE), state)
 
     def test_initially_stopped_panel_keeps_topology_without_health_attestation(self):
         self.services.current[PANEL] = 'inactive'

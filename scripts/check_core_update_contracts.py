@@ -37,7 +37,7 @@ CONTRACTS = {
     'test_core_service_identity.py': 12,
     'test_core_installation_lock.py': 10,
     'test_core_worker_cycle.py': 10,
-    'test_core_maintenance_session.py': 29,
+    'test_core_maintenance_session.py': 30,
     'test_core_prepare_worker.py': 17,
     'test_core_maintenance_control.py': 29,
     'test_core_maintenance_recovery.py': 9,
