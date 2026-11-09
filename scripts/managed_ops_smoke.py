@@ -49,7 +49,12 @@ def _copy_control(payload, control):
                'data_owner.py': 'app/data_owner.py',
                'proxy_store.py': 'app/services/proxy_store.py',
                'upstream_profile.py': 'app/services/upstream_profile.py',
-                   'inbound_policy.py': 'app/services/inbound_policy.py'}
+               'inbound_policy.py': 'app/services/inbound_policy.py',
+               'certificate_errors.py': 'app/certificates/errors.py',
+               'dns_store.py': 'app/certificates/dns_store.py',
+               'cloudflare.py': 'app/certificates/cloudflare.py',
+               'dns_journal.py': 'app/certificates/dns_journal.py',
+               'dns_backup.py': 'app/certificates/dns_backup.py'}
     digests = {}
     for destination, relative in sources.items():
         source = payload / relative

@@ -56,6 +56,12 @@ def paths(core, stream):
     return tls.get('certificate_path'), tls.get('key_path')
 
 
+def server_name(core, stream):
+    if core == 'xray':
+        return (stream.get('tlsSettings') or {}).get('serverName')
+    return (stream.get('tls') or {}).get('server_name')
+
+
 def replace_material(core, stream, certificate_paths, domain):
     if core == 'xray':
         tls = stream['tlsSettings']

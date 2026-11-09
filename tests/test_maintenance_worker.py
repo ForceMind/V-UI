@@ -73,6 +73,10 @@ class MaintenanceWorkerTests(unittest.TestCase):
         shutil.copyfile(REPO / 'app/data_owner.py', self.control / 'data_owner.py')
         for name in ('proxy_store.py', 'upstream_profile.py', 'inbound_policy.py'):
             shutil.copyfile(REPO / 'app/services' / name, self.control / name)
+        for source, target in (('errors.py', 'certificate_errors.py'), ('dns_store.py', 'dns_store.py'),
+                               ('cloudflare.py', 'cloudflare.py'), ('dns_journal.py', 'dns_journal.py'),
+                               ('dns_backup.py', 'dns_backup.py')):
+            shutil.copyfile(REPO / 'app/certificates' / source, self.control / target)
 
     def prepared(self, identity, *, healthy=True):
         source = self.base / ('source-' + identity)

@@ -154,6 +154,18 @@ class TrustTests(unittest.TestCase):
             with self.subTest(mutate=mutate), self.assertRaises(ops.Refused):
                 self.verify(receipt, payloads, python)
 
+    def test_dns_closure_is_exact_and_each_missing_or_tampered_root_helper_refuses(self):
+        names = ('certificate_errors.py','dns_store.py','cloudflare.py','dns_journal.py','dns_backup.py')
+        for manager in ('systemd','openrc'):
+            self.assertTrue({ops.CONTROL / name for name in names} <= ops.fixed_files(manager))
+        for name in names:
+            for fault in ('missing', 'changed'):
+                receipt, payloads, python = self.receipt(); path = str(ops.CONTROL / name)
+                if fault == 'missing': receipt['files'].pop(path)
+                else: payloads[path] += b'untrusted change'
+                with self.subTest(name=name, fault=fault), self.assertRaises(ops.Refused):
+                    self.verify(receipt, payloads, python)
+
     def test_changed_or_not_ready_config_is_rejected_even_with_matching_hash(self):
         for config in ({'ready': False, 'service_manager': 'systemd'},
                        {'ready': 1, 'service_manager': 'systemd'},

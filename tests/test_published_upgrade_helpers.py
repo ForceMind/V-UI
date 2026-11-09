@@ -1,9 +1,12 @@
 """Pure fixture checks; these do not qualify any installed upgrade."""
 from contextlib import redirect_stdout
+from contextlib import contextmanager
+import ast
 from copy import deepcopy
 import hashlib
 import io
 import json
+import sqlite3
 from pathlib import Path
 import tempfile
 import unittest
@@ -14,6 +17,8 @@ from published_upgrade_helpers import (FIREWALL, MAINTENANCE_FILES, PUBLISHED_BA
                                        assert_download_boundary, assert_receipt_migration,
                                        assert_upgrade_configuration, fixed_public_baseline,
                                        managed_xray_fixture_program, assert_node_summary_upgrade, assert_editor_content_addition)
+from published_upgrade_helpers import (DNS_FILES, CERTIFICATE_COLUMNS, BINDING_COLUMNS,
+    DNS_CERTIFICATE_COLUMNS, DNS_BINDING_LAYOUTS, snapshot_program)
 
 
 class PublishedUpgradeBoundaryTests(unittest.TestCase):
@@ -299,5 +304,201 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
         for changed in (missing,{**after,'future_field':{}}):
             with self.assertRaises(AssertionError):
                 assert_upgrade_configuration(self,before,changed,old_release,new_release)
+
+class PublishedDNSMigrationTests(unittest.TestCase):
+    def receipt(self, old_version):
+        before={'schema':1,'service_manager':'systemd','system_python':'/usr/bin/python3',
+                'interpreter_resolved':'/usr/bin/python3.12','interpreter_sha256':'1'*64,
+                'files':{'/usr/local/lib/v-ui/system_ops.py':'2'*64}}
+        if old_version!='0.4.14': before['files'][FIREWALL]='3'*64
+        if old_version in ('0.4.17','0.4.19','0.4.20','0.4.21','0.4.22'):
+            before['files'].update({name:'4'*64 for name in MAINTENANCE_FILES})
+        after=deepcopy(before)
+        after['files'].update({name:'5'*64 for name in MAINTENANCE_FILES|DNS_FILES|{FIREWALL}})
+        return before,after
+
+    def test_23_requires_exact_dns_additions_for_every_immutable_old_baseline(self):
+        for version in PUBLISHED_BASELINES:
+            before,after=self.receipt(version)
+            with self.subTest(version=version): assert_receipt_migration(self,before,after,version,'0.4.23')
+            variants=[]
+            for name in DNS_FILES:
+                changed=deepcopy(after);changed['files'].pop(name);variants.append(changed)
+            changed=deepcopy(after);changed['files']['/usr/local/lib/v-ui/unreviewed.py']='f'*64;variants.append(changed)
+            for name in before['files']:
+                changed=deepcopy(after);changed['files'].pop(name);variants.append(changed)
+            for field in ('schema','service_manager','system_python','interpreter_resolved','interpreter_sha256'):
+                changed=deepcopy(after);changed[field]='changed';variants.append(changed)
+            for changed in variants:
+                with self.subTest(version=version,after_fields=len(changed['files'])),self.assertRaises(AssertionError):
+                    assert_receipt_migration(self,before,changed,version,'0.4.23')
+            for names in [*( {name} for name in DNS_FILES),DNS_FILES]:
+                contaminated=deepcopy(before);contaminated['files'].update({name:'5'*64 for name in names})
+                with self.subTest(version=version,before_dns=len(names)),self.assertRaises(AssertionError):
+                    assert_receipt_migration(self,contaminated,after,version,'0.4.23')
+            with self.assertRaises(AssertionError): assert_receipt_migration(self,before,after,version,'0.4.22')
+            legacy=deepcopy(after)
+            for name in DNS_FILES: legacy['files'].pop(name)
+            assert_receipt_migration(self,before,legacy,version,'0.4.22')
+        for version in ('0.4.24','v0.4.23','0.4.23\n',None,True):
+            before,after=self.receipt('0.4.22')
+            with self.subTest(target=version),self.assertRaises(AssertionError):
+                assert_receipt_migration(self,before,after,'0.4.22',version)
+
+    def test_literal_dns_closure_and_snapshot_columns_match_reviewed_production_constants(self):
+        source=Path(__file__).resolve().parents[1]
+        tree=ast.parse((source/'scripts/install_ops_control.py').read_text())
+        dependency=next(node.value for node in tree.body if isinstance(node,ast.Assign)
+            and any(isinstance(t,ast.Name) and t.id=='DNS_SOURCE_DEPENDENCIES' for t in node.targets))
+        self.assertEqual(DNS_FILES,{'/usr/local/lib/v-ui/'+name for name in ast.literal_eval(dependency)})
+        names={'OLD_CERTIFICATE_COLUMNS','NEW_CERTIFICATE_COLUMNS','OLD_BINDING_COLUMNS','NEW_BINDING_COLUMNS'}
+        tree=ast.parse((source/'app/certificates/schema.py').read_text())
+        constants=[node for node in tree.body if isinstance(node,ast.Assign)
+            and any(isinstance(t,ast.Name) and t.id in names for t in node.targets)]
+        namespace={'frozenset':frozenset}
+        exec(compile(ast.Module(body=constants,type_ignores=[]),'<literal production schema sets>','exec'),namespace)
+        self.assertEqual(set(CERTIFICATE_COLUMNS),namespace['OLD_CERTIFICATE_COLUMNS'])
+        self.assertEqual(set(DNS_CERTIFICATE_COLUMNS),namespace['NEW_CERTIFICATE_COLUMNS'])
+        self.assertEqual(set(BINDING_COLUMNS),namespace['OLD_BINDING_COLUMNS'])
+        self.assertTrue(all(set(layout)==namespace['NEW_BINDING_COLUMNS'] for layout in DNS_BINDING_LAYOUTS))
+        models=ast.parse((source/'app/certificates/models.py').read_text())
+        def column_names(class_name):
+            model=next(node for node in models.body if isinstance(node,ast.ClassDef) and node.name==class_name)
+            return tuple(node.targets[0].id for node in model.body if isinstance(node,ast.Assign)
+                and isinstance(node.value,ast.Call) and isinstance(node.value.func,ast.Name) and node.value.func.id=='Column')
+        self.assertEqual(column_names('Certificate'),DNS_CERTIFICATE_COLUMNS)
+        self.assertIn(column_names('CertificateBinding'),DNS_BINDING_LAYOUTS)
+
+    @contextmanager
+    def data(self,modern=False,fresh_binding=False):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            old_values={'id':'a'*32,'domain':'vpn.example.test','email':'fixture@example.test',
+                'environment':'production','auto_renew':0,'revision':'b'*64,'not_before':123,'not_after':456,
+                'renew_at':234,'retry_at':0,'last_attempt':111,'failures':2,'error':'kept-error','created_at':100}
+            binding={'target':'inbound:1','certificate_id':'a'*32,'applied_certificate_id':'a'*32,
+                'applied_revision':'b'*64,'error':'CORE_STOPPED_PENDING_APPLY'}
+            with sqlite3.connect(root/'v-ui.db') as db:
+                for sql in ('CREATE TABLE users(id INTEGER,username TEXT,password_hash TEXT)',
+                            'CREATE TABLE inbounds(id INTEGER,remark TEXT,settings TEXT)',
+                            'CREATE TABLE subscription_grants(id INTEGER,token_hash TEXT,revoked INTEGER)'):
+                    db.execute(sql)
+                db.execute("INSERT INTO users VALUES(1,'fixture','fake-password-hash')")
+                db.execute("INSERT INTO inbounds VALUES(1,'retained','fake-settings')")
+                db.execute("INSERT INTO subscription_grants VALUES(1,'fake-token-hash',0)")
+                columns=DNS_CERTIFICATE_COLUMNS if modern else CERTIFICATE_COLUMNS
+                definitions=[]
+                for name in columns:
+                    if name=='method': definition="method VARCHAR(16) NOT NULL DEFAULT 'http-01'"
+                    elif name=='wildcard': definition='wildcard BOOLEAN NOT NULL DEFAULT 0'
+                    elif name=='credential_id': definition='credential_id VARCHAR(32)'
+                    else: definition='"'+name+'" '+('INTEGER' if type(old_values[name]) is int else 'TEXT')
+                    definitions.append(definition)
+                db.execute('CREATE TABLE managed_certificates('+','.join(definitions)+')')
+                db.execute('INSERT INTO managed_certificates('+','.join(CERTIFICATE_COLUMNS)+') VALUES('+','.join('?' for _ in CERTIFICATE_COLUMNS)+')',tuple(old_values[name] for name in CERTIFICATE_COLUMNS))
+                columns=DNS_BINDING_LAYOUTS[1 if fresh_binding else 0] if modern else BINDING_COLUMNS
+                db.execute('CREATE TABLE certificate_bindings('+','.join('server_name VARCHAR(253)' if name=='server_name' else name+' TEXT' for name in columns)+')')
+                db.execute('INSERT INTO certificate_bindings('+','.join(BINDING_COLUMNS)+') VALUES('+','.join('?' for _ in BINDING_COLUMNS)+')',tuple(binding[name] for name in BINDING_COLUMNS))
+                if modern:
+                    db.execute('CREATE TABLE certificate_identity_schema(version INTEGER NOT NULL)')
+                    db.execute('INSERT INTO certificate_identity_schema VALUES(1)')
+            for directory in ('certs','certificates/revisions/'+'a'*32+'/'+'b'*64):
+                folder=root/directory;folder.mkdir(parents=True)
+                (folder/'fullchain.pem').write_bytes(b'fake-chain-exact')
+                (folder/'privkey.pem').write_bytes(b'fake-private-key-exact')
+            yield root
+
+    def snapshot(self,root,*,after=False,target='0.4.23',old='0.4.22'):
+        output=io.StringIO()
+        with redirect_stdout(output):
+            exec(compile(snapshot_program(old,target,after=after,data_root=root),'<readonly service snapshot>','exec'),{})
+        text=output.getvalue()
+        self.assertNotIn('fake-private-key',text);self.assertNotIn('fake-password-hash',text)
+        self.assertNotIn('fake-token-hash',text);self.assertNotIn('kept-error',text)
+        return json.loads(text)
+
+    def test_every_legacy_value_and_material_hash_matches_both_known_23_binding_layouts(self):
+        with self.data() as old:
+            before=self.snapshot(old)
+            self.assertEqual(self.snapshot(old,after=True,target='0.4.22'),before)
+            for fresh in (False,True):
+                with self.subTest(fresh=fresh),self.data(modern=True,fresh_binding=fresh) as new:
+                    self.assertEqual(self.snapshot(new,after=True),before)
+                    with self.assertRaises(AssertionError):self.snapshot(new)
+                    with self.assertRaises(AssertionError):self.snapshot(new,after=True,target='0.4.22')
+            with self.assertRaises(AssertionError):self.snapshot(old,after=True)
+        for target in ('0.4.24','v0.4.23',None):
+            with self.assertRaises(AssertionError):snapshot_program('0.4.22',target)
+        with self.assertRaises(AssertionError):snapshot_program('0.4.23','0.4.23')
+
+    def test_each_old_certificate_binding_and_other_data_field_remains_exact(self):
+        with self.data() as old:
+            before=self.snapshot(old)
+            for table,columns in (('managed_certificates',CERTIFICATE_COLUMNS),('certificate_bindings',BINDING_COLUMNS),
+                    ('users',('id','username','password_hash')),('inbounds',('id','remark','settings')),
+                    ('subscription_grants',('id','token_hash','revoked'))):
+                for column in columns:
+                    with self.subTest(table=table,column=column),self.data(modern=True) as new:
+                        with sqlite3.connect(new/'v-ui.db') as db:db.execute('UPDATE '+table+' SET "'+column+'"=?',('changed',))
+                        with self.assertRaises(AssertionError):self.assertEqual(self.snapshot(new,after=True),before)
+            for table in ('managed_certificates','certificate_bindings','users','inbounds','subscription_grants'):
+                with self.subTest(deleted=table),self.data(modern=True) as new:
+                    with sqlite3.connect(new/'v-ui.db') as db:db.execute('DELETE FROM '+table)
+                    with self.assertRaises(AssertionError):self.assertEqual(self.snapshot(new,after=True),before)
+            for directory in ('certs','certificates/revisions/'+'a'*32+'/'+'b'*64):
+                for name in ('fullchain.pem','privkey.pem'):
+                    with self.subTest(material=directory+'/'+name),self.data(modern=True) as new:
+                        (new/directory/name).write_bytes(b'changed-fake-material')
+                        with self.assertRaises(AssertionError):self.assertEqual(self.snapshot(new,after=True),before)
+
+    def test_new_identity_defaults_and_unknown_certificate_columns_are_refused(self):
+        for table,column,value in (('managed_certificates','method','dns-01'),('managed_certificates','wildcard',1),
+                ('managed_certificates','wildcard',0.5),('managed_certificates','credential_id','c'*32),
+                ('certificate_bindings','server_name','vpn.example.test')):
+            with self.subTest(table=table,column=column,value=value),self.data(modern=True) as root:
+                with sqlite3.connect(root/'v-ui.db') as db:db.execute('UPDATE '+table+' SET '+column+'=?',(value,))
+                with self.assertRaises(AssertionError):self.snapshot(root,after=True)
+        for modern in (False,True):
+            for table in ('managed_certificates','certificate_bindings'):
+                with self.subTest(modern=modern,extra=table),self.data(modern=modern) as root:
+                    with sqlite3.connect(root/'v-ui.db') as db:db.execute('ALTER TABLE '+table+' ADD COLUMN unknown TEXT')
+                    with self.assertRaises(AssertionError):self.snapshot(root,after=modern)
+
+    def test_marker_missing_wrong_duplicate_or_unknown_columns_never_qualifies(self):
+        for sql in ('DROP TABLE certificate_identity_schema','DELETE FROM certificate_identity_schema',
+                'UPDATE certificate_identity_schema SET version=2','INSERT INTO certificate_identity_schema VALUES(1)',
+                'ALTER TABLE certificate_identity_schema ADD COLUMN unknown TEXT'):
+            with self.subTest(sql=sql),self.data(modern=True) as root:
+                with sqlite3.connect(root/'v-ui.db') as db:db.execute(sql)
+                with self.assertRaises(AssertionError):self.snapshot(root,after=True)
+        with self.data() as root:
+            with sqlite3.connect(root/'v-ui.db') as db:db.executescript('CREATE TABLE certificate_identity_schema(version INTEGER NOT NULL);INSERT INTO certificate_identity_schema VALUES(1)')
+            with self.assertRaises(AssertionError):self.snapshot(root)
+
+    def test_wrong_declared_defaults_or_types_fail_even_with_correct_existing_row_values(self):
+        for table,old,new in (
+                ('managed_certificates', "DEFAULT 'http-01'", "DEFAULT 'dns-01'"),
+                ('managed_certificates', 'DEFAULT 0', 'DEFAULT 1'),
+                ('managed_certificates', 'credential_id VARCHAR(32)', 'credential_id VARCHAR(64)'),
+                ('certificate_bindings', 'server_name VARCHAR(253)', "server_name VARCHAR(253) DEFAULT 'vpn.example.test'")):
+            with self.subTest(table=table,changed=new),self.data(modern=True) as root:
+                with sqlite3.connect(root/'v-ui.db') as db:
+                    sql=db.execute('SELECT sql FROM sqlite_master WHERE name=?',(table,)).fetchone()[0]
+                    self.assertIn(old,sql)
+                    db.execute('ALTER TABLE '+table+' RENAME TO retained_old')
+                    db.execute(sql.replace(old,new))
+                    db.execute('INSERT INTO '+table+' SELECT * FROM retained_old')
+                    db.execute('DROP TABLE retained_old')
+                with self.assertRaises(AssertionError):self.snapshot(root,after=True)
+
+    def test_read_only_snapshot_keeps_database_bytes_and_rejects_added_data_columns(self):
+        with self.data() as old,self.data(modern=True) as new:
+            before=self.snapshot(old)
+            original=(new/'v-ui.db').read_bytes()
+            self.assertEqual(self.snapshot(new,after=True),before)
+            self.assertEqual((new/'v-ui.db').read_bytes(),original)
+            with sqlite3.connect(new/'v-ui.db') as db:db.execute('ALTER TABLE users ADD COLUMN unknown TEXT')
+            with self.assertRaises(AssertionError):self.assertEqual(self.snapshot(new,after=True),before)
+
 
 if __name__=='__main__':unittest.main()

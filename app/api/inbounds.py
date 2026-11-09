@@ -81,9 +81,10 @@ class InboundDeletePayload(BaseModel):
         pattern=r"^[0-9a-f]{64}$")
 
 
-def _managed_certificate(profile: dict | None, certificate_id: str, core: str, protocol: str):
+def _managed_certificate(profile: dict | None, certificate_id: str, core: str, protocol: str,
+                         *, retained_server_name=None):
     from app.certificates.manager import get_manager
-    from app.certificates.material import CertificateError, domain_name
+    from app.certificates.material import CertificateError
     from app.api.certificates import perform
     if not supports_profile(core, protocol, profile):
         raise HTTPException(409, "此协议或传输暂不支持托管证书；Xray 仅支持 VLESS RAW/TCP TLS")
@@ -93,17 +94,27 @@ def _managed_certificate(profile: dict | None, certificate_id: str, core: str, p
     if not isinstance(server_name, str):
         raise HTTPException(422, "SNI 必须是域名字符串")
     paths, domain, _ = perform(lambda: get_manager().material(certificate_id))
-    if server_name:
+    try:
         try:
-            matches = domain_name(server_name) == domain_name(domain)
-        except CertificateError:
-            raise HTTPException(422, "SNI 格式无效，请填写有效域名") from None
-        if not matches:
-            raise HTTPException(409, "SNI 与所选证书域名不匹配，请核对后保存")
+            server_name = get_manager().connection_domain(certificate_id, server_name)
+        except CertificateError as exc:
+            if exc.code != 'CONNECTION_DOMAIN_REQUIRED' or not retained_server_name:
+                raise
+            server_name = get_manager().connection_domain(certificate_id, retained_server_name)
+    except CertificateError as exc:
+        messages = {
+            'CONNECTION_DOMAIN_REQUIRED': '请填写节点实际连接域名，并先将它的 A/AAAA 记录指向本机；不要填写通配符',
+            'INVALID_CONNECTION_DOMAIN': 'SNI 格式无效，请填写有效的具体域名',
+            'CERTIFICATE_DOMAIN_MISMATCH': 'SNI 与所选证书覆盖的域名不匹配，请核对后保存',
+        }
+        if exc.code in messages:
+            raise HTTPException(422 if exc.code != 'CERTIFICATE_DOMAIN_MISMATCH' else 409, messages[exc.code]) from None
+        raise HTTPException(404 if exc.code.endswith('NOT_FOUND') else 409,
+                            '所选证书暂不可用，请刷新证书状态后重试') from None
     return {
         **(profile or {}),
         "security": "tls",
-        "server_name": domain,
+        "server_name": server_name,
         "certificate_path": str(paths[0]),
         "key_path": str(paths[1]),
     }
@@ -166,13 +177,14 @@ def _prepare_inbound_edit(item, data: dict, *, allow_certificate_changes=True, p
     """Read-only preparation; guarded callers already checked this model."""
     data = dict(data)
     profile = data.get("profile")
+    narrow_certificate_edit = profile is None or isinstance(profile, dict) and set(profile) <= {'server_name'}
     if (data.get("certificate_id") and has_reality(item.stream_settings)
             and (not isinstance(profile, dict) or profile.get("security") != "tls")):
         raise HTTPException(409, "请先明确切换为 TLS，再绑定托管证书")
     # Match compile_profile: {} is a no-op; implicit security is protocol-aware.
     # In particular, Trojan remains TLS when security is missing/empty/null.
     default_security = "tls" if item.core == "sing-box" and item.protocol in {"hysteria2", "tuic", "trojan"} else "none"
-    if (preserve_material_paths and isinstance(profile, dict)
+    if (preserve_material_paths and not data.get('certificate_id') and isinstance(profile, dict)
             and str(profile.get('security') or default_security).lower() == 'tls'):
         # Delegated clients cannot read/supply material paths. Reuse only this
         # guarded instance's saved TLS material inside the write transaction.
@@ -201,9 +213,30 @@ def _prepare_inbound_edit(item, data: dict, *, allow_certificate_changes=True, p
             # with the same write authority as the node instance precondition.
             raise HTTPException(403, '修改已有托管证书绑定需要证书管理权限')
         if certificate_id:
-            data["profile"] = _managed_certificate(
-                data.get("profile"), certificate_id, data["core"], data["protocol"]
+            narrow = narrow_certificate_edit
+            retained_host = None
+            if narrow:
+                from app.services import managed_tls
+                error = managed_tls.target_error(item)
+                if error:
+                    raise HTTPException(409, '仅更换证书与连接域名适用于已有受支持的 TLS 节点；更改安全方式请使用高级编辑')
+                retained_host = managed_tls.server_name(item.core, item.stream_settings or {})
+            prepared_profile = _managed_certificate(
+                data.get("profile"), certificate_id, data["core"], data["protocol"], retained_server_name=retained_host
             )
+            if narrow:
+                # Certificate-only edits preserve the actual saved transport,
+                # credentials and unknown fields; never round-trip them through
+                # a smaller visual profile or silently choose a new transport.
+                from copy import deepcopy
+                from app.services import managed_tls
+                stream = deepcopy(item.stream_settings or {})
+                managed_tls.replace_material(data['core'], stream,
+                    (prepared_profile['certificate_path'], prepared_profile['key_path']), prepared_profile['server_name'])
+                data.pop('profile', None)
+                data['stream_settings'] = stream
+            else:
+                data['profile'] = prepared_profile
         elif previous_certificate and not leaving_tls:
             profile = data.get("profile")
             if not isinstance(profile, dict):

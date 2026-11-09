@@ -190,14 +190,18 @@ def init_db() -> None:
         _guard_policy_schema_before_create()
         # Register grants even when init_db is called from the standalone CLI.
         from app.services import subscription_tokens, maintenance_auth  # noqa: F401
+        from app.certificates import models as certificate_models  # noqa: F401
+        from app.certificates.schema import guard_certificate_identity_schema, migrate_certificate_identity
         with engine.connect() as conn:
             conn.execute(text("BEGIN IMMEDIATE"))
             try:
                 # Recheck under the cross-process write lock before any DDL.
                 _guard_policy_schema_before_create()
                 _guard_subscription_identity_schema(conn)
+                guard_certificate_identity_schema(conn)
                 Base.metadata.create_all(bind=conn)
                 _migrate_legacy_schema(conn)
+                migrate_certificate_identity(conn)
                 conn.commit()
             except BaseException:
                 conn.rollback()

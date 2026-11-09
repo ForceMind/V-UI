@@ -4,8 +4,11 @@ import io
 import json
 from pathlib import Path
 import tarfile
-import urllib.request
 import zipfile
+if __package__:
+    from .test_asset_download import download_pinned
+else:
+    from test_asset_download import download_pinned
 
 PINS = {
     "x86_64-gnu": {
@@ -36,8 +39,7 @@ def fetch(destination: Path, target: str="x86_64-gnu"):
     destination.mkdir(parents=True,exist_ok=True)
     evidence={}
     for name,pin in PINS[target].items():
-        with urllib.request.urlopen(pin["url"],timeout=90) as response:
-            data=response.read(100_000_001)
+        data=download_pinned(pin["url"],max_bytes=100_000_000,timeout=90)
         if len(data)>100_000_000 or hashlib.sha256(data).hexdigest()!=pin["sha256"]:
             raise ValueError("Archive checksum mismatch: "+name)
         if pin["url"].endswith(".zip"):

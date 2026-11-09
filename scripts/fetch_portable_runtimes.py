@@ -2,7 +2,11 @@
 from __future__ import annotations
 import hashlib
 from pathlib import Path
-import urllib.request
+
+if __package__:
+    from .test_asset_download import download_pinned
+else:
+    from test_asset_download import download_pinned
 
 PINS = {
     "x86_64-gnu": {
@@ -31,8 +35,7 @@ def fetch(destination: Path, keys=None) -> None:
         if key not in PINS:raise ValueError('Unknown portable runtime target: '+key)
         pin=PINS[key]
         path=destination/(key+".tar.gz")
-        with urllib.request.urlopen(pin["url"],timeout=120) as response:
-            raw=response.read(160_000_001)
+        raw=download_pinned(pin["url"],max_bytes=160_000_000,timeout=120)
         if len(raw)>160_000_000 or hashlib.sha256(raw).hexdigest()!=pin["sha256"]:
             raise ValueError("Portable Python checksum mismatch: "+key)
         path.write_bytes(raw)

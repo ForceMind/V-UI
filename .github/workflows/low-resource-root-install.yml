@@ -29,7 +29,7 @@ jobs:
           {
             BASELINE=5f44a2fb4a9ac0c32bc09b9a7859fc8ea8629154
             REVIEWED_ENTRY=$'100644 blob d3cb78d1045dc70ac070e126de27b73eda612e52\tapp/release_tools.py'
-            PRODUCT_PATHS=(app web deploy third_party main.py VERSION install.sh requirements-runtime.txt scripts/deploy.py scripts/install_system.py scripts/build_bundle.py scripts/platform_support.py scripts/fetch_portable_runtimes.py scripts/fetch_test_cores.py scripts/prepare_frontend.py scripts/vendor_frontend.py)
+            PRODUCT_PATHS=(app web deploy third_party main.py VERSION install.sh requirements-runtime.txt scripts/deploy.py scripts/install_system.py scripts/build_bundle.py scripts/platform_support.py scripts/fetch_portable_runtimes.py scripts/fetch_test_cores.py scripts/test_asset_download.py scripts/prepare_frontend.py scripts/vendor_frontend.py)
             ACTUAL_HEAD="$(git rev-parse HEAD)"
             printf 'baseline=%s\nexpected_source=%s\nactual_head=%s\n' "$BASELINE" "${VUI_SOURCE_COMMIT:-<missing>}" "$ACTUAL_HEAD"
             test -n "${VUI_SOURCE_COMMIT:-}"

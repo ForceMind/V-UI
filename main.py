@@ -16,7 +16,7 @@ from app.services.log_redaction import install_log_redaction
 from app.services.validated_export import ExportError
 from app.services.routing_store import RoutingStorageError
 
-app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.4.22')
+app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.4.23')
 app.add_middleware(AdminAuthMiddleware)
 app.include_router(maintenance.router,prefix='/api/maintenance',tags=['Temporary maintenance'])
 app.include_router(certificates.router,prefix='/api/certificates',tags=['Certificates'])
@@ -48,7 +48,7 @@ async def invalid_export(request: Request,exc: ExportError):
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request,exc: RequestValidationError):
-    if getattr(request.state, 'maintenance', None) is not None or request.url.path.startswith(('/api/maintenance','/api/auth/','/api/subscriptions','/sub/','/api/proxy/')):
+    if getattr(request.state, 'maintenance', None) is not None or request.url.path.startswith(('/api/maintenance','/api/auth/','/api/subscriptions','/sub/','/api/proxy/','/api/certificates')):
         return JSONResponse({'detail':'Invalid request'},status_code=422)
     return await request_validation_exception_handler(request,exc)
 

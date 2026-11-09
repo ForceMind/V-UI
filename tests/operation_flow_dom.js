@@ -3,7 +3,7 @@
 // service, network, installation or production data is used by this file.
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {Flow, suggestedPort, usableCertificates} = require('../web/js/operation-flow.js');
+const {Flow, suggestedPort, usableCertificates, connectionDomain} = require('../web/js/operation-flow.js');
 const {fixture,clone,rev,problem}=require('./fixtures/operation_http_fixture.cjs');
 const writes=f=>f.calls.filter(c=>c.method!=='GET'&&!c.path.endsWith('/import/preview'));
 
@@ -20,6 +20,26 @@ test('unique certificate and suggested port presets reject expired/test CA and p
     const f=fixture();assert.equal(usableCertificates(f.certs).length,1);
     for(const change of [{environment:'staging'},{revision:''},{not_after:1},{days_remaining:-1}])assert.equal(usableCertificates([{...f.certs[0],...change}]).length,0);
     assert.equal(suggestedPort([{port:10443,enable:false},{port:10444}]),10445);
+});
+test('DNS wildcard needs an explicit covered connection host before any creation or settings write',async()=>{
+    const f=fixture();Object.assign(f.certs[0],{domain:'example.test',method:'dns-01',wildcard:true,names:['example.test','*.example.test']});
+    await f.flow.load();
+    for(const host of ['', '*.example.test', 'deep.node.example.test', 'unrelated.test', 'https://node.example.test']){
+        await assert.rejects(f.flow.run('direct',{...f.choice(),connectionDomain:host}),error=>error.code.startsWith('CONNECTION_DOMAIN'));
+        assert.equal(writes(f).length,0);
+    }
+    await f.flow.run('direct',{...f.choice(),connectionDomain:'node.example.test'});
+    const created=f.calls.find(call=>call.path==='/api/inbounds'&&call.method==='POST');
+    assert.equal(created.body.profile.server_name,'node.example.test');
+    assert.equal(f.flow.intent.server,'node.example.test');
+    assert.equal(f.calls.some(call=>call.path.includes('/subscription')),false);
+});
+test('literal certificate host matching never treats a wildcard as the client SNI',()=>{
+    const cert={domain:'example.test',method:'dns-01',names:['example.test','*.example.test']};
+    assert.equal(connectionDomain(cert,'NODE.example.test.'),'node.example.test');
+    for(const host of [0,false,'*.example.test','node.example.test:443','node.example.test/path','a.b.example.test','evil-example.test','127.0.0.1'])
+        assert.throws(()=>connectionDomain(cert,host),error=>error.code.startsWith('CONNECTION_DOMAIN'));
+    assert.equal(connectionDomain({domain:'old.example.test'},undefined),'old.example.test');
 });
 test('unknown draft, pending, missing scope and changed revision stop before all writes',async()=>{
     for(const mode of ['draft','pending','scope','changed']){

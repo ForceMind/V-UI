@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -21,6 +23,20 @@ from scripts.managed_ops_smoke import (_audit_released_writer_leases, _audit_tra
     _copy_control, _database_values,
     _seed_fake_data, _write_drivers, FIXTURE_VERSION, HARNESS_VERSION, WRAPPER_BYTES,
     SUCCESS_ACTIONS, WRITER_LOCKS)
+
+
+DNS_CONTROL_FILES = {
+    'app/certificates/errors.py': 'certificate_errors.py',
+    'app/certificates/dns_store.py': 'dns_store.py',
+    'app/certificates/cloudflare.py': 'cloudflare.py',
+    'app/certificates/dns_journal.py': 'dns_journal.py',
+    'app/certificates/dns_backup.py': 'dns_backup.py',
+}
+CONTROL_SOURCE_FILES = (
+    'deploy/system_ops.py', 'deploy/ops_worker.py', 'app/release_tools.py', 'deploy/v-ui',
+    'app/data_owner.py', 'app/services/proxy_store.py', 'app/services/upstream_profile.py',
+    'app/services/inbound_policy.py', 'scripts/firewall_support.py', *DNS_CONTROL_FILES,
+)
 
 
 def evidence():
@@ -382,10 +398,9 @@ class ManagedConsumerFixtureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='vui-managed-copy-unit-') as temporary:
             root = Path(temporary); payload = root / 'payload'; control = root / 'control'
             payload.mkdir(); control.mkdir(); (payload / 'app/services').mkdir(parents=True); (payload / 'deploy').mkdir(); (payload / 'scripts').mkdir()
+            (payload / 'app/certificates').mkdir()
             files = {}
-            for name in ('deploy/system_ops.py', 'deploy/ops_worker.py', 'app/release_tools.py', 'deploy/v-ui',
-                         'app/data_owner.py', 'app/services/proxy_store.py', 'app/services/upstream_profile.py',
-                         'app/services/inbound_policy.py', 'scripts/firewall_support.py'):
+            for name in CONTROL_SOURCE_FILES:
                 raw = WRAPPER_BYTES if name.endswith('/v-ui') else b'# unit fixture, not product code\n'
                 (payload / name).write_bytes(raw)
                 files[name] = {'size': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}
@@ -396,6 +411,71 @@ class ManagedConsumerFixtureTests(unittest.TestCase):
             self.assertFalse(os.access(control / 'v-ui', os.X_OK))
             (payload / 'deploy/ops_worker.py').write_bytes(b'# tampered\n')
             with self.assertRaises(AssertionError): _copy_control(payload, control)
+
+    def test_each_dns_control_file_must_exist_and_match_manifest_before_copy(self):
+        for relative, flat in DNS_CONTROL_FILES.items():
+            for fault in ('missing', 'changed', 'symlink', 'unlisted'):
+                with self.subTest(relative=relative, fault=fault), tempfile.TemporaryDirectory() as temporary:
+                    root=Path(temporary); payload=root/'payload'; control=root/'control'
+                    payload.mkdir(); control.mkdir(); files={}
+                    for name in CONTROL_SOURCE_FILES:
+                        path=payload/name; path.parent.mkdir(parents=True,exist_ok=True)
+                        raw=WRAPPER_BYTES if name=='deploy/v-ui' else b'# fixed synthetic source\n'
+                        path.write_bytes(raw)
+                        files[name]={'size':len(raw),'sha256':hashlib.sha256(raw).hexdigest()}
+                    selected=payload/relative
+                    if fault=='missing': selected.unlink()
+                    elif fault=='changed': selected.write_bytes(b'!'+selected.read_bytes()[1:])
+                    elif fault=='symlink':
+                        raw=selected.read_bytes(); selected.unlink()
+                        external=root/'external'; external.write_bytes(raw); selected.symlink_to(external)
+                    else: files.pop(relative)
+                    (payload/'MANIFEST.json').write_text(json.dumps({'files':files}))
+                    with self.assertRaises((AssertionError,FileNotFoundError,KeyError)):
+                        _copy_control(payload,control)
+                    self.assertFalse((control/flat).exists())
+
+    def test_manifest_bound_flat_copy_loads_under_isolated_stdlib_python_and_missing_dns_never_falls_back(self):
+        source=Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary); payload=root/'payload'; control=root/'control'
+            payload.mkdir(); control.mkdir(); files={}
+            for name in CONTROL_SOURCE_FILES:
+                raw=(source/name).read_bytes(); path=payload/name
+                path.parent.mkdir(parents=True,exist_ok=True); path.write_bytes(raw)
+                files[name]={'size':len(raw),'sha256':hashlib.sha256(raw).hexdigest()}
+            (payload/'MANIFEST.json').write_text(json.dumps({'files':files}))
+            self.assertEqual(set(_copy_control(payload,control)),set(CONTROL_SOURCE_FILES))
+            code='''import runpy,sys
+from pathlib import Path
+worker=runpy.run_path(sys.argv[1])
+try:
+    api=worker['_load_release_tools']()
+except FileNotFoundError:
+    assert sys.argv[2]=='missing'
+    assert not any(name=='app' or name.startswith('app.') for name in sys.modules)
+    print('missing refused')
+else:
+    assert sys.argv[2]=='complete'
+    assert callable(api._MaintenanceSession)
+    for name in ('errors','dns_store','cloudflare','dns_journal','dns_backup'):
+        module=sys.modules['app.certificates.'+name]
+        assert Path(module.__file__).parent==Path(sys.argv[1]).parent
+    assert not any(name.split('.')[0] in ('cryptography','sqlalchemy','yaml') for name in sys.modules)
+    assert 'app.certificates.material' not in sys.modules
+    assert sys.flags.isolated and sys.flags.no_site and sys.flags.dont_write_bytecode
+    print('stdlib closure loaded')
+'''
+            def check(mode, expected):
+                result=subprocess.run([sys.executable,'-B','-I','-S','-c',code,str(control/'ops_worker.py'),mode],
+                    cwd=root,capture_output=True,text=True,timeout=10)
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assertEqual(result.stdout.strip(),expected)
+            check('complete','stdlib closure loaded')
+            for flat in DNS_CONTROL_FILES.values():
+                path=control/flat; raw=path.read_bytes(); path.unlink()
+                with self.subTest(missing=flat): check('missing','missing refused')
+                path.write_bytes(raw); path.chmod(0o600)
 
     def test_sqlite_fixture_has_recoverable_nodes_sessions_and_grants(self):
         with tempfile.TemporaryDirectory(prefix='vui-managed-db-unit-') as temporary:

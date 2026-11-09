@@ -160,6 +160,32 @@ class Materials:
 
 
 class ParallelMaterialsTests(unittest.TestCase):
+    def test_future_publisher_requires_real_dns_ca_and_both_core_steps_without_skip(self):
+        from scripts.publish_release import _parallel_other_steps
+        fixture = Materials('0.4.23')
+        required = _parallel_other_steps()
+        for path, names in required.items():
+            steps = fixture.jobs[fixture.checks[path]['id']][0]['steps']
+            present = {step['name'] for step in steps}
+            steps.extend(dict(name=name, status='completed', conclusion='success') for name in sorted(names - present))
+        policy._jobs(fixture.checks, SHA, '0.4.23', fixture.api, BROWSER_SKIP_STEPS, required)
+        for path, name in (
+                ('acme.yml', 'Test actual Certbot DNS-01 wildcard renewal and legacy-reader refusal'),
+                ('loopback.yml', 'Exercise DNS wildcard material through actual sing-box and Xray TLS')):
+            steps = fixture.jobs[fixture.checks[path]['id']][0]['steps']
+            step = next(value for value in steps if value['name'] == name)
+            with self.subTest(path=path, fault='missing'):
+                steps.remove(step)
+                with self.assertRaises(policy.ParallelPolicyError):
+                    policy._jobs(fixture.checks, SHA, '0.4.23', fixture.api, BROWSER_SKIP_STEPS, required)
+                steps.append(step)
+            with self.subTest(path=path, fault='skipped'):
+                step['conclusion'] = 'skipped'
+                with self.assertRaises(policy.ParallelPolicyError):
+                    policy._jobs(fixture.checks, SHA, '0.4.23', fixture.api, BROWSER_SKIP_STEPS, required)
+                step['conclusion'] = 'success'
+        self.assertEqual(fixture.downloads, [])
+
     def test_current_and_future_matrix_require_every_role_and_return_original_bytes(self):
         for version, count in [('0.4.22', 9), ('0.4.23', 10)]:
             with self.subTest(version=version):
