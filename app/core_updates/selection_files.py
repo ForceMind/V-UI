@@ -548,6 +548,17 @@ class SelectionFiles:
         except OSError:
             raise CoreSelectionFilesError('METADATA_IO') from None
 
+    @contextmanager
+    def hold_restore_pending(self, journal):
+        """Pin the public admission barrier for an already checked Root journal."""
+        _need(journal['operation'] == 'restore', 'RECOVERY_OPERATION')
+        with _root(self.layout) as (scope, root):
+            raw, record = _read(scope, root, PENDING)
+            _need(_pending(raw)['transaction'] == journal['transaction']
+                  and record == journal['original_files']['pending'], 'PENDING_CHANGED')
+            scope.stable()
+            yield scope.stable
+
     def _stable(self, scope, root, app_source, target, *, with_records=False):
         _need(not _exists(root, PENDING) and not _exists(root, ACTIVE), 'RECOVERY_REQUIRED')
         raw, selection_record = _read(scope, root, SELECTION)

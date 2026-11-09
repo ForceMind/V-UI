@@ -16,6 +16,7 @@ import zipfile
 from app import release_tools as tools
 from app.services.proxy_store import ProxyStore as ProxyStoreForTest
 from app.core_updates import backup_archive as full, selection as s, catalog as c, store as fs
+from app.core_updates import selection_files as sf
 import test_core_backup as fixtures
 
 
@@ -41,6 +42,20 @@ class CompleteBackupTests(unittest.TestCase):
             (self.data/name).chmod(0o600)
         self.archive=self.root/'complete.zip'
 
+    def restore_marker(self, journal):
+        metadata = self.root/'metadata'
+        metadata.mkdir(mode=0o755)
+        metadata.chmod(0o755)
+        files = sf.SelectionFiles(sf.Layout(metadata, os.geteuid(), self.root))
+        transaction = 'a'*32
+        marker = metadata/sf.PENDING
+        marker.write_bytes(sf._raw(dict(schema=1, kind='core-update-pending-v1', transaction=transaction)))
+        marker.chmod(0o644)
+        with files._io() as (scope, directory):
+            _, record = sf._read(scope, directory, sf.PENDING)
+        journal.update(operation='restore', transaction=transaction, original_files=dict(pending=record))
+        return files
+
     def test_restore_exchange_retries_after_each_first_rename(self):
         from app.core_updates.selection_files import restore_data_position
         recovery = self.root / 'recovery'
@@ -62,17 +77,30 @@ class CompleteBackupTests(unittest.TestCase):
                     data=dict(slot=slot, incoming_generation=generation(incoming))),
                 quiesced=dict(original_tree_sha256=tools.recovery_tree_digest(self.data),
                               prepared_tree_sha256=tools.recovery_tree_digest(incoming)))
+            files = self.restore_marker(journal)
+            wrong = dict(journal, transaction='f'*32)
+            with self.assertRaisesRegex(sf.CoreSelectionFilesError, 'PENDING_CHANGED'):
+                full.exchange_restore_data(guard, wrong, _selection_files=files)
+            self.assertTrue(incoming.is_dir())
             for rollback, expected in ((False, 'trial'), (True, 'restored')):
                 def lose_ack(*args):
                     fs._rename_new(*args)
                     raise OSError('fixture lost acknowledgement')
                 with patch.object(full, '_rename_new', side_effect=lose_ack), self.assertRaises(OSError):
-                    full.exchange_restore_data(guard, journal, rollback=rollback)
-                observed = full.exchange_restore_data(guard, journal, rollback=rollback)
+                    full.exchange_restore_data(guard, journal, rollback=rollback, _selection_files=files)
+                observed = full.exchange_restore_data(guard, journal, rollback=rollback, _selection_files=files)
                 self.assertEqual(restore_data_position(journal, observed), expected)
             self.assertTrue((self.data / 'v-ui.db').is_file())
             rejected = recovery / ('core-restore-' + slot + '-rejected')
             self.assertEqual((rejected / 'fixture').read_bytes(), b'candidate')
+            marker = files.layout.root/sf.PENDING
+            copy = marker.with_suffix('.copy')
+            copy.write_bytes(marker.read_bytes())
+            copy.chmod(0o644)
+            os.replace(copy, marker)
+            with self.assertRaisesRegex(sf.CoreSelectionFilesError, 'PENDING_CHANGED'):
+                full.exchange_restore_data(guard, journal, rollback=True, _selection_files=files)
+            self.assertTrue((self.data / 'v-ui.db').is_file())
 
     def test_prepared_candidate_is_retained_in_journal_slot_after_context_closes(self):
         state, intents = self.state(components=False)
@@ -97,22 +125,23 @@ class CompleteBackupTests(unittest.TestCase):
                     data=dict(slot=slot, incoming_generation=checked.data_generation,
                               incoming_trust_sha256=hashlib.sha256(chain.read_bytes()).hexdigest(),
                               preflight_tree_sha256=checked.data_sha256)))
-            observed = full.exchange_restore_data(guard, journal, rollback=True)
+            files = self.restore_marker(journal)
+            observed = full.exchange_restore_data(guard, journal, rollback=True, _selection_files=files)
             self.assertIsNone(observed['incoming'])
             wrong = deepcopy(journal)
             wrong['restore_target']['intents']['sing-box']['enabled'] = False
             with self.assertRaisesRegex(tools.ReleaseError, 'selection or intents'):
                 full.place_restore_candidate(guard, wrong, prepared,
-                    core_backup=self.fixture.tool, current_selection=state)
+                    core_backup=self.fixture.tool, current_selection=state, _selection_files=files)
             self.assertTrue(prepared.data_path.is_dir())
             wrong = deepcopy(journal)
             wrong['restore_target']['data']['incoming_trust_sha256'] = '0'*64
             with self.assertRaisesRegex(tools.ReleaseError, 'public certificate chain'):
                 full.place_restore_candidate(guard, wrong, prepared,
-                    core_backup=self.fixture.tool, current_selection=state)
+                    core_backup=self.fixture.tool, current_selection=state, _selection_files=files)
             self.assertTrue(prepared.data_path.is_dir())
             original = full.place_restore_candidate(guard, journal, prepared,
-                core_backup=self.fixture.tool, current_selection=state)
+                core_backup=self.fixture.tool, current_selection=state, _selection_files=files)
             self.assertEqual(original['data_generation'], journal['switch_context']['data_generation'])
         incoming = self.root/'recovery'/('core-restore-'+slot+'-incoming')
         self.assertTrue((incoming/'v-ui.db').is_file())

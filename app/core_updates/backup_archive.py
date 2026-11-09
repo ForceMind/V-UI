@@ -22,7 +22,7 @@ from app import release_tools as tools
 from . import artifacts as a, selection as s
 from .backup import CoreBackup, _intents
 from .boot import _data_root, _runtime_states
-from .selection_files import _new, _selection, restore_data_position
+from .selection_files import SelectionFiles, _new, _selection, restore_data_position
 from .store import _rename_new
 
 KIND = 'backup-components-v1'
@@ -364,7 +364,7 @@ def _live_restore_scope(guard, live):
         verify()
 
 
-def place_restore_candidate(guard, journal, prepared, *, core_backup, current_selection):
+def place_restore_candidate(guard, journal, prepared, *, core_backup, current_selection, _selection_files=None):
     """Place a validated candidate in its durable slot before quiescence is recorded."""
     _need(journal['phase'] == 'prepared' and journal['quiesced'] is None)
     target = journal['restore_target']
@@ -385,7 +385,8 @@ def place_restore_candidate(guard, journal, prepared, *, core_backup, current_se
     recovery = guard.root / 'recovery'
     stage = prepared.data_path
     name = 'core-restore-' + plan['slot'] + '-incoming'
-    with _live_restore_scope(guard, live) as verify:
+    files = SelectionFiles() if _selection_files is None else _selection_files
+    with files.hold_restore_pending(journal) as pending, _live_restore_scope(guard, live) as verify:
         original = validate_restore_against_current(
             guard, prepared, core_backup=core_backup, current_selection=current_selection)
         _need(original['data_generation'] == journal['switch_context']['data_generation'])
@@ -413,6 +414,7 @@ def place_restore_candidate(guard, journal, prepared, *, core_backup, current_se
                     continue
                 raise tools.ReleaseError('Restore data slot already exists')
             tools.sync_directory(guard.root)
+            pending()
             _rename_new(source, stage.name, destination, name)
             _need(_generation(recovery / name) == prepared._generation)
             os.fsync(destination)
@@ -420,7 +422,7 @@ def place_restore_candidate(guard, journal, prepared, *, core_backup, current_se
         return original
 
 
-def exchange_restore_data(guard, journal, *, rollback=False):
+def exchange_restore_data(guard, journal, *, rollback=False, _selection_files=None):
     """Move the journal's fixed slots under the stable exclusive data lease."""
     live = guard.root / 'data'
     recovery = guard.root / 'recovery'
@@ -430,11 +432,12 @@ def exchange_restore_data(guard, journal, *, rollback=False):
     _need(a._hex(slot, 32) and type(rollback) is bool)
     phase = journal['phase']
     _need(phase not in ('confirmed', 'cleanup') if rollback else phase == 'backed_up')
+    files = SelectionFiles() if _selection_files is None else _selection_files
     if rollback and journal['quiesced'] is None:
         try:
             recovery.lstat()
         except FileNotFoundError:
-            with _live_restore_scope(guard, live):
+            with files.hold_restore_pending(journal), _live_restore_scope(guard, live):
                 dev, ino = _generation(live)
                 observed = dict(live=dict(dev=dev, ino=ino), original=None, incoming=None, rejected=None)
                 _need(restore_data_position(journal, observed) == 'unplaced')
@@ -442,13 +445,14 @@ def exchange_restore_data(guard, journal, *, rollback=False):
     names = {key: 'core-restore-' + slot + '-' + key for key in ('original', 'incoming', 'rejected')}
     names['live'] = 'data'
 
-    with _live_restore_scope(guard, live) as verify, \
+    with files.hold_restore_pending(journal) as pending, _live_restore_scope(guard, live) as verify, \
             tools._maintenance_directory(guard.root) as root_fd, \
             tools._maintenance_directory(recovery) as recovery_fd:
         parents = {key: recovery_fd for key in names}
         parents['live'] = root_fd
 
         def inspect():
+            pending()
             verify()
             for path, fd in ((guard.root, root_fd), (recovery, recovery_fd)):
                 info = path.lstat()
@@ -494,6 +498,7 @@ def exchange_restore_data(guard, journal, *, rollback=False):
         os.fsync(recovery_fd)
         while position in transitions:
             source, destination, expected = transitions[position]
+            pending()
             _rename_new(parents[source], names[source], parents[destination], names[destination])
             position, observed = inspect()
             _need(position == expected, 'Restore data changed during exchange')
