@@ -30,7 +30,7 @@ CONTRACTS = {
     'test_core_maintenance_cycle.py': 18,
     'test_core_archives.py': 14,
     'test_core_backup.py': 15,
-    'test_core_backup_archive.py': 34,
+    'test_core_backup_archive.py': 35,
     'test_core_managed_boot.py': 16,
     'test_core_managed_startup.py': 21,
     'test_core_pending_admission.py': 11,

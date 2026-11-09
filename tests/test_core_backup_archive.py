@@ -105,6 +105,37 @@ class CompleteBackupTests(unittest.TestCase):
                 full.exchange_restore_data(guard, journal, rollback=True, _selection_files=files)
             self.assertTrue((self.data / 'v-ui.db').is_file())
 
+    def test_restore_trial_observes_fixed_slots_with_only_operation_lease(self):
+        slot = 'b'*32
+        recovery = self.root/'recovery'
+        recovery.mkdir(mode=0o700)
+        original = recovery/('core-restore-'+slot+'-original')
+        self.data.rename(original)
+        self.data.mkdir(mode=0o700)
+        def generation(path):
+            info = path.stat()
+            return dict(dev=info.st_dev, ino=info.st_ino)
+        journal = dict(phase='trial', switch_context=dict(data_generation=generation(original)),
+            restore_target=dict(kind='core-restore-target-v2',
+                data=dict(slot=slot, incoming_generation=generation(self.data))))
+        files = self.restore_marker(journal)
+        with tools._maintenance_lease(self.root, '.operation.lock', _proof=True) as verify:
+            result = full.observe_restore_trial(self.root, journal, verify, _selection_files=files)
+            self.assertEqual(result, dict(live=generation(self.data), original=generation(original),
+                                         incoming=None, rejected=None))
+            checks = []
+            def lost_proof():
+                verify()
+                checks.append(True)
+                if len(checks) == 3:
+                    raise tools.ReleaseError('fixture operation proof lost')
+            with self.assertRaisesRegex(tools.ReleaseError, 'fixture operation proof lost'):
+                full.observe_restore_trial(self.root, journal, lost_proof, _selection_files=files)
+            original.rename(recovery/'retained')
+            original.symlink_to(self.data, target_is_directory=True)
+            with self.assertRaisesRegex(tools.ReleaseError, 'Unsafe restore data slot'):
+                full.observe_restore_trial(self.root, journal, verify, _selection_files=files)
+
     def test_prepared_candidate_is_retained_in_journal_slot_after_context_closes(self):
         state, intents = self.state(components=False)
         certs = self.data/'certs'

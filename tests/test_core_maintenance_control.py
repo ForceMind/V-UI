@@ -19,6 +19,7 @@ from unittest.mock import patch
 from app.core_updates import artifacts, selection, selection_files, store
 from deploy import core_boot_broker as wire
 from deploy import core_maintenance_control as control
+from deploy import ops_worker
 import test_core_selection as fixtures
 
 
@@ -137,6 +138,16 @@ class FixtureChild:
             result = dict(event='trial_writers_released')
         elif command == 'prove_operation':
             result = dict(event='operation_held')
+        elif command == 'observe_restore_data':
+            frames = []
+            with patch('app.core_updates.backup_archive.observe_restore_trial', return_value=self.restore_data):
+                ops_worker._observe_restore_data(
+                    types.SimpleNamespace(send=lambda event, **fields: frames.append(dict(event=event, **fields))),
+                    types.SimpleNamespace(root=case.root, _operation_proof=lambda: None),
+                    case.files.read_restore_recovery(), request)
+            result, = frames
+            if case.fault == 'restore-observation-tx':
+                result['transaction'] = '0'*32
         elif command == 'reacquire_writers':
             if case.services.state(PANEL) != 'inactive' or case.brokers[-1].state != 'closed':
                 raise AssertionError('writer reacquisition overlapped a live trial')
@@ -557,12 +568,15 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         with self.assertRaisesRegex(selection_files.CoreSelectionFilesError, 'RESTORE_RECEIPT'):
             switch._activate_restore_trial(dict(receipt, sequence=0), lambda: trial)
         self.assertFalse(self.brokers)
-        observations = []
-        def observe():
-            observations.append(True)
-            return trial
-        state = switch._activate_restore_trial(receipt, observe)
-        self.assertEqual(len(observations), 3)
+        self.child.restore_data = trial
+        self.fault = 'restore-observation-tx'
+        with self.assertRaisesRegex(control.CoreControlError, 'CORE_RESTORE_CONTEXT'):
+            switch._activate_restore_trial(receipt)
+        self.assertEqual(self.files.read_restore_recovery()['phase'], 'backed_up')
+        self.assertFalse(self.brokers)
+        self.fault = None
+        state = switch._activate_restore_trial(receipt)
+        self.assertEqual(self.trace.count('observe_restore_data'), 4)
         self.assertEqual(self.brokers[0].context['data_generation'], incoming)
         self.assertEqual(self.files.read_stable(**SOURCE), state)
 

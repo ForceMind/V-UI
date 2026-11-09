@@ -333,7 +333,7 @@ class _Switch:
         self.broker = None
         self.broker_closed = True
 
-    def _activate_restore_trial(self, receipt, observe):
+    def _activate_restore_trial(self, receipt, observe=None):
         """Start a private restore trial after the worker exchanged the data."""
         self._proof()
         journal = self.files.read_restore_recovery()
@@ -345,12 +345,18 @@ class _Switch:
               and context['services'] == self.initial
               and self.m._digest(self.m._raw(self.config)) == context['config_sha256']
               and self.config.get('certificate_mode', 'managed') == context['certificate_mode']
-              and callable(observe), 'CORE_RESTORE_CONTEXT')
+              and (observe is None or callable(observe)), 'CORE_RESTORE_CONTEXT')
         _need(context['certificate_mode'] != 'provided', 'CORE_RESTORE_TLS_PROBE_REQUIRED')
         self.services.prove_stopped()
 
         def current_data():
-            data = observe()
+            if observe is None:
+                response = self.worker.command('observe_restore_data', 'restore_data_observed',
+                    ('transaction', 'data'), transaction=self.transaction)
+                _need(response['transaction'] == self.transaction, 'CORE_RESTORE_CONTEXT')
+                data = response['data']
+            else:
+                data = observe()
             _need(self.m.restore_data_position(journal, data) == 'trial', 'CORE_RESTORE_DATA_CHANGED')
             self._proof()
             return data

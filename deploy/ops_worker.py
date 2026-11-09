@@ -235,6 +235,14 @@ def _probe_panel_tls(channel, session, value, *, before_stop=False):
     channel.send('panel_tls', status=result['status'], trust_sha256=result['trust_sha256'])
 
 
+def _observe_restore_data(channel, session, journal, value):
+    if value != {'command': 'observe_restore_data', 'transaction': journal['transaction']}:
+        raise WorkerError('Unexpected private restore observation command')
+    from app.core_updates.backup_archive import observe_restore_trial
+    data = observe_restore_trial(session.root, journal, lambda: _prove_released_operation(session))
+    channel.send('restore_data_observed', transaction=journal['transaction'], data=data)
+
+
 def _complete_core_handshake(channel, session):
     with _quiet_candidate_io():facts = session.prepare()
     channel.send('core_context', **facts)

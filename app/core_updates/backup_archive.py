@@ -422,6 +422,55 @@ def place_restore_candidate(guard, journal, prepared, *, core_backup, current_se
         return original
 
 
+def _inspect_restore_slots(root, journal, names, parents, root_fd, recovery_fd):
+    recovery = root / 'recovery'
+    for path, fd in ((root, root_fd), (recovery, recovery_fd)):
+        info = path.lstat()
+        opened = os.fstat(fd)
+        _need(stat.S_ISDIR(info.st_mode) and (info.st_dev, info.st_ino) ==
+              (opened.st_dev, opened.st_ino), 'Restore directory changed')
+    observed = {}
+    for key, name in names.items():
+        try:
+            info = os.stat(name, dir_fd=parents[key], follow_symlinks=False)
+        except FileNotFoundError:
+            observed[key] = None
+            continue
+        _need(stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid()
+              and stat.S_IMODE(info.st_mode) == 0o700, 'Unsafe restore data slot')
+        observed[key] = dict(dev=info.st_dev, ino=info.st_ino)
+    return restore_data_position(journal, observed), observed
+
+
+def observe_restore_trial(root, journal, verify_operation, *, _selection_files=None):
+    """Read slot identities while the worker retains its operation lease."""
+    _need(journal['phase'] in ('backed_up', 'trial', 'validated') and
+          journal['restore_target']['kind'] == 'core-restore-target-v2')
+    slot = journal['restore_target']['data']['slot']
+    _need(a._hex(slot, 32))
+    names = _restore_slot_names(slot)
+    files = SelectionFiles() if _selection_files is None else _selection_files
+    verify_operation()
+    with files.hold_restore_pending(journal) as pending, \
+            tools._maintenance_directory(root) as root_fd, \
+            tools._maintenance_directory(root/'recovery') as recovery_fd:
+        parents = {key: recovery_fd for key in names}
+        parents['live'] = root_fd
+        position, observed = _inspect_restore_slots(root, journal, names, parents, root_fd, recovery_fd)
+        _need(position == 'trial', 'Restore trial data changed')
+        verify_operation()
+        pending()
+        _need(_inspect_restore_slots(root, journal, names, parents, root_fd, recovery_fd) ==
+              (position, observed), 'Restore trial data changed')
+    verify_operation()
+    return observed
+
+
+def _restore_slot_names(slot):
+    return dict(live='data', **{key: 'core-restore-' + slot + '-' + key
+                             for key in ('original', 'incoming', 'rejected')})
+
+
 def exchange_restore_data(guard, journal, *, rollback=False, _selection_files=None):
     """Move the journal's fixed slots under the stable exclusive data lease."""
     live = guard.root / 'data'
@@ -447,8 +496,7 @@ def exchange_restore_data(guard, journal, *, rollback=False, _selection_files=No
                 observed = dict(live=dict(dev=dev, ino=ino), original=None, incoming=None, rejected=None)
                 _need(restore_data_position(journal, observed) == 'unplaced')
                 return receipt(observed)
-    names = {key: 'core-restore-' + slot + '-' + key for key in ('original', 'incoming', 'rejected')}
-    names['live'] = 'data'
+    names = _restore_slot_names(slot)
 
     with files.hold_restore_pending(journal) as pending, _live_restore_scope(guard, live) as verify, \
             tools._maintenance_directory(guard.root) as root_fd, \
@@ -459,22 +507,7 @@ def exchange_restore_data(guard, journal, *, rollback=False, _selection_files=No
         def inspect():
             pending()
             verify()
-            for path, fd in ((guard.root, root_fd), (recovery, recovery_fd)):
-                info = path.lstat()
-                opened = os.fstat(fd)
-                _need(stat.S_ISDIR(info.st_mode) and (info.st_dev, info.st_ino) ==
-                      (opened.st_dev, opened.st_ino), 'Restore directory changed')
-            observed = {}
-            for key, name in names.items():
-                try:
-                    info = os.stat(name, dir_fd=parents[key], follow_symlinks=False)
-                except FileNotFoundError:
-                    observed[key] = None
-                    continue
-                _need(stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid()
-                      and stat.S_IMODE(info.st_mode) == 0o700, 'Unsafe restore data slot')
-                observed[key] = dict(dev=info.st_dev, ino=info.st_ino)
-            return restore_data_position(journal, observed), observed
+            return _inspect_restore_slots(guard.root, journal, names, parents, root_fd, recovery_fd)
 
         position, observed = inspect()
         quiesced = journal['quiesced']
