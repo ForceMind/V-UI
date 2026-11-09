@@ -74,3 +74,10 @@ class MergeReviewTransportTests(unittest.TestCase):
             with self.subTest(size=len(response)), patch.object(transport, '_request', return_value=response):
                 with self.assertRaisesRegex(MihomoPreviewError, '^PARSER_FAILED$'):
                     transport.prepare_mihomo_draft('{}', '{}', 'a'*64, [], {}, None)
+
+    def test_private_options_allow_all_declared_nodes_and_both_builtin_leaves(self):
+        import json
+        names = ['node-' + str(index) for index in range(128)]
+        report = {'upstreams': names, 'groups': [{'name': 'Chosen', 'members': names + ['DIRECT', 'REJECT']}]}
+        with patch.object(transport, '_request', return_value=json.dumps(report).encode()):
+            self.assertEqual(transport.mihomo_draft_options('{}', '{}', 'a'*64, []), report)

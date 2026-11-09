@@ -13,11 +13,11 @@ if __name__ == '__main__' and not __package__:
 
 from app.services import upstream_import as bounded
 from app.services.mihomo_merge import MihomoMergeError, serialize_mihomo_merge
-from app.services.mihomo_merge_plan import plan_mihomo
+from app.services.mihomo_merge_plan import mihomo_plan_options, plan_mihomo
 from app.services.mihomo_plan_record import MAX_RECORD_BYTES, PlanRecordError, decode_plan_record, encode_plan_record
 from app.services.mihomo_merge_review import review_mihomo_merge, serialize_reviewed_mihomo_merge
 from app.services.mihomo_preview import MihomoPreviewError, _SLOTS, _source_bytes
-from app.services.upstream_profile import UpstreamValidationError
+from app.services.upstream_profile import RESERVED_ROUTING_TARGETS, UpstreamValidationError, literal_string
 
 
 _OPTIONS_LIMIT = 32_768
@@ -42,6 +42,37 @@ def download_mihomo_merge(baseline, candidate, choices):
 
 def reviewed_mihomo_download(baseline, candidate, fingerprint, selections):
     return _request(baseline, candidate, {'fingerprint': fingerprint, 'selections': selections}, '--reviewed')
+
+
+def mihomo_draft_options(baseline, candidate, fingerprint, selections):
+    raw = _request(baseline, candidate, {'fingerprint': fingerprint, 'selections': selections}, '--options')
+    try:
+        options = json.loads(raw)
+        if (type(options) is not dict or set(options) != {'upstreams', 'groups'}
+                or type(options['upstreams']) is not list or len(options['upstreams']) > 128
+                or type(options['groups']) is not list or len(options['groups']) > 128):
+            raise ValueError()
+        names = set()
+        for name in options['upstreams']:
+            literal_string(name, allow_empty=False, max_bytes=512)
+            if len(name) > 128 or name in names or name in RESERVED_ROUTING_TARGETS | {'MATCH'}:
+                raise ValueError()
+            names.add(name)
+        group_names = set()
+        for group in options['groups']:
+            if type(group) is not dict or set(group) != {'name', 'members'}:
+                raise ValueError()
+            name, members = group['name'], group['members']
+            literal_string(name, allow_empty=False, max_bytes=512)
+            if (len(name) > 128 or name in names | group_names | RESERVED_ROUTING_TARGETS | {'MATCH'}
+                    or type(members) is not list or not 1 <= len(members) <= len(names) + 2
+                    or any(type(member) is not str or member not in names | {'DIRECT', 'REJECT'} for member in members)
+                    or len(set(members)) != len(members)):
+                raise ValueError()
+            group_names.add(name)
+        return options
+    except (ValueError, TypeError, UnicodeError, RecursionError, MemoryError, UpstreamValidationError):
+        raise MihomoPreviewError('PARSER_FAILED') from None
 
 
 def prepare_mihomo_draft(baseline, candidate, fingerprint, selections, group_members, dns_upstream):
@@ -104,7 +135,8 @@ def _request(baseline, candidate, options_value, action):
     new = _source_bytes(candidate, 'candidate')
     options = json.dumps(options_value, ensure_ascii=True, separators=(',', ':')).encode('ascii')
     options_limit = _PREPARE_OPTIONS_LIMIT if action == '--prepare' else _OPTIONS_LIMIT
-    output_limit = _PREPARE_OUTPUT_LIMIT if action == '--prepare' else bounded.MAX_INPUT_BYTES + 1
+    output_limit = (_PREPARE_OUTPUT_LIMIT if action == '--prepare' else
+                    2 * bounded.MAX_INPUT_BYTES + 1 if action == '--options' else bounded.MAX_INPUT_BYTES + 1)
     if len(options) > options_limit:
         raise MihomoMergeError('MERGE_INVALID_CHOICES')
     wire = _HEADER.pack(len(old), len(new), len(options)) + old + new + options
@@ -182,6 +214,12 @@ def _worker(action='--worker'):
             except PlanRecordError:
                 raise MihomoMergeError('PLAN_RECORD_INVALID') from None
             raw = (str(len(record)) + ' ' + str(len(merged)) + '\n').encode('ascii') + record + merged
+        elif action == '--options':
+            if type(rows) is not dict or set(rows) != {'fingerprint', 'selections'}:
+                raise MihomoMergeError('MERGE_INVALID_CHOICES')
+            merged = serialize_reviewed_mihomo_merge(old, new, rows['fingerprint'], rows['selections'])
+            raw = json.dumps(mihomo_plan_options('{}', merged), ensure_ascii=False,
+                             separators=(',', ':')).encode('utf-8')
         elif action == '--reviewed':
             if (type(rows) is not dict or set(rows) != {'fingerprint', 'selections'}):
                 raise MihomoMergeError('MERGE_INVALID_CHOICES')
@@ -204,6 +242,6 @@ def _worker(action='--worker'):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 2 or sys.argv[1] not in ('--worker', '--review', '--reviewed', '--prepare'):
+    if len(sys.argv) != 2 or sys.argv[1] not in ('--worker', '--review', '--reviewed', '--prepare', '--options'):
         raise SystemExit(64)
     _worker(sys.argv[1])

@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.mihomo_merge import MihomoMergeError
 from app.services.mihomo_merge_download import (
-    download_mihomo_merge, review_mihomo_download, reviewed_mihomo_download,
+    download_mihomo_merge, mihomo_draft_options, review_mihomo_download, reviewed_mihomo_download,
 )
 from app.services.mihomo_preview import MihomoPreviewError, preview_mihomo
 from app.services.mihomo_preview_report import render_preview_text
@@ -87,6 +87,23 @@ def review_yaml_merge(payload: MergeReviewPayload, request: Request):
         raise HTTPException(403, {'code': 'ADMIN_REQUIRED'})
     try:
         return review_mihomo_download(payload.baseline, payload.candidate)
+    except MihomoPreviewError as error:
+        raise _parser_error(error) from None
+    except MihomoMergeError as error:
+        raise HTTPException(422, {'code': error.code}) from None
+
+
+class PlanOptionsPayload(MergeReviewPayload):
+    fingerprint: str = Field(pattern=r'^[a-f0-9]{64}$', min_length=64, max_length=64)
+    selections: list[Literal['baseline', 'candidate']] = Field(max_length=256)
+
+
+@router.post('/yaml/plan/options')
+def yaml_plan_options(payload: PlanOptionsPayload, request: Request):
+    if getattr(request.state, 'admin', None) is None or getattr(request.state, 'maintenance', None) is not None:
+        raise HTTPException(403, {'code': 'ADMIN_REQUIRED'})
+    try:
+        return mihomo_draft_options(payload.baseline, payload.candidate, payload.fingerprint, payload.selections)
     except MihomoPreviewError as error:
         raise _parser_error(error) from None
     except MihomoMergeError as error:

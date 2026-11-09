@@ -43,6 +43,7 @@
     let importEpoch = 0, importBusy = false, importSaving = false, importController = null, preview = null;
     let exportEpoch = 0, exportController = null;
     const downloadUrls = new Set();
+    let yamlRefreshPending = false, yamlWriteUncertain = false, yamlSaveConfirmed = false, yamlChangeEpoch = 0;
     function invalidateReview() {
         applyReview=null; $('apply-review').hidden=true;
         globalThis.VUI_NAV?.modal.close('apply-review'); $('review-coverage').replaceChildren();
@@ -211,7 +212,7 @@
             '尚无已提交活动配置，不能导出草稿。':pending?'存在未完成事务，暂时阻止导出。':blockedNode?'所选入口未确认已应用中转，不能严格导出；直连、待应用或停止的入口不符合条件。':
             '仅使用活动修订 '+snapshot.active.revision+'；页面编辑及较新的草稿不会进入下载。服务器仍会重新核验运行状态。';
         if (diagnostic) renderDiagnostic(diagnostic);
-        $('rebase').disabled=busy||pending; $('discard').disabled=busy||pending;
+        $('rebase').disabled=busy||pending||yamlWriteUncertain; $('discard').disabled=busy||pending||yamlWriteUncertain;
         $('conflict').hidden=!conflict;
         $('save-state').textContent=conflict?'有冲突：页面编辑尚未保存。':dirty?'有未保存编辑；不会改变活动配置。':
             snapshot.active&&snapshot.active.revision===snapshot.revision?'草稿与已提交活动修订一致；这不是线路检测结果。':'草稿已保存，尚未与活动修订一致。';
@@ -240,7 +241,7 @@
             $('local-port').value=next.settings.local_port;
             clearCredentials();
         }
-        $('draft-state').textContent=mode(next.settings);
+        $('draft-state').textContent=next.execution_mode==='yaml'?'YAML 路由草稿（尚未应用）':mode(next.settings);
         $('draft-revision').textContent='修订 '+next.revision;
         $('active-state').textContent=next.active?mode(next.active.settings):'尚无已提交活动快照；当前运行状态未验证。';
         $('active-revision').textContent=next.active?'修订 '+next.active.revision:'';
@@ -272,7 +273,7 @@
             if (error.code==='PROXY_REVISION_CONFLICT') await handleConflict();
             else if (error.code==='PROXY_POLICY_REJECTED') { renderCheck({coverage:error.coverage},snapshot.revision); notice(error.message,true); }
             else if (error.status!==401) notice(error instanceof ApiError?error.message:'连接或响应异常，结果未确认。请刷新服务器状态。',true);
-        } finally { busy=false; updateControls(); }
+        } finally { busy=false; updateControls(); void refreshYamlDraft(); }
     }
     function edited() {
         invalidateReview(); $('check-result').hidden=true; $('coverage').replaceChildren(); updateControls();
@@ -297,7 +298,12 @@
     });
     $('refresh').addEventListener('click',()=>action(async()=>{
         clearExport();
+        const epoch = yamlChangeEpoch;
         await reloadSnapshot();
+        if (epoch === yamlChangeEpoch) {
+            yamlWriteUncertain = false;
+            if (!isDirty()) conflict = false;
+        }
         notice(conflict?'服务器状态已刷新；请先处理修订冲突。':'已重新读取服务器草稿与活动快照。',conflict);
     }));
     $('rebase').addEventListener('click',()=>{ conflict=false; edited(); notice('已保留页面编辑。请核对后明确保存，新保存仍需服务端修订检查。'); });
@@ -566,7 +572,7 @@
             if (error.code==='PROXY_REVISION_CONFLICT') await handleConflict();
             else if (error.code==='PROXY_POLICY_REJECTED') { renderCheck({coverage:error.coverage},snapshot.revision); notice(error.message,true); }
             else if (error.status!==401) notice(error instanceof ApiError?error.message:'保存结果未确认，原文已清空。请刷新上游列表后再决定是否重新导入。',true);
-        } finally { importSaving=false; payload.content=''; }
+        } finally { importSaving=false; payload.content=''; void refreshYamlDraft(); }
     });
     const stageNames={configuration:'配置检查',tcp:'上游 TCP',tls_or_reality:'TLS / REALITY',proxy_forwarding:'代理转发',https_exit:'HTTPS 与出口 IP（同一次请求）',dns:'业务 DNS',external_client:'外部设备端到端'};
     const diagnosticStates={running:'运行中',completed:'已结束',failed:'失败',cancelled:'已取消',expired:'证据已过期'};
@@ -666,6 +672,38 @@
             fetch('/api/proxy/diagnostics/'+encodeURIComponent(diagnostic.job_id),{method:'DELETE',credentials:'same-origin',cache:'no-store',keepalive:true,headers:{'X-VUI-Request':'1'}}).catch(()=>{});
         }
     }
+    async function refreshYamlDraft() {
+        if (busy || importSaving || !pageActive || !yamlRefreshPending) return;
+        busy=true; updateControls();
+        try {
+            while (yamlRefreshPending && pageActive) {
+                yamlRefreshPending=false;
+                const preserve=isDirty();
+                await reloadSnapshot(preserve);
+                conflict=preserve||yamlWriteUncertain;
+                notice(yamlWriteUncertain?'YAML 保存结果曾未确认。已读取服务器草稿，请核对后点击刷新继续。':
+                    preserve?'服务器草稿已更新。当前表单还有未保存编辑，请核对服务器新草稿。':
+                    yamlSaveConfirmed?'YAML 运行草稿已保存。':'服务器草稿已变化，已重新读取。',
+                    conflict);
+            }
+        } catch(error) {
+            conflict=true;
+            if (pageActive && error.status!==401) notice('YAML 草稿状态未确认，请刷新服务器状态。',true);
+        } finally { busy=false; updateControls(); }
+    }
+    function queueYamlRefresh(uncertain, confirmed = false) {
+        if (!pageActive) return;
+        yamlChangeEpoch++;
+        yamlWriteUncertain=yamlWriteUncertain||uncertain;
+        yamlSaveConfirmed=confirmed;
+        yamlRefreshPending=true;
+        invalidateReview();
+        conflict=true; updateControls();
+        void refreshYamlDraft();
+    }
+    addEventListener('vui-yaml-draft-saved',()=>queueYamlRefresh(false, true));
+    addEventListener('vui-yaml-draft-conflict',()=>queueYamlRefresh(false));
+    addEventListener('vui-yaml-draft-uncertain',()=>queueYamlRefresh(true));
     addEventListener('pagehide',leave);
     // Same-document modal Back must not deactivate the business page.
     if (!globalThis.VUI_NAV) addEventListener('popstate',leave);

@@ -1,7 +1,7 @@
 import unittest
 
 from app.services.mihomo_merge import MihomoMergeError
-from app.services.mihomo_merge_plan import plan_mihomo, render_sing_box_rules
+from app.services.mihomo_merge_plan import mihomo_plan_options, plan_mihomo, render_sing_box_rules
 
 
 BASELINE = """
@@ -42,6 +42,14 @@ rules:
             plan.route('https://example.com')
         with self.assertRaisesRegex(MihomoMergeError, '^PLAN_INVALID_DESTINATION$'):
             plan.route('fe80::1%eth0')
+
+    def test_private_options_only_show_referenced_groups_and_labels(self):
+        options = mihomo_plan_options(BASELINE, '{rules: ["MATCH,Chosen"]}')
+        self.assertEqual(options, {'upstreams': ['upstream'],
+                                   'groups': [{'name': 'Chosen', 'members': ['upstream', 'REJECT']}]})
+        self.assertNotIn('relay.example.com', repr(options))
+        self.assertNotIn('11111111-', repr(options))
+        self.assertEqual(mihomo_plan_options(BASELINE, '{rules: ["MATCH,REJECT"]}')['groups'], [])
 
     def test_renderer_keeps_rule_order_and_scopes_every_rule(self):
         plan = plan_mihomo(BASELINE, '{rules: ["DOMAIN,example.com,DIRECT", '

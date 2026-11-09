@@ -45,8 +45,7 @@ class StaticMihomoPlan:
         raise MihomoMergeError('PLAN_FINAL_REQUIRED')
 
 
-def plan_mihomo(baseline, candidate, *, choices=None, group_members=None) -> StaticMihomoPlan:
-    """Resolve explicit selections and produce ordered rules without writes."""
+def _static_document(baseline, candidate, choices):
     merged = merge_mihomo(baseline, candidate, choices=choices)
     if set(merged) - {'mode', 'proxies', 'proxy-groups', 'rules'}:
         raise MihomoMergeError('PLAN_UNSUPPORTED_SECTION')
@@ -56,7 +55,7 @@ def plan_mihomo(baseline, candidate, *, choices=None, group_members=None) -> Sta
         profiles = tuple(_clash_profile(node) for node in merged.get('proxies', ()))
     except UpstreamValidationError:
         raise MihomoMergeError('PLAN_UNSUPPORTED_NODE') from None
-    nodes = {node['name'] for node in merged.get('proxies', ())}
+    nodes = {profile.name for profile in profiles}
     available = nodes | _BUILTINS
     groups = {}
     for group in merged.get('proxy-groups', ()):
@@ -64,15 +63,7 @@ def plan_mihomo(baseline, candidate, *, choices=None, group_members=None) -> Sta
                 or not group['proxies'] or not set(group['proxies']) <= available):
             raise MihomoMergeError('PLAN_UNSUPPORTED_GROUP')
         groups[group['name']] = group['proxies']
-    if group_members is None:
-        group_members = {}
-    if (type(group_members) is not dict or len(group_members) > len(groups)
-            or any(type(name) is not str or name not in groups
-                   or type(member) is not str or member not in groups[name]
-                   for name, member in group_members.items())):
-        raise MihomoMergeError('PLAN_INVALID_GROUP_SELECTION')
-
-    rules, source_rules, referenced_groups = [], [], set()
+    rules = []
     for rule in merged.get('rules', ()):
         if type(rule) is not str:
             raise MihomoMergeError('PLAN_UNSUPPORTED_RULE')
@@ -83,21 +74,44 @@ def plan_mihomo(baseline, candidate, *, choices=None, group_members=None) -> Sta
         parsed = _rule_shape(rule)
         if parsed is None:
             raise MihomoMergeError('PLAN_UNSUPPORTED_RULE')
-        kind, operand, target = parsed
-        source_rules.append(parsed)
+        if parsed[2] not in available | groups.keys():
+            raise MihomoMergeError('PLAN_INVALID_TARGET')
+        rules.append(parsed)
+    if not rules or rules[-1][0] != 'MATCH' or any(rule[0] == 'MATCH' for rule in rules[:-1]):
+        raise MihomoMergeError('PLAN_FINAL_REQUIRED')
+    return profiles, groups, tuple(rules)
+
+
+def mihomo_plan_options(baseline, candidate, *, choices=None):
+    """Private selector labels only; no credentials, hosts or implicit selections."""
+    profiles, groups, rules = _static_document(baseline, candidate, choices)
+    referenced = {target for _, _, target in rules if target in groups}
+    return {'upstreams': [profile.name for profile in profiles],
+            'groups': [{'name': name, 'members': list(members)}
+                       for name, members in groups.items() if name in referenced]}
+
+
+def plan_mihomo(baseline, candidate, *, choices=None, group_members=None) -> StaticMihomoPlan:
+    """Resolve explicit selections and produce ordered rules without writes."""
+    profiles, groups, source_rules = _static_document(baseline, candidate, choices)
+    if group_members is None:
+        group_members = {}
+    if (type(group_members) is not dict or len(group_members) > len(groups)
+            or any(type(name) is not str or name not in groups
+                   or type(member) is not str or member not in groups[name]
+                   for name, member in group_members.items())):
+        raise MihomoMergeError('PLAN_INVALID_GROUP_SELECTION')
+    rules, referenced_groups = [], set()
+    for kind, operand, target in source_rules:
         if target in groups:
             referenced_groups.add(target)
             if target not in group_members:
                 raise MihomoMergeError('PLAN_GROUP_SELECTION_REQUIRED')
             target = group_members[target]
-        if target not in available:
-            raise MihomoMergeError('PLAN_INVALID_TARGET')
         rules.append((kind, operand, target))
     if referenced_groups != group_members.keys():
         raise MihomoMergeError('PLAN_UNUSED_GROUP_SELECTION')
-    if not rules or rules[-1][0] != 'MATCH' or any(rule[0] == 'MATCH' for rule in rules[:-1]):
-        raise MihomoMergeError('PLAN_FINAL_REQUIRED')
-    return StaticMihomoPlan(profiles, tuple(rules), tuple(source_rules), tuple(group_members.items()))
+    return StaticMihomoPlan(profiles, tuple(rules), source_rules, tuple(group_members.items()))
 
 
 def render_sing_box_rules(plan: StaticMihomoPlan, *, inbound: str, outbound_tags: dict[str, str]) -> list[dict]:

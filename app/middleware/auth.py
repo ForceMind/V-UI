@@ -193,7 +193,8 @@ class AdminAuthMiddleware:
         bounded_auth = path.startswith("/api/auth/") and request.method == "POST"
         bounded_proxy = path.startswith("/api/proxy/") and request.method in {"POST", "PUT", "PATCH"}
         merge_request = path in {"/api/proxy/yaml/merge/download",
-                                  "/api/proxy/yaml/merge/review", "/api/proxy/yaml/draft"} and request.method == "POST"
+                                  "/api/proxy/yaml/merge/review", "/api/proxy/yaml/draft",
+                                  "/api/proxy/yaml/plan/options"} and request.method == "POST"
         bounded_maintenance = path.startswith('/api/maintenance/') and request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}
         bounded_dns = path.startswith('/api/certificates') and request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}
         payload = {}

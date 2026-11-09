@@ -71,8 +71,9 @@ curl --noproxy "" --proxy socks5h://127.0.0.1:7891 --proxy-user example-user 'ht
 <label for="yaml-baseline">基线 YAML（可选，留空不比较，最多 1 MiB UTF-8）</label><textarea id="yaml-baseline" rows="4" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea><label for="yaml-baseline-file">或从本地 UTF-8 文件读入基线</label><input id="yaml-baseline-file" type="file" accept=".yaml,.yml,.txt">
 <p class="hint">下载合并 YAML 需要候选和基线两份输入。附件可能包含节点凭据，请妥善保管。</p>
 <p class="hint">包含 JSON 转义和语法的总请求最多 2 MiB。只识别有限语法，真实核心兼容性与合并等价均未验证；即使零诊断也不可应用。</p>
-<div class="actions"><button id="yaml-preview-submit" type="submit">生成只读报告</button><button id="yaml-merge-review" type="submit">检查合并冲突</button><button id="yaml-merge-download" type="submit">合并并下载 YAML</button><button id="clear-yaml-preview" type="button">清空输入与报告</button></div>
+<div class="actions"><button id="yaml-preview-submit" type="submit">生成只读报告</button><button id="yaml-merge-review" type="submit">检查合并冲突</button><button id="yaml-merge-download" type="submit">合并并下载 YAML</button><button id="yaml-plan-options" type="submit">选择运行分组</button><button id="yaml-plan-save" type="submit">保存运行草稿</button><button id="clear-yaml-preview" type="button">清空输入与报告</button></div>
 <section id="yaml-merge-conflicts" aria-label="合并冲突选择" hidden></section>
+<section id="yaml-plan-choices" aria-label="运行草稿选项" hidden></section>
 <p id="yaml-preview-notice" role="status" aria-live="polite"></p><pre id="yaml-preview-result" aria-label="只读预览报告" tabindex="0" hidden></pre>
 </form></dialog>
 </details>

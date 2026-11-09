@@ -57,6 +57,16 @@ class MihomoYamlDraftApiTests(unittest.TestCase):
         self.assertEqual(self.store.policy_schema_version(), 3)
         self.apply.assert_not_called()
 
+    def test_options_are_private_labels_and_do_not_write_a_draft(self):
+        payload = {key: self.payload[key] for key in ('baseline', 'candidate', 'fingerprint', 'selections')}
+        response = self.client.post('/api/proxy/yaml/plan/options', json=payload, headers=HEADERS)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {'upstreams': ['upstream'],
+                                          'groups': [{'name': 'Chosen', 'members': ['upstream', 'REJECT']}]})
+        self.assertNotIn('relay.example.com', response.text)
+        self.assertNotIn('11111111-', response.text)
+        self.assertEqual(self.store.read_snapshot(), self.before)
+
     def test_invalid_or_stale_review_never_mutates_saved_state(self):
         for overrides in ({'candidate': self.payload['candidate']+'\n'},
                           {'group_members': {'Chosen': 'missing'}},
