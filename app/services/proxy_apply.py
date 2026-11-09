@@ -178,8 +178,10 @@ class ProxyApplyCoordinator:
         return snapshot
 
     def _compile(self, snapshot, rows, *, active=False, fresh_pin=False, fence_required=True):
+        if snapshot.get("execution_mode") == "yaml":
+            raise ProxyApplyError("YAML_PLAN_NOT_READY")
         plan = policy_plan(rows, snapshot["settings"])
-        if fence_required and not plan.legacy and self.store.policy_schema_version() != 2:
+        if fence_required and not plan.legacy and self.store.policy_schema_version() < 2:
             self._stop()
             raise ProxyApplyError("RECOVERY_REQUIRED")
         addresses, endpoint = (), None
@@ -213,7 +215,7 @@ class ProxyApplyCoordinator:
         """
         from app.services.proxy_store import _defaults
         plan = policy_plan(rows, active["settings"] if active else _defaults())
-        if ((not plan.legacy and self.store.policy_schema_version() != 2)
+        if ((not plan.legacy and self.store.policy_schema_version() < 2)
                 or active is None and plan.relay_ids):
             self._stop()
             raise ProxyApplyError("RECOVERY_REQUIRED")
@@ -424,7 +426,7 @@ class ProxyApplyCoordinator:
         if compiled.policy_version == 2:
             # A SQL mode without its precommit capability fence is corrupt,
             # not a migration opportunity during runtime application.
-            if self.store.policy_schema_version() != 2:
+            if self.store.policy_schema_version() < 2:
                 self._stop()
                 raise ProxyApplyError("RECOVERY_REQUIRED")
             context.update(schema_version=2, policy_version=2,

@@ -15,6 +15,7 @@ Archival/compaction is a separate maintenance operation, not implicit cleanup.
 from __future__ import annotations
 
 from contextlib import contextmanager
+import base64
 import copy
 import fcntl
 import hashlib
@@ -38,7 +39,9 @@ _TX = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 _SECRET = re.compile(r"sec_[0-9a-f]{32}\Z")
 _LOCKS: dict[str, threading.RLock] = {}
 _LOCKS_GUARD = threading.Lock()
-PROXY_STATE_SCHEMA_MAX = 2
+PROXY_STATE_SCHEMA_MAX = 3
+_YAML_FENCE = "yaml-capability.json"
+_YAML_CAPABILITY = {"schema_version": 1, "kind": "yaml-capability", "minimum_state_schema": 3}
 _FLAGS = ("local_proxy_enabled", "relay_enabled")
 _PUBLIC_SETTINGS = {
     "schema_version", *_FLAGS, "selected_upstream_id", "local_port",
@@ -353,7 +356,7 @@ class ProxyStore:
             "core_revision", "pending", "transactions"} or isinstance(state, dict) and set(state) == {
             "schema_version", "store_id", "draft_revision", "active_revision", "core_revision",
             "pending", "transactions", "active_transaction_id"})
-        _require(type(state["schema_version"]) is int and state["schema_version"] in (1, 2) and state["store_id"] == store_id)
+        _require(type(state["schema_version"]) is int and state["schema_version"] in (1, 2, 3) and state["store_id"] == store_id)
         _require(isinstance(state["draft_revision"], str) and _HEX.fullmatch(state["draft_revision"]) is not None)
         active = state["active_revision"]
         _require(active is None or isinstance(active, str) and _HEX.fullmatch(active) is not None)
@@ -557,8 +560,17 @@ class ProxyStore:
 
     def _revision(self, revisions: int, secrets: int, revision: str) -> tuple[dict, dict, str | None]:
         doc = self._read_json(revisions, revision + ".json")
-        _require(isinstance(doc, dict) and set(doc) == {"schema_version", "settings", "upstreams", "local_password_revision"})
-        _require(type(doc["schema_version"]) is int and doc["schema_version"] == 1 and _digest(doc) == revision)
+        legacy_fields = {"schema_version", "settings", "upstreams", "local_password_revision"}
+        _require(type(doc) is dict and type(doc.get("schema_version")) is int)
+        _require(doc["schema_version"] in (1, 2) and _digest(doc) == revision)
+        _require(set(doc) == (legacy_fields if doc["schema_version"] == 1 else
+                              legacy_fields | {"execution_mode", "yaml_plan"}))
+        if doc["schema_version"] == 2:
+            _require(doc["execution_mode"] in ("single", "yaml"))
+            if doc["execution_mode"] == "yaml":
+                self._yaml_material(secrets, doc["yaml_plan"])
+            else:
+                _require(doc["yaml_plan"] is None)
         settings = doc["settings"]
         _require(isinstance(settings, dict) and set(settings) == _PUBLIC_SETTINGS | {"local_password_ref"})
         password_ref = settings["local_password_ref"]
@@ -612,6 +624,107 @@ class ProxyStore:
         return doc, profiles, password
 
     @staticmethod
+    def _yaml_source(value):
+        _require(type(value) is dict and set(value) == {"schema_version", "kind", "sha256", "data"}
+                 and type(value["schema_version"]) is int and value["schema_version"] == 1
+                 and value["kind"] == "yaml_source" and type(value["sha256"]) is str
+                 and _HEX.fullmatch(value["sha256"]) and type(value["data"]) is str
+                 and len(value["data"]) <= 1_398_104)
+        try:
+            raw = base64.b64decode(value["data"], validate=True)
+        except (ValueError, UnicodeError):
+            raise ProxyStorageError("Saved YAML source is invalid") from None
+        _require(0 < len(raw) <= 1_048_576 and base64.b64encode(raw).decode("ascii") == value["data"]
+                 and hashlib.sha256(raw).hexdigest() == value["sha256"])
+        return raw
+
+    def _yaml_material(self, secrets, entry):
+        from app.services.mihomo_plan_record import PlanRecordError, decode_plan_record
+        _require(type(entry) is dict and set(entry) == {"secret_ref", "secret_revision"}
+                 and type(entry["secret_ref"]) is str and _SECRET.fullmatch(entry["secret_ref"])
+                 and type(entry["secret_revision"]) is str and _HEX.fullmatch(entry["secret_revision"]))
+        secret = self._read_json(secrets, entry["secret_ref"] + ".json")
+        _require(type(secret) is dict and set(secret) == {"schema_version", "kind", "plan", "sources"}
+                 and type(secret["schema_version"]) is int and secret["schema_version"] == 1
+                 and secret["kind"] == "yaml_plan" and _digest(secret) == entry["secret_revision"])
+        try:
+            record = decode_plan_record(_canonical(secret["plan"]))
+        except PlanRecordError:
+            raise ProxyStorageError("Saved YAML plan is invalid") from None
+        manifest = record.value
+        refs = secret["sources"]
+        _require(type(refs) is dict and set(refs) == {"baseline", "candidate", "merged"})
+        sources = {}
+        for role, reference in refs.items():
+            _require(type(reference) is dict and set(reference) == {"secret_ref", "secret_revision"}
+                     and type(reference["secret_ref"]) is str and _SECRET.fullmatch(reference["secret_ref"])
+                     and type(reference["secret_revision"]) is str and _HEX.fullmatch(reference["secret_revision"]))
+            value = self._read_json(secrets, reference["secret_ref"] + ".json")
+            _require(_digest(value) == reference["secret_revision"])
+            sources[role] = self._yaml_source(value)
+            _require(value["sha256"] == manifest["sources"][role])
+        return record, sources
+
+    def _private_yaml(self, secrets, doc):
+        if doc["schema_version"] == 1:
+            return {}
+        material = None if doc["yaml_plan"] is None else self._yaml_material(secrets, doc["yaml_plan"])
+        return {"execution_mode": doc["execution_mode"], "yaml_plan": material}
+
+    def save_yaml_plan(self, record_bytes, sources, expected_revision):
+        """Private draft storage only; runtime application has its own admission."""
+        from app.services.mihomo_plan_record import PlanRecordError, decode_plan_record
+        try:
+            record = decode_plan_record(record_bytes)
+        except PlanRecordError:
+            raise ProxyValidationError("YAML plan record is invalid") from None
+        if type(sources) is not dict or set(sources) != {"baseline", "candidate", "merged"}:
+            raise ProxyValidationError("YAML sources are incomplete")
+        manifest = record.value
+        objects, references = {}, {}
+        for role, raw in sources.items():
+            if type(raw) is not bytes or not 0 < len(raw) <= 1_048_576:
+                raise ProxyValidationError("YAML source exceeds its private bound")
+            digest = hashlib.sha256(raw).hexdigest()
+            if manifest["sources"][role] != digest:
+                raise ProxyValidationError("YAML source differs from its plan")
+            secret = {"schema_version": 1, "kind": "yaml_source", "sha256": digest,
+                      "data": base64.b64encode(raw).decode("ascii")}
+            ref = "sec_" + uuid.uuid4().hex
+            objects[ref] = secret
+            references[role] = {"secret_ref": ref, "secret_revision": _digest(secret)}
+        plan = {"schema_version": 1, "kind": "yaml_plan", "plan": manifest, "sources": references}
+        plan_ref = "sec_" + uuid.uuid4().hex
+        with self._locked() as (root, revisions, secrets, state, _):
+            self._editable(state, expected_revision)
+            doc = self._revision(revisions, secrets, state["draft_revision"])[0]
+            self._snapshot(revisions, secrets, state)
+            doc.update(schema_version=2, execution_mode="yaml",
+                       yaml_plan={"secret_ref": plan_ref, "secret_revision": _digest(plan)})
+            self._check_doc_capacity(state, doc)
+            if len(_canonical(plan)) > MAX_BYTES:
+                raise ProxyCapacityError("YAML plan capacity is full")
+            # An interruption may leave private orphan objects, never an
+            # unguarded new-format document readable by an old consumer.
+            upgraded = {**state, "schema_version": 3}
+            self._commit_state(root, state, upgraded)
+            self._immutable(secrets, _YAML_FENCE, _YAML_CAPABILITY)
+            for ref, value in objects.items():
+                self._immutable(secrets, ref + ".json", value)
+            self._immutable(secrets, plan_ref + ".json", plan)
+            return self._save_doc(root, revisions, secrets, upgraded, doc)
+
+    def clear_yaml_plan(self, expected_revision):
+        with self._locked() as (root, revisions, secrets, state, _):
+            self._editable(state, expected_revision)
+            doc = self._revision(revisions, secrets, state["draft_revision"])[0]
+            self._snapshot(revisions, secrets, state)
+            if doc["schema_version"] == 1:
+                return self._snapshot(revisions, secrets, state)
+            doc.update(execution_mode="single", yaml_plan=None)
+            return self._save_doc(root, revisions, secrets, state, doc)
+
+    @staticmethod
     def _source(source_format, source_fingerprint):
         if source_format not in ("manual", "uri", "v2ray-json", "clash-yaml"):
             raise ProxyValidationError("Upstream source format is invalid")
@@ -630,7 +743,13 @@ class ProxyStore:
                 "local_password_set": settings["local_password_ref"] is not None}
 
     def _snapshot(self, revisions, secrets, state):
+        fence = self._read_json(secrets, _YAML_FENCE, optional=True)
+        if fence is not None:
+            _require(fence == _YAML_CAPABILITY and type(fence["schema_version"]) is int
+                     and type(fence["minimum_state_schema"]) is int and state["schema_version"] == 3)
         doc, profiles, _ = self._revision(revisions, secrets, state["draft_revision"])
+        _require(doc["schema_version"] == 1 or
+                 state["schema_version"] == 3 and fence is not None)
         # New historical manifests are immutable but still strictly checked;
         # their needs/source hash must bind their OWN settings, not the draft.
         documents = {state["draft_revision"]: doc}
@@ -661,8 +780,13 @@ class ProxyStore:
         if pending and pending.get("runtime_context"):
             pending_doc = self._revision(revisions, secrets, pending["revision"])[0]
             self._validate_context_snapshot(pending["runtime_context"], pending_doc)
-        return {"revision": state["draft_revision"], "settings": self._public_settings(doc["settings"]),
-                "upstreams": upstreams, "active": active, "pending": self._public_pending(pending)}
+        snapshot = {"revision": state["draft_revision"], "settings": self._public_settings(doc["settings"]),
+                    "upstreams": upstreams, "active": active, "pending": self._public_pending(pending)}
+        if doc["schema_version"] == 2:
+            snapshot["execution_mode"] = doc["execution_mode"]
+            snapshot["yaml_plan"] = (None if doc["yaml_plan"] is None else
+                                     {"revision": doc["yaml_plan"]["secret_revision"]})
+        return snapshot
 
     @staticmethod
     def _check_state_capacity(old, new):
@@ -769,7 +893,8 @@ class ProxyStore:
                     "upstreams": profiles, "local_password": password,
                     "core_revision": state["core_revision"] if active else None,
                     "pending": self._public_pending(state["pending"]),
-                    "runtime_context": self._active_context(state) if active else None}
+                    "runtime_context": self._active_context(state) if active else None,
+                    **self._private_yaml(secrets, doc)}
 
     def load_revision_snapshot(self, revision: str) -> dict:
         """Private immutable request source for idempotency validation."""
@@ -778,7 +903,8 @@ class ProxyStore:
             _require(type(revision) is str and _HEX.fullmatch(revision))
             doc, profiles, password = self._revision(revisions, secrets, revision)
             return {"revision": revision, "settings": copy.deepcopy(doc["settings"]),
-                    "upstreams": profiles, "local_password": password}
+                    "upstreams": profiles, "local_password": password,
+                    **self._private_yaml(secrets, doc)}
 
     def load_draft(self) -> dict:
         return self._load(False)
@@ -905,6 +1031,9 @@ class ProxyStore:
         with self._locked() as (root, revisions, secrets, state, _):
             self._snapshot(revisions, secrets, state)
             target = state["active_revision"] if reconcile else state["draft_revision"]
+            target_doc = self._revision(revisions, secrets, target)[0] if target is not None else None
+            if target_doc is not None and target_doc.get("execution_mode") == "yaml":
+                raise ProxyValidationError("YAML application is not available until its transaction context is supported")
             if expected_revision != target or reconcile and expected_core_revision != state["core_revision"]:
                 raise ProxyConflict("Proxy snapshot changed before apply")
             if runtime_context is not None:
@@ -1012,10 +1141,17 @@ class ProxyStore:
                     self._revision(revisions, secrets, name[:-5])
                     yield "proxy-state/revisions/" + name, self._read_bytes(revisions, name)
                 for name in sorted(os.listdir(secrets)):
+                    if name == _YAML_FENCE:
+                        yield "proxy-state/secrets/" + name, self._read_bytes(secrets, name)
+                        continue
                     _require(name.endswith(".json") and _SECRET.fullmatch(name[:-5]) is not None)
                     secret = self._read_json(secrets, name)
                     _require(type(secret.get("schema_version")) is int and secret["schema_version"] == 1)
-                    if secret.get("kind") == "local_password":
+                    if secret.get("kind") == "yaml_source":
+                        self._yaml_source(secret)
+                    elif secret.get("kind") == "yaml_plan":
+                        self._yaml_material(secrets, {"secret_ref": name[:-5], "secret_revision": _digest(secret)})
+                    elif secret.get("kind") == "local_password":
                         _require(set(secret) == {"schema_version", "kind", "password"} and bool(secret["password"]))
                         try:
                             self._password(secret["password"])

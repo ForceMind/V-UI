@@ -100,7 +100,9 @@ CORE_SOURCE_DEPENDENCIES = {
     'core_boot_broker.py': 'deploy/core_boot_broker.py',
     'core_maintenance_control.py': 'deploy/core_maintenance_control.py',
 }
-SOURCE_DEPENDENCIES = PRE_DNS_SOURCE_DEPENDENCIES | DNS_SOURCE_DEPENDENCIES | CORE_SOURCE_DEPENDENCIES
+YAML_SOURCE_DEPENDENCIES = {'mihomo_plan_record.py': 'app/services/mihomo_plan_record.py'}
+SOURCE_DEPENDENCIES = (PRE_DNS_SOURCE_DEPENDENCIES | DNS_SOURCE_DEPENDENCIES
+                       | CORE_SOURCE_DEPENDENCIES | YAML_SOURCE_DEPENDENCIES)
 RECEIPT_KEYS = {'schema', 'service_manager', 'system_python', 'interpreter_resolved',
                 'interpreter_sha256', 'files'}
 MAX_CODE = 4_000_000
@@ -522,8 +524,10 @@ def validate_existing(hashes, interpreter, manager, refresh, verified, *, missin
     # Published pre-core DNS closures have every DNS helper, and no core helper.
     # Older closures lack all DNS and all core helpers. Never accept a partial
     # core group or derive old shapes by subtracting arbitrary current files.
-    known_missing = (core_dependencies,) + tuple(core_dependencies | dns_dependencies | item
-                                                 for item in pre_dns_missing)
+    yaml_dependencies = {str(CONTROL / name) for name in YAML_SOURCE_DEPENDENCIES}
+    known_missing = (yaml_dependencies,) + tuple(
+        yaml_dependencies | older for older in
+        ((core_dependencies,) + tuple(core_dependencies | dns_dependencies | item for item in pre_dns_missing)))
     missing = (expected - set(receipt['files']) if isinstance(receipt, dict)
                and isinstance(receipt.get('files'), dict) else set())
     legacy = (refresh and isinstance(receipt, dict) and isinstance(receipt.get('files'), dict)

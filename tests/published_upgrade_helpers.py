@@ -71,10 +71,16 @@ def fixed_public_baseline(version, commit):
     return version, commit
 
 
-def assert_receipt_migration(test, before, after, old_version, candidate_version='0.4.22', *, core_control=False):
+YAML_FILES = frozenset({str(CONTROL / 'mihomo_plan_record.py')})
+
+
+def assert_receipt_migration(test, before, after, old_version, candidate_version='0.4.22', *, core_control=False, yaml_control=False):
     if old_version not in PUBLISHED_BASELINES:
         raise AssertionError('Unknown public upgrade receipt baseline')
     _target_contract(candidate_version)
+    if type(yaml_control) is not bool or yaml_control and not core_control:
+        raise AssertionError('YAML closure qualification requires the explicit core profile')
+    test.assertTrue(YAML_FILES.isdisjoint(before['files']))
     if type(core_control) is not bool or core_control and candidate_version != '0.4.23':
         raise AssertionError('Explicit P3 development control profile required')
     test.assertTrue(CORE_FILES.isdisjoint(before['files']), 'Historical receipt must not pre-contain core helpers')
@@ -89,6 +95,8 @@ def assert_receipt_migration(test, before, after, old_version, candidate_version
         additions = additions | DNS_FILES
     if core_control:
         additions = additions | CORE_FILES
+    if yaml_control:
+        additions = additions | YAML_FILES
     test.assertEqual(set(after['files']) - set(before['files']), additions)
     if old_version == '0.4.14':
         test.assertNotIn(FIREWALL, before['files'])
@@ -403,7 +411,7 @@ print('{}')
         self.test.assertEqual(manifest['source_commit'], self.candidate['source_commit'])
         self.test.assertEqual(manifest['version'], self.candidate['version'])
         assert_receipt_migration(self.test, self.old_receipt, self._receipt(), self.old_version, self.candidate['version'],
-                                 core_control=True)
+                                 core_control=True, yaml_control=True)
         self.test.assertEqual(self._snapshot(release,after=True), self.data, 'Private DB rows and certificate bytes must survive')
         assert_node_summary_upgrade(self.test, self.nodes, json.loads(api('/api/inbounds')[1]), self.old_version)
         if self.manual_editor is not None:

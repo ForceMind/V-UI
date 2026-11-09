@@ -781,7 +781,7 @@ def _database_mode_fence(data: Path, *, _existing_store_type=None):
         invalid, explicit = db.execute("SELECT count(CASE WHEN routing_mode IS NULL OR "
             "typeof(routing_mode) != 'text' OR routing_mode NOT IN (?,?,?) THEN 1 END), "
             "count(CASE WHEN routing_mode != 'inherit' THEN 1 END) FROM inbounds", sorted(MODES)).fetchone()
-        if invalid or explicit and schema != 2:
+        if invalid or explicit and schema < 2:
             raise ReleaseError('Inbound routing and its capability fence disagree; recovery is required')
         return bool(explicit)
 
