@@ -42,7 +42,7 @@ CONTRACTS = {
     'test_core_maintenance_control.py': 36,
     'test_core_maintenance_recovery.py': 9,
     'test_core_offline_guards.py': 11,
-    'test_core_authority.py': 24,
+    'test_core_authority.py': 32,
     'test_core_authority_loader.py': 2,
 }
 

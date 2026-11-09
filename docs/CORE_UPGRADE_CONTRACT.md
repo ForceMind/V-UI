@@ -846,3 +846,22 @@ Root `system_ops._load_core_authority` 只在完整安装收据/systemd通过、
 下一块仍是独立持久核心任务：异步观察真实应用与目标、Root写准入/执行前最后校权、同安装双域备份私有映射、预期pending事务/代次，再接终端新授权与完整面板流程。Root private helper安装本身不等于这些已实现。
 
 M46D最终源码独审无剩余阻断；独立复验Py3.9/3.12各loader2项与升级helper24项通过，52项纯安装/loader结果复用同源主代理证据，diffcheck通过。实际Root probe未在本机执行，待新准确源码Actions读回结果。
+
+## M46E 应用来源锚（必要前置，契约候选）
+
+独立窄查确认：active_verified验证服务UID拥有的CURRENT/MANIFEST/READY与实际文件自洽，没有独立Root的完整source40或原manifestSHA。Root config中的release_id也不能替代：它只有source前缀，且合法本地activate只切CURRENT。不能从这条自洽观察自动给候选兼容资格背书，也不能新增config.release_id强比来破坏合法activate。
+
+本迭代在Root私有控制状态中保存已明确接受安装包的来源记录，按release_id与本机target解析，记录完整source40、原MANIFEST原字节SHA、原包SHA及固定schema。来源仅由Root安装器在持有已独立SHA验证的原包快照时记录；Root受管stage亦从其已接受且受控的原包取得。禁止服务UID、网页参数、env或active_verified字典生成/补齐/替换记录。旧安装没有记录时明确未锚定；通过受信原包重验或正常已验证升级建立来源。相同标识冲突拒绝，不以更新字典替换旧身份。
+
+记录代表该包字节曾被Root明确接受，和已准备、当前活动、运行健康、组件兼容分别表达。安装失败可以保留已接受原包的来源记录，不宣称应用成功；它不产生远程授权或派工权。来源表保留多个已接受版本，因此Root activate/rollback可选择先前受验版本，不从旧config.release_id猜活动版本。不含来源锚的旧准备版本仍沿原工具边界处理，但不能获得新核心候选资格；需通过原包重验取得新资格。
+
+Root读取实际应用事实时，继续由固定CONTROL worker降权进行active_verified与文件身份观察，再在安装锁内把source40、原manifestSHA、release_id和target逐项对照Root接受记录。缺失/不符拒绝资格，无法观察/恢复待办独立报错；元数据成功匹配不称当前核心实际运行。执行前再次复核应用事实、Root记录与选择CAS。普通data restore不从备份复制/回退来源表；Root授权epoch撤销规则独立保持。
+
+最小涉及：Root私有来源记录原语及回归、scripts/install_system.py受验包快照生产入口、deploy/system_ops.py受管stage/activate的记录与选择边界、deploy/core_maintenance_control.py实际观察消费；相应Root闭包/升级/恢复失败回归与Actions真实新装/八旧版升级/x86/ARM保留。先独审输入的可信来源和失败/重试时序，再接异步事实任务；不增加任意导入、Root执行服务payload、公开写API或生产操作。当前仅契约，源码尚未实现此锚。
+
+
+M46E契约独审无架构阻断，producer已明确：新装/正常升级统一使用install_verified内verify_archive持有的已独立SHA核验快照，取原MANIFEST字节SHA，Root、非dry-run、安装锁内、首次降权stage前持久记录；在线升级复用此入口。受管Root stage目前没有Root原包快照，必须先补，不能拿worker prepared/READY返回值代替。
+
+当前已实现的第一块仅为私有表原语：authority schema2显式接受并迁移完整schema1，保留安装身份、epoch、grant、撤销tombstone与已消费记录，只补空applications，不从旧应用自授。来源记录精确绑定release_id/target/source40/原manifestSHA/原包SHA，同标识冲突拒绝、可保留多版本；读到已记录来源须重新确认durability，避免前次fsync未知被当成持久成功。新增8项回归，authority合计32项Py3.9/3.12通过，源码独审无剩余阻断；独立两版复验均零skip，准确Actions待验。SDK/stage producer、Root事实consumer、异步任务与UI尚未接，当前来源资格缺口仍未完成修复；默认Root/生产来源记录未被本机会话写入。
+
+M46D `cd8deb8` 自身十组Actions全部成功：安装42652328214完成新装/八旧版升级，组件42652327756完成四目标/ARM64。新装小日志13691911137、收据13692175880及ARM日志13693145262已独立读回，新增 `VUI_CORE_AUTHORITY_INSTALLED_ACCEPTANCE` 与既有只读/两核切换/中断/双域恢复标记齐全，测试OK，新装退出0。新装准确source=cd8deb8，bundle `b2a91be53e4d8112db8df4e8fae8fa412a29b4f3164d03b78870e7209831650a`，checksums `bddb3248bbffdcc18419785bf2425338e16042205091e0c99abdd04fdb7d29b8`。这是schema1默认Root原语的安装证明，不覆盖后续schema2/来源表新源码或实际原包producer/consumer。

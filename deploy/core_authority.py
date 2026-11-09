@@ -24,9 +24,12 @@ MAX_BYTES = 2_000_000
 MAX_GRANTS = 256
 MAX_ADMISSIONS = 1024
 MAX_BINDINGS = 1024
+MAX_APPLICATIONS = 1024
 SCOPES = frozenset(('core_operate', 'core_backup', 'core_restore'))
 ID = re.compile(r'[a-f0-9]{32}\Z')
 HEX = re.compile(r'[a-f0-9]{64}\Z')
+RELEASE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,100}\Z')
+TARGETS = frozenset(('x86_64-gnu','x86_64-musl','aarch64-gnu','aarch64-musl'))
 TOKEN = re.compile(r'vui_cg_([a-f0-9]{32})_([A-Za-z0-9_-]{43})\Z')
 MAX_INT = 2**63-1
 
@@ -90,6 +93,12 @@ def _decode(raw):
         value = json.loads(raw.decode('ascii'), object_pairs_hook=_pairs,
                            parse_float=_number, parse_constant=_number, parse_int=_json_integer)
         _need(_raw(value) == raw, 'JSON')
+        if type(value) is dict and type(value.get('schema')) is int and value['schema'] == 1:
+            _keys(value, ('schema','kind','installation_id','epoch','grants','admissions','revoked_bindings'))
+            _need(value['kind'] == 'core-authority-v1', 'SCHEMA')
+            # Preserve all existing authority and consumption state. No service
+            # metadata is consulted or given origin authority by this migration.
+            value = {**value, 'schema':2, 'kind':'core-authority-v2', 'applications':{}}
         return _validate(value)
     except CoreAuthorityError:
         raise
@@ -151,18 +160,35 @@ def _grant(value, key):
           and type(value['revoked']) is bool, 'GRANT')
 
 
+def _application(value):
+    _keys(value, ('release_id','target','app_source','manifest_sha256','archive_sha256'))
+    _need(_hex(value['release_id'], RELEASE) and type(value['target']) is str
+          and value['target'] in TARGETS and type(value['app_source']) is str
+          and re.fullmatch(r'[a-f0-9]{40}', value['app_source']) is not None
+          and _hex(value['manifest_sha256']) and _hex(value['archive_sha256']), 'APPLICATION')
+    return deepcopy(value)
+
+
+def _application_key(release_id, target):
+    return _digest(dict(release_id=release_id, target=target))
+
+
 def _known_bindings(value):
     return set(value['revoked_bindings']) | {
         _binding(row['main_id'], row['main_digest']) for row in value['grants'].values()}
 
 
 def _validate(value):
-    _keys(value, ('schema', 'kind', 'installation_id', 'epoch', 'grants', 'admissions', 'revoked_bindings'))
-    _need(type(value['schema']) is int and value['schema'] == 1 and value['kind'] == 'core-authority-v1'
+    _keys(value, ('schema', 'kind', 'installation_id', 'epoch', 'grants', 'admissions', 'revoked_bindings', 'applications'))
+    _need(type(value['schema']) is int and value['schema'] == 2 and value['kind'] == 'core-authority-v2'
           and _hex(value['installation_id'], ID) and _hex(value['epoch'], ID)
           and type(value['grants']) is dict and len(value['grants']) <= MAX_GRANTS
           and type(value['admissions']) is dict and len(value['admissions']) <= MAX_ADMISSIONS
-          and type(value['revoked_bindings']) is dict and len(value['revoked_bindings']) <= MAX_BINDINGS, 'SCHEMA')
+          and type(value['revoked_bindings']) is dict and len(value['revoked_bindings']) <= MAX_BINDINGS
+          and type(value['applications']) is dict and len(value['applications']) <= MAX_APPLICATIONS, 'SCHEMA')
+    for key, row in value['applications'].items():
+        _application(row)
+        _need(_hex(key) and key == _application_key(row['release_id'], row['target']), 'APPLICATION')
     for key, row in value['revoked_bindings'].items():
         _keys(row, ('main_id', 'main_digest', 'revoked_at'))
         _need(_integer(row['main_id']) and _hex(row['main_digest'])
@@ -313,8 +339,8 @@ class CoreAuthority:
             if not missing:
                 raise CoreAuthorityError('NOT_INITIALIZED') from None
             _need(os.listdir(directory) == ['.lock'], 'INCOMPLETE')
-            return dict(schema=1, kind='core-authority-v1', installation_id=uuid.uuid4().hex,
-                        epoch=uuid.uuid4().hex, grants={}, admissions={}, revoked_bindings={}), None
+            return dict(schema=2, kind='core-authority-v2', installation_id=uuid.uuid4().hex,
+                        epoch=uuid.uuid4().hex, grants={}, admissions={}, revoked_bindings={}, applications={}), None
         try:
             before = os.fstat(fd);self._private_file(before)
             raw = bytearray()
@@ -519,4 +545,37 @@ class CoreAuthority:
             _need(_scope(row['action'], row['parameters']) in grant['scopes'], 'SCOPE')
             row.update(phase='mutating', plan_sha256=plan_sha256, mutation_at=now)
             self._save(directory, proof, state, before)
+            return deepcopy(row)
+
+
+    def record_application(self, record):
+        """Root producer only: facts must come from its accepted original ZIP
+        snapshot. This method does not authenticate arbitrary dictionary origin.
+        No public socket/API or service-UID caller may invoke this producer.
+        """
+        record = _application(record)
+        key = _application_key(record['release_id'], record['target'])
+        with self._locked(create=True) as (directory, proof):
+            state, before = self._load(directory, missing=True)
+            previous = state['applications'].get(key)
+            if previous is not None:
+                _need(previous == record, 'APPLICATION_CONFLICT')
+                self._ack(directory, proof, before)
+                return deepcopy(previous)
+            _need(len(state['applications']) < MAX_APPLICATIONS, 'CAPACITY')
+            state['applications'][key] = record
+            self._save(directory, proof, state, before)
+            return deepcopy(record)
+
+    def application(self, *, release_id, target):
+        """Root observation only. Missing authority state remains an error;
+        a missing accepted origin returns None, never a service-metadata fill.
+        """
+        _need(_hex(release_id, RELEASE) and type(target) is str and target in TARGETS, 'APPLICATION')
+        with self._locked() as (directory, proof):
+            state, before = self._load(directory)
+            row = state['applications'].get(_application_key(release_id, target))
+            if row is None:
+                return None
+            self._ack(directory, proof, before)
             return deepcopy(row)

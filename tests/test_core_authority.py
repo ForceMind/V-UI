@@ -325,3 +325,102 @@ class CoreAuthorityTests(unittest.TestCase):
         self.assert_code('AUTHORITY', self.reserve, token)
         self.now.return_value = 1000010
         self.assert_code('AUTHORITY', self.reserve, token)
+
+
+    def app_record(self):
+        return dict(release_id='0.4.23-'+'d'*12,target='x86_64-gnu',app_source='d'*40,
+                    manifest_sha256='e'*64,archive_sha256='f'*64)
+
+    def test_application_origin_bootstrap_is_separate_from_credentials_and_returns_detached_record(self):
+        record=self.app_record()
+        self.assertEqual(self.store.record_application(record),record)
+        state=json.loads((self.root/'authority.json').read_bytes())
+        self.assertEqual(state['schema'],2);self.assertFalse(state['grants']);self.assertFalse(state['admissions'])
+        observed=self.store.application(release_id=record['release_id'],target=record['target'])
+        observed['app_source']='a'*40
+        self.assertEqual(self.store.application(release_id=record['release_id'],target=record['target']),record)
+        self.assertIsNone(self.store.application(release_id='other-version',target=record['target']))
+        self.assertIsNone(self.store.application(release_id=record['release_id'],target='x86_64-musl'))
+
+    def test_application_identity_is_immutable_but_multiple_versions_remain_available(self):
+        record=self.app_record();self.store.record_application(record)
+        raw=(self.root/'authority.json').read_bytes()
+        self.assertEqual(self.store.record_application(record),record)
+        self.assertEqual((self.root/'authority.json').read_bytes(),raw)
+        for key in ('app_source','manifest_sha256','archive_sha256'):
+            altered={**record,key:'a'*(40 if key=='app_source' else 64)}
+            self.assert_code('APPLICATION_CONFLICT',self.store.record_application,altered)
+            self.assertEqual((self.root/'authority.json').read_bytes(),raw)
+        other={**record,'release_id':'0.4.24-'+'a'*12,'app_source':'a'*40}
+        self.store.record_application(other)
+        for row in (record,other):
+            self.assertEqual(self.store.application(release_id=row['release_id'],target=row['target']),row)
+
+    def test_schema1_migration_preserves_grants_epoch_tombstones_and_consumption_without_backfilling_origins(self):
+        _,token=self.issue();task,_=self.reserve(token)
+        self.store.enter_mutation(task_id=task['id'],plan_sha256='e'*64)
+        self.store.revoke_main(main_id=7,main_digest=self.main_digest)
+        path=self.root/'authority.json'
+        legacy=json.loads(path.read_bytes());legacy.pop('applications');legacy.update(schema=1,kind='core-authority-v1')
+        raw=a._raw(legacy);path.write_bytes(raw)
+        self.assertIsNone(self.reload().application(release_id=self.app_record()['release_id'],target='x86_64-gnu'))
+        self.assertEqual(path.read_bytes(),raw)
+        self.reload().record_application(self.app_record())
+        modern=json.loads(path.read_bytes())
+        self.assertEqual(modern['schema'],2)
+        for key in ('installation_id','epoch','grants','admissions','revoked_bindings'):
+            self.assertEqual(modern[key],legacy[key])
+        self.assert_code('AUTHORITY',self.reserve,token)
+        self.assert_code('CONSUMED',self.store.enter_mutation,task_id=task['id'],plan_sha256='e'*64)
+
+    def test_only_exact_schema1_is_migrated_and_schema2_missing_origins_is_corrupt(self):
+        self.issue();path=self.root/'authority.json';current=json.loads(path.read_bytes())
+        malformed=[{**current,'schema':1,'kind':'core-authority-v1'},
+                   {key:value for key,value in current.items() if key!='applications'},
+                   {**current,'schema':3}, {**current,'schema':True}]
+        for value in malformed:
+            path.write_bytes(a._raw(value))
+            with self.subTest(schema=value.get('schema')):
+                self.assert_code('SCHEMA',self.store.application,release_id='test',target='x86_64-gnu')
+            self.assertEqual(path.read_bytes(),a._raw(value))
+
+    def test_origin_input_is_closed_and_never_uses_paths_urls_or_implicit_target(self):
+        self.issue();path=self.root/'authority.json';raw=path.read_bytes()
+        record=self.app_record()
+        for key,value in (('release_id','../outside'),('target',[]),('app_source',True),
+                          ('manifest_sha256','F'*64),('archive_sha256',None),('url','https://untrusted')):
+            with self.subTest(key=key),self.assertRaises(a.CoreAuthorityError):
+                self.store.record_application({**record,key:value})
+            self.assertEqual(path.read_bytes(),raw)
+
+    def test_epoch_reduction_never_rolls_back_accepted_application_origins(self):
+        self.store.record_application(self.app_record())
+        _,token=self.issue()
+        before=json.loads((self.root/'authority.json').read_bytes())
+        self.store.advance_epoch()
+        after=json.loads((self.root/'authority.json').read_bytes())
+        self.assertEqual(after['applications'],before['applications'])
+        self.assertEqual(after['installation_id'],before['installation_id'])
+        self.assertNotEqual(after['epoch'],before['epoch'])
+        self.assert_code('AUTHORITY',self.reserve,token)
+        self.assertEqual(self.store.application(release_id=self.app_record()['release_id'],target='x86_64-gnu'),self.app_record())
+
+    def test_origin_replay_and_reader_reconfirm_unknown_durable_publication(self):
+        self.issue();original=a.os.fsync;root=self.root.stat()
+        def fail_directory(fd):
+            info=os.fstat(fd)
+            if (info.st_dev,info.st_ino)==(root.st_dev,root.st_ino):raise OSError('inert sync failure')
+            original(fd)
+        record=self.app_record()
+        with patch.object(a.os,'fsync',side_effect=fail_directory):
+            self.assert_code('IO',self.store.record_application,record)
+            self.assert_code('IO',self.store.record_application,record)
+            self.assert_code('IO',self.store.application,release_id=record['release_id'],target=record['target'])
+        self.assertEqual(self.store.application(release_id=record['release_id'],target=record['target']),record)
+
+    def test_origin_capacity_preserves_old_versions_and_existing_identity_replay(self):
+        with patch.object(a,'MAX_APPLICATIONS',1):
+            record=self.app_record();self.store.record_application(record)
+            other={**record,'release_id':'another-accepted-package'}
+            self.assert_code('CAPACITY',self.store.record_application,other)
+            self.assertEqual(self.store.record_application(record),record)

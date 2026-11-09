@@ -168,3 +168,5 @@ M46B 4b4c236主测唯一失败为权限目录固定路径与OpenAPI参数模板�
 M46B最终修正824e42e已完成十组Actions；新装/八旧版升级、四目标与ARM64成功，新装/ARM原日志及新装同源收据已回读。M46C私有账本源码已独审，24项Py3.9/3.12独立复验通过，尚待自身Actions且未启用远程写；下一块连接受信Root闭包、异步事实任务与准入执行。
 
 M46C97e50e5私有账本已推Draft PR146，主测试成功，其余准确Actions继续；M46D源码将authority作为独立Root闭包组，保留旧CORE/DNS/公开profile，新增固定receipt loader及仅空白CI执行的真实Root原语/服务UID拒绝探针。52项纯安装/loader及24项升级helper两Python版本通过，源码已独审，新准确Actions待验。未接发放/任务执行/写API，不升级生产。
+
+M46D cd8deb8十组Actions成功，新装/八旧版升级及四目标/ARM64完成；x86/ARM原日志明确执行默认Root原语与真实服务UID拒绝，收据同源已读回。M46E必要前置确认缺独立Root应用来源锚；多版本accepted-origin契约及schema2私有表已独审，32项两版独立回归通过。新装/升级与Rootstage必须从受验原包快照产出锚，事实consumer锁内对照，旧自洽元数据不能自动背书；producer/consumer尚未接，新源码Actions待验。
