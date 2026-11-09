@@ -85,6 +85,16 @@ def installed_core_switch(check, source, work, api, service_python, ca, cert, ke
                 subprocess.run(['sudo', 'install', '-o', 'root', '-g', 'root', '-m', '0600',
                                 str(candidate/name), str(runner_root/core/'candidate'/name)], check=True)
 
+        # Probe only the installed Root-owned authority helper. This uses fake
+        # grant identity/intent and never calls application/core mutation.
+        authority_probe = runner_root/'authority.py'
+        subprocess.run(['sudo', 'install', '-o', 'root', '-g', 'root', '-m', '0600',
+                        str(source/'tests/core_authority_installed.py'), str(authority_probe)], check=True)
+        expected_authority = hashlib.sha256((source/'deploy/core_authority.py').read_bytes()).hexdigest()
+        subprocess.run(['sudo', '/usr/bin/env', 'GITHUB_ACTIONS=true', 'RUNNER_ENVIRONMENT=github-hosted',
+                        'GITHUB_REPOSITORY=ForceMind/V-UI', '/usr/bin/python3', '-B', '-I', '-S',
+                        str(authority_probe), expected_authority], check=True, timeout=45)
+
         # Xray 26.10.21 blocks private IPv4 egress by default. A documentation
         # IPv6 address is outside that matcher and stays local to this runner.
         ip = '/usr/sbin/ip'

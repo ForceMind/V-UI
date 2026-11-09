@@ -100,7 +100,13 @@ CORE_SOURCE_DEPENDENCIES = {
     'core_boot_broker.py': 'deploy/core_boot_broker.py',
     'core_maintenance_control.py': 'deploy/core_maintenance_control.py',
 }
-SOURCE_DEPENDENCIES = PRE_DNS_SOURCE_DEPENDENCIES | DNS_SOURCE_DEPENDENCIES | CORE_SOURCE_DEPENDENCIES
+# Freeze the original full core closure as a separate historical family.
+# Only an explicit refresh may add this complete authority group.
+CORE_AUTHORITY_SOURCE_DEPENDENCIES = {
+    'core_authority.py': 'deploy/core_authority.py',
+}
+SOURCE_DEPENDENCIES = (PRE_DNS_SOURCE_DEPENDENCIES | DNS_SOURCE_DEPENDENCIES
+                       | CORE_SOURCE_DEPENDENCIES | CORE_AUTHORITY_SOURCE_DEPENDENCIES)
 RECEIPT_KEYS = {'schema', 'service_manager', 'system_python', 'interpreter_resolved',
                 'interpreter_sha256', 'files'}
 MAX_CODE = 4_000_000
@@ -503,6 +509,7 @@ def validate_existing(hashes, interpreter, manager, refresh, verified, *, missin
     dependencies = {str(CONTROL / name) for name in PRE_DNS_SOURCE_DEPENDENCIES}
     dns_dependencies = {str(CONTROL / name) for name in DNS_SOURCE_DEPENDENCIES}
     core_dependencies = {str(CONTROL / name) for name in CORE_SOURCE_DEPENDENCIES}
+    authority_dependencies = {str(CONTROL / name) for name in CORE_AUTHORITY_SOURCE_DEPENDENCIES}
     # Explicit refresh migrates only known complete historical closures. The
     # pre-network controller lacks firewall_support; older closures may also
     # lack the proxy dependencies or data-owner helper. Existing bytes must all
@@ -522,8 +529,10 @@ def validate_existing(hashes, interpreter, manager, refresh, verified, *, missin
     # Published pre-core DNS closures have every DNS helper, and no core helper.
     # Older closures lack all DNS and all core helpers. Never accept a partial
     # core group or derive old shapes by subtracting arbitrary current files.
-    known_missing = (core_dependencies,) + tuple(core_dependencies | dns_dependencies | item
-                                                 for item in pre_dns_missing)
+    pre_authority_missing = (core_dependencies,) + tuple(core_dependencies | dns_dependencies | item
+                                                        for item in pre_dns_missing)
+    known_missing = (authority_dependencies,) + tuple(authority_dependencies | item
+                                                     for item in pre_authority_missing)
     missing = (expected - set(receipt['files']) if isinstance(receipt, dict)
                and isinstance(receipt.get('files'), dict) else set())
     legacy = (refresh and isinstance(receipt, dict) and isinstance(receipt.get('files'), dict)

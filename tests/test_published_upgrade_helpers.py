@@ -521,4 +521,34 @@ class PublishedDNSMigrationTests(unittest.TestCase):
             with self.assertRaises(AssertionError):self.assertEqual(self.snapshot(new,after=True),before)
 
 
+    def test_authority_profile_is_separate_from_frozen_core_and_public_profiles(self):
+        from published_upgrade_helpers import CORE_FILES, AUTHORITY_FILES
+        self.assertEqual(AUTHORITY_FILES, {'/usr/local/lib/v-ui/core_authority.py'})
+        self.assertTrue(AUTHORITY_FILES.isdisjoint(CORE_FILES))
+        for version in PUBLISHED_BASELINES:
+            before, after = self.receipt(version)
+            after['files'].update({path:'6'*64 for path in CORE_FILES | AUTHORITY_FILES})
+            assert_receipt_migration(self,before,after,version,'0.4.23',core_control=True,core_authority=True)
+            with self.assertRaises(AssertionError):
+                assert_receipt_migration(self,before,after,version,'0.4.23',core_control=True)
+            for path in AUTHORITY_FILES | CORE_FILES:
+                missing=deepcopy(after);missing['files'].pop(path)
+                with self.subTest(version=version,missing=path),self.assertRaises(AssertionError):
+                    assert_receipt_migration(self,before,missing,version,'0.4.23',core_control=True,core_authority=True)
+            polluted=deepcopy(before);polluted['files'][next(iter(AUTHORITY_FILES))]='7'*64
+            with self.assertRaises(AssertionError):
+                assert_receipt_migration(self,polluted,after,version,'0.4.23',core_control=True,core_authority=True)
+            extra=deepcopy(after);extra['files']['/usr/local/lib/v-ui/foreign.py']='7'*64
+            with self.assertRaises(AssertionError):
+                assert_receipt_migration(self,before,extra,version,'0.4.23',core_control=True,core_authority=True)
+        for controls in ({'core_control':False,'core_authority':True},
+                         {'core_control':True,'core_authority':1}):
+            with self.subTest(controls=controls),self.assertRaises(AssertionError):
+                assert_receipt_migration(self,before,after,'0.4.22','0.4.23',**controls)
+        tree=ast.parse((Path(__file__).resolve().parents[1]/'scripts/install_ops_control.py').read_text())
+        literal=next(node.value for node in tree.body if isinstance(node,ast.Assign)
+            and any(isinstance(target,ast.Name) and target.id=='CORE_AUTHORITY_SOURCE_DEPENDENCIES' for target in node.targets))
+        self.assertEqual(AUTHORITY_FILES,{'/usr/local/lib/v-ui/'+name for name in ast.literal_eval(literal)})
+
+
 if __name__=='__main__':unittest.main()

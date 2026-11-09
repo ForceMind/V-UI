@@ -43,6 +43,7 @@ CORE_FILES = frozenset(str(CONTROL / name) for name in (
     'core_github.py','core_catalog.py','core_resolver.py','core_application.py',
     'core_selection_files.py','core_boot.py','core_backup.py','core_backup_archive.py',
     'core_maintenance.py','core_maintenance_recovery.py','core_boot_broker.py','core_maintenance_control.py'))
+AUTHORITY_FILES = frozenset({str(CONTROL / 'core_authority.py')})
 CERTIFICATE_COLUMNS = ('id', 'domain', 'email', 'environment', 'auto_renew', 'revision',
     'not_before', 'not_after', 'renew_at', 'retry_at', 'last_attempt', 'failures', 'error', 'created_at')
 BINDING_COLUMNS = ('target', 'certificate_id', 'applied_certificate_id', 'applied_revision', 'error')
@@ -71,12 +72,15 @@ def fixed_public_baseline(version, commit):
     return version, commit
 
 
-def assert_receipt_migration(test, before, after, old_version, candidate_version='0.4.22', *, core_control=False):
+def assert_receipt_migration(test, before, after, old_version, candidate_version='0.4.22', *, core_control=False, core_authority=False):
     if old_version not in PUBLISHED_BASELINES:
         raise AssertionError('Unknown public upgrade receipt baseline')
     _target_contract(candidate_version)
     if type(core_control) is not bool or core_control and candidate_version != '0.4.23':
         raise AssertionError('Explicit P3 development control profile required')
+    if type(core_authority) is not bool or core_authority and (not core_control or candidate_version != '0.4.23'):
+        raise AssertionError('Explicit private core authority control profile required')
+    test.assertTrue(AUTHORITY_FILES.isdisjoint(before['files']), 'Historical receipt must not pre-contain authority helpers')
     test.assertTrue(CORE_FILES.isdisjoint(before['files']), 'Historical receipt must not pre-contain core helpers')
     test.assertTrue(DNS_FILES.isdisjoint(before['files']), 'Historical receipt must not pre-contain DNS helpers')
     if old_version in ('0.4.17', '0.4.19', '0.4.20', '0.4.21', '0.4.22'):
@@ -89,6 +93,8 @@ def assert_receipt_migration(test, before, after, old_version, candidate_version
         additions = additions | DNS_FILES
     if core_control:
         additions = additions | CORE_FILES
+    if core_authority:
+        additions = additions | AUTHORITY_FILES
     test.assertEqual(set(after['files']) - set(before['files']), additions)
     if old_version == '0.4.14':
         test.assertNotIn(FIREWALL, before['files'])
@@ -403,7 +409,7 @@ print('{}')
         self.test.assertEqual(manifest['source_commit'], self.candidate['source_commit'])
         self.test.assertEqual(manifest['version'], self.candidate['version'])
         assert_receipt_migration(self.test, self.old_receipt, self._receipt(), self.old_version, self.candidate['version'],
-                                 core_control=True)
+                                 core_control=True, core_authority=True)
         self.test.assertEqual(self._snapshot(release,after=True), self.data, 'Private DB rows and certificate bytes must survive')
         assert_node_summary_upgrade(self.test, self.nodes, json.loads(api('/api/inbounds')[1]), self.old_version)
         if self.manual_editor is not None:

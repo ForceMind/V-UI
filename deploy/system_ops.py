@@ -207,7 +207,7 @@ def fixed_files(manager):
                 'core_github.py', 'core_catalog.py', 'core_resolver.py', 'core_application.py',
                 'core_selection_files.py', 'core_boot.py', 'core_backup.py', 'core_backup_archive.py',
                 'core_maintenance.py', 'core_maintenance_recovery.py', 'core_boot_broker.py',
-                'core_maintenance_control.py')),
+                'core_maintenance_control.py', 'core_authority.py')),
             *(CONTROL / name for name in ('certificate_errors.py', 'dns_store.py', 'cloudflare.py',
                                           'dns_journal.py', 'dns_backup.py')),
             *(CONTROL / name for name in ('maintenance_daemon.py', 'maintenance_upgrade.py',
@@ -1290,6 +1290,28 @@ def _load_core_controller(expected_receipt):
     if hashlib.sha256(raw).hexdigest() != receipt['files'].get(str(path)):
         raise Refused('core controller changed')
     module = types.ModuleType('_vui_terminal_core_restore')
+    exec(compile(raw, str(path), 'exec'), module.__dict__)
+    return module
+
+
+def _load_core_authority(expected_receipt):
+    """Load the single fixed Root helper only after the complete receipt check.
+
+    No caller-selected module, source path or service-owned code is compiled.
+    Constructing the class does not create authority state or mint a grant.
+    """
+    manager, _ = verify_installation()
+    if manager != 'systemd':
+        raise Refused('core authority requires systemd')
+    path = CONTROL / 'core_authority.py'
+    raw = trusted_bytes(path)
+    receipt_raw = trusted_bytes(RECEIPT, MAX_JSON)
+    if hashlib.sha256(receipt_raw).hexdigest() != expected_receipt:
+        raise Refused('core authority receipt changed')
+    receipt = decode_json(receipt_raw)
+    if hashlib.sha256(raw).hexdigest() != receipt['files'].get(str(path)):
+        raise Refused('core authority changed')
+    module = types.ModuleType('_vui_fixed_core_authority')
     exec(compile(raw, str(path), 'exec'), module.__dict__)
     return module
 

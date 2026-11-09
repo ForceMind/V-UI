@@ -833,3 +833,16 @@ Root账本最小实现 `deploy/core_authority.py`：默认固定Root目录；iss
 私有账本独审另修普通grant减权/后到issue竞态：Root永久保留绑定撤销tombstone，且预留已发绑定的撤销容量。幂等reserve/revoke在前次目录fsync未知时重新fsync文件与目录；持续失败仍报固定IO，不假报durable成功。expiry永久撤销亦采用同一确认规则。新增交错issue、容量、未知sync和expiry回归，合计24项两Python版本通过；最终源码已独审，24项两版本独立复验均零skip，准确Actions待验。
 
 M46B修正 `824e42e` 的十组Actions全部成功。主测试42644224671保留原目录断言并成功，安装42644224723完成新装与八旧版升级，组件42644224808完成四目标和ARM64受管。新装原日志13688826054/收据13686894104及ARM日志13687858428独立读回：只读/两核切换/中断/双域恢复标记齐全、测试OK，新装退出0，准确source824e42e、bundle `bd8f828061e8b5f004b3c0734ee97f9c9d800c66678c5b086477fac08bb3d051`，checksums `9f488648b3f94f5eef62982ae1e2c94460c8a752c13afe4ca78a1547c7ffe18e`。这是M46B源码资格，不包含真实官方组件公开/生产更新或后续M46C源码。
+
+
+## M46D Root闭包与安装原语（开发候选）
+
+私有账本已于 `97e50e5` 独审提交，主测试42648992343成功，其余准确Actions继续运行。后续接线新增独立 `CORE_AUTHORITY_SOURCE_DEPENDENCIES`，保留原CORE/DNS历史集合；当前完整闭包新增core_authority.py，只在显式refresh接受完整旧闭包，不接受零散、未知或未收据文件。普通升级夹具也用独立AUTHORITY_FILES与显式profile，不能扩大冻结23或旧P3组掩盖多文件；八旧版的完整/缺失/污染/多余项负例逐一保留。
+
+Root `system_ops._load_core_authority` 只在完整安装收据/systemd通过、调用者保存的receipt摘要一致且固定helper字节摘要匹配后编译，不接受路径或模块名，不自动创建凭据。当前52项纯安装/loader回归在Py3.9/3.12通过，旧版升级helper新增精确profile后24项两版通过；Root loader两项加入原生OS清单。
+
+实际Root primitive探针仅在已存在的空白GitHub-hosted fresh/ARM core-switch测试中运行：Root-owned CI bootstrap先以NoFollow/Root所有权/FD稳定和独立收据摘要验证系统控制代码，再编译；不能先执行system_ops后靠它自验。探针使用假普通授权身份，核Root固定目录模式、磁盘无bearer、真实服务UID不能读/写、durable幂等、一次消费及撤销后迟到签发拒绝。它不读普通授权DB、不操作应用/核心/服务，不开放任何新写API；Root权限变化仅限空白CI测试。源码已独审，准确Actions尚待，不把纯fixture或旧成功替代该实际探针。
+
+下一块仍是独立持久核心任务：异步观察真实应用与目标、Root写准入/执行前最后校权、同安装双域备份私有映射、预期pending事务/代次，再接终端新授权与完整面板流程。Root private helper安装本身不等于这些已实现。
+
+M46D最终源码独审无剩余阻断；独立复验Py3.9/3.12各loader2项与升级helper24项通过，52项纯安装/loader结果复用同源主代理证据，diffcheck通过。实际Root probe未在本机执行，待新准确源码Actions读回结果。
