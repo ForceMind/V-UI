@@ -136,6 +136,7 @@ def restore_data_position(journal, observed):
     original = journal['switch_context']['data_generation']
     incoming = target['data']['incoming_generation']
     positions = {
+        ('old', None, None, None): 'unplaced',
         ('old', None, 'new', None): 'staged',
         (None, 'old', 'new', None): 'parked',
         ('new', 'old', None, None): 'trial',
@@ -1020,7 +1021,8 @@ class SelectionFiles:
         with self._io(write=True) as (scope, root):
             directory, journal, _ = self._load(scope, root, transaction, app_source, target)
             state = self._confirmed_state(scope, root, directory, journal, app_source, target)
-            positions = ('trial',) if journal['rollback'] is None else ('staged', 'restored')
+            positions = (('trial',) if journal['rollback'] is None else
+                         ('unplaced', 'staged') if journal['quiesced'] is None else ('staged', 'restored'))
             _require_restore_data(journal, restore_data, positions)
             self._archive_and_clear(scope, root, directory, journal, state)
             return state
@@ -1175,7 +1177,7 @@ class SelectionFiles:
                   and _matches(pending[1], journal['original_files']['pending']), 'PENDING_CHANGED')
             _need(journal['before'] is not None, 'BOOTSTRAP_RECOVERY_REQUIRED')
             quiesced = journal['quiesced']
-            positions = ('staged', 'restored') if quiesced is not None else ('staged',)
+            positions = ('staged', 'restored') if quiesced is not None else ('unplaced', 'staged')
             _require_restore_data(journal, restore_data, positions)
             expected_digest = quiesced.get('original_tree_sha256') if quiesced is not None else None
             _need(original_tree_sha256 == expected_digest, 'RESTORE_DATA_DIGEST')

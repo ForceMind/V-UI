@@ -363,6 +363,48 @@ def _live_restore_scope(guard, live):
         verify()
 
 
+def place_restore_candidate(guard, journal, prepared, *, core_backup, current_selection):
+    """Place a validated candidate in its durable slot before quiescence is recorded."""
+    _need(journal['phase'] == 'prepared' and journal['quiesced'] is None)
+    target = journal['restore_target']
+    _need(target is not None and target['kind'] == 'core-restore-target-v2')
+    plan = target['data']
+    _need(a._hex(plan['slot'], 32) and type(prepared) is PreparedComponentsRestore
+          and type(prepared._proof) is _RestoreProof)
+    _need(target['source_backup_sha256'] == prepared.archive_sha256
+          and plan['incoming_generation'] == prepared.data_generation
+          and plan['preflight_tree_sha256'] == prepared._proof.digest)
+    live = guard.root / 'data'
+    recovery = guard.root / 'recovery'
+    stage = prepared.data_path
+    name = 'core-restore-' + plan['slot'] + '-incoming'
+    with _live_restore_scope(guard, live) as verify:
+        original = validate_restore_against_current(
+            guard, prepared, core_backup=core_backup, current_selection=current_selection)
+        _need(original['data_generation'] == journal['switch_context']['data_generation'])
+        with tools._maintenance_directory(stage.parent) as source, \
+                tools._maintenance_directory(recovery, create=True) as destination:
+            verify()
+            info = os.stat(stage.name, dir_fd=source, follow_symlinks=False)
+            _need(stat.S_ISDIR(info.st_mode) and (info.st_dev, info.st_ino) == prepared._generation)
+            _need(_generation(stage) == prepared._generation
+                  and tools.recovery_tree_digest(stage) == prepared.data_sha256
+                  and _generation(recovery) == (os.fstat(destination).st_dev, os.fstat(destination).st_ino))
+            for key in ('original', 'rejected'):
+                try:
+                    os.stat('core-restore-' + plan['slot'] + '-' + key,
+                            dir_fd=destination, follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                raise tools.ReleaseError('Restore data slot already exists')
+            tools.sync_directory(guard.root)
+            _rename_new(source, stage.name, destination, name)
+            _need(_generation(recovery / name) == prepared._generation)
+            os.fsync(destination)
+            os.fsync(source)
+        return original
+
+
 def exchange_restore_data(guard, journal, *, rollback=False):
     """Move the journal's fixed slots under the stable exclusive data lease."""
     live = guard.root / 'data'
@@ -373,6 +415,15 @@ def exchange_restore_data(guard, journal, *, rollback=False):
     _need(a._hex(slot, 32) and type(rollback) is bool)
     phase = journal['phase']
     _need(phase not in ('confirmed', 'cleanup') if rollback else phase == 'backed_up')
+    if rollback and journal['quiesced'] is None:
+        try:
+            recovery.lstat()
+        except FileNotFoundError:
+            with _live_restore_scope(guard, live):
+                dev, ino = _generation(live)
+                observed = dict(live=dict(dev=dev, ino=ino), original=None, incoming=None, rejected=None)
+                _need(restore_data_position(journal, observed) == 'unplaced')
+                return observed
     names = {key: 'core-restore-' + slot + '-' + key for key in ('original', 'incoming', 'rejected')}
     names['live'] = 'data'
 
@@ -404,7 +455,7 @@ def exchange_restore_data(guard, journal, *, rollback=False):
         position, observed = inspect()
         quiesced = journal['quiesced']
         if quiesced is None:
-            _need(rollback and position == 'staged')
+            _need(rollback and position in ('unplaced', 'staged'))
             return observed
         if not rollback:
             _need(position in ('staged', 'parked', 'trial'))

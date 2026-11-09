@@ -392,6 +392,7 @@ class SelectionFilesTests(unittest.TestCase):
         before = inputs['switch_context']['data_generation']
         incoming = inputs['data_plan']['incoming_generation']
         positions = dict(
+            unplaced=dict(live=before, original=None, incoming=None, rejected=None),
             staged=dict(live=before, original=None, incoming=incoming, rejected=None),
             parked=dict(live=None, original=before, incoming=incoming, rejected=None),
             trial=dict(live=incoming, original=before, incoming=None, rejected=None),
@@ -521,6 +522,16 @@ class SelectionFilesTests(unittest.TestCase):
         self.assertEqual(journal['data_disposition'], 'restore_original')
         self.assertEqual(journal['confirmed_selection'], m._selection_map(restored))
         self.assertEqual(self.files.finish_cleanup(tx, restore_data=positions['restored'], **self.context), restored)
+
+    def test_dual_restore_recovers_before_candidate_is_placed(self):
+        tx, _, positions = self.dual_restore()
+        journal = self.files.read_restore_recovery()
+        restored = s.decode_selection(m._raw(journal['recovery_selection']), **self.context)
+        with patch.object(self.files, '_archive_and_clear', side_effect=OSError('fixture interruption')):
+            with self.assertRaises(m.CoreSelectionFilesError):
+                self.files.rollback_metadata(tx, self.validation(restored),
+                    final_intents=self.pre['cores'], restore_data=positions['unplaced'], **self.context)
+        self.assertEqual(self.files.finish_cleanup(tx, restore_data=positions['unplaced'], **self.context), restored)
 
     def test_bootstrap_refuses_runtime2_bad_unknown_scan_and_first_loss(self):
         stopped = self.snapshot(self.before, panel=False, enabled=(False, False))

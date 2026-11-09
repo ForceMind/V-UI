@@ -74,6 +74,28 @@ class CompleteBackupTests(unittest.TestCase):
             rejected = recovery / ('core-restore-' + slot + '-rejected')
             self.assertEqual((rejected / 'fixture').read_bytes(), b'candidate')
 
+    def test_prepared_candidate_is_retained_in_journal_slot_after_context_closes(self):
+        state, intents = self.state(components=False)
+        checksum = self.create(state, intents)
+        before = (self.data/'v-ui.db').read_bytes()
+        slot = 'c'*32
+        with self.preflight(checksum) as checked, tools.stopped(self.root) as guard, \
+                self.prepare(guard, checked, state) as prepared:
+            info = self.data.stat()
+            journal = dict(phase='prepared', quiesced=None,
+                switch_context=dict(data_generation=dict(dev=info.st_dev, ino=info.st_ino)),
+                restore_target=dict(kind='core-restore-target-v2', source_backup_sha256=checksum,
+                    data=dict(slot=slot, incoming_generation=checked.data_generation,
+                              preflight_tree_sha256=checked.data_sha256)))
+            observed = full.exchange_restore_data(guard, journal, rollback=True)
+            self.assertIsNone(observed['incoming'])
+            original = full.place_restore_candidate(guard, journal, prepared,
+                core_backup=self.fixture.tool, current_selection=state)
+            self.assertEqual(original['data_generation'], journal['switch_context']['data_generation'])
+        incoming = self.root/'recovery'/('core-restore-'+slot+'-incoming')
+        self.assertTrue((incoming/'v-ui.db').is_file())
+        self.assertEqual((self.data/'v-ui.db').read_bytes(), before)
+
     def state(self,components=True,legacy=False):
         state=self.fixture.state() if components else self.fixture.initial
         intents={}
