@@ -14,6 +14,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -115,6 +116,32 @@ class CorePrepareWorkerTests(unittest.TestCase):
                 self.assertEqual(status, 1)
                 self.assertEqual(frames, [dict(event='error', code='MAINTENANCE_REFUSED')])
                 complete.assert_not_called()
+
+    def test_restore_stage_journal_uses_its_bounded_frame_only(self):
+        for stage, size, accepted in ((False, 9000, False), (True, 9000, True), (True, 17000, False)):
+            with self.subTest(stage=stage, size=size):
+                reader, writer = socket.socketpair()
+                with reader, writer:
+                    value = dict(command='stage_restore', journal={'fixture': 'a'*size})
+                    payload = (json.dumps(value)+'\n').encode()
+                    def send():
+                        try:
+                            writer.sendall(payload)
+                        except OSError:
+                            pass  # The reader may reject the bounded frame early.
+                    sender = threading.Thread(target=send)
+                    sender.start()
+                    channel = w._Channel(reader.fileno(), io.StringIO(), time.monotonic()+2)
+                    try:
+                        if accepted:
+                            self.assertEqual(channel.read(restore_stage=stage), value)
+                        else:
+                            with self.assertRaisesRegex(w.WorkerError, 'line exceeded'):
+                                channel.read(restore_stage=stage)
+                    finally:
+                        reader.shutdown(socket.SHUT_RDWR)
+                        sender.join(2)
+                        self.assertFalse(sender.is_alive())
 
     def recovery_request(self, **overrides):
         request = dict(protocol=1, action='core_recover', transaction='a'*32, context={}, before={},

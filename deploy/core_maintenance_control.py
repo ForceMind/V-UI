@@ -14,6 +14,7 @@ import tempfile
 import threading
 import time
 import types
+import uuid
 
 
 class CoreControlError(RuntimeError):
@@ -151,6 +152,11 @@ class _Switch:
             expected_selection_revision=expected_revision), 'core_context',
             ('application', 'data_generation', 'selection', 'selection_initialized',
              'bundles', 'intents', 'runtime_schemas'))
+        self._accept_context(facts, core, expected_revision)
+
+    def _accept_context(self, facts, core, expected_revision):
+        _need(type(facts) is dict and set(facts) == {'application', 'data_generation', 'selection',
+            'selection_initialized', 'bundles', 'intents', 'runtime_schemas'}, 'CORE_APPLICATION_CONTEXT')
         app = facts['application']
         _need(type(app) is dict and set(app) == {'app_source', 'target', 'release_id',
             'current_sha256', 'manifest_sha256', 'ready_sha256'}
@@ -369,6 +375,69 @@ class _Switch:
             'restore_observer_ready', ('transaction',))
         _need(response['transaction'] == self.transaction, 'CORE_RESTORE_CONTEXT')
         self._proof()
+
+    def _backup_before(self):
+        snapshot = self.files.backup_snapshot(self.transaction, **self.source)
+        snapshot = dict(snapshot, schema=1, kind='core-backup-closure-v1',
+                        selection=self.m._selection_map(snapshot['selection']))
+        self.backup = self.worker.command('backup_core', 'core_backed_up',
+            ('backup_name', 'backup_sha256', 'snapshot_sha256'), snapshot=snapshot)
+        name, digest = self.backup['backup_name'], self.backup['backup_sha256']
+        _need(type(name) is str and re.fullmatch(r'core-maintenance-[a-f0-9]{32}\.zip', name)
+              and self.a._hex(digest) and self.backup['snapshot_sha256'] ==
+                  hashlib.sha256(self.modules.store._canonical(snapshot)).hexdigest(), 'CORE_BACKUP_RECEIPT')
+        self.files.record_backup(self.transaction, dict(kind='backup-components-v1',
+            backup_id=hashlib.sha256((name+':'+digest).encode()).hexdigest(), sha256=digest, name=name,
+            selection_revision=self.before.revision,
+            intents_sha256=self.m._digest(self.m._raw(self.final))), **self.source)
+        return digest
+
+    def run_restore(self, archive_name, archive_sha256, expected_revision):
+        """Private managed-certificate restore. The caller owns the Root installation lock."""
+        _need(self.config.get('certificate_mode', 'managed') != 'provided', 'CORE_RESTORE_TLS_PROBE_REQUIRED')
+        prepared = self.worker.exchange(dict(protocol=1, action='core_restore_prepare', archive_name=archive_name,
+            archive_sha256=archive_sha256, expected_selection_revision=expected_revision),
+            'restore_preflight', ('context', 'incoming_selection', 'incoming_intents',
+                                  'incoming_generation', 'preflight_tree_sha256'))
+        facts = prepared['context']
+        self._accept_context(facts, 'sing-box', expected_revision)
+        _need(self.initialized, 'CORE_RESTORE_CONTEXT')
+        incoming = self._state(prepared['incoming_selection'])
+        incoming_intents = self._intents(prepared['incoming_intents'], incoming)
+        self.initial = self.services.snapshot()
+        self._time()
+        _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+        self.transaction = self.files.begin_restore(incoming, expected_revision=expected_revision,
+            service_snapshot=dict(panel_running=self.initial['v-ui.service'] == 'active', cores=facts['intents']),
+            source_backup_sha256=archive_sha256, restored_intents=incoming_intents,
+            switch_context=dict(application=self.application, data_generation=self.generation,
+                services=self.initial, config_sha256=self.m._digest(self.m._raw(self.config)),
+                certificate_mode='managed', trust_sha256=None),
+            data_plan=dict(slot=uuid.uuid4().hex, incoming_generation=prepared['incoming_generation'],
+                preflight_tree_sha256=prepared['preflight_tree_sha256'], incoming_trust_sha256=None), **self.source)
+        try:
+            self.services.stop_all()
+            self.services.prove_stopped()
+            with self.files._io() as (scope, root):
+                _, journal = self.files._active(scope, root, self.transaction, **self.source, phases=('prepared',))
+            staged = self.worker.command('stage_restore', 'restore_staged',
+                ('final_intents', 'restore_data', 'original_tree_sha256', 'prepared_tree_sha256'), journal=journal)
+            self.final = self._intents(staged['final_intents'], self.before)
+            self.services.prove_stopped()
+            self.files.record_quiesced(self.transaction, dict(panel_stopped=True, writers_exclusive=True,
+                cores=self.final), restore_data=staged['restore_data'],
+                original_tree_sha256=staged['original_tree_sha256'],
+                prepared_tree_sha256=staged['prepared_tree_sha256'], **self.source)
+            self._backup_before()
+            self.worker.finish()
+            self.worker.close()
+            _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+            self.worker = _start_worker(self.ops, self.account, self.deadline, self.cancelled)
+            state = self._exchange_and_activate_restore_trial()
+            return self._result('restored_backup', state)
+        except BaseException:
+            self.services.stop_all(emergency=True)
+            raise
 
     def _exchange_and_activate_restore_trial(self, *, _new_worker=None):
         """Run the private exchange for an already staged and backed-up restore."""
@@ -614,19 +683,7 @@ class _Switch:
             self.services.prove_stopped()
             self.files.record_quiesced(self.transaction,
                 dict(panel_stopped=True, writers_exclusive=True, cores=self.final), **self.source)
-            snapshot = self.files.backup_snapshot(self.transaction, **self.source)
-            snapshot = dict(snapshot, schema=1, kind='core-backup-closure-v1',
-                            selection=self.m._selection_map(snapshot['selection']))
-            self.backup = self.worker.command('backup_core', 'core_backed_up',
-                ('backup_name', 'backup_sha256', 'snapshot_sha256'), snapshot=snapshot)
-            name, digest = self.backup['backup_name'], self.backup['backup_sha256']
-            _need(type(name) is str and re.fullmatch(r'core-maintenance-[a-f0-9]{32}\.zip', name)
-                  and self.a._hex(digest) and self.backup['snapshot_sha256'] ==
-                      hashlib.sha256(self.modules.store._canonical(snapshot)).hexdigest(), 'CORE_BACKUP_RECEIPT')
-            self.files.record_backup(self.transaction, dict(kind='backup-components-v1',
-                backup_id=hashlib.sha256((name+':'+digest).encode()).hexdigest(), sha256=digest, name=name,
-                selection_revision=self.before.revision,
-                intents_sha256=self.m._digest(self.m._raw(self.final))), **self.source)
+            digest = self._backup_before()
             _need(self.files.provision(self.transaction, **self.source) == self.after, 'CORE_TRIAL_CHANGED')
             bound = self.worker.command('bind_core_ids', 'core_ids_bound', ('selection', 'intents'),
                                         backup_sha256=digest)
@@ -669,7 +726,17 @@ def recover(ops, *, cancelled=None):
     return _run_task(ops, cancelled, None)
 
 
-def _run_task(ops, cancelled, request):
+def restore_backup(ops, *, archive_name, archive_sha256, expected_revision, cancelled=None):
+    """Fixed private restore entry for a scoped caller in an isolated session."""
+    _need(os.geteuid() == 0, 'ROOT_REQUIRED')
+    _need(os.getpid() == os.getpgrp() == os.getsid(0), 'CORE_TASK_ISOLATION')
+    _need(type(archive_name) is str and re.fullmatch(r'core-maintenance-[a-f0-9]{32}\.zip', archive_name)
+          and all(type(value) is str and ops.HEX.fullmatch(value)
+                  for value in (archive_sha256, expected_revision)), 'CORE_RESTORE_REQUEST')
+    return _run_task(ops, cancelled, (archive_name, archive_sha256, expected_revision), restore=True)
+
+
+def _run_task(ops, cancelled, request, *, restore=False):
     cancelled = [] if cancelled is None else cancelled
     deadline = time.monotonic() + ops.TIMEOUT
     with ops.installation_lock(_proof=True) as proof:
@@ -686,6 +753,8 @@ def _run_task(ops, cancelled, request):
 
             task = new_task()
             try:
+                if restore:
+                    return task.run_restore(*request)
                 if request is None:
                     return task.run_recovery()
                 try:

@@ -29,11 +29,12 @@ from app.data_owner import data_owner
 from . import artifacts as a, selection as s, store as fs
 from .application import bundle_artifacts
 from .backup import CoreBackup, _snapshot
-from .backup_archive import create as create_backup, MAX_ARCHIVE as MAX_BACKUP
+from .backup_archive import (create as create_backup, MAX_ARCHIVE as MAX_BACKUP,
+                             preflight, prepare_restore, place_restore_candidate)
 from .binary import open_runtime_artifact, verify_runtime_artifact_fd
 from .boot import _runtime_states, _data_root
 from .resolver import CoreResolver
-from .selection_files import SelectionFiles
+from .selection_files import SelectionFiles, _journal
 
 
 class CoreMaintenanceError(ValueError):
@@ -527,3 +528,61 @@ class CoreMaintenanceSession(tools._MaintenanceSession):
         return self._bind(self._before,restore=True)
     def release_writers_for_trial(self):
         _need(self._core_phase=='bound','CORE_PHASE');return super().release_writers_for_trial()
+
+
+class CoreRestorePreparation(CoreMaintenanceSession):
+    """Keep the checked backup under one operation lease until it is staged."""
+
+    def __init__(self, root, *, archive_name, archive_sha256, expected_selection_revision, **layout):
+        _need(type(archive_name) is str and re.fullmatch(r'core-maintenance-[a-f0-9]{32}\.zip', archive_name)
+              and a._hex(archive_sha256) and a._hex(expected_selection_revision), 'RESTORE_INPUT')
+        super().__init__(root, core='sing-box', expected_selection_revision=expected_selection_revision, **layout)
+        self._restore_archive = archive_name
+        self._restore_sha256 = archive_sha256
+
+    def prepare(self):
+        try:
+            facts = super().prepare()
+            _need(self._initialized, 'SELECTION_REQUIRED')
+            backup = CoreBackup(app_source=self._source, target=self._target, bundles=self._bundle_map,
+                                catalog=self._catalog, store=self._store)
+            checked = self._operation.enter_context(preflight(
+                self.root/'backups'/self._restore_archive, self._restore_sha256, self.root,
+                core_backup=backup, expected_data_path=self.root/'data', _managed=True))
+            for core in s.CORES:
+                self._resolver.current(checked.core_closure.selection, core)
+            self._unchanged_application()
+            self._restore_backup, self._restore_input = backup, checked
+            self._core_phase = 'restore_preflight'
+            return dict(context=facts, incoming_selection=_state_map(checked.core_closure.selection),
+                        incoming_intents=checked.core_closure.intents,
+                        incoming_generation=checked.data_generation, preflight_tree_sha256=checked.data_sha256)
+        except BaseException:
+            self.close()
+            raise
+
+    def stage_restore(self, journal):
+        _need(self._core_phase == 'restore_preflight', 'CORE_PHASE')
+        journal = _journal(journal, self._source, self._target)
+        _need(journal['operation'] == 'restore' and journal['phase'] == 'prepared'
+              and journal['restore_target']['kind'] == 'core-restore-target-v2'
+              and journal['switch_context']['application'] == self._app_facts
+              and journal['switch_context']['data_generation'] == self._data_generation,
+              'RESTORE_CONTEXT')
+        with self._files.hold_restore_pending(journal):
+            tools._MaintenanceSession.execute(self)
+            self._check()
+            self._final_intents = self._intents(self._observe_states(), self._before)
+            self._policy()
+            for core in s.CORES:
+                self._resolver.current(self._restore_input.core_closure.selection, core)
+            with prepare_restore(self, self._restore_input, core_backup=self._restore_backup,
+                                 current_selection=self._before) as prepared:
+                original = place_restore_candidate(self, journal, prepared, core_backup=self._restore_backup,
+                                                   current_selection=self._before, _selection_files=self._files)
+                self._core_phase = 'quiesced'
+                return dict(final_intents=deepcopy(self._final_intents),
+                            restore_data=dict(live=original['data_generation'], original=None,
+                                              incoming=prepared.data_generation, rejected=None),
+                            original_tree_sha256=original['data_sha256'],
+                            prepared_tree_sha256=prepared.data_sha256)

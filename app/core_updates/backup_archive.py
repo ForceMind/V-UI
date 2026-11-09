@@ -5,7 +5,7 @@ preparation never modify live data or Root state. Authorization clearing and
 DNS suspension affect only the private incoming tree. The exchange helper
 handles fixed data slots separately from preparation and selector publication.
 """
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 import hashlib
 import json
@@ -164,19 +164,30 @@ def create(guard, destination, *, core_backup, selection, intents, panel_was_run
 
 
 @contextmanager
-def _snapshot(path, expected_sha, workspace):
+def _snapshot(path, expected_sha, workspace, *, managed=False):
     _need(type(expected_sha) is str and re.fullmatch('[a-f0-9]{64}', expected_sha))
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    with os.fdopen(fd, 'rb') as source:
-        initial = os.fstat(source.fileno())
-        _need(stat.S_ISREG(initial.st_mode) and initial.st_nlink == 1 and initial.st_size <= MAX_ARCHIVE)
-        with tools._PrivateArchiveFile(tempfile.TemporaryFile(prefix='core-verified-', dir=workspace)) as copied:
-            digest, size = tools.stream_digest(source, copied, MAX_ARCHIVE)
-            _need(digest == expected_sha and size == initial.st_size, 'Archive checksum mismatch')
-            signature = a._file_identity
-            _need(signature(initial) == signature(os.fstat(source.fileno())) == signature(os.stat(path, follow_symlinks=False)))
-            copied.finish_writes(); copied.seek(0)
-            yield copied
+    parent_scope = tools._maintenance_directory(path.parent) if managed else nullcontext(None)
+    with parent_scope as parent:
+        name = path.name if managed else path
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        with os.fdopen(fd, 'rb') as source:
+            initial = os.fstat(source.fileno())
+            _need(stat.S_ISREG(initial.st_mode) and initial.st_nlink == 1 and initial.st_size <= MAX_ARCHIVE)
+            if managed:
+                _need(initial.st_uid == os.geteuid() and stat.S_IMODE(initial.st_mode) == 0o600)
+            with tools._PrivateArchiveFile(tempfile.TemporaryFile(prefix='core-verified-', dir=workspace)) as copied:
+                digest, size = tools.stream_digest(source, copied, MAX_ARCHIVE)
+                _need(digest == expected_sha and size == initial.st_size, 'Archive checksum mismatch')
+                signature = a._file_identity
+                _need(signature(initial) == signature(os.fstat(source.fileno())) ==
+                      signature(os.stat(name, dir_fd=parent, follow_symlinks=False)))
+                if managed:
+                    linked = path.parent.lstat()
+                    held = os.fstat(parent)
+                    _need(stat.S_ISDIR(linked.st_mode) and (linked.st_dev, linked.st_ino) ==
+                          (held.st_dev, held.st_ino))
+                copied.finish_writes(); copied.seek(0)
+                yield copied
 
 
 def _outer_extract(archive, destination, expected_data_path):
@@ -265,7 +276,7 @@ def _private_extraction_dirs(data):
 
 
 @contextmanager
-def preflight(archive_path, expected_sha, workspace, *, core_backup, expected_data_path):
+def preflight(archive_path, expected_sha, workspace, *, core_backup, expected_data_path, _managed=False):
     """Check untrusted input; never swap live data or prepare the Root store."""
     _need(type(core_backup) is CoreBackup)
     workspace, live = Path(workspace), Path(expected_data_path)
@@ -276,7 +287,7 @@ def preflight(archive_path, expected_sha, workspace, *, core_backup, expected_da
             pass
         with tempfile.TemporaryDirectory(prefix='.restore-components-', dir=workspace) as temporary:
             work=Path(temporary);work.chmod(0o700);container=work/'container'
-            with _snapshot(Path(archive_path),expected_sha,work) as snapshot, zipfile.ZipFile(snapshot) as archive:
+            with _snapshot(Path(archive_path),expected_sha,work,managed=_managed) as snapshot, zipfile.ZipFile(snapshot) as archive:
                 meta=_outer_extract(archive,container,expected_data_path)
             closure=core_backup.inspect(container/'core')
             inner=container/'data/snapshot.zip';data=work/'data'

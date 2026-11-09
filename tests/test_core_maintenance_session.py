@@ -81,6 +81,52 @@ class CoreMaintenanceTests(unittest.TestCase):
                       intents=final['final_intents'],panel_was_running=True)
         result=session.backup_core(snapshot);return session,context,result
 
+    def test_restore_session_preflights_and_stages_verified_archive_under_real_leases(self):
+        writer, context, backup = self.backed()
+        writer.close()
+        source = dict(app_source=materials.NEW_APP, target=materials.TARGET)
+        before = s.decode_selection(sf._raw(context['selection']), **source)
+        snapshot = dict(panel_running=True, cores=context['intents'])
+        self.files.bootstrap(before, writer_observation={
+            core: dict(schema=context['runtime_schemas'][core], revision=row['revision'], enabled=row['enabled'])
+            for core, row in context['intents'].items()}, service_snapshot=snapshot)
+        def new_session():
+            session = m.CoreRestorePreparation(self.root, archive_name=backup['backup_name'],
+                archive_sha256=backup['backup_sha256'], expected_selection_revision=before.revision,
+                _selection_files=self.files, _catalog=self.material.catalog, _store=self.material.store,
+                _bundle_anchor=self.cycle.base)
+            self.addCleanup(session.close)
+            return session
+        backups = self.root/'backups'
+        retained = self.root/'retained-backups'
+        backups.rename(retained)
+        backups.symlink_to(retained, target_is_directory=True)
+        with self.assertRaises(tools.ReleaseError):
+            new_session().prepare()
+        self.assertFalse((self.files.layout.root/sf.PENDING).exists())
+        backups.unlink()
+        retained.rename(backups)
+        session = new_session()
+        prepared = session.prepare()
+        incoming = s.decode_selection(sf._raw(prepared['incoming_selection']), **source)
+        slot = 'c'*32
+        tx = self.files.begin_restore(incoming, expected_revision=before.revision,
+            service_snapshot=snapshot, source_backup_sha256=backup['backup_sha256'],
+            restored_intents=prepared['incoming_intents'], switch_context=dict(
+                application=context['application'], data_generation=context['data_generation'],
+                services={'v-ui.service':'active','v-ui-http01.socket':'active','v-ui-http01.service':'inactive'},
+                config_sha256='d'*64, certificate_mode='managed', trust_sha256=None),
+            data_plan=dict(slot=slot, incoming_generation=prepared['incoming_generation'],
+                preflight_tree_sha256=prepared['preflight_tree_sha256'], incoming_trust_sha256=None), **source)
+        with self.files._io() as (scope, root):
+            _, journal = self.files._active(scope, root, tx, phases=('prepared',), **source)
+        staged = session.stage_restore(journal)
+        self.assertEqual(sf.restore_data_position(journal, staged['restore_data']), 'staged')
+        self.assertEqual(staged['final_intents'], context['intents'])
+        session.close()
+        self.assertTrue((self.root/'recovery'/('core-restore-'+slot+'-incoming')/'v-ui.db').is_file())
+        self.assertTrue((self.data/'v-ui.db').is_file())
+
     def tls_fixture(self, mode='provided'):
         config = dict(certificate_mode=mode, bind='0.0.0.0', domain='panel.example.test', port=3215)
         original = tools._maintenance_cycle_file

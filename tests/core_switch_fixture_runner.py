@@ -339,7 +339,7 @@ def switch_error_code(error, ops, control, stage):
             value = str(error)
             if re.fullmatch(r'CORE_[A-Z0-9_]{1,29}', value) and value not in codes:
                 codes.append(value)
-        elif type(error) is ops.Refused:
+        elif isinstance(error, ops.Refused):
             codes.append({
                 'service is not in a stable supported state': 'UNIT_TRANSITION',
                 'service action failed': 'UNIT_ACTION',

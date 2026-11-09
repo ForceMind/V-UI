@@ -59,6 +59,13 @@ class Refused(RuntimeError):
     """A bounded, intentionally non-sensitive failure."""
 
 
+class UnitTransition(Refused):
+    def __init__(self, unit, state):
+        super().__init__('service is not in a stable supported state')
+        self.unit = unit
+        self.state = state
+
+
 class IdentityStarting(Refused):
     """Exact systemd executor exists but has not dropped its root UID yet."""
 
@@ -660,14 +667,16 @@ class Services:
         self.executable = SYSTEMCTL if manager == 'systemd' else RC_SERVICE
         trusted_executable(self.executable)
 
-    def _run(self, arguments, ignore_cancel=False):
+    def _run(self, arguments, ignore_cancel=False, *, deadline=None):
         timeout = COMMAND_TIMEOUT
-        if self.deadline is not None and not ignore_cancel:
+        if deadline is not None:
+            timeout = min(timeout, deadline - time.monotonic())
+        elif self.deadline is not None and not ignore_cancel:
             timeout = min(timeout, self.deadline - time.monotonic())
         return run_command([str(self.executable), *arguments],
                            None if ignore_cancel else self.cancelled, timeout=timeout)
 
-    def state(self, unit):
+    def state(self, unit, *, emergency_deadline=None):
         if unit not in self.units:
             raise Refused('unknown service')
         if self.manager == 'openrc':
@@ -678,7 +687,8 @@ class Services:
             if code == 3:
                 return 'inactive'
             raise Refused('unknown OpenRC state')
-        fields = self._systemd_properties(unit)
+        fields = (self._systemd_properties(unit) if emergency_deadline is None else
+                  self._systemd_properties(unit, emergency_deadline=emergency_deadline))
         socket = unit.endswith('.socket')
         state = (fields['ActiveState'], fields['SubState'])
         active_states = {('active', 'listening'), ('active', 'running')} if socket else {('active', 'running')}
@@ -688,12 +698,16 @@ class Services:
             return 'active'
         if state == ('inactive', 'dead') and (socket or fields['MainPID'] == '0'):
             return 'inactive'
+        if state[0] in ('activating', 'deactivating', 'failed'):
+            raise UnitTransition(unit, state)
         raise Refused('service is not in a stable supported state')
 
-    def _systemd_properties(self, unit):
+    def _systemd_properties(self, unit, *, emergency_deadline=None):
         if self.manager != 'systemd' or unit not in self.units:
             raise Refused('unknown systemd service')
-        code, output = self._run(['show', '--no-pager', '--all', '--property=' + ','.join(PROPERTIES), unit])
+        command = ['show', '--no-pager', '--all', '--property=' + ','.join(PROPERTIES), unit]
+        code, output = (self._run(command) if emergency_deadline is None else
+                        self._run(command, ignore_cancel=True, deadline=emergency_deadline))
         if code:
             raise Refused('systemd query failed')
         try:
@@ -773,10 +787,32 @@ class Services:
                 failed = True
         if failed:
             raise Refused('service stop unconfirmed')
-        self.prove_stopped()
+        if not emergency or self.manager != 'systemd':
+            self.prove_stopped()
+            return
+        deadline = time.monotonic() + 5
+        reset = set()
+        while True:
+            try:
+                self.prove_stopped(emergency_deadline=deadline)
+                return
+            except UnitTransition as error:
+                if time.monotonic() >= deadline:
+                    raise
+                if error.state == ('failed', 'failed') and error.unit not in reset:
+                    fields = self._systemd_properties(error.unit, emergency_deadline=deadline)
+                    if ((fields['ActiveState'], fields['SubState']) == error.state
+                            and fields.get('MainPID', '0') == '0' and cgroup_empty(error.unit)):
+                        code, _ = self._run(['reset-failed', error.unit], ignore_cancel=True, deadline=deadline)
+                        if code:
+                            raise Refused('service stop unconfirmed') from None
+                        reset.add(error.unit)
+                time.sleep(.05)
 
-    def prove_stopped(self):
-        if any(value != 'inactive' for value in self.snapshot().values()):
+    def prove_stopped(self, *, emergency_deadline=None):
+        states = (self.snapshot() if emergency_deadline is None else
+                  {unit: self.state(unit, emergency_deadline=emergency_deadline) for unit in self.units})
+        if any(value != 'inactive' for value in states.values()):
             raise Refused('services remain active')
         if self.manager != 'systemd':
             raise Refused('OpenRC descendant quiescence cannot be proved')

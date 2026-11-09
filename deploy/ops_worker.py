@@ -49,8 +49,8 @@ class _Channel:
         self.input_fd, self.output, self.deadline = input_fd, output, deadline
         self.buffer = bytearray()
 
-    def read(self, *, initial=False):
-        limit = RECOVERY_REQUEST_LIMIT if initial else LINE_LIMIT
+    def read(self, *, initial=False, restore_stage=False):
+        limit = RECOVERY_REQUEST_LIMIT if initial or restore_stage else LINE_LIMIT
         while b'\n' not in self.buffer:
             remaining = self.deadline - time.monotonic()
             if remaining <= 0:
@@ -156,7 +156,7 @@ CORE_IMPLEMENTATIONS = (
 )
 
 
-def _load_core_session(release_tools, *, recovery=False):
+def _load_core_session(release_tools, *, recovery=False, restore=False):
     """Only private requests need this fixed CONTROL closure, never payload."""
     directory = Path(__file__).resolve().parent
     names = ('app.core_updates', 'app.release_tools') + tuple(name for name, _ in CORE_IMPLEMENTATIONS)
@@ -178,6 +178,8 @@ def _load_core_session(release_tools, *, recovery=False):
             spec.loader.exec_module(module)
         if recovery:
             return sys.modules['app.core_updates.maintenance_recovery'].CoreRecoverySession
+        if restore:
+            return sys.modules['app.core_updates.maintenance'].CoreRestorePreparation
         return sys.modules['app.core_updates.maintenance'].CoreMaintenanceSession
     except BaseException:
         for name in reversed(loaded):sys.modules.pop(name, None)
@@ -338,6 +340,25 @@ def _complete_restore_observer(channel, root, release_tools, journal):
                 return
             _prove_released_operation(session)
             channel.send('operation_held')
+
+
+def _complete_restore_preparation(channel, session):
+    with _quiet_candidate_io():
+        prepared = session.prepare()
+    channel.send('restore_preflight', **prepared)
+    value = channel.read(restore_stage=True)
+    if value == {'command': 'finish'}:
+        return
+    if set(value) != {'command', 'journal'} or value['command'] != 'stage_restore':
+        raise WorkerError('Unexpected private restore staging command')
+    with _quiet_candidate_io():
+        staged = session.stage_restore(value['journal'])
+    channel.send('restore_staged', **staged)
+    value = _core_fields(channel, 'backup_core', ('snapshot',))
+    with _quiet_candidate_io():
+        backup = session.backup_core(value['snapshot'])
+    channel.send('core_backed_up', **backup)
+    channel.expect('finish')
 
 
 def _complete_core_handshake(channel, session):
@@ -502,6 +523,14 @@ def _run(root, release_tools, input_fd, output, *, timeout=TIMEOUT):
                 _load_core_session(release_tools)
                 journal = _restore_exchange_request(request)
                 _complete_restore_exchange(channel, root, release_tools, journal)
+            elif request.get('action') == 'core_restore_prepare':
+                fields = {'archive_name', 'archive_sha256', 'expected_selection_revision'}
+                if (set(request) != {'protocol', 'action', *fields}
+                        or type(request['protocol']) is not int or request['protocol'] != 1):
+                    raise WorkerError('Invalid private restore preparation request')
+                implementation = _load_core_session(release_tools, restore=True)
+                session = implementation(root, **{key: request[key] for key in fields})
+                _complete_restore_preparation(channel, session)
             else:
                 action, arguments = _request(request)
                 if action in ('start', 'restart'):

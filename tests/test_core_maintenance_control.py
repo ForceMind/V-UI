@@ -145,8 +145,23 @@ class FixtureChild:
                 result['transaction'] = '0'*32
         elif command == 'core_restore_exchange':
             journal = ops_worker._restore_exchange_request(request)
-            case.assertEqual(journal['sequence'], self.restore_receipt['sequence'])
-            result = dict(event='restore_data_exchanged', receipt=self.restore_receipt)
+            receipt = getattr(self, 'restore_receipt', None)
+            if receipt is None:
+                receipt = dict(transaction=journal['transaction'], sequence=journal['sequence'],
+                    data=case.restore_trial_data, tree_sha256=journal['quiesced']['prepared_tree_sha256'])
+            case.assertEqual(journal['sequence'], receipt['sequence'])
+            result = dict(event='restore_data_exchanged', receipt=receipt)
+        elif command == 'core_restore_prepare':
+            result = dict(event='restore_preflight', context=dict(case.context, selection_initialized=True),
+                incoming_selection=fixtures.raw(case.before), incoming_intents=case.initial_intents,
+                incoming_generation=case.restore_trial_data['live'], preflight_tree_sha256='b'*64)
+        elif command == 'stage_restore':
+            case.services.prove_stopped()
+            case.assertEqual(request['journal']['phase'], 'prepared')
+            result = dict(event='restore_staged', final_intents=case.initial_intents,
+                restore_data=dict(live=case.restore_trial_data['original'], original=None,
+                                  incoming=case.restore_trial_data['live'], rejected=None),
+                original_tree_sha256='d'*64, prepared_tree_sha256='e'*64)
         elif command == 'observe_restore_data':
             frames = []
             with patch('app.core_updates.backup_archive.observe_restore_trial', return_value=self.restore_data):
@@ -589,6 +604,25 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.assertEqual(self.trace.count('observe_restore_data'), 4)
         self.assertEqual(self.brokers[0].context['data_generation'], incoming)
         self.assertEqual(self.files.read_stable(**SOURCE), state)
+
+    def test_private_restore_coordinates_preflight_before_stop_and_trial_after_backup(self):
+        before = self.context['data_generation']
+        incoming = dict(dev=before['dev'], ino=before['ino']+1)
+        self.restore_trial_data = dict(live=incoming, original=before, incoming=None, rejected=None)
+        self.files.bootstrap(self.before, writer_observation={
+            name: dict(schema=1, revision=row['revision'], enabled=row['enabled'])
+            if row['revision'] is not None else dict(schema=None, revision=None, enabled=False)
+            for name, row in self.initial_intents.items()},
+            service_snapshot=dict(panel_running=True, cores=self.initial_intents))
+        exchange, observer = FixtureChild(self), FixtureChild(self)
+        observer.restore_data = self.restore_trial_data
+        with patch.object(control, '_start_worker', side_effect=[control._Worker(exchange), control._Worker(observer)]):
+            result = self.switch.run_restore(ARCHIVE, BACKUP_SHA, self.before.revision)
+        self.assertEqual(result['outcome'], 'restored_backup')
+        self.assert_order('core_restore_prepare', 'stop', 'stage_restore', 'backup_core',
+                          'core_restore_exchange', 'core_restore_observe', 'start-panel', 'release:trial')
+        self.assertEqual(self.files.read_stable(**SOURCE).revision, result['selection_revision'])
+        self.assertTrue(all(child.finished for child in (self.child, exchange, observer)))
 
     def test_restore_handoff_finishes_writer_before_creating_observer(self):
         receipt, trial, incoming = self.restore_trial_fixture()

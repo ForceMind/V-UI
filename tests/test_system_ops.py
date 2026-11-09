@@ -345,6 +345,31 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(mutate.call_count, 3)
         prove.assert_not_called()
 
+    def test_emergency_stop_retries_transition_and_clears_only_empty_failed_unit(self):
+        backend = self.backend()
+        unit = 'v-ui.service'
+        failed = dict(self.properties(unit), ActiveState='failed', SubState='failed')
+        with patch.object(backend, 'mutate'), patch.object(backend, 'prove_stopped', side_effect=[
+                ops.UnitTransition(unit, ('deactivating', 'stop-sigterm')),
+                ops.UnitTransition(unit, ('failed', 'failed')), None]) as prove, \
+                patch.object(backend, '_systemd_properties', return_value=failed), \
+                patch.object(ops, 'cgroup_empty', return_value=True), \
+                patch.object(ops.time, 'sleep'), patch.object(backend, '_run', return_value=(0, b'')) as run:
+            backend.stop_all(emergency=True)
+            self.assertEqual(run.call_args.args, (['reset-failed', unit],))
+            self.assertTrue(run.call_args.kwargs['ignore_cancel'])
+            self.assertEqual(run.call_args.kwargs['deadline'], prove.call_args.kwargs['emergency_deadline'])
+            self.assertEqual(prove.call_count, 3)
+        with patch.object(backend, 'mutate'), patch.object(backend, 'prove_stopped', side_effect=[
+                ops.UnitTransition(unit, ('failed', 'failed')), ops.UnitTransition(unit, ('failed', 'failed'))]), \
+                patch.object(backend, '_systemd_properties', return_value=failed), \
+                patch.object(ops, 'cgroup_empty', return_value=False), \
+                patch.object(ops.time, 'monotonic', side_effect=[0, 1, 6]), \
+                patch.object(ops.time, 'sleep'), patch.object(backend, '_run') as run:
+            with self.assertRaises(ops.UnitTransition):
+                backend.stop_all(emergency=True)
+            run.assert_not_called()
+
     def test_stopped_requires_every_empty_service_cgroup(self):
         backend = self.backend()
         inactive = {unit: 'inactive' for unit in ops.SYSTEMD_UNITS}
