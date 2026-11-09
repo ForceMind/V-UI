@@ -26,6 +26,7 @@ from pathlib import Path
 import re
 import stat
 import threading
+import time
 import uuid
 
 from app.data_owner import DataOwnerError, data_owner
@@ -41,6 +42,7 @@ _LOCKS: dict[str, threading.RLock] = {}
 _LOCKS_GUARD = threading.Lock()
 PROXY_STATE_SCHEMA_MAX = 3
 _YAML_FENCE = "yaml-capability.json"
+_YAML_CHECK = "yaml-check.json"
 _YAML_CAPABILITY = {"schema_version": 1, "kind": "yaml-capability", "minimum_state_schema": 3}
 _FLAGS = ("local_proxy_enabled", "relay_enabled")
 _PUBLIC_SETTINGS = {
@@ -715,6 +717,82 @@ class ProxyStore:
             self._immutable(secrets, plan_ref + ".json", plan)
             return self._save_doc(root, revisions, secrets, upgraded, doc)
 
+    def _yaml_data_generation(self):
+        fd = self._data_fd(initialize=False)
+        try:
+            info = os.fstat(fd)
+            return {"dev": info.st_dev, "ino": info.st_ino}
+        finally:
+            os.close(fd)
+
+    def _yaml_check_material(self, revisions, secrets, raw):
+        from app.services.inbound_policy import plan_from_manifest
+        from app.services.mihomo_plan_record import PlanRecordError, decode_check_record, yaml_endpoint_id
+        try:
+            checked = decode_check_record(raw)
+        except PlanRecordError:
+            raise ProxyStorageError("YAML confirmation record is invalid") from None
+        value = checked.value
+        doc = self._revision(revisions, secrets, value["revision"])[0]
+        _require(doc.get("execution_mode") == "yaml")
+        record = self._yaml_material(secrets, doc["yaml_plan"])[0]
+        manifest = record.value
+        source = plan_from_manifest(value["plan_manifest"], doc["settings"])
+        _require(value["plan_revision"] == record.record_id and value["compiler"] == manifest["compiler"]
+                 and value["source_fingerprint"] == source.source_fingerprint
+                 and value["protected_enabled"] == source.requires_upstream
+                 and value["source_flags"] == {key: doc["settings"][key] for key in _FLAGS}
+                 and value["dns_upstream"] == manifest["dns_upstream"])
+        needed = ({target for _, _, target in manifest["rules"] if target not in ("DIRECT", "REJECT")}
+                  if source.requires_upstream else set())
+        if source.requires_upstream and manifest["dns_upstream"] is not None:
+            needed.add(manifest["dns_upstream"])
+        endpoints = value["endpoints"]
+        _require(endpoints.keys() == needed)
+        profiles = {profile["name"]: profile for profile in manifest["upstreams"]}
+        for name, endpoint in endpoints.items():
+            _require(endpoint["profile_id"] == yaml_endpoint_id(record.record_id, name)
+                     and endpoint["host"] == profiles[name]["server"])
+        return checked
+
+    def save_yaml_check(self, value, expected_revision):
+        """Replace the single latest private confirmation without changing draft."""
+        raw = _canonical(value)
+        if len(raw) > MAX_BYTES:
+            raise ProxyCapacityError("YAML confirmation capacity is full")
+        with self._locked() as (_, revisions, secrets, state, _):
+            self._editable(state, expected_revision)
+            self._snapshot(revisions, secrets, state)
+            checked = self._yaml_check_material(revisions, secrets, raw)
+            ticket = checked.value
+            now = int(time.time())
+            _require(state["schema_version"] == 3 and ticket["revision"] == expected_revision
+                     and ticket["data_generation"] == self._yaml_data_generation()
+                     and ticket["created_at"] <= now < ticket["expires_at"])
+            self._atomic_bytes(secrets, _YAML_CHECK, raw)
+            return {"check_id": checked.check_id, "expires_at": ticket["expires_at"]}
+
+    def load_yaml_check(self, check_id, expected_revision, *, runtime_fingerprint, issuer, source_fingerprint):
+        """Private confirmation read; possession of its ID grants no permission."""
+        if type(check_id) is not str or not _HEX.fullmatch(check_id):
+            raise ProxyValidationError("YAML confirmation ID is invalid")
+        with self._locked() as (_, revisions, secrets, state, _):
+            self._editable(state, expected_revision)
+            self._snapshot(revisions, secrets, state)
+            raw = self._read_bytes(secrets, _YAML_CHECK, optional=True)
+            if raw is None:
+                raise ProxyConflict("YAML confirmation is missing")
+            checked = self._yaml_check_material(revisions, secrets, raw)
+            value = checked.value
+            now = int(time.time())
+            if (checked.check_id != check_id or value["revision"] != expected_revision
+                    or value["runtime_fingerprint"] != runtime_fingerprint or value["issuer"] != issuer
+                    or value["source_fingerprint"] != source_fingerprint
+                    or value["data_generation"] != self._yaml_data_generation()
+                    or not value["created_at"] <= now < value["expires_at"]):
+                raise ProxyConflict("YAML confirmation changed or expired; check again")
+            return value
+
     def clear_yaml_plan(self, expected_revision):
         with self._locked() as (root, revisions, secrets, state, _):
             self._editable(state, expected_revision)
@@ -1144,6 +1222,11 @@ class ProxyStore:
                     self._revision(revisions, secrets, name[:-5])
                     yield "proxy-state/revisions/" + name, self._read_bytes(revisions, name)
                 for name in sorted(os.listdir(secrets)):
+                    if name == _YAML_CHECK:
+                        raw = self._read_bytes(secrets, name)
+                        self._yaml_check_material(revisions, secrets, raw)
+                        yield "proxy-state/secrets/" + name, raw
+                        continue
                     if name == _YAML_FENCE:
                         yield "proxy-state/secrets/" + name, self._read_bytes(secrets, name)
                         continue

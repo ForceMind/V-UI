@@ -131,6 +131,13 @@ def decode_plan_record(raw: bytes) -> StoredMihomoPlan:
         raise PlanRecordError() from None
 
 
+def yaml_endpoint_id(record_id, name):
+    _require(type(record_id) is str and _HEX.fullmatch(record_id))
+    literal_string(name, allow_empty=False, max_bytes=512)
+    raw = b'vui-yaml-endpoint-v1\0' + record_id.encode('ascii') + b'\0' + name.encode('utf-8')
+    return 'up_' + hashlib.sha256(raw).hexdigest()[:32]
+
+
 def encode_plan_record(plan, *, sources, group_members, dns_upstream) -> bytes:
     """Build immutable bytes; source hashes refer to separately stored private inputs."""
     _require(dict(plan.group_members) == group_members)
@@ -147,3 +154,85 @@ def encode_plan_record(plan, *, sources, group_members, dns_upstream) -> bytes:
         raise PlanRecordError() from None
     decode_plan_record(raw)
     return raw
+
+
+@dataclass(frozen=True)
+class StoredYamlCheck:
+    check_id: str
+    _raw: bytes = field(repr=False)
+
+    @property
+    def value(self):
+        return json.loads(self._raw)
+
+
+def decode_check_record(raw: bytes) -> StoredYamlCheck:
+    """Read private confirmation metadata without importing the YAML compiler."""
+    from app.services.inbound_policy import plan_from_manifest
+
+    try:
+        _require(type(raw) is bytes and 0 < len(raw) <= MAX_RECORD_BYTES)
+        value = json.loads(raw.decode('utf-8'), object_pairs_hook=_pairs, parse_float=_invalid_number,
+                           parse_constant=_invalid_number, parse_int=_integer)
+        fields = {'schema_version', 'kind', 'revision', 'plan_revision', 'compiler', 'source_fingerprint',
+                  'candidate_revision', 'policy_identity', 'plan_manifest', 'source_flags', 'protected_enabled',
+                  'endpoints', 'self_addresses', 'dns_upstream', 'runtime_fingerprint', 'issuer',
+                  'data_generation', 'created_at', 'expires_at'}
+        _require(type(value) is dict and set(value) == fields)
+        _require(type(value['schema_version']) is int and value['schema_version'] == 1
+                 and value['kind'] == 'yaml-check' and type(value['compiler']) is int and value['compiler'] == 1)
+        for key in ('revision', 'plan_revision', 'source_fingerprint', 'candidate_revision',
+                    'policy_identity', 'runtime_fingerprint'):
+            _require(type(value[key]) is str and _HEX.fullmatch(value[key]))
+        _require(type(value['issuer']) is str and re.fullmatch('[a-f0-9]{32}', value['issuer']))
+        _require(type(value['created_at']) is int and value['created_at'] >= 0
+                 and type(value['expires_at']) is int
+                 and 0 < value['expires_at'] - value['created_at'] <= 300)
+        generation = value['data_generation']
+        _require(type(generation) is dict and set(generation) == {'dev', 'ino'}
+                 and all(type(n) is int and 0 <= n < 1 << 64 for n in generation.values())
+                 and generation['ino'] > 0)
+        flags = value['source_flags']
+        _require(type(flags) is dict and set(flags) == {'local_proxy_enabled', 'relay_enabled'}
+                 and all(type(flag) is bool for flag in flags.values()))
+        source = plan_from_manifest(value['plan_manifest'], flags)
+        _require(type(value['protected_enabled']) is bool and source.requires_upstream == value['protected_enabled'])
+        own = value['self_addresses']
+        _require(type(own) is list and len(own) <= 4096)
+        _check_record_addresses(own, allow_empty=not value['protected_enabled'])
+        endpoints = value['endpoints']
+        _require(type(endpoints) is dict and len(endpoints) <= 128)
+        _require(value['protected_enabled'] or not endpoints)
+        ids = set()
+        for name, endpoint in endpoints.items():
+            literal_string(name, allow_empty=False, max_bytes=512)
+            _require(len(name) <= 128 and type(endpoint) is dict
+                     and set(endpoint) == {'profile_id', 'revision', 'host', 'addresses', 'resolved_at'})
+            _require(type(endpoint['profile_id']) is str
+                     and re.fullmatch('up_[a-f0-9]{32}', endpoint['profile_id'])
+                     and endpoint['profile_id'] not in ids and endpoint['revision'] == value['revision']
+                     and type(endpoint['resolved_at']) is int and endpoint['resolved_at'] >= 0)
+            ids.add(endpoint['profile_id'])
+            from app.services.upstream_profile import server_host
+            server_host(endpoint['host'])
+            _require(type(endpoint['addresses']) is list and len(endpoint['addresses']) <= 32)
+            _check_record_addresses(endpoint['addresses'])
+        dns = value['dns_upstream']
+        _require(dns is None or type(dns) is str and len(dns) <= 128)
+        if dns is not None:
+            literal_string(dns, allow_empty=False, max_bytes=512)
+            _require(not value['protected_enabled'] or dns in endpoints)
+        _require(raw == _canonical(value))
+        return StoredYamlCheck(hashlib.sha256(raw).hexdigest(), raw)
+    except PlanRecordError:
+        raise
+    except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
+        raise PlanRecordError() from None
+
+
+def _check_record_addresses(values, *, allow_empty=False):
+    _require(bool(values) or allow_empty)
+    _require(all(type(value) is str and '%' not in value for value in values))
+    addresses = [ipaddress.ip_address(value) for value in values]
+    _require([str(address) for address in addresses] == values)
+    _require(sorted(set(addresses), key=lambda address: (address.version, int(address))) == addresses)

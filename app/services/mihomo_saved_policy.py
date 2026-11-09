@@ -10,7 +10,7 @@ import re
 from app.services.inbound_policy import PolicyError
 from app.services.mihomo_merge_plan import StaticMihomoPlan
 from app.services.mihomo_plan_policy import protected_yaml_route
-from app.services.mihomo_plan_record import PlanRecordError, StoredMihomoPlan, decode_plan_record
+from app.services.mihomo_plan_record import PlanRecordError, StoredMihomoPlan, decode_plan_record, yaml_endpoint_id
 from app.services.proxy_policy import (
     AddressPolicy, CompiledPolicy, DNS_TAG, LOCAL_TAG, NAMESPACE, NORMAL_DNS_TAG, UPSTREAM_TAG,
     VerifiedEndpoint, _digest, _prepare, _upstream,
@@ -26,11 +26,6 @@ class CompiledYamlPolicy(CompiledPolicy):
     yaml_plan_revision: str = ''
     endpoints: tuple[tuple[str, VerifiedEndpoint], ...] = field(default=(), repr=False)
     dns_upstream: str | None = field(default=None, repr=False)
-
-
-def yaml_endpoint_id(record_id, name):
-    raw = b'vui-yaml-endpoint-v1\0' + record_id.encode('ascii') + b'\0' + name.encode('utf-8')
-    return 'up_' + hashlib.sha256(raw).hexdigest()[:32]
 
 
 def checked_yaml_material(snapshot):
