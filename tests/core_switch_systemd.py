@@ -179,6 +179,7 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
             return witness
 
         def task(core, action, revision, *, rejected=False):
+            case = core + ' ' + action
             args = [core, action, source_sha, revision or 'none']
             if action == 'port-conflict':
                 args.append(str(nodes[core]['port']))
@@ -188,11 +189,12 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
             try:
                 result = json.loads(output.stdout)
             except ValueError:
-                check.fail('Root core-switch fixture did not return its closed response')
+                check.fail(case + ' Root core-switch fixture did not return its closed response')
             check.assertIsInstance(result, dict)
             error = result.get('error')
             code = error if type(error) is str and re.fullmatch(r'[A-Z0-9_]{1,80}', error) else 'NO_CODE'
-            check.assertEqual(output.returncode == 0, not rejected, 'Installed core-switch outcome mismatch '+code)
+            check.assertEqual(output.returncode == 0, not rejected,
+                              case + ' installed core-switch outcome mismatch ' + code)
             check.assertIs(result['ok'], not rejected)
             if rejected:
                 check.assertEqual(set(result), {'ok', 'error'})

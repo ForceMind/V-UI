@@ -304,6 +304,49 @@ def parse(arguments):
     return core, action, source, None if revision == 'none' else revision, port
 
 
+def trace_switch(control):
+    """Remember fixed coordinator stages without recording request or output."""
+    trace = ['CONTEXT']
+    exchange = control._Worker.exchange
+    activate = control._Switch._activate
+
+    def traced_exchange(worker, request, event, fields=()):
+        if event == 'operation_held':
+            try:
+                return exchange(worker, request, event, fields)
+            except BaseException:
+                trace[0] = 'OPERATION_HELD'
+                raise
+        if re.fullmatch(r'[a-z_]{1,30}', event):
+            trace[0] = event.upper()
+        return exchange(worker, request, event, fields)
+
+    def traced_activate(task, state, intents, *, recovery, cleanup=False):
+        trace[0] = 'CLEANUP' if cleanup else ('RESTORE_BEFORE' if recovery else 'TRIAL')
+        return activate(task, state, intents, recovery=recovery, cleanup=cleanup)
+
+    control._Worker.exchange = traced_exchange
+    control._Switch._activate = traced_activate
+    return trace
+
+
+def switch_error_code(error, ops, control, stage):
+    codes = []
+    for _ in range(4):
+        if error is None:
+            break
+        if type(error) is control.CoreControlError:
+            value = str(error)
+            if re.fullmatch(r'CORE_[A-Z0-9_]{1,29}', value) and value not in codes:
+                codes.append(value)
+        elif type(error) is ops.Refused:
+            codes.append('OPS_REFUSED')
+        elif isinstance(error, OSError) and type(error.errno) is int and 0 < error.errno < 4096:
+            codes.append('ERRNO_'+str(error.errno))
+        error = error.__cause__ or error.__context__
+    return '_'.join((stage, *(codes or ['FIXTURE_SWITCH_REFUSED'])))[:80]
+
+
 def run(arguments):
     require(sys.platform == 'linux' and os.geteuid() == 0
             and os.getpid() == os.getpgrp() == os.getsid(0)
@@ -321,6 +364,7 @@ def run(arguments):
         opener = FixtureOpener(stack, folder, source, core=core, bad_digest=action == 'bad-digest')
         inject_transport(control, opener)
         conflicts = inject_assertions(control, source, opener.core, port)
+        trace = trace_switch(control)
         switch_action = 'rollback' if action == 'rollback' else 'update'
         try:
             result = control.switch(ops, core=opener.core, action=switch_action,
@@ -329,7 +373,7 @@ def run(arguments):
             if (action == 'bad-digest' and opener.corrupted and type(error) is opener.error_type
                     and str(error) == 'ASSET_DIGEST'):
                 raise Refused('ASSET_DIGEST') from None
-            raise
+            raise Refused(switch_error_code(error, ops, control, trace[0])) from None
         expected = 'restored_previous' if action == 'port-conflict' else 'switched'
         require(action != 'bad-digest' and result.get('outcome') == expected
                 and type(result.get('panel_running')) is bool
