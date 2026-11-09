@@ -137,4 +137,4 @@ jobs:
           if [[ "$TLS_CERTIFICATE_NO_BROWSER" == 'true' ]]; then args+=(--tls-certificate-no-browser); fi
           if [[ "$UI_REDESIGN_NO_BROWSER" == 'true' ]]; then args+=(--ui-redesign-no-browser); fi
           if [[ "$STARTUP_NO_BROWSER" == 'true' ]]; then args+=(--startup-no-browser); fi
-          python3 scripts/publish_release.py "${args[@]}"
+          python3 -m scripts.publish_release "${args[@]}"
