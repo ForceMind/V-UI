@@ -531,17 +531,7 @@ class _Switch:
         self._replace_restore_worker(_new_worker)
         try:
             _need(self.files.read_restore_recovery() == journal, 'CORE_RESTORE_CONTEXT')
-            response = self.worker.exchange(self._restore_worker_request(journal, 'core_restore_observe_old'),
-                                            'restore_observer_ready', ('transaction',))
-            _need(response['transaction'] == self.transaction, 'CORE_RESTORE_CONTEXT')
-            def observe():
-                result = self.worker.command('observe_restore_data', 'restore_data_observed',
-                                             ('transaction', 'data'), transaction=self.transaction)
-                _need(result['transaction'] == self.transaction
-                      and self.m.restore_data_position(journal, result['data']) in ('staged', 'restored'),
-                      'CORE_RESTORE_DATA_CHANGED')
-                self._proof()
-                return result['data']
+            observe = self._restore_recovery_observer(journal, original=True)
             observe()
             self._activate(state, self.final, recovery=True, restore_observe=observe,
                            restore_original_sha256=receipt['tree_sha256'])
@@ -555,6 +545,59 @@ class _Switch:
             raise
         finally:
             self.worker.close()
+
+    def _restore_recovery_observer(self, journal, *, original):
+        action = 'core_restore_observe_old' if original else 'core_restore_observe'
+        response = self.worker.exchange(self._restore_worker_request(journal, action),
+                                        'restore_observer_ready', ('transaction',))
+        _need(response['transaction'] == self.transaction, 'CORE_RESTORE_CONTEXT')
+
+        def observe():
+            result = self.worker.command('observe_restore_data', 'restore_data_observed',
+                                         ('transaction', 'data'), transaction=self.transaction)
+            positions = ('staged', 'restored') if original else ('trial',)
+            _need(result['transaction'] == self.transaction
+                  and self.m.restore_data_position(journal, result['data']) in positions,
+                  'CORE_RESTORE_DATA_CHANGED')
+            self._proof()
+            return result['data']
+
+        return observe
+
+    def _resume_confirmed_restore(self, journal):
+        """Finish a durable restore confirmation without moving either tree."""
+        context = journal['switch_context']
+        target = journal['restore_target']
+        _need(journal['phase'] in ('confirmed', 'cleanup') and 'confirmed_selection' in journal
+              and target['kind'] == 'core-restore-target-v2' and journal['quiesced'] is not None
+              and context['services']['v-ui.service'] == 'active'
+              and context['certificate_mode'] == self.config.get('certificate_mode', 'managed') == 'managed'
+              and self.m._digest(self.m._raw(self.config)) == context['config_sha256'],
+              'CORE_RESTORE_RECOVERY_BOOT_REQUIRED')
+        self.transaction = journal['transaction']
+        self.application = context['application']
+        self.source = {key: self.application[key] for key in ('app_source', 'target')}
+        self.initial = context['services']
+        original = journal['rollback'] is not None
+        self.generation = (context['data_generation'] if original else
+                           target['data']['incoming_generation'])
+        state = self._state(journal['confirmed_selection'])
+        intents = self._intents(journal['rollback']['intents'] if original else target['intents'], state)
+        self._time()
+        _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+        try:
+            self.services.stop_all(emergency=True)
+            self.services.prove_stopped()
+            _need(self.installation_proof() is None and self.files.read_restore_recovery() == journal,
+                  'CORE_RESTORE_CONTEXT')
+            observe = self._restore_recovery_observer(journal, original=original)
+            observe()
+            self._activate(state, intents, recovery=True, cleanup=True, restore_observe=observe)
+            self.worker.finish()
+            return dict(outcome='resumed_confirmed', selection_revision=state.revision, panel_running=True)
+        except BaseException:
+            self.services.stop_all(emergency=True)
+            raise
 
     def _activate_restore_trial(self, receipt, observe=None):
         """Start a private restore trial after the worker exchanged the data."""
@@ -622,8 +665,9 @@ class _Switch:
             observation = self._validation(state, intents, observed)
             self._proof()
             if cleanup:
+                restore = {} if restore_observe is None else {'restore_data': restore_observe()}
                 self.confirming = True
-                confirmed = self.files.finish_cleanup(self.transaction, **self.source)
+                confirmed = self.files.finish_cleanup(self.transaction, **self.source, **restore)
             elif recovery:
                 restore = {} if restore_observe is None else dict(
                     restore_data=restore_observe(), original_tree_sha256=restore_original_sha256)
@@ -844,6 +888,9 @@ def _run_task(ops, cancelled, request, *, restore=False, restore_recovery=False)
             task = new_task()
             try:
                 if restore_recovery:
+                    journal = task.files.read_restore_recovery()
+                    if 'confirmed_selection' in journal:
+                        return task._resume_confirmed_restore(journal)
                     return task._resume_restore_original()
                 if restore:
                     return task.run_restore(*request)

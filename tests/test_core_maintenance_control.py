@@ -656,6 +656,41 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.assertFalse((self.root/selection_files.PENDING).exists())
         self.assertEqual(self.files.read_stable(**SOURCE).revision, result['selection_revision'])
 
+    def test_confirmed_restore_cleanup_keeps_incoming_generation_without_exchange(self):
+        receipt, trial, incoming = self.restore_trial_fixture()
+        with patch.object(self.files, '_archive_and_clear', side_effect=OSError('fixture interruption')):
+            with self.assertRaises(selection_files.CoreSelectionFilesError):
+                self.switch._activate_restore_trial(receipt, lambda: trial)
+        journal = self.files.read_restore_recovery()
+        self.assertEqual(journal['phase'], 'confirmed')
+        self.assertTrue((self.root/selection_files.PENDING).exists())
+        self.switch.worker.close()
+        observer = FixtureChild(self)
+        observer.restore_data = trial
+        self.switch.worker = control._Worker(observer)
+        result = self.switch._resume_confirmed_restore(journal)
+        self.assertEqual(result['outcome'], 'resumed_confirmed')
+        self.assertEqual(self.brokers[-1].context['data_generation'], incoming)
+        self.assertNotIn('core_restore_rollback', self.trace)
+        self.assertNotIn('core_restore_exchange', self.trace)
+        self.assertEqual(self.files.read_stable(**SOURCE).revision, result['selection_revision'])
+
+    def test_confirmed_restore_rollback_cleanup_keeps_original_generation(self):
+        observer, trial = self.restore_original_fixture()
+        with patch.object(self.files, '_archive_and_clear', side_effect=OSError('fixture interruption')):
+            with self.assertRaises(selection_files.CoreSelectionFilesError):
+                self.switch._resume_restore_original(_new_worker=lambda: control._Worker(observer))
+        journal = self.files.read_restore_recovery()
+        self.assertIsNotNone(journal['rollback'])
+        resumed = FixtureChild(self)
+        resumed.restore_data = observer.restore_data
+        self.switch.worker = control._Worker(resumed)
+        result = self.switch._resume_confirmed_restore(journal)
+        self.assertEqual(result['outcome'], 'resumed_confirmed')
+        self.assertEqual(self.brokers[-1].context['data_generation'], trial['original'])
+        self.assertEqual(self.trace.count('core_restore_rollback'), 1)
+        self.assertEqual(self.files.read_stable(**SOURCE).revision, result['selection_revision'])
+
     def test_restore_recovery_late_observation_failure_stops_and_keeps_pending(self):
         observer, _ = self.restore_original_fixture()
         self.fault = 'restore-late-observation'
