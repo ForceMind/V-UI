@@ -173,6 +173,10 @@ class _Switch:
             and type(app['release_id']) is str and self.ops.RELEASE.fullmatch(app['release_id'])
             and all(self.a._hex(app[name]) for name in ('current_sha256', 'manifest_sha256', 'ready_sha256')),
             'CORE_APPLICATION_CONTEXT')
+        origin = self.ops.application_origin(app['release_id'],app['target'])
+        _need(type(origin) is dict and set(origin) == {'release_id','target','app_source','manifest_sha256','archive_sha256'}
+              and all(origin[name] == app[name] for name in ('release_id','target','app_source','manifest_sha256'))
+              and self.a._hex(origin['archive_sha256']), 'CORE_APPLICATION_ORIGIN')
         self.source = dict(app_source=app['app_source'], target=app['target'])
         self.application = app
         self.generation = facts['data_generation']

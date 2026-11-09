@@ -262,7 +262,7 @@ for name in names:
 (work/'bundle.sha').write_text(entries[bundle])
 # Only verified SDK bytes can advertise this private producer protocol. Older
 # accepted SDKs retain their original argument contract and remain unanchored.
-raw=(root/'install_system.py').read_bytes()
+with (root/'install_system.py').open('rb') as source:raw=source.read(512001)
 try:
     markers=[node.value for node in ast.parse(raw).body if isinstance(node,ast.Assign)
              and any(isinstance(target,ast.Name) and target.id=='ROOT_APPLICATION_ORIGIN' for target in node.targets)] if len(raw)<=512000 else []

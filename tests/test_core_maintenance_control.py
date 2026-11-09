@@ -323,7 +323,10 @@ class CoreMaintenanceControlTests(unittest.TestCase):
             store=types.SimpleNamespace(_canonical=store._canonical, _rename_new=store._rename_new,
                                         CoreArtifactStore=object),
             catalog=types.SimpleNamespace(CoreCatalog=object), broker=broker)
+        self.accepted_origin={key:self.context['application'][key] for key in ('release_id','target','app_source','manifest_sha256')}
+        self.accepted_origin['archive_sha256']='f'*64
         ops = types.SimpleNamespace(RELEASE=re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,100}\Z'),
+                                    application_origin=lambda release_id,target:deepcopy(self.accepted_origin),
                                     local_panel_tls=self.tls)
         self.switch = control._Switch(ops, modules, self.services, types.SimpleNamespace(pw_uid=501, pw_gid=501),
             self.worker, self.installation_proof, dict(target=fixtures.TARGET),
@@ -913,6 +916,19 @@ class CoreMaintenanceControlTests(unittest.TestCase):
             self.run_switch()
         self.assertIn('installation-proof', self.trace)
         self.assert_no_stop()
+
+    def test_root_origin_absent_or_conflicting_rejects_before_candidate_and_stop(self):
+        original=deepcopy(self.accepted_origin)
+        cases=[None,{**original,'app_source':'b'*40},{**original,'manifest_sha256':'b'*64},
+               {**original,'release_id':'other-release'},{**original,'target':'aarch64-gnu'},
+               {**original,'archive_sha256':True},{**original,'private_path':'/private/source'}]
+        for value in cases:
+            with self.subTest(value=value):
+                self.accepted_origin=value
+                with self.assertRaisesRegex(control.CoreControlError,'CORE_APPLICATION_ORIGIN'):
+                    self.switch._accept_context(deepcopy(self.context),CORE,None)
+                self.assertNotIn('stop',self.trace)
+        self.accepted_origin=original
 
     def test_wrong_application_context_rejected_before_candidate_or_stop(self):
         self.fault = 'app-context'

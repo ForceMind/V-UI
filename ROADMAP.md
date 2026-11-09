@@ -172,3 +172,5 @@ M46C97e50e5私有账本已推Draft PR146，主测试成功，其余准确Actions
 M46D cd8deb8十组Actions成功，新装/八旧版升级及四目标/ARM64完成；x86/ARM原日志明确执行默认Root原语与真实服务UID拒绝，收据同源已读回。M46E必要前置确认缺独立Root应用来源锚；多版本accepted-origin契约及schema2私有表已独审，32项两版独立回归通过。新装/升级与Rootstage必须从受验原包快照产出锚，事实consumer锁内对照，旧自洽元数据不能自动背书；producer/consumer尚未接，新源码Actions待验。
 
 M46E SDK producer源码已独审：短入口／受管升级显式传已核SDK pin，原包snapshot FD与匿名代码FD交固定OS校验器，固定sourceZIP helper认证后记录原始manifestSHA；新装Root私有目录引导、多目标SDK/单目标bundle与旧SDK/旧Bash兼容均覆盖。两版各104项针对性纯测及脚本47项通过，实际Root SDK来源探针只交Actions。Rootstage原包快照及事实consumer仍未接，来源资格缺口不算整体修复，远程核心写仍关闭。
+
+M46E SDK正常路径已接事实consumer：固定Root来源表lookup，候选/stop前精确核release/target/source40/原manifestSHA；两版各41项独立回归及独审通过。85426a3主测唯一失败为marker整文件读取触发流式保护，改有界512001读取，原防篡改断言不变并已单独复验；完整Linuxarchive套件仍交Actions。Rootstage来源producer、持久核心任务/权限发放/面板流程继续，未开放远程写或发布24。

@@ -875,3 +875,9 @@ SDK verifier的固定record-origin-fd模式重新verify_kit，绑定source ZIP�
 旧SDK只在字面ROOT_APPLICATION_ORIGIN=1且唯一时启用私有参数；注释、bool、重复与未知均不当作支持。旧Bash空数组展开保持兼容。成功只确认accepted-origin，后续失败保留该来源记录，不声称prepared/active/healthy。升级仍使用原私有kit与manifest pin，不创建签名钥匙、Secret或新公开资产。
 
 本机104项针对性纯测试（authority33、控制安装55、交接7、升级9）在Python3.9/3.12均通过；脚本47项完整回归通过。首次组合67项中的9个脚本失败由新空数组展开引入，已修复；4个旧安装器快照测试受/var/tmp沙箱写入限制，不计完整组合通过，交Actions验证。探针源码改为必须命中SDK记录且source匹配准确CI checkout，并验证epoch减权不回退来源；实际Root探针未在本机运行。本批源码独审无剩余阻断，准确Actions待验。Root stage原包快照producer与事实consumer尚未接，来源资格缺口仍未整体关闭。
+
+### M46E 事实消费与流式修正（源码候选）
+
+Root事实consumer已接固定authority查询：在已有安装锁内，收据绑定helper只按release_id/target查Root记录，controller把worker实测的release、target、完整source与manifestSHA逐项比对；缺失/冲突/私有额外字段均在候选下载与stop之前拒绝。不以旧config.release_id限制合法activate，也不通过CURRENT/READY自动补锚。37项controller与4项loader纯回归在Py3.9/3.12均通过，含缺锚和各字段冲突。
+
+SDK `85426a3` 的主测试42665205127在3668项中唯一失败为shell能力检测的新read_bytes触发既有Whole-file read断言。现改为open/read最多512001字节，原streaming/checksum/tamper断言保留并在独立临时夹具执行通过。本机完整11项archive suite因Linux平台门槛未运行资格成立，继续交Actions，原失败保留。当前小批独审无剩余阻断，两版独立复验各41项通过，准确Actions待验；Rootstage的原包快照producer与旧准备版本重新授予来源仍待实现，实际远程核心任务/UI也未接，不宣称P3完成。

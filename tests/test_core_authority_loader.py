@@ -36,3 +36,19 @@ class CoreAuthorityLoaderTests(unittest.TestCase):
         self.code=b'raise AssertionError("Unreceipted code must never execute")\n'
         with patch.object(self.ops,'verify_installation',return_value=('systemd',None)),patch.object(self.ops,'trusted_bytes',side_effect=self.read):
             with self.assertRaises(self.ops.Refused):self.ops._load_core_authority(self.expected)
+
+    def test_application_origin_uses_only_root_store_and_literal_lookup_keys(self):
+        self.code=(b'class CoreAuthority:\n'
+                   b'    def application(self, *, release_id, target):\n'
+                   b'        return {"release_id":release_id,"target":target,"root_record":True}\n')
+        self.receipt=json.dumps({'files':{str(self.path):hashlib.sha256(self.code).hexdigest()}}).encode()
+        with patch.object(self.ops,'verify_installation',return_value=('systemd',None)),patch.object(self.ops,'trusted_bytes',side_effect=self.read):
+            self.assertEqual(self.ops.application_origin('fixture-release','x86_64-gnu'),
+                             {'release_id':'fixture-release','target':'x86_64-gnu','root_record':True})
+
+    def test_application_origin_invalid_lookup_never_loads_or_reads_payload(self):
+        with patch.object(self.ops,'trusted_bytes') as read:
+            for release,target in (('../outside','x86_64-gnu'),('fixture','unknown'),(True,'x86_64-gnu')):
+                with self.subTest(release=release,target=target),self.assertRaises(self.ops.Refused):
+                    self.ops.application_origin(release,target)
+            read.assert_not_called()

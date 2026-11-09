@@ -1316,6 +1316,16 @@ def _load_core_authority(expected_receipt):
     return module
 
 
+def application_origin(release_id, target):
+    """Lookup Root-accepted bytes, never infer an origin from service data."""
+    if (type(release_id) is not str or not RELEASE.fullmatch(release_id)
+            or type(target) is not str or target not in ('x86_64-gnu','x86_64-musl','aarch64-gnu','aarch64-musl')):
+        raise Refused('invalid application origin lookup')
+    expected=hashlib.sha256(trusted_bytes(RECEIPT,MAX_JSON)).hexdigest()
+    module=_load_core_authority(expected)
+    return module.CoreAuthority().application(release_id=release_id,target=target)
+
+
 def core_selection_status(ops):
     """Root-only read; the controller rechecks receipt under a readonly lock."""
     expected = hashlib.sha256(trusted_bytes(RECEIPT, MAX_JSON)).hexdigest()
