@@ -785,3 +785,9 @@ Root复用原可信控制器装载、receipt摘要与systemd检查，再在只�
 M46A首轮 `b1c1b2b` 的[Linux主测试42629393218](https://github.com/ForceMind/V-UI/actions/runs/42629393218)成功，包括新增API权限、撤销/过期与固定错误边界；不是实际Root服务链的证明。[首轮安装42629393183](https://github.com/ForceMind/V-UI/actions/runs/42629393183)的fresh失败原日志确认PTY仍等待旧1/2/3菜单。原失败保留。
 
 安装夹具现以实际Root CONTROL worker的NoFollow/所有权/权限/大小及receipt摘要，逐字节绑定该场景真正安装的suite：短入口使用不可变发布suite，其余用本次候选；不能拿当前测试checkout冒充旧版实际代码。严格8/9用途集合决定精确新旧prompt，未知集合或新suite却装旧byte直接失败。新Root HTTP/Unix只读验证须同时证明旧full拒绝、新显式用途成功及撤销生效、停服时不启动、任务列表/daemon PID/业务行与runtime配置数据不变。此夹具已加入源码，四项纯能力绑定测试通过；实际安装结果等待新准确Actions，不能回填成功。
+
+M46A `078bd31` 的Linux主测试42633398294成功；旧14升级实际日志出现 `VUI_CORE_READ_ONLY_ACCEPTANCE`，只读新授权/Root socket/停服意图/固定投影和数据不变的断言已实际通过。该同轮旧19在读公开信息时HTTP403、未进入安装；旧21在新查询之前的stop任务get收到DAEMON_REFUSED。原片段daemon仍active、目标服务已inactive，但缺少原拒绝stage，不能认定原因。
+
+已独立复现机制候选：Root任务子进程os.replace发布状态时，严格trusted_bytes可能持旧FD并因nlink/ctime/现名变化拒绝合法读取。读取现保留原mode与严格trusted_bytes校验；仅对前后均Root私有regular/600/单link/有界、且inode确有安全替换的Refused，最多三次重读。稳定不安全文件、一般拒绝和变更提交不重试，客户端DAEMON_REFUSED规则不放宽。新增实际原子替换回归覆盖成功重读、稳定拒绝、不安全替换及次数上限。
+
+Root日志只增加固定stage/类别枚举（RECEIVE、TASK_LSTAT/TRUST_READ/JSON/ID、PUBLIC等），不打印原任务、路径、SHA、备份、请求或异常文本。CI只完整匹配这套枚举，未知或附加文本仍UNCLASSIFIED。当前机制修复和诊断待独审/新准确Actions；它不把原old21片段改判成已证因果或成功。

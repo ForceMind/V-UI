@@ -86,6 +86,10 @@ def safe_maintenance_journal(raw):
         if not isinstance(row, dict) or not isinstance(row.get('MESSAGE'), str):
             continue
         message = row['MESSAGE']
+        if message.startswith('VUI_MAINTENANCE_REFUSED:'):
+            refusal = re.fullmatch(r'VUI_MAINTENANCE_REFUSED:(RECEIVE|GET|LIST|STATUS|LOGS|CORE_STATUS|SUBMIT|TASK_LSTAT|TASK_TRUST_READ|TASK_JSON|TASK_ID|PUBLIC):(TRUSTED_INPUT|PROTOCOL_OR_STATE|IO|INTERNAL)', message)
+            codes.append('REQUEST_' + refusal[1] + '_' + refusal[2] if refusal else 'UNCLASSIFIED')
+            continue
         code = next(('STARTUP_' + stage for stage in STARTUP_CODES
                      if 'V-UI maintenance startup refused: STARTUP_' + stage in message), None)
         if code is None:

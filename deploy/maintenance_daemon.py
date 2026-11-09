@@ -111,11 +111,34 @@ class Store:
         if not ID.fullmatch(identity):
             raise ValueError('task')
         path = TASKS / (identity + '.json')
-        if stat.S_IMODE(path.lstat().st_mode) != 0o600:
-            raise ValueError('task mode')
-        value = self.ops.decode_json(self.ops.trusted_bytes(path, MAX_RECORD))
-        if value.get('id') != identity:
-            raise ValueError('task identity')
+        def private(info):
+            return (stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1
+                    and stat.S_IMODE(info.st_mode) == 0o600 and 0 < info.st_size <= MAX_RECORD)
+        for attempt in range(3):
+            try:
+                before = path.lstat()
+            except OSError as error:
+                error._vui_task_stage = 'TASK_LSTAT'; raise
+            if stat.S_IMODE(before.st_mode) != 0o600:
+                error = ValueError('task mode'); error._vui_task_stage = 'TASK_LSTAT'; raise error
+            try:
+                raw = self.ops.trusted_bytes(path, MAX_RECORD)
+                break
+            except self.ops.Refused as error:
+                error._vui_task_stage = 'TASK_TRUST_READ'
+                # A task child publishes state with an atomic Root-owned
+                # replacement. Retry only this provable replacement, never a
+                # stable unsafe file or a general maintenance refusal.
+                after = path.lstat()
+                if (attempt == 2 or not private(before) or not private(after)
+                        or (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)):
+                    raise
+        try:
+            value = self.ops.decode_json(raw)
+        except Exception as error:
+            error._vui_task_stage = 'TASK_JSON'; raise
+        if type(value) is not dict or value.get('id') != identity:
+            error = ValueError('task identity'); error._vui_task_stage = 'TASK_ID'; raise error
         return value
 
     def write(self, value):
@@ -387,11 +410,15 @@ def serve(ops):
             except socket.timeout:
                 continue
             with connection:
+                request_stage = 'RECEIVE'
                 try:
                     value = receive(connection, ops, account.pw_uid)
                     operation = value['operation']
+                    request_stage = operation.upper()
                     if operation == 'get':
-                        result = public(store.read(value['task_id']))
+                        row = store.read(value['task_id'])
+                        request_stage = 'PUBLIC'
+                        result = public(row)
                     elif operation == 'list':
                         result = [public(row) for row in store.all()[:100]]
                     elif operation == 'status':
@@ -422,7 +449,16 @@ def serve(ops):
                         active = (pid, row['id'])
                         result = public(row)
                     response = {'ok': True, 'result': result}
-                except Exception:
+                except Exception as error:
+                    # Fixed journal vocabulary only: no request/task bytes,
+                    # private paths, exception text or backup metadata.
+                    task_stage = getattr(error, '_vui_task_stage', None)
+                    if task_stage in ('TASK_LSTAT','TASK_TRUST_READ','TASK_JSON','TASK_ID'):
+                        request_stage = task_stage
+                    category = ('TRUSTED_INPUT' if isinstance(error, ops.Refused) else
+                                'PROTOCOL_OR_STATE' if isinstance(error, ValueError) else
+                                'IO' if isinstance(error, OSError) else 'INTERNAL')
+                    print('VUI_MAINTENANCE_REFUSED:' + request_stage + ':' + category, flush=True)
                     response = {'ok': False, 'error': 'MAINTENANCE_REFUSED'}
                 try:
                     connection.sendall(json.dumps(response, separators=(',', ':')).encode())
