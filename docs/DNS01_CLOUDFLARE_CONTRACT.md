@@ -1,6 +1,6 @@
 # Cloudflare DNS-01 与通配符证书契约
 
-状态：2026-11-08，源码已进入 **v0.4.23** 候选。设计、应用三块及CLI/snapshot/安装控制兼容实现与独立审查已收口；准确新提交的完整九组/21 jobs、四目标、新装与全部公开旧版升级资格仍待Actions。公开稳定应用、19项资产与短入口仍是v0.4.22，不访问真实账号、修改真实DNS、替用户同意CA条款或部署生产。23未公开/未部署，受保护分支合并、发布与生产升级尚未授权。
+状态：2026-11-09，**v0.4.23已公开**，正式应用源`be5d8459cdd3eeedce73f2ff6e4663e5eb781e42`，19项资产/tag/清单摘要已独立读回，匿名公共安装通过。短入口已独立固定23与公开摘要，候选/主线及实际main URL验收通过；应用及历史资产不改写。真实Cloudflare账号签发、浏览器、物理512MiB整机/24小时未验证，本批没有生产升级或真实DNS写入。
 
 用户操作见[候选DNS指南](DNS01_CLOUDFLARE.md)。[首实现提交7e418b6的设计全文](https://github.com/ForceMind/V-UI/blob/7e418b6e10587e61efcecae290302dfd440a0b6a/docs/DNS01_CLOUDFLARE_CONTRACT.md)固定保留原阶段措辞；当前进度以[路线图](../ROADMAP.md)为准。
 
@@ -91,13 +91,17 @@ auth/cleanup hook共用持久化journal。正常完成、验证失败、取消�
 
 ## 候选与验收状态
 
+以下为发布前候选阶段的历史快照；当前完成状态以[公开发布与短入口](#公开发布与短入口)节为准。原候选清单与失败判定保留，不代表当前仍未发布。
+
 下面是已有提交的实际记录，不授予当前新候选资格。源码版本升为23后，需在新的准确source重跑完整九组/21 jobs；oneclick为一个构建、一个新装及公开14/15/16/17/19/20/21/22的八个升级角色，共10角色。所有role必须拥有自己的真实成功步骤和同producer/source/run/attempt收据，不能用步骤并集、旧skip或旧材料补齐。
+
+原Cloudflare应用冻结点为`4bd1d9a648a8096fbf2fa05314e35049a2408e7c`，其源码与最终迁移夹具已独审。发布准备声明采用`parallel-v1`及`unverified-non-browser-v1`，只记录合同，不是公开发布授权或CI成功声明；冻结之后仅政策文件和普通Markdown可变。准确发布准备HEAD仍须自己的完整九组/21 jobs、10角色同源收据及四目标资格，不能继承冻结点的成功片段；若再需改变代码/CI/测试，应更新冻结点并重新审验。
 
 - [x] 设计、身份/材料/迁移、私有凭据、CF/journal、API/UI/绑定/备份及安装控制闭包源码完成。
 - [x] 应用三块及最终CLI/snapshot/安装控制兼容独审收口；早期夹具/allocator/安装错误及错误DNS传输假设已针对性修正并审查。
-- [ ] 新候选准确九组/21 jobs及每个必要step、依赖与真实固定核心资格。
-- [ ] 同提交四目标、新装、八旧版保数据升级和完整固定Certbot/Pebble/旧22 reader资格。
-- [ ] 受保护分支集成、公开23、独立短入口切换和生产升级；尚未取得相应授权。
+- [x] 冻结候选104f8c8的[九组Actions/21个job](https://github.com/ForceMind/V-UI/pull/145/checks)全部成功。PR145已普通合入dev，产品树保持。
+- [ ] 最终准确main的全部必要step、四目标、新装、八旧版保数据升级和固定Certbot/Pebble/旧22 reader材料，以及10角色同源收据须另验；公开资产只晋升该同源已验套件。
+- [ ] 按2026-11-09明确授权完成受保护分支集成、公开23与独立短入口切换；发布和切换尚未执行，生产升级仍需另行授权。
 
 | 提交/运行 | 实际结果与边界 |
 | --- | --- |
@@ -108,6 +112,8 @@ auth/cleanup hook共用持久化journal。正常完成、验证失败、取消�
 | 同提交：[链路42474830751](https://github.com/ForceMind/V-UI/actions/runs/42474830751) | 整组成功，含实际controller的11项及新增两后端DNS通配符TLS轮换/深层域名拒绝2项，无跳过。使用临时CA与固定官方sing-box/Xray，不代表公网、手机或浏览器资格 |
 | 同提交：[短入口42474830488](https://github.com/ForceMind/V-UI/actions/runs/42474830488)、[安装42474830643](https://github.com/ForceMind/V-UI/actions/runs/42474830643) | 短入口attempt1停于稳定22元数据HTTP504/502，原入口不改的attempt2成功，安装的是公开22；oneclick实际23新装成功。旧14/22已完成真实升级，但after断言仍按旧控制文件集合，因新增恰5个DNS控制文件而失败；正在补严格版本化迁移检查，不把失败改判成功 |
 | 同提交：[原生42474830397](https://github.com/ForceMind/V-UI/actions/runs/42474830397)、[部署42474830543](https://github.com/ForceMind/V-UI/actions/runs/42474830543) | 初轮分别在固定tag元数据HTTP503、固定官方资产API的HTTP503处失败；原生整组attempt2仍有HTTP500。各次成功片段不能合成同attempt矩阵资格；未开始的步骤不算通过 |
+| `4bd1d9a648a8096fbf2fa05314e35049a2408e7c`：[安装42476468258](https://github.com/ForceMind/V-UI/actions/runs/42476468258) | attempt1实际新装和六旧版升级通过，旧15安装curl超时、旧19公开资产读取超时/API503失败；attempt2的producer遇官方核心API504，消费者未执行。冷却后attempt3实际10角色全部通过，十份小ZIP收据的外层大小/摘要、source/run/attempt/producer及清单/bundle双摘要已核，producer为13616872596。不将前两轮失败改判；后续准备提交不能复用这些材料授资格 |
+| 同提交：[原生42476468236](https://github.com/ForceMind/V-UI/actions/runs/42476468236) | ARM glibc的attempt1遇固定tag元数据503，attempt2/3遇固定官方核心资产API503，候选未建成。两musl与distro成功，但整组仍失败。该源其他八组成功不补原生缺口，真实Cloudflare账号/浏览器/物理整机仍未验 |
 
 固定官方Pebble2.10.1的custom resolver[明确使用TCP](https://github.com/letsencrypt/pebble/blob/v2.10.1/va/va.go#L128-L132)。本地夹具同时监听TCP/UDP不等于CA使用两种传输。修正后的实CA断言要求UDP=0、TCP至少4次且issue/renewal各至少2次；同owner双TXT、新账户重新认证、精确SAN和仅清理own ID均保留。上述9b提交已实际通过这些断言，不称UDP回退；后续源码仍需自己的准确验收。
 
@@ -124,3 +130,21 @@ Actions的最小证据：旧HTTP fixture迁移及重复/损坏/失败回滚；�
 - [Cloudflare TXT创建](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/create/)、[按ID读取](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/get/)、[按ID删除](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/delete/)、[按名称列举Zone](https://developers.cloudflare.com/api/resources/zones/methods/list/)：限定端点、Token权限及记录身份。
 - [Certbot手动auth/cleanup hook](https://eff-certbot.readthedocs.io/en/stable/using.html#pre-and-post-validation-hooks)：固定hook模式及续期条件；文档版本与项目pin分开核验。
 - [Let’s Encrypt DNS-01](https://letsencrypt.org/docs/challenge-types/#dns-01-challenge)：通配符、多TXT、传播和最小凭据范围。首轮有意不实现其允许的CNAME/NS委派。
+
+## 正式发布启动修正
+
+2026-11-09发布启动修正：原应用功能仍与`4bd1d9a`相同；发布控制重新冻结于`039453e1a95666b5ddc539e67708fd7b22734103`，仅将工作流改为`python3 -m scripts.publish_release`并加入干净子进程回归。原main `bb33bdf`的九组/21 jobs及10份同源收据均通过，但正式晋升在创建tag/Release前因脚本入口无法导入`scripts`而停止。新冻结点之后仍只允许政策JSON和普通Markdown，最终准确main必须重新完成全套验收。
+
+[正式晋升42604920601](https://github.com/ForceMind/V-UI/actions/runs/42604920601)的原始`ModuleNotFoundError`保留。工作流权限、checkout、参数数组、默认main核对、同源材料及不覆盖旧资产的门禁未改；没有创建新tag/Release。新回归使用实际workflow launcher，在无PYTHONPATH的namespace package临时布局中启动真实publisher，假GH/git仅提供只读前置数据，并在策略入口强制停止，未访问网络或发布。原调用精确失败，模块调用及141项门禁单元通过；最终主线和完整字节晋升仍待Actions。
+
+## 公开发布与短入口
+
+- 正式源 `be5d8459cdd3eeedce73f2ff6e4663e5eb781e42`，应用功能保持4bd1d9a，发布控制冻结039453e；[v0.4.23](https://github.com/ForceMind/V-UI/releases/tag/v0.4.23)公开19项资产。
+- [主线安装42610073803](https://github.com/ForceMind/V-UI/actions/runs/42610073803)的producer、新装和八旧版升级均attempt1成功；九组/21 jobs及每个必要step、10份同source/run/attempt收据另核通过。
+- [正式晋升42612414262](https://github.com/ForceMind/V-UI/actions/runs/42612414262)完整验证并晋升同源字节，不重建。旧启动失败42604920601及候选3a6ba6d的上游403/同源attempt2记录保留，不称永久修复限流。
+- 独立匿名HTTPS读取install.sh、SHA256SUMS与RELEASE.json，三个小文件的实际摘要匹配上传元数据，18项清单逐项匹配其余公开资产digest；tag指向正式源。未在本机下载产品包或执行安装。
+- 安装器SHA-256：`82dd8ac84f6a7117762359916769a28f6aa505a6e64607d9edda67b56d5e40e3`；完整SHA256SUMS文件SHA-256：`61d6fba8f3d1c5fb6ae39a890db06e8b44e2afa165d1e13451d450a27e583a30`。
+- [匿名公共安装42613270949](https://github.com/ForceMind/V-UI/actions/runs/42613270949)成功。短入口代码源`414472ffaa872bc1212a1cc5ff0fd741bdadf1e8`，候选d864ee0和主线414472f各九组21jobs及全部必要step通过；[实际main URL安装42619332425](https://github.com/ForceMind/V-UI/actions/runs/42619332425)成功，使用的不可变正式应用源为`be5d8459cdd3eeedce73f2ff6e4663e5eb781e42`。
+- 原配置、账户、节点、订阅、证书及代理设置的升级保护保持；没有访问或升级生产实例。真实Cloudflare账号签发和浏览器未验证。
+
+入口匿名HTTPS字节读回与Git对象一致，SHA-256：`20421be76bf0ba7e3224620fd9c073d597e0f9afd62200ec9ba86ad228e137d4`。本次收口只改Markdown，入口代码、安装器信任锚、正式应用及19资产保持；文档提交不重新授予应用发布资格。浏览器、真实Cloudflare账号签发及生产升级边界保持。
