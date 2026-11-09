@@ -93,7 +93,7 @@ auth/cleanup hook共用持久化journal。正常完成、验证失败、取消�
 
 下面是已有提交的实际记录，不授予当前新候选资格。源码版本升为23后，需在新的准确source重跑完整九组/21 jobs；oneclick为一个构建、一个新装及公开14/15/16/17/19/20/21/22的八个升级角色，共10角色。所有role必须拥有自己的真实成功步骤和同producer/source/run/attempt收据，不能用步骤并集、旧skip或旧材料补齐。
 
-产品冻结点为`4bd1d9a648a8096fbf2fa05314e35049a2408e7c`，其源码与最终迁移夹具已独审。发布准备声明采用`parallel-v1`及`unverified-non-browser-v1`，只记录合同，不是公开发布授权或CI成功声明；冻结之后仅政策文件和普通Markdown可变。准确发布准备HEAD仍须自己的完整九组/21 jobs、10角色同源收据及四目标资格，不能继承冻结点的成功片段；若再需改变代码/CI/测试，应更新冻结点并重新审验。
+原Cloudflare应用冻结点为`4bd1d9a648a8096fbf2fa05314e35049a2408e7c`，其源码与最终迁移夹具已独审。发布准备声明采用`parallel-v1`及`unverified-non-browser-v1`，只记录合同，不是公开发布授权或CI成功声明；冻结之后仅政策文件和普通Markdown可变。准确发布准备HEAD仍须自己的完整九组/21 jobs、10角色同源收据及四目标资格，不能继承冻结点的成功片段；若再需改变代码/CI/测试，应更新冻结点并重新审验。
 
 - [x] 设计、身份/材料/迁移、私有凭据、CF/journal、API/UI/绑定/备份及安装控制闭包源码完成。
 - [x] 应用三块及最终CLI/snapshot/安装控制兼容独审收口；早期夹具/allocator/安装错误及错误DNS传输假设已针对性修正并审查。
@@ -128,3 +128,9 @@ Actions的最小证据：旧HTTP fixture迁移及重复/损坏/失败回滚；�
 - [Cloudflare TXT创建](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/create/)、[按ID读取](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/get/)、[按ID删除](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/delete/)、[按名称列举Zone](https://developers.cloudflare.com/api/resources/zones/methods/list/)：限定端点、Token权限及记录身份。
 - [Certbot手动auth/cleanup hook](https://eff-certbot.readthedocs.io/en/stable/using.html#pre-and-post-validation-hooks)：固定hook模式及续期条件；文档版本与项目pin分开核验。
 - [Let’s Encrypt DNS-01](https://letsencrypt.org/docs/challenge-types/#dns-01-challenge)：通配符、多TXT、传播和最小凭据范围。首轮有意不实现其允许的CNAME/NS委派。
+
+## 正式发布启动修正
+
+2026-11-09发布启动修正：原应用功能仍与`4bd1d9a`相同；发布控制重新冻结于`039453e1a95666b5ddc539e67708fd7b22734103`，仅将工作流改为`python3 -m scripts.publish_release`并加入干净子进程回归。原main `bb33bdf`的九组/21 jobs及10份同源收据均通过，但正式晋升在创建tag/Release前因脚本入口无法导入`scripts`而停止。新冻结点之后仍只允许政策JSON和普通Markdown，最终准确main必须重新完成全套验收。
+
+[正式晋升42604920601](https://github.com/ForceMind/V-UI/actions/runs/42604920601)的原始`ModuleNotFoundError`保留。工作流权限、checkout、参数数组、默认main核对、同源材料及不覆盖旧资产的门禁未改；没有创建新tag/Release。新回归使用实际workflow launcher，在无PYTHONPATH的namespace package临时布局中启动真实publisher，假GH/git仅提供只读前置数据，并在策略入口强制停止，未访问网络或发布。原调用精确失败，模块调用及141项门禁单元通过；最终主线和完整字节晋升仍待Actions。

@@ -19,9 +19,11 @@
 
 ## 当前迭代
 
-开源文档与P1发布维护已完成正常合并；当前是Cloudflare DNS-01/通配符的v0.4.23发布准备，见[实施契约](DNS01_CLOUDFLARE_CONTRACT.md)与[候选指南](DNS01_CLOUDFLARE.md)。冻结产品为`4bd1d9a648a8096fbf2fa05314e35049a2408e7c`，已完成独审；其自身八组Actions及同轮10个安装角色/10份收据通过，ARM glibc仍因官方固定资产API503未构建成功。原始失败保留。
+开源文档与P1发布维护已完成正常合并；当前是Cloudflare DNS-01/通配符的v0.4.23发布准备，见[实施契约](DNS01_CLOUDFLARE_CONTRACT.md)与[候选指南](DNS01_CLOUDFLARE.md)。原Cloudflare应用冻结产品为`4bd1d9a648a8096fbf2fa05314e35049a2408e7c`，已完成独审；其自身八组Actions及同轮10个安装角色/10份收据通过，ARM glibc仍因官方固定资产API503未构建成功。原始失败保留。
 
 当前准备提交只允许精确`.github/release-acceptance.json`及普通Markdown；必须在最终准确HEAD重验完整九组/21 jobs、四目标和全部安装角色，不继承旧source或跨attempt材料。旧v0.4.22仍是公开稳定版及短入口目标；2026-11-09已明确批准本批转Ready、release→dev→main普通合并、准确main核验后公开v0.4.23及更新短入口；未授权生产更新或真实DNS写入。发布使用parallel-v1，只晋升准确main已验同源资产，不运行publisher作所谓dry run。P3另属独立后续批次，不混入此冻结产品。
+
+2026-11-09发布启动修正：原应用功能仍与`4bd1d9a`相同；发布控制重新冻结于`039453e1a95666b5ddc539e67708fd7b22734103`，仅将工作流改为`python3 -m scripts.publish_release`并加入干净子进程回归。原main `bb33bdf`的九组/21 jobs及10份同源收据均通过，但正式晋升在创建tag/Release前因脚本入口无法导入`scripts`而停止。新冻结点之后仍只允许政策JSON和普通Markdown，最终准确main必须重新完成全套验收。
 
 职责按会话中的具体文件分工执行，保留并发修改与未跟踪文件。当前工作分支按任务命名；提交前再次核对实际分支、HEAD和差异，不把本文的历史起点当作永远不变的远端HEAD。
 
