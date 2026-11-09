@@ -2,7 +2,8 @@
 
 Writer requires the caller's actual stopped guard. Preflight and restore
 preparation never modify live data or Root state. Authorization clearing and
-DNS suspension affect only the private incoming tree. No exchange occurs here.
+DNS suspension affect only the private incoming tree. The exchange helper
+handles fixed data slots separately from preparation and selector publication.
 """
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -20,7 +21,8 @@ from app import release_tools as tools
 from . import artifacts as a, selection as s
 from .backup import CoreBackup, _intents
 from .boot import _data_root, _runtime_states
-from .selection_files import _new
+from .selection_files import _new, restore_data_position
+from .store import _rename_new
 
 KIND = 'backup-components-v1'
 MAX_MEMBERS = 15
@@ -359,6 +361,80 @@ def _live_restore_scope(guard, live):
         verify()
         yield verify
         verify()
+
+
+def exchange_restore_data(guard, journal, *, rollback=False):
+    """Move the journal's fixed slots under the stable exclusive data lease."""
+    live = guard.root / 'data'
+    recovery = guard.root / 'recovery'
+    target = journal['restore_target']
+    _need(target is not None and target['kind'] == 'core-restore-target-v2')
+    slot = target['data']['slot']
+    _need(a._hex(slot, 32) and type(rollback) is bool)
+    phase = journal['phase']
+    _need(phase not in ('confirmed', 'cleanup') if rollback else phase == 'backed_up')
+    names = {key: 'core-restore-' + slot + '-' + key for key in ('original', 'incoming', 'rejected')}
+    names['live'] = 'data'
+
+    with _live_restore_scope(guard, live) as verify, \
+            tools._maintenance_directory(guard.root) as root_fd, \
+            tools._maintenance_directory(recovery) as recovery_fd:
+        parents = {key: recovery_fd for key in names}
+        parents['live'] = root_fd
+
+        def inspect():
+            verify()
+            for path, fd in ((guard.root, root_fd), (recovery, recovery_fd)):
+                info = path.lstat()
+                opened = os.fstat(fd)
+                _need(stat.S_ISDIR(info.st_mode) and (info.st_dev, info.st_ino) ==
+                      (opened.st_dev, opened.st_ino), 'Restore directory changed')
+            observed = {}
+            for key, name in names.items():
+                try:
+                    info = os.stat(name, dir_fd=parents[key], follow_symlinks=False)
+                except FileNotFoundError:
+                    observed[key] = None
+                    continue
+                _need(stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid()
+                      and stat.S_IMODE(info.st_mode) == 0o700, 'Unsafe restore data slot')
+                observed[key] = dict(dev=info.st_dev, ino=info.st_ino)
+            return restore_data_position(journal, observed), observed
+
+        position, observed = inspect()
+        quiesced = journal['quiesced']
+        if quiesced is None:
+            _need(rollback and position == 'staged')
+            return observed
+        if not rollback:
+            _need(position in ('staged', 'parked', 'trial'))
+            original = live if position == 'staged' else recovery / names['original']
+            _need(tools.recovery_tree_digest(original) == quiesced['original_tree_sha256'],
+                  'Original restore data changed before exchange')
+        protected = ('live' if position in ('staged', 'restored') else 'original') if rollback else (
+            'live' if position == 'trial' else 'incoming')
+        digest = quiesced['original_tree_sha256' if rollback else 'prepared_tree_sha256']
+        path = live if protected == 'live' else recovery / names[protected]
+        _need(tools.recovery_tree_digest(path) == digest and inspect() == (position, observed),
+              'Restore data changed before exchange')
+        transitions = ({'trial': ('live', 'rejected', 'rollback_gap'),
+                        'rollback_gap': ('original', 'live', 'restored'),
+                        'parked': ('original', 'live', 'staged')} if rollback else
+                       {'staged': ('live', 'original', 'parked'),
+                        'parked': ('incoming', 'live', 'trial')})
+        # On retry the preceding rename may have lost its acknowledgement.
+        # Persist the observed layout before issuing a second rename.
+        os.fsync(root_fd)
+        os.fsync(recovery_fd)
+        while position in transitions:
+            source, destination, expected = transitions[position]
+            _rename_new(parents[source], names[source], parents[destination], names[destination])
+            position, observed = inspect()
+            _need(position == expected, 'Restore data changed during exchange')
+            os.fsync(root_fd)
+            os.fsync(recovery_fd)
+        _need(position in ('staged', 'restored') if rollback else position == 'trial')
+        return observed
 
 
 def _migrate_stage_runtime(data, closure, migration):

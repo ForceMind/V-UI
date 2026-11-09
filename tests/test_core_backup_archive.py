@@ -41,6 +41,39 @@ class CompleteBackupTests(unittest.TestCase):
             (self.data/name).chmod(0o600)
         self.archive=self.root/'complete.zip'
 
+    def test_restore_exchange_retries_after_each_first_rename(self):
+        from app.core_updates.selection_files import restore_data_position
+        recovery = self.root / 'recovery'
+        recovery.mkdir(mode=0o700)
+        slot = 'b' * 32
+        incoming = recovery / ('core-restore-' + slot + '-incoming')
+        incoming.mkdir(mode=0o700)
+        (incoming / 'fixture').write_bytes(b'candidate')
+        (incoming / 'fixture').chmod(0o600)
+
+        def generation(path):
+            info = path.stat()
+            return dict(dev=info.st_dev, ino=info.st_ino)
+
+        with tools.stopped(self.root) as guard:
+            journal = dict(phase='backed_up',
+                switch_context=dict(data_generation=generation(self.data)),
+                restore_target=dict(kind='core-restore-target-v2',
+                    data=dict(slot=slot, incoming_generation=generation(incoming))),
+                quiesced=dict(original_tree_sha256=tools.recovery_tree_digest(self.data),
+                              prepared_tree_sha256=tools.recovery_tree_digest(incoming)))
+            for rollback, expected in ((False, 'trial'), (True, 'restored')):
+                def lose_ack(*args):
+                    fs._rename_new(*args)
+                    raise OSError('fixture lost acknowledgement')
+                with patch.object(full, '_rename_new', side_effect=lose_ack), self.assertRaises(OSError):
+                    full.exchange_restore_data(guard, journal, rollback=rollback)
+                observed = full.exchange_restore_data(guard, journal, rollback=rollback)
+                self.assertEqual(restore_data_position(journal, observed), expected)
+            self.assertTrue((self.data / 'v-ui.db').is_file())
+            rejected = recovery / ('core-restore-' + slot + '-rejected')
+            self.assertEqual((rejected / 'fixture').read_bytes(), b'candidate')
+
     def state(self,components=True,legacy=False):
         state=self.fixture.state() if components else self.fixture.initial
         intents={}
