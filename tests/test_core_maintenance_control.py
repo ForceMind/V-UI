@@ -6,6 +6,7 @@ are fixtures. The broker schema and both public metadata transitions are real.
 from copy import deepcopy
 from contextlib import nullcontext
 import hashlib
+from io import StringIO
 import json
 import sys
 import os
@@ -667,6 +668,49 @@ class CoreMaintenanceControlTests(unittest.TestCase):
                           'core_restore_exchange', 'core_restore_observe', 'start-panel', 'release:trial')
         self.assertEqual(self.files.read_stable(**SOURCE).revision, result['selection_revision'])
         self.assertTrue(all(child.finished for child in (self.child, exchange, observer)))
+
+    def test_restore_worker_failure_frame_is_closed_and_never_success(self):
+        for request, frame, code in (
+            ({'command': 'stage_restore'}, {'event': 'restore_stage_failed', 'phase': 'PLACE'},
+             'RESTORE_STAGE_STAGE_PLACE'),
+            ({'command': 'stage_restore'}, {'event': 'restore_stage_failed', 'phase': 'PRIVATE'},
+             'CORE_WORKER_PROTOCOL'),
+            ({'command': 'stage_restore'}, {'event': 'restore_stage_failed', 'phase': 'PLACE', 'extra': 'PRIVATE'},
+             'CORE_WORKER_PROTOCOL'),
+            ({'command': 'other'}, {'event': 'restore_stage_failed', 'phase': 'PLACE'}, 'CORE_WORKER_PROTOCOL'),
+        ):
+            with self.subTest(request=request, frame=frame):
+                child = types.SimpleNamespace(send=lambda value: None, receive=lambda: frame)
+                with self.assertRaisesRegex(control.CoreControlError, '^'+code+'$'):
+                    control._Worker(child).exchange(request, 'restore_staged')
+
+    def test_restore_worker_reports_one_fixed_failure_frame_even_if_cleanup_fails(self):
+        class Session:
+            restore_stage = 'PREPARE'
+
+            def prepare(self):
+                return {}
+
+            def stage_restore(self, journal):
+                raise ValueError('private staging details')
+
+            def close(self):
+                raise OSError('private cleanup details')
+
+        read, write = os.pipe()
+        self.addCleanup(os.close, read)
+        with os.fdopen(write, 'wb') as requests:
+            requests.write(b'{"protocol":1,"action":"core_restore_prepare","archive_name":"fixture",'
+                           b'"archive_sha256":"fixture","expected_selection_revision":"fixture"}\n'
+                           b'{"command":"stage_restore","journal":{}}\n')
+        output = StringIO()
+        with patch.object(ops_worker.os, 'geteuid', return_value=1000), \
+                patch.object(ops_worker, '_load_core_session', return_value=lambda *a, **kw: Session()), \
+                patch.object(ops_worker, '_quiet_candidate_io', side_effect=nullcontext):
+            self.assertEqual(ops_worker._run(None, None, read, output), 1)
+        self.assertEqual([json.loads(line) for line in output.getvalue().splitlines()], [
+            {'event': 'restore_preflight'}, {'event': 'restore_stage_failed', 'phase': 'PREPARE'},
+        ])
 
     def test_restore_recovery_moves_data_without_confirming_or_starting_service(self):
         receipt, trial, _ = self.restore_trial_fixture()

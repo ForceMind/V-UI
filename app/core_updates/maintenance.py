@@ -681,6 +681,7 @@ class CoreRestorePreparation(CoreMaintenanceSession):
 
     def stage_restore(self, journal):
         _need(self._core_phase == 'restore_preflight', 'CORE_PHASE')
+        self.restore_stage = 'GUARD'
         journal = _journal(journal, self._source, self._target)
         _need(journal['operation'] == 'restore' and journal['phase'] == 'prepared'
               and journal['restore_target']['kind'] == 'core-restore-target-v2'
@@ -695,12 +696,15 @@ class CoreRestorePreparation(CoreMaintenanceSession):
                 _, _, certificate = self._read_panel_tls_material()
                 _need(certificate is not None and hashlib.sha256(certificate[1]).hexdigest() == trust,
                       'RESTORE_TLS_CONTEXT')
+            self.restore_stage = 'POLICY'
             self._final_intents = self._intents(self._observe_states(), self._before)
             self._policy()
             for core in s.CORES:
                 self._resolver.current(self._restore_input.core_closure.selection, core)
+            self.restore_stage = 'PREPARE'
             with prepare_restore(self, self._restore_input, core_backup=self._restore_backup,
                                  current_selection=self._before) as prepared:
+                self.restore_stage = 'PLACE'
                 original = place_restore_candidate(self, journal, prepared, core_backup=self._restore_backup,
                                                    current_selection=self._before, _selection_files=self._files)
                 self._core_phase = 'quiesced'

@@ -31,6 +31,10 @@ class WorkerError(RuntimeError):
     pass
 
 
+class _RestoreStageFailure(WorkerError):
+    pass
+
+
 class _Deadline(BaseException):
     pass
 
@@ -455,8 +459,14 @@ def _complete_restore_preparation(channel, session):
         return
     if set(value) != {'command', 'journal'} or value['command'] != 'stage_restore':
         raise WorkerError('Unexpected private restore staging command')
-    with _quiet_candidate_io():
-        staged = session.stage_restore(value['journal'])
+    try:
+        with _quiet_candidate_io():
+            staged = session.stage_restore(value['journal'])
+    except (OSError, RuntimeError, ValueError, KeyError):
+        phase = getattr(session, 'restore_stage', None)
+        if phase in ('GUARD', 'POLICY', 'PREPARE', 'PLACE'):
+            raise _RestoreStageFailure(phase) from None
+        raise
     channel.send('restore_staged', **staged)
     value = _core_fields(channel, 'backup_core', ('snapshot',))
     with _quiet_candidate_io():
@@ -594,6 +604,7 @@ def _run(root, release_tools, input_fd, output, *, timeout=TIMEOUT):
     previous_int = signal.getsignal(signal.SIGINT)
 
     deadline_active = True
+    restore_stage_failed = False
 
     def interrupted(number, _frame):
         if number != signal.SIGALRM or deadline_active:
@@ -662,11 +673,17 @@ def _run(root, release_tools, input_fd, output, *, timeout=TIMEOUT):
             # dispatched. Retire it before encoding the fixed error frame.
             deadline_active = False
             signal.setitimer(signal.ITIMER_REAL, 0)
-    except (Exception, _Deadline):
+    except (Exception, _Deadline) as error:
         deadline_active = False
         status = 1
-        try: channel.send('error', code='MAINTENANCE_REFUSED')
-        except (OSError, ValueError, _Deadline): pass
+        restore_stage_failed = isinstance(error, _RestoreStageFailure)
+        try:
+            if restore_stage_failed:
+                channel.send('restore_stage_failed', phase=str(error))
+            else:
+                channel.send('error', code='MAINTENANCE_REFUSED')
+        except (OSError, ValueError, _Deadline):
+            pass
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         try:
@@ -675,8 +692,9 @@ def _run(root, release_tools, input_fd, output, *, timeout=TIMEOUT):
         except (Exception, _Deadline):
             # A cleanup failure is still a failed worker transaction, including
             # after finish; do not override it with an earlier success return.
-            try: channel.send('error', code='MAINTENANCE_REFUSED')
-            except (OSError, ValueError): pass
+            if not restore_stage_failed:
+                try: channel.send('error', code='MAINTENANCE_REFUSED')
+                except (OSError, ValueError): pass
             status = 1
         finally:
             signal.signal(signal.SIGALRM, previous_alarm)

@@ -1380,7 +1380,8 @@ def terminal_core_action(action):
                               cancelled, timeout=TIMEOUT+60, cleanup_grace=180)
     if code != 0:
         if action == 'restore-components' and re.fullmatch(
-                rb'RESTORE_STAGE_(?:PREFLIGHT|STOP|STAGE|BACKUP|EXCHANGE|OBSERVE|ACTIVATE|FINISH)\n', output):
+                rb'RESTORE_STAGE_(?:PREFLIGHT|STOP|STAGE(?:_(?:GUARD|POLICY|PREPARE|PLACE|RECEIPT))?'
+                rb'|BACKUP|EXCHANGE|OBSERVE|ACTIVATE|FINISH)\n', output):
             print('恢复失败阶段 ' + output.decode('ascii').strip())
         raise Refused('core restore unconfirmed')
     result = decode_json(output)

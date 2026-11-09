@@ -17,7 +17,8 @@ import types
 import uuid
 
 
-RESTORE_STAGES = frozenset(('PREFLIGHT', 'STOP', 'STAGE', 'BACKUP', 'EXCHANGE', 'OBSERVE', 'ACTIVATE', 'FINISH'))
+RESTORE_STAGES = frozenset(('PREFLIGHT', 'STOP', 'STAGE', 'STAGE_GUARD', 'STAGE_POLICY', 'STAGE_PREPARE',
+                            'STAGE_PLACE', 'STAGE_RECEIPT', 'BACKUP', 'EXCHANGE', 'OBSERVE', 'ACTIVATE', 'FINISH'))
 
 
 class CoreControlError(RuntimeError):
@@ -84,6 +85,10 @@ class _Worker:
             _need(not self._closed, 'WORKER_CLOSED')
             self.child.send(request)
             value = self.child.receive()
+            if (request.get('command') == 'stage_restore' and type(value) is dict
+                    and set(value) == {'event', 'phase'} and value['event'] == 'restore_stage_failed'
+                    and value['phase'] in ('GUARD', 'POLICY', 'PREPARE', 'PLACE')):
+                raise CoreControlError('RESTORE_STAGE_STAGE_' + value['phase'])
             _need(type(value) is dict and set(value) == {'event', *fields}
                   and value['event'] == event, 'CORE_WORKER_PROTOCOL')
             return {key: value[key] for key in fields}
@@ -493,6 +498,7 @@ class _Switch:
             self.restore_stage = 'STAGE'
             staged = self.worker.command('stage_restore', 'restore_staged',
                 ('final_intents', 'restore_data', 'original_tree_sha256', 'prepared_tree_sha256'), journal=journal)
+            self.restore_stage = 'STAGE_RECEIPT'
             self.final = self._intents(staged['final_intents'], self.before)
             self.services.prove_stopped()
             self.files.record_quiesced(self.transaction, dict(panel_stopped=True, writers_exclusive=True,
@@ -1009,6 +1015,9 @@ def _run_task(ops, cancelled, request, *, restore=False, restore_recovery=False,
                     try:
                         return task.run_restore(*request)
                     except (OSError, RuntimeError, ValueError, KeyError) as error:
+                        if isinstance(error, CoreControlError) and str(error) in {
+                                'RESTORE_STAGE_STAGE_' + phase for phase in ('GUARD', 'POLICY', 'PREPARE', 'PLACE')}:
+                            raise
                         stage = getattr(task, 'restore_stage', None)
                         if stage not in RESTORE_STAGES:
                             raise
