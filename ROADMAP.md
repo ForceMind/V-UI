@@ -176,3 +176,5 @@ M46E SDK producer源码已独审：短入口／受管升级显式传已核SDK pi
 M46E SDK正常路径已接事实consumer：固定Root来源表lookup，候选/stop前精确核release/target/source40/原manifestSHA；两版各41项独立回归及独审通过。85426a3主测唯一失败为marker整文件读取触发流式保护，改有界512001读取，原防篡改断言不变并已单独复验；完整Linuxarchive套件仍交Actions。Rootstage来源producer、持久核心任务/权限发放/面板流程继续，未开放远程写或发布24。
 
 M46E本地stage来源接线已独审：Root匿名原包快照/摘要/原清单记录、Root-owned组只读交接、prepared ID精确匹配、FD绑定精确清理/foreign保留/关闭失ack不重关。两版各28项回归通过，真实Root+降权读者仅交Actions，不称产品prepare已验。两个producer与事实consumer源码接通，本批准确CI待验；远程Root凭据/任务/UI仍需完成。
+
+M46F源码新增独立终端核心维护链接，普通旧scope/预设不扩，Root bearer绑定原grant摘要/绝对期限，网页memory-only固定接口头。普通撤销Root减权先于DB写锁，重读绑定CAS；迟到UI响应不复活已结束会话。独审与两版45项纯/DOM通过，ASGI真实集成待Actions；核心任务派工/变更边界校权和完整UI仍未完成。

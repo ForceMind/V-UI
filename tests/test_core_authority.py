@@ -434,3 +434,18 @@ class CoreAuthorityTests(unittest.TestCase):
         deeper=a.CoreAuthority(_root=self.anchor/'missing'/'too'/'deep',_anchor=self.anchor,_owner=os.geteuid())
         self.assert_code('IO',deeper.record_application,self.app_record())
         self.assertFalse((self.anchor/'missing').exists())
+
+    def test_linked_grant_deadline_is_capped_under_lock_and_never_rounded_up(self):
+        record,_=self.store.issue(main_id=7,main_digest=self.main_digest,scopes=self.scope,seconds=60,not_after=1000010)
+        self.assertEqual(record['expires_at'],1000010)
+        self.now.return_value=1000010
+        self.assert_code('EXPIRED',self.store.issue,main_id=7,main_digest=self.main_digest,scopes=self.scope,seconds=60,not_after=1000010)
+
+    def test_root_status_is_authenticated_bound_metadata_without_secret_or_admission(self):
+        issued,token=self.issue()
+        status=self.store.status(token=token,main_id=7,main_digest=self.main_digest)
+        self.assertEqual(status,issued);self.assertNotIn('secret_sha256',status)
+        self.assertFalse(json.loads((self.root/'authority.json').read_bytes())['admissions'])
+        self.assert_code('AUTHORITY',self.store.status,token=token,main_id=8,main_digest=self.main_digest)
+        self.store.revoke_main(main_id=7,main_digest=self.main_digest)
+        self.assert_code('AUTHORITY',self.store.status,token=token,main_id=7,main_digest=self.main_digest)

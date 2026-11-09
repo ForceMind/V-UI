@@ -1,12 +1,13 @@
 'use strict';
 (() => {
     // A fragment is never submitted as part of a URL or copied into navigation.
-    let grant = '';
-    const fragment = String(location.hash || '');
-    const match = /^#grant=(vui_mg_[A-Za-z0-9_-]{43})$/.exec(fragment);
-    if (match) grant = match[1];
+    let grant = '', coreGrant = '';
+    let fragment = String(location.hash || '');
+    let match = /^#grant=(vui_mg_[A-Za-z0-9_-]{43})(?:&core=(vui_cg_[a-f0-9]{32}_[A-Za-z0-9_-]{43}))?$/.exec(fragment);
+    if (match) {grant = match[1];coreGrant = match[2] || '';}
     if (fragment) history.replaceState(null, '', location.pathname);
     const hadFragment = !!fragment;
+    fragment = '';match = null;
     const start = () => {
         const el = id => document.getElementById(id);
         const names = {diagnose:'只读诊断',nodes:'节点管理',share:'节点与订阅分享',relay:'中转配置',
@@ -14,7 +15,7 @@
         const actions = {status:'读取服务状态',start:'启动服务',stop:'停止服务',restart:'重启服务',backup:'私有备份',upgrade:'在线升级',restore:'停机恢复备份'};
         const phases = {queued:'排队中',running:'执行中',succeeded:'成功',success:'成功',failed:'失败',interrupted:'已中断',pending:'待执行',completed:'已完成'};
         let operationView = null;
-        let token = '', admin = false, ended = false, epoch = 0, busy = false, scopes = [], issuedID = '';
+        let token = '', admin = false, ended = false, epoch = 0, busy = false, scopes = [], issuedID = '', coreScopes = [], normalExpires = 0;
         const controllers = new Set();
         let taskTimer=null, taskSubmissionUncertain=false, watchingTask=null;
         const notice = value => { el('maintenance-notice').textContent = value; };
@@ -24,7 +25,8 @@
             const corePanel=el('maintenance-core-panel');if(corePanel)corePanel.hidden=true;
             const coreBox=el('maintenance-core-selection');if(coreBox)coreBox.textContent='';
             const hints=el('maintenance-core-hints');if(hints)hints.textContent='';
-            epoch++; ended = true; operationView?.destroy();operationView=null;token = ''; grant = ''; clearLink();
+            const authorityBox=el('maintenance-core-authority');if(authorityBox)authorityBox.textContent='';
+            epoch++; ended = true; operationView?.destroy();operationView=null;token = ''; grant = ''; coreGrant = ''; coreScopes = []; clearLink();
             controllers.forEach(controller => controller.abort()); controllers.clear();
             ['maintenance-operations','maintenance-admin-links','maintenance-admin','maintenance-remote','maintenance-tasks-panel','maintenance-audit-panel','maintenance-logs-panel'].forEach(id => { el(id).hidden = true; });
             ['maintenance-grants','maintenance-tasks','maintenance-audit','maintenance-session','maintenance-logs'].forEach(id => { el(id).textContent = ''; });
@@ -40,6 +42,7 @@
                 if (data !== undefined) headers['Content-Type'] = 'application/json';
                 for(const key of ['If-Match','Idempotency-Key'])if(extraHeaders[key])headers[key]=extraHeaders[key];
                 if (token && !exchange) headers.Authorization = 'Bearer ' + token;
+                if (coreGrant && !exchange && /^maintenance\/(?:core-authority|core-tasks(?:\/[a-f0-9]{32})?)$/.test(path)) headers['X-VUI-Core-Authorization'] = coreGrant;
                 const response = await fetch('/api/' + path, {method, headers, credentials: token || exchange ? 'omit' : 'same-origin',
                     cache:'no-store', redirect:'error', signal:controller.signal, ...(data !== undefined ? {body:JSON.stringify(data)} : {})});
                 const type=response.headers?.get('content-type')||'application/json';
@@ -144,6 +147,28 @@
             const box = el('maintenance-audit'); box.textContent = '';
             if (!rows.length) text(box, '暂无操作记录。');
             rows.forEach(row => { const entry = record(box); text(entry, time(row.created_at) + ' · ' + row.operation + ' · 状态 ' + row.status); });
+        };
+        const coreAuthority = async () => {
+            const ownEpoch=epoch;
+            if(ended)return;
+            const box=el('maintenance-core-authority');
+            coreScopes=[];
+            if (!coreGrant) {if(box)box.textContent='本次仅查看核心信息。';return;}
+            try {
+                const value=await request('maintenance/core-authority');
+                if(ended||epoch!==ownEpoch)return;
+                const allowedScopes=['core_operate','core_backup','core_restore'];
+                if (!value || !Array.isArray(value.scopes) || !value.scopes.length ||
+                    value.scopes.some(scope=>!allowedScopes.includes(scope)) || new Set(value.scopes).size!==value.scopes.length ||
+                    !Number.isSafeInteger(value.expires_at) || value.expires_at>normalExpires ||
+                    value.expires_at*1000<=Date.now() || value.revoked!==false) throw new Error('核心授权响应无效。');
+                coreScopes=value.scopes;
+                if(box)box.textContent='独立核心维护授权已核验 · 截止：'+time(value.expires_at);
+            } catch(error) {
+                if(ended||epoch!==ownEpoch)return;
+                coreGrant='';coreScopes=[];
+                if(box)box.textContent='核心维护授权未能确认，请从本机终端重新创建；普通维护权限保持。';
+            }
         };
         const coreSelection = async () => {
             if (!(admin || scopes.includes('core_read'))) throw new Error('本次授权未开放代理核心信息。');
@@ -269,7 +294,7 @@
                 if (!grant) throw new Error('维护链接格式无效，请向管理员重新获取。');
                 let result;
                 try { result = await request('maintenance/exchange', 'POST', {grant}, true); } finally { grant = ''; }
-                token = result.token; scopes = result.scopes;
+                token = result.token; scopes = result.scopes; normalExpires = result.expires_at;
                 if (typeof token !== 'string' || !/^vui_ms_[A-Za-z0-9_-]{43}$/.test(token) || !Array.isArray(scopes)) { end(); notice('维护授权响应无效，请重新获取授权。'); return; }
                 el('maintenance-remote').hidden = false;
                 el('maintenance-session').textContent = '截止：' + time(result.expires_at) + ' · 权限：' + scopes.map(scope => names[scope] || '未知权限').join('、');
@@ -277,6 +302,8 @@
             } else {
                 await request('auth/me'); admin = true; el('maintenance-admin').hidden = false; await grants(); notice('已验证管理员身份。默认只读，请按需选择维护权限。');
             }
+            if(coreGrant)await coreAuthority();
+            if(ended)return;
             const coreOnly = !admin && scopes.length > 0 && scopes.every(scope => scope === 'core_read');
             const corePanel=el('maintenance-core-panel');if(corePanel)corePanel.hidden=!(admin||scopes.includes('core_read'));
             if(!coreOnly&&globalThis.VUI_SIMPLE_OPERATIONS&&el('maintenance-operations')){

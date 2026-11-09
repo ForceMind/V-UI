@@ -48,6 +48,14 @@ def validate(value):
             raise ValueError('action')
         if value['action'] == 'restore':
             expected.add('backup_id')
+    elif operation in ('core_authority','core_revoke'):
+        expected |= {'main_id','main_digest'}
+        if operation=='core_authority':expected.add('token')
+        if (operation=='core_authority' and (type(value.get('token')) is not str
+                    or not re.fullmatch(r'vui_cg_[a-f0-9]{32}_[A-Za-z0-9_-]{43}',value['token']))
+                or type(value.get('main_id')) is not int or not 0<value['main_id']<2**63
+                or type(value.get('main_digest')) is not str or not re.fullmatch(r'[a-f0-9]{64}',value['main_digest'])):
+            raise ValueError('core authority')
     elif operation == 'get':
         expected.add('task_id')
     elif operation not in ('list', 'status', 'logs', 'core_status'):
@@ -426,6 +434,14 @@ def serve(ops):
                         services = ops.Services(manager, [])
                         services.deadline = time.monotonic() + 3
                         result = {'services': services.snapshot(), 'busy': active is not None, **install_summary(ops)}
+                    elif operation == 'core_revoke':
+                        expected=hashlib.sha256(ops.trusted_bytes(ops.RECEIPT,ops.MAX_JSON)).hexdigest()
+                        result=ops._load_core_authority(expected,_origin_only=True).CoreAuthority().revoke_main(
+                            main_id=value['main_id'],main_digest=value['main_digest'])
+                    elif operation == 'core_authority':
+                        expected=hashlib.sha256(ops.trusted_bytes(ops.RECEIPT,ops.MAX_JSON)).hexdigest()
+                        authority=ops._load_core_authority(expected).CoreAuthority()
+                        result=authority.status(token=value['token'],main_id=value['main_id'],main_digest=value['main_digest'])
                     elif operation == 'core_status':
                         result = public_core_selection(ops.core_selection_status(ops))
                     elif operation == 'logs':

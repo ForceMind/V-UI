@@ -125,6 +125,17 @@ def status():
     return _bridge('system_status')
 
 
+@router.get('/core-authority')
+def core_authority(request: Request):
+    if request.query_params:raise HTTPException(422,'核心授权检查不接受额外参数')
+    principal=_principal(request)
+    auth.authorize(principal,'GET','/api/maintenance/core-authority')
+    root_token=request.headers.get('X-VUI-Core-Authorization','')
+    if not re.fullmatch(r'vui_cg_[a-f0-9]{32}_[A-Za-z0-9_-]{43}',root_token):
+        raise HTTPException(403,'请使用本机终端创建的核心维护链接')
+    return _bridge('core_authority_status',root_token,auth.core_binding(principal))
+
+
 @router.get('/core-selection')
 def core_selection(request: Request):
     if request.query_params:

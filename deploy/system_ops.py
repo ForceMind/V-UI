@@ -1391,16 +1391,60 @@ def fixed_module(name):
     return module
 
 
+def _core_grant_link(record, *, ordinary_scopes, root_scopes, seconds):
+    """Combine one bounded non-Root creation reply with an independent Root
+    capability. Never return a Root secret to the ordinary creation worker.
+    """
+    expected={'id','scopes','created_at','expires_at','redeemed','revoked','expired','link'}
+    now=int(time.time())
+    if (type(record) is not dict or set(record)!=expected or type(record['id']) is not int
+            or not 0<record['id']<2**63 or type(record['scopes']) is not list
+            or any(type(value) is not str for value in record['scopes'])
+            or set(record['scopes'])!=set(ordinary_scopes) or len(record['scopes'])!=len(ordinary_scopes)
+            or type(record['created_at']) is not int or type(record['expires_at']) is not int
+            or not now-60<=record['created_at']<=now+2
+            or record['expires_at']!=record['created_at']+seconds or record['expires_at']<=now
+            or any(record[key] is not False for key in ('redeemed','revoked','expired'))):
+        raise Refused('ordinary grant reply refused')
+    config=decode_json(trusted_bytes(CONFIG,MAX_JSON))
+    origin=config.get('origin')
+    prefix=str(origin)+'/maintenance#grant='
+    link=record['link']
+    if (type(origin) is not str or not origin.startswith('https://') or type(link) is not str
+            or not link.startswith(prefix) or not re.fullmatch(r'vui_mg_[A-Za-z0-9_-]{43}',link[len(prefix):])):
+        raise Refused('ordinary grant origin refused')
+    token=link[len(prefix):]
+    expected_receipt=hashlib.sha256(trusted_bytes(RECEIPT,MAX_JSON)).hexdigest()
+    module=_load_core_authority(expected_receipt)
+    issued,root_token=module.CoreAuthority().issue(main_id=record['id'],main_digest=hashlib.sha256(token.encode()).hexdigest(),
+        scopes=root_scopes,seconds=seconds,not_after=record['expires_at'])
+    if issued['expires_at']>record['expires_at']:raise Refused('Root grant deadline refused')
+    return {**record,'core_scopes':issued['scopes'],'core_expires_at':issued['expires_at'],
+            'link':prefix+token+'&core='+root_token}
+
+
+def _create_core_grant(account, arguments, ordinary_scopes, root_scopes, seconds):
+    child=Child([str(PYTHON),'-B','-I','-S',str(CONTROL/'maintenance_cli_worker.py'),*arguments],
+                60,account=account,cancelled=[])
+    try:
+        record=child.receive();child.exit_zero()
+    finally:
+        child.close()
+    # The normal grant may remain for explicit revocation if Root issuance
+    # fails. Neither partial reply nor a fabricated success link is displayed.
+    return _core_grant_link(record,ordinary_scopes=ordinary_scopes,root_scopes=root_scopes,seconds=seconds)
+
+
 def terminal_grants():
-    print('临时授权: 1 创建  2 列举  3 撤销  0 返回。链接仅本次显示，请妥善保存。')
+    print('临时授权: 1 创建  2 列举  3 撤销  4 核心维护授权  0 返回。链接仅本次显示，请妥善保存。')
     choice = read_input('请选择授权操作: ', 2)
     if choice in (None, '', '0'):
         return
-    _, account = verify_installation()
+    manager, account = verify_installation()
     if choice == '1':
         print('1 只读（默认）：诊断、状态与脱敏日志\n'
               '2 日常维护：另含节点、分享、中转、证书、服务操作与升级\n'
-              '3 完整维护：另含删除与备份恢复，可能永久改变业务数据\n4 代理核心只读：查看选择，不含更新、回退或恢复')
+              '3 完整维护：另含删除与备份恢复，可能永久改变业务数据\n4 代理核心只读：查看选择和候选信息')
         preset = read_input('请选择权限 [1/2/3/4，默认 1]: ', 1) or '1'
         choices = {'1': 'diagnose',
                    '2': 'diagnose,nodes,share,relay,certificates,operate,upgrade',
@@ -1413,6 +1457,20 @@ def terminal_grants():
                 or not 1 <= int(minutes) <= 259200):
             raise Refused('invalid grant input')
         arguments = ['create', choices[preset], str(int(minutes) * 60)]
+    elif choice == '4':
+        if manager!='systemd':raise Refused('当前系统暂不支持独立核心维护授权')
+        print('1 核心维护：更新、回退、未完成操作恢复及双域备份\n'
+              '2 完整维护：所有面板功能及核心恢复；恢复仍须确认具体备份')
+        preset=read_input('请选择核心维护权限 [1/2，默认1]: ',1) or '1'
+        minutes=read_input('有效分钟数 1–259200，或输入180天/180d（默认30分钟）: ',6) or '30'
+        if minutes in ('180天','180d','180D'):minutes='259200'
+        if preset not in ('1','2') or not minutes.isascii() or not minutes.isdecimal() or not 1<=int(minutes)<=259200:
+            raise Refused('invalid core grant input')
+        ordinary=['diagnose','core_read'] if preset=='1' else ['diagnose','nodes','share','relay','certificates','operate','upgrade','destructive','core_read']
+        root_scopes=['core_operate','core_backup']+(['core_restore'] if preset=='2' else [])
+        result=_create_core_grant(account,['create',','.join(ordinary),str(int(minutes)*60)],ordinary,root_scopes,int(minutes)*60)
+        print(json.dumps(result,ensure_ascii=False))
+        return
     elif choice == '2':
         arguments = ['list']
     elif choice == '3':

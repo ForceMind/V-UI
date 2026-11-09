@@ -53,6 +53,33 @@ async function admin() {
         assert.equal(h.el('maintenance-tasks').textContent,'');assert(h.el('maintenance-remote').hidden);
     }
     {
+        const core='vui_cg_'+'b'.repeat(32)+'_'+'c'.repeat(43);
+        const h=boot('#grant='+secret+'&core='+core);
+        await h.reply({token:session,scopes:['diagnose','core_read'],expires_at:1800000000});
+        assert(!h.history[0][2].includes(core));
+        assert.equal(h.requests[0].options.headers['X-VUI-Core-Authorization'],undefined);
+        assert.equal(h.requests.at(-1).url,'/api/maintenance/core-authority');
+        assert.equal(h.requests.at(-1).options.headers['X-VUI-Core-Authorization'],core);
+        await h.reply({scopes:['core_operate','core_backup'],expires_at:1800000000,revoked:false});
+        await h.reply([]);
+        h.el('maintenance-core-refresh').fire();await flush();
+        assert(!h.requests.at(-1).options.headers['X-VUI-Core-Authorization']);
+        await h.reply({outcome:'bundle_default'});
+        h.event('pagehide');
+    }
+    {
+        const core='vui_cg_'+'b'.repeat(32)+'_'+'c'.repeat(43);
+        for(const status of [200,401]) {
+            const h=boot('#grant='+secret+'&core='+core);
+            await h.reply({token:session,scopes:['diagnose','core_read'],expires_at:1800000000});
+            assert.equal(h.requests.at(-1).url,'/api/maintenance/core-authority');
+            h.event('pagehide');
+            await h.reply({scopes:['core_operate'],expires_at:1800000000,revoked:false},status);
+            assert(h.el('maintenance-core-panel').hidden);assert(h.el('maintenance-remote').hidden);
+            assert(h.el('maintenance-operations').hidden);assert.equal(h.el('maintenance-core-authority').textContent,'');
+        }
+    }
+    {
         const h=boot('#grant=malformed');await flush();assert.equal(h.requests.length,0);
         assert(!h.history[0][2].includes('malformed'));
     }

@@ -893,3 +893,15 @@ SDK `85426a3` 的主测试42665205127在3668项中唯一失败为shell能力检�
 SDK与受管stage两个来源producer、锁内实际事实consumer现在源码均已接通，仍须本批准确Actions与小日志回读资格。旧准备版本不自动授信，重验原包后可有accepted来源；stage失败保留accepted记录不代表prepared/active/healthy。远程Root凭据发放、持久核心任务、备份映射及完整用户界面仍未完成。
 
 f205efe原生矩阵42669763135首次失败：合成stage夹具继承umask077，mkdir(0755)实际变为0700，触发生产可穿越父目录拒绝。夹具现显式chmod(0755)，只落实原夹具契约，不改生产权限规则；原10项在umask077下复验通过，独审无阻断。原失败保留，准确新源码CI另验。
+
+## M46F 核心授权发放与减权（源码候选）
+
+普通SCOPES9和旧预设保持。终端授权菜单新增独立“核心维护授权”入口，两种用途为核心更新/回退/未完成恢复/双域备份，或完整维护加双域恢复；具体恢复仍需确认。普通grant含core_read，只提供登录/只读前置，Root写用途由单独Root bearer决定，不凭普通scope升级权限。
+
+Root以固定降权Child捕获单个有界JSON并核零退出；核普通grant精确scopes/身份/时间及Root配置的固定origin/link结构，再独立签发Root token。Root secret不进入降权创建进程，组合链接只在两层成功后一次显示，失败不输出部分成功；普通记录保留可撤销。Root expiry在私有锁内钳制到普通grant绝对截止，剩余1秒可如实表示，不向上取整延长。
+
+页面严格解析双fragment后立即清hash和临时fragment变量；Root token只在内存及固定核心authority/tasks接口请求头，结束/失效清除。Root authority GET仅检查当前有效core_read普通会话，取原grant token摘要（非交换session摘要）与Root记录匹配，再由Root返回用途/期限。普通用户或管理员不能跳过Root bearer。用途文案只是展示，不是派工授权。
+
+普通core_read grant撤销先读取并释放DB事务→Root持久binding tombstone确认→BEGIN IMMEDIATE重读同id/owner/token摘要/scopes后撤销；换绑定则409，Root未知则503且不报撤销完成。Root减权后DB失败仅减权不复权。所有普通撤销入口复用此函数；受管数据恢复仍须在其实际变更前另推进Root epoch，属于后续任务接线。
+
+本批源码已独审，私有Root/链接/固定协议45项Py3.9/3.12通过、合成DOM通过（含pagehide后迟到200/401不恢复界面），新增ASGI/SQLite回归仅交Actions。本机不运行Root或产品安装，不做浏览器。完整核心持久任务与应用前最后校权尚未接，不能把本批授权发放视为远程写操作已完成。

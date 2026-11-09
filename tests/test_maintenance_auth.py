@@ -428,7 +428,8 @@ class MaintenanceAuthorizationTests(unittest.TestCase):
             self.assertEqual(remote.get('/api/maintenance/tasks',headers=headers).status_code,403)
             before = read.call_count
             self.assertEqual(remote.get('/api/maintenance/core-selection?source=untrusted',headers=headers).status_code,422)
-            maintenance.revoke_grant(self.owner,record['id'])
+            with patch('app.services.maintenance_tasks.revoke_core_binding',return_value={'revoked':True}):
+                maintenance.revoke_grant(self.owner,record['id'])
             self.assertEqual(remote.get('/api/maintenance/core-selection',headers=headers).status_code,401)
             self.assertEqual(read.call_count,before)
 
@@ -480,3 +481,38 @@ class MaintenanceAuthorizationTests(unittest.TestCase):
             discover.side_effect=RuntimeError('/private/metadata/token')
             response=remote.get('/api/maintenance/core-candidates/xray',headers=headers)
             self.assertEqual(response.status_code,503);self.assertNotIn('/private',response.text)
+
+
+    def test_root_core_authority_is_bound_to_original_grant_and_revoke_is_root_first(self):
+        remote=TestClient(main.app,base_url=ORIGIN);self.addCleanup(remote.close)
+        record,headers=self.bearer(['core_read'])
+        root='vui_cg_'+'b'*32+'_'+'c'*43
+        with database.SessionLocal() as db:original_digest=db.get(maintenance.MaintenanceGrant,record['id']).token_hash
+        with patch('app.services.maintenance_tasks.core_authority_status',return_value={'scopes':['core_operate'],'expires_at':record['expires_at'],'revoked':False}) as status:
+            self.assertEqual(remote.get('/api/maintenance/core-authority',headers=headers).status_code,403)
+            status.assert_not_called()
+            response=remote.get('/api/maintenance/core-authority',headers={**headers,'X-VUI-Core-Authorization':root})
+            self.assertEqual(response.status_code,200,response.text)
+            status.assert_called_once_with(root,{'main_id':record['id'],'main_digest':original_digest})
+            self.assertNotIn(root,response.text)
+        with patch('app.services.maintenance_tasks.revoke_core_binding',side_effect=RuntimeError('fixed failure')):
+            with self.assertRaises(HTTPException) as error:maintenance.revoke_grant(self.owner,record['id'])
+            self.assertEqual(error.exception.status_code,503)
+        with database.SessionLocal() as db:self.assertFalse(db.get(maintenance.MaintenanceGrant,record['id']).revoked)
+        with patch('app.services.maintenance_tasks.revoke_core_binding',return_value={'revoked':True}) as revoke:
+            maintenance.revoke_grant(self.owner,record['id'])
+            revoke.assert_called_once_with(record['id'],original_digest)
+        self.assertEqual(remote.get('/api/maintenance/core-authority',headers={**headers,'X-VUI-Core-Authorization':root}).status_code,401)
+
+
+    def test_core_revoke_rechecks_original_binding_after_root_ack_without_holding_db_write_lock(self):
+        record,_=self.issue(['core_read'])
+        def changed(main_id,main_digest):
+            with database.SessionLocal() as db:
+                db.get(maintenance.MaintenanceGrant,main_id).token_hash='b'*64
+                db.commit()
+            return {'revoked':True}
+        with patch('app.services.maintenance_tasks.revoke_core_binding',side_effect=changed):
+            with self.assertRaises(HTTPException) as error:maintenance.revoke_grant(self.owner,record['id'])
+            self.assertEqual(error.exception.status_code,409)
+        with database.SessionLocal() as db:self.assertFalse(db.get(maintenance.MaintenanceGrant,record['id']).revoked)

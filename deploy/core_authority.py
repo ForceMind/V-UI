@@ -156,7 +156,7 @@ def _grant(value, key):
           and all(type(item) is str and item in SCOPES for item in value['scopes'])
           and value['scopes'] == sorted(set(value['scopes']))
           and _integer(value['created_at']) and _integer(value['expires_at'])
-          and 60 <= value['expires_at']-value['created_at'] <= 15552000
+          and 1 <= value['expires_at']-value['created_at'] <= 15552000
           and type(value['revoked']) is bool, 'GRANT')
 
 
@@ -436,11 +436,12 @@ class CoreAuthority:
         _need(grant['epoch'] == state['epoch']
               and grant['created_at'] <= now < grant['expires_at'], 'AUTHORITY')
 
-    def issue(self, *, main_id, main_digest, scopes, seconds=1800):
+    def issue(self, *, main_id, main_digest, scopes, seconds=1800, not_after=None):
         _need(_integer(main_id) and _hex(main_digest) and type(scopes) in (list, tuple)
               and scopes and all(type(item) is str and item in SCOPES for item in scopes)
               and len(set(scopes)) == len(scopes) and type(seconds) is int
-              and 60 <= seconds <= 15552000, 'ISSUE')
+              and 60 <= seconds <= 15552000
+              and (not_after is None or _integer(not_after)), 'ISSUE')
         with self._locked(create=True) as (directory, proof):
             state, before = self._load(directory, missing=True)
             binding = _binding(main_id, main_digest)
@@ -452,10 +453,12 @@ class CoreAuthority:
             _need(identity not in state['grants'], 'COLLISION')
             token = 'vui_cg_'+identity+'_'+secrets.token_urlsafe(32)
             now = self._now()
+            expires_at=min(now+seconds,not_after) if not_after is not None else now+seconds
+            _need(expires_at>now,'EXPIRED')
             row = dict(id=identity, installation_id=state['installation_id'], epoch=state['epoch'],
                        main_id=main_id, main_digest=main_digest, scopes=sorted(scopes),
                        secret_sha256=hashlib.sha256(token.encode('ascii')).hexdigest(),
-                       created_at=now, expires_at=now+seconds, revoked=False)
+                       created_at=now, expires_at=expires_at, revoked=False)
             state['grants'][identity] = row
             self._save(directory, proof, state, before)
             return self._public_grant(row), token
@@ -504,6 +507,19 @@ class CoreAuthority:
                 row['revoked'] = True
             self._save(directory, proof, state, before)
             return {'advanced': True}
+
+    def status(self, *, token, main_id, main_digest):
+        """Authenticated Root capability metadata; no admission or mutation."""
+        _need(type(token) is str and TOKEN.fullmatch(token) is not None, 'AUTHORITY')
+        _need(_integer(main_id) and _hex(main_digest), 'REQUEST')
+        with self._locked() as (directory, proof):
+            state, before = self._load(directory)
+            grant = state['grants'].get(TOKEN.fullmatch(token).group(1))
+            _need(grant is not None and hmac.compare_digest(grant['secret_sha256'],
+                  hashlib.sha256(token.encode('ascii')).hexdigest()) and grant['main_id'] == main_id
+                  and hmac.compare_digest(grant['main_digest'], main_digest), 'AUTHORITY')
+            self._live(state, grant, self._now(), directory, proof, before)
+            return self._public_grant(grant)
 
     def reserve(self, *, token, main_id, main_digest, request_id, action, parameters):
         _need(type(token) is str and TOKEN.fullmatch(token) is not None, 'AUTHORITY')

@@ -78,3 +78,14 @@ class CoreReadStatusTests(unittest.TestCase):
             return read(target,*args)
         with patch.object(ops,'verify_installation',return_value=('systemd',None)), patch.object(ops,'trusted_bytes',side_effect=changed):
             with self.assertRaises(ops.Refused):ops.core_selection_status(ops)
+
+
+    def test_core_authority_and_reduction_are_closed_operations_without_write_dispatch(self):
+        token='vui_cg_'+'b'*32+'_'+'c'*43
+        identity={'main_id':7,'main_digest':'a'*64}
+        self.assertEqual(self.daemon.validate({'protocol':1,'operation':'core_authority','token':token,**identity}),'core_authority')
+        self.assertEqual(self.daemon.validate({'protocol':1,'operation':'core_revoke',**identity}),'core_revoke')
+        for extra in ({'scopes':['core_operate']},{'main_id':True},{'token':'bad'}):
+            with self.subTest(extra=extra),self.assertRaises(ValueError):
+                self.daemon.validate({'protocol':1,'operation':'core_authority','token':token,**identity,**extra})
+        with self.assertRaises(ValueError):self.daemon.validate({'protocol':1,'operation':'core_revoke','token':token,**identity})

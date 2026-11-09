@@ -36,3 +36,11 @@ def system_logs():
 
 def core_selection_status():
     return _client.request({'protocol': 1, 'operation': 'core_status'})
+
+
+def core_authority_status(root_token, binding):
+    return _client.request({'protocol':1,'operation':'core_authority','token':root_token,**binding})
+
+
+def revoke_core_binding(main_id, main_digest):
+    return _client.request({'protocol':1,'operation':'core_revoke','main_id':main_id,'main_digest':main_digest})
