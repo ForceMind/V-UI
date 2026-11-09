@@ -23,6 +23,7 @@
             clearTimeout(taskTimer);watchingTask=null;taskSubmissionUncertain=false;
             const corePanel=el('maintenance-core-panel');if(corePanel)corePanel.hidden=true;
             const coreBox=el('maintenance-core-selection');if(coreBox)coreBox.textContent='';
+            const hints=el('maintenance-core-hints');if(hints)hints.textContent='';
             epoch++; ended = true; operationView?.destroy();operationView=null;token = ''; grant = ''; clearLink();
             controllers.forEach(controller => controller.abort()); controllers.clear();
             ['maintenance-operations','maintenance-admin-links','maintenance-admin','maintenance-remote','maintenance-tasks-panel','maintenance-audit-panel','maintenance-logs-panel'].forEach(id => { el(id).hidden = true; });
@@ -58,6 +59,7 @@
         const allowed = action => admin || scopes.includes(action === 'upgrade' ? 'upgrade' : action === 'status' ? 'diagnose' : 'operate');
         const sync = () => {
             const coreButton=el('maintenance-core-refresh');if(coreButton)coreButton.disabled=busy||ended||!(admin||scopes.includes('core_read'));
+            for(const core of ['sing-box','xray']){const button=el('maintenance-core-hints-'+core);if(button)button.disabled=busy||ended||!(admin||scopes.includes('core_read'));}
             el('maintenance-create').disabled = busy || ended;
             el('maintenance-restore').disabled = busy || ended || taskSubmissionUncertain || !!watchingTask || !(admin || scopes.includes('destructive'));
             el('maintenance-actions').querySelectorAll('button').forEach(button => { button.disabled = busy || ended || !allowed(button.dataset.task) || (taskSubmissionUncertain||!!watchingTask)&&button.dataset.task!=='status'; });
@@ -168,6 +170,37 @@
         };
         const coreRefresh = el('maintenance-core-refresh');
         if (coreRefresh) coreRefresh.addEventListener('click', () => run(coreSelection));
+        const coreHints = async core => {
+            if (!(admin || scopes.includes('core_read'))) throw new Error('本次授权未开放代理核心信息。');
+            const box = el('maintenance-core-hints');
+            if (box) {box.textContent='';text(box,'正在读取官方候选…');}
+            let value;
+            try { value = await request('maintenance/core-candidates/' + core); }
+            catch (error) {
+                if (box) box.textContent='';
+                if (error.name === 'AbortError') throw Object.assign(new Error('候选查询已超时或取消，核心选择未改变。'), {status:408});
+                if (error.status === 503) throw Object.assign(new Error('暂时无法读取官方候选，请稍后重试；核心选择未改变。'), {status:503});
+                throw error;
+            }
+            if (box) box.textContent = '';
+            if (!value || value.core !== core || value.qualification !== 'unverified' ||
+                !Array.isArray(value.hints) || value.hints.length > 32 || typeof value.truncated !== 'boolean') {
+                throw new Error('官方候选响应无效。');
+            }
+            const rows = value.hints.map(row => {
+                if (!row || typeof row.version !== 'string' || !Number.isSafeInteger(row.revision)) throw new Error('官方候选响应无效。');
+                return (core === 'xray' ? 'Xray' : 'sing-box') + ' ' + row.version + ' · 修订 ' + row.revision + ' · 待验证';
+            });
+            if (!box) return;
+            text(box, '仅为官方通道信息，尚未完成本机兼容验证；当前不会更新核心。');
+            if (!value.hints.length) text(box, '当前官方通道暂无候选版本。');
+            for (const row of rows) text(box, row);
+            if (value.truncated) text(box, '最多展示32个候选，结果可能不完整。');
+        };
+        for (const core of ['sing-box','xray']) {
+            const button = el('maintenance-core-hints-'+core);
+            if (button) button.addEventListener('click', () => run(() => coreHints(core)));
+        }
         const logs = async () => {
             const value = await request('maintenance/logs');
             const rows = Array.isArray(value) ? value : value.entries || [];

@@ -17,7 +17,7 @@
 <label class="check"><input type="checkbox" value="certificates">管理已有授权证书</label>
 <label class="check"><input type="checkbox" value="operate">启停服务与创建私有备份</label>
 <label class="check"><input type="checkbox" value="upgrade">下载校验并升级正式版本</label>
-<label class="check"><input type="checkbox" value="core_read">查看代理核心选择（独立授权，不含更新或回退）</label>
+<label class="check"><input type="checkbox" value="core_read">查看代理核心信息（选择及官方候选，不含更新或回退）</label>
 <label class="check"><input type="checkbox" value="destructive">允许删除节点、撤销订阅及受支持的备份恢复</label>
 </fieldset><label for="maintenance-duration">授权有效期</label><select id="maintenance-duration"><option value="1800">30 分钟</option><option value="3600">1 小时</option><option value="7200">2 小时</option><option value="15552000">180 天</option></select>
 <p class="hint">180天属于长期授权：持有兑换后会话凭据者可按所选权限持续操作，管理员可随时撤销。默认仍为30分钟，不自动续期或延长已有授权。</p>
@@ -27,7 +27,7 @@
 <h2>已有授权</h2><button id="maintenance-refresh-grants" type="button">刷新授权</button><div id="maintenance-grants" aria-live="polite"></div></section>
 <section id="maintenance-remote" hidden><h2>临时维护会话</h2><p id="maintenance-session"></p><p>维护者可通过授权 API 管理节点、分享与中转；权限以本次选择为准，不获得管理员密码或任意系统命令权限。</p><button id="maintenance-end" type="button">清除本页维护会话</button><p class="hint">清除仅结束本页使用，立即撤销整个授权请让管理员在授权列表操作。</p></section>
 <section id="maintenance-operations" data-simple-operations="delegated" class="ops-inline" hidden></section>
-<section id="maintenance-core-panel" hidden><h2>代理核心选择</h2><p>这里显示已配置的核心选择，不代表进程正在运行。当前仅可查看，更新、回退和恢复请使用本机终端。</p><button id="maintenance-core-refresh" type="button">查看代理核心选择</button><div id="maintenance-core-selection" aria-live="polite"></div></section>
+<section id="maintenance-core-panel" hidden><h2>代理核心选择</h2><p>这里显示已配置的核心选择，不代表进程正在运行。当前仅可查看，更新、回退和恢复请使用本机终端。</p><button id="maintenance-core-refresh" type="button">查看代理核心选择</button><div id="maintenance-core-selection" aria-live="polite"></div><p>官方候选信息尚未证明本机兼容或完成准备；查询不会改变核心选择。</p><div class="actions"><button id="maintenance-core-hints-sing-box" type="button">查看 sing-box 官方候选</button><button id="maintenance-core-hints-xray" type="button">查看 Xray 官方候选</button></div><div id="maintenance-core-hints" aria-live="polite"></div></section>
 <section id="maintenance-tasks-panel" hidden><h2>服务器维护任务</h2><p>任务由独立系统维护组件执行。升级会先备份、沿用原配置与数据；重启期间面板可能短暂不可达，会自动读取任务进度；等待期间请勿重复提交。</p>
 <p id="maintenance-installation">安装版本与服务状态尚未核对。</p><button id="maintenance-refresh-status" type="button">读取安装版本与服务状态</button>
 <div id="maintenance-actions" class="actions"><button type="button" data-task="status">读取服务状态</button><button type="button" data-task="backup">创建私有备份</button><button type="button" data-task="restart">重启 V-UI</button><button type="button" data-task="start">启动 V-UI</button><button type="button" data-task="stop">停止 V-UI</button><button type="button" data-task="upgrade">在线升级正式版</button></div>

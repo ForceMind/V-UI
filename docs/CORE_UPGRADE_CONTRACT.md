@@ -791,3 +791,15 @@ M46A `078bd31` 的Linux主测试42633398294成功；旧14升级实际日志出�
 已独立复现机制候选：Root任务子进程os.replace发布状态时，严格trusted_bytes可能持旧FD并因nlink/ctime/现名变化拒绝合法读取。读取现保留原mode与严格trusted_bytes校验；仅对前后均Root私有regular/600/单link/有界、且inode确有安全替换的Refused，最多三次重读。稳定不安全文件、一般拒绝和变更提交不重试，客户端DAEMON_REFUSED规则不放宽。新增实际原子替换回归覆盖成功重读、稳定拒绝、不安全替换及次数上限。
 
 Root日志只增加固定stage/类别枚举（RECEIVE、TASK_LSTAT/TRUST_READ/JSON/ID、PUBLIC等），不打印原任务、路径、SHA、备份、请求或异常文本。CI只完整匹配这套枚举，未知或附加文本仍UNCLASSIFIED。当前机制修复和诊断待独审/新准确Actions；它不把原old21片段改判成已证因果或成功。
+
+## M46B 官方候选信息查询（开发候选）
+
+新增core_read的两个固定GET入口 `/api/maintenance/core-candidates/sing-box` 与 `/xray`。只接受核心枚举，不接受query、source/target、URL或用户制品。非Root面板服务启动固定Python元数据worker，固定官方仓库、最多5页/32个hints，空成功和网络失败分开。输出只含release_id/tag/规范version/revision/published_at及truncated，qualification必须为unverified，不能作为兼容、本机准备或更新权限。
+
+父进程限制两个并发、32KiB stdout及12秒成功截止；EOF后仍须零退出，结果和结束后复核时限。失败/超时杀本次自有进程组并回收直接worker，始终尝试关闭pipe；仅在确认回收和清理成功后释放slot。无法确认清理时返回固定错误并隔离该slot至服务重启，防止无限累积未回收worker；固定受信worker不fork、不执行其他程序，不声称通用可执行文件或逃逸进程树监督。worker拒绝Root，并设置256MiB地址空间、5秒CPU、64FD、无core dump/文件输出。SDK的软socket/deadline检查不替代父进程时限。
+
+页面明确“官方信息，尚未完成本机兼容”，没有新更新/回退按钮；失败清空旧列表并提示选择未变，会话结束清空。旧授权不自动取得core_read，API仍按精确能力与来源边界授权，Root daemon写动作不扩。
+
+10项纯投影与惰性假Python worker（正常、超时、EOF未退出、超量、非零、slot限额、清理不确定时关闭pipe并隔离slot）及合成DOM通过；无真实网络/产品核心/Root安装。API权限与完整新准确源码、真实服务集成待独审/Actions，浏览器未验证。后续仍须实际事实绑定的候选资格检查、Root独立写准入/一次消费/幂等、私有双域备份映射与pending代次，以及完整更新UI。
+
+M46A `50d27a0` 的[组件验收42637529006](https://github.com/ForceMind/V-UI/actions/runs/42637529006)九个job成功，含四目标原生TCP和ARM64受管整机。ARM小型原始日志已独立读回，明确出现新的 `VUI_CORE_READ_ONLY_ACCEPTANCE`、两核真实切换、SIGKILL恢复、双域恢复及保数据/撤销授权标记，测试退出0。同提交主测试42637529061成功；安装矩阵42637529126的八个旧版升级均成功，新装仍运行。本段不将这些结果转授后续M46B源码，旧失败仍保留。

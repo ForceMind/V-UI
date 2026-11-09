@@ -455,3 +455,24 @@ class MaintenanceAuthorizationTests(unittest.TestCase):
         catalog=remote.get('/api/maintenance/catalog',headers=headers).json()['operations']
         self.assertIn('/api/maintenance/core-selection',{row['path'] for row in catalog})
         self.assertNotIn('/api/maintenance/tasks',{row['path'] for row in catalog})
+
+    def test_core_hints_new_scope_closed_input_and_fixed_errors(self):
+        from app.services.core_hints import CoreHintsUnavailable
+        remote=TestClient(main.app,base_url=ORIGIN);self.addCleanup(remote.close)
+        with patch('app.services.core_hints.discover',return_value={'core':'sing-box','qualification':'unverified','hints':[],'truncated':False}) as discover:
+            _,legacy=self.bearer(['diagnose','upgrade','destructive'])
+            self.assertEqual(remote.get('/api/maintenance/core-candidates/sing-box',headers=legacy).status_code,403)
+            discover.assert_not_called()
+            _,headers=self.bearer(['core_read'])
+            response=remote.get('/api/maintenance/core-candidates/sing-box',headers=headers)
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual(response.json()['qualification'],'unverified')
+            discover.assert_called_once_with('sing-box')
+            self.assertEqual(remote.get('/api/maintenance/core-candidates/unknown',headers=headers).status_code,403)
+            self.assertEqual(remote.get('/api/maintenance/core-candidates/sing-box?source=untrusted',headers=headers).status_code,422)
+            self.assertEqual(discover.call_count,1)
+            discover.side_effect=CoreHintsUnavailable('BUSY')
+            self.assertEqual(remote.get('/api/maintenance/core-candidates/xray',headers=headers).status_code,429)
+            discover.side_effect=RuntimeError('/private/metadata/token')
+            response=remote.get('/api/maintenance/core-candidates/xray',headers=headers)
+            self.assertEqual(response.status_code,503);self.assertNotIn('/private',response.text)

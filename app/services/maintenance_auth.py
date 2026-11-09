@@ -213,6 +213,8 @@ def _cap(method, path, scope, purpose, revision=None):
 
 
 _cap('GET', '/api/maintenance/core-selection', 'core_read', '查看代理核心选择（不含更新与回退）')
+for _core in ('sing-box', 'xray'):
+    _cap('GET', '/api/maintenance/core-candidates/' + _core, 'core_read', '查看官方候选信息（尚未验证兼容）')
 
 for path, purpose in [('/api/maintenance/session', '当前维护权限'), ('/api/maintenance/catalog', '维护操作目录'),
         ('/api/maintenance/audit', '脱敏审计'), ('/api/maintenance/tasks', '维护任务列表'),

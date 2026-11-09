@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -135,6 +136,25 @@ def core_selection(request: Request):
     else:
         auth.authorize(principal, 'GET', '/api/maintenance/core-selection')
     return _bridge('core_selection_status')
+
+
+@router.get('/core-candidates/{core}')
+def core_candidates(core: Literal['sing-box', 'xray'], request: Request):
+    if request.query_params:
+        raise HTTPException(422, '官方候选查询不接受额外参数')
+    principal = getattr(request.state, 'maintenance', None)
+    if principal is None:
+        _admin(request)
+    else:
+        auth.authorize(principal, 'GET', '/api/maintenance/core-candidates/' + core)
+    from app.services import core_hints
+    try:
+        return core_hints.discover(core)
+    except core_hints.CoreHintsUnavailable as error:
+        raise HTTPException(429 if error.code == 'BUSY' else 503,
+                            '官方候选信息暂不可用，请稍后重试；核心选择未改变') from None
+    except Exception:
+        raise HTTPException(503, '官方候选信息暂不可用，请稍后重试；核心选择未改变') from None
 
 
 @router.get('/logs')

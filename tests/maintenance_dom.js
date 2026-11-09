@@ -129,5 +129,18 @@ async function admin() {
         h.el('maintenance-permission-preset').value='full';h.el('maintenance-permission-preset').fire('change');
         assert.equal(check.checked,false);
     }
+    {
+        const h=boot('#grant='+secret);await h.reply({token:session,scopes:['core_read'],expires_at:Date.now()/1000+100});
+        h.el('maintenance-core-hints-sing-box').fire();await flush();assert.equal(h.requests.at(-1).url,'/api/maintenance/core-candidates/sing-box');
+        await h.reply({core:'sing-box',qualification:'unverified',hints:[],truncated:false});
+        assert(h.el('maintenance-core-hints').children.some(row=>row.textContent.includes('尚未完成本机兼容')));
+        assert(h.el('maintenance-core-hints').children.some(row=>row.textContent.includes('暂无候选')));
+        h.el('maintenance-core-hints-xray').fire();await flush();await h.reply({detail:'/private/token'},503);
+        assert.equal(h.el('maintenance-core-hints').textContent,'');assert(h.el('maintenance-notice').textContent.includes('核心选择未改变'));
+        h.el('maintenance-core-hints-sing-box').fire();await flush();
+        await h.reply({core:'sing-box',qualification:'unverified',hints:[{version:'1.14.3',revision:1},{}],truncated:false});
+        assert.equal(h.el('maintenance-core-hints').textContent,'');assert(h.el('maintenance-notice').textContent.includes('响应无效'));
+        h.event('pagehide');assert.equal(h.el('maintenance-core-hints').textContent,'');
+    }
     process.stdout.write('Maintenance fragment/session/scope/cleanup/error/restore synthetic contracts passed\n');
 })().catch(error=>{console.error(error);process.exitCode=1});
