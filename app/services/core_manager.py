@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+import uuid
 from pathlib import Path
 from typing import Iterable
 
@@ -152,6 +153,7 @@ class CoreManager:
         self.adapters = {"xray": XrayAdapter(runtime_lock=self.lock),
                          "sing-box": SingBoxAdapter(runtime_lock=self.lock)}
         self._proxy_coordinator = None
+        self._yaml_confirmation_issuer = uuid.uuid4().hex
         self._artifact_snapshot = None
         if artifacts is not None:
             self.configure_artifacts(artifacts)
@@ -213,7 +215,16 @@ class CoreManager:
                 item for item in rows if item.core == "sing-box"),
             self.lock, rows_provider=self._all_rows,
             panel_origin=os.getenv("VUI_PUBLIC_ORIGIN"),
+            confirmation_provider=self._yaml_confirmation_context,
         )
+
+    def _yaml_confirmation_context(self):
+        from app.services.core_runtime import revision
+        with self.lock:
+            identities = {name: adapter.runtime.confirmation_identity()
+                          for name, adapter in sorted(self.adapters.items())}
+            return {"issuer": self._yaml_confirmation_issuer,
+                    "runtime_fingerprint": revision(identities)}
 
     @staticmethod
     def _all_rows() -> list[Inbound]:

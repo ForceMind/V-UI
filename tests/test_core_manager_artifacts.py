@@ -6,6 +6,7 @@ import threading
 import time
 import types
 import unittest
+import uuid
 
 from app.core_updates.binary import RuntimeArtifact
 from app.core_updates.selection import bundle_reference
@@ -29,12 +30,14 @@ def load_manager():
             self.calls.append(self)
         def status(self):return {'running':False}
         def close(self):pass
+        def confirmation_identity(self):
+            return {"core":self.args[0], "marker":getattr(self,"marker",0)}
     tree=ast.parse(SOURCE.read_text(),filename=str(SOURCE))
     wanted={'BaseCoreAdapter','XrayAdapter','SingBoxAdapter','CoreManager'}
     nodes=[node for node in tree.body if isinstance(node,ast.ImportFrom) and node.module=='__future__'
            or isinstance(node,ast.ClassDef) and node.name in wanted]
     namespace=dict(RuntimeArtifact=RuntimeArtifact,CoreRuntime=FakeRuntime,CoreError=RuntimeError,
-                   threading=threading,Path=Path,BIN_DIR=Path('/legacy'),DATA_DIR=Path('/data'))
+                   threading=threading,uuid=uuid,Path=Path,BIN_DIR=Path('/legacy'),DATA_DIR=Path('/data'))
     exec(compile(ast.Module(body=nodes,type_ignores=[]),str(SOURCE),'exec'),namespace)
     return types.SimpleNamespace(**namespace),FakeRuntime
 
@@ -148,6 +151,19 @@ class CoreManagerArtifactTests(unittest.TestCase):
         self.assertTrue(completed_under_lock)
         self.assertEqual(values,[self.map['sing-box']])
         self.assertFalse(self.runtime.calls)
+
+    def test_confirmation_context_is_stable_binds_both_cores_and_new_manager(self):
+        manager=self.m.CoreManager()
+        first=manager._yaml_confirmation_context()
+        self.assertEqual(first, manager._yaml_confirmation_context())
+        self.assertEqual(set(first), {'issuer','runtime_fingerprint'})
+        manager.get('xray').runtime.marker=1
+        second=manager._yaml_confirmation_context()
+        self.assertNotEqual(first['runtime_fingerprint'],second['runtime_fingerprint'])
+        self.assertEqual(first['issuer'],second['issuer'])
+        other=self.m.CoreManager()._yaml_confirmation_context()
+        self.assertNotEqual(first['issuer'],other['issuer'])
+        self.assertEqual(first['runtime_fingerprint'],other['runtime_fingerprint'])
 
 
 if __name__=='__main__':unittest.main()

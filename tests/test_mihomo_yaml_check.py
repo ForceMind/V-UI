@@ -10,8 +10,9 @@ from app.services.mihomo_merge import serialize_mihomo_merge
 from app.services.mihomo_merge_plan import plan_mihomo
 from app.services.mihomo_plan_record import encode_plan_record
 from app.services.proxy_apply import ProxyApplyCoordinator, ProxyApplyError
+from app.services.core_runtime import CoreError
 from app.services.proxy_policy import VerifiedEndpoint
-from app.services.proxy_store import ProxyStore
+from app.services.proxy_store import ProxyConflict, ProxyStore
 from tests.test_proxy_apply import FakeRuntime
 from test_mihomo_merge_plan import BASELINE
 
@@ -100,3 +101,58 @@ rules: ["DOMAIN,example.com,other", "MATCH,Chosen"]
         self.assertEqual(rejected.exception.code, 'YAML_BOOTSTRAP_TIMEOUT')
         self.assertEqual(self.runtime.calls, [])
         self.assertEqual(self.store.read_snapshot(), before)
+
+    def test_checked_yaml_mints_only_private_id_and_runtime_changes_refuse(self):
+        saved = self.save()
+        context = {'issuer': 'd'*32, 'runtime_fingerprint': 'c'*64}
+        self.coordinator.confirmation_provider = Mock(return_value=context)
+        result = self.coordinator.check(saved['revision'])
+        receipt = result['yaml_confirmation']
+        self.assertEqual(set(receipt), {'check_id', 'expires_at'})
+        private = self.store.load_yaml_check(receipt['check_id'], saved['revision'],
+                      source_fingerprint=result['source_fingerprint'], **context)
+        self.assertEqual(private['candidate_revision'], result['candidate_revision'])
+        self.assertEqual(private['endpoints']['upstream']['addresses'], ['1.1.1.1'])
+        self.assertNotIn('1.1.1.1', repr(result))
+        self.coordinator.confirmation_provider = Mock(side_effect=[context, {**context, 'issuer': 'e'*32}])
+        with self.assertRaises(ProxyConflict):
+            self.coordinator.check(saved['revision'])
+        self.assertEqual(self.store.load_yaml_check(receipt['check_id'], saved['revision'],
+                      source_fingerprint=result['source_fingerprint'], **context), private)
+
+    def test_failed_check_never_issues_confirmation(self):
+        saved = self.save()
+        self.coordinator.confirmation_provider = Mock(return_value={'issuer': 'd'*32, 'runtime_fingerprint': 'c'*64})
+        self.runtime.fail_check = True
+        with self.assertRaises(CoreError):
+            self.coordinator.check(saved['revision'])
+        self.assertFalse((self.store.path/'secrets/yaml-check.json').exists())
+
+    def test_provider_absence_has_no_confirmation_or_application_authority(self):
+        saved = self.save()
+        self.assertNotIn('yaml_confirmation', self.coordinator.check(saved['revision']))
+        self.assertFalse((self.store.path/'secrets/yaml-check.json').exists())
+        with self.assertRaisesRegex(ProxyApplyError, 'runtime application has not been enabled'):
+            self.coordinator.apply(saved['revision'], 'still-not-enabled')
+
+    def test_mutable_context_and_draft_changes_during_check_refuse_new_record(self):
+        saved = self.save()
+        context = {'issuer': 'd'*32, 'runtime_fingerprint': 'c'*64}
+        self.coordinator.confirmation_provider = Mock(return_value=context)
+        self.runtime.on_check = lambda: context.update(runtime_fingerprint='f'*64)
+        with self.assertRaises(ProxyConflict):
+            self.coordinator.check(saved['revision'])
+        self.assertFalse((self.store.path/'secrets/yaml-check.json').exists())
+        settings = {key: value for key, value in saved['settings'].items() if key != 'local_password_set'}
+        settings['local_proxy_enabled'] = False
+        self.runtime.on_check = lambda: self.store.save_draft(settings, saved['revision'])
+        with self.assertRaises(ProxyConflict):
+            self.coordinator.check(saved['revision'])
+        self.assertFalse((self.store.path/'secrets/yaml-check.json').exists())
+
+    def test_all_off_can_issue_a_record_without_resolution(self):
+        saved = self.save(enabled=False)
+        self.coordinator.confirmation_provider = Mock(return_value={'issuer': 'd'*32, 'runtime_fingerprint': 'c'*64})
+        result = self.coordinator.check(saved['revision'])
+        self.assertIn('yaml_confirmation', result)
+        self.resolve.assert_not_called()

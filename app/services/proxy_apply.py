@@ -141,7 +141,7 @@ class ProxyApplyCoordinator:
 
     def __init__(self, store: ProxyStore, runtime, build_config, operation_lock, *,
                  rows_provider=None, panel_origin=None, resolver=None, address_provider=None,
-                 compiler=None, preflight=None, verify_runtime=None, yaml_compiler=None):
+                 compiler=None, preflight=None, verify_runtime=None, yaml_compiler=None, confirmation_provider=None):
         self.store, self.runtime = store, runtime
         self.build_config, self.lock = build_config, operation_lock
         self.rows_provider = rows_provider or (lambda: [])
@@ -150,6 +150,7 @@ class ProxyApplyCoordinator:
         self.address_provider = address_provider or self_address_snapshot
         self.compiler = compiler or compile_proxy_policy
         self.yaml_compiler = yaml_compiler or compile_saved_yaml_policy
+        self.confirmation_provider = confirmation_provider
         self.preflight = preflight_local_listener if preflight is None else preflight
         self.verify_runtime = verify_runtime
 
@@ -523,10 +524,37 @@ class ProxyApplyCoordinator:
             snapshot = self._load_draft(expected_revision)
             plan = policy_plan(rows, snapshot["settings"])
             self._bind_source(plan, expected_source_fingerprint)
-            compiled, _, _ = self._compile(snapshot, rows)
+            context = (copy.deepcopy(self.confirmation_provider()) if snapshot.get("execution_mode") == "yaml"
+                       and self.confirmation_provider is not None else None)
+            compiled, _, addresses = self._compile(snapshot, rows)
             self._checked(compiled)
+            receipt = None
+            if context is not None:
+                if context != self.confirmation_provider():
+                    raise ProxyConflict("YAML runtime changed; check again")
+                now = int(time.time())
+                value = {"schema_version": 1, "kind": "yaml-check", "revision": expected_revision,
+                         "plan_revision": compiled.yaml_plan_revision, "compiler": 1,
+                         "source_fingerprint": compiled.source_fingerprint,
+                         "candidate_revision": revision(compiled.config), "policy_identity": compiled.identity,
+                         "plan_manifest": compiled.plan_manifest,
+                         "source_flags": {key: snapshot["settings"][key]
+                                          for key in ("local_proxy_enabled", "relay_enabled")},
+                         "protected_enabled": plan.requires_upstream,
+                         "endpoints": {name: {**asdict(endpoint), "addresses": sorted(set(endpoint.addresses),
+                              key=lambda address: (ipaddress.ip_address(address).version, int(ipaddress.ip_address(address))))}
+                                       for name, endpoint in compiled.endpoints},
+                         "self_addresses": sorted(set(addresses), key=lambda address:
+                              (ipaddress.ip_address(address).version, int(ipaddress.ip_address(address)))),
+                         "dns_upstream": compiled.dns_upstream,
+                         "runtime_fingerprint": context["runtime_fingerprint"], "issuer": context["issuer"],
+                         "data_generation": self.store._yaml_data_generation(),
+                         "created_at": now, "expires_at": now + 300}
+                receipt = self.store.save_yaml_check(value, expected_revision)
             result = self._public(compiled=compiled)
             result["revision"] = expected_revision
+            if receipt is not None:
+                result["yaml_confirmation"] = receipt
             return result
 
     def apply(self, expected_revision, transaction_id, rows=None, *, expected_source_fingerprint=None):
