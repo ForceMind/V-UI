@@ -26,8 +26,9 @@ def main():
     require(os.geteuid()==0 and os.getenv('GITHUB_ACTIONS')=='true'
             and os.getenv('RUNNER_ENVIRONMENT')=='github-hosted'
             and os.getenv('GITHUB_REPOSITORY')=='ForceMind/V-UI')
-    require(len(sys.argv)==2 and re.fullmatch(r'[a-f0-9]{64}',sys.argv[1]) is not None)
-    require(not os.path.lexists(AUTHORITY))
+    require(len(sys.argv)==3 and re.fullmatch(r'[a-f0-9]{64}',sys.argv[1]) is not None
+            and re.fullmatch(r'[a-f0-9]{40}',sys.argv[2]) is not None)
+    require(AUTHORITY.is_dir() and not AUTHORITY.is_symlink())
     # Reuse the independent, receipt-before-compile bootstrap from the trusted
     # Root-owned CI fixture. Never ask an unverified system_ops to self-verify.
     bootstrap_path=Path(__file__).with_name('runner.py')
@@ -61,6 +62,10 @@ def probe(ops):
     require(module.ROOT==AUTHORITY)
     manager,account=ops.verify_installation();require(manager=='systemd')
     authority=module.CoreAuthority()
+    config=ops.decode_json(ops.trusted_bytes(ops.CONFIG,ops.MAX_JSON))
+    accepted=authority.application(release_id=config['release_id'],target=config['target'])
+    require(accepted is not None and accepted['app_source']==sys.argv[2])
+    require(not authority.grants())
     fake=dict(main_id=2147483647,main_digest='a'*64)
     record,token=authority.issue(**fake,scopes=['core_operate'],seconds=60)
     parameters=dict(core='sing-box',release_id=1,selection_revision=None)
@@ -84,6 +89,7 @@ def probe(ops):
     else:
         raise ValueError('LATE_ISSUE')
     authority.advance_epoch()
+    require(authority.application(release_id=config['release_id'],target=config['target'])==accepted)
     for path,mode in ((AUTHORITY,0o700),(AUTHORITY/'.lock',0o600),(AUTHORITY/'authority.json',0o600)):
         info=path.lstat()
         require(info.st_uid==0 and stat.S_IMODE(info.st_mode)==mode and not path.is_symlink())
@@ -109,7 +115,7 @@ print('OWNER_DENIED')
         user=account.pw_uid,group=account.pw_gid,extra_groups=[],cwd='/',env=ops.ENV,
         stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=15)
     require(child.returncode==0 and child.stdout==b'OWNER_DENIED\n')
-    print('VUI_CORE_AUTHORITY_INSTALLED_ACCEPTANCE: Root receipt, private modes, real service-UID denial, durable replay, single consumption and revoke/late-issue refusal passed')
+    print('VUI_CORE_AUTHORITY_INSTALLED_ACCEPTANCE: Root receipt, accepted SDK app origin, private modes, real service-UID denial, durable replay, single consumption and revoke/late-issue refusal passed')
 
 
 if __name__=='__main__':

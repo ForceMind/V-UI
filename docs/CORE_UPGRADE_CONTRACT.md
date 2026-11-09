@@ -865,3 +865,13 @@ M46E契约独审无架构阻断，producer已明确：新装/正常升级统一�
 当前已实现的第一块仅为私有表原语：authority schema2显式接受并迁移完整schema1，保留安装身份、epoch、grant、撤销tombstone与已消费记录，只补空applications，不从旧应用自授。来源记录精确绑定release_id/target/source40/原manifestSHA/原包SHA，同标识冲突拒绝、可保留多版本；读到已记录来源须重新确认durability，避免前次fsync未知被当成持久成功。新增8项回归，authority合计32项Py3.9/3.12通过，源码独审无剩余阻断；独立两版复验均零skip，准确Actions待验。SDK/stage producer、Root事实consumer、异步任务与UI尚未接，当前来源资格缺口仍未完成修复；默认Root/生产来源记录未被本机会话写入。
 
 M46D `cd8deb8` 自身十组Actions全部成功：安装42652328214完成新装/八旧版升级，组件42652327756完成四目标/ARM64。新装小日志13691911137、收据13692175880及ARM日志13693145262已独立读回，新增 `VUI_CORE_AUTHORITY_INSTALLED_ACCEPTANCE` 与既有只读/两核切换/中断/双域恢复标记齐全，测试OK，新装退出0。新装准确source=cd8deb8，bundle `b2a91be53e4d8112db8df4e8fae8fa412a29b4f3164d03b78870e7209831650a`，checksums `bddb3248bbffdcc18419785bf2425338e16042205091e0c99abdd04fdb7d29b8`。这是schema1默认Root原语的安装证明，不覆盖后续schema2/来源表新源码或实际原包producer/consumer。
+
+### M46E 新装／在线升级 SDK producer（源码候选）
+
+私有 `--control-kit/--control-kit-sha` 由已核 install.sh 或维护升级器传递，目标子集另显式标记。install_system在Root非dry-run、首次create-user/降权stage前读取原受验snapshot FD；先独立核SDK表摘要及verifier代码摘要，再用匿名代码FD传给固定OS Python的隔离bootstrap，重核FD所有权/模式/身份/代码SHA后执行。没有可被服务UID替换的执行路径，不Root执行bundle或服务payload中的代码。直接仓库旧调用缺SDK时保留原安装语义，不产生新来源资格。
+
+SDK verifier的固定record-origin-fd模式重新verify_kit，绑定source ZIP及完整source40后仅编译固定authority标准库代码；重hash原snapshot对照SDK本机bundle，原MANIFEST SHA直接取原字节，source/release/version及本机目标逐项核。正式SDK的RELEASE是四目标，每个原bundle仅一个目标，两者分别核，不以列表相等误拒完整SDK。dup共享offset在finally还原；Snapshot与已核源码不由service-owned CURRENT/READY替代。Source表首次可创建最后两层Root私有目录并同步父目录，新Root目录GID归0。
+
+旧SDK只在字面ROOT_APPLICATION_ORIGIN=1且唯一时启用私有参数；注释、bool、重复与未知均不当作支持。旧Bash空数组展开保持兼容。成功只确认accepted-origin，后续失败保留该来源记录，不声称prepared/active/healthy。升级仍使用原私有kit与manifest pin，不创建签名钥匙、Secret或新公开资产。
+
+本机104项针对性纯测试（authority33、控制安装55、交接7、升级9）在Python3.9/3.12均通过；脚本47项完整回归通过。首次组合67项中的9个脚本失败由新空数组展开引入，已修复；4个旧安装器快照测试受/var/tmp沙箱写入限制，不计完整组合通过，交Actions验证。探针源码改为必须命中SDK记录且source匹配准确CI checkout，并验证epoch减权不回退来源；实际Root探针未在本机运行。本批源码独审无剩余阻断，准确Actions待验。Root stage原包快照producer与事实consumer尚未接，来源资格缺口仍未整体关闭。

@@ -727,10 +727,19 @@ class UpgradeTests(unittest.TestCase):
                     with self.assertRaises(upgrade.UpgradeRefused):
                         upgrade.require_installer_guard(installer)
 
+    def test_origin_support_is_explicit_and_never_derived_from_comments_or_truthy_values(self):
+        with tempfile.TemporaryDirectory() as folder:
+            installer=Path(folder)/'installer.py'
+            for value in (b'# ROOT_APPLICATION_ORIGIN = 1',b'ROOT_APPLICATION_ORIGIN = True',
+                          b'ROOT_APPLICATION_ORIGIN = 1\nROOT_APPLICATION_ORIGIN = 1',b'broken('):
+                installer.write_bytes(value);self.assertFalse(upgrade.supports_application_origin(installer))
+            installer.write_bytes(b'ROOT_APPLICATION_ORIGIN = 1\n')
+            self.assertTrue(upgrade.supports_application_origin(installer))
+
     def test_full_download_chain_uses_manifest_before_verifier_and_fixed_unattended_flags(self):
         config = self.config(); config['release_id'] = '0.4.16-aaaaaaaaaaaa'
         contents = {name: b'accepted fake bytes' for name in upgrade.ASSETS | upgrade.BUNDLES}
-        contents['install_system.py'] = b'CORE_INSTALL_GUARD = 1\n'
+        contents['install_system.py'] = b'CORE_INSTALL_GUARD = 1\nROOT_APPLICATION_ORIGIN = 1\n'
         contents['RELEASE.json'] = json.dumps({'version': '0.4.17', 'release_id': '0.4.17-' + 'a' * 12, 'source_commit': 'a' * 40}).encode()
         raw = ''.join(hashlib.sha256(data).hexdigest() + '  ' + name + '\n' for name, data in sorted(contents.items())).encode()
         pin = hashlib.sha256(raw).hexdigest()
@@ -752,6 +761,9 @@ class UpgradeTests(unittest.TestCase):
         commands = [call.args[0] for call in run.call_args_list]
         self.assertEqual(len(commands), 3)
         self.assertIn('--preflight', commands[0]); self.assertIn('--unattended-upgrade', commands[1]); self.assertIn('--refresh', commands[2])
+        self.assertIn('--control-kit',commands[1]);self.assertIn('--control-kit-sha',commands[1])
+        self.assertIn('--control-kit-local-target-only',commands[1])
+        self.assertEqual(commands[1][commands[1].index('--control-kit-sha')+1],pin)
         for command in commands:
             self.assertNotIn('--interactive', command); self.assertNotIn('--accept-terms', command)
 

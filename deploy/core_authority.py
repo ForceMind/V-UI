@@ -269,7 +269,8 @@ class CoreAuthority:
             for index, name in enumerate(self.parts):
                 last = index == len(self.parts)-1
                 created = False
-                if create and last:
+                make = create and index >= len(self.parts)-2
+                if make:
                     try:
                         os.mkdir(name, mode=0o700, dir_fd=root)
                         created = True
@@ -288,12 +289,14 @@ class CoreAuthority:
                 if fresh is not None:
                     info = os.fstat(child)
                     _need((fresh.st_dev, fresh.st_ino) == (info.st_dev, info.st_ino), 'DIRECTORY_CHANGED')
+                if created and self.owner == 0:
+                    os.fchown(child, 0, 0)
                 info = os.fstat(child)
                 _need(info.st_uid == self.owner and not info.st_mode & 0o022
                       and (not last or stat.S_IMODE(info.st_mode) == 0o700), 'DIRECTORY')
                 bindings.append((root, name, child, _directory(info)))
-                if create and last:
-                    # Persist the leaf namespace, including retry after an
+                if make:
+                    # Persist the owned namespace, including retry after an
                     # earlier interrupted bootstrap. fsync(leaf) alone cannot
                     # durably publish its name in the parent.
                     _need(_directory(os.stat(name, dir_fd=root, follow_symlinks=False)) == _directory(info),

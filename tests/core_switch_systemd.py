@@ -93,7 +93,7 @@ def installed_core_switch(check, source, work, api, service_python, ca, cert, ke
         expected_authority = hashlib.sha256((source/'deploy/core_authority.py').read_bytes()).hexdigest()
         subprocess.run(['sudo', '/usr/bin/env', 'GITHUB_ACTIONS=true', 'RUNNER_ENVIRONMENT=github-hosted',
                         'GITHUB_REPOSITORY=ForceMind/V-UI', '/usr/bin/python3', '-B', '-I', '-S',
-                        str(authority_probe), expected_authority], check=True, timeout=45)
+                        str(authority_probe), expected_authority, source_sha], check=True, timeout=45)
 
         # Xray 26.10.21 blocks private IPv4 egress by default. A documentation
         # IPv6 address is outside that matcher and stays local to this runner.

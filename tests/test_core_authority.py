@@ -424,3 +424,13 @@ class CoreAuthorityTests(unittest.TestCase):
             other={**record,'release_id':'another-accepted-package'}
             self.assert_code('CAPACITY',self.store.record_application,other)
             self.assertEqual(self.store.record_application(record),record)
+
+    def test_sdk_bootstrap_creates_only_last_two_owned_private_directories(self):
+        root=self.anchor/'maintenance'/'authority'
+        store=a.CoreAuthority(_root=root,_anchor=self.anchor,_owner=os.geteuid())
+        store.record_application(self.app_record())
+        self.assertEqual(stat.S_IMODE(root.parent.stat().st_mode),0o700)
+        self.assertEqual(stat.S_IMODE(root.stat().st_mode),0o700)
+        deeper=a.CoreAuthority(_root=self.anchor/'missing'/'too'/'deep',_anchor=self.anchor,_owner=os.geteuid())
+        self.assert_code('IO',deeper.record_application,self.app_record())
+        self.assertFalse((self.anchor/'missing').exists())

@@ -167,6 +167,18 @@ def require_installer_guard(path):
     raise UpgradeRefused('目标安装器不支持核心兼容检查，已停止升级')
 
 
+def supports_application_origin(path):
+    try:
+        with path.open('rb') as source:raw=source.read(512001)
+        if len(raw)>512000:return False
+        values=[node.value for node in ast.parse(raw).body if isinstance(node,ast.Assign)
+                and any(isinstance(target,ast.Name) and target.id=='ROOT_APPLICATION_ORIGIN' for target in node.targets)]
+        return (len(values)==1 and isinstance(values[0],ast.Constant)
+                and type(values[0].value) is int and values[0].value==1)
+    except (OSError,ValueError,SyntaxError,RecursionError):
+        return False
+
+
 def install_release(ops, config, version, pin):
     # Private continuation of upgrade(), also exercised on an ephemeral CI
     # host with an exact-candidate local transport adapter. It is not a socket,
@@ -213,6 +225,8 @@ def install_release(ops, config, version, pin):
         command = [str(ops.PYTHON), '-B', '-E', '-S', str(directory / 'install_system.py'),
                    '--bundle', str(directory / target), '--sha256', values[target],
                    '--upgrade', '--unattended-upgrade', '--open-firewall', 'no']
+        if supports_application_origin(directory/'install_system.py'):
+            command += ['--control-kit',str(directory),'--control-kit-sha',pin,'--control-kit-local-target-only']
         run(command, ops)
         # No installation lock around either child: each installer owns that
         # lock itself. The independent daemon and its root-private task survive

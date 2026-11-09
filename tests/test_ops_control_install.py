@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import zipfile
 
 from scripts import build_release_kit, install_ops_control as installer, service_support
@@ -106,6 +106,82 @@ class ControlInstallTests(unittest.TestCase):
                       for path in sorted(self.kit.iterdir()) if path.name != 'SHA256SUMS').encode()
         (self.kit / 'SHA256SUMS').write_bytes(raw)
         self.sha = hashlib.sha256(raw).hexdigest()
+
+    def origin_snapshot(self, *, source=None):
+        record=json.loads((self.kit/'RELEASE.json').read_bytes())
+        record.update(version='0.4.23',release_id='0.4.23-'+'a'*12)
+        (self.kit/'RELEASE.json').write_text(json.dumps(record))
+        meta={**record,'kind':'release','schema':1,'files':{}}
+        if source is not None:meta['source_commit']=source
+        raw=json.dumps(meta,indent=4).encode()
+        bundle=self.kit/'vui-linux-x86_64-gnu.zip'
+        with zipfile.ZipFile(bundle,'w') as stream:stream.writestr('MANIFEST.json',raw)
+        self.rehash()
+        snapshot=tempfile.TemporaryFile();self.addCleanup(snapshot.close)
+        snapshot.write(bundle.read_bytes());snapshot.flush()
+        return snapshot,raw
+
+    def test_sdk_origin_uses_original_snapshot_and_only_authenticated_fixed_root_helper(self):
+        snapshot,raw=self.origin_snapshot()
+        observed=[]
+        def factory(module):
+            self.assertTrue(hasattr(module,'CoreAuthority'))
+            return argparse.Namespace(record_application=lambda row: observed.append(row) or row)
+        position=snapshot.tell()
+        row=installer.record_application_origin(self.kit,self.sha,snapshot.fileno(),_store_factory=factory)
+        self.assertEqual(snapshot.tell(),position)
+        self.assertEqual(row['manifest_sha256'],hashlib.sha256(raw).hexdigest())
+        self.assertEqual(row['archive_sha256'],hashlib.sha256((self.kit/'vui-linux-x86_64-gnu.zip').read_bytes()).hexdigest())
+        self.assertEqual((row['app_source'],row['release_id'],row['target']),('a'*40,'0.4.23-'+'a'*12,'x86_64-gnu'))
+        self.assertEqual(observed,[row])
+
+    def test_sdk_origin_wrong_snapshot_digest_or_declared_source_never_reaches_store(self):
+        snapshot,_=self.origin_snapshot()
+        with patch('scripts.install_ops_control.types.ModuleType') as compiled:
+            snapshot.seek(0);snapshot.write(b'changed');snapshot.flush()
+            with self.assertRaises(installer.InstallError):installer.record_application_origin(self.kit,self.sha,snapshot.fileno())
+            compiled.assert_not_called()
+        snapshot,_=self.origin_snapshot(source='b'*40)
+        with patch('scripts.install_ops_control.types.ModuleType',wraps=__import__('types').ModuleType):
+            factory=Mock()
+            with self.assertRaises(installer.InstallError):
+                installer.record_application_origin(self.kit,self.sha,snapshot.fileno(),_store_factory=factory)
+            factory.assert_not_called()
+
+    def test_sdk_origin_rejects_unpinned_kit_before_loading_or_recording(self):
+        snapshot,_=self.origin_snapshot()
+        with patch('scripts.install_ops_control.types.ModuleType') as compiled:
+            with self.assertRaises(installer.InstallError):installer.record_application_origin(self.kit,'b'*64,snapshot.fileno())
+            compiled.assert_not_called()
+
+    def test_sdk_origin_private_fd_is_required_and_changed_source_archive_is_not_executed(self):
+        snapshot,_=self.origin_snapshot()
+        os.fchmod(snapshot.fileno(),0o644)
+        with self.assertRaises(installer.InstallError):installer.record_application_origin(self.kit,self.sha,snapshot.fileno())
+        os.fchmod(snapshot.fileno(),0o600)
+        (self.kit/'vui-source.zip').write_bytes(b'not accepted SDK source')
+        with patch('scripts.install_ops_control.types.ModuleType') as compiled:
+            with self.assertRaises(installer.InstallError):installer.record_application_origin(self.kit,self.sha,snapshot.fileno())
+            compiled.assert_not_called()
+
+    def test_sdk_origin_full_published_metadata_keeps_single_target_bundle_contract(self):
+        snapshot,raw=self.origin_snapshot()
+        record=json.loads((self.kit/'RELEASE.json').read_bytes())
+        record['targets']=list(installer.TARGETS)
+        (self.kit/'RELEASE.json').write_text(json.dumps(record))
+        for target in installer.TARGETS:
+            if target!='x86_64-gnu':(self.kit/('vui-linux-'+target+'.zip')).write_bytes(b'inert other target')
+        self.rehash()
+        factory=lambda module:argparse.Namespace(record_application=lambda row:row)
+        row=installer.record_application_origin(self.kit,self.sha,snapshot.fileno(),_store_factory=factory)
+        self.assertEqual(row['target'],'x86_64-gnu')
+        self.assertEqual(row['manifest_sha256'],hashlib.sha256(raw).hexdigest())
+        for target in installer.TARGETS:
+            if target!='x86_64-gnu':(self.kit/('vui-linux-'+target+'.zip')).unlink()
+        row=installer.record_application_origin(self.kit,self.sha,snapshot.fileno(),local_target_only=True,_store_factory=factory)
+        self.assertEqual(row['target'],'x86_64-gnu')
+        with self.assertRaises(installer.InstallError):
+            installer.record_application_origin(self.kit,self.sha,snapshot.fileno(),_store_factory=factory)
 
     def install(self, **kwargs):
         return installer.install(self.kit, self.sha, **kwargs)
@@ -860,7 +936,13 @@ class ControlInstallTests(unittest.TestCase):
                 controller.verify_installation()
 
     def test_legacy_panel_installer_keeps_control_installation_explicit(self):
-        self.assertNotIn('install_ops_control', (REPO / 'scripts/install_system.py').read_text())
+        from scripts import install_system as panel_installer
+        # The legacy path has no accepted SDK capability and cannot spawn a
+        # verifier or install persistent Root helpers. The explicit new SDK
+        # producer only records origin and remains a separate fixed mode.
+        with patch.object(panel_installer.subprocess,'run') as command:
+            self.assertFalse(panel_installer.record_application_origin(argparse.Namespace(),object()))
+            command.assert_not_called()
         # The online shell now has an explicit authenticated managed mode.
         # Legacy default dispatch is covered by test_installer_shell's actual
         # subprocess controls; the panel installer never installs root helpers.
