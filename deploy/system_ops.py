@@ -1302,9 +1302,15 @@ def _core_terminal_task(ops, arguments, cancelled, expected_receipt):
                                           cancelled=cancelled, _receipt_sha256=expected_receipt)
     elif len(arguments) == 3 and arguments[0] == 'restore-components':
         selection = decode_json(trusted_bytes(CONFIG.parent/'core-selection.json', MAX_JSON))
-        result = module.restore_backup(ops, archive_name=arguments[1], archive_sha256=arguments[2],
-                                       expected_revision=selection['revision'], cancelled=cancelled,
-                                       _receipt_sha256=expected_receipt)
+        try:
+            result = module.restore_backup(ops, archive_name=arguments[1], archive_sha256=arguments[2],
+                                           expected_revision=selection['revision'], cancelled=cancelled,
+                                           _receipt_sha256=expected_receipt)
+        except module.CoreControlError as error:
+            stages = {'RESTORE_STAGE_' + stage for stage in module.RESTORE_STAGES}
+            if str(error) in stages:
+                print(str(error), flush=True)
+            raise
     elif ((len(arguments) == 2 and arguments[0] == 'rollback-core')
           or (len(arguments) == 3 and arguments[0] == 'update-core')):
         try:
@@ -1373,6 +1379,9 @@ def terminal_core_action(action):
                                checksum, hashlib.sha256(receipt_raw).hexdigest(), *arguments],
                               cancelled, timeout=TIMEOUT+60, cleanup_grace=180)
     if code != 0:
+        if action == 'restore-components' and re.fullmatch(
+                rb'RESTORE_STAGE_(?:PREFLIGHT|STOP|STAGE|BACKUP|EXCHANGE|OBSERVE|ACTIVATE|FINISH)\n', output):
+            print('恢复失败阶段 ' + output.decode('ascii').strip())
         raise Refused('core restore unconfirmed')
     result = decode_json(output)
     if type(result) is not dict or type(result.get('outcome')) is not str:

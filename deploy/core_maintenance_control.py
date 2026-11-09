@@ -17,6 +17,9 @@ import types
 import uuid
 
 
+RESTORE_STAGES = frozenset(('PREFLIGHT', 'STOP', 'STAGE', 'BACKUP', 'EXCHANGE', 'OBSERVE', 'ACTIVATE', 'FINISH'))
+
+
 class CoreControlError(RuntimeError):
     """Fixed, non-sensitive failure at the Root task boundary."""
 
@@ -452,6 +455,7 @@ class _Switch:
 
     def run_restore(self, archive_name, archive_sha256, expected_revision):
         """Private restore. The caller owns the Root installation lock."""
+        self.restore_stage = 'PREFLIGHT'
         mode = self.config.get('certificate_mode', 'managed')
         prepared = self.worker.exchange(dict(protocol=1, action='core_restore_prepare', archive_name=archive_name,
             archive_sha256=archive_sha256, expected_selection_revision=expected_revision),
@@ -481,10 +485,12 @@ class _Switch:
             data_plan=dict(slot=uuid.uuid4().hex, incoming_generation=prepared['incoming_generation'],
                 preflight_tree_sha256=prepared['preflight_tree_sha256'], incoming_trust_sha256=incoming_trust), **self.source)
         try:
+            self.restore_stage = 'STOP'
             self.services.stop_all()
             self.services.prove_stopped()
             with self.files._io() as (scope, root):
                 _, journal = self.files._active(scope, root, self.transaction, **self.source, phases=('prepared',))
+            self.restore_stage = 'STAGE'
             staged = self.worker.command('stage_restore', 'restore_staged',
                 ('final_intents', 'restore_data', 'original_tree_sha256', 'prepared_tree_sha256'), journal=journal)
             self.final = self._intents(staged['final_intents'], self.before)
@@ -493,11 +499,13 @@ class _Switch:
                 cores=self.final), restore_data=staged['restore_data'],
                 original_tree_sha256=staged['original_tree_sha256'],
                 prepared_tree_sha256=staged['prepared_tree_sha256'], **self.source)
+            self.restore_stage = 'BACKUP'
             self._backup_before()
             self.worker.finish()
             self.worker.close()
             _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
             self.worker = _start_worker(self.ops, self.account, self.deadline, self.cancelled)
+            self.restore_stage = 'EXCHANGE'
             state = self._exchange_and_activate_restore_trial()
             return self._result('restored_backup', state)
         except BaseException:
@@ -559,8 +567,11 @@ class _Switch:
         self.files._require_trial_receipt(journal, receipt)
         self._replace_restore_worker(_new_worker)
         try:
+            self.restore_stage = 'OBSERVE'
             self._start_restore_observer()
+            self.restore_stage = 'ACTIVATE'
             state = self._activate_restore_trial(receipt)
+            self.restore_stage = 'FINISH'
             self.worker.finish()
             return state
         finally:
@@ -995,7 +1006,13 @@ def _run_task(ops, cancelled, request, *, restore=False, restore_recovery=False,
                         return task._resume_confirmed_restore(journal)
                     return task._resume_restore_original()
                 if restore:
-                    return task.run_restore(*request)
+                    try:
+                        return task.run_restore(*request)
+                    except (OSError, RuntimeError, ValueError, KeyError) as error:
+                        stage = getattr(task, 'restore_stage', None)
+                        if stage not in RESTORE_STAGES:
+                            raise
+                        raise CoreControlError('RESTORE_STAGE_' + stage) from error
                 if request is None:
                     return task.run_recovery()
                 try:

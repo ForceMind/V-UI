@@ -1014,6 +1014,23 @@ class MenuTests(unittest.TestCase):
                 self.assertEqual(args[6:], [digest, hashlib.sha256(receipt).hexdigest(), action, *values])
                 compile(args[5], '<fixture bootstrap>', 'exec')
 
+    def test_core_restore_menu_reports_only_fixed_failure_stages(self):
+        digest = 'b'*64
+        name = 'core-maintenance-'+'a'*32+'.zip'
+        receipt = json.dumps({'files': {str(ops.CONTROL/'system_ops.py'): digest}}).encode()
+        for raw, visible in ((b'RESTORE_STAGE_ACTIVATE\n', True),
+                             (b'RESTORE_STAGE_ACTIVATE\nprivate-output\n', False)):
+            with self.subTest(visible=visible), \
+                    patch.object(ops, 'verify_installation', return_value=('systemd', None)), \
+                    patch.object(ops, 'trusted_bytes', return_value=receipt), \
+                    patch.object(ops, 'run_command', return_value=(1, raw)):
+                code, output = self.run_menu(f'14\n{name}\n{digest}\ny\n0\n')
+            self.assertEqual(code, 0)
+            self.assertEqual('RESTORE_STAGE_ACTIVATE' in output, visible)
+            self.assertIn('恢复未完成', output)
+            self.assertNotIn('恢复完成，', output)
+            self.assertNotIn('private-output', output)
+
     def test_core_status_is_read_only_and_shows_current_and_previous(self):
         digest = 'b'*64
         receipt = json.dumps({'files': {str(ops.CONTROL/'system_ops.py'): digest}}).encode()
