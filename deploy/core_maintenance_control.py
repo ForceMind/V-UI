@@ -869,7 +869,7 @@ class _Switch:
             raise CoreControlError('CORE_RECOVERY_REQUIRED') from None
 
 
-def switch(ops, *, core, action, expected_revision, release_id=None, cancelled=None):
+def switch(ops, *, core, action, expected_revision, release_id=None, cancelled=None, _receipt_sha256=None):
     """Fixed internal operation; the caller still needs a scoped daemon action."""
     _need(os.geteuid() == 0, 'ROOT_REQUIRED')
     _need(os.getpid() == os.getpgrp() == os.getsid(0), 'CORE_TASK_ISOLATION')
@@ -877,14 +877,15 @@ def switch(ops, *, core, action, expected_revision, release_id=None, cancelled=N
           and (expected_revision is None or type(expected_revision) is str and ops.HEX.fullmatch(expected_revision))
           and (action == 'rollback' and release_id is None
                or action == 'update' and type(release_id) is int and 0 < release_id < 2**63), 'CORE_REQUEST')
-    return _run_task(ops, cancelled, (core, action, expected_revision, release_id))
+    return _run_task(ops, cancelled, (core, action, expected_revision, release_id),
+                     receipt_sha256=_receipt_sha256)
 
 
-def recover(ops, *, cancelled=None):
+def recover(ops, *, cancelled=None, _receipt_sha256=None):
     """Explicit Root-only recovery of the retained transaction."""
     _need(os.geteuid() == 0, 'ROOT_REQUIRED')
     _need(os.getpid() == os.getpgrp() == os.getsid(0), 'CORE_TASK_ISOLATION')
-    return _run_task(ops, cancelled, None)
+    return _run_task(ops, cancelled, None, receipt_sha256=_receipt_sha256)
 
 
 def restore_backup(ops, *, archive_name, archive_sha256, expected_revision, cancelled=None, _receipt_sha256=None):

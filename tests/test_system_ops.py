@@ -972,7 +972,8 @@ class MenuTests(unittest.TestCase):
         with patch.object(ops, 'installation_lock', side_effect=AssertionError('host lock')), \
                 patch.object(ops, 'verify_installation', side_effect=AssertionError('host reads')):
             for data in ('0\n', '', 'h\ninvalid\n0\n', '2\nno\n0\n', '2\n', '6\n\n0\n', '7\n\n0\n', '12\nn\n0\n',
-                         '12\n\n0\n', '13\n0\n0\n', '14\n\n0\n', '15\nn\n0\n'):
+                         '12\n\n0\n', '13\n0\n0\n', '14\n\n0\n', '15\nn\n0\n',
+                         '16\nsing-box\n\n0\n', '17\nxray\nn\n0\n', '18\nn\n0\n'):
                 code, text = self.run_menu(data)
                 self.assertEqual(code, 0, text)
                 self.assertIn('V-UI 受管维护菜单', text)
@@ -982,14 +983,21 @@ class MenuTests(unittest.TestCase):
         digest = 'b'*64
         name = 'core-maintenance-'+'a'*32+'.zip'
         receipt = json.dumps({'files': {str(ops.CONTROL/'system_ops.py'): digest}}).encode()
-        for choice, action, values in (('14', 'restore-components', [name, digest]),
-                                       ('15', 'recover-components', [])):
+        for choice, action, values, outcome, message in (
+                ('14', 'restore-components', [name, digest], 'restored_backup', '恢复完成'),
+                ('15', 'recover-components', [], 'resumed_confirmed', '恢复完成'),
+                ('16', 'update-core', ['sing-box', '42'], 'switched', '核心切换完成'),
+                ('17', 'rollback-core', ['xray'], 'restored_previous', '核心试跑失败'),
+                ('18', 'recover-core', [], 'restored_previous', '恢复完成')):
             with self.subTest(action=action), patch.object(ops, 'verify_installation', return_value=('systemd', None)), \
                     patch.object(ops, 'trusted_bytes', return_value=receipt), \
-                    patch.object(ops, 'run_command', return_value=(0, b'')) as run:
+                    patch.object(ops, 'run_command', return_value=(0, json.dumps(
+                        dict(outcome=outcome, backup_name=name, backup_sha256=digest)).encode())) as run:
                 code, output = self.run_menu('\n'.join([choice, *values, 'y', '0', '']))
                 self.assertEqual(code, 0)
-                self.assertIn('恢复完成', output)
+                self.assertIn(message, output)
+                self.assertIn('原数据备份文件 '+name, output)
+                self.assertIn('SHA-256 '+digest, output)
                 args = run.call_args.args[0]
                 self.assertEqual(args[1:6], ['-B', '-I', '-S', '-c', ops.CORE_RESTORE_BOOTSTRAP])
                 self.assertEqual(args[6:], [digest, hashlib.sha256(receipt).hexdigest(), action, *values])
@@ -1002,6 +1010,17 @@ class MenuTests(unittest.TestCase):
             with self.assertRaisesRegex(ops.Refused, 'operation interrupted'):
                 ops.run_command(['/fixed'], [2], cleanup_grace=180)
         child.close.assert_called_once_with(grace=180)
+
+    def test_core_switch_menu_refuses_invalid_or_missing_success_evidence(self):
+        receipt = json.dumps({'files': {str(ops.CONTROL/'system_ops.py'): 'b'*64}}).encode()
+        for result in ({'outcome': []}, {'outcome': 'switched'}, {'outcome': 'restored_backup'}):
+            with self.subTest(result=result), patch.object(ops, 'verify_installation', return_value=('systemd', None)), \
+                    patch.object(ops, 'trusted_bytes', return_value=receipt), \
+                    patch.object(ops, 'run_command', return_value=(0, json.dumps(result).encode())):
+                code, output = self.run_menu('17\nxray\ny\n0\n')
+            self.assertEqual(code, 0)
+            self.assertIn('恢复未完成', output)
+            self.assertNotIn('核心切换完成', output)
 
     def test_online_upgrade_accepts_y_and_yes_without_other_confirmation(self):
         client = types.SimpleNamespace(request=lambda request: {'id': 'a' * 32, 'state': 'succeeded', 'result': {'upgraded': False}})

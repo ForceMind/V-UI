@@ -1150,15 +1150,19 @@ HELP = ('V-UI 受管维护菜单\n'
         '13 / grants  创建、列举或撤销临时维护授权\n'
         '14 / restore-components  恢复节点数据及核心版本\n'
         '15 / recover-components 恢复中断的双域事务\n'
+        '16 / update-core 更新指定核心\n'
+        '17 / rollback-core 回退指定核心\n'
+        '18 / recover-core 恢复中断的核心切换\n'
         'h            帮助\n'
         '0            退出\n'
         '操作失败后不会自动恢复启动。OpenRC 当前仅支持状态查询与候选准备。')
 CHOICES = {'1': 'status', '2': 'start', '3': 'stop', '4': 'restart',
            '5': 'backup', '6': 'restore', '7': 'activate', '8': 'stage', '9': 'recover-restore', '10': 'network', '11': 'open-port', '12': 'upgrade', '13': 'grants'}
-CHOICES.update({'14': 'restore-components', '15': 'recover-components'})
+CORE_TASKS = ('restore-components', 'recover-components', 'update-core', 'rollback-core', 'recover-core')
+CHOICES.update(zip(('14', '15', '16', '17', '18'), CORE_TASKS))
 CORE_RESTORE_ARCHIVE = re.compile(r'core-maintenance-[a-f0-9]{32}\.zip\Z')
 CORE_RESTORE_BOOTSTRAP = """import hashlib, os, sys, types
-if len(sys.argv) not in (4, 6) or os.getuid() != 0 or os.geteuid() != 0:
+if len(sys.argv) not in (4, 5, 6) or os.getuid() != 0 or os.geteuid() != 0:
     raise SystemExit(1)
 path = '/usr/local/lib/v-ui/system_ops.py'
 with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as source:
@@ -1170,7 +1174,7 @@ ops.__file__ = path
 sys.modules[ops.__name__] = ops
 exec(compile(raw, path, 'exec'), ops.__dict__)
 with ops.deferred_signals() as cancelled:
-    ops._core_restore_task(ops, sys.argv[3:], cancelled, sys.argv[2])
+    ops._core_terminal_task(ops, sys.argv[3:], cancelled, sys.argv[2])
 """
 
 
@@ -1258,7 +1262,7 @@ def terminal_grants():
                    stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, check=True)
 
 
-def _core_restore_task(ops, arguments, cancelled, expected_receipt):
+def _core_terminal_task(ops, arguments, cancelled, expected_receipt):
     manager, _ = verify_installation()
     if manager != 'systemd':
         raise Refused('core restore requires systemd')
@@ -1273,17 +1277,31 @@ def _core_restore_task(ops, arguments, cancelled, expected_receipt):
     module = types.ModuleType('_vui_terminal_core_restore')
     exec(compile(raw, str(path), 'exec'), module.__dict__)
     if arguments == ['recover-components']:
-        module.recover_restore_backup(ops, cancelled=cancelled, _receipt_sha256=expected_receipt)
+        result = module.recover_restore_backup(ops, cancelled=cancelled, _receipt_sha256=expected_receipt)
+    elif arguments == ['recover-core']:
+        result = module.recover(ops, cancelled=cancelled, _receipt_sha256=expected_receipt)
     elif len(arguments) == 3 and arguments[0] == 'restore-components':
         selection = decode_json(trusted_bytes(CONFIG.parent/'core-selection.json', MAX_JSON))
-        module.restore_backup(ops, archive_name=arguments[1], archive_sha256=arguments[2],
-                              expected_revision=selection['revision'], cancelled=cancelled,
-                              _receipt_sha256=expected_receipt)
+        result = module.restore_backup(ops, archive_name=arguments[1], archive_sha256=arguments[2],
+                                       expected_revision=selection['revision'], cancelled=cancelled,
+                                       _receipt_sha256=expected_receipt)
+    elif ((len(arguments) == 2 and arguments[0] == 'rollback-core')
+          or (len(arguments) == 3 and arguments[0] == 'update-core')):
+        try:
+            selection = decode_json(trusted_bytes(CONFIG.parent/'core-selection.json', MAX_JSON))
+            revision = selection['revision']
+        except FileNotFoundError:
+            revision = None
+        update = arguments[0] == 'update-core'
+        result = module.switch(ops, core=arguments[1], action='update' if update else 'rollback',
+                               expected_revision=revision, release_id=int(arguments[2]) if update else None,
+                               cancelled=cancelled, _receipt_sha256=expected_receipt)
     else:
         raise Refused('invalid core restore task')
+    print(json.dumps(result, separators=(',', ':')), flush=True)
 
 
-def terminal_core_restore(action):
+def terminal_core_action(action):
     arguments = [action]
     if action == 'restore-components':
         name = read_input('受管备份文件名（留空取消）: ', 64, hidden=True)
@@ -1296,6 +1314,23 @@ def terminal_core_restore(action):
             raise Refused('invalid core restore input')
         arguments.extend((name, checksum))
         print('恢复会停服、备份当前数据，并撤销备份中的旧登录和维护授权。')
+    elif action in ('update-core', 'rollback-core'):
+        core = read_input('核心 sing-box/xray（留空取消）: ', 8)
+        if not core:
+            return
+        if core not in ('sing-box', 'xray'):
+            raise Refused('invalid core name')
+        arguments.append(core)
+        if action == 'update-core':
+            release = read_input('官方组件 Release 数字 ID（留空取消）: ', 19)
+            if not release:
+                return
+            if not re.fullmatch('[1-9][0-9]{0,18}', release) or int(release) >= 2**63:
+                raise Refused('invalid core release ID')
+            arguments.append(release)
+        print('操作会短暂停服并创建当前数据备份。')
+    elif action == 'recover-core':
+        print('按中断记录核验并恢复核心选择及服务状态。')
     else:
         print('按中断记录恢复已确认代次或原数据，保留失败副本。')
     answer = read_input('确认执行 [y/N]: ', 16)
@@ -1311,12 +1346,36 @@ def terminal_core_restore(action):
     if not HEX.fullmatch(checksum):
         raise Refused('invalid controller checksum')
     with deferred_signals() as cancelled:
-        code, _ = run_command([str(PYTHON), '-B', '-I', '-S', '-c', CORE_RESTORE_BOOTSTRAP,
+        code, output = run_command([str(PYTHON), '-B', '-I', '-S', '-c', CORE_RESTORE_BOOTSTRAP,
                                checksum, hashlib.sha256(receipt_raw).hexdigest(), *arguments],
                               cancelled, timeout=TIMEOUT+60, cleanup_grace=180)
     if code != 0:
         raise Refused('core restore unconfirmed')
-    print('恢复完成，已核对数据与服务状态。')
+    result = decode_json(output)
+    if type(result) is not dict or type(result.get('outcome')) is not str:
+        raise Refused('unexpected core task result')
+    outcome = result.get('outcome')
+    needs_backup = action == 'restore-components'
+    if action in ('update-core', 'rollback-core'):
+        messages = {'already_current': '核心已是所选版本。',
+                    'switched': '核心切换完成，已核对服务状态。',
+                    'restored_previous': '核心试跑失败，已恢复操作前的版本。'}
+        needs_backup = outcome != 'already_current'
+    elif action == 'restore-components':
+        messages = {'restored_backup': '恢复完成，已核对数据与服务状态。'}
+    else:
+        messages = {key: '恢复完成，已核对数据与服务状态。'
+                    for key in ('restored_previous', 'resumed_confirmed')}
+    if outcome not in messages:
+        raise Refused('unexpected core task result')
+    name, digest = result.get('backup_name'), result.get('backup_sha256')
+    if needs_backup or name is not None or digest is not None:
+        if (type(name) is not str or not CORE_RESTORE_ARCHIVE.fullmatch(name)
+                or type(digest) is not str or not HEX.fullmatch(digest)):
+            raise Refused('invalid core backup receipt')
+        print('原数据备份文件 ' + name)
+        print('SHA-256 ' + digest)
+    print(messages[outcome])
 
 
 def menu():
@@ -1336,12 +1395,12 @@ def menu():
             continue
         action = CHOICES.get(selection, selection)
         if action not in ('status', 'network', 'open-port', 'upgrade', 'grants',
-                          'restore-components', 'recover-components', *ACTIONS):
+                          *CORE_TASKS, *ACTIONS):
             print('未知选项，请输入 h 查看帮助。')
             continue
-        if action in ('restore-components', 'recover-components'):
+        if action in CORE_TASKS:
             try:
-                terminal_core_restore(action)
+                terminal_core_action(action)
             except (Refused, OSError, ValueError, KeyError, subprocess.SubprocessError):
                 print('恢复未完成。请检查服务状态及待恢复记录。')
             continue
