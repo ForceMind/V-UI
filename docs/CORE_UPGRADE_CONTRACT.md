@@ -781,3 +781,7 @@ Root复用原可信控制器装载、receipt摘要与systemd检查，再在只�
 源码已接线；纯Root投影/回执和终端预设5项、合成DOM通过。API权限、撤销/过期、未知参数及9用途payload回归须在Actions运行；本机其他既有系统测试受缺PyYAML或目录权限环境限制，不改断言，不计完整通过。浏览器未验证，没有生产操作。
 
 后续M46B先实现有硬生命周期与杀回收的非Root官方候选查询，发现结果只作hints、不称兼容或已准备。随后完成Root可独立验证的写准入、一次消费/请求幂等、同安装双域备份私有映射、预期pending事务/代次及停机持久任务，再接完整面板更新/回退/恢复。上述写操作在完成前继续关闭，不能以本批只读入口替代最终P3交付。
+
+M46A首轮 `b1c1b2b` 的[Linux主测试42629393218](https://github.com/ForceMind/V-UI/actions/runs/42629393218)成功，包括新增API权限、撤销/过期与固定错误边界；不是实际Root服务链的证明。[首轮安装42629393183](https://github.com/ForceMind/V-UI/actions/runs/42629393183)的fresh失败原日志确认PTY仍等待旧1/2/3菜单。原失败保留。
+
+安装夹具现以实际Root CONTROL worker的NoFollow/所有权/权限/大小及receipt摘要，逐字节绑定该场景真正安装的suite：短入口使用不可变发布suite，其余用本次候选；不能拿当前测试checkout冒充旧版实际代码。严格8/9用途集合决定精确新旧prompt，未知集合或新suite却装旧byte直接失败。新Root HTTP/Unix只读验证须同时证明旧full拒绝、新显式用途成功及撤销生效、停服时不启动、任务列表/daemon PID/业务行与runtime配置数据不变。此夹具已加入源码，四项纯能力绑定测试通过；实际安装结果等待新准确Actions，不能回填成功。
