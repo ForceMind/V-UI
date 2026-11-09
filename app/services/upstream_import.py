@@ -131,7 +131,7 @@ def _source_format(value):
     return value
 
 
-def _bounded_worker_io(command, raw):
+def _bounded_worker_io(command, raw, *, output_limit=MAX_WORKER_OUTPUT_BYTES):
     """Bound both pipe directions and wall time; reap even on cancellation."""
     process = None
     try:
@@ -161,13 +161,13 @@ def _bounded_worker_io(command, raw):
                             selector.unregister(pipe)
                             pipe.close()
                     else:
-                        chunk = os.read(pipe.fileno(), min(65536, MAX_WORKER_OUTPUT_BYTES + 1 - len(output)))
+                        chunk = os.read(pipe.fileno(), min(65536, output_limit + 1 - len(output)))
                         if not chunk:
                             selector.unregister(pipe)
                             pipe.close()
                         else:
                             output.extend(chunk)
-                            if len(output) > MAX_WORKER_OUTPUT_BYTES:
+                            if len(output) > output_limit:
                                 _fail("PARSER_RESOURCE_LIMIT", "The import parser exceeded its output limit")
             wait = deadline - time.monotonic()
             if wait <= 0:

@@ -192,6 +192,7 @@ class AdminAuthMiddleware:
             return
         bounded_auth = path.startswith("/api/auth/") and request.method == "POST"
         bounded_proxy = path.startswith("/api/proxy/") and request.method in {"POST", "PUT", "PATCH"}
+        merge_download = path == "/api/proxy/yaml/merge/download" and request.method == "POST"
         bounded_maintenance = path.startswith('/api/maintenance/') and request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}
         bounded_dns = path.startswith('/api/certificates') and request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}
         payload = {}
@@ -216,7 +217,7 @@ class AdminAuthMiddleware:
             except asyncio.TimeoutError:
                 await reject(408, "Request timed out")
                 return
-            if principal is not None or bounded_maintenance or bounded_dns:
+            if principal is not None or bounded_maintenance or bounded_dns or merge_download:
                 def unique_object(pairs):
                     result = {}
                     for key, value in pairs:
@@ -233,7 +234,7 @@ class AdminAuthMiddleware:
                     if type(payload) is not dict:
                         raise ValueError()
                 except (ValueError, TypeError, UnicodeError, RecursionError):
-                    await reject(422, '维护请求格式无效')
+                    await reject(422, 'Invalid request' if merge_download else '维护请求格式无效')
                     return
             original_receive, delivered = receive, False
 

@@ -117,6 +117,49 @@ class MihomoPreviewApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()['detail']['code'], 'PARSER_FAILED')
 
+    def test_merge_download_is_private_attachment_and_requires_same_origin(self):
+        path = '/api/proxy/yaml/merge/download'
+        payload = {'baseline': 'rules: ["MATCH,REJECT"]', 'candidate': 'opaque: ' + SECRET}
+        with patch.object(endpoint, 'download_mihomo_merge', wraps=endpoint.download_mihomo_merge) as merge:
+            self.auth.return_value = None
+            self.assertEqual(self.client.post(path, json=payload, headers=HEADERS).status_code, 401)
+            self.auth.return_value = {'id': 1}
+            self.assertEqual(self.client.post(path, json=payload, headers={}).status_code, 403)
+            merge.assert_not_called()
+            response = self.client.post(path, json=payload, headers=HEADERS)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers['content-type'], 'application/yaml')
+        self.assertEqual(response.headers['content-disposition'], 'attachment; filename="vui-merged.yaml"')
+        self.assertIn('no-store', response.headers['cache-control'])
+        self.assertEqual(response.headers['x-content-type-options'], 'nosniff')
+        self.assertIn(SECRET, response.text)
+        self.store.assert_not_called()
+        self.apply.assert_not_called()
+
+    def test_merge_download_conflict_does_not_disclose_private_path(self):
+        path = '/api/proxy/yaml/merge/download'
+        payload = {'baseline': SECRET + ': 1', 'candidate': SECRET + ': 2'}
+        rejected = self.client.post(path, json=payload, headers=HEADERS)
+        self.assertEqual(rejected.status_code, 422)
+        self.assertEqual(rejected.json(), {'detail': {'code': 'MERGE_CHOICES_REQUIRED'}})
+        self.assertNotIn(SECRET, rejected.text)
+        choice = {'path': [SECRET], 'side': 'candidate'}
+        accepted = self.client.post(path, json={**payload, 'choices': [choice]}, headers=HEADERS)
+        self.assertEqual(accepted.status_code, 200)
+        self.assertIn(SECRET + ': 2', accepted.text)
+        duplicate = self.client.post(path, json={**payload, 'choices': [choice, choice]}, headers=HEADERS)
+        self.assertEqual(duplicate.json(), {'detail': {'code': 'MERGE_INVALID_CHOICES'}})
+
+    def test_merge_download_rejects_ambiguous_json_before_parser(self):
+        path = '/api/proxy/yaml/merge/download'
+        body = '{"baseline":"{}", "candidate":"{}", "choices":[{"path":["x"],"side":"baseline","side":"candidate"}]}'
+        with patch.object(endpoint, 'download_mihomo_merge') as merge:
+            response = self.client.post(path, content=body,
+                                        headers={**HEADERS, 'Content-Type': 'application/json'})
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json(), {'detail': 'Invalid request'})
+        merge.assert_not_called()
+
     def test_actual_body_limit_includes_json_escaping_and_rejects_before_parser(self):
         with patch.object(endpoint, 'preview_mihomo') as parser:
             response = self.client.post(URL, content=b' ' * (2097152 + 1),
