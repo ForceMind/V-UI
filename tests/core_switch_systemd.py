@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import socket
 import subprocess
 import zipfile
@@ -211,6 +212,10 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
             output = subprocess.run(['sudo', '--preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_REPOSITORY',
                 '/usr/bin/setsid', '--wait', '/usr/bin/python3', '-B', '-I', '-S', str(runner), *args],
                 capture_output=True, text=True, timeout=650)
+            if action == 'interrupt':
+                check.assertIn(output.returncode, (-signal.SIGKILL, 128+signal.SIGKILL))
+                check.assertEqual(output.stdout.strip(), 'VUI_CORE_FIXTURE_INTERRUPT_BEFORE_TRIAL')
+                return None
             try:
                 result = json.loads(output.stdout)
             except ValueError:
@@ -309,6 +314,43 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
             print(f'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: {core} live systemd private CA, actual '
                   f'{candidate_version} and bundle {bundle_version}, bad digest, failed startup recovery, '
                   'both stock TCP paths and retained data')
+
+        interrupted_before = snapshot()
+        interrupted_selection = selected(revision)
+        interrupted_exports = {core: through(core, core+'-interrupt-before') for core in nodes}
+        task('sing-box', 'interrupt', revision)
+        check.assertTrue((metadata/'CORE_UPDATE_PENDING.json').is_file())
+        check.assertEqual(subprocess.check_output(
+            ['systemctl', 'show', 'v-ui.service', '-p', 'ActiveState', '--value'], text=True).strip(), 'inactive')
+        # Wait for the real worker to release its lease after losing its coordinator.
+        subprocess.run(['sudo', '-u', 'v-ui', '/bin/sh', '-c',
+                        'exec 9</var/lib/v-ui/.operation.lock && flock -x -w 30 9'],
+                       check=True, timeout=40)
+        with PrivateMenuSession(['sudo', '/usr/local/sbin/v-ui'], cwd='/tmp', env=dict(os.environ),
+                                timeout=850, private_values=()) as terminal:
+            terminal.expect('请选择: ')
+            terminal.send('18\n')
+            terminal.expect('确认执行 [y/N]: ')
+            terminal.send('y\n')
+            check.assertIn('恢复完成，已核对数据与服务状态。', terminal.expect('请选择: '))
+            terminal.send('0\n')
+            terminal.finish()
+        revision = json.loads((metadata/'core-selection.json').read_bytes())['revision']
+        recovered_selection = selected(revision)
+        check.assertGreater(recovered_selection['generation'], interrupted_selection['generation'])
+        check.assertEqual(recovered_selection['cores'], interrupted_selection['cores'])
+        recovered = snapshot()
+        for field in ('current', 'data', 'users'):
+            check.assertEqual(recovered[field], interrupted_before[field])
+        for core in nodes:
+            for field in ('binary', 'version', 'node', 'intent'):
+                check.assertEqual(recovered['cores'][core][field], interrupted_before['cores'][core][field])
+            check.assertEqual(through(core, core+'-interrupt-recovered'), interrupted_exports[core])
+        check.assertEqual([path for _, _, path in traffic.snapshot()], markers)
+        status, raw_identity = api('/api/auth/me')
+        check.assertEqual(status, 200)
+        check.assertEqual(json.loads(raw_identity), original_identity)
+        print('VUI_INSTALLED_CORE_INTERRUPT_ACCEPTANCE: real coordinator SIGKILL and terminal recovery')
 
         check.assertIsNotNone(restore_backup)
         before_restore()

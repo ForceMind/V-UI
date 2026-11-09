@@ -231,6 +231,7 @@ class JobTests(unittest.TestCase):
         sing_box.mkdir(mode=0o700, parents=True)
         sb_marker = b'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: sing-box synthetic evidence\n'
         xray_marker = b'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: xray synthetic evidence\n'
+        interrupt_marker = b'VUI_INSTALLED_CORE_INTERRUPT_ACCEPTANCE: synthetic evidence\n'
         restore_marker = b'VUI_INSTALLED_CORE_RESTORE_ACCEPTANCE: synthetic evidence\n'
         with patch.object(job, 'CORE_SWITCH_FIXTURE', fixture):
             with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'CORE_SWITCH_FRESH_FIXTURE_REQUIRED'):
@@ -250,12 +251,17 @@ class JobTests(unittest.TestCase):
                     with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'CORE_SWITCH_EVIDENCE_REQUIRED'):
                         self.run_role(core_switch=True, data=SUCCESS + evidence)
                     self.log.unlink()
-            for evidence in (sb_marker+xray_marker, restore_marker+sb_marker+xray_marker,
-                             sb_marker+xray_marker+restore_marker+restore_marker):
+            switches = sb_marker + xray_marker
+            for evidence in (switches, interrupt_marker+switches, switches+interrupt_marker+interrupt_marker):
+                with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'CORE_INTERRUPT_EVIDENCE_REQUIRED'):
+                    self.run_role(core_switch=True, data=SUCCESS+evidence)
+                self.log.unlink()
+            for evidence in (switches+interrupt_marker, switches+restore_marker+interrupt_marker,
+                             switches+interrupt_marker+restore_marker+restore_marker):
                 with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'CORE_RESTORE_EVIDENCE_REQUIRED'):
                     self.run_role(core_switch=True, data=SUCCESS+evidence)
                 self.log.unlink()
-            code, calls = self.run_role(core_switch=True, data=SUCCESS+sb_marker+xray_marker+restore_marker)
+            code, calls = self.run_role(core_switch=True, data=SUCCESS+switches+interrupt_marker+restore_marker)
         self.assertEqual(code, 0)
         self.assertEqual(calls[-1][1]['env']['VUI_CORE_SWITCH_FIXTURE'], str(fixture))
 

@@ -302,6 +302,7 @@ jobs:
           test "$(grep -c '^VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE:' "$log")" = 2
           test "$(grep -c '^VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: sing-box ' "$log")" = 1
           test "$(grep -c '^VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: xray ' "$log")" = 1
+          test "$(grep -c '^VUI_INSTALLED_CORE_INTERRUPT_ACCEPTANCE:' "$log")" = 1
           test "$(grep -c '^VUI_INSTALLED_CORE_RESTORE_ACCEPTANCE:' "$log")" = 1
       - name: Preserve ARM64 systemd evidence
         if: always()

@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import socket
 import stat
 import sys
@@ -252,7 +253,7 @@ def inject_transport(control, opener):
     control._modules = modules
 
 
-def inject_assertions(control, source, core, port):
+def inject_assertions(control, source, core, port, *, interrupt=False):
     original_context = control._Switch._context
 
     def context(task, name, revision):
@@ -261,13 +262,23 @@ def inject_assertions(control, source, core, port):
 
     control._Switch._context = context
     attempts = []
-    if port is None:
+    if port is None and not interrupt:
         return attempts
     original_activate = control._Switch._activate
 
     def activate(task, state, intents, *, recovery, cleanup=False):
         if recovery:
             return original_activate(task, state, intents, recovery=True, cleanup=cleanup)
+        if interrupt:
+            require(not cleanup and task.released and state == task.after, 'FIXTURE_INTERRUPT')
+            task.services.prove_stopped()
+            task._proof()
+            journal = task.files.read_switch_recovery()
+            require(journal['transaction'] == task.transaction and journal['phase'] == 'trial',
+                    'FIXTURE_INTERRUPT_JOURNAL')
+            print('VUI_CORE_FIXTURE_INTERRUPT_BEFORE_TRIAL', flush=True)
+            os.kill(os.getpid(), signal.SIGKILL)
+            raise Refused('FIXTURE_SIGNAL_NOT_DELIVERED')
         require(not attempts and not cleanup and task.initial['v-ui.service'] == 'active'
                 and intents[core]['enabled'] and port != task.config['port'], 'FIXTURE_PORT')
         task.services.prove_stopped()
@@ -292,7 +303,7 @@ def inject_assertions(control, source, core, port):
 def parse(arguments):
     require(len(arguments) in (4, 5), 'FIXTURE_INPUT')
     core, action, source, revision = arguments[:4]
-    require(core in RELEASE_IDS and action in ('update', 'rollback', 'bad-digest', 'port-conflict')
+    require(core in RELEASE_IDS and action in ('update', 'rollback', 'bad-digest', 'port-conflict', 'interrupt')
             and re.fullmatch('[a-f0-9]{40}', source)
             and (revision == 'none' or re.fullmatch('[a-f0-9]{64}', revision))
             and (len(arguments) == 5) == (action == 'port-conflict'), 'FIXTURE_INPUT')
@@ -380,7 +391,7 @@ def run(arguments):
         ops, control = installed_modules(stack)
         opener = FixtureOpener(stack, folder, source, core=core, bad_digest=action == 'bad-digest')
         inject_transport(control, opener)
-        conflicts = inject_assertions(control, source, opener.core, port)
+        conflicts = inject_assertions(control, source, opener.core, port, interrupt=action == 'interrupt')
         trace = trace_switch(control)
         switch_action = 'rollback' if action == 'rollback' else 'update'
         try:
