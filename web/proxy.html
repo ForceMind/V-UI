@@ -65,13 +65,14 @@ curl --noproxy "" --proxy socks5h://127.0.0.1:7891 --proxy-user example-user 'ht
 <div id="import-preview" hidden><h3>明确选择一个节点</h3><div id="candidates"></div><div id="ignored-sections"></div><p id="import-notices" class="hint"></p><label for="import-name">显示名称（可留空保留原名称）</label><input id="import-name" maxlength="128" autocomplete="off"><button id="save-import" type="submit" class="primary" disabled>保存所选上游</button></div></fieldset><p id="import-notice" role="status" aria-live="polite"></p><p class="hint">候选预览不会回显 UUID、REALITY 连接材料或密码。保存时服务端重新解析；只有全部未导入区块逐项确认后才能保存。</p></form></dialog>
 <dialog id="yaml-preview-dialog" aria-labelledby="yaml-dialog-heading"><form id="yaml-preview-form" autocomplete="off">
 <div class="section-head"><h2 id="yaml-dialog-heading">YAML 只读结构与差异预览</h2><button id="close-yaml-preview" type="button" aria-label="关闭并清空只读预览">关闭并清空</button></div>
-<p class="hint">点击“生成只读报告”会将候选与可选基线发送给当前面板服务器解析，不是浏览器内离线解析。不会自动读取服务器配置或下载远程 provider。</p>
+<p class="hint">生成报告、检查冲突或下载时，会将候选和基线发送给当前面板服务器处理，不是浏览器内离线解析。不会自动读取服务器配置或下载远程 provider。</p>
 <p class="hint">输入只留本次页面及请求内存，不写入浏览器存储或服务端配置；关闭、清空或离页会清除控件，不能保证浏览器或操作系统内存擦除。</p>
 <label for="yaml-candidate">候选 YAML（必填，最多 1 MiB UTF-8）</label><textarea id="yaml-candidate" rows="6" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea><label for="yaml-candidate-file">或从本地 UTF-8 文件读入候选</label><input id="yaml-candidate-file" type="file" accept=".yaml,.yml,.txt">
 <label for="yaml-baseline">基线 YAML（可选，留空不比较，最多 1 MiB UTF-8）</label><textarea id="yaml-baseline" rows="4" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea><label for="yaml-baseline-file">或从本地 UTF-8 文件读入基线</label><input id="yaml-baseline-file" type="file" accept=".yaml,.yml,.txt">
 <p class="hint">下载合并 YAML 需要候选和基线两份输入。附件可能包含节点凭据，请妥善保管。</p>
 <p class="hint">包含 JSON 转义和语法的总请求最多 2 MiB。只识别有限语法，真实核心兼容性与合并等价均未验证；即使零诊断也不可应用。</p>
-<div class="actions"><button id="yaml-preview-submit" type="submit">生成只读报告</button><button id="yaml-merge-download" type="submit">合并并下载 YAML</button><button id="clear-yaml-preview" type="button">清空输入与报告</button></div>
+<div class="actions"><button id="yaml-preview-submit" type="submit">生成只读报告</button><button id="yaml-merge-review" type="submit">检查合并冲突</button><button id="yaml-merge-download" type="submit">合并并下载 YAML</button><button id="clear-yaml-preview" type="button">清空输入与报告</button></div>
+<section id="yaml-merge-conflicts" aria-label="合并冲突选择" hidden></section>
 <p id="yaml-preview-notice" role="status" aria-live="polite"></p><pre id="yaml-preview-result" aria-label="只读预览报告" tabindex="0" hidden></pre>
 </form></dialog>
 </details>

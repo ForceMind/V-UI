@@ -9,6 +9,7 @@
     const reads = {candidate: 0, baseline: 0}, reading = {candidate: false, baseline: false};
     const invalidFile = {candidate: false, baseline: false};
     let active = true, epoch = 0, busy = false, controller = null;
+    let mergeReview = null, mergeSelects = [];
     const notices = {
         PARSER_BUSY: '解析器繁忙，请稍后手动重试。',
         PARSE_TIMEOUT: '解析超时，未生成报告；请缩小输入后重试。',
@@ -37,7 +38,10 @@
         INVALID_STRING: '输入含不支持的控制字符或字符串。',
         UNSUPPORTED_VALUE: '输入包含本工具不支持的值。',
         INVALID_INPUT: '输入不符合预览要求。',
-        MERGE_CHOICES_REQUIRED: '两份 YAML 有冲突。请先在两份输入中统一冲突值，再下载。',
+        MERGE_CHOICES_REQUIRED: '两份 YAML 有冲突，请点击“检查合并冲突”，逐项选择保留哪份内容。',
+        MERGE_REVIEW_STALE: '输入或冲突顺序已变化，请重新检查合并冲突。',
+        MERGE_REVIEW_LIMIT: '冲突超过 256 项，请先缩小输入。',
+        MERGE_INVALID_CHOICES: '冲突选择不完整或无效，请重新检查。',
         MERGE_INVALID_REFERENCES: '合并结果包含悬空引用、分组循环或无效规则顺序。',
         MERGE_NAME_COLLISION: '合并结果包含重复或保留的节点、分组名称。',
         MERGE_RESULT_LIMIT: '合并结果超出限制，请缩小输入。',
@@ -47,13 +51,67 @@
     function controls() {
         const blocked = !active || busy || roles.some(role => reading[role] || invalidFile[role]);
         $('yaml-preview-submit').disabled = blocked;
-        $('yaml-merge-download').disabled = blocked || !roles.every(role => $('yaml-' + role).value.trim());
+        const both = roles.every(role => $('yaml-' + role).value.trim());
+        $('yaml-merge-review').disabled = blocked || !both;
+        $('yaml-merge-download').disabled = blocked || !both || mergeSelects.some(select => !select.value);
+        for (const select of mergeSelects) select.disabled = blocked;
     }
-    function invalidate() {
+    function clearReview() {
+        mergeReview = null;
+        mergeSelects = [];
+        $('yaml-merge-conflicts').replaceChildren();
+        $('yaml-merge-conflicts').hidden = true;
+    }
+    function showConflicts(result, baseline, candidate) {
+        const sections = {proxies: '节点', 'proxy-groups': '分组', rules: '规则顺序', mode: '运行模式', other: '其他字段'};
+        if (!result || typeof result !== 'object' || Array.isArray(result) ||
+            Object.keys(result).sort().join(',') !== 'conflicts,fingerprint' ||
+            typeof result.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(result.fingerprint) ||
+            !Array.isArray(result.conflicts) || result.conflicts.length > 256) throw Error();
+        const lineLimits = {baseline: baseline.split(/\r\n|\r|\n/).length + 1,
+                            candidate: candidate.split(/\r\n|\r|\n/).length + 1};
+        for (const [index, row] of result.conflicts.entries()) {
+            if (!row || typeof row !== 'object' || Array.isArray(row) ||
+                Object.keys(row).sort().join(',') !== 'baseline,candidate,index,section' ||
+                row.index !== index || typeof row.section !== 'string' || !Object.hasOwn(sections, row.section)) throw Error();
+            for (const source of roles) {
+                const point = row[source];
+                if (!Array.isArray(point) || point.length !== 2 ||
+                    point.some(n => !Number.isSafeInteger(n) || n < 1) ||
+                    point[0] > lineLimits[source] || point[1] > LIMIT) throw Error();
+            }
+        }
+        clearReview();
+        mergeReview = result;
+        const panel = $('yaml-merge-conflicts');
+        const hint = document.createElement('p');
+        hint.textContent = '请对照原文选择。行列从 1 开始，列号按 Unicode 字符计数。';
+        panel.append(hint);
+        for (const row of result.conflicts) {
+            const label = document.createElement('label');
+            label.textContent = '冲突 ' + (row.index + 1) + ' · ' + sections[row.section] +
+                ' · 基线第 ' + row.baseline[0] + ' 行第 ' + row.baseline[1] + ' 列' +
+                ' / 候选第 ' + row.candidate[0] + ' 行第 ' + row.candidate[1] + ' 列';
+            const select = document.createElement('select');
+            for (const [value, text] of [['', '请选择要保留的内容'], ['baseline', '保留基线内容'], ['candidate', '使用候选内容']]) {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = text;
+                select.append(option);
+            }
+            select.addEventListener('change', controls);
+            label.append(select);
+            panel.append(label);
+            mergeSelects.push(select);
+        }
+        panel.hidden = result.conflicts.length === 0;
+    }
+    function invalidate(keepReview = false) {
         epoch++;
         if (controller) controller.abort();
         controller = null;
         busy = false;
+        if (!keepReview) clearReview();
         $('yaml-preview-result').textContent = '';
         $('yaml-preview-result').hidden = true;
         controls();
@@ -113,15 +171,26 @@
     async function submit(event) {
         event.preventDefault();
         if (!active || !dialog.open || busy || roles.some(role => reading[role] || invalidFile[role])) return;
-        invalidate();
         const download = event.submitter?.id === 'yaml-merge-download';
+        const review = event.submitter?.id === 'yaml-merge-review';
+        if (download && mergeReview && mergeSelects.some(select => !select.value)) {
+            notice('请先为每项冲突选择基线或候选内容。'); return;
+        }
+        const selectedReview = download ? mergeReview : null;
+        const selections = mergeSelects.map(select => select.value);
+        invalidate(download);
         const candidate = $('yaml-candidate').value, baseline = $('yaml-baseline').value;
-        if (download && !baseline.trim()) { notice('合并下载需要提供基线 YAML。'); return; }
+        if ((download || review) && !baseline.trim()) { notice('合并下载需要提供基线 YAML。'); return; }
         if (!candidate.trim()) { notice('请提供候选 YAML；可选基线留空表示不比较。'); return; }
         if (encoder.encode(candidate).length > LIMIT || encoder.encode(baseline).length > LIMIT) {
             notice('每份输入最多 1 MiB UTF-8 字节；请缩小输入。'); return;
         }
-        const body = JSON.stringify({candidate, baseline: baseline === '' ? null : baseline});
+        const payload = {candidate, baseline: baseline === '' ? null : baseline};
+        if (selectedReview) {
+            payload.fingerprint = selectedReview.fingerprint;
+            payload.selections = selections;
+        }
+        const body = JSON.stringify(payload);
         if (encoder.encode(body).length > REQUEST_LIMIT) {
             notice('包含 JSON 转义和语法的总请求超过 2 MiB；请缩小输入或取消基线比较。'); return;
         }
@@ -129,14 +198,15 @@
         controller = new AbortController();
         busy = true;
         controls();
-        notice(download ? '正在合并两份 YAML，完成后会下载附件。' :
+        notice(review ? '正在检查合并冲突。' : download ? '正在合并两份 YAML，完成后会下载附件。' :
                '正在由面板服务器只读解析；不会保存或应用配置。');
         try {
-            const endpoint = download ? '/api/proxy/yaml/merge/download' : '/api/proxy/yaml/preview';
+            const endpoint = review ? '/api/proxy/yaml/merge/review' :
+                download ? '/api/proxy/yaml/merge/download' : '/api/proxy/yaml/preview';
             const response = await fetch(endpoint, {
                 method: 'POST', credentials: 'same-origin', cache: 'no-store',
                 headers: {'Content-Type': 'application/json', 'X-VUI-Request': '1'},
-                ...(download ? {redirect: 'error'} : {}),
+                ...(download || review ? {redirect: 'error'} : {}),
                 body, signal: controller.signal
             });
             if (!live(token)) return;
@@ -173,10 +243,16 @@
             if (!live(token)) return;
             if (!response.ok) {
                 const code = result?.detail?.code, source = result?.detail?.source;
+                if (code === 'MERGE_REVIEW_STALE') clearReview();
                 const labels = {candidate: '候选：', baseline: '基线：', pair: '整体：'};
                 const label = typeof source === 'string' && Object.hasOwn(labels, source) ? labels[source] : '';
                 notice(typeof code === 'string' && Object.hasOwn(notices, code) ? label + notices[code] :
                        response.status === 413 ? '请求超过 2 MiB，请缩小输入。' : (download ? '合并请求未完成，请检查输入或稍后手动重试。' : '预览请求未完成，请检查输入或稍后手动重试。'));
+                return;
+            }
+            if (review) {
+                showConflicts(result, baseline, candidate);
+                notice(result.conflicts.length ? '请逐项选择，再点击“合并并下载 YAML”。' : '未发现合并冲突，可以下载。');
                 return;
             }
             if (!result || typeof result !== 'object' || Array.isArray(result) ||

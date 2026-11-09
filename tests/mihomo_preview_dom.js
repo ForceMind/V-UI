@@ -16,10 +16,12 @@ const reply = (text=REPORT, status=200) => ({status, ok:status>=200&&status<300,
 const deferred = () => {let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 const flush = () => new Promise(resolve=>setImmediate(resolve));
 class Element {
-    constructor(id,tag) {this.id=id;this.tagName=tag.toUpperCase();this.value='';this.files=[];this.disabled=false;this.hidden=false;this.open=false;this.textContent='';this.events=new Map();}
+    constructor(id,tag) {this.id=id;this.tagName=tag.toUpperCase();this.value='';this.files=[];this.disabled=false;this.hidden=false;this.open=false;this.textContent='';this.events=new Map();this.children=[];}
     addEventListener(name,fn) {this.events.set(name,[...(this.events.get(name)||[]),fn]);}
     async emit(name,event={preventDefault(){}}) {for(const fn of this.events.get(name)||[])await fn(event);}
     async click() {if(!this.disabled)await this.emit('click');}
+    append(child) {this.children.push(child);}
+    replaceChildren(...children) {this.children=[...children];}
     focus() {this.focused=true;}
     showModal() {assert(!this.open);this.open=true;}
     close() {if(this.open){this.open=false;void this.emit('close');}}
@@ -36,14 +38,18 @@ function fixture() {
     const get=id=>{assert(ids.has(id),'actual template contains '+id);return ids.get(id);};
     vm.runInNewContext(script, {
         document:{getElementById:get, body:{append(){}},
-            createElement:tag=>{assert.equal(tag,'a');return {remove(){},click(){downloads.push(this);}};}},
+            createElement:tag=>{
+                if(tag==='a')return {remove(){},click(){downloads.push(this);}};
+                assert(['p','label','select','option'].includes(tag));
+                return new Element('',tag);
+            }},
         TextEncoder, TextDecoder, AbortController,
         URL:{createObjectURL:()=> 'blob:private-fixture', revokeObjectURL:url=>revoked.push(url)},
         setTimeout:fn=>fn(),
         addEventListener:(name,fn)=>globals.set(name,[...(globals.get(name)||[]),fn]),
         location:{replace:url=>redirects.push(url)},
         fetch:async(url,options)=>{
-            assert(['/api/proxy/yaml/preview','/api/proxy/yaml/merge/download'].includes(url));assert.equal(options.method,'POST');
+            assert(['/api/proxy/yaml/preview','/api/proxy/yaml/merge/download','/api/proxy/yaml/merge/review'].includes(url));assert.equal(options.method,'POST');
             assert.equal(options.credentials,'same-origin');assert.equal(options.cache,'no-store');
             assert.equal(options.headers['X-VUI-Request'],'1');assert.equal(options.headers['Content-Type'],'application/json');
             requests.push({url,options});
@@ -59,6 +65,8 @@ function fixture() {
     return {get,requests,queued,redirects,downloads,revoked,emit,input,select,
         open:()=>get('open-yaml-preview').click(), close:()=>get('close-yaml-preview').click(),
         submit:()=>get('yaml-preview-form').emit('submit'),
+        review:()=>get('yaml-preview-form').emit('submit',
+            {preventDefault(){},submitter:get('yaml-merge-review')}),
         download:()=>get('yaml-preview-form').emit('submit',
             {preventDefault(){},submitter:get('yaml-merge-download')}),
         clear:()=>get('clear-yaml-preview').click(),
@@ -69,7 +77,7 @@ async function ready() {const f=fixture();await f.open();await f.input('candidat
 
 test('actual template declares isolated controller, limits, privacy and labels',()=>{
     assert(html.includes('/ui/js/mihomo-preview.js'));
-    assert(html.includes('发送给当前面板服务器解析，不是浏览器内离线解析'));
+    assert(html.includes('发送给当前面板服务器处理，不是浏览器内离线解析'));
     assert(html.includes('即使零诊断也不可应用'));
     assert(html.includes('不能保证浏览器或操作系统内存擦除'));
     for(const id of ['yaml-candidate','yaml-baseline']) {
@@ -282,4 +290,42 @@ test('unexpected merge attachment length is rejected before reading bytes',async
     assert.equal(f.downloads.length,0);
     assert(f.notice().includes('无法取得有效附件'));
     assert.equal(reads,0);
+});
+
+const conflictReply = () => ({status:200,ok:true,json:async()=>({
+    fingerprint:'a'.repeat(64), conflicts:[{index:0,section:'other',baseline:[1,1],candidate:[1,1]}],
+})});
+
+test('review shows only fixed coordinates and requires explicit choice before indexed download',async()=>{
+    const f=await ready();await f.input('baseline','{}');
+    f.queued.push(conflictReply);await f.review();
+    assert.equal(f.requests[0].url,'/api/proxy/yaml/merge/review');
+    const panel=f.get('yaml-merge-conflicts');
+    assert(!panel.hidden);
+    const label=panel.children[1], select=label.children[0];
+    assert(label.textContent.includes('基线第 1 行第 1 列'));
+    assert.equal(select.value,'');assert(f.get('yaml-merge-download').disabled);
+    await f.download();assert.equal(f.requests.length,1);
+    select.value='candidate';await select.emit('change');
+    assert(!f.get('yaml-merge-download').disabled);
+    f.queued.push(()=>attachment());await f.download();
+    assert.deepEqual(JSON.parse(f.requests[1].options.body),{
+        candidate:'{}',baseline:'{}',fingerprint:'a'.repeat(64),selections:['candidate'],
+    });
+    assert.equal(f.downloads.length,1);
+    await f.input('candidate','mode: rule');
+    assert(f.get('yaml-merge-conflicts').hidden);
+    assert.equal(f.get('yaml-merge-conflicts').children.length,0);
+});
+
+test('unknown review fields and stale review responses never create choices',async()=>{
+    const f=await ready();await f.input('baseline','{}');
+    f.queued.push(()=>({status:200,ok:true,json:async()=>({fingerprint:'a'.repeat(64),
+        conflicts:[{index:0,section:SECRET,baseline:[1,1],candidate:[1,1]}]})}));
+    await f.review();assert(f.get('yaml-merge-conflicts').hidden);
+    assert(!f.notice().includes(SECRET));
+    const pending=deferred();f.queued.push(()=>pending.promise);
+    const work=f.review();await flush();await f.input('candidate','mode: rule');
+    pending.resolve(conflictReply());await work;
+    assert(f.get('yaml-merge-conflicts').hidden);
 });
