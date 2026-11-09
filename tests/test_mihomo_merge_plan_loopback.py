@@ -5,6 +5,7 @@ import hashlib
 import os
 from pathlib import Path
 from queue import Queue
+import socket
 import socketserver
 import subprocess
 import tempfile
@@ -47,10 +48,26 @@ class MihomoMergePlanLoopbackTests(unittest.TestCase):
 
             class UnavailableUpstream(socketserver.BaseRequestHandler):
                 def handle(self):
-                    # Observe the TLS attempt, then reply with invalid TLS.
+                    # Consume the first ClientHello record before replying:
+                    # closing with unread request bytes can reset TCP instead
+                    # of delivering the intended invalid TLS response.
                     self.request.settimeout(2)
-                    attempted.put(self.request.recv(1))
+                    def exact(size):
+                        result = b''
+                        while len(result) < size:
+                            part = self.request.recv(size-len(result))
+                            if not part:
+                                raise ConnectionError('Incomplete fake TLS record')
+                            result += part
+                        return result
+                    header = exact(5)
+                    length = int.from_bytes(header[3:5], 'big')
+                    if header[0] != 0x16 or not 0 < length <= 16384:
+                        raise ConnectionError('Invalid fake ClientHello record')
+                    exact(length)
+                    attempted.put(header[:1])
                     self.request.sendall(b'not TLS')
+                    self.request.shutdown(socket.SHUT_WR)
 
             upstream_port = serve(stack, socketserver.ThreadingTCPServer(
                 ('127.0.0.1', 0), UnavailableUpstream))
@@ -132,10 +149,21 @@ class MihomoMergePlanLoopbackTests(unittest.TestCase):
                     self.assertEqual((relayed.snapshot()[-1][0], relayed.snapshot()[-1][2]),
                                      ('127.0.0.4', '/' + relay_marker))
                     self.assertTrue(attempted.empty(), 'Unexpected earlier TLS attempt')
+                    log = directory/('sing.log' if name == 'sing-box' else 'mihomo.log')
+                    offset = len(log.read_text(errors='replace'))
                     with self.assertRaises(OSError) as failed:
-                        https_through(port, '127.0.0.1', target_port, ca, name+'-upstream', protocol='socks5h')
-                    self.assertNotIsInstance(failed.exception, TimeoutError)
+                        https_through(port, '127.0.0.1', target_port, ca, name+'-upstream',
+                                      protocol='socks5h', timeout=10)
+                    self.assertNotIsInstance(failed.exception, TimeoutError,
+                                            log.read_text(errors='replace')[offset:])
                     self.assertEqual(attempted.get(timeout=2), b'\x16')
+                    deadline = time.monotonic()+3
+                    while True:
+                        reasons = log.read_text(errors='replace')[offset:].lower().splitlines()
+                        if any('first record does not look like a tls handshake' in line for line in reasons):
+                            break
+                        self.assertLess(time.monotonic(), deadline, 'No explicit invalid TLS record reason: '+repr(reasons))
+                        time.sleep(.05)
                     with self.assertRaises(OSError) as denied:
                         https_through(port, '127.0.0.3', denied_port, ca, name+'-final', protocol='socks5h')
                     self.assertNotIsInstance(denied.exception, TimeoutError)

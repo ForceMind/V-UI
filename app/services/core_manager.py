@@ -219,7 +219,6 @@ class CoreManager:
         )
 
     def _yaml_confirmation_context(self):
-        from app.services.core_runtime import revision
         with self.lock:
             identities = {name: adapter.runtime.confirmation_identity()
                           for name, adapter in sorted(self.adapters.items())}

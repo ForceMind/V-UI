@@ -81,3 +81,7 @@ YAML 草稿已接入原检查协调器。读取材料及能力门槛后，只解
 Actions 验收需要真实规则对照、重叠规则首条命中、多个明确出口、拒绝及出口故障、DNS 与 no-resolve 交互、自环地址拒绝、旧入站与另一核心保持、并发提交、幂等重放、旧格式迁移、切换失败回退和中断恢复。安装验收绑定同提交构建及同一轮收据。浏览器验收按用户明确授权执行。
 
 准确候选 `305d0a9` 的 [Linux 主测试](https://github.com/ForceMind/V-UI/actions/runs/42586483474)及[真实核心链路](https://github.com/ForceMind/V-UI/actions/runs/42586483573)均完成且成功。此结果覆盖草稿检查接线，不覆盖其后新增的私有检查记录组件。浏览器未验证。
+
+准确候选 `1c09330` 的 [Linux 主测试](https://github.com/ForceMind/V-UI/actions/runs/42589702878)通过；[四目标流程](https://github.com/ForceMind/V-UI/actions/runs/42589702887)在打包前因新增管理器测试后固定计数仍为 10 而失败，现按实际 11 项修正，完整 546 项严格合成契约无跳过通过。该修正不替代真实构建与安装验收。
+
+同提交的[真实链路](https://github.com/ForceMind/V-UI/actions/runs/42589702908)在 Mihomo 的无效 TLS 上游比较中得到客户端三秒握手超时，未满足原“不接受超时”断言。夹具原先只读取一个请求字节就关闭，可能在未读完 ClientHello 时触发 TCP 重置；这是待验证的夹具解释。夹具现在消费完整首条 TLS 记录后发送无效响应并半关闭，客户端仅该失败请求采用十秒上限；仍拒绝超时，并新增检查本轮真实 `first record does not look like a TLS handshake` 原因，零目标送达、无 DIRECT 和后续正向流量断言保持。准确新源必须再经真实核心验证，不能继承旧绿灯。

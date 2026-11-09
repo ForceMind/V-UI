@@ -1,5 +1,7 @@
 """Boot-snapshot/caching rules, isolated from ORM and executable processes."""
 import ast
+import hashlib
+import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import threading
@@ -37,7 +39,8 @@ def load_manager():
     nodes=[node for node in tree.body if isinstance(node,ast.ImportFrom) and node.module=='__future__'
            or isinstance(node,ast.ClassDef) and node.name in wanted]
     namespace=dict(RuntimeArtifact=RuntimeArtifact,CoreRuntime=FakeRuntime,CoreError=RuntimeError,
-                   threading=threading,uuid=uuid,Path=Path,BIN_DIR=Path('/legacy'),DATA_DIR=Path('/data'))
+                   threading=threading,uuid=uuid,Path=Path,
+                   revision=lambda value: hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest(),BIN_DIR=Path('/legacy'),DATA_DIR=Path('/data'))
     exec(compile(ast.Module(body=nodes,type_ignores=[]),str(SOURCE),'exec'),namespace)
     return types.SimpleNamespace(**namespace),FakeRuntime
 
