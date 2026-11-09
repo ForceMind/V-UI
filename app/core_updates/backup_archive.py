@@ -433,6 +433,11 @@ def exchange_restore_data(guard, journal, *, rollback=False, _selection_files=No
     phase = journal['phase']
     _need(phase not in ('confirmed', 'cleanup') if rollback else phase == 'backed_up')
     files = SelectionFiles() if _selection_files is None else _selection_files
+
+    def receipt(observed, digest=None):
+        return dict(transaction=journal['transaction'], sequence=journal['sequence'],
+                    data=observed, tree_sha256=digest)
+
     if rollback and journal['quiesced'] is None:
         try:
             recovery.lstat()
@@ -441,7 +446,7 @@ def exchange_restore_data(guard, journal, *, rollback=False, _selection_files=No
                 dev, ino = _generation(live)
                 observed = dict(live=dict(dev=dev, ino=ino), original=None, incoming=None, rejected=None)
                 _need(restore_data_position(journal, observed) == 'unplaced')
-                return observed
+                return receipt(observed)
     names = {key: 'core-restore-' + slot + '-' + key for key in ('original', 'incoming', 'rejected')}
     names['live'] = 'data'
 
@@ -475,7 +480,7 @@ def exchange_restore_data(guard, journal, *, rollback=False, _selection_files=No
         quiesced = journal['quiesced']
         if quiesced is None:
             _need(rollback and position in ('unplaced', 'staged'))
-            return observed
+            return receipt(observed)
         if not rollback:
             _need(position in ('staged', 'parked', 'trial'))
             original = live if position == 'staged' else recovery / names['original']
@@ -505,7 +510,10 @@ def exchange_restore_data(guard, journal, *, rollback=False, _selection_files=No
             os.fsync(root_fd)
             os.fsync(recovery_fd)
         _need(position in ('staged', 'restored') if rollback else position == 'trial')
-        return observed
+        final_digest = tools.recovery_tree_digest(live)
+        _need(final_digest == digest and inspect() == (position, observed),
+              'Restore data changed after exchange')
+        return receipt(observed, final_digest)
 
 
 def _migrate_stage_runtime(data, closure, migration):

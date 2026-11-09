@@ -71,7 +71,7 @@ class CompleteBackupTests(unittest.TestCase):
             return dict(dev=info.st_dev, ino=info.st_ino)
 
         with tools.stopped(self.root) as guard:
-            journal = dict(phase='backed_up',
+            journal = dict(phase='backed_up', sequence=3,
                 switch_context=dict(data_generation=generation(self.data)),
                 restore_target=dict(kind='core-restore-target-v2',
                     data=dict(slot=slot, incoming_generation=generation(incoming))),
@@ -88,8 +88,11 @@ class CompleteBackupTests(unittest.TestCase):
                     raise OSError('fixture lost acknowledgement')
                 with patch.object(full, '_rename_new', side_effect=lose_ack), self.assertRaises(OSError):
                     full.exchange_restore_data(guard, journal, rollback=rollback, _selection_files=files)
-                observed = full.exchange_restore_data(guard, journal, rollback=rollback, _selection_files=files)
-                self.assertEqual(restore_data_position(journal, observed), expected)
+                receipt = full.exchange_restore_data(guard, journal, rollback=rollback, _selection_files=files)
+                self.assertEqual(restore_data_position(journal, receipt['data']), expected)
+                self.assertEqual(receipt['transaction'], journal['transaction'])
+                self.assertEqual(receipt['sequence'], journal['sequence'])
+                self.assertEqual(receipt['tree_sha256'], tools.recovery_tree_digest(self.data))
             self.assertTrue((self.data / 'v-ui.db').is_file())
             rejected = recovery / ('core-restore-' + slot + '-rejected')
             self.assertEqual((rejected / 'fixture').read_bytes(), b'candidate')
@@ -115,7 +118,7 @@ class CompleteBackupTests(unittest.TestCase):
         with self.preflight(checksum) as checked, tools.stopped(self.root) as guard, \
                 self.prepare(guard, checked, state) as prepared:
             info = self.data.stat()
-            journal = dict(phase='prepared', quiesced=None,
+            journal = dict(phase='prepared', sequence=0, quiesced=None,
                 before=json.loads(s.encode_selection(state)),
                 after=json.loads(s.encode_selection(s._build(state.app_source, state.target,
                     state.generation+1, state.slots))),
@@ -126,8 +129,9 @@ class CompleteBackupTests(unittest.TestCase):
                               incoming_trust_sha256=hashlib.sha256(chain.read_bytes()).hexdigest(),
                               preflight_tree_sha256=checked.data_sha256)))
             files = self.restore_marker(journal)
-            observed = full.exchange_restore_data(guard, journal, rollback=True, _selection_files=files)
-            self.assertIsNone(observed['incoming'])
+            receipt = full.exchange_restore_data(guard, journal, rollback=True, _selection_files=files)
+            self.assertIsNone(receipt['data']['incoming'])
+            self.assertIsNone(receipt['tree_sha256'])
             wrong = deepcopy(journal)
             wrong['restore_target']['intents']['sing-box']['enabled'] = False
             with self.assertRaisesRegex(tools.ReleaseError, 'selection or intents'):

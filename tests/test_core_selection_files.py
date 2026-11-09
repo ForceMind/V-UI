@@ -471,12 +471,17 @@ class SelectionFilesTests(unittest.TestCase):
             self.dual_quiesce_and_backup(tx, positions['parked'])
         self.dual_quiesce_and_backup(tx, positions['staged'])
         digest = '6'*64
+        sequence = self.files.read_restore_recovery()['sequence']
         for observed, content in ((None, None), (positions['staged'], digest),
                                   (positions['trial'], inputs['data_plan']['preflight_tree_sha256'])):
             with self.subTest(observed=observed), self.assertRaises(m.CoreSelectionFilesError):
-                self.files.provision(tx, restore_data=observed, restore_tree_sha256=content, **self.context)
-        trial = self.files.provision(tx, restore_data=positions['trial'],
-                                     restore_tree_sha256=digest, **self.context)
+                self.files.provision(tx, restore_receipt=dict(transaction=tx, sequence=sequence,
+                    data=observed, tree_sha256=content), **self.context)
+        receipt = dict(transaction=tx, sequence=sequence, data=positions['trial'], tree_sha256=digest)
+        for wrong in (dict(receipt, transaction='0'*32), dict(receipt, sequence=sequence-1)):
+            with self.assertRaisesRegex(m.CoreSelectionFilesError, 'RESTORE_RECEIPT'):
+                self.files.provision(tx, restore_receipt=wrong, **self.context)
+        trial = self.files.provision(tx, restore_receipt=receipt, **self.context)
         with self.assertRaises(m.CoreSelectionFilesError):
             self.files.record_validation(tx, self.validation(trial), **self.context)
         self.files.record_validation(tx, self.validation(trial), restore_data=positions['trial'], **self.context)
@@ -501,8 +506,9 @@ class SelectionFilesTests(unittest.TestCase):
             self.files.rollback_metadata(tx, self.validation(early_selection), restore_data=positions['restored'],
                                          final_intents=self.pre['cores'], **self.context)
         self.dual_quiesce_and_backup(tx, positions['staged'])
-        self.files.provision(tx, restore_data=positions['trial'],
-            restore_tree_sha256='6'*64, **self.context)
+        self.files.provision(tx, restore_receipt=dict(transaction=tx,
+            sequence=self.files.read_restore_recovery()['sequence'],
+            data=positions['trial'], tree_sha256='6'*64), **self.context)
         journal = self.files.read_restore_recovery()
         self.assertEqual(journal['data_disposition'], 'restore_original')
         self.assertEqual(journal['quiesced']['original_tree_sha256'], '7'*64)
