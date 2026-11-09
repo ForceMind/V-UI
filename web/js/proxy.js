@@ -27,6 +27,8 @@
         STRICT_EXPORT_INGRESS_NOT_FOUND:'指定节点不是当前已启用的合格接入节点。',
         STRICT_EXPORT_STATE_MISMATCH:'活动配置、入口或运行状态已变化，严格导出已阻止；请重新核对并应用。',
         STRICT_EXPORT_RUNTIME_UNAVAILABLE:'无法确认已提交中转仍在运行，严格导出已阻止。',
+        PROXY_YAML_PLAN_NOT_READY:'YAML 草稿的运行应用仍在开发中。',
+        PROXY_YAML_BOOTSTRAP_TIMEOUT:'YAML 上游地址校验超时，请稍后重新检查。',
         PROXY_APPLY_UNAVAILABLE:'此服务器尚未开放应用能力。', PROXY_CHECK_UNAVAILABLE:'此服务器尚未开放检查能力。',
         PROXY_APPLY_FAILED:'应用未完成，请核对服务器状态；不要把草稿视为已生效。',
         PROXY_CHECK_FAILED:'草稿检查未通过；未证明线路可用。',

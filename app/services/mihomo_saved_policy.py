@@ -33,9 +33,8 @@ def yaml_endpoint_id(record_id, name):
     return 'up_' + hashlib.sha256(raw).hexdigest()[:32]
 
 
-def compile_saved_yaml_policy(base_config, inbounds, snapshot, *, endpoints, self_addresses, policy=None):
-    """Consume a validated Store snapshot and independently checked endpoint map."""
-    if (type(base_config) is not dict or type(snapshot) is not dict
+def checked_yaml_material(snapshot):
+    if (type(snapshot) is not dict
             or type(snapshot.get('revision')) is not str or not re.fullmatch('[a-f0-9]{64}', snapshot['revision'])
             or snapshot.get('execution_mode') != 'yaml'
             or type(snapshot.get('yaml_plan')) is not tuple or len(snapshot['yaml_plan']) != 2
@@ -55,6 +54,14 @@ def compile_saved_yaml_policy(base_config, inbounds, snapshot, *, endpoints, sel
                    or hashlib.sha256(raw).hexdigest() != manifest['sources'][role]
                    for role, raw in sources.items())):
         raise PolicyError('INVALID_YAML_SNAPSHOT')
+    return checked, manifest
+
+
+def compile_saved_yaml_policy(base_config, inbounds, snapshot, *, endpoints, self_addresses, policy=None):
+    """Consume a validated Store snapshot and independently checked endpoint map."""
+    if type(base_config) is not dict:
+        raise PolicyError('INVALID_BASE_CONFIG')
+    checked, manifest = checked_yaml_material(snapshot)
     profiles = tuple(UpstreamProfile.from_dict(value) for value in manifest['upstreams'])
     yaml_plan = StaticMihomoPlan(profiles, tuple(map(tuple, manifest['rules'])),
                                  tuple(map(tuple, manifest['source_rules'])), tuple(manifest['group_members'].items()))

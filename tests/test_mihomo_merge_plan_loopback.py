@@ -1,6 +1,7 @@
 """Compare the private YAML plan against fixed stock Mihomo and sing-box in CI."""
 from contextlib import ExitStack
 import json
+import hashlib
 import os
 from pathlib import Path
 from queue import Queue
@@ -225,3 +226,42 @@ class MihomoMergePlanLoopbackTests(unittest.TestCase):
             self.assertEqual(https_through(sing_port, 'match.example.test', target_port, ca,
                                            'after-guard-rejection', protocol='socks5h'), (200, BODY))
             self.assertEqual(blocked.snapshot(), blocked_before)
+
+    def test_saved_local_yaml_candidate_passes_fixed_core_configuration_check(self):
+        from app.services.mihomo_plan_record import encode_plan_record
+        from app.services.mihomo_merge import serialize_mihomo_merge
+        from app.services.mihomo_saved_policy import compile_saved_yaml_policy, yaml_endpoint_id
+        from app.services.proxy_policy import VerifiedEndpoint
+        from app.services.proxy_store import ProxyStore
+        from test_mihomo_merge_plan import BASELINE
+
+        sing_box = Path(os.environ['VUI_TEST_CORES']) / 'sing-box'
+        with tempfile.TemporaryDirectory(prefix='vui-yaml-config-') as temporary:
+            root = Path(temporary)
+            store = ProxyStore(root)
+            before = store.read_snapshot()
+            candidate = b'rules: ["DOMAIN,example.com,DIRECT", "MATCH,Chosen"]'
+            merged = serialize_mihomo_merge(BASELINE, candidate)
+            sources = {'baseline': BASELINE.encode(), 'candidate': candidate, 'merged': merged}
+            plan = plan_mihomo(BASELINE, candidate, group_members={'Chosen': 'upstream'})
+            raw = encode_plan_record(plan, sources={key: hashlib.sha256(value).hexdigest()
+                                     for key, value in sources.items()},
+                                     group_members={'Chosen': 'upstream'}, dns_upstream='upstream')
+            saved = store.save_yaml_plan(raw, sources, before['revision'])
+            settings = {key: value for key, value in saved['settings'].items() if key != 'local_password_set'}
+            settings.update(local_proxy_enabled=True, local_username='fake-config-user')
+            store.save_draft(settings, saved['revision'], local_password='fake-config-only-password')
+            snapshot = store.load_draft()
+            record = snapshot['yaml_plan'][0]
+            endpoint = VerifiedEndpoint(yaml_endpoint_id(record.record_id, 'upstream'), snapshot['revision'],
+                                        'relay.example.com', ('9.9.9.9',), 100)
+            compiled = compile_saved_yaml_policy(
+                {'inbounds': [], 'outbounds': [{'type': 'direct', 'tag': 'direct'}]}, [], snapshot,
+                endpoints={'upstream': endpoint}, self_addresses=('8.8.8.8',))
+            path = root/'candidate.json'
+            path.write_text(json.dumps(compiled.config))
+            result = subprocess.run([str(sing_box), 'check', '-c', str(path)],
+                                    capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIsNone(store.read_snapshot()['pending'])
+            self.assertIsNone(store.read_snapshot()['active'])

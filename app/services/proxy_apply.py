@@ -10,8 +10,9 @@ from __future__ import annotations
 import copy
 import errno
 import ipaddress
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import socket
+import time
 import uuid
 
 import psutil
@@ -21,12 +22,18 @@ from app.services.inbound_policy import policy_plan
 from app.services.proxy_policy import prepare_policy
 from app.services.proxy_policy import LOCAL_TAG, CompiledPolicy, VerifiedEndpoint, compile_proxy_policy
 from app.services.proxy_resolution import resolve_upstream, self_address_snapshot
+from app.services.mihomo_saved_policy import checked_yaml_material, compile_saved_yaml_policy, yaml_endpoint_id
+from app.services.upstream_profile import UpstreamProfile
 from app.services.proxy_store import ProxyCapacityError, ProxyConflict, ProxyStorageError, ProxyStore
+
+
+YAML_BOOTSTRAP_BUDGET_SECONDS = 30
 
 
 _MESSAGES = {
     "LOCAL_PORT_OCCUPIED": "Local proxy port is occupied by another socket or owner",
     "LOCAL_PORT_UNAVAILABLE": "Local proxy port ownership could not be verified",
+    "YAML_BOOTSTRAP_TIMEOUT": "YAML upstream bootstrap exceeded its aggregate deadline",
     "YAML_PLAN_NOT_READY": "YAML draft runtime application has not been enabled",
     "PREPARE_FAILED": "Proxy candidate could not be prepared; committed runtime was not changed",
     "RUNTIME_MISMATCH": "Proxy and core state disagree; affected runtime was stopped for recovery",
@@ -134,7 +141,7 @@ class ProxyApplyCoordinator:
 
     def __init__(self, store: ProxyStore, runtime, build_config, operation_lock, *,
                  rows_provider=None, panel_origin=None, resolver=None, address_provider=None,
-                 compiler=None, preflight=None, verify_runtime=None):
+                 compiler=None, preflight=None, verify_runtime=None, yaml_compiler=None):
         self.store, self.runtime = store, runtime
         self.build_config, self.lock = build_config, operation_lock
         self.rows_provider = rows_provider or (lambda: [])
@@ -142,6 +149,7 @@ class ProxyApplyCoordinator:
         self.resolver = resolver or resolve_upstream
         self.address_provider = address_provider or self_address_snapshot
         self.compiler = compiler or compile_proxy_policy
+        self.yaml_compiler = yaml_compiler or compile_saved_yaml_policy
         self.preflight = preflight_local_listener if preflight is None else preflight
         self.verify_runtime = verify_runtime
 
@@ -180,7 +188,9 @@ class ProxyApplyCoordinator:
 
     def _compile(self, snapshot, rows, *, active=False, fresh_pin=False, fence_required=True):
         if snapshot.get("execution_mode") == "yaml":
-            raise ProxyApplyError("YAML_PLAN_NOT_READY")
+            if active:
+                raise ProxyApplyError("MISSING_ACTIVE_CONTEXT")
+            return self._compile_yaml_candidate(snapshot, rows)
         plan = policy_plan(rows, snapshot["settings"])
         if fence_required and not plan.legacy and self.store.policy_schema_version() < 2:
             self._stop()
@@ -207,6 +217,42 @@ class ProxyApplyCoordinator:
         compiled = self.compiler(self.build_config(rows), rows, snapshot,
                                  endpoint=endpoint, self_addresses=addresses)
         return compiled, endpoint, addresses
+
+    def _compile_yaml_candidate(self, snapshot, rows):
+        if self.store.policy_schema_version() != 3:
+            self._stop()
+            raise ProxyApplyError("RECOVERY_REQUIRED")
+        record, manifest = checked_yaml_material(snapshot)
+        source = policy_plan(rows, snapshot["settings"])
+        endpoints, addresses = {}, ()
+        if source.requires_upstream:
+            addresses = tuple(self.address_provider(self.panel_origin))
+            profiles = {value["name"]: UpstreamProfile.from_dict(value) for value in manifest["upstreams"]}
+            needed = {target for _, _, target in manifest["rules"] if target not in {"DIRECT", "REJECT"}}
+            if manifest["dns_upstream"] is not None:
+                needed.add(manifest["dns_upstream"])
+            deadline = time.monotonic() + YAML_BOOTSTRAP_BUDGET_SECONDS
+            cache = {}
+            for name in sorted(needed):
+                if time.monotonic() >= deadline:
+                    raise ProxyApplyError("YAML_BOOTSTRAP_TIMEOUT")
+                profile = profiles[name]
+                profile_id = yaml_endpoint_id(record.record_id, name)
+                if profile.server in cache:
+                    endpoint = replace(cache[profile.server], profile_id=profile_id)
+                else:
+                    endpoint = self.resolver(profile_id, snapshot["revision"], profile,
+                                             self_addresses=addresses)
+                    if (type(endpoint) is not VerifiedEndpoint or endpoint.profile_id != profile_id
+                            or endpoint.revision != snapshot["revision"] or endpoint.host != profile.server):
+                        raise ProxyApplyError("PREPARE_FAILED")
+                    cache[profile.server] = endpoint
+                if time.monotonic() >= deadline:
+                    raise ProxyApplyError("YAML_BOOTSTRAP_TIMEOUT")
+                endpoints[name] = endpoint
+        compiled = self.yaml_compiler(self.build_config(rows), rows, snapshot,
+                                      endpoints=endpoints, self_addresses=addresses)
+        return compiled, None, addresses
 
     def _validate_saved_source(self, rows, active):
         """Reject provably corrupt persisted rows before any early return.
@@ -293,7 +339,9 @@ class ProxyApplyCoordinator:
         # CoreRuntime's validation writes an immutable private candidate but
         # neither terminates the old process nor changes its commit record.
         self.runtime.apply(compiled.config, activate=False)
-        if self.preflight is not None and compiled.pinned_address is not None:
+        has_local = any(type(row) is dict and row.get("tag") == LOCAL_TAG
+                        for row in compiled.config.get("inbounds", []))
+        if self.preflight is not None and (compiled.pinned_address is not None or has_local):
             self.preflight(compiled.config, self.runtime)
 
     def validate_active(self, rows=None) -> CompiledPolicy | None:
@@ -330,6 +378,8 @@ class ProxyApplyCoordinator:
             result.update(candidate_revision=revision(compiled.config), coverage=coverage,
                           source_fingerprint=compiled.source_fingerprint,
                           pinned_address=compiled.pinned_address, resolved_at=compiled.resolved_at)
+            if compiled.policy_version == 3:
+                result["yaml_plan"] = {"revision": compiled.yaml_plan_revision, "endpoint_count": len(compiled.endpoints)}
         return result
 
     def _existing(self, transaction_id, expected_revision, *, kind, rows=None, expected_source_fingerprint=None):
@@ -489,6 +539,8 @@ class ProxyApplyCoordinator:
             if existing is not None:
                 return existing
             snapshot = self._load_draft(expected_revision)
+            if snapshot.get("execution_mode") == "yaml":
+                raise ProxyApplyError("YAML_PLAN_NOT_READY")
             plan = policy_plan(rows, snapshot["settings"])
             self._bind_source(plan, expected_source_fingerprint, required=True)
             compiled, endpoint, addresses = self._compile(snapshot, rows)
