@@ -76,6 +76,11 @@ class CompleteBackupTests(unittest.TestCase):
 
     def test_prepared_candidate_is_retained_in_journal_slot_after_context_closes(self):
         state, intents = self.state(components=False)
+        certs = self.data/'certs'
+        certs.mkdir(mode=0o700)
+        chain = certs/'provided-fullchain.pem'
+        chain.write_bytes(b'fixture public chain')
+        chain.chmod(0o600)
         checksum = self.create(state, intents)
         before = (self.data/'v-ui.db').read_bytes()
         slot = 'c'*32
@@ -83,12 +88,29 @@ class CompleteBackupTests(unittest.TestCase):
                 self.prepare(guard, checked, state) as prepared:
             info = self.data.stat()
             journal = dict(phase='prepared', quiesced=None,
+                before=json.loads(s.encode_selection(state)),
+                after=json.loads(s.encode_selection(s._build(state.app_source, state.target,
+                    state.generation+1, state.slots))),
                 switch_context=dict(data_generation=dict(dev=info.st_dev, ino=info.st_ino)),
                 restore_target=dict(kind='core-restore-target-v2', source_backup_sha256=checksum,
+                    intents=deepcopy(intents),
                     data=dict(slot=slot, incoming_generation=checked.data_generation,
+                              incoming_trust_sha256=hashlib.sha256(chain.read_bytes()).hexdigest(),
                               preflight_tree_sha256=checked.data_sha256)))
             observed = full.exchange_restore_data(guard, journal, rollback=True)
             self.assertIsNone(observed['incoming'])
+            wrong = deepcopy(journal)
+            wrong['restore_target']['intents']['sing-box']['enabled'] = False
+            with self.assertRaisesRegex(tools.ReleaseError, 'selection or intents'):
+                full.place_restore_candidate(guard, wrong, prepared,
+                    core_backup=self.fixture.tool, current_selection=state)
+            self.assertTrue(prepared.data_path.is_dir())
+            wrong = deepcopy(journal)
+            wrong['restore_target']['data']['incoming_trust_sha256'] = '0'*64
+            with self.assertRaisesRegex(tools.ReleaseError, 'public certificate chain'):
+                full.place_restore_candidate(guard, wrong, prepared,
+                    core_backup=self.fixture.tool, current_selection=state)
+            self.assertTrue(prepared.data_path.is_dir())
             original = full.place_restore_candidate(guard, journal, prepared,
                 core_backup=self.fixture.tool, current_selection=state)
             self.assertEqual(original['data_generation'], journal['switch_context']['data_generation'])

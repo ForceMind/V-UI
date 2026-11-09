@@ -7,6 +7,7 @@ handles fixed data slots separately from preparation and selector publication.
 """
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -21,7 +22,7 @@ from app import release_tools as tools
 from . import artifacts as a, selection as s
 from .backup import CoreBackup, _intents
 from .boot import _data_root, _runtime_states
-from .selection_files import _new, restore_data_position
+from .selection_files import _new, _selection, restore_data_position
 from .store import _rename_new
 
 KIND = 'backup-components-v1'
@@ -374,6 +375,12 @@ def place_restore_candidate(guard, journal, prepared, *, core_backup, current_se
     _need(target['source_backup_sha256'] == prepared.archive_sha256
           and plan['incoming_generation'] == prepared.data_generation
           and plan['preflight_tree_sha256'] == prepared._proof.digest)
+    selection = prepared.core_closure.selection
+    before = _selection(journal['before'], selection.app_source, selection.target)
+    after = _selection(journal['after'], selection.app_source, selection.target)
+    _need(before == current_selection and after.slots == selection.slots
+          and target['intents'] == prepared.core_closure.intents,
+          'Restore selection or intents differ from the prepared backup')
     live = guard.root / 'data'
     recovery = guard.root / 'recovery'
     stage = prepared.data_path
@@ -382,6 +389,14 @@ def place_restore_candidate(guard, journal, prepared, *, core_backup, current_se
         original = validate_restore_against_current(
             guard, prepared, core_backup=core_backup, current_selection=current_selection)
         _need(original['data_generation'] == journal['switch_context']['data_generation'])
+        trust = plan['incoming_trust_sha256']
+        if trust is not None:
+            with _data_root(stage, os.geteuid(), stage.parent) as (scope, data):
+                certs = scope.directory(data, 'certs', mode=0o700)
+                fd, size = scope.file(certs, 'provided-fullchain.pem', mode=0o600, limit=128*1024)
+                raw = os.pread(fd, size+1, 0)
+                _need(len(raw) == size and hashlib.sha256(raw).hexdigest() == trust,
+                      'Restore public certificate chain differs from the journal')
         with tools._maintenance_directory(stage.parent) as source, \
                 tools._maintenance_directory(recovery, create=True) as destination:
             verify()
