@@ -110,7 +110,7 @@ def _model(profile: dict):
         raise ProxyValidationError("Upstream profile is invalid") from None
 
 
-def _settings(payload: dict, password_ref: str | None) -> dict:
+def _settings(payload: dict, password_ref: str | None, *, execution_mode="single") -> dict:
     if not isinstance(payload, dict) or set(payload) != _PUBLIC_SETTINGS:
         raise ProxyValidationError("Proxy settings have missing or unsupported fields")
     result = copy.deepcopy(payload)
@@ -126,7 +126,7 @@ def _settings(payload: dict, password_ref: str | None) -> dict:
     selected = result["selected_upstream_id"]
     if selected is not None and (not isinstance(selected, str) or not _ID.fullmatch(selected)):
         raise ProxyValidationError("Selected upstream ID is invalid")
-    if any(result[key] for key in _FLAGS) and selected is None:
+    if execution_mode != "yaml" and any(result[key] for key in _FLAGS) and selected is None:
         raise ProxyValidationError("An enabled proxy requires an explicitly selected upstream")
     if result["local_proxy_enabled"] and (not result["local_username"] or password_ref is None):
         raise ProxyValidationError("Local proxy requires a username and password")
@@ -576,7 +576,8 @@ class ProxyStore:
         password_ref = settings["local_password_ref"]
         _require(password_ref is None or isinstance(password_ref, str) and _SECRET.fullmatch(password_ref) is not None)
         try:
-            _settings({key: value for key, value in settings.items() if key != "local_password_ref"}, password_ref)
+            _settings({key: value for key, value in settings.items() if key != "local_password_ref"}, password_ref,
+                      execution_mode=doc.get("execution_mode", "single"))
         except ProxyValidationError:
             raise ProxyStorageError("Saved proxy settings are invalid; no defaults were applied.") from None
         entries = doc["upstreams"]
@@ -721,6 +722,8 @@ class ProxyStore:
             self._snapshot(revisions, secrets, state)
             if doc["schema_version"] == 1:
                 return self._snapshot(revisions, secrets, state)
+            _settings({key: value for key, value in doc["settings"].items() if key != "local_password_ref"},
+                      doc["settings"]["local_password_ref"], execution_mode="single")
             doc.update(execution_mode="single", yaml_plan=None)
             return self._save_doc(root, revisions, secrets, state, doc)
 
@@ -963,7 +966,7 @@ class ProxyStore:
                 secret = {"schema_version": 1, "kind": "local_password", "password": local_password}
                 ref = "sec_" + uuid.uuid4().hex
                 doc["local_password_revision"] = _digest(secret)
-            doc["settings"] = _settings(settings, ref)
+            doc["settings"] = _settings(settings, ref, execution_mode=doc.get("execution_mode", "single"))
             if doc["settings"]["selected_upstream_id"] is not None and doc["settings"]["selected_upstream_id"] not in profiles:
                 raise ProxyValidationError("Selected upstream does not exist")
             self._check_doc_capacity(state, doc)

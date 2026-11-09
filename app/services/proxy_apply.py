@@ -27,6 +27,7 @@ from app.services.proxy_store import ProxyCapacityError, ProxyConflict, ProxySto
 _MESSAGES = {
     "LOCAL_PORT_OCCUPIED": "Local proxy port is occupied by another socket or owner",
     "LOCAL_PORT_UNAVAILABLE": "Local proxy port ownership could not be verified",
+    "YAML_PLAN_NOT_READY": "YAML draft runtime application has not been enabled",
     "PREPARE_FAILED": "Proxy candidate could not be prepared; committed runtime was not changed",
     "RUNTIME_MISMATCH": "Proxy and core state disagree; affected runtime was stopped for recovery",
     "APPLY_FAILED": "Proxy apply failed; the complete previous committed runtime was restored",

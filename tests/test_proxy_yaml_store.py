@@ -66,6 +66,21 @@ class ProxyYamlStoreTests(unittest.TestCase):
         with self.assertRaises(ProxyStorageError):
             self.store.read_snapshot()
 
+    def test_yaml_switches_do_not_require_a_separate_classic_upstream(self):
+        saved = self.store.save_yaml_plan(self.record, self.sources, self.before['revision'])
+        settings = {key: value for key, value in saved['settings'].items() if key != 'local_password_set'}
+        settings.update(local_proxy_enabled=True, local_username='yaml-local')
+        enabled = self.store.save_draft(settings, saved['revision'], local_password='private-test-password')
+        self.assertIsNone(enabled['settings']['selected_upstream_id'])
+        revisions_before = sorted((self.store.path/'revisions').iterdir())
+        with self.assertRaises(ProxyValidationError):
+            self.store.clear_yaml_plan(enabled['revision'])
+        self.assertEqual(sorted((self.store.path/'revisions').iterdir()), revisions_before)
+        self.assertEqual(self.store.read_snapshot()['revision'], enabled['revision'])
+        settings['local_proxy_enabled'] = False
+        disabled = self.store.save_draft(settings, enabled['revision'])
+        self.assertEqual(self.store.clear_yaml_plan(disabled['revision'])['execution_mode'], 'single')
+
     def test_backup_roundtrip_includes_private_sources_and_rejects_tampering(self):
         self.store.save_yaml_plan(self.record, self.sources, self.before['revision'])
         with self.store.backup_snapshot() as entries:
