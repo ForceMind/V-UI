@@ -7,10 +7,14 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 import yaml
 
 from app.models import database
+from app.services import routing_store
+from app.services.mihomo_routing import default_routing
+from app.services.routing_store import read_snapshot, save_routing
 from app.services.core_manager import SingBoxAdapter
 import test_subscription_tokens as grant_tests
 from loopback_helpers import (
@@ -38,6 +42,11 @@ class ShadowsocksLoopbackTests(unittest.TestCase):
         self.root=Path(self.stack.enter_context(
             tempfile.TemporaryDirectory(prefix="vui-ss-chain-")
         ))
+        # Protocol authentication uses literal loopback endpoints, not geography.
+        # Select the existing no-geodata user mode before the real API export;
+        # never trim DNS fields or mutate the product's standard defaults.
+        self.stack.enter_context(patch.object(routing_store, "ROUTING_FILE", self.root/"routing.json"))
+        save_routing({**default_routing(), "mode":"direct"}, read_snapshot()["revision"])
         self.server_port=unused_port()
         self.http_port,self.http_requests=start_http_target(self.stack)
         self.udp_port,self.udp_packets=start_udp_echo(self.stack)
@@ -91,15 +100,29 @@ class ShadowsocksLoopbackTests(unittest.TestCase):
         response=self.public_get(grant["paths"]["mihomo.yaml"])
         self.assertEqual(response.status_code,200,response.text)
         config=yaml.safe_load(response.text)
+        self.assertEqual(len(config["proxies"]), 1)
         proxy=config["proxies"][0]
         self.assertEqual(proxy["type"],"ss")
         self.assertEqual(proxy["cipher"],self._db_settings()["method"])
         self.assertEqual(proxy["password"],self._db_settings()["password"])
         self.assertTrue(proxy["udp"])
+        self.assertEqual(proxy["name"], "ss-real")
+        self.assertEqual(proxy["server"], "127.0.0.1")
+        self.assertEqual(proxy["port"], self.server_port)
+        groups=config["proxy-groups"]
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["name"], "FORCE_PROXY")
+        self.assertEqual(groups[0]["type"], "select")
+        self.assertEqual(groups[0]["proxies"], [proxy["name"]])
+        self.assertNotIn("DIRECT", groups[0]["proxies"])
+        self.assertFalse(any(rule.startswith(("GEOSITE,", "GEOIP,")) for rule in config["rules"]))
+        for field in ("nameserver-policy", "proxy-server-nameserver-policy"):
+            self.assertFalse(any(name.lower().startswith(("geosite:", "geoip:")) for name in config["dns"][field]))
         config["mixed-port"]=port
         config["bind-address"]="127.0.0.1"
-        # Test the protocol path itself; local-address protection must not bypass it.
-        config["rules"]=["MATCH,PROXY"]
+        # Keep the API's complete DNS output; only force this protocol test's
+        # literal target through the sole exported SS node, with no DIRECT choice.
+        config["rules"]=["MATCH,FORCE_PROXY"]
         path=self.root/("mihomo-"+str(port)+".yaml")
         path.write_text(yaml.safe_dump(config,allow_unicode=True,sort_keys=False))
         return path

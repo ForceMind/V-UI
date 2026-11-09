@@ -193,8 +193,9 @@ class AdminAuthMiddleware:
         bounded_auth = path.startswith("/api/auth/") and request.method == "POST"
         bounded_proxy = path.startswith("/api/proxy/") and request.method in {"POST", "PUT", "PATCH"}
         bounded_maintenance = path.startswith('/api/maintenance/') and request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}
+        bounded_dns = path.startswith('/api/certificates') and request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}
         payload = {}
-        if bounded_auth or bounded_proxy or bounded_maintenance or principal is not None:
+        if bounded_auth or bounded_proxy or bounded_maintenance or bounded_dns or principal is not None:
             byte_limit = 2_097_152 if bounded_proxy else 65_536 if principal is not None else 8192
             if principal is not None and request.method in {'GET', 'HEAD', 'OPTIONS'}:
                 byte_limit = 0
@@ -215,7 +216,7 @@ class AdminAuthMiddleware:
             except asyncio.TimeoutError:
                 await reject(408, "Request timed out")
                 return
-            if principal is not None or bounded_maintenance:
+            if principal is not None or bounded_maintenance or bounded_dns:
                 def unique_object(pairs):
                     result = {}
                     for key, value in pairs:

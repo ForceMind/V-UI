@@ -9,6 +9,7 @@
 | 正式应用v0.4.22 | main `558687a76cd29f4e4735284926eb05bf6664472e`，PR137/138正常合并，[Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.22) |
 | 已验短入口 | main `39181e0cdb9643422a19049df942b208f876faf4`，PR139/140正常合并 |
 | 开源文档本批起点 | 上述入口main；后续文档提交不改变已发布应用source |
+| 已合入的发布维护 | main `3606cad8d72aef6162fbb41958dc4fcc1004724f`，P1并行安装与原生材料资格；没有新发应用或改旧22资产 |
 | 准确资格 | 应用与入口各自候选/dev/main九组、12 jobs成功，同源四目标、新装和公开14/15/16/17/19/20/21保数据升级 |
 | 实际main URL | [短命令真实安装42405651147](https://github.com/ForceMind/V-UI/actions/runs/42405651147)，[完整安装42405651162](https://github.com/ForceMind/V-UI/actions/runs/42405651162) |
 | 已授权实例更新 | 私有备份、单次正式版升级、健康与原配置读回完成；具体证据仅私存 |
@@ -18,7 +19,9 @@
 
 ## 当前迭代
 
-整顿README、用户手册、文档索引、贡献/安全/支持/社区与Issue/PR模板，补齐v0.4.22进度，归档混入当前说明的旧阶段文字。纯文档不涨版本，不更改setup摘要、安装器、应用、发布器、固定核心或生产配置。
+开源文档与P1发布维护已完成正常合并；当前是Cloudflare DNS-01/通配符的v0.4.23发布准备，见[实施契约](DNS01_CLOUDFLARE_CONTRACT.md)与[候选指南](DNS01_CLOUDFLARE.md)。冻结产品为`4bd1d9a648a8096fbf2fa05314e35049a2408e7c`，已完成独审；其自身八组Actions及同轮10个安装角色/10份收据通过，ARM glibc仍因官方固定资产API503未构建成功。原始失败保留。
+
+当前准备提交只允许精确`.github/release-acceptance.json`及普通Markdown；必须在最终准确HEAD重验完整九组/21 jobs、四目标和全部安装角色，不继承旧source或跨attempt材料。旧v0.4.22仍是公开稳定版及短入口目标；没有Ready、受保护分支合并、公开23或生产更新授权，不运行publisher作所谓dry run。P3另属独立后续批次，不混入此冻结产品。
 
 职责按会话中的具体文件分工执行，保留并发修改与未跟踪文件。当前工作分支按任务命名；提交前再次核对实际分支、HEAD和差异，不把本文的历史起点当作永远不变的远端HEAD。
 

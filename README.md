@@ -17,11 +17,7 @@
 bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh)
 ```
 
-当前短入口安装已公开的 **v0.4.22**，固定核验安装器和完整套件摘要。脚本来自本项目仓库，请先确认软件来源可信；需要固定版本和入口摘要时，使用对应 [Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.22) 的说明。显式选择当前版本：
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh) --version v0.4.22
-```
+当前短入口安装已公开的 **v0.4.22**，固定核验安装器和完整套件摘要。脚本来自本项目仓库，请先确认软件来源可信；需要固定版本和入口摘要时，使用对应 [Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.22) 的说明。该短入口仍固定公开22，不会自动安装开发候选。
 
 新安装按提示填写自己的域名、邮箱和端口，并本人确认首次自动证书的 CA 条款。管理员用户名和强密码自动生成，只在当前终端交付；保存凭据后，按安装器最终输出的 HTTPS 地址登录。域名不能带协议、路径或端口，不能用 GitHub 下载域名代替自己的域名。
 
@@ -39,6 +35,19 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh
 | 分享给手机、电脑或另一服务器 | 在节点中复制链接、显示二维码或创建订阅；供另一 V-UI 使用时选择专用的“仅 TCP”上游导出 |
 
 保存成功、核心正在运行和客户端实际连通是不同状态，请检查应用结果。节点连接地址独立于面板地址；证书错误应排查域名、证书链和时间，保持 TLS 验证开启。操作与参数说明见[配置指南](docs/CONFIGURATION.md)。
+
+## 开发候选 v0.4.23
+
+**v0.4.23** 源码候选新增 Cloudflare DNS-01、根域名与一级通配符证书、具体连接域名绑定及遗留验证记录清理。实现与独立审查已收口；当前准确提交的完整 Actions、四目标、新装及旧版升级资格仍待完成，**尚未公开或部署**。公开稳定版与短入口仍是22。
+
+[DNS-01使用指南](docs/DNS01_CLOUDFLARE.md)面向已经安装相应版本、能够以管理员登录的面板；初装仍默认HTTP-01，需要满足TCP 80条件。DNS私有备份含凭据且未加密，恢复后需重新验证启用；含DNS数据不能使用旧运行时回退。
+
+下面仅是**候选正式发布并取得、核验该版受信安装器之后**的参数示例，当前不要执行，也不要传给仍固定22的短入口。摘要占位符须替换为该版可信清单整文件摘要，详见[安装指南](docs/INSTALLATION.md#3-本地完整套件)：
+
+```bash
+bash install.sh --version v0.4.23 --with-global-cli \
+  --kit-sha256 '<独立核验的SHA256SUMS整文件SHA-256>' --interactive
+```
 
 ## 能力与边界
 
@@ -62,13 +71,13 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh
 
 NixOS、声明式或只读系统不在安装支持范围。项目尚未承诺 **512 MiB 整机长期运行资格**，请为系统、核心负载、证书、升级与备份保留资源，见[资源要求](docs/LOW_RESOURCE_TARGET.md)。
 
-v0.4.22 已完成 Actions 中的四目标构建、真实核心、新装和多个公开旧版保数据升级验收；这些结果不能代替你的主机与客户端验证。当前版本**浏览器未验证**，不声明页面视觉或真实交互验收通过。
+v0.4.22 已完成 Actions 中的四目标构建、真实核心、新装和多个公开旧版保数据升级验收；这些结果不能代替你的主机与客户端验证。公开22与23候选均**浏览器未验证**，不声明页面视觉或真实交互验收通过。
 
 ## 文档与社区
 
 | 内容 | 入口 |
 | --- | --- |
-| 使用与维护 | [文档索引](docs/README.md) · [安装](docs/INSTALLATION.md) · [配置](docs/CONFIGURATION.md) · [证书](docs/CERTIFICATES.md) |
+| 使用与维护 | [文档索引](docs/README.md) · [安装](docs/INSTALLATION.md) · [配置](docs/CONFIGURATION.md) · [证书](docs/CERTIFICATES.md) · [23候选DNS指南](docs/DNS01_CLOUDFLARE.md) |
 | 升级、备份与故障 | [运维](docs/OPERATIONS.md) · [故障排查](docs/TROUBLESHOOTING.md) |
 | 版本与方向 | [变更记录](CHANGELOG.md) · [路线图](ROADMAP.md) · [历史资料](docs/history/README.md) |
 | 参与项目 | [贡献指南](CONTRIBUTING.md) · [行为准则](CODE_OF_CONDUCT.md) · [支持渠道](SUPPORT.md) · [安全报告](SECURITY.md) |

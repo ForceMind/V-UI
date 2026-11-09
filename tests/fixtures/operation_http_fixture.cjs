@@ -56,7 +56,7 @@ function fixture(options={}) {
             const row={id:Math.max(0,...nodes.map(r=>r.id))+1,core:'sing-box',protocol:'vless',port:body.port,enable:true,
                 routing_mode:body.routing_mode,remark:body.remark,tag:body.tag,expiry_time:0,mutation_revision:rev(1000+nodes.length),
                 content_revision:rev(2000+nodes.length),share_eligible:true,upstream_export_eligible:true,routing_status:{state:'applied'}};
-            nodes.push(row);editors.set(row.id,{mutation_revision:row.mutation_revision,content_revision:row.content_revision,certificate_id:body.certificate_id,profile:{security:'tls',server_name:'vpn.example.test'}});
+            nodes.push(row);editors.set(row.id,{mutation_revision:row.mutation_revision,content_revision:row.content_revision,certificate_id:body.certificate_id,profile:{security:'tls',server_name:body.profile?.server_name||'vpn.example.test'}});
             if(!options.stopped)cores['sing-box'].running=true;
             source++;state.active.core_revision=rev(600+source);cores['sing-box'].applied_revision=state.active.core_revision;
             if(loseCreate){loseCreate=false;throw new Error('synthetic lost create reply');}

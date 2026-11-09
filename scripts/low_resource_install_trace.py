@@ -17,7 +17,7 @@ ALLOWED_PRODUCT_CHANGES = ('app/release_tools.py',)
 PRODUCT_PATHS = ('app', 'web', 'deploy', 'third_party', 'main.py', 'VERSION',
     'install.sh', 'requirements-runtime.txt', 'scripts/deploy.py',
     'scripts/install_system.py', 'scripts/build_bundle.py', 'scripts/platform_support.py',
-    'scripts/fetch_portable_runtimes.py', 'scripts/fetch_test_cores.py',
+    'scripts/fetch_portable_runtimes.py', 'scripts/fetch_test_cores.py', 'scripts/test_asset_download.py',
     'scripts/prepare_frontend.py', 'scripts/vendor_frontend.py')
 PHASES = ('verify_and_unpack_release', 'extract_portable_runtime', 'ensurepip',
           'offline_pip_install', 'pip_check', 'hash_prepared_runtime',

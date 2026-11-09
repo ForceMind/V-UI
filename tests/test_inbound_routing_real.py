@@ -590,6 +590,11 @@ class InboundRoutingRealTests(DoubleHopFixture):
         import select
         import sys
         log = self.path('simple-controller', 'stderr')
+        http_failures = []
+        allowed_codes = {'DOMAIN_MISMATCH', 'CERTIFICATE_DOMAIN_MISMATCH', 'INVALID_CONNECTION_DOMAIN',
+            'CONNECTION_DOMAIN_REQUIRED', 'CERTIFICATE_CHAIN_VERIFICATION_FAILED', 'CERTIFICATE_FILES_CHANGED',
+            'INVALID_CERTIFICATE_MATERIAL', 'CERTIFICATE_FILES_INVALID', 'CERTIFICATE_NOT_FOUND',
+            'NODE_CONTENT_CHANGED', 'PROXY_REVISION_CONFLICT'}
         with log.open('w') as stderr:
             process = subprocess.Popen(['node', 'tests/operation_http_bridge.cjs'],
                 cwd=Path(__file__).resolve().parents[1], stdin=subprocess.PIPE,
@@ -603,7 +608,8 @@ class InboundRoutingRealTests(DoubleHopFixture):
                     line=process.stdout.readline()
                     if not line:break
                     message=json.loads(line)
-                    if 'error' in message:self.fail('Shipped simple controller refused real journey: '+json.dumps(message['error']))
+                    if 'error' in message:self.fail('Shipped simple controller refused real journey: '+json.dumps(message['error'])
+                        + ' HTTP failures: ' + json.dumps(http_failures))
                     if 'result' in message:
                         result=message['result'];process.stdin.close();process.wait(timeout=5)
                         self.assertEqual(process.returncode,0);return result
@@ -613,6 +619,11 @@ class InboundRoutingRealTests(DoubleHopFixture):
                         headers=item['headers'],**({'json':item['body']} if item['body'] is not None else {}))
                     try:value=response.json()
                     except ValueError:value=response.text
+                    if response.status_code >= 400:
+                        detail=value.get('detail') if isinstance(value,dict) else None
+                        code=detail.get('code') if isinstance(detail,dict) else detail
+                        http_failures.append({'method':item['method'],'path':item['path'],
+                            'status':response.status_code,'code':code if isinstance(code,str) and code in allowed_codes else None})
                     process.stdin.write((json.dumps({'status':response.status_code,'value':value,
                         'nodeRevision':response.headers.get('X-VUI-Node-Revision')})+'\n').encode());process.stdin.flush()
                 self.fail('Shipped simple controller did not finish its bounded real journey')
@@ -626,18 +637,38 @@ class InboundRoutingRealTests(DoubleHopFixture):
         # There is no ACME request, real domain, browser or production data.
         import sqlite3
         import secrets
+        from cryptography.hazmat.primitives import serialization
+        from app.certificates.material import CertificateError, make_csr, validate_material
+        from test_certificates import SigningProvider
+        # The network fixture also covers loopback IPs. Managed material has an
+        # exact DNS-only SAN contract; never loosen the production validator.
+        with self.assertRaises(CertificateError) as rejected:
+            validate_material(self.cert.read_bytes(), self.key.read_bytes(), SNI,
+                              trusted_roots=self.trust.read_bytes())
+        self.assertEqual(rejected.exception.code, 'DOMAIN_MISMATCH')
+        provider=SigningProvider()
+        work=self.root/'managed-controller-signing'; work.mkdir(mode=0o700)
+        managed_key,csr=make_csr(SNI)
+        request=work/'request.pem'; request.write_bytes(csr); request.chmod(0o600)
+        chain=provider.issue(SimpleNamespace(domain=SNI),work,None)
+        self.assertEqual(provider.calls,1)
+        # Both actual panels and new Mihomo clients already reference this
+        # private SSL_CERT_FILE; retain every prior root and add only this CA.
+        self.trust.write_bytes(self.trust.read_bytes()+provider.ca.public_bytes(serialization.Encoding.PEM))
+        material=validate_material(chain,managed_key,SNI,trusted_roots=self.trust.read_bytes())
         certificate_id=secrets.token_hex(16)
-        chain=self.cert.read_bytes();digest=hashlib.sha256(chain).hexdigest()
+        digest=hashlib.sha256(chain).hexdigest()
+        self.assertEqual(material['revision'],digest)
         folder=self.destination.data/'certificates'/'revisions'/certificate_id/digest
         folder.mkdir(parents=True,mode=0o700)
-        for name,content in [('fullchain.pem',chain),('privkey.pem',self.key.read_bytes())]:
+        for name,content in [('fullchain.pem',chain),('privkey.pem',managed_key)]:
             path=folder/name;path.write_bytes(content);path.chmod(0o600)
         with sqlite3.connect(self.destination.data/'v-ui.db') as db:
             db.execute('INSERT INTO managed_certificates '
                 '(id,domain,email,environment,auto_renew,revision,not_before,not_after,renew_at,retry_at,last_attempt,failures,created_at) '
                 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                (certificate_id,SNI,'fixture@example.test','production',0,digest,int(time.time())-60,
-                 int(time.time())+3600,0,0,0,0,int(time.time())))
+                (certificate_id,SNI,'fixture@example.test','production',0,digest,material['not_before'],
+                 material['not_after'],0,0,0,0,int(time.time())))
         direct=self.run_simple_controller('direct',port=listen_port())
         self.assertEqual(direct['kind'],'node')
         self.assertEqual(direct['node']['routing_mode'],'direct')

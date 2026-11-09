@@ -4,7 +4,11 @@ import hashlib
 import json
 from pathlib import Path
 import sys
-import urllib.request
+
+if __package__:
+    from .test_asset_download import download_pinned
+else:
+    from test_asset_download import download_pinned
 
 PIN = {'version':'1.19.32',
        'url':'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-linux-amd64-v1.19.32.gz',
@@ -13,8 +17,7 @@ PIN = {'version':'1.19.32',
 
 
 def fetch(destination: Path):
-    with urllib.request.urlopen(PIN['url'], timeout=90) as response:
-        data = response.read(100_000_001)
+    data = download_pinned(PIN['url'], max_bytes=100_000_000, timeout=90)
     if len(data) > 100_000_000 or hashlib.sha256(data).hexdigest() != PIN['sha256']:
         raise ValueError('Mihomo archive checksum mismatch')
     binary = gzip.decompress(data)

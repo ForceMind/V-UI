@@ -9,13 +9,27 @@
 <p id="notice" role="status" aria-live="polite">正在读取…</p>
 <div id="cert-workspace" hidden>
 <section><h2>添加连接域名</h2>
-<p class="hint">将域名的 A / AAAA 记录指向此 VPS，并允许公网访问 80 端口。由一键安装器准备 HTTP-01 验证服务。不支持通配符；已有网站占用 80 时不能强行覆盖。</p>
-<form id="request-certificate"><div class="columns"><div><label for="domain">域名</label><input id="domain" required maxlength="253" placeholder="vpn.example.com（不含 https://、端口、路径）"></div><div><label for="email">联系邮箱</label><input id="email" required type="email" maxlength="254" placeholder="admin@example.com"></div></div>
+<p class="hint" id="http-guide">将域名的 A / AAAA 记录指向此 VPS，并允许公网访问 80 端口。由一键安装器准备 HTTP-01 验证服务。已有网站占用 80 时不能强行覆盖。</p>
+<form id="request-certificate"><label for="method">验证方式</label><select id="method"><option value="http-01">通过80端口验证（HTTP-01，默认）</option><option value="dns-01" id="dns-method" disabled>通过Cloudflare DNS验证（支持通配符）</option></select>
+<div class="columns"><div><label for="domain">证书域名</label><input id="domain" required maxlength="253" placeholder="vpn.example.com（不含 https://、端口、路径）"></div><div><label for="email">联系邮箱</label><input id="email" required type="email" maxlength="254" placeholder="admin@example.com"></div></div>
+<div id="dns-options" hidden><label for="coverage">覆盖范围</label><select id="coverage"><option value="wildcard">此域名和全部一级子域名（推荐）</option><option value="single">仅此域名</option></select><p id="dns-names" class="hint"></p>
+<label for="dns-profile">Cloudflare凭据</label><select id="dns-profile"><option value="">请先添加或选择凭据</option></select><button id="add-dns-profile" type="button">添加Cloudflare凭据</button>
+<p class="hint">DNS验证不要求开放80端口，也不会关闭其他证书使用的80端口。签发只证明域名控制；实际连接域名仍需配置指向本机的A/AAAA记录，不会自动修改这些记录。</p></div>
 <details><summary>高级：签发环境</summary><label for="environment">签发环境</label><select id="environment"><option value="production">正式证书（推荐，节点可用）</option><option value="staging">仅测试域名验证（不能用于正式节点）</option></select></details>
 <label class="check"><input type="checkbox" id="auto-renew" checked>到续期窗口后自动申请新证书</label>
-<label class="check"><input type="checkbox" id="terms" required>我控制该域名，并同意 <a href="https://letsencrypt.org/repository/" target="_blank" rel="noopener noreferrer">Let’s Encrypt 订阅协议</a> 与域名公开记录</label>
+<label class="check"><input type="checkbox" id="terms" required>我控制申请的域名，并同意 <a href="https://letsencrypt.org/repository/" target="_blank" rel="noopener noreferrer">Let’s Encrypt 订阅协议</a> 与域名公开记录；选择DNS验证时，允许管理本次签发和续期的验证TXT记录</label>
 <p class="hint">新私钥在本机生成；页面和订阅不会返回私钥。测试与正式证书分开保存。自动续期在面板服务运行时检查；停止服务会暂停续期。</p>
 <button type="submit" id="issue" class="primary">申请证书</button></form></section>
+<details id="dns-credentials" hidden><summary>Cloudflare凭据（仅管理员）</summary><p class="hint">在Cloudflare创建仅限指定域名的API Token，权限为Zone → DNS → Edit、Zone → Zone → Read。不要使用Global API Key。保存时只核对域名，不创建测试记录。Token仅写入；续期所需文件会进入完整私有备份，该备份未加密，请妥善保存。</p>
+<form id="dns-credential-form"><h3 id="dns-form-title">添加Cloudflare凭据</h3><label for="dns-label">凭据名称</label><input id="dns-label" required maxlength="64" placeholder="例如：主域名">
+<label for="dns-zone">DNS托管域名</label><input id="dns-zone" required maxlength="253" placeholder="example.com（Cloudflare中的Zone名称）">
+<label for="dns-token">API Token</label><input id="dns-token" required type="password" minlength="20" maxlength="256" autocomplete="new-password" spellcheck="false">
+<p class="hint">Token不会回显。替换Token不会自动启用禁用或恢复待确认的凭据；正在执行的任务保留原凭据修订。</p>
+<button id="save-dns-profile" type="submit">验证并保存</button><button id="cancel-dns-edit" type="button">取消编辑并清空</button></form><div id="dns-credential-list"></div></details>
+<section id="dns-challenges" hidden><h2>遗留的DNS验证记录（仅管理员）</h2>
+<p class="hint">这里处理本次验证留下的TXT记录。清理只使用对应Cloudflare凭据处理本任务自己的记录，不重新签发证书，不删除其他TXT。写入结果不明时先刷新核对，勿反复提交。</p>
+<p class="hint">系统无法确认未知写入没有残留时，会继续保留待清理状态。只有你已在Cloudflare核对并确认没有残留，才使用人工确认；人工确认不等于系统自动清理成功。</p>
+<div id="dns-challenge-list"></div></section>
 <section><div class="section-head"><div><h2>02 · 证书与续期</h2><p>签发成功不等于所有绑定均已应用，请查看每个使用位置的状态。</p></div><button id="refresh" type="button">刷新状态</button></div>
 <div id="certificate-list"></div></section>
 <section><h2>03 · 使用说明</h2><p class="hint">新建节点时可选择托管证书。已有受支持的 sing-box TLS 与 Xray VLESS/TCP/TLS 节点可在证书卡片中绑定。续期不会主动启动你手动停止的核心；应用失败会保留旧运行配置并显示待处理。</p>

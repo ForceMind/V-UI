@@ -297,7 +297,7 @@ class ProxyManagerIntegrationTests(unittest.TestCase):
 
     def test_certificate_reload_uses_committed_relay_and_keeps_credentials(self):
         from app.certificates.manager import CertificateManager
-        from app.certificates.models import CertificateBinding
+        from app.certificates.models import Certificate, CertificateBinding
         database.Base.metadata.create_all(self.engine)
         item = create_inbound(self.db, payload())
         self.activate(relay=True)
@@ -305,6 +305,8 @@ class ProxyManagerIntegrationTests(unittest.TestCase):
         self.draft(relay=False)
         target = 'inbound:' + str(item.id)
         self.db.add(CertificateBinding(target=target, certificate_id='a' * 32))
+        self.db.add(Certificate(id='a' * 32, domain='ingress.example.test', email='fixture@example.test',
+            environment='production', auto_renew=False, created_at=1))
         self.db.commit()
         manager = CertificateManager(Path(self.temp.name) / 'certificates')
         paths = (Path('/fixture/renewed-certificate.pem'), Path('/fixture/renewed-key.pem'))

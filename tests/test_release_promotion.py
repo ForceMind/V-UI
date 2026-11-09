@@ -1810,7 +1810,7 @@ class ReleasePromotionTests(unittest.TestCase):
     def test_actual_builder_packages_control_sources_and_installer_verifies_full_kit(self):
         root=Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as directory:
-            work=Path(directory)
+            work=Path(directory).resolve()
             source=work/'bundle.zip'
             raw=io.BytesIO()
             with zipfile.ZipFile(raw,'w') as archive:
@@ -1967,6 +1967,10 @@ class ParallelPublisherAdapterTests(unittest.TestCase):
         self.assertIs(kwargs['browser_skip_steps'],p.BROWSER_SKIP_STEPS)
         self.assertIn('Verify actual bundle under one CPU and 320 MiB cgroup',kwargs['required_other_steps']['release.yml'])
         self.assertIn('Run tests',kwargs['required_other_steps']['test.yml'])
+        self.assertIn('Test actual Certbot DNS-01 wildcard renewal and legacy-reader refusal',
+                      kwargs['required_other_steps']['acme.yml'])
+        self.assertIn('Exercise DNS wildcard material through actual sing-box and Xray TLS',
+                      kwargs['required_other_steps']['loopback.yml'])
 
     def promotion(self, existing=False):
         from scripts import publish_release as p, parallel_release_policy as policy

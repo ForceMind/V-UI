@@ -868,6 +868,11 @@ def _policy_release_compatible(data: Path, payload: Path):
     Read a literal from already verified package source; do not execute an old
     release against live data merely to discover that it ignores new metadata.
     """
+    from app.certificates.dns_backup import DNSBackupError, require_dns_release
+    try:
+        require_dns_release(data, payload)
+    except DNSBackupError:
+        raise ReleaseError('Selected release cannot safely read DNS certificate state; downgrade refused') from None
     if (data / 'v-ui.db').exists():
         _database_mode_fence(data)
     if not (data / '.proxy-state-initialized').exists():
@@ -920,6 +925,11 @@ def _backup_locked(guard: _StoppedGuard, destination: Path) -> str:
         data=root/'data'; work=Path(temporary)/'data'; work.mkdir(mode=0o700)
         private_files = set()
         if not data.is_dir(): raise ReleaseError('No data directory to back up')
+        from app.certificates.dns_backup import DNSBackupError, validate_dns_snapshot, prepare_dns_staging
+        try:
+            source_dns = validate_dns_snapshot(data)
+        except DNSBackupError:
+            raise ReleaseError('DNS state is unsafe or incomplete; no backup was created') from None
         # The initialized marker is required to distinguish saved state from a
         # never-applied installation. Copy it only as part of a validated,
         # locked proxy snapshot; do not broaden the general hidden-file rule.
@@ -950,7 +960,15 @@ def _backup_locked(guard: _StoppedGuard, destination: Path) -> str:
                 src.backup(dst)
                 if dst.execute('PRAGMA integrity_check').fetchone()[0] != 'ok': raise ReleaseError('Database integrity check failed')
         # SQLite retains its existing backup/transaction path and is not cooled.
-        return create_archive(work,destination,{'kind':'backup','data_path':str(data),'platform':PLATFORM},
+        try:
+            prepare_dns_staging(work)
+            copied_dns = validate_dns_snapshot(work)
+            if copied_dns != source_dns:
+                raise DNSBackupError()
+        except DNSBackupError:
+            raise ReleaseError('DNS backup reference closure is incomplete; no backup was created') from None
+        kind = 'backup-dns01-v1' if copied_dns else 'backup'
+        return create_archive(work,destination,{'kind':kind,'data_path':str(data),'platform':PLATFORM},
                               private_files=private_files)
 
 def recover_restore(root: Path):
@@ -1000,9 +1018,18 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
     guard._check(); root=guard.root
     with tempfile.TemporaryDirectory(prefix='.restore-',dir=root) as temporary:
         work=Path(temporary)/'data'; meta=unpack_verified(archive,expected_sha,work)
-        if meta.get('kind') != 'backup' or meta.get('data_path') != str(root/'data'):
-            raise ReleaseError('Backup belongs to a different data path; automatic path rewriting is not supported')
+        if meta.get('kind') not in ('backup', 'backup-dns01-v1') or meta.get('data_path') != str(root/'data'):
+            raise ReleaseError('Backup belongs to a different data path or unsupported format; automatic path rewriting is not supported')
         (work/MANIFEST).unlink()
+        from app.certificates.dns_backup import (DNSBackupError, validate_dns_snapshot,
+                                                prepare_dns_staging, suspend_restored_dns)
+        try:
+            prepare_dns_staging(work)
+            incoming_dns = validate_dns_snapshot(work)
+            if incoming_dns != (meta['kind'] == 'backup-dns01-v1'):
+                raise DNSBackupError()
+        except DNSBackupError:
+            raise ReleaseError('Backup DNS format or reference closure is invalid; existing data was not replaced') from None
         proxy_names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
         incoming_proxy = None
         current_schema = 1
@@ -1069,6 +1096,11 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
             ProxyStore(work).ensure_policy_v2()
         if (root / 'CURRENT.json').exists():
             _policy_release_compatible(work, active(root)[0] / 'payload')
+        if incoming_dns:
+            try:
+                suspend_restored_dns(work)
+            except DNSBackupError:
+                raise ReleaseError('Restored DNS authority could not be suspended; existing data was not replaced') from None
         db_path=work/'v-ui.db'
         if not db_path.is_file(): raise ReleaseError('Backup has no database')
         with sqlite3.connect(db_path) as db:

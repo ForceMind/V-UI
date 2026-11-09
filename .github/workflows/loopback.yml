@@ -1,5 +1,6 @@
 name: Real loopback proxy and DNS chain
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main, dev]
@@ -66,6 +67,27 @@ jobs:
           set -euo pipefail
           export VUI_DATA_DIR="$(mktemp -d)"
           python -m unittest discover -s tests -p test_inbound_routing_real.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
+      - name: Exercise DNS wildcard material through actual sing-box and Xray TLS
+        env:
+          VUI_TEST_CORES: /tmp/vui-rc1/cores
+          VUI_TEST_MIHOMO: /tmp/vui-rc1/client/mihomo
+          VUI_DNS_CORE_TLS: "1"
+        run: |
+          set -euo pipefail
+          export VUI_DATA_DIR="$(mktemp -d)"
+          python - <<'PYDNSCORE' 2>&1 | tee /tmp/vui-rc1/dns-core-tls.log
+          import sys
+          import unittest
+          loader = unittest.TestLoader()
+          suite = loader.discover('tests', pattern='test_dns_core_tls.py')
+          if loader.errors:
+              raise SystemExit('\n'.join(loader.errors))
+          if suite.countTestCases() != 2:
+              raise SystemExit('Exactly two actual DNS/core TLS cases are required')
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          if result.testsRun != 2 or result.skipped or not result.wasSuccessful():
+              raise SystemExit(1)
+          PYDNSCORE
       - name: Preserve pin and test evidence only
         if: always()
         uses: actions/upload-artifact@v4
@@ -75,4 +97,5 @@ jobs:
             /tmp/vui-rc1/cores/provenance.json
             /tmp/vui-rc1/client/mihomo-provenance.json
             /tmp/vui-rc1/result.log
+            /tmp/vui-rc1/dns-core-tls.log
           retention-days: 7

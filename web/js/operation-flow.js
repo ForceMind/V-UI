@@ -29,6 +29,22 @@
         for (let port = start; port <= 65535; port++) if (!occupied.has(port)) return port;
         return null;
     };
+    function connectionDomain(cert, supplied) {
+        const value = supplied!==undefined&&supplied!==null&&supplied!=='' ? supplied : (cert.method==='dns-01'?'':cert.domain);
+        if(typeof value!=='string'||!value)fail('CONNECTION_DOMAIN_REQUIRED','请填写实际连接域名，并将它的A/AAAA记录指向本机。');
+        if(/[\u0000-\u0020\u007f/:?#@*%\\]/.test(value))fail('CONNECTION_DOMAIN_INVALID','连接域名不能包含协议、端口、路径、空格或通配符。');
+        let host;
+        try{host=new URL('https://'+value).hostname.replace(/\.$/,'').toLowerCase();}
+        catch(_){fail('CONNECTION_DOMAIN_INVALID','请填写有效的具体域名。');}
+        const labels=host.split('.');
+        if(host.length>253||labels.length<2||/^\d+$/.test(labels.at(-1))||!labels.every(label=>/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)))
+            fail('CONNECTION_DOMAIN_INVALID','请填写有效域名，不要填写IP地址。');
+        const names=Array.isArray(cert.names)?cert.names:[cert.domain];
+        const covered=names.some(name=>name===host||typeof name==='string'&&name.startsWith('*.')&&host.endsWith(name.slice(1))&&labels.length===name.slice(2).split('.').length+1);
+        if(!covered)fail('CONNECTION_DOMAIN_MISMATCH','实际连接域名不在所选证书覆盖范围内。通配符只覆盖一级子域名。');
+        return host;
+    }
+    const certificateLabel=cert=>cert.domain+' · '+(cert.method==='dns-01'?'DNS验证':'HTTP验证')+(cert.wildcard?' · 包含一级子域名':'');
     const errors = {
         NODE_CONTENT_CHANGED:'节点设置已被其他操作修改，请刷新后重新选择，原配置保持。',
         SHARE_NODE_CHANGED:'节点已变化，请重新读取后分享。',
@@ -238,6 +254,7 @@
                 if (task === 'relay' || this.snapshot.settings.relay_enabled || this.affected().length) this.relayAllowed();
                 this.validateStartup(choice);
                 const cert = task === 'direct' || task === 'relay' ? this.validateNode(choice) : null;
+                const server = cert ? connectionDomain(cert, choice.connectionDomain) : null;
                 if (task !== 'direct') {
                     if (this.needsImpact(choice) && choice.impactStamp !== this.impactStamp())
                         fail('CONFIRM_IMPACT', '更换统一出口会影响现有中转节点或本机代理，请先核对影响并确认。');
@@ -264,10 +281,10 @@
                 if (task === 'host') { const live=await this.api('/api/cores/status');if(!live['sing-box']?.running||live['sing-box'].dirty)fail('HOST_NOT_RUNNING','设置已保存，但本机代理尚未确认启动，请核对，不要重复提交。');this.cores=live; this.stage('服务器程序代理已开启'); this.generatedAuth = null; return {kind:'host', revision:this.snapshot.active.revision}; }
                 const payload = {core:'sing-box', protocol:'vless', remark:choice.name, port:choice.port, enable:true,
                     routing_mode:task === 'relay' ? 'relay' : 'direct', tag:'vui-'+hex(16),
-                    profile:{security:'tls', transport:'direct'}, certificate_id:cert.id, expected_proxy_revision:this.snapshot.revision};
+                    profile:{security:'tls', transport:'direct', ...(cert.method==='dns-01'?{server_name:server}:{})}, certificate_id:cert.id, expected_proxy_revision:this.snapshot.revision};
                 // Existing tag is an explicit public correlation identifier,
                 // not a hidden purpose field. It resolves a lost create reply.
-                this.intent.expectedProxyRevision=this.snapshot.revision;this.intent.payload = payload; this.intent.server = cert.domain; this.intent.nodeSent = true;
+                this.intent.expectedProxyRevision=this.snapshot.revision;this.intent.payload = payload; this.intent.server = server; this.intent.nodeSent = true;
                 this.stage('正在创建节点并应用');
                 try {
                     const result = await this.api('/api/inbounds', 'POST', payload);
@@ -301,6 +318,8 @@
             this.intent.node = row;
             const editor = await this.api('/api/inbounds/'+row.id+'/editor');
             if (editor.mutation_revision && editor.mutation_revision !== row.mutation_revision) fail('NODE_CHANGED', '节点已变化，请重新选择。');
+            if(this.intent.payload.profile.server_name&&editor.profile?.server_name!==this.intent.server)
+                fail('NODE_CHANGED','节点实际连接域名未能确认，请核对已保存节点，不要重复创建或分享。');
             if (editor.certificate_id !== this.intent.payload.certificate_id) {
                 if (editor.certificate_id) fail('NODE_CHANGED', '节点证书已被其他操作更改，请重新核对。');
                 if(!REV.test(editor.content_revision||''))fail('NODE_CHANGED','节点内容条件未确认，请刷新后查看设置。');
@@ -309,6 +328,7 @@
                     fail('BIND_CONFIRM_REQUIRED','这个已创建节点尚未完成自动续期绑定。请确认使用刚才选择的域名证书，其他字段保持。', {domain:this.intent.server});
                 }
                 await this.api('/api/inbounds/'+row.id, 'PUT', {certificate_id:this.intent.payload.certificate_id,
+                    ...(this.intent.payload.profile.server_name?{profile:{server_name:this.intent.server}}:{}),
                     expected_instance_revision:row.mutation_revision, expected_content_revision:editor.content_revision,
                     expected_proxy_revision:this.intent.expectedProxyRevision});
                 const latest = await this.api('/api/inbounds'); row = latest.find(value => value.id === row.id && this.owned(value));
@@ -397,10 +417,16 @@
         }
         async edit(id, expected, changes, proxyRevision = null, expectedContent=null) {
             this.require('nodes'); if (this.busy) fail('BUSY', '请等待当前操作。');
-            const allowed = ['remark','port','enable','routing_mode','certificate_id'];
+            const allowed = ['remark','port','enable','routing_mode','certificate_id','profile'];
             if (Object.keys(changes).some(key => !allowed.includes(key))) fail('EDIT_FIELDS', '此处只修改基本设置，其他配置请进入高级编辑。');
             if ('routing_mode' in changes) {this.require('relay');if(!REV.test(proxyRevision||''))fail('SETTINGS_CHANGED','更改出口前请重新读取连接设置。');}
             if ('certificate_id' in changes) this.require('certificates');
+            if('profile' in changes){
+                if(!changes.certificate_id||!changes.profile||Object.keys(changes.profile).join(',')!=='server_name')fail('EDIT_FIELDS','这里只能在选择证书时修改实际连接域名。');
+                const cert=this.certificates.find(c=>c.id===changes.certificate_id);
+                if(!cert)fail('CERTIFICATE_REQUIRED','请选择可用的正式证书。');
+                changes={...changes,profile:{server_name:connectionDomain(cert,changes.profile.server_name)}};
+            }
             this.busy = true;
             try {
                 if(!REV.test(expectedContent||''))fail('NODE_CHANGED','当前节点缺少安全编辑条件，请刷新或进入高级编辑。');
@@ -429,5 +455,5 @@
             return info;
         }
     }
-    return {Flow, FlowError, message, usableCertificates, suggestedPort, REV};
+    return {Flow, FlowError, message, usableCertificates, suggestedPort, connectionDomain, certificateLabel, REV};
 });

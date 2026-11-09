@@ -110,6 +110,14 @@ class ControlInstallTests(unittest.TestCase):
     def install(self, **kwargs):
         return installer.install(self.kit, self.sha, **kwargs)
 
+    def pre_dns_receipt(self, receipt):
+        # Model a real historical installation: all DNS helpers are absent,
+        # rather than an unpublished mixed closure missing just an old helper.
+        for name in installer.DNS_SOURCE_DEPENDENCIES:
+            path = self.control / name
+            receipt['files'].pop(str(path)); path.unlink()
+        return receipt
+
     def test_preflight_authenticates_without_publishing_or_requiring_a_new_instance(self):
         with patch.object(installer, 'inspect_instance', side_effect=AssertionError('no instance access')), \
                 patch.object(installer, 'publish', side_effect=AssertionError('no publication')):
@@ -306,7 +314,7 @@ class ControlInstallTests(unittest.TestCase):
 
     def test_explicit_refresh_migrates_exact_pre_network_receipt_and_refuses_drift(self):
         self.install()
-        receipt = json.loads(installer.RECEIPT.read_bytes())
+        receipt = self.pre_dns_receipt(json.loads(installer.RECEIPT.read_bytes()))
         path = self.control / 'firewall_support.py'
         receipt['files'].pop(str(path))
         path.unlink()
@@ -319,7 +327,7 @@ class ControlInstallTests(unittest.TestCase):
 
     def test_explicit_refresh_migrates_intact_v0416_openrc_without_systemd_unit(self):
         self.write_instance('openrc')
-        old = self.install()
+        old = self.pre_dns_receipt(self.install())
         added = {name for name in installer.SOURCE_DEPENDENCIES if name.startswith('maintenance_')
                  or name in ('install_control_verifier.py', 'v-ui-maintenance.service')}
         for name in added:
@@ -333,7 +341,7 @@ class ControlInstallTests(unittest.TestCase):
 
     def test_pre_network_receipt_does_not_adopt_unreceipted_firewall_code(self):
         self.install()
-        receipt = json.loads(installer.RECEIPT.read_bytes())
+        receipt = self.pre_dns_receipt(json.loads(installer.RECEIPT.read_bytes()))
         receipt['files'].pop(str(self.control / 'firewall_support.py'))
         installer.RECEIPT.write_text(json.dumps(receipt))
         with self.assertRaisesRegex(installer.InstallError, 'Unreceipted dependency'):
@@ -341,7 +349,7 @@ class ControlInstallTests(unittest.TestCase):
 
     def test_pre_network_refresh_refuses_arbitrary_missing_or_extra_receipt_members(self):
         self.install()
-        original = json.loads(installer.RECEIPT.read_bytes())
+        original = self.pre_dns_receipt(json.loads(installer.RECEIPT.read_bytes()))
         path = self.control / 'firewall_support.py'
         original['files'].pop(str(path))
         path.unlink()
@@ -363,6 +371,49 @@ class ControlInstallTests(unittest.TestCase):
         for name, member in installer.SOURCE_DEPENDENCIES.items():
             self.assertEqual(verified[name], (REPO / member).read_bytes())
             self.assertFalse((self.kit / name).exists())
+
+    def test_published22_complete_closure_is_explicit_and_refresh_adds_only_all_dns_helpers(self):
+        self.assertEqual(set(installer.PRE_DNS_SOURCE_DEPENDENCIES), {
+            'data_owner.py','proxy_store.py','upstream_profile.py','inbound_policy.py',
+            'maintenance_daemon.py','maintenance_upgrade.py','maintenance_client.py','maintenance_cli_worker.py',
+            'install_control_verifier.py','v-ui-maintenance.service'})
+        self.assertEqual(installer.DNS_SOURCE_DEPENDENCIES, {
+            'certificate_errors.py':'app/certificates/errors.py','dns_store.py':'app/certificates/dns_store.py',
+            'cloudflare.py':'app/certificates/cloudflare.py','dns_journal.py':'app/certificates/dns_journal.py',
+            'dns_backup.py':'app/certificates/dns_backup.py'})
+        old = self.pre_dns_receipt(self.install())
+        installer.RECEIPT.write_text(json.dumps(old))
+        with self.assertRaises(installer.InstallError): self.install()
+        upgraded = self.install(refresh=True)
+        self.assertEqual(set(upgraded['files']) - set(old['files']),
+                         {str(self.control / name) for name in installer.DNS_SOURCE_DEPENDENCIES})
+        self.assertEqual(len(list(self.kit.iterdir())), 16)
+
+    def test_mixed_partial_dns_and_old_closure_is_never_a_historical_receipt(self):
+        original = self.install()
+        for name in (*installer.DNS_SOURCE_DEPENDENCIES, 'data_owner.py'):
+            path = self.control / name; raw = path.read_bytes()
+            bad = json.loads(json.dumps(original)); bad['files'].pop(str(path)); path.unlink()
+            installer.RECEIPT.write_text(json.dumps(bad))
+            with self.subTest(missing=name), self.assertRaisesRegex(installer.InstallError, 'incompatible'):
+                self.install(refresh=True)
+            path.write_bytes(raw); path.chmod(0o644)
+            installer.RECEIPT.write_text(json.dumps(original))
+
+    def test_every_new_dns_source_byte_is_authenticated_before_any_publication(self):
+        original = (self.kit / 'vui-source.zip').read_bytes()
+        for name in installer.DNS_SOURCE_DEPENDENCIES:
+            with zipfile.ZipFile(self.kit / 'vui-source.zip') as source:
+                members = {member: source.read(member) for member in source.namelist()}
+            member = installer.DNS_SOURCE_DEPENDENCIES[name]
+            members[member] += b'\n# untrusted change\n'
+            with zipfile.ZipFile(self.kit / 'vui-source.zip', 'w') as source:
+                source.comment = b'a' * 40
+                for item, content in members.items(): source.writestr(item, content)
+            with self.subTest(name=name), self.assertRaises(installer.InstallError):
+                installer.verify_kit(self.kit, self.sha)
+            self.assert_not_published()
+            (self.kit / 'vui-source.zip').write_bytes(original)
 
     def test_local_target_kit_keeps_complete_manifest_and_rejects_extra_or_missing_assets(self):
         record = json.loads((self.kit / 'RELEASE.json').read_bytes())
@@ -597,7 +648,7 @@ class ControlInstallTests(unittest.TestCase):
                          {str(self.control / name) for name in installer.SOURCE_DEPENDENCIES})
 
     def test_explicit_refresh_migrates_intact_m1_receipt_with_only_owner_helper_missing(self):
-        old = self.install()
+        old = self.pre_dns_receipt(self.install())
         owner = self.control / 'data_owner.py'
         old['files'].pop(str(owner))
         owner.unlink()
@@ -615,7 +666,7 @@ class ControlInstallTests(unittest.TestCase):
             self.install(refresh=True)
         dependency.write_bytes(raw)
         upgraded = self.install(refresh=True)
-        self.assertEqual(set(upgraded['files']) - set(old['files']), {str(owner)})
+        self.assertEqual(set(upgraded['files']) - set(old['files']), {str(owner)} | {str(self.control / name) for name in installer.DNS_SOURCE_DEPENDENCIES})
         self.assertEqual(owner.read_bytes(), (REPO / 'app/data_owner.py').read_bytes())
 
     def test_partial_publish_fails_closed_without_usable_wrapper_or_receipt(self):

@@ -52,24 +52,125 @@ class InstallerCertificateStateTests(unittest.TestCase):
             ''')
             self.certificate(db, 'old', 'old.example.test', 'old@example.test')
             self.certificate(db, 'stage', 'old.example.test', 'stage@example.test', 'staging')
-            db.execute('INSERT INTO certificate_bindings VALUES (?,?,?,?,?)',
+            db.execute('INSERT INTO certificate_bindings (target,certificate_id,applied_certificate_id,applied_revision,error) VALUES (?,?,?,?,?)',
                        ('panel', 'old', 'old', 'a' * 64, None))
-            db.execute('INSERT INTO certificate_bindings VALUES (?,?,?,?,?)',
+            db.execute('INSERT INTO certificate_bindings (target,certificate_id,applied_certificate_id,applied_revision,error) VALUES (?,?,?,?,?)',
                        ('inbound:1', 'old', 'old', 'a' * 64, 'OLD_ERROR'))
 
     def certificate(self, db, identifier, domain, email, environment='production'):
-        db.execute('INSERT INTO managed_certificates VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        db.execute('INSERT INTO managed_certificates (id,domain,email,environment,auto_renew,revision,not_before,not_after,renew_at,retry_at,last_attempt,failures,error,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (identifier, domain, email, environment, 1, 'a' * 64, 1, 2, 3, 0, 0, 0, None, 1))
 
-    def query(self, sql):
+    def query(self, sql, parameters=()):
         with sqlite3.connect(self.db_path) as db:
-            return db.execute(sql).fetchall()
+            return db.execute(sql, parameters).fetchall()
 
     def snapshot(self):
         return run('snapshot', self.root)
 
     def restore(self, state):
         return run('restore', self.root, json.dumps(state))
+
+    def initialize_modern(self, *, appended_sni=False):
+        from app.certificates.dns_store import DNSCredentialStore
+        self.data.mkdir(mode=0o700)
+        certificates = self.data / 'certificates'; certificates.mkdir(mode=0o700)
+        profile = DNSCredentialStore(certificates).create(label='snapshot-fake', zone_name='example.test',
+            zone_id='c' * 32, api_token='fake_snapshot_credential_' + 'x' * 32)
+        self.profile_id = profile['id']
+        self.http, self.dns, self.dns_single = 'a' * 32, 'b' * 32, 'd' * 32
+        binding = ('error VARCHAR(64), server_name VARCHAR(253)' if appended_sni else
+                   'server_name VARCHAR(253), error VARCHAR(64)')
+        with sqlite3.connect(self.db_path) as db:
+            db.executescript('CREATE TABLE managed_certificates ('
+                'id VARCHAR(32) PRIMARY KEY, domain VARCHAR(253), email VARCHAR(254), environment VARCHAR(16),'
+                "method VARCHAR(16) NOT NULL DEFAULT 'http-01', wildcard BOOLEAN NOT NULL DEFAULT 0, credential_id VARCHAR(32),"
+                'auto_renew BOOLEAN, revision VARCHAR(64), not_before INTEGER, not_after INTEGER, renew_at INTEGER,'
+                'retry_at INTEGER,last_attempt INTEGER,failures INTEGER,error VARCHAR(64),created_at INTEGER);'
+                'CREATE TABLE certificate_bindings (target VARCHAR(64) PRIMARY KEY, certificate_id VARCHAR(32),'
+                'applied_certificate_id VARCHAR(32),applied_revision VARCHAR(64),' + binding + ');'
+                'CREATE TABLE certificate_jobs (id VARCHAR(32) PRIMARY KEY,certificate_id VARCHAR(32),sequence INTEGER,'
+                'state VARCHAR(16),error VARCHAR(64),created_at INTEGER,started_at INTEGER,finished_at INTEGER);'
+                'CREATE TABLE certificate_identity_schema (version INTEGER NOT NULL);'
+                'INSERT INTO certificate_identity_schema VALUES (1);'
+                'CREATE TABLE users (id INTEGER PRIMARY KEY,value TEXT);'
+                "INSERT INTO users VALUES (1,'retain-original-user');")
+            for identifier, method, wildcard, credential, email in (
+                    (self.http,'http-01',0,None,'http@example.test'),
+                    (self.dns,'dns-01',1,profile['id'],'dns@example.test'),
+                    (self.dns_single,'dns-01',0,profile['id'],'single@example.test')):
+                db.execute('INSERT INTO managed_certificates (id,domain,email,environment,method,wildcard,credential_id,'
+                    'auto_renew,revision,not_before,not_after,renew_at,retry_at,last_attempt,failures,error,created_at) '
+                    "VALUES (?,?,?,'production',?,?,?,1,?,1,2,3,0,0,0,NULL,1)",
+                    (identifier,'old.example.test',email,method,wildcard,credential,'b'*64))
+            db.execute('INSERT INTO certificate_bindings (target,certificate_id,applied_certificate_id,applied_revision,error,server_name) '
+                'VALUES (?,?,?,?,?,?)',('panel',self.dns,self.dns,'b'*64,'ORIGINAL_PENDING','node.old.example.test'))
+            db.execute('INSERT INTO certificate_bindings (target,certificate_id,applied_certificate_id,applied_revision,error,server_name) '
+                'VALUES (?,?,?,?,?,?)',('inbound:1',self.dns,self.dns,'b'*64,None,'service.old.example.test'))
+        return certificates
+
+    def modern_restore_case(self, *, appended_sni):
+        certificates = self.initialize_modern(appended_sni=appended_sni)
+        private = {str(path.relative_to(certificates)):path.read_bytes() for path in certificates.rglob('*.json')}
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot['version'],2)
+        self.assertEqual(snapshot['panel_binding'],['panel',self.dns,self.dns,'b'*64,'ORIGINAL_PENDING','node.old.example.test'])
+        self.assertEqual(run('contact',self.root,'old.example.test','changed@example.test'),{'updated':1})
+        self.assertEqual(self.query('SELECT id,email FROM managed_certificates ORDER BY id'),
+            [(self.http,'changed@example.test'),(self.dns,'dns@example.test'),(self.dns_single,'single@example.test')])
+        with sqlite3.connect(self.db_path) as db:
+            db.execute("UPDATE managed_certificates SET revision=? WHERE id=?",('e'*64,self.dns))
+            db.execute("UPDATE certificate_bindings SET server_name='changed.old.example.test',error='CHANGED' WHERE target='panel'")
+            db.execute("UPDATE certificate_bindings SET server_name='new-service.old.example.test' WHERE target='inbound:1'")
+            db.execute("INSERT INTO users VALUES (2,'later-user')")
+        self.restore(snapshot)
+        self.assertEqual(self.snapshot()['panel_binding'],snapshot['panel_binding'])
+        self.assertEqual(self.query('SELECT method,wildcard,credential_id,revision,email FROM managed_certificates WHERE id=?',(self.dns,)),
+            [('dns-01',1,self.profile_id,'e'*64,'dns@example.test')])
+        self.assertEqual(self.query("SELECT server_name FROM certificate_bindings WHERE target='inbound:1'"),[('new-service.old.example.test',)])
+        self.assertEqual(self.query('SELECT * FROM users'),[(1,'retain-original-user'),(2,'later-user')])
+        for name,raw in private.items():self.assertEqual((certificates/name).read_bytes(),raw)
+
+    def test_modern_fresh_shape_roundtrips_literal_sni_without_dns_identity_or_private_state_rollback(self):
+        self.modern_restore_case(appended_sni=False)
+
+    def test_modern_legacy_alter_sni_order_uses_named_columns(self):
+        self.modern_restore_case(appended_sni=True)
+
+    def test_v1_journal_into_modern_http_sets_nullable_sni_but_cannot_erase_dns_sni(self):
+        self.initialize_modern()
+        snapshot=self.snapshot();snapshot['version']=1
+        snapshot['certificates']=[[self.http,'http@example.test']]
+        snapshot['panel_binding']=['panel',self.http,self.http,'b'*64,None]
+        self.restore(snapshot)
+        self.assertEqual(self.query("SELECT certificate_id,server_name FROM certificate_bindings WHERE target='panel'"),[(self.http,None)])
+        snapshot['panel_binding']=['panel',self.dns,self.dns,'b'*64,None]
+        before=self.query('SELECT * FROM certificate_bindings')
+        with self.assertRaises(ValueError):self.restore(snapshot)
+        self.assertEqual(self.query('SELECT * FROM certificate_bindings'),before)
+
+    def test_modern_missing_or_corrupt_marker_extra_column_and_triggers_refuse_without_repair(self):
+        self.initialize_modern(); original=self.db_path.read_bytes()
+        mutations=("DROP TABLE certificate_identity_schema",
+                   "UPDATE certificate_identity_schema SET version=2",
+                   "INSERT INTO certificate_identity_schema VALUES (1)",
+                   "ALTER TABLE certificate_bindings ADD COLUMN surprise TEXT",
+                   "ALTER TABLE managed_certificates ADD COLUMN surprise TEXT",
+                   "CREATE TRIGGER bad AFTER UPDATE ON certificate_bindings BEGIN DELETE FROM users; END",
+                   "CREATE TRIGGER bad_marker AFTER INSERT ON certificate_identity_schema BEGIN DELETE FROM users; END")
+        for sql in mutations:
+            with sqlite3.connect(self.db_path) as db:db.execute(sql)
+            with self.subTest(sql=sql),self.assertRaises(ValueError):self.snapshot()
+            self.assertEqual(self.query('SELECT * FROM users'),[(1,'retain-original-user')])
+            self.db_path.write_bytes(original)
+
+    def test_unknown_external_foreign_key_cannot_cascade_panel_rollback(self):
+        self.initialize_modern()
+        with sqlite3.connect(self.db_path) as db:
+            db.execute('CREATE TABLE unknown_dependant (target TEXT REFERENCES certificate_bindings(target) ON DELETE CASCADE)')
+            db.execute("INSERT INTO unknown_dependant VALUES ('panel')")
+        with self.assertRaisesRegex(ValueError,'foreign key'): self.snapshot()
+        self.assertEqual(self.query('SELECT * FROM unknown_dependant'),[('panel',)])
 
     def test_absent_database_is_not_created(self):
         state = self.snapshot()
@@ -108,7 +209,7 @@ class InstallerCertificateStateTests(unittest.TestCase):
     @unittest.skipUnless(importlib.util.find_spec('sqlalchemy'), 'SQLAlchemy is required for actual model schema')
     def test_actual_model_schema_and_uninitialized_business_state_survive_rollback(self):
         from sqlalchemy import create_engine
-        from app.certificates.models import Certificate, CertificateBinding
+        from app.certificates.models import Certificate, CertificateBinding, CertificateJob
 
         self.data.mkdir(mode=0o700)
         with sqlite3.connect(self.db_path) as db:
@@ -132,22 +233,26 @@ class InstallerCertificateStateTests(unittest.TestCase):
         try:
             Certificate.__table__.create(engine)
             CertificateBinding.__table__.create(engine)
+            CertificateJob.__table__.create(engine)
         finally:
             engine.dispose()
+        old_id, new_id = 'a' * 32, 'b' * 32
         with sqlite3.connect(self.db_path) as db:
-            self.certificate(db, 'old', 'old.example.test', 'old@example.test')
-            db.execute('INSERT INTO certificate_bindings VALUES (?,?,?,?,?)',
-                       ('panel', 'old', 'old', 'a' * 64, None))
+            db.execute('CREATE TABLE certificate_identity_schema (version INTEGER NOT NULL)')
+            db.execute('INSERT INTO certificate_identity_schema VALUES (1)')
+            self.certificate(db, old_id, 'old.example.test', 'old@example.test')
+            db.execute('INSERT INTO certificate_bindings (target,certificate_id,applied_certificate_id,applied_revision,error) VALUES (?,?,?,?,?)',
+                       ('panel', old_id, old_id, 'a' * 64, None))
         original = self.snapshot()
         self.assertTrue(original['ready'])
         self.assertEqual(run('contact', self.root, 'old.example.test', 'new@example.test'), {'updated': 1})
         with sqlite3.connect(self.db_path) as db:
-            self.certificate(db, 'new', 'new.example.test', 'new@example.test')
-            db.execute("UPDATE certificate_bindings SET certificate_id='new',applied_certificate_id='new' WHERE target='panel'")
-            db.execute("INSERT INTO certificate_bindings VALUES ('inbound:1','new',NULL,NULL,NULL)")
+            self.certificate(db, new_id, 'new.example.test', 'new@example.test')
+            db.execute("UPDATE certificate_bindings SET certificate_id=?,applied_certificate_id=? WHERE target='panel'", (new_id, new_id))
+            db.execute('INSERT INTO certificate_bindings (target,certificate_id,applied_certificate_id,applied_revision,error) VALUES (?,?,?,?,?)', ('inbound:1', new_id, None, None, None))
         self.restore(original)
         self.assertEqual(self.snapshot()['panel_binding'], original['panel_binding'])
-        self.assertEqual(self.query("SELECT email FROM managed_certificates WHERE id='old'"), [('old@example.test',)])
+        self.assertEqual(self.query('SELECT email FROM managed_certificates WHERE id=?', (old_id,)), [('old@example.test',)])
         certificates = self.query('SELECT * FROM managed_certificates')
         self.restore(unfinished)
         self.assertEqual(self.query('SELECT target FROM certificate_bindings'), [('inbound:1',)])
@@ -214,7 +319,7 @@ class InstallerCertificateStateTests(unittest.TestCase):
             db.execute("DELETE FROM certificate_bindings WHERE target='panel'")
         state = self.snapshot()
         with sqlite3.connect(self.db_path) as db:
-            db.execute("INSERT INTO certificate_bindings VALUES ('panel','old',NULL,NULL,NULL)")
+            db.execute("INSERT INTO certificate_bindings (target,certificate_id,applied_certificate_id,applied_revision,error) VALUES ('panel','old',NULL,NULL,NULL)")
         self.restore(state)
         self.assertEqual(self.query('SELECT target FROM certificate_bindings'), [('inbound:1',)])
 

@@ -190,6 +190,8 @@ def fixed_files(manager):
     base = {CONFIG, CONTROL / 'launcher.py', CONTROL / 'system_ops.py', WORKER,
             CONTROL / 'release_tools.py', CONTROL / 'data_owner.py', CONTROL / 'proxy_store.py',
             CONTROL / 'upstream_profile.py', CONTROL / 'inbound_policy.py', CONTROL / 'firewall_support.py', WRAPPER,
+            *(CONTROL / name for name in ('certificate_errors.py', 'dns_store.py', 'cloudflare.py',
+                                          'dns_journal.py', 'dns_backup.py')),
             *(CONTROL / name for name in ('maintenance_daemon.py', 'maintenance_upgrade.py',
               'maintenance_client.py', 'maintenance_cli_worker.py', 'install_control_verifier.py', 'v-ui-maintenance.service'))}
     if manager == 'systemd':

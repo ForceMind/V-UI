@@ -16,7 +16,7 @@ from app.data_owner import data_owner
 from app.models import database
 from app.certificates.models import Certificate, CertificateJob, CertificateBinding
 from app.certificates.material import (CertificateError, domain_name, email_address,
-    make_csr, private_write, validate_material)
+    certificate_names, covers_domain, make_csr, private_write, validate_material)
 from app.certificates.provider import CertbotProvider
 from app.services import managed_tls
 from app.release_tools import lease, ReleaseError, sync_directory
@@ -55,10 +55,13 @@ class CertificateManager:
         self._binding_lock = threading.RLock()
         self.panel_reloader = None
         self.worker_error = None
+        self._dns_cleanup_requested = threading.Event()
+        self._dns_cleanup_requested.set()
 
     def capabilities(self):
         return {'method': 'http-01', 'public_challenge_port': 80,
-                'production_requires_public_dns': True, 'wildcards': False,
+                'dns01': bool(getattr(self.provider, 'supports_dns', False)),
+                'production_requires_public_dns': True, 'wildcards': bool(getattr(self.provider, 'supports_dns', False)),
                 'worker_running': bool(self.thread and self.thread.is_alive()),
                 'worker_error': self.worker_error,
                 'panel_hot_reload': self.panel_reloader is not None,
@@ -73,7 +76,8 @@ class CertificateManager:
                 bindings = db.query(CertificateBinding).filter_by(certificate_id=row.id).all()
                 item = {key: getattr(row, key) for key in ('id', 'domain', 'email', 'environment',
                     'auto_renew', 'revision', 'not_before', 'not_after', 'renew_at', 'retry_at',
-                    'last_attempt', 'failures', 'error', 'created_at')}
+                    'last_attempt', 'failures', 'error', 'created_at', 'method', 'wildcard')}
+                item['names'] = certificate_names(row.domain, row.wildcard)
                 item['days_remaining'] = (row.not_after - now()) // 86400 if row.not_after else None
                 item['status'] = ('pending' if job and job.state in ACTIVE_JOBS else
                     'expired' if row.not_after and row.not_after <= now() else
@@ -87,20 +91,43 @@ class CertificateManager:
                 result.append(item)
             return result
 
-    def create(self, domain: str, email: str, environment: str, auto_renew: bool, accept_terms: bool):
+    def create(self, domain: str, email: str, environment: str, auto_renew: bool, accept_terms: bool,
+               method='http-01', wildcard=False, credential_id=None):
+        with data_owner(self.root.parent):
+            return self._create_owned(domain, email, environment, auto_renew, accept_terms,
+                                      method, wildcard, credential_id)
+
+    def _create_owned(self, domain, email, environment, auto_renew, accept_terms,
+                      method, wildcard, credential_id):
         if accept_terms is not True:
             raise CertificateError('TERMS_NOT_ACCEPTED')
         domain, email = domain_name(domain), email_address(email)
         if environment not in ('production', 'staging') or type(auto_renew) is not bool:
             raise CertificateError('INVALID_ENVIRONMENT')
+        if method not in ('http-01', 'dns-01') or type(wildcard) is not bool:
+            raise CertificateError('INVALID_CERTIFICATE_METHOD')
+        if method == 'http-01' and (wildcard or credential_id is not None):
+            raise CertificateError('INVALID_CERTIFICATE_METHOD_FIELDS')
+        if method == 'dns-01':
+            if not getattr(self.provider, 'supports_dns', False):
+                raise CertificateError('DNS01_UNAVAILABLE')
+            from app.certificates.dns_store import DNSCredentialStore, DNSStoreError
+            try:
+                snapshot = DNSCredentialStore(self.root).snapshot(credential_id)
+            except DNSStoreError as exc:
+                raise CertificateError(exc.code) from None
+            zone = snapshot['zone_name']
+            if domain != zone and not domain.endswith('.' + zone):
+                raise CertificateError('DNS_OWNER_OUTSIDE_ZONE')
         with database.SessionLocal() as db:
             db.execute(text('BEGIN IMMEDIATE'))
-            record = db.query(Certificate).filter_by(domain=domain, environment=environment).first()
+            record = db.query(Certificate).filter_by(domain=domain, environment=environment, method=method, wildcard=wildcard).first()
             if record:
                 raise CertificateError('CERTIFICATE_ALREADY_EXISTS')
             if db.query(Certificate).count() >= 32:
                 raise CertificateError('CERTIFICATE_LIMIT_REACHED')
             record = Certificate(id=uuid.uuid4().hex, domain=domain, email=email, environment=environment,
+                method=method, wildcard=wildcard, credential_id=credential_id,
                 auto_renew=auto_renew, created_at=now(), failures=0, renew_at=0, retry_at=0, last_attempt=0)
             db.add(record); db.flush()
             job = self._queue(db, record)
@@ -114,6 +141,8 @@ class CertificateManager:
                     CertificateJob.state.in_(ACTIVE_JOBS)).first()
         if pending:
             return pending
+        if record.method == 'dns-01' and hasattr(self.provider, 'check_dns_record'):
+            self.provider.check_dns_record(record)
         if record.revision and record.renew_at > now():
             raise CertificateError('RENEWAL_NOT_DUE')
         if record.retry_at > now() or record.last_attempt and record.last_attempt + COOLDOWN > now():
@@ -162,6 +191,15 @@ class CertificateManager:
         try:
             self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
             with lease(self.root / '.worker.lock'):
+                if self._dns_cleanup_requested.is_set() and hasattr(self.provider, 'recover_dns'):
+                    self._dns_cleanup_requested.clear()
+                    try:
+                        if not self.provider.recover_dns(self.stop_event):
+                            self.worker_error = 'DNS_CLEANUP_PENDING'
+                        elif self.worker_error == 'DNS_CLEANUP_PENDING':
+                            self.worker_error = None
+                    except Exception:
+                        self.worker_error = 'DNS_CLEANUP_PENDING'
                 with database.SessionLocal() as db:
                     db.execute(text('BEGIN IMMEDIATE'))
                     # Exclusive process lease means a running row belongs to an interrupted worker.
@@ -175,16 +213,25 @@ class CertificateManager:
                     record = get_record(db, job.certificate_id)
                     job.state, job.started_at = 'running', now()
                     record.last_attempt = now()
-                    values = {'id': record.id, 'domain': record.domain, 'email': record.email, 'environment': record.environment}
+                    values = {'id': record.id, 'domain': record.domain, 'email': record.email, 'environment': record.environment,
+                              'method': record.method, 'wildcard': record.wildcard, 'credential_id': record.credential_id,
+                              'names': certificate_names(record.domain, record.wildcard), 'job_id': job.id}
                     job_id = job.id; db.commit()
                 try:
+                    if values['method'] == 'dns-01':
+                        from app.certificates.dns_store import DNSCredentialStore, DNSStoreError
+                        try:
+                            snapshot = DNSCredentialStore(self.root).snapshot(values['credential_id'])
+                            values['credential_revision'] = snapshot['revision']
+                        except DNSStoreError as exc:
+                            raise CertificateError(exc.code) from None
                     with tempfile.TemporaryDirectory(prefix='.issue-', dir=self.root) as directory:
                         work = Path(directory)
-                        key, csr = make_csr(values['domain'])
+                        key, csr = make_csr(values['domain'], names=values['names'])
                         private_write(work / 'private.pem', key); private_write(work / 'request.pem', csr)
                         chain = self.provider.issue(values, work, self.stop_event)
                         meta = validate_material(chain, key, values['domain'], trusted_roots=self.trusted_roots,
-                                                 verify_chain=values['environment'] == 'production')
+                                                 verify_chain=values['environment'] == 'production', expected_names=values['names'])
                         target = self.root / 'revisions' / values['id'] / meta['revision']
                         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                         if not target.exists():
@@ -231,13 +278,32 @@ class CertificateManager:
             chain, key = (p.read_bytes() for p in paths)
             if hashlib.sha256(chain).hexdigest() != selected: raise CertificateError('CERTIFICATE_FILES_CHANGED')
             validate_material(chain, key, record.domain, trusted_roots=self.trusted_roots,
-                              verify_chain=record.environment == 'production')
+                              verify_chain=record.environment == 'production', expected_names=certificate_names(record.domain, record.wildcard))
             return paths, record.domain, selected
 
     def binding(self, target):
         with database.SessionLocal() as db:
             row=db.get(CertificateBinding,target)
             return row.certificate_id if row else None
+
+    def connection_domain(self, certificate_id, server_name=None):
+        with database.SessionLocal() as db:
+            record = get_record(db, certificate_id)
+            if not server_name:
+                if record.method == 'dns-01':
+                    raise CertificateError('CONNECTION_DOMAIN_REQUIRED')
+                server_name = record.domain
+            try:
+                selected = domain_name(server_name)
+            except CertificateError:
+                raise CertificateError('INVALID_CONNECTION_DOMAIN') from None
+            if not covers_domain(certificate_names(record.domain, record.wildcard), selected):
+                raise CertificateError('CERTIFICATE_DOMAIN_MISMATCH')
+            return selected
+
+    def request_dns_cleanup(self):
+        self._dns_cleanup_requested.set()
+        self.wakeup.set()
 
     def unbind(self, target):
         with self._binding_lock, database.SessionLocal() as db:
@@ -248,7 +314,7 @@ class CertificateManager:
             db.commit()
         return {'target':target,'configured':False}
 
-    def bind(self, certificate_id, target):
+    def bind(self, certificate_id, target, *, server_name=None):
         self.material(certificate_id)
         if target != 'panel' and not re.fullmatch(r'inbound:[1-9][0-9]*', target): raise CertificateError('INVALID_TARGET')
         with self._binding_lock:
@@ -263,10 +329,24 @@ class CertificateManager:
                     error = managed_tls.target_error(row)
                     if error:
                         raise CertificateError(error)
+                    record = get_record(db, certificate_id)
+                    if server_name is None and record.method == 'dns-01':
+                        server_name = managed_tls.server_name(row.core, row.stream_settings or {})
+                    selected_domain = self.connection_domain(certificate_id, server_name)
+                else:
+                    from app.middleware.auth import configured_origin
+                    host = urlsplit(configured_origin()).hostname
+                    try:
+                        if not host:
+                            raise CertificateError('PANEL_DOMAIN_MISMATCH')
+                        selected_domain = self.connection_domain(certificate_id, host)
+                    except CertificateError:
+                        raise CertificateError('PANEL_DOMAIN_MISMATCH') from None
                 binding = db.get(CertificateBinding, target)
                 if binding is None:
                     binding = CertificateBinding(target=target); db.add(binding)
                 binding.certificate_id = certificate_id
+                binding.server_name = selected_domain
                 db.commit()
             self._apply_target(target, explicit=True)
         return {'target': target, 'configured': True}
@@ -277,9 +357,10 @@ class CertificateManager:
             with self._binding_lock, core_manager.lock, database.SessionLocal() as db:
                 binding = db.get(CertificateBinding, target)
                 paths, domain, rev = self.material(binding.certificate_id)
+                selected_domain = self.connection_domain(binding.certificate_id, binding.server_name)
                 if target == 'panel':
                     from app.middleware.auth import configured_origin
-                    if urlsplit(configured_origin()).hostname != domain:
+                    if urlsplit(configured_origin()).hostname != selected_domain:
                         raise CertificateError('PANEL_DOMAIN_MISMATCH')
                     if self.panel_reloader is None: raise CertificateError('PANEL_HOT_RELOAD_UNAVAILABLE')
                     self.panel_reloader(*paths)
@@ -296,7 +377,9 @@ class CertificateManager:
                                    (str(paths[0]), str(paths[1]))}
                         if managed_tls.paths(row.core, stream) not in allowed:
                             raise CertificateError('BINDING_CHANGED_MANUALLY')
-                    managed_tls.replace_material(row.core, stream, paths, domain)
+                        if managed_tls.server_name(row.core, stream) != selected_domain:
+                            raise CertificateError('BINDING_CHANGED_MANUALLY')
+                    managed_tls.replace_material(row.core, stream, paths, selected_domain)
                     row.stream_settings = stream
                     db.flush()
                     core_manager.validate_inbound_change(
@@ -341,7 +424,9 @@ class CertificateManager:
         def loop():
             while not self.stop_event.is_set():
                 try:
-                    worked = self.process_once(); self.worker_error = None
+                    worked = self.process_once()
+                    if self.worker_error == 'WORKER_STORAGE_UNAVAILABLE':
+                        self.worker_error = None
                 except Exception:
                     worked = False; self.worker_error = 'WORKER_STORAGE_UNAVAILABLE'
                     logging.getLogger('vui.certificates').warning('Certificate worker storage unavailable')

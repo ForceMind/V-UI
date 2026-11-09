@@ -49,7 +49,10 @@ HTTPS_STARTUP_TIMEOUT = 120
 # mutable installed payload. Keep the public release-kit asset set unchanged.
 CONTROLLER_MEMBERS = ('scripts/deploy.py', 'app/release_tools.py', 'app/data_owner.py',
                       'app/services/proxy_store.py', 'app/services/upstream_profile.py',
-                      'app/services/inbound_policy.py', 'scripts/installer_certificate_state.py')
+                      'app/services/inbound_policy.py', 'scripts/installer_certificate_state.py',
+                      'app/certificates/errors.py', 'app/certificates/dns_store.py',
+                      'app/certificates/cloudflare.py', 'app/certificates/dns_journal.py',
+                      'app/certificates/dns_backup.py')
 # Compatibility names for older tooling/tests; new installs select a backend dynamically.
 MARKER=service_support.MARKER
 UNIT_DIR=service_support.SYSTEMD_DIR

@@ -793,11 +793,13 @@ def _parallel_other_steps():
                      NETLINK_SERVICE_DIAGNOSTIC_STEP},
         'loopback.yml': REMOTE_MAINTENANCE_LOOPBACK_STEPS | {
             'Exercise actual TLS proxy and local DNS paths',
-            'Exercise standard-client per-inbound TCP routes and independent host switch'},
+            'Exercise standard-client per-inbound TCP routes and independent host switch',
+            'Exercise DNS wildcard material through actual sing-box and Xray TLS'},
         'release.yml': {'Build version-pinned offline candidate from exact head', *{
             'Verify actual bundle under one CPU and ' + size + ' MiB cgroup'
             for size in ('512', '384', '320')}},
-        'acme.yml': {'Test actual Certbot HTTP-01 issuance and failure'},
+        'acme.yml': {'Test actual Certbot HTTP-01 issuance and failure',
+                     'Test actual Certbot DNS-01 wildcard renewal and legacy-reader refusal'},
         'short-install.yml': {'Install public stable suite through the actual short command'},
     }
 

@@ -4,7 +4,9 @@ import argparse
 import email.parser
 import hashlib
 import io
+import socket
 import tarfile
+import urllib.error
 import urllib.request
 import json
 import os
@@ -33,7 +35,22 @@ def core_sources(payload: Path):
     proof={}
     for name,repo,tag in [('sing-box','SagerNet/sing-box','v1.14.2'),('xray','XTLS/Xray-core','v26.3.27')]:
         request=urllib.request.Request(f'https://api.github.com/repos/{repo}/commits/{tag}',headers={'User-Agent':'V-UI-release-builder'})
-        with urllib.request.urlopen(request,timeout=30) as response:commit=json.load(response)['sha']
+        # Fixed repo/tag GET only: at most two 30s requests, without a new source.
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(request,timeout=30) as response:
+                    commit=json.load(response)['sha']
+                break
+            except urllib.error.HTTPError as error:
+                error.close()
+                if error.code not in (500,502,503,504) or attempt:
+                    raise
+            except (TimeoutError,socket.timeout):
+                if attempt:
+                    raise
+            except urllib.error.URLError as error:
+                if not isinstance(error.reason,(TimeoutError,socket.timeout)) or attempt:
+                    raise
         if not re.fullmatch('[a-f0-9]{40}',commit):raise ValueError('Invalid upstream source commit')
         url=f'https://codeload.github.com/{repo}/tar.gz/{commit}'
         with urllib.request.urlopen(url,timeout=90) as response:data=response.read(50_000_001)

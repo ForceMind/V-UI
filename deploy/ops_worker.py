@@ -181,25 +181,31 @@ def _load_release_tools():
     # The root controller verified these fixed sibling files against its receipt.
     # -I -S excludes cwd/PYTHONPATH/site hooks. Do not add a package payload (or
     # any directory) to sys.path: create inert, pathless namespaces and load only
-    # the three exact stdlib dependencies needed by backup/restore. No app startup,
+    # the exact stdlib dependency closure needed by backup/restore. No app startup,
     # parser, core binary, or service-owned installed code is imported here.
     directory = Path(__file__).resolve().parent
-    names = ('app', 'app.services', 'app.data_owner', 'app.services.upstream_profile',
-             'app.services.proxy_store', 'app.services.inbound_policy')
+    packages = ('app', 'app.services', 'app.certificates')
+    implementations = (('app.data_owner', 'data_owner.py'),
+                       ('app.services.upstream_profile', 'upstream_profile.py'),
+                       ('app.services.inbound_policy', 'inbound_policy.py'),
+                       ('app.services.proxy_store', 'proxy_store.py'),
+                       ('app.certificates.errors', 'certificate_errors.py'),
+                       ('app.certificates.dns_store', 'dns_store.py'),
+                       ('app.certificates.cloudflare', 'cloudflare.py'),
+                       ('app.certificates.dns_journal', 'dns_journal.py'),
+                       ('app.certificates.dns_backup', 'dns_backup.py'),
+                       ('_vui_managed_release_tools', 'release_tools.py'))
+    names = packages + tuple(name for name, _ in implementations)
     if any(name in sys.modules for name in names):
         raise WorkerError('Unexpected application modules in isolated worker')
     loaded = []
     try:
-        for name in names[:2]:
+        for name in packages:
             package = types.ModuleType(name)
             package.__path__ = []
             sys.modules[name] = package
             loaded.append(name)
-        for name, filename in (('app.data_owner', 'data_owner.py'),
-                               ('app.services.upstream_profile', 'upstream_profile.py'),
-                               ('app.services.inbound_policy', 'inbound_policy.py'),
-                               ('app.services.proxy_store', 'proxy_store.py'),
-                               ('_vui_managed_release_tools', 'release_tools.py')):
+        for name, filename in implementations:
             spec = importlib.util.spec_from_file_location(name, directory / filename)
             if spec is None or spec.loader is None:
                 raise WorkerError('Maintenance implementation unavailable')
