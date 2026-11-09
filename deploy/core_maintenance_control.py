@@ -353,19 +353,36 @@ class _Switch:
         _need(context['certificate_mode'] != 'provided', 'CORE_RESTORE_TLS_PROBE_REQUIRED')
         return journal
 
+    def _restore_worker_request(self, journal, action):
+        plan = journal['restore_target']['data']
+        return dict(protocol=1, action=action, transaction=self.transaction, slot=plan['slot'],
+                    pending=journal['original_files']['pending'],
+                    original=journal['switch_context']['data_generation'],
+                    incoming=plan['incoming_generation'])
+
     def _start_restore_observer(self):
         """Hand a stopped, exchanged restore to its read-only worker."""
         self.services.prove_stopped()
         _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
         journal = self._restore_trial_journal()
-        target = journal['restore_target']
-        plan = target['data']
-        response = self.worker.exchange(dict(protocol=1, action='core_restore_observe',
-            transaction=self.transaction, slot=plan['slot'], pending=journal['original_files']['pending'],
-            original=journal['switch_context']['data_generation'], incoming=plan['incoming_generation']),
+        response = self.worker.exchange(self._restore_worker_request(journal, 'core_restore_observe'),
             'restore_observer_ready', ('transaction',))
         _need(response['transaction'] == self.transaction, 'CORE_RESTORE_CONTEXT')
         self._proof()
+
+    def _exchange_and_activate_restore_trial(self, *, _new_worker=None):
+        """Run the private exchange for an already staged and backed-up restore."""
+        self._time()
+        _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+        self.services.prove_stopped()
+        journal = self._restore_trial_journal()
+        request = self._restore_worker_request(journal, 'core_restore_exchange')
+        request.update(sequence=journal['sequence'],
+                       original_tree_sha256=journal['quiesced']['original_tree_sha256'],
+                       prepared_tree_sha256=journal['quiesced']['prepared_tree_sha256'])
+        _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+        response = self.worker.exchange(request, 'restore_data_exchanged', ('receipt',))
+        return self._handoff_restore_trial(response['receipt'], _new_worker=_new_worker)
 
     def _handoff_restore_trial(self, receipt, *, _new_worker=None):
         """Finish the writer before starting the observer under the same Root lock."""

@@ -383,12 +383,13 @@ def lease(path: Path):
         finally: fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 @contextmanager
-def _offline_writers(data: Path):
+def _offline_writers(data: Path, *, stable=True):
     """Stable whole-data exclusion plus leases used by older source workers."""
     from app.data_owner import data_owner, DataOwnerError
     try:
         with ExitStack() as stack:
-            stack.enter_context(data_owner(data, exclusive=True))
+            if stable:
+                stack.enter_context(data_owner(data, exclusive=True))
             if os.path.lexists(data):
                 with _maintenance_directory(data): pass
                 for relative, name in (('runtime/xray', 'owner.lock'),

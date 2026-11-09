@@ -193,6 +193,27 @@ class CompleteBackupTests(unittest.TestCase):
         incoming = self.root/'recovery'/('core-restore-'+slot+'-incoming')
         self.assertTrue((incoming/'v-ui.db').is_file())
         self.assertEqual((self.data/'v-ui.db').read_bytes(), before)
+        request = dict(protocol=1, action='core_restore_exchange', transaction=journal['transaction'],
+            slot=slot, pending=journal['original_files']['pending'],
+            original=original['data_generation'], incoming=prepared.data_generation, sequence=3,
+            original_tree_sha256=original['data_sha256'], prepared_tree_sha256=prepared.data_sha256)
+        projected = ops_worker._restore_exchange_request(request)
+        frames = []
+        commands = iter((dict(command='prove_operation'), dict(command='finish')))
+        channel = SimpleNamespace(read=lambda: next(commands),
+                                  send=lambda event, **fields: frames.append((event, fields)))
+        with patch.object(full, 'SelectionFiles', return_value=files):
+            candidate_lock = incoming/'runtime/sing-box/owner.lock'
+            self.assertFalse(candidate_lock.exists())
+            with self.assertRaisesRegex(sf.CoreSelectionFilesError, 'PENDING_CHANGED'):
+                ops_worker._complete_restore_exchange(
+                    channel, self.root, tools, dict(projected, transaction='f'*32))
+            self.assertFalse(candidate_lock.exists())
+            self.assertEqual(frames, [])
+            ops_worker._complete_restore_exchange(channel, self.root, tools, projected)
+        self.assertEqual([event for event, _ in frames], ['restore_data_exchanged', 'operation_held'])
+        self.assertEqual(frames[0][1]['receipt']['data']['live'], prepared.data_generation)
+        self.assertEqual((self.root/'recovery'/('core-restore-'+slot+'-original')/'v-ui.db').read_bytes(), before)
 
     def state(self,components=True,legacy=False):
         state=self.fixture.state() if components else self.fixture.initial

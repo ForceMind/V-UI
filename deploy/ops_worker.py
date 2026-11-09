@@ -8,7 +8,7 @@ keep the worker alive until service recovery is verified and finish is sent.
 from __future__ import annotations
 
 import importlib.util
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import json
 import os
 from pathlib import Path
@@ -265,6 +265,62 @@ def _restore_observer_request(value):
                     data=dict(slot=value['slot'], incoming_generation=incoming)))
 
 
+def _restore_exchange_request(value):
+    from app.core_updates import artifacts
+    from app.core_updates.selection_files import MAX_JOURNALS
+    fields = {'sequence', 'original_tree_sha256', 'prepared_tree_sha256'}
+    if (value.get('action') != 'core_restore_exchange'
+            or not fields <= set(value) or type(value['sequence']) is not int
+            or not 0 <= value['sequence'] < MAX_JOURNALS
+            or any(not artifacts._hex(value[key]) for key in fields - {'sequence'})):
+        raise WorkerError('Invalid private restore exchange request')
+    projection = {key: item for key, item in value.items() if key not in fields}
+    projection['action'] = 'core_restore_observe'
+    journal = _restore_observer_request(projection)
+    journal['sequence'] = value['sequence']
+    journal['quiesced'] = {key: value[key] for key in fields - {'sequence'}}
+    return journal
+
+
+def _complete_restore_exchange(channel, root, release_tools, journal):
+    from app.data_owner import data_owner
+    from app.core_updates.backup_archive import (SelectionFiles, exchange_restore_data,
+                                                  _inspect_restore_slots, _restore_slot_names)
+    with release_tools._maintenance_directory(root):
+        pass
+    with ExitStack() as leases:
+        proof = leases.enter_context(release_tools._maintenance_lease(root, '.operation.lock', _proof=True))
+        leases.enter_context(release_tools._maintenance_lease(root, '.panel.lease'))
+        leases.enter_context(data_owner(root/'data', exclusive=True))
+        files = SelectionFiles()
+        pending = leases.enter_context(files.hold_restore_pending(journal))
+        names = _restore_slot_names(journal['restore_target']['data']['slot'])
+        recovery = root/'recovery'
+        with release_tools._maintenance_directory(root) as root_fd, \
+                release_tools._maintenance_directory(recovery) as recovery_fd:
+            parents = {key: root_fd if key == 'live' else recovery_fd for key in names}
+            position, observed = _inspect_restore_slots(root, journal, names, parents, root_fd, recovery_fd)
+            if position not in ('staged', 'parked', 'trial'):
+                raise WorkerError('Unexpected private restore exchange layout')
+            for key in ('live', 'incoming', 'original'):
+                if observed[key] is not None:
+                    pending()
+                    path = root/names[key] if key == 'live' else recovery/names[key]
+                    leases.enter_context(release_tools._offline_writers(path, stable=False))
+        session = types.SimpleNamespace(root=root, _operation_proof=proof)
+        guard = release_tools._StoppedGuard(root)
+        try:
+            _prove_released_operation(session)
+            receipt = exchange_restore_data(guard, journal, _selection_files=files)
+            _prove_released_operation(session)
+            channel.send('restore_data_exchanged', receipt=receipt)
+            while _command(channel.read(), ('prove_operation', 'finish')) != 'finish':
+                _prove_released_operation(session)
+                channel.send('operation_held')
+        finally:
+            guard._valid = False
+
+
 def _complete_restore_observer(channel, root, release_tools, journal):
     from app.core_updates.backup_archive import observe_restore_trial
     with release_tools._maintenance_directory(root):
@@ -442,6 +498,10 @@ def _run(root, release_tools, input_fd, output, *, timeout=TIMEOUT):
                 _load_core_session(release_tools)
                 journal = _restore_observer_request(request)
                 _complete_restore_observer(channel, root, release_tools, journal)
+            elif request.get('action') == 'core_restore_exchange':
+                _load_core_session(release_tools)
+                journal = _restore_exchange_request(request)
+                _complete_restore_exchange(channel, root, release_tools, journal)
             else:
                 action, arguments = _request(request)
                 if action in ('start', 'restart'):

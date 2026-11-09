@@ -143,6 +143,10 @@ class FixtureChild:
             result = dict(event='restore_observer_ready', transaction=journal['transaction'])
             if case.fault == 'restore-observer-ready-tx':
                 result['transaction'] = '0'*32
+        elif command == 'core_restore_exchange':
+            journal = ops_worker._restore_exchange_request(request)
+            case.assertEqual(journal['sequence'], self.restore_receipt['sequence'])
+            result = dict(event='restore_data_exchanged', receipt=self.restore_receipt)
         elif command == 'observe_restore_data':
             frames = []
             with patch('app.core_updates.backup_archive.observe_restore_trial', return_value=self.restore_data):
@@ -598,8 +602,9 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         with self.assertRaisesRegex(selection_files.CoreSelectionFilesError, 'RESTORE_RECEIPT'):
             self.switch._handoff_restore_trial(dict(receipt, sequence=0), _new_worker=new_worker)
         self.assertFalse(self.child.finished)
-        state = self.switch._handoff_restore_trial(receipt, _new_worker=new_worker)
-        self.assert_order('worker-exit-zero', 'worker-close', 'new-observer',
+        self.child.restore_receipt = receipt
+        state = self.switch._exchange_and_activate_restore_trial(_new_worker=new_worker)
+        self.assert_order('core_restore_exchange', 'worker-exit-zero', 'worker-close', 'new-observer',
                           'core_restore_observe', 'start-panel', 'release:trial')
         self.assertTrue(observer.finished)
         self.assertEqual(self.brokers[0].context['data_generation'], incoming)
