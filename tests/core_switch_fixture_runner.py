@@ -340,7 +340,24 @@ def switch_error_code(error, ops, control, stage):
             if re.fullmatch(r'CORE_[A-Z0-9_]{1,29}', value) and value not in codes:
                 codes.append(value)
         elif type(error) is ops.Refused:
-            codes.append('OPS_REFUSED')
+            codes.append({
+                'service is not in a stable supported state': 'UNIT_TRANSITION',
+                'service action failed': 'UNIT_ACTION',
+                'service stop unconfirmed': 'STOP_UNCONFIRMED',
+                'services remain active': 'UNIT_STILL_ACTIVE',
+                'service descendants remain': 'DESCENDANTS_REMAIN',
+                'service topology was not restored': 'TOPOLOGY_DRIFT',
+                'systemd configuration drift': 'UNIT_CONFIG_DRIFT',
+                'managed panel process not ready for identity': 'PANEL_IDENTITY_NOT_READY',
+                'managed panel process identity changed': 'PANEL_IDENTITY_CHANGED',
+                'active service missing process identity': 'PANEL_IDENTITY_MISSING',
+                'systemd query failed': 'SYSTEMD_QUERY',
+                'operation timed out': 'OPS_TIMEOUT',
+                'worker closed protocol': 'WORKER_PROTOCOL_CLOSED',
+                'worker exited early': 'WORKER_EXITED',
+                'child identity lost': 'WORKER_IDENTITY_LOST',
+                'child cleanup unconfirmed': 'WORKER_CLEANUP_UNCONFIRMED',
+            }.get(str(error), 'OPS_REFUSED'))
         elif isinstance(error, OSError) and type(error.errno) is int and 0 < error.errno < 4096:
             codes.append('ERRNO_'+str(error.errno))
         error = error.__cause__ or error.__context__

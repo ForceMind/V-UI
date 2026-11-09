@@ -515,6 +515,79 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.assertFalse(rows['xray']['enabled'])
         self.assertFalse(rows['xray']['owned_listeners_verified'])
 
+    def restore_trial_fixture(self, *, provided=False):
+        switch = self.switch
+        switch.source = SOURCE
+        switch.application = self.context['application']
+        switch.initial = self.services.snapshot()
+        before = self.context['data_generation']
+        incoming = dict(dev=before['dev'], ino=before['ino']+1)
+        snapshot = dict(panel_running=True, cores=self.initial_intents)
+        if provided:
+            switch.config['certificate_mode'] = 'provided'
+        self.files.bootstrap(self.before, writer_observation={
+            name: dict(schema=1, revision=row['revision'], enabled=row['enabled'])
+            if row['revision'] is not None else dict(schema=None, revision=None, enabled=False)
+            for name, row in self.initial_intents.items()}, service_snapshot=snapshot)
+        switch.transaction = self.files.begin_restore(self.before, **SOURCE,
+            expected_revision=self.before.revision, service_snapshot=snapshot,
+            source_backup_sha256='a'*64, restored_intents=self.initial_intents,
+            switch_context=dict(application=switch.application, data_generation=before,
+                services=switch.initial, config_sha256=selection_files._digest(selection_files._raw(switch.config)),
+                certificate_mode='provided' if provided else 'managed', trust_sha256='f'*64 if provided else None),
+            data_plan=dict(slot='b'*32, incoming_generation=incoming,
+                preflight_tree_sha256='c'*64, incoming_trust_sha256='e'*64 if provided else None))
+        self.services.stop_all()
+        staged = dict(live=before, original=None, incoming=incoming, rejected=None)
+        trial = dict(live=incoming, original=before, incoming=None, rejected=None)
+        self.files.record_quiesced(switch.transaction, dict(panel_stopped=True,
+            writers_exclusive=True, cores=self.initial_intents), restore_data=staged,
+            original_tree_sha256='d'*64, prepared_tree_sha256='e'*64, **SOURCE)
+        self.files.record_backup(switch.transaction, dict(kind='backup-components-v1',
+            name=ARCHIVE, sha256=BACKUP_SHA, selection_revision=self.before.revision,
+            backup_id=selection_files._digest((ARCHIVE+':'+BACKUP_SHA).encode()),
+            intents_sha256=selection_files._digest(selection_files._raw(self.initial_intents))), **SOURCE)
+        journal = self.files.read_restore_recovery()
+        receipt = dict(transaction=switch.transaction, sequence=journal['sequence'], data=trial, tree_sha256='e'*64)
+        return receipt, trial, incoming
+
+    def test_restore_trial_broker_uses_incoming_generation_and_confirms_current_data(self):
+        switch = self.switch
+        receipt, trial, incoming = self.restore_trial_fixture()
+        with self.assertRaisesRegex(selection_files.CoreSelectionFilesError, 'RESTORE_RECEIPT'):
+            switch._activate_restore_trial(dict(receipt, sequence=0), lambda: trial)
+        self.assertFalse(self.brokers)
+        observations = []
+        def observe():
+            observations.append(True)
+            return trial
+        state = switch._activate_restore_trial(receipt, observe)
+        self.assertEqual(len(observations), 3)
+        self.assertEqual(self.brokers[0].context['data_generation'], incoming)
+        self.assertEqual(self.files.read_stable(**SOURCE), state)
+
+    def test_restore_trial_cancelled_during_last_observation_retains_pending(self):
+        receipt, trial, _ = self.restore_trial_fixture()
+        count = 0
+        def observe():
+            nonlocal count
+            count += 1
+            if count == 3:
+                self.switch.cancelled.append(True)
+            return trial
+        with self.assertRaisesRegex(control.CoreControlError, 'CORE_TASK_CANCELLED'):
+            self.switch._activate_restore_trial(receipt, observe)
+        self.assertEqual(self.files.read_restore_recovery()['phase'], 'validated')
+        self.assertNotIn('release:trial', self.trace)
+        self.assertEqual(self.services.state(PANEL), 'inactive')
+
+    def test_restore_trial_provided_requires_separate_probe_before_provision(self):
+        receipt, trial, _ = self.restore_trial_fixture(provided=True)
+        with self.assertRaisesRegex(control.CoreControlError, 'CORE_RESTORE_TLS_PROBE_REQUIRED'):
+            self.switch._activate_restore_trial(receipt, lambda: trial)
+        self.assertEqual(self.files.read_restore_recovery()['phase'], 'backed_up')
+        self.assertFalse(self.brokers)
+
     def test_initially_stopped_panel_keeps_topology_without_health_attestation(self):
         self.services.current[PANEL] = 'inactive'
         before = dict(self.services.current)

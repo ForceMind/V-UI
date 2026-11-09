@@ -333,7 +333,41 @@ class _Switch:
         self.broker = None
         self.broker_closed = True
 
-    def _activate(self, state, intents, *, recovery, cleanup=False):
+    def _activate_restore_trial(self, receipt, observe):
+        """Start a private restore trial after the worker exchanged the data."""
+        self._proof()
+        journal = self.files.read_restore_recovery()
+        context = journal['switch_context']
+        target = journal['restore_target']
+        _need(journal['transaction'] == self.transaction and journal['phase'] == 'backed_up'
+              and target['kind'] == 'core-restore-target-v2'
+              and context['application'] == self.application
+              and context['services'] == self.initial
+              and self.m._digest(self.m._raw(self.config)) == context['config_sha256']
+              and self.config.get('certificate_mode', 'managed') == context['certificate_mode']
+              and callable(observe), 'CORE_RESTORE_CONTEXT')
+        _need(context['certificate_mode'] != 'provided', 'CORE_RESTORE_TLS_PROBE_REQUIRED')
+        self.services.prove_stopped()
+
+        def current_data():
+            data = observe()
+            _need(self.m.restore_data_position(journal, data) == 'trial', 'CORE_RESTORE_DATA_CHANGED')
+            self._proof()
+            return data
+
+        current_data()
+        state = self.files.provision(self.transaction, restore_receipt=receipt, **self.source)
+        self.generation = target['data']['incoming_generation']
+        self.trust_sha256 = target['data']['incoming_trust_sha256']
+        try:
+            self._activate(state, self._intents(target['intents'], state),
+                           recovery=False, restore_observe=current_data)
+        except BaseException:
+            self.services.stop_all(emergency=True)
+            raise
+        return state
+
+    def _activate(self, state, intents, *, recovery, cleanup=False, restore_observe=None):
         self.services.prove_stopped()
         self._proof()
         broker = None
@@ -373,9 +407,12 @@ class _Switch:
                 confirmed = self.files.rollback_metadata(self.transaction, observation,
                                                          final_intents=self.final, **self.source)
             else:
-                self.files.record_validation(self.transaction, observation, **self.source)
+                restore = {} if restore_observe is None else {'restore_data': restore_observe()}
+                self.files.record_validation(self.transaction, observation, **self.source, **restore)
+                if restore_observe is not None:
+                    restore['restore_data'] = restore_observe()
                 self.confirming = True
-                confirmed = self.files.confirm(self.transaction, **self.source)
+                confirmed = self.files.confirm(self.transaction, **self.source, **restore)
             _need(confirmed == state and self.files.read_stable(**self.source) == state, 'CORE_CONFIRMATION_CHANGED')
             if broker is not None:
                 broker.release(self._barriers())
