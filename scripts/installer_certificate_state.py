@@ -16,7 +16,7 @@ import stat
 import sys
 
 from app.release_tools import (ReleaseError, _maintenance_directory,
-                               atomic_json, release_id, stopped)
+                               atomic_json, release_id, _legacy_stopped)
 
 MAX_JSON = 65536
 MAX_CERTIFICATES = 512
@@ -251,7 +251,7 @@ def run(command, root, *arguments):
     state = state_value(bounded_json(arguments[0])) if command == 'restore' else None
     if command == 'contact':
         domain, email = domain_name(arguments[0]), email_address(arguments[1])
-    with _maintenance_directory(root), stopped(root):
+    with _maintenance_directory(root), _legacy_stopped(root):
         pointer = current_pointer(root)  # Also reject unsafe current pointers before a write.
         result = {'version': 2, 'db_exists': False, 'ready': False,
                   'panel_binding': None, 'certificates': [], 'current_pointer': pointer}

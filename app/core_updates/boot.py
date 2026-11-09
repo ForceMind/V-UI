@@ -129,10 +129,10 @@ def _runtime_states(data, *, owner, anchor):
     return result
 
 
-def configure_boot(manager, *, payload, manifest, ready, data, versions,
+def resolve_boot(*, payload, manifest, ready, data, versions,
                    selection_files=None, catalog=None, store=None,
                    owner=None, data_anchor=Path('/'), bundle_anchor=Path('/')):
-    """Resolve the whole confirmed snapshot, then configure the existing manager.
+    """Verify the whole confirmed snapshot without changing the runtime.
 
     None means verified absence plus only missing/valid schema1 runtime states;
     the manager is untouched, retaining exact legacy construction. A schema2
@@ -164,13 +164,6 @@ def configure_boot(manager, *, payload, manifest, ready, data, versions,
                                 bundles=bundles, catalog=catalog, store=store)
         snapshot = {core: resolver.current(state, core) for core in s.CORES}
         _need(files.read_boot(**context) == state, 'CORE_SELECTION_CHANGED')
-        try:
-            manager.configure_artifacts(snapshot)
-        except RuntimeError:
-            # CoreManager's fixed CoreError is a RuntimeError; do not import
-            # the runtime/its native dependencies just to translate late-cache
-            # refusal into the startup's fixed ValueError failure boundary.
-            raise CoreBootError('CORE_MANAGER_CONFIGURATION_REFUSED') from None
         return snapshot
     except CoreBootError:
         raise
@@ -180,6 +173,16 @@ def configure_boot(manager, *, payload, manifest, ready, data, versions,
         raise CoreBootError('CORE_MATERIAL_UNAVAILABLE') from None
     except (fs.CoreStoreError, a.CoreArtifactError, OSError):
         raise CoreBootError('RUNTIME_STATE_UNAVAILABLE') from None
+
+
+def configure_boot(manager, **context):
+    snapshot = resolve_boot(**context)
+    if snapshot is not None:
+        try:
+            manager.configure_artifacts(snapshot)
+        except RuntimeError:
+            raise CoreBootError('CORE_MANAGER_CONFIGURATION_REFUSED') from None
+    return snapshot
 
 
 def configure_managed(manager, *, session, payload, manifest, ready, data, versions):

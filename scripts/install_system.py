@@ -42,6 +42,8 @@ UNITS = ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')
 MAX_ARCHIVE = 850_000_000
 INSTALL_LOCK = Path('/run/lock/v-ui-install.lock')
 TRANSACTION_NAME = '.install-transaction.json'
+# Verified by the current controller before handing off the installer lock.
+CORE_INSTALL_GUARD = 1
 STREAM_CHUNK = 1024 * 1024
 HTTPS_STARTUP_TIMEOUT = 120
 # Complete stdlib-only dependency closure of the offline backup/restore controller.
@@ -603,6 +605,7 @@ def _recover_transaction(work):
     path = CONFIG_DIR/TRANSACTION_NAME
     if not os.path.lexists(path):
         return
+    require_legacy_core_installation()
     no_symlink_ancestors(path)
     if (not own_file(path) or stat.S_IMODE(path.stat().st_mode) != 0o600
             or path.stat().st_size > 12_000_000):
@@ -999,6 +1002,42 @@ def https_health(config, cafile=None, *, trust_saved_chain=False, deadline=None)
     raise InstallError('HTTPS 健康验证失败：120 秒启动预算已耗尽；最后结果 '+last) from None
 
 
+def require_legacy_core_installation():
+    names = ('CORE_UPDATE_PENDING.json', 'core-selection.json', 'core-selection.fence.json',
+             'core-selection.lock', '.core-update-active', '.core-update-history')
+    try:
+        fd = os.open(CONFIG_DIR, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return
+    except OSError:
+        raise InstallError('核心维护状态不可读取，已停止安装') from None
+    try:
+        for name in names:
+            try:
+                os.stat(name, dir_fd=fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            except OSError:
+                raise InstallError('核心维护状态不可读取，已停止安装') from None
+            raise InstallError('检测到独立核心选择或未完成事务，已停止普通应用安装或升级')
+    finally:
+        os.close(fd)
+
+
+def check_legacy_core_data(work):
+    # The controller has already been verified against the selected kit. The
+    # non-root child reads only bounded runtime-state files and changes no data.
+    code = ('import sys; from pathlib import Path; '
+            'sys.path.insert(0,sys.argv[1]); '
+            'from app.release_tools import _require_legacy_runtime_states; '
+            '_require_legacy_runtime_states(Path(sys.argv[2]))')
+    try:
+        as_service([sys.executable, '-B', '-I', '-S', '-c', code, str(work), str(ROOT / 'data')],
+                   capture=True, cwd=ROOT)
+    except subprocess.CalledProcessError:
+        raise InstallError('无法确认原核心运行状态，已停止应用升级或恢复') from None
+
+
 def install(args):
     validate_options(args)
     snapshot, archive, meta = verify_archive(args.bundle, args.sha256, temp_dir=getattr(args, 'archive_temp_dir', None))
@@ -1007,6 +1046,7 @@ def install(args):
 
 
 def install_verified(args, snapshot, archive, meta):
+    require_legacy_core_installation()
     existing=CONFIG.exists()
     info=check_platform()
     manager=info['init']
@@ -1099,6 +1139,8 @@ def install_verified(args, snapshot, archive, meta):
         os.chmod(bundle, 0o600); os.chown(bundle, uid, gid)
         extract_controller(archive, work, uid, gid)
         controller = work/'scripts/deploy.py'
+        if existing:
+            check_legacy_core_data(work)
         prepared = ROOT/'releases'/meta['release_id']/'READY.json'
         if not prepared.exists():
             as_service([sys.executable,'-B','-I','-S',str(controller),'--root',str(ROOT),'stage',str(bundle),'--sha256',args.sha256])
@@ -1367,6 +1409,7 @@ def main():
     # Config selection and application share the same lease. Never accept a
     # stale menu choice from another concurrent installer.
     with installation_signals(), _installation_lock(INSTALL_LOCK):
+        require_legacy_core_installation()
         if args.unattended_upgrade:
             current = saved_configuration()
             if current != saved or os.path.lexists(CONFIG_DIR/TRANSACTION_NAME):
@@ -1381,6 +1424,7 @@ def main():
                 with tempfile.TemporaryDirectory(prefix='.recovery-', dir=ROOT) as temporary:
                     work = Path(temporary); os.chown(work, account.pw_uid, account.pw_gid)
                     extract_controller(archive, work, account.pw_uid, account.pw_gid)
+                    check_legacy_core_data(work)
                     recover_transaction(work)
             read_configuration(args)
             if args.health_ca and not args.cert:

@@ -95,6 +95,30 @@ def core_update_pending() -> bool:
     return True
 
 
+def core_selection_present() -> bool:
+    """Recognize all initialization traces without trusting their contents."""
+    names = (_CORE_UPDATE_PENDING.name, 'core-selection.json', 'core-selection.fence.json',
+             'core-selection.lock', '.core-update-active', '.core-update-history')
+    try:
+        directory = os.open(_CORE_UPDATE_PENDING.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    try:
+        for name in names:
+            try:
+                os.stat(name, dir_fd=directory, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            return True
+    except OSError:
+        return True
+    finally:
+        os.close(directory)
+    return False
+
+
 def _check_pending_restore(parent: int) -> None:
     # A crash releases flock but not the durable recovery obligation. Do not
     # parse or follow this path: even an invalid or dangling journal blocks

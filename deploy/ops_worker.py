@@ -391,6 +391,10 @@ def _run(root, release_tools, input_fd, output, *, timeout=TIMEOUT):
                 _complete_core_recovery_handshake(channel, session)
             else:
                 action, arguments = _request(request)
+                if action in ('start', 'restart'):
+                    from app.data_owner import core_selection_present
+                    if core_selection_present():
+                        _load_core_session(release_tools)
                 session = release_tools._MaintenanceSession(root)
                 session.prepare(action, **arguments)
                 channel.send('prepared')

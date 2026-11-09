@@ -11,6 +11,7 @@ import re
 import shutil
 import sqlite3
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -403,14 +404,31 @@ def _offline_writers(data: Path):
 @contextmanager
 def writer_operation(root: Path):
     """Stopped in-process writer; let it claim its own component worker locks."""
-    from app.data_owner import data_owner, DataOwnerError
+    from app.data_owner import data_owner, DataOwnerError, core_update_pending
     try:
         with lease(root / '.operation.lock'), lease(root / '.panel.lease'), data_owner(root / 'data', exclusive=True):
+            if core_update_pending():
+                raise ReleaseError('核心维护尚未完成，请先恢复核心事务')
             if os.path.lexists(root / 'RESTORE_PENDING.json'):
                 raise ReleaseError('An interrupted restore requires recover-restore before writes')
             yield
     except DataOwnerError:
         raise ReleaseError('A data writer is active or its ownership is unsafe; stop it first') from None
+
+
+def _require_legacy_core_selection():
+    from app.data_owner import core_selection_present
+    if core_selection_present():
+        raise ReleaseError('检测到独立核心选择或未完成事务，当前操作需要支持核心选择的恢复流程')
+
+
+@contextmanager
+def _legacy_stopped(root: Path):
+    _require_legacy_core_selection()
+    with stopped(root) as guard:
+        _require_legacy_core_selection()
+        _require_legacy_runtime_states(root / 'data')
+        yield guard
 
 
 @contextmanager
@@ -661,6 +679,9 @@ def stage(archive: Path, expected_sha: str, root: Path) -> str:
 
 def _stage_locked(guard: _OperationGuard, archive: Path, expected_sha: str) -> str:
     guard._check_operation(); root=guard.root; key=target_key()
+    from app.data_owner import core_update_pending
+    if core_update_pending():
+        raise ReleaseError('核心维护尚未完成，请先恢复核心事务')
     with tempfile.TemporaryDirectory(prefix='.stage-',dir=root) as temporary:
         payload=Path(temporary)/'payload'; meta=unpack_verified(archive,expected_sha,payload)
         if meta.get('kind')!='release' or meta.get('platform')!=PLATFORM or key not in meta.get('targets',[]):
@@ -721,7 +742,7 @@ def active(root: Path) -> tuple[Path,dict]:
 
 def activate(root: Path, identity: str):
     root=private_root(root); identity=release_id(identity)
-    with stopped(root) as guard:
+    with _legacy_stopped(root) as guard:
         _activate_locked(guard, identity)
 
 
@@ -782,15 +803,43 @@ def _check_policy_artifact_ids(value):
         raise ReleaseError('Runtime artifact bindings are invalid')
 
 
-def _policy_runtime(data: Path, core: str, *, _expected_artifact_id=None):
+_RUNTIME_STATE_MEMBERS = ('runtime/sing-box/state.json', 'runtime/xray/state.json')
+
+
+def _legacy_runtime_state(state):
+    return (type(state) is dict and set(state) == {'revision', 'enabled'}
+            and type(state['revision']) is str and re.fullmatch('[0-9a-f]{64}', state['revision'])
+            and type(state['enabled']) is bool)
+
+
+def _unique_runtime_fields(pairs):
+    fields = dict(pairs)
+    if len(fields) != len(pairs):
+        raise ValueError('Duplicate core runtime field')
+    return fields
+
+
+def _require_legacy_runtime_states(data: Path, *, check_configs=False):
+    for core in ('sing-box', 'xray'):
+        try:
+            _policy_runtime(data, core, _state_only=not check_configs)
+        except (OSError, ValueError, RecursionError, ReleaseError):
+            raise ReleaseError('核心运行状态需要独立核心恢复，已停止旧格式操作') from None
+
+
+def _policy_runtime(data: Path, core: str, *, _expected_artifact_id=None, _state_only=False):
     """Strict saved runtime bytes for an offline controller, without launch."""
     if _expected_artifact_id is not None and (type(_expected_artifact_id) is not str
             or not re.fullmatch('[0-9a-f]{64}', _expected_artifact_id)):
         raise ReleaseError('Runtime artifact binding is invalid')
     directory = data / 'runtime' / core
-    if not os.path.lexists(directory) or not os.path.lexists(directory / 'state.json'):
-        return {'revision': None, 'enabled': False}, None
-    with _maintenance_directory(directory) as root:
+    with ExitStack() as scope:
+        try:
+            root = scope.enter_context(_maintenance_directory(directory))
+            os.stat('state.json', dir_fd=root, follow_symlinks=False)
+        except FileNotFoundError:
+            return {'revision': None, 'enabled': False}, None
+
         def read(name, limit):
             descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=root)
             try:
@@ -800,8 +849,8 @@ def _policy_runtime(data: Path, core: str, *, _expected_artifact_id=None):
                     raise ReleaseError('Committed proxy runtime file is unsafe')
                 with os.fdopen(os.dup(descriptor), 'rb') as handle: return handle.read(limit + 1)
             finally: os.close(descriptor)
-        state = json.loads(read('state.json', 4096))
-        legacy = type(state) is dict and set(state) == {'revision', 'enabled'}
+        state = json.loads(read('state.json', 4096), object_pairs_hook=_unique_runtime_fields)
+        legacy = _legacy_runtime_state(state)
         modern = (type(_expected_artifact_id) is str and re.fullmatch('[0-9a-f]{64}', _expected_artifact_id)
                   and type(state) is dict and set(state) == {'schema', 'revision', 'enabled', 'artifact_id'}
                   and type(state['schema']) is int and state['schema'] == 2
@@ -809,10 +858,12 @@ def _policy_runtime(data: Path, core: str, *, _expected_artifact_id=None):
         if (not (legacy or modern) or type(state.get('revision')) is not str
                 or not re.fullmatch('[0-9a-f]{64}', state['revision']) or type(state.get('enabled')) is not bool):
             raise ReleaseError('Committed proxy runtime state is invalid')
+        if _state_only:
+            return state, None
         raw = read(state['revision'] + '.json', 16 * 1024 * 1024)
     if digest(raw) != state['revision']:
         raise ReleaseError('Committed proxy runtime files disagree')
-    config = json.loads(raw)
+    config = json.loads(raw, object_pairs_hook=_unique_runtime_fields)
     if type(config) is not dict or type(config.get('inbounds', [])) is not list:
         raise ReleaseError('Committed proxy runtime configuration is invalid')
     return state, config
@@ -960,7 +1011,7 @@ def _activate_locked(guard: _StoppedGuard, identity: str):
 
 def backup(root: Path, destination: Path) -> str:
     root=private_root(root)
-    with stopped(root) as guard:
+    with _legacy_stopped(root) as guard:
         return _backup_locked(guard, destination)
 
 
@@ -1024,6 +1075,7 @@ def _backup_locked(guard: _StoppedGuard, destination: Path) -> str:
                               private_files=private_files)
 
 def recover_restore(root: Path):
+    _require_legacy_core_selection()
     root=private_root(root)
     with lease(root/'.operation.lock'), lease(root/'.panel.lease'), _offline_writers(root / 'data'):
         guard = _StoppedGuard(root)
@@ -1039,6 +1091,7 @@ def recover_restore(root: Path):
 
 def _recover_restore_locked(guard: _StoppedGuard):
     guard._check_recovery(); root=guard.root
+    _require_legacy_core_selection()
     journal=root/'RESTORE_PENDING.json'
     if not os.path.lexists(journal): return
     _, _, raw, old = _maintenance_recovery_snapshot(root, legacy=type(guard) is _StoppedGuard)
@@ -1046,6 +1099,7 @@ def _recover_restore_locked(guard: _StoppedGuard):
     if not safe_name(old) or not old.startswith('recovery/before-'):
         raise ReleaseError('Invalid recovery journal; manual inspection required')
     previous=root/old; data=root/'data'
+    _require_legacy_runtime_states(previous if previous.is_dir() else data)
     expected = value.get('source_sha256')
     if expected is not None:
         source = previous if previous.is_dir() else data
@@ -1060,9 +1114,64 @@ def _recover_restore_locked(guard: _StoppedGuard):
         raise ReleaseError('Restored source validation failed; journal retained')
     journal.unlink();sync_directory(root)
 
+def _check_legacy_backup_format(meta, data):
+    if (type(meta) is not dict or meta.get('kind') not in ('backup', 'backup-dns01-v1')
+            or meta.get('data_path') != str(data)):
+        raise ReleaseError('Backup belongs to a different data path or unsupported format; automatic path rewriting is not supported')
+
+
+def _bound_backup_zip_directory(stream):
+    # ZipFile allocates the directory and trusts its byte count, but not the
+    # declared entry count. Walk fixed headers before creating any ZipInfos.
+    end = zipfile._EndRecData(stream)
+    if end is None:
+        raise ReleaseError('Invalid backup ZIP directory')
+    count, remaining, offset = (end[zipfile._ECD_ENTRIES_TOTAL], end[zipfile._ECD_SIZE],
+                                end[zipfile._ECD_OFFSET])
+    zip64 = end[zipfile._ECD_SIGNATURE] == zipfile.stringEndArchive64
+    extension = zipfile.sizeEndCentDir64 + zipfile.sizeEndCentDir64Locator if zip64 else 0
+    if (not 0 < count <= 10_000 or not 46 * count <= remaining <= 16_000_000
+            or offset < 0 or offset + remaining + extension != end[zipfile._ECD_LOCATION]):
+        raise ReleaseError('Invalid backup ZIP directory')
+    stream.seek(offset)
+    for _ in range(count):
+        header = stream.read(46)
+        if len(header) != 46 or header[:4] != b'PK\x01\x02':
+            raise ReleaseError('Invalid backup ZIP directory')
+        fields = sum(struct.unpack_from('<HHH', header, 28))
+        remaining -= 46 + fields
+        if remaining < 0:
+            raise ReleaseError('Invalid backup ZIP directory')
+        stream.seek(fields, os.SEEK_CUR)
+    if remaining:
+        raise ReleaseError('Invalid backup ZIP directory')
+
+
+def _preflight_legacy_backup(stream, data):
+    try:
+        _bound_backup_zip_directory(stream)
+        with zipfile.ZipFile(stream) as archive:
+            names = archive.namelist()
+            for name, limit in ((MANIFEST, 4_000_000), *((name, 4096) for name in _RUNTIME_STATE_MEMBERS)):
+                count = names.count(name)
+                if count == 0 and name != MANIFEST:
+                    continue
+                if count != 1 or archive.getinfo(name).file_size > limit:
+                    raise ReleaseError('Invalid backup manifest or runtime state')
+                value = json.loads(archive.read(name), object_pairs_hook=_unique_runtime_fields)
+                if name == MANIFEST:
+                    _check_legacy_backup_format(value, data)
+                elif not _legacy_runtime_state(value):
+                    raise ReleaseError('备份包含独立核心状态，需要使用支持核心选择的恢复流程')
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile, RuntimeError) as exc:
+        if isinstance(exc, ReleaseError):
+            raise
+        raise ReleaseError('Invalid backup manifest or runtime state') from None
+
+
 def restore(root: Path, archive: Path, expected_sha: str):
     root=private_root(root)
-    with stopped(root) as guard:
+    with _legacy_stopped(root) as guard:
         _restore_locked(guard, archive, expected_sha)
 
 
@@ -1070,9 +1179,9 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
     guard._check(); root=guard.root
     with tempfile.TemporaryDirectory(prefix='.restore-',dir=root) as temporary:
         work=Path(temporary)/'data'; meta=unpack_verified(archive,expected_sha,work)
-        if meta.get('kind') not in ('backup', 'backup-dns01-v1') or meta.get('data_path') != str(root/'data'):
-            raise ReleaseError('Backup belongs to a different data path or unsupported format; automatic path rewriting is not supported')
+        _check_legacy_backup_format(meta, root / 'data')
         (work/MANIFEST).unlink()
+        _require_legacy_runtime_states(work)
         from app.certificates.dns_backup import (DNSBackupError, validate_dns_snapshot,
                                                 prepare_dns_staging, suspend_restored_dns)
         try:
@@ -1570,6 +1679,12 @@ class _MaintenanceSession(_StoppedGuard):
             raise ReleaseError('Invalid maintenance transaction state')
 
     def _journal_clear(self):
+        if self._action in ('backup', 'activate', 'restore', 'recover-restore'):
+            _require_legacy_core_selection()
+        elif self._action in ('stage', 'start', 'restart'):
+            from app.data_owner import core_update_pending
+            if core_update_pending():
+                raise ReleaseError('核心维护尚未完成，请先恢复核心事务')
         journal = self.root / 'RESTORE_PENDING.json'
         if self._action not in ('stop', 'recover-restore') and (journal.exists() or journal.is_symlink()):
             raise ReleaseError('An interrupted restore requires recover-restore before other operations')
@@ -1593,6 +1708,8 @@ class _MaintenanceSession(_StoppedGuard):
                 _maintenance_lease(self.root, '.operation.lock', _proof=True))
             self._operation_active = True
             self._journal_clear()
+            if action in ('backup', 'activate', 'restore'):
+                _require_legacy_runtime_states(self.root / 'data')
             if action not in ('stop', 'recover-restore'):
                 with _maintenance_directory(self.root / 'data'): pass
             if action not in ('stop', 'recover-restore'):
@@ -1600,9 +1717,11 @@ class _MaintenanceSession(_StoppedGuard):
                 self._selection = application[1]
                 self._active_application = application
                 self._anchor = _maintenance_anchor(self.root)
+                if action in ('start', 'restart'):
+                    self._verify_start_cores()
             if action == 'recover-restore':
                 self._recovery_snapshot = _maintenance_recovery_snapshot(self.root)
-                self._recovery_directories()
+                _require_legacy_runtime_states(self._recovery_directories()[0])
             self._identity = release_id(identity) if action == 'activate' else None
             if action == 'activate':
                 self._candidate()
@@ -1631,6 +1750,8 @@ class _MaintenanceSession(_StoppedGuard):
                             if total > MAX_ARCHIVE:
                                 raise ReleaseError('Restore archive exceeds limit')
                             checksum.update(chunk)
+                        if action == 'restore' and checksum.hexdigest() == sha256:
+                            _preflight_legacy_backup(stream, self.root / 'data')
                     after = os.fstat(fd)
                     named = self._archive.lstat()
                     if (signature(info) != signature(after) or signature(after) != signature(named)
@@ -1646,6 +1767,22 @@ class _MaintenanceSession(_StoppedGuard):
         except BaseException:
             self.close()
             raise
+
+    def _verify_start_cores(self):
+        from app.data_owner import core_selection_present, data_owner
+        try:
+            with data_owner(self.root / 'data'):
+                if not core_selection_present():
+                    _require_legacy_runtime_states(self.root / 'data', check_configs=True)
+                    return
+                from app.core_updates.boot import resolve_boot
+                from app.core_updates.maintenance import _versions
+                release, _, manifest, ready = self._active_application
+                payload = release / 'payload'
+                resolve_boot(payload=payload, manifest=manifest, ready=ready, data=self.root / 'data',
+                             versions=_versions(payload, manifest))
+        except (ImportError, OSError, ValueError, RuntimeError, KeyError):
+            raise ReleaseError('当前应用无法验证已选核心，已停止启动或重启') from None
 
     def _candidate(self):
         release = self.root / 'releases' / self._identity
@@ -1753,6 +1890,10 @@ class _MaintenanceSession(_StoppedGuard):
             if self._action not in ('stop', 'recover-restore') and _maintenance_anchor(self.root) != self._anchor:
                 raise ReleaseError('Bootstrap runtime changed during maintenance')
             result = {}
+            if self._action in ('start', 'restart'):
+                self._verify_start_cores()
+            if self._action in ('backup', 'activate', 'restore'):
+                _require_legacy_runtime_states(self.root / 'data')
             if self._action == 'backup':
                 result = self._automatic_backup()
             elif self._action == 'activate':

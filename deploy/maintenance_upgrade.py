@@ -4,6 +4,7 @@ Trust boundary: the current HTTPS canonical setup.sh supplies the accepted kit
 pin. It is parsed as data, never executed. Callers cannot supply a URL or pin.
 """
 from __future__ import annotations
+import ast
 import hashlib
 import json
 import os
@@ -129,6 +130,7 @@ def run(command, ops, *, timeout=1800):
 def upgrade(ops):
     with ops.installation_lock():
         manager, account = ops.verify_installation()
+        ops.require_core_compatibility('upgrade')
         config = ops.decode_json(ops.trusted_bytes(ops.CONFIG, 16384))
         if (manager != 'systemd' or config.get('installer') != 1 or config.get('ready') is not True
                 or os.path.lexists(ops.CONFIG.parent / '.install-transaction.json')):
@@ -146,6 +148,23 @@ def upgrade(ops):
     if tuple(map(int, new.groups())) <= tuple(map(int, current.groups())):
         return {'version': version, 'upgraded': False, 'reason': 'ALREADY_CURRENT_OR_NEWER'}
     return install_release(ops, config, version, pin)
+
+
+def require_installer_guard(path):
+    try:
+        with path.open('rb') as source:
+            raw = source.read(512_001)
+        if len(raw) <= 512_000:
+            markers = [node.value for node in ast.parse(raw).body
+                       if isinstance(node, ast.Assign)
+                       and any(isinstance(target, ast.Name) and target.id == 'CORE_INSTALL_GUARD'
+                               for target in node.targets)]
+            if (len(markers) == 1 and isinstance(markers[0], ast.Constant)
+                    and type(markers[0].value) is int and markers[0].value == 1):
+                return
+    except (OSError, ValueError, SyntaxError, RecursionError):
+        pass
+    raise UpgradeRefused('目标安装器不支持核心兼容检查，已停止升级')
 
 
 def install_release(ops, config, version, pin):
@@ -182,11 +201,13 @@ def install_release(ops, config, version, pin):
         # complete accepted manifest and exact source commit, before execution.
         run([str(ops.PYTHON), '-B', '-I', '-S', str(ops.CONTROL / 'install_control_verifier.py'),
              '--kit', str(directory), '--sha256', pin, '--local-target-only', '--preflight'], ops, timeout=120)
+        require_installer_guard(directory / 'install_system.py')
         # Snapshot once more before downloading code is executed. The new
         # unattended mode enforces this same root config and never creates an
         # initial account, accepts a new CA agreement or recovers a stale journal.
         with ops.installation_lock():
             ops.verify_installation()
+            ops.require_core_compatibility('upgrade')
             if ops.decode_json(ops.trusted_bytes(ops.CONFIG, 16384)) != config:
                 raise UpgradeRefused('configuration changed')
         command = [str(ops.PYTHON), '-B', '-E', '-S', str(directory / 'install_system.py'),

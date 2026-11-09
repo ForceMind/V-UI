@@ -41,6 +41,7 @@ CONTRACTS = {
     'test_core_prepare_worker.py': 15,
     'test_core_maintenance_control.py': 18,
     'test_core_maintenance_recovery.py': 9,
+    'test_core_offline_guards.py': 11,
 }
 
 

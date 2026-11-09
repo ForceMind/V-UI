@@ -848,8 +848,34 @@ def validate_done(result, request):
     return result
 
 
+def require_core_compatibility(action):
+    if action == 'stop':
+        return
+    names = ('CORE_UPDATE_PENDING.json',)
+    if action in ('upgrade', 'backup', 'activate', 'restore', 'recover-restore'):
+        names += ('core-selection.json', 'core-selection.fence.json', 'core-selection.lock',
+                  '.core-update-active', '.core-update-history')
+    try:
+        os.stat(CONFIG.parent, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    except OSError:
+        raise Refused('核心维护状态不可读取，当前操作已停止') from None
+    try:
+        with trusted_directory(CONFIG.parent) as directory:
+            for name in names:
+                try:
+                    os.stat(name, dir_fd=directory, follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                raise Refused('检测到独立核心选择或未完成事务，当前维护操作已停止')
+    except OSError:
+        raise Refused('核心维护状态不可读取，当前操作已停止') from None
+
+
 def operate(request, services, account, cancelled, worker_factory=None):
     action = validate_request(request)
+    require_core_compatibility(action)
     worker_factory = worker_factory or Child
     if action == 'stage':
         return prepare_candidate(request, account, cancelled, worker_factory)

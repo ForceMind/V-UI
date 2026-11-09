@@ -697,7 +697,7 @@ class UpgradeTests(unittest.TestCase):
         return types.SimpleNamespace(installation_lock=no_lock, verify_installation=lambda: ('systemd', object()),
             decode_json=ops.decode_json, trusted_bytes=lambda path, limit: json.dumps(config).encode(),
             CONFIG=Path('/etc/v-ui/service.json'), PYTHON=Path('/usr/bin/python3'), CONTROL=Path('/usr/local/lib/v-ui'), ENV=ops.ENV,
-            trusted_directory=no_lock)
+            trusted_directory=no_lock, require_core_compatibility=Mock())
 
     def config(self):
         return {'installer': 1, 'ready': True, 'release_id': '0.4.17-aaaaaaaaaaaa', 'certificate_mode': 'managed',
@@ -716,9 +716,20 @@ class UpgradeTests(unittest.TestCase):
             with self.assertRaises(upgrade.UpgradeRefused): upgrade.upgrade(self.fake_ops(config))
         accepted.assert_not_called()
 
+    def test_old_installer_without_lock_handoff_guard_refuses(self):
+        with tempfile.TemporaryDirectory() as folder:
+            installer = Path(folder) / 'install_system.py'
+            for raw in (b'# CORE_INSTALL_GUARD = 1', b'CORE_INSTALL_GUARD = True',
+                        b'CORE_INSTALL_GUARD = 1\nCORE_INSTALL_GUARD = 1'):
+                with self.subTest(raw=raw):
+                    installer.write_bytes(raw)
+                    with self.assertRaises(upgrade.UpgradeRefused):
+                        upgrade.require_installer_guard(installer)
+
     def test_full_download_chain_uses_manifest_before_verifier_and_fixed_unattended_flags(self):
         config = self.config(); config['release_id'] = '0.4.16-aaaaaaaaaaaa'
         contents = {name: b'accepted fake bytes' for name in upgrade.ASSETS | upgrade.BUNDLES}
+        contents['install_system.py'] = b'CORE_INSTALL_GUARD = 1\n'
         contents['RELEASE.json'] = json.dumps({'version': '0.4.17', 'release_id': '0.4.17-' + 'a' * 12, 'source_commit': 'a' * 40}).encode()
         raw = ''.join(hashlib.sha256(data).hexdigest() + '  ' + name + '\n' for name, data in sorted(contents.items())).encode()
         pin = hashlib.sha256(raw).hexdigest()
