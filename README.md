@@ -17,7 +17,7 @@
 bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh)
 ```
 
-本分支短入口固定下载已公开的 **v0.4.23**，校验安装器和完整套件摘要；本批入口仍待候选、主线及实际 main URL 验收，进度见[发布记录](docs/DNS01_CLOUDFLARE_CONTRACT.md#公开发布与短入口)。脚本来自本项目仓库，请先确认软件来源可信；需要固定版本、离线部署或手工核验时，见[安装指南](docs/INSTALLATION.md)。
+短入口固定下载已公开的 **v0.4.23**，校验安装器和完整套件摘要；候选、主线及实际 main URL 安装验收均已通过，见[发布记录](docs/DNS01_CLOUDFLARE_CONTRACT.md#公开发布与短入口)。脚本来自本项目仓库，请先确认软件来源可信；需要固定版本、离线部署或手工核验时，见[安装指南](docs/INSTALLATION.md)。
 
 新安装按提示填写自己的域名、邮箱和端口，并本人确认首次自动证书的 CA 条款。管理员用户名和强密码自动生成，只在当前终端交付；保存凭据后，按安装器最终输出的 HTTPS 地址登录。域名不能带协议、路径或端口，不能用 GitHub 下载域名代替自己的域名。
 
