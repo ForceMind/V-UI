@@ -29,6 +29,7 @@ jobs:
           VUI_TEST_MIHOMO: /tmp/vui-rc1/client/mihomo
           VUI_UDP_DNS_LOOPBACK: "1"
           VUI_UDP_DNS_PARSER: "1"
+          VUI_MIHOMO_MERGE_LOOPBACK: "1"
         run: |
           set -euo pipefail
           export VUI_DATA_DIR="$(mktemp -d)"

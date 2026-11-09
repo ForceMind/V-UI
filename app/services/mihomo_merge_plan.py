@@ -95,3 +95,26 @@ def plan_mihomo(baseline, candidate, *, choices=None, group_members=None) -> Sta
     if not rules or rules[-1][0] != 'MATCH' or any(rule[0] == 'MATCH' for rule in rules[:-1]):
         raise MihomoMergeError('PLAN_FINAL_REQUIRED')
     return StaticMihomoPlan(profiles, tuple(rules))
+
+
+def render_sing_box_rules(plan: StaticMihomoPlan, *, inbound: str, outbound_tags: dict[str, str]) -> list[dict]:
+    """Render rules for one isolated inbound; the caller owns verified outbounds."""
+    expected = {profile.name for profile in plan.upstreams} | {'DIRECT'}
+    if (type(inbound) is not str or not inbound or type(outbound_tags) is not dict
+            or outbound_tags.keys() != expected
+            or any(type(tag) is not str or not tag for tag in outbound_tags.values())
+            or len(set(outbound_tags.values())) != len(outbound_tags)):
+        raise MihomoMergeError('PLAN_INVALID_RUNTIME_TAGS')
+    fields = {'DOMAIN': 'domain', 'DOMAIN-SUFFIX': 'domain_suffix',
+              'IP-CIDR': 'ip_cidr', 'IP-CIDR6': 'ip_cidr'}
+    rendered = []
+    for kind, operand, target in plan.rules:
+        rule = {'inbound': [inbound]}
+        if kind != 'MATCH':
+            rule[fields[kind]] = [operand]
+        if target == 'REJECT':
+            rule['action'] = 'reject'
+        else:
+            rule.update(action='route', outbound=outbound_tags[target])
+        rendered.append(rule)
+    return rendered

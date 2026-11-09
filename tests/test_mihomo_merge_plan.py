@@ -1,7 +1,7 @@
 import unittest
 
 from app.services.mihomo_merge import MihomoMergeError
-from app.services.mihomo_merge_plan import plan_mihomo
+from app.services.mihomo_merge_plan import plan_mihomo, render_sing_box_rules
 
 
 BASELINE = """
@@ -42,6 +42,19 @@ rules:
             plan.route('https://example.com')
         with self.assertRaisesRegex(MihomoMergeError, '^PLAN_INVALID_DESTINATION$'):
             plan.route('fe80::1%eth0')
+
+    def test_renderer_keeps_rule_order_and_scopes_every_rule(self):
+        plan = plan_mihomo(BASELINE, '{rules: ["DOMAIN,example.com,DIRECT", '
+                                     '"IP-CIDR,192.0.2.0/24,Chosen,no-resolve", "MATCH,REJECT"]}',
+                           group_members={'Chosen': 'upstream'})
+        tags = {'DIRECT': 'direct-out', 'upstream': 'proxy-out'}
+        self.assertEqual(render_sing_box_rules(plan, inbound='test-in', outbound_tags=tags), [
+            {'inbound': ['test-in'], 'domain': ['example.com'], 'action': 'route', 'outbound': 'direct-out'},
+            {'inbound': ['test-in'], 'ip_cidr': ['192.0.2.0/24'], 'action': 'route', 'outbound': 'proxy-out'},
+            {'inbound': ['test-in'], 'action': 'reject'},
+        ])
+        with self.assertRaisesRegex(MihomoMergeError, '^PLAN_INVALID_RUNTIME_TAGS$'):
+            render_sing_box_rules(plan, inbound='test-in', outbound_tags={'DIRECT': 'same', 'upstream': 'same'})
 
     def test_requires_explicit_group_member_and_final_target(self):
         with self.assertRaisesRegex(MihomoMergeError, '^PLAN_GROUP_SELECTION_REQUIRED$'):

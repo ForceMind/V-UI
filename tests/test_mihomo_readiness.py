@@ -16,6 +16,8 @@ from test_proxy_double_hop import DoubleHopFixture
 # Audited persistent-client construction sites. Parser/version subprocess.run
 # and the HY2/TUIC sing-box-only UDP-server Popen paths are intentionally absent.
 SITES = {
+    ('test_mihomo_merge_plan_loopback.py',
+     'MihomoMergePlanLoopbackTests.test_same_explicit_decisions_and_failed_upstream_cannot_go_direct'): 'direct',
     ('core_switch_systemd.py', 'installed_core_switch.through'): 'direct',
     # Wildcard fixture: shared post-up/PID barrier before HTTP, ExitStack reap;
     # real server listeners and served leaf are checked independently.
@@ -47,6 +49,7 @@ SITES = {
 # launch implementations, fake unit processes, and non-core app/worker/benchmark
 # subprocesses. These entries do not grant Mihomo permission to use the old gate.
 OTHER_CONSTRUCTIONS = {
+    ('test_mihomo_merge_plan_loopback.py', 'MihomoMergePlanLoopbackTests.start_sing_box', 'BoundCoreProcess'),
     # Two bounded synthetic store/catalog publishers: isolated stdlib Python,
     # fake material/transport only, stdin barrier, 15s communicate and finally
     # kill/wait/close. No proxy core or readiness qualification is involved.
