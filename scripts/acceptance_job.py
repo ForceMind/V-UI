@@ -29,6 +29,8 @@ HEADER = 'VUI_ACCEPTANCE_CONTEXT '
 FOOTER = 'VUI_ACCEPTANCE_EXIT '
 
 
+CORE_SWITCH_FIXTURE = Path('/tmp/vui-oneclick/core-switch-fixture/candidate')
+
 def matrix_for_version(version):
     number = core._version(version)
     core._need(number >= (0, 4, 22), 'PARALLEL_VERSION_NOT_SUPPORTED')
@@ -188,7 +190,7 @@ def _exit_code(value):
     return value if value >= 0 else 128 - value
 
 
-def run_test(source, version, role, identity_path, log, *, old_source=None, environ=None):
+def run_test(source, version, role, identity_path, log, *, old_source=None, environ=None, core_switch=False):
     environ = os.environ if environ is None else environ
     _context(environ)
     recipe = role_recipe(version, role, old_source=old_source)
@@ -209,6 +211,10 @@ def run_test(source, version, role, identity_path, log, *, old_source=None, envi
         row = _role(version, role)
         _checkout(Path(old_source), row['source'])
     env = role_environment(environ, version, role, old_source=old_source)
+    if core_switch:
+        core._need(role == 'fresh' and CORE_SWITCH_FIXTURE.is_dir() and not CORE_SWITCH_FIXTURE.is_symlink(),
+                   'CORE_SWITCH_FRESH_FIXTURE_REQUIRED')
+        env['VUI_CORE_SWITCH_FIXTURE'] = str(CORE_SWITCH_FIXTURE)
     context = _log_context(identity, role, environ)
     code = 0
     with os.fdopen(_new_output(log, KIT), 'wb') as stream:
@@ -224,7 +230,11 @@ def run_test(source, version, role, identity_path, log, *, old_source=None, envi
                 break
         stream.write(('\n' + FOOTER + str(code) + '\n').encode()); stream.flush(); os.fsync(stream.fileno())
     if code == 0:
-        validate_test_log(_read_file(log, MAX_LOG), context)
+        raw_log = _read_file(log, MAX_LOG)
+        validate_test_log(raw_log, context)
+        if core_switch:
+            core._need(raw_log.count(b'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE:') == 1,
+                       'CORE_SWITCH_EVIDENCE_REQUIRED')
     return code
 
 
@@ -271,6 +281,7 @@ def main(argv=None):
     consume.add_argument('--bundle-output', default=str(BUNDLE))
     for command in (test, record): command.add_argument('--identity', required=True)
     test.add_argument('--log', required=True); test.add_argument('--old-source')
+    test.add_argument('--core-switch', action='store_true')
     record.add_argument('--producer-artifact-id', type=int, required=True)
     record.add_argument('--producer-artifact-digest', required=True)
     record.add_argument('--output', required=True); record.add_argument('--test-log')
@@ -286,7 +297,8 @@ def main(argv=None):
             result = prepare(args.kit, args.source, args.version, args.expected_checksums_sha256,
                              args.expected_bundle_sha256, args.identity_output, bundle_output=args.bundle_output)
         elif args.command == 'run-test':
-            code = run_test(args.source, args.version, args.role, args.identity, args.log, old_source=args.old_source)
+            code = run_test(args.source, args.version, args.role, args.identity, args.log,
+                            old_source=args.old_source, core_switch=args.core_switch)
             if code: raise SystemExit(code)
             return
         else:

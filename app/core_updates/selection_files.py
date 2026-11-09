@@ -907,6 +907,31 @@ class SelectionFiles:
         if 'switch_context' not in journal:
             self._settle_fence(scope, root, directory, journal, state)
 
+    def _confirmed_state(self, scope, root, directory, journal, app_source, target):
+        _need(journal['phase'] in ('confirmed', 'cleanup'), 'PHASE')
+        state = _selection(journal['after'] if journal['rollback'] is None
+                           else journal['rollback']['selection'], app_source, target)
+        current = _read(scope, root, SELECTION)
+        planned = [action['new'] for action in journal['actions'] if action['public'] == SELECTION]
+        _need(current[0] == s.encode_selection(state)
+              and any(_matches(current[1], record) for record in planned), 'PUBLIC_CHANGED')
+        if 'switch_context' in journal:
+            actions = [action for action in journal['actions'] if action['public'] == FENCE]
+            fence = _read(scope, root, FENCE, optional=True)
+            if fence is None:
+                # Legitimate absence is only the exact settle-fence rename gap.
+                _need(any(action['key'] == 'settle-fence' and action['old'] is not None
+                          and _exists(directory, action['old_slot'])
+                          and _exists(directory, action['new_slot']) for action in actions),
+                      'PUBLIC_CHANGED')
+            else:
+                _need(any(_matches(fence[1], action['new']) for action in actions), 'PUBLIC_CHANGED')
+                value = _fence(fence[0])
+                _need(value['transaction'] == journal['transaction']
+                      and value['confirmed_revision'] == state.revision
+                      and value['highest_generation'] == state.generation, 'FENCE_CONFLICT')
+        return state
+
     def finish_cleanup(self, transaction, *, app_source, target):
         """Explicitly finish metadata of an already durably confirmed journal.
 
@@ -915,13 +940,7 @@ class SelectionFiles:
         """
         with self._io(write=True) as (scope, root):
             directory, journal, _ = self._load(scope, root, transaction, app_source, target)
-            _need(journal['phase'] in ('confirmed', 'cleanup'), 'PHASE')
-            state = _selection(journal['after'] if journal['rollback'] is None
-                               else journal['rollback']['selection'], app_source, target)
-            current = _read(scope, root, SELECTION)
-            planned = [action['new'] for action in journal['actions'] if action['public'] == SELECTION]
-            _need(current[0] == s.encode_selection(state)
-                  and any(_matches(current[1], record) for record in planned), 'PUBLIC_CHANGED')
+            state = self._confirmed_state(scope, root, directory, journal, app_source, target)
             self._archive_and_clear(scope, root, directory, journal, state)
             return state
 
@@ -1012,6 +1031,11 @@ class SelectionFiles:
                     restored = _selection(journal['rollback']['selection'], after['app_source'], after['target'])
                     _need(maximum <= restored.generation, 'RECOVERY_CONFLICT')
                 result['recovery_selection'] = _selection_map(restored)
+            else:
+                _need(pending is not None, 'NO_SWITCH_RECOVERY')
+                confirmed = self._confirmed_state(scope, root, directory, journal,
+                                                  after['app_source'], after['target'])
+                result['confirmed_selection'] = _selection_map(confirmed)
             return result
 
     def recovery_view(self, *, app_source, target):

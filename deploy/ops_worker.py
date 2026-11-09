@@ -23,7 +23,7 @@ import types
 ROOT = Path('/var/lib/v-ui')
 TIMEOUT = 600
 LINE_LIMIT = 8192
-RECOVERY_REQUEST_LIMIT = 16384  # Two full selections plus the retained switch context.
+RECOVERY_REQUEST_LIMIT = 16384  # Before/after/confirmed selections plus the retained switch context.
 PATH_LIMIT = 4096
 
 
@@ -196,6 +196,10 @@ def _core_request(value):
 
 def _core_recovery_request(value):
     fields = ('transaction', 'context', 'before', 'after', 'final_intents', 'backup', 'allow_after_ids')
+    if 'confirmed_selection' in value:
+        fields += ('confirmed_selection',)
+        if type(value['confirmed_selection']) is not dict or type(value.get('final_intents')) is not dict:
+            raise WorkerError('Invalid confirmed core recovery request')
     if (set(value) != {'protocol', 'action', *fields}
             or type(value.get('protocol')) is not int or value['protocol'] != 1
             or value['action'] != 'core_recover'

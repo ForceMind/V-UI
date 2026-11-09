@@ -333,7 +333,7 @@ class _Switch:
         self.broker = None
         self.broker_closed = True
 
-    def _activate(self, state, intents, *, recovery):
+    def _activate(self, state, intents, *, recovery, cleanup=False):
         self.services.prove_stopped()
         self._proof()
         broker = None
@@ -351,7 +351,8 @@ class _Switch:
                     timeout=min(300, self._time()))
                 self.broker_closed = False
                 self.broker = broker
-                broker.listen()
+                broker.listen(recover_stale=recovery,
+                              rename_noreplace=self.modules.store._rename_new if recovery else None)
                 self.services.restore(self.initial)
                 identity = self._await_identity()
                 broker.arm(identity); broker.wait_ready()
@@ -364,7 +365,10 @@ class _Switch:
                 _need(self.services.state('v-ui.service') == 'inactive', 'STOPPED_PANEL_STARTED')
             observation = self._validation(state, intents, observed)
             self._proof()
-            if recovery:
+            if cleanup:
+                self.confirming = True
+                confirmed = self.files.finish_cleanup(self.transaction, **self.source)
+            elif recovery:
                 self.confirming = True
                 confirmed = self.files.rollback_metadata(self.transaction, observation,
                                                          final_intents=self.final, **self.source)
@@ -402,7 +406,7 @@ class _Switch:
 
     def run_recovery(self):
         journal = self.files.read_switch_recovery()
-        _need('recovery_selection' in journal, 'CORE_CONFIRMED_CLEANUP_REQUIRED')
+        cleanup = 'confirmed_selection' in journal
         context = journal['switch_context']
         self.application = context['application']
         self.source = {key:self.application[key] for key in ('app_source', 'target')}
@@ -415,15 +419,19 @@ class _Switch:
         self.transaction = journal['transaction']
         self.before = self._state(journal['before'])
         self.after = self._state(journal['after'])
-        restored = self._state(journal['recovery_selection'])
+        restored = self._state(journal['confirmed_selection'] if cleanup else journal['recovery_selection'])
         saved_intents = (journal['rollback']['intents'] if journal['rollback'] is not None else
                          journal['quiesced']['cores'] if journal['quiesced'] is not None else None)
         backup = journal['backup']
         allow_after = backup is not None and journal['phase'] in (
             'trial', 'validated', 'confirming', 'rollback_required', 'recovery')
-        ready = self.worker.exchange(dict(protocol=1, action='core_recover', transaction=self.transaction,
+        request = dict(protocol=1, action='core_recover', transaction=self.transaction,
             context=context, before=journal['before'], after=journal['after'], final_intents=saved_intents,
-            backup=backup, allow_after_ids=allow_after), 'core_recovery_prepared',
+            backup=backup, allow_after_ids=allow_after)
+        if cleanup:
+            _need(saved_intents is not None, 'CORE_RECOVERY_CONTEXT')
+            request['confirmed_selection'] = journal['confirmed_selection']
+        ready = self.worker.exchange(request, 'core_recovery_prepared',
             ('transaction', 'application', 'data_generation'))
         _need(ready['transaction'] == self.transaction and ready['application'] == self.application
               and ready['data_generation'] == self.generation, 'CORE_RECOVERY_CONTEXT')
@@ -434,18 +442,21 @@ class _Switch:
             self.services.stop_all()
             result = self.worker.command('proceed', 'core_recovery_bound',
                                          ('selection', 'final_intents', 'changed_cores'))
-            self.final = self._intents(result['final_intents'], self.before)
-            _need(self._state(result['selection']) == self.before
-                  and (saved_intents is None or self.final == saved_intents)
-                  and type(result['changed_cores']) is list
-                  and len(result['changed_cores']) == len(set(result['changed_cores']))
-                  and all(core in self.s.CORES for core in result['changed_cores']),
+            expected_state = restored if cleanup else self.before
+            expected_intents = self.m._rebind_intents(saved_intents, restored) if cleanup else saved_intents
+            self.final = self._intents(result['final_intents'], expected_state)
+            changed = result['changed_cores']
+            _need(self._state(result['selection']) == expected_state
+                  and (expected_intents is None or self.final == expected_intents)
+                  and type(changed) is list and all(core in self.s.CORES for core in changed)
+                  and len(changed) == len(set(changed)) and (not cleanup or not changed),
                   'CORE_RECOVERY_CONTEXT')
             self.services.prove_stopped()
             self.worker.command('release_recovery_writers', 'recovery_writers_released')
-            self._activate(restored, self.final, recovery=True)
+            self._activate(restored, self.final, recovery=True, cleanup=cleanup)
             self.worker.finish()
-            result = dict(outcome='restored_previous', selection_revision=restored.revision,
+            outcome = 'resumed_confirmed' if cleanup else 'restored_previous'
+            result = dict(outcome=outcome, selection_revision=restored.revision,
                           panel_running=self.initial['v-ui.service'] == 'active')
             if backup is not None:
                 result.update(backup_name=backup['name'], backup_sha256=backup['sha256'])

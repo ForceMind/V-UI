@@ -407,18 +407,65 @@ class CoreBootBroker:
         for parent, name, fd, expected in self._bindings:
             _need(self._dir_id(os.fstat(fd)) == expected
                   and self._dir_id(os.stat(name, dir_fd=parent, follow_symlinks=False)) == expected, 'PARENT_CHANGED')
-    def listen(self):
+    def _clear_stale_endpoint(self, original, rename_noreplace):
+        # This is only the fixed broker name inside the checked Root parent.
+        # A recovery caller holds the installation and worker operation locks.
+        _need(stat.S_ISSOCK(original.st_mode) and original.st_uid == self._layout.owner
+              and original.st_gid == self._gid and stat.S_IMODE(original.st_mode) == 0o660
+              and original.st_nlink == 1, 'ENDPOINT_EXISTS')
+        _need(self._proof() is None, 'PROOF_FAILED')
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.settimeout(.25)
+            try:
+                probe.connect(str(self.endpoint))
+            except ConnectionRefusedError:
+                pass
+            else:
+                raise CoreBootBrokerError('ENDPOINT_LIVE')
+        finally:
+            probe.close()
+        _need(self._proof() is None, 'PROOF_FAILED')
+        self._parent_bound()
+        current = os.stat('core-boot.sock', dir_fd=self._parent, follow_symlinks=False)
+        _need(self._dir_id(current) == self._dir_id(original)
+              and current.st_nlink == original.st_nlink
+              and current.st_ctime_ns == original.st_ctime_ns, 'ENDPOINT_CHANGED')
+        # Park with no replacement before the inode check that authorizes
+        # removal. A substitution at the rename boundary is preserved.
+        parked_name = '.stale-core-boot-' + secrets.token_hex(16)
+        rename_noreplace(self._parent, 'core-boot.sock', self._parent, parked_name)
+        parked = os.stat(parked_name, dir_fd=self._parent, follow_symlinks=False)
+        if self._dir_id(parked) != self._dir_id(original) or parked.st_nlink != original.st_nlink:
+            try:
+                rename_noreplace(self._parent, parked_name, self._parent, 'core-boot.sock')
+            except Exception:
+                # The replacement remains in the owned park if the public
+                # name is now occupied. Never delete an unverified inode.
+                pass
+            raise CoreBootBrokerError('ENDPOINT_CHANGED')
+        _need(self._proof() is None, 'PROOF_FAILED')
+        self._parent_bound()
+        os.unlink(parked_name, dir_fd=self._parent)
+        os.fsync(self._parent)
+
+    def listen(self, *, recover_stale=False, rename_noreplace=None):
         self._owner()
         with self._lock:
-            _need(self._state == 'new', 'BROKER_STATE')
+            _need(self._state == 'new' and type(recover_stale) is bool, 'BROKER_STATE')
             try:
                 _need(os.geteuid() == (0 if self._layout.anchor == Path('/') else self._layout.owner), 'ROOT_REQUIRED')
                 _need(self._credentials is not peer_credentials or hasattr(socket, 'SO_PEERCRED'), 'PEERCRED_UNAVAILABLE')
                 self._open_parent()
                 self._parent_bound()
-                try: os.stat('core-boot.sock', dir_fd=self._parent, follow_symlinks=False)
-                except FileNotFoundError: pass
-                else: raise CoreBootBrokerError('ENDPOINT_EXISTS')
+                try:
+                    existing = os.stat('core-boot.sock', dir_fd=self._parent, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    _need(recover_stale and self._context['purpose'] == 'old_recovery'
+                          and callable(rename_noreplace), 'ENDPOINT_EXISTS')
+                    self._clear_stale_endpoint(existing, rename_noreplace)
                 self._listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 self._listener.bind(str(self.endpoint))
                 info = os.stat('core-boot.sock', dir_fd=self._parent, follow_symlinks=False)

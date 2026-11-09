@@ -103,7 +103,7 @@ class JobTests(unittest.TestCase):
         if Path(cwd) == self.checkout: return SHA + '\n'
         return core.BASELINES[Path(cwd).name.removeprefix('old-')] + '\n'
 
-    def run_role(self, role='fresh', *, old_source=None, result=0, data=SUCCESS, fetch_result=0):
+    def run_role(self, role='fresh', *, old_source=None, result=0, data=SUCCESS, fetch_result=0, core_switch=False):
         calls = []
         def execute(command, **kwargs):
             calls.append((command, kwargs))
@@ -116,7 +116,8 @@ class JobTests(unittest.TestCase):
                 kwargs['stdout'].write(data); kwargs['stdout'].flush()
             return subprocess.CompletedProcess(command, result if command == job.TEST_COMMAND else 0)
         with patch.object(job.subprocess, 'check_output', side_effect=self.fake_git), patch.object(job.subprocess, 'run', side_effect=execute):
-            code = job.run_test(SHA, VERSION, role, self.identity_path, self.log, old_source=old_source, environ=ACTIONS)
+            code = job.run_test(SHA, VERSION, role, self.identity_path, self.log, old_source=old_source,
+                                environ=ACTIONS, core_switch=core_switch)
         return code, calls
 
     def make_receipt(self, role='fresh', **changes):
@@ -222,6 +223,18 @@ class JobTests(unittest.TestCase):
         with patch.object(job.subprocess, 'run') as execute, self.assertRaises(core.ReleaseAcceptanceError):
             job.run_test(SHA, VERSION, 'fresh', self.identity_path, self.log, environ=ACTIONS)
         execute.assert_not_called()
+
+    def test_native_core_switch_requires_fresh_fixture_and_actual_evidence(self):
+        candidate = self.root/'fixture'
+        candidate.mkdir(mode=0o700)
+        with patch.object(job, 'CORE_SWITCH_FIXTURE', candidate):
+            with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'CORE_SWITCH_EVIDENCE_REQUIRED'):
+                self.run_role(core_switch=True)
+            self.log.unlink()
+            code, calls = self.run_role(core_switch=True,
+                data=SUCCESS+b'\nVUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: fixture completed\n')
+        self.assertEqual(code, 0)
+        self.assertEqual(calls[-1][1]['env']['VUI_CORE_SWITCH_FIXTURE'], str(candidate))
 
     def test_build_receipt_requires_producer_scope_and_no_log_claim(self):
         producer_path = self.root / 'producer.json'; job.producer(self.kit, SHA, VERSION, producer_path)

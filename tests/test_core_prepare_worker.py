@@ -125,6 +125,23 @@ class CorePrepareWorkerTests(unittest.TestCase):
                                  'proof', 'tls-handshake', 'tls-login', 'proof', 'close'])
         self.assertEqual(sessions[0].arguments, {k:v for k,v in request.items() if k not in ('action','protocol')})
 
+    def test_confirmed_recovery_selection_is_optional_and_requires_exact_final_intent(self):
+        selection = {'fixture': 'confirmed'}
+        request = self.recovery_request(confirmed_selection=selection, final_intents={})
+        status, _, trace, sessions = self.run_recovery_worker([
+            command('proceed'), command('release_recovery_writers'), command('finish')], request=request)
+        self.assertEqual(status, 0)
+        self.assertEqual(trace, ['recovery_prepare', 'recovery_bind', 'recovery_release', 'close'])
+        self.assertEqual(sessions[0].arguments['confirmed_selection'], selection)
+        for overrides in (dict(confirmed_selection=None, final_intents={}),
+                          dict(confirmed_selection=[], final_intents={}),
+                          dict(confirmed_selection=selection)):
+            status, events, trace, sessions = self.run_recovery_worker(
+                [command('proceed')], request=self.recovery_request(**overrides))
+            self.assertEqual((status, trace, sessions), (1, [], []))
+            self.assertEqual(events, [dict(event='error', code='MAINTENANCE_REFUSED')])
+        self.assertNotIn('confirmed_selection', w._core_recovery_request(self.recovery_request()))
+
     def test_recovery_rejects_invalid_request_and_unproven_prepare_before_writers(self):
         from app import release_tools
         self.assertNotIn('core_recover', release_tools._MaintenanceSession.ACTIONS)
@@ -164,7 +181,7 @@ class CorePrepareWorkerTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertNotIn('operation_held', [event['event'] for event in events])
 
-    def test_recovery_only_initial_frame_can_hold_two_full_selections(self):
+    def test_recovery_only_initial_frame_can_hold_three_full_selections(self):
         from app.core_updates import artifacts, selection, selection_files
         import test_core_selection as fixture
 
@@ -192,7 +209,8 @@ class CorePrepareWorkerTests(unittest.TestCase):
         receipt = dict(kind='backup-components-v1', name='core-maintenance-'+'1'*32+'.zip',
                        backup_id=digest, sha256=digest, selection_revision=before.revision, intents_sha256=digest)
         request = self.recovery_request(context=context, before=fixture.raw(before), after=fixture.raw(after),
-                                        final_intents=intents, backup=receipt, allow_after_ids=True)
+                                        confirmed_selection=fixture.raw(after), final_intents=intents,
+                                        backup=receipt, allow_after_ids=True)
         raw = json.dumps(request,separators=(',',':')).encode()+b'\n'
         self.assertGreater(len(raw), w.LINE_LIMIT)
         self.assertLessEqual(len(raw), w.RECOVERY_REQUEST_LIMIT)

@@ -79,6 +79,7 @@ class FixtureChild:
         self.snapshot = None
         self.backup_ack = None
         self.recovering = False
+        self.confirmed_selection = None
 
     def send(self, request):
         case = self.case
@@ -94,6 +95,7 @@ class FixtureChild:
                 result['unchecked'] = True
         elif command == 'core_recover':
             self.recovering = True
+            self.confirmed_selection = request.get('confirmed_selection')
             result = dict(event='core_recovery_prepared', transaction=request['transaction'],
                           application=case.context['application'], data_generation=case.context['data_generation'])
         elif command == 'probe_panel_tls':
@@ -112,8 +114,10 @@ class FixtureChild:
             if case.services.state(PANEL) != 'inactive':
                 raise AssertionError('proceed before stop')
             if self.recovering:
-                result = dict(event='core_recovery_bound', selection=case.context['selection'],
-                              final_intents=case.final_intents, changed_cores=[])
+                state = (selection.decode_selection(selection_files._raw(self.confirmed_selection), **SOURCE)
+                         if self.confirmed_selection is not None else case.before)
+                result = dict(event='core_recovery_bound', selection=selection_files._selection_map(state),
+                              final_intents=case.intents_for(state), changed_cores=[])
             else:
                 result = dict(event='core_quiesced', final_intents=case.final_intents, source_token=TOKEN)
         elif command == 'backup_core':
@@ -179,7 +183,8 @@ class FixtureBroker:
     def event(self, name):
         self.case.trace.append(name + ':' + self.purpose)
 
-    def listen(self):
+    def listen(self, *, recover_stale=False, rename_noreplace=None):
+        self.case.assertEqual(recover_stale, self.purpose == 'old_recovery')
         self.proof()
         self.event('listen')
         self.state = 'listening'
@@ -264,7 +269,8 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         metadata = types.SimpleNamespace(**vars(selection_files))
         metadata.SelectionFiles = lambda: self.files
         modules = types.SimpleNamespace(artifacts=artifacts, selection=selection, selection_files=metadata,
-            store=types.SimpleNamespace(_canonical=store._canonical, CoreArtifactStore=object),
+            store=types.SimpleNamespace(_canonical=store._canonical, _rename_new=store._rename_new,
+                                        CoreArtifactStore=object),
             catalog=types.SimpleNamespace(CoreCatalog=object), broker=broker)
         ops = types.SimpleNamespace(RELEASE=re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,100}\Z'),
                                     local_panel_tls=self.tls)
@@ -419,6 +425,39 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.assertEqual(self.files.recovery_view(**SOURCE)['transaction'],tx)
         self.assert_order('core_recover','stop','proceed','release_recovery_writers','probe:old_recovery',
                           'release:old_recovery','finish')
+
+    def assert_confirmed_restart(self, *, rollback):
+        if rollback:
+            self.fault = 'trial-probe'
+        with patch.object(self.files, '_archive_and_clear', side_effect=OSError('interrupted after confirm')):
+            with self.assertRaisesRegex(control.CoreControlError, 'CORE_RECOVERY_REQUIRED'):
+                self.run_switch()
+        durable = self.files.read_switch_recovery()
+        self.assertEqual(durable['phase'], 'confirmed')
+        self.assertEqual(durable['rollback'] is not None, rollback)
+        confirmed = selection.decode_selection(selection_files._raw(durable['confirmed_selection']), **SOURCE)
+        self.assertEqual(confirmed.slots, self.before.slots if rollback else self.plan.after.slots)
+        if rollback:
+            self.assertGreater(confirmed.generation, self.plan.after.generation)
+        self.fault = None
+        self.worker.close()
+        self.child = FixtureChild(self)
+        self.worker = control._Worker(self.child)
+        self.addCleanup(self.worker.close)
+        self.switch.worker = self.worker
+        with patch.object(self.files, 'rollback_metadata', side_effect=AssertionError('confirmed state reverted')):
+            result = self.switch.run_recovery()
+        self.assertEqual(result['outcome'], 'resumed_confirmed')
+        self.assertEqual(self.files.read_stable(**SOURCE), confirmed)
+        self.assertEqual(self.child.confirmed_selection, durable['confirmed_selection'])
+        self.assert_order('core_recover', 'stop', 'proceed', 'release_recovery_writers',
+                          'probe:old_recovery', 'release:old_recovery', 'finish')
+
+    def test_interrupted_confirmed_update_resumes_exact_candidate(self):
+        self.assert_confirmed_restart(rollback=False)
+
+    def test_interrupted_confirmed_rollback_resumes_exact_old_generation(self):
+        self.assert_confirmed_restart(rollback=True)
 
     def assert_order(self, *events):
         index = 0

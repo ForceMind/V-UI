@@ -121,7 +121,7 @@ class FakeUnixSocket:
     def listen(self,size):pass
     def connect(self,path):
         listener=self.network.listeners.get(path)
-        if listener is None or listener.closed:raise OSError('fake listener unavailable')
+        if listener is None or listener.closed:raise ConnectionRefusedError('fake listener unavailable')
         left,right=socket.socketpair();self.stream=left
         listener.queue.put(FakeUnixSocket(self.network,right))
     def accept(self):
@@ -286,6 +286,46 @@ class BrokerTests(unittest.TestCase):
         broker=self.broker();foreign.unlink();foreign.write_bytes(b'foreign replacement')
         with self.assertRaisesRegex(b.CoreBootBrokerError,'CLEANUP_FAILED'):broker.close()
         self.assertEqual(foreign.read_bytes(),b'foreign replacement')
+    def test_recovery_reclaims_only_a_refused_owned_socket_with_live_proof(self):
+        from app.core_updates.store import _rename_new
+        broker=self.broker()
+        original=broker.endpoint
+        def recovery():
+            layout=b.BrokerLayout(self.root/'broker',os.geteuid(),self.root)
+            candidate=b.CoreBootBroker(dict(self.ctx,purpose='old_recovery'),service_uid=501,
+                service_gid=self.gid,proof=self.proof,identity_query=lambda:self.current,timeout=2,
+                layout=layout,credentials=lambda sock:(self.identity.pid,self.identity.uid,self.gid))
+            self.brokers.append(candidate)
+            return candidate
+
+        with self.assertRaisesRegex(b.CoreBootBrokerError,'ENDPOINT_LIVE'):
+            recovery().listen(recover_stale=True, rename_noreplace=_rename_new)
+        self.assertTrue(original.exists())
+        # Leave the inode behind while closing its listener, as with a crash.
+        broker._owned_inode=None
+        broker.close()
+        self.assertTrue(original.exists())
+        self.proof_error=True
+        with self.assertRaisesRegex(b.CoreBootBrokerError,'LISTEN_FAILED'):
+            recovery().listen(recover_stale=True, rename_noreplace=_rename_new)
+        self.assertTrue(original.exists())
+        self.proof_error=False
+        held=original.with_name('original-stale')
+        def substitute(parent,name,destination,park):
+            if name=='core-boot.sock':
+                original.rename(held)
+                original.write_bytes(b'foreign replacement')
+            return _rename_new(parent,name,destination,park)
+        with self.assertRaisesRegex(b.CoreBootBrokerError,'ENDPOINT_CHANGED'):
+            recovery().listen(recover_stale=True,rename_noreplace=substitute)
+        self.assertEqual(original.read_bytes(),b'foreign replacement')
+        self.assertTrue(held.exists())
+        original.unlink();held.rename(original)
+        replacement=recovery()
+        replacement.listen(recover_stale=True, rename_noreplace=_rename_new)
+        replacement.close()
+        self.assertFalse(original.exists())
+
     def test_idle_peer_eof_revokes_before_another_control_command(self):
         broker=self.broker();broker.arm(self.identity);sock=self.connect(broker)
         grant=self.claim(sock,time.monotonic()+1)

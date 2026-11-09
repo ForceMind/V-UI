@@ -625,6 +625,10 @@ print(json.dumps({'pid':child.pid,'created':child.create_time(),'binary_sha256':
             'global_flags':'dual-OFF','account_and_xray_preserved':True,
             'material_mode':'admin-provided-paths','maintenance_bearer':True,
             'source_case':os.getenv('VUI_PUBLISHED_INSTALL_VERSION','fresh-candidate')},sort_keys=True))
+        if os.getenv('VUI_CORE_SWITCH_FIXTURE'):
+            from core_switch_systemd import installed_core_switch
+            installed_core_switch(check, source, work, api, service_python, ca, cert, key, client, sing)
+
     finally:
         try:
             if maintenance_grant is not None:grant_cli('revoke',str(maintenance_grant['id']))

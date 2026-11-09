@@ -38,9 +38,9 @@ CONTRACTS = {
     'test_core_installation_lock.py': 10,
     'test_core_worker_cycle.py': 10,
     'test_core_maintenance_session.py': 28,
-    'test_core_prepare_worker.py': 14,
-    'test_core_maintenance_control.py': 16,
-    'test_core_maintenance_recovery.py': 3,
+    'test_core_prepare_worker.py': 15,
+    'test_core_maintenance_control.py': 18,
+    'test_core_maintenance_recovery.py': 9,
 }
 
 
@@ -51,7 +51,7 @@ def main():
     args = parser.parse_args()
     if args.runtime and not sys.platform.startswith('linux'):
         raise SystemExit('Runtime binding contracts require native Linux acceptance')
-    contracts = ({'test_core_runtime_artifact.py': 32, 'test_core_boot_broker.py': 19,
+    contracts = ({'test_core_runtime_artifact.py': 32, 'test_core_boot_broker.py': 20,
                   'test_core_cold_check_linux.py': 1} if args.runtime else CONTRACTS)
     os.chdir(ROOT)
     sys.path.insert(0, str(ROOT))

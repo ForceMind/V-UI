@@ -21,7 +21,7 @@ class CoreRecoverySession(CoreMaintenanceSession):
     ACTIONS = frozenset(('core_recover',))
 
     def __init__(self, root, *, transaction, context, before, after, final_intents,
-                 allow_after_ids, backup=None, **test_layout):
+                 allow_after_ids, backup=None, confirmed_selection=None, **test_layout):
         _need(a._hex(transaction, 32) and type(allow_after_ids) is bool, 'RECOVERY_CONTEXT')
         app = context['application']
         source = dict(app_source=app['app_source'], target=app['target'])
@@ -36,6 +36,15 @@ class CoreRecoverySession(CoreMaintenanceSession):
         self._recovery_context = sf._switch_context(context, self._old,
             context['services']['v-ui.service'] == 'active')
         self._saved_intents = None if final_intents is None else sf._intent(final_intents, self._old)
+        self._confirmed = None
+        if confirmed_selection is not None:
+            confirmed = s.decode_selection(sf._raw(confirmed_selection), **source)
+            recovered_before = (confirmed.slots == self._old.slots
+                                and confirmed.generation > self._candidate_state.generation)
+            _need(self._saved_intents is not None and (confirmed == self._candidate_state or recovered_before),
+                  'RECOVERY_CONFIRMED_TARGET')
+            self._confirmed = confirmed
+            self._confirmed_intents = sf._rebind_intents(self._saved_intents, confirmed)
         self._allow_after = allow_after_ids
         self._recovery_backup = deepcopy(backup)
         _need(not allow_after_ids or (backup is not None and self._saved_intents is not None),
@@ -45,9 +54,17 @@ class CoreRecoverySession(CoreMaintenanceSession):
         with self._files._io() as (scope, root):
             raw, _ = sf._read(scope, root, sf.PENDING)
             _need(sf._pending(raw)['transaction'] == self._transaction, 'RECOVERY_PENDING_CHANGED')
+            if self._confirmed is not None:
+                published, _ = sf._read(scope, root, sf.SELECTION)
+                _need(published == s.encode_selection(self._confirmed), 'RECOVERY_CONFIRMED_CHANGED')
 
     def _check_panel_material(self):
         expected = self._recovery_context['trust_sha256']
+        if self._confirmed is not None:
+            config = tools._maintenance_read_config()
+            _need(sf._digest(sf._raw(config)) == self._recovery_context['config_sha256']
+                  and config.get('certificate_mode') == self._recovery_context['certificate_mode'],
+                  'RECOVERY_CONFIG_CHANGED')
         if expected is None:
             return
         material = self._read_panel_tls_material()
@@ -78,8 +95,9 @@ class CoreRecoverySession(CoreMaintenanceSession):
                 versions=_versions(release/'payload', manifest), owner=os.geteuid(), anchor=self._bundle_anchor)
             self._resolver = CoreResolver(app_source=self._source, target=self._target,
                 bundles=self._bundle_map, catalog=self._catalog, store=self._store)
+            selected = self._before if self._confirmed is None else self._confirmed
             for core in s.CORES:
-                self._resolver.current(self._before, core)
+                self._resolver.current(selected, core)
             self._check_panel_material()
             self._core_phase = 'recovery_prepared'
             return dict(transaction=self._transaction, application=deepcopy(self._app_facts),
@@ -101,13 +119,38 @@ class CoreRecoverySession(CoreMaintenanceSession):
             _need(a._digest_fd(fd, size) == backup['sha256'], 'RECOVERY_BACKUP_CHANGED')
             scope.stable()
 
+    def _check_runtime_policy(self, artifact_ids):
+        reader = tools._readonly_proxy_store_type()
+        data = self.root/'data'
+        tools._database_mode_fence(data, _existing_store_type=reader)
+        if os.path.lexists(data/'proxy-state') or os.path.lexists(data/'.proxy-state-initialized'):
+            tools._validate_restore_policy(data, _artifact_ids=artifact_ids, _existing_store_type=reader)
+
+    def _verify_confirmed(self, states, token):
+        _need(all(item['_schema'] == 2 for item in states.values()), 'RECOVERY_CONFIRMED_SCHEMA')
+        intents = self._intents(states, self._confirmed)
+        _need(intents == self._confirmed_intents, 'RECOVERY_INTENT_CHANGED')
+        for core in s.CORES:
+            self._resolver.current(self._confirmed, core)
+        self._check_runtime_policy({core: row['artifact_id'] for core, row in intents.items()})
+        self._pending()
+        self._check_panel_material()
+        _need(self._observe_states() == states, 'RECOVERY_INTENT_CHANGED')
+        self._check()
+        self._check_writer_generation('done', token)
+        self._core_phase = 'recovery_bound'
+        return dict(selection=_state_map(self._confirmed), final_intents=intents, changed_cores=[])
+
     def execute(self):
         _need(self._core_phase == 'recovery_prepared', 'CORE_PHASE')
         self._pending()
         tools._MaintenanceSession.execute(self)
+        token = self._writer_generation
         self._check()
         self._pending()
         states = self._observe_states()
+        if self._confirmed is not None:
+            return self._verify_confirmed(states, token)
         old_ids = {core:s.reference_identity(self._before.slot(core).current) for core in s.CORES}
         intents, actual_ids, changed = {}, {}, []
         for core in s.CORES:
@@ -128,11 +171,7 @@ class CoreRecoverySession(CoreMaintenanceSession):
         _need(self._saved_intents is None or intents == self._saved_intents, 'RECOVERY_INTENT_CHANGED')
         self._final_intents = intents
         self._final_states = states
-        reader = tools._readonly_proxy_store_type()
-        data = self.root/'data'
-        tools._database_mode_fence(data, _existing_store_type=reader)
-        if os.path.lexists(data/'proxy-state') or os.path.lexists(data/'.proxy-state-initialized'):
-            tools._validate_restore_policy(data, _artifact_ids=actual_ids, _existing_store_type=reader)
+        self._check_runtime_policy(actual_ids)
         if changed:
             self._check_backup()
         self._pending()
@@ -147,5 +186,8 @@ class CoreRecoverySession(CoreMaintenanceSession):
 
     def release_recovery_writers(self):
         _need(self._core_phase == 'recovery_bound', 'CORE_PHASE')
+        if self._confirmed is not None:
+            self._pending()
+            self._check_panel_material()
         tools._MaintenanceSession.release_writers_for_trial(self)
         self._core_phase = 'recovery_writers_released'

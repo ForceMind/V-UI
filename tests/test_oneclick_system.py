@@ -146,6 +146,10 @@ class OneClickSystemTests(unittest.TestCase):
             sudoers_before = sudo_policy_snapshot() if online else None
             if online:
                 self.assertNotIn('/etc/sudoers.d/v-ui',sudoers_before)
+            core_switch_fixture = bool(os.getenv('VUI_CORE_SWITCH_FIXTURE'))
+            if core_switch_fixture:
+                self.assertIsNone(gate)
+                self.assertFalse(os.path.lexists('/var/lib/v-ui-core'))
             def cleanup():
                 subprocess.run(['sudo','systemctl','disable','--now','v-ui-maintenance.service'],capture_output=True)
                 subprocess.run(['sudo','systemctl','disable','--now','v-ui.service','v-ui-http01.socket'],capture_output=True)
@@ -155,6 +159,8 @@ class OneClickSystemTests(unittest.TestCase):
                 subprocess.run(['sudo','systemctl','daemon-reload'],check=True)
                 subprocess.run(['sudo','rm','-rf','/etc/v-ui','/usr/local/lib/v-ui','/var/lib/v-ui'],check=True)
                 subprocess.run(['sudo','rm','-rf','/var/lib/v-ui-maintenance','/run/v-ui-maintenance'],check=True)
+                if core_switch_fixture:
+                    subprocess.run(['sudo','rm','-rf','/var/lib/v-ui-core'],check=True)
                 subprocess.run(['sudo','rm','-f','/usr/local/bin/v-ui','/usr/local/sbin/v-ui'],check=True)
                 subprocess.run(['sudo','userdel','v-ui'],capture_output=True)
             if gate is None:

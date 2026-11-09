@@ -16,6 +16,7 @@ from test_proxy_double_hop import DoubleHopFixture
 # Audited persistent-client construction sites. Parser/version subprocess.run
 # and the HY2/TUIC sing-box-only UDP-server Popen paths are intentionally absent.
 SITES = {
+    ('core_switch_systemd.py', 'installed_core_switch.through'): 'direct',
     # Wildcard fixture: shared post-up/PID barrier before HTTP, ExitStack reap;
     # real server listeners and served leaf are checked independently.
     ("test_dns_core_tls.py", "DNSCoreTLSTests.start_client"): "direct",

@@ -590,3 +590,13 @@ d128a58自身[主单元42528797556](https://github.com/ForceMind/V-UI/actions/ru
 [b8b0964 主测试](https://github.com/ForceMind/V-UI/actions/runs/42536294524) 实际执行 3489 项，有一项进程清单不匹配，原 239 项跳过。新增 Linux 假后代用例已在 [三个 staged Linux 目标](https://github.com/ForceMind/V-UI/actions/runs/42536294496) 实际进入 52 项检查，均无跳过。清单现已补齐该固定调用点，严格匹配断言保留。
 
 当前两版 Python 各 478 项合成合同通过，无跳过。恢复和私有 CA 测试包含真实临时 flock、归档校验及替身传输。真实 Root、systemd、私有 CA 全链路及不同核心验收仍需 Actions。公开操作入口、确认态重启、双域恢复和离线入口守卫仍列为后续工作。
+
+## M22 确认态重启和真实切换验收入口
+
+有 pending 的已确认事务恢复时，从持久 journal 取已发布选择，并核选择文件和已记录的 fence 发布证据。非 root worker 在实际 EX 下检查现有 state2、配置摘要、原服务配置和证书摘要，只接受该确认目标及最终启停意图，零 ID 写入。恢复沿用原拓扑和受管 broker 试跑，完成清理并确认面板已解封。已归档并清除 pending 的稳定选择走常规启动，恢复入口不会重放已完成事务。
+
+恢复时只处理固定可信目录内、已验证归属和权限的旧 broker socket。两次租约证明及连接被拒后，先用 NOREPLACE 停放，再核 inode。换名窗口中的替换对象保留。活 socket 和无法证明的对象不进入清理。
+
+fresh 安装验收中已加入首个实际 systemd 切换用例。它复用同一安装及固定 Mihomo 流量夹具，构建同提交的 sing-box 四目标组件并在 x86_64 GNU runner 上执行新版。候选发布接口由 Root-owned CI 脚本提供固定响应，真实检查、下载验证、catalog、store、已安装协调器和非 root worker 路径照常执行。此用例要求坏摘要保留原进程、端口冲突后实际恢复、正常切换及回退都能通过真实 TCP/TLS 流量，并比较数据库节点摘要、CURRENT、data inode、原配置 revision、启停意图和会话。执行日志须有专用验收标记。未执行的用例不会生成该验收结果。
+
+本机两版 Python 各 487 项合成合同通过，无跳过。Linux staged 检查增加到 53 项，真实系统用例由 Actions 运行。仍需扩大到两核心及四目标、双域恢复、离线入口守卫和授权用户入口。
