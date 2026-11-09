@@ -1,6 +1,6 @@
 # Cloudflare DNS-01 与通配符证书契约
 
-状态：2026-11-09，源码已进入 **v0.4.23** 候选。设计、应用三块及CLI/snapshot/安装控制兼容实现与独立审查已收口；冻结候选104f8c8的九组Actions/21个job全部成功，包含四目标、新装和八旧版升级；最终文档/dev/main及同源材料仍须另验。公开稳定应用、19项资产与短入口仍是v0.4.22，不访问真实账号、修改真实DNS、替用户同意CA条款或部署生产。23未公开/未部署；2026-11-09已明确授权本批按release→dev→main普通合并、准确主线核验后公开23及更新短入口。不含P3/P4产品、生产升级或真实DNS写入，浏览器未验证。
+状态：2026-11-09，**v0.4.23已公开**，正式应用源`be5d8459cdd3eeedce73f2ff6e4663e5eb781e42`，19项资产/tag/清单摘要已独立读回，匿名公共安装通过。短入口在独立批次固定23与公开摘要，应用及历史资产不改写。真实Cloudflare账号签发、浏览器、物理512MiB整机/24小时未验证，本批没有生产升级或真实DNS写入。
 
 用户操作见[候选DNS指南](DNS01_CLOUDFLARE.md)。[首实现提交7e418b6的设计全文](https://github.com/ForceMind/V-UI/blob/7e418b6e10587e61efcecae290302dfd440a0b6a/docs/DNS01_CLOUDFLARE_CONTRACT.md)固定保留原阶段措辞；当前进度以[路线图](../ROADMAP.md)为准。
 
@@ -134,3 +134,13 @@ Actions的最小证据：旧HTTP fixture迁移及重复/损坏/失败回滚；�
 2026-11-09发布启动修正：原应用功能仍与`4bd1d9a`相同；发布控制重新冻结于`039453e1a95666b5ddc539e67708fd7b22734103`，仅将工作流改为`python3 -m scripts.publish_release`并加入干净子进程回归。原main `bb33bdf`的九组/21 jobs及10份同源收据均通过，但正式晋升在创建tag/Release前因脚本入口无法导入`scripts`而停止。新冻结点之后仍只允许政策JSON和普通Markdown，最终准确main必须重新完成全套验收。
 
 [正式晋升42604920601](https://github.com/ForceMind/V-UI/actions/runs/42604920601)的原始`ModuleNotFoundError`保留。工作流权限、checkout、参数数组、默认main核对、同源材料及不覆盖旧资产的门禁未改；没有创建新tag/Release。新回归使用实际workflow launcher，在无PYTHONPATH的namespace package临时布局中启动真实publisher，假GH/git仅提供只读前置数据，并在策略入口强制停止，未访问网络或发布。原调用精确失败，模块调用及141项门禁单元通过；最终主线和完整字节晋升仍待Actions。
+
+## 公开发布与短入口
+
+- 正式源 `be5d8459cdd3eeedce73f2ff6e4663e5eb781e42`，应用功能保持4bd1d9a，发布控制冻结039453e；[v0.4.23](https://github.com/ForceMind/V-UI/releases/tag/v0.4.23)公开19项资产。
+- [主线安装42610073803](https://github.com/ForceMind/V-UI/actions/runs/42610073803)的producer、新装和八旧版升级均attempt1成功；九组/21 jobs及每个必要step、10份同source/run/attempt收据另核通过。
+- [正式晋升42612414262](https://github.com/ForceMind/V-UI/actions/runs/42612414262)完整验证并晋升同源字节，不重建。旧启动失败42604920601及候选3a6ba6d的上游403/同源attempt2记录保留，不称永久修复限流。
+- 独立匿名HTTPS读取install.sh、SHA256SUMS与RELEASE.json，三个小文件的实际摘要匹配上传元数据，18项清单逐项匹配其余公开资产digest；tag指向正式源。未在本机下载产品包或执行安装。
+- 安装器SHA-256：`82dd8ac84f6a7117762359916769a28f6aa505a6e64607d9edda67b56d5e40e3`；完整SHA256SUMS文件SHA-256：`61d6fba8f3d1c5fb6ae39a890db06e8b44e2afa165d1e13451d450a27e583a30`。
+- [匿名公共安装42613270949](https://github.com/ForceMind/V-UI/actions/runs/42613270949)成功。本批短入口固定23，使用不可变正式应用源进行自身候选/主线与实际main URL验收，完成后记录入口身份。
+- 原配置、账户、节点、订阅、证书及代理设置的升级保护保持；没有访问或升级生产实例。真实Cloudflare账号签发和浏览器未验证。
