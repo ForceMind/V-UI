@@ -11,14 +11,11 @@ from app.services import upstream_import as bounded
 from app.services.mihomo_preview import (
     MAX_GROUPS, MAX_RULES, MihomoPreviewError, _equal, _load_document, _rule_shape, _source_bytes,
 )
-from app.services.mihomo_routing import RESERVED_PROXY_NAMES
-from app.services.upstream_profile import UpstreamValidationError
+from app.services.upstream_profile import RESERVED_ROUTING_TARGETS, UpstreamValidationError
 
 
 _NAMED_SECTIONS = ('proxies', 'proxy-groups')
-# V-UI's exported groups may use these three names. They need definitions.
-_EXPORT_GROUP_NAMES = {'PROXY', 'AUTO', 'FORCE_PROXY'}
-_RESERVED_NAMES = frozenset(RESERVED_PROXY_NAMES - _EXPORT_GROUP_NAMES) | {'MATCH'}
+_RESERVED_NAMES = RESERVED_ROUTING_TARGETS | {'MATCH'}
 
 
 class MihomoMergeError(ValueError):

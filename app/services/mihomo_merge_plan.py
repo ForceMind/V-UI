@@ -19,6 +19,8 @@ class StaticMihomoPlan:
     # This is private material, including upstream credentials and destinations.
     upstreams: tuple[UpstreamProfile, ...] = field(repr=False)
     rules: tuple[tuple[str, str, str], ...] = field(repr=False)
+    source_rules: tuple[tuple[str, str, str], ...] = field(repr=False)
+    group_members: tuple[tuple[str, str], ...] = field(repr=False)
 
     def route(self, destination: str) -> str:
         """Return the first matching explicit target without resolving DNS."""
@@ -70,7 +72,7 @@ def plan_mihomo(baseline, candidate, *, choices=None, group_members=None) -> Sta
                    for name, member in group_members.items())):
         raise MihomoMergeError('PLAN_INVALID_GROUP_SELECTION')
 
-    rules, referenced_groups = [], set()
+    rules, source_rules, referenced_groups = [], [], set()
     for rule in merged.get('rules', ()):
         if type(rule) is not str:
             raise MihomoMergeError('PLAN_UNSUPPORTED_RULE')
@@ -82,6 +84,7 @@ def plan_mihomo(baseline, candidate, *, choices=None, group_members=None) -> Sta
         if parsed is None:
             raise MihomoMergeError('PLAN_UNSUPPORTED_RULE')
         kind, operand, target = parsed
+        source_rules.append(parsed)
         if target in groups:
             referenced_groups.add(target)
             if target not in group_members:
@@ -94,7 +97,7 @@ def plan_mihomo(baseline, candidate, *, choices=None, group_members=None) -> Sta
         raise MihomoMergeError('PLAN_UNUSED_GROUP_SELECTION')
     if not rules or rules[-1][0] != 'MATCH' or any(rule[0] == 'MATCH' for rule in rules[:-1]):
         raise MihomoMergeError('PLAN_FINAL_REQUIRED')
-    return StaticMihomoPlan(profiles, tuple(rules))
+    return StaticMihomoPlan(profiles, tuple(rules), tuple(source_rules), tuple(group_members.items()))
 
 
 def render_sing_box_rules(plan: StaticMihomoPlan, *, inbound: str, outbound_tags: dict[str, str]) -> list[dict]:
