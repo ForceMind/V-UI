@@ -33,6 +33,7 @@ class Target(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         self.send_response(200)
+        self.send_header('Content-Length', str(len(self.server.payload)))
         self.end_headers()
         self.wfile.write(self.server.payload)
 
@@ -136,7 +137,10 @@ def verify_runtime(core, binary, version, directory):
                         assert os.path.samestat(process_binary.stat(), binary.stat())
                         connection.request('GET', f'http://127.0.0.1:{target.server_port}{target.expected_path}')
                         response = connection.getresponse()
-                        assert (response.status, response.read(100)) == (200, target.payload)
+                        assert response.status == 200
+                        assert response.getheader('Content-Length') == str(len(target.payload))
+                        assert response.length == len(target.payload)
+                        assert response.read() == target.payload
                         assert target.requests == [target.expected_path]
                         assert child.poll() is None and owns_listener(child.pid, port)
                         break
@@ -177,7 +181,11 @@ def main():
         for core in CORES:
             name = f"core-candidate-{core}-{source}-{context['run_id']}-{context['run_attempt']}"
             binary, version, digest, pack = native_binary(args.inputs/name, core, source, args.target, context, directory)
-            verify_runtime(core, binary, version, directory)
+            try:
+                verify_runtime(core, binary, version, directory)
+            except Exception as error:
+                error.add_note('Native TCP candidate: ' + core + ' / ' + args.target)
+                raise
             results[core] = dict(version=version, binary_sha256=digest, pack_sha256=pack)
     print(json.dumps(dict(schema=1, kind='core-candidate-native-tcp-v1', source=source, context=context,
                           target=args.target, cores=results), sort_keys=True))
