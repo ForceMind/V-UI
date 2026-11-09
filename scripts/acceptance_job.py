@@ -189,6 +189,28 @@ def validate_test_log(raw, expected_context):
                and not re.search(r'\b(?:SKIP|SKIPPED|skipped|FAILED|ERROR)\b', text), 'TEST_LOG_NOT_ONE_UNSKIPPED_SUCCESS')
 
 
+def validate_core_switch_evidence(raw_log):
+    markers = [line for line in raw_log.splitlines() if CORE_SWITCH_MARKER in line]
+    expected = tuple(CORE_SWITCH_MARKER + b' ' + name.encode('ascii') + b' '
+                     for name in CORE_SWITCH_CORES)
+    core._need(len(markers) == len(expected) == raw_log.count(CORE_SWITCH_MARKER)
+               and all(line.startswith(prefix) and line[len(prefix):].strip()
+                       for line, prefix in zip(markers, expected)),
+               'CORE_SWITCH_EVIDENCE_REQUIRED')
+    interrupted = [line for line in raw_log.splitlines() if CORE_INTERRUPT_MARKER in line]
+    core._need(len(interrupted) == raw_log.count(CORE_INTERRUPT_MARKER) == 1
+               and interrupted[0].startswith(CORE_INTERRUPT_MARKER + b' ')
+               and interrupted[0][len(CORE_INTERRUPT_MARKER):].strip()
+               and raw_log.find(CORE_INTERRUPT_MARKER) > raw_log.rfind(CORE_SWITCH_MARKER),
+               'CORE_INTERRUPT_EVIDENCE_REQUIRED')
+    restored = [line for line in raw_log.splitlines() if CORE_RESTORE_MARKER in line]
+    core._need(len(restored) == raw_log.count(CORE_RESTORE_MARKER) == 1
+               and restored[0].startswith(CORE_RESTORE_MARKER + b' ')
+               and restored[0][len(CORE_RESTORE_MARKER):].strip()
+               and raw_log.find(CORE_RESTORE_MARKER) > raw_log.find(CORE_INTERRUPT_MARKER),
+               'CORE_RESTORE_EVIDENCE_REQUIRED')
+
+
 def _exit_code(value):
     core._need(type(value) is int, 'TEST_EXIT_CODE')
     return value if value >= 0 else 128 - value
@@ -239,25 +261,7 @@ def run_test(source, version, role, identity_path, log, *, old_source=None, envi
         raw_log = _read_file(log, MAX_LOG)
         validate_test_log(raw_log, context)
         if core_switch:
-            markers = [line for line in raw_log.splitlines() if CORE_SWITCH_MARKER in line]
-            expected = tuple(CORE_SWITCH_MARKER + b' ' + name.encode('ascii') + b' '
-                             for name in CORE_SWITCH_CORES)
-            core._need(len(markers) == len(expected) == raw_log.count(CORE_SWITCH_MARKER)
-                       and all(line.startswith(prefix) and line[len(prefix):].strip()
-                               for line, prefix in zip(markers, expected)),
-                       'CORE_SWITCH_EVIDENCE_REQUIRED')
-            interrupted = [line for line in raw_log.splitlines() if CORE_INTERRUPT_MARKER in line]
-            core._need(len(interrupted) == raw_log.count(CORE_INTERRUPT_MARKER) == 1
-                       and interrupted[0].startswith(CORE_INTERRUPT_MARKER + b' ')
-                       and interrupted[0][len(CORE_INTERRUPT_MARKER):].strip()
-                       and raw_log.find(CORE_INTERRUPT_MARKER) > raw_log.rfind(CORE_SWITCH_MARKER),
-                       'CORE_INTERRUPT_EVIDENCE_REQUIRED')
-            restored = [line for line in raw_log.splitlines() if CORE_RESTORE_MARKER in line]
-            core._need(len(restored) == raw_log.count(CORE_RESTORE_MARKER) == 1
-                       and restored[0].startswith(CORE_RESTORE_MARKER + b' ')
-                       and restored[0][len(CORE_RESTORE_MARKER):].strip()
-                       and raw_log.find(CORE_RESTORE_MARKER) > raw_log.find(CORE_INTERRUPT_MARKER),
-                       'CORE_RESTORE_EVIDENCE_REQUIRED')
+            validate_core_switch_evidence(raw_log)
     return code
 
 

@@ -299,11 +299,13 @@ jobs:
           python -B -m unittest discover -s tests -p test_oneclick_system.py -v 2>&1 | tee "$log"
           test "$(grep -Ec '^Ran 1 test in ' "$log")" = 1
           test "$(grep -cx OK "$log")" = 1
-          test "$(grep -c '^VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE:' "$log")" = 2
-          test "$(grep -c '^VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: sing-box ' "$log")" = 1
-          test "$(grep -c '^VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: xray ' "$log")" = 1
-          test "$(grep -c '^VUI_INSTALLED_CORE_INTERRUPT_ACCEPTANCE:' "$log")" = 1
-          test "$(grep -c '^VUI_INSTALLED_CORE_RESTORE_ACCEPTANCE:' "$log")" = 1
+          python -B - "$log" <<'PY'
+          import sys
+          from pathlib import Path
+          from scripts.acceptance_job import validate_core_switch_evidence
+
+          validate_core_switch_evidence(Path(sys.argv[1]).read_bytes())
+          PY
       - name: Preserve ARM64 systemd evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
