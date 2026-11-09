@@ -138,6 +138,9 @@ class FixtureChild:
             result = dict(event='trial_writers_released')
         elif command == 'prove_operation':
             result = dict(event='operation_held')
+        elif command == 'core_restore_observe':
+            journal = ops_worker._restore_observer_request(request)
+            result = dict(event='restore_observer_ready', transaction=journal['transaction'])
         elif command == 'observe_restore_data':
             frames = []
             with patch('app.core_updates.backup_archive.observe_restore_trial', return_value=self.restore_data):
@@ -565,6 +568,7 @@ class CoreMaintenanceControlTests(unittest.TestCase):
     def test_restore_trial_broker_uses_incoming_generation_and_confirms_current_data(self):
         switch = self.switch
         receipt, trial, incoming = self.restore_trial_fixture()
+        switch._start_restore_observer()
         with self.assertRaisesRegex(selection_files.CoreSelectionFilesError, 'RESTORE_RECEIPT'):
             switch._activate_restore_trial(dict(receipt, sequence=0), lambda: trial)
         self.assertFalse(self.brokers)

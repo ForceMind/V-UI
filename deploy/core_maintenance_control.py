@@ -333,6 +333,22 @@ class _Switch:
         self.broker = None
         self.broker_closed = True
 
+    def _start_restore_observer(self):
+        """Hand a stopped, exchanged restore to its read-only worker."""
+        self.services.prove_stopped()
+        _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+        journal = self.files.read_restore_recovery()
+        target = journal['restore_target']
+        _need(journal['transaction'] == self.transaction and journal['phase'] == 'backed_up'
+              and target['kind'] == 'core-restore-target-v2', 'CORE_RESTORE_CONTEXT')
+        plan = target['data']
+        response = self.worker.exchange(dict(protocol=1, action='core_restore_observe',
+            transaction=self.transaction, slot=plan['slot'], pending=journal['original_files']['pending'],
+            original=journal['switch_context']['data_generation'], incoming=plan['incoming_generation']),
+            'restore_observer_ready', ('transaction',))
+        _need(response['transaction'] == self.transaction, 'CORE_RESTORE_CONTEXT')
+        self._proof()
+
     def _activate_restore_trial(self, receipt, observe=None):
         """Start a private restore trial after the worker exchanged the data."""
         self._proof()

@@ -98,6 +98,21 @@ class CorePrepareWorkerTests(unittest.TestCase):
             if write is not None:os.close(write)
         return status,[json.loads(line) for line in output.getvalue().splitlines()],trace,sessions
 
+    def test_private_restore_observer_dispatch_refuses_extra_fields(self):
+        request = dict(protocol=1, action='core_restore_observe', transaction='a'*32,
+            slot='b'*32, pending=dict(identity=[1]*9, sha256='c'*64, mode=0o644),
+            original=dict(dev=1, ino=2), incoming=dict(dev=1, ino=3))
+        with patch.object(w, '_complete_restore_observer') as complete:
+            status, _, _, sessions = self.run_worker([], request=request)
+            self.assertEqual(status, 0)
+            self.assertEqual(sessions, [])
+            self.assertEqual(complete.call_args.args[3]['transaction'], request['transaction'])
+            complete.reset_mock()
+            status, frames, _, _ = self.run_worker([], request=dict(request, path='/unexpected'))
+            self.assertEqual(status, 1)
+            self.assertEqual(frames, [dict(event='error', code='MAINTENANCE_REFUSED')])
+            complete.assert_not_called()
+
     def recovery_request(self, **overrides):
         request = dict(protocol=1, action='core_recover', transaction='a'*32, context={}, before={},
                        after={}, final_intents=None, backup=None, allow_after_ids=False)

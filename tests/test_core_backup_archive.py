@@ -9,6 +9,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -17,6 +18,7 @@ from app import release_tools as tools
 from app.services.proxy_store import ProxyStore as ProxyStoreForTest
 from app.core_updates import backup_archive as full, selection as s, catalog as c, store as fs
 from app.core_updates import selection_files as sf
+from deploy import ops_worker
 import test_core_backup as fixtures
 
 
@@ -119,6 +121,16 @@ class CompleteBackupTests(unittest.TestCase):
             restore_target=dict(kind='core-restore-target-v2',
                 data=dict(slot=slot, incoming_generation=generation(self.data))))
         files = self.restore_marker(journal)
+        commands = iter((dict(command='observe_restore_data', transaction=journal['transaction']),
+                         dict(command='prove_operation'), dict(command='finish')))
+        frames = []
+        channel = SimpleNamespace(read=lambda: next(commands),
+                                  send=lambda event, **fields: frames.append((event, fields)))
+        with patch.object(full, 'SelectionFiles', return_value=files):
+            ops_worker._complete_restore_observer(channel, self.root, tools, journal)
+        self.assertEqual([event for event, _ in frames],
+                         ['restore_observer_ready', 'restore_data_observed', 'operation_held'])
+        self.assertEqual(frames[1][1]['data']['live'], generation(self.data))
         with tools._maintenance_lease(self.root, '.operation.lock', _proof=True) as verify:
             result = full.observe_restore_trial(self.root, journal, verify, _selection_files=files)
             self.assertEqual(result, dict(live=generation(self.data), original=generation(original),

@@ -243,6 +243,47 @@ def _observe_restore_data(channel, session, journal, value):
     channel.send('restore_data_observed', transaction=journal['transaction'], data=data)
 
 
+def _restore_observer_request(value):
+    from app.core_updates import selection_files as files
+    fields = {'protocol', 'action', 'transaction', 'slot', 'pending', 'original', 'incoming'}
+    if (set(value) != fields or type(value['protocol']) is not int or value['protocol'] != 1
+            or value['action'] != 'core_restore_observe'
+            or any(type(value[key]) is not str or not re.fullmatch('[a-f0-9]{32}', value[key])
+                   for key in ('transaction', 'slot'))):
+        raise WorkerError('Invalid private restore observer request')
+    files._record(value['pending'])
+    original = files._data_generation(value['original'])
+    incoming = files._data_generation(value['incoming'])
+    if value['pending']['mode'] != 0o644 or original['dev'] != incoming['dev'] or original == incoming:
+        raise WorkerError('Invalid private restore observer identity')
+    # The Root controller checks the durable phase and complete journal. This
+    # projection grants only read-only observations against the pinned marker.
+    return dict(operation='restore', phase='backed_up', transaction=value['transaction'],
+                original_files=dict(pending=value['pending']),
+                switch_context=dict(data_generation=original),
+                restore_target=dict(kind='core-restore-target-v2',
+                    data=dict(slot=value['slot'], incoming_generation=incoming)))
+
+
+def _complete_restore_observer(channel, root, release_tools, journal):
+    from app.core_updates.backup_archive import observe_restore_trial
+    with release_tools._maintenance_directory(root):
+        pass
+    with release_tools._maintenance_lease(root, '.operation.lock', _proof=True) as proof:
+        session = types.SimpleNamespace(root=root, _operation_proof=proof)
+        observe_restore_trial(root, journal, lambda: _prove_released_operation(session))
+        channel.send('restore_observer_ready', transaction=journal['transaction'])
+        while True:
+            value = channel.read()
+            if value.get('command') == 'observe_restore_data':
+                _observe_restore_data(channel, session, journal, value)
+                continue
+            if _command(value, ('prove_operation', 'finish')) == 'finish':
+                return
+            _prove_released_operation(session)
+            channel.send('operation_held')
+
+
 def _complete_core_handshake(channel, session):
     with _quiet_candidate_io():facts = session.prepare()
     channel.send('core_context', **facts)
@@ -397,6 +438,10 @@ def _run(root, release_tools, input_fd, output, *, timeout=TIMEOUT):
                 implementation = _load_core_session(release_tools, recovery=True)
                 session = implementation(root, **arguments)
                 _complete_core_recovery_handshake(channel, session)
+            elif request.get('action') == 'core_restore_observe':
+                _load_core_session(release_tools)
+                journal = _restore_observer_request(request)
+                _complete_restore_observer(channel, root, release_tools, journal)
             else:
                 action, arguments = _request(request)
                 if action in ('start', 'restart'):
