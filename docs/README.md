@@ -1,8 +1,8 @@
 # V-UI 文档
 
-当前稳定版为 **v0.4.22**。新用户从[项目首页](../README.md)和[安装指南](INSTALLATION.md)开始；下载以[官方 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.22)为准。
+当前稳定版为 **v0.4.23**。新用户从[项目首页](../README.md)和[安装指南](INSTALLATION.md)开始；下载以[官方 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.23)为准。
 
-源码与开发文档现对应 **v0.4.23** 候选：实现及独审已收口，冻结候选的九组Actions/21个job全部成功；最终main资格仍须另验，未公开或部署。上述稳定版22与实际短入口保持。
+本文档对应 v0.4.23。正式应用源为 `be5d8459cdd3eeedce73f2ff6e4663e5eb781e42`，与可变短入口的源码分开记录；入口及公开资产读回见[发布记录](DNS01_CLOUDFLARE_CONTRACT.md#公开发布与短入口)。
 
 本索引按使用目的组织。专题契约和历史验收记录保留其原始日期及验证范围，旧文档中的“当前版本”“候选”“未发布”不能覆盖这里的稳定版信息。
 
@@ -12,7 +12,7 @@
 | --- | --- |
 | 安装、首次登录、端口与已有证书 | [安装指南](INSTALLATION.md) |
 | 创建直连或中转节点、服务器程序代理、分享订阅 | [配置指南](CONFIGURATION.md) |
-| 申请、续期及绑定证书 | [证书指南](CERTIFICATES.md)；[23候选Cloudflare DNS-01指南](DNS01_CLOUDFLARE.md) |
+| 申请、续期及绑定证书 | [证书指南](CERTIFICATES.md)；[Cloudflare DNS-01指南](DNS01_CLOUDFLARE.md) |
 | 查看支持的协议、客户端与部署限制 | [兼容矩阵](COMPATIBILITY.md) · [标准客户端说明](STANDARD_CLIENT_COMPATIBILITY.md) |
 | 排查安装、连接或导出失败 | [故障排查](TROUBLESHOOTING.md) · [获取帮助](../SUPPORT.md) |
 
@@ -38,7 +38,7 @@
 
 ## 协议与数据契约
 
-[Cloudflare DNS-01与通配符契约](DNS01_CLOUDFLARE_CONTRACT.md)现对应23候选已审实现；冻结候选CI已通过，已获准按dev→main正常合并并发布23；最终准确main与公开读回仍待完成。原始失败保留，不能当作公开22已具备该能力。
+[Cloudflare DNS-01与通配符契约](DNS01_CLOUDFLARE_CONTRACT.md)包含本版已审实现、准确 main 的九组/21 jobs、同源材料和公开记录。原始失败保留，不能把本版能力写成旧22已有功能。
 
 这些专题保留精确字段限制和原始验证范围，适合高级配置或实现变更时查阅。
 
@@ -56,4 +56,4 @@
 
 [历史索引](history/README.md)保留旧入口快照、阶段计划、准确提交和原始成功或失败证据。历史记录用于追溯，不作为当前安装步骤或当前版本已验证的替代依据。
 
-公开版本的构建、核心和安装验收在 GitHub Actions 中完成；23冻结候选已通过九组/21个job；发布使用的最终main与同源材料仍须独立核验。**浏览器未验证**。用户主机、真实客户端与长期运行条件需各自验证。
+公开版本的构建、核心与安装验收在 GitHub Actions 中完成；v0.4.23 的准确资格与匿名公共安装已通过。**浏览器和真实 Cloudflare 账号签发未验证**；用户主机、真实客户端与长期运行需各自验证。
