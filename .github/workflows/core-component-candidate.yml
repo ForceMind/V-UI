@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'scripts/build_core_component.py'
+      - 'scripts/check_core_candidate_native.py'
       - 'scripts/fetch_core_candidate_inputs.py'
       - 'tests/test_core_component_builder.py'
       - 'tests/test_core_candidate_inputs.py'
@@ -173,5 +174,67 @@ jobs:
         with:
           name: core-candidate-evidence-${{ matrix.core }}-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.CANDIDATE_WORK }}/candidate-evidence.json
+          if-no-files-found: error
+          retention-days: 14
+
+  native-tcp:
+    needs: candidate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-gnu
+            runner: ubuntu-24.04-arm
+          - target: x86_64-musl
+            runner: ubuntu-24.04
+          - target: aarch64-musl
+            runner: ubuntu-24.04-arm
+    env:
+      EXPECTED_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: core-candidate-[sx]*-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/vui-native-inputs
+      - name: Check same-run native binaries and TCP forwarding
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          git diff --quiet HEAD --
+          umask 077
+          output="$RUNNER_TEMP/native-tcp.json"
+          inputs="$RUNNER_TEMP/vui-native-inputs"
+          case "$TARGET" in
+            *-gnu)
+              /usr/bin/python3 -B -m scripts.check_core_candidate_native --inputs "$inputs" --target "$TARGET" > "$output"
+              ;;
+            *-musl)
+              docker run --rm \
+                -e TARGET -e EXPECTED_SOURCE -e GITHUB_ACTIONS -e RUNNER_ENVIRONMENT \
+                -e GITHUB_REPOSITORY -e GITHUB_REPOSITORY_ID -e GITHUB_RUN_ID -e GITHUB_RUN_ATTEMPT \
+                -v "$PWD:/src:ro" -v "$inputs:/inputs:ro" -w /src alpine:3.22 /bin/sh -euxc '
+                  apk add --no-cache python3 >&2
+                  adduser -D smoke
+                  su smoke -s /bin/sh -c "python3 -B -m scripts.check_core_candidate_native --inputs /inputs --target $TARGET"
+                ' > "$output"
+              ;;
+            *) exit 1 ;;
+          esac
+          test -s "$output"
+          cat "$output"
+      - name: Preserve native TCP evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: core-native-tcp-${{ matrix.target }}-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-tcp.json
           if-no-files-found: error
           retention-days: 14
