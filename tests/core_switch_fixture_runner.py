@@ -23,7 +23,7 @@ REPOSITORY = 'ForceMind/V-UI'
 REPOSITORY_ID = 1110299182
 API = 'https://api.github.com/repos/' + REPOSITORY
 WEB = 'https://github.com/' + REPOSITORY
-RELEASE_ID = 7_000_000_000_000_000_001
+RELEASE_IDS = {'sing-box': 7_000_000_000_000_000_001, 'xray': 7_000_000_000_000_000_101}
 TARGETS = ('x86_64-gnu', 'x86_64-musl', 'aarch64-gnu', 'aarch64-musl')
 MAX_SMALL = 64_000
 MAX_PACK = 100_000_000
@@ -178,18 +178,21 @@ class Response:
 
 
 class FixtureOpener:
-    def __init__(self, stack, folder, source, *, bad_digest=False):
-        candidate = directory(stack, folder, 'candidate', private=True)
+    def __init__(self, stack, folder, source, *, core, bad_digest=False):
+        require(type(core) is str and core in RELEASE_IDS, 'FIXTURE_CANDIDATE')
+        core_directory = directory(stack, folder, core, private=True)
+        candidate = directory(stack, core_directory, 'candidate', private=True)
         manifest = File(stack, candidate, 'CORE-RELEASE.json', MAX_SMALL, fixture=True)
         record = decode(manifest.small())
-        core, version, tag = (record.get(key) for key in ('core', 'version', 'tag'))
-        require(core in ('sing-box', 'xray') and type(version) is str and type(tag) is str
+        version, tag = record.get('version'), record.get('tag')
+        require(record.get('core') == core and type(version) is str and type(tag) is str
                 and len(tag) <= 100 and re.fullmatch(r'(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}', version)
                 and re.fullmatch(re.escape(f'core-{core}-v{version}-r')+r'[1-9][0-9]{0,8}', tag)
                 and record.get('kind') == 'core-release-v1' and record.get('builder_source') == source
                 and type(record.get('compatibility')) is dict
                 and record['compatibility'].get('app_sources') == [source], 'FIXTURE_CANDIDATE')
         self.core = core
+        self.release_id = RELEASE_IDS[core]
         self.corrupted = False
         self.error_type = None
         packs = {f'vui-core-{core}-{version}-{target}.zip' for target in TARGETS}
@@ -201,16 +204,16 @@ class FixtureOpener:
         self.bad_digest = bad_digest
         asset_rows = []
         for index, (name, payload) in enumerate(sorted(files.items()), 1):
-            identifier = RELEASE_ID + index
+            identifier = self.release_id + index
             url = API + '/releases/assets/' + str(identifier)
             self.assets[url] = (payload, name in packs)
             asset_rows.append(dict(id=identifier, name=name, size=payload.size, digest='sha256:'+payload.digest(),
                                    state='uploaded', url=url,
                                    browser_download_url=WEB+'/releases/download/'+tag+'/'+name))
-        release = API + '/releases/' + str(RELEASE_ID)
+        release = API + '/releases/' + str(self.release_id)
         self.metadata = {
             API: encoded(dict(id=REPOSITORY_ID, full_name=REPOSITORY, private=False)),
-            release: encoded(dict(id=RELEASE_ID, url=release, html_url=WEB+'/releases/tag/'+tag,
+            release: encoded(dict(id=self.release_id, url=release, html_url=WEB+'/releases/tag/'+tag,
                                   tag_name=tag, draft=False, prerelease=False,
                                   published_at='2026-01-01T00:00:00Z', assets=asset_rows)),
             API+'/git/ref/tags/'+tag: encoded(dict(ref='refs/tags/'+tag,
@@ -287,18 +290,18 @@ def inject_assertions(control, source, core, port):
 
 
 def parse(arguments):
-    require(len(arguments) in (3, 4), 'FIXTURE_INPUT')
-    action, source, revision = arguments[:3]
-    require(action in ('update', 'rollback', 'bad-digest', 'port-conflict')
+    require(len(arguments) in (4, 5), 'FIXTURE_INPUT')
+    core, action, source, revision = arguments[:4]
+    require(core in RELEASE_IDS and action in ('update', 'rollback', 'bad-digest', 'port-conflict')
             and re.fullmatch('[a-f0-9]{40}', source)
             and (revision == 'none' or re.fullmatch('[a-f0-9]{64}', revision))
-            and (len(arguments) == 4) == (action == 'port-conflict'), 'FIXTURE_INPUT')
+            and (len(arguments) == 5) == (action == 'port-conflict'), 'FIXTURE_INPUT')
     port = None
     if action == 'port-conflict':
-        require(re.fullmatch('[0-9]{4,5}', arguments[3]), 'FIXTURE_INPUT')
-        port = int(arguments[3])
+        require(re.fullmatch('[0-9]{4,5}', arguments[4]), 'FIXTURE_INPUT')
+        port = int(arguments[4])
         require(1024 <= port <= 65535, 'FIXTURE_INPUT')
-    return action, source, None if revision == 'none' else revision, port
+    return core, action, source, None if revision == 'none' else revision, port
 
 
 def run(arguments):
@@ -310,18 +313,18 @@ def run(arguments):
             and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted'
             and os.environ.get('GITHUB_REPOSITORY') == REPOSITORY
             and Path(__file__) == FIXTURE/'runner.py', 'FIXTURE_SCOPE')
-    action, source, revision, port = parse(arguments)
+    core, action, source, revision, port = parse(arguments)
     with ExitStack() as stack:
         folder = fixed_directory(stack, FIXTURE, private=True)
         File(stack, folder, 'runner.py', 4_000_000, fixture=True).stable()
         ops, control = installed_modules(stack)
-        opener = FixtureOpener(stack, folder, source, bad_digest=action == 'bad-digest')
+        opener = FixtureOpener(stack, folder, source, core=core, bad_digest=action == 'bad-digest')
         inject_transport(control, opener)
         conflicts = inject_assertions(control, source, opener.core, port)
         switch_action = 'rollback' if action == 'rollback' else 'update'
         try:
             result = control.switch(ops, core=opener.core, action=switch_action,
-                expected_revision=revision, release_id=RELEASE_ID if switch_action == 'update' else None)
+                expected_revision=revision, release_id=opener.release_id if switch_action == 'update' else None)
         except Exception as error:
             if (action == 'bad-digest' and opener.corrupted and type(error) is opener.error_type
                     and str(error) == 'ASSET_DIGEST'):

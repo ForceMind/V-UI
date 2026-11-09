@@ -627,7 +627,8 @@ print(json.dumps({'pid':child.pid,'created':child.create_time(),'binary_sha256':
             'source_case':os.getenv('VUI_PUBLISHED_INSTALL_VERSION','fresh-candidate')},sort_keys=True))
         if os.getenv('VUI_CORE_SWITCH_FIXTURE'):
             from core_switch_systemd import installed_core_switch
-            installed_core_switch(check, source, work, api, service_python, ca, cert, key, client, sing)
+            installed_core_switch(check, source, work, api, service_python, ca, cert, key, client,
+                                  {'sing-box': sing, 'xray': xray})
 
     finally:
         try:

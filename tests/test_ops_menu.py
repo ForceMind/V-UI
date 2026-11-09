@@ -38,7 +38,7 @@ class MenuTests(unittest.TestCase):
         for directory in self.root.rglob('*'):
             if directory.is_dir():
                 directory.chmod(0o700)
-        for name in ('app/ops_menu.py', 'app/release_tools.py', 'scripts/deploy.py'):
+        for name in ('app/ops_menu.py', 'app/release_tools.py', 'app/data_owner.py', 'scripts/deploy.py'):
             shutil.copyfile(SOURCE / name, self.payload / name)
             (self.payload / name).chmod(0o600)
         (self.runtime / 'fixture').write_bytes(b'not an executable\n')

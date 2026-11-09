@@ -29,7 +29,9 @@ HEADER = 'VUI_ACCEPTANCE_CONTEXT '
 FOOTER = 'VUI_ACCEPTANCE_EXIT '
 
 
-CORE_SWITCH_FIXTURE = Path('/tmp/vui-oneclick/core-switch-fixture/candidate')
+CORE_SWITCH_FIXTURE = WORK / 'core-switch-fixture'
+CORE_SWITCH_CORES = ('sing-box', 'xray')
+CORE_SWITCH_MARKER = b'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE:'
 
 def matrix_for_version(version):
     number = core._version(version)
@@ -212,7 +214,9 @@ def run_test(source, version, role, identity_path, log, *, old_source=None, envi
         _checkout(Path(old_source), row['source'])
     env = role_environment(environ, version, role, old_source=old_source)
     if core_switch:
-        core._need(role == 'fresh' and CORE_SWITCH_FIXTURE.is_dir() and not CORE_SWITCH_FIXTURE.is_symlink(),
+        core_directories = tuple(CORE_SWITCH_FIXTURE / name for name in CORE_SWITCH_CORES)
+        directories = (CORE_SWITCH_FIXTURE, *core_directories, *(path / 'candidate' for path in core_directories))
+        core._need(role == 'fresh' and all(path.is_dir() and not path.is_symlink() for path in directories),
                    'CORE_SWITCH_FRESH_FIXTURE_REQUIRED')
         env['VUI_CORE_SWITCH_FIXTURE'] = str(CORE_SWITCH_FIXTURE)
     context = _log_context(identity, role, environ)
@@ -233,7 +237,12 @@ def run_test(source, version, role, identity_path, log, *, old_source=None, envi
         raw_log = _read_file(log, MAX_LOG)
         validate_test_log(raw_log, context)
         if core_switch:
-            core._need(raw_log.count(b'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE:') == 1,
+            markers = [line for line in raw_log.splitlines() if CORE_SWITCH_MARKER in line]
+            expected = tuple(CORE_SWITCH_MARKER + b' ' + name.encode('ascii') + b' '
+                             for name in CORE_SWITCH_CORES)
+            core._need(len(markers) == len(expected) == raw_log.count(CORE_SWITCH_MARKER)
+                       and all(line.startswith(prefix) and line[len(prefix):].strip()
+                               for line, prefix in zip(markers, expected)),
                        'CORE_SWITCH_EVIDENCE_REQUIRED')
     return code
 

@@ -224,17 +224,34 @@ class JobTests(unittest.TestCase):
             job.run_test(SHA, VERSION, 'fresh', self.identity_path, self.log, environ=ACTIONS)
         execute.assert_not_called()
 
-    def test_native_core_switch_requires_fresh_fixture_and_actual_evidence(self):
-        candidate = self.root/'fixture'
-        candidate.mkdir(mode=0o700)
-        with patch.object(job, 'CORE_SWITCH_FIXTURE', candidate):
-            with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'CORE_SWITCH_EVIDENCE_REQUIRED'):
+    def test_native_core_switch_requires_fresh_fixture_and_both_evidence_lines(self):
+        fixture = self.root / 'fixture'
+        sing_box = fixture / 'sing-box' / 'candidate'
+        xray = fixture / 'xray' / 'candidate'
+        sing_box.mkdir(mode=0o700, parents=True)
+        sb_marker = b'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: sing-box synthetic evidence\n'
+        xray_marker = b'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: xray synthetic evidence\n'
+        with patch.object(job, 'CORE_SWITCH_FIXTURE', fixture):
+            with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'CORE_SWITCH_FRESH_FIXTURE_REQUIRED'):
                 self.run_role(core_switch=True)
-            self.log.unlink()
-            code, calls = self.run_role(core_switch=True,
-                data=SUCCESS+b'\nVUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: fixture completed\n')
+            self.assertFalse(self.log.exists())
+            xray.parent.symlink_to(sing_box.parent, target_is_directory=True)
+            with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'CORE_SWITCH_FRESH_FIXTURE_REQUIRED'):
+                self.run_role(core_switch=True)
+            self.assertFalse(self.log.exists())
+            xray.parent.unlink()
+            xray.mkdir(mode=0o700, parents=True)
+            for evidence in (b'', sb_marker, sb_marker + sb_marker, xray_marker + sb_marker,
+                             sb_marker + xray_marker + xray_marker,
+                             sb_marker.rstrip() + xray_marker + xray_marker,
+                             sb_marker + b'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: xray \n'):
+                with self.subTest(evidence=evidence):
+                    with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'CORE_SWITCH_EVIDENCE_REQUIRED'):
+                        self.run_role(core_switch=True, data=SUCCESS + evidence)
+                    self.log.unlink()
+            code, calls = self.run_role(core_switch=True, data=SUCCESS + sb_marker + xray_marker)
         self.assertEqual(code, 0)
-        self.assertEqual(calls[-1][1]['env']['VUI_CORE_SWITCH_FIXTURE'], str(candidate))
+        self.assertEqual(calls[-1][1]['env']['VUI_CORE_SWITCH_FIXTURE'], str(fixture))
 
     def test_build_receipt_requires_producer_scope_and_no_log_claim(self):
         producer_path = self.root / 'producer.json'; job.producer(self.kit, SHA, VERSION, producer_path)
