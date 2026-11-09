@@ -471,6 +471,10 @@ class MaintenanceAuthorizationTests(unittest.TestCase):
             self.assertEqual(remote.get('/api/maintenance/core-candidates/unknown',headers=headers).status_code,403)
             self.assertEqual(remote.get('/api/maintenance/core-candidates/sing-box?source=untrusted',headers=headers).status_code,422)
             self.assertEqual(discover.call_count,1)
+            discover.return_value = {'core':'xray','qualification':'unverified','hints':[],'truncated':False}
+            xray = remote.get('/api/maintenance/core-candidates/xray',headers=headers)
+            self.assertEqual(xray.status_code,200);self.assertEqual(xray.json()['core'],'xray')
+            discover.assert_called_with('xray')
             discover.side_effect=CoreHintsUnavailable('BUSY')
             self.assertEqual(remote.get('/api/maintenance/core-candidates/xray',headers=headers).status_code,429)
             discover.side_effect=RuntimeError('/private/metadata/token')
