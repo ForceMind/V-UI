@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "version": "0.4.23",
-  "product_commit": "4bd1d9a648a8096fbf2fa05314e35049a2408e7c",
+  "product_commit": "039453e1a95666b5ddc539e67708fd7b22734103",
   "install_contract": "parallel-v1",
   "browser_policy": "unverified-non-browser-v1"
 }
