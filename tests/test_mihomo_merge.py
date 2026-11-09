@@ -1,6 +1,6 @@
 import unittest
 
-from app.services.mihomo_merge import MihomoMergeError, merge_mihomo
+from app.services.mihomo_merge import MihomoMergeError, merge_mihomo, serialize_mihomo_merge
 from app.services.mihomo_preview import MihomoPreviewError
 
 
@@ -53,6 +53,23 @@ dns: {nested: {opaque: value}}
                         '{rules: ["MATCH,AUTO"]}'):
             with self.assertRaisesRegex(MihomoMergeError, '^MERGE_INVALID_REFERENCES$'):
                 merge_mihomo('{}', invalid)
+
+    def test_serialization_round_trips_private_values_and_order(self):
+        baseline = 'opaque: {flag: false, numeric_text: "012", marker: 中文}\nrules: ["MATCH,REJECT"]'
+        candidate = 'opaque: {float: 1.0e-7, explicit_null: null}\nproxies: [{name: example}]'
+        expected = merge_mihomo(baseline, candidate)
+        raw = serialize_mihomo_merge(baseline, candidate)
+        self.assertIn('中文'.encode(), raw)
+        reparsed = merge_mihomo('{}', raw)
+        self.assertEqual(reparsed, expected)
+        self.assertEqual(list(reparsed), list(expected))
+        self.assertIs(type(reparsed['opaque']['flag']), bool)
+        self.assertIs(type(reparsed['opaque']['float']), float)
+
+    def test_serialization_refuses_combined_output_exceeding_parser_budget(self):
+        values = '[' + ','.join('0' for _ in range(9000)) + ']'
+        with self.assertRaisesRegex(MihomoMergeError, '^MERGE_SERIALIZATION_REJECTED$'):
+            serialize_mihomo_merge('first: ' + values, 'second: ' + values)
 
     def test_keeps_safe_parser_rejections_and_combined_section_limit(self):
         with self.assertRaisesRegex(MihomoPreviewError, '^DUPLICATE_KEY$'):

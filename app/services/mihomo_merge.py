@@ -9,7 +9,7 @@ import json
 
 from app.services import upstream_import as bounded
 from app.services.mihomo_preview import (
-    MAX_GROUPS, MAX_RULES, _equal, _load_document, _rule_shape, _source_bytes,
+    MAX_GROUPS, MAX_RULES, MihomoPreviewError, _equal, _load_document, _rule_shape, _source_bytes,
 )
 from app.services.mihomo_routing import RESERVED_PROXY_NAMES
 from app.services.upstream_profile import UpstreamValidationError
@@ -153,3 +153,18 @@ def merge_mihomo(baseline, candidate, *, choices=None):
         raise MihomoMergeError('MERGE_RESULT_LIMIT')
     _check_references(result, named)
     return result
+
+
+def serialize_mihomo_merge(baseline, candidate, *, choices=None) -> bytes:
+    """Return private YAML bytes only if they can be safely re-imported unchanged."""
+    import yaml
+
+    merged = merge_mihomo(baseline, candidate, choices=choices)
+    try:
+        raw = yaml.safe_dump(merged, allow_unicode=True, sort_keys=False).encode('utf-8')
+        reparsed = _load_document(_source_bytes(raw, 'pair'), 'pair')
+    except (MihomoPreviewError, UnicodeError, yaml.YAMLError):
+        raise MihomoMergeError('MERGE_SERIALIZATION_REJECTED') from None
+    if not _equal(merged, reparsed):
+        raise MihomoMergeError('MERGE_SERIALIZATION_CHANGED')
+    return raw
