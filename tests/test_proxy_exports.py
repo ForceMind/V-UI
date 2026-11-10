@@ -1,18 +1,21 @@
 """Strict-export state/auth tests with fake runtimes, not network evidence."""
 import copy
+from dataclasses import replace
 import json
 from pathlib import Path
 import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import yaml
 
 from app.api import proxy_exports as api
+from app.core_updates.binary import RuntimeArtifact
+from app.core_updates.selection import bundle_reference
 from app.middleware.auth import AdminAuthMiddleware
 from app.services.core_manager import SingBoxAdapter
 from app.services.proxy_apply import ProxyApplyCoordinator
@@ -29,11 +32,12 @@ class ExportFixture:
         self.addCleanup(directory.cleanup)
         self.store = ProxyStore(Path(directory.name))
         self.runtime, self.xray = FakeRuntime(), FakeRuntime()
+        self.runtime.artifact = None
         self.runtime.active_config = lambda: copy.deepcopy(self.runtime.saved[self.runtime.record["revision"]])
         self.lock = threading.RLock()
         self.rows = [row()]
         self.rows[0].remark = "domestic ingress"
-        self.manager = SimpleNamespace(lock=self.lock, _all_rows=lambda: self.rows,
+        self.manager = SimpleNamespace(lock=self.lock, _all_rows=lambda: self.rows, runtime_artifact=lambda _: None,
             get=lambda name: SimpleNamespace(runtime=self.runtime if name == "sing-box" else self.xray))
         self.coordinator = ProxyApplyCoordinator(self.store, self.runtime, SingBoxAdapter().build_config, self.lock,
             rows_provider=lambda: self.rows, preflight=lambda *_: None,
@@ -49,6 +53,17 @@ class ExportFixture:
                         local_username="test-local")
         self.saved = self.store.save_draft(settings, added["snapshot"]["revision"], local_password=FAKE_PASSWORD)
         self.rev = self.saved["revision"]
+
+    def select_candidate_fixture(self):
+        artifact = RuntimeArtifact(bundle_reference(core="sing-box", version="1.14.3", target="x86_64-gnu",
+            app_source="a"*40, payload_manifest_sha256="b"*64, binary_sha256="c"*64, binary_size=10),
+            Path("/verified/sing-box"))
+        evidence = {"artifact_id": artifact.artifact_id, "binary_sha256": artifact.reference.binary_sha256}
+        self.manager.runtime_artifact = Mock(return_value=artifact)
+        self.runtime.artifact = artifact
+        self.runtime.execution_identity = Mock(return_value={"selected": evidence, "running": evidence})
+        self.runtime.status = Mock(return_value={**self.runtime.status(), "version_required": artifact.version})
+        return artifact, evidence
 
     def commit(self):
         self.coordinator.apply(self.rev, "test-export-commit")
@@ -170,6 +185,58 @@ class StrictExportTests(ExportFixture, unittest.TestCase):
         self.store.begin_apply(self.rev, "pending-export")
         with self.assertRaises(ProxyConflict):
             self.exported()
+
+    def test_managed_export_uses_frozen_selection_and_verified_live_generation(self):
+        self.commit()
+        artifact, _ = self.select_candidate_fixture()
+        for kind in ("sing-box", "mihomo"):
+            with self.subTest(kind=kind):
+                result = self.exported(kind)
+                self.assertEqual(result.revision, self.rev)
+                self.assertIn(FAKE_UUID, result.content)
+                self.assertNotIn(FAKE_UUID_2, result.content)
+                self.assertNotIn("DIRECT", result.content)
+                self.manager.runtime_artifact.assert_called_with("sing-box")
+                self.runtime.execution_identity.assert_called()
+        self.assertEqual(artifact.version, "1.14.3")
+
+    def test_managed_export_rejects_unbound_or_mismatched_runtime_identity(self):
+        self.commit()
+        artifact, evidence = self.select_candidate_fixture()
+        different = replace(artifact, reference=replace(artifact.reference, binary_sha256="d"*64))
+        wrong_core = replace(artifact, reference=replace(artifact.reference, core="xray", version="26.3.27"))
+        proof = {"selected": evidence, "running": evidence}
+        cases = (
+            ("no frozen selection", None, artifact, artifact.version, proof),
+            ("no runtime descriptor", artifact, None, artifact.version, proof),
+            ("different descriptor", artifact, different, artifact.version, proof),
+            ("invalid descriptor type", object(), object(), artifact.version, proof),
+            ("different core", wrong_core, wrong_core, wrong_core.version, proof),
+            ("old status version", artifact, artifact, "1.14.2", proof),
+            ("no execution proof", artifact, artifact, artifact.version, None),
+            ("missing live generation", artifact, artifact, artifact.version, {**proof, "running": None}),
+            ("wrong selected ID", artifact, artifact, artifact.version,
+             {**proof, "selected": {**evidence, "artifact_id": "d"*64}}),
+            ("wrong running digest", artifact, artifact, artifact.version,
+             {**proof, "running": {**evidence, "binary_sha256": "d"*64}}),
+        )
+        for label, selected, runtime_artifact, version, identity in cases:
+            with self.subTest(label=label):
+                self.manager.runtime_artifact.return_value = selected
+                self.runtime.artifact = runtime_artifact
+                self.runtime.status.return_value["version_required"] = version
+                self.runtime.execution_identity.return_value = identity
+                with self.assertRaisesRegex(StrictExportError, "^STRICT_EXPORT_RUNTIME_UNAVAILABLE$"):
+                    self.exported()
+
+    def test_legacy_export_requires_exact_pin_without_execution_proof(self):
+        self.commit()
+        self.runtime.execution_identity = Mock(side_effect=AssertionError("legacy identity checked"))
+        self.assertEqual(self.exported().revision, self.rev)
+        self.runtime.status = Mock(return_value={**self.runtime.status(), "version_required": "1.14.3"})
+        with self.assertRaisesRegex(StrictExportError, "^STRICT_EXPORT_RUNTIME_UNAVAILABLE$"):
+            self.exported()
+        self.runtime.execution_identity.assert_not_called()
 
     def test_exact_strict_inputs_and_operation_lock_cover_all_reads(self):
         self.commit()

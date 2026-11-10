@@ -39,6 +39,22 @@ def revision(value: dict) -> str:
     return hashlib.sha256(encode(value)).hexdigest()
 
 
+def matches_sing_box_execution(runtime, selected, status_version) -> bool:
+    """Confirm the legacy pin or a frozen selection and its live verified generation."""
+    artifact = runtime.artifact
+    if selected is None:
+        return artifact is None and status_version == VERSIONS["sing-box"]
+    if (type(selected) is not RuntimeArtifact or selected.core != "sing-box"
+            or type(artifact) is not RuntimeArtifact or artifact != selected
+            or status_version != selected.version):
+        return False
+    expected = {"artifact_id": selected.artifact_id,
+                "binary_sha256": selected.reference.binary_sha256}
+    proof = runtime.execution_identity()
+    return (type(proof) is dict and set(proof) == {"selected", "running"}
+            and all(type(value) is dict and value == expected for value in proof.values()))
+
+
 MAX_RUNTIME_BYTES = 16 * 1024 * 1024
 _STORAGE_ERROR = "Runtime storage is unsafe or unavailable; offline recovery is required"
 

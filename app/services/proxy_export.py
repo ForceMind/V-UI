@@ -20,7 +20,7 @@ import re
 
 import yaml
 
-from app.services.core_runtime import revision
+from app.services.core_runtime import matches_sing_box_execution, revision
 from app.services.inbound_policy import policy_plan
 from app.services.proxy_policy import AddressPolicy, PolicyError, ingress_coverage
 from app.services.proxy_store import ProxyConflict, ProxyStorageError
@@ -153,9 +153,10 @@ class StrictRelayExporter:
                 if (state != {"revision": active["core_revision"], "enabled": True}
                         or status.get("running") is not True or status.get("enabled") is not True
                         or status.get("binary_exists") is not True or status.get("config_exists") is not True
-                        or status.get("version_required") != "1.14.2"
                         or status.get("applied_revision") != active["core_revision"]
-                        or revision(runtime.active_config()) != active["core_revision"]):
+                        or revision(runtime.active_config()) != active["core_revision"]
+                        or not matches_sing_box_execution(
+                            runtime, self.manager.runtime_artifact("sing-box"), status.get("version_required"))):
                     raise StrictExportError("STRICT_EXPORT_RUNTIME_UNAVAILABLE")
                 xray = self.manager.get("xray").runtime
                 if xray.state().get("enabled") is not False or xray.status().get("running") is not False:

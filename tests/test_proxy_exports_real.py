@@ -25,7 +25,7 @@ from unittest.mock import patch
 import yaml
 import psutil
 
-from tests.core_candidate_context import runtime_for_fixture, singbox_client
+from tests.core_candidate_context import artifacts_for_fixture, runtime_for_fixture, singbox_client
 from app.services.core_manager import SingBoxAdapter
 from app.services.core_runtime import CoreRuntime
 from app.services.proxy_apply import ProxyApplyCoordinator
@@ -170,7 +170,9 @@ class StrictExportLoopbackTests(DoubleHopFixture):
             resolver=lambda pid, rev, value, **kw: VerifiedEndpoint(pid, rev, value["server"], (UPSTREAM,), 1))
         stopped_xray = SimpleNamespace(state=lambda: {"revision": None, "enabled": False},
                                        status=lambda: {"running": False})
+        selection = artifacts_for_fixture() or {}
         manager = SimpleNamespace(lock=lock, proxy_coordinator=self.coordinator, _all_rows=lambda: self.rows,
+            runtime_artifact=selection.get,
             get=lambda name: SimpleNamespace(runtime=self.runtime if name == "sing-box" else stopped_xray))
         self.exporter = StrictRelayExporter(manager)
         upstream = profile()
