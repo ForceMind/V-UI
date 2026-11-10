@@ -26,6 +26,7 @@ from types import SimpleNamespace
 import httpx
 import psutil
 
+from tests.core_candidate_context import artifacts_for_fixture
 from proxy_loopback_support import (
     DIRECT_EGRESS, DOH, INGRESS, SNI, TARGET, UPSTREAM, UPSTREAM_EGRESS,
 )
@@ -88,6 +89,10 @@ def install_loopback_topology(options):
     from app.services.proxy_policy import AddressPolicy, VerifiedEndpoint, compile_proxy_policy
     from app.services.proxy_store import ProxyStore
     from app.services.upstream_profile import UpstreamProfile
+
+    artifacts = artifacts_for_fixture()
+    if artifacts is not None:
+        core_manager.configure_artifacts(artifacts)
 
     log_path = str(Path(options["core_log"]).resolve())
     adapter = core_manager.get("sing-box")

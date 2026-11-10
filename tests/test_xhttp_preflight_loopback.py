@@ -3,6 +3,7 @@
 No application compiler/exporter is enabled. Provider `-t` is deliberately not
 called proof of URI payload support. Runtime is required in real isolated CI.
 """
+from tests.core_candidate_context import server_version, singbox_client
 from proxy_loopback_support import ReadyMihomoProcess
 from contextlib import ExitStack
 import http.client
@@ -36,8 +37,8 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
         cls.xray = str(Path(os.environ['VUI_TEST_CORES'])/'xray')
         cls.singbox = str(Path(os.environ['VUI_TEST_CORES'])/'sing-box')
         cls.mihomo = os.environ['VUI_TEST_MIHOMO']
-        for command, prefix in (([cls.xray, 'version'], 'Xray 26.3.27 '),
-                ([cls.singbox, 'version'], 'sing-box version 1.14.2\n'),
+        for command, prefix in (([cls.xray, 'version'], f"Xray {server_version('xray', '26.3.27')} "),
+                ([cls.singbox, 'version'], f"sing-box version {server_version('sing-box', '1.14.2')}\n"),
                 ([cls.mihomo, '-v'], 'Mihomo Meta v1.19.32 ')):
             result = subprocess.run(command, capture_output=True, text=True, timeout=15)
             output = result.stdout+result.stderr
@@ -293,7 +294,7 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
                 with self.subTest(client=client, failure=failure):
                     self.prepare_client(client, 19444, 19443, failure=failure)
         path = self.write_config(singbox_xhttp_client(19443), 'singbox-unsupported-xhttp')
-        self.checked([self.singbox, 'check', '-c', str(path)], reason='unknown transport type: xhttp')
+        self.checked([singbox_client(self.singbox), 'check', '-c', str(path)], reason='unknown transport type: xhttp')
         print('XHTTP native configs parse; provider shell parse is not URI payload acceptance; sing-box unsupported')
 
     def test_01_invalid_mode_and_provider_parser_limitation(self):

@@ -25,6 +25,7 @@ from unittest.mock import patch
 import yaml
 import psutil
 
+from tests.core_candidate_context import runtime_for_fixture, singbox_client
 from app.services.core_manager import SingBoxAdapter
 from app.services.core_runtime import CoreRuntime
 from app.services.proxy_apply import ProxyApplyCoordinator
@@ -126,7 +127,7 @@ class StrictExportParserTests(ExportFixture, unittest.TestCase):
                     path = root / artifact.filename
                     path.write_text(artifact.content)
                     path.chmod(0o600)
-                    command = ([self.singbox, "check", "-c", str(path)] if kind == "sing-box" else
+                    command = ([singbox_client(self.singbox), "check", "-c", str(path)] if kind == "sing-box" else
                                [self.mihomo, "-t", "-d", str(root), "-f", str(path)])
                     result = subprocess.run(command, capture_output=True, text=True, timeout=15)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -143,7 +144,7 @@ class StrictExportLoopbackTests(DoubleHopFixture):
                 "enabled": True, "server_name": SNI,
                 "certificate_path": str(self.cert), "key_path": str(self.key)}})]
         self.store = ProxyStore(self.root / "store")
-        self.runtime = CoreRuntime("sing-box", Path(self.singbox), self.root / "runtime")
+        self.runtime = runtime_for_fixture(CoreRuntime, "sing-box", Path(self.singbox), self.root / "runtime")
         self.addCleanup(self.runtime.close)
         # CoreRuntime launches the unchanged binary with its ordinary lifecycle.
         # Trust is scoped to these test subprocesses, never installed globally.

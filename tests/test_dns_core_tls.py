@@ -17,6 +17,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 import yaml
 
+from tests.core_candidate_context import runtime_for_fixture
 from app.certificates.dns_store import DNSCredentialStore
 from app.certificates.models import CertificateBinding
 from app.models import database
@@ -118,13 +119,13 @@ class DNSCoreTLSTests(unittest.TestCase):
                 settings = {'users': [{'uuid': UUID}]}
                 stream = {'tls': {'enabled': True, 'server_name': HOST, 'certificate_path': str(paths[0]), 'key_path': str(paths[1])}}
                 adapter = SingBoxAdapter()
-                runtime = CoreRuntime(core, Path(os.environ['VUI_TEST_CORES']) / core, root / 'runtime')
+                runtime = runtime_for_fixture(CoreRuntime, core, Path(os.environ['VUI_TEST_CORES']) / core, root / 'runtime')
             else:
                 settings = {'users': [{'id': UUID}], 'decryption': 'none'}
                 stream = {'network': 'raw', 'security': 'tls', 'tlsSettings': {'serverName': HOST,
                           'certificates': [{'certificateFile': str(paths[0]), 'keyFile': str(paths[1])}]}}
                 adapter = XrayAdapter()
-                runtime = DiagnosticXrayRuntime(core, Path(os.environ['VUI_TEST_CORES']) / core, root / 'runtime')
+                runtime = runtime_for_fixture(DiagnosticXrayRuntime, core, Path(os.environ['VUI_TEST_CORES']) / core, root / 'runtime')
             stream['_vui'] = {'security': 'tls', 'server_name': HOST, 'skip_cert_verify': False}
             stack.callback(runtime.close); adapter._runtime = runtime
             with database.SessionLocal() as db:

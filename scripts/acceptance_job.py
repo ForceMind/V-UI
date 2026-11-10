@@ -27,6 +27,7 @@ FETCH_COMMAND = [sys.executable, '-B', 'scripts/fetch_mihomo.py', str(MIHOMO.par
 MAX_LOG = 16_000_000
 HEADER = 'VUI_ACCEPTANCE_CONTEXT '
 FOOTER = 'VUI_ACCEPTANCE_EXIT '
+UPGRADE_23_MARKER = 'VUI_23_TO_24_UPGRADE_ACCEPTANCE:'
 
 
 CORE_SWITCH_FIXTURE = WORK / 'core-switch-fixture'
@@ -191,6 +192,11 @@ def validate_test_log(raw, expected_context):
                and len(re.findall(r'^Ran [0-9]+ tests? in ', text, re.M)) == 1
                and len(re.findall(r'^OK$', text, re.M)) == 1
                and not re.search(r'\b(?:SKIP|SKIPPED|skipped|FAILED|ERROR)\b', text), 'TEST_LOG_NOT_ONE_UNSKIPPED_SUCCESS')
+    if context['identity']['version']=='0.4.24' and context['role']=='upgrade-0.4.23':
+        matches=[line for line in lines if UPGRADE_23_MARKER in line]
+        core._need(len(matches)==text.count(UPGRADE_23_MARKER)==1
+                   and matches[0].startswith(UPGRADE_23_MARKER+' ')
+                   and matches[0][len(UPGRADE_23_MARKER):].strip(),'UPGRADE_23_EVIDENCE_REQUIRED')
 
 
 def validate_core_switch_evidence(raw_log):

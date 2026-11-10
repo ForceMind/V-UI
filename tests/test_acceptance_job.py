@@ -23,19 +23,24 @@ SUCCESS = b'test_actual_offline_installer_permissions_socket_and_autostart (test
 
 
 class RecipeTests(unittest.TestCase):
-    def test_current_matrix_seven_and_future_includes_exact_public22(self):
+    def test_legacy_matrices_preserved_and_24_includes_exact_public23(self):
         current = job.matrix_for_version('0.4.22')['include']
         self.assertEqual([row['version'] for row in current], ['0.4.14', '0.4.15', '0.4.16', '0.4.17', '0.4.19', '0.4.20', '0.4.21'])
         future = job.matrix_for_version('0.4.23')['include']
         self.assertEqual(future[:-1], current)
         self.assertEqual(future[-1], {'version': '0.4.22', 'source': '558687a76cd29f4e4735284926eb05bf6664472e',
                                      'path': '.published-v0422', 'netlink': True})
-        for row in future:
+        candidate = job.matrix_for_version('0.4.24')['include']
+        self.assertEqual(candidate[:-1], future)
+        self.assertEqual(candidate[-1], {'version': '0.4.23', 'source': 'be5d8459cdd3eeedce73f2ff6e4663e5eb781e42',
+                                        'path': '.published-v0423', 'netlink': True})
+        for row in candidate:
             self.assertEqual(row['source'], core.BASELINES[row['version']])
             self.assertIs(type(row['netlink']), bool)
         for value in ('0.4.21', '00.4.22', 'v0.4.22', '0.4.22-rc1', True):
             with self.subTest(value=value), self.assertRaises(core.ReleaseAcceptanceError): job.matrix_for_version(value)
         with self.assertRaises(core.ReleaseAcceptanceError): job.role_recipe('0.4.22', 'upgrade-0.4.22', old_source='/old')
+        with self.assertRaises(core.ReleaseAcceptanceError): job.role_recipe('0.4.23', 'upgrade-0.4.23', old_source='/old')
 
     def test_fresh_recipe_preserves_all_original_flags_and_fixed_commands(self):
         recipe = job.role_recipe(VERSION, 'fresh')
@@ -48,9 +53,9 @@ class RecipeTests(unittest.TestCase):
         self.assertEqual(job.TEST_COMMAND[1:], ['-B', '-m', 'unittest', 'discover', '-s', 'tests', '-p', 'test_oneclick_system.py', '-v'])
 
     def test_each_upgrade_has_exact_original_environment_without_truthy_zero_flags(self):
-        for row in job.matrix_for_version('0.4.23')['include']:
+        for row in job.matrix_for_version('0.4.24')['include']:
             role = 'upgrade-' + row['version']; old = '/workspace/' + row['path']
-            recipe = job.role_recipe('0.4.23', role, old_source=old)
+            recipe = job.role_recipe('0.4.24', role, old_source=old)
             env = recipe['env']
             self.assertEqual(env['VUI_PUBLISHED_INSTALL_VERSION'], row['version'])
             self.assertEqual(env['VUI_RELEASE_COMMIT'], row['source'])
@@ -67,7 +72,7 @@ class RecipeTests(unittest.TestCase):
                 self.assertEqual(recipe['commands'], [job.TEST_COMMAND])
             inherited = {**ACTIONS, 'PATH': '/usr/bin', **{key: '0' for key in job.role_recipe(VERSION, 'fresh')['env']},
                          'VUI_SETUP_INSTALL': '1', 'VUI_DATA_DIR': '/not-user-data', 'VUI_UNRELATED_GATE': '1'}
-            clean = job.role_environment(inherited, '0.4.23', role, old_source=old)
+            clean = job.role_environment(inherited, '0.4.24', role, old_source=old)
             self.assertEqual({key: value for key, value in clean.items() if key.startswith('VUI_')}, env)
             self.assertEqual(clean['PATH'], '/usr/bin')
         for role in ('build', 'upgrade-0.4.18', 'other', True):
@@ -211,6 +216,18 @@ class JobTests(unittest.TestCase):
         with self.assertRaises(core.ReleaseAcceptanceError): self.make_receipt()
         self.log.write_bytes(first[:-1] + b',"run_attempt":2}\n' + body)
         with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'DUPLICATE_JSON_KEY'): self.make_receipt()
+
+    def test_public23_upgrade_requires_one_exact_preservation_marker(self):
+        identity={**self.identity,'version':'0.4.24','release_id':'0.4.24-'+SHA[:12]}
+        context=job._log_context(identity,'upgrade-0.4.23',ACTIONS)
+        header=(job.HEADER+json.dumps(context)+'\n').encode()
+        footer=(job.FOOTER+'0\n').encode()
+        marker=job.UPGRADE_23_MARKER.encode()
+        for bad in (b'',marker+b' \n',b'prefix '+marker+b' evidence\n',
+                    (marker+b' evidence\n')*2):
+            with self.subTest(bad=bad),self.assertRaisesRegex(core.ReleaseAcceptanceError,'UPGRADE_23_EVIDENCE_REQUIRED'):
+                job.validate_test_log(header+bad+SUCCESS+footer,context)
+        job.validate_test_log(header+marker+b' exact preservation evidence\n'+SUCCESS+footer,context)
 
     def test_run_test_rejects_false_identity_or_changed_copy_before_any_install_command(self):
         original = self.identity_path.read_bytes()

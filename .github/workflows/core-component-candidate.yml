@@ -4,6 +4,14 @@ on:
     paths:
       - 'scripts/build_core_component.py'
       - 'scripts/check_core_candidate_native.py'
+      - 'scripts/check_core_candidate_protocols.py'
+      - 'tests/core_candidate_context.py'
+      - 'tests/test_core_candidate_protocols.py'
+      - 'tests/test_*loopback*.py'
+      - 'tests/test_*_real.py'
+      - 'tests/test_dns_core_tls.py'
+      - 'tests/tcp_upstream_export_helpers.py'
+      - 'tests/loopback_helpers.py'
       - 'scripts/fetch_mihomo.py'
       - 'scripts/test_asset_download.py'
       - 'scripts/system_maintenance_smoke.py'
@@ -248,6 +256,51 @@ jobs:
         with:
           name: core-native-tcp-${{ matrix.target }}-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/native-tcp.json
+          if-no-files-found: error
+          retention-days: 14
+
+  protocol-compatibility:
+    needs: native-tcp
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      EXPECTED_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install non-browser test dependencies
+        run: python -m pip install -r requirements-test.txt
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: core-candidate-[sx]*-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/vui-native-inputs
+      - name: Fetch the original fixed clients for compatibility tests
+        run: |
+          set -euo pipefail
+          python -B scripts/fetch_test_cores.py "$RUNNER_TEMP/vui-baseline-cores" x86_64-gnu
+          python -B scripts/fetch_mihomo.py "$RUNNER_TEMP/vui-candidate-client"
+      - name: Run existing protocol gates with the verified candidate server binaries
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          git diff --quiet HEAD --
+          umask 077
+          python -B -m scripts.check_core_candidate_protocols \
+            --inputs "$RUNNER_TEMP/vui-native-inputs" --target x86_64-gnu \
+            --source "$EXPECTED_SOURCE" --baseline-cores "$RUNNER_TEMP/vui-baseline-cores" \
+            --mihomo "$RUNNER_TEMP/vui-candidate-client/mihomo" \
+            --output "$RUNNER_TEMP/candidate-protocols.json"
+          test -s "$RUNNER_TEMP/candidate-protocols.json"
+      - name: Preserve exact candidate protocol evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: core-candidate-protocols-x86_64-gnu-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/candidate-protocols.json
           if-no-files-found: error
           retention-days: 14
 

@@ -11,6 +11,7 @@ import tempfile
 import unittest
 import warnings
 import zipfile
+from unittest.mock import patch
 
 from scripts import parallel_release_policy as policy
 from scripts import release_acceptance as core
@@ -29,7 +30,7 @@ def archive(entries):
     with warnings.catch_warnings(), zipfile.ZipFile(output, 'w') as writer:
         warnings.simplefilter('ignore', UserWarning)
         for name, raw in entries:
-            writer.writestr(name, raw)
+            writer.writestr(zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0)), raw)
     return output.getvalue()
 
 
@@ -43,7 +44,8 @@ class Materials:
     def __init__(self, version=VERSION):
         self.version = version
         self.roles = ['build', 'fresh', *('upgrade-' + value for value in BASELINES)]
-        if version == '0.4.23': self.roles.append('upgrade-0.4.22')
+        if version in ('0.4.23','0.4.24'): self.roles.append('upgrade-0.4.22')
+        if version == '0.4.24': self.roles.append('upgrade-0.4.23')
         self.checks = {}; self.jobs = {}; self.artifacts = {}; self.bytes = {}; self.downloads = []
         self.reread = {}; self.pages = {}
         for index, path in enumerate(sorted(policy.WORKFLOWS), 1):
@@ -160,6 +162,15 @@ class Materials:
 
 
 class ParallelMaterialsTests(unittest.TestCase):
+    def test_fake_archives_keep_identical_bytes_across_clock_boundaries(self):
+        with patch('zipfile.time.localtime', side_effect=[
+                (2026,11,10,0,0,0,1,314,0),(2026,11,10,0,0,2,1,314,0)]):
+            first=bundle('x86_64-gnu','0.4.23')
+            second=bundle('x86_64-gnu','0.4.23')
+        self.assertEqual(first,second)
+        with zipfile.ZipFile(io.BytesIO(first)) as reader:
+            self.assertEqual(reader.getinfo('MANIFEST.json').date_time,(1980,1,1,0,0,0))
+
     def test_future_publisher_requires_real_dns_ca_and_both_core_steps_without_skip(self):
         from scripts.publish_release import _parallel_other_steps
         fixture = Materials('0.4.23')
@@ -187,7 +198,7 @@ class ParallelMaterialsTests(unittest.TestCase):
         self.assertEqual(fixture.downloads, [])
 
     def test_current_and_future_matrix_require_every_role_and_return_original_bytes(self):
-        for version, count in [('0.4.22', 9), ('0.4.23', 10)]:
+        for version, count in [('0.4.22', 9), ('0.4.23', 10), ('0.4.24', 11)]:
             with self.subTest(version=version):
                 fixture = Materials(version); result = fixture.qualify()
                 self.assertEqual(len(fixture.jobs[fixture.checks['oneclick.yml']['id']]), count)
@@ -420,6 +431,15 @@ class LatestPublishedTests(unittest.TestCase):
                 policy.validate_latest_published('0.4.23', values.__getitem__)
         values, _ = self.fixture()
         with self.assertRaises(policy.ParallelPolicyError): policy.validate_latest_published('0.4.22', values.__getitem__)
+
+    def test_candidate24_requires_the_unchanged_public23_tag(self):
+        source='be5d8459cdd3eeedce73f2ff6e4663e5eb781e42'
+        values={'releases/latest':{'draft':False,'prerelease':False,'tag_name':'v0.4.23'},
+                'git/ref/tags/v0.4.23':{'object':{'type':'commit','sha':source}}}
+        self.assertEqual(policy.validate_latest_published('0.4.24',values.__getitem__),
+                         {'version':'0.4.23','source':source})
+        values['git/ref/tags/v0.4.23']['object']['sha']='f'*40
+        with self.assertRaises(policy.ParallelPolicyError):policy.validate_latest_published('0.4.24',values.__getitem__)
 
 
 class ScopeRepository:

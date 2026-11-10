@@ -6,6 +6,7 @@ or fingerprint tuning is supplied. ALPN h3 is explicit and zero-RTT is off.
 TUIC v5 is selected by UUID/password. Mihomo advertises UDP capability even
 with udp:false; this fixture tests HTTP/TCP only and makes no UDP claim.
 """
+from tests.core_candidate_context import server_version, singbox_client
 from proxy_loopback_support import ReadyMihomoProcess
 from contextlib import ExitStack
 import http.client
@@ -38,8 +39,9 @@ class TUICPreflightLoopbackTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.singbox = str(Path(os.environ["VUI_TEST_CORES"]) / "sing-box")
+        cls.singbox_client = singbox_client(cls.singbox)
         cls.mihomo = os.environ["VUI_TEST_MIHOMO"]
-        for command, expected in (([cls.singbox, "version"], "sing-box version 1.14.2\n"),
+        for command, expected in (([cls.singbox, "version"], f"sing-box version {server_version('sing-box', '1.14.2')}\n"),
                                   ([cls.mihomo, "-v"], "Mihomo Meta v1.19.32 ")):
             result = subprocess.run(command, capture_output=True, text=True, timeout=15)
             output = result.stdout + result.stderr
@@ -133,8 +135,8 @@ class TUICPreflightLoopbackTests(unittest.TestCase):
         else:
             path = self.unique_path(client, "json")
             path.write_text(json.dumps(config))
-            command = [self.singbox, "run", "-c", str(path)]
-            self.check_command([self.singbox, "check", "-c", str(path)], env)
+            command = [self.singbox_client, "run", "-c", str(path)]
+            self.check_command([self.singbox_client, "check", "-c", str(path)], env)
         return command, env
 
     def start_udp_server(self, process, port):

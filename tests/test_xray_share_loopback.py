@@ -14,6 +14,7 @@ from unittest.mock import patch
 import yaml
 from cryptography.hazmat.primitives import serialization
 
+from tests.core_candidate_context import runtime_for_fixture
 from app.api import inbounds as inbound_api, subscription as subscription_api
 from app.models import database
 from app.services.core_manager import XrayAdapter, core_manager
@@ -49,7 +50,7 @@ class XrayShareLoopbackTests(unittest.TestCase):
             env = {**os.environ, 'SSL_CERT_FILE': str(ca), 'SSL_CERT_DIR': str(empty)}
             server_port = unused_port()
             adapter = XrayAdapter()
-            runtime = DiagnosticXrayRuntime('xray', Path(os.environ['VUI_TEST_CORES'])/'xray', root/'xray-runtime')
+            runtime = runtime_for_fixture(DiagnosticXrayRuntime, 'xray', Path(os.environ['VUI_TEST_CORES'])/'xray', root/'xray-runtime')
             stack.callback(runtime.close); adapter._runtime = runtime
             def apply(core, *, activate=True, **kwargs):
                 self.assertEqual(core,'xray')
