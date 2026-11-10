@@ -240,6 +240,11 @@ def _cap(method, path, scope, purpose, revision=None):
 
 
 _cap('GET', '/api/maintenance/core-authority', 'core_read', '检查本次独立核心维护授权')
+_cap('POST', '/api/maintenance/core-observations', 'core_read', '异步检查实际应用及匹配的官方核心候选')
+_cap('GET', '/api/maintenance/core-tasks', 'core_read', '读取独立核心维护任务')
+_cap('GET', '/api/maintenance/core-tasks/{task_id}', 'core_read', '读取独立核心维护任务进度')
+_cap('GET', '/api/maintenance/core-requests/{request_id}', 'core_read', '确认原核心请求是否已登记；另需独立核心维护凭据')
+_cap('POST', '/api/maintenance/core-tasks', 'core_read', '提交固定核心维护任务；另需本机终端独立用途授权', 'Idempotency-Key/selection_revision')
 _cap('GET', '/api/maintenance/core-selection', 'core_read', '查看代理核心选择（不含更新与回退）')
 for _core in ('sing-box', 'xray'):
     _cap('GET', '/api/maintenance/core-candidates/' + _core, 'core_read', '查看官方候选信息（尚未验证兼容）')
@@ -286,7 +291,7 @@ _cap('POST', '/api/maintenance/tasks', 'operate', '固定系统任务；status�
 def capability(method, path):
     kinds = {'inbound_id': '[1-9][0-9]{0,18}', 'grant_id': '[1-9][0-9]{0,18}',
              'core': '(?:xray|sing-box)', 'certificate_id': '[0-9a-f]{32}',
-             'job_id': '(?:diag_)?[0-9a-f]{32}', 'task_id': '[0-9a-f]{32}'}
+             'job_id': '(?:diag_)?[0-9a-f]{32}', 'task_id': '[0-9a-f]{32}', 'request_id': '[0-9a-f]{32}'}
     for item in CAPABILITIES:
         pattern = re.escape(item['path'])
         for key, value in kinds.items():

@@ -39,14 +39,19 @@ CONTRACTS = {
     'test_core_worker_cycle.py': 10,
     'test_core_maintenance_session.py': 32,
     'test_core_prepare_worker.py': 17,
-    'test_core_maintenance_control.py': 37,
+    'test_core_maintenance_control.py': 51,
     'test_core_maintenance_recovery.py': 9,
     'test_core_offline_guards.py': 11,
-    'test_core_authority.py': 35,
+    'test_core_authority.py': 42,
     'test_core_authority_loader.py': 5,
     'test_installer_origin.py': 7,
     'test_stage_origin.py': 10,
     'test_core_grant_link.py': 5,
+    'test_core_task_store.py': 9,
+    'test_core_task_api_contract.py': 8,
+    'test_core_task_admission.py': 6,
+    'test_core_backup_recovery.py': 7,
+    'test_core_remote_tasks_installed.py': 8,
 }
 
 

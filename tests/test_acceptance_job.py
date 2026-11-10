@@ -261,7 +261,14 @@ class JobTests(unittest.TestCase):
                 with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'CORE_RESTORE_EVIDENCE_REQUIRED'):
                     self.run_role(core_switch=True, data=SUCCESS+evidence)
                 self.log.unlink()
-            code, calls = self.run_role(core_switch=True, data=SUCCESS+switches+interrupt_marker+restore_marker)
+            evidence=switches+interrupt_marker+restore_marker
+            for marker,error in job.CORE_REMOTE_MARKERS:
+                for suffix in (b'',marker+b' \n',marker+b' evidence\n'+marker+b' duplicate\n'):
+                    with self.assertRaisesRegex(core.ReleaseAcceptanceError,error):
+                        self.run_role(core_switch=True,data=SUCCESS+evidence+suffix)
+                    self.log.unlink()
+                evidence+=marker+b' synthetic evidence\n'
+            code, calls = self.run_role(core_switch=True, data=SUCCESS+evidence)
         self.assertEqual(code, 0)
         self.assertEqual(calls[-1][1]['env']['VUI_CORE_SWITCH_FIXTURE'], str(fixture))
 

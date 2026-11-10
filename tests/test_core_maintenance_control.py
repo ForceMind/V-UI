@@ -12,6 +12,8 @@ import sys
 import os
 from pathlib import Path
 import re
+import select
+import signal
 import tempfile
 import time
 import types
@@ -96,7 +98,7 @@ class FixtureChild:
                 result['application']['target'] = 'aarch64-gnu'
             elif case.fault == 'worker-extra-field':
                 result['unchecked'] = True
-        elif command == 'core_backup':
+        elif command in ('core_backup','core_backup_recover'):
             self.backup_only = True
             result = dict(event='core_context', **dict(case.context, selection_initialized=True))
         elif command == 'core_recover':
@@ -327,6 +329,7 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.accepted_origin['archive_sha256']='f'*64
         ops = types.SimpleNamespace(RELEASE=re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,100}\Z'),
                                     application_origin=lambda release_id,target:deepcopy(self.accepted_origin),
+                                    revoke_core_epoch=lambda:None,
                                     local_panel_tls=self.tls)
         self.switch = control._Switch(ops, modules, self.services, types.SimpleNamespace(pw_uid=501, pw_gid=501),
             self.worker, self.installation_proof, dict(target=fixtures.TARGET),
@@ -453,6 +456,14 @@ class CoreMaintenanceControlTests(unittest.TestCase):
     def run_switch(self):
         with patch.object(self.switch, '_plan', side_effect=self.candidate):
             return self.switch.run(CORE, 'update', None, 123)
+
+    def test_remote_admission_refusal_prevents_first_pending_and_service_stop(self):
+        def refuse(summary,**kwargs):raise control.CoreControlError('ROOT_PERMISSION_REVOKED')
+        self.switch.admission_guard=types.SimpleNamespace(live=lambda:None,enter=refuse)
+        with self.assertRaisesRegex(control.CoreControlError,'ROOT_PERMISSION_REVOKED'):self.run_switch()
+        self.assertFalse((self.root/selection_files.PENDING).exists())
+        self.assertEqual(self.services.state(PANEL),'active')
+        self.assertNotIn('stop',self.trace)
 
     def test_private_ca_uses_worker_and_keeps_the_saved_trust_on_trial_drift(self):
         self.switch.config['certificate_mode']='provided'
@@ -638,6 +649,217 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.assertEqual(self.brokers[0].context['data_generation'], incoming)
         self.assertEqual(self.files.read_stable(**SOURCE), state)
 
+    def remote_backup_fixture(self, *, running=True):
+        from deploy import core_authority
+        self.files.bootstrap(self.before,writer_observation={
+            name:dict(schema=1,revision=row['revision'],enabled=row['enabled'])
+            if row['revision'] is not None else dict(schema=None,revision=None,enabled=False)
+            for name,row in self.initial_intents.items()},
+            service_snapshot=dict(panel_running=running,cores=self.initial_intents))
+        if not running:self.services.current=dict.fromkeys(self.services.current,'inactive')
+        self.authority=core_authority.CoreAuthority(_root=self.root.parent/'authority',
+            _anchor=self.root.parent,_owner=os.geteuid())
+        _,self.backup_token=self.authority.issue(main_id=7,main_digest='a'*64,scopes=['core_backup'])
+        self.remote_sequence=1
+        intent,_=self.authority.reserve(token=self.backup_token,main_id=7,main_digest='a'*64,
+            request_id=format(self.remote_sequence,'032x'),action='backup',
+            parameters={'selection_revision':self.before.revision})
+        self.switch.admission_guard=control._AdmissionGuard(self.authority,intent)
+        return intent
+
+    def interrupt_remote_backup(self):
+        actual=self.worker.command
+        def failed(command,*args,**kwargs):
+            if command in ('backup_core','release_backup_writers'):
+                raise BrokenPipeError('inert exited backup worker')
+            return actual(command,*args,**kwargs)
+        with patch.object(self.worker,'command',side_effect=failed):
+            with self.assertRaises(BrokenPipeError):self.switch.run_backup(self.before.revision)
+        return self.authority.backup_recovery()
+
+    def new_backup_recovery(self):
+        pending=self.authority.backup_recovery()
+        self.remote_sequence+=1
+        intent,_=self.authority.reserve(token=self.backup_token,main_id=7,main_digest='a'*64,
+            request_id=format(self.remote_sequence,'032x'),action='recover',parameters=dict(
+            recovery_kind='backup',pending_transaction=pending['transaction'],pending_sequence=pending['sequence'],
+            selection_revision=pending['before']['revision']))
+        old=self.switch
+        self.child=FixtureChild(self);self.worker=control._Worker(self.child)
+        self.addCleanup(self.worker.close)
+        self.switch=control._Switch(old.ops,old.modules,self.services,old.account,self.worker,
+            self.installation_proof,dict(old.config),deadline=time.monotonic()+10,cancelled=[])
+        self.switch.admission_guard=control._AdmissionGuard(self.authority,intent)
+        return pending
+
+    def test_remote_backup_retains_original_root_context_before_stop_and_clears_success(self):
+        intent=self.remote_backup_fixture()
+        actual=self.services.stop_all
+        def stop(*args,**kwargs):
+            pending=self.authority.backup_recovery()
+            self.assertEqual(pending['transaction'],intent['id'])
+            self.assertEqual(pending['context']['facts']['application'],self.context['application'])
+            self.assertEqual(pending['context']['services'][PANEL],'active')
+            self.assertEqual(self.authority.admission(task_id=intent['id'],live=False)['phase'],'mutating')
+            return actual(*args,**kwargs)
+        with patch.object(self.services,'stop_all',side_effect=stop):
+            self.switch.run_backup(self.before.revision)
+        self.assertIsNone(self.authority.backup_recovery())
+
+    def test_backup_pending_save_unknown_fsync_never_reaches_first_service_stop(self):
+        self.remote_backup_fixture()
+        original=os.fsync;directory=self.authority.root.stat()
+        def lost(fd):
+            info=os.fstat(fd)
+            if (info.st_dev,info.st_ino)==(directory.st_dev,directory.st_ino):
+                raise OSError('inert mutation directory ack loss')
+            original(fd)
+        with patch('deploy.core_authority.os.fsync',side_effect=lost):
+            with self.assertRaises(ValueError):self.switch.run_backup(self.before.revision)
+        self.assertNotIn('stop',self.trace)
+        self.assertNotIn('emergency-stop',self.trace)
+        self.assertEqual(self.services.current[PANEL],'active')
+        pending=self.authority.backup_recovery()
+        self.assertEqual(pending['transaction'],self.switch.admission_guard.intent['id'])
+        self.assertEqual(self.authority.admission(task_id=pending['transaction'],live=False)['phase'],'mutating')
+
+    def test_backup_io_worker_exit_leaves_durable_context_without_replaying_archive(self):
+        self.remote_backup_fixture();pending=self.interrupt_remote_backup()
+        self.assertIsNotNone(pending)
+        self.assertTrue(all(state=='inactive' for state in self.services.current.values()))
+        before=list(self.trace)
+        from deploy import core_authority
+        reloaded=core_authority.CoreAuthority(_root=self.root.parent/'authority',
+            _anchor=self.root.parent,_owner=os.geteuid())
+        self.assertEqual(reloaded.backup_recovery(),pending)
+        self.assertEqual(self.trace,before)
+        self.assertEqual(self.files.read_stable(**SOURCE),self.before)
+        self.assertNotIn('restore-topology',self.trace)
+
+    def test_sigkill_after_fixture_stop_retains_root_context_without_automatic_replay(self):
+        self.remote_backup_fixture()
+        read,write=os.pipe()
+        child=os.fork()
+        if child==0:
+            os.close(read)
+            original=self.services.stop_all
+            def stopped(*args,**kwargs):
+                original(*args,**kwargs)
+                os.write(write,b'S')
+                while True:signal.pause()
+            self.services.stop_all=stopped
+            try:self.switch.run_backup(self.before.revision)
+            except BaseException:os._exit(2)
+            os._exit(3)
+        os.close(write)
+        try:
+            self.assertTrue(select.select([read],[],[],5)[0],'fixture task did not stop')
+            self.assertEqual(os.read(read,1),b'S')
+        finally:
+            os.close(read)
+            os.kill(child,signal.SIGKILL)
+            _,status=os.waitpid(child,0)
+        self.assertTrue(os.WIFSIGNALED(status))
+        self.assertEqual(os.WTERMSIG(status),signal.SIGKILL)
+        pending=self.authority.backup_recovery()
+        self.assertEqual(pending['context']['services'][PANEL],'active')
+        self.assertEqual(self.files.read_stable(**SOURCE),self.before)
+        self.assertNotIn('backup_core',self.trace)
+        self.assertEqual(self.authority.backup_recovery(),pending)
+
+    def test_explicit_backup_recovery_resumes_original_services_without_backing_up(self):
+        self.remote_backup_fixture();self.interrupt_remote_backup()
+        pending=self.new_backup_recovery();self.trace.clear()
+        result=self.switch.run_backup_recovery(pending)
+        self.assertEqual(result,dict(outcome='backup_recovered',selection_revision=self.before.revision,panel_running=True))
+        self.assertIsNone(self.authority.backup_recovery())
+        self.assert_order('core_backup_recover','stop','proceed','release_backup_writers','start-panel','finish')
+        self.assertNotIn('backup_core',self.trace)
+        self.assertEqual(self.files.read_stable(**SOURCE),self.before)
+
+    def test_explicit_backup_recovery_preserves_original_stopped_topology_and_latest_core_stop(self):
+        self.remote_backup_fixture(running=False);self.interrupt_remote_backup()
+        self.final_intents[CORE]['enabled']=False
+        pending=self.new_backup_recovery();self.trace.clear()
+        result=self.switch.run_backup_recovery(pending)
+        self.assertFalse(result['panel_running'])
+        self.assertFalse(self.switch.final[CORE]['enabled'])
+        self.assertTrue(all(state=='inactive' for state in self.services.current.values()))
+        self.assertNotIn('start-panel',self.trace)
+        self.assertIsNone(self.authority.backup_recovery())
+
+    def test_local_recovery_reuses_original_context_without_remote_bearer_or_admission(self):
+        self.remote_backup_fixture();self.interrupt_remote_backup()
+        pending=self.new_backup_recovery()
+        # The existing explicit local Root command owns the installation lock;
+        # it uses its receipt-bound authority rather than a remote capability.
+        self.switch.admission_guard=None
+        self.switch.backup_authority=self.authority
+        self.authority.revoke_main(main_id=7,main_digest='a'*64)
+        self.trace.clear()
+        with patch.object(self.authority,'admission',side_effect=AssertionError('local recovery needs no bearer')):
+            result=self.switch.run_backup_recovery(pending)
+        self.assertEqual(result['outcome'],'backup_recovered')
+        self.assertTrue(result['panel_running'])
+        self.assertIsNone(self.authority.backup_recovery())
+        self.assertNotIn('backup_core',self.trace)
+
+    def test_backup_recovery_interruption_retains_original_record_for_fresh_authorization(self):
+        self.remote_backup_fixture();self.interrupt_remote_backup()
+        pending=self.new_backup_recovery()
+        with patch.object(self.worker,'command',side_effect=BrokenPipeError('inert recovery exit')):
+            with self.assertRaises(BrokenPipeError):self.switch.run_backup_recovery(pending)
+        self.assertEqual(self.authority.backup_recovery(),pending)
+        self.assertTrue(all(state=='inactive' for state in self.services.current.values()))
+        self.assertEqual(self.new_backup_recovery(),pending)
+        self.assertEqual(self.switch.run_backup_recovery(pending)['outcome'],'backup_recovered')
+        self.assertIsNone(self.authority.backup_recovery())
+
+    def test_backup_recovery_context_or_config_change_refuses_before_stop(self):
+        self.remote_backup_fixture();self.interrupt_remote_backup()
+        for field in ('application','data_generation','selection','config'):
+            pending=self.new_backup_recovery();self.trace.clear()
+            previous=deepcopy(self.context)
+            if field=='application':self.context[field]['ready_sha256']='f'*64
+            elif field=='data_generation':self.context[field]['ino']+=1
+            elif field=='selection':self.context[field]['generation']+=1
+            else:self.switch.config['listen_port']=12345
+            with self.assertRaises((control.CoreControlError,artifacts.CoreArtifactError,selection.CoreSelectionError)):
+                self.switch.run_backup_recovery(pending)
+            self.assertNotIn('stop',self.trace)
+            self.assertEqual(self.authority.backup_recovery(),pending)
+            self.context=previous
+
+    def test_backup_recovery_revoked_or_wrong_pending_cas_never_stops_services(self):
+        self.remote_backup_fixture();self.interrupt_remote_backup()
+        pending=self.new_backup_recovery();self.trace.clear()
+        self.switch.admission_guard.intent['parameters']['pending_sequence']=2
+        with self.assertRaises(control.CoreControlError):self.switch.run_backup_recovery(pending)
+        self.assertNotIn('stop',self.trace)
+        pending=self.new_backup_recovery();self.trace.clear()
+        self.authority.revoke_main(main_id=7,main_digest='a'*64)
+        with self.assertRaises(ValueError):self.switch.run_backup_recovery(pending)
+        self.assertNotIn('stop',self.trace)
+        self.assertEqual(self.authority.backup_recovery(),pending)
+
+    def test_backup_recovery_cleanup_unknown_does_not_stop_restored_service(self):
+        self.remote_backup_fixture();self.interrupt_remote_backup()
+        pending=self.new_backup_recovery();self.trace.clear()
+        actual=self.authority.finish_backup_recovery
+        original=os.fsync;directory=self.authority.root.stat()
+        def fail_directory(fd):
+            info=os.fstat(fd)
+            if (info.st_dev,info.st_ino)==(directory.st_dev,directory.st_ino):
+                raise OSError('inert cleanup directory ack loss')
+            original(fd)
+        def lost(value):
+            with patch('deploy.core_authority.os.fsync',side_effect=fail_directory):actual(value)
+        with patch.object(self.authority,'finish_backup_recovery',side_effect=lost):
+            with self.assertRaises(ValueError):self.switch.run_backup_recovery(pending)
+        self.assertEqual(self.services.current[PANEL],'active')
+        self.assertIsNone(self.authority.backup_recovery())
+        self.assertNotIn('emergency-stop',self.trace)
+
     def test_private_backup_keeps_selection_and_restores_topology(self):
         self.files.bootstrap(self.before, writer_observation={
             name: dict(schema=1, revision=row['revision'], enabled=row['enabled'])
@@ -652,6 +874,39 @@ class CoreMaintenanceControlTests(unittest.TestCase):
         self.assertEqual(self.files.read_stable(**SOURCE), self.before)
         self.assertFalse((self.root/selection_files.PENDING).exists())
         self.assertFalse(self.brokers)
+
+    def test_failed_backup_releases_writers_and_restores_original_topology(self):
+        self.files.bootstrap(self.before, writer_observation={
+            name: dict(schema=1, revision=row['revision'], enabled=row['enabled'])
+            if row['revision'] is not None else dict(schema=None, revision=None, enabled=False)
+            for name, row in self.initial_intents.items()},
+            service_snapshot=dict(panel_running=True, cores=self.initial_intents))
+        original=self.services.snapshot()
+        self.fault='backup-sha'
+        with self.assertRaisesRegex(control.CoreControlError,'CORE_BACKUP_RECEIPT'):
+            self.switch.run_backup(self.before.revision)
+        self.assertEqual(self.services.snapshot(),original)
+        self.assert_order('backup_core','release_backup_writers','restore-topology','finish')
+        self.assertEqual(self.files.read_stable(**SOURCE),self.before)
+        self.assertFalse((self.root/selection_files.PENDING).exists())
+
+    def test_interrupted_backup_with_unconfirmed_writer_release_remains_stopped(self):
+        self.files.bootstrap(self.before, writer_observation={
+            name: dict(schema=1, revision=row['revision'], enabled=row['enabled'])
+            if row['revision'] is not None else dict(schema=None, revision=None, enabled=False)
+            for name, row in self.initial_intents.items()},
+            service_snapshot=dict(panel_running=True, cores=self.initial_intents))
+        with patch.object(self.switch,'_write_backup',side_effect=KeyboardInterrupt),patch.object(
+                self.switch.worker,'command',wraps=self.switch.worker.command) as command:
+            actual=command._mock_wraps
+            def uncertain(name,*args,**kwargs):
+                if name=='release_backup_writers':raise RuntimeError('inert worker loss')
+                return actual(name,*args,**kwargs)
+            command.side_effect=uncertain
+            with self.assertRaises(KeyboardInterrupt):self.switch.run_backup(self.before.revision)
+        self.assertTrue(all(state=='inactive' for state in self.services.snapshot().values()))
+        self.assertNotIn('restore-topology',self.trace)
+        self.assertEqual(self.files.read_stable(**SOURCE),self.before)
 
     def test_private_restore_coordinates_preflight_before_stop_and_trial_after_backup(self):
         before = self.context['data_generation']

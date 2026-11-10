@@ -526,6 +526,9 @@ class TransactionTests(unittest.TestCase):
         worker = FakeWorker(events, request, responses, fail_exit, fail_close)
         factory = unittest.mock.Mock(return_value=worker)
         def run():
+            if action in ('restore','recover-restore'):
+                with patch.object(ops,'revoke_core_epoch'):
+                    return ops.operate(request,services,ACCOUNT,[] if cancelled is None else cancelled,factory)
             if action=='stage':
                 # Wire/order fixture only. Real snapshot/Root origin/cleanup
                 # are covered by test_stage_origin and installed Actions.
@@ -808,8 +811,9 @@ class IntegratedWorkerTests(unittest.TestCase):
                 deadline=time.monotonic()+10,retain=False,check=lambda:None)
             with patch.object(ops,'accepted_stage',return_value=nullcontext(material)):
                 return ops.operate({'protocol':1,'action':action,**values},self.services,ACCOUNT,[],self.factory)
-        return ops.operate({'protocol': 1, 'action': action, **values}, self.services,
-                           ACCOUNT, [], self.factory)
+        with patch.object(ops,'revoke_core_epoch'):
+            return ops.operate({'protocol': 1, 'action': action, **values}, self.services,
+                               ACCOUNT, [], self.factory)
 
     def test_real_controller_worker_backup_restore_activate_and_control_protocol(self):
         backup = self.execute('backup')
@@ -1028,6 +1032,20 @@ class MenuTests(unittest.TestCase):
                 self.assertEqual(args[1:6], ['-B', '-I', '-S', '-c', ops.CORE_RESTORE_BOOTSTRAP])
                 self.assertEqual(args[6:], [digest, hashlib.sha256(receipt).hexdigest(), action, *values])
                 compile(args[5], '<fixture bootstrap>', 'exec')
+
+    def test_core_backup_recovery_menu_confirms_fixed_action_without_new_archive(self):
+        digest='b'*64
+        receipt=json.dumps({'files':{str(ops.CONTROL/'system_ops.py'):digest}}).encode()
+        with patch.object(ops,'verify_installation',return_value=('systemd',None)), \
+                patch.object(ops,'trusted_bytes',return_value=receipt), \
+                patch.object(ops,'run_command',return_value=(0,json.dumps(
+                    dict(outcome='backup_recovered',selection_revision='c'*64,panel_running=True)).encode())) as run:
+            code,output=self.run_menu('18\ny\n0\n')
+        self.assertEqual(code,0)
+        self.assertIn('备份中断恢复完成',output)
+        self.assertIn('未重新创建备份',output)
+        self.assertNotIn('原数据备份文件',output)
+        self.assertEqual(run.call_args.args[0][-1],'recover-core')
 
     def test_core_restore_menu_reports_only_fixed_failure_stages(self):
         digest = 'b'*64

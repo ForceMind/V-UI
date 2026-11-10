@@ -951,6 +951,7 @@ def operate(request, services, account, cancelled, worker_factory=None):
             raise Refused('worker preparation failed')
         if cancelled:
             raise Refused('operation interrupted')
+        if action in ('restore','recover-restore'):revoke_core_epoch()
         stopped = True
         if action != 'start':
             services.stop_all()
@@ -1315,7 +1316,7 @@ HELP = ('V-UI 受管维护菜单\n'
         '15 / recover-components 恢复中断的双域事务\n'
         '16 / update-core 更新指定核心\n'
         '17 / rollback-core 回退指定核心\n'
-        '18 / recover-core 恢复中断的核心切换\n'
+        '18 / recover-core 恢复中断的核心任务（含双域备份）\n'
         '19 / backup-components 备份节点数据及核心版本\n'
         '20 / core-status 查看已选择的核心版本（只读）\n'
         'h            帮助\n'
@@ -1526,6 +1527,11 @@ def _load_core_authority(expected_receipt, *, _origin_only=False):
     return module
 
 
+def revoke_core_epoch():
+    expected=hashlib.sha256(trusted_bytes(RECEIPT,MAX_JSON)).hexdigest()
+    return _load_core_authority(expected,_origin_only=True).CoreAuthority().advance_epoch()
+
+
 def application_origin(release_id, target):
     """Lookup Root-accepted bytes, never infer an origin from service data."""
     if (type(release_id) is not str or not RELEASE.fullmatch(release_id)
@@ -1611,7 +1617,7 @@ def terminal_core_action(action):
             arguments.append(release)
         print('操作会短暂停服并创建当前数据备份。')
     elif action == 'recover-core':
-        print('按中断记录核验并恢复核心选择及服务状态。')
+        print('按中断记录核验并恢复核心选择及服务状态；中断的双域备份只恢复服务，不重新备份。')
     elif action == 'backup-components':
         print('短暂停服后备份节点数据及核心版本，完成后恢复原服务状态。')
     elif action != 'core-status':
@@ -1660,6 +1666,8 @@ def terminal_core_action(action):
     else:
         messages = {key: '恢复完成，已核对数据与服务状态。'
                     for key in ('restored_previous', 'resumed_confirmed')}
+        if action == 'recover-core':
+            messages['backup_recovered'] = '备份中断恢复完成，已核对原服务状态；未重新创建备份。'
     if outcome not in messages:
         raise Refused('unexpected core task result')
     name, digest = result.get('backup_name'), result.get('backup_sha256')

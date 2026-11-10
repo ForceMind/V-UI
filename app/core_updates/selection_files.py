@@ -593,7 +593,7 @@ class SelectionFiles:
         with self._io() as (scope, root):
             return self._stable(scope, root, app_source, target)
 
-    def read_status(self):
+    def read_status(self, *, _context=False):
         """Describe Root selection metadata, without accessing the service data."""
         with self._io(allow_missing=True) as (scope, root):
             names = (SELECTION, FENCE, PENDING, ACTIVE, HISTORY, LOCK)
@@ -609,10 +609,12 @@ class SelectionFiles:
             raw, _ = _read(scope, root, SELECTION)
             value = a._json(raw)
             state = self._stable(scope, root, value['app_source'], value['target'])
-            return dict(outcome='core_selected', cores={
+            result=dict(outcome='core_selected', cores={
                 core: dict(current=state.slot(core).current.version,
                            previous=state.slot(core).previous.version if state.slot(core).previous else None)
                 for core in s.CORES})
+            if _context:result.update(selection_revision=state.revision,generation=state.generation)
+            return result
 
     def backup_stable(self, *, app_source, target):
         """Ordinary backup entry; no pending snapshot is accepted."""

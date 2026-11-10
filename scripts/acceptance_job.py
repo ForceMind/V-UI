@@ -34,6 +34,10 @@ CORE_SWITCH_CORES = ('sing-box', 'xray')
 CORE_SWITCH_MARKER = b'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE:'
 CORE_INTERRUPT_MARKER = b'VUI_INSTALLED_CORE_INTERRUPT_ACCEPTANCE:'
 CORE_RESTORE_MARKER = b'VUI_INSTALLED_CORE_RESTORE_ACCEPTANCE:'
+CORE_REMOTE_MARKERS = (
+    (b'VUI_INSTALLED_CORE_REMOTE_TASK_ACCEPTANCE:', 'CORE_REMOTE_TASK_EVIDENCE_REQUIRED'),
+    (b'VUI_INSTALLED_CORE_BACKUP_RECOVERY_ACCEPTANCE:', 'CORE_BACKUP_RECOVERY_EVIDENCE_REQUIRED'),
+)
 
 def matrix_for_version(version):
     number = core._version(version)
@@ -209,6 +213,14 @@ def validate_core_switch_evidence(raw_log):
                and restored[0][len(CORE_RESTORE_MARKER):].strip()
                and raw_log.find(CORE_RESTORE_MARKER) > raw_log.find(CORE_INTERRUPT_MARKER),
                'CORE_RESTORE_EVIDENCE_REQUIRED')
+    previous = raw_log.find(CORE_RESTORE_MARKER)
+    for marker, error in CORE_REMOTE_MARKERS:
+        lines = [line for line in raw_log.splitlines() if marker in line]
+        position = raw_log.find(marker)
+        core._need(len(lines) == raw_log.count(marker) == 1
+                   and lines[0].startswith(marker + b' ')
+                   and lines[0][len(marker):].strip() and position > previous, error)
+        previous = position
 
 
 def _exit_code(value):

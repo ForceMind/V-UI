@@ -516,3 +516,76 @@ class MaintenanceAuthorizationTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as error:maintenance.revoke_grant(self.owner,record['id'])
             self.assertEqual(error.exception.status_code,409)
         with database.SessionLocal() as db:self.assertFalse(db.get(maintenance.MaintenanceGrant,record['id']).revoked)
+
+    def test_core_task_read_and_observe_require_explicit_normal_core_scope(self):
+        remote=TestClient(main.app,base_url=ORIGIN);self.addCleanup(remote.close)
+        row={'id':'a'*32,'action':'observe','state':'queued','phase':'queued','created_at':1,'updated_at':1}
+        _,old=self.bearer(['diagnose','operate','upgrade','destructive'])
+        _,headers=self.bearer(['core_read'])
+        with patch('app.services.maintenance_tasks.core_observe',return_value=row) as observe,\
+             patch('app.services.maintenance_tasks.core_list',return_value=[]) as listing,\
+             patch('app.services.maintenance_tasks.core_get',return_value=row) as get:
+            for path in ('/api/maintenance/core-tasks','/api/maintenance/core-tasks/'+'a'*32):
+                self.assertEqual(remote.get(path,headers=old).status_code,403)
+                self.assertEqual(remote.get(path,headers=headers).status_code,200)
+            self.assertEqual(remote.post('/api/maintenance/core-observations',json={},headers={**old,'Origin':ORIGIN}).status_code,403)
+            self.assertEqual(remote.post('/api/maintenance/core-observations',json={},headers={**headers,'Origin':ORIGIN}).status_code,202)
+            observe.assert_called_once_with();listing.assert_called_once_with();get.assert_called_once_with('a'*32)
+            self.assertEqual(remote.post('/api/maintenance/core-observations',json={'source':'private'},headers={**headers,'Origin':ORIGIN}).status_code,422)
+            self.assertEqual(remote.get('/api/maintenance/core-tasks?path=private',headers=headers).status_code,422)
+            self.assertEqual(remote.post('/api/maintenance/core-observations',json={},headers=headers).status_code,403)
+
+    def test_core_submit_requires_independent_key_origin_nonce_and_original_binding(self):
+        remote=TestClient(main.app,base_url=ORIGIN);self.addCleanup(remote.close)
+        record,normal=self.bearer(['core_read'])
+        root='vui_cg_'+'b'*32+'_'+'c'*43
+        headers={**normal,'Origin':ORIGIN,'Idempotency-Key':'d'*32,'X-VUI-Core-Authorization':root}
+        body={'action':'update','parameters':{'core':'sing-box','release_id':123,'selection_revision':None}}
+        row={'id':'a'*32,'action':'update','state':'queued','phase':'queued','created_at':1,'updated_at':1}
+        with database.SessionLocal() as db:digest=db.get(maintenance.MaintenanceGrant,record['id']).token_hash
+        with patch('app.services.maintenance_tasks.core_submit',return_value=row) as submit:
+            for key in ('Origin','Idempotency-Key','X-VUI-Core-Authorization'):
+                missing={name:value for name,value in headers.items() if name!=key}
+                self.assertIn(remote.post('/api/maintenance/core-tasks',json=body,headers=missing).status_code,(403,422))
+            self.assertEqual(self.client.post('/api/maintenance/core-tasks',json=body,headers=BROWSER).status_code,403)
+            submit.assert_not_called()
+            response=remote.post('/api/maintenance/core-tasks',json=body,headers=headers)
+            self.assertEqual(response.status_code,202,response.text)
+            submit.assert_called_once_with(root,{'main_id':record['id'],'main_digest':digest},'d'*32,'update',body['parameters'])
+            self.assertNotIn(root,response.text)
+            recovery={'recovery_kind':'backup','pending_transaction':'e'*32,'pending_sequence':1,'selection_revision':'f'*64}
+            response=remote.post('/api/maintenance/core-tasks',json={'action':'recover','parameters':recovery},headers=headers)
+            self.assertEqual(response.status_code,202,response.text)
+            submit.assert_called_with(root,{'main_id':record['id'],'main_digest':digest},'d'*32,'recover',recovery)
+
+    def test_core_task_payload_rejects_foreign_material_duplicate_json_and_wrong_types(self):
+        remote=TestClient(main.app,base_url=ORIGIN);self.addCleanup(remote.close)
+        _,normal=self.bearer(['core_read'])
+        headers={**normal,'Origin':ORIGIN,'Idempotency-Key':'d'*32,'X-VUI-Core-Authorization':'vui_cg_'+'b'*32+'_'+'c'*43}
+        base={'core':'xray','release_id':123,'selection_revision':None}
+        rows=[{'action':'update','parameters':{**base,'path':'/private'}},
+              {'action':'update','parameters':{**base,'release_id':True}},
+              {'action':'backup','parameters':{'selection_revision':None}},
+              {'action':'restore','parameters':{'selection_revision':'a'*64,'backup_task_id':'ordinary.zip'}},
+              {'action':'recover','parameters':{'recovery_kind':'switch','pending_transaction':'b'*32,'pending_sequence':True,'selection_revision':None}}]
+        with patch('app.services.maintenance_tasks.core_submit') as submit:
+            for body in rows:
+                self.assertEqual(remote.post('/api/maintenance/core-tasks',json=body,headers=headers).status_code,422)
+            duplicate='{"action":"update","action":"backup","parameters":{"selection_revision":null}}'
+            self.assertEqual(remote.post('/api/maintenance/core-tasks',content=duplicate,headers={**headers,'Content-Type':'application/json'}).status_code,422)
+            self.assertEqual(remote.post('/api/maintenance/core-tasks?source=private',json={'action':'update','parameters':base},headers=headers).status_code,422)
+            submit.assert_not_called()
+
+    def test_core_request_lookup_is_authenticated_read_and_never_submits(self):
+        remote=TestClient(main.app,base_url=ORIGIN);self.addCleanup(remote.close)
+        record,headers=self.bearer(['core_read'])
+        root='vui_cg_'+'b'*32+'_'+'c'*43
+        with database.SessionLocal() as db:digest=db.get(maintenance.MaintenanceGrant,record['id']).token_hash
+        with patch('app.services.maintenance_tasks.core_lookup',return_value={'not_found':True}) as lookup,\
+             patch('app.services.maintenance_tasks.core_submit') as submit:
+            path='/api/maintenance/core-requests/'+'d'*32
+            self.assertEqual(remote.get(path,headers=headers).status_code,403)
+            response=remote.get(path,headers={**headers,'X-VUI-Core-Authorization':root})
+            self.assertEqual(response.status_code,200,response.text)
+            lookup.assert_called_once_with(root,{'main_id':record['id'],'main_digest':digest},'d'*32)
+            submit.assert_not_called()

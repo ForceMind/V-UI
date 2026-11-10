@@ -10,6 +10,23 @@ HTTP接口以`/api`开头。`/docs`和`/openapi.json`也要求管理员登录，
 
 ## 节点与核心
 
+### P3 核心独立任务候选
+
+以下接口属于独立Draft PR146，不在公开v0.4.23内。普通维护会话必须明确包含`core_read`；管理员cookie及旧用途不能代替核心独立写授权。所有接口拒绝额外query，沿用`X-VUI-Request: 1`；POST另要求准确Origin。状态和结果均脱敏、no-store。
+
+| 方法/路径 | 行为 |
+| --- | --- |
+| POST `/api/maintenance/core-observations` | 正文为空对象，返回异步实际应用/核心选择/匹配官方候选检查任务 |
+| GET `/api/maintenance/core-tasks` | 核心任务摘要列表，与普通系统任务分开 |
+| GET `/api/maintenance/core-tasks/{task_id}` | 按32位小写hex ID读取原任务及有限结果；重新授权后可查 |
+| GET `/api/maintenance/core-authority` | 另带终端发放的`X-VUI-Core-Authorization`，核本次Root凭据与原普通grant绑定 |
+| POST `/api/maintenance/core-tasks` | 另带Root凭据及32位小写hex `Idempotency-Key`，正文严格为action/parameters；返回202只代表已登记 |
+| GET `/api/maintenance/core-requests/{request_id}` | 另带原Root凭据，只核原请求登记结果；不派工、不换ID重试 |
+
+固定action为`update`、`rollback`、`backup`、`restore`、`recover`；参数依次为：`core/release_id/selection_revision`、`core/selection_revision`、`selection_revision`、`backup_task_id/selection_revision`、`recovery_kind/pending_transaction/pending_sequence/selection_revision`。`core`仅sing-box/xray；recovery_kind仅switch/restore/backup；revision为64位小写hex，只有未初始化的update或对应pending可为null。恢复参数必须来自当前检查事实，不能传私有文件名、URL、SHA、命令或自报权限。
+
+同一Root凭据和请求ID只对应同一固定参数/任务；回复未知时先查询原ID，明确未登记后才重新确认同ID。旧任务不自动重放，备份/恢复只解析Root私有成功任务映射。用途、消费边界与持久备份恢复见[核心契约](CORE_UPGRADE_CONTRACT.md#当前任务与恢复契约)。
+
 | 方法/路径 | 行为 |
 | --- | --- |
 | GET/POST `/api/inbounds` | 列出/创建；可传certificate_id选择正式托管证书 |

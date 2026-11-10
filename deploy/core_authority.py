@@ -99,6 +99,8 @@ def _decode(raw):
             # Preserve all existing authority and consumption state. No service
             # metadata is consulted or given origin authority by this migration.
             value = {**value, 'schema':2, 'kind':'core-authority-v2', 'applications':{}}
+        if type(value) is dict and 'backup_recovery' not in value:
+            value = {**value, 'backup_recovery':None}
         return _validate(value)
     except CoreAuthorityError:
         raise
@@ -128,7 +130,7 @@ def normalized(action, parameters):
     if action == 'update':
         _need(_integer(parameters['release_id']), 'RELEASE')
     if action == 'recover':
-        _need(type(parameters['recovery_kind']) is str and parameters['recovery_kind'] in ('switch', 'restore')
+        _need(type(parameters['recovery_kind']) is str and parameters['recovery_kind'] in ('switch', 'restore', 'backup')
               and _hex(parameters['pending_transaction'], ID)
               and _integer(parameters['pending_sequence'], zero=True), 'PENDING')
     if action == 'restore':
@@ -143,7 +145,7 @@ def _binding(main_id, main_digest):
 def _scope(action, parameters):
     if action == 'restore' or action == 'recover' and parameters['recovery_kind'] == 'restore':
         return 'core_restore'
-    return 'core_backup' if action == 'backup' else 'core_operate'
+    return 'core_backup' if action == 'backup' or action == 'recover' and parameters['recovery_kind'] == 'backup' else 'core_operate'
 
 
 def _grant(value, key):
@@ -179,7 +181,7 @@ def _known_bindings(value):
 
 
 def _validate(value):
-    _keys(value, ('schema', 'kind', 'installation_id', 'epoch', 'grants', 'admissions', 'revoked_bindings', 'applications'))
+    _keys(value, ('schema', 'kind', 'installation_id', 'epoch', 'grants', 'admissions', 'revoked_bindings', 'applications', 'backup_recovery'))
     _need(type(value['schema']) is int and value['schema'] == 2 and value['kind'] == 'core-authority-v2'
           and _hex(value['installation_id'], ID) and _hex(value['epoch'], ID)
           and type(value['grants']) is dict and len(value['grants']) <= MAX_GRANTS
@@ -220,7 +222,30 @@ def _validate(value):
         pair = (row['grant_id'], row['request_id'])
         _need(pair not in unique, 'IDEMPOTENCY')
         unique.add(pair)
+    pending = value['backup_recovery']
+    if pending is not None:
+        _backup_recovery(pending)
+        task = value['admissions'].get(pending['transaction'])
+        _need(task is not None and task['action'] == 'backup' and task['phase'] == 'mutating'
+              and pending['installation_id'] == value['installation_id']
+              and pending['before']['revision'] == task['parameters']['selection_revision'], 'BACKUP_RECOVERY')
     return value
+
+
+def _backup_recovery(value):
+    _keys(value, ('kind','transaction','sequence','installation_id','before','context'))
+    _need(value['kind'] == 'core-backup-recovery-v1' and _hex(value['transaction'],ID)
+          and value['sequence'] == 1 and type(value['sequence']) is int
+          and _hex(value['installation_id'],ID) and type(value['before']) is dict
+          and _hex(value['before'].get('revision')), 'BACKUP_RECOVERY')
+    context = value['context']
+    _keys(context, ('facts','config_sha256','services','trust_sha256'))
+    _keys(context['facts'], ('application','data_generation','selection','selection_initialized','bundles','intents','runtime_schemas'))
+    _need(context['facts']['selection'] == value['before'] and context['facts']['selection_initialized'] is True
+          and _hex(context['config_sha256']) and (context['trust_sha256'] is None or _hex(context['trust_sha256'])), 'BACKUP_RECOVERY')
+    _keys(context['services'], ('v-ui.service','v-ui-http01.socket','v-ui-http01.service'))
+    _need(all(row in ('active','inactive') for row in context['services'].values()), 'BACKUP_RECOVERY')
+    return deepcopy(value)
 
 
 def _file(info):
@@ -343,7 +368,7 @@ class CoreAuthority:
                 raise CoreAuthorityError('NOT_INITIALIZED') from None
             _need(os.listdir(directory) == ['.lock'], 'INCOMPLETE')
             return dict(schema=2, kind='core-authority-v2', installation_id=uuid.uuid4().hex,
-                        epoch=uuid.uuid4().hex, grants={}, admissions={}, revoked_bindings={}, applications={}), None
+                        epoch=uuid.uuid4().hex, grants={}, admissions={}, revoked_bindings={}, applications={}, backup_recovery=None), None
         try:
             before = os.fstat(fd);self._private_file(before)
             raw = bytearray()
@@ -498,8 +523,8 @@ class CoreAuthority:
 
     def advance_epoch(self):
         """Root restore calls this before any data mutation; never restore it."""
-        with self._locked() as (directory, proof):
-            state, before = self._load(directory)
+        with self._locked(create=True) as (directory, proof):
+            state, before = self._load(directory, missing=True)
             next_epoch = uuid.uuid4().hex
             _need(next_epoch != state['epoch'], 'COLLISION')
             state['epoch'] = next_epoch
@@ -539,6 +564,12 @@ class CoreAuthority:
                     _need(hmac.compare_digest(row['parameters_sha256'], digest), 'CONFLICT')
                     self._ack(directory, proof, before)
                     return deepcopy(row), False
+            pending=state['backup_recovery']
+            if pending is not None:
+                _need(action=='recover' and parameters['recovery_kind']=='backup'
+                      and parameters['pending_transaction']==pending['transaction']
+                      and parameters['pending_sequence']==pending['sequence']
+                      and parameters['selection_revision']==pending['before']['revision'], 'BACKUP_PENDING')
             _need(len(state['admissions']) < MAX_ADMISSIONS, 'CAPACITY')
             identity = uuid.uuid4().hex
             _need(identity not in state['admissions'], 'COLLISION')
@@ -550,7 +581,32 @@ class CoreAuthority:
             self._save(directory, proof, state, before)
             return deepcopy(row), True
 
-    def enter_mutation(self, *, task_id, plan_sha256):
+    def lookup(self, *, token, main_id, main_digest, request_id):
+        _need(_hex(request_id,ID),'REQUEST')
+        grant=self.status(token=token,main_id=main_id,main_digest=main_digest)
+        with self._locked() as (directory,proof):
+            state,_=self._load(directory)
+            for row in state['admissions'].values():
+                if row['grant_id']==grant['id'] and row['request_id']==request_id:return deepcopy(row)
+            return None
+
+    def admission(self, *, task_id, live=True):
+        """Read a Root-reserved immutable intent, never caller parameters.
+        Live preflight checks do not consume it or authorize a first mutation.
+        """
+        _need(_hex(task_id,ID) and type(live) is bool,'REQUEST')
+        with self._locked() as (directory,proof):
+            state,before=self._load(directory)
+            row=state['admissions'].get(task_id)
+            _need(row is not None,'ADMISSION')
+            if live:
+                _need(row['phase']=='preflight','CONSUMED')
+                grant=state['grants'][row['grant_id']]
+                self._live(state,grant,self._now(),directory,proof,before)
+                _need(_scope(row['action'],row['parameters']) in grant['scopes'],'SCOPE')
+            return deepcopy(row)
+
+    def enter_mutation(self, *, task_id, plan_sha256, backup_recovery=None):
         """Root controller calls while retaining the installation/CAS lock.
         This persistent one-shot mark is not an executable or replay ticket.
         """
@@ -562,9 +618,43 @@ class CoreAuthority:
             grant = state['grants'][row['grant_id']]
             now = self._now();self._live(state, grant, now, directory, proof, before)
             _need(_scope(row['action'], row['parameters']) in grant['scopes'], 'SCOPE')
+            _need(row['action']!='backup' or backup_recovery is not None,'BACKUP_RECOVERY')
+            pending=state['backup_recovery']
+            if pending is not None:
+                parameters=row['parameters']
+                _need(row['action']=='recover' and parameters['recovery_kind']=='backup'
+                      and parameters['pending_transaction']==pending['transaction']
+                      and parameters['pending_sequence']==pending['sequence']
+                      and parameters['selection_revision']==pending['before']['revision'], 'BACKUP_PENDING')
+            if backup_recovery is not None:
+                pending=_backup_recovery(backup_recovery)
+                _need(row['action']=='backup' and state['backup_recovery'] is None
+                      and pending['transaction']==task_id and pending['installation_id']==state['installation_id']
+                      and pending['before']['revision']==row['parameters']['selection_revision'], 'BACKUP_RECOVERY')
+                state['backup_recovery']=pending
             row.update(phase='mutating', plan_sha256=plan_sha256, mutation_at=now)
             self._save(directory, proof, state, before)
             return deepcopy(row)
+
+
+    def backup_recovery(self):
+        """Root facts only; a retained record never schedules execution."""
+        try:
+            with self._locked() as (directory,proof):
+                state,before=self._load(directory)
+                self._ack(directory,proof,before)
+                return deepcopy(state['backup_recovery'])
+        except CoreAuthorityError as error:
+            if error.code=='NOT_INITIALIZED':return None
+            raise
+
+    def finish_backup_recovery(self, expected):
+        expected=_backup_recovery(expected)
+        with self._locked() as (directory,proof):
+            state,before=self._load(directory)
+            _need(state['backup_recovery']==expected,'BACKUP_RECOVERY_CHANGED')
+            state['backup_recovery']=None
+            self._save(directory,proof,state,before)
 
 
     def record_application(self, record):

@@ -44,3 +44,25 @@ def core_authority_status(root_token, binding):
 
 def revoke_core_binding(main_id, main_digest):
     return _client.request({'protocol':1,'operation':'core_revoke','main_id':main_id,'main_digest':main_digest})
+
+
+def core_observe():
+    return _client.request({'protocol': 1, 'operation': 'core_observe'})
+
+
+def core_list():
+    return _client.request({'protocol': 1, 'operation': 'core_list'})
+
+
+def core_get(task_id):
+    return _client.request({'protocol': 1, 'operation': 'core_get', 'task_id': task_id})
+
+
+def core_lookup(root_token, binding, request_id):
+    return _client.request({'protocol': 1, 'operation': 'core_lookup', 'token': root_token,
+                            **binding, 'request_id': request_id})
+
+
+def core_submit(root_token, binding, request_id, action, parameters):
+    return _client.request({'protocol': 1, 'operation': 'core_submit', 'token': root_token,
+                            **binding, 'request_id': request_id, 'action': action, 'parameters': parameters})

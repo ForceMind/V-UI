@@ -52,6 +52,93 @@ class CoreAuthorityTests(unittest.TestCase):
             function(*args, **kwargs)
         self.assertEqual(error.exception.code, code)
 
+    def pending_backup(self):
+        _,token=self.issue(['core_backup'])
+        row,_=self.reserve(token,action='backup',parameters={'selection_revision':'b'*64})
+        before={'revision':'b'*64}
+        facts=dict(application={},data_generation={},selection=before,selection_initialized=True,
+                   bundles={},intents={},runtime_schemas={})
+        pending=dict(kind='core-backup-recovery-v1',transaction=row['id'],sequence=1,
+            installation_id=row['installation_id'],before=before,context=dict(facts=facts,
+            config_sha256='c'*64,services={'v-ui.service':'active','v-ui-http01.socket':'inactive',
+            'v-ui-http01.service':'inactive'},trust_sha256=None))
+        return token,row,pending
+
+    def test_schema2_without_backup_field_preserves_all_existing_authority(self):
+        _,token=self.issue()
+        original,_=self.reserve(token)
+        path=self.root/'authority.json';old=json.loads(path.read_bytes());old.pop('backup_recovery')
+        path.write_bytes(a._raw(old));path.chmod(0o600)
+        self.assertIsNone(self.reload().backup_recovery())
+        self.assertEqual(self.reload().admission(task_id=original['id']),original)
+        self.reload().advance_epoch()
+        modern=json.loads(path.read_bytes())
+        self.assertIsNone(modern['backup_recovery'])
+        for name in ('installation_id','admissions','applications','revoked_bindings'):
+            self.assertEqual(modern[name],old[name])
+        self.assertEqual(set(modern['grants']),set(old['grants']))
+
+    def test_backup_mutation_without_persistent_context_is_refused(self):
+        _,row,pending=self.pending_backup()
+        self.assert_code('BACKUP_RECOVERY',self.store.enter_mutation,task_id=row['id'],plan_sha256='d'*64)
+        self.assertIsNone(self.reload().backup_recovery())
+        self.assertEqual(self.reload().admission(task_id=row['id'])['phase'],'preflight')
+
+    def test_backup_context_and_mutation_are_atomic_durable_and_clear_only_exact_record(self):
+        token,row,pending=self.pending_backup()
+        self.store.enter_mutation(task_id=row['id'],plan_sha256='d'*64,backup_recovery=pending)
+        self.assertEqual(self.reload().backup_recovery(),pending)
+        actual=self.reload().admission(task_id=row['id'],live=False)
+        self.assertEqual(actual['phase'],'mutating')
+        self.assert_code('CONSUMED',self.store.enter_mutation,task_id=row['id'],plan_sha256='d'*64,
+                         backup_recovery=pending)
+        self.assert_code('BACKUP_RECOVERY_CHANGED',self.store.finish_backup_recovery,
+                         {**pending,'transaction':'f'*32})
+        self.assertEqual(self.reload().backup_recovery(),pending)
+        self.store.advance_epoch()
+        self.assertEqual(self.reload().backup_recovery(),pending)
+        self.store.finish_backup_recovery(pending)
+        self.assertIsNone(self.reload().backup_recovery())
+
+    def test_backup_pending_blocks_new_writes_but_old_nonce_and_backup_recovery_work(self):
+        token,row,pending=self.pending_backup()
+        self.store.enter_mutation(task_id=row['id'],plan_sha256='d'*64,backup_recovery=pending)
+        replay,created=self.reserve(token,action='backup',parameters={'selection_revision':'b'*64})
+        self.assertFalse(created);self.assertEqual(replay['id'],row['id'])
+        self.assert_code('BACKUP_PENDING',self.reserve,token,request='2'*32,action='backup',
+                         parameters={'selection_revision':'b'*64})
+        parameters=dict(recovery_kind='backup',pending_transaction=row['id'],pending_sequence=1,
+                        selection_revision='b'*64)
+        for changed in ({'pending_transaction':'f'*32},{'pending_sequence':2},{'selection_revision':'f'*64}):
+            self.assert_code('BACKUP_PENDING',self.reserve,token,request='3'*32,action='recover',
+                             parameters={**parameters,**changed})
+        recovery,_=self.reserve(token,request='4'*32,action='recover',parameters=parameters)
+        self.store.enter_mutation(task_id=recovery['id'],plan_sha256='e'*64)
+        self.assertEqual(self.reload().backup_recovery(),pending)
+        self.assert_code('SCOPE',self.reserve,token,request='5'*32,action='restore',
+                         parameters=dict(backup_task_id=row['id'],selection_revision='b'*64))
+        self.assert_code('SCOPE',self.reserve,token,request='6'*32)
+
+    def test_backup_pending_does_not_allow_queued_update_or_revoked_recovery_to_mutate(self):
+        _,operate=self.issue(['core_operate'])
+        queued,_=self.reserve(operate,request='9'*32)
+        token,row,pending=self.pending_backup()
+        self.store.enter_mutation(task_id=row['id'],plan_sha256='d'*64,backup_recovery=pending)
+        self.assert_code('BACKUP_PENDING',self.store.enter_mutation,task_id=queued['id'],plan_sha256='e'*64)
+        recovery,_=self.reserve(token,request='4'*32,action='recover',parameters=dict(recovery_kind='backup',
+            pending_transaction=row['id'],pending_sequence=1,selection_revision='b'*64))
+        self.store.revoke_main(main_id=7,main_digest=self.main_digest)
+        self.assert_code('AUTHORITY',self.store.enter_mutation,task_id=recovery['id'],plan_sha256='e'*64)
+        self.assertEqual(self.reload().backup_recovery(),pending)
+
+    def test_backup_durable_record_failure_prevents_caller_crossing_mutation_boundary(self):
+        token,row,pending=self.pending_backup()
+        with patch.object(self.store,'_save',side_effect=OSError('inert disk failure')):
+            with self.assertRaises(a.CoreAuthorityError):
+                self.store.enter_mutation(task_id=row['id'],plan_sha256='d'*64,backup_recovery=pending)
+        self.assertIsNone(self.reload().backup_recovery())
+        self.assertEqual(self.reload().admission(task_id=row['id'])['phase'],'preflight')
+
     def test_issue_delivers_once_and_persists_only_digest_with_private_modes(self):
         record, token = self.issue()
         raw = (self.root/'authority.json').read_bytes()
@@ -92,6 +179,7 @@ class CoreAuthorityTests(unittest.TestCase):
                          parameters={'selection_revision':'c'*64,'backup_task_id':'d'*32})
         recovery = {'selection_revision':None,'pending_transaction':'d'*32,'pending_sequence':0,'recovery_kind':'restore'}
         self.assert_code('SCOPE', self.reserve, token, action='recover', parameters=recovery)
+        self.assert_code('SCOPE', self.reserve, token, action='recover', parameters={**recovery,'recovery_kind':'backup'})
         accepted, created = self.reserve(token, action='recover', parameters={**recovery,'recovery_kind':'switch'})
         self.assertTrue(created);self.assertEqual(accepted['action'], 'recover')
 
@@ -361,7 +449,7 @@ class CoreAuthorityTests(unittest.TestCase):
         self.store.enter_mutation(task_id=task['id'],plan_sha256='e'*64)
         self.store.revoke_main(main_id=7,main_digest=self.main_digest)
         path=self.root/'authority.json'
-        legacy=json.loads(path.read_bytes());legacy.pop('applications');legacy.update(schema=1,kind='core-authority-v1')
+        legacy=json.loads(path.read_bytes());legacy.pop('applications');legacy.pop('backup_recovery');legacy.update(schema=1,kind='core-authority-v1')
         raw=a._raw(legacy);path.write_bytes(raw)
         self.assertIsNone(self.reload().application(release_id=self.app_record()['release_id'],target='x86_64-gnu'))
         self.assertEqual(path.read_bytes(),raw)
@@ -449,3 +537,13 @@ class CoreAuthorityTests(unittest.TestCase):
         self.assert_code('AUTHORITY',self.store.status,token=token,main_id=8,main_digest=self.main_digest)
         self.store.revoke_main(main_id=7,main_digest=self.main_digest)
         self.assert_code('AUTHORITY',self.store.status,token=token,main_id=7,main_digest=self.main_digest)
+
+    def test_admission_read_checks_live_authority_but_does_not_consume_mutation(self):
+        _,token=self.issue();intent,_=self.reserve(token)
+        value=self.store.admission(task_id=intent['id'])
+        self.assertEqual(value['phase'],'preflight')
+        value['parameters']['release_id']=99
+        self.assertEqual(self.store.admission(task_id=intent['id'])['parameters']['release_id'],11)
+        self.store.revoke_main(main_id=7,main_digest=self.main_digest)
+        self.assert_code('AUTHORITY',self.store.admission,task_id=intent['id'])
+        self.assertEqual(self.store.admission(task_id=intent['id'],live=False),intent)
