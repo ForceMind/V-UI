@@ -14,6 +14,7 @@ import zipfile
 import yaml
 
 from app.release_tools import target_key
+from core_switch_fixture_runner import first_failure_diagnostic
 
 from inbound_routing_real_helpers import yaml_client
 from proxy_loopback_support import BODY, ReadyMihomoProcess, https_target, https_through
@@ -238,7 +239,8 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
             error = result.get('error')
             code = error if type(error) is str and re.fullmatch(r'[A-Z0-9_]{1,80}', error) else 'NO_CODE'
             check.assertEqual(output.returncode == 0, not rejected,
-                              case + ' installed core-switch outcome mismatch ' + code)
+                              case + ' installed core-switch outcome mismatch ' + code
+                              + first_failure_diagnostic(output.stderr))
             check.assertIs(result['ok'], not rejected)
             if rejected:
                 check.assertEqual(set(result), {'ok', 'error'})

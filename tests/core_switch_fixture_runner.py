@@ -15,6 +15,7 @@ import signal
 import socket
 import stat
 import sys
+import threading
 import types
 
 
@@ -315,29 +316,159 @@ def parse(arguments):
     return core, action, source, None if revision == 'none' else revision, port
 
 
-def trace_switch(control):
-    """Remember fixed coordinator stages without recording request or output."""
-    trace = ['CONTEXT']
-    exchange = control._Worker.exchange
-    activate = control._Switch._activate
+FIRST_FAILURE_MARKER = 'VUI_CORE_SWITCH_FIRST_FAILURE '
+FIRST_FAILURE_FIELDS = frozenset(('coordinator','activation','worker_event','code','transaction_present',
+                                  'stop_attempted','released','confirming','broker_state'))
+FIRST_CONTROL_CODES = frozenset(('CORE_PANEL_TLS_TIMEOUT','CORE_PANEL_TLS_REJECTED','CORE_PANEL_TRUST_CHANGED',
+    'CORE_PANEL_IDENTITY_CHANGED','CORE_PANEL_IDENTITY_TIMEOUT','CORE_WORKER_PROTOCOL','CORE_PROBE_REJECTED',
+    'CORE_PENDING_MISSING','CORE_CONFIRMATION_CHANGED','CORE_RELEASE_UNCONFIRMED','CORE_TASK_CANCELLED',
+    'CORE_RECOVERY_REQUIRED','INSTALLATION_PROOF'))
+FIRST_BROKER_CODES = frozenset(('DEADLINE','CANCELLED','BROKER_STATE','BROKER_FAILED','PROOF_FAILED',
+    'IDENTITY_CHANGED','CLIENT_REVOKED','CONTEXT_CHANGED','THREAD_STILL_RUNNING','CLEANUP_FAILED','IO_ERROR',
+    'EOF','PROTOCOL','ENDPOINT_CHANGED','ENDPOINT_LIVE','LISTEN_FAILED','SERVICE_IDENTITY','NOT_ARMED'))
+FIRST_OPS_CODES = {
+    'service is not in a stable supported state':'UNIT_TRANSITION',
+    'service action failed':'UNIT_ACTION', 'service stop unconfirmed':'STOP_UNCONFIRMED',
+    'services remain active':'UNIT_STILL_ACTIVE', 'service descendants remain':'DESCENDANTS_REMAIN',
+    'service topology was not restored':'TOPOLOGY_DRIFT', 'systemd configuration drift':'UNIT_CONFIG_DRIFT',
+    'managed panel process not ready for identity':'PANEL_IDENTITY_NOT_READY',
+    'managed panel process identity changed':'PANEL_IDENTITY_CHANGED',
+    'active service missing process identity':'PANEL_IDENTITY_MISSING',
+    'systemd query failed':'SYSTEMD_QUERY', 'operation timed out':'OPS_TIMEOUT',
+    'worker closed protocol':'WORKER_PROTOCOL_CLOSED','worker exited early':'WORKER_EXITED',
+    'child identity lost':'WORKER_IDENTITY_LOST','child cleanup unconfirmed':'WORKER_CLEANUP_UNCONFIRMED'}
+FIRST_CODES = FIRST_CONTROL_CODES | {'BROKER_'+name for name in FIRST_BROKER_CODES} | set(FIRST_OPS_CODES.values()) | {'UNKNOWN'}
+FIRST_EVENTS = frozenset(('CONTEXT','UNKNOWN','CORE_CONTEXT','PREPARED','CORE_QUIESCED','CORE_BACKED_UP',
+    'CORE_IDS_BOUND','TRIAL_WRITERS_RELEASED','WRITERS_REACQUIRED','CORE_IDS_RESTORED',
+    'RECOVERY_WRITERS_RELEASED','CORE_RECOVERY_PREPARED','CORE_RECOVERY_BOUND','PANEL_TLS','OPERATION_HELD'))
+FIRST_BROKER_STATES = frozenset(('none','unknown','new','listening','failed','claimed','ready','probed',
+                                'probe_failed','released','revoked','closed'))
 
-    def traced_exchange(worker, request, event, fields=()):
-        if event == 'operation_held':
-            try:
-                return exchange(worker, request, event, fields)
-            except BaseException:
-                trace[0] = 'OPERATION_HELD'
+
+def first_failure_diagnostic(stderr):
+    """Accept one exact fixed fixture marker; never echo other child output."""
+    if type(stderr) is not str or len(stderr)>1024:return ''
+    lines=stderr.splitlines()
+    if len(lines)!=1 or not lines[0].startswith(FIRST_FAILURE_MARKER):return ''
+    try:
+        raw=lines[0][len(FIRST_FAILURE_MARKER):].encode('ascii')
+        value=decode(raw)
+        require(set(value)==FIRST_FAILURE_FIELDS and encoded(value)==raw,'FIXTURE_DIAGNOSTIC')
+        require(value['coordinator'] in ('SWITCH','ACTIVATE','TLS')
+            and value['activation'] in ('none','trial','recovery','cleanup')
+            and value['worker_event'] in FIRST_EVENTS and value['code'] in FIRST_CODES
+            and value['broker_state'] in FIRST_BROKER_STATES
+            and all(value[name] is None or type(value[name]) is bool for name in
+                    ('transaction_present','stop_attempted','released','confirming')),'FIXTURE_DIAGNOSTIC')
+    except (ValueError,TypeError,UnicodeError,Refused):return ''
+    return ' '+FIRST_FAILURE_MARKER+raw.decode('ascii')
+
+
+class _SwitchTrace(list):
+    def __init__(self):
+        super().__init__(['CONTEXT'])
+        self.first_failure=None
+        self._first_lock=threading.Lock()
+        self.task=None
+        self.coordinator='SWITCH'
+        self.activation='none'
+        self.worker_event='CONTEXT'
+
+    def remember(self,error,ops,control,*,worker_event=None):
+        # Claim and freeze scope before formatting a known code. A concurrent
+        # proof callback must not replace the first reporter. Broker diagnostics
+        # read only its fixed private state value and never acquire its lock.
+        with self._first_lock:
+            if self.first_failure is not None:return
+            task=self.task
+            broker=getattr(task,'broker',None)
+            def flag(name):
+                value=getattr(task,name,None)
+                return value if type(value) is bool else None
+            self.first_failure=dict(coordinator=self.coordinator,activation=self.activation,
+                worker_event=self.worker_event if worker_event is None else worker_event,code='UNKNOWN',
+                transaction_present=(getattr(task,'transaction') is not None) if hasattr(task,'transaction') else None,
+                stop_attempted=flag('stop_attempted'),released=flag('released'),confirming=flag('confirming'),
+                broker_state='unknown')
+        code='UNKNOWN'
+        if type(error) is control.CoreControlError:
+            candidate=str(error)
+            if candidate in FIRST_CONTROL_CODES:code=candidate
+        elif isinstance(error,ops.Refused):
+            code=FIRST_OPS_CODES.get(str(error),'UNKNOWN')
+        else:
+            broker_type=getattr(getattr(task,'wire',None),'CoreBootBrokerError',None)
+            if type(broker_type) is type and isinstance(error,broker_type):
+                candidate=getattr(error,'code',None)
+                if type(candidate) is str and candidate in FIRST_BROKER_CODES:code='BROKER_'+candidate
+        with self._first_lock:self.first_failure['code']=code
+        try:state='none' if broker is None else vars(broker).get('_state','unknown')
+        except TypeError:state='unknown'
+        if type(state) is not str or state not in FIRST_BROKER_STATES:state='unknown'
+        with self._first_lock:self.first_failure['broker_state']=state
+
+    def emit(self):
+        with self._first_lock:
+            value=None if self.first_failure is None else self.first_failure.copy()
+        if value is not None:
+            print(FIRST_FAILURE_MARKER+encoded(value).decode('ascii'),file=sys.stderr,flush=True)
+
+
+def trace_switch(control,ops):
+    """Preserve the first fixed failure separately from the final error code."""
+    trace=_SwitchTrace()
+    exchange=control._Worker.exchange
+    activate=control._Switch._activate
+    tls=control._Switch._tls
+    run_switch=control._Switch.run
+
+    def traced_exchange(worker,request,event,fields=()):
+        failure_event=event.upper() if type(event) is str and event.upper() in FIRST_EVENTS else 'UNKNOWN'
+        trace.worker_event=failure_event
+        if event=='operation_held':
+            try:return exchange(worker,request,event,fields)
+            except BaseException as error:
+                trace[0]='OPERATION_HELD'
+                trace.remember(error,ops,control,worker_event=failure_event)
                 raise
-        if re.fullmatch(r'[a-z_]{1,30}', event):
-            trace[0] = event.upper()
-        return exchange(worker, request, event, fields)
+        if re.fullmatch(r'[a-z_]{1,30}',event):trace[0]=event.upper()
+        try:return exchange(worker,request,event,fields)
+        except BaseException as error:
+            trace.remember(error,ops,control,worker_event=failure_event)
+            raise
 
-    def traced_activate(task, state, intents, *, recovery, cleanup=False):
-        trace[0] = 'CLEANUP' if cleanup else ('RESTORE_BEFORE' if recovery else 'TRIAL')
-        return activate(task, state, intents, recovery=recovery, cleanup=cleanup)
+    def traced_activate(task,state,intents,*,recovery,cleanup=False):
+        previous=(trace.task,trace.coordinator,trace.activation)
+        trace.task,trace.coordinator=task,'ACTIVATE'
+        trace.activation='cleanup' if cleanup else ('recovery' if recovery else 'trial')
+        trace[0]='CLEANUP' if cleanup else ('RESTORE_BEFORE' if recovery else 'TRIAL')
+        try:return activate(task,state,intents,recovery=recovery,cleanup=cleanup)
+        except BaseException as error:
+            trace.remember(error,ops,control)
+            raise
+        finally:trace.task,trace.coordinator,trace.activation=previous
 
-    control._Worker.exchange = traced_exchange
-    control._Switch._activate = traced_activate
+    def traced_tls(task,identity,*,login=False):
+        previous=(trace.task,trace.coordinator)
+        trace.task,trace.coordinator=task,'TLS'
+        try:return tls(task,identity,login=login)
+        except BaseException as error:
+            trace.remember(error,ops,control)
+            raise
+        finally:trace.task,trace.coordinator=previous
+
+    def traced_run(task,*args,**kwargs):
+        previous=trace.task;trace.task=task
+        try:return run_switch(task,*args,**kwargs)
+        except BaseException as error:
+            trace.remember(error,ops,control)
+            raise
+        finally:trace.task=previous
+
+    control._Worker.exchange=traced_exchange
+    control._Switch._activate=traced_activate
+    control._Switch._tls=traced_tls
+    control._Switch.run=traced_run
     return trace
 
 
@@ -392,12 +523,13 @@ def run(arguments):
         opener = FixtureOpener(stack, folder, source, core=core, bad_digest=action == 'bad-digest')
         inject_transport(control, opener)
         conflicts = inject_assertions(control, source, opener.core, port, interrupt=action == 'interrupt')
-        trace = trace_switch(control)
+        trace = trace_switch(control,ops)
         switch_action = 'rollback' if action == 'rollback' else 'update'
         try:
             result = control.switch(ops, core=opener.core, action=switch_action,
                 expected_revision=revision, release_id=opener.release_id if switch_action == 'update' else None)
         except Exception as error:
+            trace.emit()
             if (action == 'bad-digest' and opener.corrupted and type(error) is opener.error_type
                     and str(error) == 'ASSET_DIGEST'):
                 raise Refused('ASSET_DIGEST') from None

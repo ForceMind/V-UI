@@ -20,6 +20,12 @@
 
 同提交[原生矩阵42747608076](https://github.com/ForceMind/V-UI/actions/runs/42747608076)的ARM GNU、ARM musl及x86 musl均在模拟Root菜单stage准备失败：旧非Root夹具未接收据/Root来源helper和私有状态，最先访问固定生产receipt路径即拒绝，尚未启动stage worker。修正仅在该临时夹具补私有收据、真实来源登记和epoch状态，保持真实非Root worker、原握手及生产Root校验；96项纯回归和独审通过。四目标独立组件TCP已分别通过，但ARM受管、新装/八旧版升级及其他运行继续单独跟踪，不组合成新源码资格。上述三项主测修正与夹具修正须取得新提交自己的准确Actions。
 
+后续`3a09edd`的[主测试42749091848](https://github.com/ForceMind/V-UI/actions/runs/42749091848)3762项成功（3523通过、239条件跳过，257.111秒），新GET查询/提交的真实ASGI回归及后续固定核心检查通过。[便携矩阵42749091550](https://github.com/ForceMind/V-UI/actions/runs/42749091550)全部成功，三目标stage问题在新提交通过；不是改判4cf失败。该提交已有七组成功，其余真实链路/新装/ARM受管继续跟终态。
+
+`4cf9062`的[新装42747608005/job129603624830](https://github.com/ForceMind/V-UI/actions/runs/42747608005/job/129603624830)于Xray第一次update失败，固定码`PANEL_TLS_CORE_RECOVERY_REQUIRED`，尚未进入新增远程任务。日志附件13732433110回读确认Root来源/authority探针及sing-box循环通过；首个trial/login/recovery差异未被旧trace保留，不能确认CA、端口或时序根因。新批次仅补验收夹具的首次固定阶段/白名单错误码/实际状态标志，保留原最终错误与所有断言/超时，不输出异常正文、路径或凭据，不重试失败。10项脱敏/首错保持/并发交错控制及相关51项通过，独审无剩余本批阻断；实际首因仍须新准确Actions。
+
+同一4cf的[ARM受管job129603868757](https://github.com/ForceMind/V-UI/actions/runs/42747608387/job/129603868757)最终仅在core_read任务GET处403失败（3a09已修）。原日志明确双核切换/回退、SIGKILL终端恢复及双域恢复标记，按顺序执行的新增Root备份、专用恢复及停面板菜单恢复已完成，最终HTTP检查仍使整项失败；新任务资格标记尚未输出，不能记整项成功或改判x86首败。当前3a09的[新装42749091629](https://github.com/ForceMind/V-UI/actions/runs/42749091629)和[ARM受管42749091515](https://github.com/ForceMind/V-UI/actions/runs/42749091515)继续跟踪，已通过的主测试/原生矩阵及旧版升级不代替这两项。
+
 ## 已交付：v0.4.23
 
 - 正式应用源 `be5d8459cdd3eeedce73f2ff6e4663e5eb781e42`；[Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.23)公开19项资产，tag与清单/摘要已独立读回。

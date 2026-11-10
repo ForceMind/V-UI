@@ -52,6 +52,7 @@ CONTRACTS = {
     'test_core_task_admission.py': 6,
     'test_core_backup_recovery.py': 7,
     'test_core_remote_tasks_installed.py': 8,
+    'test_core_switch_fixture_trace.py': 10,
 }
 
 
