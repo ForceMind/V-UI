@@ -17,6 +17,7 @@ import unittest
 import httpx
 import yaml
 
+from tests.core_candidate_context import server_version
 from app.services.proxy_policy import UPSTREAM_TAG
 from app.services.proxy_store import ProxyStore
 from app.services.upstream_import import select_upstream
@@ -287,7 +288,7 @@ class TCPUpstreamExportRealTests(DoubleHopFixture):
         self.start_clients()
         self.successful_clients()
         positive = {"mode": mode, "format": source_format, "artifact_sha256": self.export_sha,
-                    "pins": {"sing-box": "1.14.2", "mihomo": "1.19.32"},
+                    "pins": {"sing-box": server_version("sing-box", "1.14.2"), "mihomo": "1.19.32"},
                     "instances": [event for panel in self.panels.values() for event in panel.events
                                   if event["event"] in {"panel-ready", "core-listening"}],
                     "https_sources": sorted({peer for peer, _, path in self.target.snapshot()

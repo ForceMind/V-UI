@@ -11,7 +11,7 @@ these substitutions. Fake-service observations do not establish an overseas IP.
 from __future__ import annotations
 
 from collections import Counter
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import functools
@@ -36,6 +36,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from tests.core_candidate_context import artifacts_for_fixture, server_version
 from app.services import proxy_diagnostics as service
 from app.services import proxy_diagnostic_worker as worker
 from app.services.proxy_policy import AddressPolicy, VerifiedEndpoint, compile_proxy_policy
@@ -381,7 +382,7 @@ class DiagnosticFixtureHarnessTests(unittest.TestCase):
                        str(os.getpid()), directory, str(path)]
             # Malformed shape is rejected before context, sockets or core spawn.
             result = subprocess.run(command, input=b'{"url":"must-not-connect"}', capture_output=True,
-                                    timeout=5, env={**os.environ, "VUI_PROXY_LOOPBACK": "1"})
+                                    timeout=5, env={**os.environ, "VUI_PROXY_LOOPBACK": "1"}, start_new_session=True)
             self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
             self.assertEqual(json.loads(result.stdout), {"event": "result", "code": "INVALID_DIAGNOSTIC_REQUEST", "exit_ip": None})
             self.assertFalse((root / "children").exists())
@@ -398,8 +399,13 @@ class DiagnosticRealWorkerTests(unittest.TestCase):
         cls.cores = Path(configured).resolve()
         cls.binary = cls.cores / "sing-box"
         result = subprocess.run([str(cls.binary), "version"], capture_output=True, text=True, timeout=5)
-        if result.returncode or "sing-box version 1.14.2" not in result.stdout or "with_utls" not in result.stdout:
-            raise AssertionError("Required official sing-box 1.14.2/with_utls is unavailable")
+        version = server_version("sing-box", "1.14.2")
+        if result.returncode or f"sing-box version {version}" not in result.stdout or "with_utls" not in result.stdout:
+            raise AssertionError(f"Required sing-box {version}/with_utls is unavailable")
+        cls.artifacts = artifacts_for_fixture()
+        if cls.artifacts is not None:
+            from app.services.core_manager import core_manager
+            core_manager.configure_artifacts(cls.artifacts)
         print("diagnostic pin: " + result.stdout.splitlines()[0])
 
     def setUp(self):
@@ -486,8 +492,10 @@ class DiagnosticRealWorkerTests(unittest.TestCase):
             return child
         events = []
         payload = {"profile": profile, "profile_id": PROFILE_ID, "revision": REVISION, "panel_origin": None}
+        binary_dir = (patch.object(core_manager, "BIN_DIR", self.cores)
+                      if self.artifacts is None else nullcontext())
         with tempfile.TemporaryDirectory(dir=self.root, prefix="private-job-") as directory, \
-                patch.object(core_manager, "BIN_DIR", self.cores), patch.object(service.subprocess, "Popen", launch):
+                binary_dir, patch.object(service.subprocess, "Popen", launch):
             result = service._run_worker(payload, time.monotonic() + 30, cancel or threading.Event(), events.append, directory)
             self.assertTrue((Path(directory) / "diagnostic.json").is_file())
         self.assertFalse(Path(directory).exists())

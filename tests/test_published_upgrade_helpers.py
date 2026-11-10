@@ -10,16 +10,19 @@ import sqlite3
 from pathlib import Path
 import tempfile
 import unittest
+import zipfile
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 from published_upgrade_helpers import (FIREWALL, MAINTENANCE_FILES, PUBLISHED_BASELINES, PublishedUpgrade,
-                                       assert_download_boundary, assert_receipt_migration,
+                                       assert_download_boundary, assert_receipt_migration, candidate_origin,
                                        assert_upgrade_configuration, fixed_public_baseline,
                                        managed_xray_fixture_program, assert_node_summary_upgrade, assert_editor_content_addition)
-from published_upgrade_helpers import (DNS_FILES, CERTIFICATE_COLUMNS, BINDING_COLUMNS,
+from published_upgrade_helpers import (DNS_FILES, CORE_FILES, AUTHORITY_FILES, CERTIFICATE_COLUMNS, BINDING_COLUMNS,
     DNS_CERTIFICATE_COLUMNS, DNS_BINDING_LAYOUTS, snapshot_program)
 
+
+PRE_DNS_BASELINES = tuple(version for version in PUBLISHED_BASELINES if version != '0.4.23')
 
 class PublishedUpgradeBoundaryTests(unittest.TestCase):
     def test_summary_additions_are_only_strict_booleans_without_old_field_drift(self):
@@ -164,6 +167,48 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
             assert_node_summary_upgrade(self, [before], [{**before, 'unknown': True}], '0.4.22')
         with self.assertRaises(AssertionError): fixed_public_baseline('0.4.22', 'f' * 40)
 
+    def test_public23_uses_immutable_source_and_exact_24_candidate(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / 'source'; source.mkdir()
+            (source / 'VERSION').write_text('0.4.24')
+            kit = root / 'kit'; kit.mkdir()
+            candidate = {'version':'0.4.24', 'source_commit':'a'*40}
+            (kit / 'RELEASE.json').write_text(json.dumps(candidate))
+            public_source = root / 'public23'
+            env = {'VUI_PUBLISHED_INSTALL_VERSION':'0.4.23',
+                   'VUI_RELEASE_COMMIT':PUBLISHED_BASELINES['0.4.23'],
+                   'VUI_PUBLISHED_UPGRADE_SOURCE':str(public_source), 'VUI_RELEASE_KIT':str(kit)}
+            with patch.dict('os.environ', env, clear=True), \
+                    patch('published_upgrade_helpers.subprocess.check_output', return_value='a'*40+'\n'), \
+                    patch('published_upgrade_helpers.published_commands') as public, \
+                    patch('published_upgrade_helpers.fixture_commands') as fixture:
+                upgrade = PublishedUpgrade(self, source, root, [], [])
+                public.assert_called_once_with(public_source,'0.4.23',PUBLISHED_BASELINES['0.4.23'],[],[])
+                fixture.assert_called_once_with(source,root,kit,[],[])
+                self.assertEqual(upgrade.candidate,candidate)
+
+    def test_candidate_origin_uses_exact_target_manifest_bytes_and_single_digest(self):
+        with tempfile.TemporaryDirectory() as folder:
+            kit = Path(folder)
+            bundle = kit / 'vui-linux-x86_64-gnu.zip'
+            release = dict(version='0.4.24', release_id='0.4.24-'+'a'*12, source_commit='a'*40)
+            raw = json.dumps(release, indent=3).encode()
+            with zipfile.ZipFile(bundle,'w') as archive:
+                archive.writestr('MANIFEST.json',raw)
+            digest = hashlib.sha256(bundle.read_bytes()).hexdigest()
+            line = digest+'  '+bundle.name+'\n'
+            table = kit/'SHA256SUMS'; table.write_text(line)
+            self.assertEqual(candidate_origin(kit, release, 'x86_64-gnu'),
+                dict(release_id=release['release_id'],target='x86_64-gnu',app_source=release['source_commit'],
+                     archive_sha256=digest,manifest_sha256=hashlib.sha256(raw).hexdigest()))
+            with self.assertRaises(AssertionError):
+                candidate_origin(kit, {**release,'source_commit':'b'*40}, 'x86_64-gnu')
+            for invalid in ('',line+line,'wrong  '+bundle.name+'\n'):
+                table.write_text(invalid)
+                with self.assertRaises(AssertionError):
+                    candidate_origin(kit, release, 'x86_64-gnu')
+
     def test_public22_to_same_candidate22_is_refused_before_public_downloads(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); source = root / 'source'; source.mkdir()
@@ -188,11 +233,12 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
                   '0.4.19':'a2b9c188658f082b189e77d237787a96eb9cf921',
                   '0.4.20':'05173798de1baed5d67a866c4125e72f74fe3f4c',
                   '0.4.21':'2aa5e11e3f09c03d048018f033ae888e7c775604',
-                  '0.4.22':'558687a76cd29f4e4735284926eb05bf6664472e'}
+                  '0.4.22':'558687a76cd29f4e4735284926eb05bf6664472e',
+                  '0.4.23':'be5d8459cdd3eeedce73f2ff6e4663e5eb781e42'}
         self.assertEqual(PUBLISHED_BASELINES,expected)
         for version,commit in expected.items():
             self.assertEqual(fixed_public_baseline(version,commit),(version,commit))
-        for version,commit in [('0.4.21','f'*40),('0.4.20','f'*40),('0.4.13','a'*40),('0.4.18',expected['0.4.19']),('0.4.19','f'*40),('0.4.17',expected['0.4.16']),
+        for version,commit in [('0.4.23',expected['0.4.22']),('0.4.24',expected['0.4.23']),('0.4.21','f'*40),('0.4.20','f'*40),('0.4.13','a'*40),('0.4.18',expected['0.4.19']),('0.4.19','f'*40),('0.4.17',expected['0.4.16']),
                                ('0.4.16',expected['0.4.15']),('0.4.16','a'*40),
                                ('0.4.14',expected['0.4.15']),('0.4.15',expected['0.4.14']),
                                ('0.4.15','a'*40),(None,None)]:
@@ -311,14 +357,16 @@ class PublishedDNSMigrationTests(unittest.TestCase):
                 'interpreter_resolved':'/usr/bin/python3.12','interpreter_sha256':'1'*64,
                 'files':{'/usr/local/lib/v-ui/system_ops.py':'2'*64}}
         if old_version!='0.4.14': before['files'][FIREWALL]='3'*64
-        if old_version in ('0.4.17','0.4.19','0.4.20','0.4.21','0.4.22'):
+        if old_version in ('0.4.17','0.4.19','0.4.20','0.4.21','0.4.22','0.4.23'):
             before['files'].update({name:'4'*64 for name in MAINTENANCE_FILES})
+        if old_version == '0.4.23':
+            before['files'].update({name:'5'*64 for name in DNS_FILES})
         after=deepcopy(before)
         after['files'].update({name:'5'*64 for name in MAINTENANCE_FILES|DNS_FILES|{FIREWALL}})
         return before,after
 
     def test_23_requires_exact_dns_additions_for_every_immutable_old_baseline(self):
-        for version in PUBLISHED_BASELINES:
+        for version in PRE_DNS_BASELINES:
             before,after=self.receipt(version)
             with self.subTest(version=version): assert_receipt_migration(self,before,after,version,'0.4.23')
             variants=[]
@@ -345,6 +393,52 @@ class PublishedDNSMigrationTests(unittest.TestCase):
             with self.subTest(target=version),self.assertRaises(AssertionError):
                 assert_receipt_migration(self,before,after,'0.4.22',version)
 
+    def test_24_requires_complete_core_authority_and_preserves_every_historical_dns_profile(self):
+        for version in PUBLISHED_BASELINES:
+            with self.subTest(version=version):
+                before, after = self.receipt(version)
+                after['files'].update({path:'6'*64 for path in CORE_FILES | AUTHORITY_FILES})
+                profiles = dict(core_control=True, core_authority=True)
+                assert_receipt_migration(self,before,after,version,'0.4.24',**profiles)
+                with self.assertRaises(AssertionError):
+                    assert_receipt_migration(self,before,after,version,'0.4.24',core_control=True)
+                for path in DNS_FILES | CORE_FILES | AUTHORITY_FILES:
+                    missing = deepcopy(after); missing['files'].pop(path)
+                    with self.assertRaises(AssertionError):
+                        assert_receipt_migration(self,before,missing,version,'0.4.24',**profiles)
+        before, after = self.receipt('0.4.23')
+        after['files'].update({path:'6'*64 for path in CORE_FILES | AUTHORITY_FILES})
+        for path in DNS_FILES:
+            missing = deepcopy(before); missing['files'].pop(path)
+            with self.assertRaises(AssertionError):
+                assert_receipt_migration(self,missing,after,'0.4.23','0.4.24',**profiles)
+        for path in CORE_FILES | AUTHORITY_FILES:
+            contaminated = deepcopy(before); contaminated['files'][path]='6'*64
+            with self.assertRaises(AssertionError):
+                assert_receipt_migration(self,contaminated,after,'0.4.23','0.4.24',**profiles)
+        with self.assertRaises(AssertionError):
+            assert_receipt_migration(self,before,after,'0.4.23','0.4.23',**profiles)
+
+    def test_p3_profile_requires_all_and_only_the_fixed_core_receipt_additions(self):
+        from published_upgrade_helpers import CORE_FILES
+        for version in PRE_DNS_BASELINES:
+            before,after=self.receipt(version)
+            after['files'].update({path:'6'*64 for path in CORE_FILES})
+            assert_receipt_migration(self,before,after,version,'0.4.23',core_control=True)
+            with self.assertRaises(AssertionError):
+                assert_receipt_migration(self,before,after,version,'0.4.23')
+            for name in CORE_FILES:
+                missing=deepcopy(after);missing['files'].pop(name)
+                with self.subTest(version=version,missing=name),self.assertRaises(AssertionError):
+                    assert_receipt_migration(self,before,missing,version,'0.4.23',core_control=True)
+            contaminated=deepcopy(before);contaminated['files'][next(iter(CORE_FILES))]='6'*64
+            with self.assertRaises(AssertionError):
+                assert_receipt_migration(self,contaminated,after,version,'0.4.23',core_control=True)
+        tree=ast.parse((Path(__file__).resolve().parents[1]/'scripts/install_ops_control.py').read_text())
+        literal=next(node.value for node in tree.body if isinstance(node,ast.Assign)
+            and any(isinstance(target,ast.Name) and target.id=='CORE_SOURCE_DEPENDENCIES' for target in node.targets))
+        self.assertEqual(CORE_FILES,{'/usr/local/lib/v-ui/'+name for name in ast.literal_eval(literal)})
+
     def test_literal_dns_closure_and_snapshot_columns_match_reviewed_production_constants(self):
         source=Path(__file__).resolve().parents[1]
         tree=ast.parse((source/'scripts/install_ops_control.py').read_text())
@@ -370,7 +464,7 @@ class PublishedDNSMigrationTests(unittest.TestCase):
         self.assertIn(column_names('CertificateBinding'),DNS_BINDING_LAYOUTS)
 
     @contextmanager
-    def data(self,modern=False,fresh_binding=False):
+    def data(self,modern=False,fresh_binding=False,existing_dns=False):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             old_values={'id':'a'*32,'domain':'vpn.example.test','email':'fixture@example.test',
@@ -402,6 +496,16 @@ class PublishedDNSMigrationTests(unittest.TestCase):
                 if modern:
                     db.execute('CREATE TABLE certificate_identity_schema(version INTEGER NOT NULL)')
                     db.execute('INSERT INTO certificate_identity_schema VALUES(1)')
+                if existing_dns:
+                    db.execute("UPDATE managed_certificates SET method='dns-01',wildcard=1,credential_id=?",('d'*32,))
+                    db.execute("UPDATE certificate_bindings SET server_name='fixture.example.test'")
+            if existing_dns:
+                profile=root/'certificates/dns-credentials'/('d'*32)
+                profile.mkdir(parents=True,mode=0o700)
+                profile.parent.chmod(0o700)
+                for name,contents in (('state.json',b'fake-dns-profile'),('e'*32+'.json',b'fake-dns-credential')):
+                    (profile/name).write_bytes(contents)
+                    (profile/name).chmod(0o600)
             for directory in ('certs','certificates/revisions/'+'a'*32+'/'+'b'*64):
                 folder=root/directory;folder.mkdir(parents=True)
                 (folder/'fullchain.pem').write_bytes(b'fake-chain-exact')
@@ -415,6 +519,7 @@ class PublishedDNSMigrationTests(unittest.TestCase):
         text=output.getvalue()
         self.assertNotIn('fake-private-key',text);self.assertNotIn('fake-password-hash',text)
         self.assertNotIn('fake-token-hash',text);self.assertNotIn('kept-error',text)
+        self.assertNotIn('fake-dns-credential',text);self.assertNotIn('fake-dns-profile',text)
         return json.loads(text)
 
     def test_every_legacy_value_and_material_hash_matches_both_known_23_binding_layouts(self):
@@ -427,9 +532,36 @@ class PublishedDNSMigrationTests(unittest.TestCase):
                     with self.assertRaises(AssertionError):self.snapshot(new)
                     with self.assertRaises(AssertionError):self.snapshot(new,after=True,target='0.4.22')
             with self.assertRaises(AssertionError):self.snapshot(old,after=True)
-        for target in ('0.4.24','v0.4.23',None):
+        for target in ('0.4.25','v0.4.23',None):
             with self.assertRaises(AssertionError):snapshot_program('0.4.22',target)
         with self.assertRaises(AssertionError):snapshot_program('0.4.23','0.4.23')
+
+    def test_23_to_24_keeps_dns_identity_binding_and_private_material_bytes(self):
+        def snapshot(root, after=False):
+            return self.snapshot(root,after=after,target='0.4.24',old='0.4.23')
+        with self.data(modern=True,existing_dns=True) as original:
+            before = snapshot(original)
+            self.assertEqual(before['managed_certificates']['columns'],list(DNS_CERTIFICATE_COLUMNS))
+            self.assertIn('server_name',before['certificate_bindings']['columns'])
+            self.assertEqual(len(before['dns_credentials']),2)
+            self.assertEqual(snapshot(original,after=True),before)
+            with self.data(modern=True,fresh_binding=True,existing_dns=True) as changed:
+                self.assertEqual(snapshot(changed,after=True),before)
+                with sqlite3.connect(changed/'v-ui.db') as db:
+                    db.execute("UPDATE managed_certificates SET method='http-01',wildcard=0,credential_id=NULL")
+                    db.execute("UPDATE certificate_bindings SET server_name=NULL")
+                after = snapshot(changed,after=True)
+                self.assertNotEqual(after['managed_certificates'],before['managed_certificates'])
+                self.assertNotEqual(after['certificate_bindings'],before['certificate_bindings'])
+                secret=next((changed/'certificates/dns-credentials').glob('*/*[0-9a-f].json'))
+                secret.write_bytes(b'inert changed material')
+                self.assertNotEqual(snapshot(changed,after=True)['dns_credentials'],before['dns_credentials'])
+                secret.chmod(0o644)
+                with self.assertRaises(AssertionError):
+                    snapshot(changed,after=True)
+        with self.data(modern=False) as legacy:
+            with self.assertRaises(AssertionError):
+                snapshot(legacy)
 
     def test_each_old_certificate_binding_and_other_data_field_remains_exact(self):
         with self.data() as old:
@@ -499,6 +631,36 @@ class PublishedDNSMigrationTests(unittest.TestCase):
             self.assertEqual((new/'v-ui.db').read_bytes(),original)
             with sqlite3.connect(new/'v-ui.db') as db:db.execute('ALTER TABLE users ADD COLUMN unknown TEXT')
             with self.assertRaises(AssertionError):self.assertEqual(self.snapshot(new,after=True),before)
+
+
+    def test_authority_profile_is_separate_from_frozen_core_and_public_profiles(self):
+        from published_upgrade_helpers import CORE_FILES, AUTHORITY_FILES
+        self.assertEqual(AUTHORITY_FILES, {'/usr/local/lib/v-ui/core_authority.py'})
+        self.assertTrue(AUTHORITY_FILES.isdisjoint(CORE_FILES))
+        for version in PRE_DNS_BASELINES:
+            before, after = self.receipt(version)
+            after['files'].update({path:'6'*64 for path in CORE_FILES | AUTHORITY_FILES})
+            assert_receipt_migration(self,before,after,version,'0.4.23',core_control=True,core_authority=True)
+            with self.assertRaises(AssertionError):
+                assert_receipt_migration(self,before,after,version,'0.4.23',core_control=True)
+            for path in AUTHORITY_FILES | CORE_FILES:
+                missing=deepcopy(after);missing['files'].pop(path)
+                with self.subTest(version=version,missing=path),self.assertRaises(AssertionError):
+                    assert_receipt_migration(self,before,missing,version,'0.4.23',core_control=True,core_authority=True)
+            polluted=deepcopy(before);polluted['files'][next(iter(AUTHORITY_FILES))]='7'*64
+            with self.assertRaises(AssertionError):
+                assert_receipt_migration(self,polluted,after,version,'0.4.23',core_control=True,core_authority=True)
+            extra=deepcopy(after);extra['files']['/usr/local/lib/v-ui/foreign.py']='7'*64
+            with self.assertRaises(AssertionError):
+                assert_receipt_migration(self,before,extra,version,'0.4.23',core_control=True,core_authority=True)
+        for controls in ({'core_control':False,'core_authority':True},
+                         {'core_control':True,'core_authority':1}):
+            with self.subTest(controls=controls),self.assertRaises(AssertionError):
+                assert_receipt_migration(self,before,after,'0.4.22','0.4.23',**controls)
+        tree=ast.parse((Path(__file__).resolve().parents[1]/'scripts/install_ops_control.py').read_text())
+        literal=next(node.value for node in tree.body if isinstance(node,ast.Assign)
+            and any(isinstance(target,ast.Name) and target.id=='CORE_AUTHORITY_SOURCE_DEPENDENCIES' for target in node.targets))
+        self.assertEqual(AUTHORITY_FILES,{'/usr/local/lib/v-ui/'+name for name in ast.literal_eval(literal)})
 
 
 if __name__=='__main__':unittest.main()

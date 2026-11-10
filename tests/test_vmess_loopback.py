@@ -18,6 +18,7 @@ from app.services.core_manager import SingBoxAdapter
 from app.services.mihomo_routing import default_routing
 from app.services.routing_store import read_snapshot,save_routing
 import test_subscription_tokens as grant_tests
+from tests.core_candidate_context import singbox_client
 from loopback_helpers import (
     certificate_files,
     start_http_target,
@@ -176,7 +177,7 @@ class VMessLoopbackTests(unittest.TestCase):
             env["SSL_CERT_FILE"]=str(other)
         process=CoreProcess(
             self.stack,
-            [str(Path(os.environ["VUI_TEST_CORES"])/"sing-box"),"run","-c",str(path)],
+            [singbox_client(str(Path(os.environ["VUI_TEST_CORES"])/"sing-box")),"run","-c",str(path)],
             self.root/("singbox-client-"+str(port)+".log"),
             env,
         )

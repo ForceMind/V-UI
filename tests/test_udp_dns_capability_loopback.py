@@ -29,6 +29,7 @@ from unittest.mock import patch
 import psutil
 import yaml
 
+from tests.core_candidate_context import server_version, singbox_client
 from app.models import database
 from app.services import routing_store
 from app.services.core_manager import SingBoxAdapter
@@ -352,7 +353,7 @@ class ShadowsocksFixture(unittest.TestCase):
         if not cores or not mihomo:
             raise AssertionError("Enabled UDP/DNS characterization requires both fixed binary paths")
         cls.singbox, cls.mihomo = str(Path(cores)/"sing-box"), mihomo
-        for command, prefix in (([cls.singbox, "version"], "sing-box version 1.14.2\n"),
+        for command, prefix in (([cls.singbox, "version"], f"sing-box version {server_version('sing-box', '1.14.2')}\n"),
                                 ([cls.mihomo, "-v"], "Mihomo Meta v1.19.32 ")):
             result = subprocess.run(command, text=True, capture_output=True, timeout=15)
             output = result.stdout + result.stderr
@@ -379,7 +380,7 @@ class ShadowsocksFixture(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return yaml.safe_load(response.text)
 
-    def core(self, stack, root, label, config, kind):
+    def core(self, stack, root, label, config, kind, *, client=False):
         path = root/(label + (".yaml" if kind == "mihomo" else ".json"))
         path.write_text(yaml.safe_dump(config, sort_keys=False) if kind == "mihomo" else json.dumps(config))
         path.chmod(0o600)
@@ -389,8 +390,9 @@ class ShadowsocksFixture(unittest.TestCase):
             command = [self.mihomo, "-d", str(home), "-f", str(path)]
             check = [self.mihomo, "-t", "-d", str(home), "-f", str(path)]
         else:
-            command = [self.singbox, "run", "-c", str(path)]
-            check = [self.singbox, "check", "-c", str(path)]
+            binary = singbox_client(self.singbox) if client else self.singbox
+            command = [binary, "run", "-c", str(path)]
+            check = [binary, "check", "-c", str(path)]
         result = subprocess.run(check, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         process_class = ReadyMihomoProcess if kind == "mihomo" else BoundCoreProcess
@@ -434,7 +436,7 @@ class ShadowsocksFixture(unittest.TestCase):
                 config["log"] = {"level": "debug", "timestamp": False}
                 self.assertEqual([value["type"] for value in config["outbounds"]], ["shadowsocks"])
             server = self.core(stack, root, "server", server_config, "sing-box")
-            client = self.core(stack, root, "client", config, kind)
+            client = self.core(stack, root, "client", config, kind, client=True)
             processes.extend((server, client))
             value = SimpleNamespace(server=server, client=client, server_port=server_port,
                                     port=client_port, targets=targets, stack=stack)

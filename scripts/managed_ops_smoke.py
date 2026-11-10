@@ -44,6 +44,7 @@ def _copy_control(payload, control):
     manifest = json.loads((payload / 'MANIFEST.json').read_text())
     sources = {'system_ops.py': 'deploy/system_ops.py',
                'ops_worker.py': 'deploy/ops_worker.py',
+               'core_authority.py': 'deploy/core_authority.py',
                'release_tools.py': 'app/release_tools.py', 'v-ui': 'deploy/v-ui',
                'firewall_support.py': 'scripts/firewall_support.py',
                'data_owner.py': 'app/data_owner.py',
@@ -173,8 +174,11 @@ raise SystemExit(worker['_run'](Path(ROOT),api,sys.stdin.fileno(),sys.stdout))
                  'CONTROL = Path(' + repr(str(control)) + ')\n'
                  'CONTROLLER = Path(' + repr(str(controller or control / 'system_ops.py')) + ')\n'
                  'PYTHON = Path(' + repr(str(python)) + ')\n'
-                 'WORKER = Path(' + repr(str(worker)) + ')\n')
-    driver.write_text('''import fcntl,importlib.util,json,os,stat,sys,time,types
+                 'WORKER = Path(' + repr(str(worker)) + ')\n'
+                 'CONFIG = Path(' + repr(str(config)) + ')\n'
+                 'AUTHORITY_SHA = ' + repr(hashlib.sha256((control/'core_authority.py').read_bytes()).hexdigest()
+                     if (control/'core_authority.py').is_file() else None) + '\n')
+    driver.write_text('''import fcntl,hashlib,importlib.util,json,os,stat,sys,time,types
 from contextlib import contextmanager
 from pathlib import Path
 ''' + constants + '''
@@ -228,6 +232,54 @@ def installation_lock():
 ops.installation_lock=installation_lock
 ops.verify_installation=lambda: ('systemd',types.SimpleNamespace(pw_uid=os.getuid(),pw_gid=os.getgid()))
 ops.PYTHON=PYTHON; ops.WORKER=WORKER
+# This remains simulated Root trust. All new source/epoch state is owned by
+# the actual non-root fixture UID under CONTROL, never a host Root directory.
+ops.CONTROL=CONTROL; ops.CONFIG=CONFIG; ops.RECEIPT=CONTROL/'fixture-ops-control.json'
+authority_path=CONTROL/'core_authority.py'
+assert AUTHORITY_SHA is not None and hashlib.sha256(authority_path.read_bytes()).hexdigest()==AUTHORITY_SHA
+ops.RECEIPT.write_text(json.dumps({'files':{str(authority_path):AUTHORITY_SHA}}))
+ops.RECEIPT.chmod(0o600)
+def fixture_owned(info,directory=False,sticky=False):
+    if (info.st_uid!=os.geteuid() or info.st_mode&0o022
+            or directory and not stat.S_ISDIR(info.st_mode)):
+        raise ops.Refused('unsafe simulated Root fixture ownership')
+@contextmanager
+def fixture_directory(path,lock_parent=False):
+    if Path(path)!=CONTROL:raise ops.Refused('unexpected simulated Root fixture directory')
+    fd=os.open(CONTROL,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    def identity(info):return info.st_dev,info.st_ino,info.st_mode,info.st_uid,info.st_gid
+    try:
+        before=os.fstat(fd);fixture_owned(before,directory=True)
+        if identity(before)!=identity(CONTROL.lstat()):raise ops.Refused('fixture directory changed')
+        yield fd
+        if identity(before)!=identity(os.fstat(fd)) or identity(before)!=identity(CONTROL.lstat()):
+            raise ops.Refused('fixture directory changed')
+    finally:os.close(fd)
+ops._root_owned=fixture_owned;ops.trusted_directory=fixture_directory
+actual_trusted_bytes=ops.trusted_bytes
+def fixture_bytes(path,limit=ops.MAX_FILE):
+    if Path(path) not in (CONFIG,ops.RECEIPT,authority_path):
+        raise ops.Refused('unexpected simulated Root fixture file')
+    return actual_trusted_bytes(path,limit)
+ops.trusted_bytes=fixture_bytes
+actual_authority_loader=ops._load_core_authority
+def fixture_authority_loader(expected_receipt,*,_origin_only=False):
+    helper=actual_authority_loader(expected_receipt,_origin_only=_origin_only)
+    implementation=helper.CoreAuthority
+    helper.CoreAuthority=lambda:implementation(_root=CONTROL/'fixture-authority',
+                                              _anchor=CONTROL,_owner=os.geteuid())
+    return helper
+ops._load_core_authority=fixture_authority_loader
+# Keep the actual stage implementation on the real non-root os module. Its
+# private test-layout constructor verifies this owner and a traversable parent.
+stage_spec=importlib.util.spec_from_file_location('packaged_fixture_stage_ops',CONTROLLER)
+stage_ops=importlib.util.module_from_spec(stage_spec);stage_spec.loader.exec_module(stage_ops)
+stage_ops.Refused=ops.Refused  # Preserve the actual menu's fixed-error catch.
+stage_parent=CONTROL/'fixture-stage-inputs';stage_parent.mkdir(mode=0o755);stage_parent.chmod(0o755)
+class FixtureStageArchive(stage_ops._StageArchive):
+    def __init__(self,request,account,cancelled):
+        super().__init__(request,account,cancelled,_parent=stage_parent,_anchor=CONTROL,_owner=os.geteuid())
+ops._StageArchive=FixtureStageArchive
 ops.cgroup_empty=lambda unit: unit in ops.SYSTEMD_UNITS
 fake_states={unit:'active' if unit != 'v-ui-http01.service' else 'inactive' for unit in ops.SYSTEMD_UNITS}
 class FakeServices(ops.Services):
@@ -455,6 +507,13 @@ def installed_managed_ops_smoke(python, payload, root, bundle, checksum, *, pane
                 ready = json.loads((prepared / 'READY.json').read_text())
                 assert ready['archive_sha256'] == candidate_sha
                 assert ready['manifest_sha256'] == file_digest(prepared / 'payload/MANIFEST.json')
+                authority_path=control/'fixture-authority/authority.json'
+                staged_authority=json.loads(authority_path.read_text())
+                assert not staged_authority['grants'] and not staged_authority['admissions']
+                assert len(staged_authority['applications'])==1
+                accepted=next(iter(staged_authority['applications'].values()))
+                assert accepted==dict(release_id=candidate_id,target=source_ready['runtime_key'],
+                    app_source=manifest['source_commit'],manifest_sha256=ready['manifest_sha256'],archive_sha256=candidate_sha)
                 session.send('5\n'); session.expect(CONFIRM); session.send('yes\n')
                 completed(session, 'backup')
                 backups = list((private / 'backups').glob('maintenance-*.zip'))
@@ -468,6 +527,9 @@ def installed_managed_ops_smoke(python, payload, root, bundle, checksum, *, pane
                 session.send(str(backup) + '\n'); session.expect('可信 SHA-256（留空取消）: ')
                 session.send(backup_sha + '\n'); session.expect(CONFIRM); session.send('yes\n')
                 completed(session, 'restore')
+                restored_authority=json.loads(authority_path.read_text())
+                assert restored_authority['epoch']!=staged_authority['epoch']
+                assert restored_authority['applications']==staged_authority['applications']
                 assert current.read_bytes() == before_current
                 restored = _database_values(private / 'data')
                 assert restored == {'nodes': [('original-fake-node',)], 'sessions': [], 'grants': [(1,)]}
@@ -514,6 +576,9 @@ def installed_managed_ops_smoke(python, payload, root, bundle, checksum, *, pane
                 journal.chmod(0o600)
                 session.send('9\n'); session.expect(CONFIRM); session.send('yes\n')
                 completed(session, 'recover-restore')
+                recovered_authority=json.loads(authority_path.read_text())
+                assert recovered_authority['epoch']!=restored_authority['epoch']
+                assert recovered_authority['applications']==staged_authority['applications']
                 assert not journal.exists() and not pending_old.exists()
                 interrupted_generations = list((private / 'recovery').glob('interrupted-*'))
                 assert len(interrupted_generations) == 1

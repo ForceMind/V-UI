@@ -673,10 +673,10 @@ class MaintenanceWorkerTests(unittest.TestCase):
         external.mkdir(mode=0o700)
         (self.data / 'runtime/xray').rmdir()
         (self.data / 'runtime/xray').symlink_to(external, target_is_directory=True)
-        session = self.session('backup')
-        with self.assertRaises((tools.ReleaseError, OSError)): session.execute()
+        with self.assertRaisesRegex(tools.ReleaseError, '核心运行状态'):
+            self.session('backup')
         self.assertFalse((external / 'owner.lock').exists())
-        session.close()
+        self.assertFalse(self.busy(self.root / '.operation.lock'))
         (self.data / 'runtime/xray').unlink()
         (self.data / 'runtime/xray').mkdir(mode=0o700)
         lock = self.data / LOCKS[0]

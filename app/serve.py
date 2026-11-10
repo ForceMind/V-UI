@@ -7,8 +7,8 @@ from pathlib import Path
 import ssl
 import sys
 from urllib.parse import urlsplit
-from app.data_owner import data_owner
-from app.release_tools import ReleaseError, active, lease, private_root, supported_environment, target_arch
+from app.data_owner import data_owner, core_update_pending
+from app.release_tools import ReleaseError, active_verified, lease, private_root, supported_environment, target_arch
 
 
 def private_file(value: str) -> Path:
@@ -19,6 +19,7 @@ def private_file(value: str) -> Path:
 
 
 def run() -> None:
+    from contextlib import ExitStack
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root',type=Path,required=True)
     parser.add_argument('--origin',required=True)
@@ -29,7 +30,6 @@ def run() -> None:
     args=parser.parse_args()
     supported_environment(); os.umask(0o077)
     root=private_root(args.root)
-    if os.path.lexists(root/'RESTORE_PENDING.json'): raise ReleaseError('Interrupted restore requires recover-restore')
     if not 1024 <= args.port <= 65535: raise ReleaseError('Use an unprivileged port in 1024–65535')
     ipaddress.ip_address(args.bind)
     os.environ['VUI_PUBLIC_ORIGIN']=args.origin
@@ -38,21 +38,57 @@ def run() -> None:
     origin=configured_origin()
     if not origin.startswith('https://') or (urlsplit(origin).port or 443) != args.port:
         raise ReleaseError('Direct HTTPS origin and listening port must match')
-    with lease(root/'.panel.lease'), data_owner(root/'data'):
-        release,_=active(root); payload=release/'payload'
+    # Ordinary startup keeps its early real ownership barrier. Only an
+    # already-pending startup may postpone that lease for a native Root claim.
+    pending_on_entry = os.path.lexists(root/'RESTORE_PENDING.json') or core_update_pending()
+    with lease(root/'.panel.lease'), ExitStack() as lifetime:
+        if not pending_on_entry:
+            lifetime.enter_context(data_owner(root/'data'))
+        release,_,manifest,ready=active_verified(root); payload=release/'payload'
         if Path(__file__).resolve().parents[1] != payload.resolve():
             raise ReleaseError('Selected release changed; rerun the active release command')
         data=root/'data'
         if not data.is_dir() or data.is_symlink() or data.stat().st_uid != os.geteuid() or data.stat().st_mode & 0o077:
             raise ReleaseError('Data directory must be owned by service user with mode 0700')
         os.environ.update(VUI_DATA_DIR=str(data),VUI_BIN_DIR=str(payload/'cores'/target_arch()),VUI_RELEASE_ROOT=str(root))
+        from app.core_updates import managed_startup
+        managed=None
+        if not pending_on_entry:
+            if os.path.lexists(root/'RESTORE_PENDING.json') or core_update_pending():
+                raise ReleaseError('Maintenance began during ordinary startup; restart through the managed controller')
+        else:
+            managed=managed_startup.try_claim(root,release,manifest,ready)
+            if managed is None:
+                raise ReleaseError('Maintenance state changed before authorization; restart through the managed controller')
+            lifetime.callback(managed_startup.clear,managed)
+            data_lifetime=lifetime.enter_context(ExitStack())
+            lifetime.callback(managed.close)
+            with managed.scope():
+                data_lifetime.enter_context(data_owner(data))
+        # Selection and material failures must stop boot before a runtime,
+        # certificate worker, database initialization or main import can act.
+        from app.core_updates.boot import configure_boot
+        from app.services.core_manager import core_manager
+        from app.services.core_runtime import VERSIONS
+        if managed is None:
+            configure_boot(core_manager, payload=payload, manifest=manifest, ready=ready,
+                           data=data, versions=VERSIONS)
+        else:
+            managed.configure(core_manager,payload=payload,manifest=manifest,ready=ready,data=data,versions=VERSIONS)
         # Only initialize the data store after taking the instance lease and
         # verifying the selected release. Bootstrap paths are not API inputs.
         from app.certificates.manager import get_manager
         from app.models.database import init_db
         from app.certificates.tls import LiveTLS
-        init_db(); manager=get_manager()
-        material=manager.panel_material()
+        if managed is None:
+            init_db(); manager=get_manager()
+            material=manager.panel_material()
+        else:
+            # A managed trial cannot repair/create/migrate its data to pass.
+            with managed.scope():
+                managed.require_database();manager=get_manager()
+                material=manager.panel_material()
+            managed.bind_certificates(manager)
         if material is None and not (args.cert and args.key):
             raise ReleaseError('No panel certificate. Complete certificate bootstrap or provide both --cert and --key')
         cert,key=(private_file(str(path)) for path in (material or (args.cert,args.key)))
@@ -62,9 +98,17 @@ def run() -> None:
         import uvicorn
         import main
         print('V-UI verified release listening with HTTPS; no privileged ports or access-log tokens',flush=True)
-        uvicorn.run(main.app,host=args.bind,port=args.port,workers=1,proxy_headers=False,
+        options=dict(host=args.bind,port=args.port,workers=1,proxy_headers=False,
             access_log=False,server_header=False,ssl_certfile=str(cert),ssl_keyfile=str(key),
             limit_concurrency=64,timeout_keep_alive=5,ssl_context_factory=lambda config, default: live_tls.context)
+        if managed is None:
+            uvicorn.run(main.app,**options)
+        else:
+            server=uvicorn.Server(uvicorn.Config(main.app,**options))
+            managed.attach_server(server)
+            server.run()
+            if not managed.released:
+                raise managed_startup.ManagedStartupError('MANAGED_STARTUP_NOT_RELEASED')
 
 
 if __name__=='__main__':

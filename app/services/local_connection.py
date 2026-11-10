@@ -7,7 +7,7 @@ owner authorization at the API boundary (relay AND share for maintenance).
 from dataclasses import dataclass, field
 import re
 
-from app.services.core_runtime import revision
+from app.services.core_runtime import matches_sing_box_execution, revision
 from app.services.proxy_store import ProxyConflict, ProxyStorageError
 
 
@@ -52,9 +52,10 @@ class LocalConnectionExporter:
                         or state != {'revision': active['core_revision'], 'enabled': True}
                         or status.get('running') is not True or status.get('enabled') is not True
                         or status.get('binary_exists') is not True or status.get('config_exists') is not True
-                        or status.get('version_required') != '1.14.2'
                         or status.get('applied_revision') != active['core_revision']
-                        or revision(runtime.active_config()) != active['core_revision']):
+                        or revision(runtime.active_config()) != active['core_revision']
+                        or not matches_sing_box_execution(
+                            runtime, self.manager.runtime_artifact('sing-box'), status.get('version_required'))):
                     raise LocalConnectionError('LOCAL_PROXY_STATE_MISMATCH')
                 # Re-read under the same manager lock, detecting other store
                 # writers before delivering a no-longer-active secret.

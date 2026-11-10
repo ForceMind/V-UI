@@ -1,0 +1,636 @@
+"""Private temp data, fake M0/M2 materials and fake native executor only.
+
+The operation/writer leases and M13 data/component backup are real. Application
+and bootstrap validation is an explicit fixture seam, never Root qualification.
+"""
+from copy import deepcopy
+import hashlib
+import io
+import importlib
+import json
+import os
+from pathlib import Path
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import types
+import unittest
+from unittest.mock import MagicMock, Mock, patch
+import zipfile
+
+from app import release_tools as tools
+from app.core_updates import maintenance as m, selection as s, selection_files as sf
+import test_core_maintenance_cycle as cycle
+import test_core_backup as materials
+
+
+PUBLIC_CHAIN = b'-----BEGIN CERTIFICATE-----\nY2VydA==\n-----END CERTIFICATE-----\n'
+
+
+class CoreMaintenanceTests(unittest.TestCase):
+    def setUp(self):
+        self.cycle=cycle.MaintenanceCycleTests();self.cycle.setUp();self.addCleanup(self.cycle.doCleanups)
+        self.material=materials.CoreBackupTests();self.material.setUp();self.addCleanup(self.material.doCleanups)
+        self.root=self.cycle.root;self.data=self.root/'data';self.payload=self.cycle.payload
+        self.calls=[]
+        manifest=self.cycle.manifest
+        manifest.update(kind='release',platform='linux-multi-cpython312',source_commit=materials.NEW_APP,
+                        targets=[materials.TARGET])
+        source=b"VERSIONS = {'sing-box':'1.14.2','xray':'26.3.27'}\n"
+        for name,raw,mode in [('app/services/core_runtime.py',source,0o600)]+[
+                ('cores/x86_64/'+core,('fake bundle '+core).encode(),0o700) for core in s.CORES]:
+            path=self.payload/name;path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+            path.write_bytes(raw);path.chmod(mode)
+            manifest['files'][name]=dict(sha256=tools.digest(raw),size=len(raw),mode=mode)
+        self.cycle.write(self.payload/tools.MANIFEST,json.dumps(manifest).encode())
+        ready=json.loads(self.cycle.ready.read_bytes());ready['manifest_sha256']=tools.digest((self.payload/tools.MANIFEST).read_bytes())
+        self.cycle.write(self.cycle.ready,json.dumps(ready).encode())
+        with sqlite3.connect(self.data/'v-ui.db') as db:
+            db.executescript('CREATE TABLE users(id INTEGER,username TEXT,password_hash TEXT);'
+                'CREATE TABLE inbounds(id INTEGER,raw_config TEXT);CREATE TABLE admin_sessions(token_hash TEXT);'
+                'CREATE TABLE subscription_grants(id INTEGER,revoked INTEGER);')
+        (self.data/'v-ui.db').chmod(0o600)
+        self.saved={}
+        for core in s.CORES:
+            raw=json.dumps(dict(inbounds=[],fake=core),separators=(',',':')).encode();revision=tools.digest(raw)
+            self.saved[core]=(raw,revision)
+            self.cycle.write(self.data/'runtime'/core/(revision+'.json'),raw)
+            self.write_state(core,dict(revision=revision,enabled=core=='sing-box'))
+        self.files=sf.SelectionFiles(sf.Layout(self.cycle.base/'root-metadata',os.geteuid(),self.cycle.base))
+        self.candidate=self.material.add('sing-box','1.14.3')
+    def write_state(self,core,value):self.cycle.write(self.data/'runtime'/core/'state.json',json.dumps(value).encode())
+    def read_state(self,core):return json.loads((self.data/'runtime'/core/'state.json').read_bytes())
+    def executor(self,argv,**kwargs):
+        binary=int(argv[0].rsplit('/',1)[1]);self.assertEqual(os.pread(binary,1024,0),b'NOT AN ELF: synthetic binary x86_64-gnu')
+        self.calls.append((list(argv),kwargs,os.fstat(binary).st_ino))
+        if '-c' in argv:
+            fd=int(argv[-1].rsplit('/',1)[1]);self.assertEqual(os.pread(fd,1024,0),self.saved['sing-box'][0])
+    def session(self,**kwargs):
+        item=m.CoreMaintenanceSession(self.root,core=kwargs.pop('core','sing-box'),
+            expected_selection_revision=kwargs.pop('expected_selection_revision',None),
+            _selection_files=kwargs.pop('selection_files',self.files),_catalog=self.material.catalog,_store=self.material.store,
+            _executor=kwargs.pop('executor',self.executor),_bundle_anchor=self.cycle.base,**kwargs)
+        self.addCleanup(item.close);return item
+    def checked(self):
+        session=self.session();context=session.prepare();prepared=session.check_core(s._reference_map(self.candidate))
+        return session,context,prepared
+    def backed(self):
+        session,context,prepared=self.checked();final=session.execute()
+        snapshot=dict(schema=1,kind='core-backup-closure-v1',selection=context['selection'],
+                      intents=final['final_intents'],panel_was_running=True)
+        result=session.backup_core(snapshot);return session,context,result
+
+    def test_backup_only_session_writes_archive_without_changing_current_state(self):
+        original = self.session()
+        context = original.prepare()
+        original.close()
+        source = dict(app_source=materials.NEW_APP, target=materials.TARGET)
+        before = s.decode_selection(sf._raw(context['selection']), **source)
+        self.files.bootstrap(before, writer_observation={
+            core: dict(schema=context['runtime_schemas'][core], revision=row['revision'], enabled=row['enabled'])
+            for core, row in context['intents'].items()},
+            service_snapshot=dict(panel_running=True, cores=context['intents']))
+        session = m.CoreBackupSession(self.root, expected_selection_revision=before.revision,
+            _selection_files=self.files, _catalog=self.material.catalog, _store=self.material.store,
+            _bundle_anchor=self.cycle.base)
+        self.addCleanup(session.close)
+        with self.assertRaisesRegex(m.CoreMaintenanceError, 'BACKUP_RUNTIME_NOT_BOOTABLE'):
+            session.prepare()
+        for core, intent in context['intents'].items():
+            self.write_state(core, dict(schema=2, **intent))
+        session = m.CoreBackupSession(self.root, expected_selection_revision=before.revision,
+            _selection_files=self.files, _catalog=self.material.catalog, _store=self.material.store,
+            _bundle_anchor=self.cycle.base)
+        self.addCleanup(session.close)
+        states = {core: self.read_state(core) for core in s.CORES}
+        session.prepare()
+        quiesced = session.execute()
+        receipt = session.backup_core(dict(schema=1, kind='core-backup-closure-v1',
+            selection=context['selection'], intents=quiesced['final_intents'], panel_was_running=True))
+        session.release_backup_writers()
+        session.close()
+        self.assertEqual(tools.file_digest(self.root/'backups'/receipt['backup_name']), receipt['backup_sha256'])
+        self.assertEqual({core: self.read_state(core) for core in s.CORES}, states)
+        self.assertEqual(self.files.read_stable(**source), before)
+
+    def test_restore_session_preflights_and_stages_verified_archive_under_real_leases(self):
+        config, chain = self.tls_fixture()
+        writer, context, backup = self.backed()
+        writer.close()
+        source = dict(app_source=materials.NEW_APP, target=materials.TARGET)
+        before = s.decode_selection(sf._raw(context['selection']), **source)
+        snapshot = dict(panel_running=True, cores=context['intents'])
+        self.files.bootstrap(before, writer_observation={
+            core: dict(schema=context['runtime_schemas'][core], revision=row['revision'], enabled=row['enabled'])
+            for core, row in context['intents'].items()}, service_snapshot=snapshot)
+        def new_session():
+            session = m.CoreRestorePreparation(self.root, archive_name=backup['backup_name'],
+                archive_sha256=backup['backup_sha256'], expected_selection_revision=before.revision,
+                _selection_files=self.files, _catalog=self.material.catalog, _store=self.material.store,
+                _bundle_anchor=self.cycle.base)
+            self.addCleanup(session.close)
+            return session
+        backups = self.root/'backups'
+        retained = self.root/'retained-backups'
+        backups.rename(retained)
+        backups.symlink_to(retained, target_is_directory=True)
+        with self.assertRaises(tools.ReleaseError):
+            new_session().prepare()
+        self.assertFalse((self.files.layout.root/sf.PENDING).exists())
+        backups.unlink()
+        retained.rename(backups)
+        session = new_session()
+        with patch.object(m, '_panel_ssl_context', return_value=('tls-context', b'leaf')):
+            prepared = session.prepare()
+        trust = hashlib.sha256(chain.read_bytes()).hexdigest()
+        self.assertEqual((prepared['original_trust_sha256'], prepared['incoming_trust_sha256']), (trust, trust))
+        incoming = s.decode_selection(sf._raw(prepared['incoming_selection']), **source)
+        slot = 'c'*32
+        tx = self.files.begin_restore(incoming, expected_revision=before.revision,
+            service_snapshot=snapshot, source_backup_sha256=backup['backup_sha256'],
+            restored_intents=prepared['incoming_intents'], switch_context=dict(
+                application=context['application'], data_generation=context['data_generation'],
+                services={'v-ui.service':'active','v-ui-http01.socket':'active','v-ui-http01.service':'inactive'},
+                config_sha256=sf._digest(sf._raw(config)), certificate_mode='provided', trust_sha256=trust),
+            data_plan=dict(slot=slot, incoming_generation=prepared['incoming_generation'],
+                preflight_tree_sha256=prepared['preflight_tree_sha256'], incoming_trust_sha256=trust), **source)
+        with self.files._io() as (scope, root):
+            _, journal = self.files._active(scope, root, tx, phases=('prepared',), **source)
+        staged = session.stage_restore(journal)
+        self.assertEqual(sf.restore_data_position(journal, staged['restore_data']), 'staged')
+        self.assertEqual(staged['final_intents'], context['intents'])
+        session.close()
+        self.assertTrue((self.root/'recovery'/('core-restore-'+slot+'-incoming')/'v-ui.db').is_file())
+        self.assertTrue((self.data/'v-ui.db').is_file())
+
+    def test_stopped_restore_verifies_saved_intent_without_launching_core(self):
+        session = self.session()
+        context = session.prepare()
+        plan = {key: context[key] for key in ('application', 'selection', 'intents')}
+        for core, row in plan['intents'].items():
+            self.write_state(core, dict(schema=2, **row))
+        m.verify_stopped_restore(self.root, context['data_generation'], plan, session._operation_proof,
+                                 _bundle_anchor=self.cycle.base)
+        discovered = m.verify_stopped_restore(self.root, context['data_generation'],
+            dict(plan, intents=None), session._operation_proof, _bundle_anchor=self.cycle.base)
+        self.assertEqual(discovered, plan['intents'])
+        with self.assertRaisesRegex(ValueError, 'DATA_GENERATION_CHANGED'):
+            m.verify_stopped_restore(self.root, dict(context['data_generation'], ino=0), plan,
+                                     session._operation_proof, _bundle_anchor=self.cycle.base)
+        bad = dict(plan, intents=deepcopy(plan['intents']))
+        bad['intents']['sing-box']['enabled'] = False
+        with self.assertRaisesRegex(m.CoreMaintenanceError, 'RESTORE_RUNTIME_CHANGED'):
+            m.verify_stopped_restore(self.root, context['data_generation'], bad, session._operation_proof,
+                                     _bundle_anchor=self.cycle.base)
+        self.assertEqual(self.calls, [])
+
+    def test_restore_probe_requires_pinned_generation_and_chain_identity(self):
+        config, chain = self.tls_fixture()
+        info = self.data.stat()
+        generation = dict(dev=info.st_dev, ino=info.st_ino)
+        trust = hashlib.sha256(PUBLIC_CHAIN).hexdigest()
+        digest = sf._digest(sf._raw(config))
+        with self.assertRaisesRegex(m.CoreMaintenanceError, 'DATA_GENERATION_CHANGED'):
+            m.RestorePanelProbe(self.root, dict(generation, ino=0), trust, digest, lambda: None)
+        with self.assertRaisesRegex(m.CoreMaintenanceError, 'RESTORE_TLS_CONTEXT'):
+            m.RestorePanelProbe(self.root, generation, '0'*64, digest, lambda: None)
+        probe = m.RestorePanelProbe(self.root, generation, trust, digest, lambda: None)
+        with patch.object(m, '_panel_ssl_context', return_value=('tls-context', b'leaf')), \
+                patch.object(m, '_panel_tls_exchange', return_value='ready') as exchange:
+            self.assertEqual(probe(require_login=False), dict(status='ready', trust_sha256=trust))
+            new_chain = chain.with_suffix('.new')
+            self.cycle.write(new_chain, PUBLIC_CHAIN)
+            os.replace(new_chain, chain)
+            self.assertEqual(probe(require_login=True), dict(status='rejected', trust_sha256=None))
+        exchange.assert_called_once()
+
+    def tls_fixture(self, mode='provided'):
+        config = dict(certificate_mode=mode, bind='0.0.0.0', domain='panel.example.test', port=3215)
+        original = tools._maintenance_cycle_file
+
+        def read(path, **options):
+            if path == tools._MAINTENANCE_CONFIG:
+                self.assertEqual(options, dict(limit=16384, owner=0, private=False))
+                return ('fixture root config identity',), json.dumps(config).encode()
+            return original(path, **options)
+
+        patches = (patch.object(tools, '_maintenance_cycle_file', side_effect=read),
+                   patch.object(tools, '_maintenance_read_config', side_effect=lambda: dict(config)))
+        for override in patches:
+            override.start()
+            self.addCleanup(override.stop)
+        certs = self.data/'certs'
+        certs.mkdir(mode=0o700)
+        chain = certs/'provided-fullchain.pem'
+        if mode == 'provided':
+            self.cycle.write(chain, PUBLIC_CHAIN)
+            # The probe neither needs nor opens the separate private key.
+            self.cycle.write(certs/'provided-privkey.pem', b'not a private key')
+        return config, chain
+
+    def test_provided_tls_uses_same_public_chain_before_stop_during_trial_and_after_recovery(self):
+        self.tls_fixture()
+        session, context, _ = self.checked()
+        with self.assertRaises(m.CoreMaintenanceError):
+            session.probe_panel_tls(require_login=False)
+        digest = hashlib.sha256(PUBLIC_CHAIN).hexdigest()
+        ready = dict(status='ready', trust_sha256=digest)
+        with patch.object(m, '_panel_ssl_context', return_value=('tls-context', b'leaf')) as load, \
+                patch.object(m, '_panel_tls_exchange', side_effect=['ready','ready','pending','ready','ready','ready']) as probe:
+            self.assertEqual(session.probe_panel_tls(require_login=True), ready)
+            final = session.execute()
+            with self.assertRaises(m.CoreMaintenanceError):
+                session.probe_panel_tls(require_login=True)
+            backup = session.backup_core(dict(schema=1, kind='core-backup-closure-v1',
+                selection=context['selection'], intents=final['final_intents'], panel_was_running=True))
+            session.bind_core_ids(backup['backup_sha256'])
+            session.release_writers_for_trial()
+            self.assertEqual(session.probe_panel_tls(require_login=False), ready)
+            self.assertEqual(session.probe_panel_tls(require_login=True), dict(status='pending', trust_sha256=digest))
+            self.assertEqual(session.probe_panel_tls(require_login=True), ready)
+            session.reacquire_writers()
+            session.restore_core_ids()
+            session.release_reacquired_writers()
+            self.assertEqual(session.probe_panel_tls(require_login=False), ready)
+            self.assertEqual(session.probe_panel_tls(require_login=True), ready)
+        self.assertEqual(load.call_count, 6)
+        self.assertTrue(all(args.args == (PUBLIC_CHAIN,) for args in load.call_args_list))
+        self.assertEqual(probe.call_args.args, (m.ipaddress.ip_address('127.0.0.1'),3215,'panel.example.test','tls-context',b'leaf'))
+
+    def test_missing_symlink_or_replaced_public_chain_never_reaches_tls(self):
+        _, chain = self.tls_fixture()
+        session, _, _ = self.checked()
+        rejected = dict(status='rejected', trust_sha256=None)
+        retained = chain.with_name('retained.pem')
+        chain.rename(retained)
+        with patch.object(m, '_panel_ssl_context', return_value=(object(), b'leaf')), \
+                patch.object(m, '_panel_tls_exchange', return_value='ready') as probe:
+            self.assertEqual(session.probe_panel_tls(require_login=True), rejected)
+            chain.symlink_to(retained)
+            self.assertEqual(session.probe_panel_tls(require_login=True), rejected)
+            probe.assert_not_called()
+            chain.unlink()
+            retained.rename(chain)
+            self.assertEqual(session.probe_panel_tls(require_login=True)['status'], 'ready')
+            chain.rename(retained)
+            self.cycle.write(chain, PUBLIC_CHAIN)
+            self.assertEqual(session.probe_panel_tls(require_login=True), rejected)
+            self.assertEqual(probe.call_count, 1)
+
+    def test_configuration_or_public_chain_drift_during_probe_refuses_ready(self):
+        for changed in ('chain', 'config'):
+            with self.subTest(changed=changed):
+                if changed == 'chain':
+                    config, chain = self.tls_fixture()
+                else:
+                    self.cycle.write(chain, PUBLIC_CHAIN)
+                session, _, _ = self.checked()
+                def mutate(*args, **kwargs):
+                    if changed == 'chain':
+                        self.cycle.write(chain, PUBLIC_CHAIN+b'\n')
+                    else:
+                        config['port'] += 1
+                    return 'ready'
+                with patch.object(m, '_panel_ssl_context', return_value=(object(), b'leaf')), \
+                        patch.object(m, '_panel_tls_exchange', side_effect=mutate):
+                    self.assertEqual(session.probe_panel_tls(require_login=True), dict(status='rejected', trust_sha256=None))
+                session.close()
+
+    def test_managed_probe_does_not_load_provided_chain_or_return_digest(self):
+        self.tls_fixture(mode='managed')
+        session, _, _ = self.checked()
+        with patch.object(m, '_panel_ssl_context', return_value=(object(), None)) as load, \
+                patch.object(m, '_panel_tls_exchange', return_value='ready'):
+            self.assertEqual(session.probe_panel_tls(require_login=True), dict(status='ready', trust_sha256=None))
+        load.assert_called_once_with(None)
+    def test_real_leases_cold_fd_backup_bind_and_one_recovery_cycle_preserve_config_and_stop(self):
+        session,context,prepared=self.checked()
+        self.assertFalse(context['selection_initialized']);self.assertEqual(len(self.calls),2)
+        self.assertEqual(self.calls[0][2],self.calls[1][2]);self.assertTrue(self.cycle.busy(self.root/'.operation.lock'))
+        # The last stop before real writer acquisition is the final user intent.
+        value=self.read_state('sing-box');value['enabled']=False;self.write_state('sing-box',value)
+        final=session.execute();self.cycle.assert_writers(True)
+        snapshot=dict(schema=1,kind='core-backup-closure-v1',selection=context['selection'],
+                      intents=final['final_intents'],panel_was_running=True)
+        result=session.backup_core(snapshot)
+        self.assertEqual(tools.file_digest(self.root/'backups'/result['backup_name']),result['backup_sha256'])
+        with zipfile.ZipFile(self.root/'backups'/result['backup_name']) as outer:
+            with zipfile.ZipFile(io.BytesIO(outer.read('data/snapshot.zip'))) as inner:
+                self.assertEqual(set(json.loads(inner.read('runtime/sing-box/state.json'))),{'revision','enabled'})
+        bound=session.bind_core_ids(result['backup_sha256'])
+        self.assertEqual(bound['intents']['sing-box']['artifact_id'],s.reference_identity(self.candidate))
+        for core,(raw,revision) in self.saved.items():
+            self.assertEqual((self.data/'runtime'/core/(revision+'.json')).read_bytes(),raw)
+            self.assertFalse(self.read_state(core)['enabled']);self.assertEqual(self.read_state(core)['schema'],2)
+        session.release_writers_for_trial();self.cycle.assert_writers(False);session._operation_proof()
+        session.reacquire_writers();self.cycle.assert_writers(True)
+        restored=session.restore_core_ids();self.assertEqual(restored['selection'],context['selection'])
+        self.assertEqual(self.read_state('sing-box')['artifact_id'],context['intents']['sing-box']['artifact_id'])
+        session.release_reacquired_writers();self.cycle.assert_writers(False)
+        self.assertTrue(self.cycle.busy(self.root/'.operation.lock'));session.close()
+        self.assertFalse(self.cycle.busy(self.root/'.operation.lock'));self.assertFalse(self.files.layout.root.exists())
+    def test_unknown_state2_without_selection_and_cas_fail_without_writer_or_native(self):
+        self.write_state('xray',dict(schema=2,artifact_id='b'*64,revision=self.saved['xray'][1],enabled=False))
+        session=self.session()
+        with self.assertRaises(m.CoreMaintenanceError):session.prepare()
+        self.assertEqual(self.calls,[]);self.assertFalse(self.cycle.busy(self.root/'.operation.lock'))
+    def test_application_manifest_can_exceed_component_metadata_budget(self):
+        bulk=self.payload/'bulk-source';bulk.mkdir()
+        for i in range(470):
+            self.cycle.write(bulk/(f'{i:04d}'+'x'*48),b'fixture')
+        manifest=self.cycle.manifest;manifest['files']=tools.files_in(self.payload)
+        raw=json.dumps(manifest).encode();self.assertGreater(len(raw),m.a.MAX_JSON)
+        self.cycle.write(self.payload/tools.MANIFEST,raw)
+        ready=json.loads(self.cycle.ready.read_bytes());ready['manifest_sha256']=tools.digest(raw)
+        self.cycle.write(self.cycle.ready,json.dumps(ready).encode())
+        self.assertEqual(tools.verify_payload(self.payload),manifest)
+        context=self.session().prepare()
+        self.assertEqual(context['application']['manifest_sha256'],tools.digest(raw))
+
+    def test_state2_appearing_before_first_cold_check_is_not_legacy_observation(self):
+        session=self.session();context=session.prepare()
+        value=self.read_state('sing-box')
+        value.update(schema=2,artifact_id=context['intents']['sing-box']['artifact_id'])
+        self.write_state('sing-box',value)
+        with self.assertRaisesRegex(m.CoreMaintenanceError,'SELECTION_REQUIRED'):
+            session.check_core(s._reference_map(self.candidate))
+        self.assertEqual(self.calls,[])
+
+    def test_policy_fence_rejects_unapplied_modes_before_any_native_or_stop(self):
+        with sqlite3.connect(self.data/'v-ui.db') as db:
+            db.execute("ALTER TABLE inbounds ADD COLUMN routing_mode TEXT")
+            db.execute("INSERT INTO inbounds VALUES(1,'fake','relay')")
+        session=self.session();session.prepare()
+        with self.assertRaises(tools.ReleaseError):session.check_core(s._reference_map(self.candidate))
+        self.assertEqual(self.calls,[]);self.assertFalse((self.root/'.panel.lease').exists())
+        self.assertFalse((self.data/'proxy-state').exists())
+    def test_source_changes_during_coldcheck_or_before_final_writer_are_rejected(self):
+        def mutate(argv,**kwargs):
+            self.executor(argv,**kwargs)
+            if '-c' in argv:
+                value=self.read_state('sing-box');value['enabled']=False;self.write_state('sing-box',value)
+        session=self.session(executor=mutate);session.prepare()
+        with self.assertRaises(m.CoreMaintenanceError):session.check_core(s._reference_map(self.candidate))
+        self.assertFalse((self.root/'.panel.lease').exists());session.close()
+        session,_,_=self.checked()
+        self.cycle.write(self.cycle.config,b'changed bootstrap')
+        # fake anchor is explicitly replaced to represent independently observed drift.
+        self.cycle.anchor=('changed','c'*64)
+        with self.assertRaises(tools.ReleaseError):session.execute()
+    def test_unused_core_missing_state_remains_missing_and_stopped(self):
+        (self.data/'runtime/xray/state.json').unlink()
+        session,context,result=self.backed()
+        self.assertEqual(context['intents']['xray']['revision'],None)
+        session.bind_core_ids(result['backup_sha256'])
+        self.assertFalse((self.data/'runtime/xray/state.json').exists())
+    def test_backup_before_snapshot_sha_tamper_and_phase_checks_do_not_bind(self):
+        session,context,_=self.checked()
+        with self.assertRaises(m.CoreMaintenanceError):session.bind_core_ids('a'*64)
+        final=session.execute()
+        bad=dict(schema=1,kind='core-backup-closure-v1',selection=context['selection'],
+                 intents=deepcopy(final['final_intents']),panel_was_running=False)
+        bad['intents']['sing-box']['enabled']=False
+        with self.assertRaises(m.CoreMaintenanceError):session.backup_core(bad)
+        good=deepcopy(bad);good['intents']=final['final_intents'];result=session.backup_core(good)
+        with self.assertRaises(m.CoreMaintenanceError):session.bind_core_ids('b'*64)
+        archive=self.root/'backups'/result['backup_name'];archive.write_bytes(archive.read_bytes()+b'x')
+        with self.assertRaises(m.CoreMaintenanceError):session.bind_core_ids(result['backup_sha256'])
+        self.assertNotIn('schema',self.read_state('sing-box'))
+    def test_repair_refuses_unknown_identity_and_does_not_overwrite_state(self):
+        session,_,result=self.backed();session.bind_core_ids(result['backup_sha256'])
+        session.release_writers_for_trial();session.reacquire_writers()
+        value=self.read_state('sing-box');value['artifact_id']='c'*64;self.write_state('sing-box',value)
+        with self.assertRaises(m.CoreMaintenanceError):session.restore_core_ids()
+        self.assertEqual(self.read_state('sing-box'),value)
+    def test_closed_or_forged_writer_guard_cannot_create_backup(self):
+        session,context,_=self.checked();final=session.execute();session._writers.close()
+        snapshot=dict(schema=1,kind='core-backup-closure-v1',selection=context['selection'],
+                      intents=final['final_intents'],panel_was_running=False)
+        with self.assertRaises(m.CoreMaintenanceError):session.backup_core(snapshot)
+        self.assertFalse((self.root/'backups').exists())
+    def test_existing_proxy_disappears_after_preread_does_not_initialize_defaults(self):
+        from app.services.proxy_store import ProxyStore
+        ProxyStore(self.data).read_snapshot()
+        original=tools._validate_restore_policy
+        def disappear(data,**kwargs):
+            (data/'proxy-state').rename(data/'retained-proxy-state')
+            (data/'.proxy-state-initialized').rename(data/'retained-proxy-marker')
+            return original(data,**kwargs)
+        session=self.session();session.prepare()
+        with patch.object(tools,'_validate_restore_policy',side_effect=disappear):
+            with self.assertRaises(Exception):session.check_core(s._reference_map(self.candidate))
+        self.assertEqual(self.calls,[]);self.assertFalse((self.data/'proxy-state').exists())
+        self.assertFalse((self.data/'.proxy-state-initialized').exists())
+        self.assertTrue((self.data/'retained-proxy-state/state.json').is_file())
+    def test_cold_check_native_failure_never_acquires_writers_or_changes_state(self):
+        states={core:self.read_state(core) for core in s.CORES}
+        def failed(argv,**kwargs):raise RuntimeError('fake binary rejected configuration')
+        session=self.session(executor=failed);session.prepare()
+        with self.assertRaises(RuntimeError):session.check_core(s._reference_map(self.candidate))
+        self.assertFalse((self.root/'.panel.lease').exists())
+        self.assertEqual({core:self.read_state(core) for core in s.CORES},states)
+        with self.assertRaises(m.CoreMaintenanceError):session.execute()
+    def test_policy_is_rechecked_after_native_observation_and_under_final_writers(self):
+        session,_,_=self.checked()
+        with sqlite3.connect(self.data/'v-ui.db') as db:
+            db.execute('ALTER TABLE inbounds ADD COLUMN routing_mode TEXT')
+            db.execute("INSERT INTO inbounds VALUES(1,'fake','relay')")
+        with self.assertRaises(tools.ReleaseError):session.execute()
+        self.assertNotIn('schema',self.read_state('sing-box'))
+        with self.assertRaises(m.CoreMaintenanceError):session.release_writers_for_trial()
+    def test_xray_coldcheck_uses_fixed_test_command_and_same_verified_fd(self):
+        candidate=self.material.add('xray','26.10.21');observed=[]
+        def executor(argv,**kwargs):
+            fd=int(argv[0].rsplit('/',1)[1]);observed.append((argv,os.fstat(fd).st_ino))
+            if argv[1]!='version':
+                self.assertEqual(argv[1:-1],['run','-test','-format=json','-c'])
+                config=int(argv[-1].rsplit('/',1)[1]);self.assertEqual(os.pread(config,1024,0),self.saved['xray'][0])
+        session=self.session(core='xray',executor=executor);session.prepare();session.check_core(s._reference_map(candidate))
+        self.assertEqual(len(observed),2);self.assertEqual(observed[0][1],observed[1][1])
+        self.assertFalse((self.root/'.panel.lease').exists())
+    def test_confirmed_context_cas_and_before_material_qualification_are_independent(self):
+        # This seam supplies a fake authenticated M5 selection. Material still
+        # uses the real independent fixture catalog/store, never this object.
+        probe=self.session();context=probe.prepare();before=probe._before;probe.close()
+        slots=tuple(s.CoreSlot(slot.core,self.candidate,slot.current) if slot.core=='sing-box' else slot for slot in before.slots)
+        current=s._build(before.app_source,before.target,8,slots)
+        self.write_state('sing-box',dict(schema=2,artifact_id=s.reference_identity(self.candidate),
+            revision=self.saved['sing-box'][1],enabled=True))
+        files=types.SimpleNamespace(read_boot=lambda **kwargs:current)
+        wrong=self.session(selection_files=files)
+        with self.assertRaises(m.CoreMaintenanceError):wrong.prepare()
+        session=self.session(selection_files=files,expected_selection_revision=current.revision)
+        facts=session.prepare();self.assertTrue(facts['selection_initialized'])
+        self.assertEqual(facts['selection']['revision'],current.revision);session.close()
+        directory=self.material.store.layout.root
+        # Remove only the fixture's independently verified current material.
+        directory.rename(directory.with_name('retained-material'))
+        session=self.session(selection_files=files,expected_selection_revision=current.revision)
+        with self.assertRaises(Exception):session.prepare()
+        self.assertEqual(self.calls,[])
+    def test_root_pending_does_not_bypass_shared_admission_but_real_writer_can_backup(self):
+        from app.data_owner import DataOwnerError, data_owner
+        owner=importlib.import_module('app.data_owner')
+        session,context,_=self.checked()
+        pending=self.cycle.base/'fake-root-pending';self.cycle.write(pending,b'not an authorization')
+        with patch.object(owner,'_CORE_UPDATE_PENDING',pending):
+            with self.assertRaises(DataOwnerError):
+                with data_owner(self.data):pass
+            final=session.execute()
+            snapshot=dict(schema=1,kind='core-backup-closure-v1',selection=context['selection'],
+                          intents=final['final_intents'],panel_was_running=False)
+            result=session.backup_core(snapshot)
+            self.assertEqual(tools.file_digest(self.root/'backups'/result['backup_name']),result['backup_sha256'])
+            session.bind_core_ids(result['backup_sha256'])
+        self.assertEqual(pending.read_bytes(),b'not an authorization')
+    @patch.object(m, '_command_group', return_value=501)
+    @patch.object(m, '_require_clean_subtree')
+    def test_native_executor_bounds_version_and_cleans_failed_fake_child(self, clean, group):
+        class Child:
+            def __init__(self,raw):
+                read,write=os.pipe();os.write(write,raw);os.close(write)
+                self.stdout=os.fdopen(read,'rb');self.done=False;self.killed=False
+            def wait(self,**kwargs):self.done=True;return 0
+            def poll(self):return 0 if self.done else None
+            def kill(self):self.killed=True;self.done=True
+        child=Child(b'sing-box version 1.14.3\n')
+        with patch.object(m.subprocess,'Popen',return_value=child) as popen:
+            m._command(['/fake-verified-fd','version'],timeout=1,expected_version='1.14.3')
+        self.assertTrue(child.stdout.closed);self.assertFalse(child.killed)
+        self.assertEqual(popen.call_args.kwargs['stdin'],m.subprocess.DEVNULL)
+        self.assertEqual(popen.call_args.kwargs['stderr'],m.subprocess.DEVNULL)
+        self.assertFalse(popen.call_args.kwargs.get('start_new_session',False))
+        child=Child(b'sing-box version 1.14.2\n')
+        with patch.object(m.subprocess,'Popen',return_value=child):
+            with self.assertRaises(m.CoreMaintenanceError):
+                m._command(['/fake-verified-fd','version'],timeout=1,expected_version='1.14.3')
+        self.assertTrue(child.stdout.closed);self.assertTrue(child.killed)
+        self.assertEqual(clean.call_count,2)
+
+    @patch.object(m, '_command_group', return_value=501)
+    def test_native_executor_refuses_success_with_live_descendant(self, group):
+        class Fatal(BaseException):
+            pass
+        child=types.SimpleNamespace(wait=lambda **kw:0,poll=lambda:0,stdout=None)
+        def abort(pid):
+            self.assertEqual(pid,501)
+            raise Fatal
+        with patch.object(m.subprocess,'Popen',return_value=child), \
+                patch.object(m.os,'waitid',return_value=None,create=True), \
+                patch.object(m,'_abort_command_group',side_effect=abort):
+            with self.assertRaises(Fatal):
+                m._command(['/fake-verified-fd','check'],timeout=1)
+
+    def test_writer_closed_during_application_read_cannot_bind_either_state(self):
+        session,_,result=self.backed()
+        original=session._unchanged_application
+        def close_during_read():
+            original()
+            session._writers.close()
+        with patch.object(session,'_unchanged_application',side_effect=close_during_read):
+            with self.assertRaises(m.CoreMaintenanceError):
+                session.bind_core_ids(result['backup_sha256'])
+        for core in s.CORES:
+            self.assertNotIn('schema',self.read_state(core))
+        self.cycle.assert_writers(False)
+
+    def test_writer_closed_after_first_state_write_cannot_bind_second(self):
+        session,_,result=self.backed();original=tools.atomic_json;writes=[]
+        def close_after_write(path,value):
+            original(path,value)
+            writes.append(path)
+            session._writers.close()
+        with patch.object(tools,'atomic_json',side_effect=close_after_write):
+            with self.assertRaises(m.CoreMaintenanceError):
+                session.bind_core_ids(result['backup_sha256'])
+        self.assertEqual(len(writes),1)
+        self.assertEqual(sum(self.read_state(core).get('schema')==2 for core in s.CORES),1)
+
+    def test_reacquired_writer_closed_during_state_read_cannot_repair(self):
+        session,_,result=self.backed()
+        session.bind_core_ids(result['backup_sha256'])
+        session.release_writers_for_trial();session.reacquire_writers()
+        original=session._observe_states
+        def close_during_read():
+            states=original()
+            session._writers.close()
+            return states
+        with patch.object(session,'_observe_states',side_effect=close_during_read):
+            with self.assertRaises(m.CoreMaintenanceError):
+                session.restore_core_ids()
+        self.assertEqual(self.read_state('sing-box')['artifact_id'],s.reference_identity(self.candidate))
+
+
+
+
+class PrivatePanelTLSTests(unittest.TestCase):
+    def test_public_chain_enables_partial_chain_without_default_trust_and_rejects_other_pem(self):
+        context = Mock(verify_flags=0)
+        with patch.object(m.ssl, 'SSLContext', return_value=context) as create, \
+                patch.object(m.ssl, 'create_default_context') as defaults, \
+                patch.object(m.ssl, 'VERIFY_X509_PARTIAL_CHAIN', 0x80000, create=True):
+            installed, leaf = m._panel_ssl_context(PUBLIC_CHAIN)
+            self.assertIs(installed, context)
+            self.assertEqual(leaf, b'cert')
+            self.assertEqual(context.verify_flags, 0x80000)
+            create.assert_called_once_with(m.ssl.PROTOCOL_TLS_CLIENT)
+            context.load_verify_locations.assert_called_once_with(cadata=PUBLIC_CHAIN.decode('ascii'))
+            defaults.assert_not_called()
+            for invalid in (b'', PUBLIC_CHAIN+b'-----BEGIN PRIVATE KEY-----\nYQ==\n-----END PRIVATE KEY-----\n',
+                            PUBLIC_CHAIN.replace(b'Y2VydA==', b'Y2VydA=')):
+                with self.assertRaises(ValueError):
+                    m._panel_ssl_context(invalid)
+
+    def exchange(self, *, status_line=b'HTTP/1.1 200 OK\r\n', leaf=b'cert',
+                 bind_error=None, handshake_error=None, require_login=True):
+        endpoint = ('::1',3215,0,0)
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        connection.getsockname.return_value = ('::1',54321,0,0)
+        connection.getpeername.return_value = endpoint
+        connection.bind.side_effect = bind_error
+        tls = MagicMock()
+        tls.__enter__.return_value = tls
+        tls.getpeercert.return_value = leaf
+        tls.recv.side_effect = [status_line,b'']
+        context = Mock()
+        context.wrap_socket.return_value = tls
+        context.wrap_socket.side_effect = handshake_error
+        with patch.object(m.socket, 'socket', return_value=connection), \
+                patch.object(m.socket, 'getaddrinfo', return_value=[(None,None,None,None,endpoint)]) as lookup:
+            result = m._panel_tls_exchange(m.ipaddress.ip_address('::1'),3215,'panel.example.test',
+                context,b'cert',require_login=require_login)
+        self.assertEqual(lookup.call_args.args[-1],m.socket.AI_NUMERICHOST)
+        connection.bind.assert_called_once_with(('::1',0,0,0))
+        return result, connection, context, tls
+
+    def test_pinned_leaf_and_hostname_checked_before_fixed_login_request(self):
+        result, connection, context, tls = self.exchange()
+        self.assertEqual(result,'ready')
+        connection.connect.assert_called_once_with(('::1',3215,0,0))
+        context.wrap_socket.assert_called_once_with(connection, server_hostname='panel.example.test')
+        tls.getpeercert.assert_called_once_with(binary_form=True)
+        tls.sendall.assert_called_once_with(b'GET /login HTTP/1.1\r\nHost: panel.example.test:3215\r\nConnection: close\r\n\r\n')
+        result, _, _, tls = self.exchange(leaf=b'other otherwise-valid leaf')
+        self.assertEqual(result,'rejected')
+        tls.sendall.assert_not_called()
+
+    def test_nonlocal_address_certificate_failure_timeout_and_login_status_fail_closed(self):
+        result, connection, _, _ = self.exchange(bind_error=OSError('address is not local'))
+        self.assertEqual(result,'rejected')
+        connection.connect.assert_not_called()
+        result, _, _, _ = self.exchange(handshake_error=m.ssl.SSLCertVerificationError('hostname mismatch'))
+        self.assertEqual(result,'rejected')
+        result, _, _, _ = self.exchange(handshake_error=TimeoutError('handshake timed out'))
+        self.assertEqual(result,'retry')
+        for line, expected in ((b'HTTP/1.1 503 Service Unavailable\r\n','pending'),
+                               (b'HTTP/1.1 302 Found\r\n','rejected'),(b'malformed','rejected')):
+            with self.subTest(line=line):
+                self.assertEqual(self.exchange(status_line=line)[0],expected)
+        result, _, _, tls = self.exchange(require_login=False)
+        self.assertEqual(result,'ready')
+        tls.sendall.assert_not_called()
+
+
+if __name__=='__main__':unittest.main()

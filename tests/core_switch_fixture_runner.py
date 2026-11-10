@@ -1,0 +1,565 @@
+#!/usr/bin/python3
+"""GitHub-hosted system fixture for the installed private core coordinator.
+
+The transport emulates one release using the same job's staged candidate.
+It never contacts GitHub or grants publication/native qualification. The
+installed coordinator, worker, store, service and kernel paths remain real.
+"""
+from contextlib import ExitStack, contextmanager
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import socket
+import stat
+import sys
+import threading
+import types
+
+
+FIXTURE = Path('/run/vui-core-switch-fixture')
+CONTROL = Path('/usr/local/lib/v-ui')
+REPOSITORY = 'ForceMind/V-UI'
+REPOSITORY_ID = 1110299182
+API = 'https://api.github.com/repos/' + REPOSITORY
+WEB = 'https://github.com/' + REPOSITORY
+RELEASE_IDS = {'sing-box': 7_000_000_000_000_000_001, 'xray': 7_000_000_000_000_000_101}
+TARGETS = ('x86_64-gnu', 'x86_64-musl', 'aarch64-gnu', 'aarch64-musl')
+MAX_SMALL = 64_000
+MAX_PACK = 100_000_000
+CHUNK = 1024 * 1024
+
+
+class Refused(RuntimeError):
+    pass
+
+
+def require(condition, code):
+    if not condition:
+        raise Refused(code)
+
+
+def encoded(value):
+    return json.dumps(value, ensure_ascii=True, allow_nan=False, separators=(',', ':')).encode('ascii')
+
+
+def decode(raw):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result, 'FIXTURE_JSON')
+            result[key] = value
+        return result
+
+    def invalid(_):
+        raise Refused('FIXTURE_JSON')
+
+    value = json.loads(raw.decode('utf-8'), object_pairs_hook=unique, parse_constant=invalid)
+    require(type(value) is dict, 'FIXTURE_JSON')
+    return value
+
+
+def identity(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def directory(stack, parent, name, *, private=False):
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open(name, flags, dir_fd=parent)
+    stack.callback(os.close, fd)
+    info = os.fstat(fd)
+    require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022
+            and (not private or stat.S_IMODE(info.st_mode) == 0o700 and info.st_gid == 0),
+            'FIXTURE_DIRECTORY')
+    return fd
+
+
+def fixed_directory(stack, path, *, private=False):
+    fd = directory(stack, None, '/')
+    for index, name in enumerate(path.parts[1:], 2):
+        fd = directory(stack, fd, name, private=private and index == len(path.parts))
+    return fd
+
+
+class File:
+    def __init__(self, stack, parent, name, limit, *, fixture=False):
+        self.parent, self.name = parent, name
+        self.fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        stack.callback(os.close, self.fd)
+        info = os.fstat(self.fd)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1
+                and not info.st_mode & 0o022 and 0 < info.st_size <= limit
+                and (not fixture or info.st_gid == 0 and stat.S_IMODE(info.st_mode) in (0o600, 0o644)),
+                'FIXTURE_FILE')
+        self.size = info.st_size
+        self.record = identity(info)
+
+    def stable(self):
+        require(identity(os.fstat(self.fd)) == self.record
+                and identity(os.stat(self.name, dir_fd=self.parent, follow_symlinks=False)) == self.record,
+                'FIXTURE_FILE_CHANGED')
+
+    def small(self):
+        value = os.pread(self.fd, self.size + 1, 0)
+        require(len(value) == self.size, 'FIXTURE_FILE_CHANGED')
+        self.stable()
+        return value
+
+    def digest(self):
+        hasher = hashlib.sha256()
+        offset = 0
+        while offset < self.size:
+            block = os.pread(self.fd, min(CHUNK, self.size-offset), offset)
+            require(bool(block), 'FIXTURE_FILE_CHANGED')
+            hasher.update(block)
+            offset += len(block)
+        self.stable()
+        return hasher.hexdigest()
+
+
+def installed_modules(stack):
+    root = fixed_directory(stack, CONTROL)
+    receipt = decode(File(stack, root, 'ops-control.json', MAX_SMALL).small())
+    require(type(receipt.get('schema')) is int and receipt['schema'] == 1
+            and receipt.get('service_manager') == 'systemd'
+            and receipt.get('system_python') == '/usr/bin/python3'
+            and type(receipt.get('files')) is dict, 'FIXTURE_RECEIPT')
+    sources = []
+    for filename in ('system_ops.py', 'core_maintenance_control.py'):
+        path = str(CONTROL/filename)
+        raw = File(stack, root, filename, 4_000_000).small()
+        require(receipt['files'].get(path) == hashlib.sha256(raw).hexdigest(), 'FIXTURE_RECEIPT')
+        sources.append((path, raw))
+    modules = []
+    for index, (path, raw) in enumerate(sources):
+        name = f'_vui_ci_installed_core_{index}'
+        require(name not in sys.modules, 'FIXTURE_NAMESPACE')
+        module = types.ModuleType(name)
+        module.__file__ = path
+        sys.modules[name] = module
+        stack.callback(sys.modules.pop, name, None)
+        exec(compile(raw, path, 'exec'), module.__dict__)
+        modules.append(module)
+    return modules
+
+
+class Response:
+    def __init__(self, url, payload, *, corrupt=False):
+        self.url, self.payload, self.corrupt = url, payload, corrupt
+        self.size = len(payload) if isinstance(payload, bytes) else payload.size
+        self.headers = {'Content-Length': str(self.size)}
+        self.offset = 0
+        self.closed = False
+
+    def geturl(self):
+        return self.url
+
+    def getcode(self):
+        return 200
+
+    def read1(self, count):
+        require(not self.closed and 0 < count <= CHUNK, 'FIXTURE_RESPONSE')
+        end = min(self.offset + count, self.size)
+        if isinstance(self.payload, bytes):
+            block = self.payload[self.offset:end]
+        else:
+            block = os.pread(self.payload.fd, end-self.offset, self.offset)
+            require(len(block) == end-self.offset, 'FIXTURE_FILE_CHANGED')
+        if self.corrupt and self.offset == 0 and block:
+            block = bytes((block[0] ^ 1,)) + block[1:]
+        self.offset = end
+        return block
+
+    def close(self):
+        self.closed = True
+        if isinstance(self.payload, File):
+            self.payload.stable()
+
+
+class FixtureOpener:
+    def __init__(self, stack, folder, source, *, core, bad_digest=False):
+        require(type(core) is str and core in RELEASE_IDS, 'FIXTURE_CANDIDATE')
+        core_directory = directory(stack, folder, core, private=True)
+        candidate = directory(stack, core_directory, 'candidate', private=True)
+        manifest = File(stack, candidate, 'CORE-RELEASE.json', MAX_SMALL, fixture=True)
+        record = decode(manifest.small())
+        version, tag = record.get('version'), record.get('tag')
+        require(record.get('core') == core and type(version) is str and type(tag) is str
+                and len(tag) <= 100 and re.fullmatch(r'(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}', version)
+                and re.fullmatch(re.escape(f'core-{core}-v{version}-r')+r'[1-9][0-9]{0,8}', tag)
+                and record.get('kind') == 'core-release-v1' and record.get('builder_source') == source
+                and type(record.get('compatibility')) is dict
+                and record['compatibility'].get('app_sources') == [source], 'FIXTURE_CANDIDATE')
+        self.core = core
+        self.release_id = RELEASE_IDS[core]
+        self.corrupted = False
+        self.error_type = None
+        packs = {f'vui-core-{core}-{version}-{target}.zip' for target in TARGETS}
+        require(set(os.listdir(candidate)) == packs | {'CORE-RELEASE.json','SHA256SUMS'}, 'FIXTURE_CANDIDATE')
+        files = {'CORE-RELEASE.json': manifest,
+                 'SHA256SUMS': File(stack, candidate, 'SHA256SUMS', MAX_SMALL, fixture=True)}
+        files.update({name:File(stack, candidate, name, MAX_PACK, fixture=True) for name in sorted(packs)})
+        self.assets = {}
+        self.bad_digest = bad_digest
+        asset_rows = []
+        for index, (name, payload) in enumerate(sorted(files.items()), 1):
+            identifier = self.release_id + index
+            url = API + '/releases/assets/' + str(identifier)
+            self.assets[url] = (payload, name in packs)
+            asset_rows.append(dict(id=identifier, name=name, size=payload.size, digest='sha256:'+payload.digest(),
+                                   state='uploaded', url=url,
+                                   browser_download_url=WEB+'/releases/download/'+tag+'/'+name))
+        release = API + '/releases/' + str(self.release_id)
+        self.metadata = {
+            API: encoded(dict(id=REPOSITORY_ID, full_name=REPOSITORY, private=False)),
+            release: encoded(dict(id=self.release_id, url=release, html_url=WEB+'/releases/tag/'+tag,
+                                  tag_name=tag, draft=False, prerelease=False,
+                                  published_at='2026-01-01T00:00:00Z', assets=asset_rows)),
+            API+'/git/ref/tags/'+tag: encoded(dict(ref='refs/tags/'+tag,
+                url=API+'/git/refs/tags/'+tag, object=dict(type='commit', sha=source,
+                                                         url=API+'/git/commits/'+source))),
+        }
+
+    def open(self, request, timeout):
+        url = request.full_url
+        require(request.get_method() == 'GET' and 0 < timeout <= 10, 'FIXTURE_ROUTE')
+        if url in self.metadata:
+            return Response(url, self.metadata[url])
+        require(url in self.assets, 'FIXTURE_ROUTE')
+        payload, native_pack = self.assets[url]
+        payload.stable()
+        corrupt = self.bad_digest and native_pack
+        if corrupt:
+            require(not self.corrupted, 'FIXTURE_ROUTE')
+            self.corrupted = True
+        return Response(url, payload, corrupt=corrupt)
+
+
+def inject_transport(control, opener):
+    original = control._modules
+
+    @contextmanager
+    def modules(ops):
+        with original(ops) as loaded:
+            require(loaded.github.API == API and loaded.github.WEB == WEB
+                    and loaded.artifacts.REPOSITORY_ID == REPOSITORY_ID, 'FIXTURE_REPOSITORY')
+            client = loaded.github.GitHubCoreClient
+            opener.error_type = loaded.github.CoreGitHubError
+            loaded.github.GitHubCoreClient = lambda: client(opener=opener)
+            yield loaded
+
+    control._modules = modules
+
+
+def inject_assertions(control, source, core, port, *, interrupt=False):
+    original_context = control._Switch._context
+
+    def context(task, name, revision):
+        original_context(task, name, revision)
+        require(task.source['app_source'] == source and name == core, 'FIXTURE_SOURCE')
+
+    control._Switch._context = context
+    attempts = []
+    if port is None and not interrupt:
+        return attempts
+    original_activate = control._Switch._activate
+
+    def activate(task, state, intents, *, recovery, cleanup=False):
+        if recovery:
+            return original_activate(task, state, intents, recovery=True, cleanup=cleanup)
+        if interrupt:
+            require(not cleanup and task.released and state == task.after, 'FIXTURE_INTERRUPT')
+            task.services.prove_stopped()
+            task._proof()
+            journal = task.files.read_switch_recovery()
+            require(journal['transaction'] == task.transaction and journal['phase'] == 'trial',
+                    'FIXTURE_INTERRUPT_JOURNAL')
+            print('VUI_CORE_FIXTURE_INTERRUPT_BEFORE_TRIAL', flush=True)
+            os.kill(os.getpid(), signal.SIGKILL)
+            raise Refused('FIXTURE_SIGNAL_NOT_DELIVERED')
+        require(not attempts and not cleanup and task.initial['v-ui.service'] == 'active'
+                and intents[core]['enabled'] and port != task.config['port'], 'FIXTURE_PORT')
+        task.services.prove_stopped()
+        task._proof()
+        with ExitStack() as stack:
+            ipv4 = stack.enter_context(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
+            ipv4.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            ipv4.bind(('127.0.0.1', port))
+            ipv4.listen(1)
+            ipv6 = stack.enter_context(socket.socket(socket.AF_INET6, socket.SOCK_STREAM))
+            ipv6.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            ipv6.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            ipv6.bind(('::1', port))
+            ipv6.listen(1)
+            attempts.append(port)
+            return original_activate(task, state, intents, recovery=False, cleanup=False)
+
+    control._Switch._activate = activate
+    return attempts
+
+
+def parse(arguments):
+    require(len(arguments) in (4, 5), 'FIXTURE_INPUT')
+    core, action, source, revision = arguments[:4]
+    require(core in RELEASE_IDS and action in ('update', 'rollback', 'bad-digest', 'port-conflict', 'interrupt')
+            and re.fullmatch('[a-f0-9]{40}', source)
+            and (revision == 'none' or re.fullmatch('[a-f0-9]{64}', revision))
+            and (len(arguments) == 5) == (action == 'port-conflict'), 'FIXTURE_INPUT')
+    port = None
+    if action == 'port-conflict':
+        require(re.fullmatch('[0-9]{4,5}', arguments[4]), 'FIXTURE_INPUT')
+        port = int(arguments[4])
+        require(1024 <= port <= 65535, 'FIXTURE_INPUT')
+    return core, action, source, None if revision == 'none' else revision, port
+
+
+FIRST_FAILURE_MARKER = 'VUI_CORE_SWITCH_FIRST_FAILURE '
+FIRST_FAILURE_FIELDS = frozenset(('coordinator','activation','worker_event','code','transaction_present',
+                                  'stop_attempted','released','confirming','broker_state'))
+FIRST_CONTROL_CODES = frozenset(('CORE_PANEL_TLS_TIMEOUT','CORE_PANEL_TLS_REJECTED','CORE_PANEL_TRUST_CHANGED',
+    'CORE_PANEL_IDENTITY_CHANGED','CORE_PANEL_IDENTITY_TIMEOUT','CORE_WORKER_PROTOCOL','CORE_PROBE_REJECTED',
+    'CORE_PENDING_MISSING','CORE_CONFIRMATION_CHANGED','CORE_RELEASE_UNCONFIRMED','CORE_TASK_CANCELLED',
+    'CORE_RECOVERY_REQUIRED','INSTALLATION_PROOF'))
+FIRST_BROKER_CODES = frozenset(('DEADLINE','CANCELLED','BROKER_STATE','BROKER_FAILED','PROOF_FAILED',
+    'IDENTITY_CHANGED','CLIENT_REVOKED','CONTEXT_CHANGED','THREAD_STILL_RUNNING','CLEANUP_FAILED','IO_ERROR',
+    'EOF','PROTOCOL','ENDPOINT_CHANGED','ENDPOINT_LIVE','LISTEN_FAILED','SERVICE_IDENTITY','NOT_ARMED'))
+FIRST_OPS_CODES = {
+    'service is not in a stable supported state':'UNIT_TRANSITION',
+    'service action failed':'UNIT_ACTION', 'service stop unconfirmed':'STOP_UNCONFIRMED',
+    'services remain active':'UNIT_STILL_ACTIVE', 'service descendants remain':'DESCENDANTS_REMAIN',
+    'service topology was not restored':'TOPOLOGY_DRIFT', 'systemd configuration drift':'UNIT_CONFIG_DRIFT',
+    'managed panel process not ready for identity':'PANEL_IDENTITY_NOT_READY',
+    'managed panel process identity changed':'PANEL_IDENTITY_CHANGED',
+    'active service missing process identity':'PANEL_IDENTITY_MISSING',
+    'systemd query failed':'SYSTEMD_QUERY', 'operation timed out':'OPS_TIMEOUT',
+    'worker closed protocol':'WORKER_PROTOCOL_CLOSED','worker exited early':'WORKER_EXITED',
+    'child identity lost':'WORKER_IDENTITY_LOST','child cleanup unconfirmed':'WORKER_CLEANUP_UNCONFIRMED'}
+FIRST_CODES = FIRST_CONTROL_CODES | {'BROKER_'+name for name in FIRST_BROKER_CODES} | set(FIRST_OPS_CODES.values()) | {'UNKNOWN'}
+FIRST_EVENTS = frozenset(('CONTEXT','UNKNOWN','CORE_CONTEXT','PREPARED','CORE_QUIESCED','CORE_BACKED_UP',
+    'CORE_IDS_BOUND','TRIAL_WRITERS_RELEASED','WRITERS_REACQUIRED','CORE_IDS_RESTORED',
+    'RECOVERY_WRITERS_RELEASED','CORE_RECOVERY_PREPARED','CORE_RECOVERY_BOUND','PANEL_TLS','OPERATION_HELD'))
+FIRST_BROKER_STATES = frozenset(('none','unknown','new','listening','failed','claimed','ready','probed',
+                                'probe_failed','released','revoked','closed'))
+
+
+def first_failure_diagnostic(stderr):
+    """Accept one exact fixed fixture marker; never echo other child output."""
+    if type(stderr) is not str or len(stderr)>1024:return ''
+    lines=stderr.splitlines()
+    if len(lines)!=1 or not lines[0].startswith(FIRST_FAILURE_MARKER):return ''
+    try:
+        raw=lines[0][len(FIRST_FAILURE_MARKER):].encode('ascii')
+        value=decode(raw)
+        require(set(value)==FIRST_FAILURE_FIELDS and encoded(value)==raw,'FIXTURE_DIAGNOSTIC')
+        require(value['coordinator'] in ('SWITCH','ACTIVATE','TLS')
+            and value['activation'] in ('none','trial','recovery','cleanup')
+            and value['worker_event'] in FIRST_EVENTS and value['code'] in FIRST_CODES
+            and value['broker_state'] in FIRST_BROKER_STATES
+            and all(value[name] is None or type(value[name]) is bool for name in
+                    ('transaction_present','stop_attempted','released','confirming')),'FIXTURE_DIAGNOSTIC')
+    except (ValueError,TypeError,UnicodeError,Refused):return ''
+    return ' '+FIRST_FAILURE_MARKER+raw.decode('ascii')
+
+
+class _SwitchTrace(list):
+    def __init__(self):
+        super().__init__(['CONTEXT'])
+        self.first_failure=None
+        self._first_lock=threading.Lock()
+        self.task=None
+        self.coordinator='SWITCH'
+        self.activation='none'
+        self.worker_event='CONTEXT'
+
+    def remember(self,error,ops,control,*,worker_event=None):
+        # Claim and freeze scope before formatting a known code. A concurrent
+        # proof callback must not replace the first reporter. Broker diagnostics
+        # read only its fixed private state value and never acquire its lock.
+        with self._first_lock:
+            if self.first_failure is not None:return
+            task=self.task
+            broker=getattr(task,'broker',None)
+            def flag(name):
+                value=getattr(task,name,None)
+                return value if type(value) is bool else None
+            self.first_failure=dict(coordinator=self.coordinator,activation=self.activation,
+                worker_event=self.worker_event if worker_event is None else worker_event,code='UNKNOWN',
+                transaction_present=(getattr(task,'transaction') is not None) if hasattr(task,'transaction') else None,
+                stop_attempted=flag('stop_attempted'),released=flag('released'),confirming=flag('confirming'),
+                broker_state='unknown')
+        code='UNKNOWN'
+        if type(error) is control.CoreControlError:
+            candidate=str(error)
+            if candidate in FIRST_CONTROL_CODES:code=candidate
+        elif isinstance(error,ops.Refused):
+            code=FIRST_OPS_CODES.get(str(error),'UNKNOWN')
+        else:
+            broker_type=getattr(getattr(task,'wire',None),'CoreBootBrokerError',None)
+            if type(broker_type) is type and isinstance(error,broker_type):
+                candidate=getattr(error,'code',None)
+                if type(candidate) is str and candidate in FIRST_BROKER_CODES:code='BROKER_'+candidate
+        with self._first_lock:self.first_failure['code']=code
+        try:state='none' if broker is None else vars(broker).get('_state','unknown')
+        except TypeError:state='unknown'
+        if type(state) is not str or state not in FIRST_BROKER_STATES:state='unknown'
+        with self._first_lock:self.first_failure['broker_state']=state
+
+    def emit(self):
+        with self._first_lock:
+            value=None if self.first_failure is None else self.first_failure.copy()
+        if value is not None:
+            print(FIRST_FAILURE_MARKER+encoded(value).decode('ascii'),file=sys.stderr,flush=True)
+
+
+def trace_switch(control,ops):
+    """Preserve the first fixed failure separately from the final error code."""
+    trace=_SwitchTrace()
+    exchange=control._Worker.exchange
+    activate=control._Switch._activate
+    tls=control._Switch._tls
+    run_switch=control._Switch.run
+
+    def traced_exchange(worker,request,event,fields=()):
+        failure_event=event.upper() if type(event) is str and event.upper() in FIRST_EVENTS else 'UNKNOWN'
+        trace.worker_event=failure_event
+        if event=='operation_held':
+            try:return exchange(worker,request,event,fields)
+            except BaseException as error:
+                trace[0]='OPERATION_HELD'
+                trace.remember(error,ops,control,worker_event=failure_event)
+                raise
+        if re.fullmatch(r'[a-z_]{1,30}',event):trace[0]=event.upper()
+        try:return exchange(worker,request,event,fields)
+        except BaseException as error:
+            trace.remember(error,ops,control,worker_event=failure_event)
+            raise
+
+    def traced_activate(task,state,intents,*,recovery,cleanup=False):
+        previous=(trace.task,trace.coordinator,trace.activation)
+        trace.task,trace.coordinator=task,'ACTIVATE'
+        trace.activation='cleanup' if cleanup else ('recovery' if recovery else 'trial')
+        trace[0]='CLEANUP' if cleanup else ('RESTORE_BEFORE' if recovery else 'TRIAL')
+        try:return activate(task,state,intents,recovery=recovery,cleanup=cleanup)
+        except BaseException as error:
+            trace.remember(error,ops,control)
+            raise
+        finally:trace.task,trace.coordinator,trace.activation=previous
+
+    def traced_tls(task,identity,*,login=False):
+        previous=(trace.task,trace.coordinator)
+        trace.task,trace.coordinator=task,'TLS'
+        try:return tls(task,identity,login=login)
+        except BaseException as error:
+            trace.remember(error,ops,control)
+            raise
+        finally:trace.task,trace.coordinator=previous
+
+    def traced_run(task,*args,**kwargs):
+        previous=trace.task;trace.task=task
+        try:return run_switch(task,*args,**kwargs)
+        except BaseException as error:
+            trace.remember(error,ops,control)
+            raise
+        finally:trace.task=previous
+
+    control._Worker.exchange=traced_exchange
+    control._Switch._activate=traced_activate
+    control._Switch._tls=traced_tls
+    control._Switch.run=traced_run
+    return trace
+
+
+def switch_error_code(error, ops, control, stage):
+    codes = []
+    for _ in range(4):
+        if error is None:
+            break
+        if type(error) is control.CoreControlError:
+            value = str(error)
+            if re.fullmatch(r'CORE_[A-Z0-9_]{1,29}', value) and value not in codes:
+                codes.append(value)
+        elif isinstance(error, ops.Refused):
+            codes.append({
+                'service is not in a stable supported state': 'UNIT_TRANSITION',
+                'service action failed': 'UNIT_ACTION',
+                'service stop unconfirmed': 'STOP_UNCONFIRMED',
+                'services remain active': 'UNIT_STILL_ACTIVE',
+                'service descendants remain': 'DESCENDANTS_REMAIN',
+                'service topology was not restored': 'TOPOLOGY_DRIFT',
+                'systemd configuration drift': 'UNIT_CONFIG_DRIFT',
+                'managed panel process not ready for identity': 'PANEL_IDENTITY_NOT_READY',
+                'managed panel process identity changed': 'PANEL_IDENTITY_CHANGED',
+                'active service missing process identity': 'PANEL_IDENTITY_MISSING',
+                'systemd query failed': 'SYSTEMD_QUERY',
+                'operation timed out': 'OPS_TIMEOUT',
+                'worker closed protocol': 'WORKER_PROTOCOL_CLOSED',
+                'worker exited early': 'WORKER_EXITED',
+                'child identity lost': 'WORKER_IDENTITY_LOST',
+                'child cleanup unconfirmed': 'WORKER_CLEANUP_UNCONFIRMED',
+            }.get(str(error), 'OPS_REFUSED'))
+        elif isinstance(error, OSError) and type(error.errno) is int and 0 < error.errno < 4096:
+            codes.append('ERRNO_'+str(error.errno))
+        error = error.__cause__ or error.__context__
+    return '_'.join((stage, *(codes or ['FIXTURE_SWITCH_REFUSED'])))[:80]
+
+
+def run(arguments):
+    require(sys.platform == 'linux' and os.geteuid() == 0
+            and os.getpid() == os.getpgrp() == os.getsid(0)
+            and sys.executable == '/usr/bin/python3'
+            and sys.flags.isolated and sys.flags.no_site and sys.flags.dont_write_bytecode
+            and os.environ.get('GITHUB_ACTIONS') == 'true'
+            and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted'
+            and os.environ.get('GITHUB_REPOSITORY') == REPOSITORY
+            and Path(__file__) == FIXTURE/'runner.py', 'FIXTURE_SCOPE')
+    core, action, source, revision, port = parse(arguments)
+    with ExitStack() as stack:
+        folder = fixed_directory(stack, FIXTURE, private=True)
+        File(stack, folder, 'runner.py', 4_000_000, fixture=True).stable()
+        ops, control = installed_modules(stack)
+        opener = FixtureOpener(stack, folder, source, core=core, bad_digest=action == 'bad-digest')
+        inject_transport(control, opener)
+        conflicts = inject_assertions(control, source, opener.core, port, interrupt=action == 'interrupt')
+        trace = trace_switch(control,ops)
+        switch_action = 'rollback' if action == 'rollback' else 'update'
+        try:
+            result = control.switch(ops, core=opener.core, action=switch_action,
+                expected_revision=revision, release_id=opener.release_id if switch_action == 'update' else None)
+        except Exception as error:
+            trace.emit()
+            if (action == 'bad-digest' and opener.corrupted and type(error) is opener.error_type
+                    and str(error) == 'ASSET_DIGEST'):
+                raise Refused('ASSET_DIGEST') from None
+            raise Refused(switch_error_code(error, ops, control, trace[0])) from None
+        expected = 'restored_previous' if action == 'port-conflict' else 'switched'
+        require(action != 'bad-digest' and result.get('outcome') == expected
+                and type(result.get('panel_running')) is bool
+                and type(result.get('selection_revision')) is str
+                and re.fullmatch('[a-f0-9]{64}', result['selection_revision'])
+                and (port is None or conflicts == [port]), 'FIXTURE_OUTCOME')
+        answer = dict(ok=True, outcome=expected, selection_revision=result['selection_revision'],
+                      panel_running=result['panel_running'])
+        if action == 'update':
+            name, digest = result.get('backup_name'), result.get('backup_sha256')
+            require(type(name) is str and re.fullmatch(r'core-maintenance-[a-f0-9]{32}\.zip', name)
+                    and type(digest) is str and re.fullmatch('[a-f0-9]{64}', digest), 'FIXTURE_BACKUP')
+            answer.update(backup_name=name, backup_sha256=digest)
+        return answer
+
+
+def main():
+    try:
+        result = run(sys.argv[1:])
+    except Refused as error:
+        result = dict(ok=False, error=str(error))
+    except BaseException:
+        result = dict(ok=False, error='FIXTURE_SWITCH_REFUSED')
+    print(encoded(result).decode('ascii'))
+    return 0 if result['ok'] else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

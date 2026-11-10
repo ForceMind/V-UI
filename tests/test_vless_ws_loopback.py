@@ -27,6 +27,7 @@ from app.services.core_manager import SingBoxAdapter
 from app.services.mihomo_routing import default_routing
 from app.services.routing_store import read_snapshot, save_routing
 import test_subscription_tokens as grant_tests
+from tests.core_candidate_context import singbox_client
 from loopback_helpers import (
     certificate_files, start_http_target, unused_port, http_through, CoreProcess,
 )
@@ -253,8 +254,9 @@ class VLESSWebSocketLoopbackTests(unittest.TestCase):
             command = [os.environ["VUI_TEST_MIHOMO"], "-d", home, "-f", str(path)]
         else:
             path = self.exported_singbox(grant, port)
-            self.check_command([self.singbox, "check", "-c", str(path)], env=env)
-            command = [self.singbox, "run", "-c", str(path)]
+            binary = singbox_client(self.singbox)
+            self.check_command([binary, "check", "-c", str(path)], env=env)
+            command = [binary, "run", "-c", str(path)]
         process = (ReadyMihomoProcess if client in ("mihomo", "mihomo-uri") else CoreProcess)(self.stack, command, self.root / f"{client}-client-{port}.log", env)
         process.start(port)
         return process, port

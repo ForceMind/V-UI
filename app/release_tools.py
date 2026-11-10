@@ -1,6 +1,7 @@
 """Offline, per-user release control. No root, daemon installation, or network calls."""
 from __future__ import annotations
-from contextlib import contextmanager, ExitStack, nullcontext
+from contextlib import closing, contextmanager, ExitStack, nullcontext
+import errno
 import fcntl
 import hashlib
 import json
@@ -11,6 +12,7 @@ import re
 import shutil
 import sqlite3
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -381,12 +383,13 @@ def lease(path: Path):
         finally: fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 @contextmanager
-def _offline_writers(data: Path):
+def _offline_writers(data: Path, *, stable=True):
     """Stable whole-data exclusion plus leases used by older source workers."""
     from app.data_owner import data_owner, DataOwnerError
     try:
         with ExitStack() as stack:
-            stack.enter_context(data_owner(data, exclusive=True))
+            if stable:
+                stack.enter_context(data_owner(data, exclusive=True))
             if os.path.lexists(data):
                 with _maintenance_directory(data): pass
                 for relative, name in (('runtime/xray', 'owner.lock'),
@@ -403,14 +406,31 @@ def _offline_writers(data: Path):
 @contextmanager
 def writer_operation(root: Path):
     """Stopped in-process writer; let it claim its own component worker locks."""
-    from app.data_owner import data_owner, DataOwnerError
+    from app.data_owner import data_owner, DataOwnerError, core_update_pending
     try:
         with lease(root / '.operation.lock'), lease(root / '.panel.lease'), data_owner(root / 'data', exclusive=True):
+            if core_update_pending():
+                raise ReleaseError('核心维护尚未完成，请先恢复核心事务')
             if os.path.lexists(root / 'RESTORE_PENDING.json'):
                 raise ReleaseError('An interrupted restore requires recover-restore before writes')
             yield
     except DataOwnerError:
         raise ReleaseError('A data writer is active or its ownership is unsafe; stop it first') from None
+
+
+def _require_legacy_core_selection():
+    from app.data_owner import core_selection_present
+    if core_selection_present():
+        raise ReleaseError('检测到独立核心选择或未完成事务，当前操作需要支持核心选择的恢复流程')
+
+
+@contextmanager
+def _legacy_stopped(root: Path):
+    _require_legacy_core_selection()
+    with stopped(root) as guard:
+        _require_legacy_core_selection()
+        _require_legacy_runtime_states(root / 'data')
+        yield guard
 
 
 @contextmanager
@@ -661,6 +681,9 @@ def stage(archive: Path, expected_sha: str, root: Path) -> str:
 
 def _stage_locked(guard: _OperationGuard, archive: Path, expected_sha: str) -> str:
     guard._check_operation(); root=guard.root; key=target_key()
+    from app.data_owner import core_update_pending
+    if core_update_pending():
+        raise ReleaseError('核心维护尚未完成，请先恢复核心事务')
     with tempfile.TemporaryDirectory(prefix='.stage-',dir=root) as temporary:
         payload=Path(temporary)/'payload'; meta=unpack_verified(archive,expected_sha,payload)
         if meta.get('kind')!='release' or meta.get('platform')!=PLATFORM or key not in meta.get('targets',[]):
@@ -698,7 +721,12 @@ def _stage_locked(guard: _OperationGuard, archive: Path, expected_sha: str) -> s
         except Exception:
             shutil.rmtree(final); raise
 
-def active(root: Path) -> tuple[Path,dict]:
+def active_verified(root: Path) -> tuple[Path,dict,dict,dict]:
+    """Reuse the full active verification result inside trusted boot code.
+
+    The returned dictionaries are observations of this verification, not a
+    transferable authority token or a seal against subsequent owner writes.
+    """
     try:
         current=json.loads((root/'CURRENT.json').read_text()); identity=release_id(current['release_id'])
         release=root/'releases'/identity
@@ -707,22 +735,42 @@ def active(root: Path) -> tuple[Path,dict]:
         if digest((release/'payload'/MANIFEST).read_bytes()) != ready['manifest_sha256']:
             raise ReleaseError('Release manifest changed after health check')
         if meta['release_id'] != identity: raise ReleaseError('Release identity mismatch')
-        return release,current
+        return release,current,meta,ready
     except (OSError,ValueError,KeyError,TypeError): raise ReleaseError('No verified active release') from None
+
+def active(root: Path) -> tuple[Path,dict]:
+    release,current,_,_=active_verified(root)
+    return release,current
 
 def activate(root: Path, identity: str):
     root=private_root(root); identity=release_id(identity)
-    with stopped(root) as guard:
+    with _legacy_stopped(root) as guard:
         _activate_locked(guard, identity)
 
 
-def _database_mode_fence(data: Path):
+def _readonly_proxy_store_type():
+    """Private offline checker reader, retaining normal ownership and flock."""
+    from app.services.proxy_store import ProxyStore
+    class ExistingProxyStore(ProxyStore):
+        def _locked(self, allow_uncertain=False, initialize=True):
+            return super()._locked(allow_uncertain=allow_uncertain, initialize=False)
+    return ExistingProxyStore
+
+
+def _policy_store(data, existing_type=None):
+    from app.services.proxy_store import ProxyStore
+    if existing_type is not None and (not isinstance(existing_type, type) or not issubclass(existing_type, ProxyStore)):
+        raise ReleaseError('Invalid private policy reader')
+    return (ProxyStore if existing_type is None else existing_type)(data)
+
+
+def _database_mode_fence(data: Path, *, _existing_store_type=None):
     """Minimal stdlib controller gate; never invent a missing proxy store."""
     from app.services.proxy_store import ProxyStore
     from app.services.inbound_policy import MODES
     data = Path(data)
     names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
-    schema = (ProxyStore(data).policy_schema_version()
+    schema = (_policy_store(data, _existing_store_type).policy_schema_version()
               if any(os.path.lexists(data / name) for name in names) else 1)
     with sqlite3.connect((data / 'v-ui.db').as_uri() + '?mode=ro', uri=True) as db:
         columns = {row[1] for row in db.execute('PRAGMA table_info(inbounds)')}
@@ -749,12 +797,51 @@ def _migrate_legacy_modes(data: Path):
     with (data / 'v-ui.db').open('rb') as handle: os.fsync(handle.fileno())
 
 
-def _policy_runtime(data: Path, core: str):
+
+def _check_policy_artifact_ids(value):
+    if value is not None and (type(value) is not dict or set(value) != {'sing-box', 'xray'}
+            or any(type(identity) is not str or not re.fullmatch('[0-9a-f]{64}', identity)
+                   for identity in value.values())):
+        raise ReleaseError('Runtime artifact bindings are invalid')
+
+
+_RUNTIME_STATE_MEMBERS = ('runtime/sing-box/state.json', 'runtime/xray/state.json')
+
+
+def _legacy_runtime_state(state):
+    return (type(state) is dict and set(state) == {'revision', 'enabled'}
+            and type(state['revision']) is str and re.fullmatch('[0-9a-f]{64}', state['revision'])
+            and type(state['enabled']) is bool)
+
+
+def _unique_runtime_fields(pairs):
+    fields = dict(pairs)
+    if len(fields) != len(pairs):
+        raise ValueError('Duplicate core runtime field')
+    return fields
+
+
+def _require_legacy_runtime_states(data: Path, *, check_configs=False):
+    for core in ('sing-box', 'xray'):
+        try:
+            _policy_runtime(data, core, _state_only=not check_configs)
+        except (OSError, ValueError, RecursionError, ReleaseError):
+            raise ReleaseError('核心运行状态需要独立核心恢复，已停止旧格式操作') from None
+
+
+def _policy_runtime(data: Path, core: str, *, _expected_artifact_id=None, _state_only=False):
     """Strict saved runtime bytes for an offline controller, without launch."""
+    if _expected_artifact_id is not None and (type(_expected_artifact_id) is not str
+            or not re.fullmatch('[0-9a-f]{64}', _expected_artifact_id)):
+        raise ReleaseError('Runtime artifact binding is invalid')
     directory = data / 'runtime' / core
-    if not os.path.lexists(directory) or not os.path.lexists(directory / 'state.json'):
-        return {'revision': None, 'enabled': False}, None
-    with _maintenance_directory(directory) as root:
+    with ExitStack() as scope:
+        try:
+            root = scope.enter_context(_maintenance_directory(directory))
+            os.stat('state.json', dir_fd=root, follow_symlinks=False)
+        except FileNotFoundError:
+            return {'revision': None, 'enabled': False}, None
+
         def read(name, limit):
             descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=root)
             try:
@@ -764,28 +851,35 @@ def _policy_runtime(data: Path, core: str):
                     raise ReleaseError('Committed proxy runtime file is unsafe')
                 with os.fdopen(os.dup(descriptor), 'rb') as handle: return handle.read(limit + 1)
             finally: os.close(descriptor)
-        state = json.loads(read('state.json', 4096))
-        if (type(state) is not dict or set(state) != {'revision', 'enabled'}
-                or type(state['revision']) is not str or not re.fullmatch('[0-9a-f]{64}', state['revision'])
-                or type(state['enabled']) is not bool):
+        state = json.loads(read('state.json', 4096), object_pairs_hook=_unique_runtime_fields)
+        legacy = _legacy_runtime_state(state)
+        modern = (type(_expected_artifact_id) is str and re.fullmatch('[0-9a-f]{64}', _expected_artifact_id)
+                  and type(state) is dict and set(state) == {'schema', 'revision', 'enabled', 'artifact_id'}
+                  and type(state['schema']) is int and state['schema'] == 2
+                  and state['artifact_id'] == _expected_artifact_id)
+        if (not (legacy or modern) or type(state.get('revision')) is not str
+                or not re.fullmatch('[0-9a-f]{64}', state['revision']) or type(state.get('enabled')) is not bool):
             raise ReleaseError('Committed proxy runtime state is invalid')
+        if _state_only:
+            return state, None
         raw = read(state['revision'] + '.json', 16 * 1024 * 1024)
     if digest(raw) != state['revision']:
         raise ReleaseError('Committed proxy runtime files disagree')
-    config = json.loads(raw)
+    config = json.loads(raw, object_pairs_hook=_unique_runtime_fields)
     if type(config) is not dict or type(config.get('inbounds', [])) is not list:
         raise ReleaseError('Committed proxy runtime configuration is invalid')
     return state, config
 
 
-def _committed_policy_protection(data: Path):
+def _committed_policy_protection(data: Path, *, _artifact_ids=None, _existing_store_type=None):
     """Protected IDs and exact inbound bindings from immutable runtime bytes.
 
     The controller deliberately does not import the ORM or compiler. Reading
     current SQL here would let an unapplied edit erase committed protection.
     """
     from app.services.proxy_store import ProxyStore
-    store = ProxyStore(data)
+    _check_policy_artifact_ids(_artifact_ids)
+    store = _policy_store(data, _existing_store_type)
     active = store.load_active(reject_pending=True)
     if active is None:
         return {'local': False, 'global': False, 'bindings': []}
@@ -798,7 +892,8 @@ def _committed_policy_protection(data: Path):
     revision = active['core_revision']
     if context['candidate_core_revision'] != revision or not re.fullmatch('[0-9a-f]{64}', revision):
         raise ReleaseError('Committed proxy runtime identity is invalid')
-    state, config = _policy_runtime(data, 'sing-box')
+    state, config = _policy_runtime(data, 'sing-box',
+        _expected_artifact_id=_artifact_ids['sing-box'] if _artifact_ids is not None else None)
     if state['revision'] != revision or config is None:
         raise ReleaseError('Committed proxy runtime files disagree')
     plan = store.context_plan(context, flags)
@@ -833,11 +928,12 @@ def _committed_policy_protection(data: Path):
             'bindings': sorted(bindings, key=lambda item: item['id'])}
 
 
-def _validate_restore_policy(data: Path):
+def _validate_restore_policy(data: Path, *, _artifact_ids=None, _existing_store_type=None):
     """Exact v2 source check without starting cores or importing runtime deps."""
     from app.services.proxy_store import ProxyStore
-    explicit = _database_mode_fence(data)
-    store = ProxyStore(data)
+    _check_policy_artifact_ids(_artifact_ids)
+    explicit = _database_mode_fence(data, _existing_store_type=_existing_store_type)
+    store = _policy_store(data, _existing_store_type)
     active = store.load_active(reject_pending=True)
     if active is None:
         if explicit:
@@ -855,9 +951,11 @@ def _validate_restore_policy(data: Path):
             raise ReleaseError('Backup rows differ from their committed inbound policy')
     elif explicit:
         raise ReleaseError('Backup contains unapplied inbound modes; dedicated recovery is required')
-    protection = _committed_policy_protection(data)
+    protection = _committed_policy_protection(data, _artifact_ids=_artifact_ids,
+        _existing_store_type=_existing_store_type)
     if protection['global'] or protection['bindings']:
-        xray, _ = _policy_runtime(data, 'xray')
+        xray, _ = _policy_runtime(data, 'xray',
+            _expected_artifact_id=_artifact_ids['xray'] if _artifact_ids is not None else None)
         if xray['enabled']:
             raise ReleaseError('Backup has incompatible active Xray and relay runtimes')
 
@@ -915,63 +1013,71 @@ def _activate_locked(guard: _StoppedGuard, identity: str):
 
 def backup(root: Path, destination: Path) -> str:
     root=private_root(root)
-    with stopped(root) as guard:
+    with _legacy_stopped(root) as guard:
         return _backup_locked(guard, destination)
+
+
+def _copy_backup_data(guard: _StoppedGuard, work: Path):
+    """Copy a stopped private data snapshot; old/new archive layouts share it."""
+    guard._check(); data=guard.root/'data'
+    private_files = set()
+    if not data.is_dir(): raise ReleaseError('No data directory to back up')
+    from app.certificates.dns_backup import DNSBackupError, validate_dns_snapshot, prepare_dns_staging
+    try:
+        source_dns = validate_dns_snapshot(data)
+    except DNSBackupError:
+        raise ReleaseError('DNS state is unsafe or incomplete; no backup was created') from None
+    # The initialized marker is required to distinguish saved state from a
+    # never-applied installation. Copy it only as part of a validated,
+    # locked proxy snapshot; do not broaden the general hidden-file rule.
+    proxy_names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
+    if any(os.path.lexists(data / name) for name in proxy_names):
+        from app.services.proxy_store import ProxyStore, ProxyStorageError
+        try:
+            with ProxyStore(data).backup_snapshot() as entries:
+                for name, content in entries:
+                    target = work / name
+                    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    with target.open('xb') as output:
+                        output.write(content); output.flush(); os.fsync(output.fileno())
+                    target.chmod(0o600); private_files.add(name)
+        except ProxyStorageError:
+            raise ReleaseError('Proxy state is unsafe or incomplete; no backup was created') from None
+    for name in files_in(data, excluded=proxy_names):
+        if name.endswith(('owner.lock','.db-wal','.db-shm')) or name.startswith('.'): continue
+        if name=='v-ui.db': continue
+        target=work/name; target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+        with (data/name).open('rb') as source, target.open('xb') as output:
+            writer = _PrivateArchiveFile(output)
+            shutil.copyfileobj(source, writer, STREAM_CHUNK)
+            writer.finish_writes()
+        target.chmod(0o600); private_files.add(name)
+    if (data/'v-ui.db').is_file():
+        with sqlite3.connect(f'file:{data / "v-ui.db"}?mode=ro',uri=True) as src, sqlite3.connect(work/'v-ui.db') as dst:
+            src.backup(dst)
+            if dst.execute('PRAGMA integrity_check').fetchone()[0] != 'ok': raise ReleaseError('Database integrity check failed')
+    # SQLite retains its existing backup/transaction path and is not cooled.
+    try:
+        prepare_dns_staging(work)
+        copied_dns = validate_dns_snapshot(work)
+        if copied_dns != source_dns:
+            raise DNSBackupError()
+    except DNSBackupError:
+        raise ReleaseError('DNS backup reference closure is incomplete; no backup was created') from None
+    kind = 'backup-dns01-v1' if copied_dns else 'backup'
+    return private_files, kind
 
 
 def _backup_locked(guard: _StoppedGuard, destination: Path) -> str:
     guard._check(); root=guard.root
     with tempfile.TemporaryDirectory(prefix='.backup-',dir=root) as temporary:
         data=root/'data'; work=Path(temporary)/'data'; work.mkdir(mode=0o700)
-        private_files = set()
-        if not data.is_dir(): raise ReleaseError('No data directory to back up')
-        from app.certificates.dns_backup import DNSBackupError, validate_dns_snapshot, prepare_dns_staging
-        try:
-            source_dns = validate_dns_snapshot(data)
-        except DNSBackupError:
-            raise ReleaseError('DNS state is unsafe or incomplete; no backup was created') from None
-        # The initialized marker is required to distinguish saved state from a
-        # never-applied installation. Copy it only as part of a validated,
-        # locked proxy snapshot; do not broaden the general hidden-file rule.
-        proxy_names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
-        if any(os.path.lexists(data / name) for name in proxy_names):
-            from app.services.proxy_store import ProxyStore, ProxyStorageError
-            try:
-                with ProxyStore(data).backup_snapshot() as entries:
-                    for name, content in entries:
-                        target = work / name
-                        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                        with target.open('xb') as output:
-                            output.write(content); output.flush(); os.fsync(output.fileno())
-                        target.chmod(0o600); private_files.add(name)
-            except ProxyStorageError:
-                raise ReleaseError('Proxy state is unsafe or incomplete; no backup was created') from None
-        for name in files_in(data, excluded=proxy_names):
-            if name.endswith(('owner.lock','.db-wal','.db-shm')) or name.startswith('.'): continue
-            if name=='v-ui.db': continue
-            target=work/name; target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
-            with (data/name).open('rb') as source, target.open('xb') as output:
-                writer = _PrivateArchiveFile(output)
-                shutil.copyfileobj(source, writer, STREAM_CHUNK)
-                writer.finish_writes()
-            target.chmod(0o600); private_files.add(name)
-        if (data/'v-ui.db').is_file():
-            with sqlite3.connect(f'file:{data / "v-ui.db"}?mode=ro',uri=True) as src, sqlite3.connect(work/'v-ui.db') as dst:
-                src.backup(dst)
-                if dst.execute('PRAGMA integrity_check').fetchone()[0] != 'ok': raise ReleaseError('Database integrity check failed')
-        # SQLite retains its existing backup/transaction path and is not cooled.
-        try:
-            prepare_dns_staging(work)
-            copied_dns = validate_dns_snapshot(work)
-            if copied_dns != source_dns:
-                raise DNSBackupError()
-        except DNSBackupError:
-            raise ReleaseError('DNS backup reference closure is incomplete; no backup was created') from None
-        kind = 'backup-dns01-v1' if copied_dns else 'backup'
+        private_files,kind=_copy_backup_data(guard,work)
         return create_archive(work,destination,{'kind':kind,'data_path':str(data),'platform':PLATFORM},
                               private_files=private_files)
 
 def recover_restore(root: Path):
+    _require_legacy_core_selection()
     root=private_root(root)
     with lease(root/'.operation.lock'), lease(root/'.panel.lease'), _offline_writers(root / 'data'):
         guard = _StoppedGuard(root)
@@ -987,6 +1093,7 @@ def recover_restore(root: Path):
 
 def _recover_restore_locked(guard: _StoppedGuard):
     guard._check_recovery(); root=guard.root
+    _require_legacy_core_selection()
     journal=root/'RESTORE_PENDING.json'
     if not os.path.lexists(journal): return
     _, _, raw, old = _maintenance_recovery_snapshot(root, legacy=type(guard) is _StoppedGuard)
@@ -994,6 +1101,7 @@ def _recover_restore_locked(guard: _StoppedGuard):
     if not safe_name(old) or not old.startswith('recovery/before-'):
         raise ReleaseError('Invalid recovery journal; manual inspection required')
     previous=root/old; data=root/'data'
+    _require_legacy_runtime_states(previous if previous.is_dir() else data)
     expected = value.get('source_sha256')
     if expected is not None:
         source = previous if previous.is_dir() else data
@@ -1008,21 +1116,223 @@ def _recover_restore_locked(guard: _StoppedGuard):
         raise ReleaseError('Restored source validation failed; journal retained')
     journal.unlink();sync_directory(root)
 
+def _check_legacy_backup_format(meta, data):
+    if (type(meta) is not dict or meta.get('kind') not in ('backup', 'backup-dns01-v1')
+            or meta.get('data_path') != str(data)):
+        raise ReleaseError('Backup belongs to a different data path or unsupported format; automatic path rewriting is not supported')
+
+
+def _bound_backup_zip_directory(stream):
+    # ZipFile allocates the directory and trusts its byte count, but not the
+    # declared entry count. Walk fixed headers before creating any ZipInfos.
+    end = zipfile._EndRecData(stream)
+    if end is None:
+        raise ReleaseError('Invalid backup ZIP directory')
+    count, remaining, offset = (end[zipfile._ECD_ENTRIES_TOTAL], end[zipfile._ECD_SIZE],
+                                end[zipfile._ECD_OFFSET])
+    zip64 = end[zipfile._ECD_SIGNATURE] == zipfile.stringEndArchive64
+    extension = zipfile.sizeEndCentDir64 + zipfile.sizeEndCentDir64Locator if zip64 else 0
+    if (not 0 < count <= 10_000 or not 46 * count <= remaining <= 16_000_000
+            or offset < 0 or offset + remaining + extension != end[zipfile._ECD_LOCATION]):
+        raise ReleaseError('Invalid backup ZIP directory')
+    stream.seek(offset)
+    for _ in range(count):
+        header = stream.read(46)
+        if len(header) != 46 or header[:4] != b'PK\x01\x02':
+            raise ReleaseError('Invalid backup ZIP directory')
+        fields = sum(struct.unpack_from('<HHH', header, 28))
+        remaining -= 46 + fields
+        if remaining < 0:
+            raise ReleaseError('Invalid backup ZIP directory')
+        stream.seek(fields, os.SEEK_CUR)
+    if remaining:
+        raise ReleaseError('Invalid backup ZIP directory')
+
+
+def _preflight_legacy_backup(stream, data):
+    try:
+        _bound_backup_zip_directory(stream)
+        with zipfile.ZipFile(stream) as archive:
+            names = archive.namelist()
+            for name, limit in ((MANIFEST, 4_000_000), *((name, 4096) for name in _RUNTIME_STATE_MEMBERS)):
+                count = names.count(name)
+                if count == 0 and name != MANIFEST:
+                    continue
+                if count != 1 or archive.getinfo(name).file_size > limit:
+                    raise ReleaseError('Invalid backup manifest or runtime state')
+                value = json.loads(archive.read(name), object_pairs_hook=_unique_runtime_fields)
+                if name == MANIFEST:
+                    _check_legacy_backup_format(value, data)
+                elif not _legacy_runtime_state(value):
+                    raise ReleaseError('备份包含独立核心状态，需要使用支持核心选择的恢复流程')
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile, RuntimeError) as exc:
+        if isinstance(exc, ReleaseError):
+            raise
+        raise ReleaseError('Invalid backup manifest or runtime state') from None
+
+
 def restore(root: Path, archive: Path, expected_sha: str):
     root=private_root(root)
-    with stopped(root) as guard:
+    with _legacy_stopped(root) as guard:
         _restore_locked(guard, archive, expected_sha)
+
+
+def _restore_policy_floor(current_data, incoming_data, incoming_proxy, *,
+                          _current_artifact_ids=None, _incoming_artifact_ids=None, _existing_store_type=None):
+    """Compare the committed runtime protection, never the uncommitted draft."""
+    proxy_names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
+    if not any(os.path.lexists(current_data/name) for name in proxy_names):
+        return 1
+    from app.services.proxy_store import ProxyStorageError
+    try:
+        current_store = _policy_store(current_data, _existing_store_type)
+        current = current_store.read_snapshot(initialize=False)
+        current_schema = current_store.policy_schema_version()
+    except ProxyStorageError:
+        raise ReleaseError('Current proxy policy is unknown; dedicated recovery is required') from None
+    if current['pending'] is not None:
+        raise ReleaseError('Current proxy apply is unresolved; dedicated recovery is required')
+    current_active = current['active']
+    incoming_active = incoming_proxy['active'] if incoming_proxy is not None else None
+    if current_active and any(current_active['settings'][key] and (
+            incoming_active is None or not incoming_active['settings'][key])
+            for key in ('local_proxy_enabled', 'relay_enabled')):
+        raise ReleaseError('Backup would turn off an active proxy; explicitly disable and commit those settings before restoring it')
+    protected = _committed_policy_protection(current_data, _artifact_ids=_current_artifact_ids,
+                                             _existing_store_type=_existing_store_type)
+    incoming_protected = (_committed_policy_protection(incoming_data, _artifact_ids=_incoming_artifact_ids,
+                             _existing_store_type=_existing_store_type) if incoming_proxy is not None
+                          else {'local': False, 'global': False, 'bindings': []})
+    if protected['bindings'] and protected['bindings'] != incoming_protected['bindings']:
+        raise ReleaseError('Backup changes committed protected inbound bindings; dedicated recovery is required')
+    return current_schema
+
+
+def _suspend_restore_dns(data):
+    from app.certificates.dns_backup import DNSBackupError, suspend_restored_dns
+    try:
+        suspend_restored_dns(data)
+    except DNSBackupError:
+        raise ReleaseError('Restored DNS authority could not be suspended; existing data was not replaced') from None
+
+
+def _writable_regular_fds():
+    """Observe actual file handles in the single-thread restore worker."""
+    root = '/proc/self/fd' if sys.platform.startswith('linux') else '/dev/fd'
+    result = {}
+    for name in os.listdir(root):
+        if not name.isdecimal():
+            continue
+        number = int(name)
+        try:
+            info = os.fstat(number)
+            flags = fcntl.fcntl(number, fcntl.F_GETFL)
+        except OSError as error:
+            if error.errno == errno.EBADF:  # listdir's descriptor has closed.
+                continue
+            raise
+        if stat.S_ISREG(info.st_mode) and (flags & os.O_ACCMODE) == os.O_RDWR:
+            result[number] = (info.st_dev, info.st_ino)
+    return result
+
+
+@contextmanager
+def _private_restore_database(data):
+    db_path = data/'v-ui.db'
+    with _maintenance_directory(data) as parent:
+        fd = os.open(db_path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        try:
+            before = os.fstat(fd)
+            if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                    or before.st_uid != os.geteuid() or stat.S_IMODE(before.st_mode) != 0o600):
+                raise ReleaseError('Unsafe restored database')
+            canonical = db_path.resolve(strict=True)
+            if canonical != db_path:
+                raise ReleaseError('Unsafe restored database')
+            previous_fds = _writable_regular_fds()
+            sqlite_fd = None
+
+            def verify(connection, *, changed=False):
+                nonlocal sqlite_fd
+                def signature(info):
+                    identity = (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid, info.st_nlink)
+                    return identity if changed else identity+(info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+                expected = signature(before)
+                opened = os.fstat(fd)
+                named = os.stat(db_path.name, dir_fd=parent, follow_symlinks=False)
+                if sqlite_fd is None:
+                    created = {number: identity for number, identity in _writable_regular_fds().items()
+                               if previous_fds.get(number) != identity}
+                    if len(created) != 1 or next(iter(created.values())) != (before.st_dev, before.st_ino):
+                        raise ReleaseError('Restored database changed during authorization cleanup')
+                    sqlite_fd = next(iter(created))
+                connected = os.fstat(sqlite_fd)
+                main = [name for _, key, name in connection.execute('PRAGMA database_list') if key == 'main']
+                if (main != [str(canonical)] or signature(opened) != expected
+                        or signature(named) != expected or signature(connected) != expected
+                        or db_path.resolve(strict=True) != canonical):
+                    raise ReleaseError('Restored database changed during authorization cleanup')
+
+            yield canonical.as_uri()+'?mode=rw', verify, fd
+        finally:
+            os.close(fd)
+
+
+def _revoke_restore_access(data, *, _strict_staging=False):
+    """Clear only restored authority in a caller-owned private extraction."""
+    db_path = data/'v-ui.db'
+    if not db_path.is_file() or (_strict_staging and db_path.is_symlink()):
+        raise ReleaseError('Backup has no database')
+    authority = {'admin_sessions', 'maintenance_sessions', 'maintenance_grants', 'subscription_grants'}
+    scope = _private_restore_database(data) if _strict_staging else nullcontext((db_path, None, None))
+    with scope as (location, verify, descriptor):
+        connection = sqlite3.connect(location, uri=True) if verify is not None else sqlite3.connect(location)
+        with closing(connection) as db:
+            if verify is not None:
+                verify(db)
+            if _strict_staging:
+                db.execute('PRAGMA foreign_keys=OFF')
+                db.execute('PRAGMA trusted_schema=OFF')
+                entries = db.execute("SELECT name,type,sql FROM sqlite_master WHERE type IN ('table','view')")
+                for name, kind, sql in entries:
+                    if name.lower() in authority and (name not in authority or kind != 'table'
+                            or not isinstance(sql, str) or not re.match(r'CREATE\s+TABLE\b', sql, re.I)):
+                        raise ReleaseError('Unsupported restored authorization schema')
+                targets = db.execute("SELECT tbl_name FROM sqlite_master WHERE type='trigger'")
+                if any(name.lower() in authority for name, in targets):
+                    raise ReleaseError('Restored authorization table has an unexpected trigger')
+            if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+                raise ReleaseError('Backup database is damaged')
+            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if not {'users', 'inbounds', 'admin_sessions', 'subscription_grants'} <= tables:
+                raise ReleaseError('Unsupported backup database schema')
+            db.execute('DELETE FROM admin_sessions')
+            if 'maintenance_sessions' in tables:
+                db.execute('DELETE FROM maintenance_sessions')
+            if 'maintenance_grants' in tables:
+                db.execute('DELETE FROM maintenance_grants')
+            db.execute('UPDATE subscription_grants SET revoked=1')
+            if _strict_staging and db.execute('PRAGMA foreign_key_check').fetchone() is not None:
+                raise ReleaseError('Restored authorization cleanup would leave invalid database references')
+            if verify is not None:
+                verify(db, changed=True)
+            db.commit()
+        if descriptor is not None:
+            os.fsync(descriptor)
+        else:
+            with db_path.open('rb') as handle:
+                os.fsync(handle.fileno())
 
 
 def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
     guard._check(); root=guard.root
     with tempfile.TemporaryDirectory(prefix='.restore-',dir=root) as temporary:
         work=Path(temporary)/'data'; meta=unpack_verified(archive,expected_sha,work)
-        if meta.get('kind') not in ('backup', 'backup-dns01-v1') or meta.get('data_path') != str(root/'data'):
-            raise ReleaseError('Backup belongs to a different data path or unsupported format; automatic path rewriting is not supported')
+        _check_legacy_backup_format(meta, root / 'data')
         (work/MANIFEST).unlink()
-        from app.certificates.dns_backup import (DNSBackupError, validate_dns_snapshot,
-                                                prepare_dns_staging, suspend_restored_dns)
+        _require_legacy_runtime_states(work)
+        from app.certificates.dns_backup import DNSBackupError, validate_dns_snapshot, prepare_dns_staging
         try:
             prepare_dns_staging(work)
             incoming_dns = validate_dns_snapshot(work)
@@ -1032,7 +1342,6 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
             raise ReleaseError('Backup DNS format or reference closure is invalid; existing data was not replaced') from None
         proxy_names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
         incoming_proxy = None
-        current_schema = 1
         if any(os.path.lexists(work / name) for name in proxy_names):
             from app.services.proxy_store import ProxyStore, ProxyStorageError
             try:
@@ -1064,61 +1373,20 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
                     raise ReleaseError('Backup contains an unresolved proxy apply; dedicated recovery is required')
             except (ProxyStorageError, OSError):
                 raise ReleaseError('Backup proxy state is unsafe or incomplete; existing data was not replaced') from None
-        if any(os.path.lexists(root / 'data' / name) for name in proxy_names):
-            # Restore is not a mode-decrease confirmation. Neither legacy nor
-            # proxy-bearing backups may silently replace an ON policy with OFF.
-            from app.services.proxy_store import ProxyStore, ProxyStorageError
-            try:
-                current_store = ProxyStore(root / 'data')
-                current = current_store.read_snapshot(initialize=False)
-                current_schema = current_store.policy_schema_version()
-            except ProxyStorageError:
-                raise ReleaseError('Current proxy policy is unknown; dedicated recovery is required') from None
-            if current['pending'] is not None:
-                raise ReleaseError('Current proxy apply is unresolved; dedicated recovery is required')
-            current_active = current['active']
-            incoming_active = incoming_proxy['active'] if incoming_proxy is not None else None
-            if current_active and any(current_active['settings'][key] and (
-                    incoming_active is None or not incoming_active['settings'][key])
-                    for key in ('local_proxy_enabled', 'relay_enabled')):
-                raise ReleaseError('Backup would turn off an active proxy; explicitly disable and commit those settings before restoring it')
-            protected = _committed_policy_protection(root / 'data')
-            incoming_protected = (_committed_policy_protection(work) if incoming_proxy is not None
-                                  else {'local': False, 'global': False, 'bindings': []})
-            if protected['bindings'] and protected['bindings'] != incoming_protected['bindings']:
-                raise ReleaseError('Backup changes committed protected inbound bindings; dedicated recovery is required')
+        current_schema = _restore_policy_floor(root/'data', work, incoming_proxy)
         _database_mode_fence(work)
         if incoming_proxy is not None:
             _validate_restore_policy(work)
         if current_schema == 2:
             # Ordinary restore cannot undo an already durable capability fence.
+            from app.services.proxy_store import ProxyStore
             _migrate_legacy_modes(work)
             ProxyStore(work).ensure_policy_v2()
         if (root / 'CURRENT.json').exists():
             _policy_release_compatible(work, active(root)[0] / 'payload')
         if incoming_dns:
-            try:
-                suspend_restored_dns(work)
-            except DNSBackupError:
-                raise ReleaseError('Restored DNS authority could not be suspended; existing data was not replaced') from None
-        db_path=work/'v-ui.db'
-        if not db_path.is_file(): raise ReleaseError('Backup has no database')
-        with sqlite3.connect(db_path) as db:
-            if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok': raise ReleaseError('Backup database is damaged')
-            tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            if not {'users','inbounds','admin_sessions','subscription_grants'} <= tables:
-                raise ReleaseError('Unsupported backup database schema')
-            # Restoring must never resurrect previously revoked access tokens.
-            db.execute('DELETE FROM admin_sessions')
-            # Restoring an old backup must not resurrect a revoked temporary
-            # maintenance link/session. Legacy archives may lack these tables.
-            if 'maintenance_sessions' in tables:
-                db.execute('DELETE FROM maintenance_sessions')
-            if 'maintenance_grants' in tables:
-                db.execute('DELETE FROM maintenance_grants')
-            db.execute('UPDATE subscription_grants SET revoked=1')
-            db.commit()
-        with db_path.open('rb') as handle: os.fsync(handle.fileno())
+            _suspend_restore_dns(work)
+        _revoke_restore_access(work)
         if not (root/'data').is_dir() or (root/'data').is_symlink():
             raise ReleaseError('Existing data directory is required for a reversible restore')
         # A managed transaction locks both inode generations before either rename.
@@ -1141,28 +1409,31 @@ def _restore_locked(guard: _StoppedGuard, archive: Path, expected_sha: str):
 
 @contextmanager
 def _maintenance_directory(path: Path, *, create=False):
-    """Open a private service-owned directory without following any path links."""
+    """Open a private service-owned directory without following any path links.
+
+    Retain ancestor FDs until exit so a close failure cannot leak a just-opened
+    child or cause retry of an already released/reused descriptor number.
+    """
     path = Path(path).absolute()
     if '..' in path.parts:
         raise ReleaseError('Unsafe maintenance directory')
-    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
-    try:
+    with ExitStack() as stack:
+        fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+        stack.callback(os.close, fd)
         for index, part in enumerate(path.parts[1:]):
             if create and index == len(path.parts) - 2:
                 try: os.mkdir(part, 0o700, dir_fd=fd)
                 except FileExistsError: pass
-            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-            os.close(fd); fd = next_fd
+            fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            stack.callback(os.close, fd)
         info = os.fstat(fd)
         if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700:
             raise ReleaseError('Maintenance directory must be private and owned by the service user')
         yield fd
-    finally:
-        os.close(fd)
 
 
 @contextmanager
-def _maintenance_lease(directory: Path, name: str):
+def _maintenance_lease(directory: Path, name: str, *, _proof=False):
     with _maintenance_directory(directory) as parent:
         fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
                      0o600, dir_fd=parent)
@@ -1182,8 +1453,18 @@ def _maintenance_lease(directory: Path, name: str):
             except BlockingIOError:
                 raise ReleaseError('Service or another operation is active; stop it first') from None
             verify()
-            try: yield
-            finally: verify()
+            proof_active = True
+            proof_pid = os.getpid() if _proof else None
+            def proof():
+                if not proof_active or proof_pid != os.getpid():
+                    raise ReleaseError('Maintenance lease proof is no longer active')
+                verify()
+            try: yield proof if _proof else None
+            finally:
+                # Revoke before closing: descriptor numbers may immediately be
+                # reused even when close later reports failure.
+                proof_active = False
+                verify()
         finally:
             os.close(fd)
 
@@ -1337,6 +1618,124 @@ def _maintenance_existing_data(path: Path):
     return True
 
 
+@contextmanager
+def _maintenance_cycle_directory(path):
+    """Checkpoint-only walk; every owned FD is closed once, even on failure."""
+    path = Path(path)
+    if not path.is_absolute() or '..' in path.parts:
+        raise ReleaseError('Unsafe maintenance cycle directory')
+    with ExitStack() as stack:
+        fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        stack.callback(os.close, fd)
+        bindings = []
+        for part in path.parts[1:]:
+            parent = os.fstat(fd)
+            if (parent.st_uid not in (0, os.geteuid()) or not stat.S_ISDIR(parent.st_mode)
+                    or parent.st_mode & 0o022 and not parent.st_mode & stat.S_ISVTX):
+                raise ReleaseError('Unsafe maintenance cycle ancestor')
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            stack.callback(os.close, child)
+            info = os.fstat(child)
+            identity = (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid)
+            bindings.append((fd, part, child, identity))
+            fd = child
+        info = os.fstat(fd)
+        if info.st_uid not in (0, os.geteuid()) or info.st_mode & 0o022:
+            raise ReleaseError('Unsafe maintenance cycle directory')
+        def verify():
+            for parent, name, child, expected in bindings:
+                signature = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid)
+                if (signature(os.fstat(child)) != expected
+                        or signature(os.stat(name, dir_fd=parent, follow_symlinks=False)) != expected):
+                    raise ReleaseError('Maintenance cycle directory changed')
+        verify()
+        yield fd, verify
+        verify()
+
+
+def _maintenance_cycle_file(path, *, limit, owner, private=True):
+    """Bounded no-follow FD/path identity and original-byte observation."""
+    with _maintenance_cycle_directory(path.parent) as (parent, verify), ExitStack() as stack:
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        stack.callback(os.close, fd)
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_uid != owner
+                or before.st_mode & (0o077 if private else 0o022) or before.st_size > limit):
+            raise ReleaseError('Unsafe maintenance cycle material')
+        raw = os.pread(fd, before.st_size + 1, 0)
+        signature = lambda info: (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        identity = signature(before)
+        if (len(raw) != before.st_size or signature(os.fstat(fd)) != identity
+                or signature(os.stat(path.name, dir_fd=parent, follow_symlinks=False)) != identity):
+            raise ReleaseError('Maintenance cycle material changed')
+        verify()
+        return identity, raw
+
+
+def _maintenance_cycle_bootstrap(root):
+    before = _maintenance_cycle_file(_MAINTENANCE_CONFIG, limit=16384, owner=0, private=False)
+    anchor = _maintenance_anchor(root)
+    if _maintenance_cycle_file(_MAINTENANCE_CONFIG, limit=16384, owner=0, private=False) != before:
+        raise ReleaseError('Bootstrap changed during maintenance cycle')
+    return before, anchor
+
+
+def _maintenance_cycle_snapshot(root):
+    """Existing app/data/lease facts only, never root-core transaction proof."""
+    def directory(path):
+        with _maintenance_cycle_directory(path) as (fd, _):
+            info = os.fstat(fd)
+            if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700:
+                raise ReleaseError('Unsafe maintenance cycle root or data')
+            return info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid
+    root_identity = directory(root)
+    current = _maintenance_cycle_file(root / 'CURRENT.json', limit=16384, owner=os.geteuid())
+    release, pointer, manifest, ready = active_verified(root)
+    material_paths = ((release / 'payload' / MANIFEST, 4_000_000), (release / 'READY.json', 64000))
+    materials = tuple(_maintenance_cycle_file(path, limit=limit, owner=os.geteuid())
+                      for path, limit in material_paths)
+    def parsed(raw):
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result: raise ReleaseError('Duplicate maintenance cycle material field')
+                result[key] = value
+            return result
+        return json.loads(raw, object_pairs_hook=unique,
+                          parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+    canonical = lambda value: json.dumps(value, sort_keys=True, ensure_ascii=True,
+                                         separators=(',', ':'), allow_nan=False).encode()
+    if (canonical(parsed(current[1])) != canonical(pointer)
+            or canonical(parsed(materials[0][1])) != canonical(manifest)
+            or canonical(parsed(materials[1][1])) != canonical(ready)
+            or digest(materials[0][1]) != ready.get('manifest_sha256')):
+        raise ReleaseError('Active application changed during maintenance cycle')
+    bootstrap = _maintenance_cycle_bootstrap(root)
+    data_identity = directory(root / 'data')
+    leases = tuple(_maintenance_cycle_file(root / name, limit=16384, owner=os.geteuid(), private=False)
+        for name in ('.panel.lease', '.data.owner.lease', 'data/runtime/xray/owner.lock',
+                     'data/runtime/sing-box/owner.lock', 'data/certificates/.worker.lock'))
+    if (directory(root) != root_identity or directory(root / 'data') != data_identity
+            or _maintenance_cycle_file(root / 'CURRENT.json', limit=16384, owner=os.geteuid()) != current
+            or tuple(_maintenance_cycle_file(path, limit=limit, owner=os.geteuid())
+                     for path, limit in material_paths) != materials):
+        raise ReleaseError('Installation changed during maintenance cycle')
+    return root_identity, current, str(release), materials, bootstrap, data_identity, leases
+
+
+class _MaintenanceWriterCheckpoint:
+    __slots__ = ('owner', 'pid', 'facts')
+    def __init__(self, owner, facts):
+        self.owner, self.pid, self.facts = owner, os.getpid(), facts
+    def __reduce__(self):
+        raise ReleaseError('Maintenance cycle checkpoint cannot be transferred')
+    def __copy__(self):
+        raise ReleaseError('Maintenance cycle checkpoint cannot be transferred')
+    def __deepcopy__(self, memo):
+        raise ReleaseError('Maintenance cycle checkpoint cannot be transferred')
+
+
 class _MaintenanceSession(_StoppedGuard):
     """Private managed-worker transaction; root never imports or calls this API.
 
@@ -1357,12 +1756,42 @@ class _MaintenanceSession(_StoppedGuard):
         self._action = None
         self._selection = None
         self._operation_active = False
+        self._operation_proof = None
+        self._writer_checkpoint = None
+        self._writer_cycle_used = False
+        self._writer_generation = None
+
+    def __copy__(self):
+        raise ReleaseError('Maintenance session cannot be transferred')
+
+    def __deepcopy__(self, memo):
+        raise ReleaseError('Maintenance session cannot be transferred')
+
+    def __reduce__(self):
+        raise ReleaseError('Maintenance session cannot be transferred')
+
+    def _mark_writers_live(self):
+        token = object()
+        self._writer_generation = token
+        # Registered after acquisitions, so raw ExitStack.close revokes first.
+        self._writers.callback(self._revoke_writer_guard, token)
+
+    def _revoke_writer_guard(self, token):
+        if self._writer_generation is token:
+            self._writer_generation = None
+            self._valid = False
 
     def _state_is(self, expected):
         if self._pid != os.getpid() or self._state != expected:
             raise ReleaseError('Invalid maintenance transaction state')
 
     def _journal_clear(self):
+        if self._action in ('backup', 'activate', 'restore', 'recover-restore'):
+            _require_legacy_core_selection()
+        elif self._action in ('stage', 'start', 'restart'):
+            from app.data_owner import core_update_pending
+            if core_update_pending():
+                raise ReleaseError('核心维护尚未完成，请先恢复核心事务')
         journal = self.root / 'RESTORE_PENDING.json'
         if self._action not in ('stop', 'recover-restore') and (journal.exists() or journal.is_symlink()):
             raise ReleaseError('An interrupted restore requires recover-restore before other operations')
@@ -1382,17 +1811,24 @@ class _MaintenanceSession(_StoppedGuard):
             with _maintenance_directory(self.root): pass
             self.root = private_root(self.root)
             self._action = action
-            self._operation.enter_context(_maintenance_lease(self.root, '.operation.lock'))
+            self._operation_proof = self._operation.enter_context(
+                _maintenance_lease(self.root, '.operation.lock', _proof=True))
             self._operation_active = True
             self._journal_clear()
+            if action in ('backup', 'activate', 'restore'):
+                _require_legacy_runtime_states(self.root / 'data')
             if action not in ('stop', 'recover-restore'):
                 with _maintenance_directory(self.root / 'data'): pass
             if action not in ('stop', 'recover-restore'):
-                _, self._selection = active(self.root)
+                application = active_verified(self.root)
+                self._selection = application[1]
+                self._active_application = application
                 self._anchor = _maintenance_anchor(self.root)
+                if action in ('start', 'restart'):
+                    self._verify_start_cores()
             if action == 'recover-restore':
                 self._recovery_snapshot = _maintenance_recovery_snapshot(self.root)
-                self._recovery_directories()
+                _require_legacy_runtime_states(self._recovery_directories()[0])
             self._identity = release_id(identity) if action == 'activate' else None
             if action == 'activate':
                 self._candidate()
@@ -1421,6 +1857,8 @@ class _MaintenanceSession(_StoppedGuard):
                             if total > MAX_ARCHIVE:
                                 raise ReleaseError('Restore archive exceeds limit')
                             checksum.update(chunk)
+                        if action == 'restore' and checksum.hexdigest() == sha256:
+                            _preflight_legacy_backup(stream, self.root / 'data')
                     after = os.fstat(fd)
                     named = self._archive.lstat()
                     if (signature(info) != signature(after) or signature(after) != signature(named)
@@ -1436,6 +1874,22 @@ class _MaintenanceSession(_StoppedGuard):
         except BaseException:
             self.close()
             raise
+
+    def _verify_start_cores(self):
+        from app.data_owner import core_selection_present, data_owner
+        try:
+            with data_owner(self.root / 'data'):
+                if not core_selection_present():
+                    _require_legacy_runtime_states(self.root / 'data', check_configs=True)
+                    return
+                from app.core_updates.boot import resolve_boot
+                from app.core_updates.maintenance import _versions
+                release, _, manifest, ready = self._active_application
+                payload = release / 'payload'
+                resolve_boot(payload=payload, manifest=manifest, ready=ready, data=self.root / 'data',
+                             versions=_versions(payload, manifest))
+        except (ImportError, OSError, ValueError, RuntimeError, KeyError):
+            raise ReleaseError('当前应用无法验证已选核心，已停止启动或重启') from None
 
     def _candidate(self):
         release = self.root / 'releases' / self._identity
@@ -1534,6 +1988,7 @@ class _MaintenanceSession(_StoppedGuard):
                     self._lock_data(data, stable=data != self.root / 'data', create=not fingerprinted)
             else:
                 self._lock_data(self.root / 'data')
+            self._mark_writers_live()
             self._valid = True
             self._state = 'executing'
             self._check()
@@ -1542,6 +1997,10 @@ class _MaintenanceSession(_StoppedGuard):
             if self._action not in ('stop', 'recover-restore') and _maintenance_anchor(self.root) != self._anchor:
                 raise ReleaseError('Bootstrap runtime changed during maintenance')
             result = {}
+            if self._action in ('start', 'restart'):
+                self._verify_start_cores()
+            if self._action in ('backup', 'activate', 'restore'):
+                _require_legacy_runtime_states(self.root / 'data')
             if self._action == 'backup':
                 result = self._automatic_backup()
             elif self._action == 'activate':
@@ -1565,6 +2024,96 @@ class _MaintenanceSession(_StoppedGuard):
             self._state = 'failed'
             raise
 
+    def release_writers_for_trial(self):
+        """One private writer cycle; not a new action or root-core trial grant."""
+        self._state_is('done')
+        if (self._action in ('stop', 'stage') or not self._valid or not self._operation_active
+                or self._operation_proof is None or self._writer_generation is None or self._writer_cycle_used):
+            raise ReleaseError('Maintenance writer cycle is unavailable')
+        try:
+            self._journal_clear()
+            self._operation_proof()
+            checkpoint = _MaintenanceWriterCheckpoint(self, _maintenance_cycle_snapshot(self.root))
+            self._operation_proof()
+            self._writer_cycle_used = True
+            self._writer_checkpoint = checkpoint
+            self._valid = False
+            self._writers.close()
+            self._state = 'trial_writers_released'
+        except BaseException:
+            self._valid = False
+            self._state = 'failed'
+            try: self._writers.close()
+            finally: self._writer_checkpoint = None
+            raise
+
+    def _check_cycle_checkpoint(self):
+        checkpoint = self._writer_checkpoint
+        if (checkpoint is None or checkpoint.owner is not self or checkpoint.pid != os.getpid()
+                or not self._operation_active or self._operation_proof is None):
+            raise ReleaseError('Maintenance writer checkpoint is unavailable')
+        self._operation_proof()
+        self._journal_clear()
+        if _maintenance_cycle_snapshot(self.root) != checkpoint.facts:
+            raise ReleaseError('Installation changed during maintenance writer cycle')
+        self._operation_proof()
+
+    def reacquire_writers(self):
+        """Reacquire existing writers only; never execute the previous action."""
+        self._state_is('trial_writers_released')
+        self._valid = False
+        try:
+            self._check_cycle_checkpoint()
+            self._writers.enter_context(_maintenance_lease(self.root, '.panel.lease'))
+            self._lock_data(self.root / 'data', create=False)
+            self._check_cycle_checkpoint()
+            self._mark_writers_live()
+            self._state = 'writers_reacquired'
+            self._valid = True
+        except BaseException:
+            self._valid = False
+            self._state = 'failed'
+            try: self._writers.close()
+            finally: self._writer_checkpoint = None
+            raise
+
+    def _check_reacquired_writers(self):
+        """Narrow internal guard; ordinary executing/done checks do not apply."""
+        self._state_is('writers_reacquired')
+        token = self._writer_generation
+        if not self._valid or token is None:
+            raise ReleaseError('Maintenance writers are not locked')
+        self._check_cycle_checkpoint()
+        if not self._valid or self._writer_generation is not token:
+            raise ReleaseError('Maintenance writers are not locked')
+
+    def release_reacquired_writers(self):
+        """Terminal private exit before external old-topology recovery.
+
+        Releases only these writer leases; operation remains held until close.
+        No service/core action or second writer cycle is granted here.
+        """
+        self._state_is('writers_reacquired')
+        try:
+            self._check_reacquired_writers()
+        except BaseException:
+            self._valid = False
+            self._writer_generation = None
+            self._writer_checkpoint = None
+            self._state = 'failed'
+            self._writers.close()
+            raise
+        # Revoke before any close callback, including a lost acknowledgement.
+        self._valid = False
+        self._writer_generation = None
+        self._writer_checkpoint = None
+        try:
+            self._writers.close()
+        except BaseException:
+            self._state = 'failed'
+            raise
+        self._state = 'recovery_writers_released'
+
     def release_writers(self):
         self._state_is('done')
         if self._action == 'stage':
@@ -1581,22 +2130,30 @@ class _MaintenanceSession(_StoppedGuard):
         if self._pid != os.getpid():
             raise ReleaseError('Maintenance session belongs to another process')
         self._valid = False
-        self._writers.close()
-        self._operation.close()
-        self._operation_active = False
-        self._state = 'closed'
+        self._writer_checkpoint = None
+        self._writer_generation = None
+        try:
+            self._writers.close()
+        finally:
+            try:
+                self._operation.close()
+            finally:
+                self._operation_active = False
+                self._operation_proof = None
+                self._state = 'closed'
 
 
 _RECOVERY_LOCKS = {'.proxy-state.lock', 'runtime/xray/owner.lock',
                    'runtime/sing-box/owner.lock', 'certificates/.worker.lock'}
 
 
-def recovery_tree_digest(data: Path, *, copy_to: Path | None = None) -> str:
+def recovery_tree_digest(data: Path, *, copy_to: Path | None = None, _sync_source=False) -> str:
     """Bounded descriptor-based fingerprint/copy; excludes only transient leases.
 
     This intentionally accepts corrupt bytes, never unsafe file ownership or
     links. It can preserve an unknown policy without interpreting it as OFF.
-    Caller holds the stable exclusive data-owner lease throughout.
+    Caller holds the stable exclusive data-owner lease throughout. Only a
+    caller-owned private prepared tree may request source fsync.
     """
     records = []; total = 0; count = 0
     with _maintenance_directory(data) as root:
@@ -1645,12 +2202,18 @@ def recovery_tree_digest(data: Path, *, copy_to: Path | None = None) -> str:
                     if (size != entry.st_size or signature(entry) != signature(os.fstat(fd))
                             or signature(entry) != signature(os.stat(name, dir_fd=directory, follow_symlinks=False))):
                         raise ReleaseError('Recovery source changed while reading')
+                    if _sync_source:
+                        os.fsync(fd)
                     records.append([path, stat.S_IMODE(entry.st_mode), size, checksum])
                 finally:
                     os.close(fd)
+            if _sync_source:
+                os.fsync(directory)
         named = data.lstat()
         if (identity.st_dev, identity.st_ino) != (named.st_dev, named.st_ino):
             raise ReleaseError('Recovery data directory changed')
     if copy_to is not None:
         for current, _, _ in os.walk(copy_to, topdown=False): sync_directory(Path(current))
+    if _sync_source:
+        sync_directory(data.parent)
     return digest(json.dumps(sorted(records), sort_keys=True, separators=(',', ':')).encode())

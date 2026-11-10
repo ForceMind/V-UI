@@ -146,6 +146,10 @@ class OneClickSystemTests(unittest.TestCase):
             sudoers_before = sudo_policy_snapshot() if online else None
             if online:
                 self.assertNotIn('/etc/sudoers.d/v-ui',sudoers_before)
+            core_switch_fixture = bool(os.getenv('VUI_CORE_SWITCH_FIXTURE'))
+            if core_switch_fixture:
+                self.assertIsNone(gate)
+                self.assertFalse(os.path.lexists('/var/lib/v-ui-core'))
             def cleanup():
                 subprocess.run(['sudo','systemctl','disable','--now','v-ui-maintenance.service'],capture_output=True)
                 subprocess.run(['sudo','systemctl','disable','--now','v-ui.service','v-ui-http01.socket'],capture_output=True)
@@ -155,6 +159,8 @@ class OneClickSystemTests(unittest.TestCase):
                 subprocess.run(['sudo','systemctl','daemon-reload'],check=True)
                 subprocess.run(['sudo','rm','-rf','/etc/v-ui','/usr/local/lib/v-ui','/var/lib/v-ui'],check=True)
                 subprocess.run(['sudo','rm','-rf','/var/lib/v-ui-maintenance','/run/v-ui-maintenance'],check=True)
+                if core_switch_fixture:
+                    subprocess.run(['sudo','rm','-rf','/var/lib/v-ui-core'],check=True)
                 subprocess.run(['sudo','rm','-f','/usr/local/bin/v-ui','/usr/local/sbin/v-ui'],check=True)
                 subprocess.run(['sudo','userdel','v-ui'],capture_output=True)
             if gate is None:
@@ -416,8 +422,12 @@ class OneClickSystemTests(unittest.TestCase):
             self.assertIn(b'certificate-list',api('/certificates')[1])
             # Socket activation really supplies :80 to an unprivileged responder.
             token='T'*43
+            # This fixture runs outside the service unit's UMask=0077.
+            # Match it so the later restore can fingerprint the whole private tree.
+            challenge_dir='/var/lib/v-ui/data/certificates/http-webroot/.well-known/acme-challenge'
             command=['sudo','-u','v-ui','/bin/sh','-c',
-                'mkdir -p /var/lib/v-ui/data/certificates/http-webroot/.well-known/acme-challenge && printf %s token.key_authorization > /var/lib/v-ui/data/certificates/http-webroot/.well-known/acme-challenge/' + token]
+                'umask 077; mkdir -p "$1" && printf %s token.key_authorization > "$1/$2"',
+                'http01-fixture',challenge_dir,token]
             subprocess.run(command,check=True)
             for path,expected in ((f'/.well-known/acme-challenge/{token}',200),('/api/auth/me',404),('/login',404)):
                 connection=http.client.HTTPConnection('127.0.0.1',80,timeout=10)
@@ -667,8 +677,11 @@ class OneClickSystemTests(unittest.TestCase):
             # before disposing only known CI drafts for the installed-core gate.
             if os.getenv('VUI_NETLINK_SYSTEMD_TEST') == '1':
                 from scripts.system_maintenance_smoke import installed_netlink_smoke
+                def login_after_restore():
+                    self.assertEqual(api('/api/auth/login', {'username': admin_username, 'password': password})[0], 200)
                 installed_netlink_smoke(self,source,work,api,ca,cert,key,
-                    published_upgrade.nodes if published_upgrade else [],private_values,expected_username=admin_username)
+                    published_upgrade.nodes if published_upgrade else [],private_values,
+                    expected_username=admin_username, login_again=login_after_restore)
             if online:
                 print('Online managed installer transport: '+online['transport']+'; interactive domain/email/admin/ports, real global v-ui menu and stop/start passed')
             if domain_retry:

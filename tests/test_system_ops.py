@@ -2,7 +2,7 @@
 
 No test invokes a real system service command, installs a kit, or changes users.
 """
-from contextlib import ExitStack, contextmanager, redirect_stdout
+from contextlib import ExitStack, contextmanager, redirect_stdout, nullcontext
 import hashlib
 import importlib.util
 import io
@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 from unittest.mock import patch
@@ -175,6 +176,16 @@ class TrustTests(unittest.TestCase):
             receipt['files'][str(ops.CONFIG)] = hashlib.sha256(payloads[str(ops.CONFIG)]).hexdigest()
             with self.assertRaises(ops.Refused):
                 self.verify(receipt, payloads, python)
+
+    def test_read_only_installation_lock_does_not_create_missing_file(self):
+        lock = self.temp/'lock'
+        with patch.object(ops, 'INSTALL_LOCK', lock), patch.object(ops, 'trusted_directory', plain_directory):
+            with ops.installation_lock(_readonly=True):
+                self.assertFalse(lock.exists())
+            self.assertFalse(lock.exists())
+            with self.assertRaisesRegex(ops.Refused, 'appeared'):
+                with ops.installation_lock(_readonly=True):
+                    lock.touch()
 
     def test_lock_checks_type_owner_mode_links_and_inode_and_preserves_contents(self):
         lock = self.temp / 'lock'
@@ -345,6 +356,31 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(mutate.call_count, 3)
         prove.assert_not_called()
 
+    def test_emergency_stop_retries_transition_and_clears_only_empty_failed_unit(self):
+        backend = self.backend()
+        unit = 'v-ui.service'
+        failed = dict(self.properties(unit), ActiveState='failed', SubState='failed')
+        with patch.object(backend, 'mutate'), patch.object(backend, 'prove_stopped', side_effect=[
+                ops.UnitTransition(unit, ('deactivating', 'stop-sigterm')),
+                ops.UnitTransition(unit, ('failed', 'failed')), None]) as prove, \
+                patch.object(backend, '_systemd_properties', return_value=failed), \
+                patch.object(ops, 'cgroup_empty', return_value=True), \
+                patch.object(ops.time, 'sleep'), patch.object(backend, '_run', return_value=(0, b'')) as run:
+            backend.stop_all(emergency=True)
+            self.assertEqual(run.call_args.args, (['reset-failed', unit],))
+            self.assertTrue(run.call_args.kwargs['ignore_cancel'])
+            self.assertEqual(run.call_args.kwargs['deadline'], prove.call_args.kwargs['emergency_deadline'])
+            self.assertEqual(prove.call_count, 3)
+        with patch.object(backend, 'mutate'), patch.object(backend, 'prove_stopped', side_effect=[
+                ops.UnitTransition(unit, ('failed', 'failed')), ops.UnitTransition(unit, ('failed', 'failed'))]), \
+                patch.object(backend, '_systemd_properties', return_value=failed), \
+                patch.object(ops, 'cgroup_empty', return_value=False), \
+                patch.object(ops.time, 'monotonic', side_effect=[0, 1, 6]), \
+                patch.object(ops.time, 'sleep'), patch.object(backend, '_run') as run:
+            with self.assertRaises(ops.UnitTransition):
+                backend.stop_all(emergency=True)
+            run.assert_not_called()
+
     def test_stopped_requires_every_empty_service_cgroup(self):
         backend = self.backend()
         inactive = {unit: 'inactive' for unit in ops.SYSTEMD_UNITS}
@@ -490,6 +526,16 @@ class TransactionTests(unittest.TestCase):
         worker = FakeWorker(events, request, responses, fail_exit, fail_close)
         factory = unittest.mock.Mock(return_value=worker)
         def run():
+            if action in ('restore','recover-restore'):
+                with patch.object(ops,'revoke_core_epoch'):
+                    return ops.operate(request,services,ACCOUNT,[] if cancelled is None else cancelled,factory)
+            if action=='stage':
+                # Wire/order fixture only. Real snapshot/Root origin/cleanup
+                # are covered by test_stage_origin and installed Actions.
+                material=types.SimpleNamespace(path=Path(request['path']),origin={'release_id':'candidate-123'},
+                    deadline=time.monotonic()+10,retain=False,check=lambda:None)
+                with patch.object(ops,'accepted_stage',return_value=nullcontext(material)):
+                    return ops.operate(request,services,ACCOUNT,[] if cancelled is None else cancelled,factory)
             return ops.operate(request, services, ACCOUNT, [] if cancelled is None else cancelled, factory)
         return run, events, services, factory, request
 
@@ -758,8 +804,16 @@ class IntegratedWorkerTests(unittest.TestCase):
         self.factory = FixtureChild
 
     def execute(self, action, **values):
-        return ops.operate({'protocol': 1, 'action': action, **values}, self.services,
-                           ACCOUNT, [], self.factory)
+        if action=='stage':
+            # Preserve the real demoted consumer protocol independently from
+            # the Root producer's isolated filesystem tests.
+            material=types.SimpleNamespace(path=Path(values['path']),origin={'release_id':'integrated-stage'},
+                deadline=time.monotonic()+10,retain=False,check=lambda:None)
+            with patch.object(ops,'accepted_stage',return_value=nullcontext(material)):
+                return ops.operate({'protocol':1,'action':action,**values},self.services,ACCOUNT,[],self.factory)
+        with patch.object(ops,'revoke_core_epoch'):
+            return ops.operate({'protocol': 1, 'action': action, **values}, self.services,
+                               ACCOUNT, [], self.factory)
 
     def test_real_controller_worker_backup_restore_activate_and_control_protocol(self):
         backup = self.execute('backup')
@@ -946,11 +1000,104 @@ class MenuTests(unittest.TestCase):
     def test_menu_first_screen_unknown_help_cancel_and_eof_no_external_action(self):
         with patch.object(ops, 'installation_lock', side_effect=AssertionError('host lock')), \
                 patch.object(ops, 'verify_installation', side_effect=AssertionError('host reads')):
-            for data in ('0\n', '', 'h\ninvalid\n0\n', '2\nno\n0\n', '2\n', '6\n\n0\n', '7\n\n0\n', '12\nn\n0\n', '12\n\n0\n', '13\n0\n0\n'):
+            for data in ('0\n', '', 'h\ninvalid\n0\n', '2\nno\n0\n', '2\n', '6\n\n0\n', '7\n\n0\n', '12\nn\n0\n',
+                         '12\n\n0\n', '13\n0\n0\n', '14\n\n0\n', '15\nn\n0\n',
+                         '16\nsing-box\n\n0\n', '17\nxray\nn\n0\n', '18\nn\n0\n'):
                 code, text = self.run_menu(data)
                 self.assertEqual(code, 0, text)
                 self.assertIn('V-UI 受管维护菜单', text)
                 self.assertNotIn('操作完成', text)
+
+    def test_core_restore_menu_only_runs_fixed_child_after_confirmation(self):
+        digest = 'b'*64
+        name = 'core-maintenance-'+'a'*32+'.zip'
+        receipt = json.dumps({'files': {str(ops.CONTROL/'system_ops.py'): digest}}).encode()
+        for choice, action, values, outcome, message in (
+                ('14', 'restore-components', [name, digest], 'restored_backup', '恢复完成'),
+                ('15', 'recover-components', [], 'resumed_confirmed', '恢复完成'),
+                ('16', 'update-core', ['sing-box', '42'], 'switched', '核心切换完成'),
+                ('16', 'update-core', ['xray', '42'], 'switched', '包括服务器回环地址'),
+                ('17', 'rollback-core', ['xray'], 'restored_previous', '核心试跑失败'),
+                ('18', 'recover-core', [], 'restored_previous', '恢复完成'),
+                ('19', 'backup-components', [], 'backup_created', '双域备份完成')):
+            with self.subTest(action=action), patch.object(ops, 'verify_installation', return_value=('systemd', None)), \
+                    patch.object(ops, 'trusted_bytes', return_value=receipt), \
+                    patch.object(ops, 'run_command', return_value=(0, json.dumps(
+                        dict(outcome=outcome, backup_name=name, backup_sha256=digest)).encode())) as run:
+                code, output = self.run_menu('\n'.join([choice, *values, 'y', '0', '']))
+                self.assertEqual(code, 0)
+                self.assertIn(message, output)
+                self.assertIn('原数据备份文件 '+name, output)
+                self.assertIn('SHA-256 '+digest, output)
+                args = run.call_args.args[0]
+                self.assertEqual(args[1:6], ['-B', '-I', '-S', '-c', ops.CORE_RESTORE_BOOTSTRAP])
+                self.assertEqual(args[6:], [digest, hashlib.sha256(receipt).hexdigest(), action, *values])
+                compile(args[5], '<fixture bootstrap>', 'exec')
+
+    def test_core_backup_recovery_menu_confirms_fixed_action_without_new_archive(self):
+        digest='b'*64
+        receipt=json.dumps({'files':{str(ops.CONTROL/'system_ops.py'):digest}}).encode()
+        with patch.object(ops,'verify_installation',return_value=('systemd',None)), \
+                patch.object(ops,'trusted_bytes',return_value=receipt), \
+                patch.object(ops,'run_command',return_value=(0,json.dumps(
+                    dict(outcome='backup_recovered',selection_revision='c'*64,panel_running=True)).encode())) as run:
+            code,output=self.run_menu('18\ny\n0\n')
+        self.assertEqual(code,0)
+        self.assertIn('备份中断恢复完成',output)
+        self.assertIn('未重新创建备份',output)
+        self.assertNotIn('原数据备份文件',output)
+        self.assertEqual(run.call_args.args[0][-1],'recover-core')
+
+    def test_core_restore_menu_reports_only_fixed_failure_stages(self):
+        digest = 'b'*64
+        name = 'core-maintenance-'+'a'*32+'.zip'
+        receipt = json.dumps({'files': {str(ops.CONTROL/'system_ops.py'): digest}}).encode()
+        for raw, visible in ((b'RESTORE_STAGE_ACTIVATE\n', True),
+                             (b'RESTORE_STAGE_ACTIVATE\nprivate-output\n', False)):
+            with self.subTest(visible=visible), \
+                    patch.object(ops, 'verify_installation', return_value=('systemd', None)), \
+                    patch.object(ops, 'trusted_bytes', return_value=receipt), \
+                    patch.object(ops, 'run_command', return_value=(1, raw)):
+                code, output = self.run_menu(f'14\n{name}\n{digest}\ny\n0\n')
+            self.assertEqual(code, 0)
+            self.assertEqual('RESTORE_STAGE_ACTIVATE' in output, visible)
+            self.assertIn('恢复未完成', output)
+            self.assertNotIn('恢复完成，', output)
+            self.assertNotIn('private-output', output)
+
+    def test_core_status_is_read_only_and_shows_current_and_previous(self):
+        digest = 'b'*64
+        receipt = json.dumps({'files': {str(ops.CONTROL/'system_ops.py'): digest}}).encode()
+        summary = dict(outcome='core_selected', cores={
+            'sing-box': dict(current='1.14.3', previous='1.14.2'),
+            'xray': dict(current='26.3.27', previous=None)})
+        with patch.object(ops, 'verify_installation', return_value=('systemd', None)), \
+                patch.object(ops, 'trusted_bytes', return_value=receipt), \
+                patch.object(ops, 'run_command', return_value=(0, json.dumps(summary).encode())) as run:
+            code, output = self.run_menu('20\n0\n')
+        self.assertEqual(code, 0)
+        self.assertNotIn('确认执行', output)
+        self.assertIn('sing-box 已选择 1.14.3，上一个版本 1.14.2', output)
+        self.assertEqual(run.call_args.args[0][-1], 'core-status')
+
+    def test_core_restore_cancel_keeps_a_bounded_child_cleanup_window(self):
+        child = unittest.mock.Mock()
+        child._check.side_effect = ops.Refused('operation interrupted')
+        with patch.object(ops, 'Child', return_value=child):
+            with self.assertRaisesRegex(ops.Refused, 'operation interrupted'):
+                ops.run_command(['/fixed'], [2], cleanup_grace=180)
+        child.close.assert_called_once_with(grace=180)
+
+    def test_core_switch_menu_refuses_invalid_or_missing_success_evidence(self):
+        receipt = json.dumps({'files': {str(ops.CONTROL/'system_ops.py'): 'b'*64}}).encode()
+        for result in ({'outcome': []}, {'outcome': 'switched'}, {'outcome': 'restored_backup'}):
+            with self.subTest(result=result), patch.object(ops, 'verify_installation', return_value=('systemd', None)), \
+                    patch.object(ops, 'trusted_bytes', return_value=receipt), \
+                    patch.object(ops, 'run_command', return_value=(0, json.dumps(result).encode())):
+                code, output = self.run_menu('17\nxray\ny\n0\n')
+            self.assertEqual(code, 0)
+            self.assertIn('恢复未完成', output)
+            self.assertNotIn('核心切换完成', output)
 
     def test_online_upgrade_accepts_y_and_yes_without_other_confirmation(self):
         client = types.SimpleNamespace(request=lambda request: {'id': 'a' * 32, 'state': 'succeeded', 'result': {'upgraded': False}})

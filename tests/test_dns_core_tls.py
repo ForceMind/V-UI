@@ -17,6 +17,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 import yaml
 
+from tests.core_candidate_context import application_host, runtime_for_fixture
 from app.certificates.dns_store import DNSCredentialStore
 from app.certificates.models import CertificateBinding
 from app.models import database
@@ -25,7 +26,7 @@ from app.services.core_runtime import CoreRuntime
 from app.services.managed_tls import paths as material_paths, server_name
 from app.services.validated_export import validated_node
 from inbound_routing_real_helpers import yaml_client
-from loopback_helpers import start_http_target, unused_port, http_through, require_tls_rejection
+from loopback_helpers import http_authority, http_through, require_tls_rejection, start_http_target, unused_port
 from proxy_loopback_support import ReadyMihomoProcess
 from test_real_cores import DiagnosticXrayRuntime
 import test_certificates as certificate_fixtures
@@ -74,9 +75,11 @@ class DNSCoreTLSTests(unittest.TestCase):
             saved['stream_without_material_paths'] = static_stream
             return node, saved, material_paths(row.core, row.stream_settings)
 
-    def start_client(self, stack, root, label, node, env):
+    def start_client(self, stack, root, label, node, env, *, ipv6=False):
         port = self.port()
         config = yaml_client({'proxies': [node]}, [node['name']], port, self.port())
+        if ipv6:
+            config['ipv6'] = True
         self.assertEqual(config['rules'], ['MATCH,ENTRY'])
         self.assertTrue(all('DIRECT' not in group['proxies'] for group in config['proxy-groups']))
         self.assertFalse(config['proxies'][0]['skip-cert-verify'])
@@ -100,7 +103,9 @@ class DNSCoreTLSTests(unittest.TestCase):
     def exercise(self, core):
         with ExitStack() as stack:
             root = Path(self.temp.name) / ('dns-core-' + core); root.mkdir(mode=0o700)
-            target_port, deliveries = start_http_target(stack); self.ports.add(target_port)
+            target_host = application_host(core)
+            ipv6 = ':' in target_host
+            target_port, deliveries = start_http_target(stack, target_host); self.ports.add(target_port)
             self.provider.supports_dns = True
             profile = DNSCredentialStore(self.manager.root).create(label='synthetic-core-tls', zone_name='example.test',
                 zone_id='d' * 32, api_token='fake_core_tls_token_' + 'x' * 32)
@@ -118,13 +123,13 @@ class DNSCoreTLSTests(unittest.TestCase):
                 settings = {'users': [{'uuid': UUID}]}
                 stream = {'tls': {'enabled': True, 'server_name': HOST, 'certificate_path': str(paths[0]), 'key_path': str(paths[1])}}
                 adapter = SingBoxAdapter()
-                runtime = CoreRuntime(core, Path(os.environ['VUI_TEST_CORES']) / core, root / 'runtime')
+                runtime = runtime_for_fixture(CoreRuntime, core, Path(os.environ['VUI_TEST_CORES']) / core, root / 'runtime')
             else:
                 settings = {'users': [{'id': UUID}], 'decryption': 'none'}
                 stream = {'network': 'raw', 'security': 'tls', 'tlsSettings': {'serverName': HOST,
                           'certificates': [{'certificateFile': str(paths[0]), 'keyFile': str(paths[1])}]}}
                 adapter = XrayAdapter()
-                runtime = DiagnosticXrayRuntime(core, Path(os.environ['VUI_TEST_CORES']) / core, root / 'runtime')
+                runtime = runtime_for_fixture(DiagnosticXrayRuntime, core, Path(os.environ['VUI_TEST_CORES']) / core, root / 'runtime')
             stream['_vui'] = {'security': 'tls', 'server_name': HOST, 'skip_cert_verify': False}
             stack.callback(runtime.close); adapter._runtime = runtime
             with database.SessionLocal() as db:
@@ -147,9 +152,12 @@ class DNSCoreTLSTests(unittest.TestCase):
             node, original, original_paths = self.node(identity)
             self.assertEqual(node['uuid'], UUID); self.assertEqual(node['servername'], HOST)
             first_serial = self.served_leaf(port, ca, paths[0])
-            first_client, proxy_port, _ = self.start_client(stack, root, 'first', node, env)
-            self.assertEqual(http_through(proxy_port, '127.0.0.1', target_port), (200, b'VUI-LOOPBACK-TARGET'))
-            self.assertEqual(len(deliveries), 1); first_client.stop()
+            first_client, proxy_port, _ = self.start_client(stack, root, 'first', node, env, ipv6=ipv6)
+            self.assertEqual(http_through(proxy_port, target_host, target_port), (200, b'VUI-LOOPBACK-TARGET'))
+            self.assertEqual(len(deliveries), 1)
+            if ipv6:
+                self.assertEqual(deliveries[0], (http_authority(target_host, target_port), '/probe'))
+            first_client.stop()
             runtime.stop()
             self.assertFalse(runtime.status()['running']); self.assertFalse(runtime.state()['enabled'])
             self.due(certificate); self.manager.process_once()
@@ -169,15 +177,18 @@ class DNSCoreTLSTests(unittest.TestCase):
             apply(core)  # Explicit restart, rather than an implicit renewal start.
             self.assertEqual(self.manager.apply_existing(certificate), [{'target': 'inbound:' + str(identity), 'applied': True}])
             self.assertNotEqual(self.served_leaf(port, ca, renewed[0]), first_serial)
-            second_client, proxy_port, _ = self.start_client(stack, root, 'renewed', after, env)
-            self.assertEqual(http_through(proxy_port, '127.0.0.1', target_port), (200, b'VUI-LOOPBACK-TARGET'))
-            self.assertEqual(len(deliveries), 2); second_client.stop()
+            second_client, proxy_port, _ = self.start_client(stack, root, 'renewed', after, env, ipv6=ipv6)
+            self.assertEqual(http_through(proxy_port, target_host, target_port), (200, b'VUI-LOOPBACK-TARGET'))
+            self.assertEqual(len(deliveries), 2)
+            if ipv6:
+                self.assertEqual(deliveries[1], (http_authority(target_host, target_port), '/probe'))
+            second_client.stop()
             bad = deepcopy(after); bad['servername'] = DEEP
-            rejected, proxy_port, log = self.start_client(stack, root, 'deep-name', bad, env)
+            rejected, proxy_port, log = self.start_client(stack, root, 'deep-name', bad, env, ipv6=ipv6)
             baseline = len(deliveries)
             def attempt():
                 try:
-                    status, _ = http_through(proxy_port, '127.0.0.1', target_port)
+                    status, _ = http_through(proxy_port, target_host, target_port)
                     self.assertNotEqual(status, 200)
                 except OSError:
                     pass

@@ -23,19 +23,24 @@ SUCCESS = b'test_actual_offline_installer_permissions_socket_and_autostart (test
 
 
 class RecipeTests(unittest.TestCase):
-    def test_current_matrix_seven_and_future_includes_exact_public22(self):
+    def test_legacy_matrices_preserved_and_24_includes_exact_public23(self):
         current = job.matrix_for_version('0.4.22')['include']
         self.assertEqual([row['version'] for row in current], ['0.4.14', '0.4.15', '0.4.16', '0.4.17', '0.4.19', '0.4.20', '0.4.21'])
         future = job.matrix_for_version('0.4.23')['include']
         self.assertEqual(future[:-1], current)
         self.assertEqual(future[-1], {'version': '0.4.22', 'source': '558687a76cd29f4e4735284926eb05bf6664472e',
                                      'path': '.published-v0422', 'netlink': True})
-        for row in future:
+        candidate = job.matrix_for_version('0.4.24')['include']
+        self.assertEqual(candidate[:-1], future)
+        self.assertEqual(candidate[-1], {'version': '0.4.23', 'source': 'be5d8459cdd3eeedce73f2ff6e4663e5eb781e42',
+                                        'path': '.published-v0423', 'netlink': True})
+        for row in candidate:
             self.assertEqual(row['source'], core.BASELINES[row['version']])
             self.assertIs(type(row['netlink']), bool)
         for value in ('0.4.21', '00.4.22', 'v0.4.22', '0.4.22-rc1', True):
             with self.subTest(value=value), self.assertRaises(core.ReleaseAcceptanceError): job.matrix_for_version(value)
         with self.assertRaises(core.ReleaseAcceptanceError): job.role_recipe('0.4.22', 'upgrade-0.4.22', old_source='/old')
+        with self.assertRaises(core.ReleaseAcceptanceError): job.role_recipe('0.4.23', 'upgrade-0.4.23', old_source='/old')
 
     def test_fresh_recipe_preserves_all_original_flags_and_fixed_commands(self):
         recipe = job.role_recipe(VERSION, 'fresh')
@@ -48,9 +53,9 @@ class RecipeTests(unittest.TestCase):
         self.assertEqual(job.TEST_COMMAND[1:], ['-B', '-m', 'unittest', 'discover', '-s', 'tests', '-p', 'test_oneclick_system.py', '-v'])
 
     def test_each_upgrade_has_exact_original_environment_without_truthy_zero_flags(self):
-        for row in job.matrix_for_version('0.4.23')['include']:
+        for row in job.matrix_for_version('0.4.24')['include']:
             role = 'upgrade-' + row['version']; old = '/workspace/' + row['path']
-            recipe = job.role_recipe('0.4.23', role, old_source=old)
+            recipe = job.role_recipe('0.4.24', role, old_source=old)
             env = recipe['env']
             self.assertEqual(env['VUI_PUBLISHED_INSTALL_VERSION'], row['version'])
             self.assertEqual(env['VUI_RELEASE_COMMIT'], row['source'])
@@ -67,7 +72,7 @@ class RecipeTests(unittest.TestCase):
                 self.assertEqual(recipe['commands'], [job.TEST_COMMAND])
             inherited = {**ACTIONS, 'PATH': '/usr/bin', **{key: '0' for key in job.role_recipe(VERSION, 'fresh')['env']},
                          'VUI_SETUP_INSTALL': '1', 'VUI_DATA_DIR': '/not-user-data', 'VUI_UNRELATED_GATE': '1'}
-            clean = job.role_environment(inherited, '0.4.23', role, old_source=old)
+            clean = job.role_environment(inherited, '0.4.24', role, old_source=old)
             self.assertEqual({key: value for key, value in clean.items() if key.startswith('VUI_')}, env)
             self.assertEqual(clean['PATH'], '/usr/bin')
         for role in ('build', 'upgrade-0.4.18', 'other', True):
@@ -103,7 +108,7 @@ class JobTests(unittest.TestCase):
         if Path(cwd) == self.checkout: return SHA + '\n'
         return core.BASELINES[Path(cwd).name.removeprefix('old-')] + '\n'
 
-    def run_role(self, role='fresh', *, old_source=None, result=0, data=SUCCESS, fetch_result=0):
+    def run_role(self, role='fresh', *, old_source=None, result=0, data=SUCCESS, fetch_result=0, core_switch=False):
         calls = []
         def execute(command, **kwargs):
             calls.append((command, kwargs))
@@ -116,7 +121,8 @@ class JobTests(unittest.TestCase):
                 kwargs['stdout'].write(data); kwargs['stdout'].flush()
             return subprocess.CompletedProcess(command, result if command == job.TEST_COMMAND else 0)
         with patch.object(job.subprocess, 'check_output', side_effect=self.fake_git), patch.object(job.subprocess, 'run', side_effect=execute):
-            code = job.run_test(SHA, VERSION, role, self.identity_path, self.log, old_source=old_source, environ=ACTIONS)
+            code = job.run_test(SHA, VERSION, role, self.identity_path, self.log, old_source=old_source,
+                                environ=ACTIONS, core_switch=core_switch)
         return code, calls
 
     def make_receipt(self, role='fresh', **changes):
@@ -211,6 +217,18 @@ class JobTests(unittest.TestCase):
         self.log.write_bytes(first[:-1] + b',"run_attempt":2}\n' + body)
         with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'DUPLICATE_JSON_KEY'): self.make_receipt()
 
+    def test_public23_upgrade_requires_one_exact_preservation_marker(self):
+        identity={**self.identity,'version':'0.4.24','release_id':'0.4.24-'+SHA[:12]}
+        context=job._log_context(identity,'upgrade-0.4.23',ACTIONS)
+        header=(job.HEADER+json.dumps(context)+'\n').encode()
+        footer=(job.FOOTER+'0\n').encode()
+        marker=job.UPGRADE_23_MARKER.encode()
+        for bad in (b'',marker+b' \n',b'prefix '+marker+b' evidence\n',
+                    (marker+b' evidence\n')*2):
+            with self.subTest(bad=bad),self.assertRaisesRegex(core.ReleaseAcceptanceError,'UPGRADE_23_EVIDENCE_REQUIRED'):
+                job.validate_test_log(header+bad+SUCCESS+footer,context)
+        job.validate_test_log(header+marker+b' exact preservation evidence\n'+SUCCESS+footer,context)
+
     def test_run_test_rejects_false_identity_or_changed_copy_before_any_install_command(self):
         original = self.identity_path.read_bytes()
         value = json.loads(original); value['validation_scope'] = core.PRODUCER_SCOPE
@@ -222,6 +240,54 @@ class JobTests(unittest.TestCase):
         with patch.object(job.subprocess, 'run') as execute, self.assertRaises(core.ReleaseAcceptanceError):
             job.run_test(SHA, VERSION, 'fresh', self.identity_path, self.log, environ=ACTIONS)
         execute.assert_not_called()
+
+    def test_native_core_switch_requires_fresh_fixture_and_both_evidence_lines(self):
+        fixture = self.root / 'fixture'
+        sing_box = fixture / 'sing-box' / 'candidate'
+        xray = fixture / 'xray' / 'candidate'
+        sing_box.mkdir(mode=0o700, parents=True)
+        sb_marker = b'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: sing-box synthetic evidence\n'
+        xray_marker = b'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: xray synthetic evidence\n'
+        interrupt_marker = b'VUI_INSTALLED_CORE_INTERRUPT_ACCEPTANCE: synthetic evidence\n'
+        restore_marker = b'VUI_INSTALLED_CORE_RESTORE_ACCEPTANCE: synthetic evidence\n'
+        with patch.object(job, 'CORE_SWITCH_FIXTURE', fixture):
+            with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'CORE_SWITCH_FRESH_FIXTURE_REQUIRED'):
+                self.run_role(core_switch=True)
+            self.assertFalse(self.log.exists())
+            xray.parent.symlink_to(sing_box.parent, target_is_directory=True)
+            with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'CORE_SWITCH_FRESH_FIXTURE_REQUIRED'):
+                self.run_role(core_switch=True)
+            self.assertFalse(self.log.exists())
+            xray.parent.unlink()
+            xray.mkdir(mode=0o700, parents=True)
+            for evidence in (b'', sb_marker, sb_marker + sb_marker, xray_marker + sb_marker,
+                             sb_marker + xray_marker + xray_marker,
+                             sb_marker.rstrip() + xray_marker + xray_marker,
+                             sb_marker + b'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE: xray \n'):
+                with self.subTest(evidence=evidence):
+                    with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'CORE_SWITCH_EVIDENCE_REQUIRED'):
+                        self.run_role(core_switch=True, data=SUCCESS + evidence)
+                    self.log.unlink()
+            switches = sb_marker + xray_marker
+            for evidence in (switches, interrupt_marker+switches, switches+interrupt_marker+interrupt_marker):
+                with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'CORE_INTERRUPT_EVIDENCE_REQUIRED'):
+                    self.run_role(core_switch=True, data=SUCCESS+evidence)
+                self.log.unlink()
+            for evidence in (switches+interrupt_marker, switches+restore_marker+interrupt_marker,
+                             switches+interrupt_marker+restore_marker+restore_marker):
+                with self.assertRaisesRegex(core.ReleaseAcceptanceError, 'CORE_RESTORE_EVIDENCE_REQUIRED'):
+                    self.run_role(core_switch=True, data=SUCCESS+evidence)
+                self.log.unlink()
+            evidence=switches+interrupt_marker+restore_marker
+            for marker,error in job.CORE_REMOTE_MARKERS:
+                for suffix in (b'',marker+b' \n',marker+b' evidence\n'+marker+b' duplicate\n'):
+                    with self.assertRaisesRegex(core.ReleaseAcceptanceError,error):
+                        self.run_role(core_switch=True,data=SUCCESS+evidence+suffix)
+                    self.log.unlink()
+                evidence+=marker+b' synthetic evidence\n'
+            code, calls = self.run_role(core_switch=True, data=SUCCESS+evidence)
+        self.assertEqual(code, 0)
+        self.assertEqual(calls[-1][1]['env']['VUI_CORE_SWITCH_FIXTURE'], str(fixture))
 
     def test_build_receipt_requires_producer_scope_and_no_log_claim(self):
         producer_path = self.root / 'producer.json'; job.producer(self.kit, SHA, VERSION, producer_path)

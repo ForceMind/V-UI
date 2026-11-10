@@ -35,6 +35,8 @@ class ShortInstallContractTests(unittest.TestCase):
                   ('0.4.21','2aa5e11e3f09c03d048018f033ae888e7c775604','.published-v0421',True)]
         if tuple(map(int,version.split('.'))) > (0,4,22):
             expected.append(('0.4.22','558687a76cd29f4e4735284926eb05bf6664472e','.published-v0422',True))
+        if tuple(map(int,version.split('.'))) > (0,4,23):
+            expected.append(('0.4.23','be5d8459cdd3eeedce73f2ff6e4663e5eb781e42','.published-v0423',True))
         return expected
 
     def test_installer_language_identity_does_not_depend_on_consent_test_opt_in(self):
@@ -58,7 +60,7 @@ class ShortInstallContractTests(unittest.TestCase):
         expected=self.expected_upgrade_baselines(version)
         self.assertEqual(rows,[dict(version=v,source=sha,path=path,netlink=netlink)
                                for v,sha,path,netlink in expected])
-        for candidate,count in [('0.4.22',7),('0.4.23',8)]:
+        for candidate,count in [('0.4.22',7),('0.4.23',8),('0.4.24',9)]:
             actual=acceptance_job.matrix_for_version(candidate)['include']
             self.assertEqual(len(actual),count)
             self.assertEqual(actual,[dict(version=v,source=sha,path=path,netlink=netlink)
@@ -106,6 +108,7 @@ class ShortInstallContractTests(unittest.TestCase):
         selected=[role for role,recipe in recipes if recipe['env'].get('VUI_NETLINK_SYSTEMD_TEST')=='1']
         expected=['fresh','upgrade-0.4.19','upgrade-0.4.20','upgrade-0.4.21']
         if tuple(map(int,version.split('.'))) > (0,4,22):expected.append('upgrade-0.4.22')
+        if tuple(map(int,version.split('.'))) > (0,4,23):expected.append('upgrade-0.4.23')
         self.assertEqual(selected,expected)
         for role,recipe in recipes:
             commands=recipe['commands']

@@ -229,7 +229,7 @@ def _prepared(root, action, archive=None, archive_sha256=None):
     with release._maintenance_directory(Path(root).absolute()): pass
     root = release.private_root(root)
     _require(action in ('restore', 'reconcile'))
-    with release.stopped(root) as guard:
+    with release._legacy_stopped(root) as guard:
         data = root / 'data'
         _require(data.is_dir() and not data.is_symlink())
         source = release.recovery_tree_digest(data)
@@ -249,6 +249,7 @@ def _prepared(root, action, archive=None, archive_sha256=None):
                 _require(meta.get('kind') == 'backup' and meta.get('data_path') == str(data))
                 (work / release.MANIFEST).unlink()
                 _normalize_extracted(work)
+                release._require_legacy_runtime_states(work)
                 # Validate before changing access records as well as afterwards.
                 release.recovery_tree_digest(work)
                 _validate(work)

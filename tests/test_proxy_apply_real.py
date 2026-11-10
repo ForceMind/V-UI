@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from tests.core_candidate_context import runtime_for_fixture
 from app.services.core_manager import SingBoxAdapter
 from app.services.core_runtime import CoreRuntime, revision
 from app.services.proxy_apply import ProxyApplyCoordinator, ProxyApplyError
@@ -45,7 +46,7 @@ class ProxyApplyRealTests(DoubleHopFixture):
         self.store = ProxyStore(self.root/"store")
         self.store.read_snapshot()
         self.runtime_root = self.root/"runtime"
-        self.runtime = CoreRuntime("sing-box", Path(self.singbox), self.runtime_root)
+        self.runtime = runtime_for_fixture(CoreRuntime, "sing-box", Path(self.singbox), self.runtime_root)
         self.addCleanup(lambda: self.runtime.close())
         self.rows = [SimpleNamespace(id=1, routing_mode="inherit", core="sing-box", protocol="vless", port=self.ingress_port,
             remark="isolated-ingress", tag="fixture-ingress", enable=True, expiry_time=0,
@@ -142,7 +143,7 @@ class ProxyApplyRealTests(DoubleHopFixture):
                     self.runtime.close()
                     self.store = ProxyStore(self.root/("store-" + mode))
                     self.store.read_snapshot()
-                    self.runtime = CoreRuntime("sing-box", Path(self.singbox), self.root/("runtime-" + mode))
+                    self.runtime = runtime_for_fixture(CoreRuntime, "sing-box", Path(self.singbox), self.root/("runtime-" + mode))
                     self.coordinator = self.make_coordinator()
                     self.profile_saved = False
                 self.start_upstream(mode)
@@ -237,7 +238,7 @@ class ProxyApplyRealTests(DoubleHopFixture):
         # Release ownership and reconstruct both objects, as after a restart.
         self.runtime.close()
         self.store = ProxyStore(self.root/"store")
-        self.runtime = CoreRuntime("sing-box", Path(self.singbox), self.runtime_root)
+        self.runtime = runtime_for_fixture(CoreRuntime, "sing-box", Path(self.singbox), self.runtime_root)
         self.coordinator = self.make_coordinator()
         with patch.dict(os.environ, self.env):
             recovered = self.coordinator.recover()
@@ -251,7 +252,7 @@ class ProxyApplyRealTests(DoubleHopFixture):
         # A second clean restart must use the same committed active/core pair,
         # never the newer still-disabled draft.
         self.runtime.close()
-        self.runtime = CoreRuntime("sing-box", Path(self.singbox), self.runtime_root)
+        self.runtime = runtime_for_fixture(CoreRuntime, "sing-box", Path(self.singbox), self.runtime_root)
         self.coordinator = self.make_coordinator()
         bootstrap = list(self.bootstrap_queries)
         with patch.dict(os.environ, self.env):
