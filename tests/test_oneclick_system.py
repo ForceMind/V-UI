@@ -338,6 +338,13 @@ class OneClickSystemTests(unittest.TestCase):
             identity=installed['release_id']
             self.assertRegex(identity,r'\A[A-Za-z0-9][A-Za-z0-9._-]{0,100}\Z')
             release=root/'releases'/identity;payload=release/'payload'
+            if published_version and os.getenv('VUI_SETUP_INSTALL') == '1':
+                manifest = json.loads(subprocess.check_output([
+                    'sudo', '-u', 'v-ui', '/bin/cat', str(payload / 'MANIFEST.json')]))
+                expected_source = os.environ['VUI_RELEASE_COMMIT']
+                self.assertEqual((manifest['version'], manifest['source_commit']),
+                                 (published_version, expected_source))
+                print(f'Short installer default installed v{published_version} from {expected_source}')
             menu=['sudo','-u','v-ui',str(release/'runtime/python/bin/python3'),'-B',
                   str(payload/'scripts/deploy.py'),'--root',str(root),'menu']
             with MenuSession(menu,cwd='/tmp',env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1'},private_values=private_values) as session:
