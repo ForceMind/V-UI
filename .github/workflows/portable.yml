@@ -109,6 +109,7 @@ jobs:
           }
           probe debian:13-slim 'apt-get update >/dev/null && apt-get install -y python3 >/dev/null'
           probe fedora:43 'dnf install -y python3 >/dev/null'
-          probe archlinux:latest 'pacman -Sy --noconfirm python >/dev/null'
+          # Keep the rolling image in sync with the package database.
+          probe archlinux:latest 'pacman -Syu --noconfirm python >/dev/null'
           probe opensuse/leap:15.6 'zypper --non-interactive install python311 >/dev/null && ln -sf /usr/bin/python3.11 /usr/local/bin/python3'
           probe alpine:3.22 'apk add --no-cache python3 >/dev/null'
