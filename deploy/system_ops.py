@@ -1616,6 +1616,8 @@ def terminal_core_action(action):
                 raise Refused('invalid core release ID')
             arguments.append(release)
         print('操作会短暂停服并创建当前数据备份。')
+        if action == 'update-core' and core == 'xray':
+            print('若候选为 Xray 26.10.21，其默认拒绝通过节点访问部分私网和保留地址，包括服务器回环地址。依赖这些地址时请保留当前版本。')
     elif action == 'recover-core':
         print('按中断记录核验并恢复核心选择及服务状态；中断的双域备份只恢复服务，不重新备份。')
     elif action == 'backup-components':

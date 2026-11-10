@@ -201,9 +201,9 @@ async function admin() {
     const facts=()=>({outcome:'observed',app_source:'a'.repeat(40),target:'x86_64-gnu',selection_revision:revision,generation:3,
         cores:{'sing-box':{current:'1.14.2',previous:'1.14.1',candidates:[{release_id:101,version:'1.14.3'}]},xray:{current:'26.3.27',previous:null,candidates:[{release_id:102,version:'26.10.21'}]}},pending:null,backups:[{id:backupID,created_at:1700000000}]});
     const coreRow=(action='observe',state='succeeded',id='1'.repeat(32),result=action==='observe'&&state==='succeeded'?facts():undefined)=>({id,action,state,phase:state==='succeeded'||state==='failed'?'finished':'preflight',created_at:1700000000,updated_at:1700000001,...(result!==undefined?{result}:{})});
-    const coreBoot=async(rootScopes=['core_operate','core_backup','core_restore'])=>{
+    const coreBoot=async(rootScopes=['core_operate','core_backup','core_restore'],options={})=>{
         const timers=new Map();let number=0;
-        const h=boot('#grant='+secret+(rootScopes?'&core='+rootKey:''),{setTimeout:(fn,ms)=>{const key=++number;timers.set(key,{fn,ms});return key},clearTimeout:key=>timers.delete(key)});
+        const h=boot('#grant='+secret+(rootScopes?'&core='+rootKey:''),{...options,setTimeout:(fn,ms)=>{const key=++number;timers.set(key,{fn,ms});return key},clearTimeout:key=>timers.delete(key)});
         await h.reply({token:session,scopes:['core_read'],expires_at:1900000000});
         if(rootScopes)await h.reply({scopes:rootScopes,expires_at:1900000000,revoked:false});
         return {...h,timers,tick:async ms=>{const entry=[...timers.entries()].find(([,row])=>row.ms===ms);assert(entry,'missing timer '+ms);timers.delete(entry[0]);entry[1].fn();await flush()}};
@@ -246,6 +246,14 @@ async function admin() {
         assert(h.el('maintenance-core-backup').disabled);assert(h.el('maintenance-core-restore').disabled);
         h.el('maintenance-core-rollback-sing-box').fire();await flush();assert.equal(JSON.parse(h.requests.at(-1).options.body).action,'rollback');assert(h.confirmations.at(-1).includes('1.14.1'));
         await h.reply(coreRow('rollback','succeeded','3'.repeat(32),{outcome:'switched'}));h.event('pagehide');
+    }
+    {
+        const h=await coreBoot(['core_operate'],{confirm:false});await observe(h);
+        const choice=h.el('maintenance-core-candidate-xray');choice.value='102';choice.fire('change');
+        assert(!h.el('maintenance-core-update-xray').disabled);
+        const requests=h.requests.length;h.el('maintenance-core-update-xray').fire();await flush();
+        assert(h.confirmations.at(-1).includes('26.10.21')&&h.confirmations.at(-1).includes('服务器回环地址'));
+        assert(h.confirmations.at(-1).includes('保留当前版本'));assert.equal(h.requests.length,requests);h.event('pagehide');
     }
     {
         const h=await coreBoot(null);await observe(h);assert(h.el('maintenance-core-update-sing-box').disabled);assert(h.el('maintenance-core-backup').disabled);

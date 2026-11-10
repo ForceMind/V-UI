@@ -16,6 +16,12 @@
 
 首个24候选 `5ff3a4d` 的[主测试42754301376](https://github.com/ForceMind/V-UI/actions/runs/42754301376)3792项中3551通过、2失败、239条件跳过；两项为独立短入口/安装矩阵测试尚未列入公开23行，更新其精确预期，保留旧角色和实际netlink门槛。同提交[协议任务129625507742](https://github.com/ForceMind/V-UI/actions/runs/42754301448/job/129625507742)在Root create核`/opt`安全父目录时拒绝，未运行任何协议。修正将专用临时目录迁至实际受管安装已使用的`/var/lib`，仍逐级核Root/NoFollow/权限与inode，不修改共享目录；15项协议夹具纯回归和独审通过。原失败保留，新提交实际协议及升级仍须Actions。
 
+5ff3的[安装42754301392](https://github.com/ForceMind/V-UI/actions/runs/42754301392)11个角色全部通过；[23→24同源日志](https://github.com/ForceMind/V-UI/actions/runs/42754301392/artifacts/13735829337)已核摘要、source、attempt及退出0，确认原DNS身份/私有材料保留、Root来源和默认核心选择。ARM受管亦通过。该安装证据不抵消5ff3单元和协议失败。
+
+`331ce9b`的[主测试42755518546](https://github.com/ForceMind/V-UI/actions/runs/42755518546)3809项为3570通过、239条件跳过；原固定核心链路通过。同源[便携x86 musl任务](https://github.com/ForceMind/V-UI/actions/runs/42755518503/job/129628876260)706项合成契约通过后，在读取固定上游源码时HTTP403限流，未完成该制品。ARM GNU/musl和distro成功；保留首次失败，源码另变后由新提交取得完整矩阵，不混用attempt或改pin/凭据。
+
+同源[候选协议任务129634265076](https://github.com/ForceMind/V-UI/actions/runs/42755518516/job/129634265076)已完成Root暂存和前16套件93项，XHTTP套件12方法出现14处失败；日志显示Xray 26.10.21对旧夹具127.0.0.1应用目标报告`blocked target`，导致正向对照不成立，其后的测试未开始。此证据与4cf未知的面板TLS首败分开。新夹具将普通转发目标与私网拒绝对照分开，旧固定核心入口、TLS/认证/无DIRECT断言和生产上游限制保持；网页和终端提示已知地址策略差异。新实际协议门槛未验，不能公开组件。
+
 ## 当前迭代：P3 远程核心任务闭环
 
 沿独立 [Draft PR146](https://github.com/ForceMind/V-UI/pull/146) 的 `release/v0.4.24` 继续；公开23、P4和Go迁移边界不变。本次从提交 `f3a2277` 及原目录19个未提交文件恢复，未覆盖原目录。下方M46A–F段落是各阶段的历史观察，不代表本批完整资格。

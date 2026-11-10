@@ -1,5 +1,5 @@
 """Offline checks for the candidate protocol harness. No core or sudo executes."""
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 import ast
 import hashlib
 import io
@@ -173,6 +173,105 @@ class CandidateProtocolGateTests(unittest.TestCase):
         with patch.object(protocols.subprocess, 'check_output', return_value=b'["private ack", 3]'):
             with self.assertRaisesRegex(RuntimeError, r'\(stage/ACK\)$'):
                 protocols.root_stage('stage')
+
+    def test_only_candidate_xray_uses_the_documentation_target(self):
+        with patch.object(fixtures, 'artifacts_for_fixture', return_value=None):
+            self.assertEqual(fixtures.application_host('xray'), '127.0.0.1')
+        with patch.object(fixtures, 'artifacts_for_fixture', return_value={'xray': object()}) as load:
+            self.assertEqual(fixtures.application_host('sing-box'), '127.0.0.1')
+            load.assert_not_called()
+            self.assertEqual(fixtures.application_host('xray'), fixtures.XRAY_APPLICATION_TARGET)
+
+    def test_application_loopback_requires_local_route_and_removes_only_added_address(self):
+        host = fixtures.XRAY_APPLICATION_TARGET
+        add = ['/usr/bin/sudo','-n','/usr/sbin/ip','-6','addr','add',host+'/128','dev','lo','nodad']
+        remove = ['/usr/bin/sudo','-n','/usr/sbin/ip','-6','addr','del',host+'/128','dev','lo']
+        for route, expected in ((f'local {host} dev lo src {host}', RuntimeError),
+                                (f'local {host} dev eth0 src {host}', AssertionError),
+                                (f'{host} via 2001:db8::1 dev lo', AssertionError)):
+            with self.subTest(route=route), patch.object(protocols.subprocess, 'run') as call, \
+                    patch.object(protocols.subprocess, 'check_output', return_value=route) as query:
+                entered = False
+                with self.assertRaises(expected):
+                    with protocols.candidate_application_loopback():
+                        entered = True
+                        raise RuntimeError('inert suite failure')
+                self.assertIs(entered, expected is RuntimeError)
+                self.assertEqual([row.args[0] for row in call.call_args_list], [add, remove])
+                query.assert_called_once_with(['/usr/sbin/ip','-6','route','get',host],text=True,timeout=10)
+        occupied = subprocess.CalledProcessError(2, add)
+        with patch.object(protocols.subprocess, 'run', side_effect=occupied) as call:
+            with self.assertRaises(subprocess.CalledProcessError):
+                with protocols.candidate_application_loopback():
+                    self.fail('address add failure entered the suite')
+        call.assert_called_once_with(add, check=True, timeout=10)
+
+    def test_proxy_http_keeps_legacy_authority_and_brackets_ipv6(self):
+        helpers = protocols.ROOT/'tests/loopback_helpers.py'
+        tree = ast.parse(helpers.read_text(), filename=str(helpers))
+        names = ('http_authority', 'http_through')
+        declarations = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
+        connection = Mock()
+        connection.getresponse.return_value = SimpleNamespace(status=200, read=lambda:b'inert body')
+        http = SimpleNamespace(client=SimpleNamespace(HTTPConnection=Mock(return_value=connection)))
+        namespace = {'http':http}
+        exec(compile(ast.Module(body=declarations,type_ignores=[]),str(helpers),'exec'), namespace)
+        for host, authority in (('127.0.0.1','127.0.0.1:4567'), ('example.test','example.test:4567'),
+                                (fixtures.XRAY_APPLICATION_TARGET, '['+fixtures.XRAY_APPLICATION_TARGET+']:4567')):
+            with self.subTest(host=host):
+                connection.reset_mock()
+                self.assertEqual(namespace['http_through'](1234, host, 4567), (200,b'inert body'))
+                connection.request.assert_called_once_with('GET','http://'+authority+'/probe',
+                                                           headers={'Connection':'close'})
+                connection.close.assert_called_once_with()
+
+    def test_xray_private_control_rejects_timeout_stale_reason_and_target_delivery(self):
+        cases = (('fresh', True), ('timeout', False), ('stale', False), ('delivered', False))
+        fixture = protocols.ROOT/'tests/test_xray_share_loopback.py'
+        helpers = protocols.ROOT/'tests/loopback_helpers.py'
+
+        def declarations(path, names):
+            tree = ast.parse(path.read_text(), filename=str(path))
+            return [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name in names]
+
+        functions = declarations(fixture, {'require_private_target_rejection'})
+        functions += declarations(helpers, {'http_authority', 'require_rejection_evidence'})
+        for outcome, accepted in cases:
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                client_log, server_log = root/'client.log', root/'xray.log'
+                client_log.write_text('')
+                reason = 'freedom: blocked target: tcp:127.0.0.1:4567\n'
+                server_log.write_text(reason if outcome == 'stale' else 'Xray ready\n')
+                deliveries = []
+                control = Mock()
+                control.request.side_effect = lambda _, path: deliveries.append(('127.0.0.1:4567', path))
+                control.getresponse.return_value = SimpleNamespace(status=200, read=lambda:b'VUI-LOOPBACK-TARGET')
+
+                def attempt(proxy, host, port):
+                    self.assertEqual((proxy, host, port), (1234, '127.0.0.1', 4567))
+                    if outcome in ('fresh', 'delivered'):
+                        with server_log.open('a') as log:
+                            log.write(reason)
+                    if outcome == 'delivered':
+                        deliveries.append(('127.0.0.1:4567', '/probe'))
+                    raise TimeoutError('inert request')
+
+                namespace = dict(ExitStack=ExitStack, start_http_target=lambda *_:(4567,deliveries),
+                    http=SimpleNamespace(client=SimpleNamespace(HTTPConnection=Mock(return_value=control),
+                                                               HTTPException=RuntimeError)),
+                    http_through=attempt,
+                    time=SimpleNamespace(monotonic=Mock(side_effect=[0,0,13]), sleep=Mock()), print=Mock())
+                exec(compile(ast.Module(body=functions,type_ignores=[]),str(fixture),'exec'), namespace)
+                check = namespace['require_private_target_rejection']
+                client = Mock()
+                if accepted:
+                    check(self, 1234, client, client_log, server_log)
+                    client.stop.assert_called_once_with()
+                else:
+                    with self.assertRaises(AssertionError):
+                        check(self, 1234, client, client_log, server_log)
+                    client.stop.assert_not_called()
 
     def test_workspace_rechecks_identity_even_when_body_raises(self):
         def directory(inode):

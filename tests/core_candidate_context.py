@@ -5,6 +5,7 @@ import stat
 from pathlib import Path
 
 CORE_ROOT = Path("/var/lib/vui-ci-core-protocols")
+XRAY_APPLICATION_TARGET = "2001:db8::114"
 
 
 @lru_cache(maxsize=1)
@@ -81,3 +82,9 @@ def server_version(core, fixed):
 def singbox_client(server):
     configured = os.environ.get('VUI_TEST_CANDIDATE_CONTEXT')
     return str(candidate_context(configured)[1]) if configured else server
+
+
+def application_host(core):
+    if core == 'xray' and artifacts_for_fixture() is not None:
+        return XRAY_APPLICATION_TARGET
+    return '127.0.0.1'

@@ -18,7 +18,7 @@ from app import release_tools
 from app.core_updates import artifacts
 from scripts import check_core_candidate_native as native
 from scripts import fetch_mihomo, fetch_test_cores
-from tests.core_candidate_context import CORE_ROOT
+from tests.core_candidate_context import CORE_ROOT, XRAY_APPLICATION_TARGET
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = 'x86_64-gnu'
@@ -445,6 +445,25 @@ def installed_candidates(staging, cores):
         leaves = [value for name, identity in installed.items() for value in (name, *identity)]
         root_stage('cleanup', *directory, *leaves)
 
+@contextmanager
+def candidate_application_loopback():
+    """Bind only the documentation address on this empty Actions runner."""
+    ip = ['/usr/sbin/ip', '-6']
+    address = XRAY_APPLICATION_TARGET + '/128'
+    sudo = ['/usr/bin/sudo', '-n', *ip, 'addr']
+    subprocess.run([*sudo, 'add', address, 'dev', 'lo', 'nodad'], check=True, timeout=10)
+    try:
+        route = subprocess.check_output([*ip, 'route', 'get', XRAY_APPLICATION_TARGET], text=True, timeout=10)
+        fields = route.split()
+        assert fields[:2] == ['local', XRAY_APPLICATION_TARGET]
+        assert fields.count('dev') == 1
+        device = fields.index('dev') + 1
+        assert fields[device:device+1] == ['lo']
+        yield
+    finally:
+        subprocess.run([*sudo, 'del', address, 'dev', 'lo'], check=True, timeout=10)
+
+
 class EvidenceResult(unittest.TextTestResult):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -555,7 +574,7 @@ def main():
         environment.update({flag: '1' for flag in FLAGS})
         environment.update(EXPECTED_SOURCE=args.source, VUI_TEST_CANDIDATE_CONTEXT=str(fixture),
                            VUI_TEST_CORES=str(CORE_ROOT), VUI_TEST_MIHOMO=str(args.mihomo))
-        with installed_candidates(directory, cores):
+        with installed_candidates(directory, cores), candidate_application_loopback():
             suites = {name: run_suite(name, directory, environment) for name in SUITES}
         assert all(digest_file(directory/name) == row['binary_sha256'] for name, row in cores.items())
         assert digest_file(baseline) == clients['sing-box']['binary_sha256']

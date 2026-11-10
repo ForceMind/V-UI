@@ -1016,6 +1016,7 @@ class MenuTests(unittest.TestCase):
                 ('14', 'restore-components', [name, digest], 'restored_backup', '恢复完成'),
                 ('15', 'recover-components', [], 'resumed_confirmed', '恢复完成'),
                 ('16', 'update-core', ['sing-box', '42'], 'switched', '核心切换完成'),
+                ('16', 'update-core', ['xray', '42'], 'switched', '包括服务器回环地址'),
                 ('17', 'rollback-core', ['xray'], 'restored_previous', '核心试跑失败'),
                 ('18', 'recover-core', [], 'restored_previous', '恢复完成'),
                 ('19', 'backup-components', [], 'backup_created', '双域备份完成')):

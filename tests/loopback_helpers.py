@@ -124,7 +124,7 @@ def start_doh(stack: ExitStack, answers: DnsAnswers, cert: Path, key: Path):
     return server.server_address[1]
 
 
-def start_http_target(stack: ExitStack):
+def start_http_target(stack: ExitStack, host: str = '127.0.0.1'):
     requests = []
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args): pass
@@ -133,7 +133,9 @@ def start_http_target(stack: ExitStack):
             data = b'VUI-LOOPBACK-TARGET'
             self.send_response(200); self.send_header('Content-Length',str(len(data)))
             self.end_headers(); self.wfile.write(data)
-    server = ThreadingHTTPServer(('127.0.0.1',0), Handler)
+    class Server(ThreadingHTTPServer):
+        address_family = socket.AF_INET6 if ipaddress.ip_address(host).version == 6 else socket.AF_INET
+    server = Server((host, 0), Handler)
     thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval':0.02}, daemon=True); thread.start()
     def close(): server.shutdown(); server.server_close(); thread.join(timeout=2)
     stack.callback(close)
@@ -256,10 +258,14 @@ def unused_port() -> int:
     with socket.socket() as sock: sock.bind(('127.0.0.1',0)); return sock.getsockname()[1]
 
 
+def http_authority(host: str, port: int) -> str:
+    return f'[{host}]:{port}' if ':' in host else f'{host}:{port}'
+
+
 def http_through(proxy_port: int, host: str, target_port: int) -> tuple[int, bytes]:
     connection = http.client.HTTPConnection('127.0.0.1', proxy_port, timeout=3)
     try:
-        connection.request('GET', f'http://{host}:{target_port}/probe', headers={'Connection':'close'})
+        connection.request('GET', f'http://{http_authority(host, target_port)}/probe', headers={'Connection':'close'})
         response = connection.getresponse()
         return response.status, response.read()
     finally: connection.close()

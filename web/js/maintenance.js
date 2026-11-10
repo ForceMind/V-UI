@@ -432,7 +432,9 @@
             el('maintenance-core-update-'+core)?.addEventListener('click',()=>run(async()=>{
                 if(!coreFacts||coreFacts.pending)return;
                 const candidate=coreFacts.cores[core].candidates.find(row=>String(row.release_id)===el('maintenance-core-candidate-'+core).value);if(!candidate)return;
-                await submitCore('update',{core,release_id:candidate.release_id,selection_revision:coreFacts.selection_revision},'确认将 '+coreNames[core]+' 从 '+coreFacts.cores[core].current+' 更新到 '+candidate.version+'？将先校验配置和备份，再短暂停止服务，验证失败时恢复原版本。');
+                const notice=core==='xray'&&candidate.version==='26.10.21'
+                    ? '\n\nXray 26.10.21 默认拒绝通过节点访问部分私网和保留地址，包括服务器回环地址。若依赖这些地址，请保留当前版本。' : '';
+                await submitCore('update',{core,release_id:candidate.release_id,selection_revision:coreFacts.selection_revision},'确认将 '+coreNames[core]+' 从 '+coreFacts.cores[core].current+' 更新到 '+candidate.version+'？将先校验配置和备份，再短暂停止服务，验证失败时恢复原版本。'+notice);
             }));
             el('maintenance-core-rollback-'+core)?.addEventListener('click',()=>run(async()=>{
                 if(!coreFacts||coreFacts.pending||!coreFacts.selection_revision||!coreFacts.cores[core].previous)return;
