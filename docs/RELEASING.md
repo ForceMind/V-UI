@@ -2,7 +2,11 @@
 
 ## 当前稳定版
 
-[v0.4.23](https://github.com/ForceMind/V-UI/releases/tag/v0.4.23) 已公开，正式应用源 `be5d8459cdd3eeedce73f2ff6e4663e5eb781e42`。公开资产与独立短入口见[发布记录](DNS01_CLOUDFLARE_CONTRACT.md#公开发布与短入口)。当前开发候选为v0.4.24，加入精确公开23升级基线；待候选完整冻结及准确验收，不能继承23的发布许可或提前更改短入口。
+[v0.4.24](https://github.com/ForceMind/V-UI/releases/tag/v0.4.24) 已公开，正式应用源为 `8b8d7cf82e55609a205455b351f659eb9de91974`，Release ID 为 440129208。准确源的十组 Actions、32 个 job、新装和九个公开旧版保数据升级见[集成验收](https://github.com/ForceMind/V-UI/pull/158)。应用门禁晋升四目标同源制品，19 项资产的清单与公开摘要已匿名比对。[应用发布运行](https://github.com/ForceMind/V-UI/actions/runs/42786336300)
+
+sing-box 1.14.3-r1 与 Xray 26.10.21-r1 依次公开，每个组件的 6 项资产及应用来源均通过匿名回读。两次晋升后，应用 `latest` 仍为 v0.4.24。[sing-box 组件](https://github.com/ForceMind/V-UI/releases/tag/core-sing-box-v1.14.3-r1) · [Xray 组件](https://github.com/ForceMind/V-UI/releases/tag/core-xray-v26.10.21-r1)
+
+公开安装器 SHA-256 为 `722198cbaedeb69fcc945f4869b39276ecbfd011620c66def15a632509240f7d`，完整 `SHA256SUMS` 文件 SHA-256 为 `a3f5cafcd556173a11748c2584e0eb7e096fe4e9e7d51108d6502d6bba2628cc`。短入口单独跟踪，公开应用包使用原冻结源码。浏览器未验证。
 
 ## v0.4.22 发行证据（历史）
 
@@ -74,10 +78,10 @@ P1提供一次构建、独立角色消费及attempt绑定，已在main `3606cad`
 
 只有这些检查成功后，才通过独立PR更新`setup.sh`的版本、真实`install.sh`字节SHA-256、完整`SHA256SUMS`字节SHA-256，以及`short-install.yml`的冻结公开产品源和直接合同。清单整文件摘要不等于某个ZIP或清单中一行的摘要。
 
-入口候选/dev/main须独立验收；PR和dev使用准确提交URL，main合并后另验实际可变的`main/setup.sh` URL。应用源与入口源分别记录，不因入口或文档推进而重建已公开套件。以下示例仍使用已公开且短入口锁定的v0.4.23；摘要占位符必须换成该版独立核验的SHA256SUMS整文件摘要。尚未公开的24不能代入：
+入口候选/dev/main须独立验收；PR和dev使用准确提交URL，main合并后另验实际可变的`main/setup.sh` URL。应用源与入口源分别记录，不因入口或文档推进而重建已公开套件。以下示例使用短入口锁定的 v0.4.24。摘要占位符使用上方已核验的整份 `SHA256SUMS` 文件摘要。
 
 ```sh
-bash install.sh --version v0.4.23 --with-global-cli \
+bash install.sh --version v0.4.24 --with-global-cli \
   --kit-sha256 '<独立核验的SHA256SUMS整文件SHA-256>' --interactive
 ```
 

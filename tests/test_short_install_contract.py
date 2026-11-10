@@ -305,11 +305,11 @@ class ShortInstallContractTests(unittest.TestCase):
         self.assertEqual(len(checkouts),2)
         self.assertEqual(checkouts[0]['with']['persist-credentials'],'false')
         self.assertEqual(checkouts[1]['with'],{'persist-credentials':'false',
-                                             'ref':'be5d8459cdd3eeedce73f2ff6e4663e5eb781e42',
+                                             'ref':'8b8d7cf82e55609a205455b351f659eb9de91974',
                                              'path':'.published-suite'})
         acceptance=next(step for step in steps if 'VUI_SETUP_INSTALL' in step.get('env',{}))
         self.assertEqual(acceptance['env']['VUI_SETUP_RELEASE_SOURCE'],'${{ github.workspace }}/.published-suite')
-        self.assertEqual(acceptance['env']['VUI_PUBLISHED_INSTALL_VERSION'],'0.4.23')
+        self.assertEqual(acceptance['env']['VUI_PUBLISHED_INSTALL_VERSION'],'0.4.24')
         self.assertEqual(acceptance['env']['VUI_RELEASE_COMMIT'],checkouts[1]['with']['ref'])
 
     def fixture(self, folder, *, release_commit=None, raw=None):
@@ -368,7 +368,9 @@ class ShortInstallContractTests(unittest.TestCase):
                 result=self.invoke(source,release_source)
             self.assertEqual(result['canonical'],'bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh)')
             self.assertIn(shlex.quote('/fixture/cert with spaces.pem'),result['initial'][2])
-            self.assertIn('--version v0.4.9',result['initial'][2])
+            self.assertNotIn('--version',result['initial'][2])
+            self.assertIn('--version v0.4.9',result['repeat'][2])
+            self.assertIn('--version v0.4.9',result['upgrade'][2])
             self.assertIn('--upgrade',result['upgrade'][2])
             self.assertIn('release_canonical',result)
 
