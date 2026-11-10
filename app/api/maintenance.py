@@ -208,7 +208,7 @@ def core_tasks(request: Request):
 
 @router.get('/core-tasks/{task_id}')
 def core_task(task_id: str, request: Request):
-    _core_access(request, 'GET', '/api/maintenance/core-tasks/{task_id}')
+    _core_access(request, 'GET', '/api/maintenance/core-tasks/' + task_id)
     if not re.fullmatch('[a-f0-9]{32}', task_id):
         raise HTTPException(422, '核心任务编号无效')
     return _bridge('core_get', task_id)
@@ -216,7 +216,7 @@ def core_task(task_id: str, request: Request):
 
 @router.get('/core-requests/{request_id}')
 def core_request(request_id: str, request: Request):
-    principal = _core_access(request, 'GET', '/api/maintenance/core-requests/{request_id}')
+    principal = _core_access(request, 'GET', '/api/maintenance/core-requests/' + request_id)
     if not re.fullmatch('[a-f0-9]{32}', request_id):
         raise HTTPException(422, '核心请求编号无效')
     tokens = request.headers.getlist('x-vui-core-authorization')

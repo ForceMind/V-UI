@@ -16,6 +16,10 @@
 
 当前最终667项核心合成契约全部执行通过，零失败/跳过（12.372秒）；另18项验收门禁/菜单控制、Node合成DOM、文档/语法和diff检查通过。独审无剩余源码阻断；新增Actions夹具要求真实Root任务、失败备份跨daemon重启保留、原nonce不重放，以及停面板后真实PTY菜单18恢复并再次备份/双核TCP。当前API真实ASGI及实际系统链待Actions，本机缺少FastAPI，未安装依赖补验。上一提交 `f3a2277` 的主测试 [42674018559](https://github.com/ForceMind/V-UI/actions/runs/42674018559) 为failure且没有job/check-run，原因尚未取得；不改判或当作当前新源码结果。浏览器未验证。
 
+`4cf9062` 首轮准确Actions保留失败：[主测试42747608079](https://github.com/ForceMind/V-UI/actions/runs/42747608079)3756项为3514通过、3失败、239条件跳过（370.721秒）。两项新GET任务/请求查询把路由模板传入权限匹配器，导致合法core_read被403；第三项为新增真实socket/租约两个测试子进程漏列启动审计清单。修正实际ID路径及精确例外后独审通过；AST全量进程清单匹配，完整ASGI/readiness仍交新Actions，本机分别缺FastAPI/cryptography。
+
+同提交[原生矩阵42747608076](https://github.com/ForceMind/V-UI/actions/runs/42747608076)的ARM GNU、ARM musl及x86 musl均在模拟Root菜单stage准备失败：旧非Root夹具未接收据/Root来源helper和私有状态，最先访问固定生产receipt路径即拒绝，尚未启动stage worker。修正仅在该临时夹具补私有收据、真实来源登记和epoch状态，保持真实非Root worker、原握手及生产Root校验；96项纯回归和独审通过。四目标独立组件TCP已分别通过，但ARM受管、新装/八旧版升级及其他运行继续单独跟踪，不组合成新源码资格。上述三项主测修正与夹具修正须取得新提交自己的准确Actions。
+
 ## 已交付：v0.4.23
 
 - 正式应用源 `be5d8459cdd3eeedce73f2ff6e4663e5eb781e42`；[Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.23)公开19项资产，tag与清单/摘要已独立读回。

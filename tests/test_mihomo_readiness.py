@@ -47,6 +47,12 @@ SITES = {
 # launch implementations, fake unit processes, and non-core app/worker/benchmark
 # subprocesses. These entries do not grant Mihomo permission to use the old gate.
 OTHER_CONSTRUCTIONS = {
+    # Installed daemon protocol peer and a kernel writer-lease holder: isolated
+    # service-UID stdlib children, private stdin, bounded readiness/read waits
+    # and finally close/kill/reap. Neither child executes a proxy core; actual
+    # Mihomo traffic still uses the shared barrier in core_switch_systemd.
+    ('core_remote_tasks_installed.py', 'Peer.__init__', 'Popen'),
+    ('core_remote_tasks_installed.py', 'writer_peer', 'Popen'),
     # Two bounded synthetic store/catalog publishers: isolated stdlib Python,
     # fake material/transport only, stdin barrier, 15s communicate and finally
     # kill/wait/close. No proxy core or readiness qualification is involved.
