@@ -17,6 +17,7 @@ from app.services.mihomo_routing import default_routing
 from app.services.routing_store import read_snapshot, save_routing
 from app.services.core_manager import SingBoxAdapter
 import test_subscription_tokens as grant_tests
+from tests.core_candidate_context import singbox_client
 from loopback_helpers import (
     CoreProcess,
     http_through,
@@ -164,7 +165,7 @@ class ShadowsocksLoopbackTests(unittest.TestCase):
         path=self.exported_singbox(grant,port)
         process=CoreProcess(
             self.stack,
-            [str(Path(os.environ["VUI_TEST_CORES"])/"sing-box"),
+            [singbox_client(str(Path(os.environ["VUI_TEST_CORES"])/"sing-box")),
              "run","-c",str(path)],
             self.root/("singbox-client-"+str(port)+".log"),
             self.env,

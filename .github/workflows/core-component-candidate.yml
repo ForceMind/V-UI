@@ -1,0 +1,375 @@
+name: Core component candidate artifacts (unqualified)
+on:
+  pull_request:
+    paths:
+      - 'scripts/build_core_component.py'
+      - 'scripts/check_core_candidate_native.py'
+      - 'scripts/check_core_candidate_protocols.py'
+      - 'tests/core_candidate_context.py'
+      - 'tests/test_core_candidate_protocols.py'
+      - 'tests/test_*loopback*.py'
+      - 'tests/test_*_real.py'
+      - 'tests/test_dns_core_tls.py'
+      - 'tests/tcp_upstream_export_helpers.py'
+      - 'tests/loopback_helpers.py'
+      - 'scripts/fetch_mihomo.py'
+      - 'scripts/test_asset_download.py'
+      - 'scripts/system_maintenance_smoke.py'
+      - 'tests/core_switch_systemd.py'
+      - 'tests/core_authority_installed.py'
+      - 'tests/test_core_authority.py'
+      - 'tests/test_core_authority_loader.py'
+      - 'deploy/core_authority.py'
+      - 'deploy/system_ops.py'
+      - 'scripts/install_ops_control.py'
+      - 'tests/core_switch_fixture_runner.py'
+      - 'tests/test_oneclick_system.py'
+      - 'scripts/fetch_core_candidate_inputs.py'
+      - 'tests/test_core_component_builder.py'
+      - 'tests/test_core_candidate_inputs.py'
+      - 'app/core_updates/artifacts.py'
+      - 'app/core_updates/store.py'
+      - 'app/core_updates/github.py'
+      - '.github/workflows/core-component-candidate.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pure-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.9', '3.12']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compile and test offline fake contracts only
+        run: |
+          python -m py_compile scripts/build_core_component.py scripts/fetch_core_candidate_inputs.py tests/test_core_component_builder.py tests/test_core_candidate_inputs.py
+          python -m unittest discover -s tests -p test_core_component_builder.py -v
+          python -m unittest discover -s tests -p test_core_candidate_inputs.py -v
+  candidate:
+    needs: pure-contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        core: ['sing-box', 'xray']
+    env:
+      CORE: ${{ matrix.core }}
+      EXPECTED_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Verify exact source and create private candidate workspace
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          git diff --quiet HEAD --
+          umask 077
+          CANDIDATE_WORK="$RUNNER_TEMP/vui-core-$CORE"
+          printf 'CANDIDATE_WORK=%s\n' "$CANDIDATE_WORK" >> "$GITHUB_ENV"
+          mkdir -m 700 "$CANDIDATE_WORK"
+      - name: Acquire pinned official materials (not native qualification)
+        run: |
+          umask 077
+          python scripts/fetch_core_candidate_inputs.py --workspace "$CANDIDATE_WORK" --core "$CORE" --builder-source "$EXPECTED_SOURCE" --output inputs > "$CANDIDATE_WORK/acquisition-summary.json"
+      - name: Build four candidate packs and aggregate without executing cores
+        run: |
+          umask 077
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from scripts import build_core_component as producer
+          from app.core_updates import artifacts as a
+          workspace = Path(os.environ['CANDIDATE_WORK'])
+          expected = json.loads((workspace / 'inputs/expected.json').read_bytes())
+          assert expected['builder_source'] == os.environ['EXPECTED_SOURCE']
+          assert expected['compatibility']['app_sources'] == [os.environ['EXPECTED_SOURCE']]
+          records, packs = [], {}
+          for target in a.TARGETS:
+              row = next(item for item in expected['upstream']['archives'] if item['target'] == target)
+              output = 'target-' + target
+              record = producer.build_target(workspace, Path('inputs/expected.json'), target=target,
+                  archive=Path('inputs') / row['archive_name'], source=Path('inputs/SOURCE.tar.gz'),
+                  destination=Path(output))
+              records.append(record)
+              packs[target] = Path(output) / record['name']
+          aggregate = producer.assemble(workspace, Path('inputs/expected.json'), packs=packs,
+                                         destination=Path('candidate'))
+          receipt = dict(schema=1, kind='core-candidate-production-v1', scope='candidate-format-only',
+              published=False, qualified=False, builder_source=os.environ['EXPECTED_SOURCE'], core=os.environ['CORE'],
+              context=dict(repository=os.environ['GITHUB_REPOSITORY'], repository_id=int(os.environ['GITHUB_REPOSITORY_ID']),
+                  run_id=int(os.environ['GITHUB_RUN_ID']), run_attempt=int(os.environ['GITHUB_RUN_ATTEMPT'])),
+              acquisition_receipt_sha256=hashlib.sha256((workspace / 'inputs/acquisition-receipt.json').read_bytes()).hexdigest(),
+              expected_sha256=hashlib.sha256((workspace / 'inputs/expected.json').read_bytes()).hexdigest(),
+              targets=records, aggregate=aggregate)
+          with (workspace / 'production-receipt.json').open('x') as output:
+              json.dump(receipt, output, sort_keys=True, indent=2)
+          print('Candidate artifacts produced; qualified=false, published=false. No core was executed.')
+          PY
+      - name: Preserve candidate files and bounded acquisition/production evidence
+        id: candidate-artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: core-candidate-${{ matrix.core }}-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.CANDIDATE_WORK }}/candidate/*
+            ${{ env.CANDIDATE_WORK }}/inputs/expected.json
+            ${{ env.CANDIDATE_WORK }}/inputs/acquisition-receipt.json
+            ${{ env.CANDIDATE_WORK }}/acquisition-summary.json
+            ${{ env.CANDIDATE_WORK }}/production-receipt.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Bind small evidence to the completed immutable candidate artifact
+        if: success()
+        env:
+          CANDIDATE_ARTIFACT_ID: ${{ steps.candidate-artifact.outputs.artifact-id }}
+          CANDIDATE_ARTIFACT_DIGEST: ${{ steps.candidate-artifact.outputs.artifact-digest }}
+          CANDIDATE_ARTIFACT_NAME: core-candidate-${{ matrix.core }}-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          umask 077
+          python - <<'PY_EVIDENCE'
+          import hashlib
+          import json
+          import os
+          import re
+          from pathlib import Path
+          workspace = Path(os.environ['CANDIDATE_WORK'])
+          raws = {key: (workspace / name).read_bytes() for key, name in (
+              ('expected', 'inputs/expected.json'), ('acquisition', 'inputs/acquisition-receipt.json'),
+              ('production', 'production-receipt.json'))}
+          assert all(0 < len(raw) <= 64_000 for raw in raws.values())
+          records = {key: json.loads(raw) for key, raw in raws.items()}
+          source, core = os.environ['EXPECTED_SOURCE'], os.environ['CORE']
+          context = dict(repository=os.environ['GITHUB_REPOSITORY'], repository_id=int(os.environ['GITHUB_REPOSITORY_ID']),
+              run_id=int(os.environ['GITHUB_RUN_ID']), run_attempt=int(os.environ['GITHUB_RUN_ATTEMPT']))
+          assert re.fullmatch('[0-9a-f]{40}', source) and core in ('sing-box', 'xray')
+          assert all(type(context[key]) is int and context[key] > 0 for key in ('repository_id', 'run_id', 'run_attempt'))
+          production, acquisition, expected = records['production'], records['acquisition'], records['expected']
+          for key, kind in (('production', 'core-candidate-production-v1'), ('acquisition', 'core-candidate-acquisition-v1'),
+                            ('expected', 'core-component-build-input-v1')):
+              assert type(records[key]['schema']) is int and records[key]['schema'] == 1 and records[key]['kind'] == kind
+          assert production['context'] == context and production['builder_source'] == source and production['core'] == core
+          assert acquisition['builder_source'] == source and expected['builder_source'] == source and expected['core'] == core
+          assert expected['compatibility']['app_sources'] == [source]
+          assert all(record['qualified'] is False and record['published'] is False for record in (production, acquisition))
+          assert production['expected_sha256'] == hashlib.sha256(raws['expected']).hexdigest()
+          assert production['acquisition_receipt_sha256'] == hashlib.sha256(raws['acquisition']).hexdigest()
+          artifact_id = os.environ['CANDIDATE_ARTIFACT_ID']
+          digest = os.environ['CANDIDATE_ARTIFACT_DIGEST']
+          if digest.startswith('sha256:'):
+              digest = digest[7:]
+          assert re.fullmatch('[1-9][0-9]{0,19}', artifact_id) and re.fullmatch('[0-9a-f]{64}', digest)
+          name = 'core-candidate-' + core + '-' + source + '-' + str(context['run_id']) + '-' + str(context['run_attempt'])
+          assert os.environ['CANDIDATE_ARTIFACT_NAME'] == name
+          evidence = dict(schema=1, kind='core-candidate-evidence-v1', qualified=False, published=False,
+              core=core, builder_source=source, context=context,
+              producer_artifact=dict(id=int(artifact_id), name=name, digest='sha256:' + digest),
+              **records)
+          raw = json.dumps(evidence, sort_keys=True, separators=(',', ':')).encode('ascii')
+          assert len(raw) <= 200_000
+          with (workspace / 'candidate-evidence.json').open('xb') as output:
+              output.write(raw)
+          print('Bounded candidate evidence recorded; no publication/native qualification granted.')
+          PY_EVIDENCE
+      - name: Preserve small candidate evidence separately from product ZIPs
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: core-candidate-evidence-${{ matrix.core }}-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.CANDIDATE_WORK }}/candidate-evidence.json
+          if-no-files-found: error
+          retention-days: 14
+
+  native-tcp:
+    needs: candidate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-gnu
+            runner: ubuntu-24.04-arm
+          - target: x86_64-musl
+            runner: ubuntu-24.04
+          - target: aarch64-musl
+            runner: ubuntu-24.04-arm
+    env:
+      EXPECTED_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: core-candidate-[sx]*-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/vui-native-inputs
+      - name: Check same-run native binaries and TCP forwarding
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          git diff --quiet HEAD --
+          umask 077
+          output="$RUNNER_TEMP/native-tcp.json"
+          inputs="$RUNNER_TEMP/vui-native-inputs"
+          case "$TARGET" in
+            *-gnu)
+              /usr/bin/python3 -B -m scripts.check_core_candidate_native --inputs "$inputs" --target "$TARGET" > "$output"
+              ;;
+            *-musl)
+              docker run --rm \
+                -e TARGET -e EXPECTED_SOURCE -e GITHUB_ACTIONS -e RUNNER_ENVIRONMENT \
+                -e GITHUB_REPOSITORY -e GITHUB_REPOSITORY_ID -e GITHUB_RUN_ID -e GITHUB_RUN_ATTEMPT \
+                -v "$PWD:/src:ro" -v "$inputs:/inputs:ro" -w /src alpine:3.22 /bin/sh -euxc '
+                  apk add --no-cache python3 >&2
+                  adduser -D smoke
+                  su smoke -s /bin/sh -c "python3 -B -m scripts.check_core_candidate_native --inputs /inputs --target $TARGET"
+                ' > "$output"
+              ;;
+            *) exit 1 ;;
+          esac
+          test -s "$output"
+          cat "$output"
+      - name: Preserve native TCP evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: core-native-tcp-${{ matrix.target }}-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-tcp.json
+          if-no-files-found: error
+          retention-days: 14
+
+  protocol-compatibility:
+    needs: native-tcp
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      EXPECTED_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install non-browser test dependencies
+        run: python -m pip install -r requirements-test.txt
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: core-candidate-[sx]*-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/vui-native-inputs
+      - name: Fetch the original fixed clients for compatibility tests
+        run: |
+          set -euo pipefail
+          python -B scripts/fetch_test_cores.py "$RUNNER_TEMP/vui-baseline-cores" x86_64-gnu
+          python -B scripts/fetch_mihomo.py "$RUNNER_TEMP/vui-candidate-client"
+      - name: Run existing protocol gates with the verified candidate server binaries
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          git diff --quiet HEAD --
+          umask 077
+          python -B -m scripts.check_core_candidate_protocols \
+            --inputs "$RUNNER_TEMP/vui-native-inputs" --target x86_64-gnu \
+            --source "$EXPECTED_SOURCE" --baseline-cores "$RUNNER_TEMP/vui-baseline-cores" \
+            --mihomo "$RUNNER_TEMP/vui-candidate-client/mihomo" \
+            --output "$RUNNER_TEMP/candidate-protocols.json"
+          test -s "$RUNNER_TEMP/candidate-protocols.json"
+      - name: Preserve exact candidate protocol evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: core-candidate-protocols-x86_64-gnu-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/candidate-protocols.json
+          if-no-files-found: error
+          retention-days: 14
+
+  managed-arm64:
+    needs: native-tcp
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    env:
+      EXPECTED_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-test.txt
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: core-candidate-[sx]*-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/vui-managed-inputs
+      - name: Build exact ARM64 GNU bundle and stage same-run core fixture
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          git diff --quiet HEAD --
+          test "$(uname -m)" = aarch64
+          work=/tmp/vui-oneclick
+          mkdir "$work" "$work/core-switch-fixture"
+          for core in sing-box xray; do
+            artifact="$RUNNER_TEMP/vui-managed-inputs/core-candidate-$core-$EXPECTED_SOURCE-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+            mkdir "$work/core-switch-fixture/$core"
+            cp -R "$artifact/candidate" "$work/core-switch-fixture/$core/candidate"
+          done
+          python -B scripts/build_bundle.py "$work/vui-linux.zip" --source-commit "$EXPECTED_SOURCE" --target aarch64-gnu
+          python -B scripts/build_release_kit.py "$work/vui-linux.zip" "$work/kit" "$EXPECTED_SOURCE"
+          python -B scripts/fetch_mihomo.py "$work/client"
+      - name: Run installed ARM64 systemd core switch and restore
+        env:
+          VUI_SYSTEM_INSTALL_TEST: '1'
+          VUI_REMOTE_MAINTENANCE_TEST: '1'
+          VUI_EXISTING_INSTALL_TEST: '1'
+          VUI_DOMAIN_RETRY_TEST: '1'
+          VUI_INSTALLER_YN_TEST: '1'
+          VUI_NETLINK_SYSTEMD_TEST: '1'
+          VUI_CORE_SWITCH_FIXTURE: /tmp/vui-oneclick/core-switch-fixture
+          VUI_RELEASE_BUNDLE: /tmp/vui-oneclick/vui-linux.zip
+          VUI_RELEASE_KIT: /tmp/vui-oneclick/kit
+          VUI_TEST_MIHOMO: /tmp/vui-oneclick/client/mihomo
+        run: |
+          set -euo pipefail
+          log=/tmp/vui-oneclick/managed-arm64.log
+          python -B -m unittest discover -s tests -p test_oneclick_system.py -v 2>&1 | tee "$log"
+          test "$(grep -Ec '^Ran 1 test in ' "$log")" = 1
+          test "$(grep -cx OK "$log")" = 1
+          python -B - "$log" <<'PY'
+          import sys
+          from pathlib import Path
+          from scripts.acceptance_job import validate_core_switch_evidence
+
+          validate_core_switch_evidence(Path(sys.argv[1]).read_bytes())
+          PY
+      - name: Preserve ARM64 systemd evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: core-managed-arm64-${{ env.EXPECTED_SOURCE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/vui-oneclick/managed-arm64.log
+          if-no-files-found: warn
+          retention-days: 14

@@ -4,6 +4,7 @@ Only HTTP/TCP payloads are tested. QUIC itself requires a UDP listener; that
 socket is not evidence of forwarded-UDP support. No obfs, hop, bandwidth, ALPN
 or fingerprint overrides are supplied: the existing pinned defaults are used.
 """
+from tests.core_candidate_context import server_version, singbox_client
 from proxy_loopback_support import ReadyMihomoProcess
 from contextlib import ExitStack
 import http.client
@@ -33,8 +34,9 @@ class Hysteria2PreflightLoopbackTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.singbox = str(Path(os.environ["VUI_TEST_CORES"]) / "sing-box")
+        cls.singbox_client = singbox_client(cls.singbox)
         cls.mihomo = os.environ["VUI_TEST_MIHOMO"]
-        for command, expected in (([cls.singbox, "version"], "sing-box version 1.14.2\n"),
+        for command, expected in (([cls.singbox, "version"], f"sing-box version {server_version('sing-box', '1.14.2')}\n"),
                                   ([cls.mihomo, "-v"], "Mihomo Meta v1.19.32 ")):
             result = subprocess.run(command, capture_output=True, text=True, timeout=15)
             output = result.stdout + result.stderr
@@ -118,8 +120,8 @@ class Hysteria2PreflightLoopbackTests(unittest.TestCase):
         else:
             path = self.unique_path(client, "json")
             path.write_text(json.dumps(config))
-            command = [self.singbox, "run", "-c", str(path)]
-            self.check_command([self.singbox, "check", "-c", str(path)], env)
+            command = [self.singbox_client, "run", "-c", str(path)]
+            self.check_command([self.singbox_client, "check", "-c", str(path)], env)
         return command, env
 
     def start_udp_server(self, process, port):

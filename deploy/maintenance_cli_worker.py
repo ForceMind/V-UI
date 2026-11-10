@@ -10,7 +10,7 @@ import sys
 
 CONTROL = Path('/usr/local/lib/v-ui')
 ROOT = Path('/var/lib/v-ui')
-SCOPES = {'diagnose', 'nodes', 'share', 'relay', 'certificates', 'operate', 'upgrade', 'destructive'}
+SCOPES = {'diagnose', 'nodes', 'share', 'relay', 'certificates', 'operate', 'upgrade', 'destructive', 'core_read'}
 
 
 def arguments(args):

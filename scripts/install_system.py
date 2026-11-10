@@ -42,6 +42,9 @@ UNITS = ('v-ui.service', 'v-ui-http01.service', 'v-ui-http01.socket')
 MAX_ARCHIVE = 850_000_000
 INSTALL_LOCK = Path('/run/lock/v-ui-install.lock')
 TRANSACTION_NAME = '.install-transaction.json'
+# Verified by the current controller before handing off the installer lock.
+CORE_INSTALL_GUARD = 1
+ROOT_APPLICATION_ORIGIN = 1
 STREAM_CHUNK = 1024 * 1024
 HTTPS_STARTUP_TIMEOUT = 120
 # Complete stdlib-only dependency closure of the offline backup/restore controller.
@@ -603,6 +606,7 @@ def _recover_transaction(work):
     path = CONFIG_DIR/TRANSACTION_NAME
     if not os.path.lexists(path):
         return
+    require_legacy_core_installation()
     no_symlink_ancestors(path)
     if (not own_file(path) or stat.S_IMODE(path.stat().st_mode) != 0o600
             or path.stat().st_size > 12_000_000):
@@ -999,6 +1003,126 @@ def https_health(config, cafile=None, *, trust_saved_chain=False, deadline=None)
     raise InstallError('HTTPS 健康验证失败：120 秒启动预算已耗尽；最后结果 '+last) from None
 
 
+def require_legacy_core_installation():
+    names = ('CORE_UPDATE_PENDING.json', 'core-selection.json', 'core-selection.fence.json',
+             'core-selection.lock', '.core-update-active', '.core-update-history')
+    try:
+        fd = os.open(CONFIG_DIR, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return
+    except OSError:
+        raise InstallError('核心维护状态不可读取，已停止安装') from None
+    try:
+        for name in names:
+            try:
+                os.stat(name, dir_fd=fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            except OSError:
+                raise InstallError('核心维护状态不可读取，已停止安装') from None
+            raise InstallError('检测到独立核心选择或未完成事务，已停止普通应用安装或升级')
+    finally:
+        os.close(fd)
+
+
+def check_legacy_core_data(work):
+    # The controller has already been verified against the selected kit. The
+    # non-root child reads only bounded runtime-state files and changes no data.
+    code = ('import sys; from pathlib import Path; '
+            'sys.path.insert(0,sys.argv[1]); '
+            'from app.release_tools import _require_legacy_runtime_states; '
+            '_require_legacy_runtime_states(Path(sys.argv[2]))')
+    try:
+        as_service([sys.executable, '-B', '-I', '-S', '-c', code, str(work), str(ROOT / 'data')],
+                   capture=True, cwd=ROOT)
+    except subprocess.CalledProcessError:
+        raise InstallError('无法确认原核心运行状态，已停止应用升级或恢复') from None
+
+
+def _origin_sdk_bytes(path, limit):
+    """Read a bounded regular no-follow SDK inode; trust comes from the
+    independently supplied whole-table digest, not pathname ownership.
+    """
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    try:
+        before=os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink!=1 or not 0<before.st_size<=limit:
+            raise InstallError('来源校验 SDK 文件类型或大小无效')
+        raw=bytearray()
+        while len(raw)<=limit:
+            chunk=os.read(fd,min(65536,limit+1-len(raw)))
+            if not chunk:break
+            raw.extend(chunk)
+        def identity(info):
+            return (info.st_dev,info.st_ino,info.st_mode,info.st_uid,info.st_gid,
+                    info.st_nlink,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+        if (identity(os.fstat(fd))!=identity(before) or identity(Path(path).lstat())!=identity(before)
+                or len(raw)!=before.st_size):
+            raise InstallError('来源校验 SDK 文件在读取时发生变化')
+        return bytes(raw)
+    finally:os.close(fd)
+
+
+def record_application_origin(args, snapshot):
+    kit=getattr(args,'control_kit',None);pin=getattr(args,'control_kit_sha',None)
+    if kit is None and pin is None:
+        if getattr(args,'control_kit_local_target_only',False):
+            raise InstallError('来源校验目标选项必须与 SDK 及摘要一起提供')
+        # Standalone legacy installation remains supported. Its metadata alone
+        # cannot acquire the new independent core compatibility qualification.
+        return False
+    if os.geteuid()!=0 or getattr(args,'dry_run',False):
+        raise InstallError('来源记录仅用于锁内 Root 正常安装')
+    if kit is None or not re.fullmatch(r'[a-f0-9]{64}',pin or ''):
+        raise InstallError('来源校验 SDK 目录与独立摘要必须一起提供')
+    kit=Path(kit).absolute()
+    table=_origin_sdk_bytes(kit/'SHA256SUMS',64000)
+    if hashlib.sha256(table).hexdigest()!=pin:
+        raise InstallError('来源校验 SDK 摘要不匹配，尚未准备候选')
+    entries={}
+    try:lines=table.decode('ascii').splitlines()
+    except UnicodeError:
+        raise InstallError('来源校验 SDK 清单编码无效') from None
+    for line in lines:
+        match=re.fullmatch(r'([a-f0-9]{64})  ([A-Za-z0-9._-]+)',line)
+        if not match or match[2] in entries:
+            raise InstallError('来源校验 SDK 清单格式无效')
+        entries[match[2]]=match[1]
+    code=_origin_sdk_bytes(kit/'install_ops_control.py',4_000_000)
+    if hashlib.sha256(code).hexdigest()!=entries.get('install_ops_control.py'):
+        raise InstallError('来源校验器字节不匹配，尚未准备候选')
+    # Execute authenticated code from a held anonymous FD. Even a caller-owned
+    # archive-temp parent cannot replace an executable pathname between checks
+    # and exec. The fixed bootstrap rechecks descriptor bytes before compiling.
+    bootstrap = """import hashlib,os,stat,sys
+fd=int(sys.argv[1]);expected=sys.argv[2]
+info=os.fstat(fd)
+assert stat.S_ISREG(info.st_mode) and info.st_uid==0 and stat.S_IMODE(info.st_mode)==0o600 and info.st_nlink in (0,1)
+assert 0<info.st_size<=4000000
+raw=os.pread(fd,info.st_size+1,0)
+after=os.fstat(fd)
+keys=('st_dev','st_ino','st_mode','st_uid','st_gid','st_nlink','st_size','st_mtime_ns','st_ctime_ns')
+assert len(raw)==info.st_size and all(getattr(info,k)==getattr(after,k) for k in keys)
+assert hashlib.sha256(raw).hexdigest()==expected
+sys.argv=['<verified-sdk-origin>']+sys.argv[3:]
+exec(compile(raw,'<verified-sdk-origin>','exec'),{'__name__':'__main__','__file__':'<verified-sdk-origin>'})
+"""
+    directory=getattr(args,'archive_temp_dir',None) or '/var/tmp'
+    with tempfile.TemporaryFile(prefix='vui-origin-sdk-',dir=directory) as verifier:
+        verifier.write(code);verifier.flush();os.fsync(verifier.fileno());os.fchmod(verifier.fileno(),0o600)
+        command_line=['/usr/bin/python3','-B','-I','-S','-c',bootstrap,str(verifier.fileno()),
+                      entries['install_ops_control.py'],'--kit',str(kit),'--sha256',pin,
+                      '--record-origin-fd',str(snapshot.fileno())]
+        if getattr(args,'control_kit_local_target_only',False):command_line.append('--local-target-only')
+        try:
+            subprocess.run(command_line,check=True,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,pass_fds=(snapshot.fileno(),verifier.fileno()),cwd='/',
+                env={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','LANG':'C.UTF-8','HOME':'/'},timeout=300)
+        except (OSError,subprocess.SubprocessError):
+            raise InstallError('应用原包来源未完成持久记录；尚未执行候选准备') from None
+    return True
+
+
 def install(args):
     validate_options(args)
     snapshot, archive, meta = verify_archive(args.bundle, args.sha256, temp_dir=getattr(args, 'archive_temp_dir', None))
@@ -1007,6 +1131,7 @@ def install(args):
 
 
 def install_verified(args, snapshot, archive, meta):
+    require_legacy_core_installation()
     existing=CONFIG.exists()
     info=check_platform()
     manager=info['init']
@@ -1075,6 +1200,7 @@ def install_verified(args, snapshot, archive, meta):
         return
     if os.geteuid() != 0:
         raise InstallError('请使用 sudo 运行安装器；安装后的应用不会以 root 运行')
+    record_application_origin(args,snapshot)
     if not existing:
         account=create_service_user();ROOT.mkdir(mode=0o700);os.chown(ROOT,account.pw_uid,account.pw_gid)
         config['ready'] = False
@@ -1099,6 +1225,8 @@ def install_verified(args, snapshot, archive, meta):
         os.chmod(bundle, 0o600); os.chown(bundle, uid, gid)
         extract_controller(archive, work, uid, gid)
         controller = work/'scripts/deploy.py'
+        if existing:
+            check_legacy_core_data(work)
         prepared = ROOT/'releases'/meta['release_id']/'READY.json'
         if not prepared.exists():
             as_service([sys.executable,'-B','-I','-S',str(controller),'--root',str(ROOT),'stage',str(bundle),'--sha256',args.sha256])
@@ -1327,6 +1455,9 @@ def read_existing_configuration(args, saved):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--bundle', required=True, type=Path); p.add_argument('--sha256', required=True)
+    p.add_argument('--control-kit',type=Path,help=argparse.SUPPRESS)
+    p.add_argument('--control-kit-sha',help=argparse.SUPPRESS)
+    p.add_argument('--control-kit-local-target-only',action='store_true',help=argparse.SUPPRESS)
     p.add_argument('--archive-temp-dir', type=Path, help='私有校验快照使用的现有磁盘目录（默认 /var/tmp；低内存主机请避免 tmpfs）')
     p.add_argument('--domain'); p.add_argument('--email'); p.add_argument('--admin')
     p.add_argument('--port',type=int);p.add_argument('--bind')
@@ -1367,6 +1498,7 @@ def main():
     # Config selection and application share the same lease. Never accept a
     # stale menu choice from another concurrent installer.
     with installation_signals(), _installation_lock(INSTALL_LOCK):
+        require_legacy_core_installation()
         if args.unattended_upgrade:
             current = saved_configuration()
             if current != saved or os.path.lexists(CONFIG_DIR/TRANSACTION_NAME):
@@ -1381,6 +1513,7 @@ def main():
                 with tempfile.TemporaryDirectory(prefix='.recovery-', dir=ROOT) as temporary:
                     work = Path(temporary); os.chown(work, account.pw_uid, account.pw_gid)
                     extract_controller(archive, work, account.pw_uid, account.pw_gid)
+                    check_legacy_core_data(work)
                     recover_transaction(work)
             read_configuration(args)
             if args.health_ca and not args.cert:

@@ -19,6 +19,7 @@ import tempfile
 import time
 import unittest
 
+from tests.core_candidate_context import server_version
 from app.services.core_manager import SingBoxAdapter
 from app.services.proxy_policy import AddressPolicy, LOCAL_TAG, UPSTREAM_TAG, compile_proxy_policy
 from loopback_helpers import (CoreProcess, certificate_files, start_http_target,
@@ -37,7 +38,7 @@ class ProxyPolicyRealTests(unittest.TestCase):
         self.assertTrue(self.binary.is_file(), "Pinned sing-box is missing")
         version = subprocess.run([str(self.binary), "version"], capture_output=True, text=True, timeout=10)
         self.assertEqual(version.returncode, 0)
-        self.assertIn("sing-box version 1.14.2", version.stdout)
+        self.assertIn(f"sing-box version {server_version('sing-box', '1.14.2')}", version.stdout)
         self.ca, self.cert, self.key = certificate_files(self.root, "relay-policy")
         self.empty_certs = self.root / "empty-certs"
         self.empty_certs.mkdir()

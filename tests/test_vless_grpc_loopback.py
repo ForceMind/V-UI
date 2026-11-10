@@ -4,6 +4,7 @@ The application adapter builds the actual server; public URI/YAML/JSON must
 preserve the same profile. The clients use unchanged checksum-pinned binaries,
 with temporary CA trust only. No custom authority or UDP behavior is claimed.
 """
+from tests.core_candidate_context import server_version, singbox_client
 from proxy_loopback_support import ReadyMihomoProcess
 import base64
 from contextlib import ExitStack
@@ -54,10 +55,11 @@ class VLESSGRPCLoopbackTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.singbox = str(Path(os.environ["VUI_TEST_CORES"]) / "sing-box")
+        cls.singbox_client = singbox_client(cls.singbox)
         cls.mihomo = os.environ["VUI_TEST_MIHOMO"]
         versions = []
         for command, expected in (
-            ([cls.singbox, "version"], "sing-box version 1.14.2\n"),
+            ([cls.singbox, "version"], f"sing-box version {server_version('sing-box', '1.14.2')}\n"),
             ([cls.mihomo, "-v"], "Mihomo Meta v1.19.32 "),
         ):
             result = subprocess.run(command, capture_output=True, text=True, timeout=15)
@@ -69,7 +71,7 @@ class VLESSGRPCLoopbackTests(unittest.TestCase):
                      if line.startswith("Tags:")), "")
         if not tags or "with_grpc" in tags.removeprefix("Tags:").strip().split(","):
             raise AssertionError("Public exports must use the pinned gRPC Lite build: " + versions[0])
-        print("gRPC public exports: sing-box 1.14.2 gRPC Lite; Mihomo 1.19.32")
+        print(f"gRPC public exports: sing-box {server_version('sing-box', '1.14.2')} gRPC Lite; Mihomo 1.19.32")
 
     def setUp(self):
         grant_tests.SubscriptionTokenTests.setUp(self)
@@ -299,8 +301,8 @@ class VLESSGRPCLoopbackTests(unittest.TestCase):
         else:
             self.assertEqual(client, "singbox")
             path = self.exported_singbox(grant, port)
-            self.check_command([self.singbox, "check", "-c", str(path)], env)
-            command = [self.singbox, "run", "-c", str(path)]
+            self.check_command([self.singbox_client, "check", "-c", str(path)], env)
+            command = [self.singbox_client, "run", "-c", str(path)]
         return command, env
 
     def verified_h2_probe(self):

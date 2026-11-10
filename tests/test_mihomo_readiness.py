@@ -16,6 +16,7 @@ from test_proxy_double_hop import DoubleHopFixture
 # Audited persistent-client construction sites. Parser/version subprocess.run
 # and the HY2/TUIC sing-box-only UDP-server Popen paths are intentionally absent.
 SITES = {
+    ('core_switch_systemd.py', 'installed_core_switch.through'): 'direct',
     # Wildcard fixture: shared post-up/PID barrier before HTTP, ExitStack reap;
     # real server listeners and served leaf are checked independently.
     ("test_dns_core_tls.py", "DNSCoreTLSTests.start_client"): "direct",
@@ -46,6 +47,20 @@ SITES = {
 # launch implementations, fake unit processes, and non-core app/worker/benchmark
 # subprocesses. These entries do not grant Mihomo permission to use the old gate.
 OTHER_CONSTRUCTIONS = {
+    # Installed daemon protocol peer and a kernel writer-lease holder: isolated
+    # service-UID stdlib children, private stdin, bounded readiness/read waits
+    # and finally close/kill/reap. Neither child executes a proxy core; actual
+    # Mihomo traffic still uses the shared barrier in core_switch_systemd.
+    ('core_remote_tasks_installed.py', 'Peer.__init__', 'Popen'),
+    ('core_remote_tasks_installed.py', 'writer_peer', 'Popen'),
+    # Two bounded synthetic store/catalog publishers: isolated stdlib Python,
+    # fake material/transport only, stdin barrier, 15s communicate and finally
+    # kill/wait/close. No proxy core or readiness qualification is involved.
+    # Synthetic Linux group fixture. The Python child is an isolated session
+    # leader retained with WNOWAIT until final SIGKILL/reap. No proxy core runs.
+    ('test_core_cold_check_linux.py', 'NativeCheckProcessGroupTests.test_python_fixture_descendant_forces_group_abort_before_clean_return', 'Popen'),
+    ('test_core_store.py', 'CoreStoreTests.test_two_processes_same_id_publish_only_once_and_keep_one_complete_artifact', 'Popen'),
+    ('test_core_catalog.py', 'CoreCatalogTests.test_two_processes_same_id_use_real_m2_fake_io_and_publish_only_one_context', 'Popen'),
     # Shipped JS controller only: pipe transport to the fixture's authenticated
     # HTTP client; 120s bound with finally kill/reap. It launches no client core.
     ('test_inbound_routing_real.py', 'InboundRoutingRealTests.run_simple_controller', 'Popen'),

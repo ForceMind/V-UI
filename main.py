@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import asyncio
 import sys
 os.umask(0o077)
 from fastapi import FastAPI, Request
@@ -8,7 +9,8 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.staticfiles import StaticFiles
 from app.api import auth, maintenance, certificates, cores, files, inbounds, management, mihomo_preview, proxy, proxy_diagnostics, proxy_exports, routing, security, singbox, subscription, subscriptions, system, xray
-from app.data_owner import data_owner
+from app.data_owner import DataOwnerError, data_owner
+from app.core_updates import managed_startup
 from app.models.database import DB_PATH, init_db
 from app.middleware.auth import AdminAuthMiddleware, configured_origin
 from app.services.core_manager import core_manager
@@ -16,8 +18,9 @@ from app.services.log_redaction import install_log_redaction
 from app.services.validated_export import ExportError
 from app.services.routing_store import RoutingStorageError
 
-app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.4.23')
+app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.4.24')
 app.add_middleware(AdminAuthMiddleware)
+app.add_middleware(managed_startup.ManagedHTTPGate)
 app.include_router(maintenance.router,prefix='/api/maintenance',tags=['Temporary maintenance'])
 app.include_router(certificates.router,prefix='/api/certificates',tags=['Certificates'])
 app.include_router(system.router,prefix='/api/system',tags=['System'])
@@ -38,6 +41,11 @@ app.include_router(auth.router,prefix='/api/auth',tags=['Auth'])
 app.include_router(security.router,prefix='/api/security',tags=['Security'])
 app.include_router(files.router,prefix='/api/files',tags=['Files'])
 
+@app.exception_handler(DataOwnerError)
+async def data_admission_refused(request: Request,exc: DataOwnerError):
+    return JSONResponse({'detail':'数据正在维护或恢复中，请稍后重试'},status_code=503,
+                        headers={'Cache-Control':'no-store'})
+
 @app.exception_handler(RoutingStorageError)
 async def invalid_routing_storage(request: Request,exc: RoutingStorageError):
     return JSONResponse({'detail':'Saved routing is unavailable; no fallback was generated'},status_code=503)
@@ -54,6 +62,18 @@ async def validation_error(request: Request,exc: RequestValidationError):
 
 @app.on_event('startup')
 async def startup_event():
+    managed=managed_startup.current()
+    if managed is not None:
+        try:
+            with managed.scope():
+                owner=data_owner(DB_PATH.parent);owner.__enter__();app.state.data_owner=owner
+                configured_origin();install_log_redaction()
+                managed.recover(core_manager)
+                managed.ready(asyncio.get_running_loop())
+            return
+        except BaseException:
+            await shutdown_event()
+            raise
     owner = data_owner(DB_PATH.parent)
     owner.__enter__()
     app.state.data_owner = owner
@@ -71,6 +91,13 @@ async def startup_event():
 
 @app.on_event('shutdown')
 async def shutdown_event():
+    managed=managed_startup.current()
+    try:
+        if managed is not None:managed.close()
+    finally:
+        await _shutdown_ordinary_resources()
+
+async def _shutdown_ordinary_resources():
     try:
         proxy_diagnostics.close_diagnostics_if_created()
     finally:

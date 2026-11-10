@@ -27,7 +27,18 @@ FETCH_COMMAND = [sys.executable, '-B', 'scripts/fetch_mihomo.py', str(MIHOMO.par
 MAX_LOG = 16_000_000
 HEADER = 'VUI_ACCEPTANCE_CONTEXT '
 FOOTER = 'VUI_ACCEPTANCE_EXIT '
+UPGRADE_23_MARKER = 'VUI_23_TO_24_UPGRADE_ACCEPTANCE:'
 
+
+CORE_SWITCH_FIXTURE = WORK / 'core-switch-fixture'
+CORE_SWITCH_CORES = ('sing-box', 'xray')
+CORE_SWITCH_MARKER = b'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE:'
+CORE_INTERRUPT_MARKER = b'VUI_INSTALLED_CORE_INTERRUPT_ACCEPTANCE:'
+CORE_RESTORE_MARKER = b'VUI_INSTALLED_CORE_RESTORE_ACCEPTANCE:'
+CORE_REMOTE_MARKERS = (
+    (b'VUI_INSTALLED_CORE_REMOTE_TASK_ACCEPTANCE:', 'CORE_REMOTE_TASK_EVIDENCE_REQUIRED'),
+    (b'VUI_INSTALLED_CORE_BACKUP_RECOVERY_ACCEPTANCE:', 'CORE_BACKUP_RECOVERY_EVIDENCE_REQUIRED'),
+)
 
 def matrix_for_version(version):
     number = core._version(version)
@@ -181,6 +192,41 @@ def validate_test_log(raw, expected_context):
                and len(re.findall(r'^Ran [0-9]+ tests? in ', text, re.M)) == 1
                and len(re.findall(r'^OK$', text, re.M)) == 1
                and not re.search(r'\b(?:SKIP|SKIPPED|skipped|FAILED|ERROR)\b', text), 'TEST_LOG_NOT_ONE_UNSKIPPED_SUCCESS')
+    if context['identity']['version']=='0.4.24' and context['role']=='upgrade-0.4.23':
+        matches=[line for line in lines if UPGRADE_23_MARKER in line]
+        core._need(len(matches)==text.count(UPGRADE_23_MARKER)==1
+                   and matches[0].startswith(UPGRADE_23_MARKER+' ')
+                   and matches[0][len(UPGRADE_23_MARKER):].strip(),'UPGRADE_23_EVIDENCE_REQUIRED')
+
+
+def validate_core_switch_evidence(raw_log):
+    markers = [line for line in raw_log.splitlines() if CORE_SWITCH_MARKER in line]
+    expected = tuple(CORE_SWITCH_MARKER + b' ' + name.encode('ascii') + b' '
+                     for name in CORE_SWITCH_CORES)
+    core._need(len(markers) == len(expected) == raw_log.count(CORE_SWITCH_MARKER)
+               and all(line.startswith(prefix) and line[len(prefix):].strip()
+                       for line, prefix in zip(markers, expected)),
+               'CORE_SWITCH_EVIDENCE_REQUIRED')
+    interrupted = [line for line in raw_log.splitlines() if CORE_INTERRUPT_MARKER in line]
+    core._need(len(interrupted) == raw_log.count(CORE_INTERRUPT_MARKER) == 1
+               and interrupted[0].startswith(CORE_INTERRUPT_MARKER + b' ')
+               and interrupted[0][len(CORE_INTERRUPT_MARKER):].strip()
+               and raw_log.find(CORE_INTERRUPT_MARKER) > raw_log.rfind(CORE_SWITCH_MARKER),
+               'CORE_INTERRUPT_EVIDENCE_REQUIRED')
+    restored = [line for line in raw_log.splitlines() if CORE_RESTORE_MARKER in line]
+    core._need(len(restored) == raw_log.count(CORE_RESTORE_MARKER) == 1
+               and restored[0].startswith(CORE_RESTORE_MARKER + b' ')
+               and restored[0][len(CORE_RESTORE_MARKER):].strip()
+               and raw_log.find(CORE_RESTORE_MARKER) > raw_log.find(CORE_INTERRUPT_MARKER),
+               'CORE_RESTORE_EVIDENCE_REQUIRED')
+    previous = raw_log.find(CORE_RESTORE_MARKER)
+    for marker, error in CORE_REMOTE_MARKERS:
+        lines = [line for line in raw_log.splitlines() if marker in line]
+        position = raw_log.find(marker)
+        core._need(len(lines) == raw_log.count(marker) == 1
+                   and lines[0].startswith(marker + b' ')
+                   and lines[0][len(marker):].strip() and position > previous, error)
+        previous = position
 
 
 def _exit_code(value):
@@ -188,7 +234,7 @@ def _exit_code(value):
     return value if value >= 0 else 128 - value
 
 
-def run_test(source, version, role, identity_path, log, *, old_source=None, environ=None):
+def run_test(source, version, role, identity_path, log, *, old_source=None, environ=None, core_switch=False):
     environ = os.environ if environ is None else environ
     _context(environ)
     recipe = role_recipe(version, role, old_source=old_source)
@@ -209,6 +255,12 @@ def run_test(source, version, role, identity_path, log, *, old_source=None, envi
         row = _role(version, role)
         _checkout(Path(old_source), row['source'])
     env = role_environment(environ, version, role, old_source=old_source)
+    if core_switch:
+        core_directories = tuple(CORE_SWITCH_FIXTURE / name for name in CORE_SWITCH_CORES)
+        directories = (CORE_SWITCH_FIXTURE, *core_directories, *(path / 'candidate' for path in core_directories))
+        core._need(role == 'fresh' and all(path.is_dir() and not path.is_symlink() for path in directories),
+                   'CORE_SWITCH_FRESH_FIXTURE_REQUIRED')
+        env['VUI_CORE_SWITCH_FIXTURE'] = str(CORE_SWITCH_FIXTURE)
     context = _log_context(identity, role, environ)
     code = 0
     with os.fdopen(_new_output(log, KIT), 'wb') as stream:
@@ -224,7 +276,10 @@ def run_test(source, version, role, identity_path, log, *, old_source=None, envi
                 break
         stream.write(('\n' + FOOTER + str(code) + '\n').encode()); stream.flush(); os.fsync(stream.fileno())
     if code == 0:
-        validate_test_log(_read_file(log, MAX_LOG), context)
+        raw_log = _read_file(log, MAX_LOG)
+        validate_test_log(raw_log, context)
+        if core_switch:
+            validate_core_switch_evidence(raw_log)
     return code
 
 
@@ -271,6 +326,7 @@ def main(argv=None):
     consume.add_argument('--bundle-output', default=str(BUNDLE))
     for command in (test, record): command.add_argument('--identity', required=True)
     test.add_argument('--log', required=True); test.add_argument('--old-source')
+    test.add_argument('--core-switch', action='store_true')
     record.add_argument('--producer-artifact-id', type=int, required=True)
     record.add_argument('--producer-artifact-digest', required=True)
     record.add_argument('--output', required=True); record.add_argument('--test-log')
@@ -286,7 +342,8 @@ def main(argv=None):
             result = prepare(args.kit, args.source, args.version, args.expected_checksums_sha256,
                              args.expected_bundle_sha256, args.identity_output, bundle_output=args.bundle_output)
         elif args.command == 'run-test':
-            code = run_test(args.source, args.version, args.role, args.identity, args.log, old_source=args.old_source)
+            code = run_test(args.source, args.version, args.role, args.identity, args.log,
+                            old_source=args.old_source, core_switch=args.core_switch)
             if code: raise SystemExit(code)
             return
         else:

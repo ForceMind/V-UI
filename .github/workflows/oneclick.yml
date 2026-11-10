@@ -154,6 +154,45 @@ jobs:
             cd /tmp/vui-oneclick
             sha256sum -c vui-linux.zip.sha256
           )
+      - name: Prepare verified official core-switch fixture
+        env:
+          SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$(git rev-parse HEAD)" = "$SOURCE"
+          fixture=/tmp/vui-oneclick/core-switch-fixture
+          mkdir -m 700 "$fixture"
+          for core in sing-box xray; do
+            mkdir -m 700 "$fixture/$core"
+            python -B scripts/fetch_core_candidate_inputs.py --workspace "$fixture/$core" \
+              --core "$core" --builder-source "$SOURCE" --output inputs > "/tmp/vui-oneclick/core-switch-fetch-$core.log"
+          done
+          python -B - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from app.core_updates import artifacts
+          from scripts import build_core_component as producer
+          from scripts.acceptance_job import CORE_SWITCH_CORES, CORE_SWITCH_FIXTURE
+
+          for core in CORE_SWITCH_CORES:
+              work = CORE_SWITCH_FIXTURE / core
+              expected_path = Path('inputs/expected.json')
+              expected = json.loads((work / expected_path).read_bytes())
+              assert expected['core'] == core
+              assert expected['builder_source'] == os.environ['SOURCE']
+              assert expected['compatibility']['app_sources'] == [os.environ['SOURCE']]
+              packs = {}
+              for target in artifacts.TARGETS:
+                  row = next(item for item in expected['upstream']['archives'] if item['target'] == target)
+                  directory = Path('target-' + target)
+                  record = producer.build_target(work, expected_path, target=target,
+                      archive=Path('inputs') / row['archive_name'], source=Path('inputs/SOURCE.tar.gz'),
+                      destination=directory)
+                  packs[target] = directory / record['name']
+              producer.assemble(work, expected_path, packs=packs, destination=Path('candidate'))
+          PY
       - name: Test interactive installer and global v-ui on ephemeral systemd runner
         env:
           SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -165,7 +204,7 @@ jobs:
           set -euo pipefail
           python -B -m scripts.acceptance_job run-test \
             --role "$ACCEPTANCE_ROLE" --source "$SOURCE" --version "$CANDIDATE_VERSION" \
-            --identity /tmp/vui-oneclick/identity.json --log /tmp/vui-oneclick/acceptance.log
+            --identity /tmp/vui-oneclick/identity.json --log /tmp/vui-oneclick/acceptance.log --core-switch
       - name: Record acceptance receipt
         env:
           SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}

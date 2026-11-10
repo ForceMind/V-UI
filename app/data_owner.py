@@ -18,6 +18,7 @@ class DataOwnerError(ValueError):
 
 
 _EXCLUSIVE = threading.local()
+_CORE_UPDATE_PENDING = Path("/etc/v-ui/CORE_UPDATE_PENDING.json")
 _UNSAFE = "Data ownership is unsafe or unavailable"
 _BUSY = "Data is in use by a service or maintenance operation; stop it first"
 
@@ -79,14 +80,68 @@ def _check_data(parent: int, name: str) -> None:
              and not info.st_mode & 0o022)
 
 
+def core_update_pending() -> bool:
+    """Fixed Root admission barrier: presence or lookup failure blocks.
+
+    No contents, phase or owner flag is interpreted as authorization. The fixed
+    production path has no environment/CLI override; tests patch the constant.
+    """
+    try:
+        os.stat(_CORE_UPDATE_PENDING, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return True
+    return True
+
+
+def core_selection_present() -> bool:
+    """Recognize all initialization traces without trusting their contents."""
+    names = (_CORE_UPDATE_PENDING.name, 'core-selection.json', 'core-selection.fence.json',
+             'core-selection.lock', '.core-update-active', '.core-update-history')
+    try:
+        directory = os.open(_CORE_UPDATE_PENDING.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    try:
+        for name in names:
+            try:
+                os.stat(name, dir_fd=directory, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            return True
+    except OSError:
+        return True
+    finally:
+        os.close(directory)
+    return False
+
+
 def _check_pending_restore(parent: int) -> None:
     # A crash releases flock but not the durable recovery obligation. Do not
     # parse or follow this path: even an invalid or dangling journal blocks
     # ordinary writers until an exclusive recovery operation resolves it.
+    core_pending = core_update_pending()
     try:
         os.stat("RESTORE_PENDING.json", dir_fd=parent, follow_symlinks=False)
     except FileNotFoundError:
+        if not core_pending:
+            return
+    # Ordinary calls retain the same barrier. The only exception is a narrow
+    # in-process startup/probe scope backed by the fixed authenticated Root
+    # socket; it still acquires and verifies this real shared flock first.
+    try:
+        from app.core_updates.managed_startup import _pending_permitted
+    except ImportError:
+        # The isolated maintenance CONTROL closure intentionally has no app
+        # startup package. Its ordinary shared callers remain refused here.
+        _pending_permitted = None
+    if _pending_permitted is not None and _pending_permitted(parent):
         return
+    if core_pending:
+        raise DataOwnerError("Core maintenance is pending; new data writers are blocked")
     raise DataOwnerError("Interrupted restore requires offline recovery before data can be used")
 
 
@@ -103,7 +158,7 @@ def data_owner(data_dir: Path, *, exclusive: bool = False):
 
     A shared scope may borrow this thread's exclusive lease to validate the
     original store offline, including during a pending restore. Ordinary
-    shared acquisition refuses a durable restore journal while holding flock.
+    shared acquisition refuses core/restore pending barriers while holding flock.
     Other threads and forked children must take their
     own flock and cannot borrow that proof. Shared scopes are otherwise normal
     independent leases, and may be released by a shutdown thread.

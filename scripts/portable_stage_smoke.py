@@ -48,6 +48,14 @@ def main():
         if result.returncode:
             raise SystemExit((result.stdout or "")+(result.stderr or ""))
         versions[name]=((result.stdout or "")+(result.stderr or "")).splitlines()[0]
+    # Use the actual staged interpreter/dependencies on this native target.
+    # Only synthetic executable/runtime contracts run here; this does not
+    # qualify a new upstream component version or an update transaction.
+    contracts=subprocess.run([str(python),"-B",str(ROOT/"scripts/check_core_update_contracts.py"),"--runtime"],
+        cwd=ROOT,env=env,capture_output=True,text=True,timeout=120)
+    if contracts.returncode:
+        raise SystemExit((contracts.stdout or "")+(contracts.stderr or ""))
+    print(contracts.stdout.strip())
     print(json.dumps({"target":ready["runtime_key"],"release_id":identity,
                       "runtime":probe.stdout.strip(),"cores":versions,**menu}))
 
