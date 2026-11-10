@@ -60,6 +60,14 @@ P1提供一次构建、独立角色消费及attempt绑定，已在main `3606cad`
 
 先上传草稿并逐项验证资产字节/摘要，再按明确批准公开。已有 tag、Release或资产不覆盖；发现问题以新版本修复，保留旧资产及原失败记录。
 
+## P3 核心组件晋升
+
+组件独立于应用发布。先验准确应用提交的新装、升级和常规门禁；同源组件工作流还须有四目标原生TCP、x86_64 GNU现有协议、ARM64受管及两种核心的生产收据。旧固定核心的loopback结果、仅构建的候选或其他attempt不授组件资格。候选收据本身始终标明未公开、未独立授予最终资格。
+
+本批组件兼容范围只包含实际公开应用的准确source。经分别明确授权后，按“应用公开并读回→同一默认HEAD的组件晋升→短入口独立更新”的顺序执行。现有人工发布工作流的组件分支要求核对核心名称、准确应用VERSION/commit、最新同源候选run，以及`RELEASE CORE <组件tag> <commit>`确认；保留原权限，不用本机运行发布器作演习。
+
+组件晋升仅上传同一受验候选的 `CORE-RELEASE.json`、`SHA256SUMS` 和四目标ZIP。草稿逐项读回且重新核HEAD/run/attempt后，才按 GitHub 的 [`make_latest=false` 发布选项](https://docs.github.com/en/rest/releases/releases#update-a-release)公开并核对应用latest不变。已有tag或Release不覆盖；上传/晋升结果未知时核对已知原记录，不重复发起或删除旧资产。
+
 ## 公开核验后再切短入口
 
 公开后独立匿名核对tag目标、latest、公开状态、完整资产集合、每项digest与实际小文件字节，核对`RELEASE.json.source_commit`，并确认旧版资产ID/大小/digest保持。

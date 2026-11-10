@@ -204,6 +204,12 @@ ROOT_UID = ROOT_GID = 0
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 MAX_BINARY = 100_000_000
 CHUNK = 1024 * 1024
+PHASE = 'ENTRY'
+
+
+def mark(phase):
+    global PHASE
+    PHASE = phase
 
 
 def identity(info):
@@ -229,6 +235,15 @@ def folder(parent, name, expected=None):
             directory_entry(parent, name, identity(os.fstat(fd)))
         finally:
             os.close(fd)
+
+
+@contextmanager
+def fixed_parent(root):
+    mark('VAR_DIRECTORY')
+    with folder(root, 'var') as (var, _):
+        mark('LIB_DIRECTORY')
+        with folder(var, 'lib') as (library, _):
+            yield library
 
 
 def fingerprint(info):
@@ -261,12 +276,14 @@ def hash_bytes(fd, size, copy_to=None):
 
 
 def stage(directory, stable, name, source, expected_source, uid, size, digest):
+    mark('VERIFY_SOURCE')
     assert name in NAMES and 0 < size <= MAX_BINARY and re.fullmatch('[a-f0-9]{64}', digest)
     before = os.fstat(source)
     assert stat.S_ISREG(before.st_mode) and stat.S_IMODE(before.st_mode) == 0o555
     assert identity(before) == expected_source
     assert before.st_nlink == 1 and before.st_uid == uid and before.st_size == size
     stable()
+    mark('COPY_BINARY')
     temp = '.stage-' + name
     target = os.open(temp, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
     created = identity(os.fstat(target))
@@ -280,6 +297,7 @@ def stage(directory, stable, name, source, expected_source, uid, size, digest):
         output = os.fstat(target)
         assert output.st_size == size and hash_bytes(target, size) == digest
         assert fingerprint(os.fstat(target)) == fingerprint(output)
+        mark('PUBLISH_BINARY')
         stable()
         leaf(directory, temp, created, mode)
         os.fchmod(target, 0o555)
@@ -305,6 +323,7 @@ def stage(directory, stable, name, source, expected_source, uid, size, digest):
 def cleanup(parent, expected, known):
     # Verify the entire closure before any delete. Unknown entries are retained.
     with folder(parent, DIRECTORY, expected) as (directory, stable):
+        mark('CLEANUP_CLOSURE')
         assert set(os.listdir(directory)) == set(known)
         for name, recorded in known.items():
             leaf(directory, name, recorded, 0o555)
@@ -323,13 +342,14 @@ def main():
     assert uid > 0
     os.umask(0o077)
     op, *args = sys.argv[1:]
+    mark('ROOT_DIRECTORY')
     root = os.open('/', DIR_FLAGS)
     try:
         info = os.fstat(root)
         assert info.st_uid == 0 and not info.st_mode & 0o022
-        with folder(root, 'opt') as (parent, opt_stable):
-            opt_stable()
+        with fixed_parent(root) as parent:
             if op == 'create':
+                mark('CREATE_DIRECTORY')
                 assert not args
                 os.mkdir(DIRECTORY, 0o700, dir_fd=parent)
                 with folder(parent, DIRECTORY) as (directory, stable):
@@ -338,11 +358,13 @@ def main():
                     stable()
                     result = identity(os.fstat(directory))
             elif op == 'stage':
+                mark('TARGET_DIRECTORY')
                 dev, ino, name, source_dev, source_ino, size, digest = args
                 with folder(parent, DIRECTORY, (int(dev), int(ino))) as (directory, stable):
                     result = stage(directory, stable, name, 0, (int(source_dev), int(source_ino)),
                                    uid, int(size), digest)
             else:
+                mark('TARGET_DIRECTORY')
                 assert op == 'cleanup'
                 dev, ino, *entries = args
                 assert len(entries) % 3 == 0
@@ -359,21 +381,42 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except BaseException:
+        print('VUI_ROOT_STAGE_FAILED:' + PHASE, file=sys.stderr)
+        raise SystemExit(1) from None
 """
 
 
+ROOT_PHASES = {b'ENTRY', b'ROOT_DIRECTORY', b'VAR_DIRECTORY', b'LIB_DIRECTORY', b'CREATE_DIRECTORY',
+               b'TARGET_DIRECTORY', b'VERIFY_SOURCE', b'COPY_BINARY', b'PUBLISH_BINARY', b'CLEANUP_CLOSURE'}
+
+
 def root_stage(action, *args, stdin=subprocess.DEVNULL):
+    assert action in ('create', 'stage', 'cleanup')
     command = ['/usr/bin/sudo', '-n', '/usr/bin/python3', '-B', '-I', '-S',
                '-c', ROOT_STAGE, action, *map(str, args)]
-    output = subprocess.check_output(command, stdin=stdin, timeout=30)
-    result = json.loads(output)
-    if action == 'cleanup':
-        assert result is None
-        return None
-    assert type(result) is list and len(result) == 2
-    assert all(type(value) is int and value > 0 for value in result)
-    return tuple(result)
+    try:
+        output = subprocess.check_output(command, stdin=stdin, stderr=subprocess.PIPE, timeout=30)
+    except subprocess.CalledProcessError as error:
+        marker = re.fullmatch(rb'VUI_ROOT_STAGE_FAILED:([A-Z_]{1,32})\n', error.stderr or b'')
+        phase = marker[1].decode('ascii') if marker and marker[1] in ROOT_PHASES else 'UNKNOWN'
+        raise RuntimeError(f'Candidate Root helper failed ({action}/{phase})') from None
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f'Candidate Root helper failed ({action}/TIMEOUT)') from None
+    except OSError:
+        raise RuntimeError(f'Candidate Root helper failed ({action}/START)') from None
+    try:
+        result = json.loads(output)
+        if action == 'cleanup':
+            assert result is None
+            return None
+        assert type(result) is list and len(result) == 2
+        assert all(type(value) is int and value > 0 for value in result)
+        return tuple(result)
+    except (AssertionError, ValueError, UnicodeError, RecursionError):
+        raise RuntimeError(f'Candidate Root helper failed ({action}/ACK)') from None
 
 
 @contextmanager

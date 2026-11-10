@@ -4,7 +4,7 @@ import os
 import stat
 from pathlib import Path
 
-CORE_ROOT = Path("/opt/vui-ci-core-protocols")
+CORE_ROOT = Path("/var/lib/vui-ci-core-protocols")
 
 
 @lru_cache(maxsize=1)

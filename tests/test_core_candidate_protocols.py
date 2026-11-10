@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -110,7 +111,8 @@ class CandidateProtocolGateTests(unittest.TestCase):
                 verified_fds.append(fd)
                 return hash_fd(fd, size)
 
-            def invoke(command, *, stdin, timeout):
+            def invoke(command, *, stdin, stderr, timeout):
+                self.assertEqual(stderr, subprocess.PIPE)
                 self.assertEqual(command[:8], ['/usr/bin/sudo','-n','/usr/bin/python3','-B','-I','-S',
                                                '-c', protocols.ROOT_STAGE])
                 args = command[8:]
@@ -149,6 +151,28 @@ class CandidateProtocolGateTests(unittest.TestCase):
                 with protocols.installed_candidates(Path('/private/staging'), cores):
                     self.fail()
         call.assert_not_called()
+
+    def test_root_failure_reports_only_a_fixed_action_and_phase(self):
+        hidden = 'private arguments and embedded source'
+        for stderr, phase in ((b'VUI_ROOT_STAGE_FAILED:LIB_DIRECTORY\n','LIB_DIRECTORY'),
+                              (b'VUI_ROOT_STAGE_FAILED:UNEXPECTED_LABEL\n','UNKNOWN'),
+                              (b'VUI_ROOT_STAGE_FAILED:LIB_DIRECTORY\nprivate stderr','UNKNOWN')):
+            with self.subTest(phase=phase):
+                refused = subprocess.CalledProcessError(1, [hidden], output=b'private stdout', stderr=stderr)
+                with patch.object(protocols.subprocess, 'check_output', side_effect=refused):
+                    with self.assertRaisesRegex(RuntimeError, r'\(create/'+phase+r'\)$') as error:
+                        protocols.root_stage('create')
+                self.assertTrue(error.exception.__suppress_context__)
+                self.assertNotIn(hidden, str(error.exception))
+
+    def test_root_timeout_and_invalid_ack_do_not_expose_invocation_or_result(self):
+        timeout = subprocess.TimeoutExpired(['private argv'], 30)
+        with patch.object(protocols.subprocess, 'check_output', side_effect=timeout):
+            with self.assertRaisesRegex(RuntimeError, r'\(stage/TIMEOUT\)$'):
+                protocols.root_stage('stage')
+        with patch.object(protocols.subprocess, 'check_output', return_value=b'["private ack", 3]'):
+            with self.assertRaisesRegex(RuntimeError, r'\(stage/ACK\)$'):
+                protocols.root_stage('stage')
 
     def test_workspace_rechecks_identity_even_when_body_raises(self):
         def directory(inode):
@@ -230,6 +254,27 @@ class CandidateRootStageTests(unittest.TestCase):
 
     def cleanup(self, expected, known):
         self.namespace['cleanup'](self.parent,expected,known)
+
+    def test_fixed_parent_walks_var_lib_and_rejects_unsafe_ancestors(self):
+        self.assertEqual(fixtures.CORE_ROOT, Path('/var/lib')/self.namespace['DIRECTORY'])
+        var = self.root/'var'
+        lib = var/'lib'
+        var.mkdir(mode=0o700)
+        lib.mkdir(mode=0o700)
+        with self.namespace['fixed_parent'](self.parent) as fd:
+            self.assertTrue(os.path.samestat(os.fstat(fd), lib.stat()))
+        var.chmod(0o770)
+        with self.assertRaises(AssertionError):
+            with self.namespace['fixed_parent'](self.parent):
+                self.fail('group writable var accepted')
+        self.assertEqual(self.namespace['PHASE'], 'VAR_DIRECTORY')
+        var.chmod(0o700)
+        lib.rename(var/'real-lib')
+        lib.symlink_to(var/'real-lib')
+        with self.assertRaises(OSError):
+            with self.namespace['fixed_parent'](self.parent):
+                self.fail('symlink lib accepted')
+        self.assertEqual(self.namespace['PHASE'], 'LIB_DIRECTORY')
 
     def test_rebound_source_path_is_not_read_by_root(self):
         self.source.rename(self.root/'original')
