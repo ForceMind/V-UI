@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from app.services.websocket_profile import websocket_host, websocket_path
 from app.services.grpc_profile import grpc_service_name, is_grpc_transport
-from app.services import hysteria2_profile, tuic_profile, reality_profile
+from app.services import hysteria2_profile, tuic_profile, reality_profile, xhttp_profile
 
 
 def profile_catalog() -> dict[str, Any]:
@@ -551,8 +551,34 @@ def compile_profile(
     stream = deepcopy(stream_settings)
 
     if core == "xray":
+        xhttp_tls = (protocol == "vless" and profile.get("transport") == "xhttp"
+                     and profile.get("security") == "tls")
+        previous_xhttp_tls = (protocol == "vless" and stream.get("security") == "tls"
+                              and "xhttp" in (stream.get("method"), stream.get("network")))
+        previous_alpn = None
+        try:
+            if previous_xhttp_tls:
+                xhttp_profile.require_editable(stream)
+                previous_alpn = stream.get("tlsSettings", {}).get("alpn")
+            xhttp_h2 = profile.get("xhttp_alpn_h2", previous_alpn == ["h2"])
+            if xhttp_tls:
+                if type(xhttp_h2) is not bool:
+                    raise ValueError("XHTTP h2 selection must be boolean")
+                if xhttp_h2:
+                    xhttp_profile.transport_options(profile.get("path"), profile.get("host"), profile.get("xhttp_mode"))
+                    xhttp_profile.server_name(profile.get("server_name"))
+                    if (profile.get("flow", "") != "" or profile.get("client_fingerprint", "chrome") != "chrome"
+                            or profile.get("skip_cert_verify", False) is not False):
+                        raise ValueError("XHTTP h2 sharing requires Chrome, verified TLS and empty flow")
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
         _apply_xray_transport(stream, profile)
         _apply_xray_security(protocol, settings, stream, profile)
+        if xhttp_tls:
+            if xhttp_h2:
+                stream["tlsSettings"]["alpn"] = ["h2"]
+            elif previous_alpn is not None and previous_alpn != ["h2"]:
+                stream["tlsSettings"]["alpn"] = previous_alpn
         if protocol == "vless":
             users = list(settings.get("users") or [])
             if users:
@@ -837,6 +863,8 @@ def decompile_profile(core: str, protocol: str, settings: dict | None,
             profile["server_name"] = str(meta.get("server_name") or tls.get("serverName") or "")
             profile["certificate_path"] = str(cert.get("certificateFile") or "")
             profile["key_path"] = str(cert.get("keyFile") or "")
+            if protocol == "vless" and method == "xhttp":
+                profile["xhttp_alpn_h2"] = tls.get("alpn") == ["h2"]
         elif security == "reality":
             reality = stream.get("realitySettings") or {}
             profile["reality_target"] = str(reality.get("target") or "")

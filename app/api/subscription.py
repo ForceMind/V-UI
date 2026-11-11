@@ -78,8 +78,8 @@ def inbound_share_link(inbound_id: int, request: Request, host: str | None = Que
     try:
         return share_link(item, _host(request, host))
     except ExportError:
-        message = ('此 Xray 节点暂不符合分享格式：目前支持单用户 VLESS、RAW/TCP、TLS、空 flow，'
-                   '需要有效 SNI；REALITY、WS、gRPC 等配置暂不能从此入口导出。'
+        message = ('此 Xray 节点暂不符合分享格式。请选择单用户 VLESS、验证 TLS 和空 flow。'
+                   'XHTTP 还需 stream-one、h2、Chrome、显式 SNI、Host 和 Path。'
                    if item.core == 'xray' else
                    '此节点配置暂不符合已支持的分享格式，请检查协议、传输、TLS 名称及用户配置。')
         raise HTTPException(409, {'code': 'SHARE_PROFILE_UNSUPPORTED', 'message': message}) from None

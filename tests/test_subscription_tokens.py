@@ -88,6 +88,29 @@ class SubscriptionTokenTests(unittest.TestCase):
         self.assertIn("vpn.example.test:10001", decoded)
         self.assertNotIn("10002", decoded)
 
+    def test_xhttp_cannot_be_granted_or_read_as_singbox_json(self):
+        from app.services.protocol_profiles import compile_profile
+        old = self.issue(formats=['sing-box.json', 'raw'])
+        with database.SessionLocal() as db:
+            item = db.get(database.Inbound, 1)
+            item.core = 'xray'
+            item.settings, item.stream_settings = compile_profile('xray', 'vless', {
+                'transport': 'xhttp', 'security': 'tls', 'xhttp_alpn_h2': True,
+                'server_name': 'vpn.example.test', 'host': 'xhttp.example.test',
+                'path': '/xhttp/', 'xhttp_mode': 'stream-one',
+                'certificate_path': '/private/cert.pem', 'key_path': '/private/key.pem',
+            }, {'users': [{'id': '11111111-1111-1111-1111-111111111111'}], 'decryption': 'none'}, {})
+            db.commit()
+        self.assertEqual(self.public_get(old['paths']['sing-box.json']).status_code, 409)
+        self.assertIn('type=xhttp', base64.b64decode(self.public_get(old['paths']['raw']).text).decode())
+        rejected = self.client.post('/api/subscriptions', headers=HEADERS, json={
+            'label': 'xhttp format boundary', 'server': 'vpn.example.test', 'inbound_ids': [1, 2],
+            'formats': ['mihomo.yaml', 'sing-box.json']})
+        self.assertEqual(rejected.status_code, 409)
+        self.assertIn('sing-box JSON', rejected.json()['detail'])
+        self.assertNotIn('/private/', rejected.text)
+        self.assertEqual(len(self.client.get('/api/subscriptions').json()), 1)
+
     def test_subscription_token_has_no_management_authority(self):
         grant = self.issue()
         with TestClient(main.app, base_url=ORIGIN, client=("127.0.0.1", 55001)) as public:

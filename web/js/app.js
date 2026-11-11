@@ -432,6 +432,7 @@ const app = createApp({
                 host: '',
                 service_name: '',
                 xhttp_mode: 'auto',
+                xhttp_alpn_h2: false,
                 reality_target: '',
                 reality_server_name: '',
                 reality_short_id: '',
@@ -1096,6 +1097,7 @@ const app = createApp({
             p.host = '';
             p.service_name = '';
             p.xhttp_mode = 'auto';
+            p.xhttp_alpn_h2 = false;
             p.reality_target = '';
             p.reality_server_name = '';
             p.reality_short_id = '';

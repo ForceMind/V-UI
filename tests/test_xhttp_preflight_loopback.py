@@ -27,10 +27,13 @@ from xhttp_helpers import (FAILURES, SNI, TARGET_BODY,
     singbox_xhttp_client, start_protocol_recorder, xray_server)
 
 
-@unittest.skipUnless(os.getenv('VUI_TEST_CORES') and os.getenv('VUI_TEST_MIHOMO'),
-                     'fixed official Xray, sing-box and Mihomo binaries required')
-class XHTTPPreflightLoopbackTests(unittest.TestCase):
+def fixed_cores_available():
+    return os.getenv('VUI_TEST_CORES') and os.getenv('VUI_TEST_MIHOMO')
+
+
+class XHTTPFixture:
     clients = ('mihomo', 'mihomo-uri')
+    profile_label = 'XHTTP'
 
     @classmethod
     def setUpClass(cls):
@@ -167,9 +170,10 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
         time.sleep(.1)
         self.assertEqual(len(self.requests), baseline, 'Rejected application traffic reached target\n'+self.logs())
 
-    def verify_clients(self, failure=None):
+    def verify_clients(self, failure=None, *, server_port=None):
         self.start_target('xray')
-        server_port = unused_port()
+        if server_port is None:
+            server_port = unused_port()
         with ExitStack() as server_stack:
             server = CoreProcess(server_stack, self.prepare_server(server_port), self.unique_path('server', 'log'), self.env)
             server.start(server_port); self.verify_server_alpn(server_port)
@@ -184,7 +188,7 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
                             if mutation is None:
                                 self.assert_success(port)
                                 self.assertIsNone(process.process.poll(), self.logs())
-                                print(f'XHTTP stream-one/h2 {client}: real HTTP body and application delivery; no DIRECT')
+                                print(f'{self.profile_label} stream-one/h2 {client}: real HTTP body and application delivery; no DIRECT')
                             else:
                                 baseline = len(self.requests)
                                 side, reasons = rejection_reason(mutation)
@@ -195,7 +199,7 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
                                     lambda: self.assert_failure(port, baseline), self.requests, reasons,
                                     expected_count=baseline, log_offset=offset, label='XHTTP '+mutation+' rejection')
                                 line = next(line for line in log.splitlines() if all(reason in line for reason in reasons))
-                                print(f'XHTTP {client} {mutation}: {line}; application delta=0; no DIRECT')
+                                print(f'{self.profile_label} {client} {mutation}: {line}; application delta=0; no DIRECT')
                                 process.stop(); time.sleep(.15)
                                 self.assertEqual(len(self.requests), baseline, 'Late rejected application delivery')
                             self.assertIsNone(server.process.poll(), self.logs())
@@ -296,6 +300,8 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
         print('HTTPUpgrade separate unchanged-byte replay: real fixed sing-box HTTP/1.1 400 Bad Request; '
               'verified TLS/SNI/http1.1; application delta=0')
 
+@unittest.skipUnless(fixed_cores_available(), 'fixed official Xray, sing-box and Mihomo binaries required')
+class XHTTPPreflightLoopbackTests(XHTTPFixture, unittest.TestCase):
     def test_00_bounded_parser_checks_and_singbox_gap(self):
         self.prepare_server(19443)
         for client in self.clients:

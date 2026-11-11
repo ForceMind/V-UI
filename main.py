@@ -15,7 +15,7 @@ from app.models.database import DB_PATH, init_db
 from app.middleware.auth import AdminAuthMiddleware, configured_origin
 from app.services.core_manager import core_manager
 from app.services.log_redaction import install_log_redaction
-from app.services.validated_export import ExportError
+from app.services.validated_export import ExportError, XHTTPUnsupportedFormat
 from app.services.routing_store import RoutingStorageError
 
 app=FastAPI(title='V-UI',description='Lightweight Xray + sing-box management panel',version='0.4.25')
@@ -52,6 +52,8 @@ async def invalid_routing_storage(request: Request,exc: RoutingStorageError):
 
 @app.exception_handler(ExportError)
 async def invalid_export(request: Request,exc: ExportError):
+    if isinstance(exc, XHTTPUnsupportedFormat):
+        return JSONResponse({'detail':'XHTTP 请选择 Mihomo YAML 或 URI，sing-box JSON 无法表达该传输。'}, status_code=409)
     return JSONResponse({'detail':'Node configuration is outside the validated export profile'},status_code=409)
 
 @app.exception_handler(RequestValidationError)
