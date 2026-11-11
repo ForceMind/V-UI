@@ -52,6 +52,25 @@ def checked_yaml_material(snapshot):
     return checked, manifest
 
 
+def compile_pinned_yaml_policy(base_config, inbounds, snapshot, ticket, *, compiler=None):
+    endpoints = {name: VerifiedEndpoint(**{**value, 'addresses': tuple(value['addresses'])})
+                 for name, value in ticket['endpoints'].items()}
+    compiler = compile_saved_yaml_policy if compiler is None else compiler
+    return compiler(base_config, inbounds, snapshot, endpoints=endpoints,
+                    self_addresses=tuple(ticket['self_addresses']))
+
+
+def compile_confirmed_yaml_policy(base_config, inbounds, snapshot, ticket, *, compiler=None):
+    compiled = compile_pinned_yaml_policy(base_config, inbounds, snapshot, ticket, compiler=compiler)
+    if (compiled.yaml_plan_revision != ticket['plan_revision']
+            or compiled.plan_manifest != ticket['plan_manifest']
+            or compiled.source_fingerprint != ticket['source_fingerprint']
+            or compiled.identity != ticket['policy_identity']
+            or _digest(compiled.config) != ticket['candidate_revision']):
+        raise PolicyError('YAML_CONFIRMATION_MISMATCH')
+    return compiled
+
+
 def compile_saved_yaml_policy(base_config, inbounds, snapshot, *, endpoints, self_addresses, policy=None):
     """Consume a validated Store snapshot and independently checked endpoint map."""
     if type(base_config) is not dict:

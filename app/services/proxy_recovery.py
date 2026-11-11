@@ -87,7 +87,7 @@ def validate_mode_fence(data, rows=None):
     names = ('proxy-state', '.proxy-state-initialized', '.proxy-state.lock')
     schema = (ProxyStore(data).policy_schema_version()
               if any(os.path.lexists(data / name) for name in names) else 1)
-    _require(plan.legacy or schema == 2)
+    _require(plan.legacy or schema >= 2)
     return rows
 
 
@@ -127,11 +127,15 @@ def _validate(data):
         from app.services.core_manager import SingBoxAdapter
         from app.services.proxy_policy import VerifiedEndpoint, compile_proxy_policy
         base = SingBoxAdapter().build_config(row for row in rows if row.core == 'sing-box')
-        endpoint = context['endpoint']
-        endpoint = (VerifiedEndpoint(**{**endpoint, 'addresses': tuple(endpoint['addresses'])})
-                    if endpoint is not None else None)
-        compiled = compile_proxy_policy(base, rows, active, endpoint=endpoint,
-                                        self_addresses=tuple(context['self_addresses']))
+        if context['schema_version'] == 3:
+            from app.services.mihomo_saved_policy import compile_confirmed_yaml_policy
+            compiled = compile_confirmed_yaml_policy(base, rows, active, context['yaml_check'])
+        else:
+            endpoint = context['endpoint']
+            endpoint = (VerifiedEndpoint(**{**endpoint, 'addresses': tuple(endpoint['addresses'])})
+                        if endpoint is not None else None)
+            compiled = compile_proxy_policy(base, rows, active, endpoint=endpoint,
+                                            self_addresses=tuple(context['self_addresses']))
         _require(_hash(compiled.config) == active['core_revision']
                  and context['candidate_core_revision'] == active['core_revision']
                  and context['policy_identity'] == compiled.identity)
@@ -140,9 +144,9 @@ def _validate(data):
         _require(not runtime['enabled'] or bool(compiled.config.get('inbounds')))
         from app.services.inbound_policy import policy_plan
         plan = policy_plan(rows, active['settings'])
-        if context['schema_version'] == 2:
-            _require(context['plan_manifest'] == plan.manifest
-                     and context['source_fingerprint'] == plan.source_fingerprint)
+        if context['schema_version'] >= 2:
+            saved = store.context_plan(context, active['settings'])
+            _require(saved.manifest == plan.manifest and saved.source_fingerprint == plan.source_fingerprint)
         else:
             _require(plan.legacy)
         if active['settings']['relay_enabled'] or plan.relay_ids:
@@ -206,7 +210,8 @@ def _reconcile(work):
     _require(context is not None)
     previous = context['previous_core_revision']
     current = _runtime(work, 'sing-box')
-    _require(current['revision'] in (previous, context['candidate_core_revision']))
+    from app.services.proxy_store import matches_recovery_state
+    _require(matches_recovery_state(context, current))
     _require(pending['base_active_revision'] is None or previous == pending['base_core_revision'])
     directory = work / 'runtime' / 'sing-box'
     if previous is not None:
@@ -239,7 +244,8 @@ def _prepared(root, action, archive=None, archive_sha256=None):
         except ProxyStorageError:
             # Dedicated recovery may replace corrupt current evidence using
             # the explicit reviewed archive. The source digest binds it.
-            pass
+            if os.path.lexists(data / 'proxy-state' / 'secrets' / 'yaml-capability.json'):
+                source_schema = 3
         with tempfile.TemporaryDirectory(prefix='.proxy-recovery-', dir=root) as temporary:
             work = Path(temporary) / 'data'
             transaction = None
@@ -254,6 +260,8 @@ def _prepared(root, action, archive=None, archive_sha256=None):
                 release.recovery_tree_digest(work)
                 _validate(work)
                 _database(work, revoke=True)
+                if source_schema == 3:
+                    _require(ProxyStore(work).policy_schema_version() == 3)
                 if source_schema == 2:
                     migrate_legacy_modes(work)
                     ProxyStore(work).ensure_policy_v2()

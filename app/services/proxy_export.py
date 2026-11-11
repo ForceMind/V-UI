@@ -132,6 +132,8 @@ class StrictRelayExporter:
                 raise StrictExportError("STRICT_EXPORT_RELAY_NOT_ACTIVE")
             if active["revision"] != base_revision:
                 raise ProxyConflict("Active revision differs")
+            if active.get("execution_mode") == "yaml":
+                raise StrictExportError("STRICT_EXPORT_YAML_POLICY")
             rows = self.manager._all_rows()
             try:
                 selected = [item for item in rows if item.id == inbound_id and item.enable is True]

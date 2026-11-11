@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import errno
+import hashlib
 import ipaddress
 from dataclasses import asdict, replace
 import socket
@@ -22,9 +23,12 @@ from app.services.inbound_policy import policy_plan
 from app.services.proxy_policy import prepare_policy
 from app.services.proxy_policy import LOCAL_TAG, CompiledPolicy, VerifiedEndpoint, compile_proxy_policy
 from app.services.proxy_resolution import resolve_upstream, self_address_snapshot
-from app.services.mihomo_saved_policy import checked_yaml_material, compile_saved_yaml_policy, yaml_endpoint_id
+from app.services.mihomo_plan_record import _canonical as canonical_yaml_record, yaml_endpoint_id
+from app.services.mihomo_saved_policy import (
+    checked_yaml_material, compile_confirmed_yaml_policy, compile_pinned_yaml_policy, compile_saved_yaml_policy,
+)
 from app.services.upstream_profile import UpstreamProfile
-from app.services.proxy_store import ProxyCapacityError, ProxyConflict, ProxyStorageError, ProxyStore
+from app.services.proxy_store import ProxyCapacityError, ProxyConflict, ProxyStorageError, ProxyStore, matches_recovery_state
 
 
 YAML_BOOTSTRAP_BUDGET_SECONDS = 30
@@ -34,7 +38,8 @@ _MESSAGES = {
     "LOCAL_PORT_OCCUPIED": "Local proxy port is occupied by another socket or owner",
     "LOCAL_PORT_UNAVAILABLE": "Local proxy port ownership could not be verified",
     "YAML_BOOTSTRAP_TIMEOUT": "YAML upstream bootstrap exceeded its aggregate deadline",
-    "YAML_PLAN_NOT_READY": "YAML draft runtime application has not been enabled",
+    "YAML_ADMIN_REQUIRED": "Administrator authorization is required for YAML checks",
+    "YAML_CORE_STOPPED": "Start the managed sing-box core and check the YAML draft again",
     "PREPARE_FAILED": "Proxy candidate could not be prepared; committed runtime was not changed",
     "RUNTIME_MISMATCH": "Proxy and core state disagree; affected runtime was stopped for recovery",
     "APPLY_FAILED": "Proxy apply failed; the complete previous committed runtime was restored",
@@ -190,7 +195,11 @@ class ProxyApplyCoordinator:
     def _compile(self, snapshot, rows, *, active=False, fresh_pin=False, fence_required=True):
         if snapshot.get("execution_mode") == "yaml":
             if active:
-                raise ProxyApplyError("MISSING_ACTIVE_CONTEXT")
+                context = snapshot.get("runtime_context")
+                if context is None or context["schema_version"] != 3:
+                    raise ProxyApplyError("MISSING_ACTIVE_CONTEXT")
+                ticket = context["yaml_check"]
+                return self._compile_confirmed_yaml(snapshot, rows, ticket), None, ticket["self_addresses"]
             return self._compile_yaml_candidate(snapshot, rows)
         plan = policy_plan(rows, snapshot["settings"])
         if fence_required and not plan.legacy and self.store.policy_schema_version() < 2:
@@ -219,7 +228,7 @@ class ProxyApplyCoordinator:
                                  endpoint=endpoint, self_addresses=addresses)
         return compiled, endpoint, addresses
 
-    def _compile_yaml_candidate(self, snapshot, rows):
+    def _resolve_yaml(self, snapshot, rows):
         if self.store.policy_schema_version() != 3:
             self._stop()
             raise ProxyApplyError("RECOVERY_REQUIRED")
@@ -251,9 +260,48 @@ class ProxyApplyCoordinator:
                 if time.monotonic() >= deadline:
                     raise ProxyApplyError("YAML_BOOTSTRAP_TIMEOUT")
                 endpoints[name] = endpoint
+        return endpoints, addresses
+
+    def _compile_yaml_candidate(self, snapshot, rows):
+        endpoints, addresses = self._resolve_yaml(snapshot, rows)
         compiled = self.yaml_compiler(self.build_config(rows), rows, snapshot,
                                       endpoints=endpoints, self_addresses=addresses)
         return compiled, None, addresses
+
+    def _check_yaml_addresses(self, ticket):
+        if ticket["protected_enabled"] and set(self.address_provider(self.panel_origin)) != set(ticket["self_addresses"]):
+            raise ProxyConflict("Local addresses changed; check the YAML draft again")
+
+    def _compile_confirmed_yaml(self, snapshot, rows, ticket):
+        self._check_yaml_addresses(ticket)
+        return compile_confirmed_yaml_policy(self.build_config(rows), rows, snapshot, ticket,
+                                             compiler=self.yaml_compiler)
+
+    def _compile_reconciled_yaml(self, snapshot, rows):
+        context = snapshot.get("runtime_context")
+        if context is None or context["schema_version"] != 3:
+            raise ProxyApplyError("MISSING_ACTIVE_CONTEXT")
+        previous = context["yaml_check"]
+        self._check_yaml_addresses(previous)
+        plan = policy_plan(rows, snapshot["settings"])
+        if plan.requires_upstream and not previous["protected_enabled"]:
+            raise ProxyConflict("New protected sources require checking and applying the YAML draft")
+        # Node and certificate reconciliation uses the committed plan and pins.
+        # Rebind its runtime metadata without issuing an administrator ticket.
+        current = {**previous, "plan_manifest": plan.manifest, "source_fingerprint": plan.source_fingerprint,
+                   "protected_enabled": plan.requires_upstream}
+        if not plan.requires_upstream:
+            current.update(endpoints={}, self_addresses=[])
+        compiled = compile_pinned_yaml_policy(self.build_config(rows), rows, snapshot, current,
+                                              compiler=self.yaml_compiler)
+        current.update(candidate_revision=revision(compiled.config), policy_identity=compiled.identity)
+        return compiled, current, plan
+
+    def _yaml_runtime_identity(self):
+        if (self.confirmation_provider is None or not self.runtime.state()["enabled"]
+                or not self.runtime.status()["running"]):
+            raise ProxyApplyError("YAML_CORE_STOPPED")
+        return self.confirmation_provider()
 
     def _validate_saved_source(self, rows, active):
         """Reject provably corrupt persisted rows before any early return.
@@ -300,6 +348,8 @@ class ProxyApplyCoordinator:
                 if plan.relay_ids:
                     raise ProxyApplyError("MISSING_ACTIVE_CONTEXT")
                 prepare_policy(self.build_config(rows), rows, snapshot)
+            elif snapshot.get("execution_mode") == "yaml":
+                _, _, plan = self._compile_reconciled_yaml(snapshot, rows)
             else:
                 plan = prepare_policy(self.build_config(rows), rows, snapshot)
                 context = snapshot.get("runtime_context")
@@ -383,7 +433,8 @@ class ProxyApplyCoordinator:
                 result["yaml_plan"] = {"revision": compiled.yaml_plan_revision, "endpoint_count": len(compiled.endpoints)}
         return result
 
-    def _existing(self, transaction_id, expected_revision, *, kind, rows=None, expected_source_fingerprint=None):
+    def _existing(self, transaction_id, expected_revision, *, kind, rows=None, expected_source_fingerprint=None,
+                  yaml_check_id=None):
         try:
             transaction = self.store.transaction(transaction_id)
         except ProxyStorageError:
@@ -396,15 +447,23 @@ class ProxyApplyCoordinator:
             raise ProxyConflict("Apply transaction ID was already used for another request")
         if transaction["phase"] == "prepared":
             raise ProxyConflict("This apply is pending recovery")
-        source = self.store.load_revision_snapshot(expected_revision)
-        plan = policy_plan(self._rows(rows), source["settings"])
-        self._bind_source(plan, expected_source_fingerprint, required=kind == "apply")
-        if context and context["schema_version"] == 2:
-            if (context["source_fingerprint"] != plan.source_fingerprint
-                    or context["plan_manifest"] != plan.manifest):
-                raise ProxyConflict("Apply transaction belongs to a different inbound policy")
-        elif not plan.legacy:
-            raise ProxyConflict("Apply transaction belongs to a legacy inbound policy")
+        if context and context["schema_version"] == 3:
+            ticket = context["yaml_check"]
+            if kind == "apply" and (yaml_check_id != hashlib.sha256(canonical_yaml_record(ticket)).hexdigest()
+                                    or expected_source_fingerprint != ticket["source_fingerprint"]):
+                raise ProxyConflict("Apply transaction ID was already used for another YAML confirmation")
+        elif yaml_check_id is not None:
+            raise ProxyConflict("Apply transaction ID was already used for a non-YAML request")
+        else:
+            source = self.store.load_revision_snapshot(expected_revision)
+            plan = policy_plan(self._rows(rows), source["settings"])
+            self._bind_source(plan, expected_source_fingerprint, required=kind == "apply")
+            if context and context["schema_version"] == 2:
+                if (context["source_fingerprint"] != plan.source_fingerprint
+                        or context["plan_manifest"] != plan.manifest):
+                    raise ProxyConflict("Apply transaction belongs to a different inbound policy")
+            elif not plan.legacy:
+                raise ProxyConflict("Apply transaction belongs to a legacy inbound policy")
         active = self._load_active()
         applied = (transaction["phase"] == "committed" and active is not None
                    and active["revision"] == transaction["revision"]
@@ -444,6 +503,8 @@ class ProxyApplyCoordinator:
         # revision to be supplied as rollback for a committed relay revision.
         if pending["base_active_revision"] is not None and previous != pending["base_core_revision"]:
             raise ProxyApplyError("RECOVERY_REQUIRED")
+        if not matches_recovery_state(context, self.runtime.state()):
+            raise ProxyApplyError("RECOVERY_REQUIRED")
         self.runtime.restore(previous, enabled=enabled)
         state = self.runtime.state()
         if state["revision"] != previous or state["enabled"] != enabled:
@@ -466,7 +527,7 @@ class ProxyApplyCoordinator:
             raise ProxyApplyError("RECOVERY_REQUIRED") from None
         raise ProxyApplyError("APPLY_FAILED") from None
 
-    def _activate(self, snapshot, active, compiled, endpoint, addresses, transaction_id, *, kind):
+    def _activate(self, snapshot, active, compiled, endpoint, addresses, transaction_id, *, kind, yaml_check=None):
         previous = self._baseline(active)
         self._checked(compiled)
         context = {"schema_version": 1, "kind": kind, "candidate_core_revision": revision(compiled.config),
@@ -485,6 +546,13 @@ class ProxyApplyCoordinator:
                            plan_manifest=copy.deepcopy(compiled.plan_manifest),
                            source_fingerprint=compiled.source_fingerprint,
                            requires_upstream=endpoint is not None)
+        if yaml_check is not None:
+            context.update(schema_version=3, yaml_check=yaml_check)
+            if kind == "apply":
+                observed = self._yaml_runtime_identity()
+                if any(observed[key] != yaml_check[key] for key in ("issuer", "runtime_fingerprint")):
+                    raise ProxyConflict("Core runtime changed; check the YAML draft again")
+            self._check_yaml_addresses(yaml_check)
         # begin is after checks and before disruption. Its strict CAS catches a
         # draft writer outside the manager lock without publishing stale data.
         try:
@@ -506,6 +574,8 @@ class ProxyApplyCoordinator:
         try:
             self.runtime.apply(compiled.config, activate=True, rollback_on_failure=False)
             self._verify(compiled)
+            if yaml_check is not None:
+                self._check_yaml_addresses(yaml_check)
             self.store.commit_apply(transaction_id, context["candidate_core_revision"])
         except Exception:
             self._failed(transaction_id)
@@ -517,11 +587,13 @@ class ProxyApplyCoordinator:
         transaction = self.store.transaction(transaction_id)
         return self._public(transaction=transaction, compiled=compiled, phase="committed", applied=True)
 
-    def check(self, expected_revision, rows=None, *, expected_source_fingerprint=None):
+    def check(self, expected_revision, rows=None, *, expected_source_fingerprint=None, allow_yaml=True):
         with self.lock:
             rows = self._rows(rows)
             self._validate_saved_source(rows, self._load_active())
             snapshot = self._load_draft(expected_revision)
+            if not allow_yaml and snapshot.get("execution_mode") == "yaml":
+                raise ProxyApplyError("YAML_ADMIN_REQUIRED")
             plan = policy_plan(rows, snapshot["settings"])
             self._bind_source(plan, expected_source_fingerprint)
             context = (copy.deepcopy(self.confirmation_provider()) if snapshot.get("execution_mode") == "yaml"
@@ -533,7 +605,8 @@ class ProxyApplyCoordinator:
                 if context != self.confirmation_provider():
                     raise ProxyConflict("YAML runtime changed; check again")
                 now = int(time.time())
-                value = {"schema_version": 1, "kind": "yaml-check", "revision": expected_revision,
+                value = {"schema_version": 2, "kind": "yaml-check", "nonce": uuid.uuid4().hex,
+                         "revision": expected_revision,
                          "plan_revision": compiled.yaml_plan_revision, "compiler": 1,
                          "source_fingerprint": compiled.source_fingerprint,
                          "candidate_revision": revision(compiled.config), "policy_identity": compiled.identity,
@@ -557,18 +630,39 @@ class ProxyApplyCoordinator:
                 result["yaml_confirmation"] = receipt
             return result
 
-    def apply(self, expected_revision, transaction_id, rows=None, *, expected_source_fingerprint=None):
+    def apply(self, expected_revision, transaction_id, rows=None, *, expected_source_fingerprint=None,
+              yaml_check_id=None):
         with self.lock:
             rows = self._rows(rows)
             active = self._load_active()
             self._validate_saved_source(rows, active)
             existing = self._existing(transaction_id, expected_revision, kind="apply", rows=rows,
-                                      expected_source_fingerprint=expected_source_fingerprint)
+                                      expected_source_fingerprint=expected_source_fingerprint,
+                                      yaml_check_id=yaml_check_id)
             if existing is not None:
                 return existing
             snapshot = self._load_draft(expected_revision)
             if snapshot.get("execution_mode") == "yaml":
-                raise ProxyApplyError("YAML_PLAN_NOT_READY")
+                if yaml_check_id is None or expected_source_fingerprint is None:
+                    raise ProxyConflict("Check the YAML draft and confirm the checked revision before applying")
+                plan = policy_plan(rows, snapshot["settings"])
+                self._bind_source(plan, expected_source_fingerprint, required=True)
+                observed = self._yaml_runtime_identity()
+                ticket = self.store.load_yaml_check(yaml_check_id, expected_revision,
+                    runtime_fingerprint=observed["runtime_fingerprint"], issuer=observed["issuer"],
+                    source_fingerprint=plan.source_fingerprint)
+                endpoints, addresses = self._resolve_yaml(snapshot, rows)
+                observed_addresses = {name: endpoint.addresses for name, endpoint in endpoints.items()}
+                confirmed_addresses = {name: tuple(value["addresses"]) for name, value in ticket["endpoints"].items()}
+                if observed_addresses != confirmed_addresses or set(addresses) != set(ticket["self_addresses"]):
+                    raise ProxyConflict("YAML upstream addresses changed; check the draft again")
+                compiled = self._compile_confirmed_yaml(snapshot, rows, ticket)
+                if not compiled.config.get("inbounds"):
+                    raise ProxyConflict("YAML application requires a running candidate configuration")
+                return self._activate(snapshot, active, compiled, None, ticket["self_addresses"],
+                                      transaction_id, kind="apply", yaml_check=ticket)
+            if yaml_check_id is not None:
+                raise ProxyConflict("The YAML confirmation does not match this draft")
             plan = policy_plan(rows, snapshot["settings"])
             self._bind_source(plan, expected_source_fingerprint, required=True)
             compiled, endpoint, addresses = self._compile(snapshot, rows)
@@ -589,11 +683,17 @@ class ProxyApplyCoordinator:
                 return existing
             if snapshot["pending"] is not None:
                 raise ProxyConflict("An apply is pending recovery")
-            compiled, endpoint, addresses = self._compile(snapshot, rows, active=True, fresh_pin=True)
+            ticket = None
+            if snapshot.get("execution_mode") == "yaml":
+                compiled, ticket, _ = self._compile_reconciled_yaml(snapshot, rows)
+                endpoint, addresses = None, ticket["self_addresses"]
+            else:
+                compiled, endpoint, addresses = self._compile(snapshot, rows, active=True, fresh_pin=True)
             if not activate:
                 self._checked(compiled)
                 return self._public(compiled=compiled)
-            return self._activate(snapshot, snapshot, compiled, endpoint, addresses, transaction_id, kind="reconcile")
+            return self._activate(snapshot, snapshot, compiled, endpoint, addresses, transaction_id,
+                                  kind="reconcile", yaml_check=ticket)
 
     def _rollback_guard(self, active):
         if active is None:

@@ -27,7 +27,8 @@
         STRICT_EXPORT_INGRESS_NOT_FOUND:'指定节点不是当前已启用的合格接入节点。',
         STRICT_EXPORT_STATE_MISMATCH:'活动配置、入口或运行状态已变化，严格导出已阻止；请重新核对并应用。',
         STRICT_EXPORT_RUNTIME_UNAVAILABLE:'无法确认已提交中转仍在运行，严格导出已阻止。',
-        PROXY_YAML_PLAN_NOT_READY:'YAML 草稿的运行应用仍在开发中。',
+        STRICT_EXPORT_YAML_POLICY:'当前活动 YAML 按规则选择出口，严格中转下载仅适用于经典单上游模式。',
+        PROXY_YAML_CORE_STOPPED:'请启动受管 sing-box，再重新检查并确认 YAML 草稿。',
         PROXY_YAML_BOOTSTRAP_TIMEOUT:'YAML 上游地址校验超时，请稍后重新检查。',
         PROXY_APPLY_UNAVAILABLE:'此服务器尚未开放应用能力。', PROXY_CHECK_UNAVAILABLE:'此服务器尚未开放检查能力。',
         PROXY_APPLY_FAILED:'应用未完成，请核对服务器状态；不要把草稿视为已生效。',
@@ -199,19 +200,22 @@
         $('retry-apply').hidden=!uncertain;
         $('retry-apply').disabled=busy||dirty||conflict||!runtime;
         $('retry-apply').textContent=uncertain?'重试已确认修订 '+attempt.revision.slice(0,12)+' 的同一次应用':'重试同一次应用';
-        $('confirm-apply').disabled=busy||pending||conflict||dirty||!runtime||!!uncertain||!applyReview||applyReview.revision!==snapshot.revision;
+        $('confirm-apply').disabled=busy||pending||conflict||dirty||!runtime||!!uncertain||!applyReview||
+            applyReview.revision!==snapshot.revision||
+            (applyReview.expiresAt!==undefined&&applyReview.expiresAt<=Date.now()/1000);
         $('cancel-apply-review').disabled=busy;
         const diagnosticsAvailable=capabilities.diagnostics_available===true;
         $('diagnostics').disabled=busy||diagnosticBusy||diagnostic?.state==='running'||conflict||dirty||!diagnosticsAvailable||!snapshot.settings.selected_upstream_id||!$('diagnostic-consent').checked;
         $('cancel-diagnostics').hidden=diagnostic?.state!=='running';
         $('cancel-diagnostics').disabled=diagnosticBusy;
-        const activeRelay=!!snapshot.active&&REVISION.test(snapshot.active.revision);
+        const activeYaml=snapshot.active?.execution_mode==='yaml';
+        const activeRelay=!!snapshot.active&&REVISION.test(snapshot.active.revision)&&!activeYaml;
         const blockedNode=exportNodeBlocked(selectedExportNode());
         const exportsAvailable=capabilities.strict_exports_available===true;
         $('export-mihomo').disabled=$('export-singbox').disabled=busy||pending||!activeRelay||!exportsAvailable||blockedNode;
         $('export-inbound').disabled=$('export-server').disabled=busy;
         $('export-state').textContent=!exportsAvailable?'此服务器尚未开放严格中转导出。':!activeRelay?
-            '尚无已提交活动配置，不能导出草稿。':pending?'存在未完成事务，暂时阻止导出。':blockedNode?'所选入口未确认已应用中转，不能严格导出；直连、待应用或停止的入口不符合条件。':
+            (activeYaml?errors.STRICT_EXPORT_YAML_POLICY:'尚无已提交活动配置，不能导出草稿。'):pending?'存在未完成事务，暂时阻止导出。':blockedNode?'所选入口未确认已应用中转，不能严格导出；直连、待应用或停止的入口不符合条件。':
             '仅使用活动修订 '+snapshot.active.revision+'；页面编辑及较新的草稿不会进入下载。服务器仍会重新核验运行状态。';
         if (diagnostic) renderDiagnostic(diagnostic);
         $('rebase').disabled=busy||pending||yamlWriteUncertain; $('discard').disabled=busy||pending||yamlWriteUncertain;
@@ -243,9 +247,11 @@
             $('local-port').value=next.settings.local_port;
             clearCredentials();
         }
-        $('draft-state').textContent=next.execution_mode==='yaml'?'YAML 路由草稿（尚未应用）':mode(next.settings);
+        $('draft-state').textContent=next.execution_mode==='yaml'?'YAML 路由草稿':mode(next.settings);
         $('draft-revision').textContent='修订 '+next.revision;
-        $('active-state').textContent=next.active?mode(next.active.settings):'尚无已提交活动快照；当前运行状态未验证。';
+        $('active-state').textContent=next.active?
+            (next.active.execution_mode==='yaml'?'YAML 路由 · '+mode(next.active.settings):mode(next.active.settings)):
+            '尚无已提交活动快照。';
         $('active-revision').textContent=next.active?'修订 '+next.active.revision:'';
         $('active-address').textContent=next.active?.pinned_address?'已提交固定地址：'+next.active.pinned_address+(next.active.resolved_at?'；解析时间：'+timestamp(next.active.resolved_at):'')+'。地址变化需明确重新应用。':'';
         $('pending-state').textContent=next.pending?'存在未结束应用事务；不表示已生效。':'没有未结束应用事务。';
@@ -318,7 +324,8 @@
         try { return new URL('http://['+value+']/').hostname.startsWith('['); } catch (_) { return false; }
     }
     async function downloadExport(kind) {
-        if (busy||capabilities.strict_exports_available!==true||snapshot?.pending||!REVISION.test(snapshot?.active?.revision||'')||exportNodeBlocked(selectedExportNode())) return;
+        if (busy||capabilities.strict_exports_available!==true||snapshot?.pending||snapshot?.active?.execution_mode==='yaml'||
+            !REVISION.test(snapshot?.active?.revision||'')||exportNodeBlocked(selectedExportNode())) return;
         const identifier=$('export-inbound').value, server=$('export-server').value;
         if (!/^[1-9][0-9]*$/.test(identifier)||!Number.isSafeInteger(Number(identifier))||!ipLiteral(server)) {
             $('export-notice').textContent='请明确填写正整数节点 ID 和公网 IP 字面量。此严格配置不接受域名、URL 或端口；公网地址由服务器再次检查。';
@@ -403,7 +410,12 @@
             if (!attempt||attempt.state!=='uncertain') return;
         } else {
             if (snapshot.pending||attempt?.state==='uncertain'||!applyReview||applyReview.revision!==snapshot.revision) return;
-            attempt={key:newKey(),revision:snapshot.revision,sourceFingerprint:applyReview.sourceFingerprint,state:'sending'};
+            if (applyReview.expiresAt!==undefined&&applyReview.expiresAt<=Date.now()/1000) {
+                invalidateReview(); updateControls();
+                throw new ApiError('YAML 检查已过期，请重新检查。',409);
+            }
+            attempt={key:newKey(),revision:snapshot.revision,sourceFingerprint:applyReview.sourceFingerprint,
+                yamlCheckId:applyReview.yamlCheckId,state:'sending'};
         }
         invalidateReview();
         const current=attempt;
@@ -411,6 +423,7 @@
         try {
             const body={base_revision:current.revision};
             if (current.sourceFingerprint) body.source_fingerprint=current.sourceFingerprint;
+            if (current.yamlCheckId) body.yaml_check_id=current.yamlCheckId;
             const result=await api('/apply','POST',body,{headers:{'Idempotency-Key':current.key}});
             // A POST success is insufficient. Only a fresh GET can describe the current active state.
             const latest=await reloadSnapshot(false);
@@ -452,13 +465,27 @@
         renderSnapshot(result.snapshot,true);
         renderCheck(result,revision);
         if (snapshot.pending||isDirty()) return;
-        applyReview={revision,sourceFingerprint:result.source_fingerprint};
+        const yaml=snapshot.execution_mode==='yaml';
+        const confirmation=result.yaml_confirmation;
+        if (yaml&&(!REVISION.test(result.source_fingerprint)||!REVISION.test(result.yaml_plan?.revision)||
+            !Number.isSafeInteger(result.yaml_plan.endpoint_count)||result.yaml_plan.endpoint_count<0||
+            !REVISION.test(confirmation?.check_id)||!Number.isSafeInteger(confirmation?.expires_at)||
+            confirmation.expires_at<=Date.now()/1000||result.running!==true||result.enabled!==true)) {
+            throw new ApiError('请启动受管 sing-box 并重新检查当前 YAML 草稿。',409);
+        }
+        applyReview={revision,sourceFingerprint:result.source_fingerprint,
+            yamlCheckId:yaml?confirmation.check_id:undefined,expiresAt:yaml?confirmation.expires_at:undefined};
         $('review-revision').textContent='待确认修订 '+revision+(result.source_fingerprint?'；入口指纹 '+result.source_fingerprint:'；旧版全继承兼容检查');
         $('review-mode').textContent='待应用组合：'+mode(snapshot.settings);
         const selected=snapshot.upstreams.find(value=>value.id===snapshot.settings.selected_upstream_id);
-        $('review-upstream').textContent=selected?'所选上游：'+selected.name+' · '+selected.server+':'+selected.server_port+' · '+(selected.tls?.mode||''):'没有使用中的上游。';
+        $('review-upstream').textContent=yaml?
+            'YAML 计划 '+result.yaml_plan.revision+' · '+result.yaml_plan.endpoint_count+' 个已检查出口 · '+timestamp(confirmation.expires_at)+' 前确认。':
+            selected?'所选上游：'+selected.name+' · '+selected.server+':'+selected.server_port+' · '+(selected.tls?.mode||''):'没有使用中的上游。';
         $('review-listener').textContent=snapshot.settings.local_proxy_enabled?
             '本机入口：127.0.0.1:'+snapshot.settings.local_port+'，使用独立鉴权；不改变系统代理。':'本机显式代理入口关闭，不监听本机代理端口。';
+        $('review-routing').textContent=yaml?
+            '受保护的流量按 YAML 规则顺序选择明确出口。应用 UDP、私网和自身目标继续受保护，代理失败时拒绝流量。':
+            '本机代理与有效中转入口使用单上游和受保护的业务 DNS。普通直连入口沿用原规则。';
         $('review-disable-warning').hidden=!(snapshot.active?.settings?.relay_enabled===true&&snapshot.settings.relay_enabled===false);
         result.coverage.forEach(item=>$('review-coverage').append(element('li',coverageLabel(item))));
         if (!result.coverage.length) $('review-coverage').append(element('li','没有启用的设备接入节点。'));

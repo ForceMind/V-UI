@@ -41,6 +41,7 @@ _SECRET = re.compile(r"sec_[0-9a-f]{32}\Z")
 _LOCKS: dict[str, threading.RLock] = {}
 _LOCKS_GUARD = threading.Lock()
 PROXY_STATE_SCHEMA_MAX = 3
+PROXY_RUNTIME_CONTEXT_SCHEMA_MAX = 3
 _YAML_FENCE = "yaml-capability.json"
 _YAML_CHECK = "yaml-check.json"
 _YAML_CAPABILITY = {"schema_version": 1, "kind": "yaml-capability", "minimum_state_schema": 3}
@@ -93,6 +94,18 @@ def _decode(raw: bytes):
 def _require(condition: bool):
     if not condition:
         raise ProxyStorageError("Proxy state is invalid; dedicated offline recovery is required. No defaults were applied.")
+
+
+def matches_recovery_state(context, current):
+    previous = context["previous_core_revision"]
+    candidate = context["candidate_core_revision"]
+    if current["revision"] not in (previous, candidate) or type(current["enabled"]) is not bool:
+        return False
+    if context["schema_version"] == 3 and context["kind"] == "apply":
+        return current["enabled"]
+    if current["revision"] == previous != candidate:
+        return current["enabled"] == context["previous_enabled"]
+    return True
 
 
 def _defaults() -> dict:
@@ -410,7 +423,18 @@ class ProxyStore:
         extended = {"policy_version", "plan_manifest", "source_fingerprint", "requires_upstream"}
         _require(isinstance(context, dict) and type(context.get("schema_version")) is int)
         version = context["schema_version"]
-        _require(version in (1, 2) and set(context) == (common if version == 1 else common | extended))
+        fields = {1: common, 2: common | extended, 3: common | {"yaml_check"}}
+        _require(version in fields and set(context) == fields[version])
+        if version == 3:
+            from app.services.mihomo_plan_record import decode_check_record
+            try:
+                ticket = decode_check_record(_canonical(context["yaml_check"])).value
+            except (TypeError, ValueError, UnicodeError, RecursionError):
+                _require(False)
+            _require(ticket["revision"] == revision and context["endpoint"] is None
+                     and ticket["candidate_revision"] == context["candidate_core_revision"]
+                     and ticket["policy_identity"] == context["policy_identity"]
+                     and ticket["self_addresses"] == context["self_addresses"])
         if version == 2:
             _require(type(context["policy_version"]) is int and context["policy_version"] == 2)
             _require(type(context["plan_manifest"]) is list and len(context["plan_manifest"]) <= 32768)
@@ -422,6 +446,8 @@ class ProxyStore:
         previous = context["previous_core_revision"]
         _require(previous is None or isinstance(previous, str) and _HEX.fullmatch(previous) is not None)
         _require(type(context["previous_enabled"]) is bool and (previous is not None or not context["previous_enabled"]))
+        if version == 3 and context["kind"] == "apply":
+            _require(context["previous_enabled"])
         endpoint = context["endpoint"]
         if endpoint is not None:
             _require(isinstance(endpoint, dict) and set(endpoint) == {"profile_id", "revision", "host", "addresses", "resolved_at"})
@@ -458,13 +484,17 @@ class ProxyStore:
         if context is None or context["schema_version"] == 1:
             return None
         from app.services.inbound_policy import PolicyError, plan_from_manifest
+        value = context["yaml_check"] if context["schema_version"] == 3 else context
         try:
-            plan = plan_from_manifest(context["plan_manifest"], settings)
+            plan = plan_from_manifest(value["plan_manifest"], settings)
         except (PolicyError, ValueError, TypeError, KeyError):
             raise ProxyStorageError("Saved inbound policy is invalid; no defaults were applied.") from None
-        _require(not plan.legacy and plan.policy_version == context["policy_version"]
-                 and plan.source_fingerprint == context["source_fingerprint"]
-                 and plan.requires_upstream == context["requires_upstream"])
+        _require(plan.source_fingerprint == value["source_fingerprint"])
+        if context["schema_version"] == 3:
+            _require(plan.requires_upstream == value["protected_enabled"])
+        else:
+            _require(not plan.legacy and plan.policy_version == value["policy_version"]
+                     and plan.requires_upstream == value["requires_upstream"])
         return plan
 
     @staticmethod
@@ -472,11 +502,15 @@ class ProxyStore:
         plan = ProxyStore.context_plan(context, settings)
         return plan.requires_upstream if plan is not None else any(settings[key] for key in _FLAGS)
 
-    @classmethod
-    def _validate_context_snapshot(cls, context, doc):
+    def _validate_context_snapshot(self, context, doc, revisions, secrets):
+        yaml = doc.get("execution_mode") == "yaml"
+        _require(yaml == (context is not None and context["schema_version"] == 3))
         if context is None:
             return
-        required = cls.requires_upstream(doc["settings"], context)
+        if yaml:
+            self._yaml_check_material(revisions, secrets, _canonical(context["yaml_check"]), doc=doc)
+            return
+        required = self.requires_upstream(doc["settings"], context)
         endpoint = context["endpoint"]
         _require((endpoint is not None) == required)
         if endpoint is not None:
@@ -725,19 +759,23 @@ class ProxyStore:
         finally:
             os.close(fd)
 
-    def _yaml_check_material(self, revisions, secrets, raw):
-        from app.services.inbound_policy import plan_from_manifest
+    def _yaml_check_material(self, revisions, secrets, raw, *, doc=None):
+        from app.services.inbound_policy import PolicyError, plan_from_manifest
         from app.services.mihomo_plan_record import PlanRecordError, decode_check_record, yaml_endpoint_id
         try:
             checked = decode_check_record(raw)
         except PlanRecordError:
             raise ProxyStorageError("YAML confirmation record is invalid") from None
         value = checked.value
-        doc = self._revision(revisions, secrets, value["revision"])[0]
-        _require(doc.get("execution_mode") == "yaml")
+        if doc is None:
+            doc = self._revision(revisions, secrets, value["revision"])[0]
+        _require(doc.get("execution_mode") == "yaml" and _digest(doc) == value["revision"])
         record = self._yaml_material(secrets, doc["yaml_plan"])[0]
         manifest = record.value
-        source = plan_from_manifest(value["plan_manifest"], doc["settings"])
+        try:
+            source = plan_from_manifest(value["plan_manifest"], doc["settings"])
+        except PolicyError:
+            raise ProxyStorageError("Saved YAML inbound policy is invalid") from None
         _require(value["plan_revision"] == record.record_id and value["compiler"] == manifest["compiler"]
                  and value["source_fingerprint"] == source.source_fingerprint
                  and value["protected_enabled"] == source.requires_upstream
@@ -834,13 +872,20 @@ class ProxyStore:
         # New historical manifests are immutable but still strictly checked;
         # their needs/source hash must bind their OWN settings, not the draft.
         documents = {state["draft_revision"]: doc}
+        validated_yaml = set()
         for transaction in state["transactions"].values():
             context = transaction.get("runtime_context")
-            if context is not None and context["schema_version"] == 2:
+            if context is not None and context["schema_version"] >= 2:
                 target = transaction["revision"]
+                if context["schema_version"] == 3:
+                    _require(fence is not None)
+                    identity = _digest(context["yaml_check"])
+                    if identity in validated_yaml:
+                        continue
+                    validated_yaml.add(identity)
                 if target not in documents:
                     documents[target] = self._revision(revisions, secrets, target)[0]
-                self._validate_context_snapshot(context, documents[target])
+                self._validate_context_snapshot(context, documents[target], revisions, secrets)
         upstreams = []
         for profile_id in sorted(profiles):
             summary = _model(profiles[profile_id]).redacted()
@@ -851,16 +896,22 @@ class ProxyStore:
         if state["active_revision"] is not None:
             active_doc, _, _ = self._revision(revisions, secrets, state["active_revision"])
             context = self._active_context(state)
-            self._validate_context_snapshot(context, active_doc)
+            self._validate_context_snapshot(context, active_doc, revisions, secrets)
             endpoint = context.get("endpoint") if context else None
             active = {"revision": state["active_revision"], "settings": self._public_settings(active_doc["settings"]),
                       "core_revision": state["core_revision"],
                       "pinned_address": endpoint["addresses"][0] if endpoint else None,
                       "resolved_at": endpoint["resolved_at"] if endpoint else None}
+            if active_doc["schema_version"] == 2:
+                active["execution_mode"] = active_doc["execution_mode"]
         pending = state["pending"]
-        if pending and pending.get("runtime_context"):
+        if pending:
             pending_doc = self._revision(revisions, secrets, pending["revision"])[0]
-            self._validate_context_snapshot(pending["runtime_context"], pending_doc)
+            context = pending.get("runtime_context")
+            if context is not None and context["schema_version"] == 3:
+                _require(fence is not None)
+            if context is not None or pending_doc.get("execution_mode") == "yaml":
+                self._validate_context_snapshot(context, pending_doc, revisions, secrets)
         snapshot = {"revision": state["draft_revision"], "settings": self._public_settings(doc["settings"]),
                     "upstreams": upstreams, "active": active, "pending": self._public_pending(pending)}
         if doc["schema_version"] == 2:
@@ -1113,14 +1164,15 @@ class ProxyStore:
             self._snapshot(revisions, secrets, state)
             target = state["active_revision"] if reconcile else state["draft_revision"]
             target_doc = self._revision(revisions, secrets, target)[0] if target is not None else None
-            if target_doc is not None and target_doc.get("execution_mode") == "yaml":
-                raise ProxyValidationError("YAML application is not available until its transaction context is supported")
+            if target_doc is not None and target_doc.get("execution_mode") == "yaml" and (
+                    runtime_context is None or runtime_context.get("schema_version") != 3):
+                raise ProxyValidationError("YAML application requires a checked transaction context")
             if expected_revision != target or reconcile and expected_core_revision != state["core_revision"]:
                 raise ProxyConflict("Proxy snapshot changed before apply")
             if runtime_context is not None:
                 self._validate_runtime_context(runtime_context, expected_revision)
                 _require(runtime_context["schema_version"] <= state["schema_version"])
-                self._validate_context_snapshot(runtime_context, self._revision(revisions, secrets, expected_revision)[0])
+                self._validate_context_snapshot(runtime_context, target_doc, revisions, secrets)
                 _require(runtime_context["kind"] == ("reconcile" if reconcile else "apply"))
                 if state["active_revision"] is not None:
                     _require(runtime_context["previous_core_revision"] == state["core_revision"])
@@ -1137,6 +1189,12 @@ class ProxyStore:
                         and state["pending"].get("runtime_context") != runtime_context):
                     raise ProxyConflict("Another apply is pending recovery")
                 return copy.deepcopy(state["pending"])
+            if not reconcile and runtime_context is not None and runtime_context["schema_version"] == 3:
+                checked = runtime_context["yaml_check"]
+                if (self._read_bytes(secrets, _YAML_CHECK, optional=True) != _canonical(checked)
+                        or checked["data_generation"] != self._yaml_data_generation()
+                        or not checked["created_at"] <= int(time.time()) < checked["expires_at"]):
+                    raise ProxyConflict("YAML confirmation changed or expired; check again")
             pending = {"transaction_id": transaction_id, "revision": expected_revision,
                        "base_active_revision": state["active_revision"], "base_core_revision": state["core_revision"],
                        "phase": "prepared"}

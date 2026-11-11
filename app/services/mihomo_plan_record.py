@@ -178,9 +178,13 @@ def decode_check_record(raw: bytes) -> StoredYamlCheck:
                   'candidate_revision', 'policy_identity', 'plan_manifest', 'source_flags', 'protected_enabled',
                   'endpoints', 'self_addresses', 'dns_upstream', 'runtime_fingerprint', 'issuer',
                   'data_generation', 'created_at', 'expires_at'}
-        _require(type(value) is dict and set(value) == fields)
-        _require(type(value['schema_version']) is int and value['schema_version'] == 1
-                 and value['kind'] == 'yaml-check' and type(value['compiler']) is int and value['compiler'] == 1)
+        _require(type(value) is dict and type(value.get('schema_version')) is int
+                 and value['schema_version'] in (1, 2))
+        if value['schema_version'] == 2:
+            fields.add('nonce')
+            _require(type(value.get('nonce')) is str and re.fullmatch('[a-f0-9]{32}', value['nonce']))
+        _require(set(value) == fields and value['kind'] == 'yaml-check'
+                 and type(value['compiler']) is int and value['compiler'] == 1)
         for key in ('revision', 'plan_revision', 'source_fingerprint', 'candidate_revision',
                     'policy_identity', 'runtime_fingerprint'):
             _require(type(value[key]) is str and _HEX.fullmatch(value[key]))

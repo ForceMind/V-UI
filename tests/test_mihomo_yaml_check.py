@@ -13,7 +13,7 @@ from app.services.proxy_apply import ProxyApplyCoordinator, ProxyApplyError
 from app.services.core_runtime import CoreError
 from app.services.proxy_policy import VerifiedEndpoint
 from app.services.proxy_store import ProxyConflict, ProxyStore
-from tests.test_proxy_apply import FakeRuntime
+from tests.test_proxy_apply import FakeRuntime, SimulatedCrash, build_config, row
 from test_mihomo_merge_plan import BASELINE
 
 
@@ -63,7 +63,7 @@ class MihomoYamlCheckTests(unittest.TestCase):
         self.assertNotIn('private-test-password', repr(result))
         self.assertNotIn('relay.example.com', repr(result))
         calls = list(self.runtime.calls)
-        with self.assertRaisesRegex(ProxyApplyError, 'runtime application has not been enabled'):
+        with self.assertRaisesRegex(ProxyConflict, 'confirm the checked revision'):
             self.coordinator.apply(saved['revision'], 'not-enabled')
         self.assertEqual(self.runtime.calls, calls)
 
@@ -132,8 +132,130 @@ rules: ["DOMAIN,example.com,other", "MATCH,Chosen"]
         saved = self.save()
         self.assertNotIn('yaml_confirmation', self.coordinator.check(saved['revision']))
         self.assertFalse((self.store.path/'secrets/yaml-check.json').exists())
-        with self.assertRaisesRegex(ProxyApplyError, 'runtime application has not been enabled'):
+        with self.assertRaisesRegex(ProxyConflict, 'confirm the checked revision'):
             self.coordinator.apply(saved['revision'], 'still-not-enabled')
+
+    def confirmed(self, saved):
+        self.runtime.apply({'inbounds': [{'tag': 'existing'}]})
+        self.coordinator.confirmation_provider = Mock(
+            return_value={'issuer': 'd'*32, 'runtime_fingerprint': 'c'*64})
+        result = self.coordinator.check(saved['revision'])
+        return {'expected_source_fingerprint': result['source_fingerprint'],
+                'yaml_check_id': result['yaml_confirmation']['check_id']}
+
+    def test_apply_binds_the_ticket_and_replays_the_same_request_after_expiry(self):
+        saved = self.save()
+        args = self.confirmed(saved)
+        applied = self.coordinator.apply(saved['revision'], 'apply-yaml', **args)
+        self.assertTrue(applied['applied'])
+        self.assertEqual(applied['snapshot']['active']['execution_mode'], 'yaml')
+        self.assertNotIn('relay.example.com', repr(applied))
+        self.assertNotIn('1.1.1.1', repr(applied))
+        before = list(self.runtime.calls)
+        with patch('app.services.proxy_store.time.time', return_value=10**11):
+            again = self.coordinator.apply(saved['revision'], 'apply-yaml', **args)
+        self.assertTrue(again['already_completed'])
+        self.assertEqual(self.runtime.calls, before)
+        with self.assertRaises(ProxyConflict):
+            self.coordinator.apply(saved['revision'], 'apply-yaml', **{**args, 'yaml_check_id': 'f'*64})
+
+    def test_maintenance_check_cannot_resolve_or_replace_the_admin_ticket(self):
+        saved = self.save()
+        args = self.confirmed(saved)
+        self.resolve.reset_mock()
+        with self.assertRaises(ProxyApplyError) as rejected:
+            self.coordinator.check(saved['revision'], allow_yaml=False)
+        self.assertEqual(rejected.exception.code, 'YAML_ADMIN_REQUIRED')
+        self.resolve.assert_not_called()
+        self.assertTrue(self.coordinator.apply(saved['revision'], 'still-valid', **args)['applied'])
+
+    def test_expiry_replaced_ticket_dns_change_and_stopped_core_refuse_before_write(self):
+        saved = self.save()
+        args = self.confirmed(saved)
+        with patch('app.services.proxy_store.time.time', return_value=10**11), self.assertRaises(ProxyConflict):
+            self.coordinator.apply(saved['revision'], 'expired', **args)
+        self.resolve.side_effect = lambda identifier, revision, profile, **kwargs: VerifiedEndpoint(
+            identifier, revision, profile.server, ('9.9.9.9',), 101)
+        with self.assertRaisesRegex(ProxyConflict, 'addresses changed'):
+            self.coordinator.apply(saved['revision'], 'address-changed', **args)
+        self.coordinator.check(saved['revision'])
+        with self.assertRaisesRegex(ProxyConflict, 'confirmation changed'):
+            self.coordinator.apply(saved['revision'], 'replaced', **args)
+        self.runtime.stop()
+        with self.assertRaisesRegex(ProxyApplyError, 'Start the managed'):
+            self.coordinator.apply(saved['revision'], 'stopped', **args)
+        self.assertIsNone(self.store.recoverable_pending())
+        for key in ('expired', 'address-changed', 'replaced', 'stopped'):
+            self.assertIsNone(self.store.transaction(key))
+
+    def test_local_address_change_during_final_core_check_cannot_prepare(self):
+        saved = self.save()
+        args = self.confirmed(saved)
+        previous = self.runtime.state()
+        self.runtime.on_check = lambda: setattr(self.addresses, 'return_value', ('8.8.4.4',))
+        with self.assertRaisesRegex(ProxyConflict, 'Local addresses changed'):
+            self.coordinator.apply(saved['revision'], 'local-change', **args)
+        self.assertIsNone(self.store.recoverable_pending())
+        self.assertEqual(self.runtime.state(), previous)
+        self.assertTrue(self.runtime.running)
+
+    def test_interruption_recovers_committed_yaml_with_saved_pins(self):
+        saved = self.save()
+        self.coordinator.apply(saved['revision'], 'old-yaml', **self.confirmed(saved))
+        previous = self.runtime.state()
+        changed = self.save(candidate='rules: ["MATCH,REJECT"]', groups={}, dns=None)
+        result = self.coordinator.check(changed['revision'])
+        with patch.object(self.store, 'commit_apply', side_effect=SimulatedCrash), self.assertRaises(SimulatedCrash):
+            self.coordinator.apply(changed['revision'], 'interrupted-yaml',
+                expected_source_fingerprint=result['source_fingerprint'],
+                yaml_check_id=result['yaml_confirmation']['check_id'])
+        self.assertIsNotNone(self.store.recoverable_pending())
+        self.resolve.reset_mock()
+        self.assertEqual(self.coordinator.recover()['phase'], 'aborted')
+        self.assertEqual(self.runtime.state(), previous)
+        self.assertEqual(self.store.load_active()['revision'], saved['revision'])
+        self.resolve.assert_not_called()
+
+    def test_interruption_keeps_evidence_when_runtime_has_an_unrelated_revision(self):
+        saved = self.save()
+        args = self.confirmed(saved)
+        with patch.object(self.store, 'commit_apply', side_effect=SimulatedCrash), self.assertRaises(SimulatedCrash):
+            self.coordinator.apply(saved['revision'], 'uncertain', **args)
+        self.runtime.record['revision'] = 'a'*64
+        calls = len(self.runtime.calls)
+        with self.assertRaisesRegex(ProxyApplyError, 'recovery could not be confirmed'):
+            self.coordinator.recover()
+        self.assertEqual(self.store.recoverable_pending()['transaction_id'], 'uncertain')
+        self.assertNotIn('restore', [call[0] for call in self.runtime.calls[calls:]])
+
+    def test_reconciliation_rotates_an_inbound_certificate_with_committed_yaml_pins(self):
+        inbound = row()
+        self.coordinator.rows_provider = lambda: [inbound]
+        self.coordinator.build_config = build_config
+        saved = self.save()
+        args = self.confirmed(saved)
+        self.coordinator.apply(saved['revision'], 'before-rotation', **args)
+        before = self.store.load_active()
+        inbound.stream_settings['tls']['certificate_path'] = '/test-only-rotated-certificate'
+        self.resolve.reset_mock()
+        self.coordinator.validate_inbound_change([inbound])
+        self.coordinator.reconcile([inbound], 'certificate-rotation')
+        after = self.store.load_active()
+        self.assertEqual(after['revision'], before['revision'])
+        self.assertNotEqual(after['core_revision'], before['core_revision'])
+        self.assertEqual(after['runtime_context']['yaml_check']['endpoints'],
+                         before['runtime_context']['yaml_check']['endpoints'])
+        self.assertEqual(self.coordinator.recover()['phase'], 'recovered')
+        self.resolve.assert_not_called()
+
+    def test_same_second_recheck_invalidates_the_first_confirmation(self):
+        saved = self.save()
+        with patch('app.services.proxy_store.time.time', return_value=1000):
+            first = self.confirmed(saved)
+            second = self.coordinator.check(saved['revision'])['yaml_confirmation']['check_id']
+            self.assertNotEqual(first['yaml_check_id'], second)
+            with self.assertRaises(ProxyConflict):
+                self.coordinator.apply(saved['revision'], 'same-second', **first)
 
     def test_mutable_context_and_draft_changes_during_check_refuse_new_record(self):
         saved = self.save()

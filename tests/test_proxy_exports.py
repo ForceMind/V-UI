@@ -77,6 +77,13 @@ class StrictExportTests(ExportFixture, unittest.TestCase):
     def setUp(self):
         self.setup_export()
 
+    def test_strict_export_refuses_an_active_yaml_policy(self):
+        self.commit()
+        active = {**self.store.load_active(), "execution_mode": "yaml"}
+        with patch.object(self.store, "load_active", return_value=active):
+            with self.assertRaisesRegex(StrictExportError, "STRICT_EXPORT_YAML_POLICY"):
+                self.exported()
+
     def test_only_committed_relay_and_never_saved_draft_is_exportable(self):
         with self.assertRaisesRegex(StrictExportError, "RELAY_NOT_ACTIVE"):
             self.exported()
