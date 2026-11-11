@@ -10,7 +10,15 @@ class MihomoPreviewPanelTests(unittest.TestCase):
         result = subprocess.run(['node', '--test-reporter=tap', 'tests/mihomo_preview_dom.js'],
                                 cwd=root, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        for expected in ('tests 25', 'pass 25', 'fail 0', 'cancelled 0', 'skipped 0', 'todo 0'):
+        for expected in ('tests 36', 'pass 36', 'fail 0', 'cancelled 0', 'skipped 0', 'todo 0'):
+            self.assertRegex(result.stdout, r'(?m)^# ' + expected + r'$', result.stdout)
+
+    def test_workspace_queues_yaml_saves_and_preserves_unknown_write_state(self):
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(['node', '--test-reporter=tap', 'tests/proxy_yaml_sync_dom.js'],
+                                cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for expected in ('tests 4', 'pass 4', 'fail 0', 'cancelled 0', 'skipped 0', 'todo 0'):
             self.assertRegex(result.stdout, r'(?m)^# ' + expected + r'$', result.stdout)
 
 

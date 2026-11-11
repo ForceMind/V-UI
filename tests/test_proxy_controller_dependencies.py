@@ -176,9 +176,9 @@ class IsolatedProxyControllerTests(unittest.TestCase):
                    'proxy_store.py': 'app/services/proxy_store.py',
                    'upstream_profile.py': 'app/services/upstream_profile.py',
                    'inbound_policy.py': 'app/services/inbound_policy.py',
-                   **control_installer.DNS_SOURCE_DEPENDENCIES}
+                   **control_installer.DNS_SOURCE_DEPENDENCIES, **control_installer.YAML_SOURCE_DEPENDENCIES}
         for missing in ('data_owner.py', 'proxy_store.py', 'upstream_profile.py', 'inbound_policy.py',
-                        *control_installer.DNS_SOURCE_DEPENDENCIES):
+                        *control_installer.DNS_SOURCE_DEPENDENCIES, *control_installer.YAML_SOURCE_DEPENDENCIES):
             with self.subTest(missing=missing):
                 for name, source in sources.items():
                     target = self.control / name
@@ -201,14 +201,14 @@ class IsolatedProxyControllerTests(unittest.TestCase):
                              'proxy_store.py': 'app/services/proxy_store.py',
                              'upstream_profile.py': 'app/services/upstream_profile.py',
                    'inbound_policy.py': 'app/services/inbound_policy.py',
-                   **control_installer.DNS_SOURCE_DEPENDENCIES}.items():
+                   **control_installer.DNS_SOURCE_DEPENDENCIES, **control_installer.YAML_SOURCE_DEPENDENCIES}.items():
             shutil.copyfile(REPO / source, self.control / name)
         code = '''import runpy,sys
 from pathlib import Path
 worker=runpy.run_path(sys.argv[1]); api=worker['_load_release_tools']()
 root=Path(sys.argv[2]); backup=Path(sys.argv[3])
 checksum=api.backup(root,backup); api.restore(root,backup,checksum)
-for name in ('app.data_owner','app.services.proxy_store','app.services.upstream_profile','app.services.inbound_policy',
+for name in ('app.data_owner','app.services.proxy_store','app.services.upstream_profile','app.services.inbound_policy','app.services.mihomo_plan_record',
              'app.certificates.errors','app.certificates.dns_store','app.certificates.cloudflare',
              'app.certificates.dns_journal','app.certificates.dns_backup'):
     assert Path(sys.modules[name].__file__).parent==Path(sys.argv[1]).parent
@@ -243,7 +243,7 @@ class DNSStdlibClosureTests(unittest.TestCase):
         sources = {'ops_worker.py':'deploy/ops_worker.py','release_tools.py':'app/release_tools.py',
                    'data_owner.py':'app/data_owner.py','proxy_store.py':'app/services/proxy_store.py',
                    'upstream_profile.py':'app/services/upstream_profile.py','inbound_policy.py':'app/services/inbound_policy.py',
-                   **control_installer.DNS_SOURCE_DEPENDENCIES}
+                   **control_installer.DNS_SOURCE_DEPENDENCIES, **control_installer.YAML_SOURCE_DEPENDENCIES}
         for target, source in sources.items(): shutil.copyfile(REPO/source,self.control/target)
 
     def isolated(self, code):

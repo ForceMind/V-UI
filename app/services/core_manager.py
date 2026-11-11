@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+import uuid
 from pathlib import Path
 from typing import Iterable
 
@@ -152,6 +153,7 @@ class CoreManager:
         self.adapters = {"xray": XrayAdapter(runtime_lock=self.lock),
                          "sing-box": SingBoxAdapter(runtime_lock=self.lock)}
         self._proxy_coordinator = None
+        self._yaml_confirmation_issuer = uuid.uuid4().hex
         self._artifact_snapshot = None
         if artifacts is not None:
             self.configure_artifacts(artifacts)
@@ -213,7 +215,15 @@ class CoreManager:
                 item for item in rows if item.core == "sing-box"),
             self.lock, rows_provider=self._all_rows,
             panel_origin=os.getenv("VUI_PUBLIC_ORIGIN"),
+            confirmation_provider=self._yaml_confirmation_context,
         )
+
+    def _yaml_confirmation_context(self):
+        with self.lock:
+            identities = {name: adapter.runtime.confirmation_identity()
+                          for name, adapter in sorted(self.adapters.items())}
+            return {"issuer": self._yaml_confirmation_issuer,
+                    "runtime_fingerprint": revision(identities)}
 
     @staticmethod
     def _all_rows() -> list[Inbound]:
@@ -292,7 +302,8 @@ class CoreManager:
                 or snapshot['active'] is None or snapshot['active']['revision'] != expected):
             raise ProxyConflict('Proxy selection changed before node operation')
 
-    def check_proxy(self, expected_revision: str, expected_source_fingerprint: str | None = None) -> dict:
+    def check_proxy(self, expected_revision: str, expected_source_fingerprint: str | None = None,
+                    *, allow_yaml=True) -> dict:
         from app.services.proxy_store import ProxyStorageError
         with self.lock:
             try:
@@ -300,7 +311,7 @@ class CoreManager:
                 rows = self._all_rows()
                 coordinator.validate_saved_source(rows)
                 self._check_proxy_runtime_gate(coordinator, expected_revision, rows)
-                result = coordinator.check(expected_revision, rows,
+                result = coordinator.check(expected_revision, rows, allow_yaml=allow_yaml,
                                            expected_source_fingerprint=expected_source_fingerprint)
                 result['runtime_fingerprint'] = self._runtime_fingerprint()
                 return result
@@ -309,7 +320,7 @@ class CoreManager:
                 raise
 
     def apply_proxy(self, expected_revision: str, transaction_id: str, expected_source_fingerprint: str | None = None,
-                    expected_runtime_fingerprint: str | None = None) -> dict:
+                    expected_runtime_fingerprint: str | None = None, yaml_check_id: str | None = None) -> dict:
         from app.services.proxy_store import ProxyStorageError, ProxyConflict
         with self.lock:
             try:
@@ -323,6 +334,9 @@ class CoreManager:
                     self._check_proxy_runtime_gate(coordinator, expected_revision, rows)
                 # Existing IDs are resolved before draft inspection, preserving
                 # idempotent replay after a newer draft has been saved.
+                if yaml_check_id is not None:
+                    return coordinator.apply(expected_revision, transaction_id, rows,
+                        expected_source_fingerprint=expected_source_fingerprint, yaml_check_id=yaml_check_id)
                 return coordinator.apply(expected_revision, transaction_id, rows,
                                          expected_source_fingerprint=expected_source_fingerprint)
             except ProxyStorageError:
@@ -358,7 +372,7 @@ class CoreManager:
         self._check_relay_runtime_gate(bool(plan.relay_ids) or bool(
             active and active["settings"]["relay_enabled"]))
         if preserve_stopped and (not plan.legacy or active and active.get("runtime_context")
-                                 and active["runtime_context"]["schema_version"] == 2):
+                                 and active["runtime_context"]["schema_version"] >= 2):
             state = adapter.runtime.state()
             if state["revision"] is not None and not state["enabled"]:
                 # An empty never-running config is not a manual stop. The
@@ -435,9 +449,12 @@ class CoreManager:
                 if (context is None or state["revision"] != active["core_revision"]
                         or bool(self.get("sing-box").runtime.status()["running"]) != state["enabled"]):
                     return result
-                if context["schema_version"] == 2:
+                if context["schema_version"] >= 2:
                     applied = coordinator.store.context_plan(context, settings)
-                    if desired.manifest != applied.manifest:
+                    from app.services.inbound_policy import yaml_runtime_sources
+                    source_matches = (yaml_runtime_sources(desired.manifest) == yaml_runtime_sources(applied.manifest)
+                                      if context["schema_version"] == 3 else desired.manifest == applied.manifest)
+                    if not source_matches:
                         for target in result.values(): target["state"] = "pending"
                         return result
                     compiled = coordinator.compile_active(rows)

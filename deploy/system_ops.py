@@ -204,7 +204,7 @@ def trusted_executable(path):
 def fixed_files(manager):
     base = {CONFIG, CONTROL / 'launcher.py', CONTROL / 'system_ops.py', WORKER,
             CONTROL / 'release_tools.py', CONTROL / 'data_owner.py', CONTROL / 'proxy_store.py',
-            CONTROL / 'upstream_profile.py', CONTROL / 'inbound_policy.py', CONTROL / 'firewall_support.py', WRAPPER,
+            CONTROL / 'mihomo_plan_record.py', CONTROL / 'upstream_profile.py', CONTROL / 'inbound_policy.py', CONTROL / 'firewall_support.py', WRAPPER,
             *(CONTROL / name for name in (
                 'core_artifacts.py', 'core_selection.py', 'core_binary.py', 'core_store.py',
                 'core_github.py', 'core_catalog.py', 'core_resolver.py', 'core_application.py',

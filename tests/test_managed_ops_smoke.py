@@ -37,6 +37,7 @@ DNS_CONTROL_FILES = {
 CONTROL_SOURCE_FILES = (
     'deploy/system_ops.py', 'deploy/ops_worker.py', 'deploy/core_authority.py', 'app/release_tools.py', 'deploy/v-ui',
     'app/data_owner.py', 'app/services/proxy_store.py', 'app/services/upstream_profile.py',
+    'app/services/mihomo_plan_record.py',
     'app/services/inbound_policy.py', 'scripts/firewall_support.py', *DNS_CONTROL_FILES,
 )
 

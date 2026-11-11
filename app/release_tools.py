@@ -781,7 +781,7 @@ def _database_mode_fence(data: Path, *, _existing_store_type=None):
         invalid, explicit = db.execute("SELECT count(CASE WHEN routing_mode IS NULL OR "
             "typeof(routing_mode) != 'text' OR routing_mode NOT IN (?,?,?) THEN 1 END), "
             "count(CASE WHEN routing_mode != 'inherit' THEN 1 END) FROM inbounds", sorted(MODES)).fetchone()
-        if invalid or explicit and schema != 2:
+        if invalid or explicit and schema < 2:
             raise ReleaseError('Inbound routing and its capability fence disagree; recovery is required')
         return bool(explicit)
 
@@ -943,11 +943,21 @@ def _validate_restore_policy(data: Path, *, _artifact_ids=None, _existing_store_
                 raise ReleaseError('Enabled relay has no committed upstream selection')
         return
     context = active.get('runtime_context')
-    if context is not None and context['schema_version'] == 2:
-        from app.services.inbound_policy import policy_plan
+    if context is not None and context['schema_version'] >= 2:
+        from app.services.inbound_policy import policy_plan, yaml_runtime_sources
         plan = policy_plan(store.policy_rows(), active['settings'])
-        if (plan.manifest != context['plan_manifest']
-                or plan.source_fingerprint != context['source_fingerprint']):
+        saved = store.context_plan(context, active['settings'])
+        if context['schema_version'] == 3:
+            settings = active['settings']
+            manifest = plan.manifest
+            matches = (yaml_runtime_sources(manifest) == yaml_runtime_sources(saved.manifest)
+                       and not any(item['enable'] and (
+                           (settings['local_proxy_enabled'] and item['port'] == settings['local_port'])
+                           or (item['core'] != 'sing-box' and (item['mode'] != 'inherit' or plan.relay_ids)))
+                           for item in manifest))
+        else:
+            matches = plan.manifest == saved.manifest and plan.source_fingerprint == saved.source_fingerprint
+        if not matches:
             raise ReleaseError('Backup rows differ from their committed inbound policy')
     elif explicit:
         raise ReleaseError('Backup contains unapplied inbound modes; dedicated recovery is required')
@@ -988,11 +998,15 @@ def _policy_release_compatible(data: Path, payload: Path):
         raw = source.read_bytes()
         if len(raw) > 512 * 1024: raise ValueError()
         module = ast.parse(raw)
-        values = [node.value.value for node in module.body if isinstance(node, ast.Assign)
-                  and any(isinstance(target, ast.Name) and target.id == 'PROXY_STATE_SCHEMA_MAX'
-                          for target in node.targets) and isinstance(node.value, ast.Constant)]
-        if len(values) != 1 or type(values[0]) is not int or values[0] < required:
-            raise ValueError()
+        markers = ['PROXY_STATE_SCHEMA_MAX']
+        if required >= 3:
+            markers.append('PROXY_RUNTIME_CONTEXT_SCHEMA_MAX')
+        for marker in markers:
+            assignments = [node for node in module.body if isinstance(node, ast.Assign)
+                           and any(isinstance(target, ast.Name) and target.id == marker for target in node.targets)]
+            if (len(assignments) != 1 or not isinstance(assignments[0].value, ast.Constant)
+                    or type(assignments[0].value.value) is not int or assignments[0].value.value < required):
+                raise ValueError()
     except (OSError, ValueError, SyntaxError):
         raise ReleaseError('Selected release cannot read per-inbound routing; downgrade refused') from None
 
@@ -1192,6 +1206,9 @@ def _restore_policy_floor(current_data, incoming_data, incoming_proxy, *,
         raise ReleaseError('Current proxy policy is unknown; dedicated recovery is required') from None
     if current['pending'] is not None:
         raise ReleaseError('Current proxy apply is unresolved; dedicated recovery is required')
+    if current_schema == 3 and (incoming_proxy is None or _policy_store(
+            incoming_data, _existing_store_type).policy_schema_version() < 3):
+        raise ReleaseError('Backup cannot read the established YAML routing capability')
     current_active = current['active']
     incoming_active = incoming_proxy['active'] if incoming_proxy is not None else None
     if current_active and any(current_active['settings'][key] and (

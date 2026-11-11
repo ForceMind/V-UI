@@ -717,6 +717,7 @@ def _load_release_tools():
     packages = ('app', 'app.services', 'app.certificates')
     implementations = (('app.data_owner', 'data_owner.py'),
                        ('app.services.upstream_profile', 'upstream_profile.py'),
+                       ('app.services.mihomo_plan_record', 'mihomo_plan_record.py'),
                        ('app.services.inbound_policy', 'inbound_policy.py'),
                        ('app.services.proxy_store', 'proxy_store.py'),
                        ('app.certificates.errors', 'certificate_errors.py'),

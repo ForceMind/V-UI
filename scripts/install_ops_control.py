@@ -105,8 +105,10 @@ CORE_SOURCE_DEPENDENCIES = {
 CORE_AUTHORITY_SOURCE_DEPENDENCIES = {
     'core_authority.py': 'deploy/core_authority.py',
 }
+YAML_SOURCE_DEPENDENCIES = {'mihomo_plan_record.py': 'app/services/mihomo_plan_record.py'}
 SOURCE_DEPENDENCIES = (PRE_DNS_SOURCE_DEPENDENCIES | DNS_SOURCE_DEPENDENCIES
-                       | CORE_SOURCE_DEPENDENCIES | CORE_AUTHORITY_SOURCE_DEPENDENCIES)
+                       | CORE_SOURCE_DEPENDENCIES | CORE_AUTHORITY_SOURCE_DEPENDENCIES
+                       | YAML_SOURCE_DEPENDENCIES)
 RECEIPT_KEYS = {'schema', 'service_manager', 'system_python', 'interpreter_resolved',
                 'interpreter_sha256', 'files'}
 MAX_CODE = 4_000_000
@@ -611,8 +613,10 @@ def validate_existing(hashes, interpreter, manager, refresh, verified, *, missin
     # core group or derive old shapes by subtracting arbitrary current files.
     pre_authority_missing = (core_dependencies,) + tuple(core_dependencies | dns_dependencies | item
                                                         for item in pre_dns_missing)
-    known_missing = (authority_dependencies,) + tuple(authority_dependencies | item
-                                                     for item in pre_authority_missing)
+    pre_yaml_missing = (authority_dependencies,) + tuple(authority_dependencies | item
+                                                        for item in pre_authority_missing)
+    yaml_dependencies = {str(CONTROL / name) for name in YAML_SOURCE_DEPENDENCIES}
+    known_missing = (yaml_dependencies,) + tuple(yaml_dependencies | item for item in pre_yaml_missing)
     missing = (expected - set(receipt['files']) if isinstance(receipt, dict)
                and isinstance(receipt.get('files'), dict) else set())
     legacy = (refresh and isinstance(receipt, dict) and isinstance(receipt.get('files'), dict)

@@ -43,7 +43,7 @@ class LinuxInstallationRegressions(unittest.TestCase):
         self.stack.callback(close)
 
     def test_http01_ipv4_and_ipv6_serve_same_temporary_port(self):
-        self.ipv6_listener()  # Only skip if the host cannot provide IPv6.
+        self.ipv6_listener().close()  # Availability only; do not occupy the later shared port.
         challenge = self.root / '.well-known' / 'acme-challenge'
         challenge.mkdir(parents=True)
         token = 'A' * 43
@@ -62,7 +62,7 @@ class LinuxInstallationRegressions(unittest.TestCase):
                 self.assertEqual(response.read(), b'challenge.key_authorization')
 
     def test_openrc_main_serves_both_families_before_clean_shutdown(self):
-        self.ipv6_listener()
+        self.ipv6_listener().close()  # Release the availability probe before choosing IPv4 port.
         challenge = self.root / '.well-known' / 'acme-challenge'
         challenge.mkdir(parents=True)
         token = 'B' * 43

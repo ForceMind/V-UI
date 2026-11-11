@@ -41,6 +41,7 @@ class CheckPayload(StrictPayload):
 
 class ApplyPayload(CheckPayload):
     runtime_fingerprint: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$', min_length=64, max_length=64)
+    yaml_check_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$', min_length=64, max_length=64)
 
 
 class DiscardDraftPayload(StrictPayload):
@@ -58,6 +59,15 @@ class SettingsPayload(StrictPayload):
     local_password: str | None = Field(default=None, max_length=255)
     dns_policy_version: int = Field(default=1, ge=1, le=1, strict=True)
     deny_policy_version: int = Field(default=1, ge=1, le=1, strict=True)
+
+
+class YamlDraftPayload(StrictPayload):
+    baseline: str = Field(min_length=1, max_length=1_048_576)
+    candidate: str = Field(min_length=1, max_length=1_048_576)
+    fingerprint: str = Field(pattern=r'^[a-f0-9]{64}$', min_length=64, max_length=64)
+    selections: list[Literal['baseline', 'candidate']] = Field(max_length=256)
+    group_members: dict[str, str] = Field(max_length=128)
+    dns_upstream: str | None = Field(default=None, max_length=128)
 
 
 def get_store() -> ProxyStore:
@@ -175,6 +185,40 @@ def create_profile(payload: ProfilePayload, response: Response, request: Request
         raise safe_error(exc) from None
 
 
+@router.post('/yaml/draft')
+def save_yaml_draft(payload: YamlDraftPayload, request: Request, response: Response,
+                    if_match: str | None = Header(default=None)):
+    if getattr(request.state, 'admin', None) is None or getattr(request.state, 'maintenance', None) is not None:
+        raise HTTPException(403, 'ADMIN_REQUIRED')
+    revision = expected_revision(single_header(request, 'if-match', if_match))
+    from app.services.mihomo_merge import MihomoMergeError
+    from app.services.mihomo_merge_download import prepare_mihomo_draft
+    from app.services.mihomo_preview import MihomoPreviewError
+    from app.api.mihomo_preview import _parser_error
+    try:
+        raw, sources = prepare_mihomo_draft(payload.baseline, payload.candidate, payload.fingerprint,
+                                           payload.selections, payload.group_members, payload.dns_upstream)
+        result = get_store().save_yaml_plan(raw, sources, revision)
+        return snapshot_response(result, response)
+    except MihomoPreviewError as error:
+        raise _parser_error(error) from None
+    except MihomoMergeError as error:
+        raise HTTPException(422, {'code': error.code}) from None
+    except (ProxyCapacityError, ProxyConflict, ProxyStorageError, ProxyValidationError) as error:
+        raise safe_error(error) from None
+
+
+@router.delete('/yaml/draft')
+def clear_yaml_draft(request: Request, response: Response, if_match: str | None = Header(default=None)):
+    if getattr(request.state, 'admin', None) is None or getattr(request.state, 'maintenance', None) is not None:
+        raise HTTPException(403, 'ADMIN_REQUIRED')
+    revision = expected_revision(single_header(request, 'if-match', if_match))
+    try:
+        return snapshot_response(get_store().clear_yaml_plan(revision), response)
+    except (ProxyCapacityError, ProxyConflict, ProxyStorageError, ProxyValidationError) as error:
+        raise safe_error(error) from None
+
+
 @router.post('/discard-draft')
 def discard_draft(payload: DiscardDraftPayload, response: Response):
     try:
@@ -194,6 +238,8 @@ def runtime_error(exc: Exception) -> HTTPException:
     from app.services.proxy_policy import PolicyError
     from app.services.proxy_resolution import ResolutionError
     if isinstance(exc, ProxyApplyError):
+        if exc.code == 'YAML_ADMIN_REQUIRED':
+            return HTTPException(403, 'ADMIN_REQUIRED')
         return HTTPException(503 if exc.code in {'RECOVERY_REQUIRED', 'RUNTIME_MISMATCH',
                              'MISSING_ACTIVE_CONTEXT'} else 409, 'PROXY_' + exc.code)
     if isinstance(exc, PolicyError):
@@ -208,7 +254,7 @@ def runtime_error(exc: Exception) -> HTTPException:
 
 
 @router.post('/check')
-def check_candidate(payload: CheckPayload, response: Response):
+def check_candidate(payload: CheckPayload, response: Response, request: Request):
     from app.services.core_runtime import CoreError
     from app.services.proxy_policy import PolicyError
     from app.services.proxy_resolution import ResolutionError
@@ -216,9 +262,13 @@ def check_candidate(payload: CheckPayload, response: Response):
     try:
         # A configuration check can bootstrap the upstream address. It is not
         # a successful TLS/authentication/HTTPS diagnostic or a live listener.
-        result = (manager.check_proxy(payload.base_revision) if payload.source_fingerprint is None
-                  else manager.check_proxy(payload.base_revision,
-                                           expected_source_fingerprint=payload.source_fingerprint))
+        if getattr(request.state, 'maintenance', None) is not None:
+            result = manager.check_proxy(payload.base_revision,
+                expected_source_fingerprint=payload.source_fingerprint, allow_yaml=False)
+        else:
+            result = (manager.check_proxy(payload.base_revision) if payload.source_fingerprint is None
+                      else manager.check_proxy(payload.base_revision,
+                                               expected_source_fingerprint=payload.source_fingerprint))
         snapshot_response(result['snapshot'], response)
         return result
     except (CoreError, PolicyError, ResolutionError, ProxyConflict,
@@ -241,7 +291,14 @@ def apply_candidate(payload: ApplyPayload, response: Response, request: Request,
     try:
         # Manager additionally gates stale enabled runtimes from other cores;
         # directly calling the coordinator would omit that global ingress gate.
-        if payload.runtime_fingerprint is not None:
+        if payload.yaml_check_id is not None:
+            if getattr(request.state, 'admin', None) is None or getattr(request.state, 'maintenance', None) is not None:
+                raise HTTPException(403, 'ADMIN_REQUIRED')
+            result = get_core_manager().apply_proxy(payload.base_revision, idempotency_key,
+                expected_source_fingerprint=payload.source_fingerprint,
+                expected_runtime_fingerprint=payload.runtime_fingerprint,
+                yaml_check_id=payload.yaml_check_id)
+        elif payload.runtime_fingerprint is not None:
             result = get_core_manager().apply_proxy(payload.base_revision, idempotency_key,
                 expected_source_fingerprint=payload.source_fingerprint,
                 expected_runtime_fingerprint=payload.runtime_fingerprint)

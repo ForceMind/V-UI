@@ -189,7 +189,7 @@ class ControlInstallTests(unittest.TestCase):
     def pre_dns_receipt(self, receipt):
         # Model a real historical installation: all DNS helpers are absent,
         # rather than an unpublished mixed closure missing just an old helper.
-        for name in installer.DNS_SOURCE_DEPENDENCIES | installer.CORE_SOURCE_DEPENDENCIES | installer.CORE_AUTHORITY_SOURCE_DEPENDENCIES:
+        for name in installer.DNS_SOURCE_DEPENDENCIES | installer.CORE_SOURCE_DEPENDENCIES | installer.CORE_AUTHORITY_SOURCE_DEPENDENCIES | installer.YAML_SOURCE_DEPENDENCIES:
             path = self.control / name
             receipt['files'].pop(str(path)); path.unlink()
         return receipt
@@ -462,19 +462,32 @@ class ControlInstallTests(unittest.TestCase):
         with self.assertRaises(installer.InstallError): self.install()
         upgraded = self.install(refresh=True)
         self.assertEqual(set(upgraded['files']) - set(old['files']),
-                         {str(self.control / name) for name in installer.DNS_SOURCE_DEPENDENCIES | installer.CORE_SOURCE_DEPENDENCIES | installer.CORE_AUTHORITY_SOURCE_DEPENDENCIES})
+                         {str(self.control / name) for name in installer.DNS_SOURCE_DEPENDENCIES | installer.CORE_SOURCE_DEPENDENCIES | installer.CORE_AUTHORITY_SOURCE_DEPENDENCIES | installer.YAML_SOURCE_DEPENDENCIES})
         self.assertEqual(len(list(self.kit.iterdir())), 16)
 
     def test_complete_pre_core_dns_receipt_refresh_adds_exactly_all_core_helpers(self):
         old=self.install()
-        for name in installer.CORE_SOURCE_DEPENDENCIES | installer.CORE_AUTHORITY_SOURCE_DEPENDENCIES:
+        for name in installer.CORE_SOURCE_DEPENDENCIES | installer.CORE_AUTHORITY_SOURCE_DEPENDENCIES | installer.YAML_SOURCE_DEPENDENCIES:
             path=self.control/name;old['files'].pop(str(path));path.unlink()
         installer.RECEIPT.write_text(json.dumps(old))
         with self.assertRaises(installer.InstallError):self.install()
         upgraded=self.install(refresh=True)
         self.assertEqual(set(upgraded['files'])-set(old['files']),
-                         {str(self.control/name) for name in installer.CORE_SOURCE_DEPENDENCIES | installer.CORE_AUTHORITY_SOURCE_DEPENDENCIES})
+                         {str(self.control/name) for name in installer.CORE_SOURCE_DEPENDENCIES | installer.CORE_AUTHORITY_SOURCE_DEPENDENCIES | installer.YAML_SOURCE_DEPENDENCIES})
         self.assertTrue(set(installer.CORE_SOURCE_DEPENDENCIES).isdisjoint(installer.COMMON_ASSETS))
+
+    def test_complete_core_receipt_refresh_adds_the_yaml_group(self):
+        old = self.install()
+        for name in installer.YAML_SOURCE_DEPENDENCIES:
+            path = self.control/name
+            old['files'].pop(str(path))
+            path.unlink()
+        installer.RECEIPT.write_text(json.dumps(old))
+        with self.assertRaises(installer.InstallError):
+            self.install()
+        refreshed = self.install(refresh=True)
+        self.assertEqual(set(refreshed['files']) - set(old['files']),
+                         {str(self.control/name) for name in installer.YAML_SOURCE_DEPENDENCIES})
 
     def test_every_partial_core_group_is_refused_and_unreceipted_new_file_is_not_adopted(self):
         original=self.install()
@@ -485,29 +498,33 @@ class ControlInstallTests(unittest.TestCase):
                 self.install(refresh=True)
             path.write_bytes(raw);path.chmod(0o644);installer.RECEIPT.write_text(json.dumps(original))
         old=json.loads(json.dumps(original));saved={}
-        for name in installer.CORE_SOURCE_DEPENDENCIES | installer.CORE_AUTHORITY_SOURCE_DEPENDENCIES:
+        for name in installer.CORE_SOURCE_DEPENDENCIES | installer.CORE_AUTHORITY_SOURCE_DEPENDENCIES | installer.YAML_SOURCE_DEPENDENCIES:
             path=self.control/name;saved[path]=path.read_bytes();old['files'].pop(str(path));path.unlink()
-        path=next(iter(saved));path.write_bytes(saved[path]);path.chmod(0o644)
+        path=self.control/next(iter(installer.CORE_SOURCE_DEPENDENCIES));path.write_bytes(saved[path]);path.chmod(0o644)
         installer.RECEIPT.write_text(json.dumps(old))
         with self.assertRaisesRegex(installer.InstallError,'Unreceipted dependency'):
             self.install(refresh=True)
         self.assertEqual(path.read_bytes(),saved[path])
 
-    def test_exact_pre_authority_core_closure_refresh_adds_only_authority(self):
+    def test_exact_pre_authority_core_closure_refresh_adds_authority_and_yaml(self):
         self.assertEqual(installer.CORE_AUTHORITY_SOURCE_DEPENDENCIES,
                          {'core_authority.py':'deploy/core_authority.py'})
         self.assertNotIn('core_authority.py', installer.CORE_SOURCE_DEPENDENCIES)
         old = self.install()
+        yaml = self.control/'mihomo_plan_record.py'
+        old['files'].pop(str(yaml));yaml.unlink()
         path = self.control/'core_authority.py'
         old['files'].pop(str(path));path.unlink()
         installer.RECEIPT.write_text(json.dumps(old))
         with self.assertRaises(installer.InstallError):self.install()
         upgraded = self.install(refresh=True)
-        self.assertEqual(set(upgraded['files'])-set(old['files']), {str(path)})
+        self.assertEqual(set(upgraded['files'])-set(old['files']), {str(path), str(yaml)})
         self.assertEqual(path.read_bytes(), (REPO/'deploy/core_authority.py').read_bytes())
 
     def test_pre_authority_refresh_never_adopts_an_unreceipted_authority_file(self):
         old = self.install()
+        yaml = self.control/'mihomo_plan_record.py'
+        old['files'].pop(str(yaml));yaml.unlink()
         path = self.control/'core_authority.py';raw=path.read_bytes()
         old['files'].pop(str(path));installer.RECEIPT.write_text(json.dumps(old))
         with self.assertRaisesRegex(installer.InstallError,'Unreceipted dependency'):
@@ -791,7 +808,7 @@ class ControlInstallTests(unittest.TestCase):
             self.install(refresh=True)
         dependency.write_bytes(raw)
         upgraded = self.install(refresh=True)
-        self.assertEqual(set(upgraded['files']) - set(old['files']), {str(owner)} | {str(self.control / name) for name in installer.DNS_SOURCE_DEPENDENCIES | installer.CORE_SOURCE_DEPENDENCIES | installer.CORE_AUTHORITY_SOURCE_DEPENDENCIES})
+        self.assertEqual(set(upgraded['files']) - set(old['files']), {str(owner)} | {str(self.control / name) for name in installer.DNS_SOURCE_DEPENDENCIES | installer.CORE_SOURCE_DEPENDENCIES | installer.CORE_AUTHORITY_SOURCE_DEPENDENCIES | installer.YAML_SOURCE_DEPENDENCIES})
         self.assertEqual(owner.read_bytes(), (REPO / 'app/data_owner.py').read_bytes())
 
     def test_partial_publish_fails_closed_without_usable_wrapper_or_receipt(self):

@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from app.data_owner import data_owner
+from app.services.upstream_profile import RESERVED_ROUTING_TARGETS
 
 DATA_DIR = Path(os.getenv("VUI_DATA_DIR", "data"))
 ROUTING_FILE = DATA_DIR / "mihomo-routing.json"
@@ -137,10 +138,7 @@ DIRECT_MODE_PRESET_ADDITIONS = {
     ),
 }
 
-RESERVED_PROXY_NAMES = {
-    "DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL", "DNS",
-    "PROXY", "AUTO", "FORCE_PROXY",
-}
+RESERVED_PROXY_NAMES = set(RESERVED_ROUTING_TARGETS) | {"PROXY", "AUTO", "FORCE_PROXY"}
 
 
 def proxy_dns(group: str) -> list[str]:

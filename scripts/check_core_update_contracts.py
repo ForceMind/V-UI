@@ -21,7 +21,7 @@ CONTRACTS = {
     'test_core_catalog.py': 24,
     'test_core_selection_files.py': 54,
     'test_core_resolver.py': 8,
-    'test_core_manager_artifacts.py': 10,
+    'test_core_manager_artifacts.py': 11,
     'test_core_application.py': 11,
     'test_core_boot.py': 19,
     'test_core_diagnostics_artifact.py': 17,

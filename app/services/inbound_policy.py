@@ -65,6 +65,12 @@ def _effective(mode, relay):
     return "relay" if mode == "relay" or mode == "inherit" and relay else "direct"
 
 
+def yaml_runtime_sources(manifest):
+    """Bindings that can affect the managed sing-box YAML runtime."""
+    return [item for item in manifest if item["core"] == "sing-box"
+            or item["enable"] and item["effective"] == "relay"]
+
+
 @dataclass(frozen=True)
 class PolicyPlan:
     requires_upstream: bool

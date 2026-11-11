@@ -13,6 +13,8 @@ import re
 import unicodedata
 import uuid as uuid_module
 
+RESERVED_ROUTING_TARGETS = frozenset({"DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL", "DNS"})
+
 SCHEMA_VERSION = 1
 MAX_STRING_BYTES = 8192
 MAX_NAME_LENGTH = 128
