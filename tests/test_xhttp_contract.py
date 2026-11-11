@@ -1,13 +1,17 @@
-"""The characterization fixture must not unlock lossy production exports."""
+"""XHTTP public export boundary and historical transport characterization."""
 from copy import deepcopy
 import json
 import unittest
 from unittest.mock import Mock, patch
 import uuid
+
+from fastapi import HTTPException
 from urllib.parse import parse_qs, urlsplit
 
 from app.services.mihomo_subscription import mihomo_config as public_mihomo_config
-from app.services.validated_export import ExportError, base64_subscription, singbox_client_config
+from app.services.protocol_profiles import compile_profile, decompile_profile
+from app.services.validated_export import ExportError, XHTTPUnsupportedFormat, base64_subscription, share_link, singbox_client_config
+from app.services.inbound_export_eligibility import export_eligibility
 from test_validated_export import vless_node
 import test_tls_rejection_evidence as evidence_tests
 from loopback_helpers import require_rejection_evidence
@@ -76,7 +80,7 @@ class XHTTPContractTests(unittest.TestCase):
         self.assertEqual(removed, {'type': 'httpupgrade', 'host': HOST, 'path': PATH})
         self.assertEqual(upgrade, plain)
 
-    def test_all_public_formats_still_reject_xhttp_and_httpupgrade(self):
+    def test_all_public_formats_reject_incomplete_or_unqualified_transports(self):
         xray = vless_node(core='xray', settings={'users': [{'id': UUID}], 'decryption': 'none'},
             stream_settings={'method': 'xhttp', 'security': 'tls',
                 'xhttpSettings': {'path': PATH, 'host': HOST, 'mode': MODE}})
@@ -91,6 +95,87 @@ class XHTTPContractTests(unittest.TestCase):
                 with self.subTest(core=item.core, transport=item.stream_settings):
                     with self.assertRaises(ExportError): export()
                     self.assertEqual(vars(item), before)
+
+
+class XHTTPPublicContractTests(unittest.TestCase):
+    profile = {'transport': 'xhttp', 'security': 'tls', 'flow': '', 'server_name': SNI,
+               'path': PATH, 'host': HOST, 'xhttp_mode': MODE, 'xhttp_alpn_h2': True,
+               'client_fingerprint': 'chrome', 'skip_cert_verify': False,
+               'certificate_path': '/test/private/server.pem', 'key_path': '/test/private/key.pem'}
+
+    def qualified(self):
+        settings, stream = compile_profile('xray', 'vless', self.profile,
+            {'users': [{'id': UUID}], 'decryption': 'none'}, {})
+        return vless_node(core='xray', settings=settings, stream_settings=stream)
+
+    def test_visual_profile_round_trips_explicit_h2_without_exporting_private_material(self):
+        item = self.qualified()
+        self.assertEqual(export_eligibility(item), {'share_eligible': True, 'upstream_export_eligible': False})
+        editor = decompile_profile('xray', 'vless', item.settings, item.stream_settings)
+        self.assertIs(editor['xhttp_alpn_h2'], True)
+        self.assertEqual(compile_profile('xray', 'vless', editor, item.settings, item.stream_settings),
+                         (item.settings, item.stream_settings))
+        uri = share_link(item, 'vpn.example.test')
+        self.assertEqual(parse_qs(urlsplit(uri).query), {
+            'security': ['tls'], 'type': ['xhttp'], 'sni': [SNI], 'host': [HOST], 'path': [PATH],
+            'mode': [MODE], 'fp': ['chrome'], 'alpn': ['h2'], 'encryption': ['none']})
+        text = public_mihomo_config([item], 'vpn.example.test', {'mode': 'direct'})
+        self.assertIn('udp: false', text)
+        self.assertNotIn('/test/private', uri + text)
+        for items in ([item], [vless_node(), item]):
+            with self.assertRaises(XHTTPUnsupportedFormat):
+                singbox_client_config(items, SNI)
+
+    def test_only_explicit_h2_is_shareable_and_older_unqualified_alpn_survives_edits(self):
+        item = self.qualified()
+        item.stream_settings['tlsSettings']['alpn'] = ['http/1.1']
+        editor = decompile_profile('xray', 'vless', item.settings, item.stream_settings)
+        self.assertIs(editor['xhttp_alpn_h2'], False)
+        self.assertEqual(compile_profile('xray', 'vless', editor, item.settings, item.stream_settings),
+                         (item.settings, item.stream_settings))
+        with self.assertRaises(ExportError):
+            share_link(item, SNI)
+        _, stream = compile_profile('xray', 'vless', {**self.profile, 'xhttp_alpn_h2': False}, item.settings, {})
+        self.assertNotIn('alpn', stream['tlsSettings'])
+
+    def test_unknown_transport_or_tls_draft_fields_cannot_be_cleared_by_the_visual_editor(self):
+        for block, key, value in (
+            ('xhttpSettings', 'extra', {'xmux': {}}),
+            ('tlsSettings', 'allowInsecure', True),
+            ('_vui', 'fingerprint_hint', 'unknown'),
+        ):
+            item = self.qualified()
+            item.stream_settings[block][key] = value
+            before = deepcopy(item.stream_settings)
+            with self.subTest(key=key):
+                with self.assertRaises(HTTPException) as error:
+                    compile_profile('xray', 'vless', self.profile, item.settings, item.stream_settings)
+                self.assertEqual(error.exception.status_code, 422)
+                with self.assertRaises(ExportError):
+                    share_link(item, SNI)
+                self.assertEqual(item.stream_settings, before)
+
+    def test_stored_profile_rejects_inconsistent_or_unsafe_values(self):
+        edits = (
+            lambda n: n.stream_settings.update(network='tcp'),
+            lambda n: n.stream_settings.update(security='reality'),
+            lambda n: n.stream_settings['xhttpSettings'].update(mode='packet-up'),
+            lambda n: n.stream_settings['xhttpSettings'].update(path='/bad%2f/'),
+            lambda n: n.stream_settings['xhttpSettings'].update(path='/dot/../'),
+            lambda n: n.stream_settings['xhttpSettings'].update(path='/no-trailing-slash'),
+            lambda n: n.stream_settings['xhttpSettings'].update(host='x.test:443'),
+            lambda n: n.stream_settings['tlsSettings'].update(alpn=['h3']),
+            lambda n: n.stream_settings['_vui'].update(server_name='bad.example.test'),
+            lambda n: n.stream_settings['_vui'].update(skip_cert_verify=True),
+            lambda n: n.stream_settings['_vui'].pop('client_fingerprint'),
+            lambda n: n.settings['users'][0].update(flow='xtls-rprx-vision'),
+            lambda n: n.settings['users'].append({'id': UUID}),
+        )
+        for edit in edits:
+            item = self.qualified()
+            edit(item)
+            with self.subTest(edit=edit), self.assertRaises(ExportError):
+                share_link(item, SNI)
 
 
 class XHTTPRejectionEvidenceTests(unittest.TestCase):

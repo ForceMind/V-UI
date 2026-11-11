@@ -392,7 +392,7 @@ def check_protocols(raw, context, source, producers):
          'PROTOCOL_PRODUCER_BYTES_DIFFER')
     suites = {name: dict(count=sum(classes.values()), ids_sha256=digest)
               for name, (classes, digest) in protocols.SUITES.items()}
-    need(len(suites) == 27 and sum(suite['count'] for suite in suites.values()) == 165
+    need(len(suites) == 28 and sum(suite['count'] for suite in suites.values()) == 172
          and canonical_equal(row['suites'], suites), 'PROTOCOL_SUITE_EVIDENCE_DIFFERS')
     pins = {'sing-box': fetch_test_cores.PINS[protocols.TARGET]['sing-box'], 'mihomo': fetch_mihomo.PIN}
     fields(row['clients'], pins, 'PROTOCOL_CLIENTS_INVALID')
