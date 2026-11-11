@@ -17,6 +17,7 @@
 <label class="check"><input type="checkbox" value="certificates">管理已有授权证书</label>
 <label class="check"><input type="checkbox" value="operate">启停服务与创建私有备份</label>
 <label class="check"><input type="checkbox" value="upgrade">下载校验并升级正式版本</label>
+<label class="check"><input type="checkbox" value="core_read">查看代理核心信息（选择及官方候选，不含更新或回退）</label>
 <label class="check"><input type="checkbox" value="destructive">允许删除节点、撤销订阅及受支持的备份恢复</label>
 </fieldset><label for="maintenance-duration">授权有效期</label><select id="maintenance-duration"><option value="1800">30 分钟</option><option value="3600">1 小时</option><option value="7200">2 小时</option><option value="15552000">180 天</option></select>
 <p class="hint">180天属于长期授权：持有兑换后会话凭据者可按所选权限持续操作，管理员可随时撤销。默认仍为30分钟，不自动续期或延长已有授权。</p>
@@ -26,6 +27,21 @@
 <h2>已有授权</h2><button id="maintenance-refresh-grants" type="button">刷新授权</button><div id="maintenance-grants" aria-live="polite"></div></section>
 <section id="maintenance-remote" hidden><h2>临时维护会话</h2><p id="maintenance-session"></p><p>维护者可通过授权 API 管理节点、分享与中转；权限以本次选择为准，不获得管理员密码或任意系统命令权限。</p><button id="maintenance-end" type="button">清除本页维护会话</button><p class="hint">清除仅结束本页使用，立即撤销整个授权请让管理员在授权列表操作。</p></section>
 <section id="maintenance-operations" data-simple-operations="delegated" class="ops-inline" hidden></section>
+<section id="maintenance-core-panel" hidden><h2>代理核心选择</h2><p id="maintenance-core-authority" aria-live="polite"></p><p>这里显示已配置的核心选择，不代表进程正在运行。使用核心维护链接后，可在下方检查并执行更新、回退或恢复。</p><button id="maintenance-core-refresh" type="button">查看代理核心选择</button><div id="maintenance-core-selection" aria-live="polite"></div><details id="maintenance-core-advanced"><summary>高级：查看未验证官方信息</summary><p>官方候选信息尚未证明本机兼容或完成准备；查询不会改变核心选择。</p><div class="actions"><button id="maintenance-core-hints-sing-box" type="button">查看 sing-box 官方候选</button><button id="maintenance-core-hints-xray" type="button">查看 Xray 官方候选</button></div><div id="maintenance-core-hints" aria-live="polite"></div></details></section>
+<section id="maintenance-core-work" hidden><h2>核心更新与恢复</h2>
+<p>点击检查，读取当前实际应用对应的官方候选。更新会先校验和备份，再短暂停止服务；失败时保留恢复记录。</p>
+<p id="maintenance-core-access">执行更新或恢复，请使用服务器终端创建的“核心维护授权”链接；普通管理员登录和旧维护授权不包含这些权限。</p>
+<div class="actions"><button id="maintenance-core-check" type="button">检查可用更新</button><button id="maintenance-core-task-refresh" type="button">刷新核心任务与进度</button></div>
+<div id="maintenance-core-available" aria-live="polite"></div>
+<div class="actions"><label for="maintenance-core-candidate-sing-box">sing-box 可用版本</label><select id="maintenance-core-candidate-sing-box"><option value="">先检查可用更新</option></select><button id="maintenance-core-update-sing-box" type="button" disabled>更新 sing-box</button><button id="maintenance-core-rollback-sing-box" type="button" disabled>回到 sing-box 上一版本</button></div>
+<div class="actions"><label for="maintenance-core-candidate-xray">Xray 可用版本</label><select id="maintenance-core-candidate-xray"><option value="">先检查可用更新</option></select><button id="maintenance-core-update-xray" type="button" disabled>更新 Xray</button><button id="maintenance-core-rollback-xray" type="button" disabled>回到 Xray 上一版本</button></div>
+<p id="maintenance-core-pending" aria-live="polite"></p><button id="maintenance-core-recover" type="button" disabled>恢复当前未完成的操作</button>
+<h3>核心与数据备份</h3><p>此备份同时保留核心选择与业务数据。恢复会撤销旧登录、维护与订阅授权，需要重新登录和授权。</p>
+<button id="maintenance-core-backup" type="button" disabled>创建核心与数据备份</button>
+<label for="maintenance-core-backup-choice">选择已成功完成的核心与数据备份</label><select id="maintenance-core-backup-choice"><option value="">先检查或刷新核心任务</option></select><button id="maintenance-core-restore" type="button" disabled>恢复所选核心与数据备份</button>
+<p id="maintenance-core-progress" role="status" aria-live="polite"></p><div id="maintenance-core-task-list" aria-live="polite"></div>
+<button id="maintenance-core-retry" type="button" hidden>重新确认登记原操作</button>
+</section>
 <section id="maintenance-tasks-panel" hidden><h2>服务器维护任务</h2><p>任务由独立系统维护组件执行。升级会先备份、沿用原配置与数据；重启期间面板可能短暂不可达，会自动读取任务进度；等待期间请勿重复提交。</p>
 <p id="maintenance-installation">安装版本与服务状态尚未核对。</p><button id="maintenance-refresh-status" type="button">读取安装版本与服务状态</button>
 <div id="maintenance-actions" class="actions"><button type="button" data-task="status">读取服务状态</button><button type="button" data-task="backup">创建私有备份</button><button type="button" data-task="restart">重启 V-UI</button><button type="button" data-task="start">启动 V-UI</button><button type="button" data-task="stop">停止 V-UI</button><button type="button" data-task="upgrade">在线升级正式版</button></div>

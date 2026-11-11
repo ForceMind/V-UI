@@ -11,9 +11,22 @@ on:
         required: true
         type: string
       confirm:
-        description: Enter RELEASE <version> <40-character commit>
+        description: Enter RELEASE <version> <commit> or RELEASE CORE <component tag> <commit>
         required: true
         type: string
+      component:
+        description: Promote an application or a separately accepted core component
+        type: choice
+        required: true
+        default: application
+        options:
+          - application
+          - sing-box
+          - xray
+      candidate_run:
+        description: Exact same-source component workflow run ID (components only)
+        type: string
+        required: false
       publish:
         description: Publish after verified uploads (false leaves a draft)
         required: true
@@ -107,6 +120,8 @@ jobs:
           VERSION: ${{ inputs.version }}
           CONFIRM: ${{ inputs.confirm }}
           PUBLISH: ${{ inputs.publish }}
+          COMPONENT: ${{ inputs.component }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
           MAINTENANCE_SHARE_NO_BROWSER: ${{ inputs.maintenance_share_no_browser }}
           PARALLEL_ACCEPTANCE_NO_BROWSER: ${{ inputs.parallel_acceptance_no_browser }}
           SIMPLE_OPERATIONS_NO_BROWSER: ${{ inputs.simple_operations_no_browser }}
@@ -122,6 +137,21 @@ jobs:
           INSTALLER_ONLY_NO_BROWSER: ${{ inputs.installer_only_no_browser }}
         run: |
           set -euo pipefail
+          case "$COMPONENT" in
+            sing-box|xray)
+              [[ "$PUBLISH" == 'true' && -n "$CANDIDATE_RUN" ]]
+              for option in INSTALLER_ONLY_NO_BROWSER CA_TRUST_NO_BROWSER INSTALL_INTERACTION_NO_BROWSER \
+                MAINTENANCE_SHARE_NO_BROWSER PARALLEL_ACCEPTANCE_NO_BROWSER SIMPLE_OPERATIONS_NO_BROWSER \
+                NETLINK_SERVICE_NO_BROWSER MAINTENANCE_180_NO_BROWSER SIMPLE_NODE_NO_BROWSER \
+                REMOTE_MAINTENANCE_NO_BROWSER TLS_CERTIFICATE_NO_BROWSER UI_REDESIGN_NO_BROWSER STARTUP_NO_BROWSER; do
+                [[ "${!option}" == 'false' ]]
+              done
+              exec python3 -m scripts.publish_core_component --core "$COMPONENT" --commit "$COMMIT" \
+                --version "$VERSION" --candidate-run "$CANDIDATE_RUN" --confirm "$CONFIRM" --publish
+              ;;
+            application) [[ -z "$CANDIDATE_RUN" ]] ;;
+            *) exit 2 ;;
+          esac
           args=(--commit "$COMMIT" --version "$VERSION" --confirm "$CONFIRM")
           if [[ "$PUBLISH" == 'true' ]]; then args+=(--publish); fi
           if [[ "$INSTALLER_ONLY_NO_BROWSER" == 'true' ]]; then args+=(--installer-only-no-browser); fi
@@ -137,4 +167,4 @@ jobs:
           if [[ "$TLS_CERTIFICATE_NO_BROWSER" == 'true' ]]; then args+=(--tls-certificate-no-browser); fi
           if [[ "$UI_REDESIGN_NO_BROWSER" == 'true' ]]; then args+=(--ui-redesign-no-browser); fi
           if [[ "$STARTUP_NO_BROWSER" == 'true' ]]; then args+=(--startup-no-browser); fi
-          python3 scripts/publish_release.py "${args[@]}"
+          python3 -m scripts.publish_release "${args[@]}"

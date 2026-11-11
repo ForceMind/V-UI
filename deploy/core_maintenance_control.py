@@ -137,11 +137,32 @@ class _Switch:
         self.broker_closed = True
         self.broker = None
         self.trust_sha256 = None
+        self.admission_guard = None
+        self.local_restore_epoch_reduced=False
+        self.backup_authority=None
 
     def _time(self):
+        if self.admission_guard is not None:self.admission_guard.live()
         remaining = self.deadline - time.monotonic()
         _need(remaining > 0 and not self.cancelled, 'CORE_TASK_CANCELLED')
         return remaining
+
+    def _phase(self,name):
+        if self.admission_guard is not None:self.admission_guard.progress(name)
+
+    def _mutation(self, *, journal=None, extra=None):
+        if self.admission_guard is None:
+            if not self.local_restore_epoch_reduced and ((extra or {}).get('purpose')=='restore' or
+                    type(journal) is dict and journal.get('operation')=='restore'):
+                self.ops.revoke_core_epoch();self.local_restore_epoch_reduced=True
+            return  # Explicit local Root operation; no remote admission.
+        self._time()
+        summary={'application':getattr(self,'application',None),'data_generation':getattr(self,'generation',None),
+                 'config_sha256':self.m._digest(self.m._raw(self.config)),
+                 'before':self.m._selection_map(self.before) if getattr(self,'before',None) is not None else None,
+                 'after':self.m._selection_map(self.after) if getattr(self,'after',None) is not None else None,
+                 'journal':journal,'extra':extra}
+        self.admission_guard.enter(summary,journal=journal)
 
     def _proof(self):
         self._time()
@@ -173,6 +194,10 @@ class _Switch:
             and type(app['release_id']) is str and self.ops.RELEASE.fullmatch(app['release_id'])
             and all(self.a._hex(app[name]) for name in ('current_sha256', 'manifest_sha256', 'ready_sha256')),
             'CORE_APPLICATION_CONTEXT')
+        origin = self.ops.application_origin(app['release_id'],app['target'])
+        _need(type(origin) is dict and set(origin) == {'release_id','target','app_source','manifest_sha256','archive_sha256'}
+              and all(origin[name] == app[name] for name in ('release_id','target','app_source','manifest_sha256'))
+              and self.a._hex(origin['archive_sha256']), 'CORE_APPLICATION_ORIGIN')
         self.source = dict(app_source=app['app_source'], target=app['target'])
         self.application = app
         self.generation = facts['data_generation']
@@ -435,6 +460,16 @@ class _Switch:
             self._tls(self._identity(), login=True)
         self._time()
         _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+        pending=None
+        if self.admission_guard is not None:
+            pending=dict(kind='core-backup-recovery-v1',transaction=self.admission_guard.intent['id'],
+                sequence=1,installation_id=self.admission_guard.intent['installation_id'],
+                before=self.m._selection_map(self.before),context=dict(facts=facts,
+                    config_sha256=self.m._digest(self.m._raw(self.config)),services=self.initial,
+                    trust_sha256=self.trust_sha256))
+        self._mutation(journal=pending,extra={'purpose':'backup','intents':facts['intents']})
+        writers_released = False
+        clearing=False
         try:
             self.services.stop_all()
             self.services.prove_stopped()
@@ -443,6 +478,7 @@ class _Switch:
             name, digest = self._write_backup(dict(selection=self.before, intents=self.final,
                                                    panel_was_running=running))
             self.worker.command('release_backup_writers', 'backup_writers_released')
+            writers_released = True
             self._proof()
             _need(self.files.read_stable(**self.source) == self.before, 'CORE_SELECTION_CONTEXT')
             self.services.prove_stopped()
@@ -452,10 +488,86 @@ class _Switch:
                 self._tls(self._await_identity(), login=True)
             self._proof()
             self.worker.finish()
+            if pending is not None:
+                clearing=True
+                self.admission_guard.authority.finish_backup_recovery(pending)
             return dict(outcome='backup_created', backup_name=name, backup_sha256=digest,
                         panel_running=running)
         except BaseException:
+            if clearing:raise
             self.services.stop_all(emergency=True)
+            # Backup never replaces data or the selection. A rejected archive
+            # must not strand an otherwise healthy installation stopped. Only
+            # resume after the same worker acknowledges releasing its writers,
+            # the installation proof and original selection still match, and
+            # the original service topology passes its normal TLS checks.
+            if not writers_released:
+                try:
+                    self.worker.command('release_backup_writers', 'backup_writers_released')
+                    self._proof()
+                    _need(self.files.read_stable(**self.source) == self.before, 'CORE_SELECTION_CONTEXT')
+                    self.services.prove_stopped()
+                    self.services.restore(self.initial)
+                    if running:
+                        self._tls(self._await_identity(), login=True)
+                    self._proof()
+                    self.worker.finish()
+                    if pending is not None:
+                        clearing=True
+                        self.admission_guard.authority.finish_backup_recovery(pending)
+                except BaseException:
+                    if not clearing:self.services.stop_all(emergency=True)
+            raise
+
+    def run_backup_recovery(self, journal):
+        # Remote callers retain their admitted guard; the explicit local Root
+        # recovery entry supplies only the receipt-bound authority read under
+        # the same installation lock. No request-supplied context is accepted.
+        authority=self.admission_guard.authority if self.admission_guard is not None else self.backup_authority
+        _need(authority is not None,'CORE_BACKUP_RECOVERY_CONTEXT')
+        context=journal['context']
+        _need(self.m._digest(self.m._raw(self.config))==context['config_sha256'], 'CORE_RECOVERY_CONFIG_CHANGED')
+        facts=self.worker.exchange(dict(protocol=1,action='core_backup_recover',
+            expected_selection_revision=journal['before']['revision']), 'core_context',
+            ('application','data_generation','selection','selection_initialized','bundles','intents','runtime_schemas'))
+        self._accept_context(facts,'sing-box',journal['before']['revision'])
+        original=context['facts']
+        _need(self.initialized and all(facts[name]==original[name] for name in
+            ('application','data_generation','selection','selection_initialized','bundles')), 'CORE_BACKUP_RECOVERY_CONTEXT')
+        # Runtime preferences can have changed in operations admitted before the
+        # interrupted stop. Re-observe them under the actual writer lease; never
+        # restore the earlier enabled flags or revision from this Root record.
+        self.initial=context['services']
+        self.trust_sha256=context['trust_sha256']
+        self._time()
+        _need(self.installation_proof() is None,'INSTALLATION_PROOF')
+        _need(authority.backup_recovery()==journal,'CORE_PENDING_CONFLICT')
+        self._mutation(journal=journal,extra={'purpose':'backup_recovery'})
+        clearing=False
+        try:
+            self.services.stop_all()
+            self.services.prove_stopped()
+            response=self.worker.command('proceed','core_quiesced',('final_intents',))
+            self.final=self._intents(response['final_intents'],self.before)
+            self.worker.command('release_backup_writers','backup_writers_released')
+            self._proof()
+            _need(self.files.read_stable(**self.source)==self.before,'CORE_SELECTION_CONTEXT')
+            _need(authority.backup_recovery()==journal,'CORE_PENDING_CONFLICT')
+            self.services.prove_stopped()
+            self.services.restore(self.initial)
+            if self.initial['v-ui.service']=='active':
+                self._tls(self._await_identity(),login=True)
+            self._proof()
+            self.worker.finish()
+            # No service action follows this terminal durable cleanup. If its
+            # directory fsync is unknown, report failure but preserve the already
+            # verified original topology; do not stop it after removing pending.
+            clearing=True
+            authority.finish_backup_recovery(journal)
+            return dict(outcome='backup_recovered',selection_revision=self.before.revision,
+                        panel_running=self.initial['v-ui.service']=='active')
+        except BaseException:
+            if not clearing:self.services.stop_all(emergency=True)
             raise
 
     def run_restore(self, archive_name, archive_sha256, expected_revision):
@@ -481,6 +593,8 @@ class _Switch:
             trust = incoming_trust = None
         self._time()
         _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+        self._mutation(extra={'purpose':'restore','archive_name':archive_name,'archive_sha256':archive_sha256,
+                              'incoming':self.m._selection_map(incoming),'prepared':prepared})
         self.transaction = self.files.begin_restore(incoming, expected_revision=expected_revision,
             service_snapshot=dict(panel_running=self.initial['v-ui.service'] == 'active', cores=facts['intents']),
             source_backup_sha256=archive_sha256, restored_intents=incoming_intents,
@@ -544,6 +658,7 @@ class _Switch:
               and self.m._digest(self.m._raw(self.config)) == context['config_sha256'],
               'CORE_RESTORE_CONTEXT')
         self.transaction = journal['transaction']
+        self._mutation(journal=journal)
         self.services.stop_all(emergency=True)
         self.services.prove_stopped()
         self._time()
@@ -675,6 +790,7 @@ class _Switch:
         intents = self._intents(journal['rollback']['intents'] if original else target['intents'], state)
         self._time()
         _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+        self._mutation(journal=journal)
         try:
             self.services.stop_all(emergency=True)
             self.services.prove_stopped()
@@ -691,6 +807,7 @@ class _Switch:
             raise
 
     def _activate_restore_trial(self, receipt, observe=None):
+        self._phase('verifying')
         """Start a private restore trial after the worker exchanged the data."""
         self._proof()
         journal = self._restore_trial_journal()
@@ -724,6 +841,7 @@ class _Switch:
 
     def _activate(self, state, intents, *, recovery, cleanup=False, restore_observe=None,
                   restore_original_sha256=None):
+        self._phase('recovering' if recovery else 'verifying')
         self.services.prove_stopped()
         self._proof()
         broker = None
@@ -783,6 +901,7 @@ class _Switch:
             self._close_broker()
 
     def _restore_before(self):
+        self._phase('recovering')
         self.files.mark_failed(self.transaction, **self.source)
         self.worker.command('reacquire_writers', 'writers_reacquired')
         restored = self.worker.command('restore_core_ids', 'core_ids_restored', ('selection', 'intents'))
@@ -833,6 +952,7 @@ class _Switch:
               and ready['data_generation'] == self.generation, 'CORE_RECOVERY_CONTEXT')
         self._time()
         _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+        self._mutation(journal=journal)
         self.stop_attempted = True
         try:
             self.services.stop_all()
@@ -883,6 +1003,7 @@ class _Switch:
                 self._tls(self._identity(), login=True)
             self._time()
             _need(self.installation_proof() is None, 'INSTALLATION_PROOF')
+            self._mutation(extra={'purpose':action,'core':core,'candidate':candidate,'prepared':prepared,'intents':pre})
             self.transaction = self.files.begin(plan, expected_revision=self.before.revision,
                 service_snapshot=dict(panel_running=self.initial['v-ui.service'] == 'active', cores=pre),
                 initial_schemas=None if self.initialized else self.initial_schemas,
@@ -942,7 +1063,7 @@ def recover(ops, *, cancelled=None, _receipt_sha256=None):
     """Explicit Root-only recovery of the retained transaction."""
     _need(os.geteuid() == 0, 'ROOT_REQUIRED')
     _need(os.getpid() == os.getpgrp() == os.getsid(0), 'CORE_TASK_ISOLATION')
-    return _run_task(ops, cancelled, None, receipt_sha256=_receipt_sha256)
+    return _run_task(ops, cancelled, None, receipt_sha256=_receipt_sha256,local_recovery=True)
 
 
 def restore_backup(ops, *, archive_name, archive_sha256, expected_revision, cancelled=None, _receipt_sha256=None):
@@ -971,6 +1092,8 @@ def inspect_core_selection(ops, *, _receipt_sha256):
               'CORE_CONTROL_CHANGED')
         manager, _ = ops.verify_installation()
         _need(manager == 'systemd', 'CORE_SYSTEMD_REQUIRED')
+        if ops._load_core_authority(_receipt_sha256).CoreAuthority().backup_recovery() is not None:
+            return {'outcome':'core_pending'}
         with _modules(ops) as modules:
             return modules.selection_files.SelectionFiles().read_status()
 
@@ -983,8 +1106,138 @@ def backup_components(ops, *, expected_revision, cancelled=None, _receipt_sha256
     return _run_task(ops, cancelled, (expected_revision,), backup=True, receipt_sha256=_receipt_sha256)
 
 
-def _run_task(ops, cancelled, request, *, restore=False, restore_recovery=False, backup=False,
-              receipt_sha256=None):
+def observe(ops):
+    """Isolated Root read task; no selector bootstrap or service mutation."""
+    _need(os.geteuid()==0,'ROOT_REQUIRED')
+    deadline=time.monotonic()+ops.TIMEOUT
+    with ops.installation_lock(_readonly=True):
+        manager,account=ops.verify_installation();_need(manager=='systemd','CORE_SYSTEMD_REQUIRED')
+        config=ops.decode_json(ops.trusted_bytes(ops.CONFIG,ops.MAX_JSON))
+        with _modules(ops) as modules:
+            files=modules.selection_files.SelectionFiles()
+            expected=hashlib.sha256(ops.trusted_bytes(ops.RECEIPT,ops.MAX_JSON)).hexdigest()
+            pending=ops._load_core_authority(expected).CoreAuthority().backup_recovery()
+            if pending is not None:
+                revision=pending['before']['revision']
+                return dict(outcome='observed',app_source=None,target=config['target'],selection_revision=revision,
+                    generation=0,cores={name:dict(current='待恢复',previous=None,candidates=[]) for name in ('sing-box','xray')},
+                    pending=dict(recovery_kind='backup',transaction=pending['transaction'],sequence=pending['sequence'],selection_revision=revision),backups=[])
+            status=files.read_status(_context=True)
+            if status['outcome']=='core_pending':
+                try:journal=files.read_switch_recovery();kind='switch'
+                except modules.selection_files.CoreSelectionFilesError as error:
+                    if str(error)!='RECOVERY_OPERATION':raise
+                    journal=files.read_restore_recovery();kind='restore'
+                before=journal.get('before');revision=before.get('revision') if type(before) is dict else None
+                return dict(outcome='observed',app_source=None,target=config['target'],selection_revision=revision,
+                    generation=0,cores={name:dict(current='待恢复',previous=None,candidates=[]) for name in ('sing-box','xray')},
+                    pending=dict(recovery_kind=kind,transaction=journal['transaction'],sequence=journal['sequence'],selection_revision=revision),backups=[])
+            worker=_start_worker(ops,account,deadline,[])
+            try:
+                task=_Switch(ops,modules,None,account,worker,None,config,deadline=deadline,cancelled=[])
+                task._context('sing-box',status.get('selection_revision'))
+                cores={name:dict(current=task.before.slot(name).current.version,
+                    previous=task.before.slot(name).previous.version if task.before.slot(name).previous else None,candidates=[]) for name in task.s.CORES}
+                worker.finish()
+            finally:worker.close()
+            result=dict(outcome='observed',app_source=task.source['app_source'],target=task.source['target'],
+                selection_revision=task.before.revision if task.initialized else None,generation=task.before.generation,
+                cores=cores,pending=None,backups=[])
+            error=_observe_candidates(modules,cores,task.source['app_source'],task.source['target'],deadline)
+            if error:result['candidate_error']=error
+            return result
+
+
+def _observe_candidates(modules,cores,app_source,target,deadline):
+    client=modules.github.GitHubCoreClient()
+    try:
+        for name in ('sing-box','xray'):
+            found=client.discover(name,deadline=deadline)
+            for hint in found.hints[:4]:
+                if time.monotonic()>=deadline:return '官方候选检查已超时，请重新检查'
+                try:
+                    candidate=client.inspect(hint.release_id,app_source=app_source,deadline=deadline)
+                    if candidate.authority.tag!=hint.tag:return '官方候选信息发生变化，请重新检查'
+                    core,version,_=modules.artifacts._tag(candidate.authority.tag)
+                    if core!=name:continue
+                    if not any(pack.target==target for pack in candidate.verified_release.packs):continue
+                    cores[name]['candidates'].append(dict(release_id=candidate.authority.release_id,version=version))
+                except modules.github.CoreGitHubError as error:
+                    if error.code=='COMPONENT_REJECTED':continue
+                    return '官方候选信息暂不可用，请稍后重新检查'
+    except modules.github.CoreGitHubError:
+        return '官方候选信息暂不可用，请稍后重新检查'
+    return None
+
+
+class _AdmissionGuard:
+    def __init__(self,authority,intent,progress=None):
+        self.authority,self.intent=authority,intent
+        self.progress=progress or (lambda phase:None)
+        self.consumed=False
+    def live(self):
+        if self.consumed:return
+        actual=self.authority.admission(task_id=self.intent['id'])
+        _need(actual==self.intent,'CORE_ADMISSION_CHANGED')
+    def enter(self,summary,*,journal=None):
+        if self.consumed:return  # Safety closure of this same admitted plan.
+        self.live()
+        parameters=self.intent['parameters']
+        if self.intent['action']=='recover':
+            _need(type(journal) is dict and journal.get('transaction')==parameters['pending_transaction']
+                  and journal.get('sequence')==parameters['pending_sequence'],'CORE_PENDING_CONFLICT')
+            before=journal.get('before')
+            revision=before.get('revision') if type(before) is dict else None
+            _need(revision==parameters['selection_revision'],'CORE_SELECTION_CONTEXT')
+        digest=hashlib.sha256(json.dumps({'intent':self.intent,'plan':summary},sort_keys=True,
+            separators=(',',':'),ensure_ascii=True,allow_nan=False).encode()).hexdigest()
+        extra={}
+        if self.intent['action']=='backup':
+            _need(type(journal) is dict,'CORE_BACKUP_RECOVERY_CONTEXT')
+            extra['backup_recovery']=journal
+        self.authority.enter_mutation(task_id=self.intent['id'],plan_sha256=digest,**extra)
+        self.consumed=True
+        self.progress('changing')
+        if self.intent['action']=='restore' or (self.intent['action']=='recover' and parameters['recovery_kind']=='restore'):
+            self.authority.advance_epoch()
+
+
+def run_admission(ops,task_id,*,backup_record=None,cancelled=None,_progress=None):
+    """Root task child entry. Parameters come exclusively from Root ledger.
+    backup_record is resolved by its Root private successful-task mapping.
+    """
+    _need(os.geteuid()==0 and type(task_id) is str and re.fullmatch(r'[a-f0-9]{32}',task_id),'CORE_ADMISSION')
+    expected=hashlib.sha256(ops.trusted_bytes(ops.RECEIPT,ops.MAX_JSON)).hexdigest()
+    authority=ops._load_core_authority(expected).CoreAuthority()
+    intent=authority.admission(task_id=task_id)
+    guard=_AdmissionGuard(authority,intent,_progress)
+    action,parameters=intent['action'],intent['parameters']
+    request=None;flags={}
+    if action in ('update','rollback'):
+        request=(parameters['core'],action,parameters['selection_revision'],parameters.get('release_id'))
+    elif action=='backup':
+        request=(parameters['selection_revision'],);flags['backup']=True
+    elif action=='restore':
+        _need(type(backup_record) is dict and set(backup_record)=={'task_id','name','sha256','installation_id'}
+              and backup_record['task_id']==parameters['backup_task_id']
+              and backup_record['installation_id']==intent['installation_id']
+              and type(backup_record['name']) is str and re.fullmatch(r'core-maintenance-[a-f0-9]{32}\.zip',backup_record['name'])
+              and ops.HEX.fullmatch(backup_record['sha256']),'CORE_BACKUP_MAPPING')
+        request=(backup_record['name'],backup_record['sha256'],parameters['selection_revision']);flags['restore']=True
+    elif action=='recover':
+        if parameters['recovery_kind']=='restore':flags['restore_recovery']=True
+        elif parameters['recovery_kind']=='backup':flags['backup_recovery']=True
+    else:raise CoreControlError('CORE_ADMISSION_ACTION')
+    return _run_task(ops,cancelled,request,receipt_sha256=expected,admission_guard=guard,**flags)
+
+
+def _run_task(ops, cancelled, request, *, restore=False, restore_recovery=False, backup=False, backup_recovery=False,
+              receipt_sha256=None, admission_guard=None,local_recovery=False):
+    if local_recovery:
+        _need(os.geteuid()==0,'ROOT_REQUIRED')
+        _need(os.getpid()==os.getpgrp()==os.getsid(0),'CORE_TASK_ISOLATION')
+        _need(admission_guard is None and request is None and not any((restore,restore_recovery,backup,backup_recovery)),
+              'CORE_LOCAL_RECOVERY_REQUEST')
     cancelled = [] if cancelled is None else cancelled
     deadline = time.monotonic() + ops.TIMEOUT
     with ops.installation_lock(_proof=True) as proof:
@@ -994,16 +1247,30 @@ def _run_task(ops, cancelled, request, *, restore=False, restore_recovery=False,
         manager, account = ops.verify_installation()
         _need(manager == 'systemd', 'CORE_SYSTEMD_REQUIRED')
         config = ops.decode_json(ops.trusted_bytes(ops.CONFIG, ops.MAX_JSON))
+        if admission_guard is not None:
+            backup_authority=admission_guard.authority
+        else:
+            expected=hashlib.sha256(ops.trusted_bytes(ops.RECEIPT,ops.MAX_JSON)).hexdigest()
+            backup_authority=ops._load_core_authority(expected).CoreAuthority()
+        backup_pending=backup_authority.backup_recovery()
+        if local_recovery and backup_pending is not None:backup_recovery=True
+        _need(backup_pending is None or backup_recovery,'CORE_BACKUP_RECOVERY_REQUIRED')
+        if backup_recovery:_need(backup_pending is not None and (admission_guard is not None or local_recovery),'CORE_BACKUP_RECOVERY_CONTEXT')
         services = ops.Services(manager, cancelled)
         services.deadline = deadline
         with _modules(ops) as modules:
             def new_task():
                 worker = _start_worker(ops, account, deadline, cancelled)
-                return _Switch(ops, modules, services, account, worker, proof, config,
-                               deadline=deadline, cancelled=cancelled)
+                task=_Switch(ops, modules, services, account, worker, proof, config,
+                             deadline=deadline, cancelled=cancelled)
+                task.admission_guard=admission_guard
+                if local_recovery:task.backup_authority=backup_authority
+                return task
 
             task = new_task()
             try:
+                if backup_recovery:
+                    return task.run_backup_recovery(backup_pending)
                 if backup:
                     return task.run_backup(*request)
                 if restore_recovery:

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Trusted local kit: sudo bash install.sh --bundle ... --sha256 ...
-# After the candidate is published: sudo bash install.sh --version v0.4.23 [installer arguments]
+# After the candidate is published: sudo bash install.sh --version v0.4.24 [installer arguments]
 set -euo pipefail
 umask 077
 
@@ -207,7 +207,7 @@ if [[ "$WITH_GLOBAL_CLI" -eq 1 ]]; then
   curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --location --retry 2 --connect-timeout 15 --max-time 300 \
     "$BASE/SHA256SUMS" -o "$WORK/SHA256SUMS"
   "$PYTHON" - "$WORK" "$BUNDLE" "$KIT_SHA" <<'PYKIT'
-import hashlib,pathlib,re,sys
+import ast,hashlib,pathlib,re,sys
 root=pathlib.Path(sys.argv[1]);bundle=sys.argv[2];trusted=sys.argv[3]
 with (root/'SHA256SUMS').open('rb') as source:raw=source.read(64001)
 if len(raw)>64000:raise SystemExit('Checksum list exceeds size limit')
@@ -241,7 +241,7 @@ else
   done
 fi
 "$PYTHON" - "$ASSET_DIR" "$BUNDLE" "$WORK" "$KIT_SHA" <<'PYVERIFY'
-import hashlib,pathlib,re,sys
+import ast,hashlib,pathlib,re,sys
 root=pathlib.Path(sys.argv[1]);bundle=sys.argv[2];work=pathlib.Path(sys.argv[3]);trusted=sys.argv[4];entries={}
 if not re.fullmatch(r'vui-linux-(?:x86_64|aarch64)-(?:gnu|musl)\.zip',bundle):
     raise SystemExit('Invalid target bundle name')
@@ -260,6 +260,16 @@ for name in names:
         for chunk in iter(lambda:source.read(1024*1024),b''):checksum.update(chunk)
     if checksum.hexdigest()!=entries.get(name):raise SystemExit('Release asset checksum mismatch: '+name)
 (work/'bundle.sha').write_text(entries[bundle])
+# Only verified SDK bytes can advertise this private producer protocol. Older
+# accepted SDKs retain their original argument contract and remain unanchored.
+with (root/'install_system.py').open('rb') as source:raw=source.read(512001)
+try:
+    markers=[node.value for node in ast.parse(raw).body if isinstance(node,ast.Assign)
+             and any(isinstance(target,ast.Name) and target.id=='ROOT_APPLICATION_ORIGIN' for target in node.targets)] if len(raw)<=512000 else []
+    supported=(len(markers)==1 and isinstance(markers[0],ast.Constant)
+               and type(markers[0].value) is int and markers[0].value==1)
+except (SyntaxError,ValueError,RecursionError):supported=False
+if supported:(work/'origin-supported').write_text('1')
 PYVERIFY
 if [[ "$WITH_GLOBAL_CLI" -eq 1 ]]; then
   [[ -x /usr/bin/python3 ]] || { echo 'Global v-ui requires a capable fixed /usr/bin/python3' >&2; exit 1; }
@@ -267,7 +277,11 @@ if [[ "$WITH_GLOBAL_CLI" -eq 1 ]]; then
 fi
 # A legacy online call retains its explicit-release trust model. The complete
 # managed flow additionally authenticates the entire kit against the caller pin.
-if PYTHONPATH="$ASSET_DIR" "$PYTHON" "$ASSET_DIR/install_system.py" --bundle "$ASSET_DIR/$BUNDLE" --sha256 "$(cat "$WORK/bundle.sha")" "$@"; then
+ORIGIN_ARGS=()
+if [[ "$WITH_GLOBAL_CLI" -eq 1 && -f "$WORK/origin-supported" ]]; then
+  ORIGIN_ARGS=(--control-kit "$ASSET_DIR" --control-kit-sha "$KIT_SHA")
+fi
+if PYTHONPATH="$ASSET_DIR" "$PYTHON" "$ASSET_DIR/install_system.py" --bundle "$ASSET_DIR/$BUNDLE" --sha256 "$(cat "$WORK/bundle.sha")" ${ORIGIN_ARGS[@]+"${ORIGIN_ARGS[@]}"} "$@"; then
   :
 else
   exit "$?"

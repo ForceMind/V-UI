@@ -48,20 +48,20 @@ class InstalledNetlinkFixtureTests(unittest.TestCase):
             and isinstance(node.func,ast.Attribute)and node.func.attr=='assertIn'and len(node.args)==2
             and isinstance(node.args[1],ast.Tuple)]
         self.assertEqual(len(gates),1)
-        self.assertEqual(ast.literal_eval(gates[0]),('0.4.20','0.4.21','0.4.22','0.4.23'))
+        self.assertEqual(ast.literal_eval(gates[0]),('0.4.20','0.4.21','0.4.22','0.4.23','0.4.24'))
 
     def test_real_installed_gate_requires_both_explicit_flag_and_actual_020(self):
         from scripts import system_maintenance_smoke as smoke
         for flag in ('', '0', '1'):
-            for version in ('0.4.14', '0.4.18', '0.4.19', '0.4.20', '0.4.21', '0.4.22', '0.4.23', '0.4.24'):
+            for version in ('0.4.14', '0.4.18', '0.4.19', '0.4.20', '0.4.21', '0.4.22', '0.4.23', '0.4.24', '0.4.25'):
                 with self.subTest(flag=flag,version=version),patch.dict(os.environ,{'VUI_NETLINK_SYSTEMD_TEST':flag}):
                     self.assertEqual(smoke.netlink_systemd_enabled(version+'-'+'a'*12),
-                                     flag=='1' and version in ('0.4.20','0.4.21','0.4.22','0.4.23'))
+                                     flag=='1' and version in ('0.4.20','0.4.21','0.4.22','0.4.23','0.4.24'))
 
     def test_019_and_020_keep_actual_180_day_cli_while_old_releases_keep_default(self):
         from scripts import system_maintenance_smoke as smoke
         for version,expected in (('0.4.14',False),('0.4.15',False),('0.4.16',False),
-                                 ('0.4.17',False),('0.4.18',False),('0.4.19',True),('0.4.20',True),('0.4.21',True),('0.4.22',True),('0.4.23',True),('0.4.24',False)):
+                                 ('0.4.17',False),('0.4.18',False),('0.4.19',True),('0.4.20',True),('0.4.21',True),('0.4.22',True),('0.4.23',True),('0.4.24',True),('0.4.25',False)):
             with self.subTest(version=version):
                 self.assertIs(smoke.maintenance_long_duration(version+'-'+'a'*12),expected)
 
@@ -641,7 +641,8 @@ class ProtocolTests(unittest.TestCase):
                 (['1', '3', '60'], 'diagnose,nodes,share,relay,certificates,operate,upgrade,destructive', '3600'),
                 (['1', '2', '180天'], 'diagnose,nodes,share,relay,certificates,operate,upgrade', '15552000'),
                 (['1', '1', '180d'], 'diagnose', '15552000'),
-                (['1', '1', '259200'], 'diagnose', '15552000')):
+                (['1', '1', '259200'], 'diagnose', '15552000'),
+                (['1', '4', '30'], 'diagnose,core_read', '1800')):
             with self.subTest(answers=answers), patch.object(ops, 'read_input', side_effect=answers), patch.object(ops, 'verify_installation', return_value=('systemd', account)), patch.object(ops.subprocess, 'run') as run:
                 ops.terminal_grants()
                 self.assertEqual(run.call_args.args[0][-3:], ['create', scopes, seconds])
@@ -726,10 +727,19 @@ class UpgradeTests(unittest.TestCase):
                     with self.assertRaises(upgrade.UpgradeRefused):
                         upgrade.require_installer_guard(installer)
 
+    def test_origin_support_is_explicit_and_never_derived_from_comments_or_truthy_values(self):
+        with tempfile.TemporaryDirectory() as folder:
+            installer=Path(folder)/'installer.py'
+            for value in (b'# ROOT_APPLICATION_ORIGIN = 1',b'ROOT_APPLICATION_ORIGIN = True',
+                          b'ROOT_APPLICATION_ORIGIN = 1\nROOT_APPLICATION_ORIGIN = 1',b'broken('):
+                installer.write_bytes(value);self.assertFalse(upgrade.supports_application_origin(installer))
+            installer.write_bytes(b'ROOT_APPLICATION_ORIGIN = 1\n')
+            self.assertTrue(upgrade.supports_application_origin(installer))
+
     def test_full_download_chain_uses_manifest_before_verifier_and_fixed_unattended_flags(self):
         config = self.config(); config['release_id'] = '0.4.16-aaaaaaaaaaaa'
         contents = {name: b'accepted fake bytes' for name in upgrade.ASSETS | upgrade.BUNDLES}
-        contents['install_system.py'] = b'CORE_INSTALL_GUARD = 1\n'
+        contents['install_system.py'] = b'CORE_INSTALL_GUARD = 1\nROOT_APPLICATION_ORIGIN = 1\n'
         contents['RELEASE.json'] = json.dumps({'version': '0.4.17', 'release_id': '0.4.17-' + 'a' * 12, 'source_commit': 'a' * 40}).encode()
         raw = ''.join(hashlib.sha256(data).hexdigest() + '  ' + name + '\n' for name, data in sorted(contents.items())).encode()
         pin = hashlib.sha256(raw).hexdigest()
@@ -751,6 +761,9 @@ class UpgradeTests(unittest.TestCase):
         commands = [call.args[0] for call in run.call_args_list]
         self.assertEqual(len(commands), 3)
         self.assertIn('--preflight', commands[0]); self.assertIn('--unattended-upgrade', commands[1]); self.assertIn('--refresh', commands[2])
+        self.assertIn('--control-kit',commands[1]);self.assertIn('--control-kit-sha',commands[1])
+        self.assertIn('--control-kit-local-target-only',commands[1])
+        self.assertEqual(commands[1][commands[1].index('--control-kit-sha')+1],pin)
         for command in commands:
             self.assertNotIn('--interactive', command); self.assertNotIn('--accept-terms', command)
 

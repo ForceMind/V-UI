@@ -64,6 +64,22 @@ class SimpleOperationStateTests(ExportFixture, unittest.TestCase):
         with self.assertRaises(LocalConnectionError):
             exporter.connection(self.rev)
 
+    def test_local_delivery_requires_running_candidate_identity(self):
+        exporter = LocalConnectionExporter(self.manager)
+        _, evidence = self.select_candidate_fixture()
+        self.assertEqual(exporter.connection(self.rev).delivery()['password'], FAKE_PASSWORD)
+        self.manager.runtime_artifact.assert_called_once_with('sing-box')
+        for running in (None, {**evidence, 'artifact_id': 'd'*64},
+                        {**evidence, 'binary_sha256': 'd'*64}):
+            with self.subTest(running=running):
+                self.runtime.execution_identity.return_value = {'selected': evidence, 'running': running}
+                with self.assertRaisesRegex(LocalConnectionError, '^LOCAL_PROXY_STATE_MISMATCH$'):
+                    exporter.connection(self.rev)
+        self.runtime.execution_identity.return_value = {'selected': evidence, 'running': evidence}
+        self.runtime.status.return_value['version_required'] = '1.14.2'
+        with self.assertRaisesRegex(LocalConnectionError, '^LOCAL_PROXY_STATE_MISMATCH$'):
+            exporter.connection(self.rev)
+
     def test_local_delivery_blocks_uncommitted_tampered_and_pending_runtime(self):
         exporter = LocalConnectionExporter(self.manager)
         config = self.runtime.saved[self.runtime.record['revision']]

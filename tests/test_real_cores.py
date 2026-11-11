@@ -14,6 +14,7 @@ from unittest.mock import patch
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
+from tests.core_candidate_context import runtime_for_fixture
 from app.api import inbounds as inbound_api
 from app.certificates.models import CertificateBinding
 from app.models import database
@@ -86,7 +87,7 @@ class PinnedCoreTests(unittest.TestCase):
                     item = SimpleNamespace(enable=True, protocol='vless', port=18443, tag='test',
                                            settings=settings, stream_settings={})
                     config = adapter.build_config([item])
-                    runtime = CoreRuntime(name, Path(os.environ['VUI_TEST_CORES']) / name, Path(tmp) / name)
+                    runtime = runtime_for_fixture(CoreRuntime, name, Path(os.environ['VUI_TEST_CORES']) / name, Path(tmp) / name)
                     self.addCleanup(runtime.close)
                     self.assertFalse(runtime.apply(config, activate=False)['applied'])
                     path = Path(tmp) / 'bad.json'
@@ -116,7 +117,7 @@ class XrayManagedTLSRealTests(unittest.TestCase):
             port = available.getsockname()[1]
         root = Path(self.temp.name)
         adapter = XrayAdapter()
-        runtime = DiagnosticXrayRuntime('xray', Path(os.environ['VUI_TEST_CORES']) / 'xray', root / 'xray-runtime')
+        runtime = runtime_for_fixture(DiagnosticXrayRuntime, 'xray', Path(os.environ['VUI_TEST_CORES']) / 'xray', root / 'xray-runtime')
         self.addCleanup(runtime.close)
         adapter._runtime = runtime
 

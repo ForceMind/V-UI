@@ -420,7 +420,7 @@ def _complete_restore_observer(channel, root, release_tools, journal):
             channel.send('operation_held')
 
 
-def _complete_core_backup(channel, session):
+def _complete_core_backup(channel, session, *, recovery=False):
     with _quiet_candidate_io():
         context = session.prepare()
     channel.send('core_context', **context)
@@ -432,12 +432,16 @@ def _complete_core_backup(channel, session):
     with _quiet_candidate_io():
         quiesced = session.execute()
     channel.send('core_quiesced', **quiesced)
-    value = _core_fields(channel, 'backup_core', ('snapshot',))
-    with _quiet_candidate_io():
-        backup = session.backup_core(value['snapshot'])
-    channel.send('core_backed_up', **backup)
-    channel.expect('release_backup_writers')
-    session.release_backup_writers()
+    if recovery:
+        channel.expect('release_backup_writers')
+        session.release_backup_recovery_writers()
+    else:
+        value = _core_fields(channel, 'backup_core', ('snapshot',))
+        with _quiet_candidate_io():
+            backup = session.backup_core(value['snapshot'])
+        channel.send('core_backed_up', **backup)
+        channel.expect('release_backup_writers')
+        session.release_backup_writers()
     channel.send('backup_writers_released')
     while True:
         value = channel.read()
@@ -646,13 +650,13 @@ def _run(root, release_tools, input_fd, output, *, timeout=TIMEOUT):
                 implementation = _load_core_session(release_tools, restore=True)
                 session = implementation(root, **{key: request[key] for key in fields})
                 _complete_restore_preparation(channel, session)
-            elif request.get('action') == 'core_backup':
+            elif request.get('action') in ('core_backup','core_backup_recover'):
                 if (set(request) != {'protocol', 'action', 'expected_selection_revision'}
                         or type(request['protocol']) is not int or request['protocol'] != 1):
                     raise WorkerError('Invalid private core backup request')
                 implementation = _load_core_session(release_tools, backup=True)
                 session = implementation(root, expected_selection_revision=request['expected_selection_revision'])
-                _complete_core_backup(channel, session)
+                _complete_core_backup(channel, session, recovery=request['action']=='core_backup_recover')
             else:
                 action, arguments = _request(request)
                 if action in ('start', 'restart'):

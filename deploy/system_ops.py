@@ -23,6 +23,9 @@ import stat
 import subprocess
 import sys
 import termios
+import tempfile
+import uuid
+import zipfile
 import time
 
 CONFIG = Path('/etc/v-ui/service.json')
@@ -207,7 +210,7 @@ def fixed_files(manager):
                 'core_github.py', 'core_catalog.py', 'core_resolver.py', 'core_application.py',
                 'core_selection_files.py', 'core_boot.py', 'core_backup.py', 'core_backup_archive.py',
                 'core_maintenance.py', 'core_maintenance_recovery.py', 'core_boot_broker.py',
-                'core_maintenance_control.py')),
+                'core_maintenance_control.py', 'core_authority.py')),
             *(CONTROL / name for name in ('certificate_errors.py', 'dns_store.py', 'cloudflare.py',
                                           'dns_journal.py', 'dns_backup.py')),
             *(CONTROL / name for name in ('maintenance_daemon.py', 'maintenance_upgrade.py',
@@ -948,6 +951,7 @@ def operate(request, services, account, cancelled, worker_factory=None):
             raise Refused('worker preparation failed')
         if cancelled:
             raise Refused('operation interrupted')
+        if action in ('restore','recover-restore'):revoke_core_epoch()
         stopped = True
         if action != 'start':
             services.stop_all()
@@ -986,22 +990,171 @@ def operate(request, services, account, cancelled, worker_factory=None):
             worker.close()
 
 
-def prepare_candidate(request, account, cancelled, worker_factory):
-    worker = worker_factory([str(PYTHON), '-B', '-I', '-S', str(WORKER)], TIMEOUT,
-                            account=account, cancelled=cancelled)
+class _StageArchive:
+    """One explicit Root stage input. The handoff directory remains owned by
+    Root; service group can traverse/read, never replace directory entries.
+    Private test layout injection is not a protocol/path option.
+    """
+    def __init__(self, request, account, cancelled, *, _parent=Path('/var/tmp'), _anchor=Path('/'), _owner=0):
+        self.request,self.account,self.cancelled=request,account,cancelled
+        self.parent,self.anchor,self.owner=_parent,_anchor,_owner
+        self.retain=False;self.path=None;self.snapshot=None
+        self.deadline=time.monotonic()+TIMEOUT
+    @staticmethod
+    def discard(fd, offset=0, size=0):
+        if hasattr(os,'posix_fadvise') and hasattr(os,'POSIX_FADV_DONTNEED'):
+            try:os.posix_fadvise(fd,offset,size,os.POSIX_FADV_DONTNEED)
+            except OSError:pass
+    def check(self):
+        if self.cancelled or time.monotonic()>=self.deadline:raise Refused('stage interrupted or timed out')
+    @contextmanager
+    def material(self):
+        if os.geteuid()!=self.owner or not self.parent.is_absolute() or '..' in self.parent.parts:
+            raise Refused('invalid stage owner or layout')
+        try:parts=self.parent.relative_to(self.anchor).parts
+        except ValueError:raise Refused('invalid stage anchor') from None
+        with ExitStack() as stack:
+            bindings=[]
+            parent=os.open(self.anchor,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW);stack.callback(os.close,parent)
+            initial=os.fstat(parent)
+            if initial.st_uid!=(0 if self.anchor==Path('/') else self.owner) or initial.st_mode&0o022:
+                raise Refused('untrusted stage anchor')
+            def directory_id(info):return info.st_dev,info.st_ino,info.st_mode,info.st_uid,info.st_gid
+            for index,name in enumerate(parts):
+                child=os.open(name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent);stack.callback(os.close,child)
+                info=os.fstat(child)
+                if (info.st_uid!=self.owner or info.st_mode&0o022 and not
+                        (index==len(parts)-1 and stat.S_IMODE(info.st_mode)==0o1777)):
+                    raise Refused('untrusted stage parent')
+                bindings.append((parent,name,child,directory_id(info)));parent=child
+            if not os.fstat(parent).st_mode&0o001:raise Refused('stage parent not traversable')
+            def proof():
+                if directory_id(os.stat(self.anchor,follow_symlinks=False))!=directory_id(initial):
+                    raise Refused('stage anchor changed')
+                for outer,name,inner,expected in bindings:
+                    if (directory_id(os.fstat(inner))!=expected or
+                            directory_id(os.stat(name,dir_fd=outer,follow_symlinks=False))!=expected):
+                        raise Refused('stage parent changed')
+            name='vui-stage-'+uuid.uuid4().hex
+            os.mkdir(name,0o700,dir_fd=parent)
+            folder=os.open(name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent);stack.callback(os.close,folder)
+            os.fchown(folder,self.owner,self.account.pw_gid);os.fchmod(folder,0o750)
+            folder_id=directory_id(os.fstat(folder));file_fd=None;file_id=None
+            self.path=self.parent/name/'bundle.zip'
+            try:
+                with tempfile.TemporaryFile(prefix='vui-stage-original-',dir=self.parent) as snapshot:
+                    self.snapshot=snapshot;checksum=hashlib.sha256();size=0
+                    original=os.open(self.request['path'],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+                    try:
+                        info=os.fstat(original)
+                        if not stat.S_ISREG(info.st_mode) or not 0<info.st_size<=850000000:
+                            raise Refused('invalid stage archive')
+                        while True:
+                            self.check();chunk=os.read(original,min(1024*1024,850000001-size))
+                            if not chunk:break
+                            size+=len(chunk)
+                            if size>850000000:raise Refused('stage archive too large')
+                            checksum.update(chunk);snapshot.write(chunk)
+                    finally:os.close(original)
+                    snapshot.flush();os.fsync(snapshot.fileno());self.discard(snapshot.fileno())
+                    if checksum.hexdigest()!=self.request['sha256']:raise Refused('stage archive digest mismatch')
+                    snapshot.seek(0)
+                    file_fd=os.open('bundle.zip',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=folder)
+                    copied=hashlib.sha256();count=0
+                    while True:
+                        self.check();chunk=snapshot.read(1024*1024)
+                        if not chunk:break
+                        copied.update(chunk);count+=len(chunk);remaining=memoryview(chunk)
+                        while remaining:
+                            written=os.write(file_fd,remaining)
+                            if not written:raise Refused('stage handoff write failed')
+                            remaining=remaining[written:]
+                        self.discard(snapshot.fileno(),count-len(chunk),len(chunk))
+                    os.fsync(file_fd);self.discard(file_fd);os.fchown(file_fd,self.account.pw_uid,self.account.pw_gid);os.fchmod(file_fd,0o600)
+                    file_id=os.fstat(file_fd)
+                    if count!=size or copied.hexdigest()!=checksum.hexdigest():raise Refused('stage handoff digest mismatch')
+                    proof();snapshot.seek(0)
+                    yield self
+                    proof()
+            finally:
+                # Never recursively remove a service-readable namespace. Keep
+                # every unknown inode or unconfirmed worker lifetime for review.
+                try:
+                    proof()
+                    named=os.stat(name,dir_fd=parent,follow_symlinks=False)
+                    if directory_id(named)!=folder_id:raise Refused('stage handoff directory changed')
+                    if not self.retain and file_fd is not None and file_id is not None:
+                        current=os.fstat(file_fd);leaf=os.stat('bundle.zip',dir_fd=folder,follow_symlinks=False)
+                        if ((leaf.st_dev,leaf.st_ino)!=(file_id.st_dev,file_id.st_ino)
+                                or (current.st_dev,current.st_ino)!=(file_id.st_dev,file_id.st_ino)
+                                or current.st_nlink!=1 or not stat.S_ISREG(current.st_mode)
+                                or current.st_uid!=self.account.pw_uid or stat.S_IMODE(current.st_mode)!=0o600):
+                            raise Refused('stage handoff file changed')
+                        os.unlink('bundle.zip',dir_fd=folder)
+                    if not self.retain:
+                        os.rmdir(name,dir_fd=parent)
+                finally:
+                    if file_fd is not None:os.close(file_fd)  # Exactly once, even on close failure.
+
+
+def _stage_origin(material, target, helper):
     try:
-        worker.send(request)
-        if worker.receive() != {'event': 'prepared'}:
-            raise Refused('candidate preparation preflight failed')
-        if cancelled:
-            raise Refused('operation interrupted')
-        worker.send({'command': 'proceed'})
-        result = validate_done(worker.receive(), request)
-        worker.send({'command': 'finish'})
-        worker.exit_zero()
-        return result
-    finally:
-        worker.close()
+        with zipfile.ZipFile(material.snapshot) as archive:
+            entries=archive.infolist()
+            if len(entries)>10000 or len({row.filename for row in entries})!=len(entries):raise Refused('stage archive members refused')
+            item=archive.getinfo('MANIFEST.json')
+            if (item.is_dir() or item.flag_bits&1 or not 0<item.file_size<=4000000
+                    or stat.S_IFMT(item.external_attr>>16) not in (0,stat.S_IFREG)):raise Refused('stage manifest refused')
+            raw=archive.read(item)
+    except (zipfile.BadZipFile,KeyError,RuntimeError,NotImplementedError):
+        raise Refused('stage archive metadata refused') from None
+    try:
+        meta=json.loads(raw,object_pairs_hook=helper._pairs,parse_int=helper._json_integer,
+                        parse_float=helper._number,parse_constant=helper._number)
+    except (ValueError,TypeError,UnicodeError,RecursionError):
+        raise Refused('stage manifest JSON refused') from None
+    if (type(meta) is not dict or type(meta.get('schema')) is not int or meta['schema']!=1
+            or meta.get('kind')!='release' or meta.get('platform')!='linux-multi-cpython312'
+            or type(meta.get('targets')) is not list or target not in meta['targets']):
+        raise Refused('stage manifest identity refused')
+    record=helper._application(dict(release_id=meta['release_id'],target=target,app_source=meta['source_commit'],
+        manifest_sha256=hashlib.sha256(raw).hexdigest(),archive_sha256=material.request['sha256']))
+    helper.CoreAuthority().record_application(record)
+    return record
+
+
+@contextmanager
+def accepted_stage(request, account, cancelled):
+    expected=hashlib.sha256(trusted_bytes(RECEIPT,MAX_JSON)).hexdigest()
+    helper=_load_core_authority(expected,_origin_only=True)
+    config=decode_json(trusted_bytes(CONFIG,MAX_JSON))
+    with _StageArchive(request,account,cancelled).material() as material:
+        material.origin=_stage_origin(material,config['target'],helper)
+        yield material
+
+
+def prepare_candidate(request, account, cancelled, worker_factory):
+    with accepted_stage(request,account,cancelled) as material:
+        record=material.origin
+        handed={**request,'path':str(material.path)}
+        material.retain=True  # Constructor failure may leave an unconfirmed child.
+        worker=worker_factory([str(PYTHON),'-B','-I','-S',str(WORKER)],
+                              max(0,material.deadline-time.monotonic()),account=account,cancelled=cancelled)
+        material.retain=False
+        try:
+            worker.send(handed)
+            if worker.receive()!={'event':'prepared'}:raise Refused('candidate preparation preflight failed')
+            material.check()
+            worker.send({'command':'proceed'})
+            result=validate_done(worker.receive(),handed)
+            if result['prepared_release']!=record['release_id']:raise Refused('candidate preparation origin mismatch')
+            worker.send({'command':'finish'});worker.exit_zero()
+            return result
+        finally:
+            try:worker.close()
+            except BaseException:
+                material.retain=True
+                raise
 
 
 FIREWALL_PROGRAMS = ('ufw', 'firewall-cmd', 'nft', 'iptables-save')
@@ -1163,7 +1316,7 @@ HELP = ('V-UI 受管维护菜单\n'
         '15 / recover-components 恢复中断的双域事务\n'
         '16 / update-core 更新指定核心\n'
         '17 / rollback-core 回退指定核心\n'
-        '18 / recover-core 恢复中断的核心切换\n'
+        '18 / recover-core 恢复中断的核心任务（含双域备份）\n'
         '19 / backup-components 备份节点数据及核心版本\n'
         '20 / core-status 查看已选择的核心版本（只读）\n'
         'h            帮助\n'
@@ -1239,20 +1392,65 @@ def fixed_module(name):
     return module
 
 
+def _core_grant_link(record, *, ordinary_scopes, root_scopes, seconds):
+    """Combine one bounded non-Root creation reply with an independent Root
+    capability. Never return a Root secret to the ordinary creation worker.
+    """
+    expected={'id','scopes','created_at','expires_at','redeemed','revoked','expired','link'}
+    now=int(time.time())
+    if (type(record) is not dict or set(record)!=expected or type(record['id']) is not int
+            or not 0<record['id']<2**63 or type(record['scopes']) is not list
+            or any(type(value) is not str for value in record['scopes'])
+            or set(record['scopes'])!=set(ordinary_scopes) or len(record['scopes'])!=len(ordinary_scopes)
+            or type(record['created_at']) is not int or type(record['expires_at']) is not int
+            or not now-60<=record['created_at']<=now+2
+            or record['expires_at']!=record['created_at']+seconds or record['expires_at']<=now
+            or any(record[key] is not False for key in ('redeemed','revoked','expired'))):
+        raise Refused('ordinary grant reply refused')
+    config=decode_json(trusted_bytes(CONFIG,MAX_JSON))
+    origin=config.get('origin')
+    prefix=str(origin)+'/maintenance#grant='
+    link=record['link']
+    if (type(origin) is not str or not origin.startswith('https://') or type(link) is not str
+            or not link.startswith(prefix) or not re.fullmatch(r'vui_mg_[A-Za-z0-9_-]{43}',link[len(prefix):])):
+        raise Refused('ordinary grant origin refused')
+    token=link[len(prefix):]
+    expected_receipt=hashlib.sha256(trusted_bytes(RECEIPT,MAX_JSON)).hexdigest()
+    module=_load_core_authority(expected_receipt)
+    issued,root_token=module.CoreAuthority().issue(main_id=record['id'],main_digest=hashlib.sha256(token.encode()).hexdigest(),
+        scopes=root_scopes,seconds=seconds,not_after=record['expires_at'])
+    if issued['expires_at']>record['expires_at']:raise Refused('Root grant deadline refused')
+    return {**record,'core_scopes':issued['scopes'],'core_expires_at':issued['expires_at'],
+            'link':prefix+token+'&core='+root_token}
+
+
+def _create_core_grant(account, arguments, ordinary_scopes, root_scopes, seconds):
+    child=Child([str(PYTHON),'-B','-I','-S',str(CONTROL/'maintenance_cli_worker.py'),*arguments],
+                60,account=account,cancelled=[])
+    try:
+        record=child.receive();child.exit_zero()
+    finally:
+        child.close()
+    # The normal grant may remain for explicit revocation if Root issuance
+    # fails. Neither partial reply nor a fabricated success link is displayed.
+    return _core_grant_link(record,ordinary_scopes=ordinary_scopes,root_scopes=root_scopes,seconds=seconds)
+
+
 def terminal_grants():
-    print('临时授权: 1 创建  2 列举  3 撤销  0 返回。链接仅本次显示，请妥善保存。')
+    print('临时授权: 1 创建  2 列举  3 撤销  4 核心维护授权  0 返回。链接仅本次显示，请妥善保存。')
     choice = read_input('请选择授权操作: ', 2)
     if choice in (None, '', '0'):
         return
-    _, account = verify_installation()
+    manager, account = verify_installation()
     if choice == '1':
         print('1 只读（默认）：诊断、状态与脱敏日志\n'
               '2 日常维护：另含节点、分享、中转、证书、服务操作与升级\n'
-              '3 完整维护：另含删除与备份恢复，可能永久改变业务数据')
-        preset = read_input('请选择权限 [1/2/3，默认 1]: ', 1) or '1'
+              '3 完整维护：另含删除与备份恢复，可能永久改变业务数据\n4 代理核心只读：查看选择和候选信息')
+        preset = read_input('请选择权限 [1/2/3/4，默认 1]: ', 1) or '1'
         choices = {'1': 'diagnose',
                    '2': 'diagnose,nodes,share,relay,certificates,operate,upgrade',
-                   '3': 'diagnose,nodes,share,relay,certificates,operate,upgrade,destructive'}
+                   '3': 'diagnose,nodes,share,relay,certificates,operate,upgrade,destructive',
+                   '4': 'diagnose,core_read'}
         minutes = read_input('有效分钟数 1–259200，或输入180天/180d（默认30分钟）: ', 6) or '30'
         if minutes in ('180天', '180d', '180D'):
             minutes = '259200'
@@ -1260,6 +1458,20 @@ def terminal_grants():
                 or not 1 <= int(minutes) <= 259200):
             raise Refused('invalid grant input')
         arguments = ['create', choices[preset], str(int(minutes) * 60)]
+    elif choice == '4':
+        if manager!='systemd':raise Refused('当前系统暂不支持独立核心维护授权')
+        print('1 核心维护：更新、回退、未完成操作恢复及双域备份\n'
+              '2 完整维护：所有面板功能及核心恢复；恢复仍须确认具体备份')
+        preset=read_input('请选择核心维护权限 [1/2，默认1]: ',1) or '1'
+        minutes=read_input('有效分钟数 1–259200，或输入180天/180d（默认30分钟）: ',6) or '30'
+        if minutes in ('180天','180d','180D'):minutes='259200'
+        if preset not in ('1','2') or not minutes.isascii() or not minutes.isdecimal() or not 1<=int(minutes)<=259200:
+            raise Refused('invalid core grant input')
+        ordinary=['diagnose','core_read'] if preset=='1' else ['diagnose','nodes','share','relay','certificates','operate','upgrade','destructive','core_read']
+        root_scopes=['core_operate','core_backup']+(['core_restore'] if preset=='2' else [])
+        result=_create_core_grant(account,['create',','.join(ordinary),str(int(minutes)*60)],ordinary,root_scopes,int(minutes)*60)
+        print(json.dumps(result,ensure_ascii=False))
+        return
     elif choice == '2':
         arguments = ['list']
     elif choice == '3':
@@ -1276,7 +1488,7 @@ def terminal_grants():
                    stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, check=True)
 
 
-def _core_terminal_task(ops, arguments, cancelled, expected_receipt):
+def _load_core_controller(expected_receipt):
     manager, _ = verify_installation()
     if manager != 'systemd':
         raise Refused('core restore requires systemd')
@@ -1290,6 +1502,55 @@ def _core_terminal_task(ops, arguments, cancelled, expected_receipt):
         raise Refused('core controller changed')
     module = types.ModuleType('_vui_terminal_core_restore')
     exec(compile(raw, str(path), 'exec'), module.__dict__)
+    return module
+
+
+def _load_core_authority(expected_receipt, *, _origin_only=False):
+    """Load the single fixed Root helper only after the complete receipt check.
+
+    No caller-selected module, source path or service-owned code is compiled.
+    Constructing the class does not create authority state or mint a grant.
+    """
+    manager, _ = verify_installation()
+    if type(_origin_only) is not bool or manager not in ('systemd','openrc') or manager!='systemd' and not _origin_only:
+        raise Refused('core authority requires systemd')
+    path = CONTROL / 'core_authority.py'
+    raw = trusted_bytes(path)
+    receipt_raw = trusted_bytes(RECEIPT, MAX_JSON)
+    if hashlib.sha256(receipt_raw).hexdigest() != expected_receipt:
+        raise Refused('core authority receipt changed')
+    receipt = decode_json(receipt_raw)
+    if hashlib.sha256(raw).hexdigest() != receipt['files'].get(str(path)):
+        raise Refused('core authority changed')
+    module = types.ModuleType('_vui_fixed_core_authority')
+    exec(compile(raw, str(path), 'exec'), module.__dict__)
+    return module
+
+
+def revoke_core_epoch():
+    expected=hashlib.sha256(trusted_bytes(RECEIPT,MAX_JSON)).hexdigest()
+    return _load_core_authority(expected,_origin_only=True).CoreAuthority().advance_epoch()
+
+
+def application_origin(release_id, target):
+    """Lookup Root-accepted bytes, never infer an origin from service data."""
+    if (type(release_id) is not str or not RELEASE.fullmatch(release_id)
+            or type(target) is not str or target not in ('x86_64-gnu','x86_64-musl','aarch64-gnu','aarch64-musl')):
+        raise Refused('invalid application origin lookup')
+    expected=hashlib.sha256(trusted_bytes(RECEIPT,MAX_JSON)).hexdigest()
+    module=_load_core_authority(expected)
+    return module.CoreAuthority().application(release_id=release_id,target=target)
+
+
+def core_selection_status(ops):
+    """Root-only read; the controller rechecks receipt under a readonly lock."""
+    expected = hashlib.sha256(trusted_bytes(RECEIPT, MAX_JSON)).hexdigest()
+    module = _load_core_controller(expected)
+    return module.inspect_core_selection(ops, _receipt_sha256=expected)
+
+
+def _core_terminal_task(ops, arguments, cancelled, expected_receipt):
+    module = _load_core_controller(expected_receipt)
     if arguments == ['recover-components']:
         result = module.recover_restore_backup(ops, cancelled=cancelled, _receipt_sha256=expected_receipt)
     elif arguments == ['recover-core']:
@@ -1355,8 +1616,10 @@ def terminal_core_action(action):
                 raise Refused('invalid core release ID')
             arguments.append(release)
         print('操作会短暂停服并创建当前数据备份。')
+        if action == 'update-core' and core == 'xray':
+            print('若候选为 Xray 26.10.21，其默认拒绝通过节点访问部分私网和保留地址，包括服务器回环地址。依赖这些地址时请保留当前版本。')
     elif action == 'recover-core':
-        print('按中断记录核验并恢复核心选择及服务状态。')
+        print('按中断记录核验并恢复核心选择及服务状态；中断的双域备份只恢复服务，不重新备份。')
     elif action == 'backup-components':
         print('短暂停服后备份节点数据及核心版本，完成后恢复原服务状态。')
     elif action != 'core-status':
@@ -1405,6 +1668,8 @@ def terminal_core_action(action):
     else:
         messages = {key: '恢复完成，已核对数据与服务状态。'
                     for key in ('restored_previous', 'resumed_confirmed')}
+        if action == 'recover-core':
+            messages['backup_recovered'] = '备份中断恢复完成，已核对原服务状态；未重新创建备份。'
     if outcome not in messages:
         raise Refused('unexpected core task result')
     name, digest = result.get('backup_name'), result.get('backup_sha256')

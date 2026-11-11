@@ -15,8 +15,17 @@ REQUIRED=['README.md','CHANGELOG.md','SECURITY.md','CONTRIBUTING.md','SUPPORT.md
 # These are current entry points; historical guides intentionally retain old versions.
 CURRENT_INSTALL_GUIDES = ('README.md', 'docs/INSTALLATION.md', 'docs/RELEASING.md', 'install.sh')
 
+def public_install_version(root):
+    versions=re.findall(r'^\s*local version=v(\d+\.\d+\.\d+)\s', (root/'setup.sh').read_text(), re.M)
+    if len(versions)!=1:
+        raise ValueError('Public installer version mismatch')
+    return versions[0]
+
 def check_current_versions(root, version):
-    expected = 'v' + version
+    public=public_install_version(root)
+    if tuple(map(int,public.split('.')))>tuple(map(int,version.split('.'))):
+        raise ValueError('Public installer version mismatch: newer than the candidate')
+    expected = 'v' + public
     for name in CURRENT_INSTALL_GUIDES:
         examples = re.findall(r'--version\s+(v\d+\.\d+\.\d+)', (root / name).read_text())
         if not examples or any(value != expected for value in examples):

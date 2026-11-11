@@ -3,6 +3,7 @@
 No application compiler/exporter is enabled. Provider `-t` is deliberately not
 called proof of URI payload support. Runtime is required in real isolated CI.
 """
+from tests.core_candidate_context import application_host, server_version, singbox_client
 from proxy_loopback_support import ReadyMihomoProcess
 from contextlib import ExitStack
 import http.client
@@ -18,7 +19,7 @@ import unittest
 
 import yaml
 
-from loopback_helpers import (certificate_files, CoreProcess, http_through,
+from loopback_helpers import (certificate_files, CoreProcess, http_authority, http_through,
     require_rejection_evidence, start_http_target, unused_port)
 from xhttp_helpers import (FAILURES, SNI, TARGET_BODY,
     chain_cleanup_errors, classify_protocol_bytes, mihomo_config, mihomo_proxy, rejection_reason,
@@ -36,8 +37,8 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
         cls.xray = str(Path(os.environ['VUI_TEST_CORES'])/'xray')
         cls.singbox = str(Path(os.environ['VUI_TEST_CORES'])/'sing-box')
         cls.mihomo = os.environ['VUI_TEST_MIHOMO']
-        for command, prefix in (([cls.xray, 'version'], 'Xray 26.3.27 '),
-                ([cls.singbox, 'version'], 'sing-box version 1.14.2\n'),
+        for command, prefix in (([cls.xray, 'version'], f"Xray {server_version('xray', '26.3.27')} "),
+                ([cls.singbox, 'version'], f"sing-box version {server_version('sing-box', '1.14.2')}\n"),
                 ([cls.mihomo, '-v'], 'Mihomo Meta v1.19.32 ')):
             result = subprocess.run(command, capture_output=True, text=True, timeout=15)
             output = result.stdout+result.stderr
@@ -54,6 +55,7 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
         self.env = {**os.environ, 'SSL_CERT_FILE': str(self.ca),
                     'SSL_CERT_DIR': str(self.root/'empty-roots')}
         self.sequence = 0
+        self.target_host = '127.0.0.1'
 
     def unique_path(self, label, suffix):
         self.sequence += 1
@@ -101,6 +103,8 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
             if invalid_mode: proxy['xhttp-opts']['mode'] = 'invalid-mode'
             if network is not None: proxy['network'] = network
             config = mihomo_config(port, proxy=proxy)
+        if ':' in self.target_host:
+            config['ipv6'] = True
         self.assertNotIn('DIRECT', json.dumps(config))
         self.assertEqual(config['rules'], ['MATCH,ONLY_PROXY'])
         path = self.unique_path(client, 'yaml')
@@ -115,15 +119,18 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
         return '\n'.join(path.name+':\n'+path.read_text(errors='replace')
                          for path in sorted(self.root.glob('*.log')))
 
-    def start_target(self):
-        self.target_port, self.requests = start_http_target(self.stack)
-        connection = http.client.HTTPConnection('127.0.0.1', self.target_port, timeout=3)
+    def start_target(self, core='sing-box'):
+        self.target_host = application_host(core)
+        self.target_port, self.requests = start_http_target(self.stack, self.target_host)
+        connection = http.client.HTTPConnection(self.target_host, self.target_port, timeout=3)
         try:
             connection.request('GET', '/reachable-control'); response = connection.getresponse()
             self.assertEqual((response.status, response.read()), (200, TARGET_BODY))
         finally: connection.close()
         # Keep every positive and negative delivery. Never rebase to hide a late request.
         self.assertEqual(len(self.requests), 1)
+        if ':' in self.target_host:
+            self.assertEqual(self.requests, [(http_authority(self.target_host, self.target_port), '/reachable-control')])
 
     def verify_server_alpn(self, port, alpn='h2'):
         context = ssl.create_default_context(cafile=str(self.ca))
@@ -140,9 +147,12 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
         deadline = time.monotonic()+8
         while time.monotonic() < deadline:
             try:
-                last = http_through(port, '127.0.0.1', self.target_port)
+                last = http_through(port, self.target_host, self.target_port)
                 if last == (200, TARGET_BODY):
                     self.assertGreater(len(self.requests), before)
+                    if ':' in self.target_host:
+                        self.assertEqual(self.requests[before:],
+                                         [(http_authority(self.target_host, self.target_port), '/probe')])
                     return
             except (OSError, http.client.HTTPException) as exc: last = exc
             time.sleep(.08)
@@ -151,14 +161,14 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
     def assert_failure(self, port, baseline):
         self.assertEqual(len(self.requests), baseline, 'Rejected application request arrived late')
         try:
-            status, _ = http_through(port, '127.0.0.1', self.target_port)
+            status, _ = http_through(port, self.target_host, self.target_port)
             self.assertGreaterEqual(status, 400, self.logs())
         except (OSError, http.client.HTTPException): pass
         time.sleep(.1)
         self.assertEqual(len(self.requests), baseline, 'Rejected application traffic reached target\n'+self.logs())
 
     def verify_clients(self, failure=None):
-        self.start_target()
+        self.start_target('xray')
         server_port = unused_port()
         with ExitStack() as server_stack:
             server = CoreProcess(server_stack, self.prepare_server(server_port), self.unique_path('server', 'log'), self.env)
@@ -293,7 +303,7 @@ class XHTTPPreflightLoopbackTests(unittest.TestCase):
                 with self.subTest(client=client, failure=failure):
                     self.prepare_client(client, 19444, 19443, failure=failure)
         path = self.write_config(singbox_xhttp_client(19443), 'singbox-unsupported-xhttp')
-        self.checked([self.singbox, 'check', '-c', str(path)], reason='unknown transport type: xhttp')
+        self.checked([singbox_client(self.singbox), 'check', '-c', str(path)], reason='unknown transport type: xhttp')
         print('XHTTP native configs parse; provider shell parse is not URI payload acceptance; sing-box unsupported')
 
     def test_01_invalid_mode_and_provider_parser_limitation(self):

@@ -1,6 +1,20 @@
 # P3 核心独立升级与回滚契约
 
-当前候选实现核心选择、独立切换、双域备份恢复与本地 Root 菜单。sing-box 的 x86_64 GNU 实机切换和回退已有证据。Xray 候选流量、完整菜单备份恢复、其他目标和远程授权仍需验证或实现。以[路线图](../ROADMAP.md)为进度入口，本页保留各阶段原始证据。下方基线代码事实对应 `4bd1d9a`。
+当前P3仍为独立草稿。持久核心任务、备份映射、API/页面和停服恢复在准确3a09edd完成十组Actions，实际x86及ARM结果见[路线图当前迭代](../ROADMAP.md#当前迭代p3-0424-候选及组件资格)。0.4.24新候选、公开23升级和新组件协议资格另验；历史四目标TCP与受管VLESS不能替代新组件完整协议门禁。下方M46阶段记录保留当时事实。
+
+### 当前任务与恢复契约
+
+核心任务与普通系统任务分开持久化，旧任务和双域备份ID互拒。检查实际应用/选择和匹配官方候选采用异步只读任务；页面不把选择版本称为实际运行版本，不把官方信息或下载完成称为本机兼容。只保留最多64条已结束的只读检查；总容量临界可优先回收这些检查，永不回收已准入写任务、在途任务或成功备份映射。Root写账本既有容量满后拒绝新增，不能删除历史绕过。
+
+写入口同时要求有效普通`core_read`会话、准确Origin/X-VUI-Request、终端独立Root凭据及固定动作参数。Root凭据绑定安装/授权代际、原普通grant摘要与绝对期限，网页只在内存保存，到期或明确拒绝后清除；只读列表和单任务GET不携带Root凭据。当前管理员登录和旧完整维护预设不自动取得写权限。更新只选择固定仓库明确兼容的官方组件Release ID，不接受URL、文件路径、SHA或命令。
+
+一次确认生成一次request_id。结果未知时只查询该原请求；确实未登记时由用户重新确认同一request_id/参数，不能换编号重复发起。同编号不同参数拒绝；Root重启将中断任务标失败，不自动重放。应用前在安装锁内复核实际事实/修订，并在Root权限锁中最后校权、持久消费一次；撤销或到期阻止首个变更，已开始的安全确认/回退不因网页断开而被抛弃。
+
+备份发生首次停服前，必须持久保存原任务、安装/应用/配置、数据代次、选择/核心意图和原服务拓扑；它是Root观察的事实，不能由HTTP调用者提供。远程备份失败或中断留下这份记录，新的核心变更保持关闭。恢复入口使用`recover`及`recovery_kind:backup`，严格绑定原任务ID/sequence/selection_revision，只需独立`core_backup`用途，不授予数据恢复或核心更新权限。面板已停止时，由Root终端菜单18明确确认，识别同一私有记录并复用恢复流程；本地Root不依赖远程bearer，不能让远程请求借此跳过授权。菜单20投影为待恢复。恢复只处理原服务状态，不重新制作备份；选择、应用、数据或配置不匹配时拒绝，恢复再次中断继续保留记录，成功且持久清理后才结束。现有本地Root菜单备份不因此自动获得该远程任务恢复资格。
+
+任务结果明确区分更新完成、原版本恢复、确认收尾、备份完成、备份中断后服务恢复及服务保持停止。重新授权查询历史任务也要展示这些事实。数据恢复会推进Root授权代际并撤销旧应用会话，必须重新登录/授权；旧Root权限记录不从备份恢复。
+
+严格中转导出和本机连接凭据交付保留原授权、已应用修订、配置和运行检查。没有独立描述符时仍要求内置固定版本；受管选择时以启动时冻结的 sing-box 制品为准，要求选定和实际运行的二进制身份都能核对。版本字符串或单独的选择记录不能代替实际运行证据，核验失败不交付凭据。
 
 P3 在独立开发分支推进。公开稳定版仍以 README 为准，组件候选制品的格式检查、真实运行验收和公开发布分别记账。Go 迁移保持暂缓。
 
@@ -28,6 +42,8 @@ v-ui终端与授权远程维护使用同一任务和状态；面板进程停止�
 2. 清单绑定组件ID、core名称、精确版本、四目标、固定官方上游来源/成员、原归档与实际二进制SHA、大小、V-UI构建/审查source40、完整checksum及兼容合同版本。拒绝重复成员、未知字段、路径越界、错架构/libc、缺摘要或未完成资格。
 3. 可信锚沿用既有官方仓库Release的HTTPS/API身份及外部资产摘要模型，明确来源后才执行内容校验，不以包内自算hash授信。不新建长期签名密钥或Secret，不扩大Actions token权限。实现前须独审证明组件清单的信任入口；若现有模型不足，先列差距，不能用自签字节或approved布尔值替代。
 4. 兼容表为已测的应用source/适配合同与核心制品的有限集合，不把一个成功case推成整个版本范围。除新增核心身份选择外，保留全部节点协议/凭据/高级字段，不能改节点DB来适配候选。首次不同版本须通过现有真实协议、TLS/错误认证、无DIRECT、中转与恢复门槛；版本/核心pin变更只发生在该独立阶段的明确资格批次。
+
+Xray 26.10.21 [固定上游源码](https://github.com/XTLS/Xray-core/blob/v26.10.21/proxy/freedom/freedom.go)在部分服务器入口的最终出站默认拒绝私网及保留地址。候选保留此限制，不改生产配置来放行。现有协议的普通转发在空白CI上使用本地文档IPv6目标独立验收，私网拒绝另核真实原因、零应用送达和无DIRECT；固定旧核心基线仍按原目标测试。更新确认明确提示这一行为差异，依赖这些地址的用户应保持原Xray。此范围不授新的私网目标、协议或公网资格。
 
 ## 选择、执行与事务
 
@@ -769,3 +785,139 @@ ac34299 的阶段日志确认，只有 Xray 候选更新后的流量检查 xray-
 成功的双域备份映射须独立限额并持久保留。安装身份与应用来源和目标兼容性分别核对，缺少映射或格式不符就拒绝恢复。
 
 授权在入队和启动前均须有效。任务进入变更阶段后，授权撤销或面板离线不阻断已开始的安全确认与回退。列表和单任务查询都需要当前有效且明确启用核心只读用途的授权。维护服务重启时，未完成任务保留失败状态及原恢复记录，不能自动重放。任务结果区分原版本已恢复、确认完成、待恢复及已停止。先验收拒绝旧授权、错任务、并发 revision、过期授权及非 systemd，再用同源安装验证停机期间的任务完成和重新授权。该草案未接入远程代码。
+
+## M46A 核心选择只读入口（开发候选）
+
+新增独立用途 `core_read`，只对新发放且明确选中的授权生效。既有只读、日常与完整预设均不自动添加该用途；网页新增未选中的独立选项，终端新增第4项“代理核心只读”。原8用途保持，显式完整9用途可由管理员提交。仅有core_read的会话不获得旧任务列表、审计或其他操作。
+
+`GET /api/maintenance/core-selection` 只调用固定Root维护服务的 `core_status`。拒绝所有query参数；socket请求只含protocol和operation，不接受core/source/target、路径、SHA或任务参数。原七种写任务白名单保持，core_status不能作为submit动作。
+
+Root复用原可信控制器装载、receipt摘要与systemd检查，再在只读安装锁内重核receipt并读取选择。只返回bundle_default、core_pending，或固定sing-box/Xray的current/previous版本；未知字段、路径和私有备份摘要均拒绝。页面显示“当前选择”，不声称它证明进程正在运行。失效会话清除显示。
+
+源码已接线；纯Root投影/回执和终端预设5项、合成DOM通过。API权限、撤销/过期、未知参数及9用途payload回归须在Actions运行；本机其他既有系统测试受缺PyYAML或目录权限环境限制，不改断言，不计完整通过。浏览器未验证，没有生产操作。
+
+后续M46B先实现有硬生命周期与杀回收的非Root官方候选查询，发现结果只作hints、不称兼容或已准备。随后完成Root可独立验证的写准入、一次消费/请求幂等、同安装双域备份私有映射、预期pending事务/代次及停机持久任务，再接完整面板更新/回退/恢复。上述写操作在完成前继续关闭，不能以本批只读入口替代最终P3交付。
+
+M46A首轮 `b1c1b2b` 的[Linux主测试42629393218](https://github.com/ForceMind/V-UI/actions/runs/42629393218)成功，包括新增API权限、撤销/过期与固定错误边界；不是实际Root服务链的证明。[首轮安装42629393183](https://github.com/ForceMind/V-UI/actions/runs/42629393183)的fresh失败原日志确认PTY仍等待旧1/2/3菜单。原失败保留。
+
+安装夹具现以实际Root CONTROL worker的NoFollow/所有权/权限/大小及receipt摘要，逐字节绑定该场景真正安装的suite：短入口使用不可变发布suite，其余用本次候选；不能拿当前测试checkout冒充旧版实际代码。严格8/9用途集合决定精确新旧prompt，未知集合或新suite却装旧byte直接失败。新Root HTTP/Unix只读验证须同时证明旧full拒绝、新显式用途成功及撤销生效、停服时不启动、任务列表/daemon PID/业务行与runtime配置数据不变。此夹具已加入源码，四项纯能力绑定测试通过；实际安装结果等待新准确Actions，不能回填成功。
+
+M46A `078bd31` 的Linux主测试42633398294成功；旧14升级实际日志出现 `VUI_CORE_READ_ONLY_ACCEPTANCE`，只读新授权/Root socket/停服意图/固定投影和数据不变的断言已实际通过。该同轮旧19在读公开信息时HTTP403、未进入安装；旧21在新查询之前的stop任务get收到DAEMON_REFUSED。原片段daemon仍active、目标服务已inactive，但缺少原拒绝stage，不能认定原因。
+
+已独立复现机制候选：Root任务子进程os.replace发布状态时，严格trusted_bytes可能持旧FD并因nlink/ctime/现名变化拒绝合法读取。读取现保留原mode与严格trusted_bytes校验；仅对前后均Root私有regular/600/单link/有界、且inode确有安全替换的Refused，最多三次重读。稳定不安全文件、一般拒绝和变更提交不重试，客户端DAEMON_REFUSED规则不放宽。新增实际原子替换回归覆盖成功重读、稳定拒绝、不安全替换及次数上限。
+
+Root日志只增加固定stage/类别枚举（RECEIVE、TASK_LSTAT/TRUST_READ/JSON/ID、PUBLIC等），不打印原任务、路径、SHA、备份、请求或异常文本。CI只完整匹配这套枚举，未知或附加文本仍UNCLASSIFIED。当前机制修复和诊断待独审/新准确Actions；它不把原old21片段改判成已证因果或成功。
+
+## M46B 官方候选信息查询（开发候选）
+
+新增core_read的两个固定GET入口 `/api/maintenance/core-candidates/sing-box` 与 `/xray`。只接受核心枚举，不接受query、source/target、URL或用户制品。非Root面板服务启动固定Python元数据worker，固定官方仓库、最多5页/32个hints，空成功和网络失败分开。输出只含release_id/tag/规范version/revision/published_at及truncated，qualification必须为unverified，不能作为兼容、本机准备或更新权限。
+
+父进程限制两个并发、32KiB stdout及12秒成功截止；EOF后仍须零退出，结果和结束后复核时限。失败/超时杀本次自有进程组并回收直接worker，始终尝试关闭pipe；仅在确认回收和清理成功后释放slot。无法确认清理时返回固定错误并隔离该slot至服务重启，防止无限累积未回收worker；固定受信worker不fork、不执行其他程序，不声称通用可执行文件或逃逸进程树监督。worker拒绝Root，并设置256MiB地址空间、5秒CPU、64FD、无core dump/文件输出。SDK的软socket/deadline检查不替代父进程时限。
+
+页面明确“官方信息，尚未完成本机兼容”，没有新更新/回退按钮；失败清空旧列表并提示选择未变，会话结束清空。旧授权不自动取得core_read，API仍按精确能力与来源边界授权，Root daemon写动作不扩。
+
+10项纯投影与惰性假Python worker（正常、超时、EOF未退出、超量、非零、slot限额、清理不确定时关闭pipe并隔离slot）及合成DOM通过；无真实网络/产品核心/Root安装。API权限与完整新准确源码、真实服务集成待独审/Actions，浏览器未验证。后续仍须实际事实绑定的候选资格检查、Root独立写准入/一次消费/幂等、私有双域备份映射与pending代次，以及完整更新UI。
+
+M46A `50d27a0` 的[组件验收42637529006](https://github.com/ForceMind/V-UI/actions/runs/42637529006)九个job成功，含四目标原生TCP和ARM64受管整机。ARM小型原始日志已独立读回，明确出现新的 `VUI_CORE_READ_ONLY_ACCEPTANCE`、两核真实切换、SIGKILL恢复、双域恢复及保数据/撤销授权标记，测试退出0。同提交主测试42637529061成功；安装矩阵42637529126的八个旧版升级均成功，新装仍运行。本段不将这些结果转授后续M46B源码，旧失败仍保留。
+
+## M46C 独立准入与持久核心任务定稿候选
+
+M46B只读查询已独审并推送 `4b4c236`，Python3.9/3.12各10项纯回归与合成DOM通过，准确Actions仍运行。此前 `50d27a0` 十组工作流全部成功：新装/八旧版升级、四目标原生TCP及ARM64受管安装通过。新装小日志13686056740和收据13686151625已读回，source准确、只读/两核切换/中断/双域恢复标记齐全且退出0。此资格不传递给后续源码。
+
+### 任务与事实
+
+现有socket单次等待5秒，完整实际应用/运行时校验可超过此窗口；不能在daemon同步处理网络和长校验，也不能为变更盲重试。后续采用独立核心任务记录及固定 `submit/get` 通道，先返回任务ID，再在隔离子进程完成。普通旧任务集合和备份ID不能混用。只读事实任务同样持安装锁，由收据绑定的OS解释器/固定CONTROL worker降权至专用服务UID，走实际active_verified→CoreMaintenanceSession.prepare→Root _accept_context观察链。绝不导入服务用户代码为Root，绝不接受请求/env自报app_source或target，不为读取bootstrap选择或启停服务。pending/未初始化/冲突明确返回，事实只证明观察时点；应用前另验。
+
+### Root独立授权
+
+写入使用**Root终端明确新建**的核心维护凭据。普通网页授权、现有三种旧预设、服务UID、scope字符串、任务ID均不能创建该凭据。Root生成独立随机不透明bearer（不是长期签名密钥），仅一次交付；Root私有0700目录和0600记录只保存不可逆摘要、随机ID、准确安装身份、不可复用的Root授权代际、关联普通维护授权ID及其原token摘要、明确用途、签发/到期时间及撤销状态。默认短期，最长沿已批准180天；旧记录不自动扩权或延长。接口读写严格检查Root所有权/权限/单link/NoFollow/父子FD绑定，持独占锁完成校验和原子fsync发布。凭据不得出现在query、日志、普通任务结果、备份或包内。网页只在用户明确提供该独立凭据后传输，原维护登录/Origin/精确用途仍须通过；终端可列举/撤销。普通授权撤销必须先取得Root关联凭据已持久禁用的确认，再提交普通授权撤销；Root确认未知时返回未完成，不报告完整撤销成功，重试只重放同一个减权请求。Root减权成功但普通DB提交失败仍保持减权，重试幂等。只允许撤销的固定受管调用不授予签发或写任务能力。Root同时保存该普通grant绑定的不可回退撤销tombstone，即使目前没有任何Root凭据也持久记录；后到的issue不能在Root ACK与普通DB提交之间重新签发。幂等ACK必须重确认文件及目录fsync，不能把前次unknown fsync结果下的可见记录当成持久成功。关联不能仅用可重用的DB数字ID：准入同时核Root安装/授权代际、原普通grant token摘要与ID。任何受管数据恢复在第一个数据变更前先持久推进Root授权代际，使所有旧凭据永久失效；即使恢复失败也不回退代际或从备份恢复此Root权限记录，必须重新授权。
+
+Root在准入时自己检查bearer摘要、安装身份、关联授权ID、时间、撤销状态和动作所需用途。写动作固定为更新、回退、中断恢复、双域备份、双域恢复；后两者分别显式授权，恢复不从更新或备份权限推导。用户不传URL、ZIP路径、SHA、命令或环境。核心只允许sing-box/xray，更新只接受官方组件Release ID，恢复只接受同安装已成功的双域备份任务ID，中断恢复必须绑定当前pending事务ID/代次；预期selection revision必填（未初始化显式null），执行时在锁内重核。
+
+### 一次消费与幂等
+
+每次用户确认生成一个随机request_id。Root把（Root凭据ID、request_id）与固定动作和全部规范参数摘要、安装身份及唯一任务ID绑定并先持久化，再允许派工；同ID同参数返回原任务，改参数冲突，跨凭据/安装不复用。确认信息不等于已执行。子任务只能消费自己的Root记录一次，执行前再核预期事实与选择/事务；崩溃不自动重放。running或已启动子进程都不表示进入变更阶段。排队和长只读preflight期间仍受撤销/到期约束。即将产生第一个变更（pending或stop等）前，持安装锁重新核实际上下文/CAS，并在Root权限锁内最后校权后持久标记该任务唯一的mutating边界及不可变计划摘要；只有该标记成功后才能变更。此前撤销/到期拒绝入变更；此后仅继续该已核计划的安全确认或恢复，不因面板停止/随后撤销而抛弃安全闭合。锁顺序固定为安装锁→权限锁，撤销只持权限锁，不能被长preflight挡住。崩溃后该消费标记不自动重放。请求结果未知时只能查询原任务，不换ID重复提交。
+
+任务查询仍要求当前有效且明确的核心只读用途；不凭任务ID授权。脱敏结果仅含阶段、结果、核心/版本、是否待恢复等固定字段。成功双域备份的文件名、摘要、安装与核心制品闭包保存在Root私有映射，由成功任务ID解析；普通备份与双域备份互拒，不把私有路径交给调用者。恢复完成撤销旧会话/维护/订阅授权，保留账户/节点/证书业务数据。当前契约经独审修订后无剩余契约阻断。Root私有准入/消费账本源码及24项隔离临时目录回归已实现，Python3.9/3.12均通过，源码已独审；准确Actions待验，尚未纳入已安装Root闭包，未接daemon派工、终端发放、API或完整任务/UI，不扩大本机或生产权限，也不称完整机制已完成。
+
+M46B `4b4c236` 主测试42642318974原失败：3617项中唯一失败是权限目录逐路由断言；目录为两个字面路径，OpenAPI注册为参数模板。新增API授权用例通过，但不以此盖过目录不一致。实现现改为两个字面GET包装，同一固定内部函数，保留原断言，并补Xray地址分发回归；新准确Actions待验。
+
+Root账本最小实现 `deploy/core_authority.py`：默认固定Root目录；issue仅交付一次随机bearer、磁盘只留摘要；严格安装epoch/原普通grant摘要及ID、明确用途、到期/撤销；幂等reserve返回旧任务但不重派，mutating仅能消费一次。Root epoch推进使排队凭据失效，expiry被观察后持久撤销、时钟回退也不能复活。状态/锁为0600、目录0700，NoFollow和父子FD绑定、独占flock、原子替换及fsync，容量满拒绝不删历史。24项隔离测试覆盖跨进程锁、父目录替换、严格umask、坏权限/硬软链接、重复/未知JSON、scope/expiry/revoke/epoch和一次消费；是假所有者临时目录测试，不是实际Root/服务验收。真实上下文CAS、备份私有映射及持久任务执行仍须下一块接线。
+
+独审追加两项必要修正：Root JSON整数在int转换前限十进制长度/64bit范围，Python3.9也拒绝巨型整数；新建权限目录名本身通过父FD fsync持久化，包含前次中断后重试，失败不返回凭据。新增10万位整数与父fsync失败/重试回归。24项回归纳入原生OS合成契约清单，仍不声称Root安装或任务集成已验收。
+
+私有账本独审另修普通grant减权/后到issue竞态：Root永久保留绑定撤销tombstone，且预留已发绑定的撤销容量。幂等reserve/revoke在前次目录fsync未知时重新fsync文件与目录；持续失败仍报固定IO，不假报durable成功。expiry永久撤销亦采用同一确认规则。新增交错issue、容量、未知sync和expiry回归，合计24项两Python版本通过；最终源码已独审，24项两版本独立复验均零skip，准确Actions待验。
+
+M46B修正 `824e42e` 的十组Actions全部成功。主测试42644224671保留原目录断言并成功，安装42644224723完成新装与八旧版升级，组件42644224808完成四目标和ARM64受管。新装原日志13688826054/收据13686894104及ARM日志13687858428独立读回：只读/两核切换/中断/双域恢复标记齐全、测试OK，新装退出0，准确source824e42e、bundle `bd8f828061e8b5f004b3c0734ee97f9c9d800c66678c5b086477fac08bb3d051`，checksums `9f488648b3f94f5eef62982ae1e2c94460c8a752c13afe4ca78a1547c7ffe18e`。这是M46B源码资格，不包含真实官方组件公开/生产更新或后续M46C源码。
+
+
+## M46D Root闭包与安装原语（开发候选）
+
+私有账本已于 `97e50e5` 独审提交，主测试42648992343成功，其余准确Actions继续运行。后续接线新增独立 `CORE_AUTHORITY_SOURCE_DEPENDENCIES`，保留原CORE/DNS历史集合；当前完整闭包新增core_authority.py，只在显式refresh接受完整旧闭包，不接受零散、未知或未收据文件。普通升级夹具也用独立AUTHORITY_FILES与显式profile，不能扩大冻结23或旧P3组掩盖多文件；八旧版的完整/缺失/污染/多余项负例逐一保留。
+
+Root `system_ops._load_core_authority` 只在完整安装收据/systemd通过、调用者保存的receipt摘要一致且固定helper字节摘要匹配后编译，不接受路径或模块名，不自动创建凭据。当前52项纯安装/loader回归在Py3.9/3.12通过，旧版升级helper新增精确profile后24项两版通过；Root loader两项加入原生OS清单。
+
+实际Root primitive探针仅在已存在的空白GitHub-hosted fresh/ARM core-switch测试中运行：Root-owned CI bootstrap先以NoFollow/Root所有权/FD稳定和独立收据摘要验证系统控制代码，再编译；不能先执行system_ops后靠它自验。探针使用假普通授权身份，核Root固定目录模式、磁盘无bearer、真实服务UID不能读/写、durable幂等、一次消费及撤销后迟到签发拒绝。它不读普通授权DB、不操作应用/核心/服务，不开放任何新写API；Root权限变化仅限空白CI测试。源码已独审，准确Actions尚待，不把纯fixture或旧成功替代该实际探针。
+
+下一块仍是独立持久核心任务：异步观察真实应用与目标、Root写准入/执行前最后校权、同安装双域备份私有映射、预期pending事务/代次，再接终端新授权与完整面板流程。Root private helper安装本身不等于这些已实现。
+
+M46D最终源码独审无剩余阻断；独立复验Py3.9/3.12各loader2项与升级helper24项通过，52项纯安装/loader结果复用同源主代理证据，diffcheck通过。实际Root probe未在本机执行，待新准确源码Actions读回结果。
+
+## M46E 应用来源锚（必要前置，契约候选）
+
+独立窄查确认：active_verified验证服务UID拥有的CURRENT/MANIFEST/READY与实际文件自洽，没有独立Root的完整source40或原manifestSHA。Root config中的release_id也不能替代：它只有source前缀，且合法本地activate只切CURRENT。不能从这条自洽观察自动给候选兼容资格背书，也不能新增config.release_id强比来破坏合法activate。
+
+本迭代在Root私有控制状态中保存已明确接受安装包的来源记录，按release_id与本机target解析，记录完整source40、原MANIFEST原字节SHA、原包SHA及固定schema。来源仅由Root安装器在持有已独立SHA验证的原包快照时记录；Root受管stage亦从其已接受且受控的原包取得。禁止服务UID、网页参数、env或active_verified字典生成/补齐/替换记录。旧安装没有记录时明确未锚定；通过受信原包重验或正常已验证升级建立来源。相同标识冲突拒绝，不以更新字典替换旧身份。
+
+记录代表该包字节曾被Root明确接受，和已准备、当前活动、运行健康、组件兼容分别表达。安装失败可以保留已接受原包的来源记录，不宣称应用成功；它不产生远程授权或派工权。来源表保留多个已接受版本，因此Root activate/rollback可选择先前受验版本，不从旧config.release_id猜活动版本。不含来源锚的旧准备版本仍沿原工具边界处理，但不能获得新核心候选资格；需通过原包重验取得新资格。
+
+Root读取实际应用事实时，继续由固定CONTROL worker降权进行active_verified与文件身份观察，再在安装锁内把source40、原manifestSHA、release_id和target逐项对照Root接受记录。缺失/不符拒绝资格，无法观察/恢复待办独立报错；元数据成功匹配不称当前核心实际运行。执行前再次复核应用事实、Root记录与选择CAS。普通data restore不从备份复制/回退来源表；Root授权epoch撤销规则独立保持。
+
+最小涉及：Root私有来源记录原语及回归、scripts/install_system.py受验包快照生产入口、deploy/system_ops.py受管stage/activate的记录与选择边界、deploy/core_maintenance_control.py实际观察消费；相应Root闭包/升级/恢复失败回归与Actions真实新装/八旧版升级/x86/ARM保留。先独审输入的可信来源和失败/重试时序，再接异步事实任务；不增加任意导入、Root执行服务payload、公开写API或生产操作。当前仅契约，源码尚未实现此锚。
+
+
+M46E契约独审无架构阻断，producer已明确：新装/正常升级统一使用install_verified内verify_archive持有的已独立SHA核验快照，取原MANIFEST字节SHA，Root、非dry-run、安装锁内、首次降权stage前持久记录；在线升级复用此入口。受管Root stage目前没有Root原包快照，必须先补，不能拿worker prepared/READY返回值代替。
+
+当前已实现的第一块仅为私有表原语：authority schema2显式接受并迁移完整schema1，保留安装身份、epoch、grant、撤销tombstone与已消费记录，只补空applications，不从旧应用自授。来源记录精确绑定release_id/target/source40/原manifestSHA/原包SHA，同标识冲突拒绝、可保留多版本；读到已记录来源须重新确认durability，避免前次fsync未知被当成持久成功。新增8项回归，authority合计32项Py3.9/3.12通过，源码独审无剩余阻断；独立两版复验均零skip，准确Actions待验。SDK/stage producer、Root事实consumer、异步任务与UI尚未接，当前来源资格缺口仍未完成修复；默认Root/生产来源记录未被本机会话写入。
+
+M46D `cd8deb8` 自身十组Actions全部成功：安装42652328214完成新装/八旧版升级，组件42652327756完成四目标/ARM64。新装小日志13691911137、收据13692175880及ARM日志13693145262已独立读回，新增 `VUI_CORE_AUTHORITY_INSTALLED_ACCEPTANCE` 与既有只读/两核切换/中断/双域恢复标记齐全，测试OK，新装退出0。新装准确source=cd8deb8，bundle `b2a91be53e4d8112db8df4e8fae8fa412a29b4f3164d03b78870e7209831650a`，checksums `bddb3248bbffdcc18419785bf2425338e16042205091e0c99abdd04fdb7d29b8`。这是schema1默认Root原语的安装证明，不覆盖后续schema2/来源表新源码或实际原包producer/consumer。
+
+### M46E 新装／在线升级 SDK producer（源码候选）
+
+私有 `--control-kit/--control-kit-sha` 由已核 install.sh 或维护升级器传递，目标子集另显式标记。install_system在Root非dry-run、首次create-user/降权stage前读取原受验snapshot FD；先独立核SDK表摘要及verifier代码摘要，再用匿名代码FD传给固定OS Python的隔离bootstrap，重核FD所有权/模式/身份/代码SHA后执行。没有可被服务UID替换的执行路径，不Root执行bundle或服务payload中的代码。直接仓库旧调用缺SDK时保留原安装语义，不产生新来源资格。
+
+SDK verifier的固定record-origin-fd模式重新verify_kit，绑定source ZIP及完整source40后仅编译固定authority标准库代码；重hash原snapshot对照SDK本机bundle，原MANIFEST SHA直接取原字节，source/release/version及本机目标逐项核。正式SDK的RELEASE是四目标，每个原bundle仅一个目标，两者分别核，不以列表相等误拒完整SDK。dup共享offset在finally还原；Snapshot与已核源码不由service-owned CURRENT/READY替代。Source表首次可创建最后两层Root私有目录并同步父目录，新Root目录GID归0。
+
+旧SDK只在字面ROOT_APPLICATION_ORIGIN=1且唯一时启用私有参数；注释、bool、重复与未知均不当作支持。旧Bash空数组展开保持兼容。成功只确认accepted-origin，后续失败保留该来源记录，不声称prepared/active/healthy。升级仍使用原私有kit与manifest pin，不创建签名钥匙、Secret或新公开资产。
+
+本机104项针对性纯测试（authority33、控制安装55、交接7、升级9）在Python3.9/3.12均通过；脚本47项完整回归通过。首次组合67项中的9个脚本失败由新空数组展开引入，已修复；4个旧安装器快照测试受/var/tmp沙箱写入限制，不计完整组合通过，交Actions验证。探针源码改为必须命中SDK记录且source匹配准确CI checkout，并验证epoch减权不回退来源；实际Root探针未在本机运行。本批源码独审无剩余阻断，准确Actions待验。Root stage原包快照producer与事实consumer尚未接，来源资格缺口仍未整体关闭。
+
+### M46E 事实消费与流式修正（源码候选）
+
+Root事实consumer已接固定authority查询：在已有安装锁内，收据绑定helper只按release_id/target查Root记录，controller把worker实测的release、target、完整source与manifestSHA逐项比对；缺失/冲突/私有额外字段均在候选下载与stop之前拒绝。不以旧config.release_id限制合法activate，也不通过CURRENT/READY自动补锚。37项controller与4项loader纯回归在Py3.9/3.12均通过，含缺锚和各字段冲突。
+
+SDK `85426a3` 的主测试42665205127在3668项中唯一失败为shell能力检测的新read_bytes触发既有Whole-file read断言。现改为open/read最多512001字节，原streaming/checksum/tamper断言保留并在独立临时夹具执行通过。本机完整11项archive suite因Linux平台门槛未运行资格成立，继续交Actions，原失败保留。当前小批独审无剩余阻断，两版独立复验各41项通过，准确Actions待验；Rootstage的原包快照producer与旧准备版本重新授予来源仍待实现，实际远程核心任务/UI也未接，不宣称P3完成。
+
+### M46E 受管stage来源生产（源码候选）
+
+本地stage已改为Root原包快照→独立SHA→原清单来源记录→相同字节交接。Root使用固定收据helper，OpenRC仅允许来源登记，核心操作仍限systemd。原输入路径只读一次，后续全部使用Root持有快照；交接为Root拥有0750服务组可读/穿越而不可写的随机目录、服务UID拥有的0600单归档，复制后核SHA。服务worker保持原协议，prepared_release须精确匹配Root接受的release_id。
+
+清理保留父/目录/叶FD与身份，仅unlink匹配的固定归档并rmdir匹配空目录，不Root递归删除。foreign inode/目录保留；worker构造或关闭不确定时保留交接；自身FD失去close确认不重试关闭复用编号。原包损坏、ZIP/JSON失败在登记前映射固定拒绝，不让交互菜单traceback退出。私有快照及复制归档按需丢弃干净页缓存；不改变用户数据、CURRENT或服务拓扑。
+
+新增stage10项、loader5项与旧事务13项，两Python版本各28项通过；独审无剩余阻断。既有真实非Root worker协议fixture继续在Linux运行，本机因Linux平台门槛未验，不回退生产约束。CI-only probe增加真实Root快照/来源登记/交接和真实降权读取进程；使用惰性协议读者，单独marker明确不冒充完整产品prepare。本机未执行Root或产品安装。
+
+SDK与受管stage两个来源producer、锁内实际事实consumer现在源码均已接通，仍须本批准确Actions与小日志回读资格。旧准备版本不自动授信，重验原包后可有accepted来源；stage失败保留accepted记录不代表prepared/active/healthy。远程Root凭据发放、持久核心任务、备份映射及完整用户界面仍未完成。
+
+f205efe原生矩阵42669763135首次失败：合成stage夹具继承umask077，mkdir(0755)实际变为0700，触发生产可穿越父目录拒绝。夹具现显式chmod(0755)，只落实原夹具契约，不改生产权限规则；原10项在umask077下复验通过，独审无阻断。原失败保留，准确新源码CI另验。
+
+## M46F 核心授权发放与减权（源码候选）
+
+普通SCOPES9和旧预设保持。终端授权菜单新增独立“核心维护授权”入口，两种用途为核心更新/回退/未完成恢复/双域备份，或完整维护加双域恢复；具体恢复仍需确认。普通grant含core_read，只提供登录/只读前置，Root写用途由单独Root bearer决定，不凭普通scope升级权限。
+
+Root以固定降权Child捕获单个有界JSON并核零退出；核普通grant精确scopes/身份/时间及Root配置的固定origin/link结构，再独立签发Root token。Root secret不进入降权创建进程，组合链接只在两层成功后一次显示，失败不输出部分成功；普通记录保留可撤销。Root expiry在私有锁内钳制到普通grant绝对截止，剩余1秒可如实表示，不向上取整延长。
+
+页面严格解析双fragment后立即清hash和临时fragment变量；Root token只在内存及固定核心authority/tasks接口请求头，结束/失效清除。Root authority GET仅检查当前有效core_read普通会话，取原grant token摘要（非交换session摘要）与Root记录匹配，再由Root返回用途/期限。普通用户或管理员不能跳过Root bearer。用途文案只是展示，不是派工授权。
+
+普通core_read grant撤销先读取并释放DB事务→Root持久binding tombstone确认→BEGIN IMMEDIATE重读同id/owner/token摘要/scopes后撤销；换绑定则409，Root未知则503且不报撤销完成。Root减权后DB失败仅减权不复权。所有普通撤销入口复用此函数；受管数据恢复仍须在其实际变更前另推进Root epoch，属于后续任务接线。
+
+本批源码已独审，私有Root/链接/固定协议45项Py3.9/3.12通过、合成DOM通过（含pagehide后迟到200/401不恢复界面），新增ASGI/SQLite回归仅交Actions。本机不运行Root或产品安装，不做浏览器。完整核心持久任务与应用前最后校权尚未接，不能把本批授权发放视为远程写操作已完成。

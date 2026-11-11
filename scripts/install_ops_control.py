@@ -100,9 +100,15 @@ CORE_SOURCE_DEPENDENCIES = {
     'core_boot_broker.py': 'deploy/core_boot_broker.py',
     'core_maintenance_control.py': 'deploy/core_maintenance_control.py',
 }
+# Freeze the original full core closure as a separate historical family.
+# Only an explicit refresh may add this complete authority group.
+CORE_AUTHORITY_SOURCE_DEPENDENCIES = {
+    'core_authority.py': 'deploy/core_authority.py',
+}
 YAML_SOURCE_DEPENDENCIES = {'mihomo_plan_record.py': 'app/services/mihomo_plan_record.py'}
 SOURCE_DEPENDENCIES = (PRE_DNS_SOURCE_DEPENDENCIES | DNS_SOURCE_DEPENDENCIES
-                       | CORE_SOURCE_DEPENDENCIES | YAML_SOURCE_DEPENDENCIES)
+                       | CORE_SOURCE_DEPENDENCIES | CORE_AUTHORITY_SOURCE_DEPENDENCIES
+                       | YAML_SOURCE_DEPENDENCIES)
 RECEIPT_KEYS = {'schema', 'service_manager', 'system_python', 'interpreter_resolved',
                 'interpreter_sha256', 'files'}
 MAX_CODE = 4_000_000
@@ -294,6 +300,86 @@ def verify_kit(directory, sha256, *, local_target_only=False):
             raise
         raise InstallError('Source archive is incomplete or invalid') from exc
     return verified, record
+
+
+def record_application_origin(directory, sha256, snapshot_fd, *, local_target_only=False,
+                              _store_factory=None):
+    """Root SDK producer, not an installed RPC. Only authenticated fixed Root
+    source bytes run here. The caller passes its original private archive FD;
+    no caller-supplied source/manifest dictionary or module path is accepted.
+    """
+    if os.geteuid() != 0 or type(snapshot_fd) is not int or snapshot_fd < 3:
+        raise InstallError('Root private snapshot FD required')
+    verified, release = verify_kit(directory, sha256, local_target_only=local_target_only)
+    table, actual = read_file(Path(directory)/'SHA256SUMS',limit=64000)
+    if actual != sha256:
+        raise InstallError('Accepted SDK checksum table changed')
+    # Parse only after verify_kit authenticated the exact table grammar and
+    # duplicate-free complete fixed set; distinct assets may share a digest.
+    values = {name:checksum for checksum,name in
+              (line.split('  ',1) for line in table.decode('ascii').splitlines())}
+    target = local_target()
+    expected = values['vui-linux-'+target+'.zip']
+    def identity(info):
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+                info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    before = os.fstat(snapshot_fd)
+    if (not stat.S_ISREG(before.st_mode) or not owned_by_root(before)
+            or stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink not in (0,1)
+            or not 0 < before.st_size <= 850_000_000):
+        raise InstallError('Invalid private application snapshot')
+    checksum = hashlib.sha256(); offset = 0
+    while offset < before.st_size:
+        chunk = os.pread(snapshot_fd, min(1024*1024,before.st_size-offset),offset)
+        if not chunk:
+            raise InstallError('Application snapshot truncated')
+        checksum.update(chunk); offset += len(chunk)
+        if hasattr(os,'posix_fadvise') and hasattr(os,'POSIX_FADV_DONTNEED'):
+            try:os.posix_fadvise(snapshot_fd,offset-len(chunk),len(chunk),os.POSIX_FADV_DONTNEED)
+            except OSError:pass
+    if checksum.hexdigest()!=expected or identity(os.fstat(snapshot_fd))!=identity(before):
+        raise InstallError('Application snapshot differs from accepted kit')
+    # Reading the original manifest uses a duplicate of the retained snapshot,
+    # never CURRENT, READY or another pathname selected by a service process.
+    position = os.lseek(snapshot_fd,0,os.SEEK_CUR)
+    try:
+        with os.fdopen(os.dup(snapshot_fd),'rb') as stream, zipfile.ZipFile(stream) as bundle:
+            entries=bundle.infolist()
+            if len(entries)>10000 or len({row.filename for row in entries})!=len(entries):
+                raise InstallError('Application snapshot members refused')
+            entry=bundle.getinfo('MANIFEST.json')
+            if (entry.is_dir() or entry.flag_bits&1 or not 0<entry.file_size<=4_000_000
+                    or stat.S_IFMT(entry.external_attr>>16) not in (0,stat.S_IFREG)):
+                raise InstallError('Application snapshot manifest refused')
+            raw=bundle.read(entry)
+    except (zipfile.BadZipFile,KeyError,RuntimeError):
+        raise InstallError('Application snapshot archive refused') from None
+    finally:
+        # dup() shares the open-file offset. Restore it before the waiting
+        # installer resumes its buffered ZipFile/snapshot objects.
+        os.lseek(snapshot_fd,position,os.SEEK_SET)
+    helper=types.ModuleType('_vui_verified_sdk_core_authority')
+    # This byte source is authenticated by pinned source ZIP and full source
+    # commit inside verify_kit; no application payload is imported as Root.
+    exec(compile(verified['core_authority.py'],'<verified-sdk-core-authority>','exec'),helper.__dict__)
+    try:
+        meta=json.loads(raw,object_pairs_hook=helper._pairs,parse_int=helper._json_integer,
+                        parse_float=helper._number,parse_constant=helper._number)
+        if (type(meta) is not dict or type(meta.get('schema')) is not int or meta['schema']!=1
+                or meta.get('kind')!='release' or meta.get('platform')!='linux-multi-cpython312'
+                or meta.get('release_id')!=release.get('release_id')
+                or meta.get('source_commit')!=release.get('source_commit')
+                or meta.get('version')!=release.get('version')
+                or meta.get('targets')!=[target] or target not in release['targets']):
+            raise InstallError('Application snapshot provenance differs from SDK')
+        record=helper._application(dict(release_id=meta['release_id'],target=target,
+            app_source=meta['source_commit'],manifest_sha256=digest(raw),archive_sha256=expected))
+        if identity(os.fstat(snapshot_fd))!=identity(before):
+            raise InstallError('Application snapshot changed during observation')
+        store=helper.CoreAuthority() if _store_factory is None else _store_factory(helper)
+        return store.record_application(record)
+    except (KeyError,TypeError,ValueError,UnicodeError,RecursionError):
+        raise InstallError('Application origin was not durably recorded') from None
 
 
 def verify_system_python():
@@ -505,6 +591,7 @@ def validate_existing(hashes, interpreter, manager, refresh, verified, *, missin
     dependencies = {str(CONTROL / name) for name in PRE_DNS_SOURCE_DEPENDENCIES}
     dns_dependencies = {str(CONTROL / name) for name in DNS_SOURCE_DEPENDENCIES}
     core_dependencies = {str(CONTROL / name) for name in CORE_SOURCE_DEPENDENCIES}
+    authority_dependencies = {str(CONTROL / name) for name in CORE_AUTHORITY_SOURCE_DEPENDENCIES}
     # Explicit refresh migrates only known complete historical closures. The
     # pre-network controller lacks firewall_support; older closures may also
     # lack the proxy dependencies or data-owner helper. Existing bytes must all
@@ -524,10 +611,12 @@ def validate_existing(hashes, interpreter, manager, refresh, verified, *, missin
     # Published pre-core DNS closures have every DNS helper, and no core helper.
     # Older closures lack all DNS and all core helpers. Never accept a partial
     # core group or derive old shapes by subtracting arbitrary current files.
+    pre_authority_missing = (core_dependencies,) + tuple(core_dependencies | dns_dependencies | item
+                                                        for item in pre_dns_missing)
+    pre_yaml_missing = (authority_dependencies,) + tuple(authority_dependencies | item
+                                                        for item in pre_authority_missing)
     yaml_dependencies = {str(CONTROL / name) for name in YAML_SOURCE_DEPENDENCIES}
-    known_missing = (yaml_dependencies,) + tuple(
-        yaml_dependencies | older for older in
-        ((core_dependencies,) + tuple(core_dependencies | dns_dependencies | item for item in pre_dns_missing)))
+    known_missing = (yaml_dependencies,) + tuple(yaml_dependencies | item for item in pre_yaml_missing)
     missing = (expected - set(receipt['files']) if isinstance(receipt, dict)
                and isinstance(receipt.get('files'), dict) else set())
     legacy = (refresh and isinstance(receipt, dict) and isinstance(receipt.get('files'), dict)
@@ -686,10 +775,17 @@ def main(argv=None):
                         help='Only authenticate the kit, command path and fixed OS interpreter; do not install')
     parser.add_argument('--local-target-only', action='store_true',
                         help='Retain the complete accepted manifest but download only the locally detected target bundle')
+    parser.add_argument('--record-origin-fd', type=int, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if (not sys.dont_write_bytecode or not sys.flags.isolated or not sys.flags.no_site
             or Path(sys.executable).resolve() != SYSTEM_PYTHON.resolve()):
         raise InstallError('Invoke with the fixed OS /usr/bin/python3 -B -I -S; no portable runtime')
+    if args.record_origin_fd is not None:
+        if args.preflight or args.refresh:
+            raise InstallError('Origin recording cannot install, refresh or preflight')
+        record_application_origin(args.kit,args.sha256,args.record_origin_fd,local_target_only=args.local_target_only)
+        print('已记录受验应用原包来源；尚未声明准备、激活或运行健康。')
+        return
     if args.preflight:
         if args.refresh:
             raise InstallError('--preflight does not refresh an installation')

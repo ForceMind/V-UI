@@ -9,6 +9,8 @@ import fcntl
 import hashlib
 import importlib.util
 import json
+import types
+import zipfile
 import os
 from pathlib import Path
 import shutil
@@ -17,7 +19,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from scripts.managed_ops_smoke import (_audit_released_writer_leases, _audit_trace,
     _copy_control, _database_values,
@@ -33,7 +35,7 @@ DNS_CONTROL_FILES = {
     'app/certificates/dns_backup.py': 'dns_backup.py',
 }
 CONTROL_SOURCE_FILES = (
-    'deploy/system_ops.py', 'deploy/ops_worker.py', 'app/release_tools.py', 'deploy/v-ui',
+    'deploy/system_ops.py', 'deploy/ops_worker.py', 'deploy/core_authority.py', 'app/release_tools.py', 'deploy/v-ui',
     'app/data_owner.py', 'app/services/proxy_store.py', 'app/services/upstream_profile.py',
     'app/services/mihomo_plan_record.py',
     'app/services/inbound_policy.py', 'scripts/firewall_support.py', *DNS_CONTROL_FILES,
@@ -395,6 +397,114 @@ class ManagedConsumerFixtureTests(unittest.TestCase):
             self.assertIn('os.getuid() != 0 and os.geteuid() != 0', worker)
             self.assertNotIn('os.environ', worker)
 
+    @contextmanager
+    def source_fixture(self):
+        """Only execute the emitted owner/temp source layer, without a worker."""
+        source=Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory(prefix='vui-managed-origin-unit-') as temporary:
+            control=Path(temporary).resolve();control.chmod(0o700)
+            config=control/'fixture-service.json'
+            config.write_text(json.dumps({'target':'aarch64-musl'}));config.chmod(0o600)
+            helper=control/'core_authority.py'
+            helper.write_bytes((source/'deploy/core_authority.py').read_bytes());helper.chmod(0o600)
+            controller=source/'deploy/system_ops.py'
+            spec=importlib.util.spec_from_file_location('owner_controlled_smoke_ops',controller)
+            ops=importlib.util.module_from_spec(spec);spec.loader.exec_module(ops)
+            ops.verify_installation=lambda:('systemd',types.SimpleNamespace(pw_uid=os.geteuid(),pw_gid=os.getegid()))
+            driver=_write_drivers(control,control/'instance',Path(sys.executable),config,controller=controller)
+            text=driver.read_text()
+            start=text.index('ops.CONTROL=CONTROL;')
+            end=text.index('ops._StageArchive=FixtureStageArchive')+len('ops._StageArchive=FixtureStageArchive')
+            namespace=dict(ops=ops,CONTROL=control,CONFIG=config,CONTROLLER=controller,os=os,stat=__import__('stat'),
+                hashlib=hashlib,json=json,importlib=importlib,Path=Path,contextmanager=contextmanager,
+                AUTHORITY_SHA=hashlib.sha256(helper.read_bytes()).hexdigest())
+            exec(compile(text[start:end],'<actual emitted simulated-root source layer>','exec'),namespace)
+            manifest=dict(schema=1,kind='release',platform='linux-multi-cpython312',release_id='fixture-candidate',
+                source_commit='a'*40,targets=['aarch64-musl'])
+            raw=json.dumps(manifest,indent=2).encode()
+            archive=control/'fixture-candidate.zip'
+            with zipfile.ZipFile(archive,'w') as pack:pack.writestr('MANIFEST.json',raw)
+            request=dict(protocol=1,action='stage',path=str(archive),sha256=hashlib.sha256(archive.read_bytes()).hexdigest())
+            account=types.SimpleNamespace(pw_uid=os.geteuid(),pw_gid=os.getegid())
+            yield ops,control,request,account,raw
+
+    def test_old_simulated_root_stage_fails_at_missing_receipt_before_worker(self):
+        source=Path(__file__).resolve().parents[1]
+        spec=importlib.util.spec_from_file_location('old_smoke_ops',source/'deploy/system_ops.py')
+        ops=importlib.util.module_from_spec(spec);spec.loader.exec_module(ops)
+        worker=Mock(side_effect=AssertionError('worker must not start before receipt'))
+        with patch.object(ops,'trusted_bytes',side_effect=FileNotFoundError('inert absent global receipt')) as read:
+            with self.assertRaises(FileNotFoundError):ops.prepare_candidate({},None,[],worker)
+        read.assert_called_once_with(Path('/usr/local/lib/v-ui/ops-control.json'),ops.MAX_JSON)
+        worker.assert_not_called()
+
+    def test_emitted_private_stage_runs_real_snapshot_origin_and_authority_before_worker(self):
+        with self.source_fixture() as (ops,control,request,account,raw):
+            worker=Mock();worker.receive.side_effect=[{'event':'prepared'},
+                {'event':'done','ok':True,'prepared_release':'fixture-candidate'}]
+            def factory(*args,**kwargs):
+                state=json.loads((control/'fixture-authority/authority.json').read_text())
+                self.assertEqual(len(state['applications']),1)
+                self.assertFalse(state['grants']);self.assertFalse(state['admissions'])
+                return worker
+            result=ops.prepare_candidate(request,account,[],factory)
+            self.assertEqual(result['prepared_release'],'fixture-candidate')
+            state=json.loads((control/'fixture-authority/authority.json').read_text())
+            self.assertEqual(next(iter(state['applications'].values())),dict(release_id='fixture-candidate',
+                target='aarch64-musl',app_source='a'*40,manifest_sha256=hashlib.sha256(raw).hexdigest(),
+                archive_sha256=request['sha256']))
+            self.assertEqual(list((control/'fixture-stage-inputs').iterdir()),[])
+            handed=worker.send.call_args_list[0].args[0]
+            self.assertNotEqual(handed['path'],request['path'])
+            self.assertFalse(Path(handed['path']).exists())
+            worker.exit_zero.assert_called_once_with();worker.close.assert_called_once_with()
+            self.assertEqual((control/'fixture-authority').stat().st_mode&0o777,0o700)
+            self.assertEqual((control/'fixture-authority/authority.json').stat().st_mode&0o777,0o600)
+
+    def test_emitted_stage_bad_digest_never_records_origin_or_starts_worker(self):
+        with self.source_fixture() as (ops,control,request,account,raw):
+            worker=Mock(side_effect=AssertionError('unverified material never dispatches'))
+            with self.assertRaisesRegex(ops.Refused,'digest'):
+                ops.prepare_candidate({**request,'sha256':'b'*64},account,[],worker)
+            worker.assert_not_called()
+            self.assertFalse((control/'fixture-authority/authority.json').exists())
+            self.assertEqual(list((control/'fixture-stage-inputs').iterdir()),[])
+
+    def test_emitted_restore_epoch_uses_real_private_authority_and_preserves_origins(self):
+        with self.source_fixture() as (ops,control,request,account,raw):
+            with ops.accepted_stage(request,account,[]):pass
+            path=control/'fixture-authority/authority.json';before=json.loads(path.read_bytes())
+            self.assertEqual(ops.revoke_core_epoch(),{'advanced':True})
+            after=json.loads(path.read_bytes())
+            self.assertNotEqual(after['epoch'],before['epoch'])
+            self.assertEqual(after['applications'],before['applications'])
+            self.assertEqual(after['installation_id'],before['installation_id'])
+            self.assertEqual(ops.revoke_core_epoch(),{'advanced':True})
+            latest=json.loads(path.read_bytes())
+            self.assertNotEqual(latest['epoch'],after['epoch'])
+            self.assertEqual(latest['applications'],before['applications'])
+
+    def test_emitted_source_helper_still_requires_receipt_hash_and_safe_file(self):
+        for fault in ('changed','symlink','mode'):
+            with self.subTest(fault=fault),self.source_fixture() as (ops,control,request,account,raw):
+                helper=control/'core_authority.py'
+                if fault=='changed':helper.write_bytes(helper.read_bytes()+b'\n# inert tamper')
+                elif fault=='symlink':
+                    kept=control/'retained-helper';helper.rename(kept);helper.symlink_to(kept)
+                else:helper.chmod(0o666)
+                with self.assertRaises((ops.Refused,OSError)):
+                    with ops.accepted_stage(request,account,[]):self.fail('bad source yielded')
+                self.assertFalse((control/'fixture-authority/authority.json').exists())
+
+    def test_emitted_stage_parent_remains_explicitly_traversable_and_owner_checked(self):
+        with self.source_fixture() as (ops,control,request,account,raw):
+            parent=control/'fixture-stage-inputs'
+            self.assertEqual(parent.stat().st_mode&0o777,0o755)
+            parent.chmod(0o700)
+            with self.assertRaisesRegex(RuntimeError,'traversable'):
+                with ops.accepted_stage(request,account,[]):self.fail('unsafe parent yielded')
+            self.assertFalse((control/'fixture-authority/authority.json').exists())
+
     def test_control_copy_requires_manifest_hashes_and_exact_unexecuted_wrapper(self):
         with tempfile.TemporaryDirectory(prefix='vui-managed-copy-unit-') as temporary:
             root = Path(temporary); payload = root / 'payload'; control = root / 'control'
@@ -461,7 +571,7 @@ else:
     assert callable(api._MaintenanceSession)
     for name in ('errors','dns_store','cloudflare','dns_journal','dns_backup'):
         module=sys.modules['app.certificates.'+name]
-        assert Path(module.__file__).parent==Path(sys.argv[1]).parent
+        assert Path(module.__file__).parent==Path(sys.argv[1]).resolve().parent
     assert not any(name.split('.')[0] in ('cryptography','sqlalchemy','yaml') for name in sys.modules)
     assert 'app.certificates.material' not in sys.modules
     assert sys.flags.isolated and sys.flags.no_site and sys.flags.dont_write_bytecode

@@ -32,6 +32,7 @@ import unittest
 import yaml
 import psutil
 
+from tests.core_candidate_context import server_version, singbox_client
 from app.services.core_manager import SingBoxAdapter
 from app.services.proxy_policy import (
     AddressPolicy, DNS_TAG, LOCAL_TAG, NAMESPACE, UPSTREAM_TAG,
@@ -390,7 +391,7 @@ class DoubleHopFixture(unittest.TestCase):
         if not cores or not mihomo:
             raise AssertionError("Enabled double-hop test requires both pinned binary paths")
         cls.singbox, cls.mihomo = str(Path(cores)/"sing-box"), mihomo
-        for command, prefix in (([cls.singbox, "version"], "sing-box version 1.14.2\n"),
+        for command, prefix in (([cls.singbox, "version"], f"sing-box version {server_version('sing-box', '1.14.2')}\n"),
                                 ([cls.mihomo, "-v"], "Mihomo Meta v1.19.32 ")):
             result = subprocess.run(command, text=True, capture_output=True, timeout=15)
             output = result.stdout + result.stderr
@@ -535,7 +536,7 @@ class DoubleHopFixture(unittest.TestCase):
         return self.sanitized("\n".join(path.name + ":\n" + path.read_text(errors="replace")
                                         for path in sorted(self.root.glob("*.log"))))
 
-    def process(self, label, config, *, client="singbox", env=None):
+    def process(self, label, config, *, client=None, env=None):
         path = self.path(label, "yaml" if client == "mihomo" else "json")
         path.write_text(yaml.safe_dump(config, sort_keys=False) if client == "mihomo" else json.dumps(config))
         path.chmod(0o600)
@@ -545,8 +546,9 @@ class DoubleHopFixture(unittest.TestCase):
             check = [self.mihomo, "-t", "-d", str(home), "-f", str(path)]
             command = [self.mihomo, "-d", str(home), "-f", str(path)]
         else:
-            check = [self.singbox, "check", "-c", str(path)]
-            command = [self.singbox, "run", "-c", str(path)]
+            binary = singbox_client(self.singbox) if client == "singbox" else self.singbox
+            check = [binary, "check", "-c", str(path)]
+            command = [binary, "run", "-c", str(path)]
         result = subprocess.run(check, text=True, capture_output=True, timeout=15, env=env or self.env)
         self.assertEqual(result.returncode, 0, self.sanitized(result.stdout + result.stderr))
         process_class = ReadyMihomoProcess if client == "mihomo" else BoundCoreProcess

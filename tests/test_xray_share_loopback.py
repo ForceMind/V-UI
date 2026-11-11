@@ -5,6 +5,7 @@ isolated per-child trust; no host trust, browser, public CA or real credentials.
 """
 from contextlib import ExitStack
 import base64
+import http.client
 import json
 import os
 from pathlib import Path
@@ -14,13 +15,15 @@ from unittest.mock import patch
 import yaml
 from cryptography.hazmat.primitives import serialization
 
+from tests.core_candidate_context import application_host, runtime_for_fixture
 from app.api import inbounds as inbound_api, subscription as subscription_api
 from app.models import database
 from app.services.core_manager import XrayAdapter, core_manager
 from test_real_cores import DiagnosticXrayRuntime
 import test_auth as auth_tests
 import test_certificates as certificate_fixtures
-from loopback_helpers import certificate_files, start_http_target, unused_port, http_through, require_tls_rejection
+from loopback_helpers import (certificate_files, http_authority, http_through, require_rejection_evidence,
+                              require_tls_rejection, start_http_target, unused_port)
 from proxy_loopback_support import ReadyMihomoProcess
 from inbound_routing_real_helpers import yaml_client, uri_client
 
@@ -39,9 +42,44 @@ class XrayShareLoopbackTests(unittest.TestCase):
         client.start(port)
         return client, log
 
+    def require_private_target_rejection(self, proxy_port, client, client_log, server_log):
+        # The same authenticated YAML client has just delivered HTTP over IPv6.
+        # A separate reachable IPv4 target must remain untouched by its probe.
+        host = '127.0.0.1'
+        with ExitStack() as control_stack:
+            port, deliveries = start_http_target(control_stack, host)
+            control = http.client.HTTPConnection(host, port, timeout=3)
+            try:
+                control.request('GET', '/reachable-control')
+                response = control.getresponse()
+                self.assertEqual((response.status, response.read()), (200, b'VUI-LOOPBACK-TARGET'))
+            finally:
+                control.close()
+            expected = [(http_authority(host, port), '/reachable-control')]
+            self.assertEqual(deliveries, expected)
+            offset = len(server_log.read_text(errors='replace'))
+
+            def attempt():
+                try:
+                    status, _ = http_through(proxy_port, host, port)
+                except (OSError, http.client.HTTPException):
+                    return
+                self.assertGreaterEqual(status, 400)
+
+            log = require_rejection_evidence(self, server_log, attempt, deliveries,
+                (f'blocked target: tcp:{host}:{port}',), expected_count=1, log_offset=offset,
+                label='Xray private IPv4 egress rejection')
+            self.assertRegex(log, rf'blocked target: tcp:127\.0\.0\.1:{port}(?![0-9])')
+            client.stop()
+            self.assertNotIn('using direct', client_log.read_text(errors='replace').lower())
+        self.assertEqual(deliveries, expected, 'Xray private IPv4 probe reached the application target')
+        print('Xray candidate VLESS/TLS: verified IPv6 forwarding and actual blocked target for private IPv4, no delivery or DIRECT')
+
     def test_real_uri_provider_and_yaml_forward_and_wrong_ca_rejects(self):
         with ExitStack() as stack:
             root = Path(self.temp.name)
+            target_host = application_host('xray')
+            candidate_ipv6 = ':' in target_host
             certificate = self.issue(domain='vpn.example.test')
             ca = root / 'fixture-roots.pem'
             ca.write_bytes(self.provider.ca.public_bytes(serialization.Encoding.PEM))
@@ -49,13 +87,16 @@ class XrayShareLoopbackTests(unittest.TestCase):
             env = {**os.environ, 'SSL_CERT_FILE': str(ca), 'SSL_CERT_DIR': str(empty)}
             server_port = unused_port()
             adapter = XrayAdapter()
-            runtime = DiagnosticXrayRuntime('xray', Path(os.environ['VUI_TEST_CORES'])/'xray', root/'xray-runtime')
+            runtime = runtime_for_fixture(DiagnosticXrayRuntime, 'xray', Path(os.environ['VUI_TEST_CORES'])/'xray', root/'xray-runtime')
             stack.callback(runtime.close); adapter._runtime = runtime
             def apply(core, *, activate=True, **kwargs):
                 self.assertEqual(core,'xray')
                 with database.SessionLocal() as db:
                     rows = db.query(database.Inbound).filter_by(core='xray').all()
-                    return runtime.apply(adapter.build_config(rows), activate=activate)
+                    config = adapter.build_config(rows)
+                    if candidate_ipv6:
+                        config['log']['loglevel'] = 'info'
+                    return runtime.apply(config, activate=activate)
             stack.enter_context(patch.dict(core_manager.adapters, {'xray':adapter}))
             # Issuance and unrelated global policy are fixture controls. Node
             # auth/revision/CRUD, adapter generation and runtime are production.
@@ -80,7 +121,7 @@ class XrayShareLoopbackTests(unittest.TestCase):
             changed = self.client.put(f'/api/inbounds/{identity}',headers=headers,
                 json={'remark':'synthetic-edited','expected_instance_revision':editor['mutation_revision']})
             self.assertEqual(changed.status_code,200,changed.text)
-            target_port, deliveries = start_http_target(stack)
+            target_port, deliveries = start_http_target(stack, target_host)
             link = self.client.get(f'/api/subscription/link/{identity}?host=127.0.0.1',headers=headers)
             self.assertEqual(link.status_code,200,link.text)
             subscription = self.client.get('/api/subscription/raw?host=127.0.0.1&core=xray',headers=headers)
@@ -100,21 +141,33 @@ class XrayShareLoopbackTests(unittest.TestCase):
                     proxy_port, controller = unused_port(), unused_port()
                     config = (yaml_client({'proxies':[node]}, [node['name']], proxy_port, controller) if kind == 'yaml'
                               else uri_client(uri, proxy_port, controller))
-                    client, _ = self.start_client(stack, root, kind, config, proxy_port, env)
+                    if candidate_ipv6:
+                        config['ipv6'] = True
+                        self.assertEqual(config['rules'], ['MATCH,ENTRY'])
+                        self.assertNotIn('DIRECT', json.dumps(config))
+                    client, client_log = self.start_client(stack, root, kind, config, proxy_port, env)
                     before = len(deliveries)
-                    status, body = http_through(proxy_port, '127.0.0.1', target_port)
+                    status, body = http_through(proxy_port, target_host, target_port)
                     self.assertEqual(status, 200); self.assertEqual(body, b'VUI-LOOPBACK-TARGET')
                     self.assertEqual(len(deliveries), before + 1)
-                    client.stop()
+                    if candidate_ipv6:
+                        self.assertEqual(deliveries[before], (http_authority(target_host, target_port), '/probe'))
+                    if candidate_ipv6 and kind == 'yaml':
+                        self.require_private_target_rejection(proxy_port, client, client_log,
+                                                              root/'synthetic-xray-launch.log')
+                    else:
+                        client.stop()
             # Use the same generated node bytes with an unrelated trust root.
             other_ca, _, _ = certificate_files(root, 'untrusted')
             bad_env = {**env, 'SSL_CERT_FILE':str(other_ca)}
             port = unused_port(); config = yaml_client({'proxies':[node]}, [node['name']], port, unused_port())
+            if candidate_ipv6:
+                config['ipv6'] = True
             rejected, log = self.start_client(stack, root, 'untrusted', config, port, bad_env)
             expected = len(deliveries)
             def attempt():
                 try:
-                    result = http_through(port, '127.0.0.1', target_port)
+                    result = http_through(port, target_host, target_port)
                     self.assertNotEqual(result[0], 200)
                 except OSError:
                     pass

@@ -27,6 +27,7 @@ import httpx
 import yaml
 
 from inbound_routing_real_helpers import MixedDeliveryEvidence, uri_client, yaml_client
+from tests.core_candidate_context import server_version
 from loopback_helpers import DnsAnswers, _socks_udp_target, certificate_files, dns_query
 from proxy_loopback_support import (
     BODY, DIRECT_EGRESS, INGRESS, SNI, TARGET, UPSTREAM, UPSTREAM_EGRESS,
@@ -573,7 +574,7 @@ class InboundRoutingRealTests(DoubleHopFixture):
         self.assertEqual(len(self.answers.snapshot()), protected_dns)
         self.assertEqual(self.client_incarnations, [self.client_pid], "Device process changed during the case")
         print("ordinary routing evidence: " + self.sanitized(json.dumps({
-            "case": label, "pins": {"sing-box": "1.14.2", "mihomo": "1.19.32"},
+            "case": label, "pins": {"sing-box": server_version("sing-box", "1.14.2"), "mihomo": "1.19.32"},
             "artifacts": self.artifacts, "client_incarnations": self.client_incarnations,
             "transitions": self.transitions_seen,
             "https_deliveries": len(self.target.snapshot()),

@@ -14,6 +14,7 @@ import zipfile
 import yaml
 
 from app.release_tools import target_key
+from core_switch_fixture_runner import first_failure_diagnostic
 
 from inbound_routing_real_helpers import yaml_client
 from proxy_loopback_support import BODY, ReadyMihomoProcess, https_target, https_through
@@ -84,6 +85,20 @@ def installed_core_switch(check, source, work, api, service_python, ca, cert, ke
             for name in sorted(expected):
                 subprocess.run(['sudo', 'install', '-o', 'root', '-g', 'root', '-m', '0600',
                                 str(candidate/name), str(runner_root/core/'candidate'/name)], check=True)
+
+        # Probe only the installed Root-owned authority helper. This uses fake
+        # grant identity/intent and never calls application/core mutation.
+        authority_probe = runner_root/'authority.py'
+        subprocess.run(['sudo', 'install', '-o', 'root', '-g', 'root', '-m', '0600',
+                        str(source/'tests/core_authority_installed.py'), str(authority_probe)], check=True)
+        expected_authority = hashlib.sha256((source/'deploy/core_authority.py').read_bytes()).hexdigest()
+        subprocess.run(['sudo', '/usr/bin/env', 'GITHUB_ACTIONS=true', 'RUNNER_ENVIRONMENT=github-hosted',
+                        'GITHUB_REPOSITORY=ForceMind/V-UI', '/usr/bin/python3', '-B', '-I', '-S',
+                        str(authority_probe), expected_authority, source_sha], check=True, timeout=45)
+
+        remote_probe = runner_root/'remote-tasks.py'
+        subprocess.run(['sudo', 'install', '-o', 'root', '-g', 'root', '-m', '0600',
+                        str(source/'tests/core_remote_tasks_installed.py'), str(remote_probe)], check=True)
 
         # Xray 26.10.21 blocks private IPv4 egress by default. A documentation
         # IPv6 address is outside that matcher and stays local to this runner.
@@ -224,7 +239,8 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
             error = result.get('error')
             code = error if type(error) is str and re.fullmatch(r'[A-Z0-9_]{1,80}', error) else 'NO_CODE'
             check.assertEqual(output.returncode == 0, not rejected,
-                              case + ' installed core-switch outcome mismatch ' + code)
+                              case + ' installed core-switch outcome mismatch ' + code
+                              + first_failure_diagnostic(output.stderr))
             check.assertIs(result['ok'], not rejected)
             if rejected:
                 check.assertEqual(set(result), {'ok', 'error'})
@@ -399,3 +415,87 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
             through(name, 'backup-restored-'+name)
         check.assertEqual([path for _, _, path in traffic.snapshot()], markers)
         print('VUI_INSTALLED_CORE_RESTORE_ACCEPTANCE: real systemd provided TLS, retained node data, revoked access and both stock TCP paths')
+
+        # Independent Root daemon tasks use existing installed/qualified core
+        # selections. There is no fake official release in this remote path.
+        def remote_task(mode):
+            process = subprocess.run(['sudo', '/usr/bin/env', 'GITHUB_ACTIONS=true',
+                'RUNNER_ENVIRONMENT=github-hosted', 'GITHUB_REPOSITORY=ForceMind/V-UI',
+                '/usr/bin/python3', '-B', '-I', '-S', str(remote_probe), mode],
+                capture_output=True, text=True, timeout=800)
+            failure = re.fullmatch(r'VUI_INSTALLED_CORE_REMOTE_TASK_FAILED:([A-Z_]{1,40})\n?', process.stderr)
+            stage = failure[1] if failure else 'UNCLASSIFIED'
+            check.assertEqual(process.returncode, 0, 'Installed remote core task failed at '+stage+'; private output withheld')
+            value = json.loads(process.stdout)
+            check.assertEqual(set(value), {'id', 'action', 'state', 'selection_revision'})
+            check.assertRegex(value['id'], r'^[a-f0-9]{32}$')
+            check.assertEqual(value['state'], 'failed' if mode=='backup-pending' else 'succeeded')
+            check.assertEqual(value['selection_revision'], restored_revision)
+            return value
+
+        remote_before = snapshot()
+        backup_task = remote_task('backup')
+        recovery_task = remote_task('backup-recovery')
+        remote_task('backup-pending')
+        check.assertEqual(subprocess.check_output(
+            ['systemctl','show','v-ui.service','-p','ActiveState','--value'],text=True).strip(),'inactive')
+        with PrivateMenuSession(['sudo','/usr/local/sbin/v-ui'],cwd='/tmp',env=dict(os.environ),
+                                timeout=850,private_values=()) as terminal:
+            terminal.expect('请选择: ')
+            terminal.send('18\n')
+            terminal.expect('确认执行 [y/N]: ')
+            terminal.send('y\n')
+            check.assertIn('备份中断恢复完成，已核对原服务状态；未重新创建备份。',terminal.expect('请选择: '))
+            terminal.send('0\n')
+            terminal.finish()
+        # A further real backup proves the original pending obligation was
+        # durably cleared, rather than merely starting the panel service.
+        remote_task('backup')
+        remote_after = snapshot()
+        check.assertEqual(selected(restored_revision), restored_selection)
+        for field in ('current', 'data', 'users'):
+            check.assertEqual(remote_after[field], remote_before[field])
+        for name in nodes:
+            for field in ('node', 'intent', 'binary', 'version', 'bundle'):
+                check.assertEqual(remote_after['cores'][name][field], remote_before['cores'][name][field])
+            through(name, 'remote-task-retained-'+name)
+        check.assertEqual([path for _, _, path in traffic.snapshot()], markers)
+        check.assertEqual(json.loads(api('/api/auth/me')[1]), original_identity)
+
+        def grants(*arguments):
+            process = subprocess.run(['sudo', '-u', 'v-ui', '/usr/bin/python3', '-B', '-I', '-S',
+                '/usr/local/lib/v-ui/maintenance_cli_worker.py', *arguments],
+                capture_output=True, text=True, timeout=60)
+            check.assertEqual(process.returncode, 0, 'Installed grant CLI failed; private output withheld')
+            return json.loads(process.stdout)
+
+        def exchange(scopes):
+            record = grants('create', scopes, '600')
+            status, raw = api('/api/maintenance/exchange', {'grant':record['link'].split('#grant=',1)[1]})
+            check.assertEqual(status, 200, 'Installed task query exchange failed; private output withheld')
+            return record, ['Authorization: Bearer '+json.loads(raw)['token']]
+
+        legacy, old_headers = exchange('diagnose,nodes,share,relay,certificates,operate,upgrade,destructive')
+        reader, read_headers = exchange('core_read')
+        body = dict(action='backup', parameters=dict(selection_revision=restored_revision))
+        try:
+            for task_record in (backup_task, recovery_task):
+                path = '/api/maintenance/core-tasks/'+task_record['id']
+                check.assertEqual(api(path, extra_headers=old_headers)[0], 403)
+                status, raw = api(path, extra_headers=read_headers)
+                check.assertEqual(status, 200, 'Explicit core_read task lookup failed; private output withheld')
+                value = json.loads(raw)
+                check.assertEqual((value['id'], value['state']), (task_record['id'], 'succeeded'))
+                check.assertNotIn('parameters', value)
+                check.assertNotIn('_backup', value)
+            check.assertEqual(api('/api/maintenance/tasks', extra_headers=read_headers)[0], 403)
+            for headers in (old_headers, read_headers):
+                check.assertEqual(api('/api/maintenance/core-tasks', body,
+                    extra_headers=[*headers, 'Idempotency-Key: '+'c'*32])[0], 403)
+            grants('revoke', str(reader['id']))
+            check.assertEqual(api('/api/maintenance/core-tasks/'+backup_task['id'], extra_headers=read_headers)[0], 401)
+        finally:
+            grants('revoke', str(legacy['id']))
+            grants('revoke', str(reader['id']))
+        print('VUI_INSTALLED_CORE_REMOTE_TASK_ACCEPTANCE: actual installed daemon backup, Root-only fake binding with real service-UID socket, durable same-nonce replay, changed-intent rejection, stale revision without service change, independent revocation and restart retention passed; ordinary HTTP core_read query and old-scope/no-Root denial passed')
+        print('VUI_INSTALLED_CORE_BACKUP_RECOVERY_ACCEPTANCE: real service-UID writer conflict after stop, durable pending across daemon restart, explicit backup-only and stopped-panel Root menu recovery, no archive replay and both stock TCP paths passed')

@@ -1,8 +1,8 @@
 # 安装与首次运行
 
-当前公开稳定版为 **v0.4.22**，源码为 **v0.4.23** 候选，尚未发布。普通新用户使用下方无参数短入口，它仍安装公开22；本页固定版本/完整套件示例是23正式发布并完成核验后才使用的准备说明。
+当前公开稳定版为 **v0.4.24**。普通新用户使用下方无参数短入口；它固定核验已公开安装器和完整清单，已有安装先进入管理菜单。
 
-已有实例先备份，升级保留原配置、管理员、节点、订阅与证书。22完整包从[公开Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.22)取得；23模板须等待对应正式Release及完整资产，不混用分支文件、其他版本或不明下载站。
+已有实例先备份，升级保留原配置、管理员、节点、订阅与证书。完整包从[官方 v0.4.24 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.24)取得，不混用分支文件、其他版本或不明下载站。
 
 ## 1. 一行安装
 
@@ -12,14 +12,14 @@
 bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh)
 ```
 
-固定版本参数的示例跟随源码候选；**仅在v0.4.23正式发布、取得并核验该版受信安装器后使用，当前不要执行**。摘要占位符必须替换为该版独立核验的SHA256SUMS整文件摘要：
+需要手动固定版本时，先从正式 Release 取得并核验 `install.sh`，再使用下列命令；这里的摘要对应 v0.4.24 的完整 `SHA256SUMS` 文件：
 
 ```bash
-bash install.sh --version v0.4.23 --with-global-cli \
-  --kit-sha256 '<独立核验的SHA256SUMS整文件SHA-256>' --interactive
+bash install.sh --version v0.4.24 --with-global-cli \
+  --kit-sha256 a3f5cafcd556173a11748c2584e0eb7e096fe4e9e7d51108d6502d6bba2628cc --interactive
 ```
 
-不要把此参数传给当前仍固定22的`main/setup.sh`。22的公开套件及历史安装说明见[固定22说明](https://github.com/ForceMind/V-UI/blob/59fc1cce15df8da850dd0a13d58b4efe6879a6be/docs/INSTALLATION.md)。
+完整安装器的校验参数不用于覆盖短入口的固定信任锚。v0.4.22 的公开套件及历史安装说明见[固定22说明](https://github.com/ForceMind/V-UI/blob/59fc1cce15df8da850dd0a13d58b4efe6879a6be/docs/INSTALLATION.md)。
 
 入口只接受内置且已公开的受信版本摘要，不自动安装开发分支。`main/setup.sh` 本身是可变仓库文件，需要信任此仓库；需要独立固定入口摘要时，请使用 Release 内的说明。过程替换下载失败可能只打印 curl 错误，外层空 Bash 仍返回 0，不能只凭该短命令的退出码认定安装成功。
 
@@ -76,12 +76,12 @@ Hysteria2 / TUIC 使用节点 UDP 端口承载 QUIC，TCP 同号规则不能代�
 
 适合需要审核下载步骤或离线转移套件的管理员。先接受官方 Release 作为软件来源，并从受信发布记录或独立核验渠道取得**整个 `SHA256SUMS` 文件的 SHA-256**。摘要证明字节一致，不是签名，不能用未知下载文件的自算值认证来源。
 
-以下是v0.4.23正式发布后的完整19项资产下载与核验模板；**当前候选未公开，不要执行**。发布资格、真实摘要与资产齐全后才逐项校验并复制到root私有目录；目标架构须按实际机器修改。GitHub 自动生成的 Source code ZIP/TAR 不替代 `vui-source.zip`。
+以下是v0.4.24完整19项资产下载与核验模板。逐项校验并复制到root私有目录；目标架构须按实际机器修改。GitHub自动生成的Source code ZIP/TAR不替代`vui-source.zip`。
 
 ```sh
 set -euo pipefail
 umask 077
-VERSION=v0.4.23
+VERSION=v0.4.24
 TARGET=x86_64-gnu
 KIT_SHA='<填写已接受的 SHA256SUMS 整文件 SHA-256>'
 case "$TARGET" in x86_64-gnu|aarch64-gnu|x86_64-musl|aarch64-musl) ;; *) exit 1;; esac
@@ -170,9 +170,9 @@ Python安装控制器的`--dry-run`会验证包并输出平台、防火墙/端�
 
 root 负责初始化和受管控制；应用、核心与 Certbot 使用专用低权限用户。不要以 root 执行服务用户可写的 portable Python 或 payload，不把配置文件当 shell 执行。
 
-## DNS候选的安装与升级边界
+## DNS-01 的安装与升级边界
 
-DNS-01在已安装并可登录的面板内由管理员配置，不替代首次安装的HTTP-01流程；初装默认仍需公网TCP 80。操作见[候选DNS指南](DNS01_CLOUDFLARE.md)。
+DNS-01在已安装并可登录的面板内由管理员配置，不替代首次安装的HTTP-01流程；初装默认仍需公网TCP 80。操作见[Cloudflare DNS-01指南](DNS01_CLOUDFLARE.md)。
 
 受支持升级遇到有效的已应用DNS面板绑定，会复用已应用旧revision，不重新签发或修改联系人。同一证书ID存在待应用版本时，保留期望值、错误和当前已应用材料，不把待应用状态提升为成功；期望/已应用ID冲突或材料损坏时明确拒绝混用。已有节点、凭据、传输和未知高级字段继续保留，停止的核心不会被证书操作擅自启动。
 
@@ -182,4 +182,4 @@ DNS-01在已安装并可登录的面板内由管理员配置，不替代首次�
 
 推荐短入口注册全局 `v-ui`。`sudo v-ui` 的 **12 在线升级**沿用原配置，**13 维护授权**默认只读、30 分钟，最长 180 天；详见[运维指南](OPERATIONS.md)。旧式安装缺少全局入口时，使用短入口升级，或按[受管控制说明](MANAGED_OPERATIONS.md)准备受信组件。
 
-保留离机备份和原版本运行时。构建和安装资格由 Actions 验收，用户主机与客户端需自行核对；公开版和候选均**浏览器未验证**，23的完整构建与真实安装/升级仍待准确Actions资格。历史安装问题与原始失败见[历史索引](history/README.md)。
+保留离机备份和原版本运行时。v0.4.24 的四目标构建、新装与九个公开旧版保数据升级已由 Actions 验收。正式应用来源及公开校验见[发布记录](RELEASING.md#当前稳定版)。用户主机与客户端需自行核对；**浏览器未验证**，历史问题与原始失败见[历史索引](history/README.md)。

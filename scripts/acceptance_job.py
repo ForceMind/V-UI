@@ -27,6 +27,7 @@ FETCH_COMMAND = [sys.executable, '-B', 'scripts/fetch_mihomo.py', str(MIHOMO.par
 MAX_LOG = 16_000_000
 HEADER = 'VUI_ACCEPTANCE_CONTEXT '
 FOOTER = 'VUI_ACCEPTANCE_EXIT '
+UPGRADE_23_MARKER = 'VUI_23_TO_24_UPGRADE_ACCEPTANCE:'
 
 
 CORE_SWITCH_FIXTURE = WORK / 'core-switch-fixture'
@@ -34,6 +35,10 @@ CORE_SWITCH_CORES = ('sing-box', 'xray')
 CORE_SWITCH_MARKER = b'VUI_INSTALLED_CORE_SWITCH_ACCEPTANCE:'
 CORE_INTERRUPT_MARKER = b'VUI_INSTALLED_CORE_INTERRUPT_ACCEPTANCE:'
 CORE_RESTORE_MARKER = b'VUI_INSTALLED_CORE_RESTORE_ACCEPTANCE:'
+CORE_REMOTE_MARKERS = (
+    (b'VUI_INSTALLED_CORE_REMOTE_TASK_ACCEPTANCE:', 'CORE_REMOTE_TASK_EVIDENCE_REQUIRED'),
+    (b'VUI_INSTALLED_CORE_BACKUP_RECOVERY_ACCEPTANCE:', 'CORE_BACKUP_RECOVERY_EVIDENCE_REQUIRED'),
+)
 
 def matrix_for_version(version):
     number = core._version(version)
@@ -187,6 +192,11 @@ def validate_test_log(raw, expected_context):
                and len(re.findall(r'^Ran [0-9]+ tests? in ', text, re.M)) == 1
                and len(re.findall(r'^OK$', text, re.M)) == 1
                and not re.search(r'\b(?:SKIP|SKIPPED|skipped|FAILED|ERROR)\b', text), 'TEST_LOG_NOT_ONE_UNSKIPPED_SUCCESS')
+    if context['identity']['version']=='0.4.24' and context['role']=='upgrade-0.4.23':
+        matches=[line for line in lines if UPGRADE_23_MARKER in line]
+        core._need(len(matches)==text.count(UPGRADE_23_MARKER)==1
+                   and matches[0].startswith(UPGRADE_23_MARKER+' ')
+                   and matches[0][len(UPGRADE_23_MARKER):].strip(),'UPGRADE_23_EVIDENCE_REQUIRED')
 
 
 def validate_core_switch_evidence(raw_log):
@@ -209,6 +219,14 @@ def validate_core_switch_evidence(raw_log):
                and restored[0][len(CORE_RESTORE_MARKER):].strip()
                and raw_log.find(CORE_RESTORE_MARKER) > raw_log.find(CORE_INTERRUPT_MARKER),
                'CORE_RESTORE_EVIDENCE_REQUIRED')
+    previous = raw_log.find(CORE_RESTORE_MARKER)
+    for marker, error in CORE_REMOTE_MARKERS:
+        lines = [line for line in raw_log.splitlines() if marker in line]
+        position = raw_log.find(marker)
+        core._need(len(lines) == raw_log.count(marker) == 1
+                   and lines[0].startswith(marker + b' ')
+                   and lines[0][len(marker):].strip() and position > previous, error)
+        previous = position
 
 
 def _exit_code(value):

@@ -2,11 +2,19 @@
 
 ## 当前稳定版
 
+[v0.4.24](https://github.com/ForceMind/V-UI/releases/tag/v0.4.24) 已公开，正式应用源为 `8b8d7cf82e55609a205455b351f659eb9de91974`，Release ID 为 440129208。准确源的十组 Actions、32 个 job、新装和九个公开旧版保数据升级见[集成验收](https://github.com/ForceMind/V-UI/pull/158)。应用门禁晋升四目标同源制品，19 项资产的清单与公开摘要已匿名比对。[应用发布运行](https://github.com/ForceMind/V-UI/actions/runs/42786336300)
+
+sing-box 1.14.3-r1 与 Xray 26.10.21-r1 依次公开，每个组件的 6 项资产及应用来源均通过匿名回读。两次晋升后，应用 `latest` 仍为 v0.4.24。[sing-box 组件](https://github.com/ForceMind/V-UI/releases/tag/core-sing-box-v1.14.3-r1) · [Xray 组件](https://github.com/ForceMind/V-UI/releases/tag/core-xray-v26.10.21-r1)
+
+公开安装器 SHA-256 为 `722198cbaedeb69fcc945f4869b39276ecbfd011620c66def15a632509240f7d`，完整 `SHA256SUMS` 文件 SHA-256 为 `a3f5cafcd556173a11748c2584e0eb7e096fe4e9e7d51108d6502d6bba2628cc`。短入口单独跟踪，公开应用包使用原冻结源码。浏览器未验证。
+
+## v0.4.22 发行证据（历史）
+
 [v0.4.22](https://github.com/ForceMind/V-UI/releases/tag/v0.4.22) 已公开，正式应用源为 `558687a76cd29f4e4735284926eb05bf6664472e`，Release ID为437741132。[发布流程42398527616](https://github.com/ForceMind/V-UI/actions/runs/42398527616)晋升该提交的已验制品；公开19项资产、真实小文件字节和摘要已匿名核验，旧21资产保持。
 
 短入口随后经 PR139→dev、PR140→main 合入 `39181e0cdb9643422a19049df942b208f876faf4`。入口候选/dev/main各自完成九组/12 jobs；[实际 main 短命令验收42405651147](https://github.com/ForceMind/V-UI/actions/runs/42405651147)和[公开完整安装验收42405651162](https://github.com/ForceMind/V-UI/actions/runs/42405651162)分别通过。入口 SHA 不是应用发布源，不重新生成或重标22资产。完整版本证据见[本版记录](MAINTENANCE_SHARE_0422.md)。浏览器未验证。
 
-## v0.4.23候选状态
+## v0.4.23候选状态（历史）
 
 当前源码候选为 **v0.4.23**，Cloudflare DNS-01、通配符、绑定与私有备份兼容源码及独立审查已收口。准确候选完整Actions、四目标、新装与所有旧版升级尚未收口；没有受保护分支合并、公开23、切换入口或生产升级授权。失败与未开始的运行记录见[候选契约](DNS01_CLOUDFLARE_CONTRACT.md#候选与验收状态)。
 
@@ -14,7 +22,7 @@
 
 ## 版本、说明和兼容
 
-纯文档、协作模板及不改变产品行为的说明更正不提升应用版本。用户可见修复、API/数据契约或协议行为变化需要独立评估版本和迁移范围；在现有 `0.x.y` 体系内保持 `VERSION`、应用版本、安装器的当前版本示例和发布说明一致。不能以改文档版本代替真实产品发布。
+纯文档、协作模板及不改变产品行为的说明更正不提升应用版本。用户可见修复、API/数据契约或协议行为变化需要独立评估版本和迁移范围。`VERSION`、应用版本和候选发行说明一致；用户安装示例及稳定版文档索引跟随已公开短入口的固定版本。候选升版不提前改公开安装命令。
 
 每次发行说明应写清用户改变、升级建议、兼容/迁移边界、已知限制和实际验证。涉及持久化或认证变化时说明原数据、会话、凭据、订阅和证书的保留或失效条件，以及恢复的前置要求。不能把回滚程序等同于可安全回滚已迁移数据。
 
@@ -56,16 +64,24 @@ P1提供一次构建、独立角色消费及attempt绑定，已在main `3606cad`
 
 先上传草稿并逐项验证资产字节/摘要，再按明确批准公开。已有 tag、Release或资产不覆盖；发现问题以新版本修复，保留旧资产及原失败记录。
 
+## P3 核心组件晋升
+
+组件独立于应用发布。先验准确应用提交的新装、升级和常规门禁；同源组件工作流还须有四目标原生TCP、x86_64 GNU现有协议、ARM64受管及两种核心的生产收据。旧固定核心的loopback结果、仅构建的候选或其他attempt不授组件资格。候选收据本身始终标明未公开、未独立授予最终资格。
+
+本批组件兼容范围只包含实际公开应用的准确source。经分别明确授权后，按“应用公开并读回→同一默认HEAD的组件晋升→短入口独立更新”的顺序执行。现有人工发布工作流的组件分支要求核对核心名称、准确应用VERSION/commit、最新同源候选run，以及`RELEASE CORE <组件tag> <commit>`确认；保留原权限，不用本机运行发布器作演习。
+
+组件晋升仅上传同一受验候选的 `CORE-RELEASE.json`、`SHA256SUMS` 和四目标ZIP。草稿逐项读回且重新核HEAD/run/attempt后，才按 GitHub 的 [`make_latest=false` 发布选项](https://docs.github.com/en/rest/releases/releases#update-a-release)公开并核对应用latest不变。已有tag或Release不覆盖；上传/晋升结果未知时核对已知原记录，不重复发起或删除旧资产。
+
 ## 公开核验后再切短入口
 
 公开后独立匿名核对tag目标、latest、公开状态、完整资产集合、每项digest与实际小文件字节，核对`RELEASE.json.source_commit`，并确认旧版资产ID/大小/digest保持。
 
 只有这些检查成功后，才通过独立PR更新`setup.sh`的版本、真实`install.sh`字节SHA-256、完整`SHA256SUMS`字节SHA-256，以及`short-install.yml`的冻结公开产品源和直接合同。清单整文件摘要不等于某个ZIP或清单中一行的摘要。
 
-入口候选/dev/main须独立验收；PR和dev使用准确提交URL，main合并后另验实际可变的`main/setup.sh` URL。应用源与入口源分别记录，不因入口或文档推进而重建已公开套件。以下参数模板仅在**v0.4.23正式发布、完整资产和真实摘要均已核验后**使用，当前候选不要执行；摘要占位符必须换成该版独立核验的SHA256SUMS整文件摘要。目前的`main/setup.sh`仍锁定22，不能提前传入23参数：
+入口候选/dev/main须独立验收；PR和dev使用准确提交URL，main合并后另验实际可变的`main/setup.sh` URL。应用源与入口源分别记录，不因入口或文档推进而重建已公开套件。以下示例使用短入口锁定的 v0.4.24。摘要占位符使用上方已核验的整份 `SHA256SUMS` 文件摘要。
 
 ```sh
-bash install.sh --version v0.4.23 --with-global-cli \
+bash install.sh --version v0.4.24 --with-global-cli \
   --kit-sha256 '<独立核验的SHA256SUMS整文件SHA-256>' --interactive
 ```
 

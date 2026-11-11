@@ -6,6 +6,7 @@ contains no URL/path/environment override. Stable selection is tested separately
 """
 from __future__ import annotations
 import argparse
+import ast
 import hashlib
 import http.client
 import importlib.util
@@ -14,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import select
+import stat
 import shutil
 import subprocess
 import sys
@@ -84,6 +86,10 @@ def safe_maintenance_journal(raw):
         if not isinstance(row, dict) or not isinstance(row.get('MESSAGE'), str):
             continue
         message = row['MESSAGE']
+        if message.startswith('VUI_MAINTENANCE_REFUSED:'):
+            refusal = re.fullmatch(r'VUI_MAINTENANCE_REFUSED:(RECEIVE|GET|LIST|STATUS|LOGS|CORE_STATUS|SUBMIT|TASK_LSTAT|TASK_TRUST_READ|TASK_JSON|TASK_ID|PUBLIC):(TRUSTED_INPUT|PROTOCOL_OR_STATE|IO|INTERNAL)', message)
+            codes.append('REQUEST_' + refusal[1] + '_' + refusal[2] if refusal else 'UNCLASSIFIED')
+            continue
         code = next(('STARTUP_' + stage for stage in STARTUP_CODES
                      if 'V-UI maintenance startup refused: STARTUP_' + stage in message), None)
         if code is None:
@@ -306,12 +312,59 @@ def daemon_pid():
 NETLINK_SYSTEMD_MARKER = 'VUI_NETLINK_SYSTEMD_ACCEPTANCE: installed20 panel-child TLS TCP URI/YAML passed'
 
 
+def installed_core_read_capability(source, *, control=CONTROL, owner=0):
+    """Bind fixture capability to installed Root bytes and the actual suite."""
+    for parent in (*reversed(control.parents), control):
+        info = parent.lstat()
+        assert stat.S_ISDIR(info.st_mode) and info.st_uid in (0, owner)
+        assert not info.st_mode & 0o022 or info.st_mode & stat.S_ISVTX
+    def read(path):
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            before = os.fstat(fd)
+            assert stat.S_ISREG(before.st_mode) and before.st_uid == owner
+            assert before.st_nlink == 1 and not before.st_mode & 0o022 and 0 < before.st_size <= 65536
+            chunks = []; total = 0
+            while True:
+                chunk = os.read(fd, min(8192, 65537-total))
+                if not chunk: break
+                chunks.append(chunk); total += len(chunk)
+                assert total <= 65536
+            raw = b''.join(chunks)
+            after = os.fstat(fd)
+            linked = os.stat(path, follow_symlinks=False)
+            identity = lambda info: (info.st_dev,info.st_ino,info.st_size,info.st_mode,info.st_uid,info.st_gid,info.st_nlink,info.st_mtime_ns,info.st_ctime_ns)
+            assert len(raw) == before.st_size and identity(before) == identity(after) == identity(linked)
+            return raw
+        finally:
+            os.close(fd)
+    worker = control/'maintenance_cli_worker.py'
+    raw = read(worker)
+    def pairs(items):
+        value = {}
+        for key,item in items:
+            assert key not in value
+            value[key] = item
+        return value
+    receipt = json.loads(read(control/'ops-control.json'), object_pairs_hook=pairs)
+    assert receipt['files'][str(worker)] == hashlib.sha256(raw).hexdigest(), 'Installed grant worker receipt mismatch'
+    expected = (Path(source)/'deploy/maintenance_cli_worker.py').read_bytes()
+    assert raw == expected, 'Installed grant worker differs from the selected suite source'
+    assignments = [node.value for node in ast.parse(raw).body if isinstance(node, ast.Assign)
+                   and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and node.targets[0].id == 'SCOPES']
+    assert len(assignments) == 1
+    scopes = ast.literal_eval(assignments[0])
+    legacy = {'diagnose','nodes','share','relay','certificates','operate','upgrade','destructive'}
+    assert type(scopes) is set and scopes in (legacy, legacy | {'core_read'}), 'Unknown installed grant scope contract'
+    return 'core_read' in scopes
+
+
 def maintenance_long_duration(release_id):
-    return release_id.startswith(('0.4.19-', '0.4.20-', '0.4.21-', '0.4.22-', '0.4.23-'))
+    return release_id.startswith(('0.4.19-', '0.4.20-', '0.4.21-', '0.4.22-', '0.4.23-', '0.4.24-'))
 
 
 def netlink_systemd_enabled(release_id):
-    return os.getenv('VUI_NETLINK_SYSTEMD_TEST') == '1' and release_id.startswith(('0.4.20-', '0.4.21-', '0.4.22-', '0.4.23-'))
+    return os.getenv('VUI_NETLINK_SYSTEMD_TEST') == '1' and release_id.startswith(('0.4.20-', '0.4.21-', '0.4.22-', '0.4.23-', '0.4.24-'))
 
 
 def verified_upgrade_fixture_rows(actual, expected):
@@ -376,9 +429,9 @@ def installed_netlink_smoke(check, source, work, api, ca, cert, key, verified_ol
     assert os.getenv('VUI_SYSTEM_INSTALL_TEST') == '1'
     config = json.loads(Path('/etc/v-ui/service.json').read_bytes())
     if not netlink_systemd_enabled(config['release_id']):
-        raise AssertionError('Installed netlink gate requires the opted-in actual 0.4.20, 0.4.21, 0.4.22 or 0.4.23 candidate')
+        raise AssertionError('Installed netlink gate requires the opted-in actual 0.4.20, 0.4.21, 0.4.22, 0.4.23 or 0.4.24 candidate')
     release = Path('/var/lib/v-ui/releases') / config['release_id']
-    check.assertIn((source/'VERSION').read_text().strip(), ('0.4.20','0.4.21','0.4.22','0.4.23'))
+    check.assertIn((source/'VERSION').read_text().strip(), ('0.4.20','0.4.21','0.4.22','0.4.23','0.4.24'))
     check.assertTrue(config['release_id'].startswith((source/'VERSION').read_text().strip()+'-'))
 
     def request(path, body=None, *, method=None, extra_headers=(), expected=200):
@@ -662,6 +715,8 @@ print(json.dumps({'pid':child.pid,'created':child.create_time(),'binary_sha256':
         print(NETLINK_SYSTEMD_MARKER)
     elif config['release_id'].startswith('0.4.21-'):
         print('VUI_SIMPLE_OPERATIONS_INSTALLED_ACCEPTANCE: installed21 panel-child TLS TCP URI/YAML passed')
+    elif config['release_id'].startswith('0.4.24-'):
+        print('VUI_MAINTENANCE_SHARE_INSTALLED_ACCEPTANCE: installed24 panel-child TLS TCP URI/YAML passed')
     else:
         print('VUI_MAINTENANCE_SHARE_INSTALLED_ACCEPTANCE: installed22 panel-child TLS TCP URI/YAML passed')
 
@@ -670,6 +725,23 @@ def nonroot_smoke(check, source, kit, api, expected_proxy):
     assert os.geteuid() != 0
     assert os.getenv('GITHUB_ACTIONS') == 'true' and os.getenv('RUNNER_ENVIRONMENT') == 'github-hosted'
     assert os.getenv('VUI_SYSTEM_INSTALL_TEST') == '1'
+    suite = Path(os.environ['VUI_SETUP_RELEASE_SOURCE']) if os.getenv('VUI_SETUP_INSTALL') == '1' else Path(source)
+    core_read = installed_core_read_capability(suite)
+    if core_read:
+        program = """import sqlite3,json,hashlib,os
+from pathlib import Path
+root=Path('/var/lib/v-ui/data')
+with sqlite3.connect('file:'+str(root/'v-ui.db')+'?mode=ro',uri=True) as db:
+ users=db.execute('SELECT id,username,password_hash,is_active FROM users ORDER BY id').fetchall()
+ nodes=db.execute('SELECT id,user_id,core,enable,port,protocol,settings,stream_settings,tag,remark,total,expiry_time,routing_mode FROM inbounds ORDER BY id').fetchall()
+ info=root.stat()
+ states={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for core in ('sing-box','xray') for p in (root/'runtime'/core).glob('*.json')}
+print(hashlib.sha256(json.dumps({'users':users,'nodes':nodes,'generation':[info.st_dev,info.st_ino],'states':states},sort_keys=True).encode()).hexdigest())
+"""
+        def witness():
+            value = subprocess.check_output(['sudo','-u','v-ui','/usr/bin/python3','-B','-I','-S','-c',program],text=True,timeout=20).strip()
+            check.assertRegex(value, r'^[a-f0-9]{64}$')
+            return value
     status = wait_idle(time.monotonic() + 15)
     pid = daemon_pid()
     check.assertEqual(status['services']['v-ui.service'], 'active')
@@ -687,6 +759,13 @@ def nonroot_smoke(check, source, kit, api, expected_proxy):
     check.assertEqual(invoke({'protocol': 1, 'operation': 'status'})['services']['v-ui.service'], 'inactive')
     # The prior persisted task is retrievable while the entire panel is stopped.
     check.assertEqual(invoke({'protocol': 1, 'operation': 'get', 'task_id': backup['id']})['state'], 'succeeded')
+    if core_read:
+        stopped_before = witness()
+        stopped_selection = invoke({'protocol':1,'operation':'core_status'})
+        check.assertEqual(witness(),stopped_before,'Stopped readonly core status changed business/runtime data')
+        check.assertIn(stopped_selection.get('outcome'), ('bundle_default','core_pending','core_selected'))
+        check.assertEqual(invoke({'protocol':1,'operation':'status'})['services']['v-ui.service'], 'inactive')
+        check.assertEqual(daemon_pid(), pid)
     task('start')
     check.assertEqual(daemon_pid(), pid)
     task('restart')
@@ -703,6 +782,39 @@ def nonroot_smoke(check, source, kit, api, expected_proxy):
             str(CONTROL / 'maintenance_cli_worker.py'), *arguments], capture_output=True, text=True, timeout=60)
         check.assertEqual(result.returncode, 0, 'Installed nonroot grant CLI failed')
         return json.loads(result.stdout)
+    if core_read:
+        before = witness()
+        tasks_before = invoke({'protocol':1,'operation':'list'})
+        direct = invoke({'protocol':1,'operation':'core_status'})
+        check.assertEqual(direct, stopped_selection)
+        invoke({'protocol':1,'operation':'core_status'}, user='nobody', expect_success=False)
+        for value in ({'protocol':1,'operation':'core_status','source':'a'*40},
+                      {'protocol':1,'operation':'submit','action':'core_status'},
+                      {'protocol':1,'operation':'submit','action':'update-core'}):
+            invoke(value,expect_success=False)
+        def exchange_scope(scopes):
+            row = grants('create', scopes, '600')
+            result, raw = api('/api/maintenance/exchange', {'grant':row['link'].split('#grant=',1)[1]})
+            check.assertEqual(result,200,'Core readonly grant exchange failed; private output withheld')
+            token = json.loads(raw)['token']
+            return row,['Authorization: Bearer '+token]
+        legacy, legacy_headers = exchange_scope('diagnose,nodes,share,relay,certificates,operate,upgrade,destructive')
+        check.assertEqual(api('/api/maintenance/core-selection',extra_headers=legacy_headers)[0],403)
+        grants('revoke',str(legacy['id']))
+        record, headers = exchange_scope('core_read')
+        result, raw = api('/api/maintenance/core-selection',extra_headers=headers)
+        check.assertEqual(result,200,'Installed core readonly API failed; private output withheld')
+        check.assertEqual(json.loads(raw),direct)
+        check.assertNotRegex(raw.decode(),r'[a-f0-9]{64}')
+        check.assertEqual(api('/api/maintenance/tasks',extra_headers=headers)[0],403)
+        check.assertEqual(api('/api/maintenance/core-selection?source=untrusted',extra_headers=headers)[0],422)
+        grants('revoke',str(record['id']))
+        check.assertEqual(api('/api/maintenance/core-selection',extra_headers=headers)[0],401)
+        check.assertEqual(invoke({'protocol':1,'operation':'list'}),tasks_before)
+        check.assertEqual(witness(),before,'Readonly core status changed business/runtime data')
+        check.assertEqual(invoke({'protocol':1,'operation':'status'})['services']['v-ui.service'],'active')
+        check.assertEqual(daemon_pid(),pid)
+        print('VUI_CORE_READ_ONLY_ACCEPTANCE: explicit grant, Root socket, stopped intent, fixed projection and unchanged data passed')
     grant = grants('create', 'diagnose', '600')
     check.assertIn('/maintenance#grant=', grant['link'])
     check.assertTrue(any(row['id'] == grant['id'] for row in grants('list')))
@@ -717,7 +829,7 @@ def nonroot_smoke(check, source, kit, api, expected_proxy):
     with PrivateMenuSession(['sudo', '/usr/local/sbin/v-ui'], cwd='/tmp', env=dict(os.environ), timeout=60) as terminal:
         terminal.expect('请选择: '); terminal.send('13\n')
         terminal.expect('请选择授权操作: '); terminal.send('1\n')
-        terminal.expect('请选择权限 [1/2/3，默认 1]: '); terminal.send('\n')
+        terminal.expect('请选择权限 [1/2/3/4，默认 1]: ' if core_read else '请选择权限 [1/2/3，默认 1]: '); terminal.send('\n')
         terminal.expect('有效分钟数 1–259200，或输入180天/180d（默认30分钟）: ' if long_duration
                         else '有效分钟数 1–120（默认 30）: ')
         terminal.send('180天\n' if long_duration else '\n')

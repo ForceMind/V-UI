@@ -7,7 +7,7 @@
 
 面向 Linux 服务器的 Xray / sing-box 中文管理面板，用于创建节点、管理证书、分享订阅和维护服务。
 
-[稳定版 v0.4.22](https://github.com/ForceMind/V-UI/releases/tag/v0.4.22) · [使用文档](docs/README.md) · [获取帮助](SUPPORT.md) · [MIT License](LICENSE)
+[稳定版 v0.4.24](https://github.com/ForceMind/V-UI/releases/tag/v0.4.24) · [使用文档](docs/README.md) · [获取帮助](SUPPORT.md) · [MIT License](LICENSE)
 
 ## 快速开始
 
@@ -17,7 +17,7 @@
 bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh)
 ```
 
-当前短入口安装已公开的 **v0.4.22**，固定核验安装器和完整套件摘要。脚本来自本项目仓库，请先确认软件来源可信；需要固定版本和入口摘要时，使用对应 [Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.22) 的说明。该短入口仍固定公开22，不会自动安装开发候选。
+短入口固定下载已公开的 **v0.4.24**，校验安装器和完整套件摘要。发布源与资产记录见[发布规范](docs/RELEASING.md#当前稳定版)。脚本来自本项目仓库，请先确认软件来源可信；需要固定版本、离线部署或手工核验时，见[安装指南](docs/INSTALLATION.md)。
 
 新安装按提示填写自己的域名、邮箱和端口，并本人确认首次自动证书的 CA 条款。管理员用户名和强密码自动生成，只在当前终端交付；保存凭据后，按安装器最终输出的 HTTPS 地址登录。域名不能带协议、路径或端口，不能用 GitHub 下载域名代替自己的域名。
 
@@ -36,18 +36,13 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh
 
 保存成功、核心正在运行和客户端实际连通是不同状态，请检查应用结果。节点连接地址独立于面板地址；证书错误应排查域名、证书链和时间，保持 TLS 验证开启。操作与参数说明见[配置指南](docs/CONFIGURATION.md)。
 
-## 开发候选 v0.4.23
+## Cloudflare DNS-01 与通配符证书
 
-**v0.4.23** 源码候选新增 Cloudflare DNS-01、根域名与一级通配符证书、具体连接域名绑定及遗留验证记录清理。实现与独立审查已收口；当前准确提交的完整 Actions、四目标、新装及旧版升级资格仍待完成，**尚未公开或部署**。公开稳定版与短入口仍是22。
+v0.4.23 新增 Cloudflare DNS-01、根域名与一级通配符证书、具体连接域名绑定及遗留验证记录清理。DNS 凭据只由管理员配置；真实 Cloudflare 账号签发与浏览器未验证。
 
 [DNS-01使用指南](docs/DNS01_CLOUDFLARE.md)面向已经安装相应版本、能够以管理员登录的面板；初装仍默认HTTP-01，需要满足TCP 80条件。DNS私有备份含凭据且未加密，恢复后需重新验证启用；含DNS数据不能使用旧运行时回退。
 
-下面仅是**候选正式发布并取得、核验该版受信安装器之后**的参数示例，当前不要执行，也不要传给仍固定22的短入口。摘要占位符须替换为该版可信清单整文件摘要，详见[安装指南](docs/INSTALLATION.md#3-本地完整套件)：
-
-```bash
-bash install.sh --version v0.4.23 --with-global-cli \
-  --kit-sha256 '<独立核验的SHA256SUMS整文件SHA-256>' --interactive
-```
+需要固定版本或离线部署时，请按[安装指南](docs/INSTALLATION.md)核验完整套件，并在完整安装器中使用`--version v0.4.24`。
 
 ## 能力与边界
 
@@ -71,13 +66,13 @@ bash install.sh --version v0.4.23 --with-global-cli \
 
 NixOS、声明式或只读系统不在安装支持范围。项目尚未承诺 **512 MiB 整机长期运行资格**，请为系统、核心负载、证书、升级与备份保留资源，见[资源要求](docs/LOW_RESOURCE_TARGET.md)。
 
-v0.4.22 已完成 Actions 中的四目标构建、真实核心、新装和多个公开旧版保数据升级验收；这些结果不能代替你的主机与客户端验证。公开22与23候选均**浏览器未验证**，不声明页面视觉或真实交互验收通过。
+v0.4.24 已完成四目标构建、新装和九个公开旧版保数据升级验收。独立组件已公开，应用安装仍携带原内置核心。**浏览器和真实 Cloudflare 账号签发未验证**。准确来源与验收见[发布记录](docs/RELEASING.md#当前稳定版)。
 
 ## 文档与社区
 
 | 内容 | 入口 |
 | --- | --- |
-| 使用与维护 | [文档索引](docs/README.md) · [安装](docs/INSTALLATION.md) · [配置](docs/CONFIGURATION.md) · [证书](docs/CERTIFICATES.md) · [23候选DNS指南](docs/DNS01_CLOUDFLARE.md) |
+| 使用与维护 | [文档索引](docs/README.md) · [安装](docs/INSTALLATION.md) · [配置](docs/CONFIGURATION.md) · [证书](docs/CERTIFICATES.md) · [Cloudflare DNS-01指南](docs/DNS01_CLOUDFLARE.md) |
 | 升级、备份与故障 | [运维](docs/OPERATIONS.md) · [故障排查](docs/TROUBLESHOOTING.md) |
 | 版本与方向 | [变更记录](CHANGELOG.md) · [路线图](ROADMAP.md) · [历史资料](docs/history/README.md) |
 | 参与项目 | [贡献指南](CONTRIBUTING.md) · [行为准则](CODE_OF_CONDUCT.md) · [支持渠道](SUPPORT.md) · [安全报告](SECURITY.md) |

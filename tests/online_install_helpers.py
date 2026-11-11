@@ -310,10 +310,10 @@ def setup_commands(source, version, release_commit, checkout_commit, ref, certif
     if len(data) > 100_000 or data != (source / 'setup.sh').read_bytes():
         raise AssertionError('Public short bootstrap differs from exact checkout')
     canonical = 'bash <(curl -fsSL ' + url + ')'
-    def command(extra):
-        return ['/bin/bash', '-c', canonical + ' ' + shlex.join(['--version', 'v'+version,
-                                                              *certificate_args, *extra])]
-    return {'initial':command(()), 'repeat':command(configured_args),
+    def command(extra, *, use_default=False):
+        version_args = [] if use_default else ['--version', 'v' + version]
+        return ['/bin/bash', '-c', canonical + ' ' + shlex.join([*version_args, *certificate_args, *extra])]
+    return {'initial':command((), use_default=True), 'repeat':command(configured_args),
             'upgrade':command((*configured_args, '--upgrade')),
             'transport':'anonymous public HTTPS short bootstrap and frozen release assets',
             'canonical':canonical, 'release_canonical':published['canonical']}

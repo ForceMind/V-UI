@@ -498,10 +498,11 @@ class ReceiptTests(unittest.TestCase):
             '0.4.19': 'a2b9c188658f082b189e77d237787a96eb9cf921',
             '0.4.20': '05173798de1baed5d67a866c4125e72f74fe3f4c',
             '0.4.21': '2aa5e11e3f09c03d048018f033ae888e7c775604',
-            '0.4.22': '558687a76cd29f4e4735284926eb05bf6664472e'})
+            '0.4.22': '558687a76cd29f4e4735284926eb05bf6664472e',
+            '0.4.23': 'be5d8459cdd3eeedce73f2ff6e4663e5eb781e42'})
         for version, source in acceptance.BASELINES.items():
             role = 'upgrade-' + version
-            candidate = '0.4.23' if version == '0.4.22' else VERSION
+            candidate = {'0.4.22':'0.4.23','0.4.23':'0.4.24'}.get(version, VERSION)
             identity = {**self.identity, 'version': candidate, 'release_id': candidate + '-' + SHA[:12]}
             result = self.create(role=role, identity=identity)
             self.assertEqual((result['old_version'], result['old_source_sha']), (version, source))

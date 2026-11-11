@@ -1,4 +1,5 @@
 """Managed Hysteria2 TLS preserves secrets and separates issuance from application."""
+from tests.core_candidate_context import runtime_for_fixture
 from proxy_loopback_support import ReadyMihomoProcess
 from contextlib import ExitStack
 from copy import deepcopy
@@ -300,7 +301,7 @@ class Hysteria2ManagedRealCoreTests(unittest.TestCase):
                     'SSL_CERT_DIR': str(self.root / 'empty-roots')}
         self.sequence = 0
         self.real_cores = core_module.CoreManager()
-        self.runtime = CoreRuntime('sing-box', Path(self.singbox), self.root / 'managed-runtime')
+        self.runtime = runtime_for_fixture(CoreRuntime, 'sing-box', Path(self.singbox), self.root / 'managed-runtime')
         self.real_cores.get('sing-box')._runtime = self.runtime
         patch.object(core_module, 'core_manager', self.real_cores).start()
         self.stack.callback(self.real_cores.stop_all)

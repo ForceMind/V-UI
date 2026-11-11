@@ -13,7 +13,7 @@ from sqlalchemy import Boolean, Column, Integer, String, Text, text
 
 from app.models import database
 
-SCOPES = frozenset({'diagnose', 'nodes', 'share', 'relay', 'certificates', 'operate', 'upgrade', 'destructive'})
+SCOPES = frozenset({'diagnose', 'nodes', 'share', 'relay', 'certificates', 'operate', 'upgrade', 'destructive', 'core_read'})
 INVALID = '维护授权已失效，请联系管理员重新授权'
 TOKEN = re.compile(r'^vui_m[gs]_[A-Za-z0-9_-]{43}$')
 DEFAULT_SECONDS = 1800
@@ -129,16 +129,29 @@ def list_grants(owner_id):
 
 
 def revoke_grant(owner_id, grant_id):
+    # Read and release the DB transaction before any Root IPC. Revalidate the
+    # exact immutable binding under the write lock after durable reduction.
+    with database.SessionLocal() as db:
+        row=db.query(MaintenanceGrant).filter_by(id=grant_id,owner_id=owner_id).first()
+        if row is None:raise HTTPException(404,'维护授权不存在')
+        binding=(row.id,row.owner_id,row.token_hash,row.scopes_json)
+        core='core_read' in (_scopes(row) or [])
+    if core:
+        from app.services import maintenance_tasks
+        try:
+            result=maintenance_tasks.revoke_core_binding(binding[0],binding[2])
+            if result!={'revoked':True}:raise ValueError('Root revocation not confirmed')
+        except Exception:
+            raise HTTPException(503,'核心授权撤销尚未确认，未报告撤销完成；请稍后重试或使用本机终端') from None
     with database.SessionLocal() as db:
         db.execute(text('BEGIN IMMEDIATE'))
-        row = db.query(MaintenanceGrant).filter_by(id=grant_id, owner_id=owner_id).first()
-        if row is None:
-            raise HTTPException(404, '维护授权不存在')
-        row.revoked = True
+        row=db.query(MaintenanceGrant).filter_by(id=grant_id,owner_id=owner_id).first()
+        if row is None or (row.id,row.owner_id,row.token_hash,row.scopes_json)!=binding:
+            raise HTTPException(409,'授权身份在撤销期间发生变化，请重新读取后操作')
+        row.revoked=True
         db.query(MaintenanceSession).filter_by(grant_id=row.id).delete()
-        value = _view(row)
-        db.commit()
-    audit(grant_id, 'grant.revoke', 200)
+        value=_view(row);db.commit()
+    audit(grant_id,'grant.revoke',200)
     return value
 
 
@@ -202,6 +215,20 @@ def authenticate(token):
                 'scopes': scopes, 'expires_at': min(session.expires_at, grant.expires_at)}
 
 
+def core_binding(principal):
+    """Original grant identity, never the exchanged session token digest."""
+    if type(principal) is not dict or type(principal.get('grant_id')) is not int:
+        raise HTTPException(403,'核心维护需要有效的临时维护会话')
+    now=int(time.time())
+    with database.SessionLocal() as db:
+        grant=db.get(MaintenanceGrant,principal['grant_id'])
+        if (grant is None or grant.revoked or grant.owner_id!=principal.get('owner_id')
+                or type(grant.expires_at) is not int or grant.expires_at<=now or not _owner(db,grant)
+                or 'core_read' not in (_scopes(grant) or [])):
+            raise HTTPException(401,INVALID)
+        return {'main_id':grant.id,'main_digest':grant.token_hash}
+
+
 # Explicit route templates; never grant an API namespace by prefix.
 # revision denotes the existing authoritative precondition the client must send.
 CAPABILITIES = []
@@ -211,6 +238,16 @@ def _cap(method, path, scope, purpose, revision=None):
     CAPABILITIES.append({'method': method, 'path': path, 'scope': scope,
                          'purpose': purpose, 'revision': revision})
 
+
+_cap('GET', '/api/maintenance/core-authority', 'core_read', '检查本次独立核心维护授权')
+_cap('POST', '/api/maintenance/core-observations', 'core_read', '异步检查实际应用及匹配的官方核心候选')
+_cap('GET', '/api/maintenance/core-tasks', 'core_read', '读取独立核心维护任务')
+_cap('GET', '/api/maintenance/core-tasks/{task_id}', 'core_read', '读取独立核心维护任务进度')
+_cap('GET', '/api/maintenance/core-requests/{request_id}', 'core_read', '确认原核心请求是否已登记；另需独立核心维护凭据')
+_cap('POST', '/api/maintenance/core-tasks', 'core_read', '提交固定核心维护任务；另需本机终端独立用途授权', 'Idempotency-Key/selection_revision')
+_cap('GET', '/api/maintenance/core-selection', 'core_read', '查看代理核心选择（不含更新与回退）')
+for _core in ('sing-box', 'xray'):
+    _cap('GET', '/api/maintenance/core-candidates/' + _core, 'core_read', '查看官方候选信息（尚未验证兼容）')
 
 for path, purpose in [('/api/maintenance/session', '当前维护权限'), ('/api/maintenance/catalog', '维护操作目录'),
         ('/api/maintenance/audit', '脱敏审计'), ('/api/maintenance/tasks', '维护任务列表'),
@@ -254,7 +291,7 @@ _cap('POST', '/api/maintenance/tasks', 'operate', '固定系统任务；status�
 def capability(method, path):
     kinds = {'inbound_id': '[1-9][0-9]{0,18}', 'grant_id': '[1-9][0-9]{0,18}',
              'core': '(?:xray|sing-box)', 'certificate_id': '[0-9a-f]{32}',
-             'job_id': '(?:diag_)?[0-9a-f]{32}', 'task_id': '[0-9a-f]{32}'}
+             'job_id': '(?:diag_)?[0-9a-f]{32}', 'task_id': '[0-9a-f]{32}', 'request_id': '[0-9a-f]{32}'}
     for item in CAPABILITIES:
         pattern = re.escape(item['path'])
         for key, value in kinds.items():

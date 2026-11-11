@@ -2,6 +2,8 @@
 import hashlib
 import io
 import json
+import os
+import sys
 from pathlib import Path
 import stat
 import shutil
@@ -2047,6 +2049,49 @@ class ParallelPublisherAdapterTests(unittest.TestCase):
         self.assertIn('args+=(--parallel-acceptance-no-browser)',text)
         section=text.split('      parallel_acceptance_no_browser:\n',1)[1].split('      simple_operations_no_browser:',1)[0]
         self.assertIn('        default: false',section)
+
+
+class PublisherEntrypointTests(unittest.TestCase):
+    def test_workflow_entrypoint_reaches_parallel_policy_from_clean_cwd(self):
+        """Exercise the actual workflow command with no PYTHONPATH or network."""
+        root = Path(__file__).resolve().parents[1]
+        lines = [line.strip() for line in (root/'.github/workflows/publish.yml').read_text().splitlines()
+                 if line.strip().startswith('python3 ')
+                 and ('scripts/publish_release.py' in line or 'scripts.publish_release' in line)]
+        self.assertEqual(len(lines), 1)
+        launcher = shlex.split(lines[0])
+        self.assertEqual(launcher[-1], '${args[@]}')
+        source = 'a'*40
+        with tempfile.TemporaryDirectory(prefix='vui-publish-entry-') as temporary:
+            fixture = Path(temporary)
+            package = fixture/'scripts'
+            package.mkdir()
+            (fixture/'VERSION').write_text('0.4.23\n')
+            code = (root/'scripts/publish_release.py').read_text()
+            guard = "if __name__=='__main__':"
+            self.assertEqual(code.count(guard), 1)
+            instrumentation = """
+def _entrypoint_request(path, *args, **kwargs):
+    if path == '': return {'default_branch': 'main'}
+    if path == 'git/ref/heads/main': return {'object': {'sha': 'a'*40}}
+    raise AssertionError('No network calls permitted in entrypoint fixture')
+request = _entrypoint_request
+subprocess.check_output = lambda *args, **kwargs: 'a'*40+'\\n'
+"""
+            (package/'publish_release.py').write_text(code.replace(guard, instrumentation+'\n'+guard, 1))
+            (package/'parallel_release_policy.py').write_text(
+                "class ParallelPolicyError(ValueError): pass\n"
+                "def validate_source_scope(*args, **kwargs):\n"
+                "    raise RuntimeError('PARALLEL_RELEASE_IMPORT_REACHED')\n")
+            result = subprocess.run([sys.executable, '-S', *launcher[1:-1], '--commit', source,
+                '--version', '0.4.23', '--confirm', 'RELEASE 0.4.23 '+source,
+                '--parallel-acceptance-no-browser'], cwd=fixture,
+                env={'PATH': os.defpath, 'HOME': str(fixture), 'PYTHONDONTWRITEBYTECODE': '1',
+                     'GITHUB_REPOSITORY': 'ForceMind/V-UI', 'GITHUB_EVENT_NAME': 'workflow_dispatch'},
+                capture_output=True, text=True, timeout=5)
+            self.assertNotEqual(result.returncode, 0)  # Fixture stops before any publication.
+            self.assertIn('PARALLEL_RELEASE_IMPORT_REACHED', result.stderr)
+            self.assertNotIn('ModuleNotFoundError', result.stderr)
 
 
 if __name__=='__main__':

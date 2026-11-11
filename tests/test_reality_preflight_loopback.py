@@ -3,6 +3,7 @@
 Only HTTP/TCP application forwarding is qualified. Reference/camouflage traffic
 is expected and counted separately; no third-party handshake site is contacted.
 """
+from tests.core_candidate_context import server_version, singbox_client
 from proxy_loopback_support import ReadyMihomoProcess
 import base64
 from contextlib import ExitStack
@@ -55,8 +56,9 @@ class RealityPreflightLoopbackTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.singbox = str(Path(os.environ['VUI_TEST_CORES']) / 'sing-box')
+        cls.singbox_client = singbox_client(cls.singbox)
         cls.mihomo = os.environ['VUI_TEST_MIHOMO']
-        for command, prefix in (([cls.singbox, 'version'], 'sing-box version 1.14.2\n'),
+        for command, prefix in (([cls.singbox, 'version'], f"sing-box version {server_version('sing-box', '1.14.2')}\n"),
                                 ([cls.mihomo, '-v'], 'Mihomo Meta v1.19.32 ')):
             result = subprocess.run(command, capture_output=True, text=True, timeout=15)
             output = result.stdout + result.stderr
@@ -164,8 +166,8 @@ class RealityPreflightLoopbackTests(unittest.TestCase):
         else:
             path = self.unique_path(client, 'json')
             path.write_text(json.dumps(config)); path.chmod(0o600)
-            self.check_command([self.singbox, 'check', '-c', str(path)])
-            command = [self.singbox, 'run', '-c', str(path)]
+            self.check_command([self.singbox_client, 'check', '-c', str(path)])
+            command = [self.singbox_client, 'run', '-c', str(path)]
         return command, self.env.copy()
 
     def assert_success(self, port):

@@ -634,6 +634,11 @@ class CoreBackupSession(CoreMaintenanceSession):
         self._core_phase = 'quiesced'
         return dict(final_intents=deepcopy(self._final_intents))
 
+    def release_backup_recovery_writers(self):
+        """Explicit Root recovery only: inspect current intents, never archive."""
+        _need(self._core_phase == 'quiesced', 'CORE_PHASE')
+        tools._MaintenanceSession.release_writers_for_trial(self)
+
     def release_backup_writers(self):
         _need(self._core_phase == 'backed_up', 'CORE_PHASE')
         tools._MaintenanceSession.release_writers_for_trial(self)
