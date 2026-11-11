@@ -1,4 +1,4 @@
-"""Opt-in empty-host public 0.4.14/0.4.15/0.4.16/0.4.17/0.4.19/0.4.20/0.4.21/0.4.22/0.4.23 -> exact candidate upgrade observations.
+"""Opt-in empty-host upgrades from fixed public releases to the exact candidate.
 
 The old installation uses anonymous published HTTPS. Only the unpublished new
 kit's download transport is adapted; neither installer nor root receipt is faked.
@@ -26,7 +26,9 @@ PUBLISHED_BASELINES = {
     '0.4.21': '2aa5e11e3f09c03d048018f033ae888e7c775604',
     '0.4.22': '558687a76cd29f4e4735284926eb05bf6664472e',
     '0.4.23': 'be5d8459cdd3eeedce73f2ff6e4663e5eb781e42',
+    '0.4.24': '8b8d7cf82e55609a205455b351f659eb9de91974',
 }
+DNS_BASELINES = frozenset({'0.4.23', '0.4.24'})
 CONTROL = Path('/usr/local/lib/v-ui')
 FIREWALL = str(CONTROL / 'firewall_support.py')
 MAINTENANCE_FILES = frozenset({
@@ -54,10 +56,12 @@ DNS_BINDING_LAYOUTS = (BINDING_COLUMNS + ('server_name',), BINDING_COLUMNS[:4] +
 
 
 def _target_contract(candidate_version, old_version):
-    if candidate_version not in ('0.4.22', '0.4.23', '0.4.24'):
-        raise AssertionError('Explicit reviewed 0.4.22, 0.4.23 or 0.4.24 upgrade target required')
-    if old_version == '0.4.23' and candidate_version != '0.4.24':
-        raise AssertionError('The published DNS baseline requires a 0.4.24 candidate')
+    if candidate_version not in ('0.4.22', '0.4.23', '0.4.24', '0.4.25'):
+        raise AssertionError('Explicit reviewed 0.4.22 through 0.4.25 upgrade target required')
+    if old_version == '0.4.23' and candidate_version not in ('0.4.24', '0.4.25'):
+        raise AssertionError('The published DNS baseline requires a candidate after 0.4.23')
+    if old_version == '0.4.24' and candidate_version != '0.4.25':
+        raise AssertionError('The published core authority baseline requires a 0.4.25 candidate')
     return candidate_version
 
 
@@ -90,7 +94,7 @@ def candidate_origin(kit, release, target):
 
 def fixed_public_baseline(version, commit):
     if version not in PUBLISHED_BASELINES or PUBLISHED_BASELINES[version] != commit:
-        raise AssertionError('Fixed public 0.4.14, 0.4.15, 0.4.16, 0.4.17, 0.4.19, 0.4.20, 0.4.21, 0.4.22 or 0.4.23 upgrade baseline required')
+        raise AssertionError('Fixed public upgrade baseline and its exact source required')
     return version, commit
 
 
@@ -108,25 +112,31 @@ def assert_receipt_migration(test, before, after, old_version, candidate_version
         raise AssertionError('Explicit P3 development control profile required')
     if type(core_authority) is not bool or core_authority and not core_control:
         raise AssertionError('Explicit private core authority control profile required')
-    if candidate_version == '0.4.24' and not (core_control and core_authority):
-        raise AssertionError('0.4.24 requires the complete core and authority control profile')
-    test.assertTrue(AUTHORITY_FILES.isdisjoint(before['files']), 'Historical receipt must not pre-contain authority helpers')
-    test.assertTrue(CORE_FILES.isdisjoint(before['files']), 'Historical receipt must not pre-contain core helpers')
-    if old_version == '0.4.23':
+    if candidate_version in ('0.4.24', '0.4.25') and not (core_control and core_authority):
+        raise AssertionError('Candidate requires the complete core and authority control profile')
+    if candidate_version == '0.4.25' and not yaml_control:
+        raise AssertionError('0.4.25 requires the YAML control reader')
+    existing_core = old_version == '0.4.24'
+    if existing_core:
+        test.assertTrue(CORE_FILES | AUTHORITY_FILES <= set(before['files']))
+    else:
+        test.assertTrue(AUTHORITY_FILES.isdisjoint(before['files']), 'Historical receipt must not pre-contain authority helpers')
+        test.assertTrue(CORE_FILES.isdisjoint(before['files']), 'Historical receipt must not pre-contain core helpers')
+    if old_version in DNS_BASELINES:
         test.assertTrue(DNS_FILES <= set(before['files']), 'Published DNS receipt must contain every DNS helper')
     else:
         test.assertTrue(DNS_FILES.isdisjoint(before['files']), 'Historical receipt must not pre-contain DNS helpers')
-    if old_version in ('0.4.17', '0.4.19', '0.4.20', '0.4.21', '0.4.22', '0.4.23'):
+    if old_version not in ('0.4.14', '0.4.15', '0.4.16'):
         test.assertTrue(MAINTENANCE_FILES <= set(before['files']))
         additions = set()
     else:
         test.assertTrue(MAINTENANCE_FILES.isdisjoint(before['files']))
         additions = MAINTENANCE_FILES | ({FIREWALL} if old_version == '0.4.14' else set())
-    if candidate_version != '0.4.22' and old_version != '0.4.23':
+    if candidate_version != '0.4.22' and old_version not in DNS_BASELINES:
         additions = additions | DNS_FILES
-    if core_control:
+    if core_control and not existing_core:
         additions = additions | CORE_FILES
-    if core_authority:
+    if core_authority and not existing_core:
         additions = additions | AUTHORITY_FILES
     if yaml_control:
         additions = additions | YAML_FILES
@@ -151,7 +161,7 @@ def snapshot_program(old_version, candidate_version, *, after=False, data_root='
     if old_version not in PUBLISHED_BASELINES or type(after) is not bool:
         raise AssertionError('Known historical snapshot and explicit phase required')
     _target_contract(candidate_version, old_version)
-    existing_dns = old_version == '0.4.23'
+    existing_dns = old_version in DNS_BASELINES
     modern = existing_dns or (after and candidate_version != '0.4.22')
     return ('data_root=' + repr(str(data_root)) + '\nmodern=' + repr(modern)
         + '\nexisting_dns=' + repr(existing_dns)
@@ -247,7 +257,7 @@ def assert_editor_content_addition(test, before, after):
 
 def assert_node_summary_upgrade(test, before, after, old_version=None):
     """Permit only the declared capability/CAS response additions for 21."""
-    if old_version in ('0.4.21', '0.4.22', '0.4.23'):
+    if old_version in ('0.4.21', '0.4.22', '0.4.23', '0.4.24'):
         test.assertEqual(after,before)
         for row in after:
             test.assertIs(type(row.get('content_revision')),str)
@@ -382,6 +392,11 @@ class PublishedUpgrade:
         self.old_release = release
         self.test.assertEqual(self.config['bootstrap_python'], str(release / 'runtime/python/bin/python3'))
         self.test.assertEqual(self._manifest(release)['source_commit'], self.old_commit)
+        if self.old_version == '0.4.24':
+            self.test.assertEqual(self._manifest(release)['version'], self.old_version)
+            self.old_origin = self._root_origin(release.name, self.config['target'])
+            self.test.assertEqual(self.old_origin['app_source'], self.old_commit)
+            self.test.assertEqual(self.old_origin['manifest_sha256'], self._manifest_digest(release))
         self._service_python(release, '''
 import json,time
 from app.models import database
@@ -412,7 +427,7 @@ with database.SessionLocal() as db:
  db.commit()
 print('{}')
 ''')
-        if self.old_version == '0.4.23':
+        if self.old_version in DNS_BASELINES:
             self._service_python(release, '''
 from pathlib import Path
 import time
@@ -471,7 +486,7 @@ print('{}')
         for table in ('users','inbounds','subscription_grants','managed_certificates'):
             self.test.assertGreater(self.data[table]['count'], 0)
         self.test.assertGreaterEqual(len(self.data['certificate_material']), 2)
-        if self.old_version == '0.4.23':
+        if self.old_version in DNS_BASELINES:
             self.test.assertGreaterEqual(self.data['managed_certificates']['count'], 2)
             self.test.assertTrue(any(name.endswith('/state.json') for name in self.data['dns_credentials']))
             self.test.assertTrue(any(re.fullmatch(r'[a-f0-9]{32}/[a-f0-9]{32}\.json', name)
@@ -481,21 +496,19 @@ print('{}')
             self.test.assertEqual(len(self.data['managed_certificate_material']), 2)
         self.test.assertEqual(self.new['download_log'].read_text(), '', 'Candidate must not download before old-data snapshot')
 
-    def _assert_23_to_24_origin(self, release, config):
-        from scripts.system_maintenance_smoke import installed_core_read_capability
-        self.test.assertTrue(installed_core_read_capability(self.source))
-        expected = candidate_origin(self.kit, self.candidate, config['target'])
+    def _manifest_digest(self, release):
         manifest_path = release / 'payload/MANIFEST.json'
-        observed = self._service_python(release, 'import hashlib,json;from pathlib import Path;'
+        return self._service_python(release, 'import hashlib,json;from pathlib import Path;'
             'print(json.dumps(hashlib.sha256(Path(' + repr(str(manifest_path)) + ').read_bytes()).hexdigest()))')
-        self.test.assertEqual(observed, expected['manifest_sha256'])
+
+    def _root_origin(self, release_id, target):
         program = """
-import json,os,stat,sys
+import json,os,re,stat,sys
 from pathlib import Path
 assert os.geteuid()==0 and os.getenv('GITHUB_ACTIONS')=='true'
 assert os.getenv('RUNNER_ENVIRONMENT')=='github-hosted' and os.getenv('GITHUB_REPOSITORY')=='ForceMind/V-UI'
 assert os.getenv('VUI_SYSTEM_INSTALL_TEST')=='1'
-expected=json.loads(sys.argv[1])
+release_id,target=sys.argv[1:]
 root=Path('/var/lib/v-ui-maintenance/core-authority')
 for path in (*reversed(root.parents),root):
  info=path.lstat()
@@ -509,16 +522,29 @@ with os.fdopen(fd,'rb') as stream:
  raw=stream.read(2000001)
  assert len(raw)==info.st_size
 state=json.loads(raw)
-assert state['schema']==2
-assert expected in state['applications'].values()
-print('ORIGIN_MATCH')
+assert state['schema']==2 and state['kind']=='core-authority-v2'
+row,=[item for item in state['applications'].values()
+      if (item['release_id'],item['target'])==(release_id,target)]
+assert set(row)=={'release_id','target','app_source','manifest_sha256','archive_sha256'}
+assert re.fullmatch('[a-f0-9]{40}',row['app_source'])
+assert all(re.fullmatch('[a-f0-9]{64}',row[key]) for key in ('manifest_sha256','archive_sha256'))
+print(json.dumps(row))
 """
         result = subprocess.run(['sudo',
             '--preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_REPOSITORY,VUI_SYSTEM_INSTALL_TEST',
-            '/usr/bin/python3', '-B', '-I', '-S', '-c', program, json.dumps(expected)],
+            '/usr/bin/python3', '-B', '-I', '-S', '-c', program, release_id, target],
             capture_output=True, text=True, timeout=15)
-        self.test.assertEqual(result.returncode, 0, 'Candidate Root origin verification failed')
-        self.test.assertEqual(result.stdout, 'ORIGIN_MATCH\n')
+        self.test.assertEqual(result.returncode, 0, 'Installed Root origin verification failed')
+        return json.loads(result.stdout)
+
+    def _assert_candidate_origin(self, release, config):
+        from scripts.system_maintenance_smoke import installed_core_read_capability
+        self.test.assertTrue(installed_core_read_capability(self.source))
+        expected = candidate_origin(self.kit, self.candidate, config['target'])
+        self.test.assertEqual(self._manifest_digest(release), expected['manifest_sha256'])
+        self.test.assertEqual(self._root_origin(release.name, config['target']), expected)
+        if self.old_version == '0.4.24':
+            self.test.assertEqual(self._root_origin(self.old_release.name, config['target']), self.old_origin)
         with MenuSession(['sudo', '/usr/local/sbin/v-ui'], cwd='/tmp', env=dict(os.environ), timeout=30) as terminal:
             terminal.expect('请选择: ')
             terminal.send('20\n')
@@ -536,8 +562,8 @@ print('ORIGIN_MATCH')
         assert_receipt_migration(self.test, self.old_receipt, self._receipt(), self.old_version, self.candidate['version'],
                                  core_control=True, core_authority=True, yaml_control=True)
         self.test.assertEqual(self._snapshot(release,after=True), self.data, 'Private DB rows and certificate bytes must survive')
-        if self.old_version == '0.4.23':
-            self._assert_23_to_24_origin(release, config)
+        if self.old_version in DNS_BASELINES:
+            self._assert_candidate_origin(release, config)
         assert_node_summary_upgrade(self.test, self.nodes, json.loads(api('/api/inbounds')[1]), self.old_version)
         if self.manual_editor is not None:
             status, raw = api('/api/inbounds/'+str(self.nodes[0]['id'])+'/editor')
@@ -552,8 +578,10 @@ print('ORIGIN_MATCH')
         self.test.assertEqual(json.loads(api('/api/subscriptions')[1]), self.grants)
         self.public_subscription(api)
         assert_download_boundary(self.test, self.kit, self.new['download_log'])
-        if self.old_version == '0.4.23':
+        if self.old_version == '0.4.23' and self.candidate['version'] == '0.4.24':
             print('VUI_23_TO_24_UPGRADE_ACCEPTANCE: existing DNS identity and private credentials retained, accepted Root origin and default core selection verified')
+        if self.old_version == '0.4.24':
+            print('VUI_24_TO_25_UPGRADE_ACCEPTANCE: public application, saved data and DNS materials retained, previous and candidate Root origins verified, YAML control reader installed')
         print('Published upgrade: immutable public '+self.old_version+' source/assets -> exact candidate; exact historical root receipt closure; config, users/password hashes, node draft/manual TLS paths, live subscription, provided/managed fixture certificate bytes and managed certificate/binding metadata retained (synthetic un-applied Xray binding on 0.4.16/17/19/20/21; no CA/core qualification); candidate-only bounded downloads OK')
 
     def public_subscription(self, api):

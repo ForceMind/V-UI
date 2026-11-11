@@ -48,7 +48,7 @@ class InstalledNetlinkFixtureTests(unittest.TestCase):
             and isinstance(node.func,ast.Attribute)and node.func.attr=='assertIn'and len(node.args)==2
             and isinstance(node.args[1],ast.Tuple)]
         self.assertEqual(len(gates),1)
-        self.assertEqual(ast.literal_eval(gates[0]),('0.4.20','0.4.21','0.4.22','0.4.23','0.4.24'))
+        self.assertEqual(ast.literal_eval(gates[0]),('0.4.20','0.4.21','0.4.22','0.4.23','0.4.24','0.4.25'))
 
     def test_real_installed_gate_requires_both_explicit_flag_and_actual_020(self):
         from scripts import system_maintenance_smoke as smoke
@@ -56,12 +56,12 @@ class InstalledNetlinkFixtureTests(unittest.TestCase):
             for version in ('0.4.14', '0.4.18', '0.4.19', '0.4.20', '0.4.21', '0.4.22', '0.4.23', '0.4.24', '0.4.25'):
                 with self.subTest(flag=flag,version=version),patch.dict(os.environ,{'VUI_NETLINK_SYSTEMD_TEST':flag}):
                     self.assertEqual(smoke.netlink_systemd_enabled(version+'-'+'a'*12),
-                                     flag=='1' and version in ('0.4.20','0.4.21','0.4.22','0.4.23','0.4.24'))
+                                     flag=='1' and version in ('0.4.20','0.4.21','0.4.22','0.4.23','0.4.24','0.4.25'))
 
     def test_019_and_020_keep_actual_180_day_cli_while_old_releases_keep_default(self):
         from scripts import system_maintenance_smoke as smoke
         for version,expected in (('0.4.14',False),('0.4.15',False),('0.4.16',False),
-                                 ('0.4.17',False),('0.4.18',False),('0.4.19',True),('0.4.20',True),('0.4.21',True),('0.4.22',True),('0.4.23',True),('0.4.24',True),('0.4.25',False)):
+                                 ('0.4.17',False),('0.4.18',False),('0.4.19',True),('0.4.20',True),('0.4.21',True),('0.4.22',True),('0.4.23',True),('0.4.24',True),('0.4.25',True),('0.4.26',False)):
             with self.subTest(version=version):
                 self.assertIs(smoke.maintenance_long_duration(version+'-'+'a'*12),expected)
 
