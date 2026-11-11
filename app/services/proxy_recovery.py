@@ -129,7 +129,7 @@ def _validate(data):
         base = SingBoxAdapter().build_config(row for row in rows if row.core == 'sing-box')
         if context['schema_version'] == 3:
             from app.services.mihomo_saved_policy import compile_confirmed_yaml_policy
-            compiled = compile_confirmed_yaml_policy(base, rows, active, context['yaml_check'])
+            compiled = compile_confirmed_yaml_policy(base, rows, active, context['yaml_check'], committed=True)
         else:
             endpoint = context['endpoint']
             endpoint = (VerifiedEndpoint(**{**endpoint, 'addresses': tuple(endpoint['addresses'])})
@@ -146,7 +146,8 @@ def _validate(data):
         plan = policy_plan(rows, active['settings'])
         if context['schema_version'] >= 2:
             saved = store.context_plan(context, active['settings'])
-            _require(saved.manifest == plan.manifest and saved.source_fingerprint == plan.source_fingerprint)
+            if context['schema_version'] == 2:
+                _require(saved.manifest == plan.manifest and saved.source_fingerprint == plan.source_fingerprint)
         else:
             _require(plan.legacy)
         if active['settings']['relay_enabled'] or plan.relay_ids:

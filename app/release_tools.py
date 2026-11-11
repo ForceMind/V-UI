@@ -944,10 +944,14 @@ def _validate_restore_policy(data: Path, *, _artifact_ids=None, _existing_store_
         return
     context = active.get('runtime_context')
     if context is not None and context['schema_version'] >= 2:
-        from app.services.inbound_policy import policy_plan
+        from app.services.inbound_policy import policy_plan, yaml_runtime_sources
         plan = policy_plan(store.policy_rows(), active['settings'])
         saved = store.context_plan(context, active['settings'])
-        if plan.manifest != saved.manifest or plan.source_fingerprint != saved.source_fingerprint:
+        if context['schema_version'] == 3:
+            matches = yaml_runtime_sources(plan.manifest) == yaml_runtime_sources(saved.manifest)
+        else:
+            matches = plan.manifest == saved.manifest and plan.source_fingerprint == saved.source_fingerprint
+        if not matches:
             raise ReleaseError('Backup rows differ from their committed inbound policy')
     elif explicit:
         raise ReleaseError('Backup contains unapplied inbound modes; dedicated recovery is required')

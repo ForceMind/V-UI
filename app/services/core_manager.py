@@ -451,7 +451,10 @@ class CoreManager:
                     return result
                 if context["schema_version"] >= 2:
                     applied = coordinator.store.context_plan(context, settings)
-                    if desired.manifest != applied.manifest:
+                    from app.services.inbound_policy import yaml_runtime_sources
+                    source_matches = (yaml_runtime_sources(desired.manifest) == yaml_runtime_sources(applied.manifest)
+                                      if context["schema_version"] == 3 else desired.manifest == applied.manifest)
+                    if not source_matches:
                         for target in result.values(): target["state"] = "pending"
                         return result
                     compiled = coordinator.compile_active(rows)

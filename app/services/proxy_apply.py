@@ -199,7 +199,7 @@ class ProxyApplyCoordinator:
                 if context is None or context["schema_version"] != 3:
                     raise ProxyApplyError("MISSING_ACTIVE_CONTEXT")
                 ticket = context["yaml_check"]
-                return self._compile_confirmed_yaml(snapshot, rows, ticket), None, ticket["self_addresses"]
+                return self._compile_confirmed_yaml(snapshot, rows, ticket, committed=True), None, ticket["self_addresses"]
             return self._compile_yaml_candidate(snapshot, rows)
         plan = policy_plan(rows, snapshot["settings"])
         if fence_required and not plan.legacy and self.store.policy_schema_version() < 2:
@@ -272,10 +272,10 @@ class ProxyApplyCoordinator:
         if ticket["protected_enabled"] and set(self.address_provider(self.panel_origin)) != set(ticket["self_addresses"]):
             raise ProxyConflict("Local addresses changed; check the YAML draft again")
 
-    def _compile_confirmed_yaml(self, snapshot, rows, ticket):
+    def _compile_confirmed_yaml(self, snapshot, rows, ticket, *, committed=False):
         self._check_yaml_addresses(ticket)
         return compile_confirmed_yaml_policy(self.build_config(rows), rows, snapshot, ticket,
-                                             compiler=self.yaml_compiler)
+                                             compiler=self.yaml_compiler, committed=committed)
 
     def _compile_reconciled_yaml(self, snapshot, rows):
         context = snapshot.get("runtime_context")
@@ -547,7 +547,8 @@ class ProxyApplyCoordinator:
                            source_fingerprint=compiled.source_fingerprint,
                            requires_upstream=endpoint is not None)
         if yaml_check is not None:
-            context.update(schema_version=3, yaml_check=yaml_check)
+            context.update(schema_version=3, yaml_check=yaml_check,
+                           candidate_enabled=bool(compiled.config.get("inbounds")))
             if kind == "apply":
                 observed = self._yaml_runtime_identity()
                 if any(observed[key] != yaml_check[key] for key in ("issuer", "runtime_fingerprint")):
@@ -732,6 +733,19 @@ class ProxyApplyCoordinator:
                 or context["schema_version"] == 1 and not plan.legacy):
             raise ProxyApplyError("RECOVERY_REQUIRED")
 
+    def _pending_recovery_guard(self, pending, active):
+        context = pending.get("runtime_context")
+        if context and context["schema_version"] == 3 and context["kind"] == "reconcile":
+            if active is None or active["revision"] != pending["revision"]:
+                raise ProxyApplyError("RECOVERY_REQUIRED")
+            # A node or certificate write can already be durable. Prove that
+            # it is exactly the prepared change, then restore the recorded
+            # baseline bytes and leave the newer rows unapplied.
+            self._compile_confirmed_yaml(active, self._rows(None), context["yaml_check"], committed=True)
+            self._rollback_guard(active)
+        else:
+            self._recovery_guard(active)
+
     def recover(self):
         """Resolve journal before core auto-recovery; unknown state stops core."""
         with self.lock:
@@ -740,7 +754,7 @@ class ProxyApplyCoordinator:
                 if pending is not None:
                     if pending.get("phase") != "prepared":
                         raise ProxyApplyError("RECOVERY_REQUIRED")
-                    self._recovery_guard(self.store.load_active())
+                    self._pending_recovery_guard(pending, self.store.load_active())
                     self._restore(pending)
                     self.store.abort_apply(pending["transaction_id"])
                     transaction = self.store.transaction(pending["transaction_id"])

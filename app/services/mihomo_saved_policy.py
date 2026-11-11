@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, replace
 import hashlib
 import ipaddress
 import re
 
-from app.services.inbound_policy import PolicyError
+from app.services.inbound_policy import PolicyError, yaml_runtime_sources
 from app.services.mihomo_merge_plan import StaticMihomoPlan
 from app.services.mihomo_plan_policy import protected_yaml_route
 from app.services.mihomo_plan_record import PlanRecordError, StoredMihomoPlan, decode_plan_record, yaml_endpoint_id
@@ -60,8 +60,15 @@ def compile_pinned_yaml_policy(base_config, inbounds, snapshot, ticket, *, compi
                     self_addresses=tuple(ticket['self_addresses']))
 
 
-def compile_confirmed_yaml_policy(base_config, inbounds, snapshot, ticket, *, compiler=None):
+def compile_confirmed_yaml_policy(base_config, inbounds, snapshot, ticket, *, compiler=None,
+                                  committed=False):
     compiled = compile_pinned_yaml_policy(base_config, inbounds, snapshot, ticket, compiler=compiler)
+    if committed and yaml_runtime_sources(compiled.plan_manifest) == yaml_runtime_sources(ticket['plan_manifest']):
+        if compiled.source_fingerprint != ticket['source_fingerprint']:
+            compiled = replace(compiled, plan_manifest=ticket['plan_manifest'],
+                source_fingerprint=ticket['source_fingerprint'],
+                identity=_yaml_identity(compiled.config, compiled.yaml_plan_revision,
+                                        ticket['source_fingerprint'], dict(compiled.endpoints)))
     if (compiled.yaml_plan_revision != ticket['plan_revision']
             or compiled.plan_manifest != ticket['plan_manifest']
             or compiled.source_fingerprint != ticket['source_fingerprint']
@@ -69,6 +76,12 @@ def compile_confirmed_yaml_policy(base_config, inbounds, snapshot, ticket, *, co
             or _digest(compiled.config) != ticket['candidate_revision']):
         raise PolicyError('YAML_CONFIRMATION_MISMATCH')
     return compiled
+
+
+def _yaml_identity(config, plan_revision, fingerprint, endpoints):
+    return _digest({'policy_version': 3, 'config': config, 'yaml_plan': plan_revision,
+                    'source_fingerprint': fingerprint, 'endpoints': {
+                        name: asdict(endpoint) for name, endpoint in sorted(endpoints.items())}})
 
 
 def compile_saved_yaml_policy(base_config, inbounds, snapshot, *, endpoints, self_addresses, policy=None):
@@ -89,8 +102,7 @@ def compile_saved_yaml_policy(base_config, inbounds, snapshot, *, endpoints, sel
     if not source.requires_upstream:
         if endpoints:
             raise PolicyError('YAML_ENDPOINT_CONTEXT_MISMATCH')
-        identity = _digest({'policy_version': 3, 'config': config, 'yaml_plan': checked.record_id,
-                            'source_fingerprint': source.source_fingerprint, 'endpoints': {}})
+        identity = _yaml_identity(config, checked.record_id, source.source_fingerprint, {})
         return CompiledYamlPolicy(config, coverage, identity, **metadata, yaml_plan_revision=checked.record_id,
                                   dns_upstream=manifest['dns_upstream'])
     policy = AddressPolicy() if policy is None else policy
@@ -152,8 +164,9 @@ def compile_saved_yaml_policy(base_config, inbounds, snapshot, *, endpoints, sel
     if dns_name is not None:
         dns = config.setdefault('dns', {})
         servers = dns.setdefault('servers', [])
-        ordinary = not settings['relay_enabled'] if source.legacy else any(
-            item['enable'] and item['effective'] == 'direct' for item in source.manifest)
+        ordinary = any(
+            item['core'] == 'sing-box' and item['enable'] and item['effective'] == 'direct'
+            for item in source.manifest)
         if not servers and ordinary:
             servers.append({'type': 'local', 'tag': NORMAL_DNS_TAG})
             dns.setdefault('final', NORMAL_DNS_TAG)
@@ -165,8 +178,6 @@ def compile_saved_yaml_policy(base_config, inbounds, snapshot, *, endpoints, sel
                                      policy=policy, dns_upstream=dns_name)
     route['rules'] = protected['rules'] + route.get('rules', [])
     route['rule_set'] = protected['rule_set'] + route.get('rule_set', [])
-    wire_endpoints = {name: asdict(endpoints[name]) for name in sorted(endpoints)}
-    identity = _digest({'policy_version': 3, 'config': config, 'yaml_plan': checked.record_id,
-                        'source_fingerprint': source.source_fingerprint, 'endpoints': wire_endpoints})
+    identity = _yaml_identity(config, checked.record_id, source.source_fingerprint, endpoints)
     return CompiledYamlPolicy(config, coverage, identity, **metadata, yaml_plan_revision=checked.record_id,
                               endpoints=tuple(sorted(endpoints.items())), dns_upstream=dns_name)

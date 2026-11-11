@@ -248,6 +248,43 @@ rules: ["DOMAIN,example.com,other", "MATCH,Chosen"]
         self.assertEqual(self.coordinator.recover()['phase'], 'recovered')
         self.resolve.assert_not_called()
 
+    def test_independent_xray_change_does_not_invalidate_committed_yaml_recovery(self):
+        inbound, xray = row(), row(2, 24444)
+        xray.core = 'xray'
+        self.coordinator.rows_provider = lambda: [inbound, xray]
+        self.coordinator.build_config = build_config
+        saved = self.save()
+        stale = self.confirmed(saved)
+        xray.remark = 'Independent core metadata'
+        with self.assertRaises(ProxyConflict):
+            self.coordinator.apply(saved['revision'], 'stale-source', **stale)
+        result = self.coordinator.check(saved['revision'])
+        self.coordinator.apply(saved['revision'], 'local-yaml',
+            expected_source_fingerprint=result['source_fingerprint'],
+            yaml_check_id=result['yaml_confirmation']['check_id'])
+        before = self.runtime.state()
+        xray.remark = 'New independent core metadata'
+        self.resolve.reset_mock()
+        self.assertEqual(self.coordinator.recover()['phase'], 'recovered')
+        self.assertEqual(self.runtime.state(), before)
+        self.resolve.assert_not_called()
+
+    def test_interrupted_certificate_reconciliation_restores_previous_runtime(self):
+        inbound = row()
+        self.coordinator.rows_provider = lambda: [inbound]
+        self.coordinator.build_config = build_config
+        saved = self.save()
+        self.coordinator.apply(saved['revision'], 'baseline', **self.confirmed(saved))
+        before = self.runtime.state()
+        inbound.stream_settings['tls']['certificate_path'] = '/test-only-new-certificate'
+        with patch.object(self.store, 'commit_apply', side_effect=SimulatedCrash), self.assertRaises(SimulatedCrash):
+            self.coordinator.reconcile(transaction_id='interrupted-rotation')
+        self.resolve.reset_mock()
+        self.assertEqual(self.coordinator.recover()['phase'], 'aborted')
+        self.assertEqual(self.runtime.state(), before)
+        self.assertEqual(self.store.transaction('interrupted-rotation')['phase'], 'aborted')
+        self.resolve.assert_not_called()
+
     def test_same_second_recheck_invalidates_the_first_confirmation(self):
         saved = self.save()
         with patch('app.services.proxy_store.time.time', return_value=1000):

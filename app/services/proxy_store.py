@@ -101,8 +101,9 @@ def matches_recovery_state(context, current):
     candidate = context["candidate_core_revision"]
     if current["revision"] not in (previous, candidate) or type(current["enabled"]) is not bool:
         return False
-    if context["schema_version"] == 3 and context["kind"] == "apply":
-        return current["enabled"]
+    if context["schema_version"] == 3:
+        return ((current["revision"] == previous and current["enabled"] == context["previous_enabled"])
+                or (current["revision"] == candidate and current["enabled"] == context["candidate_enabled"]))
     if current["revision"] == previous != candidate:
         return current["enabled"] == context["previous_enabled"]
     return True
@@ -423,9 +424,10 @@ class ProxyStore:
         extended = {"policy_version", "plan_manifest", "source_fingerprint", "requires_upstream"}
         _require(isinstance(context, dict) and type(context.get("schema_version")) is int)
         version = context["schema_version"]
-        fields = {1: common, 2: common | extended, 3: common | {"yaml_check"}}
+        fields = {1: common, 2: common | extended, 3: common | {"yaml_check", "candidate_enabled"}}
         _require(version in fields and set(context) == fields[version])
         if version == 3:
+            _require(type(context["candidate_enabled"]) is bool)
             from app.services.mihomo_plan_record import decode_check_record
             try:
                 ticket = decode_check_record(_canonical(context["yaml_check"])).value
@@ -447,7 +449,7 @@ class ProxyStore:
         _require(previous is None or isinstance(previous, str) and _HEX.fullmatch(previous) is not None)
         _require(type(context["previous_enabled"]) is bool and (previous is not None or not context["previous_enabled"]))
         if version == 3 and context["kind"] == "apply":
-            _require(context["previous_enabled"])
+            _require(context["previous_enabled"] and context["candidate_enabled"])
         endpoint = context["endpoint"]
         if endpoint is not None:
             _require(isinstance(endpoint, dict) and set(endpoint) == {"profile_id", "revision", "host", "addresses", "resolved_at"})
