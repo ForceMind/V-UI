@@ -192,7 +192,7 @@ def reserved_port(stack, host):
 
 
 class Fixture:
-    def __init__(self, stack, root, cores, *, guarded=True, fault=None):
+    def __init__(self, stack, root, cores, *, guarded=True, fault=None, udp_connect=None, single_hop=False):
         self.stack, self.root, self.cores = stack, root, cores
         self.processes = {}
         self.target = Target(stack, ALLOWED)
@@ -222,7 +222,8 @@ class Fixture:
                     'action': 'route'}
 
         overseas_rules = [{**rule(target), 'outbound': 'controlled-egress'} for target in (self.target, self.trap)]
-        domestic_rules = [{**rule(target), 'outbound': 'overseas-hop', 'udp_connect': guarded, 'udp_timeout': '2s'}
+        connected = guarded if udp_connect is None else udp_connect
+        domestic_rules = [{**rule(target), 'outbound': 'overseas-hop', 'udp_connect': connected, 'udp_timeout': '2s'}
                           for target in ((self.target,) if guarded else (self.target, self.trap))]
         reject = {'action': 'reject'}
         overseas = {'log': log, 'inbounds': [inbound(OVERSEAS, ports['overseas'], SECOND_ID, second_cert, second_key)],
@@ -234,19 +235,23 @@ class Fixture:
                                    'flow': '', 'network': ['tcp', 'udp'], 'packet_encoding': 'xudp',
                                    'tls': {'enabled': True, 'server_name': 'wrong.example.test' if fault == 'second-sni' else SNI}}],
                     'route': {'rules': [*domestic_rules, reject], 'final': 'overseas-hop'}}
+        device_hop = 'overseas' if single_hop else 'domestic'
+        device_host = OVERSEAS if single_hop else DOMESTIC
+        device_id = SECOND_ID if single_hop else FIRST_ID
         device = {'mixed-port': ports['device'], 'bind-address': DEVICE, 'allow-lan': False, 'mode': 'rule',
                   'log-level': 'debug', 'ipv6': False, 'find-process-mode': 'off', 'geo-auto-update': False,
-                  'proxies': [{'name': 'DOMESTIC_ONLY', 'type': 'vless', 'server': DOMESTIC,
-                               'port': ports['domestic'], 'uuid': BAD_ID if fault == 'first-uuid' else FIRST_ID,
+                  'proxies': [{'name': 'DOMESTIC_ONLY', 'type': 'vless', 'server': device_host,
+                               'port': ports[device_hop], 'uuid': BAD_ID if fault == 'first-uuid' else device_id,
                                'network': 'tcp', 'udp': True, 'packet-encoding': 'xudp', 'flow': '',
                                'tls': True, 'servername': 'wrong.example.test' if fault == 'first-sni' else SNI,
                                'skip-cert-verify': False}],
                   'rules': ['MATCH,DOMESTIC_ONLY']}
-        for name, host, config, ca in (
-            ('overseas', OVERSEAS, overseas, second_ca),
-            ('domestic', DOMESTIC, domestic, wrong_ca if fault == 'second-ca' else second_ca),
-            ('device', DEVICE, device, wrong_ca if fault == 'first-ca' else first_ca),
-        ):
+        roles = [('overseas', OVERSEAS, overseas, second_ca)]
+        if not single_hop:
+            roles.append(('domestic', DOMESTIC, domestic, wrong_ca if fault == 'second-ca' else second_ca))
+        device_ca = second_ca if single_hop else first_ca
+        roles.append(('device', DEVICE, device, wrong_ca if fault == 'first-ca' else device_ca))
+        for name, host, config, ca in roles:
             env = {'PATH': '/usr/bin:/bin', 'HOME': str(root), 'SSL_CERT_FILE': str(ca), 'SSL_CERT_DIR': str(empty)}
             path = root / (name + ('.yaml' if name == 'device' else '.json'))
             path.write_text(yaml.safe_dump(config) if name == 'device' else json.dumps(config))
@@ -350,14 +355,22 @@ def run_retarget(fixture, row):
     row['warmup_reply'] = assoc.receive()
     fixture.audit()
     require(row['warmup_reply'] is not None, 'Cannot test retarget without a live association')
-    fixture.reject(row, assoc, fixture.trap.address, 'domestic', ('reject',))
-    require(assoc.identity() == row['association'], 'Application association changed during retarget')
+    try:
+        fixture.reject(row, assoc, fixture.trap.address, 'domestic', ('reject',))
+    finally:
+        row['association_after'] = assoc.identity()
+    require(row['association_after'] == row['association'], 'Application association changed during retarget')
 
 
-def run_fault(fixture, row, role, reasons):
+def run_fault(fixture, row, role, reasons, *, forbidden=False):
     assoc = Association(fixture.stack, fixture.device_port)
     row['association'] = assoc.identity()
-    fixture.reject(row, assoc, fixture.target.address, role, reasons)
+    target = fixture.trap if forbidden else fixture.target
+    fixture.reject(row, assoc, target.address, role, reasons)
+
+
+def run_cold_retarget(fixture, row):
+    run_fault(fixture, row, 'domestic', ('reject',), forbidden=True)
 
 
 def run_stop(fixture, row):
@@ -365,19 +378,20 @@ def run_stop(fixture, row):
     run_fault(fixture, row, 'domestic', ('connect: connection refused',))
 
 
-def run_idle(fixture, row, leaves):
+def run_idle(fixture, row, leaves, baseline=60000, recovery=32768):
     assoc = Association(fixture.stack, fixture.device_port)
     identity = assoc.identity()
     row['association'] = identity
-    leaves['idle-release']['reason'] = 'Full 60000-byte guarded baseline has not passed'
-    leaves['idle-recovery']['reason'] = 'Full guarded idle release has not passed'
-    old_peer = fixture.exchange(row, assoc, 60000, 60000)
+    prefix = row['id'].removesuffix('-baseline')
+    idle, recovered = leaves[prefix + '-release'], leaves[prefix + '-recovery']
+    idle['reason'] = f'Full {baseline}-byte baseline has not passed'
+    recovered['reason'] = 'Idle release has not passed'
+    old_peer = fixture.exchange(row, assoc, baseline, baseline)
     upstream = psutil.Process(fixture.processes['overseas'].process.pid)
 
     def descriptors():
         return [item.fd for item in upstream.net_connections(kind='udp') if list(item.laddr) == old_peer]
 
-    idle = leaves['idle-release']
     try:
         idle['old_peer'] = old_peer
         idle['old_udp_fds'] = descriptors()
@@ -396,13 +410,12 @@ def run_idle(fixture, row, leaves):
     except (OSError, AssertionError, psutil.Error) as error:
         idle.update(status='failed', reason=clean(str(error), fixture.root))
         return
-    recovered = leaves['idle-recovery']
     try:
         recovered['association'] = assoc.identity()
         require(recovered['association'] == identity, 'Application SOCKS control/socket/relay changed')
-        fixture.exchange(recovered, assoc, 32768, 32768)
+        recovered['overseas_udp_peer'] = fixture.exchange(recovered, assoc, recovery, recovery)
         require(assoc.identity() == identity, 'Recovery replaced the application association')
-        recovered.update(status='passed', reason='Exact large reply on the original application association')
+        recovered.update(status='passed', reason=f'Exact {recovery}-byte reply on the original application association')
     except (OSError, AssertionError) as error:
         recovered.update(status='failed', reason=clean(str(error), fixture.root))
 
@@ -428,6 +441,19 @@ def build_cases():
     return cases
 
 
+def build_diagnostics():
+    cases = [
+        ('unconnected-cold-deny', True, None, run_cold_retarget, ()),
+        ('unconnected-retarget', True, None, run_retarget, ()),
+        ('unconnected-small-idle-baseline', True, None, run_idle, (1200, 1200)),
+    ]
+    for size in (32768, 60000):
+        for prefix in ('unconnected', 'one-hop'):
+            cases.extend(((f'{prefix}-up-{size}', True, None, run_exchange, (size, 1)),
+                          (f'{prefix}-down-{size}', True, None, run_exchange, (1, size))))
+    return cases
+
+
 def persist(directory, report):
     path = directory / 'report.json'
     pending = path.with_suffix('.tmp')
@@ -435,7 +461,7 @@ def persist(directory, report):
     pending.replace(path)
 
 
-def run_case(directory, cores, case, rows):
+def run_case(directory, cores, case, rows, **fixture_options):
     name, guarded, fault, operation, args = case
     row = rows[name]
     fixture = None
@@ -444,11 +470,11 @@ def run_case(directory, cores, case, rows):
         root = Path(temp)
         try:
             with ExitStack() as stack:
-                fixture = Fixture(stack, root, cores, guarded=guarded, fault=fault)
+                fixture = Fixture(stack, root, cores, guarded=guarded, fault=fault, **fixture_options)
                 phase = 'exercise'
                 try:
                     if operation is run_idle:
-                        operation(fixture, row, rows)
+                        operation(fixture, row, rows, *args)
                     else:
                         operation(fixture, row, *args)
                     row.update(status='passed', reason='Expected observations verified')
@@ -486,8 +512,13 @@ def main():
     output, expected = Path(sys.argv[1]), sys.argv[2]
     output.mkdir(parents=True, exist_ok=True)
     cases = build_cases()
-    order = [case[0] for case in cases] + ['idle-release', 'idle-recovery', 'mux-backpressure']
-    rows = {name: {'id': name, 'status': 'not_run', 'reason': 'Not reached'} for name in order}
+    qualification = [case[0] for case in cases] + ['idle-release', 'idle-recovery', 'mux-backpressure']
+    diagnostics = build_diagnostics()
+    diagnostic_ids = [case[0] for case in diagnostics] + [
+        'unconnected-small-idle-release', 'unconnected-small-idle-recovery']
+    order = qualification + diagnostic_ids
+    rows = {name: {'id': name, 'status': 'not_run', 'reason': 'Not reached',
+                   'diagnostic': name in diagnostic_ids} for name in order}
     rows['mux-backpressure']['reason'] = 'Requires a qualified baseline and an independent controlled shared-mux write-block witness'
     report = {'schema': 1, 'base': 'dd4c22eb8a4b98f88bba436cadbebdb49f5ce7c4', 'source': expected,
               'run_id': os.environ.get('GITHUB_RUN_ID'), 'attempt': os.environ.get('GITHUB_RUN_ATTEMPT'),
@@ -505,8 +536,13 @@ def main():
             cores = Path(temp)
             report['binaries'] = fetch_cores(cores)
             persist(output, report)
-            for case in cases:
-                run_case(output, cores, case, rows)
+            for case in cases + diagnostics:
+                options = {}
+                if case[0].startswith('unconnected-'):
+                    options['udp_connect'] = False
+                elif case[0].startswith('one-hop-'):
+                    options['single_hop'] = True
+                run_case(output, cores, case, rows, **options)
                 persist(output, report)
                 print(f"{case[0]}: {rows[case[0]]['status']} — {rows[case[0]]['reason']}", flush=True)
     except urllib.error.HTTPError as error:
@@ -515,7 +551,7 @@ def main():
         report['preflight_error'] = type(error).__name__ + ' during fixed-source preflight'
     report['counts'] = {status: sum(row['status']==status for row in rows.values())
                         for status in ('passed','failed','not_run')}
-    bounded = [row for name, row in rows.items() if name != 'mux-backpressure']
+    bounded = [rows[name] for name in qualification if name != 'mux-backpressure']
     if 'preflight_error' not in report and all(row['status']=='passed' for row in bounded):
         report['verdict'] = 'bounded-scenarios-passed'
     persist(output, report)
