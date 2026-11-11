@@ -948,7 +948,13 @@ def _validate_restore_policy(data: Path, *, _artifact_ids=None, _existing_store_
         plan = policy_plan(store.policy_rows(), active['settings'])
         saved = store.context_plan(context, active['settings'])
         if context['schema_version'] == 3:
-            matches = yaml_runtime_sources(plan.manifest) == yaml_runtime_sources(saved.manifest)
+            settings = active['settings']
+            manifest = plan.manifest
+            matches = (yaml_runtime_sources(manifest) == yaml_runtime_sources(saved.manifest)
+                       and not any(item['enable'] and (
+                           (settings['local_proxy_enabled'] and item['port'] == settings['local_port'])
+                           or (item['core'] != 'sing-box' and (item['mode'] != 'inherit' or plan.relay_ids)))
+                           for item in manifest))
         else:
             matches = plan.manifest == saved.manifest and plan.source_fingerprint == saved.source_fingerprint
         if not matches:

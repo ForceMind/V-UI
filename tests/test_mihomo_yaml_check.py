@@ -6,11 +6,12 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 
+from app import release_tools
 from app.services.mihomo_merge import serialize_mihomo_merge
 from app.services.mihomo_merge_plan import plan_mihomo
 from app.services.mihomo_plan_record import encode_plan_record
 from app.services.proxy_apply import ProxyApplyCoordinator, ProxyApplyError
-from app.services.core_runtime import CoreError
+from app.services.core_runtime import CoreError, encode
 from app.services.proxy_policy import VerifiedEndpoint
 from app.services.proxy_store import ProxyConflict, ProxyStore
 from tests.test_proxy_apply import FakeRuntime, SimulatedCrash, build_config, row
@@ -268,6 +269,19 @@ rules: ["DOMAIN,example.com,other", "MATCH,Chosen"]
         self.assertEqual(self.coordinator.recover()['phase'], 'recovered')
         self.assertEqual(self.runtime.state(), before)
         self.resolve.assert_not_called()
+        runtime = self.store.data_dir / 'runtime' / 'sing-box'
+        runtime.mkdir(mode=0o700, parents=True)
+        for name, value in (('state.json', before), (before['revision'] + '.json',
+                                                    self.runtime.saved[before['revision']])):
+            path = runtime / name
+            path.write_bytes(encode(value))
+            path.chmod(0o600)
+        with patch.object(ProxyStore, 'policy_rows', return_value=[inbound, xray]), \
+                patch.object(release_tools, '_database_mode_fence', return_value=False):
+            release_tools._validate_restore_policy(self.store.data_dir)
+            xray.port = saved['settings']['local_port']
+            with self.assertRaisesRegex(release_tools.ReleaseError, 'differ from'):
+                release_tools._validate_restore_policy(self.store.data_dir)
 
     def test_interrupted_certificate_reconciliation_restores_previous_runtime(self):
         inbound = row()
