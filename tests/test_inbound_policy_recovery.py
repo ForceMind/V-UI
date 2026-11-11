@@ -1,5 +1,6 @@
 """Exact committed protection and offline recovery, fake private fixtures only."""
 import copy
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -12,6 +13,9 @@ from app.services import proxy_recovery as recovery
 from app.services.core_manager import SingBoxAdapter
 from app.services.core_runtime import revision
 from app.services.inbound_policy import policy_plan
+from app.services.mihomo_merge import serialize_mihomo_merge
+from app.services.mihomo_merge_plan import plan_mihomo
+from app.services.mihomo_plan_record import encode_plan_record
 from app.services.proxy_policy import VerifiedEndpoint, compile_proxy_policy
 from app.services.proxy_store import ProxyStore
 from tests import test_proxy_recovery as fixtures
@@ -212,6 +216,28 @@ class InboundRecoveryTests(unittest.TestCase):
         current_reader = Path(__file__).resolve().parents[1] / 'app/services/proxy_store.py'
         (directory / 'proxy_store.py').write_bytes(current_reader.read_bytes())
         release._policy_release_compatible(self.data, payload)
+
+    def test_yaml_fence_rejects_legacy_restore_and_a_draft_only_reader(self):
+        self.mixed()
+        self.commit(False, False)
+        old_backup = self.backup()
+        baseline, candidate = 'mode: rule', 'rules: ["MATCH,REJECT"]'
+        plan = plan_mihomo(baseline, candidate)
+        sources = {'baseline': baseline.encode(), 'candidate': candidate.encode(),
+                   'merged': serialize_mihomo_merge(baseline, candidate)}
+        record = encode_plan_record(plan, sources={k: hashlib.sha256(v).hexdigest() for k, v in sources.items()},
+                                     group_members={}, dns_upstream=None)
+        self.store.save_yaml_plan(record, sources, self.store.read_snapshot()['revision'])
+        self.assert_no_change(lambda: release.restore(self.root, self.archive, old_backup))
+        self.assert_no_change(lambda: self.preview_restore(old_backup))
+        directory = self.top / 'candidate/app/services'
+        directory.mkdir(parents=True)
+        reader = directory / 'proxy_store.py'
+        reader.write_text('PROXY_STATE_SCHEMA_MAX = 3\n')
+        with self.assertRaisesRegex(release.ReleaseError, 'downgrade refused'):
+            release._policy_release_compatible(self.data, self.top / 'candidate')
+        reader.write_text('PROXY_STATE_SCHEMA_MAX = 3\nPROXY_RUNTIME_CONTEXT_SCHEMA_MAX = 3\n')
+        release._policy_release_compatible(self.data, self.top / 'candidate')
 
 
 if __name__ == '__main__': unittest.main()

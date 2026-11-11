@@ -105,6 +105,7 @@ def _export(kind, payload, request):
     except StrictExportError as error:
         codes = {"INVALID_STRICT_EXPORT_REQUEST": 422, "STRICT_EXPORT_PUBLIC_IP_REQUIRED": 422,
                  "STRICT_EXPORT_RELAY_NOT_ACTIVE": 409, "STRICT_EXPORT_UNQUALIFIED_INGRESS": 409,
+                 "STRICT_EXPORT_YAML_POLICY": 409,
                  "STRICT_EXPORT_INGRESS_NOT_FOUND": 409, "STRICT_EXPORT_STATE_MISMATCH": 409,
                  "STRICT_EXPORT_RUNTIME_UNAVAILABLE": 503}
         code = error.code if error.code in codes else "STRICT_EXPORT_RUNTIME_UNAVAILABLE"

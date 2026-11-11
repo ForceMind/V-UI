@@ -383,6 +383,7 @@ class CorePrepareWorkerTests(unittest.TestCase):
             source={'ops_worker.py':root/'deploy/ops_worker.py','release_tools.py':root/'app/release_tools.py',
                 'data_owner.py':root/'app/data_owner.py','upstream_profile.py':root/'app/services/upstream_profile.py',
                 'inbound_policy.py':root/'app/services/inbound_policy.py','proxy_store.py':root/'app/services/proxy_store.py',
+                'mihomo_plan_record.py':root/'app/services/mihomo_plan_record.py',
                 'certificate_errors.py':root/'app/certificates/errors.py'}
             for name in ('dns_store','cloudflare','dns_journal','dns_backup'):
                 source[name+'.py']=root/'app/certificates'/(name+'.py')

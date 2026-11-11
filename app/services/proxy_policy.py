@@ -225,7 +225,7 @@ def ingress_coverage(inbounds):
     return sorted(result, key=lambda row: row["inbound_id"])
 
 
-def _check_tags(config):
+def _check_tags(config, *, namespaces=(NAMESPACE,)):
     tags = []
     for key in ("inbounds", "outbounds", "endpoints"):
         values = config.get(key, [])
@@ -236,7 +236,7 @@ def _check_tags(config):
     if type(dns) is not dict or type(dns.get("servers", [])) is not list:
         raise PolicyError("INVALID_BASE_CONFIG")
     tags.extend(value.get("tag") if type(value) is dict else None for value in dns.get("servers", []))
-    if any(type(tag) is not str or not tag or tag.startswith(NAMESPACE) for tag in tags):
+    if any(type(tag) is not str or not tag or tag.startswith(namespaces) for tag in tags):
         raise PolicyError("RESERVED_OR_MISSING_TAG")
     if len(set(tags)) != len(tags):
         raise PolicyError("DUPLICATE_TAG")
@@ -245,9 +245,9 @@ def _check_tags(config):
     def visit(value):
         if type(value) is dict:
             for key, child in value.items():
-                if key in {"tag", "inbound", "outbound", "detour", "final", "server", "default_domain_resolver"}:
+                if key in {"tag", "inbound", "outbound", "detour", "final", "server", "default_domain_resolver", "rule_set"}:
                     references = child if type(child) is list else [child]
-                    if any(type(ref) is str and ref.startswith(NAMESPACE) for ref in references):
+                    if any(type(ref) is str and ref.startswith(namespaces) for ref in references):
                         raise PolicyError("RESERVED_TAG_REFERENCE")
                 visit(child)
         elif type(value) is list:
@@ -346,7 +346,7 @@ def _upstream(profile, pinned):
     return value
 
 
-def _prepare(config, rows, proxy_snapshot):
+def _prepare(config, rows, proxy_snapshot, *, require_upstream=True, namespaces=(NAMESPACE,)):
     settings = _settings(proxy_snapshot)
     plan = policy_plan(rows, settings)
     coverage = ingress_coverage(rows)
@@ -361,13 +361,13 @@ def _prepare(config, rows, proxy_snapshot):
             raise PolicyError("MIXED_CORE_RELAY_UNSUPPORTED", coverage)
     selected_tags = []
     if plan.requires_upstream or not plan.legacy:
-        _check_tags(config)
+        _check_tags(config, namespaces=namespaces)
         if not plan.legacy:
             selected_tags = _bind_ingress(config, rows, plan.relay_ids)
         elif settings["relay_enabled"]:
             selected_tags = _bind_ingress(config, rows)
     profile = None
-    if plan.requires_upstream:
+    if plan.requires_upstream and require_upstream:
         profile_id, revision = settings["selected_upstream_id"], proxy_snapshot.get("revision")
         if (type(profile_id) is not str or not _ID.fullmatch(profile_id)
                 or type(revision) is not str or not _REVISION.fullmatch(revision)):

@@ -16,17 +16,19 @@ const reply = (text=REPORT, status=200) => ({status, ok:status>=200&&status<300,
 const deferred = () => {let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 const flush = () => new Promise(resolve=>setImmediate(resolve));
 class Element {
-    constructor(id,tag) {this.id=id;this.tagName=tag.toUpperCase();this.value='';this.files=[];this.disabled=false;this.hidden=false;this.open=false;this.textContent='';this.events=new Map();}
+    constructor(id,tag) {this.id=id;this.tagName=tag.toUpperCase();this.value='';this.files=[];this.disabled=false;this.hidden=false;this.open=false;this.textContent='';this.events=new Map();this.children=[];}
     addEventListener(name,fn) {this.events.set(name,[...(this.events.get(name)||[]),fn]);}
     async emit(name,event={preventDefault(){}}) {for(const fn of this.events.get(name)||[])await fn(event);}
     async click() {if(!this.disabled)await this.emit('click');}
+    append(child) {this.children.push(child);}
+    replaceChildren(...children) {this.children=[...children];}
     focus() {this.focused=true;}
     showModal() {assert(!this.open);this.open=true;}
     close() {if(this.open){this.open=false;void this.emit('close');}}
     set innerHTML(_) {assert.fail('Unsafe HTML sink');}
 }
-function fixture() {
-    const ids=new Map(), globals=new Map(), requests=[], queued=[], redirects=[];
+function fixture(realNavigation=false) {
+    const ids=new Map(), globals=new Map(), requests=[], queued=[], redirects=[], downloads=[], revoked=[], dispatched=[];
     for(const match of html.matchAll(/<([\w-]+)\b[^>]*\bid="([^"]+)"[^>]*>/g)) {
         assert(!ids.has(match[2]), 'actual template IDs are unique');
         const element=new Element(match[2],match[1]);
@@ -34,36 +36,87 @@ function fixture() {
         ids.set(match[2],element);
     }
     const get=id=>{assert(ids.has(id),'actual template contains '+id);return ids.get(id);};
-    vm.runInNewContext(script, {
-        document:{getElementById:get}, TextEncoder, TextDecoder, AbortController,
+    const context = {
+        document:{getElementById:get, body:{append(){}},
+            createElement:tag=>{
+                if(tag==='a')return {remove(){},click(){downloads.push(this);}};
+                assert(['p','label','select','option'].includes(tag));
+                return new Element('',tag);
+            }},
+        TextEncoder, TextDecoder, AbortController,
+        Event: class {constructor(type){this.type=type;}},
+        dispatchEvent:event=>dispatched.push(event.type),
+        URL:{createObjectURL:()=> 'blob:private-fixture', revokeObjectURL:url=>revoked.push(url)},
+        setTimeout:fn=>fn(),
         addEventListener:(name,fn)=>globals.set(name,[...(globals.get(name)||[]),fn]),
         location:{replace:url=>redirects.push(url)},
         fetch:async(url,options)=>{
-            assert.equal(url,'/api/proxy/yaml/preview');assert.equal(options.method,'POST');
+            assert(['/api/proxy/yaml/preview','/api/proxy/yaml/merge/download','/api/proxy/yaml/merge/review',
+                '/api/proxy/yaml/plan/options','/api/proxy/yaml/draft','/api/proxy/settings'].includes(url));
+            assert.equal(options.method,url==='/api/proxy/settings'?'GET':'POST');
             assert.equal(options.credentials,'same-origin');assert.equal(options.cache,'no-store');
-            assert.equal(options.headers['X-VUI-Request'],'1');assert.equal(options.headers['Content-Type'],'application/json');
+            if(options.method==='POST'){
+                assert.equal(options.headers['X-VUI-Request'],'1');assert.equal(options.headers['Content-Type'],'application/json');
+            }
             requests.push({url,options});
             return queued.length?queued.shift()(options):reply();
         },
         localStorage:new Proxy({}, {get(){assert.fail('No localStorage');}}),
         sessionStorage:new Proxy({}, {get(){assert.fail('No sessionStorage');}}),
         console:new Proxy({}, {get(){assert.fail('No source logging');}}),
-    }, {filename:scriptPath});
+    };
+    if(realNavigation){
+        context.URL=class extends URL {
+            static createObjectURL(){return 'blob:private-fixture';}
+            static revokeObjectURL(url){revoked.push(url);}
+        };
+        context.URLSearchParams=URLSearchParams;
+        Object.assign(context.location,{origin:'https://panel.example.test',pathname:'/proxy',hash:'',search:'',
+            assign:url=>redirects.push(url)});
+        const entries=[{state:null,url:'/proxy'}];
+        let cursor=0;
+        const update=value=>{
+            const url=new URL(value,context.location.origin);
+            Object.assign(context.location,{pathname:url.pathname,hash:url.hash,search:url.search});
+        };
+        context.history={
+            state:null,
+            replaceState(state,unused,url){this.state=state;entries[cursor]={state,url};update(url);},
+            pushState(state,unused,url){cursor++;entries.splice(cursor);entries.push({state,url});this.state=state;update(url);},
+            back(){this.go(-1);},
+            go(delta){Promise.resolve().then(()=>{
+                cursor+=delta;assert(cursor>=0&&cursor<entries.length);
+                this.state=entries[cursor].state;update(entries[cursor].url);
+                for(const fn of globals.get('popstate')||[])fn({state:this.state});
+            });},
+        };
+        vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../web/js/navigation.js'),'utf8'),context);
+    }
+    vm.runInNewContext(script, context, {filename:scriptPath});
     const emit=async(name,event={})=>{for(const fn of globals.get(name)||[])await fn(event);};
     const input=async(role,value)=>{get('yaml-'+role).value=value;await get('yaml-'+role).emit('input');};
     const select=async(role,file)=>{get('yaml-'+role+'-file').files=[file];get('yaml-'+role+'-file').value='fake-name';await get('yaml-'+role+'-file').emit('change');};
-    return {get,requests,queued,redirects,emit,input,select,
+    return {get,requests,queued,redirects,downloads,revoked,dispatched,emit,input,select,
+        nav:context.VUI_NAV,history:context.history,
         open:()=>get('open-yaml-preview').click(), close:()=>get('close-yaml-preview').click(),
         submit:()=>get('yaml-preview-form').emit('submit'),
+        review:()=>get('yaml-preview-form').emit('submit',
+            {preventDefault(){},submitter:get('yaml-merge-review')}),
+        options:()=>get('yaml-preview-form').emit('submit',
+            {preventDefault(){},submitter:get('yaml-plan-options')}),
+        save:()=>get('yaml-preview-form').emit('submit',
+            {preventDefault(){},submitter:get('yaml-plan-save')}),
+        download:()=>get('yaml-preview-form').emit('submit',
+            {preventDefault(){},submitter:get('yaml-merge-download')}),
         clear:()=>get('clear-yaml-preview').click(),
         notice:()=>get('yaml-preview-notice').textContent, report:()=>get('yaml-preview-result').textContent};
 }
 function file(text) {const data=new TextEncoder().encode(text);return {name:SECRET,size:data.byteLength,arrayBuffer:async()=>data.buffer};}
-async function ready() {const f=fixture();await f.open();await f.input('candidate','{}');return f;}
+async function ready(realNavigation=false) {const f=fixture(realNavigation);await f.open();await f.input('candidate','{}');return f;}
 
 test('actual template declares isolated controller, limits, privacy and labels',()=>{
     assert(html.includes('/ui/js/mihomo-preview.js'));
-    assert(html.includes('发送给当前面板服务器解析，不是浏览器内离线解析'));
+    assert(html.includes('发送给当前面板服务器处理，不是浏览器内离线解析'));
     assert(html.includes('即使零诊断也不可应用'));
     assert(html.includes('不能保证浏览器或操作系统内存擦除'));
     for(const id of ['yaml-candidate','yaml-baseline']) {
@@ -227,4 +280,201 @@ test('queued native close from previous session cannot clear reopened inputs or 
     assert.equal(f.get('yaml-candidate').value,'mode: direct');
     assert(f.get('yaml-preview-submit').disabled);assert(!f.requests[0].options.signal.aborted);
     wait.resolve(reply());await pending;assert.equal(f.report(),REPORT);
+});
+
+const attachment = (blob=async()=>({size:64})) => ({
+    status:200, ok:true, blob,
+    headers:{get:name=>({'content-type':'application/yaml','content-length':'64',
+        'content-disposition':'attachment; filename="vui-merged.yaml"'})[name]},
+});
+
+test('private merge needs both inputs and downloads only the fixed attachment',async()=>{
+    const f=await ready();assert(f.get('yaml-merge-download').disabled);
+    await f.download();assert.equal(f.requests.length,0);
+    await f.input('baseline','rules: ["MATCH,REJECT"]');
+    assert(!f.get('yaml-merge-download').disabled);
+    f.queued.push(()=>attachment());
+    await f.download();
+    assert.equal(f.requests[0].url,'/api/proxy/yaml/merge/download');
+    assert.equal(f.requests[0].options.redirect,'error');
+    assert.deepEqual(JSON.parse(f.requests[0].options.body),
+        {candidate:'{}',baseline:'rules: ["MATCH,REJECT"]'});
+    assert.equal(f.downloads.length,1);
+    assert.equal(f.downloads[0].download,'vui-merged.yaml');
+    assert.deepEqual(f.revoked,['blob:private-fixture']);
+    assert.equal(f.report(),'');
+});
+
+test('merge conflicts and stale attachment reads never download',async()=>{
+    const f=await ready();await f.input('baseline','{}');
+    f.queued.push(()=>({status:422,ok:false,json:async()=>({detail:{code:'MERGE_CHOICES_REQUIRED', path:SECRET}})}));
+    await f.download();assert(f.notice().includes('冲突'));assert(!f.notice().includes(SECRET));
+    const reading=deferred();
+    f.queued.push(()=>attachment(()=>reading.promise));
+    const work=f.download();await flush();
+    await f.input('baseline','mode: rule');
+    reading.resolve({size:64});await work;
+    assert.equal(f.downloads.length,0);
+    assert(f.requests[1].options.signal.aborted);
+});
+
+test('unexpected merge attachment length is rejected before reading bytes',async()=>{
+    const f=await ready();await f.input('baseline','{}');
+    let reads=0;
+    const response=attachment(async()=>{reads++;return {size:1048577};});
+    const header=response.headers.get;
+    response.headers.get=name=>name==='content-length'?'1048577':header(name);
+    f.queued.push(()=>response);
+    await f.download();
+    assert.equal(f.downloads.length,0);
+    assert(f.notice().includes('无法取得有效附件'));
+    assert.equal(reads,0);
+});
+
+const conflictReply = () => ({status:200,ok:true,json:async()=>({
+    fingerprint:'a'.repeat(64), conflicts:[{index:0,section:'other',baseline:[1,1],candidate:[1,1]}],
+})});
+
+test('review shows only fixed coordinates and requires explicit choice before indexed download',async()=>{
+    const f=await ready();await f.input('baseline','{}');
+    f.queued.push(conflictReply);await f.review();
+    assert.equal(f.requests[0].url,'/api/proxy/yaml/merge/review');
+    const panel=f.get('yaml-merge-conflicts');
+    assert(!panel.hidden);
+    const label=panel.children[1], select=label.children[0];
+    assert(label.textContent.includes('基线第 1 行第 1 列'));
+    assert.equal(select.value,'');assert(f.get('yaml-merge-download').disabled);
+    await f.download();assert.equal(f.requests.length,1);
+    select.value='candidate';await select.emit('change');
+    assert(!f.get('yaml-merge-download').disabled);
+    f.queued.push(()=>attachment());await f.download();
+    assert.deepEqual(JSON.parse(f.requests[1].options.body),{
+        candidate:'{}',baseline:'{}',fingerprint:'a'.repeat(64),selections:['candidate'],
+    });
+    assert.equal(f.downloads.length,1);
+    await f.input('candidate','mode: rule');
+    assert(f.get('yaml-merge-conflicts').hidden);
+    assert.equal(f.get('yaml-merge-conflicts').children.length,0);
+});
+
+test('unknown review fields and stale review responses never create choices',async()=>{
+    const f=await ready();await f.input('baseline','{}');
+    f.queued.push(()=>({status:200,ok:true,json:async()=>({fingerprint:'a'.repeat(64),
+        conflicts:[{index:0,section:SECRET,baseline:[1,1],candidate:[1,1]}]})}));
+    await f.review();assert(f.get('yaml-merge-conflicts').hidden);
+    assert(!f.notice().includes(SECRET));
+    const pending=deferred();f.queued.push(()=>pending.promise);
+    const work=f.review();await flush();await f.input('candidate','mode: rule');
+    pending.resolve(conflictReply());await work;
+    assert(f.get('yaml-merge-conflicts').hidden);
+});
+
+const noConflicts = () => ({status:200,ok:true,json:async()=>({fingerprint:'a'.repeat(64),conflicts:[]})});
+const planOptionsReply = () => ({status:200,ok:true,json:async()=>({
+    upstreams:['One','Two'],groups:[{name:'Chosen',members:['One','Two']}],
+})});
+const snapshotReply = revision => ({status:200,ok:true,headers:{get:key=>key==='etag'?'"'+revision+'"':null},
+    json:async()=>({revision,pending:null})});
+
+async function reviewedPlan(realNavigation=false) {
+    const f=await ready(realNavigation);await f.input('baseline','{}');
+    f.queued.push(noConflicts);await f.review();
+    f.queued.push(planOptionsReply,()=>snapshotReply('b'.repeat(64)));
+    await f.options();
+    return f;
+}
+
+test('runtime draft options need explicit selections and save uses the reviewed workspace revision',async()=>{
+    const f=await reviewedPlan(), panel=f.get('yaml-plan-choices');
+    assert(!panel.hidden);assert(f.get('yaml-plan-save').disabled);
+    const group=panel.children[1].children[0],dns=panel.children[2].children[0];
+    group.value='Two';await group.emit('change');
+    dns.value='One';await dns.emit('change');
+    assert(!f.get('yaml-plan-save').disabled);
+    f.queued.push(()=>({status:200,ok:true,headers:{get:key=>key==='etag'?'"'+'c'.repeat(64)+'"':null},
+        json:async()=>({revision:'c'.repeat(64),execution_mode:'yaml',yaml_plan:{revision:'d'.repeat(64)}})}));
+    await f.save();
+    const request=f.requests.at(-1);
+    assert.equal(request.url,'/api/proxy/yaml/draft');
+    assert.equal(request.options.headers['If-Match'],'b'.repeat(64));
+    assert.deepEqual(JSON.parse(request.options.body),{
+        candidate:'{}',baseline:'{}',fingerprint:'a'.repeat(64),selections:[],
+        group_members:{Chosen:'Two'},dns_upstream:'One',
+    });
+    assert.deepEqual(f.dispatched,['vui-yaml-draft-saved']);
+    assert(f.get('yaml-plan-save').disabled);assert(f.notice().includes('已保存'));
+});
+
+test('editing inputs or changing conflict decisions invalidates runtime options',async()=>{
+    const f=await reviewedPlan();
+    await f.input('candidate','mode: rule');
+    assert(f.get('yaml-plan-choices').hidden);assert(f.get('yaml-plan-save').disabled);
+    const g=await ready();await g.input('baseline','{}');
+    g.queued.push(conflictReply);await g.review();
+    const select=g.get('yaml-merge-conflicts').children[1].children[0];
+    select.value='candidate';await select.emit('change');
+    const pending=deferred();g.queued.push(()=>pending.promise);
+    const work=g.options();await flush();
+    select.value='baseline';await select.emit('change');
+    pending.resolve(planOptionsReply());await work;
+    assert(g.requests.at(-1).options.signal.aborted);
+    assert(g.get('yaml-plan-choices').hidden);
+});
+
+test('revision conflict clears runtime options and never claims a saved draft',async()=>{
+    const f=await reviewedPlan(), panel=f.get('yaml-plan-choices');
+    panel.children[1].children[0].value='One';await panel.children[1].children[0].emit('change');
+    panel.children[2].children[0].value='One';await panel.children[2].children[0].emit('change');
+    f.queued.push(()=>({status:409,ok:false,json:async()=>({detail:'PROXY_REVISION_CONFLICT'})}));
+    await f.save();
+    assert(f.get('yaml-plan-choices').hidden);
+    assert(f.notice().includes('草稿已变化'));
+    assert.deepEqual(f.dispatched,['vui-yaml-draft-conflict']);
+});
+
+test('saving locks edits and normal close until the write result settles',async()=>{
+    const f=await reviewedPlan(), panel=f.get('yaml-plan-choices');
+    panel.children[1].children[0].value='One';await panel.children[1].children[0].emit('change');
+    panel.children[2].children[0].value='One';await panel.children[2].children[0].emit('change');
+    const pending=deferred();f.queued.push(()=>pending.promise);
+    const work=f.save();await flush();
+    assert(f.get('yaml-candidate').disabled);assert(f.get('yaml-baseline-file').disabled);
+    assert(f.get('close-yaml-preview').disabled);assert(f.get('clear-yaml-preview').disabled);
+    await f.close();assert(f.get('yaml-preview-dialog').open);
+    let prevented=false;
+    await f.get('yaml-preview-dialog').emit('cancel',{preventDefault(){prevented=true;}});
+    assert(prevented);assert(!f.requests.at(-1).options.signal.aborted);
+    pending.resolve({status:200,ok:true,headers:{get:key=>key==='etag'?'"'+'c'.repeat(64)+'"':null},
+        json:async()=>({revision:'c'.repeat(64),execution_mode:'yaml',yaml_plan:{revision:'d'.repeat(64)}})});
+    await work;
+    assert(!f.get('yaml-candidate').disabled);
+    assert.deepEqual(f.dispatched,['vui-yaml-draft-saved']);
+});
+
+test('unknown save result requires a fresh options revision and signals workspace uncertainty',async()=>{
+    const f=await reviewedPlan(), panel=f.get('yaml-plan-choices');
+    panel.children[1].children[0].value='One';await panel.children[1].children[0].emit('change');
+    panel.children[2].children[0].value='One';await panel.children[2].children[0].emit('change');
+    f.queued.push(()=>{throw Error('network lost after possible commit');});
+    await f.save();
+    assert(f.notice().includes('保存结果未确认'));
+    assert(f.get('yaml-plan-save').disabled);
+    assert.deepEqual(f.dispatched,['vui-yaml-draft-uncertain']);
+});
+
+test('real navigation preserves modal ownership and blocks Back during a YAML write',async()=>{
+    const f=await reviewedPlan(true),panel=f.get('yaml-plan-choices');
+    panel.children[1].children[0].value='One';await panel.children[1].children[0].emit('change');
+    panel.children[2].children[0].value='One';await panel.children[2].children[0].emit('change');
+    const pending=deferred();f.queued.push(()=>pending.promise);
+    const work=f.save();await flush();
+    f.history.back();await flush();
+    assert(f.get('yaml-preview-dialog').open);
+    assert.equal(f.history.state.modal,'yaml-preview');
+    assert.equal(f.nav.navigate('account'),false);
+    assert(!f.requests.at(-1).options.signal.aborted);
+    pending.resolve({status:200,ok:true,headers:{get:key=>key==='etag'?'"'+'c'.repeat(64)+'"':null},
+        json:async()=>({revision:'c'.repeat(64),execution_mode:'yaml',yaml_plan:{revision:'d'.repeat(64)}})});
+    await work;
+    assert.deepEqual(f.dispatched,['vui-yaml-draft-saved']);
 });

@@ -50,6 +50,7 @@ def _copy_control(payload, control):
                'data_owner.py': 'app/data_owner.py',
                'proxy_store.py': 'app/services/proxy_store.py',
                'upstream_profile.py': 'app/services/upstream_profile.py',
+               'mihomo_plan_record.py': 'app/services/mihomo_plan_record.py',
                'inbound_policy.py': 'app/services/inbound_policy.py',
                'certificate_errors.py': 'app/certificates/errors.py',
                'dns_store.py': 'app/certificates/dns_store.py',

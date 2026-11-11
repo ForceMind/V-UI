@@ -85,6 +85,27 @@ class ProxyRuntimeApiTests(unittest.TestCase):
             self.assertEqual(result.json()['detail'], 'INVALID_IDEMPOTENCY_KEY')
         self.manager.apply_proxy.assert_not_called()
 
+    def test_yaml_confirmation_requires_admin_and_keeps_classic_maintenance_check(self):
+        payload = {'base_revision': self.snapshot['revision'], 'source_fingerprint': 'a'*64,
+                   'yaml_check_id': 'b'*64}
+        headers = {**HEADERS, 'Idempotency-Key': KEY, 'Authorization': 'Bearer vui_ms_fixture'}
+        checked = {'snapshot': self.snapshot, 'phase': 'checked', 'applied': False}
+        self.manager.check_proxy.side_effect = [ProxyApplyError('YAML_ADMIN_REQUIRED'), checked]
+        with patch('app.services.maintenance_auth.authenticate', return_value={'owner_id': 1, 'grant_id': 'fixture'}), \
+                patch('app.services.maintenance_auth.authorize', return_value=True), \
+                patch('app.services.maintenance_auth.audit'):
+            self.assertEqual(self.post(payload=payload, headers=headers).status_code, 403)
+            self.assertEqual(self.post('/check', headers=headers).status_code, 403)
+            self.assertEqual(self.post('/check', headers=headers).status_code, 200)
+        self.manager.apply_proxy.assert_not_called()
+        self.manager.check_proxy.assert_called_with(self.snapshot['revision'],
+                                                    expected_source_fingerprint=None, allow_yaml=False)
+        self.manager.apply_proxy.return_value = {'snapshot': self.snapshot, 'phase': 'committed', 'applied': True}
+        response = self.post(payload=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.manager.apply_proxy.assert_called_once_with(self.snapshot['revision'], KEY,
+            expected_source_fingerprint='a'*64, expected_runtime_fingerprint=None, yaml_check_id='b'*64)
+
     def test_apply_uses_global_manager_gate_and_committed_snapshot(self):
         result_value = {'snapshot': self.snapshot, 'phase': 'committed', 'applied': True,
                         'transaction_id': KEY, 'revision': self.snapshot['revision']}

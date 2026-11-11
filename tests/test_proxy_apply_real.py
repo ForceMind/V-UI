@@ -8,24 +8,34 @@ host where the fixed core can start; an enabled run never skips host failures.
 """
 from copy import deepcopy
 from dataclasses import replace
+import hashlib
+import multiprocessing
 import os
 from pathlib import Path
+import signal
 import socket
 import threading
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+import uuid
+import yaml
 
 from tests.core_candidate_context import runtime_for_fixture
 from app.services.core_manager import SingBoxAdapter
-from app.services.core_runtime import CoreRuntime, revision
+from app.services.core_runtime import CoreError, CoreRuntime, revision
+from app.services.mihomo_merge import serialize_mihomo_merge
+from app.services.mihomo_merge_plan import plan_mihomo
+from app.services.mihomo_plan_record import encode_plan_record
+from app.services.mihomo_saved_policy import compile_saved_yaml_policy
 from app.services.proxy_apply import ProxyApplyCoordinator, ProxyApplyError
-from app.services.proxy_policy import VerifiedEndpoint, compile_proxy_policy
+from app.services.proxy_policy import AddressPolicy, VerifiedEndpoint, compile_proxy_policy
 from app.services.proxy_store import ProxyStore
 from test_proxy_double_hop import (
-    DoubleHopFixture, INGRESS_UUID, PASSWORD, PROFILE_ID, STATE_WALK, USERNAME,
+    AUTH, DoubleHopFixture, INGRESS_UUID, PASSWORD, PROFILE_ID, STATE_WALK, UPSTREAM_UUID, USERNAME,
 )
-from proxy_loopback_support import DIRECT_EGRESS, INGRESS, SNI, UPSTREAM
+from proxy_loopback_support import DIRECT_EGRESS, DOH, INGRESS, SNI, TARGET, UPSTREAM
 from tcp_upstream_export_helpers import local_proxy_port as allocate_proxy_fixture_port
 
 
@@ -35,7 +45,7 @@ class SimulatedInterruption(BaseException):
 
 @unittest.skipUnless(os.getenv("VUI_PROXY_LOOPBACK") == "1",
                      "real apply transitions require explicit VUI_PROXY_LOOPBACK=1")
-class ProxyApplyRealTests(DoubleHopFixture):
+class ProxyApplyFixture(DoubleHopFixture):
     def setUp(self):
         super().setUp()
         # The inherited bind(0) choice is released and can become a client
@@ -73,8 +83,9 @@ class ProxyApplyRealTests(DoubleHopFixture):
 
     def resolve_fixture(self, profile_id, rev, profile, *, self_addresses):
         self.assertEqual(tuple(self_addresses), (INGRESS,))
-        self.bootstrap_queries.append(profile["server"])
-        return VerifiedEndpoint(profile_id, rev, profile["server"], (UPSTREAM,), 1792080000)
+        host = profile["server"] if isinstance(profile, dict) else profile.server
+        self.bootstrap_queries.append(host)
+        return VerifiedEndpoint(profile_id, rev, host, (UPSTREAM,), 1792080000)
 
     def compile_fixture(self, base, rows, snapshot, **kwargs):
         compiled = compile_proxy_policy(base, rows, snapshot, policy=self.policy, **kwargs)
@@ -135,6 +146,8 @@ class ProxyApplyRealTests(DoubleHopFixture):
             with self.assertRaises(ConnectionRefusedError):
                 socket.create_connection((INGRESS, self.local_port), timeout=.5)
 
+
+class ProxyApplyRealTests(ProxyApplyFixture):
     def test_all_twelve_real_applies_commit_exact_runtime_and_remain_usable(self):
         for mode in ("tls", "reality"):
             with self.subTest(upstream=mode):
@@ -260,6 +273,163 @@ class ProxyApplyRealTests(DoubleHopFixture):
         self.assertEqual(self.bootstrap_queries, bootstrap)
         self.assert_active("11")
         self.assert_state("11")
+
+
+class YamlApplyRealTests(ProxyApplyFixture):
+    def make_coordinator(self):
+        coordinator = super().make_coordinator()
+        issuer = uuid.uuid4().hex
+        coordinator.confirmation_provider = lambda: {
+            "issuer": issuer, "runtime_fingerprint": revision(self.runtime.confirmation_identity()),
+        }
+        coordinator.yaml_compiler = self.compile_yaml_fixture
+        return coordinator
+
+    def compile_yaml_fixture(self, base, rows, snapshot, **kwargs):
+        compiled = compile_saved_yaml_policy(base, rows, snapshot, policy=self.policy, **kwargs)
+        config = deepcopy(compiled.config)
+        for inbound in config["inbounds"]:
+            if inbound["type"] == "vless":
+                self.assertEqual(inbound["listen"], "::")
+                inbound["listen"] = INGRESS
+        return replace(compiled, config=config)
+
+    def yaml_draft(self, rules, *, local_port=None):
+        baseline = yaml.safe_dump({
+            "mode": "rule",
+            "proxies": [{"name": "fixture", "type": "vless", "server": "upstream.fixture.test",
+                         "port": self.upstream_port, "uuid": UPSTREAM_UUID, "tls": True, "servername": SNI}],
+            "proxy-groups": [{"name": "Selected", "type": "select", "proxies": ["fixture"]}],
+        })
+        candidate = yaml.safe_dump({"rules": rules})
+        choices = {"Selected": "fixture"} if any(rule.endswith(",Selected") for rule in rules) else {}
+        plan = plan_mihomo(baseline, candidate, group_members=choices)
+        sources = {"baseline": baseline.encode(), "candidate": candidate.encode(),
+                   "merged": serialize_mihomo_merge(baseline, candidate)}
+        record = encode_plan_record(plan, sources={role: hashlib.sha256(raw).hexdigest()
+                                    for role, raw in sources.items()},
+                                    group_members=choices, dns_upstream="fixture" if choices else None)
+        current = self.store.read_snapshot()
+        saved = self.store.save_yaml_plan(record, sources, current["revision"])
+        if local_port is not None:
+            settings = {key: value for key, value in saved["settings"].items() if key != "local_password_set"}
+            saved = self.store.save_draft({**settings, "local_port": local_port}, saved["revision"])
+        return saved["revision"]
+
+    def checked_args(self, rev):
+        result = self.coordinator.check(rev)
+        return {"expected_source_fingerprint": result["source_fingerprint"],
+                "yaml_check_id": result["yaml_confirmation"]["check_id"]}
+
+    def verify_protected_traffic(self):
+        self.success(self.local_port, auth=AUTH)
+        for client in self.clients.values():
+            self.success(client[0])
+
+    def test_confirm_yaml_and_restore_live_yaml_after_failed_start_and_interruption(self):
+        with patch.dict(os.environ, self.env):
+            self.start_upstream("tls")
+            self.activate("11")
+            self.start_clients()
+            active = self.yaml_draft(["MATCH,Selected"])
+            result = self.coordinator.apply(active, "yaml-live", **self.checked_args(active))
+            self.assertTrue(result["applied"])
+            self.assertEqual(result["snapshot"]["active"]["execution_mode"], "yaml")
+            baseline = self.runtime.state()
+            self.verify_protected_traffic()
+            print("YAML apply: real local, sing-box and Mihomo clients used the selected TLS upstream")
+
+            port = allocate_proxy_fixture_port()
+            self.assertNotEqual(port, self.local_port)
+            draft = self.yaml_draft(["MATCH,REJECT"], local_port=port)
+            args = self.checked_args(draft)
+            launch = self.runtime._launch
+            attempted = []
+
+            def blocked_candidate(path):
+                if path.stem == baseline["revision"]:
+                    return launch(path)
+                with socket.socket() as blocker:
+                    blocker.bind((INGRESS, port))
+                    blocker.listen(1)
+                    with self.assertRaises(CoreError) as failed:
+                        launch(path)
+                    attempted.append(path.stem)
+                    raise failed.exception
+
+            with patch.object(self.runtime, "_launch", side_effect=blocked_candidate):
+                with self.assertRaises(ProxyApplyError) as failed:
+                    self.coordinator.apply(draft, "yaml-bind-failure", **args)
+            self.assertEqual(failed.exception.code, "APPLY_FAILED")
+            self.assertEqual(len(attempted), 1)
+            self.assertEqual(self.store.transaction("yaml-bind-failure")["phase"], "aborted")
+            self.assertEqual(self.runtime.state(), baseline)
+            self.verify_protected_traffic()
+            print("YAML start failure: actual occupied listener refused and previous YAML traffic returned")
+
+            self.runtime.close()
+            child = multiprocessing.get_context("spawn").Process(target=interrupt_yaml_apply, args=(
+                self.runtime_root, self.store.data_dir, self.singbox, self.rows,
+                self.ordinary_dns_port, self.doh_port, draft,
+            ))
+            child.start()
+            try:
+                child.join(45)
+                self.assertEqual(child.exitcode, -signal.SIGKILL)
+            finally:
+                if child.is_alive():
+                    child.kill()
+                    child.join(5)
+                child.close()
+            pending = self.store.recoverable_pending()
+            self.assertEqual(pending["base_active_revision"], active)
+            self.assertNotEqual(pending["runtime_context"]["candidate_core_revision"], baseline["revision"])
+            deadline = time.monotonic() + 5
+            while True:
+                with socket.socket() as probe:
+                    probe.settimeout(.2)
+                    if probe.connect_ex((INGRESS, port)) != 0:
+                        break
+                self.assertLess(time.monotonic(), deadline, "Candidate survived its coordinator")
+                time.sleep(.05)
+            self.store = ProxyStore(self.root / "store")
+            self.runtime = runtime_for_fixture(CoreRuntime, "sing-box", Path(self.singbox), self.runtime_root)
+            self.assertEqual(self.runtime.state()["revision"], pending["runtime_context"]["candidate_core_revision"])
+            self.coordinator = self.make_coordinator()
+            resolutions = list(self.bootstrap_queries)
+            recovered = self.coordinator.recover()
+            self.assertEqual(recovered["phase"], "aborted")
+            self.assertIsNone(self.store.recoverable_pending())
+            self.assertEqual(self.store.load_active()["revision"], active)
+            self.assertEqual(self.runtime.state(), baseline)
+            self.assertEqual(self.bootstrap_queries, resolutions)
+            self.verify_protected_traffic()
+            print("YAML coordinator SIGKILL: reopened store restored the previous live revision without DNS re-resolution")
+
+
+def interrupt_yaml_apply(runtime_root, data_dir, binary, rows, ordinary_dns_port, doh_port, draft):
+    fixture = YamlApplyRealTests()
+    fixture.rows = rows
+    fixture.lock = threading.RLock()
+    fixture.ordinary_dns_port = ordinary_dns_port
+    fixture.bootstrap_queries = []
+    fixture.policy = AddressPolicy._for_tests(allowed_addresses=(TARGET, UPSTREAM, DOH), doh=(DOH, doh_port, SNI))
+    fixture.store = ProxyStore(data_dir)
+    fixture.runtime = runtime_for_fixture(CoreRuntime, "sing-box", Path(binary), runtime_root)
+    fixture.coordinator = fixture.make_coordinator()
+    fixture.coordinator.recover()
+    args = fixture.checked_args(draft)
+
+    def interrupt(transaction, candidate):
+        assert transaction == "yaml-interruption"
+        assert fixture.runtime.state()["revision"] == candidate and fixture.runtime.status()["running"]
+        assert fixture.store.recoverable_pending()["transaction_id"] == transaction
+        os.kill(os.getpid(), signal.SIGKILL)
+        raise AssertionError("Coordinator signal was not delivered")
+
+    with patch.object(fixture.store, "commit_apply", side_effect=interrupt):
+        fixture.coordinator.apply(draft, "yaml-interruption", **args)
+    raise AssertionError("The YAML transaction unexpectedly returned")
 
 
 if __name__ == "__main__":

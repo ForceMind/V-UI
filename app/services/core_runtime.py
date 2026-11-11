@@ -305,6 +305,81 @@ class CoreRuntime:
                                "binary_sha256": self._generation_artifact.reference.binary_sha256}
             return {"selected": selected, "running": running}
 
+    def confirmation_identity(self) -> dict:
+        """Observe configured bytes and process state; this is not a trust grant."""
+        with self.lock:
+            try:
+                with ExitStack() as stack:
+                    # Keep every ancestor open: O_NOFOLLOW on the leaf alone
+                    # cannot detect an ancestor replaced by a symbolic link.
+                    directory = os.open(self.binary.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                    stack.callback(os.close, directory)
+                    directories = [(directory, self._confirmation_directory(os.fstat(directory)))]
+                    bindings = []
+                    for part in self.binary.parts[1:-1]:
+                        child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+                        stack.callback(os.close, child)
+                        child_identity = self._confirmation_directory(os.fstat(child))
+                        bindings.append((directory, part, child_identity))
+                        directories.append((child, child_identity))
+                        directory = child
+                    linked_fd = os.open(self.binary.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                        dir_fd=directory)
+                    stack.callback(os.close, linked_fd)
+                    fd = (stack.enter_context(open_runtime_artifact(self._artifact))
+                          if self._artifact is not None else linked_fd)
+                    before = os.fstat(fd)
+                    if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                            or before.st_uid not in (0, os.geteuid()) or before.st_mode & 0o022
+                            or not before.st_mode & 0o111 or not 0 < before.st_size <= 100 * 1024 * 1024):
+                        raise CoreError("Core confirmation identity is unavailable")
+                    digest, total = hashlib.sha256(), 0
+                    while True:
+                        chunk = os.read(fd, min(65536, 100 * 1024 * 1024 + 1 - total))
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > 100 * 1024 * 1024:
+                            raise CoreError("Core confirmation identity is unavailable")
+                        digest.update(chunk)
+                    identity = lambda info: (*self._execution_inode_from_info(info), info.st_ctime_ns, info.st_nlink)
+                    after = os.fstat(fd)
+                    linked = os.stat(self.binary.name, dir_fd=directory, follow_symlinks=False)
+                    if (total != before.st_size or identity(before) != identity(after)
+                            or identity(before) != identity(linked) or identity(before) != identity(os.fstat(linked_fd))
+                            or any(self._confirmation_directory(os.stat(part, dir_fd=parent, follow_symlinks=False)) != expected
+                                   for parent, part, expected in bindings)
+                            or any(self._confirmation_directory(os.fstat(held)) != expected
+                                   for held, expected in directories)):
+                        raise CoreError("Core confirmation identity changed")
+                    if self._artifact is not None:
+                        verify_runtime_artifact_fd(fd, self._artifact)
+                    process = self.process
+                    generation = None
+                    if process is not None and process.poll() is None:
+                        generation = {"pid": process.pid, "created_at": psutil.Process(process.pid).create_time()}
+                        if process.poll() is not None:
+                            raise CoreError("Core confirmation identity changed")
+                    return {"binary_sha256": digest.hexdigest(),
+                            "artifact_id": None if self._artifact is None else self._artifact.artifact_id,
+                            "state": self.state(), "generation": generation,
+                            "execution": self.execution_identity()}
+            except (OSError, ValueError, RuntimeArtifactError, psutil.Error):
+                raise CoreError("Core confirmation identity is unavailable") from None
+
+    @staticmethod
+    def _confirmation_directory(info):
+        # Match the owned-data ancestor policy, including sticky scratch roots.
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid not in (0, os.geteuid())
+                or info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX):
+            raise CoreError("Core confirmation identity is unavailable")
+        return info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid
+
+    @staticmethod
+    def _execution_inode_from_info(info):
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+                info.st_mode, info.st_uid, info.st_gid)
+
     def _persistent_state(self, state):
         if self._artifact is None:
             return {"revision": state["revision"], "enabled": state["enabled"]}

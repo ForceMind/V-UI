@@ -100,7 +100,7 @@ def _saved_policy_schema() -> int:
 def _guard_policy_schema_before_create() -> None:
     """Do not let create_all/ALTER disguise loss of a fenced policy column."""
     from app.services.proxy_store import ProxyStorageError
-    if _saved_policy_schema() != 2:
+    if _saved_policy_schema() < 2:
         return
     path = Path(engine.url.database).absolute()
     if not path.is_file():
@@ -176,7 +176,7 @@ def _migrate_legacy_schema(conn) -> None:
         conn.execute(text("ALTER TABLE inbounds ADD COLUMN routing_mode VARCHAR NOT NULL DEFAULT 'inherit'"))
     modes = {normalize_mode(value) for value in conn.execute(
         text("SELECT DISTINCT routing_mode FROM inbounds")).scalars()}
-    if modes - {"inherit"} and _saved_policy_schema() != 2:
+    if modes - {"inherit"} and _saved_policy_schema() < 2:
         from app.services.proxy_store import ProxyStorageError
         raise ProxyStorageError("Inbound routing capability fence is missing; offline recovery is required")
     _migrate_subscription_identity(conn)

@@ -29,9 +29,11 @@ jobs:
           VUI_TEST_MIHOMO: /tmp/vui-rc1/client/mihomo
           VUI_UDP_DNS_LOOPBACK: "1"
           VUI_UDP_DNS_PARSER: "1"
+          VUI_MIHOMO_MERGE_LOOPBACK: "1"
         run: |
           set -euo pipefail
           export VUI_DATA_DIR="$(mktemp -d)"
+          VUI_PROXY_LOOPBACK=1 PYTHONPATH=tests:. python -m unittest test_proxy_apply_real.YamlApplyRealTests -v 2>&1 | tee /tmp/vui-rc1/yaml-apply.log
           python -m unittest discover -s tests -p 'test_*loopback*.py' -v 2>&1 | tee /tmp/vui-rc1/result.log
           python -m unittest discover -s tests -p test_hysteria2_managed_certificate.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
           python -m unittest discover -s tests -p test_tuic_managed_certificate.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
@@ -97,5 +99,6 @@ jobs:
             /tmp/vui-rc1/cores/provenance.json
             /tmp/vui-rc1/client/mihomo-provenance.json
             /tmp/vui-rc1/result.log
+            /tmp/vui-rc1/yaml-apply.log
             /tmp/vui-rc1/dns-core-tls.log
           retention-days: 7
