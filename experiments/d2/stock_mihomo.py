@@ -192,7 +192,8 @@ def reserved_port(stack, host):
 
 
 class Fixture:
-    def __init__(self, stack, root, cores, *, guarded=True, fault=None, udp_connect=None, single_hop=False):
+    def __init__(self, stack, root, cores, *, guarded=True, fault=None, udp_connect=None, single_hop=False,
+                 overseas_guard=False, overseas_timeout=None):
         self.stack, self.root, self.cores = stack, root, cores
         self.processes = {}
         self.target = Target(stack, ALLOWED)
@@ -221,7 +222,11 @@ class Fixture:
             return {'network': 'udp', 'ip_cidr': [target.address[0] + '/32'], 'port': [target.address[1]],
                     'action': 'route'}
 
-        overseas_rules = [{**rule(target), 'outbound': 'controlled-egress'} for target in (self.target, self.trap)]
+        overseas_targets = (self.target,) if overseas_guard else (self.target, self.trap)
+        overseas_rules = [{**rule(target), 'outbound': 'controlled-egress'} for target in overseas_targets]
+        if overseas_timeout is not None:
+            for target_rule in overseas_rules:
+                target_rule['udp_timeout'] = overseas_timeout
         connected = guarded if udp_connect is None else udp_connect
         domestic_rules = [{**rule(target), 'outbound': 'overseas-hop', 'udp_connect': connected, 'udp_timeout': '2s'}
                           for target in ((self.target,) if guarded else (self.target, self.trap))]
@@ -345,7 +350,7 @@ def run_exchange(fixture, row, request_size, reply_size):
     fixture.exchange(row, assoc, request_size, reply_size)
 
 
-def run_retarget(fixture, row):
+def run_retarget(fixture, row, reject_role='domestic'):
     assoc = Association(fixture.stack, fixture.device_port)
     row['association'] = assoc.identity()
     request = payload(row['id'], 'warmup', 1200)
@@ -356,7 +361,7 @@ def run_retarget(fixture, row):
     fixture.audit()
     require(row['warmup_reply'] is not None, 'Cannot test retarget without a live association')
     try:
-        fixture.reject(row, assoc, fixture.trap.address, 'domestic', ('reject',))
+        fixture.reject(row, assoc, fixture.trap.address, reject_role, ('reject',))
     finally:
         row['association_after'] = assoc.identity()
     require(row['association_after'] == row['association'], 'Application association changed during retarget')
@@ -369,8 +374,8 @@ def run_fault(fixture, row, role, reasons, *, forbidden=False):
     fixture.reject(row, assoc, target.address, role, reasons)
 
 
-def run_cold_retarget(fixture, row):
-    run_fault(fixture, row, 'domestic', ('reject',), forbidden=True)
+def run_cold_retarget(fixture, row, reject_role='domestic'):
+    run_fault(fixture, row, reject_role, ('reject',), forbidden=True)
 
 
 def run_stop(fixture, row):
@@ -400,7 +405,8 @@ def run_idle(fixture, row, leaves, baseline=60000, recovery=32768):
         start = time.monotonic()
         count = 0
         while time.monotonic() - start < IDLE_WINDOW:
-            fixture.exchange(idle, sibling, 1200, 1200, f'sibling-{count}')
+            sibling_peer = fixture.exchange(idle, sibling, 1200, 1200, f'sibling-{count}')
+            require(sibling_peer != old_peer, 'Independent traffic shared the original overseas UDP socket')
             count += 1
             time.sleep(.5)
         idle['window_seconds'] = round(time.monotonic() - start, 3)
@@ -446,6 +452,9 @@ def build_diagnostics():
         ('unconnected-cold-deny', True, None, run_cold_retarget, ()),
         ('unconnected-retarget', True, None, run_retarget, ()),
         ('unconnected-small-idle-baseline', True, None, run_idle, (1200, 1200)),
+        ('egress-guard-cold-deny', True, None, run_cold_retarget, ('overseas',)),
+        ('egress-guard-retarget', True, None, run_retarget, ('overseas',)),
+        ('egress-timeout-small-idle-baseline', True, None, run_idle, (1200, 1200)),
     ]
     for size in (32768, 60000):
         for prefix in ('unconnected', 'one-hop'):
@@ -515,7 +524,9 @@ def main():
     qualification = [case[0] for case in cases] + ['idle-release', 'idle-recovery', 'mux-backpressure']
     diagnostics = build_diagnostics()
     diagnostic_ids = [case[0] for case in diagnostics] + [
-        'unconnected-small-idle-release', 'unconnected-small-idle-recovery']
+        f'{prefix}-small-idle-{stage}'
+        for prefix in ('unconnected', 'egress-timeout') for stage in ('release', 'recovery')
+    ]
     order = qualification + diagnostic_ids
     rows = {name: {'id': name, 'status': 'not_run', 'reason': 'Not reached',
                    'diagnostic': name in diagnostic_ids} for name in order}
@@ -542,6 +553,12 @@ def main():
                     options['udp_connect'] = False
                 elif case[0].startswith('one-hop-'):
                     options['single_hop'] = True
+                elif case[0] == 'egress-guard-cold-deny':
+                    options.update(single_hop=True, overseas_guard=True)
+                elif case[0] == 'egress-guard-retarget':
+                    options.update(udp_connect=False, overseas_guard=True)
+                elif case[0] == 'egress-timeout-small-idle-baseline':
+                    options.update(udp_connect=False, overseas_timeout='2s')
                 run_case(output, cores, case, rows, **options)
                 persist(output, report)
                 print(f"{case[0]}: {rows[case[0]]['status']} — {rows[case[0]]['reason']}", flush=True)
