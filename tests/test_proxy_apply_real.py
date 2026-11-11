@@ -296,6 +296,7 @@ class YamlApplyRealTests(ProxyApplyFixture):
 
     def yaml_draft(self, rules, *, local_port=None):
         baseline = yaml.safe_dump({
+            "mode": "rule",
             "proxies": [{"name": "fixture", "type": "vless", "server": "upstream.fixture.test",
                          "port": self.upstream_port, "uuid": UPSTREAM_UUID, "tls": True, "servername": SNI}],
             "proxy-groups": [{"name": "Selected", "type": "select", "proxies": ["fixture"]}],
