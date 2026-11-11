@@ -854,6 +854,13 @@
                         <el-option label="Packet Up" value="packet-up"></el-option>
                     </el-select>
                 </el-form-item>
+
+                <el-form-item
+                    v-if="newInbound.core === 'xray' && newInbound.protocol === 'vless' && newInbound.profile.transport === 'xhttp' && newInbound.profile.security === 'tls'"
+                    label="XHTTP 客户端">
+                    <el-checkbox v-model="newInbound.profile.xhttp_alpn_h2">启用 h2 以分享给 Mihomo</el-checkbox>
+                    <div>分享要求单用户、stream-one、空 flow、Chrome、证书校验及明确的 SNI、Host 和以 / 起止的 Path。支持 Mihomo YAML 和 URI 的 TCP 转发。</div>
+                </el-form-item>
             </template>
 
             </fieldset>

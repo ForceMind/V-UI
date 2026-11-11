@@ -16,10 +16,14 @@ from app.services.mihomo_routing import unique_proxy_names
 from app.services.websocket_profile import websocket_host, websocket_path
 from app.services.grpc_profile import grpc_service_name
 from app.services.hysteria2_profile import password_value
-from app.services import tuic_profile, reality_profile
+from app.services import tuic_profile, reality_profile, xhttp_profile
 
 
 class ExportError(ValueError):
+    pass
+
+
+class XHTTPUnsupportedFormat(ExportError):
     pass
 
 
@@ -235,12 +239,8 @@ def _shadowsocks_node(item, server: str, name: str) -> dict:
             "cipher":method,"password":password,"udp":True}
 
 
-def _xray_tcp_tls_node(item, server: str) -> dict:
-    """Translate only the bounded Xray VLESS raw TLS profile, never a draft fallback.
-
-    This does not migrate the saved row or expand Xray relay/UDP qualification.
-    Unknown material/transport/client fields fail closed before exporting secrets.
-    """
+def _xray_tls_node(item, server: str) -> dict:
+    """Translate the bounded Xray RAW or XHTTP VLESS TLS profiles."""
     if item.protocol != 'vless':
         raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
     settings = mapping(item.settings or {}, {'users', 'clients', 'decryption'}, 'Xray settings')
@@ -254,17 +254,24 @@ def _xray_tcp_tls_node(item, server: str) -> dict:
     user = mapping(users[0], {'id', 'flow', 'email', 'level'}, 'Xray client')
     if user.get('flow', '') != '' or user.get('level', 0) != 0:
         raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
-    stream = mapping(item.stream_settings or {}, {'method', 'network', 'security', 'tlsSettings', '_vui', 'rawSettings'}, 'Xray stream')
-    if (stream.get('method', stream.get('network', 'raw')) not in ('raw', 'tcp')
-            or stream.get('network', 'raw') not in ('raw', 'tcp') or stream.get('security') != 'tls'):
+    stream = mapping(item.stream_settings or {}, xhttp_profile.STREAM_FIELDS | {'rawSettings'}, 'Xray stream')
+    method = stream.get('method', stream.get('network', 'raw'))
+    network = stream.get('network', method)
+    xhttp = method == 'xhttp'
+    if stream.get('security') != 'tls':
         raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
-    if 'rawSettings' in stream and stream['rawSettings'] not in ({}, {'header': {'type': 'none'}}):
+    if xhttp:
+        if network != 'xhttp' or 'rawSettings' in stream or settings.get('decryption') != 'none':
+            raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
+    elif (method not in ('raw', 'tcp') or network not in ('raw', 'tcp')
+            or 'xhttpSettings' in stream
+            or ('rawSettings' in stream and stream['rawSettings'] not in ({}, {'header': {'type': 'none'}}))):
         raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
-    tls = mapping(stream.get('tlsSettings'), {'serverName', 'certificates', 'alpn'}, 'Xray TLS')
+    tls = mapping(stream.get('tlsSettings'), xhttp_profile.TLS_FIELDS, 'Xray TLS')
     certificates = tls.get('certificates')
     if not isinstance(certificates, list) or len(certificates) != 1:
         raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
-    cert = mapping(certificates[0], {'certificateFile', 'keyFile'}, 'Xray certificate')
+    cert = mapping(certificates[0], xhttp_profile.CERTIFICATE_FIELDS, 'Xray certificate')
     if any(not isinstance(cert.get(key), str) or not cert[key] for key in ('certificateFile', 'keyFile')):
         raise ExportError('XRAY_SHARE_PROFILE_UNSUPPORTED')
     neutral_tls = {'enabled': True, 'server_name': tls.get('serverName', ''),
@@ -280,12 +287,26 @@ def _xray_tcp_tls_node(item, server: str) -> dict:
     result = _vless_node(neutral, host, name, sni, meta, alpn)
     result['udp'] = False
     result.pop('packet-encoding', None)
+    if xhttp:
+        options = mapping(stream.get('xhttpSettings'), xhttp_profile.TRANSPORT_FIELDS, 'XHTTP transport')
+        try:
+            literal_sni = xhttp_profile.server_name(tls.get('serverName'))
+            transport = xhttp_profile.transport_options(options.get('path'), options.get('host'), options.get('mode'))
+        except ValueError as exc:
+            raise ExportError(str(exc)) from None
+        if (alpn != ['h2'] or meta.get('client_fingerprint') != 'chrome'
+                or meta.get('server_name') != literal_sni
+                or meta.get('security') != 'tls' or meta.get('skip_cert_verify') is not False
+                or item.enable is not True or type(getattr(item, 'expiry_time', 0)) is not int
+                or type(user.get('level', 0)) is not int):
+            raise ExportError('XHTTP requires explicit h2, Chrome and verified TLS client metadata')
+        result.update(network='xhttp', servername=literal_sni, **{'xhttp-opts': transport})
     return result
 
 
 def validated_node(item, server: str) -> dict:
     if item.core == 'xray':
-        return _xray_tcp_tls_node(item, server)
+        return _xray_tls_node(item, server)
     server,name=_common(item,server)
     if item.protocol=="shadowsocks":
         return _shadowsocks_node(item,server,name)
@@ -330,11 +351,14 @@ def validated_node(item, server: str) -> dict:
     raise ExportError("Unreachable export profile")
 
 
-def validated_nodes(items, server: str) -> list[dict]:
+def validated_nodes(items, server: str, *, for_singbox=False) -> list[dict]:
     items=list(items)
     if not items:
         raise ExportError("At least one eligible node is required; no DIRECT fallback was generated")
-    return unique_proxy_names([validated_node(item,server) for item in items])
+    nodes = [validated_node(item, server) for item in items]
+    if for_singbox and any(node.get("network") == "xhttp" for node in nodes):
+        raise XHTTPUnsupportedFormat("XHTTP supports Mihomo YAML and URI; sing-box JSON cannot represent it")
+    return unique_proxy_names(nodes)
 
 
 def share_link(item, server: str) -> str:
@@ -352,6 +376,8 @@ def share_link(item, server: str) -> str:
                 params["host"] = node["ws-opts"]["headers"]["Host"]
         elif node["network"] == "grpc":
             params["serviceName"] = node["grpc-opts"]["grpc-service-name"]
+        elif node["network"] == "xhttp":
+            params.update(node["xhttp-opts"])
         elif node.get('packet-encoding') == 'xudp':
             params["packetEncoding"] = "xudp"
         if node.get("client-fingerprint"):
@@ -426,7 +452,7 @@ def _client_tls(node: dict) -> dict:
 
 
 def singbox_client_config(items, server: str) -> dict:
-    proxies=validated_nodes(items,server)
+    proxies=validated_nodes(items,server,for_singbox=True)
     outbounds=[]
     for node in proxies:
         if node["type"]=="vless":

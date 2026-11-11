@@ -60,7 +60,7 @@ class ShellMarkupTests(unittest.TestCase):
                         'newInbound.enable', 'newInbound.routing_mode', 'newInbound.certificate_id',
                         'newInbound.profile.transport', 'newInbound.profile.security', 'newInbound.profile.flow',
                         'newInbound.profile.shadowsocks_method', 'newInbound.profile.path', 'newInbound.profile.host',
-                        'newInbound.profile.service_name', 'newInbound.profile.xhttp_mode',
+                        'newInbound.profile.service_name', 'newInbound.profile.xhttp_mode', 'newInbound.profile.xhttp_alpn_h2',
                         'newInbound.profile.server_name', 'newInbound.profile.certificate_path',
                         'newInbound.profile.key_path', 'newInbound.profile.skip_cert_verify',
                         'newInbound.profile.reality_uuid', 'newInbound.profile.reality_target',

@@ -50,7 +50,7 @@
 | UDP、DNS 和导入保真 | [能力门槛](UDP_DNS_CAPABILITY_GATES.md) |
 | VLESS 的 WS / gRPC 限制 | [WS 已验范围](VLESS_WS_CLOSURE_043.md) · [gRPC 契约](VLESS_GRPC_044.md) |
 | Hysteria2 / TUIC / REALITY | [HY2 契约](HYSTERIA2_045.md) · [TUIC 契约](TUIC_046.md) · [REALITY 契约](REALITY_VISION_047.md) |
-| 尚未公开支持的传输 | [XHTTP / HTTPUpgrade 刻画](XHTTP_CHARACTERIZATION_048.md) |
+| XHTTP 分享与传输刻画 | [XHTTP 分享候选](XHTTP_PUBLIC_PROFILE.md) · [XHTTP / HTTPUpgrade 历史刻画](XHTTP_CHARACTERIZATION_048.md) |
 
 ## 历史资料
 
