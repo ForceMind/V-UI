@@ -24,8 +24,8 @@ function snapshot(revision){
         local_port:7891,local_username:'',local_password_set:false,dns_policy_version:1,deny_policy_version:1},
         upstreams:[],active:null,pending:null};
 }
-function fixture(settings){
-    const ids=new Map(),globals=new Map(),requests=[],queue=[...settings];
+function fixture(settings,routes={}){
+    const ids=new Map(),globals=new Map(),requests=[],posted=[],queue=[...settings];
     for(const match of html.matchAll(/\bid="([^"]+)"/g))ids.set(match[1],new Element());
     const get=id=>{assert(ids.has(id),'actual ID '+id);return ids.get(id);};
     vm.runInNewContext(source,{
@@ -33,16 +33,18 @@ function fixture(settings){
         addEventListener:(name,fn)=>globals.set(name,[...(globals.get(name)||[]),fn]),
         fetch:async(url,options)=>{
             requests.push(url);
+            if(options?.body)posted.push({url,options,body:JSON.parse(options.body)});
             let value;
-            if(url==='/api/proxy/capabilities')value={};
+            if(Object.hasOwn(routes,url))value=await routes[url](options);
+            else if(url==='/api/proxy/capabilities')value={};
             else if(url==='/api/inbounds')value=[];
             else {assert.equal(url,'/api/proxy/settings');assert(queue.length);value=await queue.shift();}
             return {status:200,ok:true,json:async()=>value};
         },
         location:{replace(){assert.fail('unexpected login redirect');}},
-        setTimeout,clearTimeout,URL,AbortController,
+        setTimeout,clearTimeout,URL,AbortController,crypto:require('node:crypto').webcrypto,
     });
-    return {get,requests,queue,emit:async name=>{for(const fn of globals.get(name)||[])await fn({});}};
+    return {get,requests,posted,queue,emit:async name=>{for(const fn of globals.get(name)||[])await fn({});}};
 }
 async function settled(f, revision){
     for(let i=0;i<30;i++){
@@ -81,4 +83,33 @@ test('uncertain write keeps further writes blocked until an explicit server refr
     await f.get('refresh').emit('click');
     await settled(f,'b'.repeat(64));
     assert(!f.get('save').disabled);assert(!f.get('rebase').disabled);
+});
+test('YAML apply requires the separate confirmation and sends the checked private ID',async()=>{
+    const revision='a'.repeat(64),checkId='b'.repeat(64),saved=snapshot(revision);
+    saved.execution_mode='yaml';saved.yaml_plan={revision:'c'.repeat(64)};
+    const active={...saved,active:{revision,settings:saved.settings,execution_mode:'yaml'}};
+    const f=fixture([saved,active],{
+        '/api/proxy/capabilities':()=>({apply_available:true}),
+        '/api/proxy/check':()=>({revision,snapshot:saved,valid:true,phase:'checked',applied:false,
+            running:true,enabled:true,coverage:[],source_fingerprint:'d'.repeat(64),
+            yaml_plan:{revision:'e'.repeat(64),endpoint_count:1},
+            yaml_confirmation:{check_id:checkId,expires_at:Math.floor(Date.now()/1000)+300}}),
+        '/api/proxy/apply':()=>({phase:'committed',applied:true,snapshot:active}),
+    });
+    await settled(f,revision);
+    await f.get('apply').emit('click');
+    assert(!f.get('apply-review').hidden);
+    assert.equal(f.posted.filter(row=>row.url==='/api/proxy/apply').length,0);
+    await f.get('cancel-apply-review').emit('click');
+    assert(f.get('apply-review').hidden);
+    assert.equal(f.posted.filter(row=>row.url==='/api/proxy/apply').length,0);
+    await f.get('apply').emit('click');
+    await f.get('confirm-apply').emit('click');
+    const applied=f.posted.filter(row=>row.url==='/api/proxy/apply');
+    assert.equal(applied.length,1);
+    assert.equal(applied[0].body.yaml_check_id,checkId);
+    assert.equal(applied[0].body.base_revision,revision);
+    assert.equal(applied[0].body.source_fingerprint,'d'.repeat(64));
+    assert.match(applied[0].options.headers['Idempotency-Key'],/^[a-f0-9]{64}$/);
+    assert(f.get('active-state').textContent.includes('YAML'));
 });
