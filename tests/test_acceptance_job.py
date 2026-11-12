@@ -23,7 +23,7 @@ SUCCESS = b'test_actual_offline_installer_permissions_socket_and_autostart (test
 
 
 class RecipeTests(unittest.TestCase):
-    def test_legacy_matrices_preserved_and_25_includes_exact_public24(self):
+    def test_legacy_matrices_preserved_and_26_includes_exact_public25(self):
         current = job.matrix_for_version('0.4.22')['include']
         self.assertEqual([row['version'] for row in current], ['0.4.14', '0.4.15', '0.4.16', '0.4.17', '0.4.19', '0.4.20', '0.4.21'])
         future = job.matrix_for_version('0.4.23')['include']
@@ -38,13 +38,18 @@ class RecipeTests(unittest.TestCase):
         self.assertEqual(next_candidate[:-1], candidate)
         self.assertEqual(next_candidate[-1], {'version': '0.4.24',
             'source': '8b8d7cf82e55609a205455b351f659eb9de91974', 'path': '.published-v0424', 'netlink': True})
-        for row in next_candidate:
+        newest = job.matrix_for_version('0.4.26')['include']
+        self.assertEqual(newest[:-1], next_candidate)
+        self.assertEqual(newest[-1], {'version': '0.4.25',
+            'source': '32a03a5b6719400f21a07a75d04d278b76e0df09', 'path': '.published-v0425', 'netlink': True})
+        for row in newest:
             self.assertEqual(row['source'], core.BASELINES[row['version']])
             self.assertIs(type(row['netlink']), bool)
         for value in ('0.4.21', '00.4.22', 'v0.4.22', '0.4.22-rc1', True):
             with self.subTest(value=value), self.assertRaises(core.ReleaseAcceptanceError): job.matrix_for_version(value)
         with self.assertRaises(core.ReleaseAcceptanceError): job.role_recipe('0.4.22', 'upgrade-0.4.22', old_source='/old')
         with self.assertRaises(core.ReleaseAcceptanceError): job.role_recipe('0.4.23', 'upgrade-0.4.23', old_source='/old')
+        with self.assertRaises(core.ReleaseAcceptanceError): job.role_recipe('0.4.25', 'upgrade-0.4.25', old_source='/old')
 
     def test_fresh_recipe_preserves_all_original_flags_and_fixed_commands(self):
         recipe = job.role_recipe(VERSION, 'fresh')
@@ -223,7 +228,8 @@ class JobTests(unittest.TestCase):
 
     def test_latest_public_upgrade_requires_one_exact_preservation_marker(self):
         pairs = [('0.4.24', '0.4.23', b'VUI_23_TO_24_UPGRADE_ACCEPTANCE:'),
-                 ('0.4.25', '0.4.24', b'VUI_24_TO_25_UPGRADE_ACCEPTANCE:')]
+                 ('0.4.25', '0.4.24', b'VUI_24_TO_25_UPGRADE_ACCEPTANCE:'),
+                 ('0.4.26', '0.4.25', b'VUI_25_TO_26_UPGRADE_ACCEPTANCE:')]
         for candidate, old, marker in pairs:
             identity = {**self.identity, 'version': candidate, 'release_id': candidate + '-' + SHA[:12]}
             context = job._log_context(identity, 'upgrade-' + old, ACTIONS)

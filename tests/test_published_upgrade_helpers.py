@@ -19,10 +19,10 @@ from published_upgrade_helpers import (FIREWALL, MAINTENANCE_FILES, PUBLISHED_BA
                                        assert_upgrade_configuration, fixed_public_baseline,
                                        managed_xray_fixture_program, assert_node_summary_upgrade, assert_editor_content_addition)
 from published_upgrade_helpers import (DNS_FILES, CORE_FILES, AUTHORITY_FILES, YAML_FILES, CERTIFICATE_COLUMNS, BINDING_COLUMNS,
-    DNS_CERTIFICATE_COLUMNS, DNS_BINDING_LAYOUTS, snapshot_program)
+    DNS_CERTIFICATE_COLUMNS, DNS_BINDING_LAYOUTS, snapshot_program, yaml_draft_program)
 
 
-PRE_DNS_BASELINES = tuple(version for version in PUBLISHED_BASELINES if version not in ('0.4.23', '0.4.24'))
+PRE_DNS_BASELINES = tuple(version for version in PUBLISHED_BASELINES if version not in ('0.4.23', '0.4.24', '0.4.25'))
 
 class PublishedUpgradeBoundaryTests(unittest.TestCase):
     def test_summary_additions_are_only_strict_booleans_without_old_field_drift(self):
@@ -235,11 +235,12 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
                   '0.4.21':'2aa5e11e3f09c03d048018f033ae888e7c775604',
                   '0.4.22':'558687a76cd29f4e4735284926eb05bf6664472e',
                   '0.4.23':'be5d8459cdd3eeedce73f2ff6e4663e5eb781e42',
-                  '0.4.24':'8b8d7cf82e55609a205455b351f659eb9de91974'}
+                  '0.4.24':'8b8d7cf82e55609a205455b351f659eb9de91974',
+                  '0.4.25':'32a03a5b6719400f21a07a75d04d278b76e0df09'}
         self.assertEqual(PUBLISHED_BASELINES,expected)
         for version,commit in expected.items():
             self.assertEqual(fixed_public_baseline(version,commit),(version,commit))
-        for version,commit in [('0.4.23',expected['0.4.22']),('0.4.24',expected['0.4.23']),('0.4.21','f'*40),('0.4.20','f'*40),('0.4.13','a'*40),('0.4.18',expected['0.4.19']),('0.4.19','f'*40),('0.4.17',expected['0.4.16']),
+        for version,commit in [('0.4.23',expected['0.4.22']),('0.4.24',expected['0.4.23']),('0.4.25',expected['0.4.24']),('0.4.21','f'*40),('0.4.20','f'*40),('0.4.13','a'*40),('0.4.18',expected['0.4.19']),('0.4.19','f'*40),('0.4.17',expected['0.4.16']),
                                ('0.4.16',expected['0.4.15']),('0.4.16','a'*40),
                                ('0.4.14',expected['0.4.15']),('0.4.15',expected['0.4.14']),
                                ('0.4.15','a'*40),(None,None)]:
@@ -358,12 +359,14 @@ class PublishedDNSMigrationTests(unittest.TestCase):
                 'interpreter_resolved':'/usr/bin/python3.12','interpreter_sha256':'1'*64,
                 'files':{'/usr/local/lib/v-ui/system_ops.py':'2'*64}}
         if old_version!='0.4.14': before['files'][FIREWALL]='3'*64
-        if old_version in ('0.4.17','0.4.19','0.4.20','0.4.21','0.4.22','0.4.23','0.4.24'):
+        if old_version in ('0.4.17','0.4.19','0.4.20','0.4.21','0.4.22','0.4.23','0.4.24','0.4.25'):
             before['files'].update({name:'4'*64 for name in MAINTENANCE_FILES})
-        if old_version in ('0.4.23', '0.4.24'):
+        if old_version in ('0.4.23', '0.4.24', '0.4.25'):
             before['files'].update({name:'5'*64 for name in DNS_FILES})
-        if old_version == '0.4.24':
+        if old_version in ('0.4.24', '0.4.25'):
             before['files'].update({name:'6'*64 for name in CORE_FILES | AUTHORITY_FILES})
+        if old_version == '0.4.25':
+            before['files'].update({name:'7'*64 for name in YAML_FILES})
         after=deepcopy(before)
         after['files'].update({name:'5'*64 for name in MAINTENANCE_FILES|DNS_FILES|{FIREWALL}})
         return before,after
@@ -397,7 +400,7 @@ class PublishedDNSMigrationTests(unittest.TestCase):
                 assert_receipt_migration(self,before,after,'0.4.22',version)
 
     def test_24_requires_complete_core_authority_and_preserves_every_historical_dns_profile(self):
-        for version in (old for old in PUBLISHED_BASELINES if old != '0.4.24'):
+        for version in (old for old in PUBLISHED_BASELINES if old not in ('0.4.24', '0.4.25')):
             with self.subTest(version=version):
                 before, after = self.receipt(version)
                 after['files'].update({path:'6'*64 for path in CORE_FILES | AUTHORITY_FILES})
@@ -437,6 +440,37 @@ class PublishedDNSMigrationTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             assert_receipt_migration(self, before, before, '0.4.24', '0.4.25', **profile)
 
+    def test_26_requires_the_complete_existing_25_yaml_control_closure(self):
+        profile = dict(core_control=True, core_authority=True, yaml_control=True)
+        for old in PUBLISHED_BASELINES:
+            with self.subTest(old=old):
+                before, after = self.receipt(old)
+                after['files'].update({path:'7'*64 for path in CORE_FILES | AUTHORITY_FILES | YAML_FILES})
+                assert_receipt_migration(self, before, after, old, '0.4.26', **profile)
+        before, after = self.receipt('0.4.25')
+        for change in (lambda row: row['files'].pop(next(iter(YAML_FILES))),
+                       lambda row: row['files'].update({'/usr/local/lib/v-ui/unknown.py':'8'*64})):
+            damaged = deepcopy(after)
+            change(damaged)
+            with self.assertRaises(AssertionError):
+                assert_receipt_migration(self, before, damaged, '0.4.25', '0.4.26', **profile)
+        with self.assertRaises(AssertionError):
+            assert_receipt_migration(self, before, after, '0.4.25', '0.4.25', **profile)
+
+    def test_saved_yaml_fixture_reads_the_exact_plan_and_three_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            def witness(create):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    exec(yaml_draft_program(create=create, data_root=root), {})
+                return json.loads(out.getvalue())
+            before = witness(True)
+            self.assertEqual(witness(False), before)
+            self.assertEqual(set(before['sources']), {'baseline', 'candidate', 'merged'})
+            self.assertEqual(len(set(before['sources'].values())), 3)
+            self.assertRegex(before['plan'], r'^[a-f0-9]{64}$')
+
     def test_p3_profile_requires_all_and_only_the_fixed_core_receipt_additions(self):
         from published_upgrade_helpers import CORE_FILES
         for version in PRE_DNS_BASELINES:
@@ -459,7 +493,7 @@ class PublishedDNSMigrationTests(unittest.TestCase):
 
     def test_yaml_profile_requires_its_exact_additional_reader(self):
         from published_upgrade_helpers import CORE_FILES, YAML_FILES
-        for version in (v for v in PUBLISHED_BASELINES if v not in ('0.4.23', '0.4.24')):
+        for version in (v for v in PUBLISHED_BASELINES if v not in ('0.4.23', '0.4.24', '0.4.25')):
             before, after = self.receipt(version)
             after['files'].update({path: '6'*64 for path in CORE_FILES | YAML_FILES})
             assert_receipt_migration(self, before, after, version, '0.4.23',
@@ -570,7 +604,7 @@ class PublishedDNSMigrationTests(unittest.TestCase):
                     with self.assertRaises(AssertionError):self.snapshot(new)
                     with self.assertRaises(AssertionError):self.snapshot(new,after=True,target='0.4.22')
             with self.assertRaises(AssertionError):self.snapshot(old,after=True)
-        for target in ('0.4.26','v0.4.23',None):
+        for target in ('0.4.27','v0.4.23',None):
             with self.assertRaises(AssertionError):snapshot_program('0.4.22',target)
         with self.assertRaises(AssertionError):snapshot_program('0.4.23','0.4.23')
 

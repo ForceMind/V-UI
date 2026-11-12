@@ -12,6 +12,12 @@ sing-box 1.14.3-r1 和 Xray 26.10.21-r1 依次晋升，各六项资产通过匿�
 
 PR #147 合入 dev `f6b1258`，独立 PR #162 合入 main `982aec4a60bc468b58298039cdbe289449a4199c`。两处各十组 Actions、32 个 job 通过。主线真实日志验证 YAML 转发、端口占用后的回退及协调进程 SIGKILL 后的流量恢复。 [主线验收](https://github.com/ForceMind/V-UI/pull/162) · [YAML 应用契约](docs/YAML_APPLICATION_CONTRACT.md)
 
+## v0.4.26 发布候选
+
+基于已验收的 main `df7072b20a75b9eda6a276fc5865313f0ec34450`，本候选收录 XHTTP 的 Mihomo YAML 与 VLESS URI 分享。主线已通过真实转发和失败关闭验收。公开 v0.4.25 的固定应用源为 `32a03a5b6719400f21a07a75d04d278b76e0df09`。候选验收包含该公开版本的保数据升级及四目标同源制品，准确提交证据随草稿 PR 回读。 [XHTTP 主线验收](https://github.com/ForceMind/V-UI/pull/169) · [候选发布说明](docs/RELEASE_NOTES.md)
+
+[D2 #167](https://github.com/ForceMind/V-UI/pull/167) 保留草稿和受阻证据。HTTPUpgrade 保留现有刻画。应用 latest 和短安装入口仍为 v0.4.25，浏览器未验证。
+
 ## 已发布 v0.4.25
 
 v0.4.25 应用已从准确主线 `32a03a5b6719400f21a07a75d04d278b76e0df09` 晋升公开，四目标包及 19 项附件摘要已匿名核验。标签与应用来源一致，`latest` 指向本版。十组 Actions、33 个 job 覆盖实际新装、十条保数据升级和 ARM64 受管回归。12 份收据绑定同一轮安装套件。 [主线验收](https://github.com/ForceMind/V-UI/pull/164) · [应用 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.25)
@@ -153,7 +159,7 @@ v0.4.23已正式发布，应用与控制源码冻结、准确验收和公开读�
 | P2 | DNS-01 与通配符证书 | v0.4.23及短入口已公开收口，应用/入口身份分开 | 原配置与数据保护保持；真实Cloudflare账号、浏览器及生产升级未验证，不继承给新版本 |
 | P3 | 核心独立升级与回滚 | v0.4.24 应用、两项独立核心组件和短入口已公开验收 | 准确来源与证据见本页 P3 收口记录 |
 | P4 | 完整 YAML 导入、合并与应用 | 已合入 main `982aec4` 并验收 | v0.4.25 应用与验收见本页发布记录 |
-| P5 | 协议公开支持与 UDP 双跳 | [XHTTP 最小分享候选](docs/XHTTP_PUBLIC_PROFILE.md)；HTTPUpgrade 保留刻画；[D2 草稿 #167](https://github.com/ForceMind/V-UI/pull/167) 受阻 | 验收固定 Xray → Mihomo 的公开 YAML/URI、真实转发和失败关闭；D2 保留逐报文限制、大包与原关联恢复门槛，产品 UDP 中转保持关闭 |
+| P5 | 协议公开支持与 UDP 双跳 | [XHTTP 最小分享](docs/XHTTP_PUBLIC_PROFILE.md)已集成并验收，纳入 v0.4.26 候选。HTTPUpgrade 保留刻画，[D2 草稿 #167](https://github.com/ForceMind/V-UI/pull/167) 受阻 | 固定 Xray → Mihomo 的公开 YAML/URI 已完成真实转发和失败关闭验收；D2 保留逐报文限制、大包与原关联恢复门槛，产品 UDP 中转保持关闭 |
 | P6 | Tailscale私有管理 | 默认关闭的只读状态已有；完整私有模式未开发/验收 | 先确定面板和订阅的可达范围、启停/升级健康屏障及锁出恢复；不把只读状态当成安装、登录或私有接入能力 |
 | P7 | 容器与声明式部署 | 尚未提供专用正式部署方案 | Docker、NixOS等各自独立合同和环境矩阵；明确存储、权限、证书、网络及恢复，不能拿现有Linux系统安装资格替代 |
 

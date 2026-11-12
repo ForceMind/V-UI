@@ -1,4 +1,14 @@
-# V-UI 0.4.25
+# V-UI 0.4.26
+
+本候选将 P5 已验收的 XHTTP 分享纳入下一版应用。管理员可为 Xray VLESS 入站选择验证 TLS、Stream One 并显式启用 h2，再通过单节点分享或授权订阅交付 Mihomo YAML 和 VLESS URI。使用单 UUID、空 flow、Chrome 及明确的 SNI、Host 和规范 Path。 [主线验收](https://github.com/ForceMind/V-UI/pull/169) · [XHTTP 使用范围](XHTTP_PUBLIC_PROFILE.md)
+
+- 固定官方 Xray 26.3.27 与 Mihomo 1.19.32 验证 HTTP/TCP。两种实际导出均验证了真实转发，以及错误 UUID、CA、SNI、Path、Host、mode 的拒绝和零应用送达。
+- 含 XHTTP 节点的 sing-box JSON 导出会明确拒绝。编辑器无法保真的旧高级配置保留原值并拒绝本次编辑。HTTPUpgrade 保留刻画，D2 UDP 双跳保留受阻草稿，产品 UDP 中转保持关闭。 [D2 草稿](https://github.com/ForceMind/V-UI/pull/167)
+- 候选升级矩阵加入公开 v0.4.25。临时 systemd 验收核对账户、节点、订阅、证书、DNS 私有材料、保存的 YAML 计划及原始输入，并回读新旧 Root 来源记录。实际通过结果与四目标同源证据随候选 PR 记录。浏览器未验证。
+
+公开应用与短安装入口当前均为 v0.4.25。 [公开 v0.4.25](https://github.com/ForceMind/V-UI/releases/tag/v0.4.25)
+
+## 0.4.25 历史说明
 
 本版将已集成的 P4 YAML 应用流程纳入发行。管理员可私有合并两份 YAML，在解决冲突、保存并检查草稿后，显式应用到正在运行的受管 sing-box。应用后回读实际运行修订。启动失败或协调进程中断时，按持久事务恢复原配置、启停意图和流量。 [P4 主线验收](https://github.com/ForceMind/V-UI/pull/162) · [YAML 应用契约](YAML_APPLICATION_CONTRACT.md)
 
