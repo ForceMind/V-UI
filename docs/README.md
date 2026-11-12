@@ -1,8 +1,8 @@
 # V-UI 文档
 
-当前稳定版为 **v0.4.25**。新用户从[项目首页](../README.md)和[安装指南](INSTALLATION.md)开始；下载以[官方 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.25)为准。
+当前稳定版为 **v0.4.26**。新用户从[项目首页](../README.md)和[安装指南](INSTALLATION.md)开始；下载以[官方 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.26)为准。
 
-本文档对应 v0.4.25。正式应用源为 `32a03a5b6719400f21a07a75d04d278b76e0df09`，与可变短入口的源码分开记录；公开资产读回见[发布记录](RELEASING.md#当前稳定版)。
+本文档对应 v0.4.26。正式应用源为 `71f0e1689cd356f22e12553f74a9ec4fd8bba388`，与可变短入口的源码分开记录；公开资产读回见[发布记录](RELEASING.md#当前稳定版)。
 
 本索引按使用目的组织。专题契约和历史验收记录保留其原始日期及验证范围，旧文档中的“当前版本”“候选”“未发布”不能覆盖这里的稳定版信息。
 
@@ -50,10 +50,10 @@
 | UDP、DNS 和导入保真 | [能力门槛](UDP_DNS_CAPABILITY_GATES.md) |
 | VLESS 的 WS / gRPC 限制 | [WS 已验范围](VLESS_WS_CLOSURE_043.md) · [gRPC 契约](VLESS_GRPC_044.md) |
 | Hysteria2 / TUIC / REALITY | [HY2 契约](HYSTERIA2_045.md) · [TUIC 契约](TUIC_046.md) · [REALITY 契约](REALITY_VISION_047.md) |
-| XHTTP 分享与传输刻画 | [XHTTP 分享候选](XHTTP_PUBLIC_PROFILE.md) · [XHTTP / HTTPUpgrade 历史刻画](XHTTP_CHARACTERIZATION_048.md) |
+| XHTTP 分享与传输刻画 | [XHTTP 分享](XHTTP_PUBLIC_PROFILE.md) · [XHTTP / HTTPUpgrade 历史刻画](XHTTP_CHARACTERIZATION_048.md) |
 
 ## 历史资料
 
 [历史索引](history/README.md)保留旧入口快照、阶段计划、准确提交和原始成功或失败证据。历史记录用于追溯，不作为当前安装步骤或当前版本已验证的替代依据。
 
-公开版本的构建、核心与安装验收在 GitHub Actions 中完成；v0.4.25 的准确提交验收与公开资产匿名回读已通过。**浏览器和真实 Cloudflare 账号签发未验证**；用户主机、真实客户端与长期运行需各自验证。
+公开版本的构建、核心与安装验收在 GitHub Actions 中完成；v0.4.26 的准确提交验收与公开资产匿名回读已通过。**浏览器和真实 Cloudflare 账号签发未验证**；用户主机、真实客户端与长期运行需各自验证。

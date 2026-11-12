@@ -1,9 +1,9 @@
 # 变更日志
 
-## 0.4.26 — XHTTP 分享（发布候选）
+## 0.4.26 — XHTTP 分享
 
 - 新增经验证 TLS 的 Xray VLESS XHTTP stream-one/h2 分享，支持固定 Mihomo 的 YAML 和 URI 路径，限 HTTP/TCP。
-- 公开 v0.4.25 加入保数据升级矩阵，验收保存的 YAML 计划、私有输入和既有 Root 来源。 [候选说明](docs/RELEASE_NOTES.md)
+- 公开 v0.4.25 加入保数据升级矩阵，验收保存的 YAML 计划、私有输入和既有 Root 来源。四目标应用包已公开。 [发布说明](docs/RELEASE_NOTES.md)
 
 ## 0.4.25 — 受管 sing-box 的 YAML 应用
 

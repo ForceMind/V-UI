@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Trusted local kit: sudo bash install.sh --bundle ... --sha256 ...
-# After the candidate is published: sudo bash install.sh --version v0.4.25 [installer arguments]
+# Published release: sudo bash install.sh --version v0.4.26 [installer arguments]
 set -euo pipefail
 umask 077
 
