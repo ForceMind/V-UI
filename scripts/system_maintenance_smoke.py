@@ -360,11 +360,11 @@ def installed_core_read_capability(source, *, control=CONTROL, owner=0):
 
 
 def maintenance_long_duration(release_id):
-    return release_id.startswith(('0.4.19-', '0.4.20-', '0.4.21-', '0.4.22-', '0.4.23-', '0.4.24-', '0.4.25-'))
+    return release_id.startswith(('0.4.19-', '0.4.20-', '0.4.21-', '0.4.22-', '0.4.23-', '0.4.24-', '0.4.25-', '0.4.26-'))
 
 
 def netlink_systemd_enabled(release_id):
-    return os.getenv('VUI_NETLINK_SYSTEMD_TEST') == '1' and release_id.startswith(('0.4.20-', '0.4.21-', '0.4.22-', '0.4.23-', '0.4.24-', '0.4.25-'))
+    return os.getenv('VUI_NETLINK_SYSTEMD_TEST') == '1' and release_id.startswith(('0.4.20-', '0.4.21-', '0.4.22-', '0.4.23-', '0.4.24-', '0.4.25-', '0.4.26-'))
 
 
 def verified_upgrade_fixture_rows(actual, expected):
@@ -429,9 +429,9 @@ def installed_netlink_smoke(check, source, work, api, ca, cert, key, verified_ol
     assert os.getenv('VUI_SYSTEM_INSTALL_TEST') == '1'
     config = json.loads(Path('/etc/v-ui/service.json').read_bytes())
     if not netlink_systemd_enabled(config['release_id']):
-        raise AssertionError('Installed netlink gate requires an opted-in supported candidate from 0.4.20 through 0.4.25')
+        raise AssertionError('Installed netlink gate requires an opted-in supported candidate from 0.4.20 through 0.4.26')
     release = Path('/var/lib/v-ui/releases') / config['release_id']
-    check.assertIn((source/'VERSION').read_text().strip(), ('0.4.20','0.4.21','0.4.22','0.4.23','0.4.24','0.4.25'))
+    check.assertIn((source/'VERSION').read_text().strip(), ('0.4.20','0.4.21','0.4.22','0.4.23','0.4.24','0.4.25','0.4.26'))
     check.assertTrue(config['release_id'].startswith((source/'VERSION').read_text().strip()+'-'))
 
     def request(path, body=None, *, method=None, extra_headers=(), expected=200):
@@ -719,6 +719,8 @@ print(json.dumps({'pid':child.pid,'created':child.create_time(),'binary_sha256':
         print('VUI_MAINTENANCE_SHARE_INSTALLED_ACCEPTANCE: installed24 panel-child TLS TCP URI/YAML passed')
     elif config['release_id'].startswith('0.4.25-'):
         print('VUI_MAINTENANCE_SHARE_INSTALLED_ACCEPTANCE: installed25 panel-child TLS TCP URI/YAML passed')
+    elif config['release_id'].startswith('0.4.26-'):
+        print('VUI_MAINTENANCE_SHARE_INSTALLED_ACCEPTANCE: installed26 panel-child TLS TCP URI/YAML passed')
     else:
         print('VUI_MAINTENANCE_SHARE_INSTALLED_ACCEPTANCE: installed22 panel-child TLS TCP URI/YAML passed')
 

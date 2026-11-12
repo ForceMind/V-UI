@@ -524,6 +524,13 @@ class OneClickSystemTests(unittest.TestCase):
             self.assertNotIn(b'Fake-upgrade-password!', raw)
             if published_upgrade:
                 published_upgrade.before(release,api,private_values)
+                if published_upgrade.yaml_state is not None:
+                    status, raw = api('/api/proxy/settings')
+                    self.assertEqual(status, 200)
+                    saved_proxy = json.loads(raw)
+                    self.assertEqual(saved_proxy['revision'], published_upgrade.yaml_state['revision'])
+                    self.assertEqual(saved_proxy['execution_mode'], 'yaml')
+                    self.assertIsNone(saved_proxy['active'])
             # Rerunning with --upgrade checks/stages and makes a stopped backup.
             upgraded=(configured_setup_with_tty(upgrade_cmd,bootstrap_action='2',private_values=private_values) if os.getenv('VUI_SETUP_INSTALL') == '1' else
                       subprocess.run(upgrade_cmd,capture_output=True,text=True,timeout=300 if published_version else 120))
@@ -683,6 +690,8 @@ class OneClickSystemTests(unittest.TestCase):
             # Every historical upgrade/data/recovery assertion above completes
             # before disposing only known CI drafts for the installed-core gate.
             if os.getenv('VUI_NETLINK_SYSTEMD_TEST') == '1':
+                if published_upgrade:
+                    published_upgrade.clear_yaml_fixture(api)
                 from scripts.system_maintenance_smoke import installed_netlink_smoke
                 def login_after_restore():
                     self.assertEqual(api('/api/auth/login', {'username': admin_username, 'password': password})[0], 200)
