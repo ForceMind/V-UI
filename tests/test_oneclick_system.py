@@ -690,9 +690,10 @@ class OneClickSystemTests(unittest.TestCase):
             # Every historical upgrade/data/recovery assertion above completes
             # before disposing only known CI drafts for the installed-core gate.
             if os.getenv('VUI_NETLINK_SYSTEMD_TEST') == '1':
-                if published_upgrade:
+                from scripts.system_maintenance_smoke import installed_netlink_smoke, wait_installed_admin_identity
+                if published_upgrade and published_upgrade.yaml_state is not None:
+                    wait_installed_admin_identity(api, admin_username)
                     published_upgrade.clear_yaml_fixture(api)
-                from scripts.system_maintenance_smoke import installed_netlink_smoke
                 def login_after_restore():
                     self.assertEqual(api('/api/auth/login', {'username': admin_username, 'password': password})[0], 200)
                 installed_netlink_smoke(self,source,work,api,ca,cert,key,
