@@ -27,8 +27,10 @@ PUBLISHED_BASELINES = {
     '0.4.22': '558687a76cd29f4e4735284926eb05bf6664472e',
     '0.4.23': 'be5d8459cdd3eeedce73f2ff6e4663e5eb781e42',
     '0.4.24': '8b8d7cf82e55609a205455b351f659eb9de91974',
+    '0.4.25': '32a03a5b6719400f21a07a75d04d278b76e0df09',
 }
-DNS_BASELINES = frozenset({'0.4.23', '0.4.24'})
+DNS_BASELINES = frozenset({'0.4.23', '0.4.24', '0.4.25'})
+CORE_AUTHORITY_BASELINES = frozenset({'0.4.24', '0.4.25'})
 CONTROL = Path('/usr/local/lib/v-ui')
 FIREWALL = str(CONTROL / 'firewall_support.py')
 MAINTENANCE_FILES = frozenset({
@@ -56,12 +58,10 @@ DNS_BINDING_LAYOUTS = (BINDING_COLUMNS + ('server_name',), BINDING_COLUMNS[:4] +
 
 
 def _target_contract(candidate_version, old_version):
-    if candidate_version not in ('0.4.22', '0.4.23', '0.4.24', '0.4.25'):
-        raise AssertionError('Explicit reviewed 0.4.22 through 0.4.25 upgrade target required')
-    if old_version == '0.4.23' and candidate_version not in ('0.4.24', '0.4.25'):
-        raise AssertionError('The published DNS baseline requires a candidate after 0.4.23')
-    if old_version == '0.4.24' and candidate_version != '0.4.25':
-        raise AssertionError('The published core authority baseline requires a 0.4.25 candidate')
+    if candidate_version not in ('0.4.22', '0.4.23', '0.4.24', '0.4.25', '0.4.26'):
+        raise AssertionError('Explicit reviewed 0.4.22 through 0.4.26 upgrade target required')
+    if old_version in DNS_BASELINES and candidate_version <= old_version:
+        raise AssertionError('The published DNS baseline requires a newer candidate')
     return candidate_version
 
 
@@ -107,16 +107,20 @@ def assert_receipt_migration(test, before, after, old_version, candidate_version
     _target_contract(candidate_version, old_version)
     if type(yaml_control) is not bool or yaml_control and not core_control:
         raise AssertionError("YAML closure qualification requires the explicit core profile")
-    test.assertTrue(YAML_FILES.isdisjoint(before["files"]))
+    existing_yaml = old_version == '0.4.25'
+    if existing_yaml:
+        test.assertTrue(YAML_FILES <= set(before['files']), 'Published YAML receipt lacks its control reader')
+    else:
+        test.assertTrue(YAML_FILES.isdisjoint(before['files']))
     if type(core_control) is not bool or core_control and candidate_version == '0.4.22':
         raise AssertionError('Explicit P3 development control profile required')
     if type(core_authority) is not bool or core_authority and not core_control:
         raise AssertionError('Explicit private core authority control profile required')
-    if candidate_version in ('0.4.24', '0.4.25') and not (core_control and core_authority):
+    if candidate_version in ('0.4.24', '0.4.25', '0.4.26') and not (core_control and core_authority):
         raise AssertionError('Candidate requires the complete core and authority control profile')
-    if candidate_version == '0.4.25' and not yaml_control:
-        raise AssertionError('0.4.25 requires the YAML control reader')
-    existing_core = old_version == '0.4.24'
+    if candidate_version in ('0.4.25', '0.4.26') and not yaml_control:
+        raise AssertionError('Candidate requires the YAML control reader')
+    existing_core = old_version in CORE_AUTHORITY_BASELINES
     if existing_core:
         test.assertTrue(CORE_FILES | AUTHORITY_FILES <= set(before['files']))
     else:
@@ -138,7 +142,7 @@ def assert_receipt_migration(test, before, after, old_version, candidate_version
         additions = additions | CORE_FILES
     if core_authority and not existing_core:
         additions = additions | AUTHORITY_FILES
-    if yaml_control:
+    if yaml_control and not existing_yaml:
         additions = additions | YAML_FILES
     test.assertEqual(set(after['files']) - set(before['files']), additions)
     if old_version == '0.4.14':
@@ -257,7 +261,7 @@ def assert_editor_content_addition(test, before, after):
 
 def assert_node_summary_upgrade(test, before, after, old_version=None):
     """Permit only the declared capability/CAS response additions for 21."""
-    if old_version in ('0.4.21', '0.4.22', '0.4.23', '0.4.24'):
+    if old_version in ('0.4.21', '0.4.22', '0.4.23', '0.4.24', '0.4.25'):
         test.assertEqual(after,before)
         for row in after:
             test.assertIs(type(row.get('content_revision')),str)
@@ -322,6 +326,36 @@ with database.SessionLocal() as db:
  db.commit()
 print(json.dumps({'inbound_id':node_id,'certificate_id':identity}))
 '''
+
+
+def yaml_draft_program(*, create=False, data_root='/var/lib/v-ui/data'):
+    """Run through the installed store and return only identities and source hashes."""
+    return ('create=' + repr(create) + '\ndata_root=' + repr(str(data_root)) + '\n' + r"""
+import hashlib,json
+from app.services.mihomo_merge import serialize_mihomo_merge
+from app.services.mihomo_merge_plan import plan_mihomo
+from app.services.mihomo_plan_record import encode_plan_record
+from app.services.proxy_store import ProxyStore
+
+def digest(value):
+ return hashlib.sha256(value).hexdigest()
+
+store=ProxyStore(data_root)
+if create:
+ baseline='mode: rule\n'
+ candidate='rules:\n  - DOMAIN,fixture.example.test,REJECT\n  - MATCH,REJECT\n'
+ sources={'baseline':baseline.encode(),'candidate':candidate.encode(),
+          'merged':serialize_mihomo_merge(baseline,candidate)}
+ record=encode_plan_record(plan_mihomo(baseline,candidate),
+  sources={role:digest(raw) for role,raw in sources.items()},group_members={},dns_upstream=None)
+ store.save_yaml_plan(record,sources,store.read_snapshot()['revision'])
+draft=store.load_draft()
+assert draft['execution_mode']=='yaml'
+assert draft['pending'] is None and store.load_active() is None
+record,sources=draft['yaml_plan']
+print(json.dumps({'revision':draft['revision'],'plan':record.record_id,
+                  'sources':{role:digest(raw) for role,raw in sources.items()}}))
+""")
 
 
 class PublishedUpgrade:
@@ -392,7 +426,7 @@ class PublishedUpgrade:
         self.old_release = release
         self.test.assertEqual(self.config['bootstrap_python'], str(release / 'runtime/python/bin/python3'))
         self.test.assertEqual(self._manifest(release)['source_commit'], self.old_commit)
-        if self.old_version == '0.4.24':
+        if self.old_version in CORE_AUTHORITY_BASELINES:
             self.test.assertEqual(self._manifest(release)['version'], self.old_version)
             self.old_origin = self._root_origin(release.name, self.config['target'])
             self.test.assertEqual(self.old_origin['app_source'], self.old_commit)
@@ -483,6 +517,9 @@ print('{}')
         self.subscription_bytes = api(self.subscription)[1]
         self.grants = json.loads(api('/api/subscriptions')[1])
         self.data = self._snapshot(release)
+        self.yaml_state = None
+        if self.old_version == '0.4.25':
+            self.yaml_state = self._service_python(release, yaml_draft_program(create=True))
         for table in ('users','inbounds','subscription_grants','managed_certificates'):
             self.test.assertGreater(self.data[table]['count'], 0)
         self.test.assertGreaterEqual(len(self.data['certificate_material']), 2)
@@ -543,7 +580,7 @@ print(json.dumps(row))
         expected = candidate_origin(self.kit, self.candidate, config['target'])
         self.test.assertEqual(self._manifest_digest(release), expected['manifest_sha256'])
         self.test.assertEqual(self._root_origin(release.name, config['target']), expected)
-        if self.old_version == '0.4.24':
+        if self.old_version in CORE_AUTHORITY_BASELINES:
             self.test.assertEqual(self._root_origin(self.old_release.name, config['target']), self.old_origin)
         with MenuSession(['sudo', '/usr/local/sbin/v-ui'], cwd='/tmp', env=dict(os.environ), timeout=30) as terminal:
             terminal.expect('请选择: ')
@@ -562,6 +599,9 @@ print(json.dumps(row))
         assert_receipt_migration(self.test, self.old_receipt, self._receipt(), self.old_version, self.candidate['version'],
                                  core_control=True, core_authority=True, yaml_control=True)
         self.test.assertEqual(self._snapshot(release,after=True), self.data, 'Private DB rows and certificate bytes must survive')
+        if self.yaml_state is not None:
+            self.test.assertEqual(self._service_python(release, yaml_draft_program()), self.yaml_state,
+                                  'Saved YAML plan and all private source bytes must survive')
         if self.old_version in DNS_BASELINES:
             self._assert_candidate_origin(release, config)
         assert_node_summary_upgrade(self.test, self.nodes, json.loads(api('/api/inbounds')[1]), self.old_version)
@@ -580,9 +620,22 @@ print(json.dumps(row))
         assert_download_boundary(self.test, self.kit, self.new['download_log'])
         if self.old_version == '0.4.23' and self.candidate['version'] == '0.4.24':
             print('VUI_23_TO_24_UPGRADE_ACCEPTANCE: existing DNS identity and private credentials retained, accepted Root origin and default core selection verified')
-        if self.old_version == '0.4.24':
+        if self.old_version == '0.4.24' and self.candidate['version'] == '0.4.25':
             print('VUI_24_TO_25_UPGRADE_ACCEPTANCE: public application, saved data and DNS materials retained, previous and candidate Root origins verified, YAML control reader installed')
+        if self.old_version == '0.4.25':
+            print('VUI_25_TO_26_UPGRADE_ACCEPTANCE: prior and candidate Root origins, private DB and DNS material, saved YAML plan and three source digests verified')
         print('Published upgrade: immutable public '+self.old_version+' source/assets -> exact candidate; exact historical root receipt closure; config, users/password hashes, node draft/manual TLS paths, live subscription, provided/managed fixture certificate bytes and managed certificate/binding metadata retained (synthetic un-applied Xray binding on 0.4.16/17/19/20/21; no CA/core qualification); candidate-only bounded downloads OK')
+
+    def clear_yaml_fixture(self, api):
+        if self.yaml_state is None:
+            return
+        status, raw = api('/api/proxy/yaml/draft', method='DELETE',
+                          extra_headers=['If-Match: ' + self.yaml_state['revision']])
+        self.test.assertEqual(status, 200, 'Guarded cleanup of the checked synthetic YAML draft failed')
+        snapshot = json.loads(raw)
+        self.test.assertEqual(snapshot['execution_mode'], 'single')
+        self.test.assertIsNone(snapshot['yaml_plan'])
+        self.test.assertIsNone(snapshot['active'])
 
     def public_subscription(self, api):
         status, raw = api(self.subscription)

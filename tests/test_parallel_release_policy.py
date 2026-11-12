@@ -44,9 +44,10 @@ class Materials:
     def __init__(self, version=VERSION):
         self.version = version
         self.roles = ['build', 'fresh', *('upgrade-' + value for value in BASELINES)]
-        if version in ('0.4.23','0.4.24','0.4.25'): self.roles.append('upgrade-0.4.22')
-        if version in ('0.4.24','0.4.25'): self.roles.append('upgrade-0.4.23')
-        if version == '0.4.25': self.roles.append('upgrade-0.4.24')
+        if version in ('0.4.23','0.4.24','0.4.25','0.4.26'): self.roles.append('upgrade-0.4.22')
+        if version in ('0.4.24','0.4.25','0.4.26'): self.roles.append('upgrade-0.4.23')
+        if version in ('0.4.25','0.4.26'): self.roles.append('upgrade-0.4.24')
+        if version == '0.4.26': self.roles.append('upgrade-0.4.25')
         self.checks = {}; self.jobs = {}; self.artifacts = {}; self.bytes = {}; self.downloads = []
         self.reread = {}; self.pages = {}
         for index, path in enumerate(sorted(policy.WORKFLOWS), 1):
@@ -199,7 +200,7 @@ class ParallelMaterialsTests(unittest.TestCase):
         self.assertEqual(fixture.downloads, [])
 
     def test_current_and_future_matrix_require_every_role_and_return_original_bytes(self):
-        for version, count in [('0.4.22', 9), ('0.4.23', 10), ('0.4.24', 11), ('0.4.25', 12)]:
+        for version, count in [('0.4.22', 9), ('0.4.23', 10), ('0.4.24', 11), ('0.4.25', 12), ('0.4.26', 13)]:
             with self.subTest(version=version):
                 fixture = Materials(version); result = fixture.qualify()
                 self.assertEqual(len(fixture.jobs[fixture.checks['oneclick.yml']['id']]), count)
