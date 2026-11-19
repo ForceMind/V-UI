@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -78,16 +80,65 @@ class HTTP01FixtureContractTests(unittest.TestCase):
         process.terminate.assert_not_called();process.kill.assert_not_called()
 
     def test_existing_port_owner_is_never_stopped_when_reservation_fails(self):
-        process,connection = self.fixture(b'Address already in use\n',1)
+        for output in (b'Address already in use\n',b'',b'REA'):
+            with self.subTest(output=output):
+                process,connection = self.fixture(output,1)
+                with patch('test_oneclick_system.require_http01_fixture_host'), \
+                        patch('test_oneclick_system.subprocess.Popen',return_value=process), \
+                        patch('test_oneclick_system.select.select',return_value=([process.stdout],[],[])), \
+                        patch('test_oneclick_system.http.client.HTTPConnection',return_value=connection) as probe:
+                    with self.assertRaisesRegex(AssertionError,'Could not reserve port 80'):
+                        with occupied_http01_port():self.fail('reservation failed or READY was truncated at EOF')
+                probe.assert_not_called()
+                process.terminate.assert_not_called();process.kill.assert_not_called()
+                self.assertTrue(process.stdin.closed and process.stdout.closed)
+
+    def test_fragmented_ready_line_uses_one_deadline(self):
+        process,connection = self.fixture()
+        original_read = process.stdout.read1
         with patch('test_oneclick_system.require_http01_fixture_host'), \
                 patch('test_oneclick_system.subprocess.Popen',return_value=process), \
-                patch('test_oneclick_system.select.select',return_value=([process.stdout],[],[])), \
-                patch('test_oneclick_system.http.client.HTTPConnection',return_value=connection) as probe:
-            with self.assertRaisesRegex(AssertionError,'Could not reserve port 80'):
-                with occupied_http01_port():self.fail('reservation failed')
-        probe.assert_not_called()
-        process.terminate.assert_not_called();process.kill.assert_not_called()
+                patch('test_oneclick_system.select.select',return_value=([process.stdout],[],[])) as readable, \
+                patch.object(process.stdout,'read1',side_effect=lambda count:original_read(min(count,3))) as read, \
+                patch('test_oneclick_system.time.monotonic',side_effect=[0,1,9,9.5]), \
+                patch('test_oneclick_system.http.client.HTTPConnection',return_value=connection):
+            with occupied_http01_port():pass
+        self.assertEqual([call.args[3] for call in readable.call_args_list],[9,1])
+        self.assertEqual([call.args[0] for call in read.call_args_list],[6,3])
         self.assertTrue(process.stdin.closed and process.stdout.closed)
+        process.terminate.assert_not_called();process.kill.assert_not_called()
+
+    def test_partial_ready_line_times_out_with_a_real_pipe_still_open(self):
+        process,connection = self.fixture()
+        process.stdout.close()
+        read_fd,write_fd = os.pipe()
+        process.stdout = os.fdopen(read_fd,'rb')
+        release = threading.Event()
+        real_monotonic = time.monotonic
+        def hold_writer():
+            try:release.wait(1)
+            finally:os.close(write_fd)
+        os.write(write_fd,b'REA')
+        writer = threading.Thread(target=hold_writer,daemon=True);writer.start()
+        clock = iter([0,9.95])
+        started = real_monotonic()
+        try:
+            with patch('test_oneclick_system.require_http01_fixture_host'), \
+                    patch('test_oneclick_system.subprocess.Popen',return_value=process), \
+                    patch('test_oneclick_system.time.monotonic',side_effect=lambda:next(clock,9.95)), \
+                    patch('test_oneclick_system.http.client.HTTPConnection',return_value=connection) as probe:
+                with self.assertRaisesRegex(AssertionError,'Could not reserve port 80'):
+                    with occupied_http01_port():self.fail('partial READY line is not readiness')
+            self.assertLess(real_monotonic()-started,.5,'Reading the partial line waited for writer EOF')
+            self.assertTrue(writer.is_alive(),'The timeout must happen while the pipe writer remains open')
+            probe.assert_not_called()
+            self.assertTrue(process.stdin.closed and process.stdout.closed)
+            process.wait.assert_called_once_with(timeout=10)
+            process.terminate.assert_not_called();process.kill.assert_not_called()
+        finally:
+            release.set();writer.join(timeout=2)
+            process.stdout.close()
+        self.assertFalse(writer.is_alive())
 
     def test_unconfirmed_listener_shutdown_fails_the_fixture(self):
         process,connection = self.fixture()

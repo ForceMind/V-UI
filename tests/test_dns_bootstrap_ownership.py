@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import os
 from pathlib import Path
+import select
 import shlex
 import signal
 import subprocess
@@ -52,7 +53,16 @@ with inherited_exclusive_owner(Path(sys.argv[1]), int(sys.argv[2])):
                     pass_fds=(descriptor,), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, text=True)
                 try:
-                    self.assertEqual(child.stdout.readline(), 'ready\n')
+                    expected = b'ready\n'; ready = bytearray()
+                    deadline = time.monotonic() + 5
+                    while not ready.endswith(b'\n') and len(ready) <= len(expected):
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0 or not select.select([child.stdout], [], [], remaining)[0]:
+                            self.fail('synthetic lease child readiness deadline exceeded')
+                        chunk = os.read(child.stdout.fileno(), len(expected) + 1 - len(ready))
+                        if not chunk: break
+                        ready.extend(chunk)
+                    self.assertEqual(bytes(ready), expected)
                 except BaseException:
                     child.kill(); child.communicate(timeout=5); raise
         try:
@@ -216,12 +226,14 @@ from app.data_owner import data_owner, exclusive_owner_descriptor
 data, fixture = Path(sys.argv[1]), Path(sys.argv[2])
 with data_owner(data, exclusive=True), exclusive_owner_descriptor(data) as fd:
     child = subprocess.Popen([sys.executable, '-c', WRAPPER, str(fixture), str(data), str(fd)],
-                             pass_fds=(fd,), start_new_session=True, stderr=subprocess.DEVNULL)
-    (data / 'wrapper-pid').write_text(str(child.pid))
+                             pass_fds=(fd,), stderr=subprocess.DEVNULL)
+    pending = data / 'wrapper-pid.pending'
+    pending.write_text(str(child.pid)); pending.replace(data / 'wrapper-pid')
     while True: time.sleep(.02)
 '''.replace('WRAPPER', repr(wrapper))
         parent = subprocess.Popen([sys.executable, '-c', launcher, str(self.data), str(fixture)],
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                                  start_new_session=True)
         wrapper_pid = None
         try:
             wrapper_pid = int(self.wait_file(self.data / 'wrapper-pid'))
@@ -241,11 +253,15 @@ with data_owner(data, exclusive=True), exclusive_owner_descriptor(data) as fd:
                         raise
                     time.sleep(.02)
         finally:
-            if parent.poll() is None:
-                parent.kill(); parent.communicate(timeout=5)
-            if wrapper_pid is not None:
-                try: os.killpg(wrapper_pid, signal.SIGKILL)
+            # This known session also contains wrapper/hooks if PID publication
+            # or the first readiness wait failed. Never rely on that file for
+            # the authority to clean up the fixture's process group.
+            try:
+                try: os.killpg(parent.pid, signal.SIGKILL)
                 except ProcessLookupError: pass
+            finally:
+                if parent.poll() is None: parent.kill()
+                parent.communicate(timeout=5)
 
     def test_provider_timeout_or_dead_wrapper_reaps_real_hook_group_and_retains_journal(self):
         from app.certificates.dns_journal import DNSChallengeJournal

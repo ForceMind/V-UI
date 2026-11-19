@@ -79,7 +79,20 @@ finally:server.shutdown();server.server_close();thread.join(timeout=2)
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     ready = False
     try:
-        if not select.select([process.stdout], [], [], 10)[0] or process.stdout.readline(128) != b'READY\n':
+        expected = b'READY\n';line = b'';deadline = time.monotonic() + 10
+        while len(line) < len(expected):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([process.stdout], [], [], remaining)[0]:
+                break
+            # One raw pipe read returns the available fragment without waiting
+            # for a newline; every next fragment shares the same deadline.
+            chunk = process.stdout.read1(len(expected) - len(line))
+            if not chunk:
+                break
+            line += chunk
+            if not expected.startswith(line):
+                break
+        if line != expected or time.monotonic() > deadline:
             raise AssertionError('Could not reserve port 80 for the owned installation fixture')
         ready = True
         def check_owner():
