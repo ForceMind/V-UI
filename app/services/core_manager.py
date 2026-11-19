@@ -201,6 +201,28 @@ class CoreManager:
             raise CoreError("Unsupported core")
         return self.adapters[core]
 
+    def capability_snapshot(self) -> dict:
+        """Observe existing runtimes; do not use the mutating status path.
+
+        Reading capabilities must not create a runtime, stop an untrusted
+        configuration, acquire data ownership or wait for an apply operation.
+        Root component/selection metadata is deliberately not returned.
+        """
+        from app.services.core_runtime import core_capability_record
+        snapshot = dict(self._artifact_snapshot or ())
+        result = {name: core_capability_record(name, snapshot.get(name), state="busy")
+                  for name in self.adapters}
+        if not self.lock.acquire(blocking=False):
+            return result
+        try:
+            for name, adapter in self.adapters.items():
+                runtime = adapter._runtime
+                result[name] = (core_capability_record(name, adapter.artifact)
+                                if runtime is None else runtime.capability_snapshot())
+            return result
+        finally:
+            self.lock.release()
+
     @property
     def proxy_coordinator(self):
         if self._proxy_coordinator is not None:

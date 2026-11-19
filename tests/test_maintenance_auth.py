@@ -61,6 +61,21 @@ class MaintenanceAuthorizationTests(unittest.TestCase):
         self.assertEqual(exchanged.status_code, 200, exchanged.text)
         return record, {'Authorization': 'Bearer ' + exchanged.json()['token'], 'X-VUI-Request': '1'}
 
+    def test_core_version_diagnostics_do_not_grant_component_selection_access(self):
+        from app.services.core_manager import CoreManager
+        _, headers = self.bearer(['diagnose'])
+        remote = TestClient(main.app, base_url=ORIGIN)
+        self.addCleanup(remote.close)
+        with patch('app.api.proxy.get_core_manager', return_value=CoreManager()):
+            response = remote.get('/api/proxy/capabilities', headers=headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(set(response.json()['cores']), {'sing-box', 'xray'})
+            for private in ('artifact_id', 'binary_sha256', 'payload_manifest_sha256',
+                            'fallback', 'selection_revision', 'builder_source'):
+                self.assertNotIn(private, response.text)
+            self.assertEqual(remote.get('/api/maintenance/core-selection', headers=headers).status_code, 403)
+            self.assertEqual(remote.get('/api/proxy/capabilities').status_code, 401)
+
     def test_admin_creation_one_time_link_and_hash_only_storage(self):
         response = self.client.post('/api/maintenance/grants', json={}, headers=BROWSER)
         self.assertEqual(response.status_code, 201, response.text)
