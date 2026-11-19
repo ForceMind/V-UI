@@ -936,10 +936,23 @@ def operate(request, services, account, cancelled, worker_factory=None):
     if services.manager != 'systemd':
         # Status remains available. No write operation pretends OpenRC is stopped.
         raise Refused('OpenRC managed writes require a descendant-proof backend')
-    if action == 'start' and initial['v-ui.service'] == 'active' and initial['v-ui-http01.socket'] == 'active':
-        return {'event': 'already_running'}
+    desired = initial
     if action == 'start':
+        # Explicit start follows the saved installation choice. Other
+        # maintenance operations retain the actual pre-operation topology.
+        config = decode_json(trusted_bytes(CONFIG, MAX_JSON))
+        http01_enabled = config.get('http01_enabled', True)
+        if type(http01_enabled) is not bool:
+            raise Refused('invalid HTTP-01 service configuration')
+        desired = {'v-ui.service': 'active', 'v-ui-http01.service': 'inactive',
+                   'v-ui-http01.socket': 'active' if http01_enabled else 'inactive'}
+        if (initial['v-ui.service'] == 'active'
+                and initial['v-ui-http01.socket'] == desired['v-ui-http01.socket']
+                and (http01_enabled or initial['v-ui-http01.service'] == 'inactive')):
+            return {'event': 'already_running'}
         services.prove_stopped()
+    elif action == 'stop':
+        desired = {unit: 'inactive' for unit in SYSTEMD_UNITS}
     worker = None
     stopped = False
     try:
@@ -965,13 +978,6 @@ def operate(request, services, account, cancelled, worker_factory=None):
         if cancelled:
             raise Refused('operation interrupted')
         services.prove_stopped()
-        if action == 'start':
-            desired = {unit: 'active' if unit in ('v-ui.service', 'v-ui-http01.socket') else 'inactive'
-                       for unit in SYSTEMD_UNITS}
-        elif action == 'stop':
-            desired = {unit: 'inactive' for unit in SYSTEMD_UNITS}
-        else:
-            desired = initial
         services.restore(desired)
         worker.send({'command': 'finish'})
         worker.exit_zero()
@@ -1262,9 +1268,14 @@ def network_diagnostics(cancelled=None):
     port = config.get('port')
     if type(port) is not int or not 1 <= port <= 65535:
         raise Refused('invalid panel port')
+    http01_enabled = config.get('http01_enabled', True)
+    if type(http01_enabled) is not bool:
+        raise Refused('invalid HTTP-01 service configuration')
     info = firewall.detect()
     lines = ['网络/防火墙诊断（只读）', '本机规则后端：' + info['backend']]
-    for number in sorted({80, port}):
+    if not http01_enabled:
+        lines.append('HTTP-01：未启用；当前安装无需为证书验证开放 80/tcp。')
+    for number in sorted({port} | ({80} if http01_enabled else set())):
         status = firewall.port_open(info, number)
         label = 'allowed' if status is True else 'blocked' if status is False else 'unknown'
         listener = local_tcp_listener(number)
