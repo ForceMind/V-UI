@@ -2,7 +2,20 @@
 
 当前使用说明从[文档首页](../README.md)进入，当前版本与剩余计划以[路线图](../../ROADMAP.md)为准。
 
-本次整理以已验收的入口主线 `39181e0cdb9643422a19049df942b208f876faf4` 为归档点。下表链接固定到该提交，保留整理前的完整原文、提交与失败记录，不随当前文档修改。旧文中的“当前”“候选”“未发布”“未授权”和空复选框均反映当时阶段，不是最新产品状态。
+早期入口整理以已验收主线 `39181e0cdb9643422a19049df942b208f876faf4` 为归档点。后续状态校准按下节分别固定快照，保留整理前的完整原文、提交与失败记录。旧文中的“当前”“候选”“未发布”“未授权”和空复选框均反映当时阶段，不是最新产品状态。
+
+## 2026-11-19 状态校准快照
+
+本次以主线 `b58a76dda1d2b26c831988a53db88e25646f5b54` 固定文档原文，将过时的 v0.4.7 兼容结论、v0.4.23 交接与 P3/P4 候选叙述和当前 v0.4.26 分开。只校准事实、索引和实施方案，权限、浏览器政策、失败记录及发布约束保持。
+
+| 原文 | 固定快照 |
+| --- | --- |
+| 兼容矩阵与历史协议范围 | [COMPATIBILITY.md](https://github.com/ForceMind/V-UI/blob/b58a76dda1d2b26c831988a53db88e25646f5b54/docs/COMPATIBILITY.md) |
+| 开发约束及阶段授权记录 | [AGENTS.md](https://github.com/ForceMind/V-UI/blob/b58a76dda1d2b26c831988a53db88e25646f5b54/AGENTS.md) |
+| 开发交接原文 | [DEVELOPMENT_HANDOFF.md](https://github.com/ForceMind/V-UI/blob/b58a76dda1d2b26c831988a53db88e25646f5b54/docs/DEVELOPMENT_HANDOFF.md) |
+| 路线与阶段证据 | [ROADMAP.md](https://github.com/ForceMind/V-UI/blob/b58a76dda1d2b26c831988a53db88e25646f5b54/ROADMAP.md) |
+| 运维与核心候选说明 | [OPERATIONS.md](https://github.com/ForceMind/V-UI/blob/b58a76dda1d2b26c831988a53db88e25646f5b54/docs/OPERATIONS.md) · [MANAGED_OPERATIONS.md](https://github.com/ForceMind/V-UI/blob/b58a76dda1d2b26c831988a53db88e25646f5b54/docs/MANAGED_OPERATIONS.md) |
+| 静态 YAML 候选演进 | [YAML_APPLICATION_CONTRACT.md](https://github.com/ForceMind/V-UI/blob/b58a76dda1d2b26c831988a53db88e25646f5b54/docs/YAML_APPLICATION_CONTRACT.md) |
 
 ## 整理前的完整快照
 
@@ -42,10 +55,10 @@
 
 [变更日志](../../CHANGELOG.md)保留历代产品变化；各协议的契约和收口记录仍留在原路径。历史通过仅属于记录中的准确提交、目标和负载，不授予后续提交、新协议或其他环境资格。
 
-## 仍未成为正式产品资格的研究
+## 研究与产品资格边界
 
 - [UDP / 标准客户端兼容边界](../STANDARD_CLIENT_COMPATIBILITY.md)
-- [XHTTP / HTTPUpgrade 刻画](../XHTTP_CHARACTERIZATION_CLOSURE_048.md)
+- [XHTTP / HTTPUpgrade 历史刻画](../XHTTP_CHARACTERIZATION_CLOSURE_048.md)；v0.4.26 的[XHTTP 最小分享](../XHTTP_PUBLIC_PROFILE.md)另行取得资格，其他模式和 HTTPUpgrade 不因此开放。
 - [Tailscale 私有管理设计](../TAILSCALE_PRIVATE_MANAGEMENT_DESIGN.md)
 - [真实低资源整机与长期稳定性合同](../LOW_RESOURCE_TARGET.md)
 

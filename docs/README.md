@@ -31,14 +31,14 @@
 | 目标 | 文档 |
 | --- | --- |
 | 提交问题、变更和验证要求 | [贡献指南](../CONTRIBUTING.md) · [行为准则](../CODE_OF_CONDUCT.md) |
-| 计划与版本变化 | [路线图](../ROADMAP.md) · [变更记录](../CHANGELOG.md) |
+| 计划与版本变化 | [路线图](../ROADMAP.md) · [优化与融合实施方案](V2RAY_AGENT_INTEGRATION_PLAN.md) · [开发交接](DEVELOPMENT_HANDOFF.md) · [变更记录](../CHANGELOG.md) |
 | 管理 API | [API 参考](API.md) |
 | 发布与制品核验 | [发布指南](RELEASING.md) · [当前发布说明](RELEASE_NOTES.md) |
 | 第三方来源和许可证 | [第三方说明](../third_party/NOTICE.md) · [项目许可证](../LICENSE) |
 
 ## 协议与数据契约
 
-[Cloudflare DNS-01与通配符契约](DNS01_CLOUDFLARE_CONTRACT.md)包含本版已审实现、准确 main 的九组/21 jobs、同源材料和公开记录。原始失败保留，不能把本版能力写成旧22已有功能。
+[Cloudflare DNS-01与通配符契约](DNS01_CLOUDFLARE_CONTRACT.md)保留 v0.4.23 首发实现、准确 main 的九组/21 jobs、同源材料和公开记录。原始失败保留；当前 v0.4.26 的应用资格见[发布记录](RELEASING.md#当前稳定版)，不将旧阶段结果当作新提交验收。
 
 这些专题保留精确字段限制和原始验证范围，适合高级配置或实现变更时查阅。
 
@@ -47,6 +47,7 @@
 | 每入口跟随全局、直连和中转 | [使用说明](PER_INBOUND_ROUTING.md) · [三态契约](PER_INBOUND_ROUTING_CONTRACT.md) |
 | 服务器程序代理、全局中转与恢复 | [双开关契约](DUAL_PROXY_RELAY_CONTRACT.md) · [离线恢复](DUAL_PROXY_RELAY_OFFLINE_RECOVERY.md) |
 | 专用 TCP 上游配置 | [使用说明](TCP_UPSTREAM_EXPORT.md) · [导出契约](TCP_UPSTREAM_EXPORT_CONTRACT.md) |
+| 静态 YAML 与核心维护 | [YAML 应用契约](YAML_APPLICATION_CONTRACT.md) · [核心维护契约](CORE_UPGRADE_CONTRACT.md) |
 | UDP、DNS 和导入保真 | [能力门槛](UDP_DNS_CAPABILITY_GATES.md) |
 | VLESS 的 WS / gRPC 限制 | [WS 已验范围](VLESS_WS_CLOSURE_043.md) · [gRPC 契约](VLESS_GRPC_044.md) |
 | Hysteria2 / TUIC / REALITY | [HY2 契约](HYSTERIA2_045.md) · [TUIC 契约](TUIC_046.md) · [REALITY 契约](REALITY_VISION_047.md) |
