@@ -27,6 +27,25 @@ from app.core_updates.binary import (RuntimeArtifact, RuntimeArtifactError, open
 VERSIONS = {"xray": "26.3.27", "sing-box": "1.14.2"}
 
 
+def core_capability_record(name, artifact, *, state="not_initialized") -> dict:
+    """Public version labels only; component management details stay private.
+
+    The legacy version is an expectation from the application bundle, never
+    evidence that this version is executing. This record grants no capability.
+    """
+    from app.core_updates.selection import ComponentReference
+    return {
+        "qualification_baseline": VERSIONS[name],
+        "selected_version": artifact.version if artifact is not None else VERSIONS[name],
+        "selection_source": ("managed" if artifact is not None
+                             and type(artifact.reference) is ComponentReference else "bundled"),
+        "running": None,
+        "running_version": None,
+        "identity_state": state,
+        "matches_selected": None,
+    }
+
+
 class CoreError(RuntimeError):
     """Only fixed, non-secret messages from this exception reach the API."""
 
@@ -279,6 +298,57 @@ class CoreRuntime:
         return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
                 info.st_mode, info.st_uid, info.st_gid)
 
+    def _verified_generation(self):
+        """Observe the held executable without cleaning up or resolving paths.
+
+        Callers hold self.lock and have separately observed a live process.
+        Reuse the execution-boundary verifier; a version string is not proof.
+        """
+        if self._binary_fd is None or self._generation_artifact is None:
+            return None
+        try:
+            verify_runtime_artifact_fd(self._binary_fd, self._generation_artifact)
+            if self._execution_inode(self._binary_fd) == self._generation_binary_identity:
+                return self._generation_artifact
+        except (OSError, RuntimeArtifactError):
+            pass
+        return None
+
+    def capability_snapshot(self) -> dict:
+        """Bounded, read-only observation for the existing diagnose scope.
+
+        Never initializes storage, compiles configuration, launches/stops a
+        process, or clears an exited generation. Busy and unknown are explicit.
+        The result is a point-in-time observation, not an apply/export gate.
+        """
+        result = core_capability_record(self.name, self._artifact, state="busy")
+        if not self.lock.acquire(blocking=False):
+            return result
+        try:
+            alive = self.process is not None and self.process.poll() is None
+            result.update(running=alive, identity_state="stopped")
+            if not alive:
+                return result
+            result["identity_state"] = "unverified"
+            generation = self._verified_generation()
+            if generation is None:
+                return result
+            if self.process.poll() is not None:
+                result.update(running=False, identity_state="stopped")
+                return result
+            matches = self._artifact is not None and generation == self._artifact
+            result.update(
+                identity_state="verified" if matches else "mismatch",
+                running_version=generation.version,
+                matches_selected=matches,
+            )
+            return result
+        except OSError:
+            result.update(running=None, identity_state="unavailable")
+            return result
+        finally:
+            self.lock.release()
+
     def execution_identity(self) -> dict:
         """Internal health evidence, not a public API or a trust resolver.
 
@@ -294,15 +364,10 @@ class CoreRuntime:
             alive = self.process is not None and self.process.poll() is None
             if not alive and self._binary_fd is not None:
                 self._terminate()
-            if alive and self._binary_fd is not None and self._generation_artifact is not None:
-                try:
-                    verify_runtime_artifact_fd(self._binary_fd, self._generation_artifact)
-                    verified = self._execution_inode(self._binary_fd) == self._generation_binary_identity
-                except (OSError, RuntimeArtifactError):
-                    verified = False
-                if verified:
-                    running = {"artifact_id": self._generation_artifact.artifact_id,
-                               "binary_sha256": self._generation_artifact.reference.binary_sha256}
+            generation = self._verified_generation() if alive else None
+            if generation is not None:
+                running = {"artifact_id": generation.artifact_id,
+                           "binary_sha256": generation.reference.binary_sha256}
             return {"selected": selected, "running": running}
 
     def confirmation_identity(self) -> dict:

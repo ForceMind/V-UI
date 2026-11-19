@@ -111,6 +111,7 @@ def snapshot_response(value: dict, response: Response) -> dict:
 
 @router.get('/capabilities')
 def capabilities():
+    from app.services.core_runtime import VERSIONS
     return {
         'schema_version': 1,
         'implementation_stage': 'panel-diagnostics-exports',
@@ -123,7 +124,11 @@ def capabilities():
         'qualified_ingress': ['sing-box-vless-tcp-tls'],
         'formats': ['uri', 'v2ray-json', 'clash-yaml'],
         'upstream_profiles': ['vless-tcp-tls', 'vless-tcp-reality-vision'],
-        'core_version': '1.14.2',
+        # Retain the original compatibility baseline for existing clients.
+        # Selected and observed versions have their own explicit semantics.
+        'core_version': VERSIONS['sing-box'],
+        'core_version_semantics': 'qualification_baseline',
+        'cores': get_core_manager().capability_snapshot(),
         'application_networks': ['tcp'],
         'remote_providers': False,
         'system_proxy': False,
