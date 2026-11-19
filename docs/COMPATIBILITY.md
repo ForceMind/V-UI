@@ -1,22 +1,56 @@
 # 兼容与验证范围
 
-[v0.4.2](MAINLINE_CLOSURE_20261005.md)、[WS](VLESS_WS_CLOSURE_043.md)、[gRPC](VLESS_GRPC_CLOSURE_044.md)、[HY2](HYSTERIA2_CLOSURE_045.md)、[PR #23 安全修复](INBOUND_RESPONSE_CLOSURE_20261006.md)、[TUIC v0.4.6](TUIC_CLOSURE_046.md)和 [REALITY/Vision v0.4.7](REALITY_VISION_CLOSURE_047.md)均已完成各自准确主线验收。当前产品版本仍为 0.4.7；[PR #25 XHTTP 刻画](XHTTP_CHARACTERIZATION_CLOSURE_048.md)已完成独立审查、准确候选/主线各八组/11 jobs/全部步骤 attempt 1 验收，XHTTP/HTTPUpgrade 公开导出仍阻断。产品范围冻结；[发布准备](RELEASING.md)与正式发布另行验收。
+当前公开稳定版为 **v0.4.26**。应用源、四目标安装和旧版升级证据见[当前发布记录](RELEASING.md#当前稳定版)。本页先列当前产品范围，再保留各协议首次取得资格时的精确参数和历史证据；旧阶段的浏览器通过不能替代 v0.4.26 的浏览器验收，**当前版本浏览器未验证**。
+
+## 当前能力概览
+
+下面的“分享”只表示限定配置具备公开导出资格。它不证明用户域名、端口、证书或实际客户端已连通。编辑器能表达的高级组合也不等于已取得公开分享、中转或应用 UDP 资格。
+
+| 核心与限定组合 | 公开分享格式 | TCP / UDP 范围 | 精确依据 |
+| --- | --- | --- | --- |
+| sing-box VLESS / TCP / TLS，单 UUID、空 flow | VLESS URI/Base64、Mihomo YAML、sing-box JSON | 已验证 HTTP/TCP；普通导出的 UDP/XUDP 字段不代表全面应用 UDP 资格 | [基础范围](#已验证的原生-tcptls-基线) · [UDP 分类](UDP_DNS_CAPABILITY_GATES.md#2-四类能力不能互相代替) |
+| sing-box Trojan / TCP / TLS，单密码 | Trojan URI/Base64、Mihomo YAML、sing-box JSON | 已验证 HTTP/TCP；应用 UDP 按独立门槛 | [基础范围](#已验证的原生-tcptls-基线) |
+| sing-box VMess / TCP / TLS，单 UUID | VMess URI/Base64、Mihomo YAML、sing-box JSON | 已验证 HTTP/TCP；应用 UDP 按独立门槛 | [基础范围](#已验证的原生-tcptls-基线) |
+| sing-box Shadowsocks，三种已验 AEAD cipher | SIP002、Mihomo YAML、sing-box JSON | 已有普通 TCP/UDP 有界验证，不授予 UDP 中转资格 | [AEAD 范围](#已验证的-shadowsocks-aead-基线) |
+| sing-box VLESS / WebSocket / TLS | VLESS URI/Base64、Mihomo YAML、sing-box JSON | 仅已验 HTTP/TCP；path、Host 与 ALPN 有严格限制 | [WS 范围](VLESS_WS_CLOSURE_043.md) |
+| sing-box VLESS / gRPC Lite / TLS | VLESS URI/Base64、Mihomo YAML、sing-box JSON | 仅已验 HTTP/TCP；service_name 与 h2 有严格限制 | [gRPC 范围](VLESS_GRPC_CLOSURE_044.md) |
+| sing-box Hysteria2 / 原生 QUIC / TLS | Hysteria2 URI、Mihomo YAML、sing-box JSON | QUIC 使用 UDP 承载；应用负载只验证 HTTP/TCP | [HY2 范围](HYSTERIA2_CLOSURE_045.md) |
+| sing-box TUIC v5 / 原生 QUIC / TLS / h3 | 固定导入器支持的 TUIC URI、Mihomo YAML、sing-box JSON | 应用 UDP 未获资格；不能用无效 udp:false 声称 URI/客户端禁用了 UDP | [TUIC 范围](TUIC_CLOSURE_046.md) |
+| sing-box VLESS / direct TCP / REALITY / Vision | VLESS URI/Base64、Mihomo YAML、sing-box JSON | 已验限定 TCP；REALITY 不绑定普通托管证书 | [REALITY 范围](REALITY_VISION_CLOSURE_047.md) |
+| Xray VLESS / XHTTP / TLS / stream-one / h2 | Mihomo YAML、VLESS URI/Base64；不支持 sing-box JSON | 固定 Xray → Mihomo 的 HTTP/TCP；不含中转上游或应用 UDP | [v0.4.26 分享范围](XHTTP_PUBLIC_PROFILE.md) |
+
+XHTTP 仅上述最小组合已公开；其他 mode、REALITY、托管证书、反代/CDN 等不在该分享范围。包含 XHTTP 节点的授权请求 sing-box JSON 时整单拒绝，不静默丢弃节点。HTTPUpgrade 仍是独立刻画，公开导出阻断。
+
+| 领域 | v0.4.26 当前范围 | 明确边界 |
+| --- | --- | --- |
+| 服务器中转 | 普通模式共享单一 selected_upstream；每入口 inherit/direct/relay 与本机代理开关独立 | 有效中转仅已验 TCP，失败不隐式 DIRECT；显式入口策略保留既有资格 |
+| 静态 YAML 应用 | 已发布受管 sing-box 静态计划、冲突选择、检查、应用及恢复 | 静态非嵌套 select、限定域名/CIDR/MATCH；动态 provider 等未实现语义阻止应用，见[YAML 契约](YAML_APPLICATION_CONTRACT.md) |
+| ToClash | 服务目录与自定义规则进入 Mihomo 配置，预览与保存分开 | 客户端规则与服务器 YAML 不自动同步；URI 不携带完整规则，sing-box JSON 不承诺完整迁移 |
+| 证书 | HTTP-01、已有证书、安装后管理员管理 Cloudflare DNS-01 与根域/一级通配符 | 自动首装仍 HTTP-01；真实 Cloudflare 账号签发未验证；其他 DNS provider 未接入 |
+| 核心维护 | 已交付独立组件更新、回退、持久任务和双域恢复 | 只接受匹配当前应用来源、平台和资格的官方组件；旧登录/维护授权不自动获得核心写用途 |
+| 私有管理与部署 | Tailscale 默认关闭的只读状态已有 | 完整私有接入、多服务器控制、专用 Docker/NixOS 部署尚未交付 |
+
+套件内置核心为 sing-box 1.14.2、Xray 26.3.27，固定客户端基线为 Mihomo 1.19.32。已公开的独立组件及其对应应用来源见[组件发布记录](RELEASING.md#v0424-发行记录历史)。选择版本、实际进程身份和兼容资格分别核对，不能将“版本更新”直接等同于当前组合已验证。
+
+普通直连既有 UDP 行为保持；[D2 草稿 #167](https://github.com/ForceMind/V-UI/pull/167)仍受阻，产品 UDP 中转继续关闭。手机、公网移动网络、真实 512 MiB 整机/24 小时及真实 Tailscale 接入各有独立证据缺口，见[路线图](../ROADMAP.md#外部环境验收)。
+
+本次优化的工作包和验收要求见[实施方案](V2RAY_AGENT_INTEGRATION_PLAN.md)。下方协议记录中的准确旧提交、失败和局部通过保持原判；整理前全文可从[固定主线快照](https://github.com/ForceMind/V-UI/blob/b58a76dda1d2b26c831988a53db88e25646f5b54/docs/COMPATIBILITY.md)读取。
 
 ## Linux 安装层
 
-0.4.7 延续 0.3.1 的安装能力模型；选择依据是实际环境能力，不是发行版名称。
+v0.4.26 沿用按实际能力检测的安装模型；选择依据是实际环境能力，不是发行版名称。
 
 | 层级 | 目标 / 验收 |
 | --- | --- |
 | CPU | x86_64、ARM64 |
 | libc | glibc、musl；目标包在对应原生环境启动 |
-| init | systemd、OpenRC |
+| init | systemd；OpenRC 安装可用，但全局受管菜单仅支持状态查询和本地候选准备 |
 | Python | 固定便携 CPython 3.12 |
 | 核心 | sing-box 1.14.2、Xray 26.3.27，按 CPU/libc 选择固定官方构建 |
 | 防火墙 | UFW/firewalld 可在用户明确确认后修改；自定义 nftables/iptables 只提示 |
 | 代表性发行版探测 | Debian、Fedora、Arch、openSUSE、Alpine |
 
-“探测成功”不单独等于完整支持。正式支持声明要求普通测试、真实 one-click、portable matrix 和发布门槛同时通过。v0.4.2 的四目标附件已核验；v0.4.7 准确主线亦已通过自己的四目标门槛；任何后续包须通过自身准确提交验收，不能使用旧套件或前置链路结果替代。验收不表示附件晋升或正式发布。
+“探测成功”不单独等于完整支持。正式支持声明要求普通测试、真实 one-click、portable matrix 和发布门槛同时通过。v0.4.26 的四目标、新装和十一个公开旧版升级证据见[发布记录](RELEASING.md#当前稳定版)；任何后续包须通过自身准确提交验收，不能使用旧套件或前置链路结果替代。源码、验收、正式发布和实际部署分别记录。
 
 其他CPU和runit/s6等不支持init会被拒绝。NixOS、声明式或只读系统不在本版支持范围，请勿运行安装器；现有代码没有保证提前识别所有此类环境，不能以“有systemd”推导可安全安装。版本操作还依赖pidfd等Linux内核能力及实际libc ABI兼容。
 
@@ -119,7 +153,7 @@ TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合
 
 不复用工作区回退前丢失的本地结果，EPERM 不算本地运行通过；最终证据见[TUIC 收口](TUIC_CLOSURE_046.md)，参数见[配置](CONFIGURATION.md#046-tuic-v5tls)。40 项 ToClash、四目标 Linux 和协议区分 UDP 安装器不变。
 
-## 尚未完成的协议矩阵
+## 当前未取得公开分享资格的组合
 
 下列协议/组合即使已有表单或生成代码，也不能写成“已完整支持”：
 
@@ -128,7 +162,7 @@ TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合
 - Xray Shadowsocks、2022 cipher、插件/obfs，以及未列明的 cipher；
 - Xray VMess 及 VMess 非 TCP/TLS 组合；
 - 本页 HY2 基线范围外组合、TUIC 已验收范围外组合、REALITY/Vision 已验收范围外组合；
-- 除上述 WS 和 gRPC 基线外的 WebSocket/gRPC，以及 XHTTP / HTTPUpgrade 全组合；
+- 除上述 WS 和 gRPC 基线外的 WebSocket/gRPC；XHTTP 最小公开组合之外的模式，以及 HTTPUpgrade 公开导出；
 - 除上述 Shadowsocks AEAD 之外的 UDP 专项；
 - sing-box 完整 ToClash 规则迁移。
 
@@ -136,7 +170,9 @@ TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合
 
 ## 证书
 
-已实现 Certbot HTTP-01 单域名申请、测试/正式隔离、自动续期和消费者绑定。WS 与 gRPC 基线沿用并已验证托管证书生命周期和停止待应用语义；HY2 已完成自己的主线验收；TUIC 已完成同一流程的准确主线验收；REALITY 不适用托管证书。不把 WS Host 或 gRPC service_name 当作证书域名。DNS-01、通配符和 DNS provider API 尚未纳入。
+已实现 Certbot HTTP-01 单域名申请、测试/正式隔离、自动续期和消费者绑定。WS、gRPC、HY2、TUIC 的托管生命周期各自按对应基线验收；REALITY 不适用托管证书，当前 XHTTP 公开分享也不含托管证书。不把 WS Host 或 gRPC service_name 当作证书域名。
+
+Cloudflare DNS-01、根域与一级通配符、具体连接域名绑定及遗留 TXT 清理已随 v0.4.23 交付，v0.4.26 继续沿用。凭据及清理仅管理员，普通维护只能使用既有材料；含 DNS 数据的私有备份未加密，恢复后 profile 待验证，旧 reader 拒绝。自动首装仍使用 HTTP-01，真实 Cloudflare 账号签发与浏览器未验证，见[DNS 使用指南](DNS01_CLOUDFLARE.md)。
 
 ## 边界
 
@@ -149,7 +185,9 @@ TUIC v0.4.6 已由 [PR #22](https://github.com/ForceMind/V-UI/pull/22) 正常合
 
 最终候选 `70cc2f4` 与正常合并 master `6b049262` 的独立审查/八组验收已完成，完整公共导出/编辑/浏览器/损坏停机恢复有准确主线证据。链路首次继承 VMess/Mihomo CA 用例的被动轮询没有捕获必需 x509 原因，unchanged-code attempt 2 成功不构成永久修复；详见[收口](REALITY_VISION_CLOSURE_047.md)。Mihomo YAML、sing-box JSON、实际 URI importer 的参考握手与应用目标独立；失败需实际认证/UUID/flow原因及应用零送达，伪装 HEADERS 只记录实际数。URI importer 的 udp=true 不代表应用 UDP 已验收，也不能宣称 URI 禁用 UDP。完整契约及首次失败见[阶段记录](REALITY_VISION_047.md)。
 
-## v0.4.8 XHTTP 仅刻画，公开支持阻断
+## v0.4.8 XHTTP 刻画记录（历史）
+
+以下保留 v0.4.8 的原时点结论和失败。v0.4.26 已另行完成限定 XHTTP 的公开分享，当前支持范围以本页概览及[XHTTP 分享契约](XHTTP_PUBLIC_PROFILE.md)为准；HTTPUpgrade 的公开导出阻断保持。
 
 固定 Xray 26.3.27 可表达 XHTTP 服务端，Mihomo 1.19.32 可表达原生 YAML 与实际 URI provider；本阶段只刻画 VLESS/空 flow/单假 UUID/TLS/h2/Chrome/`stream-one`/显式 SNI、Host、path 的 HTTP/TCP。sing-box 1.14.2 的 transport decoder 不支持 XHTTP，真实 parser 以 `unknown transport type: xhttp` 拒绝，不能声称三格式或双客户端支持。
 
