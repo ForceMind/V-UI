@@ -289,6 +289,15 @@ def assert_upgrade_configuration(test, before, after, old_release, new_release):
     # Fresh provided-certificate baselines may omit this field. The upgrade writes
     # the canonical empty authorization list; existing authorizations must stay.
     expected.setdefault('ca_authorizations', [])
+    # Only historical omissions acquire defaults. Existing DNS and disabled
+    # HTTP-01 choices remain exact, including all unrelated saved fields.
+    test.assertIn(before['certificate_mode'], ('managed', 'provided'))
+    expected.setdefault('certificate_method',
+                        'provided' if before['certificate_mode'] == 'provided' else 'http-01')
+    expected.setdefault('http01_enabled', True)
+    test.assertIn(expected['certificate_method'], ('http-01', 'dns-01', 'provided'))
+    test.assertIs(type(expected['http01_enabled']), bool)
+    test.assertIs(type(after.get('http01_enabled')), bool)
     test.assertEqual(after, expected)
 
 

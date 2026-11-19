@@ -31,7 +31,7 @@ from app.certificates.cloudflare import CloudflareClient
 from app.certificates.dns_journal import DNSChallengeJournal
 from app.certificates.dns_store import DNSCredentialStore
 from app.certificates.manager import CertificateManager
-from app.certificates.models import Certificate
+from app.certificates.models import Certificate, CertificateBinding, CertificateJob
 from app.certificates.provider import CertbotProvider
 from app.models import database
 from acme_helpers import PebbleFixture
@@ -57,18 +57,67 @@ class FixtureHookProvider(CertbotProvider):
                 or info.st_uid != os.geteuid() or info.st_nlink != 1
                 or hashlib.sha256(self.fixture_hook.read_bytes()).hexdigest() != self.fixture_hook_sha):
             raise AssertionError('trusted test hook identity changed')
-        return shlex.join([sys.executable, '-B', '-I', str(self.fixture_hook), action, str(self.root), record['job_id'],
-            '--deadline', str(record['dns_deadline']), '--propagation-seconds', str(self.dns_propagation_seconds)])
+        command = [sys.executable, '-B', '-I', str(self.fixture_hook), action, str(self.root), record['job_id'],
+            '--deadline', str(record['dns_deadline']), '--propagation-seconds', str(self.dns_propagation_seconds)]
+        if record.get('_owner_fd') is not None:
+            command += ['--owner-fd', str(record['_owner_fd'])]
+        return shlex.join(command)
 
 
-def write_fixture_hook(path, *, port, ca, events):
+def copy_bootstrap_fixture(directory):
+    """Keep the production -I wrapper bytes and its app import layout intact."""
+    directory.mkdir(mode=0o700)
+    app = directory/'app';app.mkdir(mode=0o700)
+    certificates = app/'certificates';certificates.mkdir(mode=0o700)
+    pins = {}
+    for relative in ('app/certificates/dns_certbot.py', 'app/data_owner.py', 'app/__init__.py'):
+        raw = b'' if relative == 'app/__init__.py' else (ROOT/relative).read_bytes()
+        target = directory/relative
+        descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, 'wb') as stream:stream.write(raw)
+        digest = hashlib.sha256(raw).hexdigest()
+        if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+            raise AssertionError('copied bootstrap fixture differs from its source bytes')
+        pins[target] = digest
+    return certificates/'dns_certbot.py', pins
+
+
+class ExclusiveFixtureHookProvider(FixtureHookProvider):
+    """Only relocate an exact production wrapper beside the bound test hook."""
+    def set_bootstrap_fixture(self, wrapper, pins):
+        self.fixture_wrapper, self.fixture_pins = wrapper, pins
+        self.bootstrap_commands = []
+
+    def command(self, record, work):
+        for path, digest in self.fixture_pins.items():
+            info = path.lstat()
+            if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
+                    or info.st_uid != os.geteuid() or info.st_nlink != 1
+                    or hashlib.sha256(path.read_bytes()).hexdigest() != digest):
+                raise AssertionError('trusted bootstrap fixture identity changed')
+        descriptor = record.get('_owner_fd')
+        if type(descriptor) is not int or descriptor < 3:
+            raise AssertionError('bootstrap must inherit the actual exclusive descriptor')
+        command = super().command(record, work)
+        expected = [sys.executable, '-B', '-I', str(ROOT/'app/certificates/dns_certbot.py'),
+                    str(self.root), '--owner-fd', str(descriptor)]
+        if command[:7] != expected or self.fixture_hook != self.fixture_wrapper.with_name('dns_hook.py'):
+            raise AssertionError('bootstrap wrapper or hook argument contract changed')
+        command[3] = str(self.fixture_wrapper)
+        self.bootstrap_commands.append({'owner_fd': descriptor, 'job_id': record['job_id']})
+        return command
+
+
+def write_fixture_hook(path, *, port, ca, events, exclusive=False, extra_pins=None):
     # Source pinning precedes sys.path injection in the independent hook process.
     members = ('app/certificates/dns_hook.py', 'app/certificates/dns_journal.py',
         'app/certificates/cloudflare.py', 'app/certificates/dns_store.py',
-        'app/certificates/errors.py', 'app/data_owner.py', 'tests/fake_cloudflare_https.py')
+        'app/certificates/errors.py', 'app/certificates/dns_certbot.py',
+        'app/data_owner.py', 'tests/fake_cloudflare_https.py')
     pins = {str(ROOT / name): hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in members}
+    pins.update({str(name): digest for name, digest in (extra_pins or {}).items()})
     pins[str(ca)] = hashlib.sha256(Path(ca).read_bytes()).hexdigest()
-    script = '''import hashlib,json,os,stat,sys
+    script = '''import fcntl,hashlib,json,os,stat,sys
 PINS = __PINS__
 for path, expected in PINS.items():
     fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
@@ -85,25 +134,63 @@ from fake_cloudflare_https import LoopbackCloudflareTransport
 from app.certificates import cloudflare,dns_hook
 from app.certificates.cloudflare import CloudflareClient
 from app.certificates.dns_journal import DNSChallengeJournal
+from app.data_owner import exclusive_owner_descriptor
 def forbidden(*args,**kwargs):raise AssertionError('real Cloudflare transport forbidden')
 cloudflare._https=forbidden
-def factory(root):
-    return DNSChallengeJournal(root,client_factory=lambda token:CloudflareClient(token,transport=LoopbackCloudflareTransport(__PORT__,__CA__)))
-if sys.argv[1]=='auth':
-    keys=[key for key in ('CERTBOT_IDENTIFIER','CERTBOT_DOMAIN') if key in os.environ]
-    valid=bool(keys) and all(os.environ[key].removeprefix('*.')==__DOMAIN__ for key in keys)
+def record(event):
     fd=os.open(__EVENTS__,os.O_WRONLY|os.O_CREAT|os.O_APPEND|os.O_NOFOLLOW,0o600)
     try:
         info=os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_uid!=os.geteuid() or stat.S_IMODE(info.st_mode)!=0o600:
             raise SystemExit('fixture event file unsafe')
-        os.write(fd,(json.dumps({'action':'auth','identifier_keys':keys,'identifier_valid':valid})+'\\n').encode())
+        os.write(fd,(json.dumps(event)+'\\n').encode())
         os.fsync(fd)
     finally:os.close(fd)
+def identifiers():
+    keys=[key for key in ('CERTBOT_IDENTIFIER','CERTBOT_DOMAIN') if key in os.environ]
+    valid=bool(keys) and all(os.environ[key].removeprefix('*.')==__DOMAIN__ for key in keys)
+    return keys,valid
+def exclusive_event(root,action):
+    if len(sys.argv)!=10 or sys.argv[8]!='--owner-fd' or sys.argv[1]!=action:
+        raise AssertionError('exclusive hook arguments changed')
+    inherited=int(sys.argv[9])
+    with exclusive_owner_descriptor(root.parent) as held:
+        if held is None:raise AssertionError('production hook did not enter inherited exclusive ownership')
+        left,right=os.fstat(held),os.fstat(inherited)
+        if (left.st_dev,left.st_ino)!=(right.st_dev,right.st_ino):
+            raise AssertionError('hook did not retain the inherited lease')
+        lease=root.parent.parent/('.'+root.parent.name+'.owner.lease')
+        competitor=os.open(lease,os.O_RDWR|os.O_NOFOLLOW|os.O_NONBLOCK)
+        try:
+            try:fcntl.flock(competitor,fcntl.LOCK_SH|fcntl.LOCK_NB)
+            except BlockingIOError:blocked=True
+            else:
+                fcntl.flock(competitor,fcntl.LOCK_UN)
+                raise AssertionError('bootstrap did not exclude an independent shared writer')
+        finally:os.close(competitor)
+    keys,valid=identifiers()
+    record({'action':action,'owner_fd':inherited,'inherited_exclusive':True,'independent_shared_blocked':blocked,
+            'job_id':sys.argv[3],'identifier_keys':keys,'identifier_valid':valid})
+def factory(root):
+    class ExclusiveJournal(DNSChallengeJournal):
+        def present(self,*args,**kwargs):
+            result=super().present(*args,**kwargs)
+            exclusive_event(root,'auth')
+            return result
+        def cleanup(self,*args,**kwargs):
+            result=super().cleanup(*args,**kwargs)
+            if result:exclusive_event(root,'cleanup')
+            return result
+    selected=ExclusiveJournal if __EXCLUSIVE__ else DNSChallengeJournal
+    return selected(root,client_factory=lambda token:CloudflareClient(token,transport=LoopbackCloudflareTransport(__PORT__,__CA__)))
+if sys.argv[1]=='auth' and not __EXCLUSIVE__:
+    keys,valid=identifiers()
+    record({'action':'auth','identifier_keys':keys,'identifier_valid':valid})
 raise SystemExit(dns_hook.main(sys.argv[1:],journal_factory=factory,wait_seconds=0))
 '''
     for key, value in {'__PINS__': repr(pins), '__SOURCE__': repr(str(ROOT)), '__TESTS__': repr(str(ROOT / 'tests')),
-        '__PORT__': repr(port), '__CA__': repr(str(ca)), '__EVENTS__': repr(str(events)), '__DOMAIN__': repr(DOMAIN)}.items():
+        '__PORT__': repr(port), '__CA__': repr(str(ca)), '__EVENTS__': repr(str(events)),
+        '__DOMAIN__': repr(DOMAIN), '__EXCLUSIVE__': repr(exclusive)}.items():
         script = script.replace(key, value)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, 'w') as stream: stream.write(script)
@@ -202,6 +289,57 @@ class RealDNSACMETests(unittest.TestCase):
         self.assertTrue(all(event['identifier_valid'] and event['identifier_keys']
             and set(event['identifier_keys']) <= {'CERTBOT_IDENTIFIER', 'CERTBOT_DOMAIN'} for event in events))
         return sorted({name for event in events for name in event['identifier_keys']})
+
+    def test_real_exclusive_bootstrap_uses_fixed_hooks_and_cleans_only_owned_txt(self):
+        from app.certificates import dns_credentials
+        from app.certificates.cli import bootstrap_panel
+        from app.certificates.dns_credentials import DNSCredentials
+        wrapper,pins = copy_bootstrap_fixture(self.root/'exclusive-payload')
+        source_sha = hashlib.sha256((ROOT/'app/certificates/dns_certbot.py').read_bytes()).hexdigest()
+        self.assertEqual(pins[wrapper],source_sha)
+        managed = self.data/'certificates'
+        self.provider = ExclusiveFixtureHookProvider(managed,test_directory=self.pebble.directory,
+            test_ca=self.pebble.ca,dns_journal=self.journal,dns_propagation_seconds=30)
+        self.provider.set_bootstrap_fixture(wrapper,pins)
+        self.provider.set_hook(write_fixture_hook(wrapper.with_name('dns_hook.py'),
+            port=self.cf_port,ca=self.cf_ca,events=self.events,exclusive=True,extra_pins=pins))
+        self.manager = CertificateManager(managed,self.provider,trusted_roots=self.pebble.root_pem)
+        factory = lambda root: DNSCredentials(root,client_factory=lambda token: CloudflareClient(token,
+            transport=LoopbackCloudflareTransport(self.cf_port,self.cf_ca)))
+        with patch.object(dns_credentials,'DNSCredentials',side_effect=factory), release_tools.writer_operation(self.root):
+            result = bootstrap_panel(self.manager,DOMAIN,'admin@example.test',accept_terms=True,method='dns-01',
+                dns_request={'version':1,'zone_name':ZONE_NAME,'api_token':FAKE_TOKEN})
+        identifier = result['certificate_id']
+        material = self.manager.material(identifier,production=True)
+        leaf = x509.load_pem_x509_certificate(material[0][0].read_bytes())
+        san = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        self.assertEqual(san.get_values_for_type(x509.DNSName),[DOMAIN])
+        self.assertEqual(result['revision'],material[2])
+        self.assertEqual(len(self.csrs),1)
+        csr = x509.load_pem_x509_csr(self.csrs[0])
+        self.assertEqual(csr.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+                         .get_values_for_type(x509.DNSName),[DOMAIN])
+        with database.SessionLocal() as db:
+            certificate = db.get(Certificate,identifier)
+            self.assertEqual(certificate.method,'dns-01');self.assertFalse(certificate.wildcard)
+            binding = db.get(CertificateBinding,'panel')
+            self.assertEqual((binding.certificate_id,binding.applied_certificate_id,binding.applied_revision,binding.server_name),
+                             (identifier,identifier,result['revision'],DOMAIN))
+            jobs = db.query(CertificateJob).filter_by(certificate_id=identifier).all()
+            self.assertEqual([job.state for job in jobs],['succeeded'])
+        self.assertEqual(len(self.provider.bootstrap_commands),1)
+        invocation = self.provider.bootstrap_commands[0]
+        events = [json.loads(line) for line in self.events.read_text().splitlines()]
+        self.assertEqual([event['action'] for event in events],['auth','cleanup'])
+        self.assertTrue(all(event['inherited_exclusive'] and event['independent_shared_blocked']
+            and event['owner_fd']==invocation['owner_fd'] and event['job_id']==invocation['job_id'] for event in events))
+        self.assertTrue(events[0]['identifier_valid'] and events[0]['identifier_keys'])
+        summary = self.assert_cleanup()
+        self.assertEqual(summary['created'],1);self.assertEqual(summary['deleted'],1)
+        self.assertGreaterEqual(summary['tcp_queries'],1);self.assertGreater(summary['returned_owned'],0)
+        print('Pinned DNS exclusive bootstrap: unmodified fixed wrapper sha256='+source_sha+
+              '; real Certbot+Pebble single-domain issuance; auth+cleanup inherited EX FD; '
+              'independent SH writer excluded; owned TXT cleaned; unrelated TXT preserved')
 
     def test_real_root_wildcard_and_fresh_account_renewal(self):
         job = self.create(); self.process(job); identifier = job['certificate_id']

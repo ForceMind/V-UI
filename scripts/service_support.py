@@ -91,6 +91,16 @@ def start(manager: str, names: list[str], *, no_wait=False, timeout=None) -> Non
     else:
         for name in names: subprocess.run(["rc-service",name,"start"],check=True,**options())
 
+def disable(manager: str, names: list[str]) -> None:
+    """Restore explicitly disabled installer-owned challenge services."""
+    if manager == 'systemd':
+        subprocess.run(['systemctl', 'disable', *names], check=True)
+    elif manager == 'openrc':
+        for name in names:
+            subprocess.run(['rc-update', 'del', name, 'default'], check=True)
+    else:
+        raise RuntimeError('Unsupported service manager')
+
 def startup_state(manager: str, name: str, *, timeout: float) -> dict:
     """Read bounded startup state; active alone never proves HTTPS readiness."""
     if manager=="systemd":

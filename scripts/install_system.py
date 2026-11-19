@@ -25,6 +25,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import termios
 import time
 import zipfile
 try:
@@ -47,6 +48,9 @@ CORE_INSTALL_GUARD = 1
 ROOT_APPLICATION_ORIGIN = 1
 STREAM_CHUNK = 1024 * 1024
 HTTPS_STARTUP_TIMEOUT = 120
+# One bounded DNS recovery pass, issuance (900 s), worker recovery and cleanup
+# can outlive the ordinary 360 s service command. Timeout retains all intents.
+DNS_BOOTSTRAP_TIMEOUT = 1620
 # Complete stdlib-only dependency closure of the offline backup/restore controller.
 # Every member must come from the same checksum-verified bundle, never the
 # mutable installed payload. Keep the public release-kit asset set unchanged.
@@ -306,6 +310,23 @@ def validate_options(args):
     ipaddress.ip_address(args.bind)
     if bool(args.cert) != bool(args.key):
         raise InstallError('请同时提供 --cert 和 --key；自动签发时两项均不提供')
+    method = getattr(args, 'certificate_method', None) or ('provided' if args.cert else 'http-01')
+    if method not in ('http-01', 'dns-01', 'provided') or (method == 'provided') != bool(args.cert):
+        raise InstallError('证书方式与输入不一致；已有证书须同时提供 --cert 和 --key')
+    args.certificate_method = method
+    zone = getattr(args, 'dns_zone', None)
+    if zone is not None:
+        zone = fqdn(zone)
+        if method != 'dns-01' or (args.domain != zone and not args.domain.endswith('.' + zone)):
+            raise InstallError('DNS 区域必须覆盖面板域名，且只用于 DNS-01 首装')
+        args.dns_zone = zone
+    elif method == 'dns-01' and not hasattr(args, '_existing_config'):
+        raise InstallError('DNS-01 首装需要 --dns-zone 或交互填写 Cloudflare 区域')
+    if getattr(args, 'recover_dns', False):
+        saved = getattr(args, '_existing_config', None)
+        if (method != 'dns-01' or getattr(args, 'unattended_upgrade', False)
+                or saved is not None and saved.get('ready') is not False):
+            raise InstallError('本机 DNS 恢复仅用于未完成的 DNS 首装；已完成安装请使用认证后的证书管理')
     if not args.cert and not args.accept_terms:
         raise InstallError('请阅读 CA 条款并明确同意后，使用 --accept-terms 授权签发')
 
@@ -402,7 +423,7 @@ def write_root_file(path, raw, mode=0o644):
         if os.path.exists(name): os.unlink(name)
 
 
-def as_service(args, *, capture=False, tty=None, cwd=ROOT, input_text=None):
+def as_service(args, *, capture=False, tty=None, cwd=ROOT, input_text=None, timeout=360):
     account=pwd.getpwnam('v-ui')
     env={'PATH':'/usr/bin:/bin','LANG':'C.UTF-8','HOME':str(ROOT),
          'PYTHONDONTWRITEBYTECODE':'1','VUI_DATA_DIR':str(ROOT/'data')}
@@ -413,7 +434,7 @@ def as_service(args, *, capture=False, tty=None, cwd=ROOT, input_text=None):
     if input_text is not None and (not capture or tty is not None):
         raise InstallError('私有账户请求必须使用捕获管道')
     return command(args,cwd=cwd,env=env,capture_output=capture,text=capture,
-                   timeout=360,preexec_fn=demote,**options)
+                   timeout=timeout,preexec_fn=demote,**options)
 
 
 def installer_account(python, payload, action, **values):
@@ -502,10 +523,16 @@ def saved_configuration():
                 or type(saved.get('node_port', 10443)) is not int
                 or saved.get('certificate_mode') not in ('managed', 'provided')):
             raise ValueError('shape')
+        if ('http01_enabled' in saved and type(saved['http01_enabled']) is not bool
+                or 'certificate_method' in saved and saved['certificate_method'] not in ('http-01', 'dns-01', 'provided')):
+            raise ValueError('certificate shape')
         sample = argparse.Namespace(domain=saved['domain'], email=saved['email'], admin=saved['admin'],
             port=saved['port'], bind=saved['bind'], node_port=saved.get('node_port', 10443),
             cert='saved' if saved['certificate_mode'] == 'provided' else None,
             key='saved' if saved['certificate_mode'] == 'provided' else None, accept_terms=True)
+        sample.certificate_method = saved.get('certificate_method')
+        sample.dns_zone = saved.get('dns_zone')
+        sample._existing_config = saved
         validate_options(sample)
         if sample.domain != saved['domain'] or sample.email != saved['email']:
             raise ValueError('canonical')
@@ -530,6 +557,9 @@ def has_ca_authorization(saved, domain):
 
 
 def bootstrap_managed_certificate(python, payload, args):
+    method = getattr(args, 'certificate_method', 'http-01')
+    if method == 'dns-01':
+        return bootstrap_dns_certificate(python, payload, args)
     try:
         as_service([str(python),'-B','-m','app.certificates.cli','bootstrap','--root',str(ROOT),
                     '--domain',args.domain,'--email',args.email,'--accept-terms'], cwd=payload)
@@ -537,6 +567,113 @@ def bootstrap_managed_certificate(python, payload, args):
         raise InstallError('托管证书签发未完成（退出码 '+str(exc.returncode)+'，原始错误码见上方输出）。'
             '若为 HTTP-01 验证失败，请检查域名 DNS 是否指向本机、公网 TCP 80 是否可达，'
             '以及本机防火墙、云安全组和上游入站规则。此提示不代表已确定根因。') from None
+
+
+def bootstrap_dns_certificate(python, payload, args):
+    base = [str(python), '-B', '-m', 'app.certificates.cli']
+    options = ['--root', str(ROOT), '--domain', args.domain, '--email', args.email, '--accept-terms']
+    request = {'version': 1}
+    try:
+        if getattr(args, 'recover_dns', False):
+            recover_dns_first_install(base, options, payload)
+        result = as_service([*base, 'dns-bootstrap-status', *options], cwd=payload, capture=True)
+        state = json.loads(result.stdout)
+        if (type(state) is not dict or set(state) != {'version', 'needs_token'}
+                or type(state['version']) is not int or state['version'] != 1
+                or type(state['needs_token']) is not bool):
+            raise ValueError()
+        if state['needs_token']:
+            if getattr(args, 'unattended_upgrade', False):
+                raise InstallError('无人值守升级不能创建 DNS 凭据；请在本机终端恢复原证书任务')
+            with controlling_terminal() as terminal:
+                zone = getattr(args, 'dns_zone', None)
+                if not zone:
+                    zone = fqdn(read_terminal_line(terminal, 'Cloudflare DNS 区域（例如 example.com）: '))
+                if args.domain != zone and not args.domain.endswith('.' + zone):
+                    raise InstallError('DNS 区域未覆盖面板域名')
+                token = read_terminal_secret(terminal, 'Cloudflare API Token（隐藏输入）: ')
+                request.update(zone_name=zone, api_token=token)
+        # Only this captured stdin pipe carries the secret; no argv/env/path.
+        as_service([*base, 'bootstrap', *options, '--method', 'dns-01', '--private-dns-stdin'],
+                   cwd=payload, capture=True, input_text=json.dumps(request), timeout=DNS_BOOTSTRAP_TIMEOUT)
+    except (subprocess.SubprocessError, OSError, UnicodeError, ValueError) as exc:
+        codes = ('DNS_PROVIDER_FORBIDDEN', 'DNS_ZONE_NOT_FOUND', 'DNS_ZONE_NOT_UNIQUE',
+                 'DNS_CREDENTIAL_DISABLED', 'DNS_CREDENTIAL_RESTORE_PENDING', 'DNS_CLEANUP_PENDING',
+                 'DNS_CHALLENGE_OWNER_BUSY', 'DNS_PROVIDER_WRITE_UNKNOWN', 'DNS_PROVIDER_TIMEOUT',
+                 'RETRY_COOLDOWN', 'WORKER_INTERRUPTED', 'ACME_VALIDATION_FAILED',
+                 'PANEL_CERTIFICATE_BINDING_CONFLICT', 'PANEL_DOMAIN_MISMATCH')
+        captured = getattr(exc, 'stderr', '')
+        code = next((value for value in codes if type(captured) is str and value in captured), None)
+        label = '（'+code+'）' if code else ''
+        if isinstance(exc, subprocess.TimeoutExpired):
+            label = '（DNS 引导超时，结果待核对）'
+        # Exceptions may retain request/output. Never propagate or echo them.
+        raise InstallError('DNS 证书引导未完成'+label+'；原凭据、证书任务和 TXT 清理记录已保留。'
+                           '请恢复原任务后重试；本地安装回退不代表远端 TXT 已清理。') from None
+    finally:
+        request.clear()
+
+
+def recover_dns_first_install(base, options, payload):
+    """One explicit local action; the service CLI rechecks every CAS identity."""
+    result = as_service([*base, 'dns-bootstrap-recovery-status', *options], cwd=payload, capture=True)
+    state = json.loads(result.stdout)
+    if type(state) is not dict or set(state) != {'version', 'credential', 'pending'} or type(state['version']) is not int or state['version'] != 1:
+        raise ValueError()
+    profile, pending = state['credential'], state['pending']
+    valid_id = lambda value: type(value) is str and re.fullmatch('[a-f0-9]{32}', value)
+    if (type(profile) is not dict or set(profile) != {'id', 'revision', 'zone_name', 'status'}
+            or not valid_id(profile['id']) or not valid_id(profile['revision'])
+            or profile['status'] not in ('configured', 'disabled', 'restore_pending')
+            or fqdn(profile['zone_name']) != profile['zone_name']
+            or type(pending) is not list or len(pending) > 256):
+        raise ValueError()
+    for item in pending:
+        if (type(item) is not dict or set(item) != {'job_id', 'revision', 'phase', 'error'}
+                or not valid_id(item['job_id']) or not valid_id(item['revision'])
+                or item['phase'] not in ('active', 'cleanup_pending')
+                or item['error'] is not None and (type(item['error']) is not str or not re.fullmatch('[A-Z][A-Z0-9_]{0,63}', item['error']))):
+            raise ValueError()
+    request = {'version': 1, 'credential_id': profile['id'], 'expected_profile_revision': profile['revision']}
+    try:
+        with controlling_terminal() as terminal:
+            terminal.write('未完成首装的 DNS 区域：'+profile['zone_name']+'；凭据状态：'+profile['status']+'\n'
+                '1 替换 Token（保留旧版本和所有清理记录）\n'
+                '2 明确重新授权启用当前凭据（含备份恢复后冻结的凭据）\n'
+                '3 明确授权当前凭据，重试原 TXT 清理\n'
+                '4 已人工核对 TXT 不存在，使用当前凭据再次查验并记录人工确认\n')
+            for item in pending:
+                terminal.write('待处理任务：'+item['job_id']+'；'+item['phase']+'；'+(item['error'] or '无错误码')+'\n')
+            choice = read_terminal_line(terminal, '请选择本次恢复动作 [1-4，其他输入取消]: ')
+            actions = {'1': 'replace-token', '2': 'enable', '3': 'cleanup', '4': 'confirm-absent'}
+            if choice not in actions:
+                raise InstallError('DNS 恢复已取消；原状态保留')
+            request['action'] = actions[choice]
+            if choice == '1':
+                request['api_token'] = read_terminal_secret(terminal, '新的 Cloudflare API Token（隐藏输入）: ')
+            elif choice in ('3', '4'):
+                selected = read_terminal_line(terminal, '输入本次处理的完整任务 ID: ')
+                job = next((item for item in pending if item['job_id'] == selected), None)
+                if job is None:
+                    raise InstallError('任务不在本次首装恢复列表中；未执行 DNS 恢复')
+                request.update(job_id=job['job_id'], expected_revision=job['revision'])
+            if read_terminal_line(terminal, '确认执行上述恢复动作并继续原安装（仍遵守冷却）？输入 yes: ') != 'yes':
+                raise InstallError('DNS 恢复未获确认；原状态保留')
+        result = as_service([*base, 'dns-bootstrap-recover', *options, '--private-dns-stdin'],
+                            cwd=payload, capture=True, input_text=json.dumps(request), timeout=360)
+        value = json.loads(result.stdout)
+        if (type(value) is not dict or set(value) != {'version', 'action', 'phase'}
+                or type(value['version']) is not int or value['version'] != 1 or value['action'] != request['action']
+                or value['phase'] not in ('credential-replaced', 'credential-enabled', 'cleaned', 'cleanup_pending', 'manual_confirmed')):
+            raise ValueError()
+        if value['phase'] == 'manual_confirmed':
+            print('已记录人工核对 TXT 不存在；此状态为 manual_confirmed，保留原记录，不等同自动清理成功。')
+        elif value['phase'] == 'cleanup_pending':
+            raise InstallError('TXT 清理仍未完成；原任务和授权记录保留，请核对后再次恢复')
+        else:
+            print('本机 DNS 恢复动作已完成；继续原安装，仍遵守原签发冷却时间。')
+    finally:
+        request.clear()
 
 
 def certificate_state(work, action, *values):
@@ -647,16 +784,21 @@ def _recover_transaction(work):
             no_symlink_ancestors(target)
             target.unlink()
     service_support.reload(manager)
+    http = 'v-ui-http01.socket' if manager == 'systemd' else 'v-ui-http01'
+    restored = saved_configuration()
+    # Enabling HTTP-01 changes boot state even when the old panel was stopped.
+    # Restore that opt-out before deciding whether to restart the old panel.
+    if restored is not None and not restored.get('http01_enabled', True):
+        service_support.disable(manager, [http])
     if journal['was_running']:
-        http = 'v-ui-http01.socket' if manager == 'systemd' else 'v-ui-http01'
-        restored = saved_configuration()
         # A provided chain can be private/self-signed. Add the exact saved
         # chain to default trust for this recovery check; retain hostname checks.
         ca = str(ROOT/'data/certs/provided-fullchain.pem') if restored['certificate_mode'] == 'provided' else None
         deadline = time.monotonic() + HTTPS_STARTUP_TIMEOUT
         started_at = time.time()
         try:
-            service_support.start(manager, [http], timeout=_startup_remaining(deadline))
+            if restored.get('http01_enabled', True):
+                service_support.start(manager, [http], timeout=_startup_remaining(deadline))
             service_support.start(manager, [panel], no_wait=True, timeout=_startup_remaining(deadline))
             https_health(restored, ca, trust_saved_chain=ca is not None, deadline=deadline)
         except BaseException:
@@ -691,6 +833,35 @@ def controlling_terminal():
 
 
 MAX_TERMINAL_INPUT = 1024
+
+
+def read_terminal_secret(terminal, prompt):
+    """Read from the controlling TTY with echo disabled; never fall back."""
+    try:
+        descriptor = terminal.fileno()
+        if not os.isatty(descriptor):
+            raise OSError()
+        saved = termios.tcgetattr(descriptor)
+        hidden = list(saved)
+        hidden[3] &= ~(termios.ECHO | termios.ECHONL)
+        termios.tcsetattr(descriptor, termios.TCSAFLUSH, hidden)
+        try:
+            value = read_terminal_line(terminal, prompt)
+        finally:
+            previous = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
+            try:
+                # An overlong/aborted line must not leave a secret suffix for
+                # the next shell read after echo is restored.
+                termios.tcflush(descriptor, termios.TCIFLUSH)
+                termios.tcsetattr(descriptor, termios.TCSADRAIN, saved)
+                terminal.write('\n'); terminal.flush()
+            finally:
+                signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+        if not value or len(value) > 512:
+            raise InstallError('DNS Token 输入无效')
+        return value
+    except (OSError, ValueError, termios.error):
+        raise InstallError('无法建立隐藏输入的可信终端，未读取 DNS Token') from None
 
 
 def read_terminal_line(terminal, prompt, *, retry_overlong=False):
@@ -1143,8 +1314,14 @@ def install_verified(args, snapshot, archive, meta):
               'certificate_mode':'provided' if args.cert else 'managed','ipv6':ipv6,
               'service_manager':manager,'distro':info['name'],'target':info['target'],
               'bootstrap_python':str(Path(sys.executable).resolve()),'node_port':args.node_port}
+    method = getattr(args, 'certificate_method', None) or ('provided' if args.cert else 'http-01')
+    config['certificate_method'] = method
+    config['http01_enabled'] = method == 'http-01' or bool(getattr(args, 'enable_http01', False))
+    if method == 'dns-01' and getattr(args, 'dns_zone', None):
+        config['dns_zone'] = args.dns_zone
     if existing:
         saved = json.loads(CONFIG.read_text())
+        config['http01_enabled'] = saved.get('http01_enabled', True) or bool(getattr(args, 'enable_http01', False))
         config['ca_authorizations'] = list(ca_authorizations(saved))
         if hasattr(args, '_existing_config') and saved != args._existing_config:
             raise InstallError('安装配置在确认后发生变化，请重新运行；未覆盖其他修改')
@@ -1159,11 +1336,15 @@ def install_verified(args, snapshot, archive, meta):
             raise InstallError('安装已存在，请使用校验通过的安装包和 --upgrade 升级')
         if saved['port'] != args.port:
             check_port(args.port, args.bind)
+        if config['http01_enabled'] and not saved.get('http01_enabled', True):
+            check_port(80)
+            if config['ipv6']: check_port(80, '::')
         if args.node_udp_port:
             print('现有安装：已跳过节点 UDP 绑定探测，避免与运行中节点冲突；请手动核对节点端口归属。')
     else:
-        check_port(80)
-        if ipv6: check_port(80,'::')
+        if config['http01_enabled']:
+            check_port(80)
+            if ipv6: check_port(80,'::')
         check_port(args.port,args.bind)
         # This is a reference declaration: installation creates no TCP node.
         # Only an explicitly requested dry-run probes it, without reserving it
@@ -1185,7 +1366,8 @@ def install_verified(args, snapshot, archive, meta):
             raise InstallError('证书输入必须为普通文件')
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(args.cert, args.key)
-    firewall=firewall_preflight(args,sorted(set([80,args.port,args.node_port])),args.node_udp_port)
+    firewall_ports = [args.port, args.node_port] + ([80] if config['http01_enabled'] else [])
+    firewall=firewall_preflight(args,sorted(set(firewall_ports)),args.node_udp_port)
     if not args.cert and args.accept_terms:
         record = {'domain': args.domain, 'environment': 'production'}
         records = config.setdefault('ca_authorizations', [])
@@ -1197,7 +1379,8 @@ def install_verified(args, snapshot, archive, meta):
         print(json.dumps({'checks':'passed','no_changes':True,'domain':args.domain,
               'release_id':meta['release_id'],'distro':info,'service_manager':manager,
               'services':list(service_support.service_paths(manager)),'firewall':firewall,
-              'certificate_mode':config['certificate_mode']},indent=2))
+              'certificate_mode':config['certificate_mode'], 'certificate_method': method,
+              'http01_enabled': config['http01_enabled']},indent=2))
         return
     if os.geteuid() != 0:
         raise InstallError('请使用 sudo 运行安装器；安装后的应用不会以 root 运行')
@@ -1263,7 +1446,8 @@ def install_verified(args, snapshot, archive, meta):
                 write_root_file(path,value.encode(),mode)
             write_root_file(CONFIG, json.dumps({**config, 'ready': False}, indent=2).encode())
             service_support.reload(manager)
-            service_support.enable_start(manager,[http_name])
+            if config['http01_enabled']:
+                service_support.enable_start(manager,[http_name])
             release=ROOT/'releases'/meta['release_id'];python=runtime_python;payload=release/'payload'
             if args.cert:
                 copy_private(args.cert, ROOT/'data/certs/provided-fullchain.pem', uid, gid)
@@ -1294,7 +1478,7 @@ def install_verified(args, snapshot, archive, meta):
                     present = service_support.service_paths(manager)
                     service_support.stop(manager, [name for name, path in present.items() if path.exists()])
                     if was_running:
-                        service_support.start(manager,[http_name,panel_name])
+                        service_support.start(manager,([http_name] if config['http01_enabled'] else [])+[panel_name])
             raise
     print('检测到 Linux：',info['name'],'|',info['arch'],info['libc'],'|',manager)
     print('安装完成，面板登录及证书管理地址如下：')
@@ -1343,6 +1527,19 @@ def read_configuration(args):
                         if not value.isascii() or not value.isdecimal() or not 1024 <= int(value) <= 65535:
                             raise InstallError('请使用 1024–65535 范围内的非特权端口')
                         setattr(args, attr, int(value))
+            if (interactive and hasattr(args, 'certificate_method')
+                    and args.certificate_method is None and not args.cert):
+                while True:
+                    choice = ask('证书方式：1) HTTP-01  2) Cloudflare DNS-01  3) 已有证书 [1]: ', '1')
+                    if choice in ('1', '2', '3'):
+                        args.certificate_method = {'1': 'http-01', '2': 'dns-01', '3': 'provided'}[choice]
+                        break
+                    terminal.write('请输入 1、2 或 3。\n'); terminal.flush()
+            if getattr(args, 'certificate_method', None) == 'provided' and not args.cert:
+                args.cert = ask('证书链文件路径: ')
+                args.key = ask('私钥文件路径: ')
+            if getattr(args, 'certificate_method', None) == 'dns-01' and not getattr(args, 'dns_zone', None):
+                args.dns_zone = fqdn(ask('Cloudflare DNS 区域（例如 example.com）: '))
             if not args.cert and not args.accept_terms:
                 args.accept_terms = terminal_confirm(terminal,
                     '我控制该域名，并同意 https://letsencrypt.org/repository/ 的 CA 条款及公开证书记录')
@@ -1357,6 +1554,13 @@ def read_existing_configuration(args, saved):
     if args.admin is not None and args.admin != saved['admin']:
         raise InstallError('已有管理员账户会保留；账户改名请在面板中操作，不通过安装器改写')
     mode = saved['certificate_mode']
+    method = saved.get('certificate_method', 'provided' if mode == 'provided' else 'http-01')
+    if getattr(args, 'certificate_method', None) not in (None, method):
+        raise InstallError('已有安装保留原证书方式；请在面板管理绑定，不通过升级切换验证方式')
+    if getattr(args, 'dns_zone', None) not in (None, saved.get('dns_zone')):
+        raise InstallError('已有 DNS 区域保持不变；凭据调整请在面板处理')
+    args.certificate_method = method
+    args.dns_zone = saved.get('dns_zone')
     if bool(args.cert) != bool(args.key):
         raise InstallError('请同时提供 --cert 和 --key；原证书和配置未更改')
     if mode == 'managed' and (args.cert or args.key):
@@ -1472,6 +1676,13 @@ def main():
     p.add_argument('--unattended-upgrade', action='store_true',
                    help='仅沿用完整已有安装升级；拒绝新账户、新 CA 授权及未完成事务')
     p.add_argument('--cert'); p.add_argument('--key')
+    p.add_argument('--certificate-method', choices=['http-01', 'dns-01', 'provided'],
+                   help='首次安装证书方式；默认 HTTP-01，已有证书可由 --cert/--key 指定')
+    p.add_argument('--dns-zone', help='Cloudflare DNS 区域；Token 仅通过隐藏终端输入')
+    p.add_argument('--enable-http01', action='store_true',
+                   help='显式启用自有 HTTP-01 服务和 80 端口检查，供后续 HTTP 证书使用')
+    p.add_argument('--recover-dns', action='store_true',
+                   help='在可信本机终端明确修复未完成 DNS 首装的凭据或 TXT 清理；不绕过冷却和恢复授权')
     p.add_argument('--health-ca', help='可选的私有 CA 信任文件，仅用于自带证书的 HTTPS 健康验证')
     p.add_argument('--dry-run',action='store_true')
     args = p.parse_args()
