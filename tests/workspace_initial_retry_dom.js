@@ -88,7 +88,7 @@ async function fixture(initial=[]) {
         if(url===SNAPSHOT)return response({revision,settings:saved});
         if(url===PREVIEW)return response(plan(revision));
         if(url===ROUTING && method==='PUT'){saved=JSON.parse(options.body);revision=R2;return response(saved,200,revision);}
-        if(url===NODES)return response([{id:7,remark:'synthetic',core:'sing-box',protocol:'vless',enable:true}]);
+        if(url===NODES)return response([{id:7,remark:'synthetic',core:'sing-box',protocol:'vless',enable:true,subscription_formats:['mihomo.yaml']}]);
         if(url===WARNINGS || url===GRANTS && method==='GET')return response([]);
         assert.fail('Unexpected request: '+method+' '+url);
     };

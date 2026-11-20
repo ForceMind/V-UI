@@ -166,16 +166,32 @@ const app = createApp({
         const coreFieldKnown = (core, field) => coreStatusKnown.value &&
             typeof coreStatus.value[core]?.[field] === 'boolean';
         const inbounds = ref([]);
+        const inboundListKnown = ref(false);
         const inboundSearch = ref('');
+        const inboundTransport = ref('');
+        const inboundFilter = ref('all');
+        const transportNames = {tcp:'TCP', raw:'TCP', ws:'WebSocket', grpc:'gRPC',
+            xhttp:'XHTTP', httpupgrade:'HTTPUpgrade', quic:'QUIC', other:'其他'};
+        const transportLabel = row => Object.hasOwn(transportNames, row.transport) ? transportNames[row.transport] : '未知';
+        const enabledNodeCount = computed(() => inbounds.value.filter(row => row.enable === true).length);
+        const inboundTransports = computed(() => [...new Set(inbounds.value.map(transportLabel))]);
+        const connectionPath = ref('direct');
+        const connectionPaths = {
+            direct: ['手机 / 电脑', '本机节点', '目标站点'],
+            relay: ['手机 / 电脑', '本机节点', '选定上游', '目标站点'],
+            host: ['服务器程序', '回环代理', '选定上游', '目标站点'],
+        };
         const filteredInbounds = computed(() => {
             const query = inboundSearch.value.trim().toLowerCase();
-            if (!query) return inbounds.value;
-            // Search only displayed metadata, keeping the original row objects.
-            return inbounds.value.filter(row => ['remark', 'id', 'port', 'core', 'protocol'].some(field => {
-                const value = row[field];
-                return (typeof value === 'string' || typeof value === 'number') &&
-                    String(value).toLowerCase().includes(query);
-            }));
+            return inbounds.value.filter(row => {
+                if (inboundTransport.value && transportLabel(row) !== inboundTransport.value) return false;
+                if (inboundFilter.value === 'enabled' && row.enable !== true) return false;
+                if (inboundFilter.value === 'limited' && row.share_eligible === true &&
+                    row.subscription_formats?.includes('sing-box.json')) return false;
+                return !query || [row.remark, row.id, row.port, row.core, row.protocol, transportLabel(row)]
+                    .some(value => (typeof value === 'string' || typeof value === 'number') &&
+                        String(value).toLowerCase().includes(query));
+            });
         });
         const showAddInbound = ref(false);
         const editingInboundId = ref(null);
@@ -622,9 +638,11 @@ const app = createApp({
                 const res = await axios.get('/api/inbounds', {timeout:15000});
                 if (generation !== inboundListGeneration || adminSessionEnded) return;
                 inbounds.value = res.data;
+                inboundListKnown.value = true;
             } catch (error) {
                 if (generation !== inboundListGeneration || adminSessionEnded || error.response?.status === 401) return;
                 // A failed refresh cannot confirm previously shown applied state.
+                inboundListKnown.value = false;
                 inbounds.value = inbounds.value.map(row => ({...row, routing_status: null}));
                 ElMessage.error('节点列表读取失败，请检查连接后重试；运行状态未能确认。');
             }
@@ -967,6 +985,20 @@ const app = createApp({
             closeNodeWizard();
             if (purpose === 'server') openUpstreamExport(row, server);
             else void showQrCode(row);
+        };
+        const openNodeSubscription = (row, server = '') => {
+            if (adminSessionEnded || nodeWizard.busy || !Number.isSafeInteger(row?.id) || row.id <= 0 ||
+                !validInboundRevision(row.mutation_revision) || !row.subscription_formats?.includes('mihomo.yaml')) return;
+            try {
+                globalThis.sessionStorage?.setItem('vui-subscription-node', JSON.stringify({
+                    id:row.id, revision:row.mutation_revision, server:server || location.hostname,
+                    expires:Date.now() + 120000,
+                }));
+            } catch { /* The destination still supports manual node selection. */ }
+            if (!globalThis.VUI_NAV) location.assign('/workspace#subscriptions');
+            else if (!globalThis.VUI_NAV.navigate('subscriptions')) {
+                try { globalThis.sessionStorage?.removeItem('vui-subscription-node'); } catch {}
+            }
         };
         watch(currentView, closeNodeWizard, {flush:'sync'});
         clearAdminSecrets.push(closeNodeWizard);
@@ -1491,6 +1523,14 @@ const app = createApp({
             refreshingStatus,
             refreshStatus,
             inbounds,
+            inboundListKnown,
+            enabledNodeCount,
+            inboundTransport,
+            inboundTransports,
+            inboundFilter,
+            transportLabel,
+            connectionPath,
+            connectionPaths,
             inboundSearch,
             filteredInbounds,
             showAddInbound,
@@ -1561,6 +1601,7 @@ const app = createApp({
             wizardAdvanced,
             createSimpleNode,
             wizardDeliver,
+            openNodeSubscription,
             refreshWizardResult,
             toggleInbound,
             togglingInbound,

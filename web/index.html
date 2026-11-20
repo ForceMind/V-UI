@@ -62,13 +62,14 @@
             <el-main>
                 <div v-if="currentView === 'dashboard'" class="dashboard-view">
                     <div class="view-header">
-                        <div>
-                            <h1>总览</h1>
-                            <div id="status-refresh-help" class="stat-text">只读取最新状态，不会重启核心。</div>
+                        <h1>总览</h1>
+                        <div class="overview-actions">
+                            <span id="status-refresh-help" class="panel-sr-only">只读取最新状态，不会重启核心。</span>
+                            <el-button id="refresh-status" @click="refreshStatus"
+                                :disabled="!statusRefreshReady || refreshingStatus" :loading="refreshingStatus"
+                                aria-describedby="status-refresh-help">刷新状态</el-button>
+                            <el-button type="primary" @click="openAddInbound">创建节点</el-button>
                         </div>
-                        <el-button id="refresh-status" @click="refreshStatus"
-                            :disabled="!statusRefreshReady || refreshingStatus" :loading="refreshingStatus"
-                            aria-describedby="status-refresh-help">刷新状态</el-button>
                     </div>
                     <el-row :gutter="20">
                         <el-col :span="6">
@@ -122,37 +123,61 @@
                             </el-card>
                         </el-col>
                     </el-row>
+                    <section class="overview-path" aria-labelledby="connection-path-title">
+                        <div class="view-header">
+                            <h2 id="connection-path-title">连接路径</h2>
+                            <div class="connection-filters" role="group" aria-label="连接用途">
+                                <button v-for="(label, value) in {direct:'直连', relay:'中转', host:'程序代理'}" :key="value"
+                                    type="button" :aria-pressed="connectionPath === value" @click="connectionPath = value">{{ label }}</button>
+                            </div>
+                        </div>
+                        <ol><li v-for="hop in connectionPaths[connectionPath]" :key="hop">{{ hop }}</li></ol>
+                        <p class="stat-text">{{ connectionPath === 'relay' ? '中转仅 TCP · ' : '' }}设备端未验证</p>
+                    </section>
+                    <div class="overview-shortcuts">
+                        <a href="/ui/#inbounds">节点管理 <span v-if="inboundListKnown">{{ enabledNodeCount }} / {{ inbounds.length }} 已启用</span></a>
+                        <a href="/ui/#cores">核心与服务</a>
+                        <a href="/workspace#subscriptions">订阅授权</a>
+                    </div>
                 </div>
 
                 <div v-if="currentView === 'inbounds'">
                     <div class="view-header">
                         <div>
-                            <h3>节点管理</h3>
-                            <div class="stat-text">
-                                在这里新建、编辑、启停和分享节点。节点出口与运行状态分别显示。
-                            </div>
+                            <h1>节点管理</h1>
                         </div>
                         <div>
-                            <a href="/workspace#subscriptions">管理订阅分享</a> · <a href="/proxy">配置此机中转</a>
+                            <a href="/workspace#subscriptions">订阅授权</a>
                             <el-button @click="fetchInbounds">刷新节点</el-button>
-                            <el-button type="primary" @click="openSimpleOperation('direct')">创建直连节点</el-button>
+                            <el-button type="primary" @click="openAddInbound">创建节点</el-button>
+                            <el-button @click="openSimpleOperation('direct')">快速直连</el-button>
                             <el-button @click="openSimpleOperation('relay')">创建中转节点</el-button>
                         </div>
                     </div>
                     <div class="inbound-search-toolbar" role="search" aria-label="筛选入站节点">
                         <label for="inbound-search">搜索节点</label>
                         <el-input id="inbound-search" class="inbound-search-input" v-model="inboundSearch"
-                            type="search" autocomplete="off" placeholder="备注、ID、端口、核心或协议" aria-describedby="inbound-search-count"></el-input>
-                        <el-button :disabled="!inboundSearch" @click="inboundSearch = ''" aria-label="清除节点搜索">清除</el-button>
+                            type="search" autocomplete="off" placeholder="名称、协议、传输或端口" aria-describedby="inbound-search-count"></el-input>
+                        <select v-model="inboundTransport" aria-label="传输方式">
+                            <option value="">全部传输</option>
+                            <option v-for="transport in inboundTransports" :key="transport">{{ transport }}</option>
+                        </select>
+                        <div class="connection-filters" role="group" aria-label="状态筛选">
+                            <button v-for="(label, value) in {all:'全部', enabled:'已启用', limited:'分享受限'}" :key="value"
+                                type="button" :aria-pressed="inboundFilter === value" @click="inboundFilter = value">{{ label }}</button>
+                        </div>
+                        <el-button :disabled="!inboundSearch && !inboundTransport && inboundFilter === 'all'"
+                            @click="inboundSearch = ''; inboundTransport = ''; inboundFilter = 'all'" aria-label="清除节点搜索">清除</el-button>
                         <span id="inbound-search-count" role="status" aria-live="polite" aria-atomic="true">
-                            显示 {{ filteredInbounds.length }} / {{ inbounds.length }} 个节点
+                            {{ inboundListKnown ? `显示 ${filteredInbounds.length} / ${inbounds.length} 个节点` : '节点列表待确认' }}
                         </span>
                     </div>
                     <el-table :data="filteredInbounds" style="width: 100%" border>
                         <el-table-column label="节点" min-width="160">
                             <template #default="scope">
                                 <strong>{{ scope.row.remark || '未命名节点' }}</strong>
-                                <p class="stat-text">端口 {{ scope.row.port }} · {{ scope.row.enable ? '已启用' : '已停用' }}</p>
+                                <p class="stat-text">{{ scope.row.protocol }} · {{ transportLabel(scope.row) }} · {{ scope.row.port }}</p>
+                                <el-tag size="small" :type="scope.row.enable ? 'success' : 'info'">{{ scope.row.enable ? '已启用' : '已停用' }}</el-tag>
                             </template>
                         </el-table-column>
                         <el-table-column label="运行状态" min-width="210">
@@ -165,6 +190,7 @@
                             <template #default="scope">
                                 <div class="node-common-actions">
                                     <el-button v-if="scope.row.share_eligible === true" size="small" type="primary" plain @click="openSimpleShare(scope.row)">分享连接</el-button>
+                                    <el-button v-if="scope.row.subscription_formats?.includes('mihomo.yaml')" size="small" @click="openNodeSubscription(scope.row)">订阅</el-button>
 
                                     <el-button size="small" @click="openSimpleEdit(scope.row)">修改设置</el-button>
                                     <el-button size="small" :disabled="togglingInbound !== null" :loading="togglingInbound === scope.row.id" @click="toggleInbound(scope.row)">{{ scope.row.enable ? '停用' : '启用' }}</el-button>
@@ -509,15 +535,14 @@
             <template v-if="nodeWizard.step === 1">
                 <h2>这个节点给谁用？</h2>
                 <div class="node-purpose-grid" role="group" aria-label="节点用途">
-                    <button type="button" class="node-purpose-card" :aria-pressed="nodeWizard.purpose === 'device'" @click="nodeWizard.purpose = 'device'">
-                        <strong>给手机或电脑用</strong><span>手机 / 电脑 → 本机 → 网站</span><small>创建后获取连接链接或二维码。</small>
+                    <button type="button" class="node-purpose-card" @click="nodeWizard.purpose = 'device'; nodeWizard.step = 2">
+                        <strong>给手机或电脑用</strong><span>客户端直连 →</span>
                     </button>
-                    <button type="button" class="node-purpose-card" :aria-pressed="nodeWizard.purpose === 'server'" @click="nodeWizard.purpose = 'server'">
-                        <strong>给另一台服务器用</strong><span>另一台服务器 → 本机 → 网站</span><small>本机提供出口，供另一台 V-UI 导入。</small>
+                    <button type="button" class="node-purpose-card" @click="nodeWizard.purpose = 'server'; nodeWizard.step = 2">
+                        <strong>给另一台服务器用</strong><span>提供 TCP 出口 →</span>
                     </button>
                 </div>
-                <p class="node-wizard-note">这两种用途都从本机直接访问网站，不需要填写其他服务器的配置。</p>
-                <details><summary>其他用途</summary><p>本机通过另一台服务器转发：手机 / 电脑 → 本机 → 另一台服务器 → 网站。</p><a href="/proxy">连接另一台服务器</a></details>
+                <a href="/proxy">配置本机中转</a>
             </template>
             <template v-if="nodeWizard.step === 2">
                 <h2>确认连接信息</h2>
@@ -541,15 +566,16 @@
                     <p v-else-if="nodeWizard.certificateState === 'ready'">已自动选择唯一适用证书。</p>
                 </el-form>
                 <details><summary>高级设置</summary><p>推荐配置：sing-box / VLESS / 普通 TCP / TLS，从本机直接出口。连接凭据由服务器生成。</p><el-button :disabled="nodeWizard.busy" @click="wizardAdvanced">打开高级新建，选择其他协议或配置</el-button></details>
-                <p class="node-wizard-note">创建只保存节点并尝试应用。下一步由你明确生成含连接凭据的分享内容。</p>
             </template>
             <template v-if="nodeWizard.step === 3">
                 <h2>{{ nodeWizard.outcome === 'created' ? '节点已创建' : nodeWizard.outcome === 'saved' ? '节点已保存，应用未完成' : '创建结果待确认' }}</h2>
                 <p>{{ nodeWizard.remark || '未命名节点' }} · 端口 {{ nodeWizard.port }}</p>
                 <p>外部连接未验证。请在节点列表查看实际运行状态；服务启动不代表公网可达。</p>
                 <template v-if="nodeWizard.outcome === 'created'">
-                    <p>{{ nodeWizard.purpose === 'device' ? '点击下方按钮后获取含连接凭据的链接和二维码，导入手机或电脑客户端。' : '打开交付后，核对目标域名 / IP，明确确认仅 TCP 和敏感凭据，再生成供另一台 V-UI 导入的配置。' }}</p>
-                    <el-button id="node-wizard-deliver" type="primary" :disabled="nodeWizard.busy || !nodeWizard.row || (nodeWizard.purpose === 'device' ? nodeWizard.row.share_eligible !== true : nodeWizard.row.upstream_export_eligible !== true)" @click="wizardDeliver">{{ nodeWizard.purpose === 'device' ? '生成客户端链接 / 二维码' : '复制给另一台 V-UI' }}</el-button>
+                    <el-button v-if="nodeWizard.purpose === 'device'" id="node-wizard-subscribe" type="primary"
+                        :disabled="nodeWizard.busy || !nodeWizard.row?.subscription_formats?.includes('mihomo.yaml')"
+                        @click="openNodeSubscription(nodeWizard.row, nodeWizard.serverName)">创建订阅</el-button>
+                    <el-button id="node-wizard-deliver" :disabled="nodeWizard.busy || !nodeWizard.row || (nodeWizard.purpose === 'device' ? nodeWizard.row.share_eligible !== true : nodeWizard.row.upstream_export_eligible !== true)" @click="wizardDeliver">{{ nodeWizard.purpose === 'device' ? '链接 / 二维码' : '复制给另一台 V-UI' }}</el-button>
                     <p v-if="!nodeWizard.row || (nodeWizard.purpose === 'device' ? nodeWizard.row.share_eligible !== true : nodeWizard.row.upstream_export_eligible !== true)" role="status">当前导出资格未能确认，请刷新列表检查。</p>
                 </template>
                 <el-button :loading="nodeWizard.busy" :disabled="nodeWizard.busy" @click="refreshWizardResult">刷新节点列表和状态</el-button>
@@ -559,7 +585,6 @@
         <template #footer>
             <el-button v-if="nodeWizard.step === 2" :disabled="nodeWizard.busy" @click="nodeWizard.step = 1">上一步</el-button>
             <el-button :disabled="nodeWizard.busy" @click="closeNodeWizard">{{ nodeWizard.step === 3 ? '返回节点列表' : '取消' }}</el-button>
-            <el-button v-if="nodeWizard.step === 1" type="primary" @click="nodeWizard.step = 2">下一步</el-button>
             <el-button v-if="nodeWizard.step === 2" id="node-wizard-create" type="primary" :disabled="!wizardReady" :loading="nodeWizard.busy" @click="createSimpleNode">创建节点</el-button>
         </template>
     </el-dialog>
