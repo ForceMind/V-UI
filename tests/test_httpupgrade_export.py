@@ -79,3 +79,32 @@ class HTTPUpgradeExportTests(unittest.TestCase):
             row = db.get(database.Inbound, 1)
             self.assertEqual(row.stream_settings, original)
             self.assertEqual(row.remark, "node-1")
+
+    def test_switching_to_httpupgrade_does_not_drop_advanced_tls(self):
+        with database.SessionLocal() as db:
+            row = db.get(database.Inbound, 1)
+            original = deepcopy(row.stream_settings)
+            original["tls"]["alpn"] = ["h2"]
+            row.stream_settings = original
+            db.commit()
+        with patch.object(core_manager, "validate_inbound_change"), patch("app.api.inbounds.apply_checked"):
+            response = self.client.put("/api/inbounds/1", headers=HEADERS, json={
+                "profile": self.profile, "stream_settings": {}})
+        self.assertEqual(response.status_code, 422)
+        with database.SessionLocal() as db:
+            self.assertEqual(db.get(database.Inbound, 1).stream_settings, original)
+
+    def test_legacy_non_string_flow_cannot_become_eligible_by_editing(self):
+        self.make_httpupgrade()
+        with database.SessionLocal() as db:
+            row = db.get(database.Inbound, 1)
+            original = deepcopy(row.settings)
+            original["users"][0]["flow"] = False
+            row.settings = original
+            db.commit()
+        with patch.object(core_manager, "validate_inbound_change"), patch("app.api.inbounds.apply_checked"):
+            response = self.client.put("/api/inbounds/1", headers=HEADERS, json={"profile": self.profile})
+        self.assertEqual(response.status_code, 422)
+        self.assertNotIn("mihomo_yaml_only", self.client.get("/api/inbounds").json()[0])
+        with database.SessionLocal() as db:
+            self.assertEqual(db.get(database.Inbound, 1).settings, original)

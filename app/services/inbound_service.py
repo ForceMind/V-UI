@@ -299,9 +299,12 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
     old_httpupgrade = (existing is not None and existing.core == "sing-box" and existing.protocol == "vless"
                        and isinstance(old_stream, dict)
                        and httpupgrade_profile.is_httpupgrade(old_stream.get("transport")))
-    if old_httpupgrade and profile:
+    entering_httpupgrade = (existing is not None and core == "sing-box" and protocol == "vless"
+                            and profile.get("transport") == "httpupgrade" and profile.get("security") == "tls")
+    if ((old_httpupgrade and profile or entering_httpupgrade) and isinstance(old_stream, dict)
+            and not reality_profile.has_reality(old_stream)):
         try:
-            httpupgrade_profile.require_editable(old_stream)
+            httpupgrade_profile.require_editable(old_stream, existing.settings, entering=entering_httpupgrade)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     if (existing is not None and existing.core == "sing-box" and existing.protocol == "vless"

@@ -655,15 +655,33 @@ def compile_profile(
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
         previous_transport = stream.get("transport", {})
+        if protocol == "vless" and httpupgrade_profile.is_httpupgrade(previous_transport) and not reality_profile.has_reality(stream):
+            try:
+                httpupgrade_profile.require_editable(stream, settings)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            profile.setdefault("transport", "httpupgrade")
+            if profile["transport"] == "httpupgrade":
+                tls, meta = stream.get("tls", {}), stream.get("_vui", {})
+                profile.setdefault("security", "tls" if tls.get("enabled") is True else "none")
+                profile.setdefault("flow", settings["users"][0].get("flow", ""))
+                for field in ("host", "path"):
+                    profile.setdefault(field, previous_transport[field])
+                for field in ("server_name", "certificate_path", "key_path"):
+                    profile.setdefault(field, tls.get(field, ""))
+                for field in ("client_fingerprint", "skip_cert_verify"):
+                    if field in meta:
+                        profile.setdefault(field, meta[field])
         vless_httpupgrade = protocol == "vless" and profile.get("transport") == "httpupgrade"
         httpupgrade_tls = vless_httpupgrade and profile.get("security") == "tls"
-        if protocol == "vless":
+        if vless_httpupgrade:
             try:
-                httpupgrade_profile.require_editable(stream)
-                if vless_httpupgrade and {"headers", "max_early_data", "early_data_header_name",
+                if {"headers", "max_early_data", "early_data_header_name",
                                             "early_data", "fast_open", "alpn"} & profile.keys():
                     raise ValueError("The HTTPUpgrade editor does not accept advanced transport or ALPN options")
                 if httpupgrade_tls:
+                    if stream and not httpupgrade_profile.is_httpupgrade(previous_transport) and not reality_profile.has_reality(stream):
+                        httpupgrade_profile.require_editable(stream, settings, entering=True)
                     httpupgrade_profile.literal_path(profile.get("path"))
                     httpupgrade_profile.literal_host(profile.get("host"))
                     httpupgrade_profile.literal_host(profile.get("server_name"))
@@ -821,9 +839,9 @@ def decompile_profile(core: str, protocol: str, settings: dict | None,
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     settings = dict(settings or {})
     stream = dict(stream_settings or {})
-    if core == "sing-box" and protocol == "vless":
+    if core == "sing-box" and protocol == "vless" and not reality_profile.has_reality(stream):
         try:
-            httpupgrade_profile.require_editable(stream)
+            httpupgrade_profile.require_editable(stream, settings)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     grpc = core == "sing-box" and protocol == "vless" and is_grpc_transport(stream.get("transport"))
