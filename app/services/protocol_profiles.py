@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from app.services.websocket_profile import websocket_host, websocket_path
 from app.services.grpc_profile import grpc_service_name, is_grpc_transport
-from app.services import hysteria2_profile, tuic_profile, reality_profile, xhttp_profile
+from app.services import httpupgrade_profile, hysteria2_profile, tuic_profile, reality_profile, xhttp_profile
 
 
 def profile_catalog() -> dict[str, Any]:
@@ -655,6 +655,23 @@ def compile_profile(
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
         previous_transport = stream.get("transport", {})
+        vless_httpupgrade = protocol == "vless" and profile.get("transport") == "httpupgrade"
+        httpupgrade_tls = vless_httpupgrade and profile.get("security") == "tls"
+        if protocol == "vless":
+            try:
+                httpupgrade_profile.require_editable(stream)
+                if vless_httpupgrade and {"headers", "max_early_data", "early_data_header_name",
+                                            "early_data", "fast_open", "alpn"} & profile.keys():
+                    raise ValueError("The HTTPUpgrade editor does not accept advanced transport or ALPN options")
+                if httpupgrade_tls:
+                    httpupgrade_profile.literal_path(profile.get("path"))
+                    httpupgrade_profile.literal_host(profile.get("host"))
+                    httpupgrade_profile.literal_host(profile.get("server_name"))
+                    if (profile.get("flow", "") != "" or profile.get("skip_cert_verify", False) is not False
+                            or profile.get("client_fingerprint", "chrome") != "chrome"):
+                        raise ValueError("HTTPUpgrade TLS requires Chrome, verification and empty flow")
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
         previous_grpc = protocol == "vless" and is_grpc_transport(previous_transport)
         vless_grpc = protocol == "vless" and str(profile.get("transport") or "").lower() == "grpc"
         if previous_grpc:
@@ -713,6 +730,8 @@ def compile_profile(
         if protocol == "tuic":
             stream["_vui"]["client_fingerprint"] = profile["client_fingerprint"]
             stream["tls"]["alpn"] = tuic_alpn
+        if httpupgrade_tls:
+            stream["tls"]["alpn"] = ["http/1.1"]
         if vless_ws and preserved_ws_alpn:
             stream["tls"]["alpn"] = list(preserved_ws_alpn)
         if vless_grpc and str(profile.get("security") or "none").lower() == "tls":
@@ -802,6 +821,11 @@ def decompile_profile(core: str, protocol: str, settings: dict | None,
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     settings = dict(settings or {})
     stream = dict(stream_settings or {})
+    if core == "sing-box" and protocol == "vless":
+        try:
+            httpupgrade_profile.require_editable(stream)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     grpc = core == "sing-box" and protocol == "vless" and is_grpc_transport(stream.get("transport"))
     if grpc and (not isinstance(stream.get("_vui", {}), dict) or not isinstance(stream.get("tls", {}), dict)):
         raise HTTPException(status_code=422, detail="Existing gRPC TLS/client metadata cannot be represented by this editor")

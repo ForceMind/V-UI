@@ -35,6 +35,7 @@ SITES = {
     ("test_hysteria2_preflight_loopback.py", "Hysteria2PreflightLoopbackTests.verify_both_clients"): "mixed",
     ("test_tuic_preflight_loopback.py", "TUICPreflightLoopbackTests.verify_both_clients"): "mixed",
     ("test_reality_preflight_loopback.py", "RealityPreflightLoopbackTests.verify_clients"): "mixed",
+    ("test_httpupgrade_public_loopback.py", "HTTPUpgradePublicLoopbackTests.start_client"): "direct",
     ("test_xhttp_preflight_loopback.py", "XHTTPFixture.verify_clients"): "direct",
     ("test_xhttp_preflight_loopback.py", "XHTTPFixture.observe_httpupgrade_protocols"): "direct",
     ("test_xhttp_preflight_loopback.py", "XHTTPPreflightLoopbackTests.test_httpupgrade_actual_uri_wrong_transport_control"): "direct",
@@ -124,6 +125,7 @@ OTHER_CONSTRUCTIONS = {
     # No proxy core is launched and no Mihomo readiness qualification is granted.
     ('test_setup_shell.py', 'SetupShellTests.run_setup_pty', 'Popen'),
     ('test_xhttp_preflight_loopback.py', 'XHTTPPreflightLoopbackTests.test_httpupgrade_actual_uri_wrong_transport_control', 'CoreProcess'),
+    ('test_httpupgrade_public_loopback.py', 'HTTPUpgradePublicLoopbackTests.start_server', 'CoreProcess'),
     ('test_xhttp_preflight_loopback.py', 'XHTTPFixture.verify_clients', 'CoreProcess'),
 }
 

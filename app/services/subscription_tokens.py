@@ -191,7 +191,8 @@ def create_grant(owner_id: int, label: str, server: str, inbound_ids: list[int],
         if bindings is None:
             raise HTTPException(409, "Selected node identities are invalid; restore a verified full database or recreate the nodes")
         from app.services.validated_export import validated_nodes
-        validated_nodes(rows, server, for_singbox="sing-box.json" in formats)
+        validated_nodes(rows, server, for_singbox="sing-box.json" in formats,
+                        for_mihomo=formats == ["mihomo.yaml"])
         token = "vui_s_" + secrets.token_urlsafe(32)
         grant = SubscriptionGrant(owner_id=owner_id, token_hash=digest(token),
             credential_stamp=digest(user.password_hash), label=label, server=server,

@@ -59,6 +59,8 @@ SUITES = {
         '2ae6c184e1e4a6a176bea0a76c4bbd499686ff6a36b3ad30d4f99c3d373702d3'),
     'test_xhttp_preflight_loopback': ({'XHTTPPreflightLoopbackTests': 12},
         'd4141d9b67d4dace5034bc6bf5c8a026f3a1145c2992ac4069f50d1804515439'),
+    'test_httpupgrade_public_loopback': ({'HTTPUpgradePublicLoopbackTests': 7},
+        'ed895aa219c5a0d34baf36736edfcd30c2a829d6f313dad78b1bb99dd88e2c90'),
     'test_xhttp_public_loopback': ({'XHTTPPublicLoopbackTests': 7},
         'aabb3347563cb48a47410cb0b69046feb3481de949a1278bda217089f6af0fd4'),
     'test_xray_share_loopback': ({'XrayShareLoopbackTests': 1},

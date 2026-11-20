@@ -18,7 +18,7 @@ from app.models.database import Inbound
 from app.services.protocol_profiles import compile_profile, decompile_profile
 from app.services.grpc_profile import is_grpc_transport
 from app.services.hysteria2_profile import password_value
-from app.services import tuic_profile, reality_profile
+from app.services import httpupgrade_profile, tuic_profile, reality_profile
 from app.services.node_selection_revision import node_selection_revision
 from app.services.inbound_instance_revision import content_revision
 from app.services.inbound_instance_revision import INSTANCE_CHANGED, REVISION_RE, mutation_revision
@@ -296,6 +296,14 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
     )
     profile = normalize_mapping(payload.get("profile"))
     old_stream = existing.stream_settings if existing else {}
+    old_httpupgrade = (existing is not None and existing.core == "sing-box" and existing.protocol == "vless"
+                       and isinstance(old_stream, dict)
+                       and httpupgrade_profile.is_httpupgrade(old_stream.get("transport")))
+    if old_httpupgrade and profile:
+        try:
+            httpupgrade_profile.require_editable(old_stream)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     if (existing is not None and existing.core == "sing-box" and existing.protocol == "vless"
             and reality_profile.has_reality(old_stream)):
         try:
@@ -349,6 +357,9 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
         or is_grpc_transport(transport)
         or str(profile.get("transport") or "").lower() == "grpc"
     )
+    httpupgrade_edit = existing is not None and core == "sing-box" and protocol == "vless" and (
+        old_httpupgrade or httpupgrade_profile.is_httpupgrade(transport)
+        or profile.get("transport") == "httpupgrade")
     if strict_reality:
         # The REALITY compiler alone generates new credentials. Existing
         # malformed imports must not be healed by the generic ensure helper.
@@ -372,13 +383,14 @@ def _prepared_payload(payload: dict, existing: Inbound | None = None) -> tuple[s
             if not isinstance(previous_tls, dict) or previous_tls.get("enabled") is not True:
                 raise HTTPException(status_code=422, detail="Explicit TLS selection is required to change an existing TUIC security state")
         settings = deepcopy(settings)
-    elif grpc_edit:
+    elif grpc_edit or httpupgrade_edit:
         # Creating a node may generate credentials; an ordinary edit must not
         # repair an imported missing/invalid secret and silently enable export.
         users = settings.get("users")
         uid = users[0].get("uuid") if isinstance(users, list) and len(users) == 1 and isinstance(users[0], dict) else None
         if not isinstance(uid, str) or not re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", uid):
-            raise HTTPException(status_code=422, detail="Existing VLESS gRPC editing requires one explicit valid UUID; no credential was generated")
+            label = "HTTPUpgrade" if httpupgrade_edit else "gRPC"
+            raise HTTPException(status_code=422, detail=f"Existing VLESS {label} editing requires one explicit valid UUID; no credential was generated")
         settings = deepcopy(settings)
     else:
         settings = ensure_credentials(core, protocol, settings)

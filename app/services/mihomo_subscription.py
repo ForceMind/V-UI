@@ -7,7 +7,7 @@ from app.services.validated_export import validated_nodes
 
 
 def mihomo_config(inbounds, host: str, routing: dict | None = None) -> str:
-    proxies = validated_nodes(inbounds, host)
+    proxies = validated_nodes(inbounds, host, for_mihomo=True)
     settings = normalize_routing(load_routing() if routing is None else routing)
     plan = build_rule_plan(settings)
     config = {'mixed-port':7890, 'allow-lan':False, 'mode':'rule', 'log-level':'info'}

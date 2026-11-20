@@ -16,7 +16,7 @@ from app.services.mihomo_routing import unique_proxy_names
 from app.services.websocket_profile import websocket_host, websocket_path
 from app.services.grpc_profile import grpc_service_name
 from app.services.hysteria2_profile import password_value
-from app.services import tuic_profile, reality_profile, xhttp_profile
+from app.services import httpupgrade_profile, tuic_profile, reality_profile, xhttp_profile
 
 
 class ExportError(ValueError):
@@ -24,6 +24,10 @@ class ExportError(ValueError):
 
 
 class XHTTPUnsupportedFormat(ExportError):
+    pass
+
+
+class HTTPUpgradeUnsupportedFormat(ExportError):
     pass
 
 
@@ -57,9 +61,10 @@ def _common(item, server: str) -> tuple[str, str]:
     return server,name
 
 
-def _verified_tls(item, *, websocket: bool = False, grpc: bool = False, hysteria2: bool = False, tuic: bool = False) -> tuple[str, dict, list[str] | None]:
+def _verified_tls(item, *, websocket: bool = False, grpc: bool = False, httpupgrade: bool = False,
+                  hysteria2: bool = False, tuic: bool = False) -> tuple[str, dict, list[str] | None]:
     stream=mapping(item.stream_settings or {}, {"tls","_vui"} if hysteria2 or tuic else {"tls","transport","_vui"}, "stream")
-    if not (websocket or grpc) and stream.get("transport") not in (None,{}):
+    if not (websocket or grpc or httpupgrade) and stream.get("transport") not in (None,{}):
         raise ExportError("Non-TCP transports need a separately validated export profile")
     tls=mapping(stream.get("tls"), {"enabled","server_name","certificate_path","key_path","alpn"}, "TLS")
     if tls.get("enabled") is not True:
@@ -304,7 +309,26 @@ def _xray_tls_node(item, server: str) -> dict:
     return result
 
 
-def validated_node(item, server: str) -> dict:
+def _httpupgrade_options(item, sni, meta, alpn):
+    stream = item.stream_settings
+    tls = stream["tls"]
+    transport = mapping(stream["transport"], httpupgrade_profile.TRANSPORT_FIELDS, "HTTPUpgrade transport")
+    if (alpn != ["http/1.1"] or meta.get("client_fingerprint") != "chrome"
+            or ("server_name" in meta and meta["server_name"] != tls.get("server_name"))
+            or any(not isinstance(tls.get(key), str) or not tls[key]
+                   for key in ("certificate_path", "key_path"))):
+        raise ExportError("HTTPUpgrade requires explicit HTTP/1.1, Chrome and verified TLS with a certificate")
+    try:
+        if httpupgrade_profile.literal_host(tls.get("server_name")).lower() != sni:
+            raise ValueError("Invalid HTTPUpgrade SNI")
+        return {"path": httpupgrade_profile.literal_path(transport.get("path")),
+                "headers": {"Host": httpupgrade_profile.literal_host(transport.get("host"))},
+                "v2ray-http-upgrade": True}
+    except ValueError as exc:
+        raise ExportError(str(exc)) from None
+
+
+def validated_node(item, server: str, *, for_mihomo=False) -> dict:
     if item.core == 'xray':
         return _xray_tls_node(item, server)
     server,name=_common(item,server)
@@ -324,13 +348,22 @@ def validated_node(item, server: str) -> dict:
     transport = stream.get("transport") if isinstance(stream, dict) else None
     websocket = item.protocol == "vless" and isinstance(transport, dict) and transport.get("type") == "ws"
     grpc = item.protocol == "vless" and isinstance(transport, dict) and transport.get("type") == "grpc"
-    sni,meta,alpn=_verified_tls(item, websocket=websocket, grpc=grpc, hysteria2=item.protocol=="hysteria2", tuic=item.protocol=="tuic")
+    httpupgrade = item.protocol == "vless" and httpupgrade_profile.is_httpupgrade(transport)
+    if httpupgrade and not for_mihomo:
+        raise HTTPUpgradeUnsupportedFormat("HTTPUpgrade supports Mihomo YAML only")
+    sni,meta,alpn=_verified_tls(item, websocket=websocket, grpc=grpc, httpupgrade=httpupgrade,
+                               hysteria2=item.protocol=="hysteria2", tuic=item.protocol=="tuic")
     if item.protocol=="vless":
         node = _vless_node(item,server,name,sni,meta,alpn)
         if websocket:
             node["network"] = "ws"
             node["ws-opts"] = _websocket_transport(item)
             # This version verifies HTTP/TCP forwarding, not WebSocket UDP.
+            node["udp"] = False
+            node.pop("packet-encoding", None)
+        elif httpupgrade:
+            node["network"] = "ws"
+            node["ws-opts"] = _httpupgrade_options(item, sni, meta, alpn)
             node["udp"] = False
             node.pop("packet-encoding", None)
         elif grpc:
@@ -351,11 +384,11 @@ def validated_node(item, server: str) -> dict:
     raise ExportError("Unreachable export profile")
 
 
-def validated_nodes(items, server: str, *, for_singbox=False) -> list[dict]:
+def validated_nodes(items, server: str, *, for_singbox=False, for_mihomo=False) -> list[dict]:
     items=list(items)
     if not items:
         raise ExportError("At least one eligible node is required; no DIRECT fallback was generated")
-    nodes = [validated_node(item, server) for item in items]
+    nodes = [validated_node(item, server, for_mihomo=for_mihomo and not for_singbox) for item in items]
     if for_singbox and any(node.get("network") == "xhttp" for node in nodes):
         raise XHTTPUnsupportedFormat("XHTTP supports Mihomo YAML and URI; sing-box JSON cannot represent it")
     return unique_proxy_names(nodes)
@@ -507,7 +540,7 @@ def export_warnings(items) -> list[dict]:
     warnings=[]
     for item in items:
         try:
-            validated_node(item,"example.test")
+            validated_node(item,"example.test", for_mihomo=True)
         except (ValueError,TypeError,AttributeError):
             warnings.append({
                 "inbound_id":item.id,
