@@ -986,19 +986,11 @@ const app = createApp({
             if (purpose === 'server') openUpstreamExport(row, server);
             else void showQrCode(row);
         };
-        const openNodeSubscription = (row, server = '') => {
+        const openNodeSubscription = row => {
             if (adminSessionEnded || nodeWizard.busy || !Number.isSafeInteger(row?.id) || row.id <= 0 ||
                 !validInboundRevision(row.mutation_revision) || !row.subscription_formats?.includes('mihomo.yaml')) return;
-            try {
-                globalThis.sessionStorage?.setItem('vui-subscription-node', JSON.stringify({
-                    id:row.id, revision:row.mutation_revision, server:server || location.hostname,
-                    expires:Date.now() + 120000,
-                }));
-            } catch { /* The destination still supports manual node selection. */ }
             if (!globalThis.VUI_NAV) location.assign('/workspace#subscriptions');
-            else if (!globalThis.VUI_NAV.navigate('subscriptions')) {
-                try { globalThis.sessionStorage?.removeItem('vui-subscription-node'); } catch {}
-            }
+            else globalThis.VUI_NAV.navigate('subscriptions', {id:row.id, revision:row.mutation_revision});
         };
         watch(currentView, closeNodeWizard, {flush:'sync'});
         clearAdminSecrets.push(closeNodeWizard);

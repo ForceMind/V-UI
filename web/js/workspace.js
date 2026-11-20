@@ -22,14 +22,7 @@
     }
     globalThis.VUI_NAV?.subscribe(selectSection);
     selectSection();
-    if (workspaceSection === 'subscriptions') {
-        try {
-            const storage = globalThis.sessionStorage;
-            const pending = storage?.getItem('vui-subscription-node');
-            storage?.removeItem('vui-subscription-node');
-            if (pending) handoff = JSON.parse(pending);
-        } catch { /* The form can still be opened and filled manually. */ }
-    }
+    if (workspaceSection === 'subscriptions') handoff = globalThis.VUI_NAV?.consumeSubscriptionNode?.() || null;
     const validNodeRevision = value => typeof value === 'string' && value.length === 64 && /^[0-9a-f]{64}$/.test(value);
     const sameSavedRevision = (revision, plan) => typeof revision === 'string' && revision.length === 64 && /^[0-9a-f]{64}$/.test(revision) && plan?.revision === revision;
     const nodeRefreshGuidance = '请点击“刷新节点和订阅”，重新选择节点后创建订阅。';
@@ -154,8 +147,7 @@
         if (!Array.isArray(nodes) || !Array.isArray(warnings)) throw new Error('节点列表读取失败。' + nodeRefreshGuidance);
         if (number !== nodeReadNumber) return false;
         const invalid = new Set(warnings.map(w => w.inbound_id));
-        const highlighted = handoff && Number.isFinite(handoff.expires) && handoff.expires >= Date.now()
-            && handoff.expires <= Date.now() + 120000 && validNodeRevision(handoff.revision);
+        const highlighted = handoff && validNodeRevision(handoff.revision);
         const eligibility = new Map();
         const labels = nodes.map(node => {
             const input = element('input', null, {type:'checkbox', 'data-node':String(node.id)});
@@ -164,7 +156,6 @@
             input.disabled = node.enable !== true || invalid.has(node.id) || !formats.length;
             if (highlighted && !input.disabled && node.id === handoff.id && node.mutation_revision === handoff.revision) {
                 input.checked = true;
-                if (typeof handoff.server === 'string' && handoff.server.length <= 253) $('server').value = handoff.server;
             }
             const label = element('label', null, {class:'check'});
             label.append(input, document.createTextNode(`${node.remark || '节点 ' + node.id} · ${node.core}/${node.protocol}` + (input.disabled ? '（未验证或已禁用）' : '')));

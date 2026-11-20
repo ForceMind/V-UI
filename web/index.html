@@ -574,7 +574,7 @@
                 <template v-if="nodeWizard.outcome === 'created'">
                     <el-button v-if="nodeWizard.purpose === 'device'" id="node-wizard-subscribe" type="primary"
                         :disabled="nodeWizard.busy || !nodeWizard.row?.subscription_formats?.includes('mihomo.yaml')"
-                        @click="openNodeSubscription(nodeWizard.row, nodeWizard.serverName)">创建订阅</el-button>
+                        @click="openNodeSubscription(nodeWizard.row)">创建订阅</el-button>
                     <el-button id="node-wizard-deliver" :disabled="nodeWizard.busy || !nodeWizard.row || (nodeWizard.purpose === 'device' ? nodeWizard.row.share_eligible !== true : nodeWizard.row.upstream_export_eligible !== true)" @click="wizardDeliver">{{ nodeWizard.purpose === 'device' ? '链接 / 二维码' : '复制给另一台 V-UI' }}</el-button>
                     <p v-if="!nodeWizard.row || (nodeWizard.purpose === 'device' ? nodeWizard.row.share_eligible !== true : nodeWizard.row.upstream_export_eligible !== true)" role="status">当前导出资格未能确认，请刷新列表检查。</p>
                 </template>

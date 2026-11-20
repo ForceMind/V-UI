@@ -36,6 +36,7 @@ SITES = {
     ("test_tuic_preflight_loopback.py", "TUICPreflightLoopbackTests.verify_both_clients"): "mixed",
     ("test_reality_preflight_loopback.py", "RealityPreflightLoopbackTests.verify_clients"): "mixed",
     ("test_xhttp_preflight_loopback.py", "XHTTPFixture.verify_clients"): "direct",
+    ("test_panel_client_delivery_real.py", "PanelDeliveryTests.test_create_node_issue_scoped_subscription_and_forward_http"): "direct",
     ("test_xhttp_preflight_loopback.py", "XHTTPFixture.observe_httpupgrade_protocols"): "direct",
     ("test_xhttp_preflight_loopback.py", "XHTTPPreflightLoopbackTests.test_httpupgrade_actual_uri_wrong_transport_control"): "direct",
     ("test_hysteria2_managed_certificate.py", "Hysteria2ManagedRealCoreTests.forward_both"): "mixed",
@@ -97,6 +98,8 @@ OTHER_CONSTRUCTIONS = {
     ('test_proxy_diagnostics.py', 'DiagnosticWorkerTests.test_sigterm_resistant_worker_is_killed_and_reaped', 'Popen'),
     ('test_proxy_diagnostics_real.py', 'DiagnosticRealWorkerTests.start_upstream', 'BoundCoreProcess'),
     ('test_proxy_policy_real.py', 'ProxyPolicyRealTests.core', 'CoreProcess'),
+    # Isolated managed TLS server. Its Mihomo peer uses the shared ready gate above.
+    ('test_panel_client_delivery_real.py', 'PanelDeliveryTests.test_create_node_issue_scoped_subscription_and_forward_http', 'CoreProcess'),
     ('test_proxy_store.py', 'ProxyStoreTests.test_concurrent_processes_have_exactly_one_cas_winner', 'Popen'),
     ('test_reality_preflight_loopback.py', 'RealityPreflightLoopbackTests.verify_clients', 'CoreProcess'),
     ('test_release_deployment.py', 'ReleaseDeploymentTests.test_nonroot_offline_https_browser_restore_and_code_rollback.start', 'Popen'),

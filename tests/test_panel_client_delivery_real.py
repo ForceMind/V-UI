@@ -12,18 +12,18 @@ from app.services.core_manager import SingBoxAdapter, core_manager
 from loopback_helpers import CoreProcess, unused_port
 from proxy_loopback_support import ReadyMihomoProcess
 from test_auth import HEADERS, ORIGIN, TestClient
-from test_certificates import CertificateTests
+import test_certificates as cert_tests
 from test_xhttp_preflight_loopback import XHTTPFixture, fixed_cores_available
 from xhttp_helpers import mihomo_config
 
 
 @unittest.skipUnless(fixed_cores_available(), 'pinned server and client binaries required')
 class PanelDeliveryTests(XHTTPFixture, unittest.TestCase):
-    login = CertificateTests.login
-    issue = CertificateTests.issue
+    login = cert_tests.CertificateTests.login
+    issue = cert_tests.CertificateTests.issue
 
     def setUp(self):
-        CertificateTests.setUp(self)
+        cert_tests.CertificateTests.setUp(self)
         super().setUp()
         self.stack.enter_context(patch.object(routing_store, 'ROUTING_FILE', self.root / 'routing.json'))
         self.ca.write_bytes(self.provider.ca.public_bytes(Encoding.PEM))
@@ -32,7 +32,14 @@ class PanelDeliveryTests(XHTTPFixture, unittest.TestCase):
         domain = 'panel-delivery.example.test'
         cert_id = self.issue(domain=domain)
         port = unused_port()
-        with patch.object(core_manager, 'validate_inbound_change'), patch('app.api.inbounds.apply_checked', return_value={}):
+        # This fixture launches the generated server itself. Retain real
+        # certificate binding, but substitute the supervisor during API setup.
+        with (
+            patch.object(core_manager, 'validate_inbound_change'),
+            patch('app.api.inbounds.apply_checked', return_value={}),
+            patch.object(core_manager.get('sing-box'), 'status', return_value={'running': True}),
+            patch.object(core_manager, 'apply_database', return_value={'applied': True}) as apply,
+        ):
             response = self.client.post('/api/inbounds', headers=HEADERS, json={
                 'core': 'sing-box', 'protocol': 'vless', 'remark': 'ONLY_PROXY', 'enable': True,
                 'port': port, 'routing_mode': 'direct', 'profile': {'security': 'tls', 'transport': 'direct'},
@@ -40,6 +47,8 @@ class PanelDeliveryTests(XHTTPFixture, unittest.TestCase):
             })
         self.assertEqual(response.status_code, 200, response.text)
         row = response.json()['inbound']
+        apply.assert_called_once_with('sing-box', activate=True)
+        self.assertEqual(self.manager.binding(f"inbound:{row['id']}"), cert_id)
         self.assertEqual(row['transport'], 'tcp')
         self.assertEqual(row['subscription_formats'], ['mihomo.yaml', 'raw', 'sing-box.json'])
         inventory = self.client.get('/api/inbounds')

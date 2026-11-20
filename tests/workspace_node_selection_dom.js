@@ -75,8 +75,7 @@ async function fixture({revision = REVISION, nodeValues = [node()], warningValue
         assert.fail('Unexpected request: '+method+' '+url);
     };
     vm.runInNewContext(script,{document,fetch,location:{origin:'http://example.test',replace:url=>redirects.push(url),reload(){}},
-        VUI_NAV:handoff && {route:()=>({id:'subscriptions'}),subscribe(){},guard(){}},
-        sessionStorage:{getItem:()=>handoff && JSON.stringify(handoff),removeItem(){}},
+        VUI_NAV:handoff && {route:()=>({id:'subscriptions'}),consumeSubscriptionNode:()=>handoff,subscribe(){},guard(){}},
         addEventListener:(type,fn)=>globalEvents.set(type,fn),confirm:()=>true,setTimeout,clearTimeout},{filename});
     await flush();
     const queue=(url,reply,method='GET')=>queued.push({url,reply,method});
@@ -101,15 +100,13 @@ test('workspace create always transmits the revision of the displayed nodes', as
 });
 
 test('wizard handoff selects only the fresh matching instance and is consumed after one read', async()=>{
-    const handoff={id:7,revision:'a'.repeat(64),server:'certificate.example.test',expires:Date.now()+30000};
+    const handoff={id:7,revision:'a'.repeat(64)};
     const f=await fixture({handoff});
     assert.equal(f.checkboxes()[0].checked,true);
-    assert.equal(f.get('server').value,handoff.server);
     await f.click('refresh-grants');
     assert.equal(f.checkboxes()[0].checked,false);
     const replacement=await fixture({handoff,nodeValues:[node(7,'replacement',{mutation_revision:'b'.repeat(64)})]});
     assert.equal(replacement.checkboxes()[0].checked,false);
-    assert.notEqual(replacement.get('server').value,handoff.server);
 });
 
 test('mixed formats are rejected as a whole, omitting the incompatible format restores submission', async()=>{
