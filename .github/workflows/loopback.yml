@@ -23,6 +23,22 @@ jobs:
         run: |
           python scripts/fetch_test_cores.py /tmp/vui-rc1/cores
           python scripts/fetch_mihomo.py /tmp/vui-rc1/client
+      - name: Create a managed node and consume its anonymous subscription with Mihomo
+        env:
+          VUI_TEST_CORES: /tmp/vui-rc1/cores
+          VUI_TEST_MIHOMO: /tmp/vui-rc1/client/mihomo
+        run: |
+          set -euo pipefail
+          export VUI_DATA_DIR="$(mktemp -d)"
+          PYTHONPATH=tests:. python - <<'PYDELIVERY' 2>&1 | tee /tmp/vui-rc1/panel-delivery.log
+          import unittest
+          from test_panel_client_delivery_real import PanelDeliveryTests
+
+          result = unittest.TextTestRunner(verbosity=2).run(
+              unittest.defaultTestLoader.loadTestsFromTestCase(PanelDeliveryTests))
+          if result.testsRun != 1 or result.skipped or not result.wasSuccessful():
+              raise SystemExit(1)
+          PYDELIVERY
       - name: Exercise actual TLS proxy and local DNS paths
         env:
           VUI_TEST_CORES: /tmp/vui-rc1/cores
@@ -101,4 +117,5 @@ jobs:
             /tmp/vui-rc1/result.log
             /tmp/vui-rc1/yaml-apply.log
             /tmp/vui-rc1/dns-core-tls.log
+            /tmp/vui-rc1/panel-delivery.log
           retention-days: 7

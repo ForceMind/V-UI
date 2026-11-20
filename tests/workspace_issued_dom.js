@@ -86,7 +86,7 @@ async function fixture(initialGrants = [grant()], clipboard = async()=>{}) {
         if (method === 'GET' && url === '/api/routing/mihomo/catalog') return response({categories:[], presets:[]});
         if (method === 'GET' && url === SNAPSHOT) return response({revision:'1'.repeat(64), settings});
         if (method === 'GET' && url === PREVIEW) return response(plan);
-        if (method === 'GET' && url === '/api/inbounds') return response([{id:7,remark:'synthetic node',core:'sing-box',protocol:'vless',enable:true}]);
+        if (method === 'GET' && url === '/api/inbounds') return response([{id:7,remark:'synthetic node',core:'sing-box',protocol:'vless',enable:true,subscription_formats:['mihomo.yaml']}]);
         if (method === 'GET' && url === '/api/subscription/mihomo-warnings') return response([]);
         if (method === 'GET' && url === GRANTS) return response(initialGrants);
         if (method === 'POST' && url === GRANTS) return response({id:1, paths:{'mihomo.yaml':'/sub/synthetic-token/mihomo.yaml'}},201);

@@ -23,7 +23,7 @@ from app.services.node_selection_revision import node_selection_revision
 from app.services.inbound_instance_revision import content_revision
 from app.services.inbound_instance_revision import INSTANCE_CHANGED, REVISION_RE, mutation_revision
 from app.services.managed_tls import eligible as managed_certificate_eligible
-from app.services.inbound_export_eligibility import export_eligibility
+from app.services.inbound_export_eligibility import export_eligibility, subscription_formats
 
 SUPPORTED_CORES = {"xray", "sing-box"}
 XRAY_PROTOCOLS = {"vless", "vmess", "trojan", "shadowsocks"}
@@ -191,6 +191,9 @@ def to_dict(item: Inbound) -> dict:
     user_maps = [user for user in users if isinstance(user, dict)]
     obfs = settings.get("obfs")
     tls = stream.get("tls")
+    transport = stream.get("transport") if item.core == "sing-box" else stream.get("network")
+    if isinstance(transport, dict):
+        transport = transport.get("type")
     return {
         "id": item.id,
         "mutation_revision": mutation_revision(item),
@@ -205,6 +208,13 @@ def to_dict(item: Inbound) -> dict:
         "expiry_time": item.expiry_time or 0,
         "port": item.port,
         "protocol": item.protocol,
+        "transport": (
+            "quic" if item.protocol in ("hysteria2", "tuic")
+            else transport if transport in ("ws", "grpc", "xhttp", "httpupgrade", "tcp", "raw")
+            else "tcp" if transport is None
+            else "other"
+        ),
+        "subscription_formats": subscription_formats(item),
         "routing_mode": _routing_mode(item.routing_mode),
         "credentials": {
             "user_count": len(users),
