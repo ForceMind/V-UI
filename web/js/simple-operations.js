@@ -457,10 +457,10 @@
             },data=>{
                 this.content.replaceChildren(element('h3','多个节点，一条订阅地址'),element('p','在客户端添加一次订阅地址，以后刷新即可取得所选节点。地址包含访问凭据，只交给可信使用者。'));
                 const form=element('form'),name=this.field(form,'订阅名称',this.input('我的节点'));
-                const eligible=data.nodes.filter(n=>n.enable&&n.share_eligible===true&&!data.warnings.some(w=>w.inbound_id===n.id));
+                const eligible=data.nodes.filter(n=>n.enable&&(n.share_eligible===true||n.mihomo_yaml_only===true)&&!data.warnings.some(w=>w.inbound_id===n.id));
                 const picks=[];for(const node of data.nodes){
                     const input=element('input',null,{type:'checkbox',checked:eligible.length===1&&eligible[0].id===node.id,disabled:!eligible.includes(node)});
-                    const label=element('label',null,{class:'ops-check'});label.append(input,element('span',(node.remark||'节点'+node.id)+' · 端口 '+node.port+(!eligible.includes(node)?'（停用或暂不支持分享）':'')));form.append(label);picks.push([input,node.id]);
+                    const label=element('label',null,{class:'ops-check'});label.append(input,element('span',(node.remark||'节点'+node.id)+' · 端口 '+node.port+(!eligible.includes(node)?'（停用或暂不支持分享）':node.mihomo_yaml_only?'（仅 Mihomo YAML）':'')));form.append(label);picks.push([input,node.id]);
                 }
                 if(!data.nodes.length)form.append(this.note('还没有节点，请先创建节点。'));
                 const days=this.field(form,'有效期',element('select'));for(const [value,label]of[['90','90天（推荐）'],['30','30天'],['180','180天'],['365','1年']])days.append(element('option',label,{value}));
@@ -479,6 +479,8 @@
                 form.addEventListener('submit',event=>{event.preventDefault();if(submitted)return;void this.perform(async()=>{
                     const selected=picks.filter(([input,id])=>input.checked&&eligible.some(node=>node.id===id)).map(([,id])=>id);
                     if(!name.value.trim()||!selected.length)throw new globalThis.VUI_OPERATION_FLOW.FlowError('SELECT_NODES','填写名称，并选择至少一个可分享节点。');
+                    if(format.value!=='mihomo.yaml'&&eligible.some(node=>selected.includes(node.id)&&node.mihomo_yaml_only))
+                        throw new globalThis.VUI_OPERATION_FLOW.FlowError('UNSUPPORTED_FORMAT','所选 HTTPUpgrade 节点仅支持 Mihomo YAML。');
                     // The displayed inventory is the authoritative identity precondition.
                     submitted=true;submit._opsDisabled=true;
                     return await this.flow.api('/api/subscriptions','POST',{label:name.value.trim(),server:server.value.trim(),inbound_ids:selected,formats:[format.value],expires_days:Number(days.value),expected_node_revision:data.revision});

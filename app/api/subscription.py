@@ -12,7 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import ClientDisconnect
 from sqlalchemy.orm import Session
 from app.models.database import get_db
-from app.services.validated_export import ExportError, base64_subscription, export_warnings, share_link, singbox_client_config
+from app.services.validated_export import (
+    ExportError, HTTPUpgradeUnsupportedFormat, base64_subscription, export_warnings, share_link, singbox_client_config,
+)
 from app.services.inbound_service import get_inbound, list_inbounds
 from app.services.inbound_instance_revision import mutation_revision, content_revision
 from app.services.routing_store import load_routing
@@ -77,6 +79,9 @@ def inbound_share_link(inbound_id: int, request: Request, host: str | None = Que
             'message': '此节点已停用或设置了到期时间，暂不符合当前分享格式要求，请编辑节点后重试。'})
     try:
         return share_link(item, _host(request, host))
+    except HTTPUpgradeUnsupportedFormat:
+        raise HTTPException(409, {'code': 'SHARE_PROFILE_UNSUPPORTED',
+            'message': 'HTTPUpgrade 仅支持 Mihomo YAML，请从订阅入口导出。'}) from None
     except ExportError:
         message = ('此 Xray 节点暂不符合分享格式。请选择单用户 VLESS、验证 TLS 和空 flow。'
                    'XHTTP 还需 stream-one、h2、Chrome、显式 SNI、Host 和 Path。'

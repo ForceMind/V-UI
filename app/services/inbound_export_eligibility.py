@@ -19,7 +19,7 @@ def export_eligibility(item) -> dict[str, bool]:
     cycle through the subscription/export services. No draft exporter, profile
     compiler, credential generator, database operation, or runtime is invoked.
     """
-    from app.services.validated_export import share_link
+    from app.services.validated_export import HTTPUpgradeUnsupportedFormat, share_link, validated_node
     from app.services.tcp_upstream_export import tcp_upstream_profile
 
     result = {"share_eligible": False, "upstream_export_eligible": False}
@@ -36,6 +36,12 @@ def export_eligibility(item) -> dict[str, bool]:
         # The generated credential-bearing value is discarded and never logged.
         share_link(item, _CONFIGURATION_HOST)
         result["share_eligible"] = True
+    except HTTPUpgradeUnsupportedFormat:
+        try:
+            validated_node(item, _CONFIGURATION_HOST, for_mihomo=True)
+            result["mihomo_yaml_only"] = True
+        except _INVALID_PROFILE:
+            pass
     except _INVALID_PROFILE:
         pass
     try:
