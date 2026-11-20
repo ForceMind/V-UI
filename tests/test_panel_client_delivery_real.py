@@ -1,4 +1,5 @@
 """Follow the panel's managed TLS creation and exact-node subscription requests."""
+from contextlib import closing
 import json
 import unittest
 from unittest.mock import patch
@@ -55,7 +56,9 @@ class PanelDeliveryTests(XHTTPFixture, unittest.TestCase):
         self.assertEqual(inventory.json()[0]['mutation_revision'], row['mutation_revision'])
         payload = {'label': 'delivery', 'server': '127.0.0.1', 'inbound_ids': [row['id']],
                    'formats': ['mihomo.yaml'], 'expected_node_revision': inventory.headers['X-VUI-Node-Revision']}
-        with TestClient(self.client.app, base_url=ORIGIN, client=('127.0.0.1', 55002)) as anonymous:
+        # The administrator fixture already owns the application's lifespan.
+        # The second client changes only the cookie jar and peer address.
+        with closing(TestClient(self.client.app, base_url=ORIGIN, client=('127.0.0.1', 55002))) as anonymous:
             self.assertEqual(anonymous.post('/api/subscriptions', headers=HEADERS, json=payload).status_code, 401)
             self.assertEqual(self.client.post('/api/subscriptions', headers=HEADERS,
                 json={**payload, 'expected_node_revision': '0' * 64}).status_code, 409)

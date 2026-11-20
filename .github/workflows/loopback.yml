@@ -23,20 +23,6 @@ jobs:
         run: |
           python scripts/fetch_test_cores.py /tmp/vui-rc1/cores
           python scripts/fetch_mihomo.py /tmp/vui-rc1/client
-      - name: Exercise actual TLS proxy and local DNS paths
-        env:
-          VUI_TEST_CORES: /tmp/vui-rc1/cores
-          VUI_TEST_MIHOMO: /tmp/vui-rc1/client/mihomo
-          VUI_UDP_DNS_LOOPBACK: "1"
-          VUI_UDP_DNS_PARSER: "1"
-          VUI_MIHOMO_MERGE_LOOPBACK: "1"
-        run: |
-          set -euo pipefail
-          export VUI_DATA_DIR="$(mktemp -d)"
-          VUI_PROXY_LOOPBACK=1 PYTHONPATH=tests:. python -m unittest test_proxy_apply_real.YamlApplyRealTests -v 2>&1 | tee /tmp/vui-rc1/yaml-apply.log
-          python -m unittest discover -s tests -p 'test_*loopback*.py' -v 2>&1 | tee /tmp/vui-rc1/result.log
-          python -m unittest discover -s tests -p test_hysteria2_managed_certificate.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
-          python -m unittest discover -s tests -p test_tuic_managed_certificate.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
       - name: Create a managed node and consume its anonymous subscription with Mihomo
         env:
           VUI_TEST_CORES: /tmp/vui-rc1/cores
@@ -53,6 +39,20 @@ jobs:
           if result.testsRun != 1 or result.skipped or not result.wasSuccessful():
               raise SystemExit(1)
           PYDELIVERY
+      - name: Exercise actual TLS proxy and local DNS paths
+        env:
+          VUI_TEST_CORES: /tmp/vui-rc1/cores
+          VUI_TEST_MIHOMO: /tmp/vui-rc1/client/mihomo
+          VUI_UDP_DNS_LOOPBACK: "1"
+          VUI_UDP_DNS_PARSER: "1"
+          VUI_MIHOMO_MERGE_LOOPBACK: "1"
+        run: |
+          set -euo pipefail
+          export VUI_DATA_DIR="$(mktemp -d)"
+          VUI_PROXY_LOOPBACK=1 PYTHONPATH=tests:. python -m unittest test_proxy_apply_real.YamlApplyRealTests -v 2>&1 | tee /tmp/vui-rc1/yaml-apply.log
+          python -m unittest discover -s tests -p 'test_*loopback*.py' -v 2>&1 | tee /tmp/vui-rc1/result.log
+          python -m unittest discover -s tests -p test_hysteria2_managed_certificate.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
+          python -m unittest discover -s tests -p test_tuic_managed_certificate.py -v 2>&1 | tee -a /tmp/vui-rc1/result.log
       - name: Exercise dual-switch policy and real double-hop transitions
         env:
           VUI_TEST_CORES: /tmp/vui-rc1/cores
