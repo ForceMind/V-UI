@@ -68,7 +68,8 @@ class PanelDeliveryTests(XHTTPFixture, unittest.TestCase):
             self.assertEqual(set(paths), {'mihomo.yaml'})
             exported = anonymous.get(paths['mihomo.yaml'])
             self.assertEqual(exported.status_code, 200)
-            self.assertEqual(exported.headers['Cache-Control'], 'no-store')
+            directives = {value.strip().lower() for value in exported.headers['Cache-Control'].split(',')}
+            self.assertEqual(directives, {'no-store'})
             self.assertEqual(anonymous.get(paths['mihomo.yaml'].replace('mihomo.yaml', 'raw')).status_code, 404)
         proxy, = yaml.safe_load(exported.text)['proxies']
         self.assertEqual((proxy['servername'], proxy['port'], proxy['skip-cert-verify']), (domain, port, False))
