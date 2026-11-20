@@ -72,7 +72,7 @@ class HTTPUpgradeExportTests(unittest.TestCase):
             db.commit()
         with patch.object(core_manager, "validate_inbound_change"), patch("app.api.inbounds.apply_checked"):
             response = self.client.put("/api/inbounds/1", headers=HEADERS, json={
-                "profile": self.profile, "stream_settings": {}, "remark": "unrelated edit"})
+                "profile": self.profile, "remark": "unrelated edit"})
         self.assertEqual(response.status_code, 422)
         self.assertIn("no fields were dropped", response.json()["detail"])
         with database.SessionLocal() as db:
@@ -89,8 +89,9 @@ class HTTPUpgradeExportTests(unittest.TestCase):
             db.commit()
         with patch.object(core_manager, "validate_inbound_change"), patch("app.api.inbounds.apply_checked"):
             response = self.client.put("/api/inbounds/1", headers=HEADERS, json={
-                "profile": self.profile, "stream_settings": {}})
+                "profile": self.profile})
         self.assertEqual(response.status_code, 422)
+        self.assertIn("no fields were dropped", response.json()["detail"])
         with database.SessionLocal() as db:
             self.assertEqual(db.get(database.Inbound, 1).stream_settings, original)
 
