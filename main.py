@@ -52,7 +52,9 @@ async def invalid_routing_storage(request: Request,exc: RoutingStorageError):
 
 @app.exception_handler(ExportError)
 async def invalid_export(request: Request,exc: ExportError):
-    if isinstance(exc, (HTTPUpgradeUnsupportedFormat, XHTTPUnsupportedFormat)):
+    if isinstance(exc, HTTPUpgradeUnsupportedFormat):
+        return JSONResponse({'detail':'HTTPUpgrade 仅支持 Mihomo YAML。'}, status_code=409)
+    if isinstance(exc, XHTTPUnsupportedFormat):
         return JSONResponse({'detail':'XHTTP 请选择 Mihomo YAML 或 URI，sing-box JSON 无法表达该传输。'}, status_code=409)
     return JSONResponse({'detail':'Node configuration is outside the validated export profile'},status_code=409)
 

@@ -59,7 +59,7 @@ class HTTPUpgradeExportTests(unittest.TestCase):
                 response = self.client.post("/api/subscriptions", headers=HEADERS, json={
                     "label": "mixed selection", "server": SNI, "inbound_ids": [1, 2], "formats": formats})
                 self.assertEqual(response.status_code, 409)
-                self.assertIn("Mihomo YAML only", response.json()["detail"])
+                self.assertEqual(response.json()["detail"], "HTTPUpgrade 仅支持 Mihomo YAML。")
         self.assertEqual(self.client.get("/api/subscriptions").json(), [])
 
     def test_unrepresentable_saved_fields_survive_rejected_visual_edit(self):
