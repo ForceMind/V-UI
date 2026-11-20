@@ -58,7 +58,8 @@ def require_editable(stream, settings, *, entering=False):
             or type(users[0].get("flow", "")) is not str):
         raise ValueError("Existing HTTPUpgrade user options cannot be represented by this editor; no fields were dropped")
     if (("enabled" in tls and type(tls["enabled"]) is not bool)
-            or any(type(tls[key]) is not str for key in (TLS_FIELDS & tls.keys()) - {"enabled", "alpn"})
+            or any(type(tls[key]) is not str or tls[key] != tls[key].strip()
+                   for key in (TLS_FIELDS & tls.keys()) - {"enabled", "alpn"})
             or any(type(meta[key]) is not str for key in (CLIENT_FIELDS & meta.keys()) - {"skip_cert_verify"})
             or ("skip_cert_verify" in meta and type(meta["skip_cert_verify"]) is not bool)
             or ("security" in meta and meta["security"] != ("tls" if tls.get("enabled") is True else "none"))

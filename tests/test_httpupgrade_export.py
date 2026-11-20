@@ -94,6 +94,20 @@ class HTTPUpgradeExportTests(unittest.TestCase):
         with database.SessionLocal() as db:
             self.assertEqual(db.get(database.Inbound, 1).stream_settings, original)
 
+    def test_editor_does_not_normalize_a_stored_material_path(self):
+        self.make_httpupgrade()
+        with database.SessionLocal() as db:
+            row = db.get(database.Inbound, 1)
+            original = deepcopy(row.stream_settings)
+            original["tls"]["certificate_path"] += " "
+            row.stream_settings = original
+            db.commit()
+        with patch.object(core_manager, "validate_inbound_change"), patch("app.api.inbounds.apply_checked"):
+            response = self.client.put("/api/inbounds/1", headers=HEADERS, json={"profile": self.profile})
+        self.assertEqual(response.status_code, 422)
+        with database.SessionLocal() as db:
+            self.assertEqual(db.get(database.Inbound, 1).stream_settings, original)
+
     def test_legacy_non_string_flow_cannot_become_eligible_by_editing(self):
         self.make_httpupgrade()
         with database.SessionLocal() as db:
