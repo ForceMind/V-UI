@@ -153,6 +153,7 @@
         };
         const tasks = async () => {
             const value = await request('maintenance/tasks');
+            if (ended) return;
             const rows = (Array.isArray(value) ? value : value.tasks || []).filter(row=>taskID(row?.id));
             const box = el('maintenance-tasks'); box.textContent = '';
             if (!rows.length) text(box, '暂无维护任务。');
@@ -199,6 +200,7 @@
                 else if (!ended) el('maintenance-task-ack').hidden=false;
                 throw error;
             }
+            if (ended) return;
             taskSubmissionUncertain=false;watchingTask=row.id;
             el('maintenance-task-progress').textContent='任务 '+row.id+' · 已登记';
             notice('维护任务已登记，正在自动读取进度。');
@@ -411,6 +413,7 @@
         };
         const readCoreRows=async()=>{
             const value=await request('maintenance/core-tasks');
+            if (ended) return [];
             if(!Array.isArray(value)||value.length>1024)throw new Error('核心任务列表无效');
             const rows=value.map(checkedCoreTask);if(new Set(rows.map(row=>row.id)).size!==rows.length)throw new Error('核心任务列表无效');
             coreRows=rows;renderCoreRows();return rows;
@@ -572,8 +575,12 @@
                     const box=el(prefix+'-result');
                     box.textContent='';
                     if (!taskID(id)) {text(box,'请输入维护记录中的 32 位小写十六进制编号。');return;}
-                    try {render(box,await read(id));}
-                    catch (_) {if (!ended) text(box,'原任务尚未确认，请核对编号、授权和维护组件状态。');}
+                    try {
+                        const row=await read(id);
+                        if (!ended) render(box,row);
+                    } catch (_) {
+                        if (!ended) text(box,'原任务尚未确认，请核对编号、授权和维护组件状态。');
+                    }
                 });
             });
         }

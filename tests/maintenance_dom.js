@@ -264,7 +264,10 @@ async function admin() {
         h.el('maintenance-core-task-lookup').fire('submit');await flush();
         assert.equal(h.requests.length,total);
         assert.equal(h.history.length,0);assert.equal(h.copies.length,0);
+        form.fire('submit');await flush();
         h.event('pagehide');
+        assert(h.requests.at(-1).options.signal.aborted);
+        await h.reply({id,action:'backup',state:'succeeded'});
         assert.equal(input.value,'');assert.equal(box.children.length,0);
     }
     // Core UI: fixed server facts, no runtime/binary/network execution.
