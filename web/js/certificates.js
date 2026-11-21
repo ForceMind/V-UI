@@ -11,6 +11,7 @@
         STAGING_CANNOT_BE_DEPLOYED:'测试证书不能绑定到面板或节点。', PANEL_DOMAIN_MISMATCH:'该证书域名与当前面板域名不一致。',
         PANEL_HOT_RELOAD_UNAVAILABLE:'此启动方式未启用面板证书热更新，请使用受管 HTTPS 启动入口。',
         CERTIFICATE_APPLY_FAILED:'证书已签发，但应用未完成；请检查核心状态并重试应用。',
+        CERTIFICATE_BINDING_CONFLICT:'签发修订或绑定已变化，请刷新后重新核对。',
         CORE_STOPPED_PENDING_APPLY:'证书路径已保存并验证，但核心处于停止状态。请先启动核心，再重试应用。',
         BINDING_CHANGED_MANUALLY:'节点证书路径已被手动修改，自动续期未覆盖你的设置。请重新明确绑定。',
         TLS_NODE_REQUIRED:'请选择已启用 TLS 的节点；不适用于 REALITY。',
@@ -191,6 +192,47 @@
         }
         if(!jobs.length)list.append(element('p','当前没有待处理的验证记录。人工确认与自动清理分别记录，不代表重新签发。'));
     }
+    function renderBinding(card, cert, binding, deployable) {
+        const match = /^inbound:([1-9][0-9]*)$/.exec(binding.target);
+        const node = match ? nodes.find(row=>String(row.id)===match[1]) : null;
+        const title = binding.target==='panel' ? '面板 HTTPS' : node ?
+            (node.remark||'节点 '+node.id)+' · '+node.port : match ? '节点 '+match[1] : '使用位置待确认';
+        const revision = /^[a-f0-9]{64}$/.test(cert.revision||'') ? cert.revision : '';
+        const applied = /^[a-f0-9]{64}$/.test(binding.applied_revision||'') ? binding.applied_revision : '';
+        const result = applied ? (binding.pending ? '旧材料 · '+applied.slice(0,12) :
+            '当前材料 · '+applied.slice(0,12)) : '尚无确认记录';
+        const section = element('div',null,{class:'certificate-binding','data-binding-target':binding.target});
+        section.append(element('h3',title));
+        const facts = element('dl',null,{class:'certificate-binding-state'});
+        const issuance = cert.status==='pending'?'续期中 · ':cert.status==='renewal_failed'?'续期失败 · ':
+            cert.status==='expired'?'已过期 · ':'';
+        const signed = revision ? issuance+'已签发 '+revision.slice(0,12) :
+            cert.status==='pending'?'签发中':cert.status==='failed'?'签发失败':'尚未签发';
+        const application = node?.enable===false?'节点已停用':
+            binding.error==='CORE_STOPPED_PENDING_APPLY'?'核心已停止，待应用':
+            binding.error?'应用未完成':binding.pending?'待应用':'已应用';
+        for (const [key,value] of [
+            ['签发材料',signed],
+            ['绑定','已绑定'],
+            ['应用状态',application],
+            ['上次确认生效',result]
+        ]) facts.append(element('dt',key),element('dd',value));
+        section.append(facts);
+        if(binding.error)section.append(element('p',text(binding.error,cert.method),{class:'hint'}));
+        if (binding.pending || binding.error) {
+            const token = binding.binding_revision;
+            const retryable = deployable && revision && /^[a-f0-9]{64}$/.test(token||'') &&
+                (binding.target==='panel' ? capabilities.panel_hot_reload : node?.managed_certificate_eligible===true) &&
+                binding.error!=='BINDING_CHANGED_MANUALLY';
+            section.append(button('重试此位置',async()=>{
+                const response=await api('/'+cert.id+'/apply','POST',{
+                    target:binding.target,expected_revision:revision,expected_binding:token});
+                if(response.target!==binding.target||response.applied!==true)throw failure('本位置应用未确认，请刷新核对。');
+                notice('已应用到 '+title+'。');
+            },!retryable));
+        }
+        card.append(section);
+    }
     async function refresh(){
         if(!active)return;
         const generation=++refreshGeneration;
@@ -212,13 +254,13 @@
             card.append(element('p','到期：'+time(cert.not_after)+'　续期窗口：'+time(cert.renew_at),{class:'hint'}));
             if(cert.error)card.append(element('p',text(cert.error,cert.method)+' 下次重试：'+time(cert.retry_at),{class:'hint'}));
             if(cert.latest_job)card.append(element('p','最近任务：'+({queued:'排队中',running:'处理中',succeeded:'成功',failed:'失败',interrupted:'已中断'}[cert.latest_job.state]||'状态待确认')+'　'+time(cert.latest_job.finished_at||cert.latest_job.created_at),{class:'hint','data-job-state':cert.latest_job.state}));
-            for(const binding of cert.bindings)card.append(element('p',binding.target+'：'+(binding.error?text(binding.error):binding.pending?'待应用':'已配置'),{class:'hint'}));
+            const deployable=cert.environment==='production'&&cert.revision&&cert.days_remaining>=0;
+            for (const binding of cert.bindings) renderBinding(card,cert,binding,deployable);
             const actions=element('div',null,{class:'actions'});
             const dnsReadOnly=cert.method==='dns-01'&&capabilities.dns_credentials_manage!==true;
             actions.append(button('检查续期',async()=>{await api('/'+cert.id+'/renew','POST');notice('已进入续期队列。');},cert.status==='pending'||dnsReadOnly));
             actions.append(button(cert.auto_renew?'暂停自动续期':'启用自动续期',async()=>{await api('/'+cert.id+'/auto-renew','PUT',{enabled:!cert.auto_renew});notice('自动续期设置已更新。');},dnsReadOnly));
             if(dnsReadOnly)card.append(element('p','DNS签发和续期设置由管理员操作；维护授权可使用已签发材料。',{class:'hint'}));
-            const deployable=cert.environment==='production'&&cert.revision&&cert.days_remaining>=0;
             actions.append(button('应用到面板',async()=>{if(!confirm('确认将该证书用于当前面板域名？新连接将使用新证书。'))return;await api('/'+cert.id+'/bind-panel','POST');notice('面板证书已更新。');},!deployable||!capabilities.panel_hot_reload));
             const select=element('select',null,{'aria-label':'选择绑定节点','data-bind-select':cert.id});
             select.append(element('option','选择 TLS 节点',{value:''}));
@@ -251,7 +293,6 @@
                 await api('/'+cert.id+'/bind-inbound','POST',payload);
                 notice('证书已绑定节点。未运行的核心不会被自动启动。');
             },!deployable));
-            actions.append(button('重试应用',async()=>{const results=await api('/'+cert.id+'/apply','POST');if(results.some(r=>!r.applied))throw failure('仍有绑定未应用，请查看卡片状态');notice('已检查所有绑定。');},!deployable||!cert.bindings.length));
             if(cert.revision)actions.append(element('a','下载公有证书链',{href:'/api/certificates/'+cert.id+'/fullchain.pem',download:'fullchain.pem'}));
             card.append(actions);$('certificate-list').append(card);
         }

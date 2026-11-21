@@ -1,6 +1,7 @@
 """Durable certificate jobs and consumer state, with a single bounded worker."""
 from copy import deepcopy
 import hashlib
+import json
 import logging
 import os
 from pathlib import Path
@@ -38,6 +39,12 @@ def get_record(db, certificate_id):
     return record
 
 
+def binding_revision(binding) -> str:
+    fields = (binding.target, binding.certificate_id, binding.server_name,
+              binding.applied_certificate_id, binding.applied_revision, binding.error)
+    return hashlib.sha256(json.dumps(fields, separators=(',', ':')).encode()).hexdigest()
+
+
 def job_view(job):
     return {key: getattr(job, key) for key in ('id', 'certificate_id', 'state', 'error',
             'created_at', 'started_at', 'finished_at')}
@@ -73,7 +80,7 @@ class CertificateManager:
             result = []
             for row in rows:
                 job = db.query(CertificateJob).filter_by(certificate_id=row.id).order_by(CertificateJob.sequence.desc()).first()
-                bindings = db.query(CertificateBinding).filter_by(certificate_id=row.id).all()
+                bindings = db.query(CertificateBinding).filter_by(certificate_id=row.id).order_by(CertificateBinding.target).all()
                 item = {key: getattr(row, key) for key in ('id', 'domain', 'email', 'environment',
                     'auto_renew', 'revision', 'not_before', 'not_after', 'renew_at', 'retry_at',
                     'last_attempt', 'failures', 'error', 'created_at', 'method', 'wildcard')}
@@ -86,6 +93,7 @@ class CertificateManager:
                     'valid' if row.revision else 'not_issued')
                 item['latest_job'] = job_view(job) if job else None
                 item['bindings'] = [{'target': b.target, 'applied_revision': b.applied_revision,
+                    'binding_revision': binding_revision(b),
                     'pending': b.applied_revision != row.revision or b.applied_certificate_id != row.id,
                     'error': b.error} for b in bindings]
                 result.append(item)
@@ -351,12 +359,14 @@ class CertificateManager:
             self._apply_target(target, explicit=True)
         return {'target': target, 'configured': True}
 
-    def _apply_target(self, target, *, explicit=False):
+    def _apply_target(self, target, *, explicit=False, expected_revision=None):
         from app.services.core_manager import core_manager
         try:
             with self._binding_lock, core_manager.lock, database.SessionLocal() as db:
                 binding = db.get(CertificateBinding, target)
                 paths, domain, rev = self.material(binding.certificate_id)
+                if expected_revision is not None and rev != expected_revision:
+                    raise CertificateError('CERTIFICATE_BINDING_CONFLICT')
                 selected_domain = self.connection_domain(binding.certificate_id, binding.server_name)
                 if target == 'panel':
                     from app.middleware.auth import configured_origin
@@ -367,7 +377,8 @@ class CertificateManager:
                 else:
                     row = db.get(database.Inbound, int(target.split(':')[1]))
                     if not row: raise CertificateError('INBOUND_NOT_FOUND')
-                    stream = deepcopy(row.stream_settings or {})
+                    previous_stream = row.stream_settings
+                    stream = deepcopy(previous_stream or {})
                     error = managed_tls.target_error(row)
                     if error:
                         raise CertificateError(error)
@@ -386,8 +397,20 @@ class CertificateManager:
                         db.query(database.Inbound).order_by(database.Inbound.id).all())
                     db.commit()
                     # Do not resurrect a manually stopped core during renewal.
-                    runtime = core_manager.get(row.core).status()
-                    result = core_manager.apply_database(row.core, activate=bool(runtime['running']))
+                    try:
+                        runtime = core_manager.get(row.core).status()
+                        running = bool(runtime['running'])
+                        result = core_manager.apply_database(row.core, activate=running)
+                        if running and not result.get('applied'):
+                            raise CertificateError('CERTIFICATE_APPLY_FAILED')
+                    except Exception:
+                        # The runtime transaction handles its own recovery. Restore
+                        # desired material too, before a sibling apply can read it.
+                        db.refresh(row)
+                        if row.stream_settings == stream:
+                            row.stream_settings = previous_stream
+                            db.commit()
+                        raise
                     if not result.get('applied'):
                         raise CertificateError('CORE_STOPPED_PENDING_APPLY')
                 binding.applied_certificate_id = binding.certificate_id
@@ -395,6 +418,8 @@ class CertificateManager:
                 db.commit()
         except Exception as exc:
             code = exc.code if isinstance(exc, CertificateError) else 'CERTIFICATE_APPLY_FAILED'
+            if code == 'CERTIFICATE_BINDING_CONFLICT':
+                raise CertificateError(code) from None
             with database.SessionLocal() as db:
                 binding = db.get(CertificateBinding, target)
                 if binding: binding.error = code; db.commit()
@@ -405,12 +430,31 @@ class CertificateManager:
             targets = [b.target for b in db.query(CertificateBinding).filter_by(certificate_id=certificate_id).all()]
         result = []
         for target in targets:
-            try:
-                self._apply_target(target)
-                result.append({'target': target, 'applied': True})
-            except CertificateError as exc:
-                result.append({'target': target, 'applied': False, 'error': exc.code})
+            with self._binding_lock:
+                with database.SessionLocal() as db:
+                    binding = db.get(CertificateBinding, target)
+                    if binding is None or binding.certificate_id != certificate_id:
+                        continue
+                try:
+                    self._apply_target(target)
+                    result.append({'target': target, 'applied': True})
+                except CertificateError as exc:
+                    result.append({'target': target, 'applied': False, 'error': exc.code})
         return result
+
+    def retry_binding(self, certificate_id, target, revision, expected_binding):
+        with self._binding_lock:
+            with database.SessionLocal() as db:
+                certificate = get_record(db, certificate_id)
+                binding = db.get(CertificateBinding, target)
+                if (binding is None or binding.certificate_id != certificate_id
+                        or certificate.revision != revision or binding_revision(binding) != expected_binding):
+                    raise CertificateError('CERTIFICATE_BINDING_CONFLICT')
+                if (binding.applied_certificate_id == certificate_id
+                        and binding.applied_revision == revision and not binding.error):
+                    return {'target': target, 'applied': True}
+            self._apply_target(target, expected_revision=revision)
+            return {'target': target, 'applied': True}
 
     def panel_material(self):
         with database.SessionLocal() as db:

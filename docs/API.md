@@ -86,12 +86,14 @@ POST `/api/subscriptions`：label、server（节点公开地址）、inbound_ids
 | PUT `/{id}/auto-renew` | enabled布尔值 |
 | POST `/{id}/bind-panel` | 正式证书、同面板域名、热更新 |
 | POST `/{id}/bind-inbound` | inbound_id，受支持TLS节点 |
-| POST `/{id}/apply` | 重试已配置消费者，逐消费者返回结果 |
+| POST `/{id}/apply` | 提供 `target`、`expected_revision` 和 `expected_binding` 时仅重试该位置。无请求体继续返回逐消费者结果 |
 | GET `/{id}/fullchain.pem` | 管理员下载公有证书链，无私钥接口 |
 
 证书API不接受shell命令、用户hooks、任意CA URL、DNS provider token。申请错误与应用错误分开，不能看到job成功就忽略绑定失败。自动续期暂停不取消已经排队的明确请求。
 
 通用401/403/429与维护方式见[排错](TROUBLESHOOTING.md)。
+
+单位置重试使用列表中的 `bindings[].target`、证书 `revision` 及对应的 `bindings[].binding_revision`。修订或绑定改动返回 409，需要刷新后核对。响应 `applied: true` 只对应指定位置。列表中的 `applied_revision` 是最近一次确认应用的材料版本。
 
 ### 节点安全模式与托管证书
 
