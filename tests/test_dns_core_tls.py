@@ -22,7 +22,7 @@ from app.certificates.dns_store import DNSCredentialStore
 from app.certificates.models import CertificateBinding
 from app.models import database
 from app.services.core_manager import SingBoxAdapter, XrayAdapter, core_manager
-from app.services.core_runtime import CoreRuntime
+from app.services.core_runtime import CoreError, CoreRuntime
 from app.services.managed_tls import paths as material_paths, server_name
 from app.services.validated_export import validated_node
 from inbound_routing_real_helpers import yaml_client
@@ -99,6 +99,55 @@ class DNSCoreTLSTests(unittest.TestCase):
             with context.wrap_socket(stream, server_hostname=HOST) as tls:
                 self.assertEqual(tls.getpeercert(binary_form=True), leaf.public_bytes(serialization.Encoding.DER))
         return leaf.serial_number
+
+    def verify_partial_application(self, certificate, identity, runtime, port, ca):
+        panel_reloads = []
+        self.manager.panel_reloader = lambda *paths: panel_reloads.append(paths)
+        self.manager.bind(certificate, 'panel')
+        previous, _, previous_revision = self.manager.material(certificate)
+        previous_bytes = tuple(path.read_bytes() for path in previous)
+        previous_serial = self.served_leaf(port, ca, previous[0])
+        baseline = runtime.state()['revision']
+        launch = runtime._launch
+
+        def fail_new_config(path):
+            if path.stem != baseline:
+                raise CoreError('synthetic candidate startup failure')
+            return launch(path)
+
+        self.due(certificate)
+        with patch.object(runtime, '_launch', side_effect=fail_new_config):
+            self.assertTrue(self.manager.process_once())
+        listed, = self.client.get('/api/certificates').json()
+        target = f'inbound:{identity}'
+        bindings = {item['target']: item for item in listed['bindings']}
+        newest, _, newest_revision = self.manager.material(certificate)
+        self.assertNotEqual(previous_revision, newest_revision)
+        self.assertEqual(listed['latest_job']['state'], 'succeeded')
+        self.assertEqual(bindings['panel']['applied_revision'], newest_revision)
+        self.assertEqual(bindings[target]['applied_revision'], previous_revision)
+        self.assertTrue(bindings[target]['pending'])
+        self.assertEqual(bindings[target]['error'], 'CERTIFICATE_APPLY_FAILED')
+        self.assertEqual(tuple(path.read_bytes() for path in previous), previous_bytes)
+        self.assertEqual(self.node(identity)[2], tuple(map(str, previous)))
+        self.assertEqual(self.served_leaf(port, ca, previous[0]), previous_serial)
+        self.assertEqual(len(panel_reloads), 2)
+        endpoint = f'/api/certificates/{certificate}/apply'
+        payload = {'target': target, 'expected_revision': newest_revision,
+                   'expected_binding': bindings[target]['binding_revision']}
+        stale = self.client.post(endpoint, headers=certificate_fixtures.auth_tests.HEADERS,
+                                 json={**payload, 'expected_binding': '0' * 64})
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(runtime.state()['revision'], baseline)
+        retry = self.client.post(endpoint, headers=certificate_fixtures.auth_tests.HEADERS, json=payload)
+        self.assertEqual(retry.status_code, 200, retry.text)
+        self.assertEqual(retry.json(), {'target': target, 'applied': True})
+        self.assertEqual(len(panel_reloads), 2)
+        self.assertNotEqual(self.served_leaf(port, ca, newest[0]), previous_serial)
+        listed, = self.client.get('/api/certificates').json()
+        self.assertTrue(all(not item['pending'] and item['applied_revision'] == newest_revision
+                            for item in listed['bindings']))
+        print('Certificate partial apply: old TLS leaf kept serving; targeted API retry changed only the failed binding')
 
     def exercise(self, core):
         with ExitStack() as stack:
@@ -194,9 +243,11 @@ class DNSCoreTLSTests(unittest.TestCase):
                     pass
             evidence = require_tls_rejection(self, log, attempt, deliveries, DEEP, expected_count=baseline)
             self.assertIn('x509', evidence); self.assertNotIn('using DIRECT', log.read_text())
-            rejected.stop(); runtime.stop()
+            rejected.stop()
             self.assertEqual(len(deliveries), baseline, 'Deep-name rejection delivered HTTP, possibly via DIRECT')
             self.assertEqual(self.node(identity)[:2], (after, original))
+            self.verify_partial_application(certificate, identity, runtime, port, ca)
+            runtime.stop()
 
     def test_sing_box_actual_dns_wildcard_tls_rotation_and_deep_name_rejection(self):
         self.exercise('sing-box')
