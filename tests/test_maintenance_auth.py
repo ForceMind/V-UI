@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -575,6 +575,44 @@ class MaintenanceAuthorizationTests(unittest.TestCase):
             self.assertEqual(remote.post('/api/maintenance/core-tasks',content=duplicate,headers={**headers,'Content-Type':'application/json'}).status_code,422)
             self.assertEqual(remote.post('/api/maintenance/core-tasks?source=private',json={'action':'update','parameters':base},headers=headers).status_code,422)
             submit.assert_not_called()
+
+    def test_original_task_lookup_requires_current_permission_and_keeps_namespace(self):
+        remote = TestClient(main.app, base_url=ORIGIN)
+        self.addCleanup(remote.close)
+        task_id = 'a' * 32
+        ordinary_path = '/api/maintenance/tasks/' + task_id
+        core_path = '/api/maintenance/core-tasks/' + task_id
+        ordinary = {'id': task_id, 'action': 'upgrade', 'state': 'failed', 'error': 'MAINTENANCE_INTERRUPTED'}
+        core = {'id': task_id, 'action': 'recover', 'state': 'succeeded', 'phase': 'finished',
+                'created_at': 1, 'updated_at': 2, 'result': {'outcome': 'restored_previous'}}
+        _, diagnostic = self.bearer(['diagnose'])
+        record, core_reader = self.bearer(['core_read'])
+        with patch('app.services.maintenance_tasks.get_task', return_value=ordinary) as read_task, \
+             patch('app.services.maintenance_tasks.core_get', return_value=core) as read_core, \
+             patch('app.services.maintenance_tasks.submit_task') as submit, \
+             patch('app.services.maintenance_tasks.core_submit') as submit_core, \
+             patch('app.services.maintenance_tasks.revoke_core_binding', return_value={'revoked': True}):
+            response = remote.get(ordinary_path, headers=diagnostic)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json(), ordinary)
+            self.assertIn('no-store', response.headers['Cache-Control'])
+            self.assertEqual(remote.get(core_path, headers=diagnostic).status_code, 403)
+            self.assertEqual(remote.get(ordinary_path, headers=core_reader).status_code, 403)
+            response = remote.get(core_path, headers=core_reader)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json(), core)
+            self.assertIn('no-store', response.headers['Cache-Control'])
+
+            maintenance.revoke_grant(self.owner, record['id'])
+            self.assertEqual(remote.get(core_path, headers=core_reader).status_code, 401)
+            _, new_reader = self.bearer(['core_read'])
+            response = remote.get(core_path, headers=new_reader)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json(), core)
+            read_task.assert_called_once_with(task_id)
+            self.assertEqual(read_core.call_args_list, [call(task_id), call(task_id)])
+            submit.assert_not_called()
+            submit_core.assert_not_called()
 
     def test_core_request_lookup_is_authenticated_read_and_never_submits(self):
         remote=TestClient(main.app,base_url=ORIGIN);self.addCleanup(remote.close)

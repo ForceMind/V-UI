@@ -2,6 +2,12 @@
 
 更新：2026-11-11。此文件是当前开发顺序与阶段状态的唯一清单；使用方法见[文档首页](docs/README.md)，准确发布证据见[版本记录](docs/RELEASING.md#当前稳定版)，旧路线和阶段原文见[历史索引](docs/history/README.md)。
 
+## W4 正式面板交付
+
+以 [已审定设计稿 8486c56](https://github.com/ForceMind/V-UI/tree/8486c567ac7d03e0aabf3d65000ddb83f5d5f778/docs/ui-wireframes) 的顺序推进。客户端交付 [#180](https://github.com/ForceMind/V-UI/pull/180)、YAML 检查与恢复 [#181](https://github.com/ForceMind/V-UI/pull/181)、证书逐位置状态与重试 [#182](https://github.com/ForceMind/V-UI/pull/182) 保留草稿，各自保留准确提交验收记录。
+
+本批为 W4 的远程维护原任务查回。应用任务和核心任务分别按原编号读取，授权撤销后清除本页任务记录。交付门槛为准确提交的合成事件与隔离 API 验收，覆盖断开、串号、原任务查询及权限，结果在独立草稿 PR 记录。
+
 ## 已完成 P3：v0.4.24 与独立核心组件
 
 v0.4.24 应用已正式发布。应用源 `8b8d7cf82e55609a205455b351f659eb9de91974` 的十组 Actions、32 个 job 通过，覆盖四目标、实际新装、九个旧版保数据升级与两核组件资格。19 项应用资产通过匿名核验。 [主线验收](https://github.com/ForceMind/V-UI/pull/158) · [应用发布](https://github.com/ForceMind/V-UI/releases/tag/v0.4.24)
