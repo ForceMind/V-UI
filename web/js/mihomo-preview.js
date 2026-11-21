@@ -11,7 +11,7 @@
     let active = true, epoch = 0, busy = false, controller = null;
     let mergeReview = null, mergeSelects = [];
     let planOptions = null, planSelects = [], planDns = null, planRevision = null;
-    let writing = false;
+    let writing = false, savedRevision = null;
     const notices = {
         PARSER_BUSY: '解析器繁忙，请稍后手动重试。',
         PARSE_TIMEOUT: '解析超时，未生成报告；请缩小输入后重试。',
@@ -78,6 +78,7 @@
         }
         $('close-yaml-preview').disabled = writing;
         $('clear-yaml-preview').disabled = writing;
+        $('yaml-view-saved').hidden = !savedRevision;
     }
     function clearPlan() {
         planOptions = null;
@@ -162,7 +163,7 @@
         planRevision = revision;
         const panel = $('yaml-plan-choices');
         const hint = document.createElement('p');
-        hint.textContent = '保存仅更新运行草稿。当前版本的 YAML 运行应用仍在开发中。';
+        hint.textContent = '保存后，可回到路由计划检查并确认应用。';
         panel.append(hint);
         function selector(labelText, values) {
             const label = document.createElement('label');
@@ -188,6 +189,7 @@
     }
     function invalidate(keepReview = false) {
         epoch++;
+        savedRevision = null;
         if (controller) controller.abort();
         controller = null;
         busy = false;
@@ -274,7 +276,7 @@
         if (options) clearPlan();
         invalidate(download || options || save);
         const candidate = $('yaml-candidate').value, baseline = $('yaml-baseline').value;
-        if ((download || review || options || save) && !baseline.trim()) { notice('合并下载需要提供基线 YAML。'); return; }
+        if ((download || review || options || save) && !baseline.trim()) { notice('合并与运行草稿需要基线 YAML。'); return; }
         if (!candidate.trim()) { notice('请提供候选 YAML；可选基线留空表示不比较。'); return; }
         if (encoder.encode(candidate).length > LIMIT || encoder.encode(baseline).length > LIMIT) {
             notice('每份输入最多 1 MiB UTF-8 字节；请缩小输入。'); return;
@@ -387,12 +389,13 @@
                     response.headers.get('etag') !== '"' + result.revision + '"') throw Error();
                 planRevision = null;
                 saveConfirmed = true;
-                notice('YAML 运行草稿已保存。');
+                savedRevision = result.revision;
+                notice('运行草稿已保存，等待检查。');
                 return;
             }
             if (review) {
                 showConflicts(result, baseline, candidate);
-                notice(result.conflicts.length ? '请逐项选择，再点击“合并并下载 YAML”。' : '未发现合并冲突，可以下载。');
+                notice(result.conflicts.length ? '请逐项选择，再继续选择运行分组。' : '没有冲突。可继续选择运行分组或下载。');
                 return;
             }
             if (!result || typeof result !== 'object' || Array.isArray(result) ||
@@ -428,6 +431,14 @@
         $('yaml-candidate').focus();
     });
     $('close-yaml-preview').addEventListener('click', () => { if (writing) return; clear(); if (dialog.open) dialog.close(); });
+    $('yaml-view-saved').addEventListener('click', () => {
+        if (!active || !dialog.open || writing || !savedRevision) return;
+        const revision = savedRevision;
+        clear();
+        dialog.close();
+        $('yaml-preview-heading').focus();
+        dispatchEvent(new CustomEvent('vui-yaml-draft-view', {detail:revision}));
+    });
     $('clear-yaml-preview').addEventListener('click', clear);
     // Native close events are queued. An old close delivered after reopening
     // must not clear the new dialog session or abort its request.

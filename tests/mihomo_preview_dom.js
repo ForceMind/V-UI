@@ -28,7 +28,7 @@ class Element {
     set innerHTML(_) {assert.fail('Unsafe HTML sink');}
 }
 function fixture(realNavigation=false) {
-    const ids=new Map(), globals=new Map(), requests=[], queued=[], redirects=[], downloads=[], revoked=[], dispatched=[];
+    const ids=new Map(), globals=new Map(), requests=[], queued=[], redirects=[], downloads=[], revoked=[], dispatched=[], details=[];
     for(const match of html.matchAll(/<([\w-]+)\b[^>]*\bid="([^"]+)"[^>]*>/g)) {
         assert(!ids.has(match[2]), 'actual template IDs are unique');
         const element=new Element(match[2],match[1]);
@@ -45,7 +45,8 @@ function fixture(realNavigation=false) {
             }},
         TextEncoder, TextDecoder, AbortController,
         Event: class {constructor(type){this.type=type;}},
-        dispatchEvent:event=>dispatched.push(event.type),
+        CustomEvent: class {constructor(type, options){this.type=type;this.detail=options.detail;}},
+        dispatchEvent:event=>{dispatched.push(event.type);details.push(event.detail);},
         URL:{createObjectURL:()=> 'blob:private-fixture', revokeObjectURL:url=>revoked.push(url)},
         setTimeout:fn=>fn(),
         addEventListener:(name,fn)=>globals.set(name,[...(globals.get(name)||[]),fn]),
@@ -96,7 +97,7 @@ function fixture(realNavigation=false) {
     const emit=async(name,event={})=>{for(const fn of globals.get(name)||[])await fn(event);};
     const input=async(role,value)=>{get('yaml-'+role).value=value;await get('yaml-'+role).emit('input');};
     const select=async(role,file)=>{get('yaml-'+role+'-file').files=[file];get('yaml-'+role+'-file').value='fake-name';await get('yaml-'+role+'-file').emit('change');};
-    return {get,requests,queued,redirects,downloads,revoked,dispatched,emit,input,select,
+    return {get,requests,queued,redirects,downloads,revoked,dispatched,details,emit,input,select,
         nav:context.VUI_NAV,history:context.history,
         open:()=>get('open-yaml-preview').click(), close:()=>get('close-yaml-preview').click(),
         submit:()=>get('yaml-preview-form').emit('submit'),
@@ -116,9 +117,9 @@ async function ready(realNavigation=false) {const f=fixture(realNavigation);awai
 
 test('actual template declares isolated controller, limits, privacy and labels',()=>{
     assert(html.includes('/ui/js/mihomo-preview.js'));
-    assert(html.includes('发送给当前面板服务器处理，不是浏览器内离线解析'));
-    assert(html.includes('即使零诊断也不可应用'));
-    assert(html.includes('不能保证浏览器或操作系统内存擦除'));
+    assert(html.includes('文件由当前面板解析'));
+    assert(html.includes('服务器将原文存入私有材料区'));
+    assert(html.includes('关闭或离开会清空页面输入'));
     for(const id of ['yaml-candidate','yaml-baseline']) {
         const tag=html.match(new RegExp('<textarea[^>]*id="'+id+'"[^>]*>'))[0];
         assert(tag.includes('autocomplete="off"'));assert(tag.includes('spellcheck="false"'));
@@ -403,6 +404,16 @@ test('runtime draft options need explicit selections and save uses the reviewed 
     });
     assert.deepEqual(f.dispatched,['vui-yaml-draft-saved']);
     assert(f.get('yaml-plan-save').disabled);assert(f.notice().includes('已保存'));
+    assert(!f.get('yaml-view-saved').hidden);
+    const sent=f.requests.length;
+    await f.get('yaml-view-saved').click();
+    assert.equal(f.requests.length,sent,'handoff alone does not check or apply');
+    assert.deepEqual(f.dispatched,['vui-yaml-draft-saved','vui-yaml-draft-view']);
+    assert.equal(f.details.at(-1),'c'.repeat(64));
+    assert(!f.get('yaml-preview-dialog').open);
+    assert.equal(f.get('yaml-candidate').value,'');
+    assert.equal(f.get('yaml-baseline').value,'');
+    assert(f.get('yaml-preview-heading').focused);
 });
 
 test('editing inputs or changing conflict decisions invalidates runtime options',async()=>{
