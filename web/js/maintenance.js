@@ -17,7 +17,7 @@
         let operationView = null;
         let token = '', admin = false, ended = false, epoch = 0, busy = false, scopes = [], issuedID = '', coreScopes = [], normalExpires = 0;
         const controllers = new Set();
-        let taskTimer=null, taskSubmissionUncertain=false, watchingTask=null;
+        let taskTimer=null, taskSubmissionUncertain=false, watchingTask=null, taskChecking=false;
         let coreFacts=null, coreRows=[], coreWatching=null, coreTimer=null, coreUnknown=null, coreExpires=0, coreExpiryTimer=null;
         const clearCoreAuthority=message=>{
             clearTimeout(coreExpiryTimer);coreExpiryTimer=null;
@@ -43,6 +43,11 @@
             const retry=el('maintenance-core-retry');if(retry)retry.hidden=true;
             for(const id of ['maintenance-core-available','maintenance-core-progress','maintenance-core-pending','maintenance-core-task-list']){const node=el(id);if(node)node.textContent='';}
             for(const id of ['maintenance-core-backup-choice','maintenance-core-candidate-sing-box','maintenance-core-candidate-xray']){const node=el(id);if(node){node.textContent='';node.value='';}}
+            for (const prefix of ['maintenance-task','maintenance-core-task']) {
+                el(prefix+'-id').value='';
+                el(prefix+'-result').textContent='';
+            }
+            el('maintenance-task-progress').textContent='';
             const corePanel=el('maintenance-core-panel');if(corePanel)corePanel.hidden=true;
             const coreBox=el('maintenance-core-selection');if(coreBox)coreBox.textContent='';
             const hints=el('maintenance-core-hints');if(hints)hints.textContent='';
@@ -67,11 +72,15 @@
                 if (coreGrant && !exchange && (path==='maintenance/core-authority'||path==='maintenance/core-tasks'&&method==='POST'||/^maintenance\/core-requests\/[a-f0-9]{32}$/.test(path))) headers['X-VUI-Core-Authorization'] = coreGrant;
                 const response = await fetch('/api/' + path, {method, headers, credentials: token || exchange ? 'omit' : 'same-origin',
                     cache:'no-store', redirect:'error', signal:controller.signal, ...(data !== undefined ? {body:JSON.stringify(data)} : {})});
+                if (captured !== epoch) throw new Error('请求已取消。');
+                if (response.status === 401 && !exchange) {
+                    end(); notice('授权或登录已失效，请重新登录或获得维护授权。');
+                    throw Object.assign(new Error('维护授权已失效。'), {status:401});
+                }
                 const type=response.headers?.get('content-type')||'application/json';
                 const value=type.includes('json')?await response.json():await response.text();
                 if (captured !== epoch) throw new Error('请求已取消。');
                 if (!response.ok) {
-                    if (response.status === 401 && !exchange) { end(); notice('授权或登录已失效，请重新登录或获得维护授权。'); }
                     if(response.status===403&&headers['X-VUI-Core-Authorization'])clearCoreAuthority('独立核心维护授权已被拒绝，请从本机终端重新创建；仍可查询已有核心任务。');
                     const labels = {401:'授权无效、已兑换、已撤销或已到期。',403:'本次授权没有这项操作权限。',409:'当前状态不允许操作，请核对配置或稍后刷新。',422:'输入无效，请核对权限与有效期。',429:'请求过于频繁，请稍后再试。',503:'系统维护组件暂不可用，请使用终端检查服务。'};
                     throw Object.assign(new Error(labels[response.status] || '请求未完成，请检查服务后重试。'), {status:response.status,detail:value?.detail});
@@ -83,7 +92,13 @@
         const text = (parent, value) => { const p = document.createElement('p'); p.textContent = value; parent.append(p); };
         const record = parent => { const row = document.createElement('div'); row.className = 'maintenance-record'; parent.append(row); return row; };
         const allowed = action => admin || scopes.includes(action === 'upgrade' ? 'upgrade' : action === 'status' ? 'diagnose' : 'operate');
+        const taskID = value => typeof value==='string' && /^[a-f0-9]{32}$/.test(value);
+        const canReadTasks = () => admin || ['diagnose','operate','upgrade','destructive'].some(scope=>scopes.includes(scope));
         const sync = () => {
+            el('maintenance-continue-task').hidden = !watchingTask;
+            el('maintenance-continue-task').disabled = busy || ended || taskChecking;
+            el('maintenance-task-lookup-submit').disabled = busy || ended || !canReadTasks();
+            el('maintenance-core-task-lookup-submit').disabled = busy || ended || !scopes.includes('core_read');
             const coreButton=el('maintenance-core-refresh');if(coreButton)coreButton.disabled=busy||ended||!(admin||scopes.includes('core_read'));
             for(const core of ['sing-box','xray']){const button=el('maintenance-core-hints-'+core);if(button)button.disabled=busy||ended||!(admin||scopes.includes('core_read'));}
             el('maintenance-create').disabled = busy || ended;
@@ -114,53 +129,83 @@
                 })); entry.append(button);
             });
         };
+        const taskLabel = row => Object.hasOwn(actions,row.action) ? actions[row.action] : '维护任务';
+        const taskState = row => {
+            const state = row.state || row.status;
+            return Object.hasOwn(phases,state) ? phases[state] : '状态未确认';
+        };
+        const renderTask = (box,row) => {
+            const entry = record(box);
+            text(entry, taskLabel(row)+' · '+taskState(row));
+            text(entry, '任务编号 '+row.id);
+            text(entry, '创建时间 '+time(row.created_at));
+            const version = row.result?.version;
+            if (typeof version==='string' && /^v?[0-9]{1,8}\.[0-9]{1,8}\.[0-9]{1,8}$/.test(version)) text(entry,'目标版本 '+version);
+            const code = row.error || row.code;
+            if (typeof code==='string' && /^MAINTENANCE_[A-Z0-9_]{1,65}$/.test(code)) text(entry,'结果代码 '+code);
+        };
+        const readTask = async id => {
+            const row=await request('maintenance/tasks/'+id);
+            if (row?.id!==id || !Object.hasOwn(actions,row.action) || !Object.hasOwn(phases,row.state || row.status)) {
+                throw new Error('维护任务响应无效');
+            }
+            return row;
+        };
         const tasks = async () => {
             const value = await request('maintenance/tasks');
-            const rows = Array.isArray(value) ? value : value.tasks || [];
+            if (ended) return;
+            const rows = (Array.isArray(value) ? value : value.tasks || []).filter(row=>taskID(row?.id));
             const box = el('maintenance-tasks'); box.textContent = '';
             if (!rows.length) text(box, '暂无维护任务。');
             const select=el('maintenance-backup-id'),chosen=select.value;select.textContent='';
             const empty=document.createElement('option');empty.value='';empty.textContent='选择一个成功完成的私有备份';select.append(empty);
             rows.filter(row=>row.action==='backup'&&row.state==='succeeded'&&/^[a-f0-9]{32}$/.test(row.id)).forEach(row=>{const option=document.createElement('option');option.value=row.id;option.textContent=time(row.created_at)+' · 私有备份';select.append(option);});
             if(rows.some(row=>row.id===chosen&&row.action==='backup'&&row.state==='succeeded'))select.value=chosen;
-            rows.forEach(row => {
-                const entry = record(box);
-                text(entry, (actions[row.action] || '维护任务') + ' · ' + (phases[row.state || row.status] || '状态未确认'));
-                text(entry, '任务 ID：' + row.id);
-                text(entry, '创建时间：' + time(row.created_at));
-                if (/^v?[0-9]+\.[0-9]+\.[0-9]+$/.test(row.result?.version || '')) text(entry, '目标版本：' + row.result.version);
-                if (row.error || row.code) text(entry, '结果代码：' + String(row.error || row.code).replace(/[^A-Z0-9_-]/g, '').slice(0,80));
-            });
+            rows.forEach(row=>renderTask(box,row));
         };
         const watchTask=async(id,attempt=0)=>{
-            if(ended||watchingTask!==id)return;
-            const captured=epoch;
-            try{
-                const row=await request('maintenance/tasks/'+id);
-                if(ended||epoch!==captured||watchingTask!==id)return;
-                const state=row.state||row.status;
-                if(['succeeded','failed','interrupted','success','completed'].includes(state)){
-                    watchingTask=null;sync();await tasks();notice((actions[row.action]||'维护任务')+'：'+(phases[state]||'已结束')+'。请按结果核对服务状态。');return;
+            if (ended || watchingTask!==id || taskChecking) return;
+            taskChecking=true; sync();
+            try {
+                const row=await readTask(id);
+                if (ended || watchingTask!==id) return;
+                el('maintenance-task-progress').textContent='任务 '+id+' · '+taskState(row);
+                if (['succeeded','failed','interrupted','success','completed'].includes(row.state || row.status)) {
+                    watchingTask=null;
+                    notice(taskLabel(row)+' · '+taskState(row)+'。请按结果核对服务状态。');
+                    await tasks();
+                    return;
                 }
-                notice('任务'+(phases[state]||'状态待确认')+'，正在自动读取进度；不要重复提交。');
-            }catch(_){if(ended||epoch!==captured)return;notice('面板可能正在重启，正在重新读取已有任务；不会重复提交。');}
-            if(attempt<59)taskTimer=setTimeout(()=>watchTask(id,attempt+1),5000);
-            else{watchingTask=null;taskSubmissionUncertain=true;const ack=el('maintenance-task-ack');if(ack)ack.hidden=false;sync();notice('自动等待已结束，任务结果仍需核对。点击“刷新维护任务”，不要再次提交同一操作。');}
+                notice('正在读取原任务进度。');
+            } catch (_) {
+                if (ended || watchingTask!==id) return;
+                notice('暂时无法读取原任务，正在重新连接。');
+            } finally {
+                taskChecking=false;
+                if (!ended) sync();
+            }
+            if (attempt<59) taskTimer=setTimeout(()=>watchTask(id,attempt+1),5000);
+            else notice('自动等待已暂停。点击“继续查回原任务”读取同一编号。');
         };
         const submitTask=async body=>{
             if(taskSubmissionUncertain||watchingTask)return;
-            // Mark before the POST; a lost reply is never retried automatically.
+            // A missing POST reply cannot be matched to a system task ID.
             taskSubmissionUncertain=true;sync();
-            try{
-                const row=await request('maintenance/tasks','POST',body);
-                if(!/^[a-f0-9]{32}$/.test(row.id||''))throw new Error('Invalid task response');
-                taskSubmissionUncertain=false;watchingTask=row.id;notice('维护任务已登记，正在自动读取进度。');
-                clearTimeout(taskTimer);taskTimer=setTimeout(()=>watchTask(row.id),1000);await tasks();
-            }catch(error){
+            let row;
+            try {
+                row=await request('maintenance/tasks','POST',body);
+                if(!taskID(row?.id))throw new Error('Invalid task response');
+            } catch (error) {
                 if([400,403,409,422,429].includes(error.status))taskSubmissionUncertain=false;
-                else{const ack=el('maintenance-task-ack');if(ack)ack.hidden=false;}
+                else if (!ended) el('maintenance-task-ack').hidden=false;
                 throw error;
             }
+            if (ended) return;
+            taskSubmissionUncertain=false;watchingTask=row.id;
+            el('maintenance-task-progress').textContent='任务 '+row.id+' · 已登记';
+            notice('维护任务已登记，正在自动读取进度。');
+            taskTimer=setTimeout(()=>watchTask(row.id),1000);
+            await tasks();
         };
         const ack=el('maintenance-task-ack');if(ack)ack.addEventListener('click',()=>run(async()=>{
             await tasks();if(!confirm('请确认已核对任务记录和实际服务状态。上次请求可能已执行，允许下一次操作并不会撤销它。继续？'))return;
@@ -345,18 +390,30 @@
             if(coreFacts.candidate_error)text(box,'官方候选查询未完成，请稍后重新检查。当前空列表不表示没有可用更新。');
             renderCoreBackups();coreSync();
         };
+        const renderCoreRow = (box,row) => {
+            const entry=record(box);
+            text(entry,coreActions[row.action]+' · '+taskState(row)+' · '+corePhases[row.phase]);
+            text(entry,'任务编号 '+row.id);
+            text(entry,'创建时间 '+time(row.created_at));
+            if(row.result?.version)text(entry,'目标版本 '+row.result.version);
+            if(coreOutcomes[row.result?.outcome])text(entry,coreOutcomes[row.result.outcome]);
+            if(row.result?.panel_running===false)text(entry,'面板服务保持停止。');
+            if(row.result?.pending||row.state==='failed')text(entry,'请检查当前状态；有未完成操作时先恢复。');
+        };
+        const readCoreTask = async id => {
+            const row=checkedCoreTask(await request('maintenance/core-tasks/'+id));
+            if (row.id!==id) throw new Error('核心任务身份不符');
+            return row;
+        };
         const renderCoreRows=()=>{
             const box=el('maintenance-core-task-list');box.textContent='';
             if(!coreRows.length)text(box,'暂无核心维护任务。');
-            for(const row of coreRows){const entry=record(box);text(entry,time(row.created_at)+' · '+coreActions[row.action]+' · '+({queued:'排队中',running:'执行中',succeeded:'已完成',failed:'未完成'}[row.state])+' · '+corePhases[row.phase]);
-                if(row.result?.version)text(entry,'目标版本：'+row.result.version);
-                if(coreOutcomes[row.result?.outcome])text(entry,coreOutcomes[row.result.outcome]);
-                if(row.result?.panel_running===false)text(entry,'面板服务保持停止。需要启动时请从本机终端明确启动。');
-                if(row.result?.pending||row.state==='failed')text(entry,'请检查当前状态；有未完成操作时先恢复，不要重复发起变更。');}
+            for (const row of coreRows) renderCoreRow(box,row);
             renderCoreBackups();coreSync();
         };
         const readCoreRows=async()=>{
             const value=await request('maintenance/core-tasks');
+            if (ended) return [];
             if(!Array.isArray(value)||value.length>1024)throw new Error('核心任务列表无效');
             const rows=value.map(checkedCoreTask);if(new Set(rows.map(row=>row.id)).size!==rows.length)throw new Error('核心任务列表无效');
             coreRows=rows;renderCoreRows();return rows;
@@ -370,8 +427,7 @@
             if(ended||coreWatching!==id)return;
             const captured=epoch;
             try{
-                const row=checkedCoreTask(await request('maintenance/core-tasks/'+id));
-                if(row.id!==id)throw new Error('核心任务身份不符');
+                const row=await readCoreTask(id);
                 if(ended||epoch!==captured||coreWatching!==id)return;
                 coreRows=[row,...coreRows.filter(value=>value.id!==id)];renderCoreRows();
                 if(['succeeded','failed'].includes(row.state)){coreWatching=null;coreCompleted(row);return;}
@@ -389,10 +445,15 @@
         const refreshCore=async()=>{
             if(coreUnknown&&coreGrant){
                 const own=coreUnknown;
+                own.notFound=false;coreSync();
                 const value=await request('maintenance/core-requests/'+own.nonce);
                 if(ended||coreUnknown!==own)return;
                 if(exact(value,['not_found'])&&value.not_found===true){own.notFound=true;coreSync();coreProgress('尚未找到原操作记录。可点击“重新确认登记原操作”，只确认同一个请求，不会创建另一项操作。');}
-                else{const row=checkedCoreTask(value);coreUnknown=null;trackCore(row);}
+                else {
+                    const row=checkedCoreTask(value);
+                    if (row.action!==own.action) throw new Error('核心任务动作不符');
+                    coreUnknown=null;trackCore(row);
+                }
                 return;
             }
             const rows=await readCoreRows();
@@ -497,6 +558,32 @@
         el('maintenance-end').addEventListener('click', () => { end(); notice('本页维护会话已清除。'); });
         el('maintenance-refresh-grants').addEventListener('click', () => run(grants));
         el('maintenance-refresh-tasks').addEventListener('click', () => run(tasks));
+        el('maintenance-continue-task').addEventListener('click', () => run(async () => {
+            if (!watchingTask || taskChecking) return;
+            clearTimeout(taskTimer);
+            await watchTask(watchingTask);
+        }));
+        for (const [prefix,permitted,read,render] of [
+            ['maintenance-task',canReadTasks,readTask,renderTask],
+            ['maintenance-core-task',()=>scopes.includes('core_read'),readCoreTask,renderCoreRow]
+        ]) {
+            el(prefix+'-lookup').addEventListener('submit', event => {
+                event.preventDefault();
+                run(async () => {
+                    if (!permitted()) return;
+                    const id=el(prefix+'-id').value.trim();
+                    const box=el(prefix+'-result');
+                    box.textContent='';
+                    if (!taskID(id)) {text(box,'请输入维护记录中的 32 位小写十六进制编号。');return;}
+                    try {
+                        const row=await read(id);
+                        if (!ended) render(box,row);
+                    } catch (_) {
+                        if (!ended) text(box,'原任务尚未确认，请核对编号、授权和维护组件状态。');
+                    }
+                });
+            });
+        }
         el('maintenance-refresh-audit').addEventListener('click', () => run(audit));
         el('maintenance-refresh-logs').addEventListener('click', () => run(logs));
         el('maintenance-refresh-status').addEventListener('click', () => run(installation));
