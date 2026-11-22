@@ -524,9 +524,6 @@ def _uri_profile(text):
         if not re.fullmatch(r"[1-9][0-9]{0,4}", raw_port):
             _fail("INVALID_PORT", "An explicit canonical upstream port is required")
         query = _uri_query(parts)
-        for key, value in query.items():
-            literal_string(key)
-            literal_string(value)
         transport = query.get("type", "tcp")
         mode = query.get("security")
         # headerType=none explicitly selects ordinary TCP framing. Reject
@@ -534,6 +531,9 @@ def _uri_profile(text):
         fields = URI_FIELDS | {"headerType"} if query.get("headerType") == "none" else URI_FIELDS
         if _packet_encoding_requested(query, fields, "packetEncoding"):
             _reject_udp_capability()
+        for key, value in query.items():
+            literal_string(key)
+            literal_string(value)
         if transport != "tcp":
             _fail("UNSUPPORTED_TRANSPORT", "Only direct TCP transport is qualified for upstream import")
         if query.get("headerType") == "http" or "path" in query or "host" in query:
