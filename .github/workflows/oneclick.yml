@@ -28,14 +28,21 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements-test.txt
+      - name: Prepare fixed core source metadata
+        env:
+          VUI_CI_METADATA_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -m 700 /tmp/vui-oneclick
+          python -B -m scripts.ci_github_metadata cores --output /tmp/vui-oneclick/core-metadata.json
       - name: Build exact candidate for installer test
         env:
           SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE"
-          mkdir -m 700 /tmp/vui-oneclick
-          python scripts/build_bundle.py /tmp/vui-oneclick/vui-linux.zip --source-commit "$SOURCE" | tee /tmp/vui-oneclick/build.log
+          python scripts/build_bundle.py /tmp/vui-oneclick/vui-linux.zip --source-commit "$SOURCE" \
+            --core-metadata /tmp/vui-oneclick/core-metadata.json | tee /tmp/vui-oneclick/build.log
       - name: Assemble exact candidate kit for combined installation acceptance
         env:
           SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -291,6 +298,14 @@ jobs:
             cd /tmp/vui-oneclick
             sha256sum -c vui-linux.zip.sha256
           )
+      - name: Prepare fixed public release metadata
+        env:
+          VUI_CI_METADATA_TOKEN: ${{ github.token }}
+          OLD_VERSION: ${{ matrix.version }}
+        run: |
+          set -euo pipefail
+          python -B -m scripts.ci_github_metadata release --version "$OLD_VERSION" \
+            --output /tmp/vui-oneclick/published-metadata.json
       - name: Test published v${{ matrix.version }} to exact candidate upgrade on ephemeral systemd runner
         env:
           SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -304,7 +319,7 @@ jobs:
           python -B -m scripts.acceptance_job run-test \
             --role "$ACCEPTANCE_ROLE" --source "$SOURCE" --version "$CANDIDATE_VERSION" \
             --identity /tmp/vui-oneclick/identity.json --log /tmp/vui-oneclick/acceptance.log \
-            --old-source "$OLD_SOURCE"
+            --old-source "$OLD_SOURCE" --published-metadata /tmp/vui-oneclick/published-metadata.json
       - name: Record acceptance receipt
         env:
           SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}

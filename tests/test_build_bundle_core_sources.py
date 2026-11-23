@@ -15,6 +15,9 @@ import urllib.error
 import urllib.request
 
 
+from scripts.ci_github_metadata import CORE_TAGS
+
+
 SOURCE = Path(__file__).resolve().parents[1] / 'scripts/build_bundle.py'
 
 
@@ -23,7 +26,7 @@ def load_core_sources():
     tree = ast.parse(SOURCE.read_text())
     function, = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'core_sources']
     namespace = dict(Path=Path, urllib=urllib, json=json, socket=socket, re=re,
-                     tarfile=tarfile, io=io, hashlib=hashlib)
+                     tarfile=tarfile, io=io, hashlib=hashlib, CORE_TAGS=CORE_TAGS)
     exec(compile(ast.Module(body=[function], type_ignores=[]), str(SOURCE), 'exec'), namespace)
     return namespace['core_sources']
 
@@ -62,6 +65,16 @@ class CoreSourceReadTests(unittest.TestCase):
                 self.assertEqual((Path(temporary)/'third_party/core-licenses'/(name+'-LICENSE')).read_bytes(),b'synthetic upstream license\n')
         self.assertTrue(all(response.closed for response in responses))
         return get.call_args_list
+
+    def test_prepared_commit_downloads_immutable_archives_without_api_requests(self):
+        commits = {'sing-box': 'a' * 40, 'xray': 'b' * 40}
+        with tempfile.TemporaryDirectory() as temporary, patch.object(
+                urllib.request, 'urlopen', side_effect=[io.BytesIO(self.archive), io.BytesIO(self.archive)]) as get:
+            self.core_sources(Path(temporary), prepared_commits=commits)
+        self.assertEqual([call.args[0] for call in get.call_args_list], [
+            'https://codeload.github.com/SagerNet/sing-box/tar.gz/' + commits['sing-box'],
+            'https://codeload.github.com/XTLS/Xray-core/tar.gz/' + commits['xray'],
+        ])
 
     def test_original_success_uses_each_exact_tag_once_and_retains_sources_and_licenses(self):
         calls = self.exercise()
