@@ -375,8 +375,10 @@ class PublishedUpgrade:
         test.assertNotEqual(self.candidate['version'], self.old_version)
         _target_contract(self.candidate['version'], self.old_version)
         self.old_source = Path(os.environ['VUI_PUBLISHED_UPGRADE_SOURCE'])
+        metadata = os.environ.get('VUI_PUBLISHED_METADATA')
+        metadata_args = {'prepared_metadata': Path(metadata)} if metadata else {}
         self.old = published_commands(self.old_source, self.old_version, self.old_commit,
-                                      certificate_args, configured_args)
+                                      certificate_args, configured_args, **metadata_args)
         self.new = fixture_commands(source, work, self.kit, certificate_args, configured_args)
 
     def _service_python(self, release, program):

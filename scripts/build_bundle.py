@@ -21,6 +21,7 @@ sys.dont_write_bytecode=True
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from app.release_tools import PLATFORM,create_archive,supported_environment
+from scripts.ci_github_metadata import CORE_TAGS
 from vendor_frontend import fetch as fetch_frontend
 from fetch_test_cores import fetch as fetch_cores
 from fetch_portable_runtimes import fetch as fetch_runtimes, PINS as RUNTIME_PINS
@@ -28,29 +29,37 @@ from platform_support import target_key as detected_target
 from prepare_frontend import prepare as prepare_frontend
 
 
-def core_sources(payload: Path):
+def core_sources(payload: Path, *, prepared_commits=None):
     """Retain the upstream release-tag sources and license alongside binaries."""
     output=payload/'sources';output.mkdir(mode=0o700)
     licenses=payload/'third_party/core-licenses';licenses.mkdir(parents=True,exist_ok=True,mode=0o700)
     proof={}
-    for name,repo,tag in [('sing-box','SagerNet/sing-box','v1.14.2'),('xray','XTLS/Xray-core','v26.3.27')]:
-        request=urllib.request.Request(f'https://api.github.com/repos/{repo}/commits/{tag}',headers={'User-Agent':'V-UI-release-builder'})
-        # Fixed repo/tag GET only: at most two 30s requests, without a new source.
-        for attempt in range(2):
-            try:
-                with urllib.request.urlopen(request,timeout=30) as response:
-                    commit=json.load(response)['sha']
-                break
-            except urllib.error.HTTPError as error:
-                error.close()
-                if error.code not in (500,502,503,504) or attempt:
-                    raise
-            except (TimeoutError,socket.timeout):
-                if attempt:
-                    raise
-            except urllib.error.URLError as error:
-                if not isinstance(error.reason,(TimeoutError,socket.timeout)) or attempt:
-                    raise
+    if prepared_commits is not None and (
+            not isinstance(prepared_commits, dict) or set(prepared_commits) != {name for name, _, _ in CORE_TAGS}
+            or any(not isinstance(commit, str) or not re.fullmatch(r'[a-f0-9]{40}', commit)
+                   for commit in prepared_commits.values())):
+        raise ValueError('Invalid prepared core source commits')
+    for name,repo,tag in CORE_TAGS:
+        if prepared_commits is not None:
+            commit = prepared_commits[name]
+        else:
+            request=urllib.request.Request(f'https://api.github.com/repos/{repo}/commits/{tag}',headers={'User-Agent':'V-UI-release-builder'})
+            # Fixed repo/tag GET only: at most two 30s requests, without a new source.
+            for attempt in range(2):
+                try:
+                    with urllib.request.urlopen(request,timeout=30) as response:
+                        commit=json.load(response)['sha']
+                    break
+                except urllib.error.HTTPError as error:
+                    error.close()
+                    if error.code not in (500,502,503,504) or attempt:
+                        raise
+                except (TimeoutError,socket.timeout):
+                    if attempt:
+                        raise
+                except urllib.error.URLError as error:
+                    if not isinstance(error.reason,(TimeoutError,socket.timeout)) or attempt:
+                        raise
         if not re.fullmatch('[a-f0-9]{40}',commit):raise ValueError('Invalid upstream source commit')
         url=f'https://codeload.github.com/{repo}/tar.gz/{commit}'
         with urllib.request.urlopen(url,timeout=90) as response:data=response.read(50_000_001)
@@ -95,7 +104,9 @@ def wheel_lock(payload: Path, key: str):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('destination',type=Path)
-    p.add_argument('--source-commit',required=True);p.add_argument('--target');args=p.parse_args()
+    p.add_argument('--source-commit',required=True);p.add_argument('--target')
+    p.add_argument('--core-metadata', type=Path)
+    args=p.parse_args()
     os.umask(0o077)
     if os.name!='posix':raise ValueError('Linux build environment required')
     if not re.fullmatch('[a-f0-9]{40}',args.source_commit):raise ValueError('Exact source commit required')
@@ -123,7 +134,17 @@ def main():
         arch=key.split('-',1)[0]
         fetch_cores(payload/'cores'/arch,key)
         fetch_runtimes(payload/'runtimes',[key])
-        core_sources(payload)
+        if args.core_metadata is None:
+            core_sources(payload)
+        else:
+            with args.core_metadata.open('rb') as metadata:
+                raw_metadata = metadata.read(1025)
+            if len(raw_metadata) > 1024:
+                raise ValueError('Prepared core metadata exceeds bound')
+            prepared_commits = json.loads(raw_metadata)
+            if not isinstance(prepared_commits, dict):
+                raise ValueError('Invalid prepared core source commits')
+            core_sources(payload, prepared_commits=prepared_commits)
         wheel_lock(payload,key)
         # Included bin hashes, npm archive integrities and lock files are themselves
         # protected by the final manifest and independent archive SHA-256.
