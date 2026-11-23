@@ -79,7 +79,8 @@ def _get(path, token):
 
 
 def prepare(kind, version, token):
-    if not token or not re.fullmatch(r'[A-Za-z0-9_]+', token):
+    # Treat Actions installation tokens as opaque Bearer values, including JWT form.
+    if not token or not re.fullmatch(r'[A-Za-z0-9._~+/-]+=*', token):
         raise ValueError('Scoped Actions token required')
     if kind == 'cores':
         result = {}

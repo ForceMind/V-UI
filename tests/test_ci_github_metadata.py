@@ -10,7 +10,7 @@ from urllib.error import HTTPError
 from scripts import ci_github_metadata as metadata
 
 
-TOKEN = 'fake_only_metadata_token'
+TOKEN = 'ghs_12345_synthetic-header.synthetic_payload.synthetic-signature'
 TAG_PATH = '/repos/ForceMind/V-UI/releases/tags/v0.4.19'
 
 
@@ -46,8 +46,9 @@ class GitHubMetadataTests(unittest.TestCase):
                 metadata.prepare('release', '../../arbitrary', TOKEN)
             with self.assertRaisesRegex(ValueError, 'Stable public release'):
                 metadata.prepare('release', '0.4.20', TOKEN)
-        with self.assertRaisesRegex(ValueError, 'Scoped Actions token required'):
-            metadata.prepare('cores', None, '')
+        for bad_token in ('', 'injected\r\nAuthorization: other'):
+            with self.assertRaisesRegex(ValueError, 'Scoped Actions token required'):
+                metadata.prepare('cores', None, bad_token)
 
     def test_rate_limit_one_retry_then_fail_without_waiting_again(self):
         errors = [HTTPError(metadata.API + TAG_PATH, 403, 'limited', {'Retry-After': '2'}, io.BytesIO())
