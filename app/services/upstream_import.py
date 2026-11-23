@@ -44,6 +44,7 @@ MAX_WORKER_OUTPUT_BYTES = 256 * 1024
 MAX_CONCURRENT_PARSERS = 2
 _PARSER_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_PARSERS)
 SOURCE_FORMATS = frozenset({"uri", "v2ray-json", "clash-yaml"})
+URI_START = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
 FORMAT_ALIASES = {"json": "v2ray-json", "xray-json": "v2ray-json", "yaml": "clash-yaml"}
 URI_FIELDS = frozenset({"type", "security", "encryption", "flow", "fp", "pbk", "sid", "sni", "alpn"})
 XRAY_IGNORED_SECTIONS = frozenset({"log", "inbounds", "routing", "dns", "policy", "api", "stats",
@@ -58,7 +59,8 @@ CLASH_IGNORED_SECTIONS = frozenset({
 })
 CLASH_FIELDS = frozenset({"name", "type", "server", "port", "uuid", "network", "tls", "servername", "alpn",
                           "client-fingerprint", "flow", "skip-cert-verify", "udp", "reality-opts"})
-KNOWN_URI_SCHEMES = frozenset({"vless", "vmess", "trojan", "ss", "ssr", "hysteria", "hysteria2", "hy2", "tuic"})
+KNOWN_URI_SCHEMES = frozenset({"vless", "vmess", "trojan", "ss", "ssr", "hysteria", "hysteria2", "hy2", "tuic",
+                              "tg", "wireguard", "amneziawg"})
 
 
 class UpstreamImportError(UpstreamValidationError):
@@ -491,13 +493,18 @@ def _uri_parts(text):
         _fail("INVALID_URI", "Invalid percent encoding in share URI")
     try:
         parts = urlsplit(text)
-        if parts.scheme not in KNOWN_URI_SCHEMES:
+        if parts.scheme not in KNOWN_URI_SCHEMES or (parts.scheme == "tg" and parts.netloc != "proxy"):
             _fail("UNSUPPORTED_FORMAT", "Remote subscriptions and unknown URI formats are not supported")
         return parts
     except ValueError as error:
         if isinstance(error, UpstreamValidationError):
             raise
         _fail("INVALID_URI", "Invalid share URI")
+
+
+def _uri_query(parts):
+    return _duplicate_object(parse_qsl(parts.query, keep_blank_values=True, strict_parsing=True,
+                                       encoding="utf-8", errors="strict", max_num_fields=32))
 
 
 def _uri_profile(text):
@@ -516,19 +523,36 @@ def _uri_profile(text):
         raw_port = parts.netloc.rsplit(":", 1)[-1]
         if not re.fullmatch(r"[1-9][0-9]{0,4}", raw_port):
             _fail("INVALID_PORT", "An explicit canonical upstream port is required")
-        pairs = parse_qsl(parts.query, keep_blank_values=True, strict_parsing=True,
-                          encoding="utf-8", errors="strict", max_num_fields=32)
-        query = _duplicate_object(pairs)
-        if _packet_encoding_requested(query, URI_FIELDS, "packetEncoding"):
+        query = _uri_query(parts)
+        transport = query.get("type", "tcp")
+        mode = query.get("security")
+        # headerType=none explicitly selects ordinary TCP framing. Reject
+        # everything else that would require an unrepresented TCP header.
+        fields = URI_FIELDS | {"headerType"} if query.get("headerType") == "none" else URI_FIELDS
+        if _packet_encoding_requested(query, fields, "packetEncoding"):
             _reject_udp_capability()
-        strict_mapping(query, URI_FIELDS, {"security", "sni"})
         for key, value in query.items():
             literal_string(key)
             literal_string(value)
+        if transport != "tcp":
+            _fail("UNSUPPORTED_TRANSPORT", "Only direct TCP transport is qualified for upstream import")
+        if query.get("headerType") == "http" or "path" in query or "host" in query:
+            _fail("UNSUPPORTED_TCP_HEADER", "TCP with HTTP header settings is not qualified for upstream import")
+        if mode == "reality" and "support-x25519mlkem768" in query:
+            _fail("UNSUPPORTED_REALITY_KEY_EXCHANGE", "This REALITY link declares an unqualified hybrid key exchange")
+        if mode == "reality" and ("spx" in query or "pqv" in query):
+            _fail("UNSUPPORTED_REALITY_OPTIONS", "This REALITY link requires options the upstream profile cannot preserve")
+        strict_mapping(query, fields, {"security"})
+        if mode not in {"tls", "reality"}:
+            _fail("UNSUPPORTED_SECURITY", "Only verified TLS or REALITY is supported")
+        if "sni" not in query:
+            if mode == "tls":
+                _fail("MISSING_TLS_SERVER_NAME", "Enter the TLS certificate DNS name explicitly before importing")
+            _fail("MISSING_FIELD", "REALITY requires an explicitly supplied DNS server name")
         name = unquote(parts.fragment, encoding="utf-8", errors="strict") if parts.fragment else "Imported upstream"
         uid = unquote(parts.username, encoding="utf-8", errors="strict")
         return _base(name, parts.hostname, port, uid, query["security"], query["sni"],
-                     transport=query.get("type", "tcp"), flow=query.get("flow", ""),
+                     transport=transport, flow=query.get("flow", ""),
                      encryption=query.get("encryption", "none"),
                      alpn=query["alpn"].split(",") if "alpn" in query else [],
                      fingerprint=query.get("fp", ""), key=query.get("pbk", ""), short=query.get("sid", ""))
@@ -625,14 +649,20 @@ def _safe_summary(candidate, source_format, index, profile, error):
     name, protocol, host, port, transport, mode = "Unsupported upstream", "unknown", "", None, "", ""
     raw_name, raw_host, raw_port, raw_transport, raw_mode = None, None, None, None, None
     if source_format == "uri":
-        parts = _uri_parts(candidate)
-        protocol = parts.scheme
-        if protocol == "vless":
-            try:
-                raw_host, raw_port = parts.hostname, parts.port
-                raw_name = unquote(parts.fragment, encoding="utf-8", errors="strict")
-            except (ValueError, UnicodeError):
-                pass
+        try:
+            parts = _uri_parts(candidate)
+        except UpstreamValidationError:
+            parts = None
+        if parts is not None:
+            protocol = "mtproto" if parts.scheme == "tg" else parts.scheme
+            if protocol == "vless":
+                try:
+                    raw_host, raw_port = parts.hostname, parts.port
+                    raw_name = unquote(parts.fragment, encoding="utf-8", errors="strict")
+                    query = _uri_query(parts)
+                    raw_transport, raw_mode = query.get("type", "tcp"), query.get("security")
+                except (ValueError, UnicodeError):
+                    pass
     elif type(candidate) is dict:
         key = "protocol" if source_format == "v2ray-json" else "type"
         known = {"vless", "vmess", "trojan", "ss", "shadowsocks", "socks", "http", "hysteria2", "tuic", "freedom", "blackhole", "direct", "reject"}
@@ -669,15 +699,21 @@ def _parse(raw, source_format, selected_index):
     if not text:
         _fail("EMPTY_INPUT", "Provide an upstream share URI or configuration")
     if source_format == "auto":
-        if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", text):
+        if URI_START.match(text):
             source_format = "uri"
         elif text.startswith(("{", "[")):
             source_format = "v2ray-json"
         else:
             source_format = "clash-yaml"
     if source_format == "uri":
-        _uri_parts(text)
-        candidates, ignored, convert = [text], [], _uri_profile
+        lines = [line for line in (row.strip(" \t\r") for row in text.split("\n")) if line]
+        if len(lines) > MAX_CANDIDATES:
+            _fail("CANDIDATE_LIMIT", "The import contains more than 128 candidates")
+        if len(lines) == 1 or not all(URI_START.match(line) for line in lines):
+            # Preserve single-link errors and reject embedded newline fragments
+            # that cannot be separated into a complete list of share links.
+            _uri_parts(text)
+        candidates, ignored, convert = lines, [], _uri_profile
     else:
         document = _load_json(text) if source_format == "v2ray-json" else _load_yaml(text)
         _validate_tree(document)

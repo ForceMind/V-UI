@@ -23,6 +23,7 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 
+from scripts.ci_github_metadata import MAX_METADATA, RETRY_WINDOW, retry_rate_limit
 from scripts.publish_release import ASSETS, installation_command
 from scripts.ops_menu_smoke import MenuSession
 
@@ -192,7 +193,7 @@ with pathlib.Path(LOG).open('a') as stream:
             'download_log': log}
 
 
-def published_commands(source, version, commit, certificate_args, configured_args):
+def published_commands(source, version, commit, certificate_args, configured_args, *, prepared_metadata=None):
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version) or (source / 'VERSION').read_text().strip() != version:
         raise AssertionError('Published version differs from checked out source')
     if subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip() != commit:
@@ -212,16 +213,16 @@ def published_commands(source, version, commit, certificate_args, configured_arg
                 result._verified_asset_urls = expected
             return result
     opener = build_opener(ProxyHandler({}), AssetRedirect())
-    def open_response(request):
+    def open_response(request, timeout):
         try:
-            return opener.open(request, timeout=60)
+            return opener.open(request, timeout=timeout)
         except HTTPError as error:
             error.close()
             raise
-    def attempt(request, limit):
+    def attempt(request, limit, timeout=60):
         # A read timeout can follow partial internal buffering. Publish no bytes
         # until this complete bounded read succeeds; the context always closes.
-        with open_response(request) as response:
+        with open_response(request, timeout) as response:
             if urlsplit(response.geturl()).scheme != 'https':
                 raise AssertionError('Public acceptance must retain HTTPS')
             expected = getattr(request, '_verified_asset_urls', None)
@@ -233,9 +234,22 @@ def published_commands(source, version, commit, certificate_args, configured_arg
         return data
     def read(url, limit, asset=None):
         request = Request(url, headers={'User-Agent': 'V-UI-public-install-acceptance'})
+        deadline = time.monotonic() + RETRY_WINDOW
         try:
             return attempt(request, limit)
         except (HTTPError, TimeoutError, socket.timeout, URLError) as error:
+            if (prepared_metadata is not None and asset is not None
+                    and isinstance(error, HTTPError) and error.code in (403, 429)):
+                phase = f'Public v{version} asset {asset["name"]}'
+                if retry_rate_limit(error, phase, deadline):
+                    try:
+                        timeout = min(60, max(1, deadline - time.monotonic()))
+                        return attempt(request, limit, timeout)
+                    except HTTPError as final:
+                        if final.code in (403, 429):
+                            retry_rate_limit(final, phase, 0)
+                        raise
+                raise
             timeout = isinstance(error, (TimeoutError, socket.timeout)) or (
                 isinstance(error, URLError) and isinstance(error.reason, (TimeoutError, socket.timeout)))
             eligible = error.code in (502, 503, 504) if isinstance(error, HTTPError) else timeout
@@ -258,7 +272,14 @@ def published_commands(source, version, commit, certificate_args, configured_arg
                                                'Accept': 'application/octet-stream'})
             request._verified_asset_urls = (url, api_url)
             return attempt(request, limit)  # One fresh alternate read; no third call or partial-byte reuse.
-    release = json.loads(read(metadata_url, 1_000_000))
+    if prepared_metadata is None:
+        raw_metadata = read(metadata_url, MAX_METADATA)
+    else:
+        with prepared_metadata.open('rb') as stream:
+            raw_metadata = stream.read(MAX_METADATA + 1)
+        if len(raw_metadata) > MAX_METADATA:
+            raise AssertionError('Prepared public metadata exceeds bound')
+    release = json.loads(raw_metadata)
     if release.get('draft') or release.get('prerelease') or release.get('tag_name') != 'v' + version:
         raise AssertionError('Stable public release is required')
     assets = {item['name']: item for item in release['assets']}

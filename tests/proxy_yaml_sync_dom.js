@@ -42,7 +42,7 @@ function fixture(settings,routes={}){
             return {status:200,ok:true,json:async()=>value};
         },
         location:{replace(){assert.fail('unexpected login redirect');}},
-        setTimeout,clearTimeout,URL,AbortController,crypto:require('node:crypto').webcrypto,
+        setTimeout,clearTimeout,URL,TextEncoder,AbortController,crypto:require('node:crypto').webcrypto,
     });
     return {get,requests,posted,queue,emit:async name=>{for(const fn of globals.get(name)||[])await fn({});}};
 }
@@ -84,6 +84,46 @@ test('uncertain write keeps further writes blocked until an explicit server refr
     await settled(f,'b'.repeat(64));
     assert(!f.get('save').disabled);assert(!f.get('rebase').disabled);
 });
+test('pasted links show qualification and add only the explicitly supplied SNI to the chosen row',async()=>{
+    const revision='a'.repeat(64);
+    const foreign='vmess://synthetic';
+    const legacy='vless://00000000-0000-4000-8000-000000000001@node.example.test:443?type=tcp&security=tls#Legacy';
+    const eligible=legacy.replace('#Legacy','&sni=other.example.test#Existing');
+    const f=fixture([snapshot(revision)],{
+        '/api/proxy/import/preview':options=>{
+            const {content}=JSON.parse(options.body);
+            const repaired=content.includes('&sni=cert.example.test#Legacy');
+            return {source_format:'uri',ignored_sections:[],notice_codes:[],candidates:[
+                {index:0,protocol:'vmess',supported:false,reason_code:'UNSUPPORTED_PROTOCOL'},
+                {index:1,protocol:'vless',transport:'tcp',tls_mode:'tls',name:'Legacy',supported:repaired,
+                    reason_code:repaired?'':'MISSING_TLS_SERVER_NAME'},
+                {index:2,protocol:'vless',transport:'tcp',tls_mode:'tls',name:'Existing',supported:true}
+            ]};
+        }
+    });
+    await settled(f,revision);
+    f.get('import-dialog').open=true;
+    f.get('import-format').value='uri';
+    f.get('import-content').value=[foreign,'',legacy,eligible].join('\n');
+    await f.get('preview-import').emit('click');
+    const [unsupported,missing,editor,supported]=f.get('candidates').children;
+    assert(unsupported.children[0].disabled);
+    assert(missing.children[0].disabled);
+    assert.equal(supported.children[0].disabled,false);
+    assert(supported.children[1].children.some(node=>node.textContent==='可导入'));
+    assert(unsupported.children[1].children.some(node=>node.textContent.includes('仅支持 VLESS')));
+    assert(f.get('save-import').disabled);
+    assert.equal(editor.children[0].value,'');
+    editor.children[0].value='cert.example.test';
+    await editor.children[1].emit('click');
+    const requests=f.posted.filter(row=>row.url==='/api/proxy/import/preview');
+    assert.equal(requests.length,2);
+    assert.equal(requests[1].body.content,[foreign,'',legacy.replace('#','&sni=cert.example.test#'),eligible].join('\n'));
+    assert.equal(f.get('candidates').children[1].children[0].disabled,false);
+    assert(f.get('save-import').disabled);
+    assert.equal(f.posted.filter(row=>row.url==='/api/proxy/profiles').length,0);
+});
+
 test('YAML apply requires the separate confirmation and sends the checked private ID',async()=>{
     const revision='a'.repeat(64),checkId='b'.repeat(64),saved=snapshot(revision);
     saved.execution_mode='yaml';saved.yaml_plan={revision:'c'.repeat(64)};

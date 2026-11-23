@@ -206,6 +206,29 @@ class ShortInstallContractTests(unittest.TestCase):
             self.assertLess(job['steps'].index(tested),job['steps'].index(receipt))
             self.assertLess(job['steps'].index(receipt),job['steps'].index(upload))
 
+    def test_oneclick_metadata_token_is_scoped_to_the_two_preparation_steps(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = yaml.load((root / '.github/workflows/oneclick.yml').read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual(workflow['permissions'], {'contents': 'read'})
+        steps_with_token = []
+        for job, config in workflow['jobs'].items():
+            for step in config['steps']:
+                if 'VUI_CI_METADATA_TOKEN' in step.get('env', {}):
+                    steps_with_token.append((job, step['name']))
+                    self.assertNotIn('if', step)
+                    self.assertNotIn('continue-on-error', step)
+                    self.assertIn('python -B -m scripts.ci_github_metadata ', step['run'])
+        self.assertEqual(steps_with_token, [
+            ('build-kit', 'Prepare fixed core source metadata'),
+            ('published-upgrade', 'Prepare fixed public release metadata'),
+        ])
+        build = next(step for step in workflow['jobs']['build-kit']['steps']
+                     if step.get('name') == 'Build exact candidate for installer test')
+        upgrade = next(step for step in workflow['jobs']['published-upgrade']['steps']
+                       if 'acceptance_job run-test' in step.get('run', ''))
+        self.assertIn('--core-metadata /tmp/vui-oneclick/core-metadata.json', build['run'])
+        self.assertIn('--published-metadata /tmp/vui-oneclick/published-metadata.json', upgrade['run'])
+
     def test_existing_browser_steps_remain_explicit_manual_opt_in(self):
         root=Path(__file__).resolve().parents[1]
         for name in ('test.yml','release.yml','acme.yml'):

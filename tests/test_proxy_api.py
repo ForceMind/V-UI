@@ -92,6 +92,29 @@ class ProxyApiTests(unittest.TestCase):
         self.assertEqual(self.snapshot().json(), before)
         self.apply.assert_not_called()
 
+    def test_pasted_panel_share_links_can_only_save_the_qualified_selected_node(self):
+        before = self.snapshot()
+        other_secret = 'fake-trojan-password'
+        links = f'trojan://{other_secret}@remote.example.test:443#Outside\n{URI}'
+        payload = {'format': 'uri', 'content': links}
+        preview = self.client.post('/api/proxy/import/preview', json=payload, headers=HEADERS)
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertEqual([row['supported'] for row in preview.json()['candidates']], [False, True])
+        self.assertNotIn(other_secret, preview.text)
+        self.assertNotIn(UUID, preview.text)
+        rejected = self.add_profile(content=links, candidate_index=0)
+        self.assertEqual(rejected.status_code, 422, rejected.text)
+        self.assertNotIn(other_secret, rejected.text)
+        self.assertEqual(self.snapshot().json(), before.json())
+        saved = self.add_profile(content=links, candidate_index=1)
+        self.assertEqual(saved.status_code, 201, saved.text)
+        self.assertNotIn(UUID, saved.text)
+        snapshot = saved.json()['snapshot']
+        self.assertEqual([item['name'] for item in snapshot['upstreams']], ['Fake'])
+        self.assertIsNone(snapshot['settings']['selected_upstream_id'])
+        self.assertIsNone(snapshot['active'])
+        self.apply.assert_not_called()
+
     def test_save_profile_requires_explicit_selection_and_returns_no_secret(self):
         revision = self.snapshot().headers['etag']
         result = self.client.post('/api/proxy/profiles', json={'format': 'uri', 'content': URI},

@@ -80,17 +80,35 @@ class OnlineAssetFallbackTests(unittest.TestCase):
             raise AssertionError('Unexpected mocked public URL')
         self.responses.append(result); return result
 
-    def invoke(self):
+    def invoke(self, **options):
         opener = type('MockOpener', (), {'open': lambda unused, request, timeout: self.open(request, timeout)})()
         with patch.object(helpers, 'build_opener', return_value=opener) as factory, \
                 patch.object(helpers.subprocess, 'check_output', return_value=COMMIT + '\n') as git:
-            result = helpers.published_commands(self.source, VERSION, COMMIT, [], [])
+            result = helpers.published_commands(self.source, VERSION, COMMIT, [], [], **options)
             self.handlers = factory.call_args.args
             git.assert_called_once_with(['git', 'rev-parse', 'HEAD'], cwd=self.source, text=True)
             return result
 
     def api_requests(self):
         return [request for request in self.requests if request.full_url.startswith(API)]
+
+    def test_prepared_release_preserves_anonymous_downloads_and_integrity(self):
+        metadata_path = self.source / 'metadata.json'
+        metadata_path.write_text(json.dumps(self.release))
+        url = PREFIX + 'install.sh'
+        self.plans[url] = [HTTPError(url, 429, 'synthetic limit', {'Retry-After': '1'}, io.BytesIO()),
+                           Response(url, self.files['install.sh'])]
+        with patch.object(helpers.time, 'sleep') as sleep:
+            outcome = self.invoke(prepared_metadata=metadata_path)
+        sleep.assert_called_once_with(1)
+        self.assertEqual(outcome['transport'], 'anonymous public HTTPS release assets')
+        self.assertEqual([request.full_url for request in self.requests], [url, url, *[PREFIX + name for name in SMALL[1:]]])
+        for request in self.requests:
+            self.assertIsNone(request.get_header('Authorization'))
+        self.release['tag_name'] = 'v0.4.21'
+        metadata_path.write_text(json.dumps(self.release))
+        with self.assertRaisesRegex(AssertionError, 'Stable public release'):
+            self.invoke(prepared_metadata=metadata_path)
 
     def test_three_verified_small_assets_each_get_one_same_id_fallback_and_no_auth(self):
         for name, status in zip(SMALL, (502, 503, 504)):
