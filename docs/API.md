@@ -86,7 +86,7 @@ POST `/api/subscriptions`：label、server（节点公开地址）、inbound_ids
 | PUT `/{id}/auto-renew` | enabled布尔值 |
 | POST `/{id}/bind-panel` | 正式证书、同面板域名、热更新 |
 | POST `/{id}/bind-inbound` | inbound_id，受支持TLS节点 |
-| POST `/{id}/apply` | 提供 `target`、`expected_revision` 和 `expected_binding` 时仅重试该位置。无请求体继续返回逐消费者结果 |
+| POST `/{id}/apply` | 提供 `target`、`expected_revision` 和 `expected_binding` 时仅重试该位置。节点所属核心有未应用配置时返回 409 `CERTIFICATE_CORE_HAS_PENDING_CONFIG`。无请求体继续返回逐消费者结果 |
 | GET `/{id}/fullchain.pem` | 管理员下载公有证书链，无私钥接口 |
 
 证书API不接受shell命令、用户hooks、任意CA URL、DNS provider token。申请错误与应用错误分开，不能看到job成功就忽略绑定失败。自动续期暂停不取消已经排队的明确请求。

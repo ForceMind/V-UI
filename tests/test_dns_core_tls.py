@@ -139,6 +139,24 @@ class DNSCoreTLSTests(unittest.TestCase):
                                  json={**payload, 'expected_binding': '0' * 64})
         self.assertEqual(stale.status_code, 409)
         self.assertEqual(runtime.state()['revision'], baseline)
+        with database.SessionLocal() as db:
+            selected = db.get(database.Inbound, identity)
+            other = database.Inbound(core=selected.core, protocol=selected.protocol,
+                port=self.port(), settings=deepcopy(selected.settings), stream_settings=deepcopy(selected.stream_settings),
+                enable=True, expiry_time=0, routing_mode='inherit', remark='unapplied sibling', tag='unapplied-sibling')
+            db.add(other)
+            db.commit()
+            other_id = other.id
+        blocked = self.client.post(endpoint, headers=certificate_fixtures.auth_tests.HEADERS, json=payload)
+        self.assertEqual(blocked.status_code, 409, blocked.text)
+        self.assertEqual(blocked.json()['detail'], 'CERTIFICATE_CORE_HAS_PENDING_CONFIG')
+        self.assertEqual(runtime.state()['revision'], baseline)
+        self.assertEqual(self.served_leaf(port, ca, previous[0]), previous_serial)
+        self.assertEqual(len(panel_reloads), 2)
+        with database.SessionLocal() as db:
+            self.assertEqual(db.get(database.Inbound, other_id).tag, 'unapplied-sibling')
+            db.delete(db.get(database.Inbound, other_id))
+            db.commit()
         retry = self.client.post(endpoint, headers=certificate_fixtures.auth_tests.HEADERS, json=payload)
         self.assertEqual(retry.status_code, 200, retry.text)
         self.assertEqual(retry.json(), {'target': target, 'applied': True})
@@ -186,14 +204,24 @@ class DNSCoreTLSTests(unittest.TestCase):
                     stream_settings=stream, enable=True, expiry_time=0, routing_mode='inherit',
                     remark='synthetic-wildcard-' + core, tag='wildcard-' + core)
                 db.add(row); db.commit(); identity = row.id
+            build_config = adapter.build_config
+
+            def build_local(rows):
+                config = build_config(rows)
+                # Listener address is the only test-local server endpoint change.
+                for inbound in config['inbounds']:
+                    inbound['listen'] = '127.0.0.1'
+                return config
+
             def apply(selected, *, activate=True, **kwargs):
                 self.assertEqual(selected, core)
                 with database.SessionLocal() as db:
                     config = adapter.build_config(db.query(database.Inbound).filter_by(core=core).all())
-                # Listener address is the only test-local server endpoint change.
-                for inbound in config['inbounds']: inbound['listen'] = '127.0.0.1'
                 return runtime.apply(config, activate=activate)
+
+            stack.enter_context(patch.object(adapter, 'build_config', side_effect=build_local))
             stack.enter_context(patch.dict(core_manager.adapters, {core: adapter}))
+            stack.enter_context(patch.object(core_manager, '_compiled_active', return_value=None))
             stack.enter_context(patch.object(core_manager, 'validate_inbound_change'))
             stack.enter_context(patch.object(core_manager, 'apply_database', side_effect=apply))
             apply(core)

@@ -377,6 +377,8 @@ class CertificateManager:
                 else:
                     row = db.get(database.Inbound, int(target.split(':')[1]))
                     if not row: raise CertificateError('INBOUND_NOT_FOUND')
+                    if expected_revision is not None and core_manager.status()[row.core]['dirty']:
+                        raise CertificateError('CERTIFICATE_CORE_HAS_PENDING_CONFIG')
                     previous_stream = row.stream_settings
                     stream = deepcopy(previous_stream or {})
                     error = managed_tls.target_error(row)
@@ -418,7 +420,7 @@ class CertificateManager:
                 db.commit()
         except Exception as exc:
             code = exc.code if isinstance(exc, CertificateError) else 'CERTIFICATE_APPLY_FAILED'
-            if code == 'CERTIFICATE_BINDING_CONFLICT':
+            if code in ('CERTIFICATE_BINDING_CONFLICT', 'CERTIFICATE_CORE_HAS_PENDING_CONFIG'):
                 raise CertificateError(code) from None
             with database.SessionLocal() as db:
                 binding = db.get(CertificateBinding, target)

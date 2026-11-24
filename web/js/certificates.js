@@ -12,6 +12,7 @@
         PANEL_HOT_RELOAD_UNAVAILABLE:'此启动方式未启用面板证书热更新，请使用受管 HTTPS 启动入口。',
         CERTIFICATE_APPLY_FAILED:'证书已签发，但应用未完成；请检查核心状态并重试应用。',
         CERTIFICATE_BINDING_CONFLICT:'签发修订或绑定已变化，请刷新后重新核对。',
+        CERTIFICATE_CORE_HAS_PENDING_CONFIG:'该核心有未应用的配置。请先在节点管理核对并处理，再重试此位置。',
         CORE_STOPPED_PENDING_APPLY:'证书路径已保存并验证，但核心处于停止状态。请先启动核心，再重试应用。',
         BINDING_CHANGED_MANUALLY:'节点证书路径已被手动修改，自动续期未覆盖你的设置。请重新明确绑定。',
         TLS_NODE_REQUIRED:'请选择已启用 TLS 的节点；不适用于 REALITY。',
