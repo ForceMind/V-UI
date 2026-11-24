@@ -63,6 +63,9 @@ def occupied_http01_port():
     program = '''from http.server import BaseHTTPRequestHandler,HTTPServer
 import sys,threading
 class Handler(BaseHTTPRequestHandler):
+ # Keep the response open so the probing client closes first. Service-port
+ # TIME_WAIT from the fixture would make the next clean install reject 80.
+ protocol_version='HTTP/1.1'
  def do_GET(self):
   body=b'oneclick-owned-port80\\n'
   self.send_response(200);self.send_header('Content-Length',str(len(body)));self.end_headers()
