@@ -348,6 +348,28 @@ test('DNS maintenance never reads or manages admin metadata while allowing exist
     assert.equal(f.requests.filter(request=>/\/dns-(?:credentials|challenges)/.test(request.url)).length,0);
 });
 
+test('partial apply shows both revisions and retries only the failed binding', async()=>{
+    const revision='a'.repeat(64), old='b'.repeat(64), bindingToken='c'.repeat(64);
+    const stable={target:'panel',applied_revision:revision,pending:false,error:null,binding_revision:'d'.repeat(64)};
+    const pending={target:'inbound:7',applied_revision:old,pending:true,error:'CERTIFICATE_APPLY_FAILED',binding_revision:bindingToken};
+    const cert=certificate('synthetic-a',{revision,bindings:[stable,pending]});
+    const f=await fixture([cert]);
+    const rows=()=>f.card(cert.id).querySelectorAll('[data-binding-target]');
+    const [panel,node]=rows();
+    assert.match(panel.textContent,/面板 HTTPS.*已签发 aaaaaaaaaaaa.*已绑定.*已应用.*当前材料/);
+    assert.equal(panel.querySelectorAll('button').length,0);
+    assert.match(node.textContent,/TLS A.*已签发 aaaaaaaaaaaa.*已绑定.*应用未完成.*旧材料 · bbbbbbbbbbbb/);
+    node.querySelectorAll('button')[0].click();await flush();
+    const request=f.take('POST');
+    assert.equal(request.url,'/api/certificates/synthetic-a/apply');
+    assert.deepEqual(request.body,{target:'inbound:7',expected_revision:revision,expected_binding:bindingToken});
+    request.resolve(response({applied:true,target:'inbound:7'}));await flush();
+    await f.finishReads([{...cert,bindings:[stable,{...pending,applied_revision:revision,pending:false,error:null}]}]);
+    assert.match(rows()[1].textContent,/已应用.*当前材料 · aaaaaaaaaaaa/);
+    assert.equal(rows()[1].querySelectorAll('button').length,0);
+    assert.equal(f.requests.filter(item=>item.method==='POST').length,1);
+});
+
 test('challenge CAS conflict is Chinese, blocks blind repetition, and fresh readback selects the new revision', async()=>{
     const p=profile(),job=challenge(),f=await fixture([],{admin:true,profiles:[p],challenges:[job]});
     challengeButton(f,'使用当前凭据清理验证记录').click();await flush();

@@ -30,7 +30,7 @@
 <p class="hint">这里处理本次验证留下的TXT记录。清理只使用对应Cloudflare凭据处理本任务自己的记录，不重新签发证书，不删除其他TXT。写入结果不明时先刷新核对，勿反复提交。</p>
 <p class="hint">系统无法确认未知写入没有残留时，会继续保留待清理状态。只有你已在Cloudflare核对并确认没有残留，才使用人工确认；人工确认不等于系统自动清理成功。</p>
 <div id="dns-challenge-list"></div></section>
-<section><div class="section-head"><div><h2>02 · 证书与续期</h2><p>签发成功不等于所有绑定均已应用，请查看每个使用位置的状态。</p></div><button id="refresh" type="button">刷新状态</button></div>
+<section><div class="section-head"><h2>证书与使用位置</h2><button id="refresh" type="button">刷新状态</button></div>
 <div id="certificate-list"></div></section>
 <section><h2>03 · 使用说明</h2><p class="hint">新建节点时可选择托管证书。已有受支持的 sing-box TLS 与 Xray VLESS/TCP/TLS 节点可在证书卡片中绑定。续期不会主动启动你手动停止的核心；应用失败会保留旧运行配置并显示待处理。</p>
 <p class="hint">“应用到面板”只接受正式环境、且与当前面板域名一致的证书。热更新只影响新连接，不要求退出后台。HTTP-01 的 80 端口不提供面板登录或任意文件。</p></section>

@@ -33,6 +33,13 @@ class BindInbound(BaseModel):
     server_name: str | None = Field(default=None, min_length=3, max_length=253)
 
 
+class RetryBinding(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    target: str = Field(max_length=27, pattern=r'^(panel|inbound:[1-9][0-9]{0,18})$')
+    expected_revision: str = Field(pattern=r'^[a-f0-9]{64}$')
+    expected_binding: str = Field(pattern=r'^[a-f0-9]{64}$')
+
+
 class DNSCredentialCreate(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     label: str = Field(min_length=1, max_length=64)
@@ -211,8 +218,11 @@ def inbound(certificate_id: str, payload: BindInbound):
 
 
 @router.post('/{certificate_id}/apply')
-def retry_apply(certificate_id: str):
-    return perform(lambda: get_manager().apply_existing(certificate_id))
+def retry_apply(certificate_id: str, payload: RetryBinding | None = None):
+    if payload is None:
+        return perform(lambda: get_manager().apply_existing(certificate_id))
+    return perform(lambda: get_manager().retry_binding(
+        certificate_id, payload.target, payload.expected_revision, payload.expected_binding))
 
 
 @router.get('/{certificate_id}/fullchain.pem')
