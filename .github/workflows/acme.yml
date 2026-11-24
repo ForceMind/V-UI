@@ -61,6 +61,7 @@ jobs:
                   return {name for child in value for name in identifiers(child)}
               return {value.id()}
           required = {
+              'test_acme_dns_real.RealDNSACMETests.test_real_exclusive_bootstrap_uses_fixed_hooks_and_cleans_only_owned_txt',
               'test_acme_dns_real.RealDNSACMETests.test_real_root_wildcard_and_fresh_account_renewal',
               'test_acme_dns_real.RealDNSACMETests.test_nonpropagation_failure_retains_previous_material',
               'test_acme_dns_real.RealDNSACMETests.test_wrong_fake_cf_tls_ca_never_publishes_material',
@@ -72,7 +73,7 @@ jobs:
                   return super().wasSuccessful() and self.testsRun == len(required) and not self.skipped
           result = unittest.TextTestRunner(verbosity=2, resultclass=StrictResult).run(suite)
           if result.testsRun != len(required) or result.skipped or not result.wasSuccessful():
-              raise SystemExit('Strict DNS/legacy reader acceptance did not complete all four cases without skips')
+              raise SystemExit('Strict DNS/legacy reader acceptance did not complete all five cases without skips')
           PYDNS
       - name: Install explicit test browser
         if: github.event_name == 'workflow_dispatch' && inputs.run_browser == true

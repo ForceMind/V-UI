@@ -238,3 +238,80 @@ def data_owner(data_dir: Path, *, exclusive: bool = False):
             os.close(fd)
         if parent is not None:
             os.close(parent)
+
+
+@contextmanager
+def exclusive_owner_descriptor(data_dir: Path):
+    """Export this process's held exclusive lease to a fixed child only.
+
+    The descriptor is passed with ``pass_fds``, never through a file, token or
+    environment variable. Ordinary live workers have no exclusive lease and
+    continue to use their independent shared ownership in each child.
+    """
+    selected = Path(data_dir)
+    _require('..' not in selected.parts)
+    path = Path(os.path.abspath(selected))
+    owner = getattr(_EXCLUSIVE, 'held', {}).get(str(path))
+    if owner is None or owner[0] != os.getpid():
+        yield None
+        return
+    descriptor = None
+    try:
+        _verify(owner[1], owner[2], path.parent, '.' + path.name + '.owner.lease')
+        descriptor = os.dup(owner[2])
+        yield descriptor
+    except OSError:
+        raise DataOwnerError(_UNSAFE) from None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+@contextmanager
+def inherited_exclusive_owner(data_dir: Path, descriptor: int):
+    """Borrow a checked exclusive open-file-description in a fixed child.
+
+    This is the stopped certificate bootstrap's subprocess handoff. Retaining
+    the same flock description means the child still excludes every ordinary
+    writer and offline restore if its parent is killed. No shared-lock fallback
+    is allowed when a descriptor was supplied.
+    """
+    selected = Path(data_dir)
+    _require('..' not in selected.parts and type(descriptor) is int and descriptor >= 3)
+    path = Path(os.path.abspath(selected))
+    _require(bool(path.name))
+    key, name = str(path), '.' + path.name + '.owner.lease'
+    held = getattr(_EXCLUSIVE, 'held', {})
+    _require(key not in held)
+    parent = owned = None
+    registered = False
+    try:
+        try:
+            parent = _parent(path.parent)
+            owned = os.dup(descriptor)
+            _require(fcntl.fcntl(owned, fcntl.F_GETFL) & os.O_ACCMODE == os.O_RDWR)
+            _verify(parent, owned, path.parent, name)
+            _check_data(parent, path.name)
+            try:
+                fcntl.flock(owned, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise DataOwnerError(_BUSY) from None
+            _verify(parent, owned, path.parent, name)
+            _check_pending_restore(parent)
+        except OSError:
+            raise DataOwnerError(_UNSAFE) from None
+        _EXCLUSIVE.held = held
+        held[key] = (os.getpid(), parent, owned)
+        registered = True
+        try:
+            yield
+        finally:
+            _safe_verify(parent, owned, path.parent, name)
+    finally:
+        if registered:
+            held.pop(key, None)
+        # Never LOCK_UN an inherited flock: other children may still use it.
+        if owned is not None:
+            os.close(owned)
+        if parent is not None:
+            os.close(parent)

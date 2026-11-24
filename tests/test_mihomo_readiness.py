@@ -59,6 +59,19 @@ OTHER_CONSTRUCTIONS = {
     # Mihomo traffic still uses the shared barrier in core_switch_systemd.
     ('core_remote_tasks_installed.py', 'Peer.__init__', 'Popen'),
     ('core_remote_tasks_installed.py', 'writer_peer', 'Popen'),
+    # DNS bootstrap flock fixtures: fixed Python code, private temporary data
+    # and one inherited lease FD; no proxy binary or external DNS. The first
+    # waits at most 5s for a bounded ready frame, then releases via stdin with
+    # 5s communicate/kill/reap. The parent/wrapper/hook tree uses 8s ready-file
+    # deadlines and finally kills its own new session after checking exclusion.
+    ('test_dns_bootstrap_ownership.py', 'DNSBootstrapOwnershipTests.test_child_keeps_exclusive_flock_after_parent_scope_closes', 'Popen'),
+    ('test_dns_bootstrap_ownership.py', 'DNSBootstrapOwnershipTests.test_killed_parent_then_killed_wrapper_leave_live_hook_exclusive', 'Popen'),
+    # Empty hosted Actions/systemd runner only: fixed sudo -n /usr/bin/python3
+    # -B -I -S loopback HTTP fixture, no shell or proxy core. Select bounds its
+    # READY wait to 10s; HTTP identity checks have 5s bounds. Closing stdin
+    # requests child shutdown; wait/terminate/kill is bounded at 10/5/5s and
+    # never signals an unrelated existing owner of port 80.
+    ('test_oneclick_system.py', 'occupied_http01_port', 'Popen'),
     # Two bounded synthetic store/catalog publishers: isolated stdlib Python,
     # fake material/transport only, stdin barrier, 15s communicate and finally
     # kill/wait/close. No proxy core or readiness qualification is involved.

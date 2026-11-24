@@ -16,7 +16,7 @@ if __package__ in (None, ''):
 from app.certificates.dns_journal import DNSChallengeJournal
 from app.certificates.dns_store import DNSStoreError
 from app.certificates.errors import CertificateError
-from app.data_owner import data_owner
+from app.data_owner import data_owner, inherited_exclusive_owner
 
 
 def main(argv=None, *, journal_factory=DNSChallengeJournal, wait_seconds=None):
@@ -26,6 +26,7 @@ def main(argv=None, *, journal_factory=DNSChallengeJournal, wait_seconds=None):
     parser.add_argument('job_id')
     parser.add_argument('--deadline', type=float, required=True)
     parser.add_argument('--propagation-seconds', type=int, default=60)
+    parser.add_argument('--owner-fd', type=int)
     args = parser.parse_args(argv)
     try:
         root = Path(args.root)
@@ -38,7 +39,9 @@ def main(argv=None, *, journal_factory=DNSChallengeJournal, wait_seconds=None):
         if type(wait) is not int or not 0 <= wait <= 300:
             raise CertificateError('DNS_HOOK_ARGUMENTS_INVALID')
         deadline = time.monotonic() + args.deadline - time.time()
-        with data_owner(root.parent):
+        ownership = (data_owner(root.parent) if args.owner_fd is None
+                     else inherited_exclusive_owner(root.parent, args.owner_fd))
+        with ownership:
             journal = journal_factory(root)
             if args.action == 'auth':
                 identifiers = [os.environ[key] for key in ('CERTBOT_IDENTIFIER', 'CERTBOT_DOMAIN') if key in os.environ]

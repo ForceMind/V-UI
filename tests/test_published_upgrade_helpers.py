@@ -90,14 +90,16 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
                 'port':8443,'node_port':10443,'bind':'127.0.0.1','certificate_mode':'provided',
                 'origin':'https://vpn.example.test:8443','ready':True,'future_field':'retain-me'}
         after={**before,'release_id':new_release.name,
-               'bootstrap_python':str(new_release/'runtime/python/bin/python3'),'ca_authorizations':[]}
+               'bootstrap_python':str(new_release/'runtime/python/bin/python3'),'ca_authorizations':[],
+               'certificate_method':'provided','http01_enabled':True}
         assert_upgrade_configuration(self,before,after,old_release,new_release)
         self.assertNotIn('ca_authorizations',before,'Comparison must not modify the old observation')
         for field,value in {'domain':'changed.example.test','admin':'replaced-owner','email':'other@example.test',
                             'port':9443,'node_port':11443,'bind':'0.0.0.0','certificate_mode':'managed',
                             'origin':'https://changed.example.test:8443','ready':False,'future_field':'lost',
                             'bootstrap_python':before['bootstrap_python'],
-                            'release_id':'unaccepted-release','ca_authorizations':['unexpected']}.items():
+                            'release_id':'unaccepted-release','ca_authorizations':['unexpected'],
+                            'certificate_method':'http-01','http01_enabled':False,'unknown_extra':True}.items():
             with self.subTest(field=field):
                 with self.assertRaises(AssertionError):
                     assert_upgrade_configuration(self,before,{**after,field:value},old_release,new_release)
@@ -112,14 +114,56 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
         new_release=Path('/var/lib/v-ui/releases/candidate-015')
         before={'release_id':old_release.name,
                 'bootstrap_python':str(old_release/'runtime/python/bin/python3'),
+                'certificate_mode':'managed',
                 'ca_authorizations':[{'domain':'vpn.example.test','environment':'production'}]}
         after={**before,'release_id':new_release.name,
-               'bootstrap_python':str(new_release/'runtime/python/bin/python3')}
+               'bootstrap_python':str(new_release/'runtime/python/bin/python3'),
+               'certificate_method':'http-01','http01_enabled':True}
         assert_upgrade_configuration(self,before,after,old_release,new_release)
         for authorizations in ([],None,[{'domain':'other.example.test','environment':'production'}]):
             with self.subTest(authorizations=authorizations):
                 with self.assertRaises(AssertionError):
                     assert_upgrade_configuration(self,before,{**after,'ca_authorizations':authorizations},old_release,new_release)
+
+    def test_existing_certificate_method_and_http01_choice_are_preserved_exactly(self):
+        old_release=Path('/var/lib/v-ui/releases/old')
+        new_release=Path('/var/lib/v-ui/releases/new')
+        for mode,method in (('provided','provided'),('managed','http-01'),('managed','dns-01')):
+            for enabled in (True,False):
+                before={'release_id':old_release.name,
+                        'bootstrap_python':str(old_release/'runtime/python/bin/python3'),
+                        'certificate_mode':mode,'certificate_method':method,'http01_enabled':enabled,
+                        'dns_zone':'example.test','future_field':{'keep':'unchanged'}}
+                after={**before,'release_id':new_release.name,
+                       'bootstrap_python':str(new_release/'runtime/python/bin/python3'),'ca_authorizations':[]}
+                with self.subTest(mode=mode,method=method,enabled=enabled):
+                    assert_upgrade_configuration(self,before,after,old_release,new_release)
+                    for field,value in (('certificate_method','provided' if method!='provided' else 'dns-01'),
+                                        ('http01_enabled',not enabled),('http01_enabled',int(enabled)),
+                                        ('http01_enabled','false'),('future_field',{}),('unexpected',True)):
+                        with self.subTest(field=field,value=value),self.assertRaises(AssertionError):
+                            assert_upgrade_configuration(self,before,{**after,field:value},old_release,new_release)
+                    for field in ('certificate_method','http01_enabled'):
+                        missing={key:value for key,value in after.items() if key!=field}
+                        with self.subTest(missing=field),self.assertRaises(AssertionError):
+                            assert_upgrade_configuration(self,before,missing,old_release,new_release)
+
+    def test_only_missing_legacy_http01_field_defaults_to_true(self):
+        old_release=Path('/var/lib/v-ui/releases/old')
+        new_release=Path('/var/lib/v-ui/releases/new')
+        for mode,method in (('managed','http-01'),('provided','provided')):
+            before={'release_id':old_release.name,
+                    'bootstrap_python':str(old_release/'runtime/python/bin/python3'),'certificate_mode':mode}
+            after={**before,'release_id':new_release.name,
+                   'bootstrap_python':str(new_release/'runtime/python/bin/python3'),'ca_authorizations':[],
+                   'certificate_method':method,'http01_enabled':True}
+            with self.subTest(mode=mode):
+                assert_upgrade_configuration(self,before,after,old_release,new_release)
+                self.assertNotIn('http01_enabled',before)
+                self.assertNotIn('certificate_method',before)
+                for value in (False,1,'true',None):
+                    with self.subTest(value=value),self.assertRaises(AssertionError):
+                        assert_upgrade_configuration(self,before,{**after,'http01_enabled':value},old_release,new_release)
 
     def test_complete_candidate_downloads_match_accepted_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -345,9 +389,11 @@ class PublishedUpgradeBoundaryTests(unittest.TestCase):
         new_release=Path('/var/lib/v-ui/releases/candidate-016')
         before={'release_id':old_release.name,
                 'bootstrap_python':str(old_release/'runtime/python/bin/python3'),
+                'certificate_mode':'provided',
                 'ca_authorizations':[],'future_field':{'preserve':'exactly'}}
         after={**before,'release_id':new_release.name,
-               'bootstrap_python':str(new_release/'runtime/python/bin/python3')}
+               'bootstrap_python':str(new_release/'runtime/python/bin/python3'),
+               'certificate_method':'provided','http01_enabled':True}
         assert_upgrade_configuration(self,before,after,old_release,new_release)
         missing=deepcopy(after);del missing['ca_authorizations']
         for changed in (missing,{**after,'future_field':{}}):

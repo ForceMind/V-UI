@@ -1,5 +1,6 @@
 """Ephemeral CI host only: exercise the real sudo installer and systemd services."""
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
+import ast
 import hashlib
 import grp
 import http.client
@@ -31,6 +32,168 @@ def installer_has_chinese_prompts(version):
     if not re.fullmatch(r'\d+\.\d+\.\d+', version):
         raise AssertionError('Exact stable installer version required')
     return tuple(map(int, version.split('.'))) >= (0, 4, 10)
+
+
+def http01_responder_arguments(source, environ):
+    """Inspect the initial installer's source, including frozen public suites."""
+    if environ.get('VUI_PUBLISHED_UPGRADE_SOURCE'):
+        source = Path(environ['VUI_PUBLISHED_UPGRADE_SOURCE'])
+    elif environ.get('VUI_PUBLISHED_INSTALL_VERSION') and environ.get('VUI_SETUP_INSTALL') == '1':
+        source = Path(environ['VUI_SETUP_RELEASE_SOURCE'])
+    tree = ast.parse((Path(source) / 'scripts/install_system.py').read_text())
+    supported = any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == 'add_argument'
+                    and any(isinstance(arg, ast.Constant) and arg.value == '--enable-http01'
+                            for arg in node.args) for node in ast.walk(tree))
+    return ['--enable-http01'] if supported else []
+
+
+def require_http01_fixture_host():
+    if (os.geteuid() == 0 or os.getenv('VUI_SYSTEM_INSTALL_TEST') != '1'
+            or os.getenv('GITHUB_ACTIONS') != 'true'
+            or os.getenv('RUNNER_ENVIRONMENT') != 'github-hosted'
+            or os.getenv('GITHUB_REPOSITORY') != 'ForceMind/V-UI'):
+        raise AssertionError('HTTP-01 installation fixture requires an explicit empty hosted runner')
+
+
+@contextmanager
+def occupied_http01_port():
+    """Keep this fixture's listener alive; never stop an existing port owner."""
+    require_http01_fixture_host()
+    program = '''from http.server import BaseHTTPRequestHandler,HTTPServer
+import sys,threading
+class Handler(BaseHTTPRequestHandler):
+ def do_GET(self):
+  body=b'oneclick-owned-port80\\n'
+  self.send_response(200);self.send_header('Content-Length',str(len(body)));self.end_headers()
+  self.wfile.write(body)
+ def log_message(self,*args):pass
+server=HTTPServer(('127.0.0.1',80),Handler)
+thread=threading.Thread(target=server.serve_forever,kwargs={'poll_interval':.05},daemon=True)
+thread.start()
+print('READY',flush=True)
+try:sys.stdin.buffer.read(1)
+finally:server.shutdown();server.server_close();thread.join(timeout=2)
+'''
+    process = subprocess.Popen(['sudo', '-n', '/usr/bin/python3', '-B', '-I', '-S', '-c', program],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    ready = False
+    try:
+        expected = b'READY\n';line = b'';deadline = time.monotonic() + 10
+        while len(line) < len(expected):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([process.stdout], [], [], remaining)[0]:
+                break
+            # One raw pipe read returns the available fragment without waiting
+            # for a newline; every next fragment shares the same deadline.
+            chunk = process.stdout.read1(len(expected) - len(line))
+            if not chunk:
+                break
+            line += chunk
+            if not expected.startswith(line):
+                break
+        if line != expected or time.monotonic() > deadline:
+            raise AssertionError('Could not reserve port 80 for the owned installation fixture')
+        ready = True
+        def check_owner():
+            if process.poll() is not None:
+                raise AssertionError('Owned port 80 listener exited during installation')
+            connection = http.client.HTTPConnection('127.0.0.1', 80, timeout=5)
+            try:
+                connection.request('GET', '/oneclick-port-owner')
+                response = connection.getresponse()
+                if response.status != 200 or response.read(128) != b'oneclick-owned-port80\n':
+                    raise AssertionError('Installation changed the port 80 listener')
+            finally:
+                connection.close()
+        check_owner()
+        yield check_owner
+    finally:
+        process.stdin.close()
+        try:
+            code = process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            # These signals address only the sudo process created above. EOF is
+            # the fixture child's normal shutdown channel, including failures.
+            process.terminate()
+            try:process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill();process.wait(timeout=5)
+            raise AssertionError('Owned port 80 listener shutdown was not confirmed') from None
+        finally:
+            process.stdout.close()
+        if ready and code != 0:
+            raise AssertionError('Owned port 80 listener exited unsuccessfully')
+
+
+def exercise_http01_disabled_install(test, source, work, bundle, sha, kit,
+                                    certificate_args, configured_args, ca, domain, port, cleanup):
+    """Real hosted systemd/provided TLS; DNS here is a preflight, not issuance."""
+    require_http01_fixture_host()
+    fixture = work / 'http01-disabled';fixture.mkdir(mode=0o700)
+    disabled_args = [value for value in certificate_args if value != '--enable-http01']
+    commands = fixture_commands(source, fixture, kit, disabled_args, configured_args)
+    context = ssl.create_default_context(cafile=ca)
+    def https_probe(timeout):
+        with socket.create_connection(('127.0.0.1', port), timeout=timeout) as connection:
+            with context.wrap_socket(connection, server_hostname=domain) as tls:
+                tls.sendall(('GET /api/auth/me HTTP/1.1\r\nHost: '+domain+'\r\nConnection: close\r\n\r\n').encode())
+                response = http.client.HTTPResponse(tls);response.begin()
+                return response.status, response.read(32768)
+    def diagnostics():
+        result = subprocess.run(['systemctl', 'show', 'v-ui.service',
+                                 '--property=ActiveState,SubState,Result'],
+                                capture_output=True, text=True, timeout=5)
+        return result.stdout[:1000]
+    def assert_disabled():
+        config = json.loads(Path('/etc/v-ui/service.json').read_text())
+        test.assertIs(config['ready'], True)
+        test.assertEqual(config['certificate_method'], 'provided')
+        test.assertIs(config['http01_enabled'], False)
+        test.assertEqual(subprocess.run(['systemctl', 'is-enabled', '--quiet', 'v-ui.service']).returncode, 0)
+        test.assertEqual(subprocess.run(['systemctl', 'is-active', '--quiet', 'v-ui.service']).returncode, 0)
+        test.assertEqual(subprocess.run(['systemctl', 'is-enabled', 'v-ui-http01.socket'],
+                                       capture_output=True, text=True).stdout.strip(), 'disabled')
+        for unit in ('v-ui-http01.socket', 'v-ui-http01.service'):
+            result = subprocess.run(['systemctl', 'show', '--property=ActiveState', '--value', unit],
+                                    check=True, capture_output=True, text=True)
+            test.assertEqual(result.stdout.strip(), 'inactive')
+        return config
+    with occupied_http01_port() as check_owner:
+        dns = subprocess.run(['sudo', 'bash', str(source/'install.sh'), '--bundle', str(bundle), '--sha256', sha,
+                              *configured_args, '--bind', '127.0.0.1', '--open-firewall', 'no',
+                              '--certificate-method', 'dns-01', '--dns-zone', 'example.test',
+                              '--accept-terms', '--dry-run'], capture_output=True, text=True, timeout=120)
+        test.assertEqual(dns.returncode, 0, redact_installer_output(dns.stdout+dns.stderr)[-8000:])
+        start = re.search(r'\{\s*"checks"\s*:', dns.stdout)
+        test.assertIsNotNone(start, 'DNS preflight did not return its structured result')
+        result = json.loads(dns.stdout[start.start():])
+        test.assertEqual(result['checks'], 'passed')
+        test.assertIs(result['no_changes'], True)
+        test.assertEqual(result['certificate_method'], 'dns-01')
+        test.assertIs(result['http01_enabled'], False)
+        for path in ('/etc/v-ui', '/var/lib/v-ui', '/usr/local/lib/v-ui'):
+            test.assertFalse(os.path.lexists(path), 'DNS preflight changed managed installation state')
+        check_owner()
+        print('DNS-01 occupied port 80: real installer preflight passed without installation or certificate issuance')
+        try:
+            installed = configured_setup_with_tty(commands['repeat'])
+            test.assertEqual(installed.returncode, 0, installed.stdout[-8000:])
+            before = assert_disabled()
+            wait_for_managed_https(https_probe, diagnostics)
+            check_owner()
+            global_menu_check(test, {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'}, exercise_start_stop=True)
+            assert_disabled();wait_for_managed_https(https_probe, diagnostics);check_owner()
+            upgraded = configured_setup_with_tty(commands['upgrade'])
+            test.assertEqual(upgraded.returncode, 0, upgraded.stdout[-8000:])
+            after = assert_disabled()
+            test.assertTrue(after['admin'] == before['admin'], 'Upgrade changed the saved administrator')
+            wait_for_managed_https(https_probe, diagnostics);check_owner()
+            print('Provided certificate occupied port 80: default HTTP-01 disabled / real installation / '
+                  'verified HTTPS401 / global menu stop-start / upgrade / unrelated listener retained')
+        finally:
+            cleanup()
+        check_owner()
 
 
 def wait_for_managed_https(probe, diagnostics, *, timeout=20, private_values=()):
@@ -105,6 +268,10 @@ class OneClickSystemTests(unittest.TestCase):
             node_port = unused_port()
             certificate_args = ['--cert',str(cert),'--key',str(key),'--health-ca',str(ca),
                                 '--bind','127.0.0.1','--open-firewall','no']
+            http01_args = http01_responder_arguments(source, os.environ)
+            # This historical scenario explicitly exercises the HTTP responder.
+            # Frozen public installers must never receive an unsupported flag.
+            certificate_args.extend(http01_args)
             if not exercise_confirmations:
                 certificate_args.append('--assume-external-ports-open')
             configured_args = ['--domain',domain,'--email','admin@example.test',
@@ -165,6 +332,10 @@ class OneClickSystemTests(unittest.TestCase):
                 subprocess.run(['sudo','userdel','v-ui'],capture_output=True)
             if gate is None:
                 stack.callback(cleanup)
+                if http01_args and not published_version and os.getenv('VUI_RELEASE_KIT'):
+                    exercise_http01_disabled_install(self, source, work, bundle, sha,
+                        Path(os.environ['VUI_RELEASE_KIT']), certificate_args, configured_args,
+                        ca, domain, port, cleanup)
             else:
                 cmd = gate.command(cmd)
                 repeat_cmd = cmd

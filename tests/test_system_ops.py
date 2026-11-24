@@ -514,7 +514,7 @@ class FakeWorker:
 
 
 class TransactionTests(unittest.TestCase):
-    def execute(self, action, active=True, responses=None, fail_exit=False, fail_close=False, fail_stop=False, fail_restore=False, cancelled=None):
+    def execute(self, action, active=True, responses=None, fail_exit=False, fail_close=False, fail_stop=False, fail_restore=False, cancelled=None, config=None):
         events = []
         request = {'protocol': 1, 'action': action}
         if action in ('restore', 'stage'):
@@ -526,6 +526,12 @@ class TransactionTests(unittest.TestCase):
         worker = FakeWorker(events, request, responses, fail_exit, fail_close)
         factory = unittest.mock.Mock(return_value=worker)
         def run():
+            if action == 'start':
+                def read_config(path, limit):
+                    self.assertEqual((path, limit), (ops.CONFIG, ops.MAX_JSON))
+                    return json.dumps({} if config is None else config).encode()
+                with patch.object(ops, 'trusted_bytes', side_effect=read_config):
+                    return ops.operate(request, services, ACCOUNT, [] if cancelled is None else cancelled, factory)
             if action in ('restore','recover-restore'):
                 with patch.object(ops,'revoke_core_epoch'):
                     return ops.operate(request,services,ACCOUNT,[] if cancelled is None else cancelled,factory)
@@ -566,6 +572,67 @@ class TransactionTests(unittest.TestCase):
         self.assertEqual(run(), {'event': 'already_running'})
         factory.assert_not_called()
         self.assertEqual(events, ['snapshot'])
+
+    def test_start_honors_explicit_http01_choice_and_legacy_default(self):
+        for config, enabled in (({}, True), ({'http01_enabled': True}, True),
+                                ({'http01_enabled': False}, False)):
+            with self.subTest(config=config):
+                run, events, services, _, _ = self.execute('start', active=False, config=config)
+                self.assertEqual(run(), {'event': 'done', 'ok': True})
+                self.assertEqual(services.states, {
+                    'v-ui.service': 'active', 'v-ui-http01.service': 'inactive',
+                    'v-ui-http01.socket': 'active' if enabled else 'inactive'})
+                restore_index = next(index for index, event in enumerate(events)
+                                     if isinstance(event, tuple) and event[0] == 'restore')
+                self.assertLess(events.index(('receive', {'event': 'writers_released'})), restore_index)
+
+    def test_start_idempotence_matches_saved_http01_choice(self):
+        for enabled, responder_active in ((False, False), (True, False), (True, True)):
+            with self.subTest(enabled=enabled, responder_active=responder_active):
+                run, events, services, factory, _ = self.execute('start', config={'http01_enabled': enabled})
+                services.states['v-ui-http01.socket'] = 'active' if enabled else 'inactive'
+                services.states['v-ui-http01.service'] = 'active' if responder_active else 'inactive'
+                initial = services.states.copy()
+                self.assertEqual(run(), {'event': 'already_running'})
+                self.assertEqual(services.states, initial)
+                factory.assert_not_called()
+                self.assertEqual(events, ['snapshot'])
+
+    def test_start_rejects_nonboolean_http01_choice_before_worker_or_mutation(self):
+        for value in ('false', 'true', '', 0, 1, None, [], {}):
+            with self.subTest(value=value):
+                run, events, services, factory, _ = self.execute('start', config={'http01_enabled': value})
+                initial = services.states.copy()
+                with self.assertRaisesRegex(ops.Refused, 'invalid HTTP-01 service configuration'):
+                    run()
+                factory.assert_not_called()
+                self.assertEqual(services.states, initial)
+                self.assertEqual(events, ['snapshot'])
+
+    def test_disabled_http01_does_not_accept_or_mutate_unexpected_active_http_units(self):
+        for socket_active, responder_active in ((True, False), (False, True), (True, True)):
+            with self.subTest(socket_active=socket_active, responder_active=responder_active):
+                run, events, services, factory, _ = self.execute('start', config={'http01_enabled': False})
+                services.states['v-ui-http01.socket'] = 'active' if socket_active else 'inactive'
+                services.states['v-ui-http01.service'] = 'active' if responder_active else 'inactive'
+                initial = services.states.copy()
+                with self.assertRaises(ops.Refused):
+                    run()
+                factory.assert_not_called()
+                self.assertEqual(services.states, initial)
+                self.assertEqual(events, ['snapshot', 'prove_stopped'])
+
+    def test_nonstart_maintenance_restores_actual_topology_without_http01_config_read(self):
+        for action in ('restart', 'backup', 'restore', 'activate', 'recover-restore'):
+            for states in (('inactive', 'inactive', 'inactive'), ('active', 'inactive', 'inactive'),
+                           ('active', 'active', 'active')):
+                with self.subTest(action=action, states=states):
+                    run, _, services, _, _ = self.execute(action)
+                    initial = dict(zip(ops.SYSTEMD_UNITS, states))
+                    services.states = initial.copy()
+                    with patch.object(ops, 'trusted_bytes', side_effect=AssertionError('start-only configuration')):
+                        self.assertTrue(run()['ok'])
+                    self.assertEqual(services.states, initial)
 
     def test_partially_active_start_refuses_without_worker_or_service_change(self):
         run, events, services, factory, _ = self.execute('start')
@@ -804,6 +871,10 @@ class IntegratedWorkerTests(unittest.TestCase):
         self.factory = FixtureChild
 
     def execute(self, action, **values):
+        if action == 'start':
+            with patch.object(ops, 'trusted_bytes', return_value=self.fixture.config.read_bytes()):
+                return ops.operate({'protocol': 1, 'action': action, **values}, self.services,
+                                   ACCOUNT, [], self.factory)
         if action=='stage':
             # Preserve the real demoted consumer protocol independently from
             # the Root producer's isolated filesystem tests.
@@ -908,6 +979,43 @@ class NetworkTests(unittest.TestCase):
         self.assertIn('不能证明外部可达', text)
         self.assertNotIn('10443', text)
         firewall.open_ports.assert_not_called()
+
+    def test_diagnostics_follow_http01_choice_and_keep_legacy_default(self):
+        for choice, expected in (({}, [80, 3215]), ({'http01_enabled': True}, [80, 3215]),
+                                 ({'http01_enabled': False}, [3215])):
+            with self.subTest(choice=choice):
+                firewall = self.fake_firewall(status=False)
+                config = {'port': 3215, 'domain': 'panel.example.test', **choice}
+                with patch.object(ops, 'network_context', return_value=(firewall, config)), \
+                     patch.object(ops, 'local_tcp_listener', return_value=False) as listener, \
+                     patch.object(ops, 'local_panel_tls', return_value='unknown'):
+                    text = '\n'.join(ops.network_diagnostics())
+                self.assertEqual([call.args[1] for call in firewall.port_open.call_args_list], expected)
+                self.assertEqual([call.args[0] for call in listener.call_args_list], expected)
+                if choice.get('http01_enabled', True):
+                    self.assertIn('80/tcp：本机规则 blocked', text)
+                    self.assertNotIn('HTTP-01：未启用', text)
+                else:
+                    self.assertIn('HTTP-01：未启用', text)
+                    self.assertNotIn('80/tcp：本机规则', text)
+                self.assertIn('3215/tcp：本机规则 blocked', text)
+                self.assertIn('公网入站：unknown', text)
+                firewall.open_ports.assert_not_called()
+
+    def test_diagnostics_reject_invalid_http01_choice_before_probing(self):
+        for value in ('false', 0, 1, None, [], {}):
+            with self.subTest(value=value):
+                firewall = self.fake_firewall()
+                config = {'port': 3215, 'http01_enabled': value}
+                with patch.object(ops, 'network_context', return_value=(firewall, config)), \
+                     patch.object(ops, 'local_tcp_listener') as listener, \
+                     patch.object(ops, 'local_panel_tls') as tls, \
+                     self.assertRaisesRegex(ops.Refused, 'invalid HTTP-01 service configuration'):
+                    ops.network_diagnostics()
+                firewall.detect.assert_not_called()
+                firewall.open_ports.assert_not_called()
+                listener.assert_not_called()
+                tls.assert_not_called()
 
     def test_open_exact_protocol_port_requires_known_managed_block_and_readback(self):
         firewall = self.fake_firewall()

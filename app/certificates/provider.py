@@ -1,5 +1,6 @@
 """Certbot CSR mode: no live symlinks, user shell hooks, or untrusted CA URLs."""
 import os
+from contextlib import nullcontext
 from pathlib import Path
 import signal
 import shlex
@@ -10,6 +11,7 @@ from urllib.parse import urlsplit
 from app.certificates.errors import CertificateError
 from app.certificates.dns_journal import DNSChallengeJournal
 from app.certificates.dns_store import DNSCredentialStore, DNSStoreError
+from app.data_owner import exclusive_owner_descriptor
 
 DIRECTORIES = {
     'production': 'https://acme-v02.api.letsencrypt.org/directory',
@@ -53,6 +55,8 @@ class CertbotProvider:
                 '--chain-path', str(work / 'chain.pem'), '--fullchain-path', str(work / 'fullchain.pem')]
         if record.get('method', 'http-01') == 'dns-01':
             command[:4] = [sys.executable, '-B', '-I', str(Path(__file__).absolute().with_name('dns_certbot.py')), str(self.root)]
+            if record.get('_owner_fd') is not None:
+                command[5:5] = ['--owner-fd', str(record['_owner_fd'])]
             index = command.index('--webroot')
             command[index:index + 5] = ['--manual', '--preferred-challenges', 'dns-01',
                 '--manual-auth-hook', self._dns_hook_command(record, 'auth'),
@@ -63,9 +67,12 @@ class CertbotProvider:
         import re
         if not re.fullmatch('[a-f0-9]{32}', record.get('job_id', '')):
             raise CertificateError('INVALID_DNS_JOB')
-        return shlex.join([sys.executable, '-B', '-I', str(Path(__file__).absolute().with_name('dns_hook.py')),
+        command = [sys.executable, '-B', '-I', str(Path(__file__).absolute().with_name('dns_hook.py')),
                            action, str(self.root), record['job_id'], '--deadline', str(record['dns_deadline']),
-                           '--propagation-seconds', str(self.dns_propagation_seconds)])
+                           '--propagation-seconds', str(self.dns_propagation_seconds)]
+        if record.get('_owner_fd') is not None:
+            command += ['--owner-fd', str(record['_owner_fd'])]
+        return shlex.join(command)
 
     def check_dns_record(self, record):
         try:
@@ -115,8 +122,14 @@ class CertbotProvider:
         if self.test_ca:
             env['REQUESTS_CA_BUNDLE'] = str(self.test_ca)
         # stderr stays off the HTTP response. Certbot's bounded local logs are owner-only.
-        process = subprocess.Popen(self.command(record, work), stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=work, start_new_session=True)
+        ownership = (exclusive_owner_descriptor(self.root.parent)
+                     if record.get('method') == 'dns-01' else nullcontext(None))
+        with ownership as descriptor:
+            selected = {**record, '_owner_fd': descriptor} if descriptor is not None else record
+            inherited = {'pass_fds': (descriptor,)} if descriptor is not None else {}
+            process = subprocess.Popen(self.command(selected, work), stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=work,
+                start_new_session=True, **inherited)
         try:
             while process.poll() is None:
                 if stop.wait(.2) or time.monotonic() > deadline:
@@ -129,8 +142,19 @@ class CertbotProvider:
             with output.open('rb') as handle:
                 return handle.read(131073)
         finally:
-            if process.poll() is None:
-                os.killpg(process.pid, signal.SIGTERM)
-                try: process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL); process.wait(timeout=5)
+            dns = record.get('method') == 'dns-01'
+            if process.poll() is None or dns:
+                # A DNS wrapper can die while its hook retains the inherited
+                # exclusive lease. Reap that entire session before attempting
+                # journal recovery, even when the wrapper has already exited.
+                try: os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError: pass
+                if process.poll() is None:
+                    try: process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        try: os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError: pass
+                        process.wait(timeout=5)
+                if dns:
+                    try: os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError: pass
