@@ -46,6 +46,7 @@
 | --- | --- |
 | 每入口跟随全局、直连和中转 | [使用说明](PER_INBOUND_ROUTING.md) · [三态契约](PER_INBOUND_ROUTING_CONTRACT.md) |
 | 服务器程序代理、全局中转与恢复 | [双开关契约](DUAL_PROXY_RELAY_CONTRACT.md) · [离线恢复](DUAL_PROXY_RELAY_OFFLINE_RECOVERY.md) |
+| 核心版本与运行身份 | [能力诊断开发说明](CORE_CAPABILITY_DIAGNOSTICS.md) |
 | 专用 TCP 上游配置 | [使用说明](TCP_UPSTREAM_EXPORT.md) · [导出契约](TCP_UPSTREAM_EXPORT_CONTRACT.md) |
 | 静态 YAML 与核心维护 | [YAML 应用契约](YAML_APPLICATION_CONTRACT.md) · [核心维护契约](CORE_UPGRADE_CONTRACT.md) |
 | UDP、DNS 和导入保真 | [能力门槛](UDP_DNS_CAPABILITY_GATES.md) |

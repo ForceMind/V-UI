@@ -81,6 +81,26 @@ class ProxyApiTests(unittest.TestCase):
         self.assertIsNone(result.json()['active'])
         self.apply.assert_not_called()
 
+    def test_capabilities_keep_baseline_and_read_only_runtime_observations(self):
+        from app.services.core_manager import CoreManager
+        from app.services.core_runtime import VERSIONS
+        manager = CoreManager()
+        with patch.object(proxy, 'get_core_manager', return_value=manager):
+            response = self.client.get('/api/proxy/capabilities')
+            self.assertEqual(response.status_code, 200, response.text)
+            value = response.json()
+            self.assertEqual(value['core_version'], VERSIONS['sing-box'])
+            self.assertEqual(value['core_version_semantics'], 'qualification_baseline')
+            self.assertTrue(value['apply_available'])
+            self.assertEqual(set(value['cores']), {'xray', 'sing-box'})
+            self.assertIsNone(value['cores']['sing-box']['running_version'])
+            self.assertTrue(all(adapter._runtime is None for adapter in manager.adapters.values()))
+            self.assertIn('no-store', response.headers['cache-control'])
+            self.auth.return_value = None
+            with patch.object(manager, 'capability_snapshot', side_effect=AssertionError('unauthorized read')):
+                self.assertEqual(self.client.get('/api/proxy/capabilities').status_code, 401)
+        self.apply.assert_not_called()
+
     def test_preview_is_secret_free_and_does_not_save(self):
         before = self.snapshot().json()
         result = self.client.post('/api/proxy/import/preview',

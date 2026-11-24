@@ -78,6 +78,26 @@
         const key = (settings.local_proxy_enabled ? '1' : '0') + (settings.relay_enabled ? '1' : '0');
         return key + ' · ' + modes[key];
     };
+    function renderCoreCapabilities(value) {
+        const version = item => typeof item==='string'&&/^[A-Za-z0-9._-]{1,64}$/.test(item)?item:null;
+        const rows = [];
+        for (const [name, label] of [['xray','Xray'],['sing-box','sing-box']]) {
+            const row=value?.cores?.[name];
+            const baseline=version(row?.qualification_baseline), selected=version(row?.selected_version);
+            const observed=version(row?.running_version);
+            const source={bundled:'随应用提供',managed:'独立受管组件'}[row?.selection_source];
+            let state='运行版本未核实';
+            if (row?.identity_state==='not_initialized') state='尚未取得运行记录';
+            else if (row?.identity_state==='busy') state='核心操作进行中，稍后刷新核对';
+            else if (row?.identity_state==='stopped'&&row.running===false&&row.running_version===null) state='当前未运行';
+            else if (row?.identity_state==='verified'&&row.running===true&&row.matches_selected===true&&observed&&observed===selected) state='已核对运行版本 '+observed;
+            else if (row?.identity_state==='mismatch'&&row.running===true&&row.matches_selected===false&&observed) state='运行版本 '+observed+' 与当前选择不一致，请核对';
+            else if (row?.running===true) state='进程在运行，版本身份未核实';
+            rows.push(element('li',label+'：兼容基线 '+(baseline||'未确认')+'；当前选择 '+
+                (selected||'未确认')+(source?'（'+source+'）':'')+'；'+state+'。'));
+        }
+        $('core-capabilities').replaceChildren(...rows);
+    }
     const timestamp = value => typeof value==='number'&&Number.isFinite(value)?new Date(value*1000).toLocaleString():'时间未确认';
     const notice = (message, error=false) => { $('notice').textContent=message; $('notice').className=error?'error':''; };
     const importNotice = message => { $('import-notice').textContent=message; };
@@ -323,6 +343,14 @@
         clearExport();
         const epoch = yamlChangeEpoch;
         await reloadSnapshot();
+        try {
+            capabilities=await api('/capabilities');
+            renderCoreCapabilities(capabilities);
+        } catch (_) {
+            // A failed observation cannot retain a previous verified label.
+            // Existing draft/recovery refresh remains usable independently.
+            renderCoreCapabilities(null);
+        }
         if (epoch === yamlChangeEpoch) {
             yamlWriteUncertain = false;
             if (!isDirty()) conflict = false;
@@ -796,6 +824,7 @@
     action(async()=>{
         closeImport(); clearCredentials();
         capabilities=await api('/capabilities');
+        renderCoreCapabilities(capabilities);
         await reloadSnapshot(false);
         $('diagnostic-state').textContent=capabilities.diagnostics_available===true?'服务器线路诊断：尚未执行':'服务器线路诊断：未开放，未测';
         $('diagnostic-notice').textContent=capabilities.diagnostics_available===true?'每次诊断绑定一个已保存上游与修订，最长 30 秒；每管理员一次，启动间隔至少 30 秒。':'线路诊断暂不可用。';

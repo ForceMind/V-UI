@@ -53,6 +53,50 @@ async function settled(f, revision){
     }
     assert.fail('workspace did not settle on '+revision);
 }
+test('core capability display distinguishes the baseline, selection and verified running version',async()=>{
+    const f=fixture([snapshot('a'.repeat(64))],{'/api/proxy/capabilities':()=>({cores:{
+        'sing-box':{qualification_baseline:'1.14.2',selected_version:'1.14.3',selection_source:'managed',
+            running:true,running_version:'1.14.3',identity_state:'verified',matches_selected:true},
+        xray:{qualification_baseline:'26.3.27',selected_version:'26.3.27',selection_source:'bundled',
+            running:true,running_version:null,identity_state:'unverified',matches_selected:null}
+    }})});
+    await settled(f,'a'.repeat(64));
+    const rows=f.get('core-capabilities').children.map(row=>row.textContent);
+    assert(rows[1].includes('兼容基线 1.14.2'));
+    assert(rows[1].includes('当前选择 1.14.3'));
+    assert(rows[1].includes('已核对运行版本 1.14.3'));
+    assert(rows[0].includes('版本身份未核实'));
+    assert(!rows[0].includes('已核对运行版本'));
+});
+test('legacy and contradictory capabilities never display a verified running version',async()=>{
+    for(const capabilities of [{},{cores:{'sing-box':{running:true,identity_state:'verified',
+        matches_selected:true,running_version:'1.14.3',selected_version:'1.14.2'},
+        xray:{qualification_baseline:'<private>',selected_version:'<script>',running:'true',
+            identity_state:'verified',running_version:'26.3.27',matches_selected:true}}}]){
+        const f=fixture([snapshot('a'.repeat(64))],{'/api/proxy/capabilities':()=>capabilities});
+        await settled(f,'a'.repeat(64));
+        const text=f.get('core-capabilities').children.map(row=>row.textContent).join(' ');
+        assert(!text.includes('已核对运行版本'));
+        assert(!text.includes('<private>'));
+        assert(!text.includes('<script>'));
+    }
+});
+test('failed capability refresh clears old verified evidence while retaining the draft refresh',async()=>{
+    let reads=0;
+    const f=fixture([snapshot('a'.repeat(64)),snapshot('b'.repeat(64))],{
+        '/api/proxy/capabilities':()=>{
+            if(reads++)throw new Error('temporary network failure');
+            return {cores:{'sing-box':{qualification_baseline:'1.14.2',selected_version:'1.14.2',
+                running:true,running_version:'1.14.2',identity_state:'verified',matches_selected:true}}};
+        }
+    });
+    await settled(f,'a'.repeat(64));
+    assert(f.get('core-capabilities').children[1].textContent.includes('已核对运行版本'));
+    await f.get('refresh').emit('click');
+    await settled(f,'b'.repeat(64));
+    assert(!f.get('core-capabilities').children[1].textContent.includes('已核对运行版本'));
+    assert(f.get('core-capabilities').children[1].textContent.includes('未核实'));
+});
 test('save refresh queues behind an older busy response and ends on the latest revision',async()=>{
     const old=deferred(),f=fixture([old.promise,snapshot('b'.repeat(64))]);
     await flush();
