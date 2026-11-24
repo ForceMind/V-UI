@@ -80,10 +80,10 @@ run_vui_local_installer --upgrade --recover-dns
 
 ## 验证边界
 
-本批需要分别记录以下证据：
+准确开发源码 `2c70c3d9de6dbf265e8e383f6d0c93445a4788da`已核对以下证据。
 
 - 本地回归：私有 stdin 协议、隐藏终端、真实进程的描述符继承、权限失败、未知写入、超时与中断后的材料保留。
 - ACME 验收：固定 Certbot、Pebble 与假 Cloudflare 的 DNS 签发及清理契约，并单独验证本批继承独占描述符的首装链路。既有 shared 路径的通过记录不能替代新增 EX 路径的结果。
 - Actions 空白系统验收：候选套件构建、占用 80 时的 DNS 预检、自备证书默认安装、HTTPS 就绪、菜单启停，以及旧版升级配置保留。
 
-DNS 安装预检通过不等于完整 DNS 首装签发通过；自备证书的真实系统安装也不替代 DNS 端到端验收。真实 Cloudflare 账号、用户域名、生产安装和浏览器需要各自的独立证据。
+五项 [ACME 测试](https://github.com/ForceMind/V-UI/actions/runs/45451730622/attempts/1)覆盖真实 Certbot/Pebble 与假 Cloudflare，含首装独占描述符和 TXT 清理。[空白系统验收](https://github.com/ForceMind/V-UI/actions/runs/45451730835/attempts/1)完成 DNS 预检与自备证书实际安装，80 端口的原监听保留，面板 HTTPS 返回 401，启停和升级成功。真实 Cloudflare 整机首装、用户域名与浏览器仍需各自验证。

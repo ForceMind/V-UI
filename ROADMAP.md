@@ -20,19 +20,19 @@
 
 ## W0–W4 正式面板与安装增量
 
-沿 [已审定设计稿 8486c56](https://github.com/ForceMind/V-UI/tree/8486c567ac7d03e0aabf3d65000ddb83f5d5f778/docs/ui-wireframes) 组合已批准范围。下列提交是组合过程中的交接点；组合后必须在准确 dev 提交重新验收。原草稿继续提供历史证据。
+沿 [已审定设计稿 8486c56](https://github.com/ForceMind/V-UI/tree/8486c567ac7d03e0aabf3d65000ddb83f5d5f778/docs/ui-wireframes) 组合已批准范围。下列提交保留组合过程中的交接点。准确开发源码 `2c70c3d9de6dbf265e8e383f6d0c93445a4788da`已通过九组 Actions，四目标包已核对；新装及 12 个已发布旧版升级在同一轮通过。 [安装及升级验收](https://github.com/ForceMind/V-UI/actions/runs/45451730835/attempts/1)
 
 | 交付物 | 源码交接点 | 本次复验 |
 | --- | --- | --- |
 | W0 文档和稳定版入口 | `b07d201` | 对齐 v0.4.27，文档与链接检查及复审通过 |
-| W1 核心身份诊断 | `11839d8` | 9 项合成界面通过，覆盖刷新出错清除旧身份；完整环境诊断仍单列 |
-| W2 DNS 首装和原任务恢复 | `cca92d9` | 源码独审通过，候选空白系统、假 CA 与真实账号的资格分别记录 |
-| W3 节点到订阅 | `1bd8ed9` | 节点选择 31、首次重试 24、客户端交付 40 项合成验证通过；需实际客户端复验 |
-| W4 YAML 草稿检查、回退与重试 | `1146bd2` | 36 项预览、11 项事务同步合成通过；需真实流量与中断恢复复验 |
-| W4 证书逐位置状态和重试 | `81268b6` | 23 项合成通过；需两固定核心的失败保留旧材料与同位置重试 |
-| W4 维护断线查回 | `61f2506` | 合成和模板检查通过；需隔离 API 验证原编号、权限与撤销 |
+| W1 核心身份诊断 | `11839d8` | 9 项合成界面和 Linux API 通过，刷新失败清除旧身份，维护权限保持。 [API 验收](https://github.com/ForceMind/V-UI/actions/runs/45451730668/attempts/1) |
+| W2 DNS 首装和原任务恢复 | `cca92d9` | 固定 Certbot/Pebble 五项通过。空白系统复验占用 80 时的 DNS 预检与自备证书实际安装、启停和升级。 [ACME 验收](https://github.com/ForceMind/V-UI/actions/runs/45451730622/attempts/1) |
+| W3 节点到订阅 | `1bd8ed9` | 节点选择 31、首次重试 24、客户端交付 40 项合成通过。库存、订阅授权和固定 Mihomo 真流量通过。 [链路验收](https://github.com/ForceMind/V-UI/actions/runs/45451730511/attempts/1) |
+| W4 YAML 草稿检查、回退与重试 | `1146bd2` | 36 项预览、11 项事务同步合成通过，且通过真实流量、端口冲突回退和 SIGKILL 恢复。 [链路验收](https://github.com/ForceMind/V-UI/actions/runs/45451730511/attempts/1) |
+| W4 证书逐位置状态和重试 | `81268b6` | 23 项合成通过，两固定核心实际 TLS 均验证旧材料保留及原位置重试。 [链路验收](https://github.com/ForceMind/V-UI/actions/runs/45451730511/attempts/1) |
+| W4 维护断线查回 | `61f2506` | 合成与隔离 API 通过，覆盖原任务编号、权限隔离及撤销。 [API 验收](https://github.com/ForceMind/V-UI/actions/runs/45451730668/attempts/1) |
 
-公开 v0.4.27 仍对应既有已验收制品。完整 DNS 首装、公开 v0.4.27 到下一版本保数据升级、浏览器及外部环境，按各自门槛另外取证。当前开发没有升版。
+公开 v0.4.27 仍对应既有已验收制品。仍需验证真实 Cloudflare 整机签发、公开 v0.4.27 到下一版本的保数据升级、浏览器和外部环境。W1 完整环境诊断继续单列。
 
 ## 已完成 P3：v0.4.24 与独立核心组件
 
@@ -197,7 +197,7 @@ v0.4.23已正式发布，应用与控制源码冻结、准确验收和公开读�
 | P2 | DNS-01 与通配符证书 | v0.4.23及短入口已公开收口，应用/入口身份分开 | 原配置与数据保护保持；真实Cloudflare账号、浏览器及生产升级未验证，不继承给新版本 |
 | P3 | 核心独立升级与回滚 | v0.4.24 应用、两项独立核心组件和短入口已公开验收 | 准确来源与证据见本页 P3 收口记录 |
 | P4 | 完整 YAML 导入、合并与应用 | 已合入 main `982aec4` 并验收 | v0.4.25 应用与验收见本页发布记录 |
-| P5 | 协议公开支持与 UDP 双跳 | [XHTTP 最小分享](docs/XHTTP_PUBLIC_PROFILE.md)已集成并验收，已随 v0.4.26 公开。HTTPUpgrade 的[最小 Mihomo YAML](docs/HTTPUPGRADE_MIHOMO_PROFILE.md)候选验收通过，已进入 dev `08b87e8`，独立 dev 验收待终态；公开 v0.4.27 保持原范围，[D2 草稿 #167](https://github.com/ForceMind/V-UI/pull/167) 受阻 | 固定 Xray → Mihomo 的公开 YAML/URI 已完成真实转发和失败关闭验收；D2 保留逐报文限制、大包与原关联恢复门槛，产品 UDP 中转保持关闭 |
+| P5 | 协议公开支持与 UDP 双跳 | [XHTTP 最小分享](docs/XHTTP_PUBLIC_PROFILE.md)已集成并验收，已随 v0.4.26 公开。HTTPUpgrade 的[最小 Mihomo YAML](docs/HTTPUPGRADE_MIHOMO_PROFILE.md)候选验收通过，已在 dev `08b87e8` 通过九组及真实流量验收，组合源码已复验。 [独立安装验收](https://github.com/ForceMind/V-UI/actions/runs/45433610436/attempts/1)；公开 v0.4.27 保持原范围，[D2 草稿 #167](https://github.com/ForceMind/V-UI/pull/167) 受阻 | 固定 Xray → Mihomo 的公开 YAML/URI 已完成真实转发和失败关闭验收；D2 保留逐报文限制、大包与原关联恢复门槛，产品 UDP 中转保持关闭 |
 | P6 | Tailscale 私有管理 | 默认关闭的只读状态已有，[私有化设计](docs/TAILSCALE_PRIVATE_MANAGEMENT_DESIGN.md)已复核健康和证书前置 | 先取得隔离主机、管理端、带外恢复与实验授权，执行共存和回滚；再确认面板和订阅的可达范围 |
 | P7 | 容器与声明式部署 | [Docker 与 NixOS 各自的开发和验收契约](docs/DEPLOYMENT_TARGETS_CONTRACT.md)已登记 | 分别固定镜像/系统输入、提供空白环境，完成首次启动、流量、升级、失败与持久恢复 |
 

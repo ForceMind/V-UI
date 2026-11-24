@@ -8,7 +8,7 @@
 | --- | --- |
 | 正式应用 | [v0.4.27](https://github.com/ForceMind/V-UI/releases/tag/v0.4.27)，应用源 `bdf5fbac4475424562c4733b1816093857f62f55`，19 项公开资产 |
 | 主线接手点 | `96452a3b6c742940e6a3b013c2f9cbecbd3427e0`，已验的 v0.4.27 短入口 |
-| 开发接手点 | `08b87e8007c8f784c4f374a1c26688b128fab2fa`；HTTPUpgrade 原候选已独审及 10 组精确 Actions，通过后正常快进 dev |
+| 开发验收源码 | `2c70c3d9de6dbf265e8e383f6d0c93445a4788da`，HTTPUpgrade 与 W0–W4 已组合；九组 Actions 和四目标包已验。 [准确安装矩阵](https://github.com/ForceMind/V-UI/actions/runs/45451730835/attempts/1) |
 | 应用验收 | 九组准确主线 Actions，四目标、新装、12 个旧版升级及 14 份同源收据，见[主线安装验收](https://github.com/ForceMind/V-UI/actions/runs/45371977272/attempts/3) |
 | 后续入口 | 固定 v0.4.27 安装器和完整清单，见[真实短入口验收](https://github.com/ForceMind/V-UI/actions/runs/45390054777/attempts/1) |
 | 独立实验 | [D2 #167](https://github.com/ForceMind/V-UI/pull/167)仍为草稿；固定核心实验 13 项通过、22 项失败、5 项未执行，产品 UDP 中转继续关闭 |
@@ -20,11 +20,11 @@
 - P2 管理员 Cloudflare DNS-01、通配符、绑定、清理与私有备份兼容已随 v0.4.23 交付。自动首装仍 HTTP-01，DNS 首装是新增工作。
 - P3 独立核心更新、回退、持久任务、远程用途授权及双域恢复已随 v0.4.24 交付。组件仍按当前应用来源和平台核对资格。
 - P4 静态 YAML 已集成并随 v0.4.25 发布，保持普通单上游模式和原入口策略；动态 provider、任意规则和自动出口切换不由此取得资格。
-- v0.4.26 已公开限定 Xray VLESS/XHTTP/TLS/stream-one/h2 向 Mihomo 的 YAML 与 URI 分享。sing-box JSON、其他 mode、应用 UDP 和中转上游不在该范围，HTTPUpgrade 的 [Mihomo YAML 开发提交](HTTPUPGRADE_MIHOMO_PROFILE.md)已进入 dev，独立 dev 验收运行见[检查](https://github.com/ForceMind/V-UI/actions/runs/45433610436)。公开 v0.4.27 保留原范围。
+- v0.4.26 已公开限定 Xray VLESS/XHTTP/TLS/stream-one/h2 向 Mihomo 的 YAML 与 URI 分享。sing-box JSON、其他 mode、应用 UDP 和中转上游不在该范围，HTTPUpgrade 的 [Mihomo YAML 开发提交](HTTPUPGRADE_MIHOMO_PROFILE.md)已在 dev 通过独立和组合验收。 [独立安装验收](https://github.com/ForceMind/V-UI/actions/runs/45433610436/attempts/1)。公开 v0.4.27 保留原范围。
 
 节点、ToClash、订阅、升级、备份与维护授权继续复用现有模块，精确范围见[兼容矩阵](COMPATIBILITY.md)。
 
-W0–W4 的[源码交接点与逐项验证](../ROADMAP.md#w0w4-正式面板与安装增量)集中记录在路线图。W1 完整环境诊断、W2 整机 DNS 签发和公开 v0.4.27 到下一版本的保数据升级仍需各自证据。下一版本待候选阶段确定。
+W0–W4 的[源码交接点与逐项验证](../ROADMAP.md#w0w4-正式面板与安装增量)集中记录在路线图。准确开发源码 `2c70c3d9de6dbf265e8e383f6d0c93445a4788da`的安装首轮 14 项通过，四目标同源制品已回读。W1 完整环境诊断、W2 整机 DNS 签发和公开 v0.4.27 到下一版本的保数据升级仍需各自证据。下一版本待候选阶段确定。
 
 接手 P6 先读 [Tailscale 私有管理设计](TAILSCALE_PRIVATE_MANAGEMENT_DESIGN.md)与共存矩阵。P7 先读[独立部署契约](DEPLOYMENT_TARGETS_CONTRACT.md)。两项均须按指定隔离环境取证。
 
