@@ -12,6 +12,10 @@ sing-box 1.14.3-r1 和 Xray 26.10.21-r1 依次晋升，各六项资产通过匿�
 
 PR #147 合入 dev `f6b1258`，独立 PR #162 合入 main `982aec4a60bc468b58298039cdbe289449a4199c`。两处各十组 Actions、32 个 job 通过。主线真实日志验证 YAML 转发、端口占用后的回退及协调进程 SIGKILL 后的流量恢复。 [主线验收](https://github.com/ForceMind/V-UI/pull/162) · [YAML 应用契约](docs/YAML_APPLICATION_CONTRACT.md)
 
+## v0.4.27 发布候选
+
+分享链接兼容及其 CI 修复已集成到主线。准确主线九组 Actions 与一键安装 13 项已通过。候选补验公开 v0.4.26 的保数据升级，要求准确提交的九组 Actions、同一轮 14 项安装验收与四目标同源制品。 [主线集成](https://github.com/ForceMind/V-UI/pull/185)
+
 ## 已发布 v0.4.26
 
 v0.4.26 应用已从准确主线 `71f0e1689cd356f22e12553f74a9ec4fd8bba388` 公开发行，收录 XHTTP 的 Mihomo YAML 与 VLESS URI 分享。19 项附件摘要、标签和 `latest` 已匿名核验。十组 Actions、34 个作业覆盖四目标、新装和十一个公开旧版保数据升级。13 份收据绑定同一轮安装套件。 [主线验收](https://github.com/ForceMind/V-UI/pull/171) · [正式发布](https://github.com/ForceMind/V-UI/releases/tag/v0.4.26)

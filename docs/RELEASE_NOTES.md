@@ -1,4 +1,12 @@
-# V-UI 0.4.26
+# V-UI 0.4.27
+
+管理员可在上游节点面板预览 3x-ui 与 x-ui 的分享链接，再显式导入受支持的节点。预览逐项说明不支持的格式或参数。上游仍须通过既有协议与路由验证，UDP 中转保持关闭。 [主线集成与验收](https://github.com/ForceMind/V-UI/pull/185) · [上游配置](CONFIGURATION.md)
+
+一键安装 CI 使用只读令牌查询固定核心及旧版发布元数据。公开安装脚本和附件仍通过匿名 HTTPS 下载并校验摘要。
+
+本候选加入公开 v0.4.26 的升级验收。验收对照账户、节点、实际订阅、证书绑定、DNS 私有材料、保存的 YAML 计划和原始输入，并核对新旧 Root 来源。候选资格要求同轮 14 项一键安装、九组 Actions 和四个 Linux 目标的同来源制品。浏览器未验证。
+
+## 0.4.26 历史说明
 
 v0.4.26 将 P5 已验收的 XHTTP 分享纳入正式发行。管理员可为 Xray VLESS 入站选择验证 TLS、Stream One 并显式启用 h2，再通过单节点分享或授权订阅交付 Mihomo YAML 和 VLESS URI。使用单 UUID、空 flow、Chrome 及明确的 SNI、Host 和规范 Path。 [主线验收](https://github.com/ForceMind/V-UI/pull/169) · [XHTTP 使用范围](XHTTP_PUBLIC_PROFILE.md)
 
