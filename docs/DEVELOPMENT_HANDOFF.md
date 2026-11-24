@@ -1,12 +1,48 @@
 # 当前开发交接
 
-## v0.4.27 稳定版与 P5 候选
+更新：2026-11-24。已公开 v0.4.27；应先按[路线图](../ROADMAP.md)确认开发批次，按[发布记录](RELEASING.md#当前稳定版)核对现行应用来源。计划、准确源码、CI、正式发布和生产部署分别记账。
 
-正式应用源为 `bdf5fbac4475424562c4733b1816093857f62f55`，短入口源为 `96452a3b6c742940e6a3b013c2f9cbecbd3427e0`。官方四目标、发布与短入口证据见[发布规范](RELEASING.md#当前稳定版)。
+## 本次接手基线
 
-当前推进 [HTTPUpgrade 草稿 #179](https://github.com/ForceMind/V-UI/pull/179)。候选只支持固定 sing-box 与 Mihomo 的 HTTP/TCP YAML 订阅。准确旧候选的真实转发和六类负向已有记录，旧安装矩阵仍有下载 403。同步 v0.4.27 基线后，以[候选契约](HTTPUPGRADE_MIHOMO_PROFILE.md)和当前草稿准确提交的 Actions 验收为准。保留 D2 草稿 #167 与受阻证据。
+| 身份 | 核验结果 |
+| --- | --- |
+| 正式应用 | [v0.4.27](https://github.com/ForceMind/V-UI/releases/tag/v0.4.27)，应用源 `bdf5fbac4475424562c4733b1816093857f62f55`，19 项公开资产 |
+| 主线接手点 | `96452a3b6c742940e6a3b013c2f9cbecbd3427e0`，已验的 v0.4.27 短入口 |
+| 开发接手点 | `08b87e8007c8f784c4f374a1c26688b128fab2fa`；HTTPUpgrade 原候选已独审及 10 组精确 Actions，通过后正常快进 dev |
+| 应用验收 | 九组准确主线 Actions，四目标、新装、12 个旧版升级及 14 份同源收据，见[主线安装验收](https://github.com/ForceMind/V-UI/actions/runs/45371977272/attempts/3) |
+| 后续入口 | 固定 v0.4.27 安装器和完整清单，见[真实短入口验收](https://github.com/ForceMind/V-UI/actions/runs/45390054777/attempts/1) |
+| 独立实验 | [D2 #167](https://github.com/ForceMind/V-UI/pull/167)仍为草稿；固定核心实验 13 项通过、22 项失败、5 项未执行，产品 UDP 中转继续关闭 |
 
-## v0.4.23 交接快照（历史）
+这些 SHA 是接手时的观察值。实施、审查或合并前重新核对远端分支、开放 PR、未提交内容及准确检查，不把本页值当作永久 HEAD。
+
+## 当前已交付与增量范围
+
+- P2 管理员 Cloudflare DNS-01、通配符、绑定、清理与私有备份兼容已随 v0.4.23 交付。自动首装仍 HTTP-01，DNS 首装是新增工作。
+- P3 独立核心更新、回退、持久任务、远程用途授权及双域恢复已随 v0.4.24 交付。组件仍按当前应用来源和平台核对资格。
+- P4 静态 YAML 已集成并随 v0.4.25 发布，保持普通单上游模式和原入口策略；动态 provider、任意规则和自动出口切换不由此取得资格。
+- v0.4.26 已公开限定 Xray VLESS/XHTTP/TLS/stream-one/h2 向 Mihomo 的 YAML 与 URI 分享。sing-box JSON、其他 mode、应用 UDP 和中转上游不在该范围，HTTPUpgrade 的 [Mihomo YAML 开发提交](HTTPUPGRADE_MIHOMO_PROFILE.md)已进入 dev，独立 dev 验收运行见[检查](https://github.com/ForceMind/V-UI/actions/runs/45433610436)。公开 v0.4.27 保留原范围。
+
+节点、ToClash、订阅、升级、备份与维护授权继续复用现有模块，精确范围见[兼容矩阵](COMPATIBILITY.md)。
+
+本轮按[优化与融合实施方案](V2RAY_AGENT_INTEGRATION_PLAN.md)执行 W0–W4，映射既有 P1–P7，不重开已完成的 P2/P3/P4：先校准文档；W1 首块区分兼容基线、已选核心和实际验证运行版本，完整环境/公网诊断继续分项跟踪；W2 接入 DNS 首装及清理、中断恢复；W3 客户端交付、W4 静态规则预览与恢复分别作为后续批次。版本号建议不等于已构建或已发布。
+
+## 当前保护与验收要求
+
+- 普通模式单一共享上游、每入口 inherit/direct/relay 与本机代理开关独立；静态 YAML 沿用独立检查、应用与恢复契约。
+- 普通升级保留有效订阅；备份恢复继续撤销旧会话、订阅令牌和维护授权，DNS profile 待验证，旧任务与一次性写授权不重放。
+- 固定官方核心及已验协议、鉴权、精确 Origin、修订、幂等和失败保护保持。未知写入读取原任务；DNS 本地回退不代表远端副作用消失。
+- 服务用户非 root，不擅改 SSH、未知防火墙、云安全组或无关服务；真实凭据、节点导出、数据库、证书和备份只私存。
+- 构建、四目标制品、真实核心与系统安装/升级在 GitHub Actions 空白临时主机执行；文档使用已有离线检查，代码按受影响行为回归并独审。
+- **浏览器当前不运行，报告未验证。** 真实 Cloudflare、手机移动网络、真实 512 MiB 整机/24 小时及 Tailscale 接入仍各有缺口；不拿其他层结果替代。
+
+遵守 [AGENTS](../AGENTS.md) 与[贡献指南](../CONTRIBUTING.md)。先完成可审阅差异、独审和必要准确 CI，外部操作按对应明确授权执行。正式发布只晋升同源已验制品，旧资产不覆盖；生产与真实账号/网络操作不由旧发布许可推定。
+
+## 历史交接原文
+
+下方完整保留 v0.4.22–v0.4.24 的原时点交接、冻结范围、失败及授权记录，不作为当前未完成清单。整理前全文另见[固定快照](https://github.com/ForceMind/V-UI/blob/b58a76dda1d2b26c831988a53db88e25646f5b54/docs/DEVELOPMENT_HANDOFF.md)，其他阶段见[历史索引](history/README.md)。
+
+<details>
+<summary>展开 2026-11-10 以前的历史交接</summary>
 
 更新：2026-11-10。当前正式应用为v0.4.23，源`be5d8459cdd3eeedce73f2ff6e4663e5eb781e42`；准确晋升和入口记录见[DNS发布记录](DNS01_CLOUDFLARE_CONTRACT.md#公开发布与短入口)，开发顺序统一在[路线图](../ROADMAP.md)。旧记录按其产生时点保留。
 
@@ -76,3 +112,5 @@ P3 接手先读[核心独立升级契约](CORE_UPGRADE_CONTRACT.md)和[候选终
 已保留P3本地6a83d76/b0c9637既有文档，正常合入23当前主线为4bf8bae。源码/证据以P3契约及路线图为准，独立PR146/147仍保持草稿，不能混作23已发布能力。P3实际本地核心与恢复已实现，但远程Root写入和完整面板更新未完成。
 
 M46A新增独立core_read、固定Root core_status及维护页面。旧8用途预设不扩权，新用途必须明确发放；该入口只显示选择，不证明实际运行版本。纯Root/终端预设与合成DOM通过，API授权与新准确提交完整资格待Actions；后续官方候选发现须有独立进程硬超时和杀回收，Root写入须独立授权证据，不信UID、任务ID或自报scope。P3源码VERSION仍23开发基线，统一候选版本/公开23升级基线在完整发布准备阶段更新，不反复调试升版。
+
+</details>

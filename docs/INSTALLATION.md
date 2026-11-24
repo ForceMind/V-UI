@@ -4,6 +4,8 @@
 
 已有实例先备份，升级保留原配置、管理员、节点、订阅与证书。完整包从[官方 v0.4.27 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.27)取得，不混用分支文件、其他版本或不明下载站。
 
+本页描述已公开 v0.4.26。该版自动首装仍使用 HTTP-01；已有证书可按后文提供，Cloudflare DNS-01 由安装后的管理员面板管理。DNS-01 首装及按挑战方式调整 80 端口预检属于[后续实施批次](V2RAY_AGENT_INTEGRATION_PLAN.md#w2-cloudflare-dns-01-首装与恢复)，本页不将计划写成已发布参数或能力。
+
 ## 1. 一行安装
 
 准备 Bash、curl 和 root 或已有 sudo 权限后，在服务器终端执行：

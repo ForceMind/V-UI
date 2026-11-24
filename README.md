@@ -47,12 +47,12 @@ v0.4.23 新增 Cloudflare DNS-01、根域名与一级通配符证书、具体连
 ## 能力与边界
 
 - 节点与订阅：支持符合[兼容矩阵](docs/COMPATIBILITY.md)的 VLESS、Trojan、VMess、Shadowsocks、Hysteria2 和 TUIC 组合，提供对应 URI/Base64、Mihomo YAML、sing-box JSON 导出。
-- 代理与中转：服务器程序代理和入站中转独立控制；每入口可跟随全局、指定直连或指定中转，实例共用一个选定上游。服务器程序代理仅为本机程序提供代理入口，不接管全系统流量或提供系统 TUN。
+- 代理与中转：服务器程序代理和入站中转独立控制；普通模式中每入口可跟随全局、指定直连或指定中转，共用一个选定上游。已发布的[静态 YAML 模式](docs/YAML_APPLICATION_CONTRACT.md)可将明确选定的节点、非嵌套 select 分组和受支持规则应用到受管 sing-box；未实现语义会阻止应用。服务器程序代理仅为本机程序提供代理入口，不接管全系统流量或提供系统 TUN。
 - 证书：支持 HTTP-01 自动申请、续期与绑定，也可提供已有证书。申请成功和节点实际应用分别检查。
-- 运维：提供服务管理、备份恢复、正式在线升级和限时远程维护；应用与核心使用专用低权限账号。
-- 支持范围：有效中转仅限已验证 TCP，UDP 中转尚未获支持资格；QUIC 使用 UDP 承载不代表应用 UDP 已验证。XHTTP 的 Mihomo 分享范围见[分享契约](docs/XHTTP_PUBLIC_PROFILE.md)。HTTPUpgrade 公开导出仍阻断。
+- 运维：提供服务管理、备份恢复、正式在线升级、合资格核心组件更新与回退、限时远程维护；核心写入使用独立授权。应用与核心使用专用低权限账号。
+- 支持范围：有效中转仅限已验证 TCP，UDP 中转尚未获支持资格；QUIC 使用 UDP 承载不代表应用 UDP 已验证。XHTTP 的 Mihomo 分享范围见[分享契约](docs/XHTTP_PUBLIC_PROFILE.md)。公开 v0.4.27 的 HTTPUpgrade 导出仍阻断，开发中的 Mihomo YAML 见[候选契约](docs/HTTPUPGRADE_MIHOMO_PROFILE.md)。
 
-后端使用 **Python / FastAPI / SQLite**，前端使用 Vue 3 / Element Plus。流量由固定官方 Xray 26.3.27、sing-box 1.14.2 核心处理，客户端兼容基线为 Mihomo 1.19.32。发行包自带固定 CPython 3.12、离线依赖与前端资源，运行无需 Node.js 或 Redis。核心版本随经过验证的正式套件管理。
+后端使用 **Python / FastAPI / SQLite**，前端使用 Vue 3 / Element Plus。套件内置固定官方 Xray 26.3.27、sing-box 1.14.2，客户端兼容基线为 Mihomo 1.19.32；独立核心组件还须通过当前应用来源与平台的兼容检查，不能仅按版本号推定可用。发行包自带固定 CPython 3.12、离线依赖与前端资源，运行无需 Node.js 或 Redis。选择记录与实际运行版本分别检查。
 
 ## 平台与资源
 
@@ -74,7 +74,7 @@ v0.4.27 已完成四目标构建、新装和十二个公开旧版保数据升级
 | --- | --- |
 | 使用与维护 | [文档索引](docs/README.md) · [安装](docs/INSTALLATION.md) · [配置](docs/CONFIGURATION.md) · [证书](docs/CERTIFICATES.md) · [Cloudflare DNS-01指南](docs/DNS01_CLOUDFLARE.md) |
 | 升级、备份与故障 | [运维](docs/OPERATIONS.md) · [故障排查](docs/TROUBLESHOOTING.md) |
-| 版本与方向 | [变更记录](CHANGELOG.md) · [路线图](ROADMAP.md) · [历史资料](docs/history/README.md) |
+| 版本与方向 | [变更记录](CHANGELOG.md) · [路线图](ROADMAP.md) · [优化与融合实施方案](docs/V2RAY_AGENT_INTEGRATION_PLAN.md) · [历史资料](docs/history/README.md) |
 | 参与项目 | [贡献指南](CONTRIBUTING.md) · [行为准则](CODE_OF_CONDUCT.md) · [支持渠道](SUPPORT.md) · [安全报告](SECURITY.md) |
 
 报告问题请提供版本、系统架构、复现步骤和已脱敏日志，不公开密码、完整订阅地址或私钥。安全漏洞按[安全政策](SECURITY.md)私下报告。
