@@ -97,6 +97,27 @@ test('failed capability refresh clears old verified evidence while retaining the
     assert(!f.get('core-capabilities').children[1].textContent.includes('已核对运行版本'));
     assert(f.get('core-capabilities').children[1].textContent.includes('未核实'));
 });
+test('failed snapshot refresh invalidates the prior running-version observation',async()=>{
+    const revision='a'.repeat(64);
+    let snapshotUnavailable=false;
+    const f=fixture([],{
+        '/api/proxy/settings':()=>{
+            if(snapshotUnavailable)throw new Error('temporary snapshot failure');
+            return snapshot(revision);
+        },
+        '/api/proxy/capabilities':()=>({cores:{'sing-box':{
+            qualification_baseline:'1.14.2',selected_version:'1.14.2',running:true,
+            running_version:'1.14.2',identity_state:'verified',matches_selected:true
+        }}})
+    });
+    await settled(f,revision);
+    assert(f.get('core-capabilities').children[1].textContent.includes('已核对运行版本'));
+    snapshotUnavailable=true;
+    await f.get('refresh').emit('click');
+    await settled(f,revision);
+    assert(f.get('core-capabilities').children[1].textContent.includes('运行版本未核实'));
+    assert.equal(f.get('notice').className,'error');
+});
 test('save refresh queues behind an older busy response and ends on the latest revision',async()=>{
     const old=deferred(),f=fixture([old.promise,snapshot('b'.repeat(64))]);
     await flush();

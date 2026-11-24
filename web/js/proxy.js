@@ -341,6 +341,7 @@
     });
     $('refresh').addEventListener('click',()=>action(async()=>{
         clearExport();
+        renderCoreCapabilities(null);
         const epoch = yamlChangeEpoch;
         await reloadSnapshot();
         try {
