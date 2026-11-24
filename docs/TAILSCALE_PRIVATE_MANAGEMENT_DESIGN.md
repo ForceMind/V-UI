@@ -4,6 +4,12 @@
 
 已有 [V-TS-01 方案](TAILSCALE_MANAGEMENT_OVERLAY.md)与 [C0–C8 / R0–R4](TAILSCALE_MANAGEMENT_ACCEPTANCE.md)负责安装共存、原 URL 路径和基线恢复，本文件不重复它们。V-TS-02 只读观察器已由 [PR54](https://github.com/ForceMind/V-UI/pull/54) / [PR55](https://github.com/ForceMind/V-UI/pull/55)完成软件收口；真实 Tailscale 状态与共存仍未测。状态卡片不能批准本方案或驱动安全动作。关闭 V-TS-02 观察、unknown/stale 或停止 Tailscale 都不等于退出私有模式，不能解除隔离。
 
+## 2026-11-24 接手核对
+
+- [只读状态契约](TAILSCALE_STATUS_CONTRACT.md)继续适用。面板不会安装、登录或配置 Tailscale。真实 C0–C8/R0–R4、P0–P9 均无新验收。
+- W2 源码提供 DNS-01 与自备证书的首装分支，并把 HTTP-01 服务开关写入安装配置。DNS 首装还需候选整机签发及真实账号证据。安装器健康检查仍按地址族连接回环，并验证原 HTTPS 域名和未登录 401。W2 不授予私有地址监听、隔离重启或运维资格。相关检查见[安装源文件](../scripts/install_system.py)。
+- 首个可执行实验沿 [共存合同](TAILSCALE_MANAGEMENT_ACCEPTANCE.md)采用单台隔离 Linux 主机与独立管理电脑。实验登记固定软件与地址族、保留原公网配置、有实际带外入口和恢复点。完成共存、故障与回滚取证后，才选择全 HTTPS 私有化（含订阅）或另案保留公网订阅。实际实验还缺目标主机、管理电脑、带外负责人和网络操作授权。
+
 ## 1. 保护目标与威胁模型
 
 目标是：在明确选择的部署上，**整个面板 HTTPS 服务只能经获准的私有管理路径到达**，公网及未授权设备不能访问它；已有 VLESS 等业务入口及 direct/relay TCP 合同不随之改变。不是“服务器所有端口都私有”，也不是只隐藏 `/ui`。不保证匿名、零中断、始终在线或抵抗已控制主机 root 的攻击者。

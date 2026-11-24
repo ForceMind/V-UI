@@ -24,6 +24,7 @@
 | 全局管理入口与受管操作的详细边界 | [受管运维](MANAGED_OPERATIONS.md) |
 | 远程维护的权限与撤销规则 | [维护权限契约](REMOTE_MAINTENANCE_CONTRACT.md) |
 | 资源预算及尚未获得的整机资格 | [低资源目标](LOW_RESOURCE_TARGET.md) |
+| 规划中的私有管理和其他部署目标 | [Tailscale](TAILSCALE_PRIVATE_MANAGEMENT_DESIGN.md) · [Docker 和 NixOS](DEPLOYMENT_TARGETS_CONTRACT.md) |
 | 报告漏洞 | [安全政策](../SECURITY.md) |
 
 ## 开发与贡献
