@@ -377,7 +377,7 @@ class CertificateManager:
                 else:
                     row = db.get(database.Inbound, int(target.split(':')[1]))
                     if not row: raise CertificateError('INBOUND_NOT_FOUND')
-                    if expected_revision is not None and core_manager.status()[row.core]['dirty']:
+                    if expected_revision is not None and core_manager.has_unapplied_config(row.core):
                         raise CertificateError('CERTIFICATE_CORE_HAS_PENDING_CONFIG')
                     previous_stream = row.stream_settings
                     stream = deepcopy(previous_stream or {})

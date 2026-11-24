@@ -261,14 +261,14 @@ class CoreManager:
                 pass
             adapter.runtime.last_error = message
 
-    def _compiled_active(self, rows):
+    def _compiled_active(self, rows, *, stop_all_on_recovery=True):
         from app.services.proxy_store import ProxyConflict, ProxyStorageError, ProxyValidationError
         from app.services.proxy_policy import PolicyError
         from app.services.proxy_resolution import ResolutionError
         try:
             return self.proxy_coordinator.compile_active(rows)
         except CoreError as exc:
-            if getattr(exc, "code", None) in {"RECOVERY_REQUIRED", "RUNTIME_MISMATCH"}:
+            if stop_all_on_recovery and getattr(exc, "code", None) in {"RECOVERY_REQUIRED", "RUNTIME_MISMATCH"}:
                 self._stop_untrusted("Proxy state is unavailable; core operations blocked")
             raise
         except (ProxyConflict, ProxyStorageError, ProxyValidationError, PolicyError, ResolutionError):
@@ -423,6 +423,26 @@ class CoreManager:
         with self.lock:
             self.require_proxy_revision(expected_proxy_revision)
             return self._apply_rows(core, self._all_rows(), activate=activate, preserve_stopped=preserve_stopped)
+
+    def has_unapplied_config(self, core: str) -> bool:
+        """Check only the selected core before a certificate retry changes its rows."""
+        from app.services.proxy_store import ProxyStorageError
+        with self.lock:
+            rows = self._all_rows()
+            adapter = self.get(core)
+            try:
+                compiled = self._compiled_active(rows, stop_all_on_recovery=False) if core == "sing-box" else None
+                if compiled is None:
+                    config = adapter.build_config(item for item in rows if item.core == core)
+                else:
+                    active = self.proxy_coordinator.store.load_active()
+                    context = active.get("runtime_context") if active else None
+                    if context is None or compiled.identity != context["policy_identity"]:
+                        return True
+                    config = compiled.config
+                return revision(config) != adapter.runtime.state()["revision"]
+            except (CoreError, ProxyStorageError):
+                return True
 
     def status(self) -> dict:
         with self.lock:

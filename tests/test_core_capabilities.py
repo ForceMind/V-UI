@@ -13,7 +13,7 @@ from unittest.mock import Mock, PropertyMock, patch
 from app.core_updates.binary import RuntimeArtifact, open_runtime_artifact
 from app.core_updates.selection import bundle_reference
 from app.services.core_manager import CoreManager
-from app.services.core_runtime import CoreRuntime, VERSIONS
+from app.services.core_runtime import CoreRuntime, VERSIONS, revision
 
 
 class CoreCapabilityTests(unittest.TestCase):
@@ -44,6 +44,21 @@ class CoreCapabilityTests(unittest.TestCase):
         self.runtime._generation_binary_identity = self.runtime._execution_inode(fd)
         self.runtime.process = SimpleNamespace(poll=lambda: None)
         return fd
+
+    def test_certificate_config_check_does_not_stop_or_inspect_another_core(self):
+        from app.services.proxy_apply import ProxyApplyError
+
+        manager = CoreManager(artifacts=self.artifacts)
+        manager._proxy_coordinator = Mock()
+        manager._proxy_coordinator.compile_active.side_effect = ProxyApplyError("RECOVERY_REQUIRED")
+        active = manager.get('xray').build_config([])
+        with patch.object(manager, '_all_rows', return_value=[]), \
+             patch.object(manager, '_stop_untrusted', side_effect=AssertionError('unrelated stop')), \
+             patch.object(manager.get('xray').runtime, 'state', return_value={'revision': revision(active)}):
+            self.assertFalse(manager.has_unapplied_config('xray'))
+            manager._proxy_coordinator.compile_active.assert_not_called()
+            self.assertTrue(manager.has_unapplied_config('sing-box'))
+            manager._proxy_coordinator.compile_active.assert_called_once_with([])
 
     def test_uninitialized_manager_does_not_create_runtime_or_read_configuration(self):
         manager = CoreManager(artifacts=self.artifacts)
