@@ -333,6 +333,20 @@ test('address-bar hash navigation obeys real editor dirty guard and restores the
     env.history.forward(); await flush();
     assert.equal(state.currentView.value, 'cores'); assert.equal(state.showAddInbound.value, false);
 });
+test('subscription navigation carries only the instance selector and consumes it once',()=>{
+    const revision='a'.repeat(64), env=environment('/ui/#inbounds');
+    const nav=env.sandbox.VUI_NAV;
+    assert.equal(nav.navigate('subscriptions',{id:7,revision,token:'do-not-copy'}),true);
+    const url='/workspace#subscriptions?node=7&revision='+revision;
+    const destination=environment(url);
+    const next=destination.sandbox.VUI_NAV;
+    assert.equal(next.route().id,'subscriptions');
+    assert.equal(JSON.stringify(next.consumeSubscriptionNode()),JSON.stringify({id:7,revision}));
+    assert.equal(destination.sandbox.location.hash,'#subscriptions');
+    assert.equal(next.consumeSubscriptionNode(),null);
+    assert.equal(next.route('/workspace','#subscriptions?token=synthetic').id,'routing');
+    assert.equal(nav.route('/workspace','#subscriptions').id,'subscriptions');
+});
 test('simple operation dialog uses the actual navigation modal layer and Back clears delivered data',async()=>{
     const f=environment();const {Document}=require('./fixtures/operation_dom.cjs');
     const document=new Document(),root=document.createElement('div');document.body.append(root);

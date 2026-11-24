@@ -12,12 +12,15 @@
         const value = String(hash || '').replace(/^#/, '');
         return views.includes(value) ? value : value === 'site' ? 'legacy' : 'dashboard';
     };
+    const subscriptionSelectionHash = /^#subscriptions\?node=([1-9][0-9]{0,15})&revision=([a-f0-9]{64})$/;
     const route = (pathname = location.pathname, hash = location.hash) => {
         let id = 'dashboard';
         if (pathname === '/ui' || pathname === '/ui/' || pathname === '/ui/index.html') {
             const old = String(hash || '').replace(/^#/, '');
             id = old === 'settings' ? 'account' : ['routing', 'subscriptions'].includes(old) ? old : appView(hash);
-        } else if (pathname === '/workspace') id = hash === '#subscriptions' ? 'subscriptions' : 'routing';
+        } else if (pathname === '/workspace') {
+            id = hash === '#subscriptions' || subscriptionSelectionHash.test(hash) ? 'subscriptions' : 'routing';
+        }
         else if (pathname === '/proxy') id = 'proxy';
         else if (pathname === '/certificates') id = 'certificates';
         else if (pathname === '/account') id = 'account';
@@ -68,9 +71,13 @@
         },
         forget() { modal = null; }
     };
-    const navigate = id => {
+    const navigate = (id, node = null) => {
         if (!Object.hasOwn(targets, id)) return false;
-        const url = targets[id];
+        let url = targets[id];
+        if (id === 'subscriptions' && node && Number.isSafeInteger(node.id) && node.id > 0 &&
+            typeof node.revision === 'string' && /^[a-f0-9]{64}$/.test(node.revision)) {
+            url += '?node=' + node.id + '&revision=' + node.revision;
+        }
         if (currentURL() === url) return true;
         if (!allowed()) return false;
         const parsed = new URL(url, location.origin);
@@ -130,7 +137,14 @@
         if (!Object.values(targets).includes(url.pathname + url.hash)) return;
         event.preventDefault(); navigate(destination.id);
     }, true);
-    globalThis.VUI_NAV = Object.freeze({ targets, route, appView, loginURL, resumeTarget, navigate,
+    const consumeSubscriptionNode = () => {
+        const selection = location.pathname === '/workspace' && subscriptionSelectionHash.exec(location.hash);
+        if (!selection) return null;
+        history.replaceState(history.state, '', targets.subscriptions);
+        const id = Number(selection[1]);
+        return Number.isSafeInteger(id) ? {id, revision:selection[2]} : null;
+    };
+    globalThis.VUI_NAV = Object.freeze({ targets, route, appView, loginURL, resumeTarget, navigate, consumeSubscriptionNode,
         replaceLogin(pathname, hash) { forcedExit = true; pageLeaving = true; closeRequest++; modal = null; location.replace(loginURL(pathname, hash)); },
         resume() { forcedExit = true; pageLeaving = true; closeRequest++; modal = null; location.replace(resumeTarget()); },
         subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },

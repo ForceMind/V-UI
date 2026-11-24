@@ -52,6 +52,27 @@ class HTTPUpgradeExportTests(unittest.TestCase):
             "server": SNI, "format": "clash-yaml", "acknowledge_tcp_only": True})
         self.assertEqual(response.status_code, 409)
 
+    def test_inventory_offers_only_mihomo_yaml_for_eligible_httpupgrade(self):
+        self.make_httpupgrade()
+        response = self.client.get("/api/inbounds")
+        self.assertEqual(response.status_code, 200)
+        row = next(item for item in response.json() if item["id"] == 1)
+        self.assertEqual(row["transport"], "httpupgrade")
+        self.assertEqual(row["subscription_formats"], ["mihomo.yaml"])
+        self.assertNotIn(UUID, response.text)
+        self.assertNotIn("/private/", response.text)
+
+        with database.SessionLocal() as db:
+            stored = db.get(database.Inbound, 1)
+            invalid = deepcopy(stored.stream_settings)
+            invalid["transport"]["headers"] = {"X-Advanced": "unsupported"}
+            stored.stream_settings = invalid
+            db.commit()
+        response = self.client.get("/api/inbounds")
+        self.assertEqual(response.status_code, 200)
+        row = next(item for item in response.json() if item["id"] == 1)
+        self.assertEqual(row["subscription_formats"], [])
+
     def test_downloaded_yaml_is_rejected_as_relay_upstream(self):
         self.make_httpupgrade()
         subscription = self.issue(formats=["mihomo.yaml"])

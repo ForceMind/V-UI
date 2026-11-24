@@ -617,7 +617,13 @@ print(json.dumps(row))
                                   'Saved YAML plan and all private source bytes must survive')
         if self.old_version in DNS_BASELINES:
             self._assert_candidate_origin(release, config)
-        assert_node_summary_upgrade(self.test, self.nodes, json.loads(api('/api/inbounds')[1]), self.old_version)
+        after_nodes = json.loads(api('/api/inbounds')[1])
+        for row in after_nodes:
+            self.test.assertIn(row.pop('transport'), ('tcp', 'raw'))
+            formats = row.pop('subscription_formats')
+            self.test.assertIs(type(formats), list)
+            self.test.assertTrue(set(formats) <= {'mihomo.yaml', 'raw', 'sing-box.json'})
+        assert_node_summary_upgrade(self.test, self.nodes, after_nodes, self.old_version)
         if self.manual_editor is not None:
             status, raw = api('/api/inbounds/'+str(self.nodes[0]['id'])+'/editor')
             self.test.assertEqual(status, 200)

@@ -12,7 +12,8 @@ const NODES = '/api/inbounds', WARNINGS = '/api/subscription/mihomo-warnings', G
 const REVISION = 'a'.repeat(64), REPLACEMENT = 'b'.repeat(64);
 const CONFLICT = 'Subscription node selection changed; refresh nodes and select them again';
 const settings = {mode:'direct', direct_domains:[], proxy_domains:[], presets:{}, bypass_cgnat:false, intranet:[]};
-const node = (id = 7, remark = 'original instance', changes = {}) => ({id, remark, core:'sing-box', protocol:'vless', enable:true, ...changes});
+const node = (id = 7, remark = 'original instance', changes = {}) => ({id, remark, core:'sing-box', protocol:'vless', enable:true,
+    mutation_revision:'a'.repeat(64), subscription_formats:['mihomo.yaml','raw','sing-box.json'], ...changes});
 const grant = () => ({id:1, label:'synthetic grant', server:'node.example.test', inbound_ids:[7], formats:['mihomo.yaml'], expires_at:2000000000,
     revoked:false, expired:false, invalidated:false, invalidation_reason:null});
 const token = () => ({id:1, paths:{'mihomo.yaml':'/sub/synthetic-token/mihomo.yaml'}});
@@ -48,7 +49,7 @@ function matches(el, selector) {
     const attribute=/^\[data-([a-z]+)(?:="([^"]*)")?\]$/.exec(selector);
     return Boolean(attribute && Object.hasOwn(el.dataset,attribute[1]) && (attribute[2]===undefined || el.dataset[attribute[1]]===attribute[2]));
 }
-async function fixture({revision = REVISION, nodeValues = [node()], warningValues = []} = {}) {
+async function fixture({revision = REVISION, nodeValues = [node()], warningValues = [], handoff = null} = {}) {
     const elements=new Map(), requests=[], queued=[], globalEvents=new Map(), redirects=[];
     const buttons=['reload','preview','save','add-zone','refresh-grants','create-grant','forget','copy','download'];
     const get=id=>{if(!elements.has(id))elements.set(id,new Element(buttons.includes(id)?'button':'div'));return elements.get(id);};
@@ -74,6 +75,7 @@ async function fixture({revision = REVISION, nodeValues = [node()], warningValue
         assert.fail('Unexpected request: '+method+' '+url);
     };
     vm.runInNewContext(script,{document,fetch,location:{origin:'http://example.test',replace:url=>redirects.push(url),reload(){}},
+        VUI_NAV:handoff && {route:()=>({id:'subscriptions'}),consumeSubscriptionNode:()=>handoff,subscribe(){},guard(){}},
         addEventListener:(type,fn)=>globalEvents.set(type,fn),confirm:()=>true,setTimeout,clearTimeout},{filename});
     await flush();
     const queue=(url,reply,method='GET')=>queued.push({url,reply,method});
@@ -95,6 +97,30 @@ test('workspace create always transmits the revision of the displayed nodes', as
     assert.equal(f.posts().length,1);assert.equal(JSON.parse(f.posts()[0].options.body).expected_node_revision,REVISION);
     assert.deepEqual(JSON.parse(f.posts()[0].options.body).inbound_ids,[7]);
     assert.equal(f.reads(NODES).length,1,'post-create list refresh does not silently adopt another inventory');
+});
+
+test('wizard handoff selects only the fresh matching instance and is consumed after one read', async()=>{
+    const handoff={id:7,revision:'a'.repeat(64)};
+    const f=await fixture({handoff});
+    assert.equal(f.checkboxes()[0].checked,true);
+    await f.click('refresh-grants');
+    assert.equal(f.checkboxes()[0].checked,false);
+    const replacement=await fixture({handoff,nodeValues:[node(7,'replacement',{mutation_revision:'b'.repeat(64)})]});
+    assert.equal(replacement.checkboxes()[0].checked,false);
+});
+
+test('mixed formats are rejected as a whole, omitting the incompatible format restores submission', async()=>{
+    const f=await fixture({nodeValues:[node(),node(8,'XHTTP',{subscription_formats:['mihomo.yaml','raw']})]});
+    f.select();
+    const json=f.get('json-format');json.name='format';json.value='sing-box.json';json.checked=true;
+    await f.get('grant-form').emit('change');
+    assert.equal(f.get('create-grant').disabled,true);
+    await f.submit();assert.equal(f.posts().length,0);
+    json.checked=false;
+    await f.get('grant-form').emit('change');
+    assert.equal(f.get('create-grant').disabled,false);
+    await f.submit();assert.equal(f.posts().length,1);
+    assert.deepEqual(JSON.parse(f.posts()[0].options.body).formats,['mihomo.yaml']);
 });
 for(const badRevision of [null,'','A'.repeat(64),'a'.repeat(63),'g'.repeat(64),' '+REVISION,REVISION+'\n']) {
     test('missing or invalid node revision fails closed: '+JSON.stringify(badRevision),async()=>{

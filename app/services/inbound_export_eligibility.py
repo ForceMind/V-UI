@@ -12,6 +12,25 @@ _INVALID_PROFILE = (ValueError, TypeError, KeyError, AttributeError, UnicodeErro
                     OverflowError, RecursionError)
 
 
+def subscription_formats(item) -> list[str]:
+    """Qualify the saved profile for display without returning its contents."""
+    from app.services.validated_export import HTTPUpgradeUnsupportedFormat, XHTTPUnsupportedFormat, validated_nodes
+
+    try:
+        validated_nodes([item], _CONFIGURATION_HOST, for_singbox=True)
+    except HTTPUpgradeUnsupportedFormat:
+        try:
+            validated_nodes([item], _CONFIGURATION_HOST, for_mihomo=True)
+        except _INVALID_PROFILE:
+            return []
+        return ["mihomo.yaml"]
+    except XHTTPUnsupportedFormat:
+        return ["mihomo.yaml", "raw"]
+    except _INVALID_PROFILE:
+        return []
+    return ["mihomo.yaml", "raw", "sing-box.json"]
+
+
 def export_eligibility(item) -> dict[str, bool]:
     """Reuse qualified exporters without disclosing artifacts or changing rows.
 
