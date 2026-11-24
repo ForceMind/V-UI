@@ -160,7 +160,10 @@
             const label = element('label', null, {class:'check'});
             label.append(input, document.createTextNode(`${node.remark || '节点 ' + node.id} · ${node.core}/${node.protocol}` + (input.disabled ? '（未验证或已禁用）' : '')));
             if (!input.disabled && !formats.includes('sing-box.json')) {
-                label.append(element('small', '（Mihomo YAML / Base64）'));
+                const availableFormats = [];
+                if (formats.includes('mihomo.yaml')) availableFormats.push('Mihomo YAML');
+                if (formats.includes('raw')) availableFormats.push('Base64');
+                if (availableFormats.length) label.append(element('small', '（' + availableFormats.join(' / ') + '）'));
             }
             return label;
         });

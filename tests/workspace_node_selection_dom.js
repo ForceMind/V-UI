@@ -109,6 +109,17 @@ test('wizard handoff selects only the fresh matching instance and is consumed af
     assert.equal(replacement.checkboxes()[0].checked,false);
 });
 
+test('node labels show only the formats supported by that node', async()=>{
+    const f=await fixture({nodeValues:[
+        node(7,'HTTPUpgrade',{subscription_formats:['mihomo.yaml']}),
+        node(8,'XHTTP',{subscription_formats:['mihomo.yaml','raw']})
+    ]});
+    const labels=f.get('nodes').children;
+    assert.match(labels[0].textContent,/（Mihomo YAML）/);
+    assert.doesNotMatch(labels[0].textContent,/Base64/);
+    assert.match(labels[1].textContent,/（Mihomo YAML \/ Base64）/);
+});
+
 test('mixed formats are rejected as a whole, omitting the incompatible format restores submission', async()=>{
     const f=await fixture({nodeValues:[node(),node(8,'XHTTP',{subscription_formats:['mihomo.yaml','raw']})]});
     f.select();
