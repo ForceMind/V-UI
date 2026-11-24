@@ -38,7 +38,7 @@
 
 ## 协议与数据契约
 
-[Cloudflare DNS-01与通配符契约](DNS01_CLOUDFLARE_CONTRACT.md)保留 v0.4.23 首发实现、准确 main 的九组/21 jobs、同源材料和公开记录。原始失败保留；当前 v0.4.26 的应用资格见[发布记录](RELEASING.md#当前稳定版)，不将旧阶段结果当作新提交验收。
+[Cloudflare DNS-01与通配符契约](DNS01_CLOUDFLARE_CONTRACT.md)保留 v0.4.23 首发实现、准确 main 的九组/21 jobs、同源材料和公开记录。原始失败保留；当前 v0.4.27 的应用资格见[发布记录](RELEASING.md#当前稳定版)，不将旧阶段结果当作新提交验收。
 
 这些专题保留精确字段限制和原始验证范围，适合高级配置或实现变更时查阅。
 
