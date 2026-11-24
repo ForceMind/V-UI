@@ -4,7 +4,7 @@
 
 一键安装 CI 使用只读令牌查询固定核心及旧版发布元数据。公开安装脚本和附件仍通过匿名 HTTPS 下载并校验摘要。
 
-本候选加入公开 v0.4.26 的升级验收。验收对照账户、节点、实际订阅、证书绑定、DNS 私有材料、保存的 YAML 计划和原始输入，并核对新旧 Root 来源。候选资格要求同轮 14 项一键安装、九组 Actions 和四个 Linux 目标的同来源制品。浏览器未验证。
+从公开 v0.4.26 保数据升级到 v0.4.27 已通过。验收对照账户、节点、实际订阅、证书绑定、DNS 私有材料、保存的 YAML 计划和原始输入，并核对新旧 Root 来源。主线九组 Actions 通过，一键安装在同一轮通过全部 14 项，四个 Linux 目标均来自同一发布提交。浏览器未验证。 [正式发布](https://github.com/ForceMind/V-UI/releases/tag/v0.4.27) · [一键安装验收](https://github.com/ForceMind/V-UI/actions/runs/45371977272/attempts/3)
 
 ## 0.4.26 历史说明
 
@@ -14,7 +14,7 @@ v0.4.26 将 P5 已验收的 XHTTP 分享纳入正式发行。管理员可为 Xra
 - 含 XHTTP 节点的 sing-box JSON 导出会明确拒绝。编辑器无法保真的旧高级配置保留原值并拒绝本次编辑。HTTPUpgrade 保留刻画，D2 UDP 双跳保留受阻草稿，产品 UDP 中转保持关闭。 [D2 草稿](https://github.com/ForceMind/V-UI/pull/167)
 - 公开 v0.4.25 的保数据升级已通过。临时 systemd 验收核对账户、节点、订阅、证书、DNS 私有材料、保存的 YAML 计划及原始输入，并回读新旧 Root 来源记录。通过结果和四目标同源证据见 [主线验收](https://github.com/ForceMind/V-UI/pull/171)。浏览器未验证。
 
-应用 v0.4.26 已公开。短入口固定本版的安装器和整份校验清单。 [正式发布](https://github.com/ForceMind/V-UI/releases/tag/v0.4.26) · [发布记录](RELEASING.md#当前稳定版)
+应用 v0.4.26 已公开。本版发布后，短入口曾固定其安装器和整份校验清单。 [正式发布](https://github.com/ForceMind/V-UI/releases/tag/v0.4.26) · [发布记录](RELEASING.md#当前稳定版)
 
 ## 0.4.25 历史说明
 

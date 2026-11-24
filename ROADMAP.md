@@ -1,6 +1,6 @@
 # 开发路线与当前进度
 
-更新：2026-11-11。此文件是当前开发顺序与阶段状态的唯一清单；使用方法见[文档首页](docs/README.md)，准确发布证据见[版本记录](docs/RELEASING.md#当前稳定版)，旧路线和阶段原文见[历史索引](docs/history/README.md)。
+更新：2026-11-24。此文件是当前开发顺序与阶段状态的唯一清单；使用方法见[文档首页](docs/README.md)，准确发布证据见[版本记录](docs/RELEASING.md#当前稳定版)，旧路线和阶段原文见[历史索引](docs/history/README.md)。
 
 ## 已完成 P3：v0.4.24 与独立核心组件
 
@@ -12,15 +12,15 @@ sing-box 1.14.3-r1 和 Xray 26.10.21-r1 依次晋升，各六项资产通过匿�
 
 PR #147 合入 dev `f6b1258`，独立 PR #162 合入 main `982aec4a60bc468b58298039cdbe289449a4199c`。两处各十组 Actions、32 个 job 通过。主线真实日志验证 YAML 转发、端口占用后的回退及协调进程 SIGKILL 后的流量恢复。 [主线验收](https://github.com/ForceMind/V-UI/pull/162) · [YAML 应用契约](docs/YAML_APPLICATION_CONTRACT.md)
 
-## v0.4.27 发布候选
+## 已发布 v0.4.27
 
-分享链接兼容及其 CI 修复已集成到主线。准确主线九组 Actions 与一键安装 13 项已通过。候选补验公开 v0.4.26 的保数据升级，要求准确提交的九组 Actions、同一轮 14 项安装验收与四目标同源制品。 [主线集成](https://github.com/ForceMind/V-UI/pull/185)
+v0.4.27 从主线 `bdf5fbac4475424562c4733b1816093857f62f55` 正式发布，支持预览并导入受支持的 3x-ui 与 x-ui 分享链接作为上游。准确主线的九组 Actions 通过。一键安装第 3 轮同轮通过 14 项，覆盖隔离新装和包含 v0.4.26 在内的 12 个保数据升级来源。四目标同源制品和 19 项公开附件已核验。 [正式发布](https://github.com/ForceMind/V-UI/releases/tag/v0.4.27) · [一键安装验收](https://github.com/ForceMind/V-UI/actions/runs/45371977272/attempts/3)
 
 ## 已发布 v0.4.26
 
 v0.4.26 应用已从准确主线 `71f0e1689cd356f22e12553f74a9ec4fd8bba388` 公开发行，收录 XHTTP 的 Mihomo YAML 与 VLESS URI 分享。19 项附件摘要、标签和 `latest` 已匿名核验。十组 Actions、34 个作业覆盖四目标、新装和十一个公开旧版保数据升级。13 份收据绑定同一轮安装套件。 [主线验收](https://github.com/ForceMind/V-UI/pull/171) · [正式发布](https://github.com/ForceMind/V-UI/releases/tag/v0.4.26)
 
-公开 v0.4.25 保数据升级核对了账户、节点、订阅、证书、DNS 私有材料、保存的 YAML 计划及原始输入，并回读新旧 Root 来源。短入口固定校验 v0.4.26 的安装器和整份清单。 [升级日志](https://github.com/ForceMind/V-UI/actions/runs/43167888490/artifacts/13921399661) · [发布记录](docs/RELEASING.md#当前稳定版)
+公开 v0.4.25 保数据升级核对了账户、节点、订阅、证书、DNS 私有材料、保存的 YAML 计划及原始输入，并回读新旧 Root 来源。本版发布后，短入口曾固定校验 v0.4.26 的安装器和整份清单。 [升级日志](https://github.com/ForceMind/V-UI/actions/runs/43167888490/artifacts/13921399661) · [发布记录](docs/RELEASING.md#当前稳定版)
 
 [D2 #167](https://github.com/ForceMind/V-UI/pull/167) 保留草稿和受阻证据。HTTPUpgrade 保留现有刻画。浏览器未验证。
 
