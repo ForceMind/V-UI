@@ -16,6 +16,7 @@ class Element {
     replaceChildren(...nodes){this.children=[...nodes];}
     setAttribute(key,value){this[key]=String(value);}
     close(){this.open=false;}
+    focus(){this.focused=true;}
     querySelector(){return null;}
     querySelectorAll(){return [];}
 }
@@ -39,12 +40,13 @@ function fixture(settings,routes={}){
             else if(url==='/api/proxy/capabilities')value={};
             else if(url==='/api/inbounds')value=[];
             else {assert.equal(url,'/api/proxy/settings');assert(queue.length);value=await queue.shift();}
-            return {status:200,ok:true,json:async()=>value};
+            const status=value?.responseStatus||200;
+            return {status,ok:status===200,json:async()=>value};
         },
         location:{replace(){assert.fail('unexpected login redirect');}},
         setTimeout,clearTimeout,URL,TextEncoder,AbortController,crypto:require('node:crypto').webcrypto,
     });
-    return {get,requests,posted,queue,emit:async name=>{for(const fn of globals.get(name)||[])await fn({});}};
+    return {get,requests,posted,queue,emit:async (name,event={})=>{for(const fn of globals.get(name)||[])await fn(event);}};
 }
 async function settled(f, revision){
     for(let i=0;i<30;i++){
@@ -202,8 +204,13 @@ test('YAML apply requires the separate confirmation and sends the checked privat
         '/api/proxy/apply':()=>({phase:'committed',applied:true,snapshot:active}),
     });
     await settled(f,revision);
-    await f.get('apply').emit('click');
+    const checkCount=f.posted.length;
+    await f.emit('vui-yaml-draft-view',{detail:revision});
+    assert.equal(f.posted.length,checkCount);
+    await f.get('yaml-review-saved').emit('click');
     assert(!f.get('apply-review').hidden);
+    assert(f.get('connection-advanced').open && f.get('connection-setup').open);
+    assert(f.get('review-heading').focused);
     assert.equal(f.posted.filter(row=>row.url==='/api/proxy/apply').length,0);
     await f.get('cancel-apply-review').emit('click');
     assert(f.get('apply-review').hidden);
@@ -217,4 +224,60 @@ test('YAML apply requires the separate confirmation and sends the checked privat
     assert.equal(applied[0].body.source_fingerprint,'d'.repeat(64));
     assert.match(applied[0].options.headers['Idempotency-Key'],/^[a-f0-9]{64}$/);
     assert(f.get('active-state').textContent.includes('YAML'));
+    assert.match(f.get('yaml-transaction-state').textContent,/已确认活动修订/);
+});
+
+function yamlFixture(){
+    const revision='a'.repeat(64),previous='b'.repeat(64),checkId='c'.repeat(64);
+    const saved={...snapshot(revision),execution_mode:'yaml',yaml_plan:{revision:'d'.repeat(64)}};
+    saved.active={revision:previous,settings:saved.settings,execution_mode:'yaml'};
+    const check={revision,snapshot:saved,valid:true,phase:'checked',applied:false,running:true,enabled:true,
+        coverage:[],source_fingerprint:'e'.repeat(64),yaml_plan:{revision:'f'.repeat(64),endpoint_count:1},
+        yaml_confirmation:{check_id:checkId,expires_at:Math.floor(Date.now()/1000)+300}};
+    return {revision,previous,saved,check,capabilities:{apply_available:true}};
+}
+test('port refusal and rollback report the preserved revision only after a fresh matching read',async()=>{
+    const {revision,previous,saved,check,capabilities}=yamlFixture();
+    for(const [code,expected] of [['PROXY_LOCAL_PORT_OCCUPIED',/端口占用.*原活动修订/],
+        ['PROXY_APPLY_FAILED',/已回退.*原活动修订/],['PROXY_TRANSACTION_NOT_ACTIVE',/原事务.*原活动修订/]]){
+        const f=fixture([saved,saved],{'/api/proxy/capabilities':()=>capabilities,'/api/proxy/check':()=>check,
+            '/api/proxy/apply':()=>({responseStatus:409,detail:code})});
+        await settled(f,revision);
+        await f.get('yaml-review-saved').emit('click');
+        assert.match(f.get('review-active-revision').textContent,new RegExp(previous));
+        await f.get('confirm-apply').emit('click');
+        assert.match(f.get('yaml-transaction-state').textContent,expected);
+        assert.match(f.get('yaml-active-state').textContent,new RegExp(previous.slice(0,12)));
+        assert.equal(f.requests.filter(url=>url==='/api/proxy/settings').length,2);
+    }
+    const f=fixture([saved,{...saved,pending:{revision}}],{'/api/proxy/capabilities':()=>capabilities,
+        '/api/proxy/check':()=>check,'/api/proxy/apply':()=>({responseStatus:409,detail:'PROXY_APPLY_FAILED'})});
+    await settled(f,revision);
+    await f.get('yaml-review-saved').emit('click');
+    await f.get('confirm-apply').emit('click');
+    assert.match(f.get('yaml-transaction-state').textContent,/事务尚未结束/);
+    assert.doesNotMatch(f.get('yaml-transaction-state').textContent,/已回退/);
+});
+
+test('pending recovery and unknown apply keep refresh read-only and retry the original confirmation',async()=>{
+    const {revision,saved,check,capabilities}=yamlFixture();
+    const pending={...saved,pending:{revision}}, active={...saved,active:{...saved.active,revision}};
+    let sent=0;
+    const f=fixture([saved,pending,saved,active],{'/api/proxy/capabilities':()=>capabilities,'/api/proxy/check':()=>check,
+        '/api/proxy/apply':()=> ++sent===1 ? {responseStatus:503,detail:'PROXY_RECOVERY_REQUIRED'} :
+            {applied:true,phase:'committed',snapshot:active}});
+    await settled(f,revision);
+    await f.get('yaml-review-saved').emit('click');
+    await f.get('confirm-apply').emit('click');
+    assert.match(f.get('yaml-transaction-state').textContent,/事务尚未结束/);
+    assert(f.get('yaml-review-saved').disabled);
+    assert(f.get('yaml-retry-apply').disabled);
+    await f.get('yaml-refresh-state').emit('click');
+    assert.equal(sent,1);
+    assert.match(f.get('yaml-transaction-state').textContent,/应用结果待核对/);
+    await f.get('yaml-retry-apply').emit('click');
+    const applies=f.posted.filter(row=>row.url==='/api/proxy/apply');
+    assert.deepEqual(applies[0].body,applies[1].body);
+    assert.equal(applies[0].options.headers['Idempotency-Key'],applies[1].options.headers['Idempotency-Key']);
+    assert.match(f.get('yaml-transaction-state').textContent,/已确认活动修订/);
 });

@@ -62,6 +62,7 @@
     let exportEpoch = 0, exportController = null;
     const downloadUrls = new Set();
     let yamlRefreshPending = false, yamlWriteUncertain = false, yamlSaveConfirmed = false, yamlChangeEpoch = 0;
+    let yamlViewedRevision = null, yamlUnchangedActive = null;
     function invalidateReview() {
         applyReview=null; $('apply-review').hidden=true;
         globalThis.VUI_NAV?.modal.close('apply-review'); $('review-coverage').replaceChildren();
@@ -261,6 +262,32 @@
             '服务器存在未结束事务。草稿写入与新的应用已阻止，请刷新状态或重试同一次事务。':
             dirty?'先保存页面编辑，才能检查或应用准确的草稿修订。':
             uncertain?'上次应用结果不确定。重试会沿用相同事务标识，不创建重复应用。':'应用只处理已保存修订；成功后还需重新读取活动快照确认。';
+        renderYamlStatus(dirty, uncertain);
+    }
+    function renderYamlStatus(dirty, uncertain) {
+        const saved = snapshot.execution_mode === 'yaml';
+        const activeRevision = REVISION.test(snapshot.active?.revision || '') ? snapshot.active.revision : null;
+        const activeYaml = snapshot.active?.execution_mode === 'yaml';
+        $('yaml-saved-state').textContent = saved ? 'YAML · ' + snapshot.revision.slice(0, 12) : '暂无 YAML 草稿';
+        $('yaml-active-state').textContent = activeRevision ?
+            (activeYaml ? 'YAML · ' : '现有策略 · ') + activeRevision.slice(0, 12) : '暂无已提交修订';
+        $('yaml-review-saved').disabled = !saved || $('apply').disabled;
+        $('yaml-refresh-state').disabled = busy;
+        const retryableYaml = !!(uncertain && attempt.yamlCheckId);
+        $('yaml-retry-apply').hidden = !retryableYaml;
+        $('yaml-retry-apply').disabled = !retryableYaml || !!snapshot.pending || $('retry-apply').disabled;
+        let status = '';
+        if (snapshot.pending) status = '事务尚未结束。请刷新核对恢复结果，当前运行状态未确认。';
+        else if (yamlWriteUncertain) status = '保存结果待核对。请刷新事务状态。';
+        else if (retryableYaml) status = '应用结果待核对。可刷新状态或重试原事务。';
+        else if (yamlViewedRevision && yamlViewedRevision !== snapshot.revision)
+            status = busy ? '正在回读已保存的草稿。' : '刚保存的修订已变化。请核对当前草稿。';
+        else if (dirty || conflict) status = '先处理页面编辑或修订冲突，再检查。';
+        else if (yamlUnchangedActive?.revision === snapshot.revision && yamlUnchangedActive.previous === activeRevision)
+            status = yamlUnchangedActive.message + '回读确认仍为原活动修订。';
+        else if (saved && activeYaml && activeRevision === snapshot.revision) status = '已确认活动修订。设备端连接需另行验证。';
+        else if (saved) status = '草稿待检查。确认应用前可核对入口影响。';
+        $('yaml-transaction-state').textContent = status;
     }
     function renderSnapshot(next, preserve=false) {
         if (!next||!REVISION.test(next.revision)||!next.settings||!Array.isArray(next.upstreams)) {
@@ -313,6 +340,11 @@
         try { await fn(); }
         catch(error) {
             if (!pageActive) return;
+            if (!snapshot && error.status!==401) {
+                $('yaml-saved-state').textContent='状态未确认';
+                $('yaml-active-state').textContent='状态未确认';
+                $('yaml-transaction-state').textContent='读取失败，请重新加载页面。';
+            }
             if (error.code==='PROXY_REVISION_CONFLICT') await handleConflict();
             else if (error.code==='PROXY_POLICY_REJECTED') { renderCheck({coverage:error.coverage},snapshot.revision); notice(error.message,true); }
             else if (error.status!==401) notice(error instanceof ApiError?error.message:'连接或响应异常，结果未确认。请刷新服务器状态。',true);
@@ -339,7 +371,7 @@
             renderSnapshot(result); notice('草稿已保存；活动配置未由保存操作改变。');
         });
     });
-    $('refresh').addEventListener('click',()=>action(async()=>{
+    const refreshState=()=>action(async()=>{
         clearExport();
         renderCoreCapabilities(null);
         const epoch = yamlChangeEpoch;
@@ -357,7 +389,9 @@
             if (!isDirty()) conflict = false;
         }
         notice(conflict?'服务器状态已刷新；请先处理修订冲突。':'已重新读取服务器草稿与活动快照。',conflict);
-    }));
+    });
+    $('refresh').addEventListener('click',refreshState);
+    $('yaml-refresh-state').addEventListener('click',refreshState);
     $('rebase').addEventListener('click',()=>{ conflict=false; edited(); notice('已保留页面编辑。请核对后明确保存，新保存仍需服务端修订检查。'); });
     $('discard').addEventListener('click',()=>{ conflict=false; renderSnapshot(snapshot); $('check-result').hidden=true; notice('页面编辑已放弃，已载入最新服务器草稿。'); });
     function ipLiteral(value) {
@@ -459,7 +493,8 @@
                 throw new ApiError('YAML 检查已过期，请重新检查。',409);
             }
             attempt={key:newKey(),revision:snapshot.revision,sourceFingerprint:applyReview.sourceFingerprint,
-                yamlCheckId:applyReview.yamlCheckId,state:'sending'};
+                yamlCheckId:applyReview.yamlCheckId,previous:snapshot.active?.revision,state:'sending'};
+            yamlUnchangedActive=null;
         }
         invalidateReview();
         const current=attempt;
@@ -480,7 +515,19 @@
             if (error.status===409) {
                 current.state='finished';
                 if (error.code!=='PROXY_REVISION_CONFLICT') {
-                    try { await reloadSnapshot(false); } catch (_) { /* No new success claim without a confirmed snapshot. */ }
+                    try {
+                        const latest=await reloadSnapshot(false);
+                        const outcomes={
+                            PROXY_LOCAL_PORT_OCCUPIED:'端口占用，未应用候选。',
+                            PROXY_APPLY_FAILED:'应用失败，已回退。',
+                            PROXY_TRANSACTION_NOT_ACTIVE:'原事务未成为活动配置。'
+                        };
+                        if (current.yamlCheckId && Object.hasOwn(outcomes,error.code) &&
+                            REVISION.test(current.previous || '') && !latest.pending && latest.revision===current.revision &&
+                            latest.active?.revision===current.previous) {
+                            yamlUnchangedActive={revision:current.revision,previous:current.previous,message:outcomes[error.code]};
+                        }
+                    } catch (_) { /* No new success claim without a confirmed snapshot. */ }
                 }
                 throw error;
             }
@@ -492,7 +539,7 @@
             } else { throw error; }
         }
     }
-    $('apply').addEventListener('click',()=>action(async()=>{
+    const reviewApplication=()=>action(async()=>{
         if (isDirty()||conflict||snapshot.pending||attempt?.state==='uncertain'||capabilities.apply_available!==true) return;
         invalidateReview();
         const revision=snapshot.revision;
@@ -520,6 +567,8 @@
         applyReview={revision,sourceFingerprint:result.source_fingerprint,
             yamlCheckId:yaml?confirmation.check_id:undefined,expiresAt:yaml?confirmation.expires_at:undefined};
         $('review-revision').textContent='待确认修订 '+revision+(result.source_fingerprint?'；入口指纹 '+result.source_fingerprint:'；旧版全继承兼容检查');
+        $('review-active-revision').textContent=REVISION.test(snapshot.active?.revision || '')?
+            '当前活动修订 '+snapshot.active.revision:'暂无已提交活动修订';
         $('review-mode').textContent='待应用组合：'+mode(snapshot.settings);
         const selected=snapshot.upstreams.find(value=>value.id===snapshot.settings.selected_upstream_id);
         $('review-upstream').textContent=yaml?
@@ -535,11 +584,23 @@
         if (!result.coverage.length) $('review-coverage').append(element('li','没有启用的设备接入节点。'));
         $('apply-review').hidden=false;
         globalThis.VUI_NAV?.modal.open('apply-review', () => { invalidateReview(); updateControls(); }, () => !busy);
+        $('review-heading').focus();
         notice('同一保存修订的配置预检已返回。请核对影响，再点击独立确认按钮；尚未应用。');
-    }));
+    });
+    $('apply').addEventListener('click',reviewApplication);
+    $('yaml-review-saved').addEventListener('click',()=>{
+        if ($('yaml-review-saved').disabled || snapshot?.execution_mode!=='yaml') return;
+        yamlViewedRevision=null;
+        $('connection-advanced').open=true;
+        $('connection-setup').open=true;
+        return reviewApplication();
+    });
     $('confirm-apply').addEventListener('click',()=>action(()=>apply(false)));
     $('cancel-apply-review').addEventListener('click',()=>{ invalidateReview(); updateControls(); notice('应用核对已取消，未发送新的应用事务。'); });
     $('retry-apply').addEventListener('click',()=>action(()=>apply(true)));
+    $('yaml-retry-apply').addEventListener('click',()=>{
+        if (!$('yaml-retry-apply').disabled) return action(()=>apply(true));
+    });
     function inputWithinLimit() {
         return new TextEncoder().encode($('import-content').value).byteLength<=MAX_INPUT_BYTES;
     }
@@ -816,6 +877,11 @@
     addEventListener('vui-yaml-draft-saved',()=>queueYamlRefresh(false, true));
     addEventListener('vui-yaml-draft-conflict',()=>queueYamlRefresh(false));
     addEventListener('vui-yaml-draft-uncertain',()=>queueYamlRefresh(true));
+    addEventListener('vui-yaml-draft-view',event=>{
+        if (!pageActive || typeof event.detail!=='string' || !REVISION.test(event.detail)) return;
+        yamlViewedRevision=event.detail;
+        updateControls();
+    });
     addEventListener('pagehide',leave);
     // Same-document modal Back must not deactivate the business page.
     if (!globalThis.VUI_NAV) addEventListener('popstate',leave);
