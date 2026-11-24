@@ -18,6 +18,7 @@ function boot(hash='',options={}) {
     }
     const el=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id)};
     for(const id of ['maintenance-admin','maintenance-remote','maintenance-tasks-panel','maintenance-audit-panel','maintenance-issued','maintenance-operations','maintenance-core-panel','maintenance-core-work','maintenance-logs-panel'])el(id).hidden=true;
+    el('maintenance-task-ack').hidden=true;
     el('maintenance-duration').value='1800';
     el('maintenance-actions').buttons=['status','backup','restart','start','stop','upgrade'].map(action=>{const e=new Element();e.dataset.task=action;return e});
     const c={console,AbortController,setTimeout:options.setTimeout||setTimeout,clearTimeout:options.clearTimeout||clearTimeout,URL,location:{hash,pathname:'/maintenance',origin:'https://panel.example.test'},
@@ -196,6 +197,79 @@ async function admin() {
         assert.equal(h.el('maintenance-core-hints').textContent,'');assert(h.el('maintenance-notice').textContent.includes('响应无效'));
         h.event('pagehide');assert.equal(h.el('maintenance-core-hints').textContent,'');
     }
+    {
+        const timers=new Map();let number=0;
+        const h=boot('',{setTimeout:(fn,ms)=>{const key=++number;timers.set(key,{fn,ms});return key;},clearTimeout:key=>timers.delete(key)});
+        const tick=async delay=>{
+            const [key,timer]=[...timers.entries()].find(([,value])=>value.ms===delay);
+            timers.delete(key);timer.fn();await flush();
+        };
+        await h.reply({id:1});await h.reply([]);await h.reply([]);
+        const upgrade=h.el('maintenance-actions').buttons.find(button=>button.dataset.task==='upgrade');
+        const id='a'.repeat(32);
+        upgrade.fire();await flush();
+        await h.reply({id,state:'queued'});
+        await h.reply({detail:'private list failure'},503);
+        assert(h.el('maintenance-task-ack').hidden);
+        assert(!h.el('maintenance-continue-task').hidden);
+        await tick(1000);
+        assert.equal(h.requests.at(-1).url,'/api/maintenance/tasks/'+id);
+        await h.reply({detail:'private connection failure'},503);
+        await tick(5000);
+        await h.reply({id:'b'.repeat(32),action:'upgrade',state:'succeeded'});
+        assert(upgrade.disabled);
+        for (let i=2;i<60;i++) {
+            await tick(5000);
+            assert.equal(h.requests.at(-1).url,'/api/maintenance/tasks/'+id);
+            await h.reply({id,action:'upgrade',state:'running'});
+        }
+        assert(h.el('maintenance-notice').textContent.includes('等待已暂停'));
+        assert(upgrade.disabled);
+        assert(h.el('maintenance-task-ack').hidden);
+        h.el('maintenance-continue-task').fire();await flush();
+        assert.equal(h.requests.at(-1).url,'/api/maintenance/tasks/'+id);
+        assert.equal(h.requests.at(-1).options.method,'GET');
+        await h.reply({id,action:'upgrade',state:'succeeded'});
+        await h.reply({detail:'private listing error after success'},503);
+        assert(!upgrade.disabled);
+        assert(h.el('maintenance-continue-task').hidden);
+        assert(h.el('maintenance-task-progress').textContent.includes(id+' · 成功'));
+        assert.equal(h.requests.filter(row=>row.options.method==='POST').length,1);
+        h.event('pagehide');
+    }
+    {
+        // After reopening, use the known ID rather than the task list or a URL fragment.
+        const h=await admin(),id='d'.repeat(32),prefix='maintenance-task';
+        const form=h.el(prefix+'-lookup'),input=h.el(prefix+'-id'),box=h.el(prefix+'-result');
+        const lines=()=>box.children.flatMap(row=>[row.textContent,...row.children.map(field=>field.textContent)]);
+        input.value=id+'/foreign';const before=h.requests.length;
+        form.fire('submit');await flush();
+        assert.equal(h.requests.length,before);
+        assert(lines().join().includes('32 位'));
+        input.value=id;form.fire('submit');await flush();
+        assert.equal(h.requests.at(-1).url,'/api/maintenance/tasks/'+id);
+        assert.equal(h.requests.at(-1).options.method,'GET');
+        await h.reply({id:'c'.repeat(32),action:'backup',state:'succeeded'});
+        assert(lines().join().includes('尚未确认'));
+        assert(!lines().some(line=>line.includes('成功')));
+        form.fire('submit');await flush();
+        await h.reply({id,action:'backup',state:'failed',created_at:1700000000,
+            error:'MAINTENANCE_INTERRUPTED',result:{path:'private-'+secret}});
+        assert(lines().some(line=>line.includes(id)));
+        assert(lines().some(line=>line.includes('MAINTENANCE_INTERRUPTED')));
+        assert(!lines().some(line=>line.includes(secret)));
+        assert.equal(h.requests.filter(row=>row.options.method==='POST').length,0);
+        const total=h.requests.length;
+        h.el('maintenance-core-task-id').value=id;
+        h.el('maintenance-core-task-lookup').fire('submit');await flush();
+        assert.equal(h.requests.length,total);
+        assert.equal(h.history.length,0);assert.equal(h.copies.length,0);
+        form.fire('submit');await flush();
+        h.event('pagehide');
+        assert(h.requests.at(-1).options.signal.aborted);
+        await h.reply({id,action:'backup',state:'succeeded'});
+        assert.equal(input.value,'');assert.equal(box.children.length,0);
+    }
     // Core UI: fixed server facts, no runtime/binary/network execution.
     const rootKey='vui_cg_'+'e'.repeat(32)+'_'+'f'.repeat(43),revision='a'.repeat(64),backupID='b'.repeat(32);
     const facts=()=>({outcome:'observed',app_source:'a'.repeat(40),target:'x86_64-gnu',selection_revision:revision,generation:3,
@@ -290,7 +364,12 @@ async function admin() {
     }
     {
         const h=await coreBoot();await observe(h);h.el('maintenance-core-backup').fire();await flush();await h.reply({},503);
-        h.el('maintenance-core-task-refresh').fire();await flush();await h.reply(coreRow('backup','running','7'.repeat(32),undefined));
+        h.el('maintenance-core-task-refresh').fire();await flush();
+        await h.reply(coreRow('update','succeeded','9'.repeat(32),{outcome:'switched'}));
+        assert(h.el('maintenance-core-check').disabled);
+        h.el('maintenance-core-task-refresh').fire();await flush();
+        assert(h.requests.at(-1).url.includes('/core-requests/'));
+        await h.reply(coreRow('backup','running','7'.repeat(32),undefined));
         assert.equal(h.requests.filter(row=>row.options.method==='POST'&&row.url.endsWith('/core-tasks')).length,1);
         await h.tick(1000);assert(h.requests.at(-1).url.endsWith('/'+'7'.repeat(32)));h.event('pagehide');
         await h.reply(coreRow('backup','succeeded','7'.repeat(32),{outcome:'backup_created',backup_id:'7'.repeat(32)}));assert(h.el('maintenance-core-work').hidden);assert.equal(h.el('maintenance-core-progress').textContent,'');
@@ -300,6 +379,26 @@ async function admin() {
         assert(h.el('maintenance-core-progress').textContent.includes('候选查询未完成'));assert(!h.el('maintenance-core-available').children.some(row=>row.textContent.includes('secret path')));
         h.el('maintenance-core-check').fire();await flush();const bad=facts();bad.cores.xray.candidates.push({release_id:104,version:'private-value'});await h.reply(coreRow('observe','succeeded','8'.repeat(32),bad));
         assert.equal(h.el('maintenance-core-available').textContent,'');assert(!h.el('maintenance-notice').textContent.includes('private-value'));h.event('pagehide');
+    }
+    {
+        const h=await coreBoot(),id='8'.repeat(32);
+        const form=h.el('maintenance-core-task-lookup'),input=h.el('maintenance-core-task-id'),box=h.el('maintenance-core-task-result');
+        input.value=id;form.fire('submit');await flush();
+        const get=h.requests.at(-1);
+        assert.equal(get.url,'/api/maintenance/core-tasks/'+id);
+        assert.equal(get.options.method,'GET');
+        assert.equal(get.options.headers['X-VUI-Core-Authorization'],undefined);
+        await h.reply(coreRow('recover','succeeded',id,{outcome:'restored_previous',panel_running:false}));
+        assert(box.children[0].children.some(row=>row.textContent.includes(id)));
+        assert(box.children[0].children.some(row=>row.textContent.includes('已恢复到原有版本')));
+        assert(h.el('maintenance-core-recover').disabled);
+        form.fire('submit');await flush();
+        h.requests.at(-1).resolve({ok:false,status:401,async json(){throw new Error('malformed gateway response')}});
+        await flush();
+        assert.equal(input.value,'');assert.equal(box.children.length,0);
+        assert(h.el('maintenance-core-work').hidden);
+        assert(h.el('maintenance-notice').textContent.includes('授权或登录已失效'));
+        assert.equal(h.requests.filter(row=>row.url.endsWith('/core-tasks')&&row.options.method==='POST').length,0);
     }
     process.stdout.write('Maintenance fragment/session/scope/cleanup/error/restore synthetic contracts passed\n');
 })().catch(error=>{console.error(error);process.exitCode=1});

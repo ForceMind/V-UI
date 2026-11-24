@@ -6,4 +6,7 @@
 .maintenance-record{border:1px solid var(--line,#d5dce3);border-radius:8px;padding:14px;margin:12px 0;overflow-wrap:anywhere}
 .maintenance-record p{margin:4px 0}
 #maintenance-actions{flex-wrap:wrap}
+.maintenance-task-lookup{margin-top:12px}
+.maintenance-task-lookup label{margin:0}
+.maintenance-task-lookup input{width:min(100%,24rem)}
 #maintenance-notice{white-space:pre-wrap;overflow-wrap:anywhere;min-height:24px}
