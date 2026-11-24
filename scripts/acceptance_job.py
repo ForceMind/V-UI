@@ -30,10 +30,12 @@ FOOTER = 'VUI_ACCEPTANCE_EXIT '
 UPGRADE_23_MARKER = 'VUI_23_TO_24_UPGRADE_ACCEPTANCE:'
 UPGRADE_24_MARKER = 'VUI_24_TO_25_UPGRADE_ACCEPTANCE:'
 UPGRADE_25_MARKER = 'VUI_25_TO_26_UPGRADE_ACCEPTANCE:'
+UPGRADE_26_MARKER = 'VUI_26_TO_27_UPGRADE_ACCEPTANCE:'
 UPGRADE_MARKERS = {
     ('0.4.24', 'upgrade-0.4.23'): UPGRADE_23_MARKER,
     ('0.4.25', 'upgrade-0.4.24'): UPGRADE_24_MARKER,
     ('0.4.26', 'upgrade-0.4.25'): UPGRADE_25_MARKER,
+    ('0.4.27', 'upgrade-0.4.26'): UPGRADE_26_MARKER,
 }
 
 
@@ -241,7 +243,8 @@ def _exit_code(value):
     return value if value >= 0 else 128 - value
 
 
-def run_test(source, version, role, identity_path, log, *, old_source=None, environ=None, core_switch=False):
+def run_test(source, version, role, identity_path, log, *, old_source=None, environ=None, core_switch=False,
+             published_metadata=None):
     environ = os.environ if environ is None else environ
     _context(environ)
     recipe = role_recipe(version, role, old_source=old_source)
@@ -262,6 +265,9 @@ def run_test(source, version, role, identity_path, log, *, old_source=None, envi
         row = _role(version, role)
         _checkout(Path(old_source), row['source'])
     env = role_environment(environ, version, role, old_source=old_source)
+    if published_metadata is not None:
+        core._need(old_source is not None, 'PUBLISHED_METADATA_REQUIRES_UPGRADE')
+        env['VUI_PUBLISHED_METADATA'] = str(Path(published_metadata).absolute())
     if core_switch:
         core_directories = tuple(CORE_SWITCH_FIXTURE / name for name in CORE_SWITCH_CORES)
         directories = (CORE_SWITCH_FIXTURE, *core_directories, *(path / 'candidate' for path in core_directories))
@@ -334,6 +340,7 @@ def main(argv=None):
     for command in (test, record): command.add_argument('--identity', required=True)
     test.add_argument('--log', required=True); test.add_argument('--old-source')
     test.add_argument('--core-switch', action='store_true')
+    test.add_argument('--published-metadata')
     record.add_argument('--producer-artifact-id', type=int, required=True)
     record.add_argument('--producer-artifact-digest', required=True)
     record.add_argument('--output', required=True); record.add_argument('--test-log')
@@ -350,7 +357,8 @@ def main(argv=None):
                              args.expected_bundle_sha256, args.identity_output, bundle_output=args.bundle_output)
         elif args.command == 'run-test':
             code = run_test(args.source, args.version, args.role, args.identity, args.log,
-                            old_source=args.old_source, core_switch=args.core_switch)
+                            old_source=args.old_source, core_switch=args.core_switch,
+                            published_metadata=args.published_metadata)
             if code: raise SystemExit(code)
             return
         else:

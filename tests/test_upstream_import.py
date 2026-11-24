@@ -175,8 +175,10 @@ class UpstreamImportTests(unittest.TestCase):
             node[key] = "private-fixture"
             expected = "UDP_CAPABILITY_NOT_QUALIFIED" if key == "packet-encoding" else "UNKNOWN_FIELD"
             self.unsupported(as_yaml(node), expected)
-        for key in ("allowInsecure", "insecure", "path", "host", "headerType", "serviceName", "spx", "ech", "privateKey"):
+        for key in ("allowInsecure", "insecure", "headerType", "serviceName", "spx", "ech", "privateKey"):
             self.unsupported(uri(**{key: "private-fixture"}), "UNKNOWN_FIELD")
+        for key in ("path", "host"):
+            self.unsupported(uri(**{key: "private-fixture"}), "UNSUPPORTED_TCP_HEADER")
 
     def test_json_nested_allowlists_are_strict_even_for_empty_unknown_values(self):
         for path, key in ((["settings"], "servers"), (["settings", "vnext", 0], "extra"),
@@ -301,6 +303,50 @@ class UpstreamImportTests(unittest.TestCase):
             node = xray(True)
             del node["streamSettings"]["realitySettings"][key]
             self.unsupported(json.dumps(node), "MISSING_FIELD")
+
+    def test_share_links_from_both_panel_generators(self):
+        prefix = f"vless://{UUID}@upstream.example.test:443?"
+        old_xui = prefix + "type=tcp&security=tls#Upstream"
+        modern_3xui = prefix + "type=tcp&encryption=none&security=tls&sni=tls.example.test#Upstream"
+        self.unsupported(old_xui, "MISSING_TLS_SERVER_NAME")
+        repaired_xui = old_xui.replace("#", "&sni=tls.example.test#")
+        for link in (repaired_xui, modern_3xui, uri(headerType="none")):
+            with self.subTest(link=link):
+                self.assertEqual(select_upstream(link, 0), select_upstream(uri(), 0))
+        self.unsupported(modern_3xui.replace("tls.example.test", "127.0.0.1"), "INVALID_SERVER_NAME")
+        self.unsupported(uri(headerType="http"), "UNSUPPORTED_TCP_HEADER")
+        self.unsupported(uri(headerType="none", packetEncoding="xudp"), "UDP_CAPABILITY_NOT_QUALIFIED")
+        newest_reality = uri(True, **{"support-x25519mlkem768": "true"})
+        self.unsupported(newest_reality, "UNSUPPORTED_REALITY_KEY_EXCHANGE")
+        self.unsupported(uri(True, spx="/probe"), "UNSUPPORTED_REALITY_OPTIONS")
+        self.unsupported(prefix + "type=tcp&security=xtls", "UNSUPPORTED_SECURITY")
+
+    def test_mixed_pasted_links_keep_order_and_reasons_without_exposing_credentials(self):
+        opaque = base64.b64encode(json.dumps({"id": UUID, "ps": "Outside"}).encode()).decode()
+        links = [
+            "vmess://" + opaque,
+            uri(type="ws", path="/ws"),
+            "https://panel.example.test/sub/private",
+            uri().replace("#", "&note=%ZZ#"),
+            uri(),
+            "tg://proxy?server=panel.example.test&port=443&secret=dummy",
+        ]
+        text = "\r\n\r\n".join(links)
+        preview = preview_upstreams(text).to_dict()
+        rows = preview["candidates"]
+        self.assertEqual([item["index"] for item in rows], list(range(len(links))))
+        self.assertEqual([item["reason_code"] for item in rows],
+                         ["UNSUPPORTED_PROTOCOL", "UNSUPPORTED_TRANSPORT", "UNSUPPORTED_FORMAT",
+                          "INVALID_URI", "", "UNSUPPORTED_PROTOCOL"])
+        self.assertEqual((rows[1]["protocol"], rows[1]["transport"], rows[1]["tls_mode"]), ("vless", "ws", "tls"))
+        self.assertEqual(rows[5]["protocol"], "mtproto")
+        self.assertNotIn(UUID, json.dumps(preview))
+        self.assertNotIn(opaque, json.dumps(preview))
+        self.assertNotIn("/sub/private", json.dumps(preview))
+        self.assertEqual(select_upstream(text, 4), select_upstream(uri(), 0))
+        for index in (0, 1, 2, 3, 5):
+            self.unsupported(text, rows[index]["reason_code"], index=index)
+        self.reject_input("\n".join([uri()] * 129), "CANDIDATE_LIMIT")
 
     def test_uri_unicode_name_and_bracketed_ipv6(self):
         value = uri().replace("upstream.example.test", "[2001:db8::1]").replace("#Upstream", "#%E6%B5%B7%E5%A4%96")

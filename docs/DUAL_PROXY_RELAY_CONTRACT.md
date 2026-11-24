@@ -106,7 +106,7 @@ profile 的稳定内部 ID 为 `up_<32 位小写 hex>`。来源 `source_format`/
 
 | 格式 | 允许的容器 | 节点转换 |
 | --- | --- | --- |
-| `uri` | 单个 `vless://` URI | 严格参数白名单与上面的两类出口组合；其他 scheme 明确不支持 |
+| `uri` | 一条或逐行粘贴的节点分享 URI，最多 128 条 | 预览按原顺序列出。仅符合上面两类出口组合的 `vless://` 可保存，其他已识别协议附固定拒绝原因 |
 | `v2ray-json` | 单个 outbound 对象，或标准 `outbounds` 数组 | 只选择一个受支持 VLESS outbound，单 `vnext`/单 user；不启动原配置 |
 | `clash-yaml` | 单个 proxy 映射，或 `proxies` 数组 | 只选择一个受支持 VLESS proxy；组、DIRECT/REJECT 不是上游节点 |
 

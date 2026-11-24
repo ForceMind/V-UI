@@ -6,6 +6,21 @@
     const modes = {'00':'主机代理关 / 默认入口直连', '10':'主机代理开 / 默认入口直连', '01':'主机代理关 / 默认入口中转', '11':'主机代理开 / 默认入口中转'};
     const routingModes = {inherit:'跟随全局', direct:'指定直连', relay:'指定中转'};
     const importReasons = {
+        UNSUPPORTED_PROTOCOL:'上游目前仅支持 VLESS。',
+        UNSUPPORTED_TRANSPORT:'上游目前仅支持 TCP，链接指定了其他传输。',
+        UNSUPPORTED_SECURITY:'上游要求验证 TLS 或合资格的 REALITY。',
+        UNSUPPORTED_TCP_HEADER:'此链接使用 TCP 的 HTTP 头部设置，当前无法导入。',
+        UNSUPPORTED_REALITY_KEY_EXCHANGE:'此链接声明 REALITY 混合密钥交换，当前上游核心尚未获得该组合的运行资格。',
+        UNSUPPORTED_REALITY_OPTIONS:'此链接含 REALITY SpiderX 或额外验证参数，当前上游无法保留。',
+        UNSUPPORTED_ENCRYPTION:'上游目前仅支持 encryption=none。',
+        UNSUPPORTED_FLOW:'流控与当前支持的 TLS 或 REALITY Vision 组合不符。',
+        UNSUPPORTED_FINGERPRINT:'TLS 仅支持可选 Chrome 指纹，REALITY 必须使用 Chrome。',
+        MISSING_TLS_SERVER_NAME:'缺少 TLS 证书域名（SNI），补填后可重新预览。',
+        INVALID_SERVER_NAME:'SNI 必须是明确的 DNS 域名。',
+        MISSING_FIELD:'链接缺少必填字段，请核对 TLS 或 REALITY 设置。',
+        UNKNOWN_FIELD:'链接包含当前无法保真导入的参数。',
+        INVALID_URI:'分享链接格式无效。',
+        UNSUPPORTED_FORMAT:'请粘贴节点分享链接，当前入口不会读取远程订阅。',
         UDP_CAPABILITY_NOT_QUALIFIED:'此节点声明了 UDP 或 packet encoding，目前尚未获得双开关上游导入资格。不会自动删除这些字段或降为 TCP-only；普通节点导出与中转上游的支持范围不同。'
     };
     const errors = {
@@ -540,6 +555,34 @@
             $('import-content').value=''; $('import-file').value=''; importNotice('文件必须是有效 UTF-8，且不超过 1 MiB。');
         }
     });
+    function tlsNameEditor(previewValue, index) {
+        const editor=element('div',null,{class:'actions'});
+        const input=element('input',null,{type:'text',maxlength:'253',autocomplete:'off',spellcheck:'false',
+            placeholder:'证书域名（SNI）','aria-label':'第 '+(index+1)+' 个节点的 TLS 证书域名（SNI）'});
+        const button=element('button','补填并重新预览',{type:'button'});
+        button.addEventListener('click',()=>{
+            if (importBusy || preview!==previewValue || $('import-format').value!=='uri') return;
+            const value=input.value.trim();
+            if (!/^[A-Za-z0-9.-]{1,253}$/.test(value)) {
+                importNotice('请输入原节点证书上的 DNS 域名。');
+                input.focus();
+                return;
+            }
+            const lines=$('import-content').value.split('\n');
+            const candidates=lines.map((text,line)=>({line,text:text.replace(/^[ \t\r]+|[ \t\r]+$/g,'')}))
+                .filter(item=>item.text);
+            const entry=candidates[index];
+            if (!entry) return;
+            const fragment=entry.text.indexOf('#');
+            const end=fragment===-1?entry.text.length:fragment;
+            lines[entry.line]=entry.text.slice(0,end)+'&sni='+encodeURIComponent(value)+entry.text.slice(end);
+            $('import-content').value=lines.join('\n');
+            $('import-file').value='';
+            return previewImport();
+        });
+        editor.append(input,button);
+        return editor;
+    }
     function showPreview(value) {
         preview=value; $('import-preview').hidden=false;
         value.candidates.forEach(candidate=>{
@@ -548,9 +591,19 @@
             radio.disabled=candidate.supported!==true;
             radio.addEventListener('change',selectionReady);
             const description=element('span',candidate.name||'未命名候选');
-            description.append(element('small',(candidate.protocol||'')+' / '+(candidate.transport||'')+' / '+(candidate.tls_mode||'')+' · '+(candidate.server||'')+':'+(candidate.server_port??'')));
-            if (!candidate.supported) description.append(element('small','不支持：'+(importReasons[candidate.reason_code]||candidate.reason||candidate.reason_code||'超出本期范围')));
+            const kind=[candidate.protocol,candidate.transport,candidate.tls_mode].filter(Boolean).join(' / ');
+            const endpoint=candidate.server?[candidate.server,candidate.server_port].filter(Boolean).join(' · '):'';
+            if (kind||endpoint) description.append(element('small',[kind,endpoint].filter(Boolean).join(' · ')));
+            if (candidate.supported) description.append(element('small','可导入'));
+            else {
+                const repairable=candidate.reason_code==='MISSING_TLS_SERVER_NAME';
+                description.append(element('small',(repairable?'待补填：':'不支持：')+
+                    (importReasons[candidate.reason_code]||candidate.reason||'超出当前范围')));
+            }
             label.append(radio,description); $('candidates').append(label);
+            if (value.source_format==='uri' && candidate.reason_code==='MISSING_TLS_SERVER_NAME') {
+                $('candidates').append(tlsNameEditor(value,candidate.index));
+            }
         });
         if (!value.candidates.length) $('candidates').append(element('p','没有可选择的候选节点。'));
         if (value.ignored_sections.length) $('ignored-sections').append(element('h3','逐项确认不导入的区块'));
@@ -561,7 +614,7 @@
         $('import-notices').textContent=value.notice_codes?.length?'完整客户端配置不会迁移；远程 provider 不会读取。':'';
         selectionReady();
     }
-    $('preview-import').addEventListener('click',async()=>{
+    async function previewImport() {
         if (importBusy) return;
         if (!$('import-content').value||!inputWithinLimit()) { importNotice('请输入不超过 1 MiB 的配置。'); return; }
         resetPreview();
@@ -578,7 +631,8 @@
         } finally {
             if (epoch===importEpoch) { importBusy=false; importController=null; $('import-fields').disabled=false; selectionReady(); }
         }
-    });
+    }
+    $('preview-import').addEventListener('click',previewImport);
     $('import-form').addEventListener('submit',async event=>{
         event.preventDefault();
         if (importBusy||busy||conflict||snapshot.pending||!preview||$('save-import').disabled) return;

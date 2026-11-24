@@ -28,9 +28,11 @@ PUBLISHED_BASELINES = {
     '0.4.23': 'be5d8459cdd3eeedce73f2ff6e4663e5eb781e42',
     '0.4.24': '8b8d7cf82e55609a205455b351f659eb9de91974',
     '0.4.25': '32a03a5b6719400f21a07a75d04d278b76e0df09',
+    '0.4.26': '71f0e1689cd356f22e12553f74a9ec4fd8bba388',
 }
-DNS_BASELINES = frozenset({'0.4.23', '0.4.24', '0.4.25'})
-CORE_AUTHORITY_BASELINES = frozenset({'0.4.24', '0.4.25'})
+DNS_BASELINES = frozenset({'0.4.23', '0.4.24', '0.4.25', '0.4.26'})
+CORE_AUTHORITY_BASELINES = frozenset({'0.4.24', '0.4.25', '0.4.26'})
+YAML_BASELINES = frozenset({'0.4.25', '0.4.26'})
 CONTROL = Path('/usr/local/lib/v-ui')
 FIREWALL = str(CONTROL / 'firewall_support.py')
 MAINTENANCE_FILES = frozenset({
@@ -58,8 +60,8 @@ DNS_BINDING_LAYOUTS = (BINDING_COLUMNS + ('server_name',), BINDING_COLUMNS[:4] +
 
 
 def _target_contract(candidate_version, old_version):
-    if candidate_version not in ('0.4.22', '0.4.23', '0.4.24', '0.4.25', '0.4.26'):
-        raise AssertionError('Explicit reviewed 0.4.22 through 0.4.26 upgrade target required')
+    if candidate_version not in ('0.4.22', '0.4.23', '0.4.24', '0.4.25', '0.4.26', '0.4.27'):
+        raise AssertionError('Explicit reviewed 0.4.22 through 0.4.27 upgrade target required')
     if old_version in DNS_BASELINES and candidate_version <= old_version:
         raise AssertionError('The published DNS baseline requires a newer candidate')
     return candidate_version
@@ -107,7 +109,7 @@ def assert_receipt_migration(test, before, after, old_version, candidate_version
     _target_contract(candidate_version, old_version)
     if type(yaml_control) is not bool or yaml_control and not core_control:
         raise AssertionError("YAML closure qualification requires the explicit core profile")
-    existing_yaml = old_version == '0.4.25'
+    existing_yaml = old_version in YAML_BASELINES
     if existing_yaml:
         test.assertTrue(YAML_FILES <= set(before['files']), 'Published YAML receipt lacks its control reader')
     else:
@@ -116,9 +118,9 @@ def assert_receipt_migration(test, before, after, old_version, candidate_version
         raise AssertionError('Explicit P3 development control profile required')
     if type(core_authority) is not bool or core_authority and not core_control:
         raise AssertionError('Explicit private core authority control profile required')
-    if candidate_version in ('0.4.24', '0.4.25', '0.4.26') and not (core_control and core_authority):
+    if candidate_version in ('0.4.24', '0.4.25', '0.4.26', '0.4.27') and not (core_control and core_authority):
         raise AssertionError('Candidate requires the complete core and authority control profile')
-    if candidate_version in ('0.4.25', '0.4.26') and not yaml_control:
+    if candidate_version in ('0.4.25', '0.4.26', '0.4.27') and not yaml_control:
         raise AssertionError('Candidate requires the YAML control reader')
     existing_core = old_version in CORE_AUTHORITY_BASELINES
     if existing_core:
@@ -261,7 +263,7 @@ def assert_editor_content_addition(test, before, after):
 
 def assert_node_summary_upgrade(test, before, after, old_version=None):
     """Permit only the declared capability/CAS response additions for 21."""
-    if old_version in ('0.4.21', '0.4.22', '0.4.23', '0.4.24', '0.4.25'):
+    if old_version in ('0.4.21', '0.4.22', '0.4.23', '0.4.24', '0.4.25', '0.4.26'):
         test.assertEqual(after,before)
         for row in after:
             test.assertIs(type(row.get('content_revision')),str)
@@ -375,8 +377,10 @@ class PublishedUpgrade:
         test.assertNotEqual(self.candidate['version'], self.old_version)
         _target_contract(self.candidate['version'], self.old_version)
         self.old_source = Path(os.environ['VUI_PUBLISHED_UPGRADE_SOURCE'])
+        metadata = os.environ.get('VUI_PUBLISHED_METADATA')
+        metadata_args = {'prepared_metadata': Path(metadata)} if metadata else {}
         self.old = published_commands(self.old_source, self.old_version, self.old_commit,
-                                      certificate_args, configured_args)
+                                      certificate_args, configured_args, **metadata_args)
         self.new = fixture_commands(source, work, self.kit, certificate_args, configured_args)
 
     def _service_python(self, release, program):
@@ -518,7 +522,7 @@ print('{}')
         self.grants = json.loads(api('/api/subscriptions')[1])
         self.data = self._snapshot(release)
         self.yaml_state = None
-        if self.old_version == '0.4.25':
+        if self.old_version in YAML_BASELINES:
             self.yaml_state = self._service_python(release, yaml_draft_program(create=True))
         for table in ('users','inbounds','subscription_grants','managed_certificates'):
             self.test.assertGreater(self.data[table]['count'], 0)
@@ -622,8 +626,10 @@ print(json.dumps(row))
             print('VUI_23_TO_24_UPGRADE_ACCEPTANCE: existing DNS identity and private credentials retained, accepted Root origin and default core selection verified')
         if self.old_version == '0.4.24' and self.candidate['version'] == '0.4.25':
             print('VUI_24_TO_25_UPGRADE_ACCEPTANCE: public application, saved data and DNS materials retained, previous and candidate Root origins verified, YAML control reader installed')
-        if self.old_version == '0.4.25':
+        if self.old_version == '0.4.25' and self.candidate['version'] == '0.4.26':
             print('VUI_25_TO_26_UPGRADE_ACCEPTANCE: prior and candidate Root origins, private DB and DNS material, saved YAML plan and three source digests verified')
+        if self.old_version == '0.4.26' and self.candidate['version'] == '0.4.27':
+            print('VUI_26_TO_27_UPGRADE_ACCEPTANCE: account and node data, live subscription, certificate bindings, private DNS material, saved YAML sources and both Root origins verified')
         print('Published upgrade: immutable public '+self.old_version+' source/assets -> exact candidate; exact historical root receipt closure; config, users/password hashes, node draft/manual TLS paths, live subscription, provided/managed fixture certificate bytes and managed certificate/binding metadata retained (synthetic un-applied Xray binding on 0.4.16/17/19/20/21; no CA/core qualification); candidate-only bounded downloads OK')
 
     def clear_yaml_fixture(self, api):

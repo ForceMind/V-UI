@@ -41,6 +41,8 @@ class ShortInstallContractTests(unittest.TestCase):
             expected.append(('0.4.24','8b8d7cf82e55609a205455b351f659eb9de91974','.published-v0424',True))
         if tuple(map(int,version.split('.'))) > (0,4,25):
             expected.append(('0.4.25','32a03a5b6719400f21a07a75d04d278b76e0df09','.published-v0425',True))
+        if tuple(map(int,version.split('.'))) > (0,4,26):
+            expected.append(('0.4.26','71f0e1689cd356f22e12553f74a9ec4fd8bba388','.published-v0426',True))
         return expected
 
     def test_installer_language_identity_does_not_depend_on_consent_test_opt_in(self):
@@ -64,7 +66,7 @@ class ShortInstallContractTests(unittest.TestCase):
         expected=self.expected_upgrade_baselines(version)
         self.assertEqual(rows,[dict(version=v,source=sha,path=path,netlink=netlink)
                                for v,sha,path,netlink in expected])
-        for candidate,count in [('0.4.22',7),('0.4.23',8),('0.4.24',9),('0.4.25',10),('0.4.26',11)]:
+        for candidate,count in [('0.4.22',7),('0.4.23',8),('0.4.24',9),('0.4.25',10),('0.4.26',11),('0.4.27',12)]:
             actual=acceptance_job.matrix_for_version(candidate)['include']
             self.assertEqual(len(actual),count)
             self.assertEqual(actual,[dict(version=v,source=sha,path=path,netlink=netlink)
@@ -115,6 +117,7 @@ class ShortInstallContractTests(unittest.TestCase):
         if tuple(map(int,version.split('.'))) > (0,4,23):expected.append('upgrade-0.4.23')
         if tuple(map(int,version.split('.'))) > (0,4,24):expected.append('upgrade-0.4.24')
         if tuple(map(int,version.split('.'))) > (0,4,25):expected.append('upgrade-0.4.25')
+        if tuple(map(int,version.split('.'))) > (0,4,26):expected.append('upgrade-0.4.26')
         self.assertEqual(selected,expected)
         for role,recipe in recipes:
             commands=recipe['commands']
@@ -205,6 +208,29 @@ class ShortInstallContractTests(unittest.TestCase):
             self.assertLess(job['steps'].index(prepared),job['steps'].index(tested))
             self.assertLess(job['steps'].index(tested),job['steps'].index(receipt))
             self.assertLess(job['steps'].index(receipt),job['steps'].index(upload))
+
+    def test_oneclick_metadata_token_is_scoped_to_the_two_preparation_steps(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = yaml.load((root / '.github/workflows/oneclick.yml').read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual(workflow['permissions'], {'contents': 'read'})
+        steps_with_token = []
+        for job, config in workflow['jobs'].items():
+            for step in config['steps']:
+                if 'VUI_CI_METADATA_TOKEN' in step.get('env', {}):
+                    steps_with_token.append((job, step['name']))
+                    self.assertNotIn('if', step)
+                    self.assertNotIn('continue-on-error', step)
+                    self.assertIn('python -B -m scripts.ci_github_metadata ', step['run'])
+        self.assertEqual(steps_with_token, [
+            ('build-kit', 'Prepare fixed core source metadata'),
+            ('published-upgrade', 'Prepare fixed public release metadata'),
+        ])
+        build = next(step for step in workflow['jobs']['build-kit']['steps']
+                     if step.get('name') == 'Build exact candidate for installer test')
+        upgrade = next(step for step in workflow['jobs']['published-upgrade']['steps']
+                       if 'acceptance_job run-test' in step.get('run', ''))
+        self.assertIn('--core-metadata /tmp/vui-oneclick/core-metadata.json', build['run'])
+        self.assertIn('--published-metadata /tmp/vui-oneclick/published-metadata.json', upgrade['run'])
 
     def test_existing_browser_steps_remain_explicit_manual_opt_in(self):
         root=Path(__file__).resolve().parents[1]
@@ -311,11 +337,11 @@ class ShortInstallContractTests(unittest.TestCase):
         self.assertEqual(len(checkouts),2)
         self.assertEqual(checkouts[0]['with']['persist-credentials'],'false')
         self.assertEqual(checkouts[1]['with'],{'persist-credentials':'false',
-                                             'ref':'71f0e1689cd356f22e12553f74a9ec4fd8bba388',
+                                             'ref':'bdf5fbac4475424562c4733b1816093857f62f55',
                                              'path':'.published-suite'})
         acceptance=next(step for step in steps if 'VUI_SETUP_INSTALL' in step.get('env',{}))
         self.assertEqual(acceptance['env']['VUI_SETUP_RELEASE_SOURCE'],'${{ github.workspace }}/.published-suite')
-        self.assertEqual(acceptance['env']['VUI_PUBLISHED_INSTALL_VERSION'],'0.4.26')
+        self.assertEqual(acceptance['env']['VUI_PUBLISHED_INSTALL_VERSION'],'0.4.27')
         self.assertEqual(acceptance['env']['VUI_RELEASE_COMMIT'],checkouts[1]['with']['ref'])
 
     def fixture(self, folder, *, release_commit=None, raw=None):

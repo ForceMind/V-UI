@@ -52,6 +52,20 @@ class HTTPUpgradeExportTests(unittest.TestCase):
             "server": SNI, "format": "clash-yaml", "acknowledge_tcp_only": True})
         self.assertEqual(response.status_code, 409)
 
+    def test_downloaded_yaml_is_rejected_as_relay_upstream(self):
+        self.make_httpupgrade()
+        subscription = self.issue(formats=["mihomo.yaml"])
+        download = self.public_get(subscription["paths"]["mihomo.yaml"])
+        self.assertEqual(download.status_code, 200)
+
+        preview = self.client.post("/api/proxy/import/preview", headers=HEADERS, json={
+            "format": "clash-yaml", "content": download.text})
+        self.assertEqual(preview.status_code, 200)
+        candidate, = preview.json()["candidates"]
+        self.assertFalse(candidate["supported"])
+        self.assertEqual(candidate["reason_code"], "UNKNOWN_FIELD")
+        self.assertNotIn(UUID, preview.text)
+
     def test_new_grant_rejects_each_unsupported_format_atomically(self):
         self.make_httpupgrade()
         for formats in (["raw"], ["sing-box.json"], ["mihomo.yaml", "raw"], ["mihomo.yaml", "sing-box.json"]):
