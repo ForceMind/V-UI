@@ -134,10 +134,11 @@ def exercise_http01_disabled_install(test, source, work, bundle, sha, kit,
     disabled_args = [value for value in certificate_args if value != '--enable-http01']
     commands = fixture_commands(source, fixture, kit, disabled_args, configured_args)
     context = ssl.create_default_context(cafile=ca)
+    authority = domain if port == 443 else f'{domain}:{port}'
     def https_probe(timeout):
         with socket.create_connection(('127.0.0.1', port), timeout=timeout) as connection:
             with context.wrap_socket(connection, server_hostname=domain) as tls:
-                tls.sendall(('GET /api/auth/me HTTP/1.1\r\nHost: '+domain+'\r\nConnection: close\r\n\r\n').encode())
+                tls.sendall(('GET /api/auth/me HTTP/1.1\r\nHost: '+authority+'\r\nConnection: close\r\n\r\n').encode())
                 response = http.client.HTTPResponse(tls);response.begin()
                 return response.status, response.read(32768)
     def diagnostics():
