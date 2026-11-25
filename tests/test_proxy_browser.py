@@ -7,6 +7,7 @@ VUI_PROXY_BROWSER=1 is an opt-in gate; missing browser/dependencies fail when on
 The real login lands on the dashboard, so its checksum-pinned frontend assets
 must be prepared too; blocking its development CDN leaves app.js without Axios.
 """
+from contextlib import contextmanager
 from copy import deepcopy
 import json
 import os
@@ -99,6 +100,26 @@ def fixture_snapshot(revision='a' * 64):
             'active': None, 'pending': None}
 
 
+@contextmanager
+def report_editor_failure(page):
+    try:
+        yield
+    except AssertionError:
+        state = page.evaluate("""() => ({
+            modal: history.state?.modal ?? null,
+            dialogs: [...document.querySelectorAll('[role=dialog]')].filter(
+                item => item.getClientRects().length
+            ).map(item => item.getAttribute('aria-label')),
+            messages: [...document.querySelectorAll('.el-message')].map(
+                item => ({type: item.className, text: item.innerText})
+            ),
+            saveLocked: [...document.querySelectorAll('.vui-node-editor .el-dialog__footer button')]
+                .map(button => ({text: button.innerText, disabled: button.disabled}))
+        })""")
+        print('Advanced editor assertion state:', json.dumps(state, ensure_ascii=False))
+        raise
+
+
 def expand_details(details):
     summary = details.locator(':scope > summary')
     if details.get_attribute('open') is None:
@@ -142,6 +163,7 @@ def discard_import(page):
 def discard_node_editor(page, dialog):
     confirm_discard(page, dialog.get_by_role('button', name='取消', exact=True),
                     '放弃本次未保存的节点编辑？')
+    page.wait_for_function("history.state?.modal !== 'inbound-editor'")
 
 
 def open_advanced_node_creation(page):
@@ -150,6 +172,7 @@ def open_advanced_node_creation(page):
     wizard.get_by_role('button', name='给手机或电脑用', exact=False).click()
     expand_details(wizard.locator('details'))
     wizard.get_by_role('button', name='打开高级新建，选择其他协议或配置', exact=True).click()
+    page.wait_for_function("history.state?.modal === 'inbound-editor'")
 
 
 def open_node_action(row, label):
@@ -1097,9 +1120,14 @@ rules:
         dialog.get_by_placeholder('例如：US-01').fill('created-policy-node')
         dialog.locator('#inbound-routing-mode').select_option('relay')
         fault['save'] = 'saved'
-        dialog.get_by_role('button', name='创建并应用', exact=True).click()
-        expect(dialog).not_to_be_visible()
-        expect(page.locator('.el-message--warning')).to_contain_text('已保存为期望状态')
+        with report_editor_failure(page), page.expect_response(lambda response: (
+                urlparse(response.url).path == '/api/inbounds' and response.request.method == 'POST')) as saved:
+            dialog.get_by_role('button', name='创建并应用', exact=True).click()
+        self.assertEqual(saved.value.status, 409)
+        self.assertIs(saved.value.json()['detail']['saved'], True)
+        with report_editor_failure(page):
+            expect(dialog).not_to_be_visible()
+            expect(page.locator('.el-message--warning')).to_contain_text('已保存为期望状态')
         row = page.get_by_role('row').filter(has_text='created-policy-node')
         expect(row).to_contain_text('指定中转')
         expect(row).to_contain_text('待应用')
@@ -1204,10 +1232,18 @@ rules:
                     expect(dialog.get_by_placeholder('例如：US-01')).to_have_value(remark)
                     if status == 422:
                         detail = 'Synthetic saving-lock rejection: ' + ('edit' if editing else 'create')
-                        held.pop().fulfill(status=422, json={'detail': detail})
-                        expect(page.locator('.el-message--error')).to_have_text('节点参数不符合要求，请核对端口、协议和安全设置后重试。')
-                        expect(dialog).to_be_visible()
-                        expect(dialog.get_by_role('button', name='取消', exact=True)).to_be_enabled()
+                        reply = held.pop()
+                        with page.expect_response(lambda response: (
+                                response.request.method == method and
+                                urlparse(response.url).path == urlparse(reply.request.url).path)) as rejected:
+                            reply.fulfill(status=422, json={'detail': detail})
+                        self.assertEqual(rejected.value.status, 422)
+                        self.assertEqual(rejected.value.json(), {'detail': detail})
+                        with report_editor_failure(page):
+                            expect(dialog).to_be_visible()
+                            expect(dialog.get_by_role('button', name='取消', exact=True)).to_be_enabled()
+                            expect(page.locator('.el-message--error')).to_have_text(
+                                '节点参数不符合要求，请核对端口、协议和安全设置后重试。')
                         check_controls(dialog, False, editing)
                         expect(dialog.get_by_placeholder('例如：US-01')).to_have_value(remark)
                     else:

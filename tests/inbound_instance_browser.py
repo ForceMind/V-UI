@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 def assert_inbound_instance_conflicts(case):
     from playwright.sync_api import expect
-    from test_proxy_browser import discard_node_editor, open_node_action
+    from test_proxy_browser import discard_node_editor, open_node_action, report_editor_failure
 
     page, context, base = case.page, case.context, case.base
     page.set_viewport_size({'width': 1440, 'height': 1000})
@@ -94,9 +94,13 @@ def assert_inbound_instance_conflicts(case):
                                   and response.request.method == 'GET') as stale_editor:
             open_node_action(old_row, '完整高级编辑')
         case.assertEqual(stale_editor.value.status, 200)
-        case.assertEqual(stale_editor.value.json()['mutation_revision'], replacement['mutation_revision'])
-        expect(page.locator('.el-message--error').filter(has_text='节点已发生变化，请刷新节点列表并重新打开编辑。')).to_be_visible()
-        expect(editor).not_to_be_visible()
+        result = stale_editor.value.json()
+        case.assertEqual(result['mutation_revision'], replacement['mutation_revision'])
+        case.assertFalse(result.get('certificate_binding_unavailable'))
+        with report_editor_failure(page):
+            expect(page.locator('.el-message--error').filter(
+                has_text='节点已发生变化，请刷新节点列表并重新打开编辑。')).to_be_visible()
+            expect(editor).not_to_be_visible()
         case.assertEqual(len(writes), 1)
         refresh()
         new_row = page.get_by_role('row').filter(has_text='identity-replacement-edit')
