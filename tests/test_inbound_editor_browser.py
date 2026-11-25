@@ -13,6 +13,8 @@ import sys
 import tempfile
 import time
 import unittest
+
+from test_proxy_browser import open_advanced_node_creation, open_node_action
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import yaml
@@ -96,12 +98,12 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 page.locator('#login-name').fill('security-admin')
                 page.locator('#login-password').fill(password)
                 page.get_by_role('button', name='登录面板', exact=True).click()
-                page.wait_for_url('**/ui/')
+                page.wait_for_url('**/ui/#dashboard')
                 check_page_brand(page, base)
                 expect(page.get_by_role('heading', name='V-UI', exact=True)).to_be_visible()
-                menu = page.get_by_role('menuitem', name='安全中心', exact=True)
+                menu = page.get_by_role('link', name='安全中心', exact=True)
                 def tab_to_menu():
-                    expect(menu).to_have_attribute('tabindex', '0')
+                    expect(menu).to_have_attribute('href', '/ui/#security')
                     # Bound a real keyboard traversal; programmatic focus hides tabindex defects.
                     for _ in range(20):
                         page.keyboard.press('Tab')
@@ -128,18 +130,22 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 notice = check_notice()
                 for _ in range(3):
                     menu.click(); notice.click(); check_notice()
-                page.get_by_role('menuitem', name='系统状态', exact=True).click()
+                page.locator('.vui-nav-link[data-nav-id="dashboard"]').click()
                 expect(page.get_by_role('region', name='安全中心', exact=True)).to_have_count(0)
-                tab_to_menu(); menu.press('Space'); check_notice()
-                # The existing SPA returns to the dashboard after reload/full-page history.
-                page.reload(); tab_to_menu(); menu.press('Enter'); check_notice()
-                page.get_by_role('menuitem', name='面板设置', exact=True).click()
-                page.wait_for_url('**/account')
-                page.go_back(); page.wait_for_url('**/ui/')
-                tab_to_menu(); menu.press('Space'); check_notice()
-                page.go_forward(); page.wait_for_url('**/account')
-                page.go_back(); page.wait_for_url('**/ui/')
                 tab_to_menu(); menu.press('Enter'); check_notice()
+                page.reload()
+                page.wait_for_url('**/ui/#security')
+                check_notice()
+                page.locator('.vui-nav-link[data-nav-id="account"]').click()
+                page.wait_for_url('**/account')
+                page.go_back()
+                page.wait_for_url('**/ui/#security')
+                check_notice()
+                page.go_forward()
+                page.wait_for_url('**/account')
+                page.go_back()
+                page.wait_for_url('**/ui/#security')
+                check_notice()
                 self.assertEqual(errors, [])
                 self.assertEqual(external, [])
                 self.assertEqual(security_requests, [])
@@ -231,10 +237,10 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 def login():
                     page.goto(base + '/login')
                     page.locator('#login-name').fill('editor-admin'); page.locator('#login-password').fill(password)
-                    page.get_by_role('button', name='登录面板', exact=True).click(); page.wait_for_url('**/ui/')
-                    page.get_by_text('入站节点', exact=True).first.click()
+                    page.get_by_role('button', name='登录面板', exact=True).click(); page.wait_for_url('**/ui/#dashboard')
+                    page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 def open_edit(name):
-                    page.locator('.el-table__row').filter(has_text=name).get_by_role('button', name='编辑', exact=True).click()
+                    open_node_action(page.locator('.el-table__row').filter(has_text=name), '完整高级编辑')
                     return page.get_by_role('dialog')
                 def security(dialog, label):
                     dialog.locator('.el-form-item').filter(has_text='传输安全').locator('.el-select').click()
@@ -262,7 +268,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 created_credentials = {}
                 for label, value in (('None', 'none'), ('REALITY', 'reality')):
                     name = 'managed-' + value
-                    page.get_by_role('button', name='添加节点', exact=True).click()
+                    open_advanced_node_creation(page)
                     dialog = page.get_by_role('dialog'); dialog.get_by_text('sing-box', exact=True).click()
                     security(dialog, 'TLS')
                     dialog.get_by_placeholder('例如：US-01').fill(name)
@@ -304,7 +310,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                         stored_stream = json.loads(db.execute('SELECT stream_settings FROM inbounds WHERE id=?', (identity,)).fetchone()[0])
                     private = stored_stream['tls']['reality']['private_key'] if value == 'reality' else None
                     if private: self.assertNotIn(private, json.dumps(state))
-                    page.reload(); page.get_by_text('入站节点', exact=True).first.click(); dialog = open_edit(name)
+                    page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click(); dialog = open_edit(name)
                     expect(dialog.locator('.el-form-item').filter(has_text='传输安全')).to_contain_text(label)
                     dialog.get_by_placeholder('例如：US-01').fill(name + '-edited')
                     save(dialog, identity)
@@ -325,7 +331,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 # VMess already has validated API/export/renewal support. Its actual
                 # create/edit form must expose the same managed TLS selector.
                 def vmess_draft():
-                    page.get_by_role('button', name='添加节点', exact=True).click()
+                    open_advanced_node_creation(page)
                     dialog = page.get_by_role('dialog')
                     dialog.get_by_text('sing-box', exact=True).click()
                     dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select').click()
@@ -357,12 +363,12 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 dialog.get_by_placeholder('例如：US-01').fill('cancelled-vmess')
                 dialog.get_by_role('button', name='取消', exact=True).click()
                 self.assertEqual(editor(vmess_id)['remark'], 'managed-vmess')
-                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-vmess')
                 expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).to_contain_text('vpn.example.test')
                 dialog.get_by_placeholder('例如：US-01').fill('managed-vmess-edited')
                 save(dialog, vmess_id)
-                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-vmess-edited')
                 expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).to_contain_text('vpn.example.test')
                 dialog.get_by_role('button', name='取消', exact=True).click()
@@ -371,7 +377,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 # VLESS WS uses the same visual editor and managed certificate.
                 # Its optional Host is client metadata, never a server Host gate.
                 def ws_draft():
-                    page.get_by_role('button', name='添加节点', exact=True).click()
+                    open_advanced_node_creation(page)
                     dialog = page.get_by_role('dialog')
                     dialog.get_by_text('sing-box', exact=True).click()
                     security(dialog, 'TLS')
@@ -433,14 +439,14 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 dialog.get_by_placeholder('可选，例如 cdn.example.com').fill('cancelled.example.test')
                 dialog.get_by_role('button', name='取消', exact=True).click()
                 self.assertEqual(editor(ws_id), state)
-                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-vless-ws')
                 check_ws_prefill(dialog, '/vless-ws', 'cdn.example.test')
                 dialog.get_by_placeholder('例如：US-01').fill('managed-vless-ws-edited')
                 dialog.get_by_placeholder('/', exact=True).fill('/vless-ws-edited')
                 dialog.get_by_placeholder('可选，例如 cdn.example.com').fill('cdn2.example.test')
                 save(dialog, ws_id)
-                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-vless-ws-edited')
                 check_ws_prefill(dialog, '/vless-ws-edited', 'cdn2.example.test')
                 dialog.get_by_role('button', name='取消', exact=True).click()
@@ -458,7 +464,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 # gRPC Lite uses the same managed TLS lifecycle with literal
                 # service names, preserved HTTP/2 ALPN and no Host control.
                 def grpc_draft():
-                    page.get_by_role('button', name='添加节点', exact=True).click()
+                    open_advanced_node_creation(page)
                     dialog = page.get_by_role('dialog')
                     dialog.get_by_text('sing-box', exact=True).click()
                     security(dialog, 'TLS')
@@ -519,13 +525,13 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 dialog.get_by_placeholder('TunService').fill('Cancelled.Service')
                 dialog.get_by_role('button', name='取消', exact=True).click()
                 self.assertEqual(editor(grpc_id), state)
-                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-vless-grpc')
                 check_grpc_prefill(dialog, 'VUI.Service_1')
                 dialog.get_by_placeholder('例如：US-01').fill('managed-vless-grpc-edited')
                 dialog.get_by_placeholder('TunService').fill('VUI.Edited-2')
                 save(dialog, grpc_id)
-                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-vless-grpc-edited')
                 check_grpc_prefill(dialog, 'VUI.Edited-2')
                 dialog.get_by_role('button', name='取消', exact=True).click()
@@ -545,7 +551,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 # passwords may be supplied, but are never returned for editing.
                 hy2_password = 'Synthetic-browser-HY2:p@ss/word?+#%'
                 def hy2_draft():
-                    page.get_by_role('button', name='添加节点', exact=True).click()
+                    open_advanced_node_creation(page)
                     dialog = page.get_by_role('dialog')
                     dialog.get_by_text('sing-box', exact=True).click()
                     dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select').click()
@@ -610,13 +616,13 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 dialog.get_by_placeholder('例如：US-01').fill('cancelled-hysteria2')
                 dialog.get_by_role('button', name='取消', exact=True).click()
                 self.assertEqual(check_hy2_state(), hy2_state)
-                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-hysteria2')
                 check_hy2_prefill(dialog)
                 dialog.get_by_placeholder('例如：US-01').fill('managed-hysteria2-edited')
                 save(dialog, hy2_id)
                 check_hy2_state()
-                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-hysteria2-edited')
                 check_hy2_prefill(dialog)
                 dialog.get_by_role('button', name='取消', exact=True).click()
@@ -639,7 +645,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 tuic_uuid = '11111111-1111-4111-8111-111111111111'
                 tuic_password = 'Synthetic-browser-TUIC:p@ss/word?+#%'
                 def tuic_draft():
-                    page.get_by_role('button', name='添加节点', exact=True).click()
+                    open_advanced_node_creation(page)
                     dialog = page.get_by_role('dialog')
                     dialog.get_by_text('sing-box', exact=True).click()
                     dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select').click()
@@ -714,13 +720,13 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 dialog.get_by_placeholder('例如：US-01').fill('cancelled-tuic')
                 dialog.get_by_role('button', name='取消', exact=True).click()
                 self.assertEqual(check_tuic_state(), tuic_state)
-                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-tuic')
                 check_tuic_prefill(dialog)
                 dialog.get_by_placeholder('例如：US-01').fill('managed-tuic-edited')
                 save(dialog, tuic_id)
                 check_tuic_state()
-                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-tuic-edited')
                 check_tuic_prefill(dialog)
                 dialog.get_by_role('button', name='取消', exact=True).click()
@@ -742,7 +748,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 # Qualified REALITY has a handshake reference address, no local
                 # certificate binding, and hidden independently editable UUID/ID.
                 def reality_draft():
-                    page.get_by_role('button', name='添加节点', exact=True).click()
+                    open_advanced_node_creation(page)
                     dialog = page.get_by_role('dialog'); dialog.get_by_text('sing-box', exact=True).click()
                     security(dialog, 'REALITY')
                     dialog.get_by_placeholder('例如：US-01').fill('qualified-reality')
@@ -800,7 +806,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 dialog.locator('.el-form-item').filter(has_text=re.compile('^Short ID')).locator('input').fill('aaaaaaaaaaaaaaaa')
                 dialog.get_by_role('button', name='取消', exact=True).click()
                 self.assertEqual(reality_material(), (reality_settings, reality_stream))
-                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('qualified-reality'); check_reality_prefill(dialog)
                 dialog.get_by_placeholder('例如：US-01').fill('qualified-reality-edited')
                 save(dialog, reality_id)
@@ -832,7 +838,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 self.assertEqual(reality_stream['_vui']['reality_public_key'], reality_public)
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     created_credentials[reality_id], reality_stream_before = db.execute('SELECT settings,stream_settings FROM inbounds WHERE id=?', (reality_id,)).fetchone()
-                page.reload(); page.get_by_text('入站节点', exact=True).first.click()
+                page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('qualified-reality-edited'); check_reality_prefill(dialog)
                 dialog.get_by_role('button', name='取消', exact=True).click()
                 # The separate certificate-management card must offer both TLS

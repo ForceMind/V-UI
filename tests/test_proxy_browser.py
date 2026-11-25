@@ -99,6 +99,36 @@ def fixture_snapshot(revision='a' * 64):
             'active': None, 'pending': None}
 
 
+def expand_details(details):
+    summary = details.locator(':scope > summary')
+    if details.get_attribute('open') is None:
+        summary.click()
+    from playwright.sync_api import expect
+    expect(details).to_have_attribute('open', '')
+
+
+def open_proxy_settings(page):
+    from playwright.sync_api import expect
+    expand_details(page.locator('#connection-advanced'))
+    expect(page.locator('#proxy-workspace')).to_be_visible()
+    expand_details(page.locator('#connection-setup'))
+    expand_details(page.locator('#connection-state-details'))
+    expect(page.locator('#refresh')).to_be_enabled()
+
+
+def open_advanced_node_creation(page):
+    page.get_by_role('button', name='创建节点', exact=True).click()
+    wizard = page.locator('#node-wizard')
+    wizard.get_by_role('button', name='给手机或电脑用', exact=False).click()
+    expand_details(wizard.locator('details'))
+    wizard.get_by_role('button', name='打开高级新建，选择其他协议或配置', exact=True).click()
+
+
+def open_node_action(row, label):
+    expand_details(row.locator('.node-more'))
+    row.get_by_role('button', name=label, exact=True).click()
+
+
 class ProxyPageStaticTests(unittest.TestCase):
     def test_import_fieldset_assertions_require_property_attribute_and_controls(self):
         # Unit-check assertion wiring, not Chromium's disabled implementation.
@@ -332,12 +362,10 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         self.assertEqual(self.errors, [])
 
     def open_page(self, page=None):
-        from playwright.sync_api import expect
         page = page or self.page
-        # Exercise the CSP-protected M3 page backed by authenticated APIs.
+        # Open the real advanced controls for the authenticated proxy cases.
         page.goto(self.base + '/proxy')
-        expect(page.locator('#proxy-workspace')).to_be_visible()
-        expect(page.locator('#refresh')).to_be_enabled()
+        open_proxy_settings(page)
         return page
 
     def open_inbound_view(self, page=None):
@@ -346,6 +374,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         The shared link selects /ui/#inbounds without rebuilding Vue setup.
         Open the mobile drawer before activating the real navigation link.
         """
+        from playwright.sync_api import expect
         page = page or self.page
         with page.expect_response(lambda response: urlparse(response.url).path == '/api/inbounds'
                                   and response.request.method == 'GET') as loaded:
@@ -364,6 +393,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         from playwright.sync_api import expect
         page = page or self.page
         page.locator('#open-import').click()
+        expand_details(page.locator('#connection-import-options'))
         page.locator('#import-format').select_option(source)
         page.locator('#import-content').fill(content)
         page.locator('#preview-import').click()
@@ -455,6 +485,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
             route.fulfill(status=200, content_type='application/json', body=json.dumps(payload))
         page.route('**/api/management/tailscale', reply)
         page.reload()
+        open_proxy_settings(page)
         expect(page.locator('#tailscale-card')).to_be_visible()
         expect(page.locator('#tailscale-state')).to_have_text('控制平面在线')
         self.assertNotIn('100.64.0.7', page.locator('#tailscale-card').inner_text())
@@ -470,6 +501,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         expect(page.locator('#tailscale-state')).to_have_text('未知：请手动刷新')
         page.goto(self.base + '/account')
         page.go_back()
+        open_proxy_settings(page)
         expect(page.locator('#tailscale-state')).not_to_have_text('控制平面在线')
         self.assertEqual(self.external, [])
         self.assertEqual(self.errors, [])
@@ -495,6 +527,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         expect(page.locator('#draft-state')).to_contain_text('01')
         expect(page.locator('#active-state')).to_contain_text('尚无')
         expect(page.locator('#apply')).to_be_disabled()
+        expand_details(page.locator('#connection-diagnostics'))
         expect(page.locator('#diagnostics')).to_be_disabled()
         page.locator('#local-enabled').check()
         expect(page.locator('#draft-mode')).to_contain_text('11')
@@ -518,6 +551,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         page.locator('#save').click()
         expect(page.locator('#draft-state')).to_contain_text('00')
         page.reload()
+        open_proxy_settings(page)
         expect(page.locator('#draft-state')).to_contain_text('00')
         page.locator('#relay-enabled').check()
         expect(page.locator('#upstream')).to_have_value(upstream_id)
@@ -543,6 +577,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         expect(page.locator('#save-import')).to_be_disabled()
         self.save_import(index=1)
         page.locator('#open-import').click()
+        expand_details(page.locator('#connection-import-options'))
         page.locator('#import-format').select_option('clash-yaml')
         yaml = f'''proxies:
   - name: YAML candidate
@@ -562,6 +597,7 @@ rules:
         expect(page.locator('#import-preview')).to_be_visible()
         self.save_import()
         page.locator('#open-import').click()
+        expand_details(page.locator('#connection-import-options'))
         page.locator('#import-file').set_input_files({'name': 'too-large.txt', 'mimeType': 'text/plain', 'buffer': b'x' * (1048576 + 1)})
         expect(page.locator('#import-notice')).to_contain_text('超过 1 MiB')
         expect(page.locator('#import-content')).to_have_value('')
@@ -615,7 +651,7 @@ rules:
                 expect(page.locator('#import-file')).to_have_value('')
                 self.assertEqual(self.context.request.get(self.base + '/api/proxy/settings').json(), before)
         page.reload()
-        expect(page.locator('#proxy-workspace')).to_be_visible()
+        open_proxy_settings(page)
         expect(page.locator('#draft-mode')).to_contain_text('00')
         expect(page.locator('#relay-enabled')).not_to_be_checked()
         expect(page.locator('#local-enabled')).not_to_be_checked()
@@ -710,7 +746,7 @@ rules:
         expect(page.locator('#import-content')).to_have_value('')
         page.locator('#import-content').fill(URI)
         page.reload()
-        expect(page.locator('#proxy-workspace')).to_be_visible()
+        open_proxy_settings(page)
         expect(page.locator('#import-dialog')).not_to_be_visible()
         expect(page.locator('#import-content')).to_have_value('')
         page.locator('#relay-enabled').check()
@@ -718,7 +754,7 @@ rules:
         page.locator('#import-content').fill(URI)
         page.goto(self.base + '/account')
         page.go_back()
-        expect(page.locator('#proxy-workspace')).to_be_visible()
+        open_proxy_settings(page)
         expect(page.locator('#import-content')).to_have_value('')
         page.locator('#relay-enabled').check()
         page.locator('#open-import').click()
@@ -728,7 +764,7 @@ rules:
         page.wait_for_url('**/login?return=proxy')
         self.login(page)
         page.goto(self.base + '/proxy')
-        expect(page.locator('#proxy-workspace')).to_be_visible()
+        open_proxy_settings(page)
         expect(page.locator('#import-content')).to_have_value('')
         self.assertEqual(len(self.context.request.get(self.base + '/api/proxy/settings').json()['upstreams']), 0)
         self.assert_private()
@@ -861,6 +897,7 @@ rules:
                 route.fulfill(status=404, json={'detail': 'not found'})
         self.context.route('**/api/proxy/**', runtime)
         page = self.open_page()
+        expand_details(page.locator('#connection-export'))
         expect(page.locator('#export-mihomo')).to_be_enabled()
         page.locator('#export-inbound').fill('7')
         page.locator('#export-server').fill('node.example.test')
@@ -917,6 +954,7 @@ rules:
                 route.fulfill(status=404, json={'detail': 'not found'})
         self.context.route('**/api/proxy/**', runtime)
         page = self.open_page()
+        expand_details(page.locator('#connection-diagnostics'))
         expect(page.locator('#diagnostics')).to_be_disabled()
         page.locator('#diagnostic-consent').check()
         page.locator('#diagnostics').click()
@@ -1018,15 +1056,15 @@ rules:
         page.set_viewport_size({'width': 1440, 'height': 1000})
         self.open_inbound_view(page)
         expect(page.get_by_text('policy-node-1', exact=True)).to_be_visible()
-        page.get_by_role('button', name='添加节点', exact=True).click()
-        dialog = page.get_by_role('dialog', name='添加节点', exact=True)
+        open_advanced_node_creation(page)
+        dialog = page.get_by_role('dialog', name='高级新建节点', exact=True)
         expect(dialog.locator('#inbound-routing-mode')).to_have_value('inherit')
         dialog.locator('#inbound-routing-mode').select_option('relay')
         expect(dialog).to_contain_text('服务器严格核验')
         dialog.get_by_role('button', name='取消', exact=True).click()
         expect(dialog).not_to_be_visible()
         self.assertEqual(writes, [])
-        page.get_by_role('button', name='添加节点', exact=True).click()
+        open_advanced_node_creation(page)
         expect(dialog.locator('#inbound-routing-mode')).to_have_value('inherit')
         dialog.get_by_placeholder('例如：US-01').fill('created-policy-node')
         dialog.locator('#inbound-routing-mode').select_option('relay')
@@ -1040,18 +1078,18 @@ rules:
         self.assertEqual(len(writes), 1)
         self.assertEqual(writes[0][1]['routing_mode'], 'relay')
         self.assertNotIn('routing_mode', writes[0][1]['profile'])
-        row.get_by_role('button', name='编辑', exact=True).click()
-        editor = page.get_by_role('dialog', name='编辑节点', exact=True)
+        open_node_action(row, '完整高级编辑')
+        editor = page.get_by_role('dialog', name='编辑节点（高级）', exact=True)
         expect(editor.locator('#inbound-routing-mode')).to_have_value('relay')
         editor.locator('#inbound-routing-mode').select_option('direct')
         fault['save'] = 'invalid'
         editor.get_by_role('button', name='保存并应用', exact=True).click()
-        expect(page.locator('.el-message--error')).to_contain_text('Explicit policy rejected')
+        expect(page.locator('.el-message--error')).to_have_text('节点参数不符合要求，请核对端口、协议和安全设置后重试。')
         expect(editor).to_be_visible()
         expect(editor.locator('#inbound-routing-mode')).to_have_value('direct')
         editor.get_by_role('button', name='取消', exact=True).click()
         page.get_by_role('button', name='刷新节点', exact=True).click()
-        row.get_by_role('button', name='编辑', exact=True).click()
+        open_node_action(row, '完整高级编辑')
         expect(editor.locator('#inbound-routing-mode')).to_have_value('relay')
         editor.locator('#inbound-routing-mode').select_option('direct')
         fault['save'] = 'hold'
@@ -1065,7 +1103,7 @@ rules:
         expect(editor).not_to_be_visible()
         page.reload()
         self.open_inbound_view(page)
-        row.get_by_role('button', name='编辑', exact=True).click()
+        open_node_action(row, '完整高级编辑')
         expect(editor.locator('#inbound-routing-mode')).to_have_value('relay')
         editor.get_by_role('button', name='取消', exact=True).click()
         self.assert_private()
@@ -1108,10 +1146,11 @@ rules:
         try:
             for editing in (False, True):
                 if editing:
-                    page.get_by_role('row').filter(has_text='saving-lock-fixture').get_by_role('button', name='编辑', exact=True).click()
+                    row = page.get_by_role('row').filter(has_text='saving-lock-fixture')
+                    open_node_action(row, '完整高级编辑')
                 else:
-                    page.get_by_role('button', name='添加节点', exact=True).click()
-                dialog = page.get_by_role('dialog', name='编辑节点' if editing else '添加节点', exact=True)
+                    open_advanced_node_creation(page)
+                dialog = page.get_by_role('dialog', name='编辑节点（高级）' if editing else '高级新建节点', exact=True)
                 if not editing:
                     dialog.get_by_text('Xray', exact=True).click()
                     control(dialog, '传输安全').click()
@@ -1138,7 +1177,7 @@ rules:
                     if status == 422:
                         detail = 'Synthetic saving-lock rejection: ' + ('edit' if editing else 'create')
                         held.pop().fulfill(status=422, json={'detail': detail})
-                        expect(page.locator('.el-message--error').filter(has_text=detail)).to_contain_text(detail)
+                        expect(page.locator('.el-message--error')).to_have_text('节点参数不符合要求，请核对端口、协议和安全设置后重试。')
                         expect(dialog).to_be_visible()
                         expect(dialog.get_by_role('button', name='取消', exact=True)).to_be_enabled()
                         check_controls(dialog, False, editing)
@@ -1174,20 +1213,20 @@ rules:
         self.open_inbound_view(page)
         first = page.get_by_role('row').filter(has_text='policy-node-1')
         second = page.get_by_role('row').filter(has_text='policy-node-2')
-        first.get_by_role('button', name='编辑', exact=True).click()
-        second.get_by_role('button', name='编辑', exact=True).click()
-        editor = page.get_by_role('dialog', name='编辑节点', exact=True)
+        open_node_action(first, '完整高级编辑')
+        open_node_action(second, '完整高级编辑')
+        editor = page.get_by_role('dialog', name='编辑节点（高级）', exact=True)
         expect(editor.locator('#inbound-routing-mode')).to_have_value('relay')
         held.pop().fulfill(json=rows[0])
         expect(editor.locator('#inbound-routing-mode')).to_have_value('relay')
         editor.get_by_role('button', name='取消', exact=True).click()
-        first.get_by_role('button', name='编辑', exact=True).click()
-        page.get_by_role('button', name='添加节点', exact=True).click()
-        page.get_by_role('dialog', name='添加节点', exact=True).get_by_role('button', name='取消', exact=True).click()
+        open_node_action(first, '完整高级编辑')
+        open_advanced_node_creation(page)
+        page.get_by_role('dialog', name='高级新建节点', exact=True).get_by_role('button', name='取消', exact=True).click()
         held.pop().fulfill(json=rows[0])
         page.wait_for_timeout(100)
         expect(page.get_by_role('dialog')).not_to_be_visible()
-        second.get_by_role('button', name='编辑', exact=True).click()
+        open_node_action(second, '完整高级编辑')
         expect(editor.locator('#inbound-routing-mode')).to_have_value('relay')
         self.context.route('**/api/auth/me', lambda route: route.fulfill(status=401, json={'detail': 'expired'}))
         self.context.route('**/api/inbounds/2', lambda route: route.fulfill(status=401, json={'detail': 'expired'}))
@@ -1293,6 +1332,7 @@ rules:
         state['settings']['local_proxy_enabled'] = state['settings']['relay_enabled'] = False
         state['active']['settings'] = deepcopy(state['settings'])
         page.locator('#refresh').click()
+        expand_details(page.locator('#connection-export'))
         page.locator('#export-server').fill('8.8.8.8')
         page.locator('#export-inbound').fill('2')
         expect(page.locator('#export-mihomo')).to_be_disabled()

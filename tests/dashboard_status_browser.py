@@ -52,22 +52,22 @@ def assert_dashboard_status_recovery(case):
         expect(page.locator('#' + identifier)).to_have_attribute(
             'data-status', 'known' if value else 'unknown', timeout=timeout)
 
-    def unknown_system():
+    def unknown_system(metric_state):
         known('system-status-tag', False)
         expect(page.locator('#system-status-tag')).to_have_text('系统状态未确认')
         for identifier in ('cpu-status', 'memory-status'):
             known(identifier, False)
-            expect(page.locator('#' + identifier)).to_contain_text('状态未确认')
+            expect(page.locator('#' + identifier)).to_contain_text(metric_state)
             expect(page.locator('#' + identifier + ' .el-progress')).to_have_count(0)
         expect(page.locator('#cpu-status')).not_to_contain_text('2 核')
         expect(page.locator('#memory-status')).not_to_contain_text('MiB')
 
-    def unknown_cores():
+    def unknown_cores(card_state):
         for prefix, label in (('xray', 'Xray'), ('singbox', 'sing-box')):
             known(prefix + '-status-tag', False)
             expect(page.locator('#' + prefix + '-status-tag')).to_have_text(label + ' 状态未确认')
             known(prefix + '-core-status', False)
-            expect(page.locator('#' + prefix + '-core-status')).to_contain_text('状态未确认')
+            expect(page.locator('#' + prefix + '-core-status')).to_contain_text(card_state)
             expect(page.locator('#' + prefix + '-core-status')).not_to_contain_text(
                 re.compile('已安装|未安装|运行中|已停止'))
 
@@ -91,11 +91,11 @@ def assert_dashboard_status_recovery(case):
         while len(held) != 2 and time.monotonic() < deadline:
             page.wait_for_timeout(20)
         case.assertEqual(set(held), {system_path, core_path})
-        unknown_system()
-        unknown_cores()
+        unknown_system('读取中…')
+        unknown_cores('读取中…')
         case.assertLess(time.monotonic() - initial_started, 4,
                         'initial pending assertions must precede the unchanged 5s request timeout')
-        case.assertEqual(failed, [], 'initial Unknown must not be timeout evidence')
+        case.assertEqual(failed, [], 'initial loading must precede any timeout')
         modes.update({system_path: 'ok', core_path: 'ok'})
         held.pop(system_path).fulfill(json=system)
         held.pop(core_path).fulfill(json=cores)
@@ -108,7 +108,7 @@ def assert_dashboard_status_recovery(case):
         # Natural existing 3s poll, no injected timer or restart action.
         modes[system_path] = 'fail'
         known('cpu-status', False, timeout=10000)
-        unknown_system()
+        unknown_system('状态未确认')
         known('xray-status-tag')
         expect(page.locator('#xray-status-tag')).to_have_text('Xray 运行中')
         known('singbox-core-status')
@@ -121,7 +121,7 @@ def assert_dashboard_status_recovery(case):
         known('cpu-status', timeout=10000)
         metrics(0, 0)
         known('xray-status-tag', False, timeout=15000)
-        unknown_cores()
+        unknown_cores('状态未确认')
         metrics(0, 0)
 
         # False/zero are real confirmed values, unlike absent or failed reads.
@@ -140,7 +140,7 @@ def assert_dashboard_status_recovery(case):
         case.assertEqual(writes, [], 'display recovery must issue no API mutations')
         case.assertEqual(failed, [], 'a timed-out initial read must not be hidden by later recovery')
         case.assert_private()
-        print('Dashboard status: real Chromium / synthetic GET replies / initial unknown / '
+        print('Dashboard status: real Chromium / synthetic GET replies / initial loading / '
               'independent failures / natural poll recovery / confirmed zero and false OK')
     finally:
         for route in held.values():

@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 def assert_inbound_instance_conflicts(case):
     from playwright.sync_api import expect
+    from test_proxy_browser import open_node_action
 
     page, context, base = case.page, case.context, case.base
     page.set_viewport_size({'width': 1440, 'height': 1000})
@@ -66,8 +67,8 @@ def assert_inbound_instance_conflicts(case):
         original = create('identity-original-edit', 10463, old_uuid)
         case.open_inbound_view(page)
         old_row = page.get_by_role('row').filter(has_text='identity-original-edit')
-        old_row.get_by_role('button', name='编辑', exact=True).click()
-        editor = page.get_by_role('dialog', name='编辑节点', exact=True)
+        open_node_action(old_row, '完整高级编辑')
+        editor = page.get_by_role('dialog', name='编辑节点（高级）', exact=True)
         expect(editor).to_be_visible()
         draft = editor.get_by_placeholder('例如：US-01')
         draft.fill('preserve-original-edit-intent')
@@ -80,7 +81,7 @@ def assert_inbound_instance_conflicts(case):
         case.assertEqual(rejected.value.json(), {'detail': changed})
         expect(editor).to_be_visible()
         expect(draft).to_have_value('preserve-original-edit-intent')
-        expect(page.locator('.el-message--error').filter(has_text='Failed to update inbound: ' + changed)).to_be_visible()
+        expect(page.locator('.el-message--error').filter(has_text='节点已发生变化，请刷新节点列表并重新打开编辑。')).to_be_visible()
         case.assertEqual(rows(), [replacement], 'rejected stale PUT must not alter replacement')
         case.assertEqual(len(writes), 1, 'identity conflict must not retry automatically')
         case.assertEqual(writes[0].post_data_json['expected_instance_revision'], original['mutation_revision'])
@@ -91,15 +92,15 @@ def assert_inbound_instance_conflicts(case):
         # adopting its GET revision. No refresh has happened yet.
         with page.expect_response(lambda response: urlparse(response.url).path == f'/api/inbounds/{original["id"]}/editor'
                                   and response.request.method == 'GET') as stale_editor:
-            old_row.get_by_role('button', name='编辑', exact=True).click()
+            open_node_action(old_row, '完整高级编辑')
         case.assertEqual(stale_editor.value.status, 200)
         case.assertEqual(stale_editor.value.json()['mutation_revision'], replacement['mutation_revision'])
-        expect(page.locator('.el-message--error').filter(has_text='Failed to load inbound editor: ' + changed)).to_be_visible()
+        expect(page.locator('.el-message--error').filter(has_text='节点已发生变化，请刷新节点列表并重新打开编辑。')).to_be_visible()
         expect(editor).not_to_be_visible()
         case.assertEqual(len(writes), 1)
         refresh()
         new_row = page.get_by_role('row').filter(has_text='identity-replacement-edit')
-        new_row.get_by_role('button', name='编辑', exact=True).click()
+        open_node_action(new_row, '完整高级编辑')
         expect(editor).to_be_visible()
         expect(draft).to_have_value('identity-replacement-edit')
         editor.get_by_role('button', name='取消', exact=True).click()
@@ -107,17 +108,17 @@ def assert_inbound_instance_conflicts(case):
 
         # The first delete confirmation names the displayed instance. A second
         # caller replaces it while that actual Element Plus dialog is open.
-        new_row.get_by_role('button', name='删除', exact=True).click()
-        confirmation = page.get_by_role('dialog', name='Warning', exact=True)
-        expect(confirmation).to_contain_text('identity-replacement-edit:10464')
+        open_node_action(new_row, '删除节点')
+        confirmation = page.get_by_role('dialog', name='删除节点', exact=True)
+        expect(confirmation).to_contain_text('“identity-replacement-edit”（端口10464）')
         next_row = legacy_replace(replacement, 'identity-replacement-delete', 10465)
         with page.expect_response(lambda response: urlparse(response.url).path == f'/api/inbounds/{replacement["id"]}/delete'
                                   and response.request.method == 'POST') as rejected_delete:
-            confirmation.get_by_role('button', name='OK', exact=True).click()
+            confirmation.get_by_role('button', name='确认删除', exact=True).click()
         case.assertEqual(rejected_delete.value.status, 409)
         case.assertEqual(rejected_delete.value.json(), {'detail': changed})
         expect(confirmation).not_to_be_visible()
-        expect(page.locator('.el-message--error').filter(has_text='Failed to delete inbound: ' + changed)).to_be_visible()
+        expect(page.locator('.el-message--error').filter(has_text='节点已发生变化，请刷新后重新选择。')).to_be_visible()
         case.assertEqual(rows(), [next_row])
         case.assertEqual(len(writes), 2)
         case.assertEqual(writes[-1].post_data_json, {
@@ -126,12 +127,12 @@ def assert_inbound_instance_conflicts(case):
 
         # Only explicit refresh and a new confirmation may delete the new row.
         refresh()
-        page.get_by_role('row').filter(has_text='identity-replacement-delete').get_by_role(
-            'button', name='删除', exact=True).click()
-        expect(confirmation).to_contain_text('identity-replacement-delete:10465')
+        delete_row = page.get_by_role('row').filter(has_text='identity-replacement-delete')
+        open_node_action(delete_row, '删除节点')
+        expect(confirmation).to_contain_text('“identity-replacement-delete”（端口10465）')
         with page.expect_response(lambda response: urlparse(response.url).path == f'/api/inbounds/{next_row["id"]}/delete'
                                   and response.request.method == 'POST') as accepted_delete:
-            confirmation.get_by_role('button', name='OK', exact=True).click()
+            confirmation.get_by_role('button', name='确认删除', exact=True).click()
         saved_not_applied(accepted_delete.value)
         expect(page.locator('.el-message--warning')).to_contain_text('节点删除已保存')
         expect(page.get_by_role('row').filter(has_text='identity-replacement-delete')).to_have_count(0)

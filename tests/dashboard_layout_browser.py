@@ -16,6 +16,9 @@ BASELINE_SOURCE_COMMIT = '8ed33ec446c4b03bf3a76ae7847957c7da58fa07'
 BASELINE_SHA256 = '90a5ef35714aff5321ab49e90268eba19c6c2d5fba937a70d5bd883f9114d2b5'
 BASELINE_CSS = Path(__file__).parent / 'fixtures/dashboard_pre_responsive.css'
 CARD_IDS = ('cpu-status', 'memory-status', 'xray-core-status', 'singbox-core-status')
+NAV_IDS = ('dashboard', 'inbounds', 'routing', 'subscriptions', 'proxy',
+           'certificates', 'maintenance', 'cores', 'diagnostics', 'firewall',
+           'security', 'account', 'legacy')
 VIEWPORTS = ((390, 844, 2), (768, 1024, 2), (1440, 1000, 4))
 TOLERANCE = 1.0
 HEADER_READY_TIMEOUT_MS = 5000
@@ -251,7 +254,7 @@ def assert_dashboard_responsive_layout(case):
             page.locator('.vui-menu-toggle').click()
             expect(page.locator('.vui-sidebar')).to_have_css('transform', 'matrix(1, 0, 0, 1, 0, 0)')
         menus = page.locator('.vui-nav-link[data-nav-id]')
-        case.assertEqual(menus.count(), 12)
+        case.assertEqual(tuple(item.get_attribute('data-nav-id') for item in menus.all()), NAV_IDS)
         for item in menus.all():
             item.scroll_into_view_if_needed()
             in_viewport(item, 'menu item')
@@ -288,6 +291,8 @@ def assert_dashboard_responsive_layout(case):
         case.assertEqual(proxy_document.value.headers.get('cache-control'), 'no-store')
         for directive in ("script-src 'self'", "connect-src 'self'", "style-src 'self'"):
             case.assertIn(directive, proxy_document.value.headers['content-security-policy'])
+        from test_proxy_browser import expand_details
+        expand_details(page.locator('#connection-advanced'))
         expect(page.locator('#proxy-workspace')).to_be_visible()
         case.assert_private()
         page.go_back()

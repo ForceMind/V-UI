@@ -23,7 +23,7 @@ from types import SimpleNamespace
 import unittest
 
 from scripts.fetch_test_cores import PINS
-from test_proxy_browser import prepare_browser_payload, observe_browser_pages
+from test_proxy_browser import observe_browser_pages, open_advanced_node_creation, open_node_action, open_proxy_settings, prepare_browser_payload
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -227,19 +227,19 @@ class InboundRoutingBrowserTests(unittest.TestCase):
             return lambda response: response.url == base + endpoint and response.request.method == method
 
         def nodes():
-            page.get_by_role('menuitem', name='入站节点', exact=True).click()
+            page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
             return page.locator('.el-table__row').filter(has_text=NODE_NAME)
 
         page.goto(base + '/login')
         page.locator('#login-name').fill('routing-tester')
         page.locator('#login-password').fill(PASSWORD)
         page.get_by_role('button', name='登录面板', exact=True).click()
-        page.wait_for_url('**/ui/')
+        page.wait_for_url('**/ui/#dashboard')
         nodes()
         initial = read('/api/proxy/settings')
         self.assertIsNone(initial['active'])
         self.assertEqual(initial['upstreams'], [])
-        page.get_by_role('button', name='添加节点', exact=True).click()
+        open_advanced_node_creation(page)
         dialog = page.get_by_role('dialog')
         dialog.get_by_text('sing-box', exact=True).click()
         dialog.get_by_placeholder('例如：US-01').fill(NODE_NAME)
@@ -279,15 +279,16 @@ class InboundRoutingBrowserTests(unittest.TestCase):
         row = nodes()
         expect(row).to_contain_text('指定直连')
         expect(row).to_contain_text('已应用出口未确认')
-        row.get_by_role('button', name='编辑', exact=True).click()
+        open_node_action(row, '完整高级编辑')
         expect(dialog.locator('#inbound-routing-mode')).to_have_value('direct')
         dialog.locator('#inbound-routing-mode').select_option('inherit')
         dialog.get_by_role('button', name='取消', exact=True).click()
         self.assertEqual(read(f'/api/inbounds/{identity}/editor')['routing_mode'], 'direct')
         self.assertIsNone(read('/api/proxy/settings')['active'])
 
-        page.get_by_role('menuitem', name='代理与中转', exact=True).click()
+        page.locator('.vui-nav-link[data-nav-id="proxy"]').click()
         page.wait_for_url('**/proxy')
+        open_proxy_settings(page)
         expect(page.locator('#local-enabled')).not_to_be_checked()
         expect(page.locator('#relay-enabled')).not_to_be_checked()
         expect(page.locator('#upstream')).to_have_value('')

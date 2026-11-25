@@ -226,7 +226,7 @@ for (const editing of [false, true]) for (const outcome of ['success', 'rejectio
             assert.equal(s.showAddInbound.value, true);
             assert.deepEqual(clone(s.newInbound), draft, 'rejection preserves the original draft');
             assert.equal(f.messages.at(-1).kind, 'error');
-            assert.match(f.messages.at(-1).text, /synthetic rejection/);
+            assert.equal(f.messages.at(-1).text, '节点参数不符合要求，请核对端口、协议和安全设置后重试。');
             assert.deepEqual(f.disabled(), eligible, 'rejection restores original eligibility');
         }
         assert.equal(await f.choose('profile.security', 'tls'), true, 'settled editor accepts edits again');
