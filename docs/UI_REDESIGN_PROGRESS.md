@@ -107,3 +107,9 @@
 在 `d88bdc9` 上恢复旧重启和节点搜索测试。固定依赖下，两组共 20 项通过，合计 248 项前端定向检查通过，另有 18 项 Python 契约或测试入口通过。保留基线的 11 项失败记录和当轮回归结果。无筛选时沿用原列表对象，其他筛选继续保留原节点身份。
 
 Chromium 测试入口已与现行菜单、原生重启确认和节点操作对齐。ARM64 受管终端验收在既有核心切换与备份中断场景中加入 20 的提示断言，之后仍按原 18 恢复。浏览器和 Linux 的实际运行结果待取证。浏览器使用现有 `Test V-UI`，真实核心恢复使用现有 `Core component candidate artifacts`。候选分支和手动触发待授权。
+
+## 隔离 Actions 回归
+
+确认为同一公开候选分支。首个远端候选 `73146ff` 的 [Chromium 运行](https://github.com/ForceMind/V-UI/actions/runs/45587723236) 在前置单测运行 4017 项后报告 11 项失败，未进入浏览器。原因是分享测试的 Vue 替身未识别默认 watcher，另有两组 Python 包装仍使用旧 TAP 用例数量。已补齐另外两处仅在固定前端依赖验收里会执行的 TAP 数量对应，17 项本地 Python 定向验证通过。
+
+原候选的 [ARM64 尝试 1](https://github.com/ForceMind/V-UI/actions/runs/45587547829/attempts/1) 和 [尝试 2](https://github.com/ForceMind/V-UI/actions/runs/45587547829/attempts/2) 均在无凭据读取 sing-box 官方固定材料时返回 HTTP 403，受管 systemd job 未执行。另一次本机匿名 HEAD 诊断可获取官方元数据及源归档响应，资产 API 返回 302。该诊断未读取归档内容，也无法证明 Actions Runner 的拒绝来源。保留两轮原始结果和现有材料完整性门槛。

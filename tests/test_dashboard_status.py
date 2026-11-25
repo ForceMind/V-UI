@@ -14,7 +14,7 @@ def assert_dashboard_status(test_case):
         cwd=root, capture_output=True, text=True, timeout=30,
     )
     test_case.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-    for expected in ("tests 8", "pass 8", "fail 0", "cancelled 0", "skipped 0", "todo 0"):
+    for expected in ("tests 10", "pass 10", "fail 0", "cancelled 0", "skipped 0", "todo 0"):
         test_case.assertRegex(result.stdout, r"(?m)^# " + expected + r"$", result.stdout)
 
 

@@ -12,7 +12,7 @@ class WorkspaceControllerTests(unittest.TestCase):
             capture_output=True, text=True, timeout=15,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        for expected in ("tests 40", "pass 40", "fail 0", "cancelled 0", "skipped 0", "todo 0"):
+        for expected in ("tests 42", "pass 42", "fail 0", "cancelled 0", "skipped 0", "todo 0"):
             self.assertRegex(result.stdout, r"(?m)^# " + expected + r"$", result.stdout)
 
     def test_reload_draft_revision_and_failure_lifecycle(self):

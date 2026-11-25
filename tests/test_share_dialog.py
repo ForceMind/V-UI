@@ -32,7 +32,10 @@ function boot(realVue=process.argv[1]||''){
  if(realVue){vm.runInContext(fs.readFileSync(realVue,'utf8'),c);c.Vue={...c.Vue,onMounted(){},createApp({setup}){api=setup();return app}}}
  else c.Vue={createApp({setup}){api=setup();return app},onMounted(){},reactive:v=>v,
  ref(value){const callbacks=[];return{callbacks,get value(){return value},set value(v){if(v!==value){value=v;callbacks.forEach(f=>f(v))}}}},
- watch(target,callback,options){assert.equal(options.flush,'sync');if(target?.callbacks)target.callbacks.push(callback)},
+ watch(target,callback,{flush='pre'}={}){
+  assert(['sync','pre'].includes(flush));
+  if(target?.callbacks)target.callbacks.push(flush==='sync'?callback:value=>Promise.resolve().then(()=>callback(value)));
+ },
  computed:f=>({get value(){return f()}}),nextTick(){return nextUpdate?.promise||Promise.resolve()}};
  c.document={getElementById(id){return id==='qrcode'?(present?container:null):id==='share-link'?output:null}};
  vm.runInContext(source,c);

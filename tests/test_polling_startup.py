@@ -14,8 +14,8 @@ def assert_polling_startup_control(case):
         cwd=root, capture_output=True, text=True, timeout=30,
     )
     case.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-    case.assertRegex(result.stdout, r'(?m)^1\.\.19$', result.stdout)
-    for expected in ('tests 19', 'pass 19', 'fail 0', 'cancelled 0', 'skipped 0', 'todo 0'):
+    case.assertRegex(result.stdout, r'(?m)^1\.\.20$', result.stdout)
+    for expected in ('tests 20', 'pass 20', 'fail 0', 'cancelled 0', 'skipped 0', 'todo 0'):
         case.assertRegex(result.stdout, r'(?m)^# ' + expected + r'$', result.stdout)
 
 
