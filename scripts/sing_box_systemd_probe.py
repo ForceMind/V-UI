@@ -296,7 +296,8 @@ def main():
     account = pwd.getpwnam('nobody')
     if account.pw_uid == 0:
         raise RuntimeError('Probe account must not be root')
-    work = Path(tempfile.mkdtemp(prefix='vui-sbox-af-', dir='/run'))
+    # The hosted runner may mount /run noexec. Use a private directory outside PrivateTmp.
+    work = Path(tempfile.mkdtemp(prefix='vui-sbox-af-', dir='/var/lib'))
     units, report = [], {'canonical_sandbox': canonical, 'core_binary_sha256': digest,
                          'fake_only': True, 'vps_cause_proven': False, 'variants': {}}
     def interrupted(signum, _frame):
