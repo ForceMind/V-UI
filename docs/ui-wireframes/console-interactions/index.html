@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<title>V-UI · 交互线稿</title>
+<style>
+:root{color-scheme:light;--ink:#202c36;--muted:#4b5d6a;--nav:#18364b;--bg:#eff5fa;--line:#cfdce5;--teal:#155f72;--ok:#16604c;--warn:#744809;--bad:#932e2d}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 system-ui,"Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink)}
+h1,h2,h3,p{margin:0} h1{font-size:1.75rem}h2{font-size:1.12rem}h3{font-size:1rem}p+p{margin-top:.35rem}
+button,input,select,textarea{font:inherit;color:inherit} button,input,select,textarea{min-height:44px}
+button{cursor:pointer;background:white;border:1px solid #9fb6c5;border-radius:6px;padding:.38rem .72rem;text-align:left}
+button:disabled{cursor:default;color:#546671;background:#e8eff3}
+button.primary:not(:disabled){background:var(--teal);border-color:var(--teal);color:white}
+:focus-visible{outline:3px solid #2684a2;outline-offset:3px}
+a{color:var(--teal)} .muted,small{color:var(--muted)} small{font-size:.86rem}
+[hidden]{display:none!important}
+.review{min-height:64px;padding:.55rem max(1rem,calc((100% - 1320px)/2));border-bottom:1px solid var(--line);background:white;display:flex;gap:1rem;align-items:center;flex-wrap:wrap}
+.review strong{white-space:nowrap}.review label{display:flex;align-items:center;gap:.5rem}.review select{max-width:100%;padding:.3rem;border:1px solid var(--line);border-radius:5px;background:#fff}
+.app{margin:1.05rem auto 2rem;max-width:1320px;width:calc(100% - 2rem);min-height:660px;border:1px solid var(--line);border-radius:9px;overflow:hidden;display:grid;grid-template-columns:190px minmax(0,1fr);background:var(--bg)}
+.app.phone{max-width:390px;grid-template-columns:minmax(0,1fr);position:relative}
+.side{display:flex;flex-direction:column;gap:.35rem;background:var(--nav);color:#fff;padding:1.1rem .85rem}
+.side strong{font-size:1.25rem;margin:.1rem .4rem 1rem}.side button{background:transparent;color:#fff;border-color:transparent;width:100%}
+.side button[aria-current="page"]{background:#27556a;border-color:#587e91}
+.side span{color:#c4d2d9;padding:.45rem .7rem}
+.phone .side{position:absolute;inset:55px auto 0 0;z-index:1;width:min(230px,85%);display:none}
+.phone .side.open{display:flex}.mobile{display:none}.phone .mobile{display:flex}
+.mobile{padding:.4rem .85rem;background:var(--nav);color:#fff;align-items:center;gap:.65rem}
+main{min-width:0}.page{display:grid;align-content:start;gap:1rem;padding:1.25rem;min-width:0}
+.top,.row,.actions{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap}
+.top,.spread{justify-content:space-between}.left{justify-content:flex-start}.stack{display:grid;gap:.75rem}.columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}
+.strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.65rem}.strip div{display:grid;gap:.25rem}
+.card{background:white;border:1px solid var(--line);border-radius:8px;padding:.9rem;min-width:0}
+.badge{display:inline-block;color:#3a515f;background:#e9eff3;border-radius:4px;padding:.1rem .36rem;width:max-content;max-width:100%}
+.good{color:var(--ok);background:#e5f2eb}.warn{color:var(--warn);background:#fff2d8}.danger{color:var(--bad);background:#fff0ee}
+.notice{border-left:4px solid var(--teal);padding:.7rem .85rem;display:grid;gap:.45rem;background:#e6f0f4;border-radius:4px}
+.notice.warn{border-color:#996721;background:#fff2d8}.notice.danger{border-color:#a83e3e;background:#fff0ee}.notice.good{border-color:#257d63;background:#e5f2eb}
+progress{width:100%;accent-color:var(--teal)}.node{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:.6rem}
+.node+.node{border-top:1px solid var(--line);padding-top:.75rem;margin-top:.75rem}
+.dialog{border:1px solid var(--line);border-radius:10px;width:min(490px,calc(100% - 1.4rem));max-height:90vh;padding:1rem;color:var(--ink);background:#fff}
+.dialog::backdrop{background:#1326388c}.dialog textarea{width:100%;resize:vertical}
+.qr{border:2px dashed #728a98;color:#455c69;display:grid;place-items:center;min-height:132px;max-width:160px;aspect-ratio:1/1}
+fieldset{min-width:0;margin:0;border:1px solid var(--line);border-radius:7px;padding:.58rem .75rem}
+legend{font-weight:650}label.field{display:grid;gap:.25rem}input:not([type="checkbox"]),textarea{width:100%;border:1px solid #9fb6c5;border-radius:5px;padding:.45rem;background:white}
+.choice{display:flex;gap:.46rem;align-items:center;min-height:44px}.choice input{min-height:auto;accent-color:var(--teal);width:1.1rem;height:1.1rem;margin:0}
+.term{background:#152630;color:#e5edf2;padding:1rem;border-radius:8px;font-family:ui-monospace,Consolas,"Microsoft YaHei",monospace;display:grid;gap:.75rem}
+.term .group{border:1px solid #4d6672;padding:.6rem;border-radius:6px}.term h2{color:#a0d9dd;margin-bottom:.45rem}.term .muted{color:#b9cbd4}
+.term button{background:#1b3442;color:#f0f7fa;border-color:#657e8a;min-height:44px}.term button:disabled{color:#b9c5cc;background:#31434d}
+.term .cmd{display:grid;grid-template-columns:2ch minmax(0,1fr);gap:.6rem;width:100%;margin:.22rem 0}.term form{display:flex;align-items:end;gap:.45rem}.term form label{flex:1}.term input{color:#202c36}.term .notice button{color:#273d4a;background:white}
+.phone .strip{grid-template-columns:repeat(2,minmax(0,1fr))}.phone .columns,.phone .node{grid-template-columns:minmax(0,1fr)}.phone .page{padding:.85rem}.phone .top h1{width:100%}
+@media(max-width:740px){.app{grid-template-columns:minmax(0,1fr);position:relative}.side{position:absolute;inset:55px auto 0 0;z-index:1;width:min(230px,85%);display:none}.side.open{display:flex}.mobile{display:flex}.strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:500px){.columns,.node{grid-template-columns:minmax(0,1fr)}.page{padding:.85rem}.top h1{width:100%}.review label{flex-wrap:wrap}.review{gap:.45rem}}
+</style>
+</head>
+<body>
+<header class="review">
+ <strong>V-UI · 交互线稿</strong><small>离线示例</small>
+ <label for="scenario">查看状态 <select id="scenario"></select></label>
+ <button id="width" type="button" aria-pressed="false">窄屏预览</button>
+</header>
+<div id="app" class="app">
+ <div class="mobile"><button type="button" id="nav-toggle" aria-controls="navigation" aria-expanded="false">菜单</button><strong>V-UI</strong></div>
+ <nav id="navigation" class="side" aria-label="线稿页面">
+  <strong>V-UI</strong>
+  <button type="button" data-page="overview">总览</button>
+  <button type="button" data-page="nodes">节点管理</button>
+  <span>代理与中转</span>
+  <button type="button" data-page="subscriptions">订阅</button>
+  <span>证书</span><span>远程维护</span>
+  <button type="button" data-page="terminal">终端菜单</button>
+ </nav>
+ <main id="screen" class="page" aria-label="线稿"></main>
+</div>
+<dialog id="dialog" class="dialog" aria-labelledby="dialog-title"><div id="dialog-content" class="stack"></div></dialog>
+<noscript>启用 JavaScript 后可切换线稿和示例状态。</noscript>
+<script>
+(function () {
+'use strict';
+const $ = id => document.getElementById(id);
+const e = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const modes = {
+    overview:{ready:'总览 · 正常',loading:'总览 · 加载中',partial:'总览 · 部分读取失败',
+        noPending:'总览 · 无待处理',applyFailed:'总览 · 证书应用失败',auth:'总览 · 会话过期'},
+    nodes:{ready:'节点 · 正常',empty:'节点 · 空列表',shareFetch:'节点 · 分享读取失败',
+        shareChanged:'节点 · 分享前节点变更',clip:'节点 · 复制失败',qr:'节点 · 二维码失败',forbidden:'节点 · 无分享权限'},
+    subscriptions:{ready:'订阅 · 正常',changed:'订阅 · 节点变更',noResult:'订阅 · 结果未知，有记录',noResultAbsent:'订阅 · 结果未知，无记录',
+        offline:'订阅 · 列表读取失败',copyError:'订阅 · 复制失败',clientError:'订阅 · 客户端拉取失败',auth:'订阅 · 会话过期'},
+    terminal:{ready:'终端 · 正常',busy:'终端 · 任务执行中',restore:'终端 · 数据恢复中断',
+        dual:'终端 · 双域恢复中断',core:'终端 · 核心任务中断',failure:'终端 · 操作失败',openrc:'终端 · OpenRC'}
+};
+const nodes = {
+    direct:{label:'直连示例',summary:'sing-box · VLESS · TCP',share:true,formats:['yaml','json','raw']},
+    upgrade:{label:'传输示例',summary:'sing-box · VLESS · HTTPUpgrade',share:false,formats:['yaml']}
+};
+const formats = {yaml:'Mihomo YAML', json:'sing-box JSON', raw:'Base64'};
+const recover = {restore:'9',dual:'15',core:'18'};
+const termGroups = [
+    ['服务',[1,2,3,4]], ['诊断与授权',[10,11,13]], ['版本',[8,7,12]],
+    ['备份与恢复',[5,6,9,19,14,15]], ['核心',[20,16,17,18]], ['帮助与退出',['h',0]]
+];
+const termCommands = {
+    1:['服务状态','查看受管服务状态。随后按需检查 HTTPS 和节点连通性。'],
+    2:['启动服务','启动已停止的受管服务。'],
+    3:['停止服务','将停止受管服务与 HTTP-01 socket。'],
+    4:['重启服务','沿用当前运行拓扑。服务可能短时中断。'],
+    5:['备份数据','停机创建私有备份。核对文件与摘要，然后核对原服务状态。'],
+    6:['恢复备份','核对备份和 SHA-256，再停机恢复。旧登录、维护授权和订阅令牌将失效。'],
+    7:['激活已准备版本','先核对候选及备份。可升级或回退代码。'],
+    8:['准备本地候选','核对可信套件。仅准备候选，之后用 7 激活。'],
+    9:['恢复中断的数据还原','保持停机，按原数据还原记录恢复。'],
+    10:['网络诊断','只读查看监听和本机规则。'],
+    11:['放行指定端口','核对端口及 TCP 或 UDP，确认后只改已启用且受支持的本机规则。'],
+    12:['更新到官方稳定版','确认目标后下载。备份、停服、切换并检查 HTTPS。'],
+    13:['维护授权','进入创建、列举、撤销菜单。先确认用途与权限。'],
+    14:['恢复节点数据与核心','核对受管备份文件名和 SHA-256。停服、备份当前数据后恢复。'],
+    15:['恢复中断的双域事务','按原双域记录恢复已确认代次或原数据。'],
+    16:['更新指定核心','选择核心和官方组件 Release ID。短暂停服并备份。'],
+    17:['回退指定核心','选择核心，核对已保存且可验证的上一版本。'],
+    18:['恢复中断的核心任务','按原记录恢复核心选择与服务。若为双域备份中断，只恢复服务。'],
+    19:['备份节点数据与核心','短暂停服，备份完成后恢复原服务状态。'],
+    20:['查看核心版本','查看已选择的版本和上一版本。'],
+    h:['帮助','保留全部编号。输入编号并回车，或选择本线稿中的同名操作。'],
+    0:['退出','结束终端会话。']
+};
+const state = {
+    page:'overview', mode:'ready', panel:'', node:'direct', filter:'all', termChoice:'', feedback:'',
+    form:{name:'',host:'',days:'90',nodes:[],formats:['yaml']},
+    issued:null, previous:'', cert:'', termResult:'', busy:false
+};
+const screen = $('screen');
+const dialog = $('dialog');
+let trigger = '';
+const button = (action,text,{primary=false,disabled=false}={}) =>
+    `<button type="button" id="${action}" data-act="${action}"${primary?' class="primary"':''}${disabled?' disabled':''}>${text}</button>`;
+const badge = (s,style='') => `<small class="badge ${style}">${s}</small>`;
+const note = (s,action='',style='') => `<div class="notice ${style}" ${style==='danger'?'role="alert"':'role="status"'}><p>${s}</p>${action?`<div>${action}</div>`:''}</div>`;
+const head = (title,items='') => `<div class="top"><h1 id="page-title" tabindex="-1">${title}</h1><div class="actions">${items}</div></div>`;
+const card = s => `<section class="card stack">${s}</section>`;
+const later = callback => window.setTimeout(callback,280);
+const pending = () => state.mode === 'applyFailed' || state.cert === 'failed';
+function authView() {
+    return head('登录已过期') + note('重新登录后返回当前页。',button('login-demo','演示重新登录',{primary:true}),'warn');
+}
+function overview() {
+    if (state.mode === 'auth') return authView();
+    const loading = state.mode === 'loading', partial = state.mode === 'partial';
+    const status = loading?'读取中…':partial?'状态未确认':'运行中';
+    const actionable = !loading && state.mode !== 'noPending' && state.cert !== 'applied';
+    return head('总览',button('refresh-overview',loading?'读取中…':'刷新状态',{disabled:loading}) + button('create-node','创建节点',{primary:true})) +
+        (state.cert==='applied'?note('此位置已应用（演示）。','','good'):'') +
+        (partial?note('sing-box 和内存读取失败。',button('retry-overview','重试读取'),'danger'):'') +
+        `<div class="strip card" aria-busy="${loading}"><div>面板${badge(loading?status:'运行中',loading?'':'good')}</div>
+        <div>Xray${badge(loading?status:'运行中',loading?'':'good')}</div>
+        <div>sing-box${badge(status,partial?'warn':loading?'':'good')}</div>
+        <div>待处理${badge(loading?'读取中…':actionable?'1 项':'0 项',actionable?'warn':'')}</div></div>` +
+        `<div class="columns">${card(`<h2>CPU</h2>${loading?'读取中…':'24%<progress aria-label="CPU 24%" value="24" max="100"></progress>'}`)}
+        ${card(`<h2>内存</h2>${loading?'读取中…':partial?'状态未确认':'1.3 / 4 GB<progress aria-label="内存 1.3 GB，共 4 GB" value="1.3" max="4"></progress>'}`)}</div>` +
+        `<div class="columns">${card(`<h2>待处理</h2>${loading?'读取中…':actionable?
+            `<div class="row spread"><p>${pending()?'证书应用失败':'证书待应用'}</p>${button('open-cert','查看位置')}</div>`:
+            '<p>暂无待处理项</p>'}`)}
+        ${card(`<h2>常用入口</h2><div class="actions">${button('jump-nodes','节点管理')}${button('go-sub','订阅')}</div>`)}</div>`;
+}
+function nodePage() {
+    const keys = Object.keys(nodes).filter(key => state.filter === 'all' || !nodes[key].share);
+    return head('节点管理') + (state.mode === 'empty' ?
+        note('暂无节点。',button('create-node','创建节点',{primary:true}),'') :
+        `<div class="actions" role="group" aria-label="节点筛选">
+        <button type="button" id="filter-all" data-act="filter-all" aria-pressed="${state.filter==='all'}">全部</button>
+        <button type="button" id="filter-limited" data-act="filter-limited" aria-pressed="${state.filter==='limited'}">分享受限</button></div>` +
+        (state.feedback?note(state.feedback, state.mode==='forbidden'?button('reopen-admin','返回管理员演示'):state.feedback.includes('刷新')?button('reload-nodes','刷新节点'):'','warn'):'') +
+        card(keys.map(key => {
+            const n = nodes[key];
+            return `<div class="node"><div><h2>${n.label}</h2><small>${n.summary}</small>${!n.share?` <span>${badge('仅 Mihomo YAML','warn')}</span>`:''}</div>
+                <div class="actions">${n.share&&state.mode!=='forbidden'?button('share-'+key,'分享连接',{primary:true}):''}
+                ${state.mode!=='forbidden'?button('sub-'+key,'创建订阅',{primary:!n.share}):badge('需订阅权限','warn')}</div></div>`;
+        }).join('')));
+}
+function emptyGrant() {
+    return {name:'',host:'',days:'90',nodes:[],formats:['yaml']};
+}
+function grantView() {
+    if (state.mode === 'auth') return authView();
+    const f = state.form, blocked = ['changed','noResult','noResultAbsent','offline'].includes(state.mode), issued = state.issued;
+    const hiddenAddress = issued==='unknown'||issued==='hidden';
+    const nodeChoices = Object.entries(nodes).map(([key,n]) =>
+        `<label class="choice"><input type="checkbox" name="node" value="${key}"${f.nodes.includes(key)?' checked':''}> <span>${n.label}${n.share?'':' <small>仅 Mihomo YAML</small>'}</span></label>`).join('');
+    const formatChoices = Object.entries(formats).map(([key,label]) =>
+        `<label class="choice"><input type="checkbox" name="format" value="${key}"${f.formats.includes(key)?' checked':''}> <span>${label}</span></label>`).join('');
+    const tryList = button('refresh-grants','刷新节点和订阅',{primary:true});
+    const reason = {changed:'节点已变化。刷新后重新选择。',noResult:'结果未确认。先查订阅列表。',noResultAbsent:'结果未确认。先查订阅列表。',offline:'订阅列表读取失败。'}[state.mode];
+    return head('订阅',button('back-nodes','返回节点')) +
+        (reason?note(reason,tryList,'danger'):'') +
+        (issued?card(`<h2>${hiddenAddress?'订阅记录':'订阅已创建'}</h2>
+          <p>${hiddenAddress?'地址已隐藏。遗失时可更换地址。':'地址只显示一次。请导入客户端并刷新。'}</p>
+          ${hiddenAddress?`<div>${button('rotate-grant','更换地址')}</div>`:
+          `<label class="field" for="issued-text">订阅地址</label>
+          <textarea id="issued-text" readonly rows="2">[示例地址 · 无法连接]</textarea>
+          <div class="actions">${button('copy-sub','复制地址',{primary:true})}${button('forget-sub','关闭地址')}</div>
+          <div aria-live="polite" id="sub-feedback"></div>`}`) : '') +
+        (state.mode==='clientError'?note('客户端拉取失败。先核对授权和格式，再刷新客户端。',button('inspect-grant','查看订阅状态'),'danger'):'') +
+        (state.feedback?note(state.feedback,'','good'):'') +
+        (issued?'':`<form class="card stack" id="grant-form">
+            <h2>创建订阅</h2>
+            <fieldset ${blocked||state.busy?'disabled':''}><legend>1. 选节点</legend>${nodeChoices}</fieldset>
+            <fieldset ${blocked||state.busy?'disabled':''}><legend>2. 选格式</legend>${formatChoices}</fieldset>
+            <div id="format-feedback" hidden></div>
+            <fieldset ${blocked||state.busy?'disabled':''}><legend>3. 核对</legend>
+              <div class="columns"><label class="field">订阅名称<input id="grant-name" name="name" maxlength="128" value="${e(f.name)}" placeholder="例如：我的手机" required></label>
+              <label class="field">公开连接地址<input id="grant-host" name="host" maxlength="253" value="${e(f.host)}" placeholder="vpn.example.com" required><small>域名或 IP，无协议和端口。</small></label></div>
+              <label class="field">有效天数<input id="grant-days" name="days" type="number" min="1" max="3650" value="${e(f.days)}" required></label>
+            </fieldset>
+            <div class="actions"><button type="submit" class="primary" id="create-grant" ${blocked||state.busy?'disabled':''}>${state.busy?'正在创建…':'生成地址'}</button></div>
+        </form>`);
+}
+function updateFormat() {
+    const row = $('format-feedback');
+    if (!row) return;
+    const {nodes:selected,formats:picked} = state.form;
+    const conflicts = Object.entries(nodes).filter(([key,n])=>selected.includes(key)&&picked.some(format=>!n.formats.includes(format)));
+    row.hidden = conflicts.length === 0;
+    row.innerHTML = row.hidden?'':note('传输示例仅支持 Mihomo YAML。',button('compatible-formats','只选兼容格式'),'warn');
+    $('create-grant').disabled = state.busy || ['changed','noResult','noResultAbsent','offline'].includes(state.mode) || !selected.length ||
+        !picked.length || conflicts.length > 0;
+}
+function terminal() {
+    const activeRecovery = recover[state.mode];
+    const busy = state.mode==='busy';
+    const uncertain = busy || Boolean(activeRecovery) || state.mode==='failure';
+    const menuItems = termGroups.map(([name,ids])=>`<section class="group"><h2>${name}</h2>${ids.map(id=>
+        `<button id="term-${id}" data-act="term-${id}" class="cmd" type="button"><span>${id}</span><span>${termCommands[id][0]}</span></button>`
+    ).join('')}</section>`).join('');
+    return head('终端菜单') + `<div class="term">
+        <div class="row spread"><strong>V-UI 受管维护</strong><small class="muted">${state.mode==='openrc'?'OpenRC':'systemd'} · 示例</small></div>
+        <p>${badge('面板 '+(state.mode==='restore'?'已停止':uncertain?'状态未确认':'运行中'),uncertain?'warn':'good')} ${badge('Xray '+(uncertain?'状态未确认':'运行中'),uncertain?'warn':'good')} ${badge('sing-box 状态未确认','warn')}</p>
+        ${busy?note('任务执行中。请等原任务结束。',button('term-1-status','1 查看状态'),'warn'):''}
+        ${activeRecovery?note(`检测到中断记录。原记录对应菜单 ${activeRecovery}。`,button('recover-match',activeRecovery+' '+termCommands[activeRecovery][0]),'warn'):''}
+        ${state.mode==='failure'?note('操作失败。先核对任务输出和服务状态。',button('term-1-status','1 查看状态') + ' ' + button('term-10-diag','10 网络诊断'),'danger'):''}
+        ${state.mode==='openrc'?note('当前仅能查看服务状态或准备本地候选。','','warn'):''}
+        ${state.termResult?note(state.termResult,'','good'):''}
+        <form id="terminal-command"><label class="field">选择编号<input id="terminal-input" autocomplete="off" maxlength="2"></label><button type="submit">执行编号</button></form>
+        <div id="term-feedback" tabindex="-1" aria-live="polite"></div>
+        <div class="columns">${menuItems}</div>
+    </div>`;
+}
+function render() {
+    Object.entries(modes[state.page]).forEach(([value,label],index)=>{
+        if (index===0) $('scenario').replaceChildren();
+        $('scenario').add(new Option(label,value,value===state.mode,value===state.mode));
+    });
+    $('scenario').disabled = state.busy;
+    screen.setAttribute('aria-busy', String(state.busy || state.page==='overview'&&state.mode==='loading'));
+    screen.innerHTML = {overview,nodes:nodePage,subscriptions:grantView,terminal}[state.page]();
+    document.querySelectorAll('[data-page]').forEach(button => {
+        if (button.dataset.page===state.page) button.setAttribute('aria-current','page');
+        else button.removeAttribute('aria-current');
+    });
+    if (state.page === 'subscriptions') updateFormat();
+}
+function go(page,{carry=false}={}) {
+    if(state.busy) return;
+    closeDialog(false);
+    const restore = page === 'nodes' && state.page === 'subscriptions' && state.previous;
+    if (state.page === 'subscriptions') state.issued = null;
+    if (!carry && page === 'subscriptions') {
+        state.form = emptyGrant();
+        state.previous = '';
+    }
+    state.page = page;
+    state.mode = 'ready';
+    state.feedback = '';
+    state.termResult = '';
+    state.cert = '';
+    toggleNav(false);
+    render();
+    (restore && $(restore) || $('page-title'))?.focus();
+}
+function openDialog(panel,id) {
+    state.panel = panel;
+    trigger = id;
+    renderDialog();
+    if (!dialog.open) dialog.showModal();
+    $('dialog-title').focus();
+}
+function closeDialog(restore=true) {
+    state.panel = '';
+    if (dialog.open) dialog.close();
+    $('dialog-content').replaceChildren();
+    if (restore) ($(trigger)||$('page-title'))?.focus();
+}
+function renderDialog() {
+    let title, html;
+    const closing = button('close-panel','关闭');
+    if (state.panel==='certificate') {
+        title = '证书 · 使用位置';
+        html = `<p>已签发 · 已绑定到直连示例</p>${pending()?
+            note('应用失败。上次确认生效：旧证书。',button('retry-cert','重试此位置',{primary:true}),'danger'):
+            note('新证书待应用。旧证书仍生效。',button('retry-cert','应用此位置',{primary:true}),'warn')}`;
+    } else if (state.panel==='create-node') {
+        title = '创建节点';
+        html = '<p>进入现有创建向导。保存成功后可在节点管理中分享。</p>';
+    } else if (state.panel==='share') {
+        title = '分享 · '+nodes[state.node].label;
+        if (state.mode==='shareFetch') {
+            html = note('链接读取失败。',button('retry-share','重试读取',{primary:true}),'danger');
+        } else {
+            html = `<p>VLESS 链接</p><textarea id="share-text" aria-label="示例连接链接" readonly rows="2">[示例链接 · 无法连接]</textarea>
+            <div class="actions">${button('copy-share','复制链接',{primary:true})}${button('show-qr','显示二维码')}</div>
+            <div id="qr-view"></div><div aria-live="polite" id="share-feedback"></div>
+            <div>${button('sub-from-share','创建订阅')}</div>`;
+        }
+    } else if (state.panel==='rotate') {
+        title = '更换订阅地址';
+        html = note('旧地址将失效。请把新地址重新导入客户端。',button('confirm-rotate','确认更换',{primary:true}),'warn');
+    } else {
+        const command = termCommands[state.termChoice];
+        title = `${state.termChoice} · ${command[0]}`;
+        const choice = state.termChoice;
+        const readOnly = ['1','10','20','h','0'].includes(choice);
+        const inputs = {
+            6:'备份绝对路径和 SHA-256', 7:'已准备版本 ID', 8:'可信本地包路径和 SHA-256',
+            11:'TCP 或 UDP、精确端口', 14:'受管备份文件名和 SHA-256',
+            16:'核心及官方组件 Release ID',17:'核心'
+        };
+        const detail = choice==='9'?'原本已停的服务保持停止。':
+            inputs[choice]?'实际需输入'+inputs[choice]+'。':'';
+        const sample = {
+            1:'面板状态以本次查询为准。', 10:'监听和规则需分别核对。', 20:'实际运行状态用 1 复查。'
+        };
+        html = `<p>${command[1]}</p>` + (readOnly ?
+            (sample[choice]?`<p class="muted">${sample[choice]}</p>`:'') :
+            choice==='13'?'<p>创建 · 列举 · 撤销</p><p class="muted">默认只读 · 30 分钟</p>':
+            `${detail?`<p class="muted">${detail}</p>`:''}<div>${button('confirm-term','演示确认',{primary:true})}</div>`);
+    }
+    $('dialog-content').innerHTML = `<div class="row spread"><h2 id="dialog-title" tabindex="-1">${title}</h2>${closing}</div>${html}`;
+}
+function prepareSubscription(key,previous) {
+    state.form = emptyGrant();
+    state.form.nodes = [key];
+    state.node = key;
+    state.previous = previous;
+    go('subscriptions',{carry:true});
+}
+function toggleNav(open) {
+    $('navigation').classList.toggle('open',open);
+    $('nav-toggle').setAttribute('aria-expanded',String(open));
+}
+function termAction(id, origin) {
+    if (!Object.hasOwn(termCommands,id)) return termMessage('请输入菜单中的编号、h 或 0。');
+    const readOnly = ['1','10','20','h','0'].includes(id);
+    const selected = recover[state.mode];
+    if (state.mode==='openrc' && !['1','8','h','0'].includes(id)) return termMessage('当前系统不支持此操作。');
+    if (state.mode==='busy' && !readOnly) return termMessage('任务执行中。查看状态，等待原任务结束。');
+    if (selected && !readOnly && id!==selected) return termMessage('先处理原中断记录。请选择 '+selected+'。');
+    if (['9','15','18'].includes(id) && id!==selected) return termMessage('未发现此类型的待恢复记录。');
+    state.termChoice = id;
+    openDialog('terminal',origin);
+}
+function termMessage(message) {
+    $('term-feedback').innerHTML = note(message,'','warn');
+    $('term-feedback').focus();
+}
+function mockCopy(field, feedback, failure, success) {
+    if (failure) {
+        $(field).focus();
+        $(field).select();
+        $(feedback).textContent = '复制失败。已选中文本，可手动复制。';
+    } else {
+        $(feedback).textContent = success + '（演示）';
+    }
+}
+function focused(id) {
+    ($(id)||$('page-title'))?.focus();
+}
+function refreshOverview() {
+    state.mode = 'loading';
+    render();
+    later(()=>{
+        if (state.page !== 'overview' || state.mode !== 'loading') return;
+        state.mode='ready';
+        render();
+        focused('refresh-overview');
+    });
+}
+function action(id) {
+    switch (id) {
+        case 'jump-nodes': case 'back-nodes': go('nodes'); break;
+        case 'go-sub': go('subscriptions'); break;
+        case 'refresh-overview': case 'retry-overview': refreshOverview(); break;
+        case 'open-cert': openDialog('certificate',id); break;
+        case 'create-node': openDialog('create-node',id); break;
+        case 'retry-cert':
+            state.cert='applied'; state.mode='ready'; closeDialog(false); render(); focused('page-title'); break;
+        case 'login-demo':
+            state.mode='ready'; state.form=emptyGrant(); render(); focused('page-title'); break;
+        case 'filter-all': case 'filter-limited':
+            state.filter=id.slice(7); render(); focused(id); break;
+        case 'reload-nodes': case 'reopen-admin':
+            state.mode='ready'; state.feedback=''; render(); focused('page-title'); break;
+        case 'share-direct':
+            if(state.mode==='shareChanged') {
+                state.feedback='节点已变化。请刷新节点后重选。'; render(); focused('reload-nodes'); break;
+            }
+            state.node='direct'; openDialog('share',id); break;
+        case 'retry-share':
+            state.mode='ready'; render(); renderDialog(); focused('dialog-title'); break;
+        case 'copy-share': mockCopy('share-text','share-feedback',state.mode==='clip','链接已复制'); break;
+        case 'show-qr':
+            $('qr-view').innerHTML = state.mode==='qr'?note('二维码未加载。可复制链接。','','warn'):
+                '<div class="qr" aria-label="二维码示意">二维码占位</div>'; break;
+        case 'sub-direct': case 'sub-upgrade': prepareSubscription(id.slice(4),id); break;
+        case 'sub-from-share': prepareSubscription(state.node,'share-'+state.node); break;
+        case 'refresh-grants': {
+            const resultFound = state.mode==='noResult', resultAbsent = state.mode==='noResultAbsent';
+            state.mode='ready'; state.form.nodes=[]; state.issued=resultFound?'unknown':null;
+            state.feedback=resultFound?'已查到已有订阅。':resultAbsent?'未找到新记录。请重选节点再提交。':'已刷新，请重新选择节点。';
+            render(); focused(resultFound?'rotate-grant':'page-title'); break;
+        }
+        case 'compatible-formats':
+            state.form.formats=['yaml']; render(); focused('create-grant'); break;
+        case 'copy-sub': mockCopy('issued-text','sub-feedback',state.mode==='copyError','订阅地址已复制'); break;
+        case 'forget-sub':
+            state.issued='hidden'; render(); focused('rotate-grant'); break;
+        case 'inspect-grant':
+            state.issued='unknown'; state.feedback='授权有效（示例）。核对格式后用原地址在客户端重试。';
+            render(); focused('rotate-grant'); break;
+        case 'rotate-grant': openDialog('rotate',id); break;
+        case 'confirm-rotate':
+            state.mode='ready'; state.feedback=''; state.issued='new'; closeDialog(false); render(); focused('copy-sub'); break;
+        case 'close-panel': closeDialog(); break;
+        case 'recover-match': termAction(recover[state.mode],id); break;
+        case 'term-1-status': termAction('1',id); break;
+        case 'term-10-diag': termAction('10',id); break;
+        case 'confirm-term': {
+            const chosen = state.termChoice, recovering=chosen===recover[state.mode];
+            state.mode=recovering?'ready':state.mode;
+            state.termResult=recovering?'已按原记录恢复（演示）。用 1 复查服务，再检查连接。':'操作已确认（演示）。';
+            closeDialog(false); render(); focused('term-'+chosen); break;
+        }
+        default:
+            if (id.startsWith('term-')) termAction(id.slice(5),id);
+    }
+}
+function applyScenario(value) {
+    if (state.busy) return;
+    state.mode=value; state.feedback=''; state.cert=''; state.termResult=''; state.issued=null;
+    if (state.page==='subscriptions' && ['changed','offline','auth'].includes(value)) state.form.nodes=[];
+    if (state.page==='subscriptions' && value==='auth') state.form=emptyGrant();
+    render();
+}
+function createGrant() {
+    if ($('create-grant').disabled) return;
+    state.busy=true; render();
+    later(()=>{
+        state.busy=false;
+        state.issued='new';
+        state.feedback='';
+        render();
+        focused('copy-sub');
+    });
+}
+function syncForm(t) {
+    const f=state.form;
+    if (t.name==='node' || t.name==='format') {
+        const choices = Array.from($('grant-form').querySelectorAll(`input[name="${t.name}"]:checked`), n=>n.value);
+        f[t.name==='node'?'nodes':'formats']=choices;
+        updateFormat();
+    } else if (['name','host','days'].includes(t.name)) f[t.name]=t.value;
+}
+$('scenario').addEventListener('change', event=>applyScenario(event.target.value));
+$('width').addEventListener('click', event=>{
+    const phone = $('app').classList.toggle('phone');
+    event.currentTarget.setAttribute('aria-pressed',String(phone));
+    event.currentTarget.textContent=phone?'桌面预览':'窄屏预览';
+    toggleNav(false);
+});
+$('nav-toggle').addEventListener('click', ()=>toggleNav(!$('navigation').classList.contains('open')));
+dialog.addEventListener('cancel', event=>{event.preventDefault();closeDialog();});
+document.addEventListener('click', event=>{
+    const control=event.target.closest('button');
+    if (control?.dataset.page) go(control.dataset.page);
+    else if (control?.dataset.act && !state.busy) action(control.dataset.act);
+});
+document.addEventListener('input', event=>{if(event.target.form?.id==='grant-form') syncForm(event.target);});
+document.addEventListener('submit', event=>{
+    event.preventDefault();
+    if (event.target.id==='terminal-command') termAction($('terminal-input').value.trim().toLowerCase(),'terminal-input');
+    else if (event.target.id==='grant-form' && !state.busy) createGrant();
+});
+render();
+})();
+</script>
+</body>
+</html>
