@@ -276,6 +276,10 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     self.assertEqual(pending.value.status, 200, pending.value.text())
                     expect(dialog).not_to_be_visible(timeout=20000)
                     saved = pending.value.json()['inbound']
+                    if saved['protocol'] in ('hysteria2', 'tuic'):
+                        profile = pending.value.request.post_data_json['profile']
+                        self.assertNotIn('xhttp_alpn_h2', profile)
+                        self.assertEqual(profile['transport'], 'quic')
                     self.assertNotIn('settings', saved)
                     self.assertNotIn('stream_settings', saved)
                     self.assertIs(type(saved['managed_certificate_eligible']), bool)

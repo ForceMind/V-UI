@@ -1314,6 +1314,10 @@ const app = createApp({
                     }
                 }
                 let profile = { ...newInbound.profile };
+                if (['hysteria2', 'tuic'].includes(newInbound.protocol) && profile.xhttp_alpn_h2 === false) {
+                    // The shared form initializes this XHTTP-only control even for QUIC.
+                    delete profile.xhttp_alpn_h2;
+                }
                 if (newInbound.core === 'sing-box' && newInbound.protocol === 'vless' && profile.security === 'reality' && profile.transport === 'direct') {
                     // Send only this dedicated profile's visible fields. The
                     // server validates persisted state before any edit so an

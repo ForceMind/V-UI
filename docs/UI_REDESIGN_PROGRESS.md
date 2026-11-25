@@ -121,3 +121,6 @@ Chromium 测试入口已与现行菜单、原生重启确认和节点操作对�
 `d5db6a4` 已验证已有 TLS 和 REALITY 节点的分享、TCP URI 复制并导入，以及真实 API 的 YAML 输出导入。新建 TLS 节点的浏览器下载由服务器用途向导进入。REALITY YAML 的双实例浏览器证据覆盖真实 API 到目标面板导入。某一会话撤销场景复现取消页面跳转后分享仍可见，三个向导用例卡在页脚按钮定位。保留原日志，后继提交按原套件补验。[运行记录](https://github.com/ForceMind/V-UI/actions/runs/45664828832)
 
 会话确认结束时主动清理管理员简易操作面板，覆盖链接、二维码、旧请求和复制反馈。真实 Chromium 与受管证书仍须在后继准确提交验收。
+
+
+准确隔离提交 `643e6dc` 的双实例 20 项全部通过，含新建 TLS 节点的 URI/YAML 下载。会话撤销而跳转取消时，已显示二维码和迟到响应均清理。证书套件在 `b61624f` 通过部分节点编辑与绑定场景后发现，Hysteria2 提交携带未使用的 XHTTP ALPN 开关，真实 API 返回 422。QUIC 表单提交时省略这一初始默认值，协议额外配置仍由服务端按原契约校验。[双实例证据](https://github.com/ForceMind/V-UI/actions/runs/45669702355) · [证书首个保存失败](https://github.com/ForceMind/V-UI/actions/runs/45672892786)
