@@ -473,7 +473,7 @@ with database.SessionLocal() as db:
                             page.route('**/*',guard)
                             page.goto(base+'/login')
                             page.locator('#login-name').fill('tester');page.locator('#login-password').fill(password)
-                            page.get_by_role('button',name='登录面板').click();page.wait_for_url('**/ui/')
+                            page.get_by_role('button',name='登录面板').click();page.wait_for_url(base + '/ui/#dashboard')
                             # Old dashboard uses CDN until the release-packaging stage.
                             external.clear();page.goto(base+'/workspace')
                             expect(page.locator('#workspace')).to_be_visible()

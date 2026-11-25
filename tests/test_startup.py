@@ -41,7 +41,7 @@ def check_browser(base_url):
             expect(page.locator("#message")).to_contain_text("不正确")
             page.locator("#login-password").fill(PASSWORD)
             page.get_by_role("button", name="登录面板").click()
-            page.wait_for_url("**/ui/", wait_until="domcontentloaded")
+            page.wait_for_url(base_url + "/ui/#dashboard", wait_until="domcontentloaded")
             assert context.request.get(base_url + "/api/auth/me").status == 200
             check_page_brand(page, base_url)
             for path in ("/workspace", "/certificates"):
@@ -62,13 +62,13 @@ def check_browser(base_url):
             page.locator("#profile-name").fill("tester-new")
             page.locator("#current-password").fill(PASSWORD)
             page.get_by_role("button", name="保存并退出全部会话").click()
+            page.wait_for_url(base_url + "/login?return=account", wait_until="domcontentloaded")
             expect(page.locator("#login-form")).to_be_visible()
             assert context.request.get(base_url + "/api/auth/me").status == 401
             page.locator("#login-name").fill("tester-new")
             page.locator("#login-password").fill(PASSWORD)
             page.get_by_role("button", name="登录面板").click()
-            page.wait_for_url("**/ui/", wait_until="domcontentloaded")
-            page.goto(base_url + "/account")
+            page.wait_for_url(base_url + "/account", wait_until="domcontentloaded")
             expect(page.locator("#current-name")).to_have_text("tester-new")
             page.get_by_role("button", name="退出登录", exact=True).click()
             expect(page.locator("#login-form")).to_be_visible()
