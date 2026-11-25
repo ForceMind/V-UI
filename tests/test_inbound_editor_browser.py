@@ -14,7 +14,7 @@ import tempfile
 import time
 import unittest
 
-from test_proxy_browser import open_advanced_node_creation, open_node_action
+from test_proxy_browser import choose_manual_certificate, open_advanced_node_creation, open_node_action
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import yaml
@@ -263,7 +263,11 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     dialog.locator('.el-form-item').filter(has_text='传输安全').locator('.el-select').click()
                     page.get_by_role('option', name=label, exact=True).click()
                 def select_certificate(dialog):
-                    dialog.locator('.el-form-item').filter(has_text='托管证书').locator('.el-select').click()
+                    managed = dialog.locator('.el-form-item').filter(has_text=re.compile(r'^托管证书'))
+                    if not managed.count():
+                        dialog.locator('.el-form-item').filter(has_text=re.compile(r'^证书来源')).locator('.el-select').click()
+                        page.get_by_role('option', name='已有托管证书（自动填写材料路径）', exact=True).click()
+                    managed.locator('.el-select').click()
                     page.get_by_role('option', name='vpn.example.test', exact=True).click()
                 def save(dialog, identity=None):
                     endpoint = '/api/inbounds' + (f'/{identity}' if identity else '')
@@ -299,15 +303,19 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     self.assertEqual(before['profile']['security'], 'tls')
                     # Dismissing a changed draft must leave the stored TLS binding intact.
                     dialog = open_edit(name); security(dialog, label)
-                    expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).not_to_be_visible()
+                    expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^托管证书'))).not_to_be_visible()
                     cancel_editor(dialog)
                     self.assertEqual(editor(identity)['certificate_id'], certificate_id)
                     dialog = open_edit(name)
                     expect(dialog).to_contain_text('已有凭据保留在服务器')
                     # Staying on TLS cannot clear managed renewal while retaining its files.
-                    managed = dialog.locator('.el-form-item').filter(has_text='托管证书').locator('.el-select')
-                    managed.hover(); managed.locator('.el-select__clear').click()
-                    expect(dialog.get_by_placeholder('/etc/letsencrypt/live/example.com/fullchain.pem')).to_have_value('')
+                    choose_manual_certificate(page, dialog)
+                    certificate_path = dialog.get_by_placeholder('/etc/letsencrypt/live/example.com/fullchain.pem')
+                    key_path = dialog.get_by_placeholder('/etc/letsencrypt/live/example.com/privkey.pem')
+                    certificate_path.fill('')
+                    key_path.fill('')
+                    expect(certificate_path).to_have_value('')
+                    expect(key_path).to_have_value('')
                     with page.expect_response(lambda response: response.url.endswith(f'/api/inbounds/{identity}') and response.request.method == 'PUT') as rejected:
                         dialog.get_by_role('button', name='保存并应用', exact=True).click()
                     self.assertEqual(rejected.value.status, 409)
@@ -354,7 +362,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select').click()
                     page.get_by_role('option', name='VMess', exact=True).click()
                     security(dialog, 'TLS')
-                    managed = dialog.locator('.el-form-item').filter(has_text='托管证书')
+                    managed = dialog.locator('.el-form-item').filter(has_text=re.compile(r'^托管证书'))
                     expect(managed).to_be_visible()
                     dialog.get_by_placeholder('例如：US-01').fill('managed-vmess')
                     dialog.get_by_role('spinbutton').fill(str(unused_port()))
@@ -374,7 +382,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 self.assertEqual(state['profile']['security'], 'tls')
                 self.assertNotIn(vmess_uuid, json.dumps(state))
                 dialog = open_edit('managed-vmess')
-                expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).to_contain_text('vpn.example.test')
+                expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^托管证书'))).to_contain_text('vpn.example.test')
                 expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select__wrapper')).to_have_class(re.compile(r'is-disabled'))
                 self.assertNotIn(vmess_uuid, dialog.inner_text())
                 dialog.get_by_placeholder('例如：US-01').fill('cancelled-vmess')
@@ -382,12 +390,12 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 self.assertEqual(editor(vmess_id)['remark'], 'managed-vmess')
                 page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-vmess')
-                expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).to_contain_text('vpn.example.test')
+                expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^托管证书'))).to_contain_text('vpn.example.test')
                 dialog.get_by_placeholder('例如：US-01').fill('managed-vmess-edited')
                 save(dialog, vmess_id)
                 page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-vmess-edited')
-                expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).to_contain_text('vpn.example.test')
+                expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^托管证书'))).to_contain_text('vpn.example.test')
                 cancel_editor(dialog)
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     self.assertEqual(db.execute('SELECT settings FROM inbounds WHERE id=?', (vmess_id,)).fetchone()[0], created_credentials[vmess_id])
@@ -434,7 +442,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     expect(dialog.get_by_placeholder('/', exact=True)).to_have_value(path)
                     expect(dialog.get_by_placeholder('可选，例如 cdn.example.com')).to_have_value(host)
                     expect(dialog.get_by_placeholder('example.com', exact=True)).to_have_value('vpn.example.test')
-                    expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).to_contain_text('vpn.example.test')
+                    expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^托管证书'))).to_contain_text('vpn.example.test')
                     expect(dialog).to_contain_text('已有凭据保留在服务器')
                     expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select__wrapper')).to_have_class(re.compile(r'is-disabled'))
                     self.assertNotIn(ws_uuid, dialog.inner_text())
@@ -524,7 +532,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     expect(dialog.get_by_placeholder('TunService')).to_have_value(service)
                     expect(dialog.get_by_placeholder('可选，例如 cdn.example.com')).to_have_count(0)
                     expect(dialog.get_by_placeholder('example.com', exact=True)).to_have_value('vpn.example.test')
-                    expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).to_contain_text('vpn.example.test')
+                    expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^托管证书'))).to_contain_text('vpn.example.test')
                     expect(dialog).to_contain_text('已有凭据保留在服务器')
                     expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select__wrapper')).to_have_class(re.compile(r'is-disabled'))
                     self.assertNotIn(grpc_uuid, dialog.inner_text())
@@ -616,7 +624,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     return state
 
                 def check_hy2_prefill(dialog):
-                    expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).to_contain_text('vpn.example.test')
+                    expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^托管证书'))).to_contain_text('vpn.example.test')
                     expect(dialog.get_by_placeholder('example.com', exact=True)).to_have_value('vpn.example.test')
                     expect(dialog).to_contain_text('已有凭据保留在服务器')
                     expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select__wrapper')).to_have_class(re.compile(r'is-disabled'))
@@ -717,7 +725,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     return state
 
                 def check_tuic_prefill(dialog):
-                    expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).to_contain_text('vpn.example.test')
+                    expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^托管证书'))).to_contain_text('vpn.example.test')
                     expect(dialog.get_by_placeholder('example.com', exact=True)).to_have_value('vpn.example.test')
                     expect(dialog).to_contain_text('已有凭据保留在服务器')
                     expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select__wrapper')).to_have_class(re.compile(r'is-disabled'))
@@ -774,7 +782,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     dialog.get_by_placeholder('必填，例如 reference.example.test').fill('reference.example.test')
                     expect(dialog).to_contain_text('握手参考端与应用目标不同')
                     expect(dialog).to_contain_text('不绑定托管证书')
-                    expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).not_to_be_visible()
+                    expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^托管证书'))).not_to_be_visible()
                     expect(dialog.locator('.el-form-item').filter(has_text='Flow')).to_contain_text('XTLS Vision')
                     for label in ('REALITY UUID', 'Short ID'):
                         field = dialog.locator('.el-form-item').filter(has_text=re.compile('^'+label)).locator('input')
@@ -863,11 +871,12 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 page.goto(base + '/certificates')
                 card = page.locator(f'[data-certificate="{certificate_id}"]')
                 choices = card.get_by_label('选择绑定节点')
-                expect(choices.locator(f'option[value="{vmess_id}"]')).to_have_text('managed-vmess-edited')
-                expect(choices.locator(f'option[value="{ws_id}"]')).to_have_text('managed-vless-ws-edited')
-                expect(choices.locator(f'option[value="{grpc_id}"]')).to_have_text('managed-vless-grpc-edited')
-                expect(choices.locator(f'option[value="{hy2_id}"]')).to_have_text('managed-hysteria2-edited')
-                expect(choices.locator(f'option[value="{tuic_id}"]')).to_have_text('managed-tuic-edited')
+                for identity, name in ((vmess_id, 'managed-vmess-edited'), (ws_id, 'managed-vless-ws-edited'),
+                                       (grpc_id, 'managed-vless-grpc-edited'), (hy2_id, 'managed-hysteria2-edited'),
+                                       (tuic_id, 'managed-tuic-edited')):
+                    state = editor(identity)
+                    expect(choices.locator(f'option[value="{identity}"]')).to_have_text(
+                        f'{name} · 端口 {state["port"]} · sing-box')
                 expect(choices.locator(f'option[value="{reality_id}"]')).to_have_count(0)
                 choices.select_option(str(vmess_id))
                 # Preserve both an existing selection and a newer choice made
