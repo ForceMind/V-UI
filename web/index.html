@@ -71,58 +71,50 @@
                             <el-button type="primary" @click="openAddInbound">创建节点</el-button>
                         </div>
                     </div>
-                    <el-row :gutter="20">
-                        <el-col :span="6">
-                            <el-card id="cpu-status" shadow="hover" :data-status="systemMetricKnown('cpu') ? 'known' : 'unknown'">
-                                <template #header>CPU</template>
-                                <el-progress v-if="systemMetricKnown('cpu')"
-                                    type="dashboard"
-                                    :percentage="systemStatus.cpu.percent"
-                                    :color="colors">
-                                </el-progress>
-                                <p v-else role="status">状态未确认</p>
-                                <div v-if="systemMetricKnown('cpu')" class="stat-text">
-                                    {{ systemStatus.cpu?.cores }} 核
-                                </div>
-                            </el-card>
-                        </el-col>
-                        <el-col :span="6">
-                            <el-card id="memory-status" shadow="hover" :data-status="systemMetricKnown('memory') ? 'known' : 'unknown'">
-                                <template #header>内存</template>
-                                <el-progress v-if="systemMetricKnown('memory')"
-                                    type="dashboard"
-                                    :percentage="systemStatus.memory.percent"
-                                    :color="colors">
-                                </el-progress>
-                                <p v-else role="status">状态未确认</p>
-                                <div v-if="systemMetricKnown('memory')" class="stat-text">
-                                    {{ systemStatus.memory?.used }} / {{ systemStatus.memory?.total }}
-                                </div>
-                            </el-card>
-                        </el-col>
-                        <el-col :span="6">
-                            <el-card id="xray-core-status" shadow="hover"
-                                :data-status="coreFieldKnown('xray', 'binary_exists') && coreFieldKnown('xray', 'running') ? 'known' : 'unknown'">
-                                <template #header>Xray 核心</template>
-                                <el-tag :type="!coreFieldKnown('xray', 'binary_exists') ? 'warning' : coreStatus.xray.binary_exists ? 'success' : 'danger'">
-                                    {{ !coreFieldKnown('xray', 'binary_exists') ? '状态未确认' : coreStatus.xray.binary_exists ? '已安装' : '未安装' }}
-                                </el-tag>
-                                <p>{{ !coreFieldKnown('xray', 'running') ? '状态未确认' : coreStatus.xray.running ? '运行中' : '已停止' }}</p>
-                                <p v-if="!coreFieldKnown('xray', 'binary_exists') || !coreFieldKnown('xray', 'running')" role="status" class="stat-text">状态未确认</p>
-                            </el-card>
-                        </el-col>
-                        <el-col :span="6">
-                            <el-card id="singbox-core-status" shadow="hover"
-                                :data-status="coreFieldKnown('sing-box', 'binary_exists') && coreFieldKnown('sing-box', 'running') ? 'known' : 'unknown'">
-                                <template #header>sing-box 核心</template>
-                                <el-tag :type="!coreFieldKnown('sing-box', 'binary_exists') ? 'warning' : coreStatus['sing-box'].binary_exists ? 'success' : 'danger'">
-                                    {{ !coreFieldKnown('sing-box', 'binary_exists') ? '状态未确认' : coreStatus['sing-box'].binary_exists ? '已安装' : '未安装' }}
-                                </el-tag>
-                                <p>{{ !coreFieldKnown('sing-box', 'running') ? '状态未确认' : coreStatus['sing-box'].running ? '运行中' : '已停止' }}</p>
-                                <p v-if="!coreFieldKnown('sing-box', 'binary_exists') || !coreFieldKnown('sing-box', 'running')" role="status" class="stat-text">状态未确认</p>
-                            </el-card>
-                        </el-col>
-                    </el-row>
+                    <p v-if="unconfirmedOverview.length" class="overview-feedback" role="status">
+                        {{ unconfirmedOverview.join('、') }}状态未确认。 <button type="button" :disabled="refreshingStatus" @click="retryOverview">重试读取</button>
+                    </p>
+                    <div class="overview-status-grid" :aria-busy="!overviewLoaded || refreshingStatus">
+                        <div><strong>面板</strong><span>{{ systemStatusKnown || coreStatusKnown ? '可访问' : overviewLoaded ? '状态未确认' : '读取中…' }}</span></div>
+                        <div v-for="(core, label) in {Xray:'xray', 'sing-box':'sing-box'}" :key="core"
+                            :id="core === 'xray' ? 'xray-core-status' : 'singbox-core-status'"
+                            :data-status="coreFieldKnown(core,'running') && coreFieldKnown(core,'binary_exists') ? 'known' : 'unknown'">
+                            <strong>{{ label }}</strong><span role="status" :class="coreFieldKnown(core,'running') && coreStatus[core].running ? 'overview-ok' : ''">
+                                {{ coreFieldKnown(core,'running') ? (coreStatus[core].running ? '运行中' : '已停止') : overviewLoaded ? '状态未确认' : '读取中…' }}
+                            </span>
+                            <small role="status">{{ coreFieldKnown(core,'binary_exists') ? (coreStatus[core].binary_exists ? '已安装' : '未安装') : (overviewLoaded ? '安装状态未确认' : '') }}</small>
+                        </div>
+                        <div><strong>待处理</strong><span>{{ overviewCertificates === null ? (overviewCertificatesLoaded ? '状态未确认' : '读取中…') : overviewCertificates.length + ' 项' }}</span></div>
+                    </div>
+                    <div class="overview-cards">
+                        <div v-for="(label, metric) in {cpu:'CPU', memory:'内存'}" :key="metric"
+                            :id="metric + '-status'" class="overview-card" :data-status="systemMetricKnown(metric) ? 'known' : 'unknown'">
+                            <h2>{{ label }}</h2>
+                            <template v-if="systemMetricKnown(metric)">
+                                <el-progress :percentage="systemStatus[metric].percent" :aria-label="label"></el-progress>
+                                <div v-if="metric === 'cpu' && Number.isInteger(systemStatus.cpu.cores)" class="stat-text">{{ systemStatus.cpu.cores }} 核</div>
+                                <div v-if="metric === 'memory' && typeof systemStatus.memory.used === 'string' && typeof systemStatus.memory.total === 'string'" class="stat-text">{{ systemStatus.memory.used }} / {{ systemStatus.memory.total }}</div>
+                            </template>
+                            <p v-else role="status">{{ overviewLoaded ? '状态未确认' : '读取中…' }}</p>
+                        </div>
+                        <section class="overview-card" aria-labelledby="overview-pending">
+                            <h2 id="overview-pending">待处理</h2>
+                            <p v-if="overviewCertificates === null">{{ overviewCertificatesLoaded ? '证书状态未确认' : '读取中…' }}</p>
+                            <p v-else-if="!overviewCertificates.length">暂无待处理项</p>
+                            <ul v-else>
+                                <li v-for="item in overviewCertificates" :key="item.anchor">
+                                    <span>{{ item.domain }} · {{ item.target }} · {{ item.failed ? '应用未完成' : '待应用' }}</span>
+                                    <a :href="'/certificates#' + item.anchor">查看位置</a>
+                                </li>
+                            </ul>
+                        </section>
+                        <section class="overview-card" aria-labelledby="overview-links"><h2 id="overview-links">常用入口</h2>
+                            <div class="overview-shortcuts">
+                                <a href="/ui/#inbounds">节点管理 <span v-if="inboundListKnown">{{ enabledNodeCount }} / {{ inbounds.length }} 已启用</span></a>
+                                <a href="/workspace#subscriptions">订阅</a>
+                            </div>
+                        </section>
+                    </div>
                     <section class="overview-path" aria-labelledby="connection-path-title">
                         <div class="view-header">
                             <h2 id="connection-path-title">连接路径</h2>
@@ -134,17 +126,12 @@
                         <ol><li v-for="hop in connectionPaths[connectionPath]" :key="hop">{{ hop }}</li></ol>
                         <p class="stat-text">{{ connectionPath === 'relay' ? '中转仅 TCP · ' : '' }}设备端未验证</p>
                     </section>
-                    <div class="overview-shortcuts">
-                        <a href="/ui/#inbounds">节点管理 <span v-if="inboundListKnown">{{ enabledNodeCount }} / {{ inbounds.length }} 已启用</span></a>
-                        <a href="/ui/#cores">核心与服务</a>
-                        <a href="/workspace#subscriptions">订阅授权</a>
-                    </div>
                 </div>
 
                 <div v-if="currentView === 'inbounds'">
                     <div class="view-header">
                         <div>
-                            <h1>节点管理</h1>
+                            <h1 id="inbound-title" tabindex="-1">节点管理</h1>
                         </div>
                         <div>
                             <a href="/workspace#subscriptions">订阅授权</a>
@@ -172,10 +159,15 @@
                             {{ inboundListKnown ? `显示 ${filteredInbounds.length} / ${inbounds.length} 个节点` : '节点列表待确认' }}
                         </span>
                     </div>
-                    <el-table :data="filteredInbounds" style="width: 100%" border>
+                    <p v-if="!inboundListKnown" class="overview-feedback" role="status">
+                        节点列表待确认。 <button type="button" @click="fetchInbounds">刷新节点</button>
+                    </p>
+                    <el-table class="vui-node-list" :data="filteredInbounds" style="width: 100%" border>
                         <el-table-column label="节点" min-width="160">
                             <template #default="scope">
                                 <strong>{{ scope.row.remark || '未命名节点' }}</strong>
+                                <el-tag v-if="scope.row.subscription_formats?.length === 1 && scope.row.subscription_formats[0] === 'mihomo.yaml'"
+                                    type="warning" size="small">仅 Mihomo YAML</el-tag>
                                 <p class="stat-text">{{ scope.row.protocol }} · {{ transportLabel(scope.row) }} · {{ scope.row.port }}</p>
                                 <el-tag size="small" :type="scope.row.enable ? 'success' : 'info'">{{ scope.row.enable ? '已启用' : '已停用' }}</el-tag>
                             </template>
@@ -189,8 +181,8 @@
                         <el-table-column label="操作" min-width="370">
                             <template #default="scope">
                                 <div class="node-common-actions">
-                                    <el-button v-if="scope.row.share_eligible === true" size="small" type="primary" plain @click="openSimpleShare(scope.row)">分享连接</el-button>
-                                    <el-button v-if="scope.row.subscription_formats?.includes('mihomo.yaml')" size="small" @click="openNodeSubscription(scope.row)">订阅</el-button>
+                                    <el-button v-if="scope.row.share_eligible === true" size="small" type="primary" plain :id="'share-node-' + scope.row.id" @click="openSimpleShare(scope.row)">分享连接</el-button>
+                                    <el-button v-if="scope.row.subscription_formats?.includes('mihomo.yaml')" size="small" :id="'subscribe-node-' + scope.row.id" @click="openNodeSubscription(scope.row)">创建订阅</el-button>
 
                                     <el-button size="small" @click="openSimpleEdit(scope.row)">修改设置</el-button>
                                     <el-button size="small" :disabled="togglingInbound !== null" :loading="togglingInbound === scope.row.id" @click="toggleInbound(scope.row)">{{ scope.row.enable ? '停用' : '启用' }}</el-button>

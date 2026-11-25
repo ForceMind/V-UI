@@ -260,7 +260,8 @@ for (const kind of ['create', 'rotate']) {
         const f = await fixture(); await f.rotate(1).click();
         f.queue(url, async()=>({...response({}), json:async()=>{throw new Error('Synthetic JSON failure');}}), 'POST');
         await beginIssue(f, kind); await flush(); assertHidden(f);
-        assert.equal(f.get('notice').className, 'error'); assert.equal(f.get('create-grant').disabled, false);
+        assert.equal(f.get('notice').className, 'error');
+        assert.equal(f.get('create-grant').disabled, kind==='create');
     });
 }
 for (const invalidator of ['Hide', 'pagehide']) {
@@ -326,4 +327,33 @@ test('invalid rotation duration preserves visible token and does not send a requ
     f.get('days').value='0'; await f.rotate(1).click();
     assert.equal(f.requests.length,count); assert.equal(f.get('issued').hidden,false);
     assert.match(f.get('notice').textContent,/有效天数/);
+});
+
+test('ambiguous creation requires a successful list read and explicit review', async () => {
+    const f=await fixture();
+    f.queue(GRANTS,async()=>{throw new TypeError('connection lost');},'POST');
+    await f.submit(); await flush();
+    assertHidden(f);
+    assert.equal(f.get('create-grant').disabled,true);
+    assert.equal(f.get('grant-uncertain').hidden,false);
+    await f.submit(); await flush();
+    assert.equal(f.requests.filter(r=>r.method==='POST').length,1);
+    f.queue(GRANTS,async()=>response({detail:'unavailable'},503), 'GET');
+    await f.get('review-uncertain').click(); await flush();
+    assert.equal(f.get('retry-after-review').hidden,true);
+    await f.get('review-uncertain').click(); await flush();
+    assert.equal(f.get('retry-after-review').hidden,false);
+    assert.equal(f.get('create-grant').disabled,true);
+    await f.get('retry-after-review').click(); await f.submit(); await flush();
+    assert.equal(f.requests.filter(r=>r.method==='POST').length,2);
+    assert.match(f.get('issued-urls').value,/synthetic-token/);
+});
+test('created address remains available when the following list read fails', async () => {
+    const f=await fixture();
+    f.queue(GRANTS,async()=>response({detail:'unavailable'},503),'GET');
+    await f.submit(); await flush();
+    assert.match(f.get('issued-urls').value,/synthetic-token/);
+    assert.match(f.get('notice').textContent,/订阅已创建，列表读取失败/);
+    assert.equal(f.get('grant-uncertain').hidden,true);
+    assert.equal(f.requests.filter(r=>r.method==='POST').length,1);
 });

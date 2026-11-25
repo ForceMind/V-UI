@@ -24,6 +24,7 @@ for (const name of ['vue', 'axios']) {
     assert.equal(hash(assetSources[name]), provenance[name].selected_sha256[name + '.js']);
 }
 const SYSTEM = '/api/system/status', CORE = '/api/cores/status', AUTH = '/api/auth/me';
+const CERTIFICATES = '/api/certificates';
 const unrelated = ['/api/inbounds', '/api/routing/mihomo/catalog', '/api/routing/mihomo',
     '/api/routing/mihomo/preview', '/api/subscription/mihomo-warnings'];
 function renderer(V) {
@@ -57,9 +58,9 @@ function fixture(t, held = [], initiallyHidden = false) {
     const dataFor=url=>url===AUTH?{username:'synthetic-admin'}:url===SYSTEM?
         {os:'Synthetic Linux',cpu:{percent:generation?12:37,cores:2},memory:{percent:generation?18:64,used:'64 MiB',total:'100 MiB'}}:
         url===CORE?{xray:{running:!generation,binary_exists:true},'sing-box':{running:false,binary_exists:true}}:
-        url==='/api/inbounds'||url.endsWith('warnings')?[]:{};
+        url===CERTIFICATES||url==='/api/inbounds'||url.endsWith('warnings')?[]:{};
     A.defaults.adapter=config=>{
-        assert.equal(config.method,'get','read-only controller');assert([AUTH,SYSTEM,CORE,...unrelated].includes(config.url),config.url);
+        assert.equal(config.method,'get','read-only controller');assert([AUTH,SYSTEM,CORE,CERTIFICATES,...unrelated].includes(config.url),config.url);
         const request={url:config.url,timeout:config.timeout,started:now,settled:false,config};requests.push(request);
         if([SYSTEM,CORE].includes(config.url))assert.equal(requests.filter(r=>r.url===config.url&&!r.settled).length,1,'status single flight');
         return new Promise((resolve,reject)=>{
@@ -102,7 +103,7 @@ function fixture(t, held = [], initiallyHidden = false) {
         return()=>V.h(name,attrs,[slots.header?.(),slots.default?.()]);}});
     app.mount(host.host);
     context.singleStatusRequest = actualSingleStatusRequest;
-    assert.equal(readers.length, 2);
+    assert.equal(readers.length, 3);
     const flush=async()=>{for(let i=0;i<100;i++)await Promise.resolve();await V.nextTick();};
     const snapshot=()=>({cpu:state.systemStatus.value.cpu?.percent,xray:state.coreStatus.value.xray?.running,
         systemKnown:state.systemOsKnown.value,coreKnown:state.coreFieldKnown('xray','running'),
@@ -131,20 +132,21 @@ const statusCounts = f => [f.count(SYSTEM), f.count(CORE)];
 const assertPollers = f => {
     assert.equal(f.pollers(), 2, 'exactly one poller per status endpoint');
     assert.equal(f.listeners.size, 2);
-    assert.deepEqual(delays(f), [3000, 10000]);
+    const extra = f.requests.filter(r => r.url === '/api/inbounds' && !r.settled).map(r=>r.timeout);
+    assert.deepEqual(delays(f), [3000,10000,...extra]);
 };
 for (const held of unrelated) test('status polling starts while unrelated GET is pending: ' + held, async t => {
     const f = fixture(t, [held]); await f.flush();
     assert.equal(f.done, false, 'outer initialization still awaits every initial task');
     assert.deepEqual(statusCounts(f), [1, 1]); assertPollers(f);
     assert(f.requests.filter(r => [SYSTEM, CORE].includes(r.url)).every(r => r.settled && r.timeout === 5000));
-    assert.equal(f.requests.find(r => r.url === held).timeout, 0, 'no new auxiliary timeout');
-    assert.deepEqual(f.snapshot().percentages, [37, 64]); assert.equal(f.snapshot().xrayTag, 'Xray Running');
+    assert.equal(f.requests.find(r => r.url === held).timeout, held === '/api/inbounds' ? 15000 : 0, 'existing auxiliary timeout');
+    assert.deepEqual(f.snapshot().percentages, [37, 64]); assert.equal(f.snapshot().xrayTag, 'Xray 运行中');
     f.setGeneration(1); await f.advance(2999); assert.deepEqual(statusCounts(f), [1, 1]);
     await f.advance(1); assert.deepEqual(statusCounts(f), [2, 1]);
-    assert.deepEqual(f.snapshot().percentages, [12, 18]); assert.equal(f.snapshot().xrayTag, 'Xray Running');
+    assert.deepEqual(f.snapshot().percentages, [12, 18]); assert.equal(f.snapshot().xrayTag, 'Xray 运行中');
     await f.advance(7000); assert.deepEqual(statusCounts(f), [4, 2]);
-    assert.equal(f.snapshot().xrayTag, 'Xray Stopped'); assert.equal(f.done, false);
+    assert.equal(f.snapshot().xrayTag, 'Xray 已停止'); assert.equal(f.done, false);
     assert.equal(f.requests.filter(r => r.url === held && !r.settled).length, 1);
     assertPollers(f); f.release(held); await f.flush();
     assert.equal(f.done, true); assertPollers(f); assert.deepEqual(statusCounts(f), [4, 2], 'no restart on auxiliary completion');
@@ -154,7 +156,7 @@ for (const held of unrelated) test('status polling starts while unrelated GET is
 test('authenticated bootstrap preserves actual request start order and existing cadence', async t => {
     const f = fixture(t); await f.flush(); assert.equal(f.done, true);
     assert.deepEqual(f.requests.map(r => r.url), [AUTH, '/api/inbounds', '/api/routing/mihomo/catalog',
-        '/api/routing/mihomo', '/api/subscription/mihomo-warnings', SYSTEM, CORE, '/api/routing/mihomo/preview']);
+        '/api/routing/mihomo', '/api/subscription/mihomo-warnings', CERTIFICATES, SYSTEM, CORE, '/api/routing/mihomo/preview']);
     assertPollers(f); await f.advance(10000); assert.deepEqual(statusCounts(f), [4, 2]);
     assert.deepEqual(f.errors, []);
 });
@@ -170,7 +172,7 @@ for (const held of [SYSTEM, CORE]) test('both initial status reads must settle b
 });
 
 test('existing modeled 5000ms status timeout starts polling and later reads recover', async t => {
-    const f = fixture(t, [SYSTEM, CORE, '/api/inbounds']); await f.flush();
+    const f = fixture(t, [SYSTEM, CORE, '/api/routing/mihomo']); await f.flush();
     await f.advance(4999); assert.equal(f.pollers(), 0); assert.equal(f.done, false);
     await f.advance(1); assertPollers(f); assert.equal(f.done, false);
     assert.equal(f.snapshot().systemKnown, false); assert.equal(f.snapshot().coreKnown, false);
@@ -178,7 +180,7 @@ test('existing modeled 5000ms status timeout starts polling and later reads reco
     assert(f.requests.filter(r => [SYSTEM, CORE].includes(r.url)).every(r => r.timedOut && r.timeout === 5000));
     f.holds.delete(SYSTEM); f.holds.delete(CORE); await f.advance(10000);
     assert.deepEqual(statusCounts(f), [4, 2]); assert.equal(f.snapshot().systemKnown, true);
-    assert.equal(f.snapshot().coreKnown, true); f.release('/api/inbounds'); await f.flush(); assertPollers(f);
+    assert.equal(f.snapshot().coreKnown, true); f.release('/api/routing/mihomo'); await f.flush(); assertPollers(f);
 });
 
 test('pending real controller authentication gates every auxiliary and status request', async t => {
@@ -212,30 +214,30 @@ test('session end before initial status settlement cannot install new pollers', 
 });
 
 test('session end while auxiliary bootstrap is pending stops polling without resurrection', async t => {
-    const f = fixture(t, ['/api/inbounds']); await f.flush(); assertPollers(f);
+    const f = fixture(t, ['/api/routing/mihomo']); await f.flush(); assertPollers(f);
     f.setAuth(401); f.invalidate(); await f.flush(); assert.deepEqual(f.redirects, ['/login']);
     assert.equal(f.listeners.size, 0); assert.equal(f.timers.size, 0);
-    f.release('/api/inbounds'); await f.flush(); assert.equal(f.done, true); assert.equal(f.pollers(), 2);
+    f.release('/api/routing/mihomo'); await f.flush(); assert.equal(f.done, true); assert.equal(f.pollers(), 2);
     await f.show(true); await f.show(false); await f.advance(60000);
     assert.equal(f.listeners.size, 0); assert.equal(f.timers.size, 0);
     assert.deepEqual(statusCounts(f), [1, 1]); assert.deepEqual(f.errors, []);
 });
 
 test('synthetic hidden pause and visible fresh reads are unchanged with auxiliary pending', async t => {
-    const f = fixture(t, ['/api/inbounds']); await f.flush(); await f.advance(10000);
+    const f = fixture(t, ['/api/routing/mihomo']); await f.flush(); await f.advance(10000);
     assert.deepEqual(statusCounts(f), [4, 2]); await f.show(true); assert.equal(f.timers.size, 0);
     await f.advance(60000); assert.deepEqual(statusCounts(f), [4, 2]); f.setGeneration(1);
     await f.show(false); assert.deepEqual(statusCounts(f), [5, 3]); assertPollers(f);
-    assert.deepEqual(f.snapshot().percentages, [12, 18]); assert.equal(f.snapshot().xrayTag, 'Xray Stopped');
-    f.release('/api/inbounds'); await f.flush(); assertPollers(f); assert.deepEqual(f.errors, []);
+    assert.deepEqual(f.snapshot().percentages, [12, 18]); assert.equal(f.snapshot().xrayTag, 'Xray 已停止');
+    f.release('/api/routing/mihomo'); await f.flush(); assertPollers(f); assert.deepEqual(f.errors, []);
 });
 
 test('initial synthetic hidden state installs listeners but no periodic timer until shown', async t => {
-    const f = fixture(t, ['/api/inbounds'], true); await f.flush();
+    const f = fixture(t, ['/api/routing/mihomo'], true); await f.flush();
     assert.equal(f.pollers(), 2); assert.equal(f.listeners.size, 2); assert.equal(f.timers.size, 0);
     await f.advance(60000); assert.deepEqual(statusCounts(f), [1, 1]);
     await f.show(false); assert.deepEqual(statusCounts(f), [2, 2]); assertPollers(f);
-    f.release('/api/inbounds'); await f.flush(); assertPollers(f); assert.deepEqual(f.errors, []);
+    f.release('/api/routing/mihomo'); await f.flush(); assertPollers(f); assert.deepEqual(f.errors, []);
 });
 
 test('existing manual fresh callers share one flight and one queued fresh read', async t => {
@@ -254,5 +256,18 @@ test('synthetic visible resumption during a status flight stays single-flight th
     assert.deepEqual(statusCounts(f), [4, 2]); await f.show(true); await f.show(false); await f.show(true); await f.show(false);
     assert.equal(f.count(CORE), 2); assert.equal(f.requests.filter(r => r.url === CORE && !r.settled).length, 1);
     f.setGeneration(1); f.release(CORE); await f.flush(); assert.equal(f.count(CORE), 3);
-    assert.equal(f.snapshot().xrayTag, 'Xray Stopped'); assertPollers(f); assert.deepEqual(f.errors, []);
+    assert.equal(f.snapshot().xrayTag, 'Xray 已停止'); assertPollers(f); assert.deepEqual(f.errors, []);
+});
+
+test('certificate overview is a separate authenticated read and never creates its own poller', async t => {
+    const f = fixture(t, [CERTIFICATES]); await f.flush();
+    assert.equal(f.done,false);
+    assert.equal(f.count(CERTIFICATES),1);
+    assert.deepEqual(f.snapshot().percentages,[37,64]);
+    assert.equal(f.snapshot().xrayTag,'Xray 运行中');
+    assert.equal(f.pollers(),2);
+    f.release(CERTIFICATES); await f.flush();
+    assert.equal(f.done,true); assertPollers(f);
+    await f.advance(10000);
+    assert.equal(f.count(CERTIFICATES),1);
 });

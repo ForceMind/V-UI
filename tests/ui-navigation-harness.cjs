@@ -373,3 +373,16 @@ test('Back cancellation keeps the simple form and history layer; later confirmat
     f.history.back();await flush();assert.equal(view.dialog.open,true);assert.equal(f.position,1);assert.equal(view.fields.name.value,'保留输入');assert.equal(questions,1);
     accepted=true;f.history.back();await flush();assert.equal(view.dialog.open,false);assert.equal(f.position,0);assert.equal(questions,2);assert.equal(Object.keys(view.fields).length,0);view.destroy();
 });
+
+test('return from subscription carries only enumerated filters and original node action', () => {
+    const f=environment();
+    const nav=f.sandbox.VUI_NAV;
+    const safe={id:7,revision:'a'.repeat(64),filter:'limited',transport:'HTTPUpgrade',action:'subscribe'};
+    assert.equal(nav.navigate('subscriptions',{...safe,search:'synthetic-secret',shareLink:'synthetic-secret'}),true);
+    assert.equal(f.assignments.at(-1),'/workspace#subscriptions?node=7&revision='+'a'.repeat(64));
+    assert.equal(JSON.stringify(f.history.state.inboundReturn),JSON.stringify(safe));
+    assert.equal(JSON.stringify(nav.consumeInboundReturn()),JSON.stringify(safe));
+    assert.equal(nav.consumeInboundReturn(),null);
+    nav.navigate('subscriptions',{...safe,transport:'synthetic-secret'});
+    assert.equal(f.history.state.inboundReturn,undefined);
+});

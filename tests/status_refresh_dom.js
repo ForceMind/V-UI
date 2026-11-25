@@ -48,7 +48,7 @@ const render = V.compile('<section>' + html.slice(h1, h2) + html.slice(d1, d2) +
     decodeEntities(value) {assert.doesNotMatch(value, /&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]+);/i); return value;}
 });
 const SYSTEM = '/api/system/status', CORE = '/api/cores/status', AUTH = '/api/auth/me';
-const unrelated = ['/api/inbounds', '/api/routing/mihomo/catalog', '/api/routing/mihomo',
+const unrelated = ['/api/certificates', '/api/inbounds', '/api/routing/mihomo/catalog', '/api/routing/mihomo',
     '/api/routing/mihomo/preview', '/api/subscription/mihomo-warnings'];
 const system = (percent = 37) => ({os: 'Synthetic Linux', cpu: {percent, cores: 2},
     memory: {percent, used: percent + ' MiB', total: '100 MiB'}});
@@ -230,7 +230,7 @@ for (const first of [SYSTEM, CORE]) test('native component action holds busy unt
     await f.finish(first === SYSTEM ? CORE : SYSTEM); f.idle();
     assert.equal(await f.click(), true); f.pending(); assert.deepEqual(counts(f), [3, 3]);
     await f.finish(SYSTEM, 200, system(0)); f.pending(); await f.finish(CORE, 200, cores(false)); f.idle();
-    assert.deepEqual(f.snapshot().percentages, [0, 0]); assert.equal(f.snapshot().coreTag, 'Xray Stopped');
+    assert.deepEqual(f.snapshot().percentages, [0, 0]); assert.equal(f.snapshot().coreTag, 'Xray 已停止');
 });
 test('same-tick direct calls have one synchronous manual admission before rendering', async t => {
     const f = fixture(t); await flush(); holdStatus(f);
@@ -248,7 +248,7 @@ test('initial reads are not reused as manual fresh completion and do not duplica
     await f.finish(CORE, 200, cores(false)); f.pending(); assert.deepEqual(counts(f), [2, 2]);
     assert.equal(f.pollers(), 2); assert.equal(f.done, true);
     await f.finish(SYSTEM, 200, system(24)); f.pending(); await f.finish(CORE); f.idle();
-    assert.equal(f.snapshot().cpu, 24); assert.equal(f.snapshot().coreTag, 'Xray Running');
+    assert.equal(f.snapshot().cpu, 24); assert.equal(f.snapshot().coreTag, 'Xray 运行中');
     assert.equal(f.pollers(), 2); assert.equal(f.listeners.size, 2);
 });
 test('natural synthetic timer reads stay single-flight and manual fresh waits for its newer reads', async t => {
@@ -258,7 +258,7 @@ test('natural synthetic timer reads stay single-flight and manual fresh waits fo
     await f.finish(CORE, 200, cores(false)); f.pending(); assert.deepEqual(counts(f), [5, 3]);
     await f.finish(SYSTEM, 200, system(12)); f.pending(); assert.deepEqual(counts(f), [6, 3]);
     await f.finish(SYSTEM, 200, system(24)); f.pending(); await f.finish(CORE); f.idle();
-    assert.equal(f.snapshot().cpu, 24); assert.equal(f.snapshot().coreTag, 'Xray Running');
+    assert.equal(f.snapshot().cpu, 24); assert.equal(f.snapshot().coreTag, 'Xray 运行中');
     f.holds.clear(); await f.advance(10000); assert.deepEqual(counts(f), [9, 4]);
     assert.equal(f.pollers(), 2); assert.equal(f.listeners.size, 2);
 });
@@ -268,18 +268,18 @@ for (const failed of [SYSTEM, CORE]) test('independent failed read shows Unknown
     await f.finish(failed, 503); f.pending();
     assert.equal(f.snapshot().system, failed !== SYSTEM); assert.equal(f.snapshot().core, failed !== CORE);
     if (failed === SYSTEM) {assert.equal(f.snapshot().cpuTag, 'unknown'); assert.deepEqual(f.snapshot().percentages, []);}
-    else assert.equal(f.snapshot().coreTag, 'Xray Unknown');
+    else assert.equal(f.snapshot().coreTag, 'Xray 状态未确认');
     await f.finish(failed === SYSTEM ? CORE : SYSTEM); f.idle();
     assert.equal(await f.click(), true); f.pending(); await f.finish(SYSTEM, 200, system(0));
     await f.finish(CORE, 200, cores(false)); f.idle();
     assert.equal(f.snapshot().system, true); assert.equal(f.snapshot().core, true);
-    assert.deepEqual(f.snapshot().percentages, [0, 0]); assert.equal(f.snapshot().coreTag, 'Xray Stopped');
+    assert.deepEqual(f.snapshot().percentages, [0, 0]); assert.equal(f.snapshot().coreTag, 'Xray 已停止');
 });
 test('malformed replies remain Unknown without claiming success and next valid read recovers', async t => {
     const f = fixture(t); await flush(); holdStatus(f); await f.click();
     await f.finish(SYSTEM, 200, []); await f.finish(CORE, 200, {xray: {running: 'false'}}); f.idle();
     assert.equal(f.snapshot().system, false); assert.equal(f.snapshot().core, false);
-    assert.deepEqual(f.snapshot().percentages, []); assert.equal(f.snapshot().coreTag, 'Xray Unknown');
+    assert.deepEqual(f.snapshot().percentages, []); assert.equal(f.snapshot().coreTag, 'Xray 状态未确认');
     await f.click(); await f.finish(SYSTEM); await f.finish(CORE); f.idle();
     assert.equal(f.snapshot().system, true); assert.equal(f.snapshot().core, true);
 });

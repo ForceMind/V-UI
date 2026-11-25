@@ -121,7 +121,11 @@
         }
         close() {
             if(!this.canLeave())return;
-            this.returnEdit=null;this.clear();if(this.dialog){this.dialog.close();globalThis.VUI_NAV?.modal.close(this.modalId);}
+            this.returnEdit=null;this.clear();
+            if(this.dialog){
+                this.dialog.close();globalThis.VUI_NAV?.modal.close(this.modalId);
+                this.opener?.focus?.();this.opener=null;
+            }
         }
         async perform(action, success=null) {
             if(this.uiBusy||this.ended)return;const epoch=this.epoch;
@@ -153,7 +157,9 @@
             if(this.uiBusy||this.flow.busy||this.ended)return;
             if(this.dirty&&!this.info&&!confirm('切换操作会清除本次未提交的连接内容，继续？'))return;
             if(this.flow.attempt?.state==='uncertain'||this.flow.intent?.nodeSent&&!this.info){this.showError({code:'PENDING',message:'请先核对上一操作的结果。'});return;}
+            if (!this.dialog?.open) this.opener = document.activeElement;
             this.clear();this.task=task;this.target=target;
+            if(task==='share')this.status.textContent='正在读取连接信息…';
             if(this.dialog&&!this.dialog.open){this.dialog.showModal();globalThis.VUI_NAV?.modal.open(this.modalId,()=>this.close(),()=>this.canLeave());}
             return await this.perform(async()=>{
                 await this.flow.load();
@@ -351,6 +357,16 @@
                 }
                 box.append(element('p','选择后再次点击原操作按钮；尚未保存或连接。'));
             }
+            if(this.task==='share' && this.target) {
+                const reason=error.code || (typeof error.detail==='string'?error.detail:error.detail?.code);
+                if(['NODE_CHANGED','SHARE_NODE_CHANGED','SHARE_UNAVAILABLE'].includes(reason)) {
+                    if(!this.options.remote)this.problem.append(this.button('刷新节点并返回',()=>{
+                        this.close();if(!this.dialog?.open)globalThis.dispatchEvent(new Event('vui:operations-changed'));
+                    }));
+                } else if(![401,403,404,409,422].includes(error.status)) {
+                    this.problem.append(this.button('重试读取',()=>this.open('share',this.target),{primary:true}));
+                }
+            }
             if(['UNKNOWN_DRAFT','PENDING'].includes(error.code))this.draftReview();
             this.lock();
         }
@@ -391,7 +407,15 @@
                 box.append(this.button(upstream?'复制TCP出口链接':'复制连接链接',()=>this.copy(value,text)));
                 if(!upstream){
                     const qr=element('div',null,{class:'ops-qr'});
-                    box.append(this.button('显示二维码',()=>{qr.replaceChildren();if(globalThis.QRCode)new QRCode(qr,{text:value,width:196,height:196});else qr.textContent='二维码组件未加载，可先复制连接链接。';}),qr);
+                    qr.setAttribute('role','status');
+                    box.append(this.button('显示二维码',()=>{
+                        qr.replaceChildren();
+                        try { if(!globalThis.QRCode)throw new Error('QR unavailable');new QRCode(qr,{text:value,width:196,height:196}); }
+                        catch (_) { qr.replaceChildren();qr.textContent='二维码未加载，可复制连接链接。'; }
+                    }),qr);
+                    if (!this.options.remote && this.dialog && row.subscription_formats?.includes('mihomo.yaml')) {
+                        box.append(this.button('创建订阅',()=>globalThis.dispatchEvent(new CustomEvent('vui:subscribe-node',{detail:row}))));
+                    }
                     if(row.upstream_export_eligible===true)box.append(this.button('给中转服务器使用（仅TCP，含凭据）',()=>this.delivery(row,server,true)));
                 }
                 this.content.querySelector('.ops-delivery')?.remove();this.content.append(box);

@@ -36,6 +36,11 @@
     const listeners = new Set(), guards = new Set();
     const positionOf = state => state?.vuiNavigation === 1 && Number.isSafeInteger(state.position) && state.position >= 0 ? state.position : null;
     const marker = () => ({ vuiNavigation: 1, position: sequence });
+    const validateInboundReturn = value => Number.isSafeInteger(value?.id) && value.id > 0 &&
+        typeof value.revision === 'string' && /^[a-f0-9]{64}$/.test(value.revision) &&
+        ['all','enabled','limited'].includes(value.filter) &&
+        ['','TCP','WebSocket','gRPC','XHTTP','HTTPUpgrade','QUIC','其他','未知'].includes(value.transport) &&
+        ['share','subscribe'].includes(value.action);
     let activeRouteID = route().id;
     const notify = reason => { const target = route(); activeRouteID = target.id; listeners.forEach(listener => listener(target, reason)); };
     const pageAllowed = () => [...guards].every(guard => guard() !== false);
@@ -44,7 +49,9 @@
     // Replacing the current entry never enables a Back jump from a cold link.
     if (typeof history !== 'undefined') {
         sequence = positionOf(history.state) ?? 0;
-        history.replaceState(marker(), '', currentURL());
+        const inboundReturn = history.state?.inboundReturn;
+        history.replaceState(activeRouteID === 'inbounds' && validateInboundReturn(inboundReturn) ?
+            {...marker(), inboundReturn} : marker(), '', currentURL());
     }
     const modalHistory = {
         open(id, close, canClose = () => true) {
@@ -84,7 +91,14 @@
         // Invalidate secrets and pending reads before either kind of navigation.
         // Clear ownership first so the close callback cannot traverse old history.
         if (modal) { const old = modal; modal = null; old.close(); }
-        if (parsed.pathname !== location.pathname) { approvedExit = true; location.assign(url); return true; }
+        if (parsed.pathname !== location.pathname) {
+            if (id === 'subscriptions' && activeRouteID === 'inbounds' && validateInboundReturn(node)) {
+                const {id, revision, filter, transport, action} = node;
+                // Never save free-text node searches or share link contents.
+                history.replaceState({...marker(), inboundReturn:{id,revision,filter,transport,action}}, '', currentURL());
+            }
+            approvedExit = true; location.assign(url); return true;
+        }
         if (history.state?.modal) history.replaceState(marker(), '', url);
         else { sequence++; history.pushState(marker(), '', url); }
         notify();
@@ -129,7 +143,7 @@
     if (document.addEventListener) document.addEventListener('click', event => {
         if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         const anchor = event.target.closest?.('a[href]');
-        if (!anchor || anchor.target || anchor.hasAttribute('download')) return;
+        if (!anchor || anchor.target || anchor.hasAttribute('download') || anchor.hasAttribute('data-vui-native')) return;
         let url;
         try { url = new URL(anchor.href, location.origin); } catch (_) { return; }
         if (url.origin !== location.origin || url.search) return;
@@ -144,7 +158,13 @@
         const id = Number(selection[1]);
         return Number.isSafeInteger(id) ? {id, revision:selection[2]} : null;
     };
-    globalThis.VUI_NAV = Object.freeze({ targets, route, appView, loginURL, resumeTarget, navigate, consumeSubscriptionNode,
+    const consumeInboundReturn = () => {
+        const value = history.state?.inboundReturn;
+        if (route().id !== 'inbounds' || !validateInboundReturn(value)) return null;
+        history.replaceState(marker(), '', currentURL());
+        return value;
+    };
+    globalThis.VUI_NAV = Object.freeze({ targets, route, appView, loginURL, resumeTarget, navigate, consumeSubscriptionNode, consumeInboundReturn,
         replaceLogin(pathname, hash) { forcedExit = true; pageLeaving = true; closeRequest++; modal = null; location.replace(loginURL(pathname, hash)); },
         resume() { forcedExit = true; pageLeaving = true; closeRequest++; modal = null; location.replace(resumeTarget()); },
         subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },

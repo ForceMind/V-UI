@@ -19,3 +19,12 @@
 fieldset{min-width:0}legend{max-width:100%;overflow-wrap:anywhere}
 @media(max-width:760px){header{height:auto;min-height:66px;flex-wrap:wrap;padding:12px 16px}nav{flex-wrap:wrap}}
 .brand{display:inline-flex;align-items:center;gap:7px}.vui-brand-image{display:block;flex:none}@media(max-width:480px){header{height:auto;min-height:66px;flex-wrap:wrap;gap:8px;padding-top:10px;padding-bottom:10px}nav{flex-wrap:wrap;gap:8px 12px}}
+
+#subscriptions .actions a { display:inline-flex; align-items:center; min-height:44px; }
+#subscriptions button { min-height:44px; }
+#subscriptions button.primary { background:#155f72; border-color:#155f72; }
+#subscriptions label.check { min-height:44px; }
+#delivery-format-note:empty { display:none; }
+#delivery-format-note,.grant-recovery { color:#744809; }
+.grant-recovery { padding:10px 14px; border-left:4px solid #996721; background:#fff2d8; }
+.subscription-check { padding:0 0 10px; }

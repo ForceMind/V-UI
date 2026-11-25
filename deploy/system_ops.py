@@ -1309,30 +1309,33 @@ def network_open(protocol, port, cancelled=None):
     return str(port) + '/' + protocol + ' 本机规则已放行并回读；公网可达性未验证。'
 
 
-HELP = ('V-UI 受管维护菜单\n'
-        '1 / status   查看受管服务状态\n'
-        '2 / start    启动已停止的服务\n'
-        '3 / stop     停止服务与 HTTP-01 socket\n'
-        '4 / restart  按当前运行拓扑重启\n'
-        '5 / backup   停机创建私有备份\n'
-        '6 / restore  校验并停机恢复备份\n'
-        '7 / activate 选择已准备版本（升级或代码回退，先备份）\n'
-        '8 / stage    准备可信本地候选（不激活）\n'
-        '9 / recover-restore 完成中断还原的恢复\n'
-        '10 / network 网络/防火墙诊断（只读）\n'
-        '11 / open-port 手动精确放行端口（明确确认）\n'
-        '12 / upgrade 在线升级官方稳定版（选择后才下载，保留配置与数据）\n'
-        '13 / grants  创建、列举或撤销临时维护授权\n'
-        '14 / restore-components  恢复节点数据及核心版本\n'
-        '15 / recover-components 恢复中断的双域事务\n'
-        '16 / update-core 更新指定核心\n'
-        '17 / rollback-core 回退指定核心\n'
-        '18 / recover-core 恢复中断的核心任务（含双域备份）\n'
-        '19 / backup-components 备份节点数据及核心版本\n'
-        '20 / core-status 查看已选择的核心版本（只读）\n'
-        'h            帮助\n'
-        '0            退出\n'
-        '操作失败后不会自动恢复启动。OpenRC 当前仅支持状态查询与候选准备。')
+HELP = (
+    'V-UI 受管维护菜单\n'
+    '用 1 查服务。连接是否可用需另行核对。\n'
+    '\n服务\n'
+    ' 1  查看状态    2  启动       3  停止        4  重启（沿用原拓扑）\n'
+    '\n诊断与授权\n'
+    '10  网络诊断   11  精确放行  13  维护授权\n'
+    '\n版本\n'
+    ' 8  准备候选    7  激活候选  12  官方稳定版升级\n'
+    '\n备份与恢复\n'
+    ' 5  私有备份    6  恢复备份   9  恢复中断的数据还原\n'
+    '19  双域备份   14  双域恢复  15  恢复中断的双域事务\n'
+    '\n核心\n'
+    '20  查看选择   16  更新      17  回退       18  恢复中断的核心任务\n'
+    '\n h  帮助        0  退出\n'
+    'OpenRC 仅支持 1 查看状态和 8 准备本地候选。'
+)
+RECOVERY_HINTS = {
+    'restore': '数据还原中断时保持停机，用 9 恢复原记录。',
+    'restore-components': '双域恢复中断时用 15 恢复原记录。',
+    'update-core': '核心切换中断时用 18 恢复原任务。',
+    'rollback-core': '核心回退中断时用 18 恢复原任务。',
+    'backup-components': '双域备份任务留有中断记录时用 18，只恢复服务。',
+    'recover-restore': '确认仍有原中断记录后，用 9 恢复。',
+    'recover-components': '确认仍有原双域记录后，用 15 恢复。',
+    'recover-core': '确认仍有原任务记录后，用 18 恢复。',
+}
 CHOICES = {'1': 'status', '2': 'start', '3': 'stop', '4': 'restart',
            '5': 'backup', '6': 'restore', '7': 'activate', '8': 'stage', '9': 'recover-restore', '10': 'network', '11': 'open-port', '12': 'upgrade', '13': 'grants'}
 CORE_TASKS = ('restore-components', 'recover-components', 'update-core', 'rollback-core', 'recover-core',
@@ -1567,7 +1570,7 @@ def _core_terminal_task(ops, arguments, cancelled, expected_receipt):
     elif arguments == ['recover-core']:
         result = module.recover(ops, cancelled=cancelled, _receipt_sha256=expected_receipt)
     elif arguments == ['core-status']:
-        result = module.inspect_core_selection(ops, _receipt_sha256=expected_receipt)
+        result = module.inspect_core_selection(ops, _receipt_sha256=expected_receipt, include_recovery_kind=True)
     elif arguments == ['backup-components']:
         selection = decode_json(trusted_bytes(CONFIG.parent/'core-selection.json', MAX_JSON))
         result = module.backup_components(ops, expected_revision=selection['revision'],
@@ -1698,7 +1701,15 @@ def show_core_selection(result):
         print('未发现独立核心选择记录。')
         return
     if result == {'outcome': 'core_pending'}:
-        print('有待恢复的核心事务，当前选择待确认。')
+        print('有待恢复的核心事务，当前选择待确认。请核对原操作。')
+        return
+    if set(result) == {'outcome', 'recovery_kind'} and result['outcome'] == 'core_pending':
+        hints = {'restore': '用 15 恢复原双域事务。', 'switch': '用 18 恢复原核心切换。',
+                 'backup': '用 18 恢复原服务状态。'}
+        kind = result['recovery_kind']
+        if type(kind) is not str or kind not in hints:
+            raise Refused('invalid recovery kind')
+        print('有待恢复的核心事务。' + hints[kind])
         return
     cores = result.get('cores')
     if (set(result) != {'outcome', 'cores'} or result['outcome'] != 'core_selected'
@@ -1743,6 +1754,9 @@ def menu():
                 terminal_core_action(action)
             except (Refused, OSError, ValueError, KeyError, subprocess.SubprocessError):
                 print('恢复未完成。请检查服务状态及待恢复记录。')
+                print('用 1 核对服务。')
+                if action in RECOVERY_HINTS:
+                    print(RECOVERY_HINTS[action])
             continue
         if action in ('upgrade', 'grants'):
             try:
@@ -1753,7 +1767,7 @@ def menu():
                         continue
                     client = fixed_module('maintenance_client')
                     task = client.request({'protocol': 1, 'operation': 'submit', 'action': 'upgrade'})
-                    print('升级任务已登记: ' + task['id'] + '；面板停止期间由独立维护服务继续执行。')
+                    print('升级任务已登记: ' + task['id'] + '；请等待原任务，面板停止时仍会继续。')
                     while task['state'] in ('queued', 'running'):
                         time.sleep(1)
                         task = client.request({'protocol': 1, 'operation': 'get', 'task_id': task['id']})
@@ -1832,6 +1846,8 @@ def menu():
             if answer != 'yes':
                 print('已取消，未执行操作。')
                 continue
+        if action != 'status':
+            print('正在处理，请等待当前任务完成。')
         with deferred_signals() as cancelled:
             try:
                 with installation_lock():
@@ -1857,8 +1873,14 @@ def menu():
                         print('SHA-256: ' + result['backup_sha256'])
                     if 'selected_release' in result:
                         print('已选择版本: ' + result['selected_release'])
-            except (Refused, OSError, ValueError, KeyError, subprocess.SubprocessError):
-                print('操作未完成或状态无法确认。请检查受信安装与服务；不会自动恢复启动。')
+            except (Refused, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+                if isinstance(error, Refused) and str(error) == 'another installer or maintenance operation is running':
+                    print('已有维护任务在执行。请等待原任务完成，再用 1 核对服务。')
+                else:
+                    print('操作未完成或状态无法确认。请检查受信安装与服务；不会自动恢复启动。')
+                    print('用 1 核对服务。')
+                    if action in RECOVERY_HINTS:
+                        print(RECOVERY_HINTS[action])
             if cancelled:
                 return 128 + cancelled[0]
 

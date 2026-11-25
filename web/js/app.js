@@ -152,9 +152,26 @@ const app = createApp({
         const coreStatusKnown = ref(false);
         const statusRefreshReady = ref(false);
         const refreshingStatus = ref(false);
+        const overviewLoaded = ref(false);
+        const overviewCertificates = ref(null);
+        const overviewCertificatesLoaded = ref(false);
+        const unconfirmedOverview = computed(() => {
+            if (!overviewLoaded.value) return [];
+            const missing = [];
+            if (!systemMetricKnown('cpu')) missing.push('CPU');
+            if (!systemMetricKnown('memory')) missing.push('内存');
+            for (const [core, label] of [['xray', 'Xray'], ['sing-box', 'sing-box']]) {
+                if (!coreFieldKnown(core, 'running') || !coreFieldKnown(core, 'binary_exists')) missing.push(label);
+            }
+            if (overviewCertificatesLoaded.value && overviewCertificates.value === null) missing.push('证书');
+            return missing;
+        });
         clearAdminSecrets.push(() => {
             // A stale 401 alone does not end a currently valid session.
-            if (adminSessionEnded) statusRefreshReady.value = false;
+            if (adminSessionEnded) {
+                statusRefreshReady.value = false;
+                overviewCertificates.value = null;
+            }
         });
         const statusObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
         const systemOsKnown = computed(() => systemStatusKnown.value &&
@@ -551,13 +568,6 @@ const app = createApp({
                 .reduce((sum, section) => sum + (section.rules?.length || 0), 0);
         });
 
-        const colors = [
-            { color: '#f56c6c', percentage: 100 },
-            { color: '#e6a23c', percentage: 80 },
-            { color: '#5cb87a', percentage: 60 },
-            { color: '#1989fa', percentage: 40 },
-            { color: '#6f7ad3', percentage: 20 }
-        ];
 
         const splitLines = (value) => {
             return String(value || '')
@@ -618,15 +628,56 @@ const app = createApp({
             }
         });
 
+        const fetchOverviewCertificates = singleStatusRequest(async () => {
+            if (adminSessionEnded) return;
+            try {
+                const {data} = await axios.get('/api/certificates', {timeout:5000});
+                if (adminSessionEnded) return;
+                if (!Array.isArray(data)) throw new Error('Invalid certificate list');
+                const pending = [];
+                for (const cert of data) {
+                    if (typeof cert?.id !== 'string' || !/^[a-f0-9]{32}$/.test(cert.id) || typeof cert.domain !== 'string' ||
+                        !Array.isArray(cert.bindings)) throw new Error('Invalid certificate bindings');
+                    for (const binding of cert.bindings) {
+                        if (typeof binding?.target !== 'string' ||
+                            !/^(panel|inbound:[1-9][0-9]*)$/.test(binding.target) ||
+                            typeof binding.pending !== 'boolean') throw new Error('Invalid binding');
+                        if (binding.pending || binding.error) pending.push({
+                            anchor: 'binding-' + cert.id + '-' + binding.target.replace(':','-'),
+                            domain: cert.domain, target: binding.target === 'panel' ? '面板 HTTPS' : '节点 #' + binding.target.slice(8),
+                            failed: Boolean(binding.error)
+                        });
+                    }
+                }
+                overviewCertificates.value = pending;
+            } catch (_) { overviewCertificates.value = null; }
+            finally { if (!adminSessionEnded) overviewCertificatesLoaded.value = true; }
+        });
+
         const refreshStatus = async () => {
             if (!statusRefreshReady.value || adminSessionEnded || refreshingStatus.value) return;
             refreshingStatus.value = true;
             try {
                 // Own both new reads, including any wait behind existing polls.
                 // Each reader keeps its independent Unknown/error semantics.
-                await Promise.all([fetchSystemStatus.fresh(), fetchCoreStatus.fresh()]);
+                await Promise.all([fetchSystemStatus.fresh(), fetchCoreStatus.fresh(),
+                    ...(currentView.value === 'dashboard' ? [fetchOverviewCertificates.fresh()] : [])]);
             } finally {
                 refreshingStatus.value = false;
+            }
+        };
+
+        watch(currentView, (view) => {
+            if (view === 'dashboard' && statusRefreshReady.value) {
+                void fetchOverviewCertificates.fresh();
+            }
+        });
+
+        const retryOverview = async () => {
+            await refreshStatus();
+            if (currentView.value === 'dashboard' && !adminSessionEnded) {
+                await nextTick();
+                document.getElementById('refresh-status')?.focus();
             }
         };
 
@@ -986,17 +1037,33 @@ const app = createApp({
             if (purpose === 'server') openUpstreamExport(row, server);
             else void showQrCode(row);
         };
-        const openNodeSubscription = row => {
+        const focusReturnedNode = async () => {
+            if (currentView.value !== 'inbounds' || adminSessionEnded) return;
+            const entry = globalThis.VUI_NAV?.consumeInboundReturn?.();
+            if (!entry) return;
+            inboundFilter.value = entry.filter;
+            inboundTransport.value = entry.transport;
+            await nextTick();
+            const target = inbounds.value.find(row => row.id === entry.id && row.mutation_revision === entry.revision);
+            (target && document.getElementById(entry.action + '-node-' + entry.id) ||
+                document.getElementById('inbound-title'))?.focus();
+        };
+        const openNodeSubscription = (row, action = 'subscribe') => {
             if (adminSessionEnded || nodeWizard.busy || !Number.isSafeInteger(row?.id) || row.id <= 0 ||
                 !validInboundRevision(row.mutation_revision) || !row.subscription_formats?.includes('mihomo.yaml')) return;
             if (!globalThis.VUI_NAV) location.assign('/workspace#subscriptions');
-            else globalThis.VUI_NAV.navigate('subscriptions', {id:row.id, revision:row.mutation_revision});
+            else globalThis.VUI_NAV.navigate('subscriptions', {id:row.id, revision:row.mutation_revision,
+                ...(currentView.value === 'inbounds' ? {filter:inboundFilter.value, transport:inboundTransport.value, action} : {})});
         };
         watch(currentView, closeNodeWizard, {flush:'sync'});
         clearAdminSecrets.push(closeNodeWizard);
         addEventListener('pagehide', closeNodeWizard);
         if (!globalThis.VUI_NAV) addEventListener('popstate', closeNodeWizard);
         globalThis.VUI_NAV?.guard(canLeaveNodeWizard);
+        addEventListener('vui:subscribe-node', event => {
+            if (currentView.value === 'inbounds') openNodeSubscription(event.detail, 'share');
+        });
+
         const openSimpleOperation = task => {
             if (savingInbound.value || nodeWizard.busy || adminSessionEnded) return;
             if (!globalThis.VUI_SIMPLE_OPERATIONS) { ElMessage.error('操作界面尚未加载，请刷新重试。'); return; }
@@ -1492,13 +1559,16 @@ const app = createApp({
             }
             if (adminSessionEnded) return;
             statusRefreshReady.value = true;
+            const initialCertificates = currentView.value === 'dashboard' ? fetchOverviewCertificates() : Promise.resolve();
             await Promise.all([
                 Promise.all([fetchSystemStatus.fresh(), fetchCoreStatus.fresh()]).then(() => {
                     if (adminSessionEnded) return;
                     statusPollers.push(visibleStatusPoller(fetchSystemStatus, 3000));
                     statusPollers.push(visibleStatusPoller(fetchCoreStatus, 10000));
+                    overviewLoaded.value = true;
                 }),
-                fetchInbounds(),
+                initialCertificates,
+                fetchInbounds().then(focusReturnedNode),
                 fetchRouting(),
                 fetchMihomoWarnings()
             ]);
@@ -1514,6 +1584,11 @@ const app = createApp({
             statusRefreshReady,
             refreshingStatus,
             refreshStatus,
+            retryOverview,
+            overviewLoaded,
+            overviewCertificates,
+            overviewCertificatesLoaded,
+            unconfirmedOverview,
             inbounds,
             inboundListKnown,
             enabledNodeCount,
@@ -1536,7 +1611,6 @@ const app = createApp({
             beforeInboundEditorClose,
             newInbound,
             protocolOptions,
-            colors,
             restartingCore,
             currentUser,
             userForm,

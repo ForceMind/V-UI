@@ -65,7 +65,7 @@ const system = (cpu = 37, memory = 64) => ({os: 'Synthetic Linux', cpu: {percent
     memory: {percent: memory, used: memory + ' MiB', total: '100 MiB'}});
 const cores = () => ({xray: {running: true, binary_exists: true}, 'sing-box': {running: false, binary_exists: true}});
 
-function fixture(t) {
+function fixture(t, {certificates=[]} = {}) {
     let options, state, mounted, timerID = 0;
     const requests = [], errors = [], renderErrors = [], timers = new Map(), listeners = new Set();
     const document = {hidden: false, getElementById() {return null;},
@@ -87,6 +87,8 @@ function fixture(t) {
                 assert.equal(pending(url).length, 0, url + ' must stay single-flight');
                 const gate = deferred(); requests.push({url, config, gate, settled: false}); return gate.promise;
             }
+            if (url === '/api/certificates') return certificates instanceof Error ?
+                Promise.reject(certificates) : Promise.resolve({data:certificates});
             const allowed = ['/api/auth/me', '/api/inbounds', '/api/routing/mihomo/catalog',
                 '/api/routing/mihomo', '/api/routing/mihomo/preview', '/api/subscription/mihomo-warnings'];
             assert(allowed.includes(url), 'Unexpected API read: ' + url);
@@ -138,7 +140,7 @@ function fixture(t) {
         const reading = fire(url === SYSTEM ? 3000 : 10000); await flush();
         settle(url, kind, data); await reading; await flush();
     };
-    return {snapshot, find, mount: () => mounted(), start, read, settle, fire, pending,
+    return {snapshot, find, text:()=>text(host.host), host:host.host, mount: () => mounted(), start, read, settle, fire, pending,
         requests, errors, state, timers, show};
 }
 
@@ -149,34 +151,34 @@ function assertField(f, id, known, content) {
     if (!known) {
         assert.notEqual(node.props.type, 'success', id + ' unknown must not be green');
         if (id.endsWith('-status') && !id.endsWith('-tag'))
-            assert(walk(node).some(child => child.props.role === 'status' && /状态未确认/.test(text(child))),
+            assert(walk(node).some(child => child.props.role === 'status' && /状态未确认|读取中/.test(text(child))),
                 id + ' unknown needs an accessible notice');
     }
 }
 function assertSystemUnknown(f) {
     assert.deepEqual(f.snapshot().percentages, [], 'unconfirmed metrics must not become 0 or stale progress');
-    assertField(f, 'system-status-tag', false, /^System Unknown$/);
-    assertField(f, 'cpu-status', false, /Unknown/); assertField(f, 'memory-status', false, /Unknown/);
-    assert.doesNotMatch(text(f.find('cpu-status')), /2 Cores/);
+    assertField(f, 'system-status-tag', false, /^系统状态未确认$/);
+    assertField(f, 'cpu-status', false, /状态未确认|读取中/); assertField(f, 'memory-status', false, /状态未确认|读取中/);
+    assert.doesNotMatch(text(f.find('cpu-status')), /2 核/);
     assert.doesNotMatch(text(f.find('memory-status')), /MiB/);
 }
 function assertCoreUnknown(f) {
     assert.deepEqual(f.snapshot().tags.filter(tag => /Xray|sing-box/.test(tag.text)).map(tag => tag.text),
-        ['Xray Unknown', 'sing-box Unknown']);
+        ['Xray 状态未确认', 'sing-box 状态未确认']);
     for (const [prefix, name] of [['xray', 'Xray'], ['singbox', 'sing-box']]) {
-        assertField(f, prefix + '-status-tag', false, new RegExp('^' + name + ' Unknown$'));
-        assertField(f, prefix + '-core-status', false, /Unknown/);
-        assert.doesNotMatch(text(f.find(prefix + '-core-status')), /Installed|Missing|Running|Stopped/);
+        assertField(f, prefix + '-status-tag', false, new RegExp('^' + name + ' 状态未确认$'));
+        assertField(f, prefix + '-core-status', false, /状态未确认|读取中/);
+        assert.doesNotMatch(text(f.find(prefix + '-core-status')), /已安装|未安装|运行中|已停止/);
     }
 }
 function assertHealthy(f, percentages = [37, 64]) {
     assert.deepEqual(f.snapshot().percentages, percentages);
-    assertField(f, 'system-status-tag', true, /^Running on Synthetic Linux$/);
-    assertField(f, 'cpu-status', true, /CPU/); assertField(f, 'memory-status', true, /Memory/);
-    assertField(f, 'xray-status-tag', true, /^Xray Running$/);
-    assertField(f, 'singbox-status-tag', true, /^sing-box Stopped$/);
-    assertField(f, 'xray-core-status', true, /Installed Running/);
-    assertField(f, 'singbox-core-status', true, /Installed Stopped/);
+    assertField(f, 'system-status-tag', true, /^运行系统：Synthetic Linux$/);
+    assertField(f, 'cpu-status', true, /CPU/); assertField(f, 'memory-status', true, /内存/);
+    assertField(f, 'xray-status-tag', true, /^Xray 运行中$/);
+    assertField(f, 'singbox-status-tag', true, /^sing-box 已停止$/);
+    assertField(f, 'xray-core-status', true, /运行中 已安装/);
+    assertField(f, 'singbox-core-status', true, /已停止 已安装/);
 }
 
 test('initial, pending and first failed reads remain Unknown without fabricated zeros', async t => {
@@ -184,7 +186,9 @@ test('initial, pending and first failed reads remain Unknown without fabricated 
     assertSystemUnknown(f); assertCoreUnknown(f); const initial = f.snapshot();
     const mounting = f.mount(); await flush();
     assert.equal(f.pending(SYSTEM).length, 1); assert.equal(f.pending(CORE).length, 1);
-    assert.deepEqual(f.snapshot(), initial);
+    assert.deepEqual(f.snapshot().tags, initial.tags);
+    assert.deepEqual(f.snapshot().percentages, initial.percentages);
+    assert.match(f.text(),/面板 读取中…/);
     f.settle(SYSTEM, '500'); f.settle(CORE, '500'); await mounting; await flush();
     assertSystemUnknown(f); assertCoreUnknown(f); assert.equal(f.errors.length, 2);
     assert.deepEqual([...f.timers.values()].map(timer => timer.delay).sort((a, b) => a - b), [3000, 10000]);
@@ -194,8 +198,8 @@ test('ordinary pending polls keep confirmed display, and system failure invalida
     const f = fixture(t); await f.start(); assertHealthy(f); const healthy = f.snapshot();
     const pending = f.fire(3000); await flush(); assert.deepEqual(f.snapshot(), healthy);
     f.settle(SYSTEM, '500'); await pending; await flush(); assertSystemUnknown(f);
-    assertField(f, 'xray-status-tag', true, /^Xray Running$/);
-    assertField(f, 'singbox-core-status', true, /Installed Stopped/);
+    assertField(f, 'xray-status-tag', true, /^Xray 运行中$/);
+    assertField(f, 'singbox-core-status', true, /已停止 已安装/);
     assert.equal(f.state.coreStatus.value.xray.running, true);
     await f.read(SYSTEM, 'ok', system(12, 34)); assertHealthy(f, [12, 34]);
 });
@@ -204,21 +208,21 @@ test('core failure does not invalidate metrics and independent 200 recovery rest
     const f = fixture(t); await f.start(); const pending = f.fire(10000); await flush(); assertHealthy(f);
     f.settle(CORE, '500'); await pending; await flush(); assertCoreUnknown(f);
     assert.deepEqual(f.snapshot().percentages, [37, 64]);
-    assertField(f, 'system-status-tag', true, /^Running on Synthetic Linux$/);
+    assertField(f, 'system-status-tag', true, /^运行系统：Synthetic Linux$/);
     await f.read(CORE, 'ok', cores()); assertHealthy(f);
 });
 
 test('synthetic timeouts invalidate each endpoint, and false or zero values are confirmed facts', async t => {
     const f = fixture(t); await f.start();
     await f.read(SYSTEM, 'timeout'); assertSystemUnknown(f);
-    assertField(f, 'xray-status-tag', true, /^Xray Running$/);
+    assertField(f, 'xray-status-tag', true, /^Xray 运行中$/);
     await f.read(CORE, 'timeout'); assertCoreUnknown(f); assertSystemUnknown(f);
     await f.read(SYSTEM, 'ok', system(0, 0)); assertCoreUnknown(f);
     assert.deepEqual(f.snapshot().percentages, [0, 0]);
     await f.read(CORE, 'ok', {xray: {running: false, binary_exists: false}, 'sing-box': {running: false, binary_exists: false}});
     for (const prefix of ['xray', 'singbox']) {
-        assertField(f, prefix + '-status-tag', true, /Stopped$/);
-        assertField(f, prefix + '-core-status', true, /Missing Stopped/);
+        assertField(f, prefix + '-status-tag', true, /已停止$/);
+        assertField(f, prefix + '-core-status', true, /已停止 未安装/);
     }
 });
 
@@ -228,11 +232,11 @@ test('malformed or missing 200 system fields are Unknown, not coerced percentage
         {os: '', cpu: {percent: -1}, memory: {percent: 101}},
         {os: ' ', cpu: {percent: NaN}, memory: {percent: Infinity}}]) {
         await f.read(SYSTEM, 'ok', data); assertSystemUnknown(f);
-        assertField(f, 'xray-status-tag', true, /^Xray Running$/);
+        assertField(f, 'xray-status-tag', true, /^Xray 运行中$/);
     }
     await f.read(SYSTEM, 'ok', {os: 'Synthetic Linux', cpu: {percent: 0}, memory: {}});
     assert.deepEqual(f.snapshot().percentages, [0]);
-    assertField(f, 'cpu-status', true, /CPU/); assertField(f, 'memory-status', false, /Unknown/);
+    assertField(f, 'cpu-status', true, /CPU/); assertField(f, 'memory-status', false, /状态未确认|读取中/);
     await f.read(SYSTEM, 'ok', system()); assertHealthy(f);
 });
 
@@ -244,10 +248,10 @@ test('missing and nonboolean core fields cannot imply Stopped or Missing after a
         assert.deepEqual(f.snapshot().percentages, [37, 64]);
     }
     await f.read(CORE, 'ok', {xray: {running: false}, 'sing-box': {binary_exists: false}});
-    assertField(f, 'xray-status-tag', true, /^Xray Stopped$/);
-    assertField(f, 'xray-core-status', false, /Unknown Stopped/);
-    assertField(f, 'singbox-status-tag', false, /^sing-box Unknown$/);
-    assertField(f, 'singbox-core-status', false, /Missing Unknown/);
+    assertField(f, 'xray-status-tag', true, /^Xray 已停止$/);
+    assertField(f, 'xray-core-status', false, /已停止 安装状态未确认/);
+    assertField(f, 'singbox-status-tag', false, /^sing-box 状态未确认$/);
+    assertField(f, 'singbox-core-status', false, /状态未确认 未安装/);
     await f.read(CORE, 'ok', cores()); assertHealthy(f);
 });
 
@@ -270,7 +274,26 @@ test('first timeout recovery does not confirm the other endpoint while its initi
     f.settle(SYSTEM, 'timeout'); await flush(); assertSystemUnknown(f); assertCoreUnknown(f);
     assert.equal(f.pending(CORE).length, 1);
     f.settle(CORE, 'ok', cores()); await mounting; await flush();
-    assertSystemUnknown(f); assertField(f, 'xray-status-tag', true, /^Xray Running$/);
+    assertSystemUnknown(f); assertField(f, 'xray-status-tag', true, /^Xray 运行中$/);
     const recovering = f.fire(3000); await flush(); assertSystemUnknown(f);
     f.settle(SYSTEM, 'ok', system()); await recovering; await flush(); assertHealthy(f);
+});
+
+test('only pending certificate bindings link to the exact certificate and target', async t => {
+    const id='a'.repeat(32);
+    const f=fixture(t,{certificates:[{id,domain:'example.invalid',bindings:[
+        {target:'panel',pending:false,error:null},{target:'inbound:7',pending:true,error:'CERTIFICATE_APPLY_FAILED'}
+    ]}]});
+    await f.start();
+    assert.match(f.text(),/1 项/);
+    assert.match(f.text(),/example.invalid · 节点 #7 · 应用未完成/);
+    const links=walk(f.host).flatMap(node=>node.type==='a'?[node.props.href]:[]);
+    assert.deepEqual(links.filter(value=>value?.startsWith('/certificates#')),['/certificates#binding-'+id+'-inbound-7']);
+});
+test('certificate refusal leaves the pending count unknown without hiding CPU/core facts', async t => {
+    const f=fixture(t,{certificates:new Error('403')});
+    await f.start();
+    assertHealthy(f);
+    assert.match(f.text(),/证书状态未确认/);
+    assert.doesNotMatch(f.text(),/暂无待处理项/);
 });

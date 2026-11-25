@@ -65,3 +65,30 @@
     .overview-path li { border-top: 0; border-inline-start: 2px solid #72c2d8; padding: .15rem .65rem; }
     .connection-filters button { min-height: 44px; }
 }
+
+.overview-status-grid,.overview-cards { display:grid; gap:12px; margin:0 0 12px; }
+.overview-status-grid { grid-template-columns:repeat(4,minmax(0,1fr)); padding:14px; background:white; border:1px solid #d0dce6; border-radius:8px; }
+.overview-status-grid>div { display:grid; align-content:start; justify-items:start; gap:3px; min-width:0; }
+.overview-status-grid [data-status="unknown"] span,.overview-feedback { color:#744809; }
+.overview-ok { color:#16604c; }
+.overview-cards { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.dashboard-view .overview-card { margin:0; padding:14px; background:white; border:1px solid #d0dce6; border-radius:8px; min-width:0; }
+.overview-card h2 { font-size:1rem; margin:0 0 10px; }
+.overview-card ul { padding:0; margin:0; list-style:none; }
+.overview-card li { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; overflow-wrap:anywhere; }
+.overview-card li a,.overview-feedback button { min-height:44px; display:inline-flex; align-items:center; }
+.overview-feedback button { padding:0 10px; background:white; border:1px solid #c8a365; border-radius:6px; color:inherit; cursor:pointer; }
+@media(max-width:800px) { .overview-status-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:480px) { .overview-cards { grid-template-columns:minmax(0,1fr); } }
+
+.node-common-actions .el-button { min-height:44px; }
+
+@media(max-width:640px) {
+    .vui-node-list .el-table__header-wrapper { position:absolute; width:1px; height:1px; clip-path:inset(50%); overflow:hidden; }
+    .vui-node-list .el-table__body { display:block; width:100%!important; }
+    .vui-node-list .el-table__body colgroup { display:none; }
+    .vui-node-list .el-table__body tbody,.vui-node-list .el-table__row { display:block; }
+    .vui-node-list .el-table__row { padding:8px 0; border-bottom:1px solid #d0dce6; }
+    .vui-node-list .el-table__row td { display:block; width:auto; border:none; }
+    .vui-node-list .el-table__row .cell { overflow-wrap:anywhere; }
+}

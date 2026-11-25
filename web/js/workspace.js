@@ -3,7 +3,8 @@
     const $ = id => document.getElementById(id);
     let savedRevision = '', savedForm = '', editNumber = 0, catalog = null, issued = null, issuedNumber = 0, busy = false;
     let nodeRevision = '', nodeReadNumber = 0;
-    let formatEligibility = new Map(), handoff = null;
+    let formatEligibility = new Map(), nodeLabels = new Map(), handoff = null, createUncertain = '';
+    const formatLabels = {'mihomo.yaml':'Mihomo YAML', raw:'Base64', 'sing-box.json':'sing-box JSON'};
     let initialized = false, initialAuthExpired = false;
     let workspaceSection = globalThis.VUI_NAV?.route().id === 'subscriptions' ? 'subscriptions' : 'routing';
     const sectionScroll = new Map();
@@ -23,6 +24,16 @@
     globalThis.VUI_NAV?.subscribe(selectSection);
     selectSection();
     if (workspaceSection === 'subscriptions') handoff = globalThis.VUI_NAV?.consumeSubscriptionNode?.() || null;
+    let returnedFromNode = false;
+    if (handoff && document.referrer) {
+        const previous = new URL(document.referrer);
+        returnedFromNode = previous.origin === location.origin && ['/ui','/ui/','/ui/index.html'].includes(previous.pathname);
+    }
+    $('return-nodes').addEventListener('click', event => {
+        if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        if (busy || returnedFromNode) event.preventDefault();
+        if (!busy && returnedFromNode) history.back();
+    });
     const validNodeRevision = value => typeof value === 'string' && value.length === 64 && /^[0-9a-f]{64}$/.test(value);
     const sameSavedRevision = (revision, plan) => typeof revision === 'string' && revision.length === 64 && /^[0-9a-f]{64}$/.test(revision) && plan?.revision === revision;
     const nodeRefreshGuidance = '请点击“刷新节点和订阅”，重新选择节点后创建订阅。';
@@ -114,25 +125,43 @@
     }
     // Invalidate local continuations, not the already-authorized server operation.
     function hideIssued() { issuedNumber++; issued = null; $('issued-urls').value = ''; $('issued').hidden = true; $('download').disabled = true; }
+    function validIssued(value) {
+        if (!Number.isSafeInteger(value?.id) || value.id <= 0 || !value.paths || typeof value.paths !== 'object') return false;
+        const paths=Object.entries(value.paths);
+        return paths.length > 0 && paths.every(([format,path]) => Object.hasOwn(formatLabels,format) &&
+            typeof path === 'string' && /^\/sub\/[A-Za-z0-9_-]+\/(?:mihomo\.yaml|raw|sing-box\.json)$/.test(path) && path.endsWith('/'+format));
+    }
     function showIssued(value) {
         issued = value; $('issued-urls').value = Object.values(value.paths).map(p => location.origin + p).join('\n');
         $('issued').hidden = false; $('download').disabled = busy || !value.paths['mihomo.yaml'];
     }
     const selectedNodes = () => [...document.querySelectorAll('[data-node]:checked')]
         .filter(node => !node.disabled).map(node => Number(node.dataset.node));
-    function unsupportedFormats(ids, formats) {
-        return formats.some(format => ids.some(id => !formatEligibility.get(id)?.includes(format)));
+    const selectedFormats = () => [...document.querySelectorAll('input[name="format"]:checked')].map(input => input.value);
+    function compatibleFormats(ids) {
+        return Object.keys(formatLabels).filter(format => ids.every(id => formatEligibility.get(id)?.includes(format)));
     }
     function updateGrantState() {
-        const ids = selectedNodes();
-        const formats = [...document.querySelectorAll('input[name="format"]:checked')].map(input => input.value);
-        const unsupported = unsupportedFormats(ids, formats);
-        $('delivery-format-note').textContent = unsupported ? '所选节点有不支持的格式。请调整选项后再创建。' : '';
-        $('create-grant').disabled = busy || !validNodeRevision(nodeRevision) || unsupported;
+        const ids = selectedNodes(), formats = selectedFormats(), compatible = compatibleFormats(ids);
+        const conflicts = formats.filter(format => !compatible.includes(format));
+        const restricted = ids.filter(id => conflicts.some(format => !formatEligibility.get(id)?.includes(format)));
+        $('delivery-format-note').textContent = restricted.length ? restricted.map(id => {
+            const available = (formatEligibility.get(id) || []).map(format => formatLabels[format]).filter(Boolean).join('、');
+            return (nodeLabels.get(id) || '节点 #'+id) + '可用格式：' + (available || '无');
+        }).join('。') : '';
+        $('select-compatible-formats').hidden = !conflicts.length || !compatible.length;
+        $('create-grant').disabled = busy || initialAuthExpired || Boolean(createUncertain) ||
+            !validNodeRevision(nodeRevision) || conflicts.length > 0;
+        $('grant-uncertain').hidden = !createUncertain;
+        $('retry-after-review').hidden = createUncertain !== 'reviewed';
+        $('grant-uncertain-note').textContent = createUncertain === 'reviewed' ?
+            '已读取列表。已有记录可用原地址，遗失时可更换。确认没有新记录后再提交。' :
+            '创建结果未确认。请先核对订阅记录。';
     }
     function invalidateNodes() {
         nodeReadNumber++; nodeRevision = '';
         formatEligibility.clear();
+        nodeLabels.clear();
         document.querySelectorAll('[data-node]').forEach(input => { input.checked = false; input.disabled = true; });
         updateGrantState();
     }
@@ -172,6 +201,7 @@
         if (!nodes.length) $('nodes').textContent = '暂无节点，请先到节点管理创建。';
         handoff = null;
         formatEligibility = eligibility;
+        nodeLabels = new Map(nodes.map(node => [node.id,node.remark]));
         nodeRevision = revision; updateGrantState(); return true;
     }
     async function refreshNodesAndGrants() {
@@ -181,7 +211,9 @@
         if (number === nodeReadNumber) notice('节点和订阅已刷新，请重新选择节点。');
     }
     async function refreshGrants() {
-        const values = await json('/api/subscriptions'); $('grants').replaceChildren();
+        const values = await json('/api/subscriptions');
+        if (!Array.isArray(values)) throw new Error('订阅列表读取失败。');
+        $('grants').replaceChildren();
         values.forEach(value => {
             const row = element('tr', null); const name = element('td', value.label);
             name.append(element('small', value.server));
@@ -256,28 +288,70 @@
     }));
     $('refresh-grants').addEventListener('click', () => operation(refreshNodesAndGrants));
     $('grant-form').addEventListener('change', updateGrantState);
-    $('grant-form').addEventListener('submit', event => { event.preventDefault(); operation(async () => {
-        if (!validNodeRevision(nodeRevision)) throw new Error('节点版本尚未就绪。' + nodeRefreshGuidance);
-        const ids = selectedNodes();
-        const formats = [...document.querySelectorAll('input[name="format"]:checked')].map(n => n.value);
-        if (!ids.length || !formats.length) throw new Error('请选择至少一个已验证节点和输出格式');
-        if (unsupportedFormats(ids, formats)) throw new Error('所选节点有不支持的格式。请调整选项后再创建。');
-        hideIssued(); const number = issuedNumber;
-        let result;
-        try {
-            result = await json('/api/subscriptions', {method:'POST', body:JSON.stringify({label:$('label').value.trim(), server:$('server').value.trim(),
-                inbound_ids:ids, formats, expires_days:Number($('days').value), expected_node_revision:nodeRevision})});
-        } catch (error) {
-            if (error.status === 409 && error.message === nodeSelectionConflict) {
-                invalidateNodes(); throw new Error('节点列表已变化。' + nodeRefreshGuidance);
-            }
-            throw error;
+    $('select-compatible-formats').addEventListener('click', () => {
+        const compatible = compatibleFormats(selectedNodes()), selected = selectedFormats();
+        const retain = selected.filter(format => compatible.includes(format));
+        for (const input of document.querySelectorAll('input[name="format"]')) {
+            input.checked = (retain.length ? retain : compatible.slice(0,1)).includes(input.value);
         }
-        if (number === issuedNumber) showIssued(result);
+        updateGrantState();
+    });
+    $('review-uncertain').addEventListener('click', () => operation(async () => {
         await refreshGrants();
-        if (number === issuedNumber) notice('订阅已创建。请保存新地址，不要分享给他人。');
-    }); });
-    $('forget').addEventListener('click', hideIssued);
+        createUncertain = 'reviewed';
+        $('subscription-records').focus?.();
+    }));
+    $('retry-after-review').addEventListener('click', () => {
+        if (busy || createUncertain !== 'reviewed') return;
+        createUncertain = '';
+        updateGrantState();
+        $('create-grant').focus?.();
+    });
+    $('grant-form').addEventListener('submit', event => {
+        event.preventDefault();
+        if (createUncertain || initialAuthExpired) return;
+        operation(async () => {
+            if (!validNodeRevision(nodeRevision)) throw new Error('节点版本尚未就绪。' + nodeRefreshGuidance);
+            const ids = selectedNodes(), formats = selectedFormats();
+            if (!ids.length || !formats.length) throw new Error('请选择至少一个已验证节点和输出格式');
+            const compatible = compatibleFormats(ids);
+            if (formats.some(format => !compatible.includes(format))) throw new Error('所选节点有不支持的格式。请调整选项后再创建。');
+            hideIssued();
+            const number = issuedNumber;
+            let result;
+            try {
+                result = await json('/api/subscriptions', {method:'POST', body:JSON.stringify({label:$('label').value.trim(),
+                    server:$('server').value.trim(), inbound_ids:ids, formats, expires_days:Number($('days').value),
+                    expected_node_revision:nodeRevision})});
+                if (!validIssued(result)) throw new Error('创建响应未确认');
+            } catch (error) {
+                if (error.status === 409 && error.message === nodeSelectionConflict) {
+                    invalidateNodes();
+                    throw new Error('节点列表已变化。' + nodeRefreshGuidance);
+                }
+                if (!initialAuthExpired && number === issuedNumber &&
+                    (!error.status || error.status >= 500 || error.status === 408)) {
+                    createUncertain = 'unconfirmed';
+                    notice('创建结果未确认，请核对订阅记录。', true);
+                    updateGrantState();
+                    $('grant-uncertain-note').focus?.();
+                    return;
+                }
+                throw error;
+            }
+            if (number === issuedNumber) {
+                showIssued(result);
+                $('issued-title').focus?.();
+            }
+            try { await refreshGrants(); }
+            catch (error) {
+                if (!initialAuthExpired) notice(number === issuedNumber ? '订阅已创建，列表读取失败。请保存地址后刷新列表。' : '订阅列表读取失败。', true);
+                return;
+            }
+            if (number === issuedNumber) notice('订阅已创建。导入客户端后刷新。');
+        });
+    });
+    $('forget').addEventListener('click', () => { hideIssued(); updateGrantState(); $('subscription-records').focus?.(); });
     $('copy').addEventListener('click', () => operation(async () => {
         if (!issued) return;
         const number = issuedNumber;

@@ -46,6 +46,7 @@ function matches(el, selector) {
     if(selector==='.zone')return el.className==='zone';
     if(selector==='[data-node]:checked')return Object.hasOwn(el.dataset,'node') && el.checked;
     if(selector==='input[name="format"]:checked')return el.name==='format' && el.checked;
+    if(selector==='input[name="format"]')return el.name==='format';
     const attribute=/^\[data-([a-z]+)(?:="([^"]*)")?\]$/.exec(selector);
     return Boolean(attribute && Object.hasOwn(el.dataset,attribute[1]) && (attribute[2]===undefined || el.dataset[attribute[1]]===attribute[2]));
 }
@@ -238,4 +239,20 @@ test('grant-list failure does not discard a successfully refreshed node frame or
     assert.equal(f.get('create-grant').disabled,false);assert.equal(f.checkboxes()[0].checked,false);
     await f.submit();assert.equal(f.posts().length,0);f.select();await f.submit();
     assert.equal(f.posts().length,1);assert.equal(JSON.parse(f.posts()[0].options.body).expected_node_revision,REPLACEMENT);
+});
+
+test('compatible format action keeps the common selection and never submits by itself',async()=>{
+    const f=await fixture({nodeValues:[node(),node(8,'HTTPUpgrade',{subscription_formats:['mihomo.yaml']})]});
+    f.select();
+    const raw=f.get('raw-format');raw.name='format';raw.value='raw';raw.checked=true;
+    await f.get('grant-form').emit('change');
+    assert.match(f.get('delivery-format-note').textContent,/HTTPUpgrade可用格式：Mihomo YAML/);
+    assert.equal(f.get('create-grant').disabled,true);
+    await f.click('select-compatible-formats');
+    assert.equal(raw.checked,false);
+    assert.equal(f.get('synthetic-format').checked,true);
+    assert.equal(f.get('create-grant').disabled,false);
+    assert.equal(f.posts().length,0);
+    await f.submit();
+    assert.deepEqual(JSON.parse(f.posts()[0].options.body).formats,['mihomo.yaml']);
 });

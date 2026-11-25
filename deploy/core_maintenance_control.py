@@ -1084,7 +1084,7 @@ def recover_restore_backup(ops, *, cancelled=None, _receipt_sha256=None):
     return _run_task(ops, cancelled, None, restore_recovery=True, receipt_sha256=_receipt_sha256)
 
 
-def inspect_core_selection(ops, *, _receipt_sha256):
+def inspect_core_selection(ops, *, _receipt_sha256, include_recovery_kind=False):
     """Read only the locally verified selector, under the installation lock."""
     _need(os.geteuid() == 0, 'ROOT_REQUIRED')
     with ops.installation_lock(_readonly=True):
@@ -1093,9 +1093,23 @@ def inspect_core_selection(ops, *, _receipt_sha256):
         manager, _ = ops.verify_installation()
         _need(manager == 'systemd', 'CORE_SYSTEMD_REQUIRED')
         if ops._load_core_authority(_receipt_sha256).CoreAuthority().backup_recovery() is not None:
-            return {'outcome':'core_pending'}
+            return ({'outcome':'core_pending','recovery_kind':'backup'} if include_recovery_kind else
+                    {'outcome':'core_pending'})
         with _modules(ops) as modules:
-            return modules.selection_files.SelectionFiles().read_status()
+            files = modules.selection_files.SelectionFiles()
+            result = files.read_status()
+            if include_recovery_kind and result['outcome'] == 'core_pending':
+                try:
+                    files.read_switch_recovery()
+                    result['recovery_kind'] = 'switch'
+                except modules.selection_files.CoreSelectionFilesError as error:
+                    if str(error) == 'RECOVERY_OPERATION':
+                        try:
+                            files.read_restore_recovery()
+                            result['recovery_kind'] = 'restore'
+                        except modules.selection_files.CoreSelectionFilesError:
+                            pass
+            return result
 
 
 def backup_components(ops, *, expected_revision, cancelled=None, _receipt_sha256=None):

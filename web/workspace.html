@@ -21,15 +21,21 @@
 </form>
 <div class="preview-head"><strong id="preview-label">尚未生成预览</strong><span id="rule-count"></span></div><div id="warnings"></div><pre id="rule-preview" tabindex="0">修改表单只改变草稿；保存后，客户端刷新订阅才会应用新配置。</pre>
 </section>
-<section id="subscriptions" data-workspace-section="subscriptions"><div class="section-head"><h2>订阅授权</h2><button id="refresh-grants" type="button">刷新节点和订阅</button></div>
+<section id="subscriptions" data-workspace-section="subscriptions"><div class="section-head"><h2>订阅</h2><div class="actions"><a id="return-nodes" href="/ui/#inbounds" data-vui-native>返回节点</a><button id="refresh-grants" type="button">刷新节点和订阅</button></div></div>
 <details><summary>格式与连接说明</summary><p>订阅只包含所选节点。配置资格与设备连通性分别核对。</p><p id="subscription-routing-capability" role="note">普通配置描述入口协议，不证明已应用出口；已应用中转入口本轮仅 TCP，服务器拒绝 UDP，具体以节点的已应用状态为准。普通直连既有能力不变。</p></details>
-<form id="grant-form"><div class="columns"><div><label for="label">订阅名称</label><input id="label" required maxlength="128" placeholder="例如：我的手机"></div><div><label for="server">节点公开连接地址</label><input id="server" required maxlength="253" placeholder="vpn.example.com 或 IP，不含端口和 https://"></div></div>
+<form id="grant-form">
+<fieldset><legend>1. 选择节点</legend><div id="nodes"></div></fieldset>
+<fieldset><legend>2. 输出格式</legend><label class="check"><input type="checkbox" name="format" value="mihomo.yaml" checked>Mihomo YAML</label><label class="check"><input type="checkbox" name="format" value="raw">Base64</label><label class="check"><input type="checkbox" name="format" value="sing-box.json">sing-box JSON</label>
+<p id="delivery-format-note" class="error" role="status" aria-live="polite"></p><button id="select-compatible-formats" type="button" hidden>只选兼容格式</button></fieldset>
+<div class="subscription-check"><h3>3. 核对</h3><div class="columns"><div><label for="label">订阅名称</label><input id="label" required maxlength="128" placeholder="例如：我的手机"></div><div><label for="server">节点公开连接地址</label><input id="server" required maxlength="253" placeholder="vpn.example.com 或 IP，不含端口和 https://"></div></div>
 <p class="hint">这是客户端连接代理节点的地址，不一定等于面板地址；全部选中节点使用此地址。</p>
-<fieldset><legend>选择节点</legend><div id="nodes"></div></fieldset><fieldset><legend>输出格式</legend><label class="check"><input type="checkbox" name="format" value="mihomo.yaml" checked>Mihomo 完整配置</label><label class="check"><input type="checkbox" name="format" value="raw">Base64 节点链接</label><label class="check"><input type="checkbox" name="format" value="sing-box.json">sing-box 连接配置（不含 ToClash 分流）</label></fieldset>
-<p id="delivery-format-note" class="error" role="status" aria-live="polite"></p>
-<div class="actions"><label for="days">有效天数</label><input id="days" type="number" min="1" max="3650" value="90" required><button id="create-grant" class="primary" type="submit">生成订阅地址</button></div></form>
-<div id="issued" hidden><div class="section-head"><strong>新地址只在本次显示</strong><button id="forget" type="button">清除地址显示</button></div><p class="hint">复制到客户端后妥善保管；不写入浏览器存储。遗失时可以轮换，旧地址立即失效。</p><textarea id="issued-urls" readonly rows="4" aria-label="新订阅地址"></textarea><div class="actions"><button id="copy" type="button">复制地址</button><button id="download" type="button">下载 Mihomo YAML</button></div></div>
-<div class="table-wrap"><table><thead><tr><th>名称 / 节点地址</th><th>范围</th><th>状态</th><th>有效期</th><th>操作</th></tr></thead><tbody id="grants"></tbody></table></div>
+<div class="actions"><label for="days">有效天数</label><input id="days" type="number" min="1" max="3650" value="90" required><button id="create-grant" class="primary" type="submit">生成订阅地址</button></div></div></form>
+<div id="grant-uncertain" class="grant-recovery" hidden>
+<p id="grant-uncertain-note" role="status" tabindex="-1"></p>
+<button id="review-uncertain" type="button">核对订阅记录</button>
+<button id="retry-after-review" type="button" hidden>已核对，允许重新提交</button></div>
+<div id="issued" hidden><div class="section-head"><strong id="issued-title" tabindex="-1">新地址只在本次显示</strong><button id="forget" type="button">清除地址显示</button></div><p class="hint">复制到客户端后妥善保管；不写入浏览器存储。遗失时可以轮换，旧地址立即失效。</p><textarea id="issued-urls" readonly rows="4" aria-label="新订阅地址"></textarea><div class="actions"><button id="copy" type="button">复制地址</button><button id="download" type="button">下载 Mihomo YAML</button></div></div>
+<h3 id="subscription-records" tabindex="-1">订阅记录</h3><div class="table-wrap"><table><thead><tr><th>名称 / 节点地址</th><th>范围</th><th>状态</th><th>有效期</th><th>操作</th></tr></thead><tbody id="grants"></tbody></table></div>
 <p class="hint">列表不会再显示原始令牌。轮换使用上方有效天数；修改管理员密码也会让旧订阅失效，重新登录后可按需轮换。</p>
 </section>
 </div><footer>V-UI · ToClash 0.3.8 固定基准 · 此页不连接第三方转换服务</footer></main></body></html>

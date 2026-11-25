@@ -1,8 +1,7 @@
 """Native dashboard geometry in the existing authenticated proxy browser gate.
 
-The baseline fixture is the exact, unmodified web/css/style.css from source
-commit 8ed33ec446c4b03bf3a76ae7847957c7da58fa07. Its hash is checked before use;
-only that same-origin CSS response is replaced, never Vue, app.js or the page.
+The archived circular-gauge stylesheet still has a separate integrity check.
+The live check measures the current status strip and resource cards.
 Normal measurements use actual read-only APIs. Separate, labelled long-text
 and Unknown cases alter GET replies only, not accounts, hosts or controllers.
 """
@@ -103,12 +102,13 @@ def assert_dashboard_responsive_layout(case):
     from playwright.sync_api import expect
 
     page, context = case.page, case.context
-    baseline = read_baseline_css()
     candidate_css = (Path(__file__).parents[1] / 'web/css/style.css').read_bytes()
     style_url = case.base + '/ui/css/style.css'
     shell_url = case.base + '/ui/css/shell.css'
     shell_css = (Path(__file__).parents[1] / 'web/css/shell.css').read_bytes()
-    writes, real_reads, old_css_reads = [], set(), []
+    operations_url = case.base + '/ui/css/simple-operations.css'
+    operations_css = (Path(__file__).parents[1] / 'web/css/simple-operations.css').read_bytes()
+    writes, real_reads = [], set()
     status_paths = ('/api/auth/me', '/api/system/status', '/api/cores/status')
     document_headers = None
     phase = 'actual'
@@ -125,22 +125,10 @@ def assert_dashboard_responsive_layout(case):
             case.assertEqual(response.headers.get('cache-control'), 'no-store', path)
             real_reads.add(path)
 
-    def old_css(route):
-        case.assertEqual(route.request.url, style_url)
-        case.assertEqual(route.request.method, 'GET')
-        old_css_reads.append(route.request.url)
-        response = route.fetch()
-        case.assertEqual(response.status, 200)
-        route.fulfill(response=response, headers=replacement_headers(response.headers), body=baseline)
-
-    def archived_shell(route):
-        response = route.fetch()
-        case.assertEqual(response.status, 200)
-        route.fulfill(response=response, headers=replacement_headers(response.headers), body=b'')
-
-    def visit(expected_css=candidate_css):
+    def visit():
         nonlocal document_headers
-        with page.expect_response(style_url) as stylesheet, page.expect_response(shell_url) as shell_response:
+        with page.expect_response(style_url) as stylesheet, page.expect_response(shell_url) as shell_response, \
+                page.expect_response(operations_url) as operations_response:
             response = page.goto(case.base + '/ui/')
         case.assertEqual(response.status, 200)
         case.assertEqual(response.headers.get('cache-control'), 'no-store')
@@ -152,18 +140,19 @@ def assert_dashboard_responsive_layout(case):
             document_headers = headers
         case.assertEqual(headers, document_headers, 'CSS must not change document policy')
         case.assertEqual(stylesheet.value.status, 200)
-        case.assertEqual(stylesheet.value.body(), expected_css,
-                         'browser must receive exactly the selected stylesheet bytes')
+        case.assertEqual(stylesheet.value.body(), candidate_css)
         case.assertEqual(shell_response.value.status, 200)
-        case.assertEqual(shell_response.value.body(), b'' if expected_css == baseline else shell_css)
+        case.assertEqual(shell_response.value.body(), shell_css)
+        case.assertEqual(operations_response.value.status, 200)
+        case.assertEqual(operations_response.value.body(), operations_css)
         expect(page.locator('.vui-current-user')).to_be_visible()
-        expect(page.locator('.dashboard-view .el-card')).to_have_count(4)
+        expect(page.locator('.dashboard-view .overview-card')).to_have_count(4)
 
     def known():
         for identifier in CARD_IDS:
             expect(page.locator('#' + identifier)).to_have_attribute('data-status', 'known')
         expect(page.locator('.header .vui-current-user')).not_to_have_text('')
-        expect(page.locator('.dashboard-view .el-progress-circle')).to_have_count(2)
+        expect(page.locator('.dashboard-view .el-progress--line')).to_have_count(2)
 
     def box(selector):
         return page.locator(selector).evaluate(MEASURE_BOX)
@@ -199,7 +188,7 @@ def assert_dashboard_responsive_layout(case):
         case.assertLessEqual(dimensions['body'], width + TOLERANCE, dimensions)
         no_horizontal_clip(box('.layout-container > .el-container > .el-main'), 'main', text=False)
 
-        cards = page.locator('.dashboard-view > .el-row > .el-col').evaluate_all('''elements =>
+        cards = page.locator('.overview-status-grid > div').evaluate_all('''elements =>
             elements.map(element => { const r = element.getBoundingClientRect();
                 return {left: r.left, top: r.top, width: r.width}; })''')
         case.assertEqual(len(cards), 4)
@@ -250,21 +239,13 @@ def assert_dashboard_responsive_layout(case):
             card.scroll_into_view_if_needed()
             in_viewport(card, identifier)
             no_horizontal_clip(box('#' + identifier), identifier)
-            for part in ('.el-card__header', '.el-card__body'):
-                measured_part = box('#' + identifier + ' ' + part)
-                no_horizontal_clip(measured_part, identifier + part)
-                case.assertLessEqual(measured_part['scrollHeight'],
-                                     measured_part['clientHeight'] + TOLERANCE,
-                                     identifier + part + ' clips vertically')
+            measured_card = box('#' + identifier)
+            case.assertLessEqual(measured_card['scrollHeight'], measured_card['clientHeight'] + TOLERANCE,
+                                 identifier + ' clips vertically')
             if with_gauges and identifier in CARD_IDS[:2]:
-                body = box('#' + identifier + ' .el-card__body')
-                gauge = box('#' + identifier + ' .el-progress-circle')['rect']
-                case.assertAlmostEqual(gauge['width'], 110 if width <= 800 else 126, delta=TOLERANCE)
-                case.assertAlmostEqual(gauge['height'], 110 if width <= 800 else 126, delta=TOLERANCE)
-                case.assertLessEqual(horizontal_excess(gauge, body['content']), TOLERANCE,
-                                     identifier + ' gauge outside body content')
-                case.assertGreaterEqual(gauge['top'], body['content']['top'] - TOLERANCE)
-                case.assertLessEqual(gauge['bottom'], body['content']['bottom'] + TOLERANCE)
+                gauge = box('#' + identifier + ' .el-progress--line')
+                case.assertGreater(gauge['rect']['width'], 0)
+                case.assertLessEqual(horizontal_excess(gauge['rect'], measured_card['content']), TOLERANCE)
         # Every existing item is reachable by ordinary vertical scrolling.
         if width <= 800:
             page.locator('.vui-menu-toggle').click()
@@ -283,41 +264,6 @@ def assert_dashboard_responsive_layout(case):
 
     page.on('request', observe)
     page.on('response', observe_response)
-    # End setUp's controller before routing; a same-document /ui/ navigation
-    # could otherwise miss the stylesheet interception or retain old polls.
-    page.goto('about:blank')
-    context.route(style_url, old_css)
-    context.route(shell_url, archived_shell)
-    try:
-        page.set_viewport_size({'width': 390, 'height': 844})
-        visit(expected_css=baseline)
-        known()
-        case.assertEqual(old_css_reads, [style_url])
-        case.assertEqual(real_reads, set(status_paths))
-        observed = {}
-        for identifier in CARD_IDS[:2]:
-            body = box('#' + identifier + ' .el-card__body')
-            gauge = box('#' + identifier + ' .el-progress-circle')['rect']
-            case.assertAlmostEqual(gauge['width'], 126, delta=TOLERANCE)
-            case.assertGreater(body['clientWidth'], 0)
-            observed[identifier] = {
-                'gaugeOutsideContentPx': horizontal_excess(gauge, body['content']),
-                'bodyHorizontalOverflowPx': body['scrollWidth'] - body['clientWidth']}
-        case.assertTrue(any(value['gaugeOutsideContentPx'] > TOLERANCE
-                            for value in observed.values()),
-                        'Known original CSS must show a specific finite gauge containment violation')
-        case.assertEqual(case.external, [])
-        case.assertEqual(case.errors, [])
-        print('Dashboard old-CSS native containment: ' + json.dumps(observed, sort_keys=True))
-        page.set_viewport_size({'width': 1440, 'height': 1000})
-        # Archived CSS on the current DOM is a containment control, not the old shell.
-        desktop_before = {'headerHeight': box('.header')['rect']['height'],
-                          'columnWidths': page.locator('.dashboard-view > .el-row > .el-col')
-                          .evaluate_all('elements => elements.map(e => e.getBoundingClientRect().width)')}
-    finally:
-        context.unroute(style_url, old_css)
-        context.unroute(shell_url, archived_shell)
-
     try:
         page.goto('about:blank')
         visit()
@@ -327,7 +273,7 @@ def assert_dashboard_responsive_layout(case):
             if width == 1440:
                 case.assertEqual(len(result['columnWidths']), 4)
                 expect(page.locator('.vui-sidebar')).to_have_css('width', '220px')
-        case.assertEqual(old_css_reads, [style_url], 'candidate must use its actual CSS response')
+        case.assertEqual(real_reads, set(status_paths))
 
         page.set_viewport_size({'width': 390, 'height': 844})
         page.locator('.vui-menu-toggle').click()
@@ -390,7 +336,7 @@ def assert_dashboard_responsive_layout(case):
             for identifier in CARD_IDS:
                 expect(page.locator('#' + identifier)).to_have_attribute('data-status', 'unknown')
                 expect(page.locator('#' + identifier)).to_contain_text('状态未确认')
-            expect(page.locator('.dashboard-view .el-progress-circle')).to_have_count(0)
+            expect(page.locator('.dashboard-view .el-progress--line')).to_have_count(0)
             for viewport in VIEWPORTS:
                 layout(*viewport, with_gauges=False)
         finally:
@@ -401,8 +347,8 @@ def assert_dashboard_responsive_layout(case):
         known()
         case.assertEqual(writes, [], 'layout, resize and navigation must not mutate any API')
         case.assert_private()
-        print('Dashboard new-layout native success: real API / 390:1 / 768:2 / 1440:4 / '
-              'unclipped cards and 126px gauges / normal scroll / proxy and back / '
+        print('Dashboard native success: real API / 390:2 / 768:2 / 1440:4 status columns / '
+              'unclipped cards and linear gauges / normal scroll / proxy and back / '
               'synthetic long-text and Unknown GET presentation / no writes')
     finally:
         page.remove_listener('request', observe)

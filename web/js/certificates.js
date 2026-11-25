@@ -202,7 +202,8 @@
         const applied = /^[a-f0-9]{64}$/.test(binding.applied_revision||'') ? binding.applied_revision : '';
         const result = applied ? (binding.pending ? '旧材料 · '+applied.slice(0,12) :
             '当前材料 · '+applied.slice(0,12)) : '尚无确认记录';
-        const section = element('div',null,{class:'certificate-binding','data-binding-target':binding.target});
+        const section = element('div',null,{class:'certificate-binding','data-binding-target':binding.target,
+            id:'binding-'+cert.id+'-'+binding.target.replace(':','-'),tabindex:'-1'});
         section.append(element('h3',title));
         const facts = element('dl',null,{class:'certificate-binding-state'});
         const issuance = cert.status==='pending'?'续期中 · ':cert.status==='renewal_failed'?'续期失败 · ':
@@ -234,6 +235,7 @@
         }
         card.append(section);
     }
+    let focusBinding = /^#(binding-[a-f0-9]{32}-(?:panel|inbound-[1-9][0-9]*))$/.exec(location.hash || '')?.[1];
     async function refresh(){
         if(!active)return;
         const generation=++refreshGeneration;
@@ -298,6 +300,12 @@
             card.append(actions);$('certificate-list').append(card);
         }
         if(!certs.length)$('certificate-list').append(element('p','尚未申请证书。填写自己的域名并申请正式证书，成功后即可在节点中选择。'));
+        if (focusBinding) {
+            const binding = $(focusBinding);
+            focusBinding = null;
+            if (binding) { binding.focus(); binding.scrollIntoView?.({block:'center'}); }
+            else notice('该证书使用位置已变化。请核对当前列表。',true);
+        }
         writeNeedsReadback=false;
     }
     $('request-certificate').addEventListener('submit',event=>{event.preventDefault();action(async()=>{
