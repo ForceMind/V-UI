@@ -37,7 +37,7 @@ class SecurityCenterBrowserTests(unittest.TestCase):
             root = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix='vui-security-browser-')))
             payload = root / 'payload'
             payload.mkdir()
-            for name in ('app', 'web'):
+            for name in ('app', 'deploy', 'web'):
                 shutil.copytree(source / name, payload / name, ignore=shutil.ignore_patterns('__pycache__', 'vendor'))
             shutil.copyfile(source / 'main.py', payload / 'main.py')
             shutil.copytree(assets, payload / 'web/vendor')
@@ -158,7 +158,7 @@ class InboundEditorBrowserTests(unittest.TestCase):
             root = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix='vui-node-editor-browser-')))
             payload = root / 'payload'
             payload.mkdir()
-            for name in ('app', 'web'):
+            for name in ('app', 'deploy', 'web'):
                 shutil.copytree(source / name, payload / name, ignore=shutil.ignore_patterns('__pycache__', 'vendor'))
             shutil.copyfile(source / 'main.py', payload / 'main.py')
             shutil.copytree(assets, payload / 'web/vendor')

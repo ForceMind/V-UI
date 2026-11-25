@@ -40,7 +40,7 @@ def prepare_browser_payload(destination, assets):
         if not (assets / Path(target).name).is_file():
             raise ValueError('Missing pinned browser frontend asset: ' + target)
     destination.mkdir()
-    for name in ('app', 'web'):
+    for name in ('app', 'deploy', 'web'):
         shutil.copytree(ROOT / name, destination / name,
                         ignore=shutil.ignore_patterns('__pycache__', 'vendor'))
     shutil.copyfile(ROOT / 'main.py', destination / 'main.py')
@@ -164,7 +164,8 @@ class ProxyPageStaticTests(unittest.TestCase):
             self.assertFalse(any('://' in source for source in scripts))
             for source in scripts:
                 self.assertTrue((payload / 'web' / (source.removeprefix('/ui/'))).is_file(), source)
-            for path in ('main.py', 'web/proxy.html', 'web/js/proxy.js', 'web/js/account.js'):
+            for path in ('main.py', 'deploy/core_boot_broker.py', 'web/proxy.html',
+                         'web/js/proxy.js', 'web/js/account.js'):
                 self.assertEqual((payload / path).read_bytes(), (ROOT / path).read_bytes())
         self.assertEqual((ROOT / 'web/index.html').read_bytes(), original)
 
