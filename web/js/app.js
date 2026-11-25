@@ -76,6 +76,7 @@ function endAdminSession(announce = false) {
     if (adminSessionEnded) return;
     adminSessionEnded = true;
     clearAdminSecrets.forEach(clear => clear());
+    globalThis.dispatchEvent?.(new Event('vui:admin-session-ended'));
     statusPollers.forEach(poller => poller.stop());
     try { if (announce && adminSessionChannel) adminSessionChannel.postMessage('session-ended'); } catch (_) {}
     try { if (adminSessionChannel) adminSessionChannel.close(); } catch (_) {}

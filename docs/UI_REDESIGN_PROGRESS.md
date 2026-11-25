@@ -113,3 +113,11 @@ Chromium 测试入口已与现行菜单、原生重启确认和节点操作对�
 确认为同一公开候选分支。首个远端候选 `73146ff` 的 [Chromium 运行](https://github.com/ForceMind/V-UI/actions/runs/45587723236) 在前置单测运行 4017 项后报告 11 项失败，未进入浏览器。原因是分享测试的 Vue 替身未识别默认 watcher，另有两组 Python 包装仍使用旧 TAP 用例数量。已补齐另外两处仅在固定前端依赖验收里会执行的 TAP 数量对应，17 项本地 Python 定向验证通过。
 
 原候选的 [ARM64 尝试 1](https://github.com/ForceMind/V-UI/actions/runs/45587547829/attempts/1) 和 [尝试 2](https://github.com/ForceMind/V-UI/actions/runs/45587547829/attempts/2) 均在无凭据读取 sing-box 官方固定材料时返回 HTTP 403，受管 systemd job 未执行。另一次本机匿名 HEAD 诊断可获取官方元数据及源归档响应，资产 API 返回 302。该诊断未读取归档内容，也无法证明 Actions Runner 的拒绝来源。保留两轮原始结果和现有材料完整性门槛。
+
+## 2026-11-25 双实例 Chromium 续验
+
+隔离提交 `fbf2a08` 的代理与节点浏览器套件 30/30，且每节点直连经真实 API 与固定核心通过。原双实例用例停在旧登录地址，受管证书步骤随原顺序跳过。[运行记录](https://github.com/ForceMind/V-UI/actions/runs/45632595566)
+
+`d5db6a4` 已验证已有 TLS 和 REALITY 节点的分享、TCP URI 复制并导入，以及真实 API 的 YAML 输出导入。新建 TLS 节点的浏览器下载由服务器用途向导进入。REALITY YAML 的双实例浏览器证据覆盖真实 API 到目标面板导入。某一会话撤销场景复现取消页面跳转后分享仍可见，三个向导用例卡在页脚按钮定位。保留原日志，后继提交按原套件补验。[运行记录](https://github.com/ForceMind/V-UI/actions/runs/45664828832)
+
+会话确认结束时主动清理管理员简易操作面板，覆盖链接、二维码、旧请求和复制反馈。真实 Chromium 与受管证书仍须在后继准确提交验收。

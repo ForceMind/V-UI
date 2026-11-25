@@ -533,7 +533,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         wizard.locator('#node-wizard-port').fill(str(unused_port()))
         with page.expect_response(lambda reply: urlparse(reply.url).path == '/api/inbounds'
                                   and reply.request.method == 'POST', timeout=25000) as created:
-            wizard.locator('#node-wizard-create').click()
+            page.locator('#node-wizard-create').click()
         self.assertEqual(created.value.status, 200)
         self.assertGreater(created.value.json()['inbound']['id'], 0)
         expect(wizard.get_by_role('heading', name='节点已创建', exact=True)).to_be_visible()
@@ -966,6 +966,26 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
             self.browser_value('() => { shareCopyAudit.resolve(); }')
             self.assertEqual(self.browser_value('() => shareCopyAudit.writes.length'), 1)
             self.assert_share_cleared()
+        self.page.wait_for_url('**/login')
+        self.assert_share_cleared()
+
+        self.login(self.source)
+        self.open_nodes()
+        with self.held_endpoints('/api/subscription/link/') as pending:
+            with self.page.expect_request(lambda request: urlparse(request.url).path == '/api/subscription/link/1'):
+                self.select_share(1)
+            self.assertEqual(len(pending), 1)
+            response = pending[0].fetch(timeout=10000)
+            try:
+                self.assertEqual(response.status, 200)
+                self.assertIn(UUID, response.text())
+                with self.end_session_with_canceled_navigation():
+                    self.assert_share_cleared()
+                    pending.pop().fulfill(response=response)
+                    self.page.wait_for_timeout(200)
+                    self.assert_share_cleared()
+            finally:
+                response.dispose()
         self.page.wait_for_url('**/login')
         self.assert_share_cleared()
         self.assert_private()

@@ -105,6 +105,8 @@
         }
         destroy() {
             if(this.ended)return;this.ended=true;this.clear();this.host.replaceChildren();
+            if(this.dialog?.open)this.dialog.close();
+            this.opener=null;
             this.guard?.();removeEventListener('pagehide',this.pagehide);
         }
         expire() {
@@ -596,5 +598,8 @@
         if(root.dataset.simpleOperations==='delegated')continue;
         const dialog=root.dataset.simpleOperations==='dialog';mount(root,{dialog,advanced:dialog?row=>{const view=views.get(root);view?.close();if(view?.dialog?.open)return;globalThis.dispatchEvent(new CustomEvent('vui:advanced-node',{detail:row?{id:row.id,revision:row.mutation_revision}:null}));}:null});
     }};
+    addEventListener('vui:admin-session-ended',()=>{
+        for(const view of views.values())if(!view.options.remote)view.destroy();
+    });
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
