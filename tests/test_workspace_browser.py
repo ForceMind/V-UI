@@ -47,16 +47,20 @@ class WorkspaceBrowserTests(unittest.TestCase):
 
         original = create_node('selection-original', 10446, old_uuid)
         original_instance = instance(original)
+        page.goto('about:blank')
+        page.goto(base+'/workspace#routing')
+        expect(page.locator('#proxy')).to_be_visible()
+        page.locator('#proxy').fill('keep-draft-during-node-refresh.example.test')
         with page.expect_response(lambda response: response.url == base+'/api/inbounds'
                                   and response.request.method == 'GET') as displayed:
-            page.goto(base+'/workspace')
+            page.goto(base+'/workspace#subscriptions')
+            page.locator('#refresh-grants').click()
         revision = displayed.value.headers.get('x-vui-node-revision')
         self.assertRegex(revision or '', r'^[0-9a-f]{64}$')
         expect(page.locator('#workspace')).to_be_visible()
         expect(page.locator('#create-grant')).to_be_enabled()
         page.locator('#label').fill('stale-page-new-authorization')
         page.locator('#server').fill('vpn.example.test')
-        page.locator('#proxy').fill('keep-draft-during-node-refresh.example.test')
         selected = page.locator(f'[data-node="{original}"]')
         selected.check()
         for output_format in ('mihomo.yaml', 'raw', 'sing-box.json'):
@@ -159,7 +163,8 @@ class WorkspaceBrowserTests(unittest.TestCase):
             return {value['id']:value for value in values}
 
         def create_from_form(identifier, label):
-            page.goto(base + '/workspace')
+            page.goto('about:blank')
+            page.goto(base + '/workspace#subscriptions')
             expect(page.locator('#workspace')).to_be_visible()
             expect(page.locator('#create-grant')).to_be_enabled()
             page.locator('#label').fill(label)
@@ -490,6 +495,7 @@ with database.SessionLocal() as db:
                             self.assert_reload_preserves_inflight_drafts(page,context,base,dialogs,expect)
                             assert_workspace_preview_revision_races(self,page,context,base,work,dialogs,expect)
                             assert_workspace_initial_read_retry(self,context,base,work,expect)
+                            page.goto(base + '/workspace#subscriptions')
                             page.locator('#label').fill('<img src=x onerror=alert(1)>')
                             page.locator('#server').fill('vpn.example.test');page.locator('[data-node="1"]').check()
                             page.locator('#create-grant').click();expect(page.locator('#issued')).to_be_visible()
@@ -497,9 +503,11 @@ with database.SessionLocal() as db:
                             self.assertEqual(context.request.get(first).status,200)
                             self.assertIn('draft.example.test',context.request.get(first).text())
                             self.assertEqual(page.locator('#grants img').count(),0)
+                            page.goto(base + '/workspace#routing')
                             page.locator('#proxy').fill('updated.example.test');page.locator('#save').click()
                             expect(page.locator('#save-state')).to_contain_text('已与保存版本一致')
                             self.assertIn('updated.example.test',context.request.get(first).text())
+                            page.goto(base + '/workspace#subscriptions')
                             page.reload();expect(page.locator('#workspace')).to_be_visible();expect(page.locator('#issued')).to_be_hidden()
                             page.locator('[data-rotate]').click();expect(page.locator('#issued')).to_be_visible()
                             second=page.locator('#issued-urls').input_value()
