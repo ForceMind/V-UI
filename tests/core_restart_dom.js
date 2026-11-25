@@ -39,9 +39,9 @@ const filename = process.argv[2] || path.join(root, 'web/js/app.js');
 const source = fs.readFileSync(filename, 'utf8');
 const html = fs.readFileSync(process.argv[3] || path.join(root, 'web/index.html'), 'utf8');
 const start = html.indexOf('<div class="header-right">');
-const end = html.indexOf('<el-dropdown', start);
+const end = html.indexOf('</el-header>', start);
 assert(start > 0 && end > start, 'exact shipped restart header exists');
-const header = html.slice(start, end) + '</div>';
+const header = html.slice(start, end);
 assert.equal((header.match(/<el-button\b/g) || []).length, 2);
 const render = V.compile(header, {decodeEntities(value) {
     assert.doesNotMatch(value, /&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]+);/i);
@@ -105,7 +105,7 @@ function fixture(t) {
                     const request = {...deferred(), url}; gets.push(request); return request.promise;
                 }
                 const initial = {'/api/auth/me': {username: 'synthetic'}, '/api/system/status': {},
-                    '/api/inbounds': [], '/api/subscription/mihomo-warnings': [],
+                    '/api/inbounds': [], '/api/certificates': [], '/api/subscription/mihomo-warnings': [],
                     '/api/routing/mihomo/catalog': {categories: [], presets: []},
                     '/api/routing/mihomo': {}, '/api/routing/mihomo/preview': {}};
                 assert(Object.hasOwn(initial, url), 'only existing startup reads: ' + url);
@@ -122,7 +122,7 @@ function fixture(t) {
     app.mount(host.host);
     const button = core => {
         const found = walk(host.host).filter(node => node.type === 'button' &&
-            nodeText(node).trim() === (core === 'xray' ? 'Xray' : 'sing-box'));
+            nodeText(node).trim() === (core === 'xray' ? '重启 Xray' : '重启 sing-box'));
         assert.equal(found.length, 1, 'one actual rendered button for ' + core); return found[0];
     };
     const pending = owner => {

@@ -37,12 +37,25 @@ const deferred = () => {
     return {promise, resolve, reject};
 };
 const sample = () => [
-    {id: 91, remark: 'Cloud ALPHA 北京', port: 10471, core: 'xray', protocol: 'vless', mutation_revision: 'a'.repeat(64)},
-    {id: 72, remark: 'Literal [a-z].* Beta', port: 20472, core: 'sing-box', protocol: 'vmess', mutation_revision: 'b'.repeat(64)},
+    {id: 91, remark: 'Cloud ALPHA 北京', port: 10471, core: 'xray', protocol: 'vless', transport:'tcp', mutation_revision: 'a'.repeat(64)},
+    {id: 72, remark: 'Literal [a-z].* Beta', port: 20472, core: 'sing-box', protocol: 'vmess', transport:'ws', mutation_revision: 'b'.repeat(64)},
     {id: 38, remark: 'Gamma / Local', port: 30473, core: 'xray', protocol: 'trojan', mutation_revision: 'c'.repeat(64)},
 ];
 function renderer() {
-    const node = (type, text = '') => ({type, text, children: [], parent: null, props: {}});
+    const node = (type, text = '') => {
+        const element = {type, text, props: {}, children: [], parent: null};
+        if (type === 'option') Object.defineProperty(element, 'value', {get: () => element.props.value ?? element.text});
+        if (type === 'select') {
+            const listeners = new Map();
+            Object.defineProperty(element, 'options', {get: () => element.children.filter(item => item.type === 'option')});
+            element.addEventListener = (name, listener) => listeners.set(name, listener);
+            element.choose = value => {
+                element.options.forEach(option => {option.selected = option.value === value;});
+                listeners.get('change')({target:element});
+            };
+        }
+        return element;
+    };
     const remove = item => {
         if (item.parent) item.parent.children.splice(item.parent.children.indexOf(item), 1);
         item.parent = null;
@@ -67,7 +80,7 @@ const flush = async () => {for (let n = 0; n < 12; n++) await Promise.resolve();
 
 function fixture(t) {
     let options, state, rows = sample();
-    const reads = [], writes = [], messages = [], confirmations = [], renderErrors = [], held = [];
+    const reads = [], writes = [], messages = [], confirmations = [], simpleOperations = [], renderErrors = [], held = [];
     const pending = new Map();
     const appStub = {component() {}, use() {}, mount() {}};
     const forbidden = label => {throw Error('Unexpected ' + label);};
@@ -80,6 +93,7 @@ function fixture(t) {
         sessionStorage: new Proxy({}, {get() {forbidden('sessionStorage');}}),
         history: new Proxy({}, {get() {forbidden('history');}}),
         setTimeout() {forbidden('new timer');}, clearTimeout() {},
+        VUI_SIMPLE_OPERATIONS: {open(task, target) {simpleOperations.push({task, target}); return Promise.resolve();}},
         Vue: {...V, createApp(value) {options = value; return appStub;}, onMounted() {}},
         ElementPlus: {ElMessage: Object.fromEntries(['error', 'warning', 'success'].map(kind =>
             [kind, message => messages.push({kind, message})])),
@@ -135,7 +149,7 @@ function fixture(t) {
         assert.deepEqual(writes, [], 'this read-only fixture never mutates backend state');
         assert(held.every(gate => gate.settled), 'all held reads must settle');
     });
-    return {state, reads, writes, messages, confirmations, context, host, find, button,
+    return {state, reads, writes, messages, confirmations, simpleOperations, context, host, find, button,
         async load(next = rows) {rows = next; await state.fetchInbounds(); await flush();},
         hold(url = '/api/inbounds') {
             const gate = deferred(), result = {...gate, settled: false};
@@ -226,6 +240,15 @@ test('rendered label, live count, model binding and keyboard-capable clear use t
     f.clear().props.onClick(); await flush();
     assert.equal(f.state.inboundSearch.value, ''); assert.equal(f.clear().props.disabled, true);
     assert.equal(text(f.count()), '显示 3 / 3 个节点'); assert.equal(f.table().props.rows, f.state.inbounds.value);
+    f.find(node => node.type === 'select' && node.props['aria-label'] === '传输方式').choose('WebSocket');
+    await flush();
+    assert.equal(f.state.inboundTransport.value, 'WebSocket');
+    assert.deepEqual(f.ids(), [72]);
+    assert.equal(f.clear().props.disabled, false);
+    f.clear().props.onClick(); await flush();
+    assert.equal(f.state.inboundTransport.value, '');
+    assert.equal(f.table().props.rows, f.state.inbounds.value);
+    assert.deepEqual(f.reads, ['/api/inbounds'], 'local filtering never requests fresh inventory');
 });
 
 test('refresh retains the exact query and current generation, never applying a late stale list', async t => {
@@ -243,24 +266,27 @@ test('refresh retains the exact query and current generation, never applying a l
 test('filtered row edit, export, share and cancelled delete keep the selected original identity', async t => {
     const f = fixture(t), rows = sample();
     // Explicit qualified TLS node for this action fixture; other search cases retain VMess.
-    Object.assign(rows[1], {protocol:'vless', share_eligible:true, upstream_export_eligible:true});
+    Object.assign(rows[1], {protocol:'vless', share_eligible:true, upstream_export_eligible:true,
+        content_revision:'e'.repeat(64)});
     await f.load(rows); await f.search('beta');
     const selected = f.state.inbounds.value[1];
     assert.equal(f.table().children[0].props.row, selected);
-    await f.button('编辑').props.onClick(); await flush();
+    await f.button('完整高级编辑').props.onClick(); await flush();
     assert.equal(f.state.editingInboundId.value, selected.id);
     assert.equal(f.state.newInbound.remark, selected.remark);
     assert.deepEqual(f.reads, ['/api/inbounds', '/api/inbounds/72/editor', '/api/certificates']);
     f.state.closeInboundEditor();
-    f.button('给另一台 V-UI').props.onClick();
+    f.state.openUpstreamExport(f.table().children[0].props.row, 'example.invalid');
     assert.equal(f.state.upstreamExport.inboundId, selected.id); assert.equal(f.state.upstreamExport.name, selected.remark);
     f.state.closeUpstreamExport();
-    const held = f.hold('/api/subscription/link/72'), sharing = f.button('分享给客户端').props.onClick();
-    assert.equal(f.reads.at(-1), '/api/subscription/link/72');
-    f.state.closeQrDialog(); held.resolve({data: 'synthetic-late-link'}); await sharing;
-    assert.equal(f.state.qrLink.value, '');
+    await f.button('分享连接').props.onClick();
+    assert.equal(f.simpleOperations.length,1);
+    assert.equal(f.simpleOperations[0].task,'share');
+    assert.equal(f.simpleOperations[0].target.id,selected.id);
+    assert.equal(f.simpleOperations[0].target.revision,selected.mutation_revision);
+    assert.equal(f.simpleOperations[0].target.contentRevision,selected.content_revision);
     await f.button('删除节点').props.onClick();
-    assert.deepEqual(f.confirmations, ['Delete Literal [a-z].* Beta:20472?']);
+    assert.deepEqual(f.confirmations, ['确认永久删除“Literal [a-z].* Beta”（端口20472）？配置和此节点的连接将删除。']);
     assert.equal(f.state.inbounds.value[1], selected); assert.deepEqual(f.writes, []);
 });
 

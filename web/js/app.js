@@ -200,6 +200,7 @@ const app = createApp({
         };
         const filteredInbounds = computed(() => {
             const query = inboundSearch.value.trim().toLowerCase();
+            if (!query && !inboundTransport.value && inboundFilter.value === 'all') return inbounds.value;
             return inbounds.value.filter(row => {
                 if (inboundTransport.value && transportLabel(row) !== inboundTransport.value) return false;
                 if (inboundFilter.value === 'enabled' && row.enable !== true) return false;

@@ -345,6 +345,8 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
         with PrivateMenuSession(['sudo', '/usr/local/sbin/v-ui'], cwd='/tmp', env=dict(os.environ),
                                 timeout=850, private_values=()) as terminal:
             terminal.expect('请选择: ')
+            terminal.send('20\n')
+            check.assertIn('有待恢复的核心事务。用 18 恢复原核心切换。', terminal.expect('请选择: '))
             terminal.send('18\n')
             terminal.expect('确认执行 [y/N]: ')
             terminal.send('y\n')
@@ -442,6 +444,8 @@ print(json.dumps({'panel':panel,'current':hashlib.sha256(current).hexdigest(),
         with PrivateMenuSession(['sudo','/usr/local/sbin/v-ui'],cwd='/tmp',env=dict(os.environ),
                                 timeout=850,private_values=()) as terminal:
             terminal.expect('请选择: ')
+            terminal.send('20\n')
+            check.assertIn('有待恢复的核心事务。用 18 恢复原服务状态。', terminal.expect('请选择: '))
             terminal.send('18\n')
             terminal.expect('确认执行 [y/N]: ')
             terminal.send('y\n')

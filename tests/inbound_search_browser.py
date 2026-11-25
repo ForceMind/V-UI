@@ -71,7 +71,7 @@ def assert_inbound_local_search(case):
         rendered = page.locator('.el-table__body-wrapper .el-table__row')
         expect(rendered).to_have_count(len(expected))
         case.assertEqual(rendered.evaluate_all(
-            'elements => elements.map(row => Number(row.querySelector("td").textContent.trim()))'),
+            r'elements => elements.map(row => Number(row.querySelector(".node-more p").textContent.match(/^ID (\d+) ·/)[1]))'),
             [row['id'] for row in expected], 'rendered order and IDs must match the filtered inventory')
         identity = page.evaluate('''original => {
             const state = ''' + STATE + ''';
@@ -154,23 +154,24 @@ def assert_inbound_local_search(case):
         search.fill('beta')
         assert_view([selected], inventory, original)
         filtered_row = page.locator('.el-table__body-wrapper .el-table__row')
+        filtered_row.locator('details.node-more > summary').click()
         with page.expect_response(lambda response: urlparse(response.url).path ==
                                   f'/api/inbounds/{selected["id"]}/editor') as editor_response:
-            filtered_row.get_by_role('button', name='编辑', exact=True).click()
+            filtered_row.get_by_role('button', name='完整高级编辑', exact=True).click()
         case.assertEqual(editor_response.value.status, 200)
         case.assertEqual(editor_response.value.json()['id'], selected['id'])
         case.assertEqual(editor_response.value.json()['mutation_revision'], selected['mutation_revision'])
-        editor = page.get_by_role('dialog', name='编辑节点', exact=True)
+        editor = page.get_by_role('dialog', name='编辑节点（高级）', exact=True)
         expect(editor).to_be_visible()
         expect(editor.get_by_placeholder('例如：US-01')).to_have_value(selected['remark'])
         editor.get_by_role('button', name='取消', exact=True).click()
         expect(editor).not_to_be_visible()
         expect(search).to_have_value('beta')
         assert_view([selected], inventory, original)
-        filtered_row.get_by_role('button', name='删除', exact=True).click()
-        confirmation = page.get_by_role('dialog', name='Warning', exact=True)
-        expect(confirmation).to_contain_text(f'{selected["remark"]}:{selected["port"]}')
-        confirmation.get_by_role('button', name='Cancel', exact=True).click()
+        filtered_row.get_by_role('button', name='删除节点', exact=True).click()
+        confirmation = page.get_by_role('dialog', name='删除节点', exact=True)
+        expect(confirmation).to_contain_text(f'“{selected["remark"]}”（端口{selected["port"]}）')
+        confirmation.get_by_role('button', name='取消', exact=True).click()
         expect(confirmation).not_to_be_visible()
         case.assertEqual(rows(), inventory, 'opening/cancelling must preserve all records')
 

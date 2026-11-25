@@ -28,7 +28,7 @@ def assert_core_restart_single_flight(case):
     synthetic_cores = {core: {'running': False, 'binary_exists': False}
                        for core in ('xray', 'sing-box')}
     held_posts, held_status = [], []
-    mocked_posts, writes, unexpected_writes, failed = [], [], [], []
+    mocked_posts, writes, unexpected_writes, failed, confirmations = [], [], [], [], []
     mock_requests = set()
     modes = {'hold_status': False}
     completed_status = []
@@ -75,7 +75,7 @@ def assert_core_restart_single_flight(case):
 
     def button(core):
         return page.locator('.header-right').get_by_role(
-            'button', name='Xray' if core == 'xray' else 'sing-box', exact=True)
+            'button', name='重启 Xray' if core == 'xray' else '重启 sing-box', exact=True)
 
     def assert_pending(owner):
         case.assertEqual(page.evaluate('() => ' + STATE + '.restartingCore'), owner)
@@ -101,14 +101,23 @@ def assert_core_restart_single_flight(case):
             expect(control.locator('.el-icon.is-loading')).to_have_count(0)
         case.assertEqual(page.evaluate('() => ' + STATE + '.restartingCore'), '')
 
+    def confirm_restart(dialog):
+        confirmations.append((dialog.type, dialog.message))
+        if dialog.type == 'confirm' and re.fullmatch(r'重启(xray|sing-box)节点组会短暂中断其中全部节点连接。确认重启？',
+                                                      dialog.message):
+            dialog.accept()
+        else:
+            dialog.dismiss()
+
+    page.on('dialog', confirm_restart)
     page.on('request', observe)
     page.on('requestfailed', observe_failure)
     context.route('**/api/**', intercept)
     try:
         page.goto(case.base + '/ui/')
-        expect(page.get_by_role('menuitem', name='系统状态', exact=True)).to_be_visible()
-        expect(page.locator('#xray-status-tag')).to_have_text('Xray Stopped')
-        expect(page.locator('#singbox-status-tag')).to_have_text('sing-box Stopped')
+        expect(page.locator('.vui-nav-link[data-nav-id="dashboard"]')).to_be_visible()
+        expect(page.locator('#xray-status-tag')).to_have_text('Xray 已停止')
+        expect(page.locator('#singbox-status-tag')).to_have_text('sing-box 已停止')
         assert_idle()
         expected_posts = []
         # Both orderings and normal enabled clicks after success, validation
@@ -132,8 +141,8 @@ def assert_core_restart_single_flight(case):
                 # checks, not calls to a hand-coded component or forced input.
                 case.assertEqual(len(mocked_posts), len(expected_posts))
                 if outcome == 'error':
-                    message = 'Synthetic restart rejection ' + first
-                    held_posts[0].fulfill(status=409, json={'detail': message})
+                    held_posts[0].fulfill(status=409, json={'detail':'Synthetic restart rejection ' + first})
+                    message = core + '重启未完成，请刷新运行状态后核对。'
                     held_posts.pop(0)
                     expect(page.locator('.el-message--error .el-message__content').filter(
                         has_text=re.compile('^' + re.escape(message) + '$')).last).to_be_visible()
@@ -144,10 +153,10 @@ def assert_core_restart_single_flight(case):
                     modes['hold_status'] = True
                     data = {'valid': outcome == 'success'}
                     if outcome == 'invalid':
-                        message = 'Synthetic validation failure ' + first
-                        data['validation_output'] = message
+                        data['validation_output'] = 'Synthetic validation failure ' + first
+                        message = core + '配置检查未通过，运行配置保持，请查看节点设置。'
                     else:
-                        message = core + ' restarted'
+                        message = core + '节点组已重启，请查看实际运行状态'
                     held_posts[0].fulfill(json=data)
                     held_posts.pop(0)
                     wait_until(lambda: bool(held_status), 'restart must await a fresh synthetic status read')
@@ -185,6 +194,8 @@ def assert_core_restart_single_flight(case):
                 case.assertEqual(unexpected_writes, [], 'zero unintended API mutations')
                 case.assertEqual(failed, [], 'no timeout/aborted mock masquerades as recovery')
         case.assertEqual(len(mocked_posts), 8)
+        case.assertEqual(confirmations, [('confirm', f'重启{path.split("/")[-2]}节点组会短暂中断其中全部节点连接。确认重启？')
+                                         for _, path in expected_posts])
         case.assertGreaterEqual(len(completed_status), 6)
         case.assertEqual(case.external, [])
         case.assertEqual(case.errors, [])
@@ -209,6 +220,7 @@ def assert_core_restart_single_flight(case):
             page.goto('about:blank')
         finally:
             context.unroute('**/api/**', intercept)
+            page.remove_listener('dialog', confirm_restart)
             page.remove_listener('request', observe)
             page.remove_listener('requestfailed', observe_failure)
         case.assertEqual(cleanup_errors, [], 'all held synthetic routes must clean up')
