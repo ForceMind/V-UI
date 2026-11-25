@@ -100,7 +100,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 page.get_by_role('button', name='登录面板', exact=True).click()
                 page.wait_for_url('**/ui/#dashboard')
                 check_page_brand(page, base)
-                expect(page.get_by_role('heading', name='V-UI', exact=True)).to_be_visible()
+                expect(page.get_by_role('heading', name='总览', exact=True)).to_be_visible()
                 menu = page.get_by_role('link', name='安全中心', exact=True)
                 def tab_to_menu():
                     expect(menu).to_have_attribute('href', '/ui/#security')
@@ -120,6 +120,10 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                         expect(notice).to_contain_text(text)
                         self.assertIn(text, region.aria_snapshot())
                     expect(region.locator('input, button, form, [role="button"], [role="textbox"]')).to_have_count(0)
+                    links = {'账户与密码': '/account', '订阅授权': '/workspace#subscriptions',
+                             '主机防火墙边界': '/ui/#firewall'}
+                    for label, target in links.items():
+                        expect(region.get_by_role('link', name=label, exact=True)).to_have_attribute('href', target)
                     self.assertEqual(security_requests, [])
                     return notice
                 # Keyboard activation exposes the scope before there is anything to submit.
@@ -242,6 +246,19 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 def open_edit(name):
                     open_node_action(page.locator('.el-table__row').filter(has_text=name), '完整高级编辑')
                     return page.get_by_role('dialog')
+                def cancel_editor(dialog):
+                    def confirm_discard(prompt):
+                        if (prompt.type, prompt.message) == ('confirm', '放弃本次未保存的节点编辑？'):
+                            prompt.accept()
+                        else:
+                            prompt.dismiss()
+                    page.on('dialog', confirm_discard)
+                    try:
+                        dialog.get_by_role('button', name='取消', exact=True).click()
+                    finally:
+                        page.remove_listener('dialog', confirm_discard)
+                    page.wait_for_function("history.state?.modal !== 'inbound-editor'")
+
                 def security(dialog, label):
                     dialog.locator('.el-form-item').filter(has_text='传输安全').locator('.el-select').click()
                     page.get_by_role('option', name=label, exact=True).click()
@@ -283,7 +300,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     # Dismissing a changed draft must leave the stored TLS binding intact.
                     dialog = open_edit(name); security(dialog, label)
                     expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).not_to_be_visible()
-                    dialog.get_by_role('button', name='取消', exact=True).click()
+                    cancel_editor(dialog)
                     self.assertEqual(editor(identity)['certificate_id'], certificate_id)
                     dialog = open_edit(name)
                     expect(dialog).to_contain_text('已有凭据保留在服务器')
@@ -296,7 +313,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     self.assertEqual(rejected.value.status, 409)
                     self.assertEqual(editor(identity)['certificate_id'], certificate_id)
                     # Reopen the stored binding and switch security directly, leaving its selector hidden.
-                    dialog.get_by_role('button', name='取消', exact=True).click(); dialog = open_edit(name)
+                    cancel_editor(dialog); dialog = open_edit(name)
                     security(dialog, label)
                     if value == 'reality':
                         dialog.get_by_placeholder('example.com:443').fill('127.0.0.1:19445')
@@ -344,7 +361,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     select_certificate(dialog)
                     return dialog
                 dialog = vmess_draft()
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 self.assertEqual(len(context.request.get(base + '/api/inbounds').json()), len(identities))
                 dialog = vmess_draft()
                 vmess_id = save(dialog); identities.append(vmess_id)
@@ -361,7 +378,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 expect(dialog.locator('.el-form-item').filter(has_text=re.compile(r'^协议')).locator('.el-select__wrapper')).to_have_class(re.compile(r'is-disabled'))
                 self.assertNotIn(vmess_uuid, dialog.inner_text())
                 dialog.get_by_placeholder('例如：US-01').fill('cancelled-vmess')
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 self.assertEqual(editor(vmess_id)['remark'], 'managed-vmess')
                 page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-vmess')
@@ -371,7 +388,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-vmess-edited')
                 expect(dialog.locator('.el-form-item').filter(has_text='托管证书')).to_contain_text('vpn.example.test')
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     self.assertEqual(db.execute('SELECT settings FROM inbounds WHERE id=?', (vmess_id,)).fetchone()[0], created_credentials[vmess_id])
                 # VLESS WS uses the same visual editor and managed certificate.
@@ -392,7 +409,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     select_certificate(dialog)
                     return dialog
                 dialog = ws_draft()
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 self.assertEqual(len(context.request.get(base + '/api/inbounds').json()), len(identities))
                 dialog = ws_draft()
                 ws_id = save(dialog); identities.append(ws_id)
@@ -437,7 +454,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     self.assertEqual(editor(ws_id), state)
                 dialog.get_by_placeholder('/', exact=True).fill('/cancelled-ws')
                 dialog.get_by_placeholder('可选，例如 cdn.example.com').fill('cancelled.example.test')
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 self.assertEqual(editor(ws_id), state)
                 page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-vless-ws')
@@ -449,7 +466,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-vless-ws-edited')
                 check_ws_prefill(dialog, '/vless-ws-edited', 'cdn2.example.test')
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 self.assertEqual(editor(ws_id)['certificate_id'], certificate_id)
                 self.assertNotIn(ws_uuid, json.dumps(editor(ws_id)))
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
@@ -481,7 +498,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     select_certificate(dialog)
                     return dialog
                 dialog = grpc_draft()
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 self.assertEqual(len(context.request.get(base + '/api/inbounds').json()), len(identities))
                 dialog = grpc_draft()
                 grpc_id = save(dialog); identities.append(grpc_id)
@@ -523,7 +540,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     expect(dialog).to_be_visible()
                     self.assertEqual(editor(grpc_id), state)
                 dialog.get_by_placeholder('TunService').fill('Cancelled.Service')
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 self.assertEqual(editor(grpc_id), state)
                 page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-vless-grpc')
@@ -534,7 +551,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-vless-grpc-edited')
                 check_grpc_prefill(dialog, 'VUI.Edited-2')
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 self.assertEqual(editor(grpc_id)['certificate_id'], certificate_id)
                 self.assertNotIn(grpc_uuid, json.dumps(editor(grpc_id)))
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
@@ -574,7 +591,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     select_certificate(dialog)
                     return dialog
                 dialog = hy2_draft()
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 self.assertEqual(len(context.request.get(base + '/api/inbounds').json()), len(identities))
                 dialog = hy2_draft()
                 hy2_id = save(dialog); identities.append(hy2_id)
@@ -614,7 +631,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 dialog = open_edit('managed-hysteria2')
                 check_hy2_prefill(dialog).fill('Cancelled-HY2-password')
                 dialog.get_by_placeholder('例如：US-01').fill('cancelled-hysteria2')
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 self.assertEqual(check_hy2_state(), hy2_state)
                 page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-hysteria2')
@@ -625,7 +642,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-hysteria2-edited')
                 check_hy2_prefill(dialog)
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     settings, hy2_stream_before = db.execute('SELECT settings,stream_settings FROM inbounds WHERE id=?', (hy2_id,)).fetchone()
                 self.assertEqual(settings, created_credentials[hy2_id])
@@ -671,7 +688,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     select_certificate(dialog)
                     return dialog
                 dialog = tuic_draft()
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 self.assertEqual(len(context.request.get(base + '/api/inbounds').json()), len(identities))
                 dialog = tuic_draft()
                 tuic_id = save(dialog); identities.append(tuic_id)
@@ -718,7 +735,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 dialog = open_edit('managed-tuic')
                 check_tuic_prefill(dialog).fill('Cancelled-TUIC-password')
                 dialog.get_by_placeholder('例如：US-01').fill('cancelled-tuic')
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 self.assertEqual(check_tuic_state(), tuic_state)
                 page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-tuic')
@@ -729,7 +746,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('managed-tuic-edited')
                 check_tuic_prefill(dialog)
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     settings, tuic_stream_before = db.execute('SELECT settings,stream_settings FROM inbounds WHERE id=?', (tuic_id,)).fetchone()
                 self.assertEqual(settings, created_credentials[tuic_id])
@@ -763,7 +780,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                         field = dialog.locator('.el-form-item').filter(has_text=re.compile('^'+label)).locator('input')
                         expect(field).to_have_attribute('type', 'password'); expect(field).to_have_value('')
                     return dialog
-                dialog = reality_draft(); dialog.get_by_role('button', name='取消', exact=True).click()
+                dialog = reality_draft(); cancel_editor(dialog)
                 self.assertEqual(len(context.request.get(base + '/api/inbounds').json()), len(identities))
                 dialog = reality_draft(); reality_id = save(dialog); identities.append(reality_id)
 
@@ -804,7 +821,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 dialog = open_edit('qualified-reality'); check_reality_prefill(dialog)
                 dialog.get_by_placeholder('例如：US-01').fill('cancelled-reality')
                 dialog.locator('.el-form-item').filter(has_text=re.compile('^Short ID')).locator('input').fill('aaaaaaaaaaaaaaaa')
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 self.assertEqual(reality_material(), (reality_settings, reality_stream))
                 page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('qualified-reality'); check_reality_prefill(dialog)
@@ -819,7 +836,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     dialog.get_by_role('button', name='保存并应用', exact=True).click()
                 self.assertEqual(rejected.value.status, 422, rejected.value.text())
                 self.assertEqual(reality_material(), (reality_settings, reality_stream))
-                short_input.fill(''); dialog.get_by_role('button', name='取消', exact=True).click()
+                short_input.fill(''); cancel_editor(dialog)
                 dialog = open_edit('qualified-reality-edited'); check_reality_prefill(dialog)
                 dialog.locator('.el-form-item').filter(has_text='REALITY UUID').locator('input').fill('22222222-2222-4222-8222-222222222222')
                 save(dialog, reality_id)
@@ -840,7 +857,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                     created_credentials[reality_id], reality_stream_before = db.execute('SELECT settings,stream_settings FROM inbounds WHERE id=?', (reality_id,)).fetchone()
                 page.reload(); page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
                 dialog = open_edit('qualified-reality-edited'); check_reality_prefill(dialog)
-                dialog.get_by_role('button', name='取消', exact=True).click()
+                cancel_editor(dialog)
                 # The separate certificate-management card must offer both TLS
                 # targets and complete its existing normal VMess bind action.
                 page.goto(base + '/certificates')
@@ -1070,7 +1087,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                         check_tuic_prefill(dialog)
                     if identity == reality_id:
                         check_reality_prefill(dialog)
-                    dialog.get_by_role('button', name='取消', exact=True).click()
+                    cancel_editor(dialog)
                 with sqlite3.connect(root / 'data/v-ui.db') as db:
                     self.assertEqual(db.execute('SELECT id,settings FROM inbounds ORDER BY id').fetchall(), secrets_before)
                     self.assertEqual(db.execute('SELECT stream_settings FROM inbounds WHERE id=?', (ws_id,)).fetchone()[0], ws_stream_before)
