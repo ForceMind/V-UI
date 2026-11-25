@@ -90,6 +90,8 @@ def assert_inbound_instance_conflicts(case):
 
         # The old displayed row must not open a replacement editor by silently
         # adopting its GET revision. No refresh has happened yet.
+        last_error = page.locator('.el-message--error').last
+        previous_id = last_error.get_attribute('id') if last_error.count() else ''
         with page.expect_response(lambda response: urlparse(response.url).path == f'/api/inbounds/{original["id"]}/editor'
                                   and response.request.method == 'GET') as stale_editor:
             open_node_action(old_row, '完整高级编辑')
@@ -98,8 +100,9 @@ def assert_inbound_instance_conflicts(case):
         case.assertEqual(result['mutation_revision'], replacement['mutation_revision'])
         case.assertFalse(result.get('certificate_binding_unavailable'))
         with report_editor_failure(page):
-            expect(page.locator('.el-message--error').filter(
-                has_text='节点已发生变化，请刷新节点列表并重新打开编辑。')).to_be_visible()
+            expect(last_error).not_to_have_attribute('id', previous_id)
+            expect(last_error).to_have_text(
+                '节点已发生变化，请刷新节点列表并重新打开编辑。')
             expect(editor).not_to_be_visible()
         case.assertEqual(len(writes), 1)
         refresh()

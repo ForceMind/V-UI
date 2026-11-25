@@ -102,9 +102,10 @@ def fixture_snapshot(revision='a' * 64):
 
 @contextmanager
 def report_editor_failure(page):
+    from playwright.sync_api import TimeoutError
     try:
         yield
-    except AssertionError:
+    except (AssertionError, TimeoutError):
         state = page.evaluate("""() => ({
             modal: history.state?.modal ?? null,
             dialogs: [...document.querySelectorAll('[role=dialog]')].filter(
@@ -173,6 +174,11 @@ def open_advanced_node_creation(page):
     expand_details(wizard.locator('details'))
     wizard.get_by_role('button', name='打开高级新建，选择其他协议或配置', exact=True).click()
     page.wait_for_function("history.state?.modal === 'inbound-editor'")
+
+
+def choose_manual_certificate(page, dialog):
+    dialog.locator('.el-form-item').filter(has_text='证书来源').locator('.el-select').click()
+    page.get_by_role('option', name='手工证书路径（保留现有配置）', exact=True).click()
 
 
 def open_node_action(row, label):
@@ -1117,6 +1123,13 @@ rules:
         self.assertEqual(writes, [])
         open_advanced_node_creation(page)
         expect(dialog.locator('#inbound-routing-mode')).to_have_value('inherit')
+        dialog.get_by_text('sing-box', exact=True).click()
+        dialog.locator('.el-form-item').filter(has_text='传输安全').locator('.el-select').click()
+        page.get_by_role('option', name='TLS', exact=True).click()
+        choose_manual_certificate(page, dialog)
+        dialog.get_by_placeholder('example.com', exact=True).fill('entry.example.test')
+        dialog.get_by_placeholder('/etc/letsencrypt/live/example.com/fullchain.pem').fill('/tmp/synthetic-cert.pem')
+        dialog.get_by_placeholder('/etc/letsencrypt/live/example.com/privkey.pem').fill('/tmp/synthetic-key.pem')
         dialog.get_by_placeholder('例如：US-01').fill('created-policy-node')
         dialog.locator('#inbound-routing-mode').select_option('relay')
         fault['save'] = 'saved'
@@ -1140,7 +1153,8 @@ rules:
         editor.locator('#inbound-routing-mode').select_option('direct')
         fault['save'] = 'invalid'
         editor.get_by_role('button', name='保存并应用', exact=True).click()
-        expect(page.locator('.el-message--error')).to_have_text('节点参数不符合要求，请核对端口、协议和安全设置后重试。')
+        expect(page.locator('.el-message--error').last).to_have_text(
+            '节点参数不符合要求，请核对端口、协议和安全设置后重试。')
         expect(editor).to_be_visible()
         expect(editor.locator('#inbound-routing-mode')).to_have_value('direct')
         discard_node_editor(page, editor)
@@ -1233,6 +1247,8 @@ rules:
                     if status == 422:
                         detail = 'Synthetic saving-lock rejection: ' + ('edit' if editing else 'create')
                         reply = held.pop()
+                        last_error = page.locator('.el-message--error').last
+                        previous_id = last_error.get_attribute('id') if last_error.count() else ''
                         with page.expect_response(lambda response: (
                                 response.request.method == method and
                                 urlparse(response.url).path == urlparse(reply.request.url).path)) as rejected:
@@ -1242,7 +1258,8 @@ rules:
                         with report_editor_failure(page):
                             expect(dialog).to_be_visible()
                             expect(dialog.get_by_role('button', name='取消', exact=True)).to_be_enabled()
-                            expect(page.locator('.el-message--error')).to_have_text(
+                            expect(last_error).not_to_have_attribute('id', previous_id)
+                            expect(last_error).to_have_text(
                                 '节点参数不符合要求，请核对端口、协议和安全设置后重试。')
                         check_controls(dialog, False, editing)
                         expect(dialog.get_by_placeholder('例如：US-01')).to_have_value(remark)

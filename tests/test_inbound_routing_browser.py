@@ -24,7 +24,7 @@ import unittest
 
 from scripts.fetch_test_cores import PINS
 from test_proxy_browser import (
-    discard_node_editor, observe_browser_pages, open_advanced_node_creation,
+    choose_manual_certificate, discard_node_editor, observe_browser_pages, open_advanced_node_creation,
     open_node_action, open_proxy_settings, prepare_browser_payload,
 )
 
@@ -252,6 +252,7 @@ class InboundRoutingBrowserTests(unittest.TestCase):
         dialog.locator('#inbound-routing-mode').select_option('direct')
         dialog.locator('.el-form-item').filter(has_text='传输安全').locator('.el-select').click()
         page.get_by_role('option', name='TLS', exact=True).click()
+        choose_manual_certificate(page, dialog)
         dialog.get_by_placeholder('example.com', exact=True).fill('vpn.example.test')
         dialog.get_by_placeholder('/etc/letsencrypt/live/example.com/fullchain.pem').fill(str(certificate))
         dialog.get_by_placeholder('/etc/letsencrypt/live/example.com/privkey.pem').fill(str(key))
