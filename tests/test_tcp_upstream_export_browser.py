@@ -26,6 +26,7 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 import unittest
 
+from test_inbound_routing_browser import stop_owned_panel, verified_dependencies
 from test_proxy_browser import (
     expand_details, observe_browser_pages, open_proxy_settings, prepare_browser_payload,
 )
@@ -449,8 +450,7 @@ class TCPUpstreamExportBrowserTests(unittest.TestCase):
                'VUI_PUBLIC_ORIGIN': '', 'VUI_DATA_DIR': str(directory / 'data'),
                'VUI_BIN_DIR': str(directory / 'no-cores'), 'VUI_CERTIFICATES_ENABLED': '0'}
         if managed_tls:
-            cores = Path(os.environ['VUI_TEST_CORES']).resolve()
-            self.assertTrue((cores / 'sing-box').is_file(), 'fixed sing-box required for wizard')
+            cores, _, _ = verified_dependencies(os.environ)
             env['VUI_BIN_DIR'] = str(cores)
         env['PYTHONPATH'] = os.pathsep.join((str(self.payload), str(ROOT / 'tests')))
         code = '''import json,sys,uvicorn
@@ -478,14 +478,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
 '''
         process = subprocess.Popen([sys.executable, '-B', '-c', code], cwd=self.payload, env=env,
                                    stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT, text=True)
-        def stop():
-            process.terminate()
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
-        self.addCleanup(stop)
+        self.addCleanup(stop_owned_panel, process)
         process.stdin.write(json.dumps({'password': PASSWORD, 'nodes': nodes,
                                         'managed_tls': managed_tls, 'data': str(directory / 'data')}))
         process.stdin.close()
@@ -518,12 +511,39 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         page.locator('.vui-nav-link[data-nav-id="inbounds"]').click()
         expect(page.get_by_role('heading', name='节点管理', exact=True)).to_be_visible()
 
+    def initialize_wizard_routing(self, instance):
+        from playwright.sync_api import expect
+        page, base = instance['page'], instance['base']
+        page.goto(base + '/proxy')
+        open_proxy_settings(page)
+        expect(page.locator('#local-enabled')).not_to_be_checked()
+        expect(page.locator('#relay-enabled')).not_to_be_checked()
+        expect(page.locator('#upstream')).to_have_value('')
+        with page.expect_response(lambda reply: urlparse(reply.url).path == '/api/proxy/check'
+                                  and reply.request.method == 'POST', timeout=20000) as reviewed:
+            page.locator('#apply').click()
+        self.assertEqual(reviewed.value.status, 200, reviewed.value.text())
+        self.assertTrue(reviewed.value.json()['valid'])
+        expect(page.locator('#apply-review')).to_be_visible()
+        with page.expect_response(lambda reply: urlparse(reply.url).path == '/api/proxy/apply'
+                                  and reply.request.method == 'POST', timeout=25000) as applied:
+            page.locator('#confirm-apply').click()
+        self.assertEqual(applied.value.status, 200, applied.value.text())
+        self.assertTrue(applied.value.json()['applied'])
+        snapshot = instance['context'].request.get(base + '/api/proxy/settings').json()
+        self.assertIsNotNone(snapshot['active'])
+        self.assertIsNone(snapshot['pending'])
+        self.assertFalse(snapshot['active']['settings']['local_proxy_enabled'])
+        self.assertFalse(snapshot['active']['settings']['relay_enabled'])
+        self.assertIsNone(snapshot['active']['settings']['selected_upstream_id'])
+
     def open_wizard_export(self):
         from playwright.sync_api import expect
         from loopback_helpers import unused_port
         wizard_panel = self.start_panel('wizard', [], managed_tls=True)
         self.instances['wizard'] = wizard_panel
         self.connect_panel(wizard_panel)
+        self.initialize_wizard_routing(wizard_panel)
         page = wizard_panel['page']
         self.open_nodes(page)
         page.get_by_role('button', name='创建节点', exact=True).click()
@@ -534,7 +554,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         with page.expect_response(lambda reply: urlparse(reply.url).path == '/api/inbounds'
                                   and reply.request.method == 'POST', timeout=25000) as created:
             page.locator('#node-wizard-create').click()
-        self.assertEqual(created.value.status, 200)
+        self.assertEqual(created.value.status, 200, created.value.text())
         self.assertGreater(created.value.json()['inbound']['id'], 0)
         expect(wizard.get_by_role('heading', name='节点已创建', exact=True)).to_be_visible()
         page.locator('#node-wizard-deliver').click()
@@ -717,6 +737,13 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
             while pending:
                 pending.pop().abort()
             page.unroute(matches, hold)
+
+    def wait_for_held_reply(self, pending, page=None):
+        page = page or self.page
+        deadline = time.monotonic() + 10
+        while not pending and time.monotonic() < deadline:
+            page.wait_for_timeout(20)
+        self.assertEqual(len(pending), 1, 'matching browser request was not intercepted')
 
     def release_reply(self, pending, status=200, index=0):
         route = pending.pop(index)
@@ -974,7 +1001,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
         with self.held_endpoints('/api/subscription/link/') as pending:
             with self.page.expect_request(lambda request: urlparse(request.url).path == '/api/subscription/link/1'):
                 self.select_share(1)
-            self.assertEqual(len(pending), 1)
+            self.wait_for_held_reply(pending)
             response = pending[0].fetch(timeout=10000)
             try:
                 self.assertEqual(response.status, 200)
@@ -1143,7 +1170,7 @@ uvicorn.run(main.app,host='127.0.0.1',port=0,proxy_headers=False,use_colors=Fals
                 page.locator('#upstream-export-request').click()
             expect(page.locator('#upstream-export-request')).to_be_disabled()
             page.locator('#upstream-export-request').evaluate('button => {button.click(); button.click()}')
-            self.assertEqual(len(pending), 1)
+            self.wait_for_held_reply(pending, page)
             real = pending[0].fetch(timeout=10000)
             try:
                 self.assertEqual(real.status, 200)
