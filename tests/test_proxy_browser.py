@@ -116,6 +116,34 @@ def open_proxy_settings(page):
     expect(page.locator('#refresh')).to_be_enabled()
 
 
+def confirm_discard(page, button, message):
+    prompts = []
+
+    def acknowledge(dialog):
+        prompts.append((dialog.type, dialog.message))
+        if (dialog.type, dialog.message) == ('confirm', message):
+            dialog.accept()
+        else:
+            dialog.dismiss()
+
+    page.on('dialog', acknowledge)
+    try:
+        button.click()
+    finally:
+        page.remove_listener('dialog', acknowledge)
+    if prompts != [('confirm', message)]:
+        raise AssertionError(f'Expected one discard confirmation, got {prompts!r}')
+
+
+def discard_import(page):
+    confirm_discard(page, page.locator('#close-import'), '放弃本次未保存的上游导入内容？')
+
+
+def discard_node_editor(page, dialog):
+    confirm_discard(page, dialog.get_by_role('button', name='取消', exact=True),
+                    '放弃本次未保存的节点编辑？')
+
+
 def open_advanced_node_creation(page):
     page.get_by_role('button', name='创建节点', exact=True).click()
     wizard = page.locator('#node-wizard')
@@ -645,7 +673,7 @@ rules:
                 # A real disabled control must not post even after repeated native activation.
                 page.locator('#save-import').evaluate('(button) => { button.click(); button.click(); }')
                 self.assertEqual(writes, [])
-                page.locator('#close-import').click()
+                discard_import(page)
                 expect(page.locator('#import-dialog')).not_to_be_visible()
                 expect(page.locator('#import-content')).to_have_value('')
                 expect(page.locator('#import-file')).to_have_value('')
@@ -723,7 +751,7 @@ rules:
         self.assertEqual(clicks, 0)
         self.assertEqual(len(held), 1)
         expect(page.locator('#close-import')).to_be_enabled()
-        page.locator('#close-import').click()
+        discard_import(page)
         expect(page.locator('#import-content')).to_have_value('')
         expect(page.locator('#import-file')).to_have_value('')
         expect(page.locator('#import-name')).to_have_value('')
@@ -739,7 +767,7 @@ rules:
         expect(page.locator('#import-preview')).not_to_be_visible()
         self.assertEqual(len(held), 1)
         self.import_text()
-        page.locator('#close-import').click()
+        discard_import(page)
         expect(page.locator('#import-content')).to_have_value('')
         page.locator('#open-import').click()
         expect(page.locator('#import-preview')).not_to_be_visible()
@@ -1061,7 +1089,7 @@ rules:
         expect(dialog.locator('#inbound-routing-mode')).to_have_value('inherit')
         dialog.locator('#inbound-routing-mode').select_option('relay')
         expect(dialog).to_contain_text('服务器严格核验')
-        dialog.get_by_role('button', name='取消', exact=True).click()
+        discard_node_editor(page, dialog)
         expect(dialog).not_to_be_visible()
         self.assertEqual(writes, [])
         open_advanced_node_creation(page)
@@ -1087,7 +1115,7 @@ rules:
         expect(page.locator('.el-message--error')).to_have_text('节点参数不符合要求，请核对端口、协议和安全设置后重试。')
         expect(editor).to_be_visible()
         expect(editor.locator('#inbound-routing-mode')).to_have_value('direct')
-        editor.get_by_role('button', name='取消', exact=True).click()
+        discard_node_editor(page, editor)
         page.get_by_role('button', name='刷新节点', exact=True).click()
         open_node_action(row, '完整高级编辑')
         expect(editor.locator('#inbound-routing-mode')).to_have_value('relay')
@@ -1146,8 +1174,8 @@ rules:
         try:
             for editing in (False, True):
                 if editing:
-                    row = page.get_by_role('row').filter(has_text='saving-lock-fixture')
-                    open_node_action(row, '完整高级编辑')
+                    node_row = page.get_by_role('row').filter(has_text='saving-lock-fixture')
+                    open_node_action(node_row, '完整高级编辑')
                 else:
                     open_advanced_node_creation(page)
                 dialog = page.get_by_role('dialog', name='编辑节点（高级）' if editing else '高级新建节点', exact=True)

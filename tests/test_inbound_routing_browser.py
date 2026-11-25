@@ -23,7 +23,10 @@ from types import SimpleNamespace
 import unittest
 
 from scripts.fetch_test_cores import PINS
-from test_proxy_browser import observe_browser_pages, open_advanced_node_creation, open_node_action, open_proxy_settings, prepare_browser_payload
+from test_proxy_browser import (
+    discard_node_editor, observe_browser_pages, open_advanced_node_creation,
+    open_node_action, open_proxy_settings, prepare_browser_payload,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -282,7 +285,7 @@ class InboundRoutingBrowserTests(unittest.TestCase):
         open_node_action(row, '完整高级编辑')
         expect(dialog.locator('#inbound-routing-mode')).to_have_value('direct')
         dialog.locator('#inbound-routing-mode').select_option('inherit')
-        dialog.get_by_role('button', name='取消', exact=True).click()
+        discard_node_editor(page, dialog)
         self.assertEqual(read(f'/api/inbounds/{identity}/editor')['routing_mode'], 'direct')
         self.assertIsNone(read('/api/proxy/settings')['active'])
 

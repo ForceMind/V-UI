@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 def assert_inbound_instance_conflicts(case):
     from playwright.sync_api import expect
-    from test_proxy_browser import open_node_action
+    from test_proxy_browser import discard_node_editor, open_node_action
 
     page, context, base = case.page, case.context, case.base
     page.set_viewport_size({'width': 1440, 'height': 1000})
@@ -85,7 +85,7 @@ def assert_inbound_instance_conflicts(case):
         case.assertEqual(rows(), [replacement], 'rejected stale PUT must not alter replacement')
         case.assertEqual(len(writes), 1, 'identity conflict must not retry automatically')
         case.assertEqual(writes[0].post_data_json['expected_instance_revision'], original['mutation_revision'])
-        editor.get_by_role('button', name='取消', exact=True).click()
+        discard_node_editor(page, editor)
         expect(editor).not_to_be_visible()
 
         # The old displayed row must not open a replacement editor by silently
