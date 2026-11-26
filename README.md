@@ -54,11 +54,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/3x-ui-zh-lite
 
 ## 离线安装或更新
 
-传输同一版本的完整安装包与 `.sha256` 到目标服务器。以 `zh.5` 为例：
+传输同一版本的完整安装包与 `.sha256` 到目标服务器。以 `zh.6` 为例：
 
 ```bash
-sha256sum -c 3x-ui-v3.11.0-zh.5-linux-amd64.tar.gz.sha256
-tar -xzf 3x-ui-v3.11.0-zh.5-linux-amd64.tar.gz
+sha256sum -c 3x-ui-v3.11.0-zh.6-linux-amd64.tar.gz.sha256
+tar -xzf 3x-ui-v3.11.0-zh.6-linux-amd64.tar.gz
 cd 3x-ui-zh-lite
 sudo bash install.sh
 ```
@@ -83,7 +83,7 @@ sudo bash install.sh
 
 `zh.5` 修正 `zh.4` 启动时新增的 PostgreSQL、Fail2ban 和证书问答。默认命令直接安装，附加工具可通过显式参数或中文运维菜单使用。源码提交 `7419cedf740d2d49f958a69af132a10c90c2ac32` 构建的安装包在 Ubuntu 24.04 的伪终端下直接装好并通过真实登录，同时通过了两个原版的迁移与故障回退。[本次验收](https://github.com/ForceMind/V-UI/actions/runs/45803743790)
 
-`zh.6` 将默认新装的监听地址与地址输出对齐原版 3.11.0 的无人值守路径。验收检查模拟公网 IP 回包、非回环网卡上的真实登录、显式签发时的 HTTPS 和失败回退，并复验两版原版迁移。
+`zh.6` 将默认新装的监听地址与地址输出对齐原版 3.11.0 的无人值守路径。源码提交 `e3e17a46ac8effa7f3a1a93190b829b1e01c8a00` 构建的包在 Ubuntu 24.04 通过了模拟公网 IPv4 回包、非回环网卡上的真实登录、模拟签发成功时的真实 HTTPS 与签发失败时的本机 HTTP 回退，以及两个原版的迁移与故障回退。[本次验收](https://github.com/ForceMind/V-UI/actions/runs/45807654895)
 
 `zh.3` 修正证书申请前的端口占用检查、绑定结果回读及 HTTPS 就绪检查。全新安装选用证书时，HTTPS 验证失败会保留证书文件并验证已恢复仅本机的 HTTP。独立签发遇到现有监听时保留现有服务，可从证书菜单用 DNS 验证。本地模拟检查覆盖端口占用与空闲、HTTPS 探测参数、证书私钥不匹配、部分写入及重置回读。
 
