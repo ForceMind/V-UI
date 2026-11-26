@@ -29,7 +29,7 @@ require_root() {
 }
 
 lock_operations() {
-    exec 9>/run/lock/x-ui-zh-lite.lock
+    exec 9>/run/x-ui-zh-lite.lock
     flock -n 9 || die '已有安装、更新或运维操作在执行。'
 }
 

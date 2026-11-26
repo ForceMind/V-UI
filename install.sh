@@ -37,7 +37,7 @@ done
 version=$(<"$package/版本")
 [[ $version =~ ^v3\.11\.0-zh\.[1-9][0-9]*$ ]] || die '安装包版本无效。'
 
-exec 9>/run/lock/x-ui-zh-lite.lock
+exec 9>/run/x-ui-zh-lite.lock
 flock -n 9 || die '已有安装、更新或运维操作在执行。'
 
 if [[ $mode == install ]]; then
