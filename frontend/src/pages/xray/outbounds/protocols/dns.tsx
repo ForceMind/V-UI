@@ -68,13 +68,13 @@ export default function DnsFields() {
           >
             <Select options={DNSRuleActions.map((a) => ({ value: a, label: a }))} />
           </FormField>
-          <FormField label="QType" name={['settings', 'rules', index, 'qType']}>
+          <FormField label="查询类型" name={['settings', 'rules', index, 'qType']}>
             <Input placeholder="1,3,23-24" />
           </FormField>
           <FormField label={t('domainName')} name={['settings', 'rules', index, 'domain']}>
             <Input placeholder="domain:example.com" />
           </FormField>
-          <FormField label="RCode" name={['settings', 'rules', index, 'rCode']}>
+          <FormField label="响应码" name={['settings', 'rules', index, 'rCode']}>
             <InputNumber min={0} max={65535} style={{ width: '100%' }} />
           </FormField>
         </div>

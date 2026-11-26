@@ -90,14 +90,14 @@ export function isApiRule(rule: { outboundTag?: string; inboundTag?: string | st
 
 export function ruleCriteriaChips(rule: RuleRow) {
   const chips: { label: string; value?: string }[] = [];
-  if (rule.domain) chips.push({ label: 'Domain', value: rule.domain });
+  if (rule.domain) chips.push({ label: '域名', value: rule.domain });
   if (rule.ip) chips.push({ label: 'IP', value: rule.ip });
-  if (rule.port) chips.push({ label: 'Port', value: rule.port });
-  if (rule.sourceIP) chips.push({ label: 'Src IP', value: rule.sourceIP });
-  if (rule.sourcePort) chips.push({ label: 'Src Port', value: rule.sourcePort });
+  if (rule.port) chips.push({ label: '端口', value: rule.port });
+  if (rule.sourceIP) chips.push({ label: '来源 IP', value: rule.sourceIP });
+  if (rule.sourcePort) chips.push({ label: '来源端口', value: rule.sourcePort });
   if (rule.network) chips.push({ label: 'L4', value: rule.network.toUpperCase() });
-  if (rule.protocol) chips.push({ label: 'Protocol', value: rule.protocol });
-  if (rule.user) chips.push({ label: 'User', value: rule.user });
+  if (rule.protocol) chips.push({ label: '协议', value: rule.protocol });
+  if (rule.user) chips.push({ label: '用户', value: rule.user });
   if (rule.vlessRoute) chips.push({ label: 'VLESS', value: rule.vlessRoute });
   return chips;
 }

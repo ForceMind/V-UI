@@ -44,7 +44,7 @@ export default function CloneInboundModal({
           // Only online nodes are deployable targets: nodes report `unknown`
           // until their first heartbeat, and the backend refuses any status
           // other than online.
-          label: `${n.name}${n.status === 'online' ? '' : ` (${n.status || 'offline'})`}`,
+          label: `${n.name}${n.status === 'online' ? '' : ` (${t(`pages.nodes.statusValues.${n.status || 'offline'}`)})`}`,
           disabled: n.status !== 'online',
         })),
     ],

@@ -10,7 +10,7 @@ export type { HostRecord };
 
 async function fetchHosts(): Promise<HostRecord[]> {
   const msg = await HttpUtil.get('/panel/api/hosts/list', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch hosts');
+  if (!msg?.success) throw new Error(msg?.msg || '获取主机列表失败');
   const validated = parseMsg(msg, HostListSchema, 'hosts/list');
   return Array.isArray(validated.obj) ? validated.obj : [];
 }

@@ -84,7 +84,7 @@ function validateGeckoPacketSize(_rule: unknown, value: unknown): Promise<void> 
   if (parseGeckoPacketSize(value)) return Promise.resolve();
   return Promise.reject(
     new Error(
-      `Use a range like 512-1200 (${GECKO_MIN_PACKET_SIZE}-${GECKO_MAX_PACKET_SIZE}, max ≥ min)`,
+      `请填写范围，例如 512-1200（${GECKO_MIN_PACKET_SIZE}-${GECKO_MAX_PACKET_SIZE}，最大值 ≥ 最小值）`,
     ),
   );
 }
@@ -97,9 +97,7 @@ function validateSalamanderPassword(_rule: unknown, value: unknown): Promise<voi
   const bytes = new TextEncoder().encode(typeof value === 'string' ? value : '').length;
   if (bytes >= SALAMANDER_MIN_PSK_BYTES) return Promise.resolve();
   return Promise.reject(
-    new Error(
-      `Use at least ${SALAMANDER_MIN_PSK_BYTES} bytes; xray-core refuses a shorter password`,
-    ),
+    new Error(`密码至少需要 ${SALAMANDER_MIN_PSK_BYTES} 个字节，xray-core 不接受更短的密码`),
   );
 }
 
@@ -355,7 +353,7 @@ export default function FinalMaskForm({
       )}
       {showQuic && (
         <>
-          <Form.Item label="QUIC Params" htmlFor={`${uid}-quic-params`}>
+          <Form.Item label="QUIC 参数" htmlFor={`${uid}-quic-params`}>
             <Switch
               id={`${uid}-quic-params`}
               checked={hasQuicParams}
@@ -394,7 +392,7 @@ function TcpMasksList({
     <Form.List name={[...base, 'tcp']}>
       {(fields, { add, remove }) => (
         <>
-          <Form.Item label="TCP Masks">
+          <Form.Item label="TCP 混淆">
             <Space>
               <Button
                 type="primary"
@@ -465,7 +463,7 @@ function TcpMaskItem({
   return (
     <div>
       <Divider style={{ margin: 0 }}>
-        TCP Mask {displayIndex}
+        TCP 混淆 {displayIndex}
         <DeleteOutlined
           className="danger-icon"
           role="button"
@@ -476,15 +474,15 @@ function TcpMaskItem({
         />
       </Divider>
 
-      <Form.Item label="Type" name={[fieldName, 'type']}>
+      <Form.Item label="类型" name={[fieldName, 'type']}>
         <Select
           onChange={(v) =>
             form.setFieldValue([...absolutePath, 'settings'], defaultTcpMaskSettings(v))
           }
           options={[
-            { value: 'fragment', label: 'Fragment' },
-            { value: 'header-custom', label: 'Header Custom' },
-            { value: 'sudoku', label: 'Sudoku' },
+            { value: 'fragment', label: '分片' },
+            { value: 'header-custom', label: '自定义头部' },
+            { value: 'sudoku', label: '数独混淆' },
             { value: 'xmc', label: 'XMC (Minecraft)' },
             ...(allowFilter ? [FILTER_MASK_OPTION] : []),
           ]}
@@ -505,7 +503,7 @@ function TcpMaskItem({
             return (
               <>
                 <Form.Item
-                  label="Packets"
+                  label="数据包"
                   name={[fieldName, 'settings', 'packets']}
                   rules={[{ validator: validateFragmentPackets }]}
                 >
@@ -515,23 +513,23 @@ function TcpMaskItem({
                       { value: '1-3', label: '1-3' },
                       { value: '1-5', label: '1-5' },
                     ]}
-                    placeholder="tlshello or n-m, e.g. 1-3"
+                    placeholder="tlshello 或 n-m 范围，例如 1-3"
                   />
                 </Form.Item>
                 <FragmentRangeList
                   listName={[fieldName, 'settings', 'lengths']}
-                  label="Lengths"
-                  placeholder="e.g. 100-200"
+                  label="长度"
+                  placeholder="例如 100-200"
                   minItems={1}
                   validator={validateFragmentLength}
                 />
                 <FragmentRangeList
                   listName={[fieldName, 'settings', 'delays']}
-                  label="Delays"
-                  placeholder="e.g. 10-20 or 0"
+                  label="延迟"
+                  placeholder="例如 10-20 或 0"
                   validator={validateFragmentDelayEntry}
                 />
-                <Form.Item label="Max Split" name={[fieldName, 'settings', 'maxSplit']}>
+                <Form.Item label="最大拆分次数" name={[fieldName, 'settings', 'maxSplit']}>
                   <Input />
                 </Form.Item>
               </>
@@ -551,20 +549,20 @@ function TcpMaskItem({
           if (type === 'xmc') {
             return (
               <>
-                <Form.Item label="Hostname" name={[fieldName, 'settings', 'hostname']}>
-                  <Input placeholder="Server address mimicked in the handshake" />
+                <Form.Item label="主机名" name={[fieldName, 'settings', 'hostname']}>
+                  <Input placeholder="握手时模拟的服务器地址" />
                 </Form.Item>
                 <XmcProfilesList tcpFieldName={fieldName} />
-                <Form.Item label="Password" required>
+                <Form.Item label="密码" required>
                   <Space.Compact block>
                     <Form.Item
                       name={[fieldName, 'settings', 'password']}
                       noStyle
-                      rules={[{ required: true, message: 'Password is required' }]}
+                      rules={[{ required: true, message: '请填写密码' }]}
                     >
                       <Input
-                        aria-label="Password"
-                        placeholder="Obfuscation password"
+                        aria-label="密码"
+                        placeholder="混淆密码"
                         style={{ width: 'calc(100% - 32px)' }}
                       />
                     </Form.Item>
@@ -590,9 +588,9 @@ function TcpMaskItem({
   );
 }
 
-const FILTER_MASK_OPTION = { value: 'filter', label: 'Filter (source IPs)' };
-const FILTER_ALLOWED_HINT = 'Only these sources may connect; empty allows every source';
-const FILTER_BLOCKED_HINT = 'These sources are dropped before any other mask runs';
+const FILTER_MASK_OPTION = { value: 'filter', label: '来源 IP 筛选' };
+const FILTER_ALLOWED_HINT = '仅允许这些来源连接；留空则允许所有来源';
+const FILTER_BLOCKED_HINT = '执行其他混淆前先丢弃这些来源的连接';
 
 // xray-core 26.10.21 (#7206) screens a listener's source IPs; a blocked match wins over an allowed
 // one, and an empty list leaves that side open. Links and JSON subscriptions drop it.
@@ -601,7 +599,7 @@ function FilterMaskSettings({ fieldName }: { fieldName: number }) {
   return (
     <>
       <Form.Item
-        label="Allowed Source IPs"
+        label="允许的来源 IP"
         name={[fieldName, 'settings', 'allowedSourceIPs']}
         tooltip={FILTER_ALLOWED_HINT}
       >
@@ -617,7 +615,7 @@ function FilterMaskSettings({ fieldName }: { fieldName: number }) {
         {FILTER_ALLOWED_HINT}
       </span>
       <Form.Item
-        label="Blocked Source IPs"
+        label="阻止的来源 IP"
         name={[fieldName, 'settings', 'blockedSourceIPs']}
         tooltip={FILTER_BLOCKED_HINT}
       >
@@ -639,22 +637,22 @@ function FilterMaskSettings({ fieldName }: { fieldName: number }) {
 function SudokuSettings({ fieldName }: { fieldName: number }) {
   return (
     <>
-      <Form.Item label="Password" name={[fieldName, 'settings', 'password']}>
+      <Form.Item label="密码" name={[fieldName, 'settings', 'password']}>
         <Input />
       </Form.Item>
       <Form.Item label="ASCII" name={[fieldName, 'settings', 'ascii']}>
         <Input />
       </Form.Item>
-      <Form.Item label="Custom Table" name={[fieldName, 'settings', 'customTable']}>
+      <Form.Item label="自定义表" name={[fieldName, 'settings', 'customTable']}>
         <Input />
       </Form.Item>
-      <Form.Item label="Custom Tables" name={[fieldName, 'settings', 'customTables']}>
+      <Form.Item label="自定义表列表" name={[fieldName, 'settings', 'customTables']}>
         <Select mode="tags" style={{ width: '100%' }} tokenSeparators={[',']} />
       </Form.Item>
-      <Form.Item label="Padding Min" name={[fieldName, 'settings', 'paddingMin']}>
+      <Form.Item label="最小填充长度" name={[fieldName, 'settings', 'paddingMin']}>
         <InputNumber min={0} />
       </Form.Item>
-      <Form.Item label="Padding Max" name={[fieldName, 'settings', 'paddingMax']}>
+      <Form.Item label="最大填充长度" name={[fieldName, 'settings', 'paddingMax']}>
         <InputNumber min={0} />
       </Form.Item>
     </>
@@ -668,7 +666,7 @@ function validateFragmentPackets(_rule: unknown, value: unknown): Promise<void> 
   if (str.length === 0 || str === 'tlshello' || /^\d+-\d+$/.test(str)) {
     return Promise.resolve();
   }
-  return Promise.reject(new Error('Use "tlshello" or a packet range like 1-3'));
+  return Promise.reject(new Error('请填写 tlshello 或数据包范围，例如 1-3'));
 }
 
 // xray refuses only a 0 minimum in the LAST lengths entry; an earlier 0 is an
@@ -676,11 +674,11 @@ function validateFragmentPackets(_rule: unknown, value: unknown): Promise<void> 
 function validateFragmentLength(_rule: unknown, value: unknown, isLast: boolean): Promise<void> {
   const str = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
   if (str.length === 0) {
-    return Promise.reject(new Error('Length is required — remove the row if you do not need it'));
+    return Promise.reject(new Error('请填写长度，不需要时请删除此行'));
   }
   const min = Number(str.split('-')[0]);
   if (!Number.isFinite(min) || min < 0 || (isLast && min === 0)) {
-    return Promise.reject(new Error('Length minimum must be greater than 0 (e.g. 100-200)'));
+    return Promise.reject(new Error('最小长度必须大于 0，例如 100-200'));
   }
   return Promise.resolve();
 }
@@ -691,12 +689,10 @@ function validateFragmentLength(_rule: unknown, value: unknown, isLast: boolean)
 function validateFragmentDelayEntry(_rule: unknown, value: unknown): Promise<void> {
   const str = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
   if (str.length === 0) {
-    return Promise.reject(
-      new Error("Delay is required — remove the row if you don't want a delay"),
-    );
+    return Promise.reject(new Error('请填写延迟，不需要延迟时请删除此行'));
   }
   if (!/^\d+(?:-\d+)?$/.test(str)) {
-    return Promise.reject(new Error('Use a delay in ms, e.g. 10 or 10-20'));
+    return Promise.reject(new Error('请填写延迟（毫秒），例如 10 或 10-20'));
   }
   return Promise.resolve();
 }
@@ -773,11 +769,11 @@ function validateRandRange(_rule: unknown, value: unknown): Promise<void> {
   const str = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
   if (str.length === 0) return Promise.resolve();
   const m = /^(\d{1,3})(?:-(\d{1,3}))?$/.exec(str);
-  if (!m) return Promise.reject(new Error('Use a byte value or range like 0-255'));
+  if (!m) return Promise.reject(new Error('请填写字节值或范围，例如 0-255'));
   const from = Number(m[1]);
   const to = m[2] !== undefined ? Number(m[2]) : from;
   if (from > 255 || to > 255) {
-    return Promise.reject(new Error('randRange bytes must be within 0-255'));
+    return Promise.reject(new Error('随机字节范围必须在 0-255 之间'));
   }
   return Promise.resolve();
 }
@@ -800,12 +796,12 @@ const XMC_USERNAME_PATTERN = /^[A-Za-z0-9_]{3,16}$/;
 
 function validateXmcUsername(_rule: unknown, value: unknown): Promise<void> {
   if (typeof value === 'string' && XMC_USERNAME_PATTERN.test(value)) return Promise.resolve();
-  return Promise.reject(new Error('3-16 characters, letters/digits/underscore only'));
+  return Promise.reject(new Error('长度为 3-16 个字符，仅允许字母、数字和下划线'));
 }
 
 function validateXmcUuid(_rule: unknown, value: unknown): Promise<void> {
   if (typeof value === 'string' && XMC_UUID_PATTERN.test(value.trim())) return Promise.resolve();
-  return Promise.reject(new Error('Enter the profile UUID (dashed or 32 hex characters)'));
+  return Promise.reject(new Error('请填写配置 UUID（带连字符或 32 位十六进制字符）'));
 }
 
 // Each mask needs at least one fully signed profile since xray-core #6487 —
@@ -818,8 +814,8 @@ function XmcProfilesList({ tcpFieldName }: { tcpFieldName: number }) {
       {(profiles, { add, remove }) => (
         <>
           <Form.Item
-            label="Profiles"
-            extra="Signed Minecraft session profiles; resolve the UUID by username, then fetch the profile with unsigned=false."
+            label="配置列表"
+            extra="使用已签名的 Minecraft 会话配置：先根据用户名解析 UUID，再以 unsigned=false 获取配置。"
           >
             <Button
               type="primary"
@@ -832,7 +828,7 @@ function XmcProfilesList({ tcpFieldName }: { tcpFieldName: number }) {
           {profiles.map((profile, idx) => (
             <div key={profile.key}>
               <Divider style={{ margin: 0 }}>
-                Profile {idx + 1}
+                配置 {idx + 1}
                 <DeleteOutlined
                   className="danger-icon"
                   role="button"
@@ -843,7 +839,7 @@ function XmcProfilesList({ tcpFieldName }: { tcpFieldName: number }) {
                 />
               </Divider>
               <Form.Item
-                label="Username"
+                label="用户名"
                 name={[profile.name, 'username']}
                 rules={[{ validator: validateXmcUsername }]}
               >
@@ -857,23 +853,23 @@ function XmcProfilesList({ tcpFieldName }: { tcpFieldName: number }) {
                 <Input placeholder="069a79f4-44e9-4726-a5be-fca90e38aaf5" />
               </Form.Item>
               <Form.Item
-                label="Textures Value"
+                label="纹理值"
                 name={[profile.name, 'texturesValue']}
-                rules={[{ required: true, message: 'Textures value is required' }]}
+                rules={[{ required: true, message: '请填写纹理值' }]}
               >
                 <Input.TextArea
                   autoSize={{ minRows: 2, maxRows: 4 }}
-                  placeholder="Base64 value from the session profile"
+                  placeholder="会话配置中的 Base64 纹理值"
                 />
               </Form.Item>
               <Form.Item
-                label="Textures Signature"
+                label="纹理签名"
                 name={[profile.name, 'texturesSignature']}
-                rules={[{ required: true, message: 'Textures signature is required' }]}
+                rules={[{ required: true, message: '请填写纹理签名' }]}
               >
                 <Input.TextArea
                   autoSize={{ minRows: 2, maxRows: 4 }}
-                  placeholder="Base64 signature from the session profile"
+                  placeholder="会话配置中的 Base64 签名"
                 />
               </Form.Item>
             </div>
@@ -885,29 +881,26 @@ function XmcProfilesList({ tcpFieldName }: { tcpFieldName: number }) {
 }
 
 const HEADER_CUSTOM_TCP_GROUPS = [
-  { key: 'clients', label: 'Clients', tooltip: undefined },
-  { key: 'servers', label: 'Servers', tooltip: undefined },
+  { key: 'clients', label: '客户端', tooltip: undefined },
+  { key: 'servers', label: '服务端', tooltip: undefined },
   {
     key: 'errors',
-    label: 'Errors',
-    tooltip: 'Sent instead when the matching client group fails to match, e.g. an HTTP 400',
+    label: '错误响应',
+    tooltip: '客户端分组匹配失败时发送的响应，例如 HTTP 400',
   },
 ] as const;
 
-const UDP_MODE_HINT =
-  'Prefix puts the header on every packet; Standalone exchanges it as separate handshake packets first';
-const NOISE_RESET_HINT = 'Seconds before the noise is sent to a destination again; 0 sends it once';
+const UDP_MODE_HINT = '前缀模式在每个数据包中添加头部；独立模式先通过单独的握手数据包交换头部';
+const NOISE_RESET_HINT = '再次向同一目标发送噪声的间隔（秒）；0 表示只发送一次';
 const NOISE_SCRIPT_HINT =
-  'A Lua file xray-core runs to build the noise, found beside the xray binary; replaces the noise list';
-const DOH_TLS_HINT =
-  'tlsSettings for the https:// addresses, e.g. a serverName to front the domain';
-const DOH_QUIC_HINT = 'QUIC parameters for an https:// address reached over h3';
-const REUSE_HINT = 'Writes the bytes an earlier item captured under this name';
+  '由 xray-core 执行并生成噪声的 Lua 文件，位于 Xray 程序所在目录；将替代噪声列表';
+const DOH_TLS_HINT = 'HTTPS 地址的 TLS 配置，例如用于域名前置的 serverName';
+const DOH_QUIC_HINT = '通过 HTTP/3 访问 HTTPS 地址时使用的 QUIC 参数';
+const REUSE_HINT = '写入前面条目以此名称捕获的字节';
 const TRANSFORM_HINT =
-  'An expression tree, e.g. {"op": "concat", "args": [{"type": "str", "bytes": "OK "}, {"reuse": "nonce"}]}';
-const CAPTURE_HINT = 'Saves the bytes this item writes or reads under a name later items can reuse';
-const UDP_HOP_HINT =
-  'Advertised to clients as a hop range; the server listens on its own port only';
+  '表达式树，例如 {"op": "concat", "args": [{"type": "str", "bytes": "OK "}, {"reuse": "nonce"}]}';
+const CAPTURE_HINT = '以指定名称保存当前条目写入或读取的字节，供后续条目复用';
+const UDP_HOP_HINT = '向客户端公布端口跳跃范围；服务器仅监听自身端口';
 
 function HeaderCustomGroups({
   tcpFieldName,
@@ -942,7 +935,7 @@ function HeaderCustomGroups({
               {groups.map((group, gi) => (
                 <div key={group.key}>
                   <Divider style={{ margin: 0 }}>
-                    {label} Group {gi + 1}
+                    {label} 分组 {gi + 1}
                     <DeleteOutlined
                       className="danger-icon"
                       role="button"
@@ -955,7 +948,7 @@ function HeaderCustomGroups({
                   <Form.List name={[group.name]}>
                     {(items, { add: addItem, remove: removeItem }) => (
                       <>
-                        <Form.Item label="Items">
+                        <Form.Item label="条目">
                           <Button
                             size="small"
                             icon={<PlusOutlined aria-hidden />}
@@ -1014,7 +1007,7 @@ function UdpMasksList({
     <Form.List name={[...base, 'udp']}>
       {(fields, { add, remove }) => (
         <>
-          <Form.Item label="UDP Masks">
+          <Form.Item label="UDP 混淆">
             <Button
               type="primary"
               size="small"
@@ -1081,7 +1074,7 @@ function UdpMaskItem({
     }
   };
 
-  const udpHopOption = allowUdpHop ? [{ value: 'udphop', label: 'UDP Hop' }] : [];
+  const udpHopOption = allowUdpHop ? [{ value: 'udphop', label: 'UDP 端口跳跃' }] : [];
   const filterOption = allowFilter ? [FILTER_MASK_OPTION] : [];
   const options = isHysteria
     ? [{ value: 'salamander', label: 'Salamander (Hysteria2)' }, ...udpHopOption, ...filterOption]
@@ -1089,13 +1082,13 @@ function UdpMaskItem({
         // Salamander is the mask xray-core's own wireguard finalmask example
         // uses; it stays hysteria-only elsewhere to keep legacy parity.
         ...(isWireguard ? [{ value: 'salamander', label: 'Salamander' }] : []),
-        { value: 'mkcp-legacy', label: 'mKCP Legacy' },
+        { value: 'mkcp-legacy', label: '传统 mKCP' },
         { value: 'xdns', label: 'xDNS' },
         { value: 'xicmp', label: 'xICMP' },
         { value: 'realm', label: 'Realm' },
-        { value: 'header-custom', label: 'Header Custom' },
-        { value: 'noise', label: 'Noise' },
-        { value: 'sudoku', label: 'Sudoku' },
+        { value: 'header-custom', label: '自定义头部' },
+        { value: 'noise', label: '噪声' },
+        { value: 'sudoku', label: '数独混淆' },
         ...udpHopOption,
         ...filterOption,
       ];
@@ -1103,7 +1096,7 @@ function UdpMaskItem({
   return (
     <div>
       <Divider style={{ margin: 0 }}>
-        UDP Mask {displayIndex}
+        UDP 混淆 {displayIndex}
         <DeleteOutlined
           className="danger-icon"
           role="button"
@@ -1114,7 +1107,7 @@ function UdpMaskItem({
         />
       </Divider>
 
-      <Form.Item label="Type" name={[fieldName, 'type']}>
+      <Form.Item label="类型" name={[fieldName, 'type']}>
         <Select onChange={onTypeChange} options={options} />
       </Form.Item>
 
@@ -1138,21 +1131,21 @@ function UdpMaskItem({
           if (type === 'mkcp-legacy') {
             return (
               <>
-                <Form.Item label="Header" name={[fieldName, 'settings', 'header']}>
+                <Form.Item label="头部" name={[fieldName, 'settings', 'header']}>
                   <Select
                     options={[
-                      { value: '', label: 'Original / AES-128-GCM' },
+                      { value: '', label: '原始格式 / AES-128-GCM' },
                       { value: 'dns', label: 'DNS' },
                       { value: 'dtls', label: 'DTLS 1.2' },
                       { value: 'srtp', label: 'SRTP' },
                       { value: 'utp', label: 'uTP' },
-                      { value: 'wechat', label: 'WeChat Video' },
+                      { value: 'wechat', label: '微信视频' },
                       { value: 'wireguard', label: 'WireGuard' },
                     ]}
                   />
                 </Form.Item>
-                <Form.Item label="Value" name={[fieldName, 'settings', 'value']}>
-                  <Input placeholder="password (AES-128-GCM) or domain (DNS header)" />
+                <Form.Item label="值" name={[fieldName, 'settings', 'value']}>
+                  <Input placeholder="密码（AES-128-GCM）或域名（DNS 头部）" />
                 </Form.Item>
               </>
             );
@@ -1168,13 +1161,13 @@ function UdpMaskItem({
             return (
               <>
                 <Form.Item
-                  label="Dgram"
+                  label="数据报套接字"
                   name={[fieldName, 'settings', 'dgram']}
                   valuePropName="checked"
                 >
                   <Switch />
                 </Form.Item>
-                <Form.Item label="IPs" name={[fieldName, 'settings', 'ips']}>
+                <Form.Item label="IP 地址" name={[fieldName, 'settings', 'ips']}>
                   <Select mode="tags" style={{ width: '100%' }} tokenSeparators={[',']} />
                 </Form.Item>
               </>
@@ -1186,7 +1179,7 @@ function UdpMaskItem({
                 <Form.Item label="URL" name={[fieldName, 'settings', 'url']}>
                   <Input placeholder="realm://token@host:port/id" />
                 </Form.Item>
-                <Form.Item label="STUN Servers" name={[fieldName, 'settings', 'stunServers']}>
+                <Form.Item label="STUN 服务器" name={[fieldName, 'settings', 'stunServers']}>
                   <Select
                     mode="tags"
                     style={{ width: '100%' }}
@@ -1194,44 +1187,44 @@ function UdpMaskItem({
                     placeholder="host:port"
                   />
                 </Form.Item>
-                <Form.Item label="IP Mode" name={[fieldName, 'settings', 'ipMode']}>
+                <Form.Item label="IP 模式" name={[fieldName, 'settings', 'ipMode']}>
                   <Select
                     allowClear
-                    placeholder="dual"
+                    placeholder="双栈"
                     options={[
-                      { value: 'dual', label: 'Dual' },
+                      { value: 'dual', label: '双栈' },
                       { value: 'v4', label: 'IPv4' },
                       { value: 'v6', label: 'IPv6' },
                     ]}
                   />
                 </Form.Item>
                 <Form.Item
-                  label="Port Mapping (UPnP / NAT-PMP)"
+                  label="端口映射（UPnP / NAT-PMP）"
                   name={[fieldName, 'settings', 'portMapping', 'enabled']}
                   valuePropName="checked"
                 >
                   <Switch />
                 </Form.Item>
                 <Form.Item
-                  label="Mapping Timeout (s)"
+                  label="映射超时（秒）"
                   name={[fieldName, 'settings', 'portMapping', 'timeout']}
                 >
-                  <InputNumber min={0} placeholder="10 = default" />
+                  <InputNumber min={0} placeholder="默认值：10" />
                 </Form.Item>
                 <Form.Item
-                  label="Mapping Lifetime (s)"
+                  label="映射有效期（秒）"
                   name={[fieldName, 'settings', 'portMapping', 'lifetime']}
                 >
-                  <InputNumber min={0} placeholder="600 = default" />
+                  <InputNumber min={0} placeholder="默认值：600" />
                 </Form.Item>
                 <Divider plain style={{ margin: '8px 0' }}>
-                  TLS (optional)
+                  TLS（可选）
                 </Divider>
                 <Form.Item
-                  label="Server Name"
+                  label="服务器名称"
                   name={[fieldName, 'settings', 'tlsConfig', 'serverName']}
                 >
-                  <Input placeholder="SNI for the realm server (leave empty to skip TLS)" />
+                  <Input placeholder="Realm 服务器的 SNI，留空则跳过 TLS" />
                 </Form.Item>
                 <Form.Item label="ALPN" name={[fieldName, 'settings', 'tlsConfig', 'alpn']}>
                   <Select
@@ -1244,14 +1237,11 @@ function UdpMaskItem({
                     ]}
                   />
                 </Form.Item>
-                <Form.Item
-                  label="Fingerprint"
-                  name={[fieldName, 'settings', 'tlsConfig', 'fingerprint']}
-                >
+                <Form.Item label="指纹" name={[fieldName, 'settings', 'tlsConfig', 'fingerprint']}>
                   <Select allowClear style={{ width: '100%' }} options={UTLS_FINGERPRINT_OPTIONS} />
                 </Form.Item>
                 <Form.Item
-                  label="Allow Insecure"
+                  label="允许不安全连接"
                   name={[fieldName, 'settings', 'tlsConfig', 'allowInsecure']}
                   valuePropName="checked"
                 >
@@ -1305,11 +1295,11 @@ function SalamanderUdpMaskSettings({
     <>
       <Form.Item
         htmlFor={`${uid}-salamander-mode`}
-        label="Mode"
+        label="模式"
         extra={
           mode === 'gecko'
-            ? 'Salamander plus Gecko: splits each packet into random-padded fragments sized within the range below, defeating packet-length fingerprinting. Stored as Salamander with packetSize.'
-            : 'Scrambles each packet into random-looking bytes.'
+            ? 'Salamander 与 Gecko 组合：将每个数据包拆分为随机填充分片，大小限制在下方范围内，以抵抗包长指纹识别。保存为含 packetSize 的 Salamander 配置。'
+            : '将每个数据包混淆为看似随机的字节。'
         }
       >
         <Select
@@ -1333,12 +1323,12 @@ function SalamanderUdpMaskSettings({
           }}
           options={[
             { value: 'salamander', label: 'Salamander' },
-            { value: 'gecko', label: 'Gecko experimental' },
+            { value: 'gecko', label: 'Gecko（实验性）' },
           ]}
         />
       </Form.Item>
 
-      <Form.Item label="Password">
+      <Form.Item label="密码">
         <Space.Compact block>
           <Form.Item
             name={[fieldName, 'settings', 'password']}
@@ -1346,8 +1336,8 @@ function SalamanderUdpMaskSettings({
             rules={[{ validator: validateSalamanderPassword }]}
           >
             <Input
-              aria-label="Password"
-              placeholder="Obfuscation password"
+              aria-label="密码"
+              placeholder="混淆密码"
               style={{ width: 'calc(100% - 32px)' }}
             />
           </Form.Item>
@@ -1366,10 +1356,10 @@ function SalamanderUdpMaskSettings({
 
       {mode === 'gecko' && (
         <Form.Item
-          label="Packet size"
+          label="数据包大小"
           name={[fieldName, 'settings', 'packetSize']}
           rules={[{ validator: validateGeckoPacketSize }]}
-          extra="Serialized as a string range, for example 512-1200."
+          extra="保存为字符串范围，例如 512-1200。"
         >
           <GeckoPacketSizeInput />
         </Form.Item>
@@ -1403,7 +1393,7 @@ function GeckoPacketSizeInput({
         style={{ width: '50%' }}
       />
       <InputNumber
-        aria-label="Packet size max"
+        aria-label="数据包大小上限"
         prefix="Max"
         min={GECKO_MIN_PACKET_SIZE}
         max={GECKO_MAX_PACKET_SIZE}
@@ -1430,14 +1420,14 @@ function UdpHeaderCustom({
   const uid = useId();
   return (
     <>
-      <Form.Item label="Mode" name={[udpFieldName, 'settings', 'mode']} tooltip={UDP_MODE_HINT}>
+      <Form.Item label="模式" name={[udpFieldName, 'settings', 'mode']} tooltip={UDP_MODE_HINT}>
         <Select
           aria-describedby={`${uid}-mode-hint`}
           allowClear
-          placeholder="Prefix"
+          placeholder="前缀"
           options={[
-            { value: 'prefix', label: 'Prefix' },
-            { value: 'standalone', label: 'Standalone' },
+            { value: 'prefix', label: '前缀' },
+            { value: 'standalone', label: '独立握手' },
           ]}
         />
       </Form.Item>
@@ -1504,7 +1494,7 @@ function XdnsSettings({ udpFieldName }: { udpFieldName: number }) {
       <Form.List name={[udpFieldName, 'settings', 'domains']}>
         {(domains, { add, remove }) => (
           <>
-            <Form.Item label="Domains">
+            <Form.Item label="域名列表">
               <Button
                 type="primary"
                 size="small"
@@ -1516,7 +1506,7 @@ function XdnsSettings({ udpFieldName }: { udpFieldName: number }) {
             {domains.map((domain, di) => (
               <div key={domain.key}>
                 <Divider style={{ margin: 0 }}>
-                  Domain {di + 1}
+                  域名 {di + 1}
                   <DeleteOutlined
                     className="danger-icon"
                     role="button"
@@ -1526,7 +1516,7 @@ function XdnsSettings({ udpFieldName }: { udpFieldName: number }) {
                     onKeyDown={activateOnKey(() => remove(domain.name))}
                   />
                 </Divider>
-                <Form.Item label="Names" name={[domain.name, 'names']}>
+                <Form.Item label="名称列表" name={[domain.name, 'names']}>
                   <Select
                     mode="tags"
                     style={{ width: '100%' }}
@@ -1534,20 +1524,20 @@ function XdnsSettings({ udpFieldName }: { udpFieldName: number }) {
                     placeholder="t.example.com"
                   />
                 </Form.Item>
-                <Form.Item label="Record Types" name={[domain.name, 'types']}>
+                <Form.Item label="记录类型" name={[domain.name, 'types']}>
                   <Select
                     mode="multiple"
                     options={XDNS_RECORD_TYPE_OPTIONS}
-                    placeholder="TXT (client), all (server)"
+                    placeholder="客户端默认 TXT，服务端默认全部"
                   />
                 </Form.Item>
                 <Form.Item label="EDNS0" name={[domain.name, 'edns0']}>
-                  <InputNumber min={512} max={4096} placeholder="off" />
+                  <InputNumber min={512} max={4096} placeholder="关闭" />
                 </Form.Item>
-                <Form.Item label="Length Limit" name={[domain.name, 'lenLimit']}>
+                <Form.Item label="长度上限" name={[domain.name, 'lenLimit']}>
                   <InputNumber min={0} max={255} placeholder="255" />
                 </Form.Item>
-                <Form.Item label="Label Limit" name={[domain.name, 'labelLimit']}>
+                <Form.Item label="标签长度上限" name={[domain.name, 'labelLimit']}>
                   <InputNumber min={0} max={63} placeholder="63" />
                 </Form.Item>
               </div>
@@ -1558,7 +1548,7 @@ function XdnsSettings({ udpFieldName }: { udpFieldName: number }) {
       <Form.List name={[udpFieldName, 'settings', 'resolvers']}>
         {(resolvers, { add, remove }) => (
           <>
-            <Form.Item label="Resolvers (client)">
+            <Form.Item label="解析器（客户端）">
               <Button
                 type="primary"
                 size="small"
@@ -1570,7 +1560,7 @@ function XdnsSettings({ udpFieldName }: { udpFieldName: number }) {
             {resolvers.map((resolver, ri) => (
               <div key={resolver.key}>
                 <Divider style={{ margin: 0 }}>
-                  Resolver {ri + 1}
+                  解析器 {ri + 1}
                   <DeleteOutlined
                     className="danger-icon"
                     role="button"
@@ -1580,7 +1570,7 @@ function XdnsSettings({ udpFieldName }: { udpFieldName: number }) {
                     onKeyDown={activateOnKey(() => remove(resolver.name))}
                   />
                 </Divider>
-                <Form.Item label="Addresses" name={[resolver.name, 'addrs']}>
+                <Form.Item label="地址列表" name={[resolver.name, 'addrs']}>
                   <Select
                     mode="tags"
                     style={{ width: '100%' }}
@@ -1588,7 +1578,7 @@ function XdnsSettings({ udpFieldName }: { udpFieldName: number }) {
                     placeholder="udp://8.8.8.8:53, https://dns.google/dns-query"
                   />
                 </Form.Item>
-                <Form.Item label="Workers" name={[resolver.name, 'worker']}>
+                <Form.Item label="工作线程" name={[resolver.name, 'worker']}>
                   <InputNumber min={1} placeholder="32" />
                 </Form.Item>
                 <Form.Item
@@ -1622,7 +1612,7 @@ function XdnsSettings({ udpFieldName }: { udpFieldName: number }) {
           </>
         )}
       </Form.List>
-      <Form.Item label="Extra Poll (client)" name={[udpFieldName, 'settings', 'extraPoll']}>
+      <Form.Item label="额外轮询（客户端）" name={[udpFieldName, 'settings', 'extraPoll']}>
         <InputNumber min={0} max={3} placeholder="0" />
       </Form.Item>
     </>
@@ -1630,9 +1620,9 @@ function XdnsSettings({ udpFieldName }: { udpFieldName: number }) {
 }
 
 const UDP_HOP_MODES = [
-  { value: 'intervalRemote', label: 'Rotate server port (interval)' },
-  { value: 'perConnRemote', label: 'Random server port per connection' },
-  { value: 'intervalLocal', label: 'Rotate local port (interval)' },
+  { value: 'intervalRemote', label: '定时轮换服务器端口' },
+  { value: 'perConnRemote', label: '每个连接随机选择服务器端口' },
+  { value: 'intervalLocal', label: '定时轮换本地端口' },
 ];
 
 // xray-core lowercases each comma-separated mode, so a lowercase one (from an mport
@@ -1655,7 +1645,7 @@ function validateUdpHopInterval(_: unknown, value: unknown) {
     .split('-')
     .map((v) => Number(v.trim()));
   const valid = bounds.length <= 2 && bounds.every((v) => Number.isInteger(v) && v >= 5);
-  return valid ? Promise.resolve() : Promise.reject(new Error('seconds ≥ 5, e.g. 30 or 5-10'));
+  return valid ? Promise.resolve() : Promise.reject(new Error('秒数必须 ≥ 5，例如 30 或 5-10'));
 }
 
 // Client-only hopping (xray-core 26.9.9); every key needs a registered field because the
@@ -1664,25 +1654,25 @@ function UdpHopSettings({ udpFieldName }: { udpFieldName: number }) {
   return (
     <>
       <Form.Item
-        label="Mode"
+        label="模式"
         name={[udpFieldName, 'settings', 'mode']}
         getValueProps={(value) => ({ value: udpHopModesFromWire(value) })}
         normalize={(value: string[]) => value.join(',')}
-        rules={[{ required: true, message: 'pick at least one mode' }]}
+        rules={[{ required: true, message: '请至少选择一种模式' }]}
       >
         <Select mode="multiple" options={UDP_HOP_MODES} />
       </Form.Item>
       <Form.Item
-        label="Interval (s)"
+        label="间隔（秒）"
         name={[udpFieldName, 'settings', 'interval']}
         rules={[{ validator: validateUdpHopInterval }]}
       >
-        <Input placeholder="30 or 5-10" />
+        <Input placeholder="30 或 5-10" />
       </Form.Item>
-      <Form.Item label="Remote Ports" name={[udpFieldName, 'settings', 'remotePorts']}>
+      <Form.Item label="远程端口" name={[udpFieldName, 'settings', 'remotePorts']}>
         <Input placeholder="20000-50000" />
       </Form.Item>
-      <Form.Item label="Remote IPs" name={[udpFieldName, 'settings', 'remoteIPs']}>
+      <Form.Item label="远程 IP" name={[udpFieldName, 'settings', 'remoteIPs']}>
         <Select mode="tags" style={{ width: '100%' }} tokenSeparators={[',', ' ']} />
       </Form.Item>
     </>
@@ -1699,7 +1689,7 @@ function validateNoiseReset(_: unknown, value: unknown) {
     bounds.length <= 2 &&
     bounds.every((v) => Number.isInteger(v) && v >= 0) &&
     bounds[0] <= bounds[bounds.length - 1];
-  return valid ? Promise.resolve() : Promise.reject(new Error('seconds, e.g. 0 or 60-120'));
+  return valid ? Promise.resolve() : Promise.reject(new Error('请填写秒数，例如 0 或 60-120'));
 }
 
 // xray-core 26.10.17 (#7124) refuses a noise script beside noise items, so a script replaces the list.
@@ -1717,18 +1707,18 @@ function NoiseItems({
   return (
     <>
       <Form.Item
-        label="Reset"
+        label="重置"
         name={[udpFieldName, 'settings', 'reset']}
         tooltip={NOISE_RESET_HINT}
         rules={[{ validator: validateNoiseReset }]}
       >
-        <Input placeholder="0 or 60-120" aria-describedby={`${uid}-reset-hint`} />
+        <Input placeholder="0 或 60-120" aria-describedby={`${uid}-reset-hint`} />
       </Form.Item>
       <span id={`${uid}-reset-hint`} hidden>
         {NOISE_RESET_HINT}
       </span>
       <Form.Item
-        label="Script"
+        label="脚本"
         name={[udpFieldName, 'settings', 'script']}
         tooltip={NOISE_SCRIPT_HINT}
         normalize={(value: string) => value || undefined}
@@ -1764,7 +1754,7 @@ function NoiseItemList({
       <Form.List name={[udpFieldName, 'settings', 'noise']}>
         {(items, { add, remove }) => (
           <>
-            <Form.Item label="Noise">
+            <Form.Item label="噪声">
               <Button
                 type="primary"
                 size="small"
@@ -1776,7 +1766,7 @@ function NoiseItemList({
             {items.map((item, ni) => (
               <div key={item.key}>
                 <Divider style={{ margin: 0 }}>
-                  Noise {ni + 1}
+                  噪声 {ni + 1}
                   <DeleteOutlined
                     className="danger-icon"
                     role="button"
@@ -1807,9 +1797,9 @@ function NoiseItemList({
 type ItemKind = 'bytes' | 'reuse' | 'transform';
 
 const ITEM_KIND_OPTIONS: { value: ItemKind; label: string }[] = [
-  { value: 'bytes', label: 'Bytes' },
-  { value: 'reuse', label: 'Reuse variable' },
-  { value: 'transform', label: 'Transform' },
+  { value: 'bytes', label: '字节' },
+  { value: 'reuse', label: '复用变量' },
+  { value: 'transform', label: '转换' },
 ];
 
 function itemKindOf(item: unknown): ItemKind {
@@ -1823,7 +1813,7 @@ function validateCustomVarName(_: unknown, value: unknown) {
   if (value == null || value === '') return Promise.resolve();
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(value))
     ? Promise.resolve()
-    : Promise.reject(new Error('letters, digits and _, not starting with a digit'));
+    : Promise.reject(new Error('仅允许字母、数字和下划线，且不能以数字开头'));
 }
 
 // Hands the form only a parsed JSON object, so half-typed text never reaches the config.
@@ -1868,7 +1858,7 @@ function JsonObjectInput({
           }
         }}
       />
-      {invalid && <Typography.Text type="danger">Must be a JSON object</Typography.Text>}
+      {invalid && <Typography.Text type="danger">必须为 JSON 对象</Typography.Text>}
     </>
   );
 }
@@ -1923,7 +1913,7 @@ function ItemEditor({
   return (
     <>
       {allowVariables && (
-        <Form.Item label="Kind" htmlFor={`${uid}-kind`}>
+        <Form.Item label="类别" htmlFor={`${uid}-kind`}>
           <Select
             id={`${uid}-kind`}
             value={kind}
@@ -1933,28 +1923,28 @@ function ItemEditor({
         </Form.Item>
       )}
       {kind === 'bytes' && (
-        <Form.Item label="Type" name={[fieldName, 'type']}>
+        <Form.Item label="类型" name={[fieldName, 'type']}>
           <Select
             onChange={onTypeChange}
             options={[
-              { value: 'array', label: 'Array' },
-              { value: 'str', label: 'String' },
-              { value: 'hex', label: 'Hex' },
+              { value: 'array', label: '数组' },
+              { value: 'str', label: '字符串' },
+              { value: 'hex', label: '十六进制' },
               { value: 'base64', label: 'Base64' },
               // Only the noise mask parses tag expressions (xray-core 26.9.30, #6862).
-              ...(delayMode === 'string' ? [{ value: 'exp', label: 'Expression' }] : []),
+              ...(delayMode === 'string' ? [{ value: 'exp', label: '表达式' }] : []),
             ]}
           />
         </Form.Item>
       )}
 
       {delayMode === 'number' && (
-        <Form.Item label="Delay (ms)" name={[fieldName, 'delay']}>
+        <Form.Item label="延迟（毫秒）" name={[fieldName, 'delay']}>
           <InputNumber min={0} />
         </Form.Item>
       )}
       {delayMode === 'string' && (
-        <Form.Item label="Delay" name={[fieldName, 'delay']}>
+        <Form.Item label="延迟" name={[fieldName, 'delay']}>
           <Input placeholder="10-20" />
         </Form.Item>
       )}
@@ -1962,15 +1952,15 @@ function ItemEditor({
       {kind === 'reuse' && (
         <>
           <Form.Item
-            label="Reuse"
+            label="复用"
             name={[fieldName, 'reuse']}
             tooltip={REUSE_HINT}
             rules={[
-              { required: true, message: 'name the captured variable' },
+              { required: true, message: '请填写已捕获变量的名称' },
               { validator: validateCustomVarName },
             ]}
           >
-            <Input placeholder="variable name" aria-describedby={`${uid}-reuse-hint`} />
+            <Input placeholder="变量名称" aria-describedby={`${uid}-reuse-hint`} />
           </Form.Item>
           <span id={`${uid}-reuse-hint`} hidden>
             {REUSE_HINT}
@@ -1980,10 +1970,10 @@ function ItemEditor({
       {kind === 'transform' && (
         <>
           <Form.Item
-            label="Transform"
+            label="转换"
             name={[fieldName, 'transform']}
             tooltip={TRANSFORM_HINT}
-            rules={[{ required: true, message: 'enter the transform expression' }]}
+            rules={[{ required: true, message: '请填写转换表达式' }]}
           >
             <JsonObjectInput
               aria-describedby={`${uid}-transform-hint`}
@@ -2009,9 +1999,9 @@ function ItemEditor({
           if (type === 'array') {
             return (
               <>
-                <Form.Item label="Rand" name={[fieldName, 'rand']}>
+                <Form.Item label="随机长度" name={[fieldName, 'rand']}>
                   {delayMode === 'string' ? (
-                    <Input placeholder="0 or 1-8192" />
+                    <Input placeholder="0 或 1-8192" />
                   ) : (
                     <InputNumber min={0} />
                   )}
@@ -2020,7 +2010,7 @@ function ItemEditor({
                     explicit "" as the range 0-0 (all-zero fill bytes), while
                     an omitted randRange falls back to the 0-255 default. */}
                 <Form.Item
-                  label="Rand Range"
+                  label="随机字节范围"
                   name={[fieldName, 'randRange']}
                   normalize={(v) => (v === '' ? undefined : v)}
                   rules={[{ validator: validateRandRange }]}
@@ -2032,12 +2022,12 @@ function ItemEditor({
           }
           if (type === 'base64') {
             return (
-              <Form.Item label="Packet">
+              <Form.Item label="数据包">
                 <Space.Compact block>
                   <Form.Item name={[fieldName, 'packet']} noStyle>
                     <Input
-                      aria-label="Packet"
-                      placeholder="binary data"
+                      aria-label="数据包"
+                      placeholder="二进制数据"
                       style={{ width: 'calc(100% - 32px)' }}
                     />
                   </Form.Item>
@@ -2053,7 +2043,7 @@ function ItemEditor({
             );
           }
           return (
-            <Form.Item label="Packet" name={[fieldName, 'packet']}>
+            <Form.Item label="数据包" name={[fieldName, 'packet']}>
               <Input placeholder={type === 'exp' ? '<b 0d0a0d0a><t><rc 20-40>' : 'binary data'} />
             </Form.Item>
           );
@@ -2063,13 +2053,13 @@ function ItemEditor({
       {allowVariables && (
         <>
           <Form.Item
-            label="Capture"
+            label="捕获"
             name={[fieldName, 'capture']}
             tooltip={CAPTURE_HINT}
             normalize={(v) => (v === '' ? undefined : v)}
             rules={[{ validator: validateCustomVarName }]}
           >
-            <Input placeholder="variable name" aria-describedby={`${uid}-capture-hint`} />
+            <Input placeholder="变量名称" aria-describedby={`${uid}-capture-hint`} />
           </Form.Item>
           <span id={`${uid}-capture-hint`} hidden>
             {CAPTURE_HINT}
@@ -2098,43 +2088,43 @@ function QuicParamsForm({
 
   return (
     <>
-      <Form.Item label="Congestion" name={[...base, 'congestion']}>
+      <Form.Item label="拥塞控制" name={[...base, 'congestion']}>
         <Select
           options={[
             { value: 'reno', label: 'Reno' },
             { value: 'bbr', label: 'BBR' },
             { value: 'brutal', label: 'Brutal' },
-            { value: 'force-brutal', label: 'Force Brutal' },
+            { value: 'force-brutal', label: '强制 Brutal' },
           ]}
         />
       </Form.Item>
       {congestion === 'bbr' && (
-        <Form.Item label="BBR Profile" name={[...base, 'bbrProfile']}>
+        <Form.Item label="BBR 策略" name={[...base, 'bbrProfile']}>
           <Select
             allowClear
-            placeholder="standard"
+            placeholder="标准"
             options={[
-              { value: 'conservative', label: 'Conservative' },
-              { value: 'standard', label: 'Standard' },
-              { value: 'aggressive', label: 'Aggressive' },
+              { value: 'conservative', label: '保守' },
+              { value: 'standard', label: '标准' },
+              { value: 'aggressive', label: '激进' },
             ]}
           />
         </Form.Item>
       )}
-      <Form.Item label="Debug" name={[...base, 'debug']} valuePropName="checked">
+      <Form.Item label="调试" name={[...base, 'debug']} valuePropName="checked">
         <Switch />
       </Form.Item>
 
       {(congestion === 'brutal' || congestion === 'force-brutal') && (
         <>
-          <Form.Item label="Brutal Up" name={[...base, 'brutalUp']}>
-            <Input placeholder="e.g. 60 mbps" />
+          <Form.Item label="Brutal 上行速率" name={[...base, 'brutalUp']}>
+            <Input placeholder="例如 60 mbps" />
           </Form.Item>
-          <Form.Item label="Brutal Down" name={[...base, 'brutalDown']}>
-            <Input placeholder="e.g. 100 mbps" />
+          <Form.Item label="Brutal 下行速率" name={[...base, 'brutalDown']}>
+            <Input placeholder="例如 100 mbps" />
           </Form.Item>
           <Form.Item
-            label="Brutal Disable Loss Comp"
+            label="禁用 Brutal 丢包补偿"
             name={[...base, 'brutalDisableLossCompensation']}
             valuePropName="checked"
           >
@@ -2147,7 +2137,7 @@ function QuicParamsForm({
           itself listens on its own port. */}
       {showUdpHop && (
         <>
-          <Form.Item htmlFor={`${uid}-udp-hop`} label="UDP Hop" tooltip={UDP_HOP_HINT}>
+          <Form.Item htmlFor={`${uid}-udp-hop`} label="UDP 端口跳跃" tooltip={UDP_HOP_HINT}>
             <Switch
               id={`${uid}-udp-hop`}
               aria-describedby={`${uid}-udp-hop-hint`}
@@ -2162,62 +2152,62 @@ function QuicParamsForm({
           </Form.Item>
           {hasUdpHop && (
             <>
-              <Form.Item label="Hop Ports" name={[...base, 'udpHop', 'ports']}>
-                <Input placeholder="e.g. 20000-50000" />
+              <Form.Item label="跳跃端口" name={[...base, 'udpHop', 'ports']}>
+                <Input placeholder="例如 20000-50000" />
               </Form.Item>
-              <Form.Item label="Hop Interval (s)" name={[...base, 'udpHop', 'interval']}>
-                <Input placeholder="e.g. 5-10" />
+              <Form.Item label="跳跃间隔（秒）" name={[...base, 'udpHop', 'interval']}>
+                <Input placeholder="例如 5-10" />
               </Form.Item>
             </>
           )}
         </>
       )}
 
-      <Form.Item label="Max Idle Timeout (s)" name={[...base, 'maxIdleTimeout']}>
+      <Form.Item label="最大空闲超时（秒）" name={[...base, 'maxIdleTimeout']}>
         <InputNumber min={4} max={120} />
       </Form.Item>
-      <Form.Item label="Keep Alive Period (s)" name={[...base, 'keepAlivePeriod']}>
+      <Form.Item label="保活周期（秒）" name={[...base, 'keepAlivePeriod']}>
         <InputNumber min={2} max={60} />
       </Form.Item>
       <Form.Item
-        label="Disable Path MTU Dis"
+        label="禁用路径 MTU 探测"
         name={[...base, 'disablePathMTUDiscovery']}
         valuePropName="checked"
       >
         <Switch />
       </Form.Item>
       <Form.Item
-        label="Disable Chrome Parrot"
+        label="禁用 Chrome 指纹模拟"
         name={[...base, 'disableChromeParrot']}
         valuePropName="checked"
       >
         <Switch />
       </Form.Item>
-      <Form.Item label="Disable GSO" name={[...base, 'disableGSO']} valuePropName="checked">
+      <Form.Item label="禁用 GSO" name={[...base, 'disableGSO']} valuePropName="checked">
         <Switch />
       </Form.Item>
       <Form.Item
-        label="Disable Stateless Reset"
+        label="禁用无状态重置"
         name={[...base, 'disableStatelessReset']}
         valuePropName="checked"
       >
         <Switch />
       </Form.Item>
 
-      <Form.Item label="Max Incoming Streams" name={[...base, 'maxIncomingStreams']}>
-        <InputNumber min={8} placeholder="1024 = default" />
+      <Form.Item label="最大入站流数量" name={[...base, 'maxIncomingStreams']}>
+        <InputNumber min={8} placeholder="默认值：1024" />
       </Form.Item>
-      <Form.Item label="Init Stream Window" name={[...base, 'initStreamReceiveWindow']}>
-        <InputNumber min={16384} placeholder="8388608 = default" />
+      <Form.Item label="初始流接收窗口" name={[...base, 'initStreamReceiveWindow']}>
+        <InputNumber min={16384} placeholder="默认值：8388608" />
       </Form.Item>
-      <Form.Item label="Max Stream Window" name={[...base, 'maxStreamReceiveWindow']}>
-        <InputNumber min={16384} placeholder="8388608 = default" />
+      <Form.Item label="最大流接收窗口" name={[...base, 'maxStreamReceiveWindow']}>
+        <InputNumber min={16384} placeholder="默认值：8388608" />
       </Form.Item>
-      <Form.Item label="Init Conn Window" name={[...base, 'initConnectionReceiveWindow']}>
-        <InputNumber min={16384} placeholder="20971520 = default" />
+      <Form.Item label="初始连接接收窗口" name={[...base, 'initConnectionReceiveWindow']}>
+        <InputNumber min={16384} placeholder="默认值：20971520" />
       </Form.Item>
-      <Form.Item label="Max Conn Window" name={[...base, 'maxConnectionReceiveWindow']}>
-        <InputNumber min={16384} placeholder="20971520 = default" />
+      <Form.Item label="最大连接接收窗口" name={[...base, 'maxConnectionReceiveWindow']}>
+        <InputNumber min={16384} placeholder="默认值：20971520" />
       </Form.Item>
     </>
   );

@@ -113,7 +113,7 @@ const METRICS: MetricDef[] = [
   },
   {
     key: 'diskRead',
-    tab: 'Disk I/O',
+    tab: '磁盘读写',
     tabKey: 'pages.index.historyTabDisk',
     title: 'pages.index.historyTitleDisk',
     icon: <HddOutlined aria-hidden />,
@@ -127,7 +127,7 @@ const METRICS: MetricDef[] = [
   },
   {
     key: 'diskUsage',
-    tab: 'Disk Usage',
+    tab: '磁盘使用量',
     tabKey: 'pages.index.historyTabDiskUsage',
     title: 'pages.index.historyTitleDiskUsage',
     icon: <PieChartOutlined aria-hidden />,
@@ -256,7 +256,7 @@ async function loadBucket(metric: (typeof METRICS)[number], bucket: number): Pro
       points3: await fetchAligned(metric.key3),
     };
   } catch (e) {
-    console.error('Failed to fetch history bucket', e);
+    console.error('获取历史统计失败', e);
     return EMPTY_CHART;
   }
 }

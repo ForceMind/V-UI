@@ -634,7 +634,7 @@ export default function InboundFormModal({
               value: n.id,
               // Same rule as the clone target picker: only online is
               // deployable (`unknown` = no heartbeat yet).
-              label: `${n.name}${n.status === 'online' ? '' : ` (${n.status || 'offline'})`}`,
+              label: `${n.name}${n.status === 'online' ? '' : ` (${t(`pages.nodes.statusValues.${n.status || 'offline'}`)})`}`,
               disabled: n.status !== 'online',
             }))}
           />

@@ -75,7 +75,7 @@ export default function ClientRenewalFields({
         headers: { 'Content-Type': 'application/json' },
         silent: true,
       });
-      if (!msg?.success) throw new Error(msg?.msg || 'Renewal preview failed');
+      if (!msg?.success) throw new Error(msg?.msg || '续期预览失败');
       return ClientRenewalPreviewSchema.parse(msg.obj);
     },
   });

@@ -284,7 +284,7 @@ export default function NordModal({
         .map((s: NordServer) => {
           const firstLocId = (s.location_ids || [])[0];
           const city = firstLocId != null ? locToCity[firstLocId] : null;
-          return { ...s, cityId: city?.id || null, cityName: city?.name || 'Unknown' };
+          return { ...s, cityId: city?.id || null, cityName: city?.name || '未知' };
         })
         .sort((a: NordServer, b: NordServer) => a.load - b.load);
       methods.setValue('cityId', null);

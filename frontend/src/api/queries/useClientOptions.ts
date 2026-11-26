@@ -13,7 +13,7 @@ const ClientRecordListSchema = z
 
 async function fetchClients(): Promise<ClientRecord[]> {
   const msg = await HttpUtil.get('/panel/api/clients/list', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to load clients');
+  if (!msg?.success) throw new Error(msg?.msg || '加载客户端失败');
   const validated = parseMsg(msg, ClientRecordListSchema, 'clients/list');
   return validated.obj ?? [];
 }

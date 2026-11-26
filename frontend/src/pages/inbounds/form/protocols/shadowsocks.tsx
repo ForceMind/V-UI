@@ -57,7 +57,7 @@ export default function ShadowsocksFields({ isSSWith2022 }: ShadowsocksFieldsPro
           ]}
         />
       </FormField>
-      <FormField name={['settings', 'ivCheck']} label="ivCheck" valueProp="checked">
+      <FormField name={['settings', 'ivCheck']} label="初始化向量校验" valueProp="checked">
         <Switch />
       </FormField>
     </>

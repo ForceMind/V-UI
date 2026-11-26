@@ -102,12 +102,20 @@ describe('HttpUtil', () => {
     expect(console.error).not.toHaveBeenCalled();
   });
 
+  it('translates browser network errors while keeping server messages intact', async () => {
+    mockRequest.mockRejectedValue(new TypeError('Failed to fetch'));
+    expect((await HttpUtil.get('/x', undefined, { silent: true })).msg).toBe('网络请求失败');
+
+    mockRequest.mockRejectedValue(new HttpError(400, 'Bad Request', { msg: 'upstream detail' }));
+    expect((await HttpUtil.get('/x', undefined, { silent: true })).msg).toBe('upstream detail');
+  });
+
   it('returns "No response data" for an empty body', async () => {
     mockRequest.mockResolvedValue(envelope(''));
 
     const msg = await HttpUtil.get('/x', undefined, { silent: true });
 
     expect(msg.success).toBe(false);
-    expect(msg.msg).toBe('No response data');
+    expect(msg.msg).toBe('未收到响应数据');
   });
 });

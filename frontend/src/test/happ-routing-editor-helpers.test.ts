@@ -82,7 +82,7 @@ describe('Happ routing editor profile loading', () => {
     expect(loadHappRouting(' \n ')).toEqual({
       success: true,
       profile: {
-        Name: 'Custom Rules',
+        Name: '自定义规则',
         GlobalProxy: 'true',
         DirectSites: [],
         DirectIp: [],

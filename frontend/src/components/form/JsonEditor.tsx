@@ -77,6 +77,29 @@ const ultraDarkTheme = buildDarkTheme({
   selection: '#2a2a2a',
 });
 
+const chineseEditorPhrases = EditorState.phrases.of({
+  'Go to line': '跳转到行',
+  go: '跳转',
+  Find: '查找',
+  Replace: '替换',
+  next: '下一个',
+  previous: '上一个',
+  all: '全部',
+  'match case': '区分大小写',
+  regexp: '正则表达式',
+  'by word': '全词匹配',
+  replace: '替换',
+  'replace all': '全部替换',
+  close: '关闭',
+  'current match': '当前匹配项',
+  'on line': '位于行',
+  'replaced match on line $': '已替换第 $ 行的匹配项',
+  'replaced $ matches': '已替换 $ 个匹配项',
+  Diagnostics: '诊断',
+  'No diagnostics': '未发现问题',
+  Completions: '补全建议',
+});
+
 function themeExtension(isDark: boolean, isUltra: boolean) {
   if (!isDark) return [];
   const chrome = isUltra ? ultraDarkTheme : darkTheme;
@@ -121,10 +144,16 @@ const JsonEditor = forwardRef<JsonEditorHandle, JsonEditorProps>(function JsonEd
         doc: value,
         extensions: [
           basicSetup,
+          chineseEditorPhrases,
           EditorView.contentAttributes.of({ 'aria-label': t('jsonEditor') }),
           keymap.of([indentWithTab]),
           json(),
-          linter(jsonParseLinter()),
+          linter((view) =>
+            jsonParseLinter()(view).map((diagnostic) => ({
+              ...diagnostic,
+              message: 'JSON 语法错误，请检查此处的引号、逗号和括号',
+            })),
+          ),
           lintGutter(),
           EditorView.lineWrapping,
           updateListener,

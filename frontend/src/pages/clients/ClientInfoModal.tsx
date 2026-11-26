@@ -241,7 +241,7 @@ export default function ClientInfoModal({
     setDownloadingFormat(format);
     try {
       const response = await fetch(url);
-      if (!response.ok) throw new Error('Subscription download failed');
+      if (!response.ok) throw new Error('订阅下载失败');
       const content = await response.text();
       FileManager.downloadTextFile(content, SUBSCRIPTION_DOWNLOAD_NAMES[format]);
     } catch (_) {
@@ -576,7 +576,7 @@ export default function ClientInfoModal({
                 <Divider>{t('subscription.title')}</Divider>
                 <div className="link-row">
                   <Tag color="green" className="link-row-tag">
-                    SUB
+                    订阅
                   </Tag>
                   <a
                     href={subLink}
@@ -759,7 +759,7 @@ export default function ClientInfoModal({
                       {parts ? (
                         <LinkTags parts={parts} />
                       ) : (
-                        <Tag className="link-row-tag">LINK</Tag>
+                        <Tag className="link-row-tag">链接</Tag>
                       )}
                       <span className="link-row-title" title={rowTitle}>
                         {rowTitle}

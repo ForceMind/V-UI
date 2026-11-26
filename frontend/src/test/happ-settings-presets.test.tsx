@@ -94,7 +94,11 @@ function routingProfile(): Record<string, unknown> {
   const prefix = 'happ://routing/onadd/';
   const link = routingRules();
   expect(link.startsWith(prefix)).toBe(true);
-  return JSON.parse(atob(link.slice(prefix.length))) as Record<string, unknown>;
+  return JSON.parse(
+    new TextDecoder().decode(
+      Uint8Array.from(atob(link.slice(prefix.length)), (char) => char.charCodeAt(0)),
+    ),
+  ) as Record<string, unknown>;
 }
 
 describe('Happ routing preset controls', () => {
@@ -117,10 +121,10 @@ describe('Happ routing preset controls', () => {
   });
 
   it.each([
-    ['Iran Bypass', 'Iran Bypass'],
+    ['Iran Bypass', '伊朗分流'],
     ['China Direct (Bypass-CN)', 'Bypass-CN'],
-    ['Full Proxy', 'Global Proxy'],
-    ['Global Bypass Local Network', 'Global Bypass Local Network'],
+    ['Full Proxy', '全局代理'],
+    ['Global Bypass Local Network', '全局代理（绕过本地网络）'],
   ])('applies %s without AdBlock by default', (label, profileName) => {
     renderSettings();
     choosePreset(label);
@@ -140,7 +144,7 @@ describe('Happ routing preset controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Apply preset' }));
 
     expect(routingProfile()).toMatchObject({
-      Name: 'Global Bypass Local Network',
+      Name: '全局代理（绕过本地网络）',
       GlobalProxy: 'true',
       DirectSites: ['geosite:private'],
       DirectIp: ['geoip:private'],
@@ -151,7 +155,7 @@ describe('Happ routing preset controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Apply preset' }));
 
     expect(routingProfile()).toMatchObject({
-      Name: 'Global Proxy',
+      Name: '全局代理',
       GlobalProxy: 'true',
       DirectSites: [],
       DirectIp: [],

@@ -177,7 +177,7 @@ async function loadHistory(url: string | null, bucket: number): Promise<MetricsC
   try {
     return toChart(await HttpUtil.get<{ t: number; v: number }[]>(url), bucket);
   } catch (e) {
-    console.error('Failed to fetch xray metrics bucket', e);
+    console.error('获取 Xray 历史指标失败', e);
     return EMPTY_CHART;
   }
 }
@@ -187,7 +187,7 @@ async function loadState(): Promise<XrayState | null> {
     const msg = await HttpUtil.get<XrayState>('/panel/api/server/xrayMetricsState');
     return msg?.success && msg.obj ? msg.obj : null;
   } catch (e) {
-    console.error('Failed to fetch xray metrics state', e);
+    console.error('获取 Xray 指标状态失败', e);
     return null;
   }
 }
@@ -197,7 +197,7 @@ async function loadObservatory(): Promise<ObservatoryTag[]> {
     const msg = await HttpUtil.get<ObservatoryTag[]>('/panel/api/server/xrayObservatory');
     return msg?.success && Array.isArray(msg.obj) ? msg.obj : [];
   } catch (e) {
-    console.error('Failed to fetch observatory snapshot', e);
+    console.error('获取连接观测快照失败', e);
     return [];
   }
 }

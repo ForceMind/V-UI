@@ -37,7 +37,7 @@ export default function TwoFactorModal({
     if (!open || !token) return null;
     return new OTPAuth.TOTP({
       issuer: '3x-ui',
-      label: 'Administrator',
+      label: '管理员',
       algorithm: 'SHA1',
       digits: 6,
       period: 30,

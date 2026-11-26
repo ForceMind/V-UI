@@ -72,14 +72,14 @@ const TRACKED_PROTOCOLS: readonly string[] = [
 
 async function fetchSlimInbounds(): Promise<unknown[]> {
   const msg = await HttpUtil.get('/panel/api/inbounds/list/slim', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch inbounds');
+  if (!msg?.success) throw new Error(msg?.msg || '获取入站列表失败');
   const validated = parseMsg(msg, SlimInboundListSchema, 'inbounds/list/slim');
   return Array.isArray(validated.obj) ? validated.obj : [];
 }
 
 async function fetchOnlineClients(): Promise<string[]> {
   const msg = await HttpUtil.post('/panel/api/clients/onlines', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch onlines');
+  if (!msg?.success) throw new Error(msg?.msg || '获取在线状态失败');
   const validated = parseMsg(msg, OnlinesSchema, 'clients/onlines');
   return Array.isArray(validated.obj) ? validated.obj : [];
 }
@@ -90,7 +90,7 @@ async function fetchOnlineClients(): Promise<string[]> {
 // sub-node is attributed to that sub-node, not the node it syncs through (#4983).
 async function fetchOnlineClientsByGuid(): Promise<Record<string, string[]>> {
   const msg = await HttpUtil.post('/panel/api/clients/onlinesByGuid', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch onlinesByGuid');
+  if (!msg?.success) throw new Error(msg?.msg || '按节点获取在线状态失败');
   const validated = parseMsg(msg, OnlineByNodeSchema, 'clients/onlinesByGuid');
   return validated.obj && typeof validated.obj === 'object'
     ? (validated.obj as Record<string, string[]>)
@@ -103,7 +103,7 @@ async function fetchOnlineClientsByGuid(): Promise<Record<string, string[]>> {
 // user-level stat can't attribute traffic to a single inbound on its own.
 async function fetchActiveInboundsByNode(): Promise<Record<string, string[]>> {
   const msg = await HttpUtil.post('/panel/api/clients/activeInbounds', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch activeInbounds');
+  if (!msg?.success) throw new Error(msg?.msg || '获取活动入站失败');
   const validated = parseMsg(msg, ActiveInboundsByNodeSchema, 'clients/activeInbounds');
   return validated.obj && typeof validated.obj === 'object'
     ? (validated.obj as Record<string, string[]>)
@@ -133,7 +133,7 @@ function sameGuidSets(a: Map<string, Set<string>>, b: Map<string, Set<string>>):
 
 async function fetchLastOnlineMap(): Promise<Record<string, number>> {
   const msg = await HttpUtil.post('/panel/api/clients/lastOnline', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch lastOnline');
+  if (!msg?.success) throw new Error(msg?.msg || '获取最后在线时间失败');
   const validated = parseMsg(msg, LastOnlineMapSchema, 'clients/lastOnline');
   return validated.obj && typeof validated.obj === 'object' ? validated.obj : {};
 }
@@ -142,7 +142,7 @@ async function fetchDefaultSettings(): Promise<DefaultsPayload> {
   const msg = await HttpUtil.post('/panel/api/setting/defaultSettings', undefined, {
     silent: true,
   });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch defaults');
+  if (!msg?.success) throw new Error(msg?.msg || '获取默认设置失败');
   const validated = parseMsg(msg, DefaultsPayloadSchema, 'setting/defaultSettings');
   return validated.obj ?? {};
 }

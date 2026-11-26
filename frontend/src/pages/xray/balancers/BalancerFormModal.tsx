@@ -383,7 +383,7 @@ export default function BalancerFormModal({
                     <Input
                       value={c.match}
                       aria-label={t('pages.xray.balancer.costMatch')}
-                      placeholder="tag pattern"
+                      placeholder="标签匹配模式"
                       onChange={(e) =>
                         methods.setValue(
                           'settings.costs',
@@ -394,7 +394,7 @@ export default function BalancerFormModal({
                     <InputNumber
                       value={c.value}
                       aria-label={t('pages.xray.balancer.costValue')}
-                      placeholder="weight"
+                      placeholder="权重"
                       style={{ width: 100 }}
                       onChange={(v) =>
                         methods.setValue(

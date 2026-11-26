@@ -136,7 +136,7 @@ export default function VersionModal({ open, status, onClose, onBusy }: VersionM
             },
             {
               key: '2',
-              label: 'Geofiles',
+              label: '地理数据文件',
               children: (
                 <>
                   <div className="version-list">

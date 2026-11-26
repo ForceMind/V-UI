@@ -20,7 +20,7 @@ export function buildHappPresetDeeplink(preset: string, includeAdblock = false):
         'happ://routing/onadd/' +
         toBase64Utf8(
           JSON.stringify({
-            Name: 'Iran Bypass',
+            Name: '伊朗分流',
             GlobalProxy: 'true',
             RouteOrder: 'block-proxy-direct',
             DirectSites: ['geosite:private', 'domain:ir', 'geosite:category-ir'],
@@ -88,7 +88,7 @@ export function buildHappPresetDeeplink(preset: string, includeAdblock = false):
         'happ://routing/onadd/' +
         toBase64Utf8(
           JSON.stringify({
-            Name: 'Global Proxy',
+            Name: '全局代理',
             GlobalProxy: 'true',
             DirectSites: [],
             DirectIp: [],
@@ -106,7 +106,7 @@ export function buildHappPresetDeeplink(preset: string, includeAdblock = false):
         'happ://routing/onadd/' +
         toBase64Utf8(
           JSON.stringify({
-            Name: 'Global Bypass Local Network',
+            Name: '全局代理（绕过本地网络）',
             GlobalProxy: 'true',
             DirectSites: ['geosite:private'],
             DirectIp: ['geoip:private'],

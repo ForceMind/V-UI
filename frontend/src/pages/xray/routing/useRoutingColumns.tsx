@@ -181,7 +181,7 @@ export function useRoutingColumns({
             )}
             {record.sourcePort && (
               <CriterionRow
-                label="Port"
+                label="端口"
                 value={record.sourcePort}
                 title={`Source port: ${record.sourcePort}`}
               />
@@ -229,13 +229,13 @@ export function useRoutingColumns({
             )}
             {record.protocol && (
               <CriterionRow
-                label="Protocol"
+                label="协议"
                 value={record.protocol}
                 title={`Protocol: ${record.protocol}`}
               />
             )}
             {record.attrs && (
-              <CriterionRow label="Attrs" value={record.attrs} title={`Attrs: ${record.attrs}`} />
+              <CriterionRow label="属性" value={record.attrs} title={`Attrs: ${record.attrs}`} />
             )}
             {!record.network && !record.protocol && !record.attrs && (
               <span className="criterion-empty">—</span>
@@ -254,15 +254,11 @@ export function useRoutingColumns({
               <CriterionRow label="IP" value={record.ip} title={`Destination IP: ${record.ip}`} />
             )}
             {record.domain && (
-              <CriterionRow
-                label="Domain"
-                value={record.domain}
-                title={`Domain: ${record.domain}`}
-              />
+              <CriterionRow label="域名" value={record.domain} title={`Domain: ${record.domain}`} />
             )}
             {record.port && (
               <CriterionRow
-                label="Port"
+                label="端口"
                 value={record.port}
                 title={`Destination port: ${record.port}`}
               />
@@ -284,13 +280,13 @@ export function useRoutingColumns({
             <div className="criterion-flow">
               {inboundParts.length > 0 && (
                 <CriterionRow
-                  label="Tag"
+                  label="标签"
                   values={inboundParts}
                   title={`Inbound tag: ${inboundTagsDisplayTitle(record.inboundTag, remarkByTag) ?? inboundParts.join(', ')}`}
                 />
               )}
               {record.user && (
-                <CriterionRow label="User" value={record.user} title={`User: ${record.user}`} />
+                <CriterionRow label="用户" value={record.user} title={`User: ${record.user}`} />
               )}
               {inboundParts.length === 0 && !record.user && (
                 <span className="criterion-empty">—</span>

@@ -21,7 +21,7 @@ async function fetchFail2banStatus(): Promise<Fail2banStatus> {
   const msg = await HttpUtil.get<Fail2banStatus>('/panel/api/server/fail2banStatus', undefined, {
     silent: true,
   });
-  if (!msg?.success || !msg.obj) throw new Error(msg?.msg || 'Failed to fetch fail2ban status');
+  if (!msg?.success || !msg.obj) throw new Error(msg?.msg || '获取 Fail2ban 状态失败');
   return { ...FAIL_OPEN_STATUS, ...msg.obj };
 }
 

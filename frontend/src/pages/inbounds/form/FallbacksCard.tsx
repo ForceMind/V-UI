@@ -39,7 +39,7 @@ export default function FallbacksCard({
         icon={<PlusOutlined aria-hidden />}
         onClick={addFallback}
       >
-        {t('pages.inbounds.fallbacks.add') || 'Add fallback'}
+        {t('pages.inbounds.fallbacks.add') || '添加回落'}
       </Button>
       <Button
         size="small"
@@ -58,14 +58,14 @@ export default function FallbacksCard({
     <Card
       size="small"
       className="mt-12"
-      title={t('pages.inbounds.fallbacks.title') || 'Fallbacks'}
+      title={t('pages.inbounds.fallbacks.title') || '回落'}
       extra={addButtons}
     >
       {fallbacks.length === 0 ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           styles={{ image: { height: 36 } }}
-          description={t('pages.inbounds.fallbacks.empty') || 'No fallbacks yet'}
+          description={t('pages.inbounds.fallbacks.empty') || '暂无回落规则'}
           style={{ margin: '4px 0 12px' }}
         />
       ) : (
@@ -82,7 +82,7 @@ export default function FallbacksCard({
                 aria-label={t('pages.inbounds.fallbacks.pickInbound')}
                 value={record.childId}
                 options={fallbackChildOptions}
-                placeholder={t('pages.inbounds.fallbacks.pickInbound') || 'Pick an inbound'}
+                placeholder={t('pages.inbounds.fallbacks.pickInbound') || '选择入站'}
                 allowClear
                 showSearch={{
                   filterOption: (input, option) =>
@@ -117,7 +117,7 @@ export default function FallbacksCard({
                 <Input
                   aria-label="SNI"
                   prefix="SNI"
-                  placeholder={t('pages.inbounds.fallbacks.matchAny') || 'any'}
+                  placeholder={t('pages.inbounds.fallbacks.matchAny') || '任意'}
                   value={record.name}
                   onChange={(e) => updateFallback(record.rowKey, { name: e.target.value })}
                 />
@@ -126,14 +126,14 @@ export default function FallbacksCard({
                 <Input
                   aria-label="ALPN"
                   prefix="ALPN"
-                  placeholder={t('pages.inbounds.fallbacks.matchAny') || 'any'}
+                  placeholder={t('pages.inbounds.fallbacks.matchAny') || '任意'}
                   value={record.alpn}
                   onChange={(e) => updateFallback(record.rowKey, { alpn: e.target.value })}
                 />
               </Col>
               <Col xs={24} sm={12}>
                 <Input
-                  aria-label="Path"
+                  aria-label="路径"
                   prefix="Path"
                   placeholder="/"
                   value={record.path}
@@ -142,16 +142,16 @@ export default function FallbacksCard({
               </Col>
               <Col xs={24} sm={12}>
                 <Input
-                  aria-label="Dest"
+                  aria-label="目标"
                   prefix="Dest"
-                  placeholder={t('pages.inbounds.fallbacks.destPlaceholder') || 'auto'}
+                  placeholder={t('pages.inbounds.fallbacks.destPlaceholder') || '自动'}
                   value={record.dest}
                   onChange={(e) => updateFallback(record.rowKey, { dest: e.target.value })}
                 />
               </Col>
               <Col xs={24} sm={12}>
                 <InputNumber
-                  aria-label="xver"
+                  aria-label="PROXY 协议版本"
                   prefix="xver"
                   min={0}
                   max={2}

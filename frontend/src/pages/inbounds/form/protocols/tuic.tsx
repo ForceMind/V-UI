@@ -112,10 +112,10 @@ export default function TuicFields() {
           >
             <Select
               options={[
-                { label: 'Info', value: 'info' },
-                { label: 'Warn', value: 'warn' },
-                { label: 'Error', value: 'error' },
-                { label: 'Debug', value: 'debug' },
+                { label: '信息', value: 'info' },
+                { label: '警告', value: 'warn' },
+                { label: '错误', value: 'error' },
+                { label: '调试', value: 'debug' },
               ]}
             />
           </FormField>
@@ -244,7 +244,7 @@ export default function TuicFields() {
       >
         <Select
           options={[
-            { label: 'Native (Recommended)', value: 'native' },
+            { label: '原生模式（推荐）', value: 'native' },
             { label: 'QUIC', value: 'quic' },
           ]}
         />

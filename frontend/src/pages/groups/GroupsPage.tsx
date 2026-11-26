@@ -71,7 +71,7 @@ const JSON_HEADERS = { headers: { 'Content-Type': 'application/json' } } as cons
 
 async function fetchGroups(): Promise<GroupSummary[]> {
   const msg = await HttpUtil.get('/panel/api/clients/groups', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to load groups');
+  if (!msg?.success) throw new Error(msg?.msg || '加载分组失败');
   const validated = parseMsg(msg, GroupSummaryListSchema, 'clients/groups');
   return validated.obj ?? [];
 }
@@ -166,7 +166,7 @@ export default function GroupsPage() {
     queryKey: keys.clients.all(),
     queryFn: async () => {
       const msg = await HttpUtil.get('/panel/api/clients/list', undefined, { silent: true });
-      if (!msg?.success) throw new Error(msg?.msg || 'Failed to load clients');
+      if (!msg?.success) throw new Error(msg?.msg || '加载客户端失败');
       const validated = parseMsg(msg, ClientRecordListSchema, 'clients/list');
       return validated.obj ?? [];
     },

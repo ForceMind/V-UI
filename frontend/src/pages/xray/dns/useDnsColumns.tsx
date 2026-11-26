@@ -119,7 +119,7 @@ export function useFakednsColumns({
         ),
       },
       {
-        title: 'IP pool',
+        title: 'IP 地址池',
         dataIndex: 'ipPool',
         key: 'ipPool',
         align: 'left',
@@ -133,7 +133,7 @@ export function useFakednsColumns({
         ),
       },
       {
-        title: 'Pool size',
+        title: '地址池大小',
         dataIndex: 'poolSize',
         key: 'poolSize',
         align: 'right',

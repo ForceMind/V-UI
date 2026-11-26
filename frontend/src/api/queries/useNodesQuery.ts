@@ -22,7 +22,7 @@ export interface NodeTotals {
 
 async function fetchNodes(): Promise<NodeRecord[]> {
   const msg = await HttpUtil.get('/panel/api/nodes/list', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch nodes');
+  if (!msg?.success) throw new Error(msg?.msg || '获取节点失败');
   const validated = parseMsg(msg, NodeListSchema, 'nodes/list');
   return Array.isArray(validated.obj) ? validated.obj : [];
 }

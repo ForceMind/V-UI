@@ -139,7 +139,7 @@ function CertRow({
       )}
       <FormField
         name={['streamSettings', 'tlsSettings', 'certificates', index, 'ocspStapling']}
-        label="OCSP Stapling"
+        label="OCSP 装订"
       >
         <InputNumber min={0} suffix="s" style={{ width: '50%' }} />
       </FormField>
@@ -372,7 +372,7 @@ export default function TlsForm({
       <FormField name={['streamSettings', 'tlsSettings', 'settings', 'fingerprint']} label="uTLS">
         <Select
           options={[
-            { value: '', label: 'None' },
+            { value: '', label: '无' },
             ...Object.values(UTLS_FINGERPRINT).map((fp) => ({ value: fp, label: fp })),
           ]}
         />

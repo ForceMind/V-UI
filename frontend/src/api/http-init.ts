@@ -18,7 +18,7 @@ export class HttpError extends Error {
   response: { status: number; statusText: string; data: unknown };
 
   constructor(status: number, statusText: string, data: unknown) {
-    super(`Request failed with status ${status}`);
+    super(`请求失败，状态码：${status}`);
     this.name = 'HttpError';
     this.status = status;
     this.response = { status, statusText, data };

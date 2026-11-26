@@ -1,5 +1,7 @@
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
+import { z } from 'zod';
+import { zhCN } from 'zod/locales';
 import { LanguageManager, type LanguageScope } from '@/utils';
 import { loadAntdLocale } from './AntdRootConfig';
 import messages from '../../../internal/web/translation/zh-CN.json';
@@ -12,6 +14,7 @@ const subscriptionLocales = import.meta.glob([
 ]);
 
 export async function readyI18n(scope: LanguageScope = 'panel') {
+  if (scope === 'panel') z.config(zhCN());
   const requested = scope === 'subscription' ? LanguageManager.getLanguage(scope) : language;
   const key = `../../../internal/web/translation/${requested}.json`;
   const load = Object.hasOwn(subscriptionLocales, key) ? subscriptionLocales[key] : undefined;

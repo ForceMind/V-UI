@@ -126,11 +126,11 @@ const trafficPayloadSchema = {
     clientTrafficSource: {
       type: 'string',
       enum: ['xray', 'tuic'],
-      description: 'Present for native TUIC samples; omitted Xray samples default to xray.',
+      description: '原生 TUIC 采样时提供此字段；Xray 采样省略时默认为 xray。',
     },
     clientTrafficIntervalMs: {
       type: 'integer',
-      description: 'Sampling interval used to calculate client speed, in milliseconds.',
+      description: '计算客户端速率的采样间隔，单位为毫秒。',
     },
     nodeTraffics: {
       type: 'array',
@@ -177,11 +177,11 @@ export const websocketEnvelopeSchema = {
   required: ['type', 'payload', 'time'],
   properties: {
     type: { type: 'string', enum: eventTypes },
-    payload: { description: 'Shape is selected by type; see x-websocket-events on GET /ws.' },
+    payload: { description: '根据 type 选择数据结构，详见 GET /ws 的 x-websocket-events。' },
     time: {
       type: 'integer',
       format: 'int64',
-      description: 'Server emission time in Unix milliseconds.',
+      description: '服务器发送时刻的 Unix 时间戳，单位为毫秒。',
     },
   },
 };
@@ -192,8 +192,7 @@ export function buildWebSocketEvents(
   return [
     {
       type: 'status',
-      summary:
-        'Server health snapshot pushed every two seconds; same payload as server/status obj.',
+      summary: '每两秒推送服务器健康快照，内容与 server/status 的 obj 相同。',
       payloadSchema: statusPayloadSchema,
       example: {
         type: 'status',
@@ -226,7 +225,7 @@ export function buildWebSocketEvents(
     {
       type: 'traffic',
       summary:
-        'Live traffic deltas plus online, per-node and last-online maps. TUIC also sends source-tagged client deltas with their sampling interval for live speed.',
+        '实时流量增量、在线客户端、各节点状态和最后在线时间。TUIC 还会发送带来源标记及采样间隔的客户端增量，用于计算实时速率。',
       payloadSchema: trafficPayloadSchema,
       example: {
         type: 'traffic',
@@ -243,8 +242,7 @@ export function buildWebSocketEvents(
     },
     {
       type: 'client_stats',
-      summary:
-        'Absolute client counters and/or inbound summaries; snapshot says whether clients is complete or only recently active rows.',
+      summary: '客户端累计流量与入站摘要。snapshot 表示 clients 是完整列表还是仅包含近期活动记录。',
       payloadSchema: clientStatsPayloadSchema,
       example: {
         type: 'client_stats',
@@ -258,13 +256,13 @@ export function buildWebSocketEvents(
     },
     {
       type: 'inbounds',
-      summary: 'Full inbound list after an inbound mutation, unless invalidate is used at scale.',
+      summary: '入站变更后的完整入站列表；大规模数据时改用 invalidate 通知重新获取。',
       payloadSchema: { type: 'array', items: { $ref: '#/components/schemas/Inbound' } },
       example: { type: 'inbounds', payload: [examples.Inbound], time: timestamp },
     },
     {
       type: 'outbounds',
-      summary: 'Current outbound traffic rows after the periodic traffic collection.',
+      summary: '定期流量采集后的当前出站流量记录。',
       payloadSchema: {
         type: 'array',
         items: { $ref: '#/components/schemas/OutboundTraffics' },
@@ -273,13 +271,13 @@ export function buildWebSocketEvents(
     },
     {
       type: 'nodes',
-      summary: 'Current node tree after the heartbeat probe cycle.',
+      summary: '心跳探测周期结束后的当前节点树。',
       payloadSchema: { type: 'array', items: { $ref: '#/components/schemas/NodeView' } },
       example: { type: 'nodes', payload: [examples.NodeView], time: timestamp },
     },
     {
       type: 'notification',
-      summary: 'An in-panel notification emitted by server actions.',
+      summary: '服务器操作触发的面板内通知。',
       payloadSchema: {
         type: 'object',
         required: ['title', 'message', 'level'],
@@ -301,7 +299,7 @@ export function buildWebSocketEvents(
     },
     {
       type: 'xray_state',
-      summary: 'Xray process state change after a stop, restart or error.',
+      summary: '停止、重启或发生错误后的 Xray 进程状态变化。',
       payloadSchema: {
         type: 'object',
         required: ['state', 'errorMsg'],
@@ -318,8 +316,7 @@ export function buildWebSocketEvents(
     },
     {
       type: 'invalidate',
-      summary:
-        'Requests a REST re-fetch. clients is an invalidate payload type, not a top-level event.',
+      summary: '通知重新请求 REST 接口。clients 是 invalidate 载荷类型，不是顶层事件。',
       payloadSchema: {
         type: 'object',
         required: ['type'],

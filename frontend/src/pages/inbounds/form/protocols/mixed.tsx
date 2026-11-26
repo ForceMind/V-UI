@@ -12,8 +12,8 @@ export default function MixedFields({ mixedUdpOn }: { mixedUdpOn: boolean }) {
       <FormField name={['settings', 'auth']} label={t('pages.inbounds.info.auth')}>
         <Select
           options={[
-            { value: 'noauth', label: 'noauth' },
-            { value: 'password', label: 'password' },
+            { value: 'noauth', label: '无需验证' },
+            { value: 'password', label: '密码验证' },
           ]}
         />
       </FormField>

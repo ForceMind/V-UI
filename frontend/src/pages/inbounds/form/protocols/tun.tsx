@@ -93,7 +93,7 @@ export default function TunFields() {
         label={t('pages.inbounds.form.autoOutboundsInterface')}
         tooltip={t('pages.inbounds.form.autoOutboundsInterfaceTooltip')}
       >
-        <Input placeholder="auto" />
+        <Input placeholder="自动" />
       </FormField>
       <FormField
         name={['settings', 'autoSystemDnsToGateway']}

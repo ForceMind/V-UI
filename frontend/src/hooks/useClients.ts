@@ -142,15 +142,15 @@ async function fetchClientPage(params: ClientQueryParams): Promise<ClientPageRes
   const msg = await HttpUtil.get(`/panel/api/clients/list/paged?${qs}`, undefined, {
     silent: true,
   });
-  if (!msg?.success || !msg.obj) throw new Error(msg?.msg || 'Failed to fetch clients');
+  if (!msg?.success || !msg.obj) throw new Error(msg?.msg || '获取客户端失败');
   const validated = parseMsg(msg, ClientPageResponseSchema, 'clients/list/paged', { strict: true });
-  if (!validated.obj) throw new Error('Empty clients response');
+  if (!validated.obj) throw new Error('客户端响应为空');
   return validated.obj;
 }
 
 async function fetchInboundOptions(): Promise<InboundOption[]> {
   const msg = await HttpUtil.get('/panel/api/inbounds/options', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch inbound options');
+  if (!msg?.success) throw new Error(msg?.msg || '获取入站选项失败');
   const validated = parseMsg(msg, InboundOptionsSchema, 'inbounds/options');
   return Array.isArray(validated.obj) ? validated.obj : [];
 }
@@ -159,7 +159,7 @@ async function fetchDefaults(): Promise<Record<string, unknown>> {
   const msg = await HttpUtil.post('/panel/api/setting/defaultSettings', undefined, {
     silent: true,
   });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch defaults');
+  if (!msg?.success) throw new Error(msg?.msg || '获取默认设置失败');
   const validated = parseMsg(msg, DefaultsPayloadSchema, 'setting/defaultSettings');
   return validated.obj || {};
 }
@@ -239,7 +239,7 @@ export function useClients(options: UseClientsOptions = {}) {
     queryKey: keys.clients.onlines(),
     queryFn: async () => {
       const msg = await HttpUtil.post('/panel/api/clients/onlines', undefined, { silent: true });
-      if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch onlines');
+      if (!msg?.success) throw new Error(msg?.msg || '获取在线状态失败');
       const validated = parseMsg(msg, OnlinesSchema, 'clients/onlines');
       return Array.isArray(validated.obj) ? validated.obj : [];
     },

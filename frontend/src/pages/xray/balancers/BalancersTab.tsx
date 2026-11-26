@@ -369,9 +369,9 @@ export default function BalancersTab({
         </div>
       ),
     },
-    { title: 'Tag', dataIndex: 'tag', key: 'tag', align: 'center', width: 160 },
+    { title: '标签', dataIndex: 'tag', key: 'tag', align: 'center', width: 160 },
     {
-      title: 'Strategy',
+      title: '策略',
       key: 'strategy',
       align: 'center',
       width: 140,
@@ -382,7 +382,7 @@ export default function BalancersTab({
       ),
     },
     {
-      title: 'Selector',
+      title: '选择器',
       key: 'selector',
       align: 'center',
       render: (_v, record) =>
@@ -393,7 +393,7 @@ export default function BalancersTab({
         )),
     },
     {
-      title: 'Fallback',
+      title: '回落目标',
       dataIndex: 'displayFallbackTag',
       key: 'displayFallbackTag',
       align: 'center',

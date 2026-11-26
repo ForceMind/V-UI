@@ -50,7 +50,7 @@ export default function WireguardFields() {
   return (
     <>
       <FormField label={t('pages.inbounds.address')} name={['settings', 'address']}>
-        <Input placeholder="comma-separated, e.g. 10.0.0.1,fd00::1" />
+        <Input placeholder="以逗号分隔，例如 10.0.0.1,fd00::1" />
       </FormField>
       <Form.Item label={t('pages.inbounds.privatekey')}>
         <Space.Compact block>
@@ -85,10 +85,10 @@ export default function WireguardFields() {
         <Switch />
       </FormField>
       <FormField label={t('pages.xray.outboundForm.reserved')} name={['settings', 'reserved']}>
-        <Input placeholder="comma-separated bytes, e.g. 1,2,3" />
+        <Input placeholder="以逗号分隔的字节，例如 1,2,3" />
       </FormField>
       <FormField label={t('pages.xray.outboundForm.remoteDNS')} name={['settings', 'remoteDNS']}>
-        <Input placeholder="comma-separated, e.g. 1.1.1.1,2606:4700:4700::1111" />
+        <Input placeholder="以逗号分隔，例如 1.1.1.1,2606:4700:4700::1111" />
       </FormField>
       <Form.Item label={t('pages.inbounds.form.peers')}>
         <Button

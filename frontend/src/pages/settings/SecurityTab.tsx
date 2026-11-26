@@ -181,7 +181,7 @@ export default function SecurityTab({ allSetting, updateSetting, saveSetting }: 
   async function confirmCreateToken() {
     const name = createName.trim();
     if (!name) {
-      messageApi.error(t('pages.settings.security.apiTokenNameRequired') || 'Name is required');
+      messageApi.error(t('pages.settings.security.apiTokenNameRequired') || '请填写名称');
       return;
     }
     setCreating(true);
@@ -378,14 +378,12 @@ export default function SecurityTab({ allSetting, updateSetting, saveSetting }: 
                 <div className="api-token-header">
                   <p className="api-token-hint">{t('pages.nodes.apiTokenHint')}</p>
                   <Button type="primary" size="small" onClick={openCreateModal}>
-                    + {t('pages.settings.security.apiTokenNew') || 'New token'}
+                    + {t('pages.settings.security.apiTokenNew') || '新建令牌'}
                   </Button>
                 </div>
                 <Spin spinning={apiTokensLoading}>
                   {!apiTokens.length && !apiTokensLoading && (
-                    <Empty
-                      description={t('pages.settings.security.apiTokenEmpty') || 'No tokens yet'}
-                    />
+                    <Empty description={t('pages.settings.security.apiTokenEmpty') || '暂无令牌'} />
                   )}
                   {apiTokens.map((row) => (
                     <div key={row.id} className={`api-token-row${row.enabled ? '' : ' disabled'}`}>
@@ -431,7 +429,7 @@ export default function SecurityTab({ allSetting, updateSetting, saveSetting }: 
 
       <Modal
         open={createOpen}
-        title={t('pages.settings.security.apiTokenNew') || 'New API token'}
+        title={t('pages.settings.security.apiTokenNew') || '新建 API 令牌'}
         confirmLoading={creating}
         okText={t('confirm')}
         cancelText={t('cancel')}
@@ -440,7 +438,7 @@ export default function SecurityTab({ allSetting, updateSetting, saveSetting }: 
       >
         <Form layout="vertical">
           <Form.Item
-            label={t('pages.settings.security.apiTokenName') || 'Name'}
+            label={t('pages.settings.security.apiTokenName') || '名称'}
             htmlFor={`${uid}-tokenName`}
             required
           >
@@ -449,7 +447,7 @@ export default function SecurityTab({ allSetting, updateSetting, saveSetting }: 
               value={createName}
               maxLength={64}
               placeholder={
-                t('pages.settings.security.apiTokenNamePlaceholder') || 'e.g. central-panel-a'
+                t('pages.settings.security.apiTokenNamePlaceholder') || '例如 central-panel-a'
               }
               onChange={(e) => setCreateName(e.target.value)}
               onPressEnter={confirmCreateToken}
@@ -475,7 +473,7 @@ export default function SecurityTab({ allSetting, updateSetting, saveSetting }: 
 
       <Modal
         open={!!createdToken}
-        title={t('pages.settings.security.apiTokenCreatedTitle') || 'Token created'}
+        title={t('pages.settings.security.apiTokenCreatedTitle') || '令牌已创建'}
         okText={t('done')}
         onOk={() => setCreatedToken(null)}
         onCancel={() => setCreatedToken(null)}

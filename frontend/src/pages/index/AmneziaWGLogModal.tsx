@@ -186,16 +186,16 @@ export default function AmneziaWGLogModal({ open, onClose }: AmneziaWGLogModalPr
               </div>
               <div className="log-meta">
                 <span className="log-meta-pair">
-                  <span className="log-meta-key">iface</span>
+                  <span className="log-meta-key">接口</span>
                   <span className="log-meta-val">{peer.interface}</span>
                 </span>
                 <span className="log-meta-pair">
-                  <span className="log-meta-key">inbound</span>
+                  <span className="log-meta-key">入站</span>
                   <span className="log-meta-val">{peer.tag}</span>
                 </span>
                 {peer.email && (
                   <span className="log-meta-pair">
-                    <span className="log-meta-key">email</span>
+                    <span className="log-meta-key">客户端</span>
                     <span className="log-meta-val">{peer.email}</span>
                   </span>
                 )}
@@ -215,7 +215,7 @@ export default function AmneziaWGLogModal({ open, onClose }: AmneziaWGLogModalPr
                 <th>{t('pages.index.amneziawgHandshake')}</th>
                 <th>{t('pages.index.amneziawgInterface')}</th>
                 <th>{t('pages.index.amneziawgInbound')}</th>
-                <th>Email</th>
+                <th>客户端标识</th>
                 <th>{t('pages.index.amneziawgEndpoint')}</th>
                 <th>{t('pages.clients.amneziaWgAllowedIPs')}</th>
                 <th>↑ / ↓</th>

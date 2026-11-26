@@ -128,14 +128,14 @@ describe('CloneInboundModal', () => {
       );
     // Only `online` is selectable — `offline` and `unknown` (no heartbeat
     // yet) are both shown but disabled.
-    expect(option('arm3 (offline)')?.className).toContain('ant-select-item-option-disabled');
-    expect(option('arm5 (unknown)')?.className).toContain('ant-select-item-option-disabled');
+    expect(option('arm3 (Offline)')?.className).toContain('ant-select-item-option-disabled');
+    expect(option('arm5 (Unknown)')?.className).toContain('ant-select-item-option-disabled');
     expect(option('arm2')?.className).not.toContain('ant-select-item-option-disabled');
 
     const labels = Array.from(document.querySelectorAll('.ant-select-item-option')).map((o) =>
       (o.textContent ?? '').trim(),
     );
-    expect(labels).toEqual(['Local panel', 'arm2', 'arm3 (offline)', 'arm5 (unknown)']);
+    expect(labels).toEqual(['Local panel', 'arm2', 'arm3 (Offline)', 'arm5 (Unknown)']);
   });
 
   it('select-all picks only selectable targets and clear-all blocks submit', () => {

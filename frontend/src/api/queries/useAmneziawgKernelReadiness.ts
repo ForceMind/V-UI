@@ -9,7 +9,7 @@ async function fetchKernelReadiness(): Promise<KernelReadiness> {
   const msg = await HttpUtil.get('/panel/api/inbounds/amneziawgKernelReadiness', undefined, {
     silent: true,
   });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch kernel readiness');
+  if (!msg?.success) throw new Error(msg?.msg || '获取内核就绪状态失败');
   return ReadinessSchema.parse(msg.obj);
 }
 

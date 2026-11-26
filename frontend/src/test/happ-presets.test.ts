@@ -13,10 +13,12 @@ describe('Happ presets and helpers', () => {
     expect(link.startsWith('happ://routing/onadd/')).toBe(true);
 
     const b64 = link.replace('happ://routing/onadd/', '');
-    const jsonStr = atob(b64);
+    const jsonStr = new TextDecoder().decode(
+      Uint8Array.from(atob(b64), (char) => char.charCodeAt(0)),
+    );
     const parsed = JSON.parse(jsonStr);
 
-    expect(parsed.Name).toBe('Iran Bypass');
+    expect(parsed.Name).toBe('伊朗分流');
     expect(parsed.GlobalProxy).toBe('true');
     expect(parsed.DirectSites).toContain('domain:ir');
     expect(parsed.DirectIp).toContain('geoip:ir');
@@ -28,7 +30,9 @@ describe('Happ presets and helpers', () => {
     expect(link.startsWith('happ://routing/onadd/')).toBe(true);
 
     const b64 = link.replace('happ://routing/onadd/', '');
-    const jsonStr = atob(b64);
+    const jsonStr = new TextDecoder().decode(
+      Uint8Array.from(atob(b64), (char) => char.charCodeAt(0)),
+    );
     const parsed = JSON.parse(jsonStr);
 
     expect(parsed).toEqual({
@@ -96,10 +100,12 @@ describe('Happ presets and helpers', () => {
   it('keeps the global preset without direct exceptions', () => {
     const link = buildHappPresetDeeplink('global');
     const b64 = link.replace('happ://routing/onadd/', '');
-    const jsonStr = atob(b64);
+    const jsonStr = new TextDecoder().decode(
+      Uint8Array.from(atob(b64), (char) => char.charCodeAt(0)),
+    );
     const parsed = JSON.parse(jsonStr);
 
-    expect(parsed.Name).toBe('Global Proxy');
+    expect(parsed.Name).toBe('全局代理');
     expect(parsed.GlobalProxy).toBe('true');
     expect(parsed.DirectSites).toEqual([]);
     expect(parsed.DirectIp).toEqual([]);
@@ -110,9 +116,13 @@ describe('Happ presets and helpers', () => {
     const link = buildHappPresetDeeplink('lan-bypass');
     const prefix = 'happ://routing/onadd/';
     expect(link.startsWith(prefix)).toBe(true);
-    const parsed = JSON.parse(atob(link.slice(prefix.length)));
+    const parsed = JSON.parse(
+      new TextDecoder().decode(
+        Uint8Array.from(atob(link.slice(prefix.length)), (char) => char.charCodeAt(0)),
+      ),
+    );
 
-    expect(parsed.Name).toBe('Global Bypass Local Network');
+    expect(parsed.Name).toBe('全局代理（绕过本地网络）');
     expect(parsed.GlobalProxy).toBe('true');
     expect(parsed.DirectSites).toEqual(['geosite:private']);
     expect(parsed.DirectIp).toEqual(['geoip:private']);

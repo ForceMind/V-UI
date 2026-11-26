@@ -13,10 +13,10 @@ export default function BlackholeFields() {
       <FormField label={t('pages.xray.outboundForm.responseType')} name={['settings', 'type']}>
         <Select
           options={[
-            { value: '', label: '(empty)' },
-            { value: 'none', label: 'none' },
+            { value: '', label: '（空）' },
+            { value: 'none', label: '无' },
             { value: 'http', label: 'http' },
-            { value: 'custom', label: 'custom' },
+            { value: 'custom', label: '自定义' },
           ]}
         />
       </FormField>

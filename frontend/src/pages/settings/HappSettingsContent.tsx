@@ -150,7 +150,7 @@ export default function HappSettingsContent({
                   <Input.TextArea
                     value={allSetting.subRoutingRules}
                     rows={4}
-                    placeholder="happ://routing/onadd/... or https://.../DEFAULT.DEEPLINK"
+                    placeholder="happ://routing/onadd/... 或 https://.../DEFAULT.DEEPLINK"
                     onChange={(e) => updateSetting({ subRoutingRules: e.target.value })}
                   />
                 </SettingListItem>
@@ -196,7 +196,7 @@ export default function HappSettingsContent({
                   <Input
                     value={allSetting.subHappSubInfoText}
                     maxLength={200}
-                    placeholder="Welcome to our high-speed network!"
+                    placeholder="欢迎使用我们的高速网络！"
                     onChange={(e) => updateSetting({ subHappSubInfoText: e.target.value })}
                   />
                 </SettingListItem>
@@ -226,7 +226,7 @@ export default function HappSettingsContent({
                   <Input
                     value={allSetting.subHappSubInfoButtonText}
                     maxLength={25}
-                    placeholder="Support Channel"
+                    placeholder="支持频道"
                     onChange={(e) => updateSetting({ subHappSubInfoButtonText: e.target.value })}
                   />
                 </SettingListItem>
@@ -286,7 +286,7 @@ export default function HappSettingsContent({
                     <Input
                       aria-label={t('pages.settings.subHappColorProfile')}
                       value={allSetting.subHappColorProfile}
-                      placeholder='{"serverRowBackgroundColor":"#21003D67"} or resetcolors'
+                      placeholder='{"serverRowBackgroundColor":"#21003D67"} 或 resetcolors'
                       onChange={(e) => updateSetting({ subHappColorProfile: e.target.value })}
                     />
                     <Space wrap size="small">
@@ -305,7 +305,7 @@ export default function HappSettingsContent({
                           })
                         }
                       >
-                        Violet
+                        紫色
                       </Button>
                       <Button
                         size="small"
@@ -316,7 +316,7 @@ export default function HappSettingsContent({
                           })
                         }
                       >
-                        Turquoise
+                        青绿色
                       </Button>
                     </Space>
                   </Space>

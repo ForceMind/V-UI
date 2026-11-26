@@ -8,7 +8,7 @@ import { SubBalancerListSchema, type SubBalancer } from '@/schemas/subBalancer';
 
 async function fetchSubBalancers(): Promise<SubBalancer[]> {
   const msg = await HttpUtil.get('/panel/api/sub-balancers', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch subscription balancers');
+  if (!msg?.success) throw new Error(msg?.msg || '获取订阅负载均衡配置失败');
   const validated = parseMsg(msg, SubBalancerListSchema, 'sub-balancers');
   return Array.isArray(validated.obj) ? validated.obj : [];
 }

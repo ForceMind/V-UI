@@ -364,7 +364,7 @@ export default function AppSidebar() {
               >
                 {pinned ? <PushpinFilled aria-hidden /> : <PushpinOutlined aria-hidden />}
               </button>
-              <DocsButton ariaLabel={t('menu.docs') || 'Documentation'} />
+              <DocsButton ariaLabel={t('menu.docs') || '文档'} />
               <ThemeCycleButton
                 id="theme-cycle"
                 isDark={isDark}
@@ -376,22 +376,18 @@ export default function AppSidebar() {
           )}
         </div>
         <Tooltip
-          title={
-            railCollapsed ? t('commandPalette.title') || 'Command Palette (Ctrl + K)' : undefined
-          }
+          title={railCollapsed ? t('commandPalette.title') || '命令面板（Ctrl + K）' : undefined}
           placement="right"
         >
           <button
             type="button"
             className={`sidebar-command-trigger${railCollapsed ? ' collapsed' : ''}`}
             onClick={openCommandPalette}
-            aria-label={t('commandPalette.title') || 'Command Palette (Ctrl + K)'}
+            aria-label={t('commandPalette.title') || '命令面板（Ctrl + K）'}
           >
             <span className="sidebar-command-left">
               <SearchOutlined aria-hidden className="sidebar-command-icon" />
-              <span className="sidebar-command-text">
-                {t('commandPalette.search') || 'Search...'}
-              </span>
+              <span className="sidebar-command-text">{t('commandPalette.search') || '搜索…'}</span>
             </span>
             <span className="sidebar-command-kbd">
               <span className="kbd-cmd">{SHORTCUT_MODIFIER}</span>
@@ -440,7 +436,7 @@ export default function AppSidebar() {
             <span className="drawer-brand">3X-UI</span>
           </div>
           <div className="drawer-header-actions">
-            <DocsButton ariaLabel={t('menu.docs') || 'Documentation'} />
+            <DocsButton ariaLabel={t('menu.docs') || '文档'} />
             <ThemeCycleButton
               id="theme-cycle-drawer"
               isDark={isDark}
@@ -465,12 +461,12 @@ export default function AppSidebar() {
             setDrawerOpen(false);
             openCommandPalette();
           }}
-          aria-label={t('commandPalette.title') || 'Command Palette (Ctrl + K)'}
+          aria-label={t('commandPalette.title') || '命令面板（Ctrl + K）'}
           style={{ margin: '8px 12px 4px', width: 'calc(100% - 24px)' }}
         >
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <SearchOutlined aria-hidden className="sidebar-command-icon" />
-            <span>{t('commandPalette.search') || 'Search...'}</span>
+            <span>{t('commandPalette.search') || '搜索…'}</span>
           </span>
           <span className="sidebar-command-kbd">
             <span className="kbd-cmd">{SHORTCUT_MODIFIER}</span>

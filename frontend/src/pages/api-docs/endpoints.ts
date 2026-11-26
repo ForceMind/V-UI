@@ -74,27 +74,27 @@ const outboundSubscriptionBodyParams: EndpointParam[] = [
     name: 'remark',
     in: 'body (form)',
     type: 'string',
-    desc: 'Optional display label.',
+    desc: '可选的显示名称。',
     optional: true,
   },
   {
     name: 'url',
     in: 'body (form)',
     type: 'string',
-    desc: 'Subscription URL (required). Must be a public http(s) address; private/internal targets are blocked unless allowPrivate is true.',
+    desc: '订阅地址（必填），必须为公开 HTTP(S) 地址。默认禁止私有、内部和回环地址，除非 allowPrivate 为 true。',
   },
   {
     name: 'tagPrefix',
     in: 'body (form)',
     type: 'string',
-    desc: 'Prefix for generated outbound tags. Defaults to the lowest free "sub<N>-" prefix.',
+    desc: '生成出站标签时使用的前缀。默认选择最小的未占用 sub<N>- 前缀。',
     optional: true,
   },
   {
     name: 'userAgent',
     in: 'body (form)',
     type: 'string',
-    desc: 'Custom User-Agent sent when fetching this subscription. Defaults to "3x-ui-outbound-sub/1.0".',
+    desc: '获取订阅时发送的自定义 User-Agent，默认为 3x-ui-outbound-sub/1.0。',
     optional: true,
     defaultValue: '3x-ui-outbound-sub/1.0',
   },
@@ -102,7 +102,7 @@ const outboundSubscriptionBodyParams: EndpointParam[] = [
     name: 'updateInterval',
     in: 'body (form)',
     type: 'integer',
-    desc: 'Seconds between auto-refreshes. Default 600.',
+    desc: '自动刷新间隔，单位为秒，默认为 600。',
     optional: true,
     defaultValue: 600,
   },
@@ -110,7 +110,7 @@ const outboundSubscriptionBodyParams: EndpointParam[] = [
     name: 'enabled',
     in: 'body (form)',
     type: 'boolean',
-    desc: 'Whether the subscription is active. Default true.',
+    desc: '是否启用订阅，默认为 true。',
     optional: true,
     defaultValue: true,
   },
@@ -118,7 +118,7 @@ const outboundSubscriptionBodyParams: EndpointParam[] = [
     name: 'allowPrivate',
     in: 'body (form)',
     type: 'boolean',
-    desc: 'Allow the URL to point at a private/internal/loopback address. Default false.',
+    desc: '允许订阅指向私有、内部或回环地址，默认为 false。',
     optional: true,
     defaultValue: false,
   },
@@ -126,7 +126,7 @@ const outboundSubscriptionBodyParams: EndpointParam[] = [
     name: 'allowInsecure',
     in: 'body (form)',
     type: 'boolean',
-    desc: "Skip TLS certificate verification when fetching the subscription's URL. Default false.",
+    desc: '获取订阅时跳过 TLS 证书验证，默认为 false。',
     optional: true,
     defaultValue: false,
   },
@@ -134,7 +134,7 @@ const outboundSubscriptionBodyParams: EndpointParam[] = [
     name: 'prepend',
     in: 'body (form)',
     type: 'boolean',
-    desc: "Place this subscription's outbounds before the manual template outbounds. Default false.",
+    desc: '将此订阅的出站放在手动模板出站之前，默认为 false。',
     optional: true,
     defaultValue: false,
   },
@@ -145,13 +145,13 @@ const subBalancerBodyParams: EndpointParam[] = [
     name: 'remark',
     in: 'body (form)',
     type: 'string',
-    desc: 'Display label, used as the config remarks (required).',
+    desc: '显示名称，用作配置备注（必填）。',
   },
   {
     name: 'strategy',
     in: 'body (form)',
     type: 'string',
-    desc: 'Balancer strategy: "leastLoad", "leastPing", "roundRobin" or "random". Default "random".',
+    desc: '负载均衡策略：leastLoad、leastPing、roundRobin 或 random，默认为 random。',
     optional: true,
     defaultValue: 'random',
   },
@@ -159,20 +159,20 @@ const subBalancerBodyParams: EndpointParam[] = [
     name: 'inboundIds',
     in: 'body (form)',
     type: 'integer[]',
-    desc: 'Repeated form keys selecting the member inbounds (required, at least one).',
+    desc: '通过重复的表单键选择成员入站，至少提供一个。',
   },
   {
     name: 'memberWeights',
     in: 'body (form)',
     type: 'object',
-    desc: 'leastLoad only: JSON object mapping inbound id to a static weight > 0, e.g. {"3":0.2}. Lower weight = picked more often; absent ids weigh 1. Rejected for other strategies; entries for unselected inbounds are dropped.',
+    desc: '仅用于 leastLoad：将入站编号映射到大于 0 的静态权重，例如 {"3":0.2}。权重越小，选择越频繁；未设置时权重为 1。其他策略不接受此字段，未选中入站的权重会被丢弃。',
     optional: true,
   },
   {
     name: 'sortOrder',
     in: 'body (form)',
     type: 'integer',
-    desc: '1-based position in the subscription list. Default 1.',
+    desc: '订阅列表中的位置，从 1 开始，默认为 1。',
     optional: true,
     defaultValue: 1,
   },
@@ -180,42 +180,41 @@ const subBalancerBodyParams: EndpointParam[] = [
     name: 'enabled',
     in: 'body (form)',
     type: 'boolean',
-    desc: 'Whether the balancer is emitted. Default true on create; unchanged when omitted on update.',
+    desc: '是否输出此负载均衡配置。创建时默认为 true，更新时省略则保留原值。',
     optional: true,
   },
 ];
 
 const subscriptionHeadResponses = {
-  '200': { description: 'Subscription is available. Headers match GET; no response body.' },
-  '404': { description: 'No enabled client matches the subscription ID.' },
-  '500': { description: 'Subscription generation failed.' },
+  '200': { description: '订阅可用。响应头与 GET 相同，无响应正文。' },
+  '404': { description: '没有与此订阅标识匹配的已启用客户端。' },
+  '500': { description: '生成订阅失败。' },
 };
 
 const hwidStatusErrorResponses = {
-  '404': { description: 'No enabled client matches the subscription ID. Empty body.' },
-  '500': { description: 'Database lookup failed. Empty body.' },
+  '404': { description: '没有与此订阅标识匹配的已启用客户端，响应正文为空。' },
+  '500': { description: '数据库查询失败，响应正文为空。' },
 };
 
 export const sections: readonly Section[] = [
   {
     id: 'authentication',
-    title: 'Authentication',
+    title: '身份验证',
     description:
-      'Two authentication modes are supported. UI sessions use a cookie set by the login endpoint. Programmatic clients (bots, scripts, remote panels) authenticate with a Bearer token taken from Settings → Security → API Token. Both work for every endpoint under /panel/api/*.',
+      '支持两种身份验证方式：浏览器会话使用登录接口设置的 Cookie；机器人、脚本和远程面板使用“设置 → 安全 → API 令牌”中的 Bearer 令牌。两种方式均适用于 /panel/api/* 下的所有接口。',
     endpoints: [
       {
         method: 'POST',
         path: '/login',
-        summary:
-          'Authenticate with username + password and receive a session cookie. Required before any cookie-based API call.',
+        summary: '使用用户名和密码登录并获取会话 Cookie。使用 Cookie 调用接口前必须先登录。',
         params: [
-          { name: 'username', in: 'body', type: 'string', desc: 'Panel admin username.' },
-          { name: 'password', in: 'body', type: 'string', desc: 'Panel admin password.' },
+          { name: 'username', in: 'body', type: 'string', desc: '面板管理员用户名。' },
+          { name: 'password', in: 'body', type: 'string', desc: '面板管理员密码。' },
           {
             name: 'twoFactorCode',
             in: 'body',
             type: 'string',
-            desc: 'OTP code when 2FA is enabled. Omit otherwise.',
+            desc: '启用双重验证时填写一次性验证码，否则省略。',
             optional: true,
           },
         ],
@@ -226,21 +225,20 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/logout',
-        summary: 'Clear the session cookie. Requires the CSRF header for browser sessions.',
+        summary: '清除会话 Cookie。浏览器会话需携带 CSRF 请求头。',
         response: '{\n  "success": true\n}',
       },
       {
         method: 'GET',
         path: '/csrf-token',
         summary:
-          'Mint a CSRF token for the current session. The SPA replays it in the X-CSRF-Token header on unsafe requests. Bearer-token callers can skip this — the middleware short-circuits CSRF for authenticated API requests.',
+          '为当前会话生成 CSRF 令牌，前端在修改请求的 X-CSRF-Token 请求头中发送。使用 Bearer 令牌验证的 API 调用不需要此令牌。',
         response: '{\n  "success": true,\n  "obj": "csrf-token-string"\n}',
       },
       {
         method: 'POST',
         path: '/getTwoFactorEnable',
-        summary:
-          'Returns whether 2FA is enabled on the panel — used by the login page to decide whether to show the OTP field.',
+        summary: '返回面板是否启用双重验证，登录页据此决定是否显示一次性验证码输入框。',
         response: '{\n  "success": true,\n  "obj": false\n}',
       },
     ],
@@ -248,15 +246,15 @@ export const sections: readonly Section[] = [
 
   {
     id: 'inbounds',
-    title: 'Inbounds',
+    title: '入站管理',
     description:
-      'Manage inbound configurations and their clients. All endpoints live under /panel/api/inbounds and require a logged-in session or Bearer token. Link-generating endpoints honour forwarded headers only when the request comes from a configured trusted proxy.',
+      '管理入站及其客户端。接口位于 /panel/api/inbounds，需要已登录会话或 Bearer 令牌。生成链接时，仅信任来自已配置可信代理的转发请求头。',
     endpoints: [
       {
         method: 'GET',
         path: '/panel/api/inbounds/list',
         summary:
-          'List every inbound owned by the authenticated user, including each inbound’s clientStats traffic counters. settings, streamSettings, and sniffing are returned as nested JSON objects (no escaped strings); legacy callers that send them back as JSON-encoded strings are still accepted on write.',
+          '列出当前用户的所有入站及 clientStats 流量计数。settings、streamSettings 和 sniffing 返回嵌套 JSON 对象；写入时仍兼容旧版 JSON 编码字符串。',
         responseSchema: 'Inbound',
         responseSchemaArray: true,
       },
@@ -264,7 +262,7 @@ export const sections: readonly Section[] = [
         method: 'GET',
         path: '/panel/api/inbounds/list/slim',
         summary:
-          'Same shape as /list but with settings.clients[] stripped down to {email, enable, comment} and ClientStats not enriched with UUID/SubId. Use this for list pages; fetch /get/:id when you need the full per-client payload (uuid, password, flow, ...).',
+          '与 /list 结构相同，但 settings.clients[] 仅保留 {email, enable, comment}，ClientStats 不包含 UUID/SubId。适合列表页；需要 uuid、password、flow 等完整信息时请求 /get/:id。',
         response:
           '{\n  "success": true,\n  "obj": [\n    {\n      "id": 1,\n      "remark": "VLESS-443",\n      "settings": {\n        "clients": [\n          { "email": "alice", "enable": true }\n        ],\n        "decryption": "none"\n      },\n      "clientStats": []\n    }\n  ]\n}',
       },
@@ -272,7 +270,7 @@ export const sections: readonly Section[] = [
         method: 'GET',
         path: '/panel/api/inbounds/options',
         summary:
-          'Lightweight picker projection of the authenticated user’s inbounds. Returns id, remark, tag, protocol, port, a server-computed tlsFlowCapable flag (true for VLESS on TCP with tls or reality, or on XHTTP with VLESS encryption / vlessenc enabled), and ssMethod (the Shadowsocks cipher, empty for non-Shadowsocks inbounds — used by the client UI to generate a valid Shadowsocks 2022 PSK). Use this for dropdowns and attach pickers — it skips settings, streamSettings, and clientStats so the payload stays small even on panels with thousands of clients.',
+          '返回轻量入站选项：id、remark、tag、protocol、port、tlsFlowCapable 和 ssMethod。tlsFlowCapable 表示 TCP 上启用 TLS/Reality 的 VLESS，或 XHTTP 上启用 VLESS 加密的 VLESS；ssMethod 为 Shadowsocks 加密方式，供生成 2022 PSK 使用。省略 settings、streamSettings 和 clientStats，适合大量客户端场景中的选择器。',
         responseSchema: 'InboundOption',
         responseSchemaArray: true,
       },
@@ -281,42 +279,41 @@ export const sections: readonly Section[] = [
         path: '/panel/api/inbounds/amneziawgKernelReadiness',
         responseSchema: 'Readiness',
         summary:
-          'Whether this host can run an AmneziaWG inbound on the kernel module. Returns ready, host blocker codes (root/tools/module/nft), and the command that fixes them. Saving an inbound also checks its features and rejects IPv6, port forwarding, routeThroughXray, or a pinned listen address that the kernel backend cannot honor.',
+          '检查主机能否通过内核模块运行 AmneziaWG 入站，返回 ready、root/tools/module/nft 阻塞代码及修复命令。保存入站时还会拒绝内核后端不支持的 IPv6、端口转发、routeThroughXray 和固定监听地址。',
       },
       {
         method: 'GET',
         path: '/panel/api/inbounds/allLinks',
         responseObjectSchema: { type: 'array', nullable: true, items: { type: 'string' } },
         summary:
-          'Return every protocol URL (vless://, vmess://, trojan://, ss://, hysteria://, mtproto) across all inbounds and all of their clients. Links are rendered through the subscription engine, so the configured remark template (name-only display part) is applied per client — the same output the client info/QR pages use. Protocols without a URL form (socks, http, mixed, wireguard, dokodemo, tunnel) contribute nothing. Used by the panel’s "Export all inbound links" action.',
+          '导出所有入站和客户端的协议链接（vless://、vmess://、trojan://、ss://、hysteria://、mtproto）。通过订阅引擎应用每个客户端的备注模板，与客户端详情和二维码中的链接一致。不具备链接格式的 socks、http、mixed、wireguard、dokodemo、tunnel 不输出。',
         response:
           '{\n  "success": true,\n  "obj": [\n    "vless://uuid@host:443?security=reality&...#Germany-alice",\n    "vmess://eyJ2IjoyLC..."\n  ]\n}',
       },
       {
         method: 'GET',
         path: '/panel/api/inbounds/get/:id',
-        summary: 'Fetch a single inbound by numeric ID.',
-        params: [{ name: 'id', in: 'path', type: 'number', desc: 'Inbound ID.' }],
+        summary: '按数字编号获取单个入站。',
+        params: [{ name: 'id', in: 'path', type: 'number', desc: '入站编号。' }],
       },
       {
         method: 'POST',
         path: '/panel/api/inbounds/add',
         summary:
-          'Create a new inbound. Send the full inbound payload (protocol, port, settings, streamSettings, sniffing, remark, expiryTime, total, enable). settings, streamSettings, and sniffing may be sent as nested JSON objects (preferred) or as JSON-encoded strings (legacy).',
+          '创建入站，提交完整配置：protocol、port、settings、streamSettings、sniffing、remark、expiryTime、total、enable。配置对象建议直接嵌套，也兼容旧版 JSON 编码字符串。',
         body: inboundBody,
         errorResponse: '{\n  "success": false,\n  "msg": "Port 443 is already in use"\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/inbounds/del/:id',
-        summary: 'Delete an inbound by ID. Also removes its associated client stats rows.',
-        params: [{ name: 'id', in: 'path', type: 'number', desc: 'Inbound ID.' }],
+        summary: '按编号删除入站，同时删除关联客户端的流量统计记录。',
+        params: [{ name: 'id', in: 'path', type: 'number', desc: '入站编号。' }],
       },
       {
         method: 'POST',
         path: '/panel/api/inbounds/bulkDel',
-        summary:
-          'Delete many inbounds in one call. Processes the list sequentially; failures are reported per id and the rest still proceed. Restarts xray at most once.',
+        summary: '批量删除入站，按列表顺序处理。逐项报告失败，其余项继续执行，最多重启一次 Xray。',
         body: '{\n  "ids": [1, 2, 3]\n}',
         response:
           '{\n  "success": true,\n  "obj": {\n    "deleted": 2,\n    "skipped": [\n      { "id": 3, "reason": "..." }\n    ]\n  }\n}',
@@ -325,58 +322,53 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/inbounds/update/:id',
         summary:
-          'Replace an inbound’s configuration. Body shape mirrors /add, but the inbound keeps its stored client list and enable flag: settings.clients and enable in the body are ignored. Manage clients through the /panel/api/clients endpoints and toggle the inbound with /setEnable.',
-        params: [{ name: 'id', in: 'path', type: 'number', desc: 'Inbound ID.' }],
+          '替换入站配置，请求结构与 /add 相同，但保留已存储的客户端列表和启用状态，忽略请求中的 settings.clients 与 enable。客户端通过 /panel/api/clients 管理，启用状态通过 /setEnable 修改。',
+        params: [{ name: 'id', in: 'path', type: 'number', desc: '入站编号。' }],
         body: inboundBody,
       },
       {
         method: 'POST',
         path: '/panel/api/inbounds/setEnable/:id',
-        summary:
-          'Toggle only the enable flag without serialising the whole settings JSON. Recommended for UI switches on large inbounds.',
-        params: [{ name: 'id', in: 'path', type: 'number', desc: 'Inbound ID.' }],
+        summary: '仅修改 enable 标志，无需序列化整个 settings。推荐用于大入站的界面开关。',
+        params: [{ name: 'id', in: 'path', type: 'number', desc: '入站编号。' }],
         body: '{\n  "enable": false\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/inbounds/:id/subSortIndex',
-        summary:
-          'Set only the subscription sort order. Reads the stored inbound, so a reorder cannot carry a stale client list over a concurrent edit.',
-        params: [{ name: 'id', in: 'path', type: 'number', desc: 'Inbound ID.' }],
+        summary: '仅修改订阅排序。读取已保存的入站，避免排序请求用旧客户端列表覆盖并发编辑。',
+        params: [{ name: 'id', in: 'path', type: 'number', desc: '入站编号。' }],
         body: '{\n  "subSortIndex": 2\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/inbounds/:id/resetTraffic',
-        summary:
-          'Zero out upload + download counters for a single inbound. Does not touch per-client counters.',
-        params: [{ name: 'id', in: 'path', type: 'number', desc: 'Inbound ID.' }],
+        summary: '清零单个入站的上传和下载计数，不修改客户端计数。',
+        params: [{ name: 'id', in: 'path', type: 'number', desc: '入站编号。' }],
       },
       {
         method: 'POST',
         path: '/panel/api/inbounds/:id/delAllClients',
         summary:
-          'Remove every client attached to a single inbound while keeping the inbound itself. Collects emails from settings.clients[] and feeds them into the optimized bulk-delete path (runtime user removal + traffic-row cleanup + SyncInbound). Destructive and cannot be undone.',
-        params: [{ name: 'id', in: 'path', type: 'number', desc: 'Inbound ID.' }],
+          '删除某个入站中的所有客户端，保留入站本身。从 settings.clients[] 收集标识后批量移除运行时用户、清理流量记录并同步入站。此操作不可撤销。',
+        params: [{ name: 'id', in: 'path', type: 'number', desc: '入站编号。' }],
         response: '{\n  "success": true,\n  "obj": {\n    "deleted": 12\n  }\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/inbounds/resetAllTraffics',
-        summary:
-          'Reset upload + download counters on every inbound. Destructive — accounting history is lost.',
+        summary: '清零所有入站的上传和下载计数，历史计量数据将丢失。',
       },
       {
         method: 'POST',
         path: '/panel/api/inbounds/import',
-        summary:
-          'Bulk-import an inbound from a JSON blob (e.g. one exported via the UI). The body uses form encoding with a single "data" field.',
+        summary: '从 JSON 导入入站，例如界面导出的配置。使用表单编码，通过单个 data 字段提交。',
         params: [
           {
             name: 'data',
             in: 'body (form)',
             type: 'string',
-            desc: 'JSON-encoded inbound payload.',
+            desc: '经过 JSON 编码的入站配置。',
           },
         ],
       },
@@ -384,19 +376,19 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/inbounds/pushClientTraffics',
         summary:
-          "Receive a master panel's aggregated per-client usage, keyed by the master's GUID. Stored in a side table used only for the UI display overlay and local quota enforcement — never folded into the local counters that masters poll, so delta accounting stays intact. Called panel-to-panel by the node traffic sync job.",
+          '接收主面板汇总的客户端用量，以主面板 GUID 区分来源。保存在独立表中，仅用于界面叠加显示和本地额度控制，不混入供主面板轮询的本地计数，避免破坏增量计量。由节点流量同步任务调用。',
         params: [
           {
             name: 'masterGuid',
             in: 'body (json)',
             type: 'string',
-            desc: 'Stable GUID of the pushing master panel.',
+            desc: '推送数据的主面板稳定 GUID。',
           },
           {
             name: 'traffics',
             in: 'body (json)',
             type: 'object[]',
-            desc: 'Client traffic rows; only email/up/down are read.',
+            desc: '客户端流量记录，仅读取 email、up、down。',
           },
         ],
         body: '{\n  "masterGuid": "9f6c2d-…",\n  "traffics": [\n    { "email": "alice", "up": 1048576, "down": 2097152 }\n  ]\n}',
@@ -406,23 +398,22 @@ export const sections: readonly Section[] = [
         method: 'GET',
         path: '/panel/api/inbounds/:id/fallbacks',
         summary:
-          "List the fallback rules attached to a master VLESS/Trojan TCP-TLS inbound. Each rule links one child inbound (the dest) to optional SNI/ALPN/path/dest/xver match criteria. When dest is empty the child inbound's listen+port is used.",
-        params: [{ name: 'id', in: 'path', type: 'number', desc: 'Master inbound ID.' }],
+          '列出 VLESS/Trojan TCP-TLS 主入站的回落规则。每项关联一个子入站及可选 SNI/ALPN/path/dest/xver 条件。dest 为空时使用子入站的监听地址和端口。',
+        params: [{ name: 'id', in: 'path', type: 'number', desc: '主入站编号。' }],
         response:
           '{\n  "success": true,\n  "obj": [\n    {\n      "id": 1,\n      "masterId": 10,\n      "childId": 11,\n      "name": "",\n      "alpn": "",\n      "path": "/vlws",\n      "dest": "",\n      "xver": 2,\n      "sortOrder": 0\n    }\n  ]\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/inbounds/:id/fallbacks',
-        summary:
-          'Replace the entire fallback list for a master inbound. Body is JSON. Triggers an Xray restart.',
+        summary: '替换主入站的全部回落规则，使用 JSON 请求正文，并触发 Xray 重启。',
         params: [
-          { name: 'id', in: 'path', type: 'number', desc: 'Master inbound ID.' },
+          { name: 'id', in: 'path', type: 'number', desc: '主入站编号。' },
           {
             name: 'fallbacks',
             in: 'body (json)',
             type: 'object[]',
-            desc: 'Array of {childId, name, alpn, path, dest, xver, sortOrder} entries. Leave dest empty to auto-resolve from the child inbound\'s listen+port; set it (e.g. "8443", "127.0.0.1:8443", "/dev/shm/x.sock") to override.',
+            desc: '由 {childId, name, alpn, path, dest, xver, sortOrder} 组成的数组。dest 留空时使用子入站监听地址和端口，也可指定 8443、127.0.0.1:8443 或 /dev/shm/x.sock 等值覆盖。',
           },
         ],
         body: '{\n  "fallbacks": [\n    { "childId": 11, "path": "/vlws", "xver": 2 },\n    { "childId": 12, "alpn": "h2", "dest": "8443" }\n  ]\n}',
@@ -433,21 +424,21 @@ export const sections: readonly Section[] = [
 
   {
     id: 'server',
-    title: 'Server',
+    title: '服务器',
     description:
-      'System status, log retrieval, certificate generators, Xray binary management, and backup/restore. All under /panel/api/server.',
+      '系统状态、日志、证书生成、Xray 程序管理和备份恢复，接口均位于 /panel/api/server。',
     endpoints: [
       {
         method: 'GET',
         path: '/panel/api/openapi.json',
         summary:
-          'Serve this API description as an OpenAPI 3 document — the same file that powers the API Docs page. Requires a session or Bearer token like the rest of /panel/api. Useful for generating clients or importing into API tooling.',
+          '以 OpenAPI 3 格式返回当前接口文档，也是面板 API 文档页的数据来源。与其他 /panel/api 接口一样需要会话或 Bearer 令牌，可用于生成客户端或导入接口工具。',
       },
       {
         method: 'GET',
         path: '/panel/api/server/status',
         summary:
-          'Real-time machine snapshot: CPU, memory, swap, disk, network IO, load averages, open connections, Xray state. Cached and refreshed every 2 seconds in the background.',
+          '实时主机快照：CPU、内存、交换空间、磁盘、网络读写、负载、连接数和 Xray 状态。后台每两秒更新缓存。',
         response:
           '{\n  "success": true,\n  "obj": {\n    "cpu": 12.5,\n    "mem": { "current": 2147483648, "total": 8589934592 },\n    "swap": { "current": 0, "total": 4294967296 },\n    "disk": { "current": 53687091200, "total": 268435456000 },\n    "netIO": { "up": 1073741824, "down": 2147483648 },\n    "xray": { "state": "running", "version": "v25.10.31" },\n    "tcpCount": 42,\n    "load": { "load1": 0.5, "load5": 0.3, "load15": 0.2 }\n  }\n}',
       },
@@ -455,41 +446,39 @@ export const sections: readonly Section[] = [
         method: 'GET',
         path: '/panel/api/server/fail2banStatus',
         summary:
-          'Reports whether per-client IP limits can be enforced on this host. The panel uses it to gate the "IP Limit" field, since enforcement depends on Fail2ban being installed.',
+          '检查主机能否实施客户端 IP 限制，面板据此控制“IP 限制”字段是否可用。此功能依赖 Fail2ban。',
         response:
           '{\n  "success": true,\n  "obj": {\n    "enabled": true,\n    "installed": true,\n    "usable": true,\n    "windows": false\n  }\n}',
       },
       {
         method: 'GET',
         path: '/panel/api/server/cpuHistory/:bucket',
-        summary:
-          'Legacy: aggregated CPU history. Use /history/cpu/:bucket instead — same data with a uniform {t, v} shape.',
+        summary: '旧版 CPU 汇总历史。请改用 /history/cpu/:bucket，数据相同，统一采用 {t, v} 结构。',
         params: [
           {
             name: 'bucket',
             in: 'path',
             type: 'number',
-            desc: 'Bucket size in seconds. Allowed: 2, 30, 60, 120, 180, 300.',
+            desc: '统计分桶大小，单位为秒，允许 2、30、60、120、180、300。',
           },
         ],
       },
       {
         method: 'GET',
         path: '/panel/api/server/history/:metric/:bucket',
-        summary:
-          'Aggregated time-series for one metric. Returns an array of {t, v} samples covering the last ~6 hours.',
+        summary: '返回某项指标最近约六小时的聚合时序数据，样本结构为 {t, v}。',
         params: [
           {
             name: 'metric',
             in: 'path',
             type: 'string',
-            desc: 'cpu | mem | netUp | netDown | online | load1 | load5 | load15.',
+            desc: '指标：cpu、mem、netUp、netDown、online、load1、load5、load15。',
           },
           {
             name: 'bucket',
             in: 'path',
             type: 'number',
-            desc: 'Bucket size in seconds. Allowed: 2, 30, 60, 120, 180, 300.',
+            desc: '统计分桶大小，单位为秒，允许 2、30、60、120、180、300。',
           },
         ],
         response:
@@ -499,25 +488,25 @@ export const sections: readonly Section[] = [
         method: 'GET',
         path: '/panel/api/server/xrayMetricsState',
         summary:
-          'Xray runtime metrics state — whether the xray config has a `metrics` block, which expvar keys are flowing, and the current snapshot values for each. Returns an empty state when metrics are not configured.',
+          '返回 Xray 运行指标状态，包括是否配置 metrics、已产生数据的 expvar 键及当前快照。未配置指标时返回空状态。',
       },
       {
         method: 'GET',
         path: '/panel/api/server/xrayMetricsHistory/:metric/:bucket',
         summary:
-          'Time-series history for one Xray runtime metric over the last ~6 hours. Same {t, v} shape as /history/:metric/:bucket.',
+          '返回某项 Xray 运行指标最近约六小时的历史，结构与 /history/:metric/:bucket 相同，为 {t, v}。',
         params: [
           {
             name: 'metric',
             in: 'path',
             type: 'string',
-            desc: 'xrAlloc | xrSys | xrHeapObjects | xrNumGC | xrPauseNs.',
+            desc: '指标：xrAlloc、xrSys、xrHeapObjects、xrNumGC、xrPauseNs。',
           },
           {
             name: 'bucket',
             in: 'path',
             type: 'number',
-            desc: 'Bucket size in seconds. Allowed: 2, 30, 60, 120, 180, 300.',
+            desc: '统计分桶大小，单位为秒，允许 2、30、60、120、180、300。',
           },
         ],
       },
@@ -525,50 +514,49 @@ export const sections: readonly Section[] = [
         method: 'GET',
         path: '/panel/api/server/xrayObservatory',
         summary:
-          'Latest snapshot from the Xray observatory — per-outbound latency, health status, and last-probe time. Only populated when the Xray config has an observatory configured.',
+          '返回 Xray 连接观测的最新快照，包括各出站的延迟、健康状态和最后探测时间。仅在配置了连接观测时有数据。',
       },
       {
         method: 'GET',
         path: '/panel/api/server/xrayObservatoryHistory/:tag/:bucket',
-        summary:
-          'Time-series of observatory probe results for one outbound tag. Same {t, v} shape as the other history endpoints.',
+        summary: '返回某个出站标签的连接观测历史，与其他历史接口一样采用 {t, v} 结构。',
         params: [
           {
             name: 'tag',
             in: 'path',
             type: 'string',
-            desc: 'Outbound tag from the observatory config.',
+            desc: '连接观测配置中的出站标签。',
           },
           {
             name: 'bucket',
             in: 'path',
             type: 'number',
-            desc: 'Bucket size in seconds. Allowed: 2, 30, 60, 120, 180, 300.',
+            desc: '统计分桶大小，单位为秒，允许 2、30、60、120、180、300。',
           },
         ],
       },
       {
         method: 'GET',
         path: '/panel/api/server/getXrayVersion',
-        summary: 'List Xray binary versions available for install on this host.',
+        summary: '列出此主机可安装的 Xray 版本。',
         response: '{\n  "success": true,\n  "obj": ["v25.10.31", "v25.9.15", "v25.8.1"]\n}',
       },
       {
         method: 'GET',
         path: '/panel/api/server/getPanelUpdateInfo',
-        summary: 'Check whether a newer 3x-ui release is available on GitHub.',
+        summary: '检查 GitHub 上是否有更新的 3x-ui 版本。',
       },
       {
         method: 'GET',
         path: '/panel/api/server/getUpdateStatus',
         summary:
-          'Report the outcome of the most recently launched panel self-update (see POST updatePanel). Compare the returned runId against the one updatePanel returned to tell this run apart from a stale result.',
+          '返回最近一次面板自更新的结果。将 runId 与 POST updatePanel 返回值对比，以区分当前运行和旧结果。',
         responseSchema: 'PanelUpdateStatus',
       },
       {
         method: 'GET',
         path: '/panel/api/server/getConfigJson',
-        summary: 'Return the assembled Xray config that\u2019s currently running on this host.',
+        summary: '返回此主机当前运行的完整 Xray 配置。',
         response:
           '{\n  "success": true,\n  "obj": {\n    "log": { "loglevel": "warning" },\n    "inbounds": [...],\n    "outbounds": [...],\n    "routing": { "rules": [...] }\n  }\n}',
       },
@@ -576,25 +564,25 @@ export const sections: readonly Section[] = [
         method: 'GET',
         path: '/panel/api/server/getDb',
         summary:
-          'Stream a full database backup as an attachment: the SQLite .db file on SQLite panels, or a pg_dump custom-format archive (.dump) on PostgreSQL panels. Use as a manual backup.',
+          '下载完整数据库备份。SQLite 面板返回 .db 文件，PostgreSQL 面板返回 pg_dump 自定义格式的 .dump 文件，可用作手动备份。',
       },
       {
         method: 'GET',
         path: '/panel/api/server/getMigration',
         summary:
-          'Stream a cross-engine migration file as an attachment: a .dump (SQL text) on SQLite, or a .db SQLite database built from the live data on PostgreSQL.',
+          '下载跨数据库引擎迁移文件。SQLite 返回 SQL 文本 .dump，PostgreSQL 返回基于实时数据生成的 SQLite .db 文件。',
       },
       {
         method: 'GET',
         path: '/panel/api/server/getNewUUID',
-        summary: 'Generate a fresh UUID v4. Convenience helper for client IDs.',
+        summary: '生成 UUID v4，可用于客户端标识。',
         responseSchema: 'NewUUIDResponse',
       },
       {
         method: 'GET',
         path: '/panel/api/server/getWebCertFiles',
         summary:
-          'Return this panel\'s own web TLS certificate and key file paths. The central panel calls it on a node (via the node API token) so "Set Cert from Panel" fills a node-assigned inbound with paths that exist on the node.',
+          '返回当前面板 Web TLS 证书和密钥的文件路径。主面板通过节点 API 令牌调用，使分配到节点的入站能够使用节点本机证书路径。',
         response:
           '{\n  "success": true,\n  "obj": {\n    "webCertFile": "/root/cert/example.com/fullchain.pem",\n    "webKeyFile": "/root/cert/example.com/privkey.pem"\n  }\n}',
       },
@@ -602,61 +590,59 @@ export const sections: readonly Section[] = [
         method: 'GET',
         path: '/panel/api/server/descendants',
         summary:
-          'Read-only summaries (guid, parentGuid, name, address, status, versions) of the nodes this panel manages. A parent panel calls it on a node (via the node API token) to surface transitive sub-nodes in a chained topology. Counts are computed by the parent, not returned here.',
+          '只读返回当前面板管理的节点摘要：guid、parentGuid、name、address、status 和版本。上级面板通过节点 API 令牌读取，用于展示链式拓扑中的间接节点。节点数量由上级面板计算。',
         response:
           '{\n  "success": true,\n  "obj": [\n    {\n      "guid": "c3d4-...",\n      "parentGuid": "a1b2-...",\n      "name": "Node3",\n      "address": "10.0.0.3",\n      "status": "online"\n    }\n  ]\n}',
       },
       {
         method: 'GET',
         path: '/panel/api/server/getNewX25519Cert',
-        summary: 'Generate a new X25519 keypair for Reality.',
+        summary: '生成 Reality 使用的 X25519 密钥对。',
         response:
           '{\n  "success": true,\n  "obj": {\n    "privateKey": "uN9qLfV3zH8w...",\n    "publicKey": "5v8xPqR2sM7k..."\n  }\n}',
       },
       {
         method: 'GET',
         path: '/panel/api/server/getNewmldsa65',
-        summary: 'Generate a new ML-DSA-65 keypair. Returns {seed, verify}.',
+        summary: '生成 ML-DSA-65 密钥对，返回 {seed, verify}。',
         responseSchema: 'MLDSA65Response',
       },
       {
         method: 'GET',
         path: '/panel/api/server/getNewmlkem768',
-        summary: 'Generate a new ML-KEM-768 keypair. Returns {seed, client}.',
+        summary: '生成 ML-KEM-768 密钥对，返回 {seed, client}。',
         responseSchema: 'MLKEM768Response',
       },
       {
         method: 'GET',
         path: '/panel/api/server/getNewVlessEnc',
         summary:
-          'Generate VLESS encryption auth options. Returns an auths array each with id, label, encryption, and decryption fields.',
+          '生成 VLESS 加密认证选项，返回 auths 数组，每项包含 id、label、encryption、decryption。',
         response:
           '{\n  "success": true,\n  "obj": {\n    "auths": [\n      { "id": 0, "label": "Auth #0", "encryption": "aes-256-gcm", "decryption": "" }\n    ]\n  }\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/server/stopXrayService',
-        summary: 'Stop the Xray binary. All proxies go offline immediately.',
+        summary: '停止 Xray 程序，所有代理立即离线。',
         errorResponse: '{\n  "success": false,\n  "msg": "Xray is not running"\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/server/restartXrayService',
-        summary:
-          'Reload Xray with the current config. Typically required after structural inbound or routing changes.',
+        summary: '按当前配置重新加载 Xray，通常用于入站结构或路由变更后。',
         errorResponse: '{\n  "success": false,\n  "msg": "Xray config is invalid: ..."\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/server/installXray/:version',
-        summary:
-          'Download and install the specified Xray version. Pass "latest" for the newest release.',
+        summary: '下载并安装指定 Xray 版本，latest 表示最新版本。',
         params: [
           {
             name: 'version',
             in: 'path',
             type: 'string',
-            desc: 'Xray tag (e.g. v25.10.31) or "latest".',
+            desc: 'Xray 版本标签，例如 v25.10.31；latest 表示最新版本。',
           },
         ],
       },
@@ -664,13 +650,13 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/server/updatePanel',
         summary:
-          'Self-update the panel to the latest version. The server restarts on success. Bearer-token callers need admin or node-admin scope.',
+          '将面板更新至最新版本，成功后重启服务器进程。Bearer 令牌调用者需要 admin 或 node-admin 权限。',
         params: [
           {
             name: 'dev',
             in: 'body (form)',
             type: 'boolean',
-            desc: "Override this run's channel. Omit to use the panel's configured channel.",
+            desc: '覆盖本次更新渠道，省略则使用面板配置的渠道。',
             optional: true,
           },
         ],
@@ -679,14 +665,13 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/server/setUpdateChannel',
-        summary:
-          'Toggle the panel update channel between stable and the rolling per-commit dev release. Only effective on dev builds.',
+        summary: '在稳定版和随提交滚动发布的开发版之间切换更新渠道，仅对开发版构建生效。',
         params: [
           {
             name: 'dev',
             in: 'body (form)',
             type: 'boolean',
-            desc: 'true = dev channel, false = stable.',
+            desc: 'true 为开发渠道，false 为稳定渠道。',
           },
         ],
         body: 'dev=true',
@@ -694,40 +679,39 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/server/updateGeofile',
-        summary:
-          'Refresh the default GeoIP / GeoSite data files. Use the /:fileName variant to update one file.',
+        summary: '更新默认 GeoIP/GeoSite 数据文件；更新单个文件请使用 /:fileName 接口。',
       },
       {
         method: 'POST',
         path: '/panel/api/server/updateGeofile/:fileName',
-        summary: 'Refresh a single Geo file by filename (e.g. geoip.dat, geosite.dat).',
+        summary: '按文件名更新单个地理数据文件，例如 geoip.dat、geosite.dat。',
         params: [
           {
             name: 'fileName',
             in: 'path',
             type: 'string',
-            desc: 'Filename of the data file to refresh.',
+            desc: '需要更新的数据文件名。',
           },
         ],
       },
       {
         method: 'POST',
         path: '/panel/api/server/logs/:count',
-        summary: 'Return the last N lines of the panel\u2019s own log.',
+        summary: '返回面板日志末尾的 N 行。',
         params: [
-          { name: 'count', in: 'path', type: 'number', desc: 'Number of trailing log lines.' },
+          { name: 'count', in: 'path', type: 'number', desc: '返回末尾的日志行数。' },
           {
             name: 'level',
             in: 'body (form)',
             type: 'string',
-            desc: 'Minimum log level filter.',
+            desc: '最低日志级别筛选条件。',
             optional: true,
           },
           {
             name: 'syslog',
             in: 'body (form)',
             type: 'boolean',
-            desc: 'Read system logs instead of the panel log.',
+            desc: '读取系统日志而非面板日志。',
             optional: true,
           },
         ],
@@ -739,35 +723,35 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/server/xraylogs/:count',
-        summary: 'Return the last N lines of the Xray process log.',
+        summary: '返回 Xray 进程日志末尾的 N 行。',
         params: [
-          { name: 'count', in: 'path', type: 'number', desc: 'Number of trailing log lines.' },
+          { name: 'count', in: 'path', type: 'number', desc: '返回末尾的日志行数。' },
           {
             name: 'filter',
             in: 'body (form)',
             type: 'string',
-            desc: 'Keyword filter — only lines containing this string.',
+            desc: '关键字筛选，仅返回包含此字符串的行。',
             optional: true,
           },
           {
             name: 'showDirect',
             in: 'body (form)',
             type: 'string',
-            desc: '"true" to include direct (freedom) traffic lines.',
+            desc: 'true 表示包含直连（freedom）流量日志。',
             optional: true,
           },
           {
             name: 'showBlocked',
             in: 'body (form)',
             type: 'string',
-            desc: '"true" to include blocked (blackhole) traffic lines.',
+            desc: 'true 表示包含拦截（blackhole）流量日志。',
             optional: true,
           },
           {
             name: 'showProxy',
             in: 'body (form)',
             type: 'string',
-            desc: '"true" to include proxy traffic lines.',
+            desc: 'true 表示包含代理流量日志。',
             optional: true,
           },
         ],
@@ -780,19 +764,19 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/server/amneziawglogs/:count',
         summary:
-          'Return live AmneziaWG peer activity (handshake, endpoint, transfer) plus the panel’s own AmneziaWG event lines.',
+          '返回 AmneziaWG 对等节点的实时握手、端点和流量，以及面板自身的 AmneziaWG 事件日志。',
         params: [
           {
             name: 'count',
             in: 'path',
             type: 'number',
-            desc: 'Maximum peer rows and event lines to return.',
+            desc: '最多返回的对等节点和事件日志条数。',
           },
           {
             name: 'filter',
             in: 'body (form)',
             type: 'string',
-            desc: 'Keyword filter — only rows/lines containing this string.',
+            desc: '关键字筛选，仅返回包含此字符串的记录或日志行。',
             optional: true,
           },
         ],
@@ -803,19 +787,19 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/server/importDB',
         summary:
-          'Restore the panel DB from an uploaded backup (multipart form, field name "db"). SQLite panels accept a SQLite database (.db) or a SQLite migration dump (.dump); PostgreSQL panels accept a pg_dump archive (.dump), a SQLite database (.db), or a SQLite migration dump. The panel restarts after restore. Destructive.',
+          '从上传的备份恢复数据库，使用多部分表单，字段名为 db。SQLite 面板接受 SQLite .db 或迁移 .dump；PostgreSQL 面板接受 pg_dump .dump、SQLite .db 或 SQLite 迁移文件。恢复后面板重启，此操作将覆盖现有数据。',
         params: [
           {
             name: 'db',
             in: 'body (multipart)',
             type: 'file',
-            desc: 'Database backup or migration file to upload.',
+            desc: '需要上传的数据库备份或迁移文件。',
           },
           {
             name: 'keepHostSettings',
             in: 'body (multipart)',
             type: 'boolean',
-            desc: "Keep this machine's addresses, certificates and node identity. Default true.",
+            desc: '保留本机地址、证书和节点身份，默认为 true。',
             optional: true,
             defaultValue: true,
           },
@@ -824,14 +808,13 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/server/getNewEchCert',
-        summary:
-          'Generate a new ECH (Encrypted Client Hello) keypair and config list for the given SNI.',
+        summary: '为指定 SNI 生成 ECH（加密客户端问候）密钥对和配置列表。',
         params: [
           {
             name: 'sni',
             in: 'body (form)',
             type: 'string',
-            desc: 'Server Name Indication to generate the ECH config for.',
+            desc: '需要生成 ECH 配置的服务器名称指示（SNI）。',
           },
         ],
         body: 'sni=example.com',
@@ -842,14 +825,14 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/server/getCertHash',
         summary:
-          'Compute the hex SHA-256 of a certificate (DER) for pinning (pinnedPeerCertSha256). Provide either a server file path or inline PEM/DER content.',
+          '计算 DER 证书的十六进制 SHA-256，供 pinnedPeerCertSha256 固定证书使用。支持服务端文件路径或直接提供 PEM/DER 内容。',
         bodyRequiredOneOf: ['certFile', 'certContent'],
         params: [
           {
             name: 'certFile',
             in: 'body (form)',
             type: 'string',
-            desc: 'Path to a certificate file on the server. Takes precedence over certContent.',
+            desc: '服务器上的证书文件路径，优先于 certContent。',
             optional: true,
             pattern: '.*\\S.*',
           },
@@ -857,7 +840,7 @@ export const sections: readonly Section[] = [
             name: 'certContent',
             in: 'body (form)',
             type: 'string',
-            desc: 'Inline PEM (or DER) certificate content, used when certFile is empty.',
+            desc: '直接提供 PEM 或 DER 证书内容，certFile 为空时使用。',
             optional: true,
             pattern: '.*\\S.*',
           },
@@ -869,20 +852,20 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/server/getRemoteCertHash',
         summary:
-          'Run `xray tls ping` against a remote server and return its live leaf-certificate SHA-256 hash(es) for pinning (pinnedPeerCertSha256).',
+          '对远程服务器执行 xray tls ping，返回当前叶证书的 SHA-256 列表，供 pinnedPeerCertSha256 使用。',
         params: [
           {
             name: 'server',
             in: 'body (form)',
             type: 'string',
-            desc: 'Remote server as domain or domain:port (default port 443), e.g. cloudflare-dns.com.',
+            desc: '远程域名或域名:端口，默认端口为 443，例如 cloudflare-dns.com。',
           },
           {
             name: 'allowPrivate',
             in: 'body (form)',
             type: 'boolean',
             optional: true,
-            desc: 'Ping a private/internal/loopback server (LAN, Docker service name). Default false (SSRF guard blocks it and the error response sets obj.privateTarget=true).',
+            desc: '允许探测私有、内部或回环服务器，例如局域网或 Docker 服务名。默认为 false；请求防护拦截此类目标时，错误响应会设置 obj.privateTarget=true。',
           },
         ],
         body: 'server=cloudflare-dns.com',
@@ -892,34 +875,34 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/server/scanRealityTarget',
         summary:
-          'Run a live TLS 1.3 probe against a candidate REALITY target and return a feasibility verdict (TLS 1.3 + h2 + X25519 + trusted certificate) plus the certificate SAN DNS names. A target on a private/loopback address is reported with privateTarget=true and probed only when allowPrivate is set.',
+          '对候选 REALITY 目标进行 TLS 1.3 实时探测，根据 TLS 1.3、h2、X25519 和可信证书判断可用性，并返回证书 SAN 域名。私有或回环地址标记 privateTarget=true，仅在 allowPrivate 开启时探测。',
         params: [
           {
             name: 'target',
             in: 'body (form)',
             type: 'string',
-            desc: 'Candidate target as host or host:port (default port 443), e.g. www.cloudflare.com:443.',
+            desc: '候选主机或主机:端口，默认端口为 443，例如 www.cloudflare.com:443。',
           },
           {
             name: 'sni',
             in: 'body (form)',
             type: 'string',
             optional: true,
-            desc: 'SNI the handshake sends and the certificate is verified against (the inbound serverNames). Defaults to the target host, which a fronting proxy answers with its default certificate.',
+            desc: '握手发送并用于证书验证的 SNI，对应入站 serverNames。默认使用目标主机名，前置代理通常以其默认证书响应。',
           },
           {
             name: 'xver',
             in: 'body (form)',
             type: 'number',
             optional: true,
-            desc: 'PROXY protocol version the target expects (matches the inbound xver). 0 = none.',
+            desc: '目标所需的 PROXY 协议版本，对应入站 xver，0 表示不使用。',
           },
           {
             name: 'allowPrivate',
             in: 'body (form)',
             type: 'boolean',
             optional: true,
-            desc: 'Probe a private/internal/loopback target (LAN, Docker service name). Default false (SSRF guard blocks it and the response sets privateTarget=true).',
+            desc: '允许探测私有、内部或回环目标，例如局域网或 Docker 服务名。默认为 false；请求防护拦截时返回 privateTarget=true。',
           },
         ],
         body: 'target=www.cloudflare.com:443',
@@ -929,14 +912,14 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/server/scanRealityTargets',
         summary:
-          'Probe/discover REALITY targets and return each verdict ranked by feasibility then latency. Each comma-separated token may be a domain (validated with SNI), a bare IP, or a CIDR range (discovered without SNI by reading the certificate domain). When empty, the realityScanCandidates setting is probed (the built-in seed list if that setting is empty).',
+          '探测或发现 REALITY 目标，按可用性和延迟排序。逗号分隔项可以是域名（携带 SNI 验证）、IP 或 CIDR（不携带 SNI，从证书发现域名）。留空时使用 realityScanCandidates 设置；该设置也为空时使用内置候选列表。',
         params: [
           {
             name: 'targets',
             in: 'body (form)',
             type: 'string',
             optional: true,
-            desc: 'Optional comma-separated tokens: domain[:port], IP[:port], or CIDR (e.g. 104.16.0.0/24). When omitted, the realityScanCandidates setting is probed (the built-in seed list if that setting is empty).',
+            desc: '可选的逗号分隔目标：域名[:端口]、IP[:端口] 或 CIDR，例如 104.16.0.0/24。省略时使用 realityScanCandidates 设置，设置为空则使用内置候选列表。',
           },
         ],
         body: 'targets=104.16.0.0/24,www.apple.com:443',
@@ -946,16 +929,14 @@ export const sections: readonly Section[] = [
       {
         method: 'GET',
         path: '/panel/api/server/clientIps',
-        summary:
-          'Fetch the fully aggregated inbound_client_ips database table. Used by nodes to sync recently active IPs across the cluster.',
+        summary: '获取完整聚合的 inbound_client_ips 数据表，供节点同步集群近期活动 IP。',
         responseSchema: 'InboundClientIps',
         responseSchemaArray: true,
       },
       {
         method: 'POST',
         path: '/panel/api/server/clientIps',
-        summary:
-          'Submit a list of recently active IP timestamps. The panel merges them with the existing database to maintain a unified global IP-limit view.',
+        summary: '提交近期活动 IP 及时间戳，面板合并到数据库，以保持全局 IP 限制视图一致。',
         requestSchema: {
           type: 'array',
           items: {
@@ -981,15 +962,15 @@ export const sections: readonly Section[] = [
 
   {
     id: 'clients',
-    title: 'Clients',
+    title: '客户端',
     description:
-      'Manage clients as first-class entities that can be attached to one or more inbounds. A single client row drives the settings.clients entry in every inbound it belongs to. Endpoints live under /panel/api/clients.',
+      '将客户端作为独立实体管理，可关联一个或多个入站。同一客户端记录用于生成所属各入站的 settings.clients 项。接口位于 /panel/api/clients。',
     endpoints: [
       {
         method: 'GET',
         path: '/panel/api/clients/list',
         summary:
-          'List every client with its attached inbound IDs and traffic record. The reverse field, if set, is returned as a nested JSON object (legacy JSON-encoded-string form is still accepted on write).',
+          '列出所有客户端、关联入站编号及流量记录。reverse 返回嵌套 JSON 对象，写入时仍兼容旧版 JSON 编码字符串。',
         response:
           '{\n  "success": true,\n  "obj": [\n    {\n      "id": 1,\n      "email": "alice@example.com",\n      "subId": "abcd1234",\n      "uuid": "...",\n      "totalGB": 53687091200,\n      "expiryTime": 1735689600000,\n      "enable": true,\n      "reverse": null,\n      "inboundIds": [3, 5],\n      "traffic": { "up": 1024, "down": 4096, "enable": true }\n    }\n  ]\n}',
       },
@@ -997,13 +978,13 @@ export const sections: readonly Section[] = [
         method: 'GET',
         path: '/panel/api/clients/list/paged',
         summary:
-          'Filter, sort, and paginate clients on the server. Each item is a slim row (no uuid/password/auth/flow/security/reverse/tgId) so the clients page can ship 25-ish rows in a few KB instead of the full table. The response also includes a summary computed across the full DB row set so dashboard counters stay stable as the user paginates or filters: the *Count fields are exact, while the email arrays beside them stop at 200 entries so the payload does not grow with the panel. Page size capped at 200; fetch /get/:email to obtain the full per-client payload for an edit/info modal.',
+          '在服务端筛选、排序和分页客户端。每行省略 uuid/password/auth/flow/security/reverse/tgId，减少列表载荷。响应摘要按完整数据库计算，计数字段精确，关联标识数组最多 200 项。每页最多 200 行；编辑或详情页通过 /get/:email 获取完整数据。',
         params: [
           {
             name: 'page',
             in: 'query',
             type: 'number',
-            desc: '1-indexed page number. Defaults to 1.',
+            desc: '页码从 1 开始，默认为 1。',
             optional: true,
             defaultValue: 1,
           },
@@ -1011,7 +992,7 @@ export const sections: readonly Section[] = [
             name: 'pageSize',
             in: 'query',
             type: 'number',
-            desc: 'Rows per page. Defaults to 25, capped at 200.',
+            desc: '每页行数，默认 25，最多 200。',
             optional: true,
             defaultValue: 25,
           },
@@ -1019,35 +1000,35 @@ export const sections: readonly Section[] = [
             name: 'search',
             in: 'query',
             type: 'string',
-            desc: 'Case-insensitive substring match on email, subId, comment, UUID, password, auth or Telegram ID.',
+            desc: '忽略大小写，在 email、subId、comment、UUID、password、auth 或 Telegram 标识中匹配子字符串。',
             optional: true,
           },
           {
             name: 'filter',
             in: 'query',
             type: 'string',
-            desc: 'CSV status buckets: online, active, deactive, depleted or expiring. Values are ORed.',
+            desc: '逗号分隔的状态：online、active、deactive、depleted、expiring，多个值取并集。',
             optional: true,
           },
           {
             name: 'protocol',
             in: 'query',
             type: 'string',
-            desc: 'CSV inbound protocols: vmess, vless, trojan, shadowsocks, wireguard, hysteria, http, mixed, tunnel, tun, mtproto or amneziawg. Values are ORed.',
+            desc: '逗号分隔的入站协议：vmess、vless、trojan、shadowsocks、wireguard、hysteria、http、mixed、tunnel、tun、mtproto、amneziawg，多个值取并集。',
             optional: true,
           },
           {
             name: 'inbound',
             in: 'query',
             type: 'string',
-            desc: 'CSV positive inbound IDs. Values are ORed; invalid or non-positive IDs are ignored.',
+            desc: '逗号分隔的正整数入站编号，多个值取并集，忽略无效或非正数编号。',
             optional: true,
           },
           {
             name: 'sort',
             in: 'query',
             type: 'string',
-            desc: 'Sort key. An omitted or unknown value falls back to client ID ascending.',
+            desc: '排序字段，省略或不识别时按客户端编号升序。',
             optional: true,
             enum: [
               'enable',
@@ -1065,7 +1046,7 @@ export const sections: readonly Section[] = [
             name: 'order',
             in: 'query',
             type: 'string',
-            desc: 'Sort direction. Only descend selects descending order; otherwise ascending.',
+            desc: '排序方向，仅 descend 表示降序，其他值均为升序。',
             optional: true,
             enum: ['ascend', 'descend'],
           },
@@ -1073,35 +1054,35 @@ export const sections: readonly Section[] = [
             name: 'expiryFrom',
             in: 'query',
             type: 'number',
-            desc: 'Inclusive minimum expiry time in Unix milliseconds. Zero or negative means unset.',
+            desc: '最小到期时间，包含边界，单位为 Unix 毫秒。0 或负数表示不设置。',
             optional: true,
           },
           {
             name: 'expiryTo',
             in: 'query',
             type: 'number',
-            desc: 'Inclusive maximum expiry time in Unix milliseconds. Zero or negative means unbounded.',
+            desc: '最大到期时间，包含边界，单位为 Unix 毫秒。0 或负数表示无上限。',
             optional: true,
           },
           {
             name: 'usageFrom',
             in: 'query',
             type: 'number',
-            desc: 'Inclusive minimum combined upload and download usage in bytes. Zero means unset.',
+            desc: '最小上传和下载合计用量，单位为字节，包含边界，0 表示不设置。',
             optional: true,
           },
           {
             name: 'usageTo',
             in: 'query',
             type: 'number',
-            desc: 'Inclusive maximum combined upload and download usage in bytes. Zero means unbounded.',
+            desc: '最大上传和下载合计用量，单位为字节，包含边界，0 表示无上限。',
             optional: true,
           },
           {
             name: 'autoRenew',
             in: 'query',
             type: 'string',
-            desc: 'on selects clients with an interval or calendar-day reset; off selects clients without either.',
+            desc: 'on 筛选已设置定期间隔或日历重置的客户端，off 筛选未设置的客户端。',
             optional: true,
             enum: ['on', 'off'],
           },
@@ -1109,7 +1090,7 @@ export const sections: readonly Section[] = [
             name: 'hasTgId',
             in: 'query',
             type: 'string',
-            desc: 'yes selects clients with a non-zero Telegram ID; no selects clients without one.',
+            desc: 'yes 筛选 Telegram 标识非零的客户端，no 筛选未设置的客户端。',
             optional: true,
             enum: ['yes', 'no'],
           },
@@ -1117,7 +1098,7 @@ export const sections: readonly Section[] = [
             name: 'hasComment',
             in: 'query',
             type: 'string',
-            desc: 'yes selects clients with a non-blank comment; no selects clients without one.',
+            desc: 'yes 筛选备注非空的客户端，no 筛选备注为空的客户端。',
             optional: true,
             enum: ['yes', 'no'],
           },
@@ -1125,7 +1106,7 @@ export const sections: readonly Section[] = [
             name: 'group',
             in: 'query',
             type: 'string',
-            desc: 'CSV group names, matched case-insensitively after trimming. Values are ORed.',
+            desc: '逗号分隔的分组名称，去除首尾空格后忽略大小写匹配，多个值取并集。',
             optional: true,
           },
         ],
@@ -1134,10 +1115,9 @@ export const sections: readonly Section[] = [
       {
         method: 'GET',
         path: '/panel/api/clients/get/:email',
-        summary:
-          'Fetch one client by email, including the inbound IDs and external config IDs it is attached to.',
+        summary: '按 email 获取客户端，包含已关联的入站编号和外部配置编号。',
         params: [
-          { name: 'email', in: 'path', type: 'string', desc: 'Client email (unique identifier).' },
+          { name: 'email', in: 'path', type: 'string', desc: '客户端 email，作为唯一标识。' },
         ],
         response:
           '{\n  "success": true,\n  "obj": {\n    "client": { "id": 1, "email": "alice@example.com", ... },\n    "inboundIds": [3, 5],\n    "externalLinks": [\n      { "id": 11, "kind": "link", "value": "vless://...", "remark": "DE", "enable": true, "expiryTime": 0 },\n      { "id": 12, "kind": "subscription", "value": "https://provider.example/sub/abc", "remark": "Provider", "enable": false, "expiryTime": 1767225600000, "namePrefix": "[zjh] ", "lastFetchAt": 1767220000000, "lastFetchError": "" }\n    ]\n  }\n}',
@@ -1145,15 +1125,15 @@ export const sections: readonly Section[] = [
       {
         method: 'GET',
         path: '/panel/api/clients/get/subId/:subId',
-        summary: 'Fetch clients by subscription ID.',
+        summary: '按订阅标识获取客户端。',
         description:
-          'Matches the exact subscription ID and orders results by client ID. Returns an array of the same payloads as GET /clients/get/:email, since multiple clients can share a subscription ID. Includes disabled, expired and unattached clients. An unknown ID returns HTTP 200 with success:false, obj:null and a record-not-found message, matching the email lookup. Requires an admin token or a panel login session.',
+          '精确匹配订阅标识并按客户端编号排序，返回与 GET /clients/get/:email 相同结构的数组。同一订阅可关联多个客户端，包括禁用、过期和未关联入站的客户端。标识不存在时返回 HTTP 200、success:false、obj:null 和记录不存在提示。需要管理员令牌或面板登录会话。',
         params: [
           {
             name: 'subId',
             in: 'path',
             type: 'string',
-            desc: 'Exact subscription ID (URL-encoded).',
+            desc: '精确订阅标识，需进行 URL 编码。',
           },
         ],
         responseObjectSchema: {
@@ -1174,11 +1154,8 @@ export const sections: readonly Section[] = [
       {
         method: 'GET',
         path: '/panel/api/clients/get/tgId/:tgId',
-        summary:
-          'Fetch clients by Telegram user ID. Returns an array since multiple clients can share the same Telegram ID.',
-        params: [
-          { name: 'tgId', in: 'path', type: 'integer', desc: 'Telegram user ID (numeric).' },
-        ],
+        summary: '按 Telegram 用户编号获取客户端。同一编号可关联多个客户端，因此返回数组。',
+        params: [{ name: 'tgId', in: 'path', type: 'integer', desc: 'Telegram 数字用户编号。' }],
         response:
           '{\n  "success": true,\n  "obj": [\n    {\n      "client": { "id": 1, "email": "alice@example.com", ... },\n      "inboundIds": [3, 5],\n      "externalLinks": [],\n      "usedTraffic": 1048576\n    }\n  ]\n}',
       },
@@ -1186,21 +1163,21 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/add',
         summary:
-          'Create a new client and attach it to one or more inbounds in a single call. Body is JSON. Per-protocol secrets are generated server-side when omitted, so callers can send only the universal fields.',
+          '使用 JSON 一次创建客户端并关联一个或多个入站。未提供协议密钥时由服务端生成，因此调用方可以只提交通用字段。',
         description:
-          'Fields the server fills in when they are omitted — a valid value sent by the caller is never overwritten. Re-adding an email that already exists, with its stored `subId`, reuses the stored `id`, `password`, `auth` and `secret` instead of minting new ones, so the identity stays in sync across its inbounds.\n\n- **VLESS / VMess** — `id`, a fresh UUID\n- **Trojan** — `password`\n- **Shadowsocks** — `password`. On a `2022-blake3-*` inbound a supplied password that does not base64-decode to the key length of the cipher (16 or 32 bytes) is replaced by a generated key and the call still succeeds, so read the client back if you did not let the server pick. Legacy ciphers keep any non-empty password\n- **Hysteria** — `auth`\n- **mtproto** — `secret`, a FakeTLS secret derived from the fronting domain of the inbound, or from `www.cloudflare.com` when it has none\n- **WireGuard** — `privateKey` and `publicKey` when both are blank, or `publicKey` alone when only a `privateKey` was sent, plus `allowedIPs`: one free `/32` taken from the /24 the existing peers of that inbound already sit in, or from `10.0.0.0/24` when it has none\n\nAccepted on the same body but never generated: `preSharedKey` and `keepAlive` (WireGuard), `adTag` (mtproto).\n\nWireGuard is the only one of these that can fail. Allocation widens the search to the containing /16 before giving up with `inbound <id>: wireguard: no free address available in <scope>`, and an `allowedIPs` supplied by the caller is validated instead of allocated: `inbound <id>: wireguard: allowedIPs entry <entry> overlaps <address> used by another client` when its range overlaps an address or prefix a different client of that same inbound holds, or `... used by a client on <inbound>` when the holder sits on another WireGuard or AmneziaWG inbound. Ranges are compared, not strings, so `10.0.0.9/24` collides with `10.0.0.5/32`; a `0.0.0.0/0` or `::/0` default route claims no address. Allocation likewise skips every address inside a prefix another client holds. The same validation runs on POST /panel/api/clients/{email}/attach, where a client that already carries an address brings it along.\n\nAn `inboundIds` entry that names no existing inbound rejects the whole call before anything is written. Past that, the inbounds are applied concurrently and independently: one that fails no longer stops the others, so a `success:false` response can still have created the client on the rest. Every error names the inbound it came from (`inbound 7: <message>`), and several failures are reported together, one per line. `limitHwid` is applied only when every inbound succeeded, so re-run the call after fixing the failure.',
+          '未提供的密钥由服务端补全，调用方提供的有效值不会被覆盖。重新添加已存在的 email 并提供其已存储的 subId 时，会复用 id、password、auth 和 secret，保持各入站身份一致。\n\n- VLESS/VMess：生成 UUID 作为 id。\n- Trojan：生成 password。\n- Shadowsocks：生成 password。对 2022-blake3-*，如果提供的密码无法通过 Base64 解码为对应加密方式要求的 16 或 32 字节，会替换为生成密钥，接口仍成功；如未交由服务端选择，应回读客户端确认。传统加密方式保留所有非空密码。\n- Hysteria：生成 auth。\n- mtproto：按入站前置域名生成 FakeTLS secret，未设置域名时使用 www.cloudflare.com。\n- WireGuard：privateKey/publicKey 均空时生成密钥对；仅有 privateKey 时补公钥。allowedIPs 从现有对等节点所在 /24 分配空闲 /32；无现有节点时使用 10.0.0.0/24。\n\npreSharedKey、keepAlive（WireGuard）和 adTag（mtproto）可提交，但不会自动生成。\n\nWireGuard 地址分配失败时会先扩大到所在 /16 搜索，然后返回无空闲地址错误。显式 allowedIPs 只验证不分配；与同一或其他 WireGuard/AmneziaWG 入站中其他客户端的地址或前缀重叠时拒绝。按地址范围比较，因此 10.0.0.9/24 与 10.0.0.5/32 冲突；0.0.0.0/0 和 ::/0 默认路由不占用地址。自动分配也跳过已占用前缀，关联客户端接口同样执行此验证。\n\n任何 inboundIds 不存在时整次调用在写入前拒绝。此后各入站独立并发执行，某项失败不阻止其他入站，因此 success:false 仍可能部分创建成功。错误带有入站编号，多项错误分行报告。仅所有入站成功时应用 limitHwid，修复失败后可重新调用。',
         params: [
           {
             name: 'client',
             in: 'body (json)',
             type: 'object',
-            desc: 'Client fields: email, subId, id (uuid), password, auth, flow, totalGB, expiryTime, limitIp, limitHwid, tgId (numeric Telegram user ID, 0 = none), comment, enable. Protocol-specific: secret and adTag (mtproto), privateKey, publicKey, preSharedKey, allowedIPs and keepAlive (WireGuard).',
+            desc: '客户端字段：email、subId、id（UUID）、password、auth、flow、totalGB、expiryTime、limitIp、limitHwid、tgId（Telegram 数字用户编号，0 表示未设置）、comment、enable。协议专用字段：secret/adTag（mtproto），privateKey/publicKey/preSharedKey/allowedIPs/keepAlive（WireGuard）。',
           },
           {
             name: 'inboundIds',
             in: 'body (json)',
             type: 'integer[]',
-            desc: 'Inbound IDs to attach the client to. At least one required.',
+            desc: '需要关联的入站编号，至少一个。',
           },
         ],
         body: '{\n  "client": {\n    "email": "alice@example.com",\n    "totalGB": 53687091200,\n    "expiryTime": 1735689600000,\n    "tgId": 0,\n    "limitIp": 0,\n    "limitHwid": 0,\n    "enable": true\n  },\n  "inboundIds": [3, 5]\n}',
@@ -1209,45 +1186,45 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/clients/renewalPreview',
-        summary: 'Preview client auto-renewal dates without saving or resetting anything.',
+        summary: '预览客户端自动续期日期，不保存或重置任何数据。',
         description:
-          'Uses the same calendar and catch-up calculation as auto-renew in the panel timezone. resetWeekday is 1 (Monday) to 7 (Sunday), 0 disables weekly mode; it cannot be combined with positive reset or resetDay. Existing resetDay takes precedence over reset. With expiryTime=0, calendar modes suggest a first cutoff but do not activate renewal. Negative expiryTime waits for first-use activation. resetMax and resetCount simulate the existing per-period allowance limit; the preview is informational and does not reserve an allowance or guarantee node availability.',
+          '使用面板时区及自动续期相同的日历和补齐算法。resetWeekday 为 1（周一）至 7（周日），0 禁用，不能与正数 reset 或 resetDay 同时使用。resetDay 优先于 reset。expiryTime=0 时仅建议首次截止日期，不启用续期；负数表示等待首次使用。resetMax/resetCount 模拟现有周期次数限制。预览仅供参考，不预留次数或保证节点可用。',
         params: [
           {
             name: 'expiryTime',
             in: 'body (json)',
             type: 'integer',
-            desc: 'Current cutoff in Unix milliseconds; 0 unlimited, negative first-use duration.',
+            desc: '当前截止时间，单位为 Unix 毫秒。0 表示无限期，负数表示首次使用后的时长。',
           },
           {
             name: 'reset',
             in: 'body (json)',
             type: 'integer',
-            desc: 'Fixed interval in days; 0 disabled.',
+            desc: '固定间隔，单位为天，0 表示禁用。',
           },
           {
             name: 'resetDay',
             in: 'body (json)',
             type: 'integer',
-            desc: 'Monthly calendar day 1-31; 0 disabled.',
+            desc: '每月日历日期 1-31，0 表示禁用。',
           },
           {
             name: 'resetWeekday',
             in: 'body (json)',
             type: 'integer',
-            desc: 'Weekly calendar day 1-7 (Monday-Sunday); 0 disabled.',
+            desc: '每周日期 1-7，分别为周一至周日，0 表示禁用。',
           },
           {
             name: 'resetMax',
             in: 'body (json)',
             type: 'integer',
-            desc: 'Maximum renewals; 0 unlimited.',
+            desc: '最大续期次数，0 表示不限。',
           },
           {
             name: 'resetCount',
             in: 'body (json)',
             type: 'integer',
-            desc: 'Renewals already consumed; defaults to 0.',
+            desc: '已消耗的续期次数，默认为 0。',
           },
         ],
         responseSchema: 'ClientRenewalPreview',
@@ -1256,15 +1233,15 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/update/:email',
         summary:
-          'Update an existing client by email. Changes propagate to every attached inbound. Body is the JSON client payload — supply the full set of fields you want to keep (the server replaces the row, it does not patch).',
+          '按 email 更新客户端并同步到所有关联入站。使用 JSON 提交需要保留的完整字段，服务器替换整条记录，不进行局部合并。',
         description:
-          'The inbounds are applied concurrently and independently: one that fails no longer stops the others. Every inbound error names the inbound it came from (`inbound 7: <message>`), and several failures are reported together, one per line. So a `success:false` response can still have applied the edit to the remaining inbounds. The client record is written after the inbounds, so a failure there is reported without an `inbound <id>:` prefix and leaves the inbound edits in place.',
+          '各入站独立并发更新，某项失败不阻止其他项。错误带入站编号并逐行报告，因此 success:false 可能已更新其他入站。客户端记录在入站之后写入；记录写入失败时错误不带入站前缀，已完成的入站修改保留。',
         params: [
           {
             name: 'email',
             in: 'path',
             type: 'string',
-            desc: 'Current client email (unique identifier).',
+            desc: '当前客户端 email，作为唯一标识。',
           },
         ],
         body: '{\n  "email": "alice@example.com",\n  "totalGB": 107374182400,\n  "expiryTime": 1767225600000,\n  "limitHwid": 2,\n  "tgId": 123456789,\n  "enable": true\n}',
@@ -1274,16 +1251,16 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/del/:email',
         summary:
-          'Delete a client by email. Removes it from every attached inbound and drops its traffic record unless keepTraffic=1 is passed.',
+          '按 email 删除客户端，从所有关联入站移除并删除流量记录；keepTraffic=1 可保留流量记录。',
         description:
-          'The inbounds are applied concurrently and independently: one that fails no longer stops the others. Every inbound error names the inbound it came from (`inbound 7: <message>`), and several failures are reported together, one per line. So a `success:false` response can still have removed the client from the remaining inbounds; the client record is kept in that case, so re-running the call retries exactly the leftovers. The record and traffic rows are dropped after the inbounds, so a failure there is reported without an `inbound <id>:` prefix and leaves the client already removed from every inbound.',
+          '各入站独立并发移除，某项失败不阻止其他项。错误带入站编号并逐行报告，失败时客户端记录保留，重新调用仅重试剩余项。客户端及流量记录在入站之后删除，记录删除失败时错误不带入站前缀，已完成的入站移除保留。',
         params: [
-          { name: 'email', in: 'path', type: 'string', desc: 'Client email (unique identifier).' },
+          { name: 'email', in: 'path', type: 'string', desc: '客户端 email，作为唯一标识。' },
           {
             name: 'keepTraffic',
             in: 'query',
             type: 'integer',
-            desc: 'Pass 1 to retain the xray_client_traffic row after deletion.',
+            desc: '设为 1 可在删除后保留 xray_client_traffic 记录。',
           },
         ],
         response: '{\n  "success": true,\n  "msg": "Client deleted"\n}',
@@ -1291,16 +1268,16 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/clients/:email/attach',
-        summary: 'Attach an existing client to one or more additional inbounds. Body is JSON.',
+        summary: '将已有客户端关联到更多入站，使用 JSON 请求正文。',
         description:
-          'A WireGuard client brings its stored `allowedIPs` into the new inbound instead of being given a fresh address, so the call fails with `inbound <id>: wireguard: allowedIPs entry <entry> overlaps <address> used by another client` when its range overlaps an address or prefix a different client of the target inbound holds. Free the address on that inbound first — see POST /panel/api/clients/add for the full rule. Inbounds are applied independently, so the remaining ones are still attached and a `success:false` response can be partial.',
+          'WireGuard 客户端将已有 allowedIPs 带入新入站，不重新分配。若与目标入站其他客户端地址或前缀重叠则失败，需先释放冲突地址，完整规则见 POST /panel/api/clients/add。各入站独立处理，因此 success:false 仍可能部分关联成功。',
         params: [
-          { name: 'email', in: 'path', type: 'string', desc: 'Client email (unique identifier).' },
+          { name: 'email', in: 'path', type: 'string', desc: '客户端 email，作为唯一标识。' },
           {
             name: 'inboundIds',
             in: 'body (json)',
             type: 'integer[]',
-            desc: 'Inbound IDs to attach.',
+            desc: '需要关联的入站编号。',
           },
         ],
         body: '{\n  "inboundIds": [7, 9]\n}',
@@ -1309,16 +1286,16 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/clients/:email/detach',
-        summary: 'Detach a client from one or more inbounds without deleting the client.',
+        summary: '将客户端从指定入站解除关联，保留客户端本身。',
         description:
-          'The inbounds are applied concurrently and independently: one that fails no longer stops the others. Every inbound error names the inbound it came from (`inbound 7: <message>`), and several failures are reported together, one per line. So a `success:false` response can still have detached the remaining inbounds. Detach writes nothing beyond the inbounds, so every error carries the prefix.',
+          '各入站独立并发解除关联，某项失败不阻止其他项。每项错误带入站编号并逐行报告，因此 success:false 仍可能已解除其他关联。本操作只写入站数据，所有错误均带入站前缀。',
         params: [
-          { name: 'email', in: 'path', type: 'string', desc: 'Client email (unique identifier).' },
+          { name: 'email', in: 'path', type: 'string', desc: '客户端 email，作为唯一标识。' },
           {
             name: 'inboundIds',
             in: 'body (json)',
             type: 'integer[]',
-            desc: 'Inbound IDs to detach.',
+            desc: '需要解除关联的入站编号。',
           },
         ],
         body: '{\n  "inboundIds": [5]\n}',
@@ -1328,14 +1305,14 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/:email/externalLinks',
         summary:
-          "Replace a client's external links and external subscriptions. Sends the full set; the server replaces all rows. Disabled rows stay saved for editing but are not emitted in generated subscriptions. The owning client's disabled or expired state also stops these rows from being emitted on future subscription fetches; credentials already imported by an app remain valid until the external provider revokes them.",
+          '完整替换客户端的外部链接和外部订阅。禁用项保留以供编辑，但不生成到订阅中；所属客户端禁用或过期也会停止后续输出。已被应用导入的凭据需由外部服务撤销后才会失效。',
         params: [
-          { name: 'email', in: 'path', type: 'string', desc: 'Client email (unique identifier).' },
+          { name: 'email', in: 'path', type: 'string', desc: '客户端 email，作为唯一标识。' },
           {
             name: 'externalLinks',
             in: 'body',
             type: 'object[]',
-            desc: "Full replacement list; the server replaces all rows. Each row supports { kind, value, remark, enable, expiryTime, namePrefix }. kind=link: value must be a supported share link such as vless://, vmess://, trojan://, ss://, hysteria2://, or wireguard://, and remark overrides the exported node name. kind=subscription: value must be an http(s) subscription URL, and namePrefix is prepended to fetched node names. Omit enable to default true; enable=false or an expired expiryTime keeps the row saved but excludes it from generated subscriptions. expiryTime is a unix millisecond timestamp where 0 means no link-specific expiry; the owning client's enabled state and expiry still apply. A negative value is rejected. Rows are matched by kind+value across saves, so id is ignored on write. lastFetchAt and lastFetchError are read-only status fields returned by GET.",
+            desc: '完整替换列表，每项支持 {kind, value, remark, enable, expiryTime, namePrefix}。kind=link 时 value 必须为支持的 vless://、vmess://、trojan://、ss://、hysteria2:// 或 wireguard:// 等分享链接，remark 可覆盖节点名。kind=subscription 时 value 为 HTTP(S) 订阅地址，namePrefix 加在获取到的节点名前。enable 默认 true；禁用或过期项保留存储但不输出。expiryTime 为非负 Unix 毫秒时间戳，0 表示此链接无独立到期时间；所属客户端启用状态和期限仍适用。保存时按 kind+value 匹配，写入忽略 id。lastFetchAt/lastFetchError 为 GET 返回的只读状态。',
           },
         ],
         body: '{\n  "externalLinks": [\n    { "kind": "link", "value": "vless://uuid@host:443?...#srv", "remark": "DE", "enable": true, "expiryTime": 0 },\n    { "kind": "subscription", "value": "https://provider.example/sub/abc", "remark": "Provider", "enable": false, "expiryTime": 1767225600000, "namePrefix": "[zjh] " }\n  ]\n}',
@@ -1344,29 +1321,28 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/clients/resetAllTraffics',
-        summary:
-          'Reset the up/down counters for every client globally. Quotas and expiry are not affected. Triggers an Xray restart if any counter actually moved.',
+        summary: '全局清零所有客户端上传和下载计数，不修改额度和期限。确有计数变化时重启 Xray。',
         response: '{\n  "success": true\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/clients/delDepleted',
         summary:
-          'Delete every client whose traffic quota is exhausted (used >= total, when reset is disabled) or whose expiry has passed. Returns the deleted count and triggers an Xray restart when any client was on a running inbound.',
+          '删除额度耗尽（未开启重置时 used >= total）或已过期的客户端，返回删除数量；涉及运行中入站时重启 Xray。',
         response: '{\n  "success": true,\n  "obj": {\n    "deleted": 0\n  }\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/clients/delOrphans',
         summary:
-          'Delete every client that is not attached to any inbound, along with its traffic record, IP log, HWID devices, and external links. Useful for clearing clients left unattached after their inbounds were removed. Returns the deleted count. Cannot be undone.',
+          '删除未关联任何入站的客户端及其流量记录、IP 日志、HWID 设备和外部链接。适合清理入站删除后遗留的客户端，返回删除数量，不可撤销。',
         response: '{\n  "success": true,\n  "obj": {\n    "deleted": 0\n  }\n}',
       },
       {
         method: 'GET',
         path: '/panel/api/clients/export',
         summary:
-          'Return every client as a {client, inboundIds, traffic} array — the shape /import accepts — so the payload round-trips straight back through /import. traffic carries the usage counters (up, down, resetCount, lastOnline, lastSubFetch) and is omitted for a client with no traffic row; the quota itself stays in client.totalGB. Clients with no inbound attachment are included with an empty inboundIds list. The UI shows this in a CodeMirror viewer (copy / download); programmatic callers get the array in obj.',
+          '以 {client, inboundIds, traffic} 数组导出所有客户端，可直接回导 /import。traffic 包含 up、down、resetCount、lastOnline、lastSubFetch，无流量记录时省略；额度仍在 client.totalGB。未关联入站的客户端也会导出，inboundIds 为空。界面可复制或下载，API 在 obj 中返回数组。',
         response:
           '{\n  "success": true,\n  "obj": [\n    {\n      "client": {\n        "email": "alice@example.com",\n        "id": "...",\n        "totalGB": 53687091200,\n        "expiryTime": 0,\n        "limitHwid": 2,\n        "enable": true,\n        "subId": "..."\n      },\n      "inboundIds": [7, 9],\n      "traffic": {\n        "up": 1048576,\n        "down": 2097152,\n        "resetCount": 0,\n        "lastOnline": 1735680000000\n      }\n    }\n  ]\n}',
       },
@@ -1374,7 +1350,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/import',
         summary:
-          'Import clients from a JSON body { "data": "<json>" }, where data is a string-encoded array produced by /export ([{client, inboundIds, traffic}]). Items with inboundIds are created and attached to those inbounds; items with an empty inboundIds list are restored as unattached client records. An optional traffic object restores the usage counters, only for clients this import creates. Existing emails are never overwritten — they are returned in skipped, and their live counters are left untouched. Triggers a single Xray restart at the end if any target inbound was running; a failure while restoring counters still reports success=false after the clients were created.',
+          '通过 JSON 正文 {"data":"<json>"} 导入 /export 生成的 [{client,inboundIds,traffic}] 字符串数组。有 inboundIds 时创建并关联，空列表时恢复为独立客户端。可选 traffic 仅为新建客户端恢复计数。已有 email 不覆盖，列入 skipped，现有计数保留。涉及运行中入站时最后统一重启 Xray；计数恢复失败仍返回 success=false，已创建的客户端保留。',
         body: '{\n  "data": "[{\\"client\\":{\\"email\\":\\"alice@example.com\\",\\"enable\\":true},\\"inboundIds\\":[7]}]"\n}',
         response:
           '{\n  "success": true,\n  "obj": {\n    "created": 2,\n    "skipped": [\n      { "email": "alice@example.com", "reason": "email already in use: alice@example.com" }\n    ]\n  }\n}',
@@ -1383,7 +1359,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/bulkAdjust',
         summary:
-          'Shift expiry and/or traffic quota for many clients in one call. addDays/addBytes may be negative. Clients with unlimited expiry (expiryTime=0) or unlimited traffic (totalGB=0) are skipped for the corresponding field — bulk extend never converts unlimited to limited. A client that was auto-disabled solely because it was depleted (expired or over quota) is automatically re-enabled — locally and on its node — when the adjustment lifts it out of depletion; a manually-disabled or still-depleted client is left disabled. The optional flow directive sets the XTLS flow on every client: "none" clears it, "xtls-rprx-vision"/"xtls-rprx-vision-udp443" set it where the inbound supports it (omit or "" to leave it unchanged). The optional limitHwid sets maximum registered devices (0 = unlimited). The optional adTag sets MTProto Telegram sponsor channel ("none" clears). Returns the adjusted count and per-email skip reasons.',
+          '批量调整期限或流量额度，addDays/addBytes 可为负数。无限期或无限流量的对应字段跳过，绝不转为有限值。仅因耗尽自动禁用的客户端在调整后恢复可用时会在本地及节点重新启用；手动禁用或仍耗尽的客户端不变。flow 可省略或留空保留，none 清除，支持的入站可设 xtls-rprx-vision 或 xtls-rprx-vision-udp443。limitHwid 设置设备上限，0 为无限；adTag 设置 MTProto 赞助频道，none 清除。返回调整数量及逐客户端跳过原因。',
         body: '{\n  "emails": ["alice", "bob"],\n  "addDays": 30,\n  "addBytes": 53687091200,\n  "flow": "xtls-rprx-vision",\n  "limitHwid": 2,\n  "adTag": "0123456789abcdef0123456789abcdef"\n}',
         response:
           '{\n  "success": true,\n  "obj": {\n    "adjusted": 2,\n    "skipped": [\n      { "email": "carol", "reason": "unlimited expiry" }\n    ]\n  }\n}',
@@ -1392,7 +1368,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/bulkEnable',
         summary:
-          'Enable many clients in one call. Emails are grouped by inbound and applied with a single read-modify-write per inbound; the running Xray (local or remote node) is updated to add each user. Note that enabling a client whose quota is exhausted or whose expiry has passed only flips the flag — the traffic loop will disable it again on the next tick. Returns the changed count and per-email skip reasons.',
+          '批量启用客户端。按入站分组，每个入站一次读改写，并向本地或节点 Xray 添加用户。已过期或额度耗尽时仅翻转开关，下次流量检查会再次禁用。返回修改数量及逐客户端跳过原因。',
         body: '{\n  "emails": ["alice", "bob"]\n}',
         response:
           '{\n  "success": true,\n  "obj": {\n    "changed": 2,\n    "skipped": [\n      { "email": "carol", "reason": "client not found" }\n    ]\n  }\n}',
@@ -1401,7 +1377,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/bulkDisable',
         summary:
-          'Disable many clients in one call. Emails are grouped by inbound and applied with a single read-modify-write per inbound; the running Xray (local or remote node) is updated to remove each user. Returns the changed count and per-email skip reasons.',
+          '批量禁用客户端。按入站分组，每个入站一次读改写，并从本地或节点 Xray 移除用户。返回修改数量及逐客户端跳过原因。',
         body: '{\n  "emails": ["alice", "bob"]\n}',
         response:
           '{\n  "success": true,\n  "obj": {\n    "changed": 2,\n    "skipped": [\n      { "email": "carol", "reason": "client not found" }\n    ]\n  }\n}',
@@ -1410,7 +1386,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/bulkDel',
         summary:
-          'Delete many clients in one call. The server processes the list sequentially so each delete sees the committed state of the previous one — avoids the race the per-email fan-out had on the panel side. Pass keepTraffic=true to retain the xray_client_traffic rows after deletion.',
+          '批量删除客户端，服务器按顺序处理，使每次删除看到前一次已提交状态，避免并发删除竞争。keepTraffic=true 可保留 xray_client_traffic 记录。',
         body: '{\n  "emails": ["alice", "bob"],\n  "keepTraffic": false\n}',
         response:
           '{\n  "success": true,\n  "obj": {\n    "deleted": 2,\n    "skipped": [\n      { "email": "carol", "reason": "client not found" }\n    ]\n  }\n}',
@@ -1419,7 +1395,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/bulkCreate',
         summary:
-          'Create many clients in one call. Body is a JSON array of {client, inboundIds} payloads — the same shape /add accepts. Items are processed sequentially; per-email skip reasons are returned for items that fail (e.g., duplicate email). Triggers a single Xray restart at the end if any inbound was running.',
+          '批量创建客户端，JSON 正文为 /add 同形的 {client,inboundIds} 数组。顺序处理，逐客户端返回失败或跳过原因（如标识重复）。涉及运行中入站时最后统一重启一次 Xray。',
         body: '[\n  {\n    "client": {\n      "email": "alice@example.com",\n      "totalGB": 53687091200,\n      "expiryTime": 0,\n      "limitHwid": 2,\n      "enable": true\n    },\n    "inboundIds": [7]\n  },\n  {\n    "client": {\n      "email": "bob@example.com",\n      "totalGB": 53687091200,\n      "expiryTime": 0,\n      "limitHwid": 0,\n      "enable": true\n    },\n    "inboundIds": [7, 9]\n  }\n]',
         response:
           '{\n  "success": true,\n  "obj": {\n    "created": 2,\n    "skipped": [\n      { "email": "alice@example.com", "reason": "email already in use" }\n    ]\n  }\n}',
@@ -1428,7 +1404,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/groups/bulkAdd',
         summary:
-          "Add many clients to a group in one call. Updates clients.group_name and patches the matching client entry inside every owning inbound's settings JSON in a single transaction. If the group name does not yet exist (in client_groups or as a derived label), it is auto-created as a persistent group. To clear the group label, use /groups/bulkRemove instead.",
+          '批量将客户端加入分组，在同一事务中更新 clients.group_name 和各所属入站配置中的对应项。不存在的分组自动持久创建。清除分组请使用 /groups/bulkRemove。',
         body: '{\n  "emails": ["alice", "bob"],\n  "group": "customer-a"\n}',
         response: '{\n  "success": true,\n  "obj": {\n    "affected": 2\n  }\n}',
       },
@@ -1436,7 +1412,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/groups/bulkRemove',
         summary:
-          "Clear the group label on many clients in one call. Inverse of /groups/bulkAdd. Clients themselves are kept — only the group label is cleared from clients.group_name and from each owning inbound's settings JSON. Groups become empty if all their members are removed.",
+          '批量清除客户端分组，与 /groups/bulkAdd 相反。客户端保留，仅清除 clients.group_name 及各所属入站配置中的分组标签。所有成员移出后分组变为空组。',
         body: '{\n  "emails": ["alice", "bob"]\n}',
         response: '{\n  "success": true,\n  "obj": {\n    "affected": 2\n  }\n}',
       },
@@ -1444,19 +1420,19 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/bulkAttach',
         summary:
-          'Attach many existing clients to many inbounds in one call. Each client keeps its identity (email/UUID/password/subId) and a shared traffic row; all clients are added to a target inbound in a single AddInboundClient call. Clients already present on a target are reported under skipped. Returns per-email attached/skipped/errors lists and triggers a single Xray restart if any target inbound was running.',
+          '批量将已有客户端关联到多个入站，保留 email/UUID/password/subId 身份及共享流量记录。每个目标入站一次 AddInboundClient 添加全部用户，已存在者列入 skipped。逐客户端返回 attached/skipped/errors，涉及运行中入站时统一重启一次 Xray。',
         params: [
           {
             name: 'emails',
             in: 'body (json)',
             type: 'string[]',
-            desc: 'Emails of existing clients to attach.',
+            desc: '需要关联的已有客户端 email 列表。',
           },
           {
             name: 'inboundIds',
             in: 'body (json)',
             type: 'integer[]',
-            desc: 'Target inbound IDs to attach every client to.',
+            desc: '所有客户端需要关联的目标入站编号。',
           },
         ],
         body: '{\n  "emails": ["alice", "bob"],\n  "inboundIds": [7, 9]\n}',
@@ -1467,19 +1443,19 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/bulkDetach',
         summary:
-          "Mirror of bulkAttach: detach many existing clients from many inbounds in one call. For each email, intersects the client's current inbounds with the requested set and detaches from those only; (email, inbound) pairs where the client is not currently attached are silently no-ops. Emails not attached to any of the requested inbounds are reported under skipped. Client records are kept even if they become orphaned — use bulkDel for full removal. Returns per-email detached/skipped/errors lists and triggers a single Xray restart if any target inbound was running.",
+          '批量解除多个客户端与多个入站的关联。仅处理当前关联与请求入站的交集，不存在的关联不做操作。没有匹配关联的客户端列入 skipped，解除后无入站的客户端记录仍保留，完整删除请使用 bulkDel。逐客户端返回 detached/skipped/errors，涉及运行中入站时统一重启一次 Xray。',
         params: [
           {
             name: 'emails',
             in: 'body (json)',
             type: 'string[]',
-            desc: 'Emails of existing clients to detach.',
+            desc: '需要解除关联的已有客户端 email 列表。',
           },
           {
             name: 'inboundIds',
             in: 'body (json)',
             type: 'integer[]',
-            desc: 'Inbound IDs to detach the clients from.',
+            desc: '需要与客户端解除关联的入站编号。',
           },
         ],
         body: '{\n  "emails": ["alice", "bob"],\n  "inboundIds": [7, 9]\n}',
@@ -1490,7 +1466,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/bulkResetTraffic',
         summary:
-          'Zero up/down counters for many clients in one call. Loops the single-reset path so each client is re-enabled across its attached inbounds and pushed to Xray/remote nodes. Returns the count of successfully reset clients.',
+          '批量清零客户端上传和下载计数。逐个执行重置，在关联入站重新启用客户端并同步至 Xray 或远程节点，返回成功重置数量。',
         body: '{\n  "emails": ["alice", "bob"]\n}',
         response: '{\n  "success": true,\n  "obj": {\n    "affected": 2\n  }\n}',
       },
@@ -1498,7 +1474,7 @@ export const sections: readonly Section[] = [
         method: 'GET',
         path: '/panel/api/clients/groups',
         summary:
-          'List all client groups with their member counts. Merges persisted groups (rows in client_groups, including empty placeholders) with the distinct group_name values currently set on clients. Sorted alphabetically (case-insensitive).',
+          '列出客户端分组及成员数。合并 client_groups 中的持久分组（包括空组）和客户端当前 group_name，忽略大小写按名称排序。',
         response:
           '{\n  "success": true,\n  "obj": [\n    { "name": "customer-a", "clientCount": 5 },\n    { "name": "internal", "clientCount": 0 }\n  ]\n}',
       },
@@ -1506,15 +1482,14 @@ export const sections: readonly Section[] = [
         method: 'GET',
         path: '/panel/api/clients/groups/:name/emails',
         summary:
-          'Return just the email list of clients that currently belong to the given group. Useful for fanning a single bulk action over an entire group without round-tripping the full client list.',
-        params: [{ name: 'name', in: 'path', type: 'string', desc: 'Group name (URL-encoded).' }],
+          '仅返回指定分组的客户端 email 列表，便于批量操作整个分组，无需获取完整客户端记录。',
+        params: [{ name: 'name', in: 'path', type: 'string', desc: '分组名称，需进行 URL 编码。' }],
         response: '{\n  "success": true,\n  "obj": ["alice", "bob", "carol"]\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/clients/groups/create',
-        summary:
-          'Create a new empty (placeholder) group. The group becomes selectable in client forms and the filter drawer even before any client is added to it. Errors if a group with the same name already exists.',
+        summary: '创建空分组，创建后即可在客户端表单和筛选中选择。名称已存在时返回错误。',
         body: '{\n  "name": "customer-a"\n}',
         response: '{\n  "success": true,\n  "obj": {\n    "name": "customer-a"\n  }\n}',
       },
@@ -1522,7 +1497,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/groups/rename',
         summary:
-          "Rename a group. The new name is applied to the client_groups row AND propagated to every matching client (both clients.group_name and the client entry inside every owning inbound's settings JSON) in a single transaction. Returns the number of clients whose label was updated.",
+          '在同一事务中重命名分组，更新 client_groups、所有匹配客户端的 clients.group_name 及所属入站配置，返回更新的客户端数量。',
         body: '{\n  "oldName": "customer-a",\n  "newName": "tier-1"\n}',
         response: '{\n  "success": true,\n  "obj": {\n    "affected": 5\n  }\n}',
       },
@@ -1530,7 +1505,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/groups/delete',
         summary:
-          'Remove a group. Deletes the client_groups row and clears the group label from every matching client (both clients.group_name and the inbound settings JSON). The clients themselves are NOT deleted — use /bulkDel after filtering by group for that. Returns the count of clients whose label was cleared.',
+          '删除分组并清除所有匹配客户端的分组标签，更新客户端表及入站配置。保留客户端本身，如需删除客户端应按分组筛选后调用 /bulkDel。返回清除标签的客户端数量。',
         body: '{\n  "name": "customer-a"\n}',
         response: '{\n  "success": true,\n  "obj": {\n    "affected": 5\n  }\n}',
       },
@@ -1538,7 +1513,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/groups/resetTraffic',
         summary:
-          "Reset only the group-level traffic counter shown on the groups page. Snapshots the current up/down sum of the group's members as a baseline so the group total reads zero, while leaving each client's own counters (and their quotas) untouched. No Xray restart is triggered. Creates the client_groups row if the group exists only as a derived label.",
+          '仅重置分组页显示的分组流量，以成员当前上传下载总和为基线归零，不修改各客户端计数和额度，不重启 Xray。仅存在派生标签时会创建 client_groups 记录。',
         body: '{\n  "name": "customer-a"\n}',
         response: '{\n  "success": true,\n  "obj": {\n    "name": "customer-a"\n  }\n}',
       },
@@ -1546,68 +1521,62 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/resetTraffic/:email',
         summary:
-          'Zero out a single client’s up/down counters. Re-enables the client across every attached inbound and pushes the change to Xray (or the remote node) so depleted users can connect again immediately.',
-        params: [{ name: 'email', in: 'path', type: 'string', desc: 'Client email.' }],
+          '清零单个客户端的上传下载计数，在所有关联入站重新启用并同步至 Xray 或远程节点，使耗尽用户立即恢复连接。',
+        params: [{ name: 'email', in: 'path', type: 'string', desc: '客户端 email。' }],
       },
       {
         method: 'POST',
         path: '/panel/api/clients/updateTraffic/:email',
-        summary:
-          'Manually adjust a client’s upload + download counters. Useful for migrations from external accounting systems.',
-        params: [{ name: 'email', in: 'path', type: 'string', desc: 'Client email.' }],
+        summary: '手动调整客户端上传和下载计数，适合从外部计量系统迁移。',
+        params: [{ name: 'email', in: 'path', type: 'string', desc: '客户端 email。' }],
         body: '{\n  "upload": 1073741824,\n  "download": 5368709120\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/clients/ips/:email',
-        summary:
-          'List source IPs that have connected with the given client’s credentials. Returns an array of "ip (timestamp)" strings.',
-        params: [{ name: 'email', in: 'path', type: 'string', desc: 'Client email.' }],
+        summary: '列出使用此客户端凭据连接过的来源 IP，返回 ip（时间戳）字符串数组。',
+        params: [{ name: 'email', in: 'path', type: 'string', desc: '客户端 email。' }],
       },
       {
         method: 'POST',
         path: '/panel/api/clients/clearIps/:email',
-        summary: 'Reset the recorded IP list for a client.',
-        params: [{ name: 'email', in: 'path', type: 'string', desc: 'Client email.' }],
+        summary: '清空客户端已记录的 IP 列表。',
+        params: [{ name: 'email', in: 'path', type: 'string', desc: '客户端 email。' }],
       },
       {
         method: 'POST',
         path: '/panel/api/clients/hwids/:email',
-        summary:
-          'List registered HWID devices for a client with a short fingerprint. Full hashes are not exposed.',
-        params: [{ name: 'email', in: 'path', type: 'string', desc: 'Client email.' }],
+        summary: '列出客户端已注册的 HWID 设备及短指纹，不公开完整散列值。',
+        params: [{ name: 'email', in: 'path', type: 'string', desc: '客户端 email。' }],
         response:
           '{\n  "success": true,\n  "obj": [\n    {\n      "id": 1,\n      "firstSeen": 1735000000000,\n      "lastSeen": 1735100000000,\n      "userAgent": "Happ/1.0",\n      "deviceOs": "android",\n      "osVersion": "15",\n      "deviceModel": "Pixel 9",\n      "fingerprint": "6ad17c93e821"\n    }\n  ]\n}',
       },
       {
         method: 'DELETE',
         path: '/panel/api/clients/hwids/:email',
-        summary:
-          'Clear all registered HWID devices for a client so new devices can register again.',
-        params: [{ name: 'email', in: 'path', type: 'string', desc: 'Client email.' }],
+        summary: '清除客户端所有已注册 HWID 设备，允许新设备重新注册。',
+        params: [{ name: 'email', in: 'path', type: 'string', desc: '客户端 email。' }],
       },
       {
         method: 'DELETE',
         path: '/panel/api/clients/hwids/:email/:id',
-        summary:
-          'Remove a single registered HWID device by its id, freeing one slot under the HWID limit.',
+        summary: '按编号删除单个已注册 HWID 设备，释放一个设备名额。',
         params: [
-          { name: 'email', in: 'path', type: 'string', desc: 'Client email.' },
-          { name: 'id', in: 'path', type: 'number', desc: 'Device id, from the list endpoint.' },
+          { name: 'email', in: 'path', type: 'string', desc: '客户端 email。' },
+          { name: 'id', in: 'path', type: 'number', desc: '设备编号，由列表接口返回。' },
         ],
       },
       {
         method: 'POST',
         path: '/panel/api/clients/onlines',
-        summary:
-          'List the emails of currently connected clients (last seen within the heartbeat window), deduped across every node.',
+        summary: '返回心跳窗口内活动客户端的 email 列表，跨所有节点去重。',
         response: '{\n  "success": true,\n  "obj": ["user1", "user2"]\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/clients/onlinesByGuid',
         summary:
-          'Online client emails grouped by the panelGuid of the node that physically hosts each client. The local panel uses its own GUID; each node (at any depth in a chain) uses its GUID. Lets the inbounds page attribute online status to the real node instead of the intermediate one it syncs through.',
+          '按实际承载客户端的节点 panelGuid 返回在线客户端。各层节点和本地面板均使用自己的 GUID，使入站页将状态归属实际节点而非中间同步节点。',
         response:
           '{\n  "success": true,\n  "obj": {\n    "a1b2-...": ["user1"],\n    "c3d4-...": ["user1", "user2"]\n  }\n}',
       },
@@ -1615,7 +1584,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/clientIpsByGuid',
         summary:
-          'Per-client source IPs grouped by the panelGuid of the node that observed them. Lets the central panel attribute and enforce per-client IP limits using the real visitor IPs each node sees, instead of the address of the intermediate panel it syncs through.',
+          '按观测到来源 IP 的节点 panelGuid 分组，主面板据此使用节点看到的真实访客 IP 统计和实施客户端 IP 限制，避免使用中间面板地址。',
         response:
           '{\n  "success": true,\n  "obj": {\n    "a1b2-...": {\n      "user1": [\n        { "ip": "1.2.3.4", "timestamp": 1700000000 }\n      ]\n    }\n  }\n}',
       },
@@ -1623,27 +1592,27 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/activeInbounds',
         summary:
-          "Inbound tags that carried traffic within the heartbeat window, grouped by the hosting node's panelGuid. Pairs with onlinesByGuid so the inbounds page only marks a multi-inbound client online on the inbounds it actually used. Nodes that do not report per-inbound activity are absent.",
+          '按承载节点 panelGuid 返回心跳窗口内有流量的入站标签。配合 onlinesByGuid，只将多入站客户端实际使用的入站标为在线。未上报逐入站活动的节点不包含在结果中。',
         response:
           '{\n  "success": true,\n  "obj": {\n    "a1b2-...": ["in-443-tcp", "in-8443-tcp"]\n  }\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/clients/lastOnline',
-        summary: 'Map of client email → last-seen unix timestamp.',
+        summary: '客户端 email 到最后在线 Unix 时间戳的映射。',
         response:
           '{\n  "success": true,\n  "obj": {\n    "user1": 1700000000,\n    "user2": 1699999000\n  }\n}',
       },
       {
         method: 'GET',
         path: '/panel/api/clients/traffic/:email',
-        summary: 'Traffic counters for a client identified by email.',
+        summary: '按客户端 email 获取流量计数。',
         params: [
           {
             name: 'email',
             in: 'path',
             type: 'string',
-            desc: 'Client email (unique across the panel).',
+            desc: '客户端 email，在面板内唯一。',
           },
         ],
         responseSchema: 'ClientTraffic',
@@ -1652,13 +1621,13 @@ export const sections: readonly Section[] = [
         method: 'GET',
         path: '/panel/api/clients/subLinks/:subId',
         summary:
-          'Return every protocol URL (vless://, vmess://, trojan://, ss://, hysteria://, hy2://) for clients matching the subscription ID. Same result set as the configured subPath endpoint, but as a JSON array — no base64. When an inbound has streamSettings.externalProxy set, one URL is emitted per external proxy. Empty array when the subId has no enabled clients.',
+          '返回匹配订阅标识的客户端协议链接（vless://、vmess://、trojan://、ss://、hysteria://、hy2://）。与 subPath 接口结果相同，但返回 JSON 数组而非 Base64。有 externalProxy 时每个外部代理输出一个链接，无已启用客户端时返回空数组。',
         params: [
           {
             name: 'subId',
             in: 'path',
             type: 'string',
-            desc: "Subscription ID, taken from the client's subId field.",
+            desc: '客户端 subId 字段中的订阅标识。',
           },
         ],
         response:
@@ -1668,17 +1637,17 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/happLink/:id',
         summary:
-          'Generate a fresh Happ crypt5 link locally from the current client subscription URL when Happ link generation is enabled. The panel applies a resource limit of 8192 UTF-8 bytes to the source URL; this is not a Happ client maximum. Longer sources return success: false with msg: happ_source_too_long and obj: null. The source URL is not sent to a generation provider, and the result is not stored or reused.',
-        params: [{ name: 'id', in: 'path', type: 'integer', desc: 'Stable client record ID.' }],
+          '启用 Happ 链接生成时，使用当前客户端订阅地址在本地生成全新 crypt5 链接。面板限制来源地址为 8192 个 UTF-8 字节，这是面板资源限制，不是 Happ 客户端上限。超长返回 success:false、msg:happ_source_too_long、obj:null。地址不会发往外部生成服务，结果也不会存储或复用。',
+        params: [{ name: 'id', in: 'path', type: 'integer', desc: '客户端记录的稳定编号。' }],
         responseSchema: 'HappLinkResult',
       },
       {
         method: 'GET',
         path: '/panel/api/clients/links/:email',
         summary:
-          'Return every URL for one client across all attached inbounds, one per advertised endpoint: the managed hosts of the inbound, else its streamSettings.externalProxy entries, else its own address. Supported protocols: vmess, vless, trojan, shadowsocks, hysteria, mtproto. Protocols without a URL form (socks, http, mixed, wireguard, dokodemo, tunnel) contribute nothing.',
+          '返回客户端在所有关联入站的链接，每个公布端点一个。端点优先级为入站托管主机、externalProxy、入站自身地址。支持 vmess、vless、trojan、shadowsocks、hysteria、mtproto；socks、http、mixed、wireguard、dokodemo、tunnel 等无链接格式的协议不输出。',
         params: [
-          { name: 'email', in: 'path', type: 'string', desc: 'Client email (unique identifier).' },
+          { name: 'email', in: 'path', type: 'string', desc: '客户端 email，作为唯一标识。' },
         ],
         response:
           '{\n  "success": true,\n  "obj": [\n    "vless://uuid@host:443?...#user1"\n  ]\n}',
@@ -1688,15 +1657,13 @@ export const sections: readonly Section[] = [
 
   {
     id: 'nodes',
-    title: 'Nodes',
-    description:
-      'Manage remote 3x-ui panels acting as nodes for a central panel. All endpoints under /panel/api/nodes.',
+    title: '节点管理',
+    description: '管理作为主面板节点的远程 3x-ui 面板，接口均位于 /panel/api/nodes。',
     endpoints: [
       {
         method: 'GET',
         path: '/panel/api/nodes/list',
-        summary:
-          'List every configured node with its connection details, health, and last heartbeat patch.',
+        summary: '列出所有已配置节点，包括连接信息、健康状态及最近心跳更新。',
         responseSchema: 'NodeView',
         responseSchemaArray: true,
       },
@@ -1704,7 +1671,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/nodes/mtls/ca',
         summary:
-          "This panel's node-auth CA certificate (public, PEM) to paste into a node's mTLS trust setting. Lazily mints the CA and the master client cert on first call. Pair with setting tlsVerifyMode=mtls on the node.",
+          '返回面板的节点认证 CA 公共 PEM 证书，供粘贴到节点的双向 TLS 信任设置。首次调用生成 CA 和主面板客户端证书，节点需设置 tlsVerifyMode=mtls。',
         response:
           '{\n  "success": true,\n  "obj": {\n    "caCert": "-----BEGIN CERTIFICATE-----\\n...\\n-----END CERTIFICATE-----\\n"\n  }\n}',
       },
@@ -1712,28 +1679,28 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/nodes/mtls/trustCA',
         summary:
-          "Set the CA certificate this panel trusts for incoming node-API client certificates (this panel acting as a node). Paste the managing panel's CA (from nodes/mtls/ca). An empty caCert disables it. A non-empty value must be a PEM certificate. Applied on the next panel restart.",
+          '设置当前面板作为节点时信任的入站 API 客户端证书 CA，内容来自管理面板 nodes/mtls/ca。空 caCert 表示禁用，非空值必须为 PEM 证书，下次面板重启后生效。',
         body: '{\n  "caCert": "-----BEGIN CERTIFICATE-----\\n...\\n-----END CERTIFICATE-----\\n"\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/nodes/mtls/reloadClient',
         summary:
-          'Validate the stored master mTLS client credential and invalidate cached transports. Each transport closes its old idle pool and rebuilds with the rotated certificate before its next request.',
+          '验证已存储的主面板双向 TLS 客户端凭据并失效缓存连接。各传输关闭旧空闲连接池，在下次请求前使用轮换后的证书重建。',
       },
       {
         method: 'GET',
         path: '/panel/api/nodes/get/:id',
-        summary: 'Fetch a single node by ID.',
-        params: [{ name: 'id', in: 'path', type: 'number', desc: 'Node ID.' }],
+        summary: '按编号获取单个节点。',
+        params: [{ name: 'id', in: 'path', type: 'number', desc: '节点编号。' }],
         responseSchema: 'NodeView',
       },
       {
         method: 'GET',
         path: '/panel/api/nodes/webCert/:id',
         summary:
-          'Fetch a node\'s own web TLS certificate/key file paths (proxied to the node). Used by the inbound form\'s "Set Cert from Panel" so a node-assigned inbound gets paths that exist on the node, not the central panel.',
-        params: [{ name: 'id', in: 'path', type: 'number', desc: 'Node ID.' }],
+          '通过代理读取节点自身 Web TLS 证书和密钥文件路径。用于入站表单“从面板设置证书”，确保节点入站使用节点本机路径。',
+        params: [{ name: 'id', in: 'path', type: 'number', desc: '节点编号。' }],
         response:
           '{\n  "success": true,\n  "obj": {\n    "webCertFile": "/root/cert/example.com/fullchain.pem",\n    "webKeyFile": "/root/cert/example.com/privkey.pem"\n  }\n}',
       },
@@ -1741,7 +1708,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/nodes/add',
         summary:
-          'Register a new remote node. Provide its URL, write-only apiToken, and optional remark / allowPrivateAddress flag. Responses expose hasApiToken only.',
+          '注册远程节点，提交地址、只写 apiToken 及可选 remark/allowPrivateAddress。响应仅通过 hasApiToken 表示是否设置令牌，不返回令牌内容。',
         body: '{\n  "name": "de-fra-1",\n  "remark": "",\n  "scheme": "https",\n  "address": "node1.example.com",\n  "port": 2053,\n  "basePath": "/",\n  "apiToken": "abcdef...",\n  "clearApiToken": false,\n  "enable": true,\n  "allowPrivateAddress": false\n}',
         responseSchema: 'NodeView',
       },
@@ -1749,28 +1716,27 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/nodes/update/:id',
         summary:
-          'Replace a node\u2019s connection details. apiToken is write-only: omit it or send an empty string to keep the stored token; set clearApiToken=true to clear it.',
-        params: [{ name: 'id', in: 'path', type: 'number', desc: 'Node ID.' }],
+          '替换节点连接信息。apiToken 只写，省略或空字符串时保留原令牌，clearApiToken=true 时清除。',
+        params: [{ name: 'id', in: 'path', type: 'number', desc: '节点编号。' }],
         body: '{\n  "name": "de-fra-1",\n  "remark": "",\n  "scheme": "https",\n  "address": "node1.example.com",\n  "port": 2053,\n  "basePath": "/",\n  "apiToken": "",\n  "clearApiToken": false,\n  "enable": true,\n  "allowPrivateAddress": false\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/nodes/del/:id',
-        summary: 'Delete a node. Inbounds bound to it are not auto-migrated.',
-        params: [{ name: 'id', in: 'path', type: 'number', desc: 'Node ID.' }],
+        summary: '删除节点，不自动迁移关联入站。',
+        params: [{ name: 'id', in: 'path', type: 'number', desc: '节点编号。' }],
       },
       {
         method: 'POST',
         path: '/panel/api/nodes/setEnable/:id',
-        summary: 'Pause or resume traffic sync with this node.',
-        params: [{ name: 'id', in: 'path', type: 'number', desc: 'Node ID.' }],
+        summary: '暂停或恢复与此节点的流量同步。',
+        params: [{ name: 'id', in: 'path', type: 'number', desc: '节点编号。' }],
         body: '{\n  "enable": true\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/nodes/test',
-        summary:
-          'Probe a node without saving it. Uses the body as connection details and returns the same heartbeat snapshot a registered node would have.',
+        summary: '使用请求正文中的连接信息测试节点，不保存，返回与已注册节点相同的心跳快照。',
         body: '{\n  "scheme": "https",\n  "address": "node1.example.com",\n  "port": 2053,\n  "basePath": "/",\n  "apiToken": "abcdef..."\n}',
         responseSchema: 'ProbeResultUI',
       },
@@ -1778,15 +1744,14 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/nodes/certFingerprint',
         summary:
-          "Connect to the node over HTTPS without verifying its certificate and return the leaf certificate's SHA-256 (base64). Used by the Add/Edit Node dialog to fetch and pin a self-signed certificate. Uses the same body as /test.",
+          '通过 HTTPS 连接节点但不验证证书，返回叶证书的 Base64 SHA-256，供节点新增或编辑时固定自签名证书。请求正文与 /test 相同。',
         body: '{\n  "scheme": "https",\n  "address": "node1.example.com",\n  "port": 2053,\n  "basePath": "/"\n}',
         response: '{\n  "success": true,\n  "obj": "k3b1...base64-sha256...="\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/nodes/inbounds',
-        summary:
-          'Use unsaved node connection details to list the remote inbounds available for selective import.',
+        summary: '使用尚未保存的节点连接信息，列出可选择导入的远程入站。',
         body: '{\n  "name": "de-fra-1",\n  "scheme": "https",\n  "address": "node1.example.com",\n  "port": 2053,\n  "basePath": "/",\n  "apiToken": "abcdef..."\n}',
         response:
           '{\n  "success": true,\n  "obj": [\n    { "tag": "inbound-443", "remark": "VLESS", "protocol": "vless", "port": 443 }\n  ]\n}',
@@ -1794,14 +1759,14 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/nodes/probe/:id',
-        summary: 'Probe an existing node, updating its cached health state.',
-        params: [{ name: 'id', in: 'path', type: 'number', desc: 'Node ID.' }],
+        summary: '探测已存在的节点并更新健康状态缓存。',
+        params: [{ name: 'id', in: 'path', type: 'number', desc: '节点编号。' }],
       },
       {
         method: 'POST',
         path: '/panel/api/nodes/updatePanel',
         summary:
-          'Trigger the official panel self-updater on each given node (downloads the latest release and restarts). Only enabled, online nodes are updated; offline/disabled ones are reported as skipped. Set "dev": true to move the nodes to the rolling per-commit dev channel instead of the latest stable release. Returns a per-node result list.',
+          '对指定节点调用官方面板自更新程序，下载最新版本并重启。仅处理已启用且在线节点，其余列为跳过。dev:true 使用随提交滚动发布的开发渠道，否则使用最新稳定版。返回逐节点结果。',
         body: '{\n  "ids": [1, 2, 3],\n  "dev": false\n}',
         response:
           '{\n  "success": true,\n  "obj": [\n    { "id": 1, "name": "de-1", "ok": true },\n    { "id": 2, "name": "fr-1", "ok": false, "error": "node is offline" }\n  ]\n}',
@@ -1809,16 +1774,15 @@ export const sections: readonly Section[] = [
       {
         method: 'GET',
         path: '/panel/api/nodes/history/:id/:metric/:bucket',
-        summary:
-          'Aggregated metric history for a node — same shape as /server/history, scoped to one node.',
+        summary: '返回单个节点的聚合指标历史，结构与 /server/history 相同。',
         params: [
-          { name: 'id', in: 'path', type: 'number', desc: 'Node ID.' },
-          { name: 'metric', in: 'path', type: 'string', desc: 'cpu | mem.' },
+          { name: 'id', in: 'path', type: 'number', desc: '节点编号。' },
+          { name: 'metric', in: 'path', type: 'string', desc: '指标：cpu 或 mem。' },
           {
             name: 'bucket',
             in: 'path',
             type: 'number',
-            desc: 'Bucket size in seconds. Allowed: 2, 30, 60, 120, 180, 300.',
+            desc: '统计分桶大小，单位为秒，允许 2、30、60、120、180、300。',
           },
         ],
       },
@@ -1827,51 +1791,49 @@ export const sections: readonly Section[] = [
 
   {
     id: 'hosts',
-    title: 'Hosts',
+    title: '主机管理',
     description:
-      'Per-inbound override endpoints. Each enabled host renders one extra subscription link/proxy with its own address/port/TLS, superseding the legacy externalProxy array. All endpoints under /panel/api/hosts.',
+      '管理入站主机覆盖配置。每个已启用主机使用自身地址、端口和 TLS 生成额外订阅链接，替代旧 externalProxy 数组。接口位于 /panel/api/hosts。',
     endpoints: [
       {
         method: 'GET',
         path: '/panel/api/hosts/list',
-        summary:
-          'List every host across all inbounds, grouped by inbound then ordered by sort order.',
+        summary: '列出所有入站的主机，先按入站分组，再按排序值排列。',
         responseSchema: 'HostGroup',
         responseSchemaArray: true,
       },
       {
         method: 'GET',
         path: '/panel/api/hosts/raw',
-        summary:
-          'List every host row with its numeric id, for id-based pickers such as the per-client host rule override.',
+        summary: '列出所有主机记录及数字编号，用于按编号选择，例如逐客户端主机规则覆盖。',
         responseSchema: 'Host',
         responseSchemaArray: true,
       },
       {
         method: 'GET',
         path: '/panel/api/hosts/get/:groupId',
-        summary: 'Fetch a single host group by Group ID.',
-        params: [{ name: 'groupId', in: 'path', type: 'string', desc: 'Host Group ID.' }],
+        summary: '按分组编号获取主机组。',
+        params: [{ name: 'groupId', in: 'path', type: 'string', desc: '主机分组编号。' }],
         responseSchema: 'HostGroup',
       },
       {
         method: 'GET',
         path: '/panel/api/hosts/byInbound/:inboundId',
-        summary: "Fetch one inbound's hosts, grouped by host group.",
-        params: [{ name: 'inboundId', in: 'path', type: 'number', desc: 'Inbound ID.' }],
+        summary: '获取单个入站的主机，按主机组分组。',
+        params: [{ name: 'inboundId', in: 'path', type: 'number', desc: '入站编号。' }],
         responseSchema: 'HostGroup',
         responseSchemaArray: true,
       },
       {
         method: 'GET',
         path: '/panel/api/hosts/tags',
-        summary: 'Distinct, sorted set of tags used across all hosts.',
+        summary: '返回所有主机标签，去重并排序。',
         response: '{\n  "success": true,\n  "obj": ["CDN", "EU", "FAST"]\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/hosts/add',
-        summary: 'Create a host group on inbounds.',
+        summary: '在入站上创建主机组。',
         body: '{\n  "inboundIds": [1],\n  "remark": "cdn-front",\n  "hosts": ["cdn.example.com"],\n  "port": 8443,\n  "security": "same",\n  "tags": ["CDN"]\n}',
         responseSchema: 'Host',
         responseSchemaArray: true,
@@ -1879,8 +1841,8 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/hosts/update/:groupId',
-        summary: 'Replace a host group’s content.',
-        params: [{ name: 'groupId', in: 'path', type: 'string', desc: 'Host Group ID.' }],
+        summary: '替换主机组内容。',
+        params: [{ name: 'groupId', in: 'path', type: 'string', desc: '主机分组编号。' }],
         body: '{\n  "inboundIds": [1],\n  "remark": "cdn-front",\n  "hosts": ["cdn.example.com"],\n  "port": 8443,\n  "security": "same",\n  "tags": ["CDN"]\n}',
         responseSchema: 'Host',
         responseSchemaArray: true,
@@ -1888,27 +1850,27 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/hosts/del/:groupId',
-        summary: 'Delete a host group.',
-        params: [{ name: 'groupId', in: 'path', type: 'string', desc: 'Host Group ID.' }],
+        summary: '删除主机组。',
+        params: [{ name: 'groupId', in: 'path', type: 'string', desc: '主机分组编号。' }],
       },
       {
         method: 'POST',
         path: '/panel/api/hosts/setEnable/:groupId',
-        summary: 'Enable or disable a host group.',
-        params: [{ name: 'groupId', in: 'path', type: 'string', desc: 'Host Group ID.' }],
+        summary: '启用或禁用主机组。',
+        params: [{ name: 'groupId', in: 'path', type: 'string', desc: '主机分组编号。' }],
         body: '{\n  "enable": true\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/hosts/reorder',
         summary:
-          'Set host group sort order by the position of each groupId in the array. IDs must be unique and refer to existing groups; omitted groups follow in their previous order.',
+          '按数组中的 groupId 位置设置主机组顺序。编号必须唯一且对应已存在分组，省略的分组按原顺序排在后面。',
         body: '{\n  "ids": ["abc-123", "def-456"]\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/hosts/bulk/add',
-        summary: 'Add a host group to inbounds (same as /add).',
+        summary: '将主机组添加到入站，与 /add 相同。',
         body: '{\n  "inboundIds": [1, 2],\n  "hosts": ["cdn.example.com", "cdn2.example.com:443"],\n  "remark": "Cloudflare CDN",\n  "port": 0,\n  "security": "same",\n  "isDisabled": false\n}',
         responseSchema: 'Host',
         responseSchemaArray: true,
@@ -1916,13 +1878,13 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/hosts/bulk/setEnable',
-        summary: 'Enable or disable many host groups in one call.',
+        summary: '批量启用或禁用主机组。',
         body: '{\n  "ids": ["abc-123", "def-456"],\n  "enable": false\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/hosts/bulk/del',
-        summary: 'Delete many host groups in one call.',
+        summary: '批量删除主机组。',
         body: '{\n  "ids": ["abc-123", "def-456"]\n}',
       },
     ],
@@ -1930,145 +1892,134 @@ export const sections: readonly Section[] = [
 
   {
     id: 'backup',
-    title: 'Backup',
-    description: 'Operations that interact with the configured Telegram bot.',
+    title: '备份',
+    description: '与已配置 Telegram 机器人交互的操作。',
     endpoints: [
       {
         method: 'POST',
         path: '/panel/api/backuptotgbot',
-        summary:
-          'Send a fresh DB backup to every Telegram chat configured as an admin recipient. No body, no params.',
+        summary: '向所有已配置为管理员接收方的 Telegram 会话发送最新数据库备份，无请求正文或参数。',
       },
     ],
   },
 
   {
     id: 'settings',
-    title: 'Settings',
-    description:
-      'Panel configuration and user credentials. All endpoints live under /panel/api/setting and require a logged-in session or Bearer token.',
+    title: '面板设置',
+    description: '面板配置及管理员凭据，接口位于 /panel/api/setting，需要登录会话或 Bearer 令牌。',
     endpoints: [
       {
         method: 'POST',
         path: '/panel/api/setting/all',
         summary:
-          'Return every panel setting: web server, Telegram bot, subscription, security, LDAP. The full JSON blob that the Settings page edits.',
+          '返回全部面板设置，包括 Web 服务、Telegram、订阅、安全和 LDAP，即设置页编辑的完整 JSON。',
         response:
           '{\n  "success": true,\n  "obj": {\n    "webPort": 2053,\n    "webCertFile": "",\n    "webKeyFile": "",\n    "webBasePath": "/",\n    "subPort": 10882,\n    "subPath": "/sub/",\n    "subClashAutoDetect": false,\n    "subClashUserAgentRegex": "",\n    "subJsonEnable": false,\n    "subJsonAutoDetect": false,\n    "subJsonAlwaysArray": false,\n    "subJsonUserAgentRegex": "",\n    "subJsonPath": "/json/",\n    "subJsonURI": "https://sub.example.com/json/",\n    "subClashEnable": true,\n    "subClashPath": "/clash/",\n    "subClashURI": "https://sub.example.com/clash/",\n    "tgBotEnable": false,\n    "tgBotToken": "",\n    ...\n  }\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/setting/defaultSettings',
-        summary:
-          'Return the computed default settings based on the request host. Useful to preview what a fresh install would use.',
+        summary: '按当前请求主机计算默认设置，可用于预览全新安装的默认值。',
       },
       {
         method: 'POST',
         path: '/panel/api/setting/factoryDefaults',
         summary:
-          'Return the shipped (factory) default value per browser-safe setting key, so clients can tell a stored value apart from the default it would fall back to. Per-install material (secret, panelGuid, mTLS keys) and credential fields are never included.',
+          '返回浏览器可访问设置的出厂默认值，供区分已存储值和回退值。不包含安装专属材料（secret、panelGuid、双向 TLS 密钥）或凭据字段。',
       },
       {
         method: 'POST',
         path: '/panel/api/setting/update',
         summary:
-          'Persist every setting at once. The body mirrors the shape returned by /all. Invalid values (bad ports, missing cert pairs, etc.) are rejected before write.',
+          '一次保存全部设置，结构与 /all 返回值相同。无效端口、缺少证书配对等问题在写入前拒绝。',
         body: '{\n  "webPort": 2053,\n  "webBasePath": "/",\n  "subPort": 10882,\n  "subPath": "/sub/",\n  "subClashAutoDetect": false,\n  "subClashUserAgentRegex": "",\n  "subJsonEnable": false,\n  "subJsonAutoDetect": false,\n  "subJsonAlwaysArray": false,\n  "subJsonUserAgentRegex": "",\n  "subJsonPath": "/json/",\n  "subJsonURI": "https://sub.example.com/json/",\n  "subClashEnable": true,\n  "subClashPath": "/clash/",\n  "subClashURI": "https://sub.example.com/clash/",\n  "tgBotEnable": false,\n  ...\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/setting/validateRegex',
-        summary:
-          'Validate any regular expression with the backend Go RE2 compiler without saving it.',
+        summary: '使用服务端 Go RE2 编译器验证正则表达式，不保存。',
         body: '{\n  "regex": "(?m)^general-purpose$"\n}',
         response: '{\n  "success": true,\n  "msg": ""\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/setting/updateUser',
-        summary:
-          'Change the panel admin username and password. Requires the current credentials for verification. The session is refreshed with the new values on success.',
+        summary: '修改面板管理员用户名和密码，需用当前凭据验证；成功后以新凭据刷新会话。',
         params: [
-          { name: 'oldUsername', in: 'body', type: 'string', desc: 'Current admin username.' },
-          { name: 'oldPassword', in: 'body', type: 'string', desc: 'Current admin password.' },
-          { name: 'newUsername', in: 'body', type: 'string', desc: 'Desired new username.' },
-          { name: 'newPassword', in: 'body', type: 'string', desc: 'Desired new password.' },
+          { name: 'oldUsername', in: 'body', type: 'string', desc: '当前管理员用户名。' },
+          { name: 'oldPassword', in: 'body', type: 'string', desc: '当前管理员密码。' },
+          { name: 'newUsername', in: 'body', type: 'string', desc: '新的用户名。' },
+          { name: 'newPassword', in: 'body', type: 'string', desc: '新的密码。' },
         ],
         body: '{\n  "oldUsername": "admin",\n  "oldPassword": "admin",\n  "newUsername": "newadmin",\n  "newPassword": "newpass"\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/setting/restartPanel',
-        summary:
-          'Restart the entire 3x-ui process after a 3-second grace period. The connection drops immediately; the panel comes back online ~5-10 seconds later.',
+        summary: '等待三秒后重启整个 3x-ui 进程。连接立即断开，面板通常在约 5-10 秒后恢复。',
       },
       {
         method: 'POST',
         path: '/panel/api/setting/testSmtp',
-        summary:
-          'Test SMTP connection with stage-by-stage reporting (connect, auth, send). Returns structured result with stage and message.',
+        summary: '分阶段测试 SMTP 连接，包括连接、认证和发送，返回包含阶段及消息的结构化结果。',
         response:
           '{\n  "success": true,\n  "stage": "send",\n  "msg": "Test email sent successfully"\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/setting/testTgBot',
-        summary: 'Test Telegram bot connection by sending a test message to the configured chat.',
+        summary: '向已配置的会话发送测试消息，以测试 Telegram 机器人连接。',
         response: '{\n  "success": true,\n  "msg": "Test message sent to Telegram"\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/setting/tgBotCapabilities',
-        summary:
-          'Report what the configured bot can do. Inline mode is a BotFather switch, so the panel warns when it is off.',
+        summary: '返回机器人能力。内联模式由 BotFather 控制，未开启时面板会显示提示。',
         responseSchema: 'TgBotCapabilities',
       },
       {
         method: 'POST',
         path: '/panel/api/setting/testDiscord',
-        summary: 'Test Discord bot connection by sending a test embed to the configured channel.',
+        summary: '向已配置频道发送测试嵌入消息，以测试 Discord 机器人连接。',
         response: '{\n  "success": true,\n  "msg": "Test notification sent successfully"\n}',
       },
       {
         method: 'GET',
         path: '/panel/api/setting/getDefaultJsonConfig',
-        summary:
-          'Return the built-in default Xray JSON config template that ships with this panel version.',
+        summary: '返回当前面板版本自带的默认 Xray JSON 配置模板。',
       },
     ],
   },
 
   {
     id: 'api-tokens',
-    title: 'API Tokens',
+    title: 'API 令牌',
     description:
-      'Manage scoped Bearer tokens for programmatic auth. admin grants the full panel API; monitor is read-only for status and metrics; node-sync manages node configuration without panel updates; node-admin adds panel self-update to node-sync. Tokens may expire and are stored as SHA-256 hashes. The plaintext is returned only once at creation.',
+      '管理程序调用使用的 Bearer 权限令牌。admin 可操作全部面板 API；monitor 仅读取状态和指标；node-sync 管理节点配置但不能更新面板；node-admin 额外允许面板自更新。令牌可设置到期时间，以 SHA-256 存储，明文仅创建时返回一次。',
     endpoints: [
       {
         method: 'GET',
         path: '/panel/api/setting/apiTokens',
-        summary:
-          'List every API token, enabled or not. The token value is never returned — only metadata.',
+        summary: '列出所有 API 令牌（包括禁用项），仅返回元数据，不返回令牌值。',
         response:
           '{\n  "success": true,\n  "obj": [\n    {\n      "id": 1,\n      "name": "central-panel-a",\n      "enabled": true,\n      "createdAt": 1736000000,\n      "scope": "node-admin",\n      "expiresAt": 0\n    }\n  ]\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/setting/apiTokens/create',
-        summary:
-          'Mint a scoped API token. The server-generated plaintext is returned only once and stored as a hash.',
+        summary: '生成指定权限的 API 令牌。服务端生成的明文仅返回一次，存储为散列值。',
         params: [
           {
             name: 'name',
             in: 'body',
             type: 'string',
-            desc: 'Human-readable label, e.g. "central-panel-a".',
+            desc: '便于识别的名称，例如 central-panel-a。',
           },
           {
             name: 'scope',
             in: 'body',
             type: 'string',
-            desc: 'admin (default), monitor, node-sync, or node-admin. node-admin inherits node-sync and may also start a panel update.',
+            desc: '权限：admin（默认）、monitor、node-sync 或 node-admin。node-admin 包含 node-sync 权限，并允许启动面板更新。',
             enum: ['admin', 'monitor', 'node-sync', 'node-admin'],
             optional: true,
           },
@@ -2076,7 +2027,7 @@ export const sections: readonly Section[] = [
             name: 'expiresAt',
             in: 'body',
             type: 'number',
-            desc: 'Future Unix milliseconds, or 0 for no expiry.',
+            desc: '未来的 Unix 毫秒时间戳，0 表示永不过期。',
             optional: true,
           },
         ],
@@ -2088,15 +2039,14 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/setting/apiTokens/delete/:id',
-        summary:
-          'Permanently delete a token. Any caller using it stops authenticating immediately.',
+        summary: '永久删除令牌，使用该令牌的调用方立即无法通过身份验证。',
         params: [
-          { name: 'id', in: 'path', type: 'number', desc: 'Token row ID.' },
+          { name: 'id', in: 'path', type: 'number', desc: '令牌记录编号。' },
           {
             name: 'expectedScope',
             in: 'body',
             type: 'string',
-            desc: 'Stored scope expected by the operator.',
+            desc: '操作员预期的已存储权限范围。',
           },
         ],
         body: '{\n  "expectedScope": "node-sync"\n}',
@@ -2105,16 +2055,15 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/setting/apiTokens/setEnabled/:id',
-        summary:
-          'Toggle a token enabled/disabled without deleting it. Disabled tokens are rejected by checkAPIAuth on the next request.',
+        summary: '切换令牌启用状态，保留记录。禁用后，下一次请求即被 checkAPIAuth 拒绝。',
         params: [
-          { name: 'id', in: 'path', type: 'number', desc: 'Token row ID.' },
-          { name: 'enabled', in: 'body', type: 'boolean', desc: 'New enabled state.' },
+          { name: 'id', in: 'path', type: 'number', desc: '令牌记录编号。' },
+          { name: 'enabled', in: 'body', type: 'boolean', desc: '新的启用状态。' },
           {
             name: 'expectedScope',
             in: 'body',
             type: 'string',
-            desc: 'Stored scope expected by the operator.',
+            desc: '操作员预期的已存储权限范围。',
           },
         ],
         body: '{\n  "enabled": false,\n  "expectedScope": "node-sync"\n}',
@@ -2125,53 +2074,49 @@ export const sections: readonly Section[] = [
 
   {
     id: 'xray-settings',
-    title: 'Xray Settings',
+    title: 'Xray 设置',
     description:
-      'Xray configuration template, outbound management, Warp/Nord/PIA integration, and config testing. All endpoints under /panel/api/xray.',
+      'Xray 配置模板、出站管理、Warp/Nord/PIA 集成及配置测试，接口位于 /panel/api/xray。',
     endpoints: [
       {
         method: 'POST',
         path: '/panel/api/xray/',
         summary:
-          'Return the Xray config template (JSON string), available inbound tags, client reverse tags, and the configured outbound test URL in one response.',
+          '一次返回 Xray 配置模板（JSON 字符串）、可用入站标签、客户端反向代理标签及出站测试地址。',
         response:
           '{\n  "success": true,\n  "obj": {\n    "xraySetting": "{...raw xray config...}",\n    "inboundTags": "[\\"in-443-tcp\\"]",\n    "clientReverseTags": "[]",\n    "outboundTestUrl": "https://www.google.com/generate_204"\n  }\n}',
       },
       {
         method: 'GET',
         path: '/panel/api/xray/getDefaultJsonConfig',
-        summary:
-          'Return the built-in default Xray config shipped with the panel (identical to /panel/api/setting/getDefaultJsonConfig).',
+        summary: '返回面板自带的默认 Xray 配置，与 /panel/api/setting/getDefaultJsonConfig 相同。',
       },
       {
         method: 'GET',
         path: '/panel/api/xray/getOutboundsTraffic',
-        summary:
-          'Return traffic statistics for every outbound. Each outbound shows up/down/total counters.',
+        summary: '返回所有出站的流量统计，每项包含 up/down/total 计数。',
       },
       {
         method: 'GET',
         path: '/panel/api/xray/getXrayResult',
-        summary:
-          'Return the most recent Xray process stdout/stderr output. Useful to check for startup errors or runtime warnings.',
+        summary: '返回最近的 Xray 标准输出和错误输出，用于检查启动错误或运行警告。',
       },
       {
         method: 'POST',
         path: '/panel/api/xray/update',
-        summary:
-          'Save the Xray JSON config template and optionally the outbound test URL. Both are sent as form fields.',
+        summary: '保存 Xray JSON 配置模板，可同时保存出站测试地址，两者均通过表单字段发送。',
         params: [
           {
             name: 'xraySetting',
             in: 'body (form)',
             type: 'string',
-            desc: 'Full Xray JSON config template.',
+            desc: '完整 Xray JSON 配置模板。',
           },
           {
             name: 'outboundTestUrl',
             in: 'body (form)',
             type: 'string',
-            desc: 'URL used for outbound reachability tests. Defaults to https://www.google.com/generate_204.',
+            desc: '出站连通性测试地址，默认为 https://www.google.com/generate_204。',
             optional: true,
           },
         ],
@@ -2179,40 +2124,40 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/xray/warp/:action',
-        summary: 'Manage Cloudflare Warp integration. The action parameter selects the operation.',
+        summary: '管理 Cloudflare WARP 集成，通过 action 参数选择操作。',
         params: [
           {
             name: 'action',
             in: 'path',
             type: 'string',
-            desc: 'data — return Warp stats. del — delete Warp data. config — return current config. reg — register (sends keys). regMasque — register a separate device enrolled for MASQUE and return its warp key pair, addresses and endpoint. changeIp — rotate the endpoint. license — set a Warp+ key. interval — set automatic rotation in hours.',
+            desc: 'data：返回 WARP 统计；del：删除数据；config：返回当前配置；reg：注册并提交密钥；regMasque：注册独立 MASQUE 设备，返回 WARP 密钥对、地址和端点；changeIp：轮换端点；license：设置 WARP+ 密钥；interval：设置自动轮换间隔（小时）。',
           },
           {
             name: 'privateKey',
             in: 'body (form)',
             type: 'string',
-            desc: 'Required when action=reg.',
+            desc: 'action=reg 时必填。',
             optional: true,
           },
           {
             name: 'publicKey',
             in: 'body (form)',
             type: 'string',
-            desc: 'Required when action=reg.',
+            desc: 'action=reg 时必填。',
             optional: true,
           },
           {
             name: 'license',
             in: 'body (form)',
             type: 'string',
-            desc: 'Required when action=license.',
+            desc: 'action=license 时必填。',
             optional: true,
           },
           {
             name: 'interval',
             in: 'body (form)',
             type: 'integer',
-            desc: 'Non-negative hours between automatic rotations. Required when action=interval; 0 disables rotation.',
+            desc: '自动轮换间隔，单位为小时，必须非负。action=interval 时必填，0 表示禁用。',
             optional: true,
           },
         ],
@@ -2220,33 +2165,33 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/xray/nord/:action',
-        summary: 'Manage NordVPN integration. The action parameter selects the operation.',
+        summary: '管理 NordVPN 集成，通过 action 参数选择操作。',
         params: [
           {
             name: 'action',
             in: 'path',
             type: 'string',
-            desc: 'countries — list available countries. servers — list servers in a country (sends countryId). reg — get NordVPN credentials (sends token). setKey — store NordVPN API key (sends key). data — return current NordVPN connection data. del — delete NordVPN data.',
+            desc: 'countries：列出国家；servers：按 countryId 列出国家内服务器；reg：提交 token 获取 NordVPN 凭据；setKey：提交 key 保存 API 密钥；data：返回当前连接数据；del：删除数据。',
           },
           {
             name: 'countryId',
             in: 'body (form)',
             type: 'string',
-            desc: 'Required when action=servers.',
+            desc: 'action=servers 时必填。',
             optional: true,
           },
           {
             name: 'token',
             in: 'body (form)',
             type: 'string',
-            desc: 'Required when action=reg.',
+            desc: 'action=reg 时必填。',
             optional: true,
           },
           {
             name: 'key',
             in: 'body (form)',
             type: 'string',
-            desc: 'Required when action=setKey.',
+            desc: 'action=setKey 时必填。',
             optional: true,
           },
         ],
@@ -2254,40 +2199,40 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/xray/pia/:action',
-        summary: 'Manage PIA WireGuard integration. The action parameter selects the operation.',
+        summary: '管理 PIA WireGuard 集成，通过 action 参数选择操作。',
         params: [
           {
             name: 'action',
             in: 'path',
             type: 'string',
-            desc: 'countries — list available countries from the signed PIA server list. servers — list regions and WireGuard servers in a country (sends countryCode). reg — sign in with a PIA username and password (sends username, password). data — return the signed-in account hint. del — delete stored PIA credentials. addKey — register a WireGuard key with the selected server (sends hostname) and return fields to build the outbound.',
+            desc: 'countries：读取已签名 PIA 服务器列表中的国家；servers：按 countryCode 列出区域和 WireGuard 服务器；reg：提交 username/password 登录；data：返回已登录账户提示；del：删除已保存凭据；addKey：向 hostname 指定服务器注册 WireGuard 密钥并返回出站配置字段。',
           },
           {
             name: 'username',
             in: 'body (form)',
             type: 'string',
-            desc: 'Required when action=reg.',
+            desc: 'action=reg 时必填。',
             optional: true,
           },
           {
             name: 'password',
             in: 'body (form)',
             type: 'string',
-            desc: 'Required when action=reg.',
+            desc: 'action=reg 时必填。',
             optional: true,
           },
           {
             name: 'countryCode',
             in: 'body (form)',
             type: 'string',
-            desc: 'Required when action=servers.',
+            desc: 'action=servers 时必填。',
             optional: true,
           },
           {
             name: 'hostname',
             in: 'body (form)',
             type: 'string',
-            desc: 'Required when action=addKey.',
+            desc: 'action=addKey 时必填。',
             optional: true,
           },
         ],
@@ -2295,13 +2240,13 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/xray/resetOutboundsTraffic',
-        summary: 'Reset traffic counters for a specific outbound by tag.',
+        summary: '按标签重置指定出站的流量计数。',
         params: [
           {
             name: 'tag',
             in: 'body (form)',
             type: 'string',
-            desc: 'Outbound tag to reset (e.g. "proxy", "direct").',
+            desc: '需要重置的出站标签，例如 proxy 或 direct。',
           },
         ],
         body: 'tag=proxy',
@@ -2310,26 +2255,26 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/xray/testOutbound',
         summary:
-          'Test an outbound configuration. Sends the outbound JSON (required), optionally all outbounds (to resolve sockopt.dialerProxy dependencies), and a mode flag.',
+          '测试出站配置。必须提供出站 JSON，可选提供全部出站以解析 sockopt.dialerProxy 依赖，并通过模式字段选择探测方式。',
         params: [
           {
             name: 'outbound',
             in: 'body (form)',
             type: 'string',
-            desc: 'JSON-encoded single outbound to test (required).',
+            desc: 'JSON 编码的单个待测出站，必填。',
           },
           {
             name: 'allOutbounds',
             in: 'body (form)',
             type: 'string',
-            desc: 'JSON array of all outbounds — used to resolve dialerProxy chains.',
+            desc: '全部出站的 JSON 数组，用于解析 dialerProxy 链。',
             optional: true,
           },
           {
             name: 'mode',
             in: 'body (form)',
             type: 'string',
-            desc: '"tcp" for a fast dial-only probe (parallel-safe), "real" for a real-delay probe whose delay is the full request time including tunnel establishment. Default/empty uses a full HTTP probe reporting the warm per-request round-trip. Both HTTP variants run through a temp xray instance.',
+            desc: 'tcp 仅探测拨号，速度快且可并发；real 测量含隧道建立的完整请求延迟。默认或留空使用完整 HTTP 探测，报告连接预热后的单次往返延迟。两种 HTTP 模式均通过临时 Xray 实例执行。',
             optional: true,
           },
         ],
@@ -2339,26 +2284,26 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/xray/testOutbounds',
         summary:
-          'Test a batch of outbounds (max 50) through one shared temp xray instance. Returns an array of results in input order, each with the outbound tag, delay, HTTP status and a connect/TLS/TTFB timing breakdown.',
+          '通过共享临时 Xray 实例批量测试出站，最多 50 项。按输入顺序返回标签、延迟、HTTP 状态及连接/TLS/首字节耗时分解。',
         params: [
           {
             name: 'outbounds',
             in: 'body (form)',
             type: 'string',
-            desc: 'JSON array of outbound configs to test (required).',
+            desc: '待测出站配置的 JSON 数组，必填。',
           },
           {
             name: 'allOutbounds',
             in: 'body (form)',
             type: 'string',
-            desc: 'JSON array of all outbounds — used to resolve dialerProxy chains.',
+            desc: '全部出站的 JSON 数组，用于解析 dialerProxy 链。',
             optional: true,
           },
           {
             name: 'mode',
             in: 'body (form)',
             type: 'string',
-            desc: '"tcp" for fast dial-only probes (UDP-transport outbounds are still probed over HTTP), "real" for real-delay probes whose delay is the full request time including tunnel establishment. Default/empty routes an HTTP request through each outbound and reports the warm per-request round-trip.',
+            desc: 'tcp 为快速拨号探测，UDP 传输出站仍使用 HTTP；real 测量含隧道建立的完整请求延迟；默认或留空通过各出站发起 HTTP 请求，报告预热后的单次往返延迟。',
             optional: true,
           },
         ],
@@ -2368,13 +2313,13 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/xray/balancerStatus',
         summary:
-          'Live state of routing balancers in the running core (RoutingService.GetBalancerInfo): current override and the targets the strategy prefers. Returns a map keyed by balancer tag.',
+          '读取运行中内核的路由负载均衡实时状态（RoutingService.GetBalancerInfo），包括当前覆盖设置和策略首选目标，返回以负载均衡标签为键的映射。',
         params: [
           {
             name: 'tags',
             in: 'body (form)',
             type: 'string',
-            desc: 'Comma-separated balancer tags to query (e.g. "b1,b2").',
+            desc: '逗号分隔的负载均衡标签，例如 b1,b2。',
           },
         ],
         body: 'tags=b1,b2',
@@ -2383,14 +2328,14 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/xray/balancerOverride',
         summary:
-          'Force a balancer in the running core to always pick one outbound (RoutingService.OverrideBalancerTarget). Applied live without a restart and kept across config saves; cleared when Xray restarts or the target outbound is removed.',
+          '强制运行中负载均衡始终选择指定出站（RoutingService.OverrideBalancerTarget）。实时生效，无需重启，保存配置后保留；Xray 重启或目标出站移除后清除。',
         params: [
-          { name: 'tag', in: 'body (form)', type: 'string', desc: 'Balancer tag (required).' },
+          { name: 'tag', in: 'body (form)', type: 'string', desc: '负载均衡标签，必填。' },
           {
             name: 'target',
             in: 'body (form)',
             type: 'string',
-            desc: 'Outbound tag to force; it must exist in the running config. Empty clears the override and returns control to the strategy.',
+            desc: '强制使用的出站标签，必须存在于当前运行配置。留空清除覆盖，恢复策略控制。',
             optional: true,
           },
         ],
@@ -2400,14 +2345,14 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/xray/routeTest',
         summary:
-          'Ask the running core which outbound its router would pick for a synthetic connection (RoutingService.TestRoute). No traffic is sent.',
+          '让运行中内核判断模拟连接会选择哪个出站（RoutingService.TestRoute），不发送实际流量。',
         bodyRequiredOneOf: ['domain', 'ip'],
         params: [
           {
             name: 'domain',
             in: 'body (form)',
             type: 'string',
-            desc: 'Target domain. Either domain or ip is required.',
+            desc: '目标域名，domain 和 ip 至少提供一个。',
             optional: true,
             minLength: 1,
           },
@@ -2415,7 +2360,7 @@ export const sections: readonly Section[] = [
             name: 'ip',
             in: 'body (form)',
             type: 'string',
-            desc: 'Target IP. Either domain or ip is required.',
+            desc: '目标 IP，domain 和 ip 至少提供一个。',
             optional: true,
             minLength: 1,
           },
@@ -2423,35 +2368,35 @@ export const sections: readonly Section[] = [
             name: 'port',
             in: 'body (form)',
             type: 'number',
-            desc: 'Target port (optional).',
+            desc: '目标端口，可选。',
             optional: true,
           },
           {
             name: 'network',
             in: 'body (form)',
             type: 'string',
-            desc: '"tcp" (default) or "udp".',
+            desc: '传输类型 tcp（默认）或 udp。',
             optional: true,
           },
           {
             name: 'inboundTag',
             in: 'body (form)',
             type: 'string',
-            desc: 'Simulate arrival on this inbound (optional).',
+            desc: '模拟从此入站进入，可选。',
             optional: true,
           },
           {
             name: 'protocol',
             in: 'body (form)',
             type: 'string',
-            desc: 'Sniffed protocol such as http, tls, bittorrent (optional).',
+            desc: '嗅探协议，例如 http、tls、bittorrent，可选。',
             optional: true,
           },
           {
             name: 'email',
             in: 'body (form)',
             type: 'string',
-            desc: 'User attribution for user-based rules (optional).',
+            desc: '用于用户规则的用户归属，可选。',
             optional: true,
           },
         ],
@@ -2461,40 +2406,39 @@ export const sections: readonly Section[] = [
         method: 'GET',
         path: '/panel/api/xray/geodata/files',
         summary:
-          'List the geo databases (.dat files) in the Xray asset folder, with the layout detected from their contents, size, modification time and category count. A database that fails to parse is still listed, with the reason in "error".',
+          '列出 Xray 资源目录中的 .dat 地理数据库，按内容识别结构，并返回大小、修改时间和分类数。解析失败的文件仍列出，原因位于 error。',
       },
       {
         method: 'GET',
         path: '/panel/api/xray/geodata/categories',
-        summary:
-          'One page of a database\'s categories, each with its entry count and the attributes its domains carry (e.g. "ads", "cn").',
+        summary: '分页返回数据库分类，每项包含条目数及域名属性，例如 ads、cn。',
         params: [
           {
             name: 'file',
             in: 'query',
             type: 'string',
-            desc: 'Database file name inside the asset folder, e.g. geosite.dat (required).',
+            desc: '资源目录内的数据库文件名，例如 geosite.dat，必填。',
           },
           {
             name: 'q',
             in: 'query',
             type: 'string',
             optional: true,
-            desc: 'Case-insensitive substring filter on the category code.',
+            desc: '忽略大小写，以分类代码子字符串筛选。',
           },
           {
             name: 'offset',
             in: 'query',
             type: 'integer',
             optional: true,
-            desc: 'Rows to skip. Defaults to 0.',
+            desc: '跳过的行数，默认为 0。',
           },
           {
             name: 'limit',
             in: 'query',
             type: 'integer',
             optional: true,
-            desc: 'Rows to return, capped at 500. Omit it to return every category — the index is small and the panel filters it client-side.',
+            desc: '返回行数，最多 500。省略时返回全部分类；索引较小，由前端筛选。',
           },
         ],
       },
@@ -2502,40 +2446,40 @@ export const sections: readonly Section[] = [
         method: 'GET',
         path: '/panel/api/xray/geodata/entries',
         summary:
-          'One page of the rules inside a category — domain rules typed as domain/full/keyword/regexp for geosite databases, CIDRs for geoip ones.',
+          '分页返回分类中的规则。geosite 域名规则类型为 domain/full/keyword/regexp，geoip 返回 CIDR。',
         params: [
           {
             name: 'file',
             in: 'query',
             type: 'string',
-            desc: 'Database file name inside the asset folder (required).',
+            desc: '资源目录内的数据库文件名，必填。',
           },
           {
             name: 'code',
             in: 'query',
             type: 'string',
-            desc: 'Category code, case-insensitive, e.g. google (required).',
+            desc: '分类代码，忽略大小写，例如 google，必填。',
           },
           {
             name: 'q',
             in: 'query',
             type: 'string',
             optional: true,
-            desc: 'Case-insensitive substring filter on the rule value.',
+            desc: '忽略大小写，以规则值的子字符串筛选。',
           },
           {
             name: 'offset',
             in: 'query',
             type: 'integer',
             optional: true,
-            desc: 'Rows to skip. Defaults to 0.',
+            desc: '跳过的行数，默认为 0。',
           },
           {
             name: 'limit',
             in: 'query',
             type: 'integer',
             optional: true,
-            desc: 'Rows to return, capped at 500. Defaults to the cap.',
+            desc: '返回行数，最多 500，默认使用上限。',
           },
         ],
       },
@@ -2543,19 +2487,19 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/xray/geodata/validate',
         summary:
-          'Check routing tokens against the databases on disk and return only the ones that do not resolve. Plain domains and CIDRs are ignored. Each issue carries a reason: syntax, fileMissing or categoryMissing.',
+          '对照磁盘数据库检查路由标记，仅返回无法解析的项，忽略普通域名和 CIDR。原因代码包括 syntax、fileMissing、categoryMissing。',
         params: [
           {
             name: 'tokens',
             in: 'body (form)',
             type: 'string',
-            desc: 'Comma-separated routing tokens, e.g. "geosite:google,geosite:blabla". Max 500 per request.',
+            desc: '逗号分隔的路由标记，例如 geosite:google,geosite:blabla，每次最多 500 项。',
           },
           {
             name: 'kind',
             in: 'body (form)',
             type: 'string',
-            desc: '"ip" to parse the tokens as IP rules (geoip:, ext-ip:, leading !). Anything else parses them as domain rules (geosite:, ext-site:).',
+            desc: 'ip 表示按 IP 规则解析（geoip:、ext-ip:、前导 !），其他值按域名规则解析（geosite:、ext-site:）。',
             optional: true,
           },
         ],
@@ -2564,58 +2508,53 @@ export const sections: readonly Section[] = [
       {
         method: 'GET',
         path: '/panel/api/xray/outbound-subs',
-        summary:
-          'List all outbound subscriptions (remote URLs that supply additional outbounds), newest first.',
+        summary: '列出提供附加出站的远程订阅，按创建时间倒序。',
       },
       {
         method: 'POST',
         path: '/panel/api/xray/outbound-subs',
         summary:
-          'Create an outbound subscription. The URL is fetched, parsed into outbounds with stable tags, and merged additively into the running Xray config.',
+          '创建出站订阅，获取地址内容并解析成稳定标签出站，以追加方式合并到运行中的 Xray 配置。',
         params: outboundSubscriptionBodyParams,
       },
       {
         method: 'POST',
         path: '/panel/api/xray/outbound-subs/:id',
-        summary:
-          'Update an existing outbound subscription by id. Accepts the same form fields as create.',
+        summary: '按编号更新出站订阅，表单字段与创建相同。',
         params: [
-          { name: 'id', in: 'path', type: 'integer', desc: 'Subscription id.' },
+          { name: 'id', in: 'path', type: 'integer', desc: '订阅编号。' },
           ...outboundSubscriptionBodyParams,
         ],
       },
       {
         method: 'DELETE',
         path: '/panel/api/xray/outbound-subs/:id',
-        summary: 'Delete an outbound subscription by id.',
-        params: [{ name: 'id', in: 'path', type: 'integer', desc: 'Subscription id.' }],
+        summary: '按编号删除出站订阅。',
+        params: [{ name: 'id', in: 'path', type: 'integer', desc: '订阅编号。' }],
       },
       {
         method: 'POST',
         path: '/panel/api/xray/outbound-subs/:id/del',
-        summary:
-          'Delete an outbound subscription by id (POST alias of DELETE for clients that cannot send DELETE).',
-        params: [{ name: 'id', in: 'path', type: 'integer', desc: 'Subscription id.' }],
+        summary: '按编号删除出站订阅，为不支持 DELETE 的客户端提供 POST 等价接口。',
+        params: [{ name: 'id', in: 'path', type: 'integer', desc: '订阅编号。' }],
       },
       {
         method: 'POST',
         path: '/panel/api/xray/outbound-subs/:id/refresh',
-        summary:
-          'Force an immediate re-fetch of the subscription and return the parsed outbounds. Signals Xray to reload.',
-        params: [{ name: 'id', in: 'path', type: 'integer', desc: 'Subscription id.' }],
+        summary: '立即重新获取订阅并返回解析后的出站，同时通知 Xray 重新加载。',
+        params: [{ name: 'id', in: 'path', type: 'integer', desc: '订阅编号。' }],
       },
       {
         method: 'POST',
         path: '/panel/api/xray/outbound-subs/:id/move',
-        summary:
-          'Reorder a subscription one step up or down in priority (controls its position in the merged outbounds).',
+        summary: '将订阅优先级上移或下移一位，控制它在合并出站中的位置。',
         params: [
-          { name: 'id', in: 'path', type: 'integer', desc: 'Subscription id.' },
+          { name: 'id', in: 'path', type: 'integer', desc: '订阅编号。' },
           {
             name: 'dir',
             in: 'body (form)',
             type: 'string',
-            desc: '"up" to raise priority, anything else to lower it.',
+            desc: 'up 表示提高优先级，其他值表示降低。',
             optional: true,
           },
         ],
@@ -2623,34 +2562,33 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/xray/outbound-subs/parse',
-        summary:
-          'Preview a subscription URL: fetch and parse it into outbounds without persisting anything.',
+        summary: '预览订阅地址，获取并解析出站，不保存任何数据。',
         params: [
           {
             name: 'url',
             in: 'body (form)',
             type: 'string',
-            desc: 'Subscription URL to preview (required).',
+            desc: '需要预览的订阅地址，必填。',
           },
           {
             name: 'userAgent',
             in: 'body (form)',
             type: 'string',
-            desc: 'Custom User-Agent sent while fetching the preview.',
+            desc: '获取预览时发送的自定义 User-Agent。',
             optional: true,
           },
           {
             name: 'allowPrivate',
             in: 'body (form)',
             type: 'boolean',
-            desc: 'Allow a private/internal/loopback URL. Default false.',
+            desc: '允许私有、内部或回环地址，默认为 false。',
             optional: true,
           },
           {
             name: 'allowInsecure',
             in: 'body (form)',
             type: 'boolean',
-            desc: 'Skip TLS certificate verification. Default false.',
+            desc: '跳过 TLS 证书验证，默认为 false。',
             optional: true,
           },
         ],
@@ -2660,22 +2598,21 @@ export const sections: readonly Section[] = [
 
   {
     id: 'sub-balancers',
-    title: 'Subscription Balancers',
+    title: '订阅负载均衡',
     description:
-      'Client-side balancers for the JSON subscription: each enabled balancer is emitted as one extra config document whose members are the proxy outbounds of the selected inbounds (routing.balancers + burstObservatory). Managed in Settings → Sub Balancers.',
+      'JSON 订阅中的客户端负载均衡。每个启用项生成一份额外配置，成员为选中入站的代理出站，使用 routing.balancers 和 burstObservatory。在“设置 → 订阅负载均衡”中管理。',
     endpoints: [
       {
         method: 'GET',
         path: '/panel/api/sub-balancers',
-        summary: 'List all subscription balancers in sort order (sort_order asc, id asc).',
+        summary: '按 sort_order 升序、id 升序列出全部订阅负载均衡配置。',
         responseSchema: 'SubBalancer',
         responseSchemaArray: true,
       },
       {
         method: 'POST',
         path: '/panel/api/sub-balancers',
-        summary:
-          'Create a subscription balancer. It appears in the JSON subscription of every client that sits on at least one selected inbound.',
+        summary: '创建订阅负载均衡配置。与任一所选入站关联的客户端，其 JSON 订阅中均包含此配置。',
         params: subBalancerBodyParams,
         responseSchema: 'SubBalancer',
       },
@@ -2683,9 +2620,9 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/sub-balancers/:id',
         summary:
-          'Update a balancer by id. Accepts the same form fields as create (full-row update); omitting memberWeights clears stored weights, while omitting enabled keeps its current value.',
+          '按编号替换完整负载均衡记录，字段与创建相同。省略 memberWeights 会清除已存权重，省略 enabled 则保留当前状态。',
         params: [
-          { name: 'id', in: 'path', type: 'integer', desc: 'Balancer id.' },
+          { name: 'id', in: 'path', type: 'integer', desc: '负载均衡编号。' },
           ...subBalancerBodyParams,
         ],
         responseSchema: 'SubBalancer',
@@ -2693,16 +2630,15 @@ export const sections: readonly Section[] = [
       {
         method: 'DELETE',
         path: '/panel/api/sub-balancers/:id',
-        summary: 'Delete a balancer by id.',
-        params: [{ name: 'id', in: 'path', type: 'integer', desc: 'Balancer id.' }],
+        summary: '按编号删除负载均衡配置。',
+        params: [{ name: 'id', in: 'path', type: 'integer', desc: '负载均衡编号。' }],
         responseSchema: 'SubBalancer',
       },
       {
         method: 'POST',
         path: '/panel/api/sub-balancers/:id/del',
-        summary:
-          'Delete a balancer by id (POST alias of DELETE for clients that cannot send DELETE).',
-        params: [{ name: 'id', in: 'path', type: 'integer', desc: 'Balancer id.' }],
+        summary: '按编号删除负载均衡配置，为不支持 DELETE 的客户端提供 POST 等价接口。',
+        params: [{ name: 'id', in: 'path', type: 'integer', desc: '负载均衡编号。' }],
         responseSchema: 'SubBalancer',
       },
     ],
@@ -2710,29 +2646,29 @@ export const sections: readonly Section[] = [
 
   {
     id: 'subscription',
-    title: 'Subscription Server',
+    title: '订阅服务器',
     description:
-      'A separate HTTP/HTTPS server that serves proxy subscription links (standard, JSON, and Clash) to clients. The server listens on its own port (default 2096) and is configured in Settings → Subscription. Fresh panels generate random path prefixes for each format; all paths remain configurable. Every subscription endpoint sets response headers for client apps to read traffic/expiry info.',
+      '向客户端提供标准、JSON 和 Clash 订阅的独立 HTTP/HTTPS 服务。使用独立端口，默认 2096，在“设置 → 订阅”配置。新安装为各格式生成随机路径前缀，仍可自行修改。各订阅接口通过响应头提供流量和期限信息。',
     subHeader: [
       {
         name: 'Subscription-Userinfo',
-        desc: 'Traffic and expiry: <code>upload=N; download=N; total=N; expire=TS</code>',
+        desc: '流量和期限：<code>upload=N; download=N; total=N; expire=TS</code>。',
       },
-      { name: 'Profile-Title', desc: 'Base64-encoded subscription display name' },
-      { name: 'Profile-Web-Page-Url', desc: 'Link to the subscription info page' },
-      { name: 'Support-Url', desc: 'Support contact URL configured in settings' },
+      { name: 'Profile-Title', desc: '经过 Base64 编码的订阅显示名称。' },
+      { name: 'Profile-Web-Page-Url', desc: '订阅详情页链接。' },
+      { name: 'Support-Url', desc: '设置中配置的支持联系地址。' },
       {
         name: 'Profile-Update-Interval',
-        desc: 'Suggested polling interval in minutes (e.g. <code>10</code>)',
+        desc: '建议轮询间隔，单位为分钟，例如 <code>10</code>。',
       },
-      { name: 'Announce', desc: 'Base64-encoded announcement string' },
+      { name: 'Announce', desc: '经过 Base64 编码的公告文本。' },
       {
         name: 'Routing-Enable',
-        desc: '<code>true</code> or <code>false</code> — whether routing rules are included',
+        desc: '<code>true</code> 或 <code>false</code>，表示是否包含路由规则。',
       },
       {
         name: 'Routing',
-        desc: 'Global routing rules for client apps that support them (e.g. Happ)',
+        desc: '供支持此功能的客户端（如 Happ）使用的全局路由规则。',
       },
     ],
     endpoints: [
@@ -2740,37 +2676,36 @@ export const sections: readonly Section[] = [
         method: 'GET',
         path: '/{subPath}:subid',
         summary:
-          'Return base64-encoded subscription links for all enabled clients matching the subscription ID. When the request has an Accept: text/html header or ?html=1, renders a styled info page instead. With ?format=info, returns the page view-model as JSON (traffic, expiry, online status; no links) for live polling. The path prefix is configured by subPath.',
+          '返回匹配订阅标识的所有已启用客户端链接，使用 Base64 编码。Accept:text/html 或 ?html=1 时显示详情页；?format=info 返回流量、期限和在线状态的 JSON 视图模型，不含链接，供实时轮询。路径前缀由 subPath 配置。',
         params: [
-          { name: 'subid', in: 'path', type: 'string', desc: 'Client subscription ID.' },
+          { name: 'subid', in: 'path', type: 'string', desc: '客户端订阅标识。' },
           {
             name: 'format',
             in: 'query',
             type: 'string',
             optional: true,
-            desc: 'Set to "info" to get the subscription status view-model as JSON instead of the links.',
+            desc: '设为 info 时返回订阅状态的 JSON 视图模型，而非链接。',
           },
         ],
       },
       {
         method: 'HEAD',
         path: '/{subPath}:subid',
-        summary:
-          'Return the same status and subscription metadata headers as GET without a response body.',
-        params: [{ name: 'subid', in: 'path', type: 'string', desc: 'Client subscription ID.' }],
+        summary: '返回与 GET 相同的状态和订阅元数据响应头，无响应正文。',
+        params: [{ name: 'subid', in: 'path', type: 'string', desc: '客户端订阅标识。' }],
         responses: subscriptionHeadResponses,
       },
       {
         method: 'GET',
         path: '/{subPath}:subid/hwid-status',
         summary:
-          'Return aggregate HWID device-slot usage for the subscription: whether an HWID limit is active, the limit, how many devices are registered and how many slots remain. Read-only — it never registers a device, so asking does not consume a slot. Counters only: no HWID value, email or device metadata. The path prefix is configured by subPath.',
+          '返回订阅的 HWID 设备名额汇总：限制是否启用、名额上限、已注册数量和剩余数量。此接口只读，不注册设备或占用名额，仅返回计数，不包含 HWID、email 或设备信息。路径前缀由 subPath 配置。',
         description:
-          'Responds with the bare HwidSlotStatus object, not the <code>{success,msg,obj}</code> panel envelope, like the other subscription-server routes. With no HWID limit configured, <code>active</code> is false and every counter is 0.',
-        params: [{ name: 'subid', in: 'path', type: 'string', desc: 'Client subscription ID.' }],
+          '与其他订阅服务接口一样，直接返回 HwidSlotStatus 对象，不使用面板 <code>{success,msg,obj}</code> 包装。未配置 HWID 限制时，active 为 false，所有计数为 0。',
+        params: [{ name: 'subid', in: 'path', type: 'string', desc: '客户端订阅标识。' }],
         responses: {
           '200': {
-            description: 'Device-slot counters for the subscription.',
+            description: '订阅的设备名额计数。',
             content: {
               'application/json': { schema: { $ref: '#/components/schemas/HwidSlotStatus' } },
             },
@@ -2781,11 +2716,10 @@ export const sections: readonly Section[] = [
       {
         method: 'HEAD',
         path: '/{subPath}:subid/hwid-status',
-        summary:
-          'Return the HWID device-slot status code and headers as GET without a response body.',
-        params: [{ name: 'subid', in: 'path', type: 'string', desc: 'Client subscription ID.' }],
+        summary: '返回与 GET 相同的 HWID 设备名额状态码和响应头，无响应正文。',
+        params: [{ name: 'subid', in: 'path', type: 'string', desc: '客户端订阅标识。' }],
         responses: {
-          '200': { description: 'Headers match GET; no response body.' },
+          '200': { description: '响应头与 GET 相同，无响应正文。' },
           ...hwidStatusErrorResponses,
         },
       },
@@ -2793,30 +2727,28 @@ export const sections: readonly Section[] = [
         method: 'GET',
         path: '/{jsonPath}:subid',
         summary:
-          'Return subscription as a JSON array of proxy configs (one per enabled client). Only when JSON subscription is enabled in settings. The path prefix is configured by subJsonPath.',
-        params: [{ name: 'subid', in: 'path', type: 'string', desc: 'Client subscription ID.' }],
+          '以 JSON 数组返回代理配置，每个启用客户端一份。仅在设置中启用 JSON 订阅时提供，路径前缀由 subJsonPath 配置。',
+        params: [{ name: 'subid', in: 'path', type: 'string', desc: '客户端订阅标识。' }],
       },
       {
         method: 'HEAD',
         path: '/{jsonPath}:subid',
-        summary:
-          'Return the JSON subscription status and metadata headers without a body. Registered only when JSON subscriptions are enabled.',
-        params: [{ name: 'subid', in: 'path', type: 'string', desc: 'Client subscription ID.' }],
+        summary: '返回 JSON 订阅状态和元数据响应头，无正文。仅在启用 JSON 订阅时注册此路由。',
+        params: [{ name: 'subid', in: 'path', type: 'string', desc: '客户端订阅标识。' }],
         responses: subscriptionHeadResponses,
       },
       {
         method: 'GET',
         path: '/{clashPath}:subid',
         summary:
-          'Return subscription as a Clash/Mihomo-compatible YAML config, including configured global Clash routing rules. Only when Clash subscription is enabled in settings. The path prefix is configured by subClashPath.',
-        params: [{ name: 'subid', in: 'path', type: 'string', desc: 'Client subscription ID.' }],
+          '返回兼容 Clash/Mihomo 的 YAML 配置，包括已配置的全局 Clash 路由规则。仅在启用 Clash 订阅时提供，路径前缀由 subClashPath 配置。',
+        params: [{ name: 'subid', in: 'path', type: 'string', desc: '客户端订阅标识。' }],
       },
       {
         method: 'HEAD',
         path: '/{clashPath}:subid',
-        summary:
-          'Return the Clash subscription status and metadata headers without a body. Registered only when Clash subscriptions are enabled.',
-        params: [{ name: 'subid', in: 'path', type: 'string', desc: 'Client subscription ID.' }],
+        summary: '返回 Clash 订阅状态和元数据响应头，无正文。仅在启用 Clash 订阅时注册此路由。',
+        params: [{ name: 'subid', in: 'path', type: 'string', desc: '客户端订阅标识。' }],
         responses: subscriptionHeadResponses,
       },
     ],
@@ -2824,18 +2756,18 @@ export const sections: readonly Section[] = [
 
   {
     id: 'websocket',
-    title: 'WebSocket',
+    title: 'WebSocket 实时事件',
     description:
-      'Real-time status updates via WebSocket. Connect once at <code>ws://<panel>/ws</code> to receive a stream of JSON messages without polling. Requires an authenticated session cookie (Bearer token auth is not supported). Each message has a <code>type</code> field that identifies the payload shape.',
+      '通过 WebSocket 实时更新状态。连接 <code>ws://<panel>/ws</code> 后持续接收 JSON 消息，无需轮询。需要已验证的会话 Cookie，不支持 Bearer 令牌。各消息以 type 字段标识载荷结构。',
     endpoints: [
       {
         method: 'GET',
         path: '/ws',
         summary:
-          'Upgrade an HTTP connection to a WebSocket. Requires an authenticated session cookie (Bearer token auth is not supported here). Returns 101 Switching Protocols on success. The server then pushes JSON messages described below.',
+          '将 HTTP 连接升级为 WebSocket，需要已验证的会话 Cookie，不支持 Bearer 令牌。成功返回 101 状态码，随后服务器推送下述 JSON 消息。',
         responses: {
-          '101': { description: 'Switching Protocols. WebSocket messages use WebSocketEnvelope.' },
-          '401': { description: 'No authenticated panel session cookie.' },
+          '101': { description: '协议切换成功，WebSocket 消息使用 WebSocketEnvelope。' },
+          '401': { description: '未提供已验证的面板会话 Cookie。' },
         },
         security: [{ cookieAuth: [] }],
       },

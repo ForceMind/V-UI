@@ -213,7 +213,6 @@ export default function IndexPage() {
                     onOpenVersionSwitch={() => setVersionOpen(true)}
                   />
 
-
                   {health && (
                     <div className="ov-health" style={{ color: health.color }}>
                       <span className="ov-health-mark" />
@@ -233,7 +232,7 @@ export default function IndexPage() {
                       detail={
                         status.resourceScope === 'container'
                           ? `${status.logicalPro} vCPU`
-                          : `${CPUFormatter.cpuCoreFormat(status.cpuCores)} / ${status.logicalPro}T · ${CPUFormatter.cpuSpeedFormat(status.cpuSpeedMhz)}`
+                          : `${CPUFormatter.cpuCoreFormat(status.cpuCores)} / ${status.logicalPro}线程 · ${CPUFormatter.cpuSpeedFormat(status.cpuSpeedMhz)}`
                       }
                       footLeft={`${t('pages.index.avg')} ${mean(history.series.cpu).toFixed(0)}%`}
                       footRight={`${t('pages.index.peak')} ${peak(history.series.cpu).toFixed(0)}%`}
@@ -373,7 +372,7 @@ export default function IndexPage() {
                 size={isMobile ? 'small' : 'middle'}
                 icon={<CopyOutlined aria-hidden />}
               >
-                Copy
+                复制
               </Button>,
             ]}
           >

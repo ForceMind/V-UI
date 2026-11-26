@@ -306,7 +306,7 @@ describe('Happ routing editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Generate Deeplink' }));
     expect(routingRules().startsWith('happ://routing/onadd/')).toBe(true);
     expect(generatedProfile()).toEqual({
-      Name: 'Custom Rules',
+      Name: '自定义规则',
       GlobalProxy: 'true',
       DirectSites: ['domain:local.example'],
       DirectIp: [],

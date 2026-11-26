@@ -550,7 +550,7 @@ export default function CommandPalette() {
         id: 'act-cycle-theme',
         category: 'actions',
         title: t('menu.theme'),
-        subtitle: isUltra ? 'Ultra Dark' : isDark ? 'Dark' : 'Light',
+        subtitle: isUltra ? '深黑模式' : isDark ? '深色模式' : '浅色模式',
         keywords: ['theme', 'light', 'dark', 'ultra'],
         icon: isDark ? <SunOutlined aria-hidden /> : <MoonOutlined aria-hidden />,
         action: cycleTheme,
@@ -756,7 +756,7 @@ export default function CommandPalette() {
                 {t('close')}
               </span>
             </div>
-            <span>3x-ui Command Palette</span>
+            <span>3x-ui 命令面板</span>
           </div>
         </div>
       </div>

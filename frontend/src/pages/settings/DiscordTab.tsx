@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Alert, Button, Input, Select, Space, Switch, Tabs } from 'antd';
 import { BellOutlined, SendOutlined, SettingOutlined } from '@ant-design/icons';
 import { HttpUtil, LanguageManager } from '@/utils';
+import { panelLanguageLabel } from '@/i18n/panel-language-labels';
 import type { AllSetting } from '@/models/setting';
 import { SettingListItem } from '@/components/ui';
 import { DiscordNotifications } from '@/components/ui/notifications/DiscordNotifications';
@@ -50,10 +51,10 @@ export default function DiscordTab({ allSetting, updateSetting }: DiscordTabProp
           value: l.value,
           label: (
             <>
-              <span role="img" aria-label={l.name}>
+              <span role="img" aria-label={panelLanguageLabel(l.value)}>
                 {l.icon}
               </span>
-              &nbsp;&nbsp;<span>{l.name}</span>
+              &nbsp;&nbsp;<span>{panelLanguageLabel(l.value)}</span>
             </>
           ),
         }),

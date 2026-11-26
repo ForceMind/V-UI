@@ -70,7 +70,7 @@ export default function FreedomFields() {
         />
       </FormField>
 
-      <Form.Item label="Fragment" htmlFor={`${uid}-fragment`}>
+      <Form.Item label="分片" htmlFor={`${uid}-fragment`}>
         <Switch
           id={`${uid}-fragment`}
           checked={fragmentEnabled}
@@ -99,7 +99,7 @@ export default function FreedomFields() {
                 const str = String(value ?? '').trim();
                 /* xray accepts "tlshello" or any packet-number range (#5075) */
                 if (str === '' || str === 'tlshello' || /^\d+-\d+$/.test(str)) return true;
-                return 'Use "tlshello" or a packet range like 1-3';
+                return '请填写 tlshello 或数据包范围，例如 1-3';
               },
             }}
           >
@@ -109,7 +109,7 @@ export default function FreedomFields() {
                 { value: '1-3', label: '1-3' },
                 { value: '1-5', label: '1-5' },
               ]}
-              placeholder="tlshello or n-m, e.g. 1-3"
+              placeholder="tlshello 或 n-m 范围，例如 1-3"
             />
           </FormField>
           <FormField
@@ -258,7 +258,7 @@ export default function FreedomFields() {
           >
             <Select
               allowClear
-              placeholder="(any)"
+              placeholder="（任意）"
               options={['tcp', 'udp', 'tcp,udp'].map((v) => ({
                 value: v,
                 label: v,
@@ -275,7 +275,7 @@ export default function FreedomFields() {
             <Select
               mode="tags"
               tokenSeparators={[',', ' ']}
-              placeholder="e.g. 10.0.0.0/8, geoip:private"
+              placeholder="例如 10.0.0.0/8, geoip:private"
             />
           </FormField>
           {finalRulesValues[index]?.action === 'block' && (
@@ -283,7 +283,7 @@ export default function FreedomFields() {
               label={t('pages.xray.outboundForm.blockDelay')}
               name={['settings', 'finalRules', index, 'blockDelay']}
             >
-              <Input placeholder="optional: 5000-10000" />
+              <Input placeholder="可选，例如 5000-10000" />
             </FormField>
           )}
         </div>

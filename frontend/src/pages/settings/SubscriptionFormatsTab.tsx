@@ -45,29 +45,29 @@ const DEFAULT_BLOCK_RULES: SubJsonRule[] = [
 const BLOCK_IP_RULE: SubJsonRule = { type: 'field', outboundTag: 'block', ip: [] };
 
 const directIPsOptions = [
-  { label: 'Private IP', value: 'geoip:private' },
-  { label: '🇮🇷 Iran', value: 'geoip:ir' },
-  { label: '🇨🇳 China', value: 'geoip:cn' },
-  { label: '🇷🇺 Russia', value: 'geoip:ru' },
-  { label: '🇻🇳 Vietnam', value: 'geoip:vn' },
-  { label: '🇪🇸 Spain', value: 'geoip:es' },
-  { label: '🇮🇩 Indonesia', value: 'geoip:id' },
-  { label: '🇺🇦 Ukraine', value: 'geoip:ua' },
-  { label: '🇹🇷 Türkiye', value: 'geoip:tr' },
-  { label: '🇧🇷 Brazil', value: 'geoip:br' },
+  { label: '私有 IP', value: 'geoip:private' },
+  { label: '🇮🇷 伊朗', value: 'geoip:ir' },
+  { label: '🇨🇳 中国', value: 'geoip:cn' },
+  { label: '🇷🇺 俄罗斯', value: 'geoip:ru' },
+  { label: '🇻🇳 越南', value: 'geoip:vn' },
+  { label: '🇪🇸 西班牙', value: 'geoip:es' },
+  { label: '🇮🇩 印度尼西亚', value: 'geoip:id' },
+  { label: '🇺🇦 乌克兰', value: 'geoip:ua' },
+  { label: '🇹🇷 土耳其', value: 'geoip:tr' },
+  { label: '🇧🇷 巴西', value: 'geoip:br' },
 ];
 const directDomainsOptions = [
-  { label: 'Private DNS', value: 'geosite:private' },
-  { label: '🇮🇷 Iran', value: 'geosite:category-ir' },
-  { label: '🇨🇳 China', value: 'geosite:cn' },
-  { label: '🇷🇺 Russia', value: 'geosite:category-ru' },
+  { label: '私有 DNS', value: 'geosite:private' },
+  { label: '🇮🇷 伊朗', value: 'geosite:category-ir' },
+  { label: '🇨🇳 中国', value: 'geosite:cn' },
+  { label: '🇷🇺 俄罗斯', value: 'geosite:category-ru' },
   { label: 'Apple', value: 'geosite:apple' },
   { label: 'Meta', value: 'geosite:meta' },
   { label: 'Google', value: 'geosite:google' },
 ];
 const blockDomainsOptions = [
-  { label: 'Ads All', value: 'geosite:category-ads-all' },
-  { label: 'Adult +18', value: 'geosite:category-porn' },
+  { label: '全部广告', value: 'geosite:category-ads-all' },
+  { label: '成人内容（18+）', value: 'geosite:category-porn' },
 ];
 
 function readJson<T>(raw: string, fallback: T): T {
@@ -240,7 +240,7 @@ export default function SubscriptionFormatsTab({
                   >
                     <Input.TextArea
                       value={allSetting.subJsonRoutingRules}
-                      placeholder="happ://routing/onadd/... , routing JSON, or https://.../DEFAULT.JSON"
+                      placeholder="happ://routing/onadd/...、路由 JSON 或 https://.../DEFAULT.JSON"
                       onChange={(e) => updateSetting({ subJsonRoutingRules: e.target.value })}
                       autoSize={{ minRows: 2, maxRows: 6 }}
                     />
@@ -415,7 +415,10 @@ export default function SubscriptionFormatsTab({
               </SettingListItem>
               {directEnabled && (
                 <div className="format-settings">
-                  <SettingListItem paddings="small" title={<>{t('pages.settings.direct')} IPs</>}>
+                  <SettingListItem
+                    paddings="small"
+                    title={<>{t('pages.settings.direct')} IP 地址</>}
+                  >
                     <Select
                       mode="tags"
                       value={ruleValues('direct', 'ip')}

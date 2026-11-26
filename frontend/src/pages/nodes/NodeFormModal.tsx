@@ -168,7 +168,7 @@ export default function NodeFormModal({
       if (msg?.success && msg.obj) {
         setTestResult(msg.obj);
       } else {
-        setTestResult({ status: 'offline', error: msg?.msg || 'unknown error' });
+        setTestResult({ status: 'offline', error: msg?.msg || '未知错误' });
       }
     } finally {
       setTesting(false);

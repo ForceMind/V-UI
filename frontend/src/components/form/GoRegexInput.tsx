@@ -18,7 +18,7 @@ export async function validateGoRegex(value: string): Promise<string> {
     { regex: value },
     { silent: true },
   );
-  return result.success ? '' : result.msg || 'Invalid Go RE2 regular expression';
+  return result.success ? '' : result.msg || '无效的 Go RE2 正则表达式';
 }
 
 export default function GoRegexInput({

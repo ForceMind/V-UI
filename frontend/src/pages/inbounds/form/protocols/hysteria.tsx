@@ -62,10 +62,10 @@ export default function HysteriaFields() {
           <FormField label={t('pages.inbounds.form.type')} name={[...MASQ_PATH, 'type']}>
             <Select
               options={[
-                { value: '', label: 'default (404 page)' },
-                { value: 'proxy', label: 'proxy (reverse proxy)' },
-                { value: 'file', label: 'file (serve directory)' },
-                { value: 'string', label: 'string (fixed body)' },
+                { value: '', label: '默认（404 页面）' },
+                { value: 'proxy', label: '反向代理' },
+                { value: 'file', label: '文件目录' },
+                { value: 'string', label: '固定正文' },
               ]}
             />
           </FormField>

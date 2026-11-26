@@ -8,6 +8,7 @@ import { useTheme } from '@/hooks/useTheme';
 import AppSidebar from '@/layouts/AppSidebar';
 import { EXAMPLES } from '@/generated/examples';
 import { buildWebSocketEvents } from './websocket-events';
+import { chineseSwaggerPlugin } from './chinese-swagger';
 import './ApiDocsPage.css';
 
 const basePath = window.X_UI_BASE_PATH || '';
@@ -91,14 +92,14 @@ export default function ApiDocsPage() {
               items={[
                 {
                   key: 'panel-api',
-                  label: '3X-UI Panel API',
+                  label: '3x-ui 面板 API',
                   children: (
                     <div className="docs-wrapper" role="region" aria-label={t('menu.apiDocs')}>
                       <SwaggerUI
                         url={openApiUrl}
                         docExpansion="list"
                         deepLinking={false}
-                        plugins={[sectionTabsPlugin]}
+                        plugins={[sectionTabsPlugin, chineseSwaggerPlugin]}
                         tryItOutEnabled
                         persistAuthorization
                       />
@@ -107,15 +108,14 @@ export default function ApiDocsPage() {
                 },
                 {
                   key: 'websocket-events',
-                  label: 'WebSocket events',
+                  label: 'WebSocket 事件',
                   children: (
                     <section className="websocket-events">
                       <Typography.Paragraph>
-                        After the cookie-authenticated{' '}
-                        <Typography.Text code>GET /ws</Typography.Text> upgrade, every server
-                        message uses{' '}
-                        <Typography.Text code>{'{ type, payload, time }'}</Typography.Text>. The
-                        time value is Unix milliseconds.
+                        通过 Cookie 身份验证并完成 <Typography.Text code>GET /ws</Typography.Text>{' '}
+                        连接升级后，服务端消息均使用{' '}
+                        <Typography.Text code>{'{ type, payload, time }'}</Typography.Text> 格式。
+                        时间值为 Unix 时间戳，单位为毫秒。
                       </Typography.Paragraph>
                       <Row gutter={[12, 12]}>
                         {websocketEvents.map((event) => (

@@ -27,7 +27,7 @@ export interface ValidateGeoTokensInput {
 
 async function fetchGeodataFiles(): Promise<GeoFile[]> {
   const msg = await HttpUtil.get('/panel/api/xray/geodata/files', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch geodata files');
+  if (!msg?.success) throw new Error(msg?.msg || '获取地理数据文件失败');
   const validated = parseMsg(msg, GeoFileListSchema, 'xray/geodata/files');
   return Array.isArray(validated.obj) ? validated.obj : [];
 }
@@ -38,7 +38,7 @@ async function fetchGeodataCategories(file: string, query: string): Promise<GeoC
     { file, q: query },
     { silent: true },
   );
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch geodata categories');
+  if (!msg?.success) throw new Error(msg?.msg || '获取地理数据分类失败');
   const validated = parseMsg(msg, GeoCategoryPageSchema, 'xray/geodata/categories');
   return validated.obj ?? EMPTY_CATEGORY_PAGE;
 }
@@ -55,7 +55,7 @@ async function fetchGeodataEntries(
     { file, code, q: query, offset, limit },
     { silent: true },
   );
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch geodata entries');
+  if (!msg?.success) throw new Error(msg?.msg || '获取地理数据条目失败');
   const validated = parseMsg(msg, GeoEntryPageSchema, 'xray/geodata/entries');
   return validated.obj ?? EMPTY_ENTRY_PAGE;
 }
@@ -103,7 +103,7 @@ export function useValidateGeoTokens() {
         { tokens: tokens.join(','), kind },
         { silent: true },
       );
-      if (!msg?.success) throw new Error(msg?.msg || 'Failed to validate geodata tokens');
+      if (!msg?.success) throw new Error(msg?.msg || '验证地理数据标记失败');
       const validated = parseMsg(msg, GeodataTokenIssueListSchema, 'xray/geodata/validate');
       return Array.isArray(validated.obj) ? validated.obj : [];
     },

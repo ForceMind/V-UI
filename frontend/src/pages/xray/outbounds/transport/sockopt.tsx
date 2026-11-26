@@ -125,8 +125,8 @@ export default function SockoptForm({
           <FormField label="TProxy" name={['streamSettings', 'sockopt', 'tproxy']}>
             <Select
               options={[
-                { value: 'off', label: 'off' },
-                { value: 'redirect', label: 'redirect' },
+                { value: 'off', label: '关闭' },
+                { value: 'redirect', label: '重定向' },
                 { value: 'tproxy', label: 'tproxy' },
               ]}
             />
@@ -167,7 +167,7 @@ export default function SockoptForm({
           >
             <InputNumber min={0} />
           </FormField>
-          <Form.Item label="Happy Eyeballs" htmlFor={`${uid}-happyEyeballs`}>
+          <Form.Item label="双栈并发连接" htmlFor={`${uid}-happyEyeballs`}>
             <Switch
               id={`${uid}-happyEyeballs`}
               checked={hasHe}
@@ -185,7 +185,7 @@ export default function SockoptForm({
                 label={t('pages.inbounds.form.tryDelayMs')}
                 name={['streamSettings', 'sockopt', 'happyEyeballs', 'tryDelayMs']}
               >
-                <InputNumber min={0} placeholder="0 (disabled) — 250 recommended" />
+                <InputNumber min={0} placeholder="0 表示禁用，建议 250" />
               </FormField>
               <FormField
                 label={t('pages.inbounds.form.prioritizeIPv6')}

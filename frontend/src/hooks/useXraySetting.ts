@@ -104,15 +104,13 @@ type XrayConfigPayload = z.infer<typeof XrayConfigPayloadSchema>;
 
 export async function fetchXrayConfig(): Promise<XrayConfigPayload> {
   const msg = await HttpUtil.post('/panel/api/xray/', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to load xray config');
-  if (typeof msg.obj !== 'string')
-    throw new Error('Malformed xray config response: expected string');
+  if (!msg?.success) throw new Error(msg?.msg || '加载 Xray 配置失败');
+  if (typeof msg.obj !== 'string') throw new Error('Xray 配置响应格式错误：应为字符串');
   let parsed: unknown;
   try {
     parsed = JSON.parse(msg.obj);
   } catch (e) {
-    const err = e as Error;
-    throw new Error(`Malformed xray config response: ${err.message}`, { cause: e });
+    throw new Error('Xray 配置响应不是有效的 JSON', { cause: e });
   }
   const result = XrayConfigPayloadSchema.safeParse(parsed);
   if (!result.success) {
@@ -126,7 +124,7 @@ async function fetchOutboundsTraffic(): Promise<OutboundTrafficRow[]> {
   const msg = await HttpUtil.get('/panel/api/xray/getOutboundsTraffic', undefined, {
     silent: true,
   });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch outbounds traffic');
+  if (!msg?.success) throw new Error(msg?.msg || '获取出站流量失败');
   const validated = parseMsg(msg, OutboundTrafficListSchema, 'xray/getOutboundsTraffic');
   return Array.isArray(validated.obj) ? validated.obj : [];
 }
@@ -318,10 +316,10 @@ export function useXraySetting(): UseXraySettingResult {
           mode: effMode,
         });
         const msg = parseMsg(raw, OutboundTestResultListSchema, 'xray/testOutbounds');
-        if (!msg?.success || !Array.isArray(msg.obj)) return failAll(msg?.msg || 'Unknown error');
+        if (!msg?.success || !Array.isArray(msg.obj)) return failAll(msg?.msg || '未知错误');
         const list = msg.obj;
         return outbounds.map(
-          (_ob, i) => list[i] ?? { success: false, error: 'Missing result', mode: effMode },
+          (_ob, i) => list[i] ?? { success: false, error: '缺少结果', mode: effMode },
         );
       } catch (e) {
         return failAll(String(e));

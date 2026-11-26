@@ -114,11 +114,11 @@ export default function XhttpForm({ onXmuxToggle }: XhttpFormProps) {
           >
             <Select
               options={[
-                { value: '', label: 'Default (queryInHeader)' },
-                { value: 'queryInHeader', label: 'queryInHeader' },
-                { value: 'header', label: 'header' },
-                { value: 'cookie', label: 'cookie' },
-                { value: 'query', label: 'query' },
+                { value: '', label: '默认（请求头中的查询参数）' },
+                { value: 'queryInHeader', label: '请求头中的查询参数' },
+                { value: 'header', label: '请求头' },
+                { value: 'cookie', label: 'Cookie' },
+                { value: 'query', label: '查询参数' },
               ]}
             />
           </FormField>
@@ -128,9 +128,9 @@ export default function XhttpForm({ onXmuxToggle }: XhttpFormProps) {
           >
             <Select
               options={[
-                { value: '', label: 'Default (repeat-x)' },
-                { value: 'repeat-x', label: 'repeat-x' },
-                { value: 'tokenish', label: 'tokenish' },
+                { value: '', label: '默认（重复填充）' },
+                { value: 'repeat-x', label: '重复填充' },
+                { value: 'tokenish', label: '令牌格式' },
               ]}
             />
           </FormField>
@@ -142,12 +142,12 @@ export default function XhttpForm({ onXmuxToggle }: XhttpFormProps) {
         name={['streamSettings', 'xhttpSettings', 'uplinkHTTPMethod']}
       >
         <Select
-          placeholder="Default (POST)"
+          placeholder="默认（POST）"
           options={[
-            { value: '', label: 'Default (POST)' },
+            { value: '', label: '默认（POST）' },
             { value: 'POST', label: 'POST' },
             { value: 'PUT', label: 'PUT' },
-            { value: 'GET', label: 'GET (packet-up only)', disabled: mode !== 'packet-up' },
+            { value: 'GET', label: 'GET（仅分包上行）', disabled: mode !== 'packet-up' },
           ]}
         />
       </FormField>
@@ -162,13 +162,13 @@ export default function XhttpForm({ onXmuxToggle }: XhttpFormProps) {
         name={['streamSettings', 'xhttpSettings', 'sessionIDPlacement']}
       >
         <Select
-          placeholder="Default (path)"
+          placeholder="默认（路径）"
           options={[
-            { value: '', label: 'Default (path)' },
-            { value: 'path', label: 'path' },
-            { value: 'header', label: 'header' },
-            { value: 'cookie', label: 'cookie' },
-            { value: 'query', label: 'query' },
+            { value: '', label: '默认（路径）' },
+            { value: 'path', label: '路径' },
+            { value: 'header', label: '请求头' },
+            { value: 'cookie', label: 'Cookie' },
+            { value: 'query', label: '查询参数' },
           ]}
         />
       </FormField>
@@ -207,13 +207,13 @@ export default function XhttpForm({ onXmuxToggle }: XhttpFormProps) {
         name={['streamSettings', 'xhttpSettings', 'seqPlacement']}
       >
         <Select
-          placeholder="Default (path)"
+          placeholder="默认（路径）"
           options={[
-            { value: '', label: 'Default (path)' },
-            { value: 'path', label: 'path' },
-            { value: 'header', label: 'header' },
-            { value: 'cookie', label: 'cookie' },
-            { value: 'query', label: 'query' },
+            { value: '', label: '默认（路径）' },
+            { value: 'path', label: '路径' },
+            { value: 'header', label: '请求头' },
+            { value: 'cookie', label: 'Cookie' },
+            { value: 'query', label: '查询参数' },
           ]}
         />
       </FormField>
@@ -247,11 +247,11 @@ export default function XhttpForm({ onXmuxToggle }: XhttpFormProps) {
           >
             <Select
               options={[
-                { value: '', label: 'Default (auto)' },
-                { value: 'auto', label: 'auto' },
-                { value: 'body', label: 'body' },
-                { value: 'header', label: 'header' },
-                { value: 'cookie', label: 'cookie' },
+                { value: '', label: '默认（自动）' },
+                { value: 'auto', label: '自动' },
+                { value: 'body', label: '正文' },
+                { value: 'header', label: '请求头' },
+                { value: 'cookie', label: 'Cookie' },
               ]}
             />
           </FormField>
@@ -267,7 +267,7 @@ export default function XhttpForm({ onXmuxToggle }: XhttpFormProps) {
                 label={t('pages.xray.outboundForm.uplinkChunkSize')}
                 name={['streamSettings', 'xhttpSettings', 'uplinkChunkSize']}
               >
-                <InputNumber min={0} placeholder="0 (unlimited)" style={{ width: '100%' }} />
+                <InputNumber min={0} placeholder="0 表示无限制" style={{ width: '100%' }} />
               </FormField>
             </>
           )}

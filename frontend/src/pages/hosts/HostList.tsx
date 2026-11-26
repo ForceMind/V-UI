@@ -203,7 +203,7 @@ export default function HostList(props: HostListProps) {
       render: (_, h) => {
         const addrs = h.hosts?.filter((a) => a.trim() !== '') || [];
         if (addrs.length === 0)
-          return <Tag color="orange">{t('pages.hosts.fields.inheritAddress') || 'inherits'}</Tag>;
+          return <Tag color="orange">{t('pages.hosts.fields.inheritAddress') || '继承'}</Tag>;
         const visible = addrs.slice(0, 1);
         const overflow = addrs.slice(1);
         return (
@@ -297,7 +297,15 @@ export default function HostList(props: HostListProps) {
       title: t('pages.hosts.fields.security'),
       dataIndex: 'security',
       key: 'security',
-      render: (security: string) => <Tag>{security || 'same'}</Tag>,
+      render: (security: string) => (
+        <Tag>
+          {!security || security === 'same'
+            ? '继承入站'
+            : security === 'none'
+              ? t('none')
+              : security}
+        </Tag>
+      ),
     },
     {
       title: t('pages.hosts.fields.tags'),

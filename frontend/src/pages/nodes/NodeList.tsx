@@ -142,10 +142,10 @@ function formatUptime(secs?: number, available = true): string {
   if (!secs) return '-';
   const days = Math.floor(secs / 86400);
   const hours = Math.floor((secs % 86400) / 3600);
-  if (days > 0) return `${days}d ${hours}h`;
+  if (days > 0) return `${days}天 ${hours}小时`;
   const mins = Math.floor((secs % 3600) / 60);
-  if (hours > 0) return `${hours}h ${mins}m`;
-  return `${mins}m`;
+  if (hours > 0) return `${hours}小时 ${mins}分钟`;
+  return `${mins}分钟`;
 }
 
 // Stable per language: the columns memo depends on it, and a fresh function each
@@ -425,11 +425,13 @@ export default function NodeList({
         render: (_value, record) => record.xrayVersion || '-',
       },
       {
-        title: t('pages.nodes.panelVersion') || 'Panel version',
+        title: t('pages.nodes.panelVersion') || '面板版本',
         dataIndex: 'panelVersion',
         align: 'center',
         render: (_value, record) => {
-          const availableVersion = record.panelVersion?.includes('-zh.') ? forkLatestVersion : latestVersion;
+          const availableVersion = record.panelVersion?.includes('-zh.')
+            ? forkLatestVersion
+            : latestVersion;
           const canUpdate =
             isUpdateEligible(record) &&
             isPanelUpdateAvailable(availableVersion, record.panelVersion || '');
@@ -813,9 +815,7 @@ export default function NodeList({
                   <Tag>{statsNode.xrayVersion || '-'}</Tag>
                 </div>
                 <div className="stat-row">
-                  <span className="stat-label">
-                    {t('pages.nodes.panelVersion') || 'Panel version'}
-                  </span>
+                  <span className="stat-label">{t('pages.nodes.panelVersion') || '面板版本'}</span>
                   <Tag>{statsNode.panelVersion || '-'}</Tag>
                 </div>
                 <div className="stat-row">

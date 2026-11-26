@@ -213,7 +213,7 @@ describe('generated OpenAPI runtime contracts', () => {
 
     const params = Object.fromEntries((paged.parameters ?? []).map((param) => [param.name, param]));
     for (const name of ['filter', 'protocol', 'inbound', 'group']) {
-      expect(params[name].description).toContain('CSV');
+      expect(params[name].description).toContain('逗号分隔');
     }
     expect(params.sort.schema.enum).toEqual([
       'enable',

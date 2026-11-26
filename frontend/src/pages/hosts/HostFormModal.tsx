@@ -364,7 +364,7 @@ export default function HostFormModal({
                       <Select
                         options={['same', 'tls', 'none', 'reality'].map((v) => ({
                           value: v,
-                          label: v,
+                          label: v === 'same' ? '继承入站' : v === 'none' ? t('none') : v,
                         }))}
                       />
                     </FormField>

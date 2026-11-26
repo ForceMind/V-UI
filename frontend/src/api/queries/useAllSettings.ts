@@ -20,7 +20,7 @@ type SettingSaveResult = {
 
 async function fetchAllSetting(): Promise<AllSettingInput | null> {
   const msg = await HttpUtil.post('/panel/api/setting/all', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch settings');
+  if (!msg?.success) throw new Error(msg?.msg || '获取设置失败');
   const validated = parseMsg(msg, AllSettingResponseSchema, 'setting/all');
   return validated.obj;
 }

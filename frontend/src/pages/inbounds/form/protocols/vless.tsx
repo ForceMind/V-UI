@@ -71,7 +71,7 @@ export default function VlessFields({
       {network === 'tcp' && (security === 'tls' || security === 'reality') && (
         <Form.Item
           label={t('pages.inbounds.form.visionTestseed')}
-          extra="Applies only to clients using the xtls-rprx-vision flow; ignored otherwise."
+          extra={'仅对使用 xtls-rprx-vision 流控的客户端生效，其他客户端忽略此设置。'}
         >
           <Space.Compact block>
             {[900, 500, 900, 256].map((def, i) => (

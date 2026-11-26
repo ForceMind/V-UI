@@ -27,7 +27,7 @@ pg_ensure_hba_password_auth() {
     local tmp
     tmp=$(mktemp) || return 1
     {
-        echo "# Added by 3x-ui: allow password logins for the panel database."
+        echo "# 由 3x-ui 添加：允许面板数据库使用密码登录。"
         echo "host    ${pg_db}    all    127.0.0.1/32    md5"
         echo "host    ${pg_db}    all    ::1/128         md5"
         cat "${hba_file}"
@@ -61,7 +61,7 @@ pg_apt_install_pgdg_server() {
         rm -f "${list}"
     done
     apt-get update >&2 || true
-    echo -e "${yellow}PostgreSQL ${PG_TARGET_MAJOR} is not available for this system; installing the distribution's PostgreSQL instead.${plain}" >&2
+    echo -e "${yellow}当前系统无法安装 PostgreSQL ${PG_TARGET_MAJOR}，将改用发行版提供的 PostgreSQL。${plain}" >&2
     return 1
 }
 
@@ -85,7 +85,7 @@ pg_el_install_pgdg_server() {
         dnf -qy module reset postgresql > /dev/null 2>&1 || true
         dnf remove -y -q pgdg-redhat-repo >&2 || true
     fi
-    echo -e "${yellow}PostgreSQL ${PG_TARGET_MAJOR} is not available for this system; installing the distribution's PostgreSQL instead.${plain}" >&2
+    echo -e "${yellow}当前系统无法安装 PostgreSQL ${PG_TARGET_MAJOR}，将改用发行版提供的 PostgreSQL。${plain}" >&2
     return 1
 }
 
@@ -140,7 +140,7 @@ install_postgres_local() {
             rc-service postgresql start >&2 || return 1
             ;;
         *)
-            echo -e "${red}Unsupported distro for automatic PostgreSQL install: ${release}${plain}" >&2
+            echo -e "${red}当前发行版 ${release} 不支持自动安装 PostgreSQL${plain}" >&2
             return 1
             ;;
     esac
@@ -179,7 +179,7 @@ install_postgres_local() {
     runuser -u postgres -- psql -c "ALTER USER \"${pg_user}\" WITH PASSWORD '${pg_pass}';" >&2 || return 1
 
     pg_ensure_hba_password_auth "${pg_db}" \
-        || echo -e "${yellow}Warning: could not update pg_hba.conf; PostgreSQL may reject the panel's TCP login (ident auth).${plain}" >&2
+        || echo -e "${yellow}警告：无法更新 pg_hba.conf，PostgreSQL 可能因 ident 认证拒绝面板的 TCP 登录。${plain}" >&2
 
     local pg_pass_enc
     pg_pass_enc=$(printf '%s' "${pg_pass}" | sed -e 's/%/%25/g' -e 's/:/%3A/g' -e 's/@/%40/g' -e 's|/|%2F|g' -e 's/?/%3F/g' -e 's/#/%23/g')
@@ -196,7 +196,7 @@ PG_PORT=${pg_port}
 PG_DB=${pg_db}
 EOF
             umask "${prev_umask}"
-            echo -e "${red}Failed to write PostgreSQL credentials to ${PG_CRED_FILE}${plain}" >&2
+            echo -e "${red}无法将 PostgreSQL 凭据写入 ${PG_CRED_FILE}${plain}" >&2
             return 1
         fi
         umask "${prev_umask}"
@@ -210,7 +210,7 @@ ensure_pg_client() {
     if command -v pg_dump > /dev/null 2>&1 && command -v pg_restore > /dev/null 2>&1; then
         return 0
     fi
-    echo -e "${yellow}Installing PostgreSQL client tools (pg_dump/pg_restore) for in-panel backup...${plain}" >&2
+    echo -e "${yellow}正在安装 PostgreSQL 客户端工具（pg_dump/pg_restore），以支持面板内备份……${plain}" >&2
     case "${release}" in
         ubuntu | debian | armbian)
             apt-get update >&2 && apt-get install -y -q postgresql-client >&2 || return 1
@@ -288,7 +288,7 @@ setup_ssl_certificate() {
     if ! command -v ~/.acme.sh/acme.sh &> /dev/null; then
         install_acme
         if [ $? -ne 0 ]; then
-            echo -e "${yellow}acme.sh 安装失败, skipping SSL setup${plain}"
+            echo -e "${yellow}acme.sh 安装失败，已跳过 SSL 配置${plain}"
             return 1
         fi
     fi
@@ -341,8 +341,8 @@ setup_ip_certificate() {
     local ipv6="$2" # optional
 
     echo -e "${green}正在签发 Let's Encrypt 短期 IP 证书。${plain}"
-    echo -e "${yellow}Note: IP certificates are valid for ~6 days and will auto-renew.${plain}"
-    echo -e "${yellow}Default listener is port 80. If you choose another port, ensure external port 80 forwards to it.${plain}"
+    echo -e "${yellow}提示：IP 证书有效期约 6 天，将自动续期。${plain}"
+    echo -e "${yellow}默认监听端口为 80；若选择其他端口，请将公网 80 端口转发到该端口。${plain}"
 
     # Check for acme.sh
     if ! command -v ~/.acme.sh/acme.sh &> /dev/null; then
@@ -386,43 +386,45 @@ setup_ip_certificate() {
         echo -e "${red}端口无效，使用 80 端口。${plain}"
         WebPort=80
     fi
-    echo -e "${green}Using port ${WebPort} for standalone validation.${plain}"
+    echo -e "${green}使用端口 ${WebPort} 进行独立验证。${plain}"
     if [[ "${WebPort}" -ne 80 ]]; then
-        echo -e "${yellow}Reminder: Let's Encrypt still connects on port 80; forward external port 80 to ${WebPort}.${plain}"
+        echo -e "${yellow}提醒：Let's Encrypt 仍会连接公网 80 端口，请将其转发到 ${WebPort}。${plain}"
     fi
 
     # Ensure chosen port is available
     while true; do
         if is_port_in_use "${WebPort}"; then
-            echo -e "${yellow}Port ${WebPort} is in use.${plain}"
+            echo -e "${yellow}端口 ${WebPort} 已被占用。${plain}"
 
             local alt_port=""
             if [[ "$NONINTERACTIVE" == "1" ]]; then
-                echo -e "${red}Port ${WebPort} is busy; cannot proceed in non-interactive mode.${plain}"
+                echo -e "${red}端口 ${WebPort} 已被占用，非交互模式下无法继续。${plain}"
                 return 1
             fi
-            read -rp "Enter another port for acme.sh standalone listener (leave empty to abort): " alt_port
+            read -rp "请输入 acme.sh 独立验证服务的其他监听端口（留空取消）： " alt_port
             alt_port="${alt_port// /}"
             if [[ -z "${alt_port}" ]]; then
-                echo -e "${red}Port ${WebPort} is busy; cannot proceed.${plain}"
+                echo -e "${red}端口 ${WebPort} 已被占用，无法继续。${plain}"
                 return 1
             fi
             if ! [[ "${alt_port}" =~ ^[0-9]+$ ]] || ((alt_port < 1 || alt_port > 65535)); then
-                echo -e "${red}Invalid port provided.${plain}"
+                echo -e "${red}输入的端口无效。${plain}"
                 return 1
             fi
             WebPort="${alt_port}"
             continue
         else
-            echo -e "${green}Port ${WebPort} is free and ready for standalone validation.${plain}"
+            echo -e "${green}端口 ${WebPort} 可用，可以进行独立验证。${plain}"
             break
         fi
     done
 
     # Issue certificate with shortlived profile
-    echo -e "${green}Issuing IP certificate for ${ipv4}...${plain}"
-    ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt --force > /dev/null 2>&1
-    [[ -n "${XUI_ACME_EMAIL:-}" ]] && ~/.acme.sh/acme.sh --register-account -m "${XUI_ACME_EMAIL}" > /dev/null 2>&1
+    echo -e "${green}正在为 ${ipv4} 签发 IP 证书……${plain}"
+    ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt --force > /dev/null 2>&1 || { printf '设置证书签发机构失败。\n' >&2; return 1; }
+    if [[ -n "${XUI_ACME_EMAIL:-}" ]]; then
+        ~/.acme.sh/acme.sh --register-account -m "$XUI_ACME_EMAIL" > /dev/null 2>&1 || { printf 'ACME 账号注册失败，未继续签发。\n' >&2; return 1; }
+    fi
 
     ~/.acme.sh/acme.sh --issue \
         ${domain_args} \
@@ -434,12 +436,12 @@ setup_ip_certificate() {
         --force
 
     if [ $? -ne 0 ]; then
-        echo -e "${red}Failed to issue IP certificate${plain}"
-        echo -e "${yellow}Please ensure port ${WebPort} is reachable (or forwarded from external port 80)${plain}"
+        echo -e "${red}IP 证书签发失败${plain}"
+        echo -e "${yellow}请确保端口 ${WebPort} 可从公网访问（或已从公网 80 端口转发）${plain}"
         return 1
     fi
 
-    echo -e "${green}Certificate issued successfully, installing...${plain}"
+    echo -e "${green}证书签发成功，正在安装……${plain}"
 
     if ! ~/.acme.sh/acme.sh --installcert --force -d "$ipv4" \
         --key-file "${certDir}/privkey.pem" \
@@ -461,9 +463,9 @@ setup_ip_certificate() {
     xui_cli cert -webCert "${certDir}/fullchain.pem" -webCertKey "${certDir}/privkey.pem"
 
     if [ $? -ne 0 ]; then
-        echo -e "${yellow}Warning: Could not set certificate paths automatically${plain}"
-        echo -e "${yellow}Certificate files are at:${plain}"
-        echo -e "  Cert: ${certDir}/fullchain.pem"
+        echo -e "${yellow}警告：无法自动设置证书路径${plain}"
+        echo -e "${yellow}证书文件位于：${plain}"
+        echo -e "  证书： ${certDir}/fullchain.pem"
         echo -e "  私钥：${certDir}/privkey.pem"
         return 1
     else
@@ -471,7 +473,7 @@ setup_ip_certificate() {
     fi
 
     echo -e "${green}IP 证书已安装并绑定面板。${plain}"
-    echo -e "${green}Certificate valid for ~6 days, auto-renews via acme.sh cron job.${plain}"
-    echo -e "${yellow}acme.sh will automatically renew and reload x-ui before expiry.${plain}"
+    echo -e "${green}证书有效期约 6 天，由 acme.sh 定时任务自动续期。${plain}"
+    echo -e "${yellow}acme.sh 将在证书到期前自动续期并重载 x-ui。${plain}"
     return 0
 }

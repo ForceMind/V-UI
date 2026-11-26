@@ -71,7 +71,7 @@ export default function InboundInfoModal({
     try {
       const msg = await HttpUtil.post(`/panel/api/clients/ips/${clientStats.email}`);
       if (!msg?.success) {
-        setClientIpsText((msg?.obj as string) || 'No IP record');
+        setClientIpsText((msg?.obj as string) || '暂无 IP 记录');
         setClientIpsArray([]);
         return;
       }
@@ -225,7 +225,7 @@ export default function InboundInfoModal({
     if (ipLimitEnable && (clientSet?.limitIp ?? 0) > 0 && stats?.email) {
       void HttpUtil.post(`/panel/api/clients/ips/${stats.email}`).then((msg) => {
         if (!msg?.success) {
-          setClientIpsText((msg?.obj as string) || 'No IP record');
+          setClientIpsText((msg?.obj as string) || '暂无 IP 记录');
           return;
         }
         let ips: unknown = msg.obj;
@@ -702,7 +702,9 @@ export default function InboundInfoModal({
             <div className="info-row">
               <dt>{t('security')}</dt>
               <dd>
-                <Tag color={securityColor}>{securityLabel}</Tag>
+                <Tag color={securityColor}>
+                  {securityLabel === 'none' ? t('none') : securityLabel}
+                </Tag>
               </dd>
             </div>
             {encryptionLabel && (
@@ -812,7 +814,8 @@ export default function InboundInfoModal({
             <dt>{t('pages.inbounds.info.outboundsInterface')}</dt>
             <dd>
               <Tag color="green">
-                {(inbound.settings.autoOutboundsInterface as string) || 'auto'}
+                {(inbound.settings.autoOutboundsInterface as string) ||
+                  t('pages.inbounds.form.autoOption')}
               </Tag>
             </dd>
           </div>
@@ -1226,7 +1229,7 @@ export default function InboundInfoModal({
                     link && (
                       <div key={`wg-link-${j}`} className="link-panel">
                         <div className="link-panel-header">
-                          <Tag color="green">Peer {idx + 1} link</Tag>
+                          <Tag color="green">对等节点 {idx + 1} 链接</Tag>
                           <Tooltip title={t('copy')}>
                             <Button
                               size="small"
@@ -1284,7 +1287,7 @@ export default function InboundInfoModal({
                   link && (
                     <div key={`awg-link-${j}`} className="link-panel">
                       <div className="link-panel-header">
-                        <Tag color="green">Peer {idx + 1} link</Tag>
+                        <Tag color="green">对等节点 {idx + 1} 链接</Tag>
                         <Tooltip title={t('copy')}>
                           <Button
                             size="small"

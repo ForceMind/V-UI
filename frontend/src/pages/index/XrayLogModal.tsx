@@ -201,13 +201,13 @@ export default function XrayLogModal({ open, onClose }: XrayLogModalProps) {
         </Form.Item>
         <Form.Item>
           <Checkbox checked={showDirect} onChange={(e) => setShowDirect(e.target.checked)}>
-            Direct
+            直连
           </Checkbox>
           <Checkbox checked={showBlocked} onChange={(e) => setShowBlocked(e.target.checked)}>
-            Blocked
+            拦截
           </Checkbox>
           <Checkbox checked={showProxy} onChange={(e) => setShowProxy(e.target.checked)}>
-            Proxy
+            代理
           </Checkbox>
           <Checkbox checked={autoUpdate} onChange={(e) => setAutoUpdate(e.target.checked)}>
             {t('pages.index.autoUpdate')}
@@ -225,7 +225,7 @@ export default function XrayLogModal({ open, onClose }: XrayLogModalProps) {
 
       <div className={`log-container ${isMobile ? 'log-container-mobile' : ''}`}>
         {orderedLogs.length === 0 ? (
-          <div className="log-empty">No Record...</div>
+          <div className="log-empty">暂无记录…</div>
         ) : isMobile ? (
           orderedLogs.map((log, idx) => (
             <div key={idx} className="log-card">
@@ -245,19 +245,19 @@ export default function XrayLogModal({ open, onClose }: XrayLogModalProps) {
               <div className="log-meta">
                 {log.Inbound && (
                   <span className="log-meta-pair">
-                    <span className="log-meta-key">in</span>
+                    <span className="log-meta-key">入站</span>
                     <span className="log-meta-val">{log.Inbound}</span>
                   </span>
                 )}
                 {log.Outbound && (
                   <span className="log-meta-pair">
-                    <span className="log-meta-key">out</span>
+                    <span className="log-meta-key">出站</span>
                     <span className="log-meta-val">{log.Outbound}</span>
                   </span>
                 )}
                 {log.Email && (
                   <span className="log-meta-pair">
-                    <span className="log-meta-key">email</span>
+                    <span className="log-meta-key">客户端</span>
                     <span className="log-meta-val">{log.Email}</span>
                   </span>
                 )}
@@ -268,12 +268,12 @@ export default function XrayLogModal({ open, onClose }: XrayLogModalProps) {
           <table className="xraylog-table">
             <thead>
               <tr>
-                <th>Date</th>
-                <th>From</th>
-                <th>To</th>
-                <th>Inbound</th>
-                <th>Outbound</th>
-                <th>Email</th>
+                <th>日期</th>
+                <th>来源</th>
+                <th>目标</th>
+                <th>入站</th>
+                <th>出站</th>
+                <th>客户端标识</th>
               </tr>
             </thead>
             <tbody>

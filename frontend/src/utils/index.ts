@@ -2,8 +2,23 @@ import i18next from 'i18next';
 import { httpRequest } from '@/api/http-init';
 import type { HttpResponse } from '@/api/http-init';
 import { getMessage } from './messageBus';
+import { panelMessage } from './panel-message';
 
 type RespEnvelope = { success?: unknown; msg?: unknown; obj?: unknown };
+
+function requestErrorText(message?: string): string {
+  if (!message) return '请求失败';
+  const builtinErrors: Record<string, string> = {
+    'Failed to fetch': '网络请求失败',
+    'fetch failed': '网络请求失败',
+    'Network request failed': '网络请求失败',
+    'NetworkError when attempting to fetch resource.': '网络请求失败',
+    'Load failed': '网络请求失败',
+    'The operation was aborted.': '请求已取消',
+    'The operation was aborted due to timeout': '请求超时',
+  };
+  return builtinErrors[message] ?? message;
+}
 
 export class Msg<T = unknown> {
   success: boolean;
@@ -12,7 +27,7 @@ export class Msg<T = unknown> {
 
   constructor(success: boolean = false, msg: string = '', obj: T | null = null) {
     this.success = success;
-    this.msg = msg;
+    this.msg = panelMessage(msg);
     this.obj = obj;
   }
 }
@@ -54,7 +69,7 @@ export class HttpUtil {
 
   static _respToMsg(resp: HttpResponse | undefined): Msg {
     if (!resp || !resp.data) {
-      return new Msg(false, 'No response data');
+      return new Msg(false, '未收到响应数据');
     }
     const { data } = resp;
     if (data == null) {
@@ -64,7 +79,7 @@ export class HttpUtil {
       const d = data as RespEnvelope;
       return new Msg(Boolean(d.success), typeof d.msg === 'string' ? d.msg : '', d.obj ?? null);
     }
-    return typeof data === 'object' ? (data as Msg) : new Msg(false, 'unknown data:', data);
+    return typeof data === 'object' ? (data as Msg) : new Msg(false, '无法识别响应数据：', data);
   }
 
   static async get<T = unknown>(
@@ -86,7 +101,7 @@ export class HttpUtil {
       const data = err.response?.data;
       const errorMsg = new Msg<T>(
         false,
-        data?.msg || data?.message || err.message || 'Request failed',
+        data?.msg || data?.message || requestErrorText(err.message),
       );
       if (!silent) {
         console.error('GET request failed:', error);
@@ -115,7 +130,7 @@ export class HttpUtil {
       const data = err.response?.data;
       const errorMsg = new Msg<T>(
         false,
-        data?.msg || data?.message || err.message || 'Request failed',
+        data?.msg || data?.message || requestErrorText(err.message),
       );
       if (!silent) {
         console.error('POST request failed:', error);
@@ -141,7 +156,7 @@ export class HttpUtil {
       const data = err.response?.data;
       const errorMsg = new Msg<T>(
         false,
-        data?.msg || data?.message || err.message || 'Request failed',
+        data?.msg || data?.message || requestErrorText(err.message),
       );
       if (!silent) this._handleMsg(errorMsg);
       return errorMsg;
@@ -734,7 +749,7 @@ export class CPUFormatter {
   }
 
   static cpuCoreFormat(cores: number): string {
-    return cores === 1 ? '1 Core' : cores + ' Cores';
+    return `${cores} 核`;
   }
 }
 
@@ -748,12 +763,12 @@ export class TimeFormatter {
   }
 
   static formatSecond(second: number): string {
-    if (second < 60) return second.toFixed(0) + 's';
-    if (second < 3600) return (second / 60).toFixed(0) + 'm';
-    if (second < 3600 * 24) return (second / 3600).toFixed(0) + 'h';
+    if (second < 60) return second.toFixed(0) + '秒';
+    if (second < 3600) return (second / 60).toFixed(0) + '分钟';
+    if (second < 3600 * 24) return (second / 3600).toFixed(0) + '小时';
     const day = Math.floor(second / 3600 / 24);
     const remain = Number((second / 3600 - day * 24).toFixed(0));
-    return day + 'd' + (remain > 0 ? ' ' + remain + 'h' : '');
+    return day + '天' + (remain > 0 ? ' ' + remain + '小时' : '');
   }
 }
 

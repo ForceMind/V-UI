@@ -32,7 +32,7 @@ export function loadHappRouting(input: string): HappRoutingLoadResult {
     return {
       success: true,
       profile: {
-        Name: 'Custom Rules',
+        Name: '自定义规则',
         GlobalProxy: 'true',
         DirectSites: [],
         DirectIp: [],

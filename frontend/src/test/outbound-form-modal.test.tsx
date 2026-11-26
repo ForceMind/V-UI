@@ -867,8 +867,8 @@ describe('OutboundFormModal finalmask variables', () => {
         ],
       },
       () => {
-        chooseOptionByLabel('Kind', 'Reuse variable');
-        typeInto('Reuse', 'nonce');
+        chooseOptionByLabel('类别', '复用变量');
+        typeInto('复用', 'nonce');
       },
     );
 
@@ -889,8 +889,8 @@ describe('OutboundFormModal finalmask variables', () => {
         ],
       },
       () => {
-        chooseOptionByLabel('Kind', 'Transform');
-        typeInto('Transform', typed);
+        chooseOptionByLabel('类别', '转换');
+        typeInto('转换', typed);
       },
     );
 
@@ -927,7 +927,7 @@ describe('OutboundFormModal finalmask variables', () => {
   it('saves a noise reset typed as a range', async () => {
     const finalmask = await saveFinalmask(
       { udp: [{ type: 'noise', settings: { reset: 0, noise: [] } }] },
-      () => typeInto('Reset', '60-120'),
+      () => typeInto('重置', '60-120'),
     );
 
     expect(finalmask.udp).toEqual([{ type: 'noise', settings: { reset: '60-120', noise: [] } }]);

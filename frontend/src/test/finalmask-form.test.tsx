@@ -24,8 +24,8 @@ describe('FinalMaskForm item types', () => {
     );
 
     // An opened dropdown stays in the DOM, so read header-custom's before noise's.
-    expect(listSelectOptions('finalmask_udp_1_settings_client_0_type')).not.toContain('Expression');
-    expect(listSelectOptions('finalmask_udp_0_settings_noise_0_type')).toContain('Expression');
+    expect(listSelectOptions('finalmask_udp_1_settings_client_0_type')).not.toContain('表达式');
+    expect(listSelectOptions('finalmask_udp_0_settings_noise_0_type')).toContain('表达式');
   });
 });
 
@@ -37,13 +37,13 @@ describe('FinalMaskForm filter mask', () => {
     const client = renderWithProviders(
       <FinalMaskField network="tcp" protocol="vless" side="client" value={value} />,
     );
-    expect(listSelectOptions('finalmask_tcp_0_type')).not.toContain('Filter (source IPs)');
+    expect(listSelectOptions('finalmask_tcp_0_type')).not.toContain('来源 IP 筛选');
     client.unmount();
 
     renderWithProviders(
       <FinalMaskField network="tcp" protocol="vless" side="server" value={value} />,
     );
-    expect(listSelectOptions('finalmask_tcp_0_type')).toContain('Filter (source IPs)');
+    expect(listSelectOptions('finalmask_tcp_0_type')).toContain('来源 IP 筛选');
   });
 });
 
@@ -61,10 +61,10 @@ describe('FinalMaskForm salamander password', () => {
     const input = document.getElementById('finalmask_udp_0_settings_password') as HTMLInputElement;
 
     fireEvent.change(input, { target: { value: 'abc' } });
-    expect(await screen.findByText(/at least 4 bytes/)).toBeTruthy();
+    expect(await screen.findByText(/至少需要 4 个字节/)).toBeTruthy();
 
     fireEvent.change(input, { target: { value: 'a€' } });
-    await waitFor(() => expect(screen.queryByText(/at least 4 bytes/)).toBeNull());
+    await waitFor(() => expect(screen.queryByText(/至少需要 4 个字节/)).toBeNull());
   });
 });
 
@@ -88,14 +88,14 @@ describe('FinalMaskForm fragment lengths', () => {
     fireEvent.change(lengthInput(0), { target: { value: '0' } });
     // The blank last entry's error proves validation ran before the assertion.
     fireEvent.change(lengthInput(2), { target: { value: '' } });
-    expect(await screen.findByText(/Length is required/)).toBeTruthy();
-    expect(screen.queryByText(/greater than 0/)).toBeNull();
+    expect(await screen.findByText(/请填写长度/)).toBeTruthy();
+    expect(screen.queryByText(/大于 0/)).toBeNull();
   });
 
   it('rejects 0 in the last entry', async () => {
     const lengthInput = renderLengths(['0', '104', '1']);
     fireEvent.change(lengthInput(2), { target: { value: '0' } });
-    expect(await screen.findByText(/greater than 0/)).toBeTruthy();
+    expect(await screen.findByText(/大于 0/)).toBeTruthy();
   });
 });
 

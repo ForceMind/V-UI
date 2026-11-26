@@ -352,7 +352,7 @@ export default function IncySettingsContent({
                       { value: 'tlshello', label: 'tlshello' },
                       { value: '1-3', label: '1-3' },
                       { value: '1', label: '1' },
-                      { value: 'all', label: 'all' },
+                      { value: 'all', label: '全部' },
                     ]}
                   />
                 </SettingListItem>
@@ -382,7 +382,7 @@ export default function IncySettingsContent({
                     options={[
                       { value: '', label: t('pages.settings.subIncyNotSet') },
                       { value: 'rand', label: 'rand' },
-                      { value: 'str', label: 'str' },
+                      { value: 'str', label: '字符串' },
                       { value: 'hex', label: 'hex' },
                     ]}
                   />
@@ -478,7 +478,7 @@ export default function IncySettingsContent({
                 >
                   <Input.TextArea
                     value={allSetting.subIncyRoutingRules}
-                    placeholder="incy://routing/onadd/... or https://.../DEFAULT.JSON"
+                    placeholder="incy://routing/onadd/... 或 https://.../DEFAULT.JSON"
                     onChange={(e) => updateSetting({ subIncyRoutingRules: e.target.value })}
                   />
                 </SettingListItem>

@@ -11,7 +11,7 @@ const POLL_INTERVAL_MS = 2000;
 
 async function fetchStatus(): Promise<Status> {
   const msg = await HttpUtil.get('/panel/api/server/status', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch status');
+  if (!msg?.success) throw new Error(msg?.msg || '获取状态失败');
   const validated = parseMsg(msg, StatusSchema, 'server/status');
   return new Status(validated.obj);
 }

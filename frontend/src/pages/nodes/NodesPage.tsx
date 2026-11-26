@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { panelMessage } from '@/utils/panel-message';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -230,7 +231,7 @@ export default function NodesPage() {
       if (failed === 0) {
         messageApi.success(t('pages.nodes.toasts.updateStarted'));
       } else {
-        const firstError = results.find((r) => !r.ok)?.error ?? '';
+        const firstError = panelMessage(results.find((r) => !r.ok)?.error ?? '');
         const base = t('pages.nodes.toasts.updateResult', { ok, failed });
         messageApi.warning(firstError ? `${base} — ${firstError}` : base);
       }

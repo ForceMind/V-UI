@@ -146,14 +146,14 @@ export default function RuleCardList({
                     </Tag>
                   </Tooltip>
                 ) : (
-                  <span className="criterion-empty">any</span>
+                  <span className="criterion-empty">任意</span>
                 )}
               </div>
               <span className="flow-arrow">→</span>
               <div className="flow-side flow-side-target">
                 <span className="flow-label">
                   {rule.balancerTag
-                    ? t('pages.xray.balancer') || 'Balancer'
+                    ? t('pages.xray.balancer') || '负载均衡'
                     : t('pages.xray.Outbounds')}
                 </span>
                 {rule.outboundTag ? (

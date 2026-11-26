@@ -9,7 +9,7 @@ export function validateSessionIDTable(_rule: unknown, value: unknown): Promise<
   if (str === '') return Promise.resolve();
   // eslint-disable-next-line no-control-regex
   if (/[^\x00-\x7f]/.test(str)) {
-    return Promise.reject(new Error('sessionIDTable must contain only ASCII characters'));
+    return Promise.reject(new Error('会话标识字符表仅允许 ASCII 字符'));
   }
   return Promise.resolve();
 }
@@ -20,15 +20,15 @@ export function validateSessionIDLength(_rule: unknown, value: unknown): Promise
   const str = typeof value === 'string' ? value.trim() : '';
   if (str === '') return Promise.resolve();
   if (!/^\d+(?:-\d+)?$/.test(str)) {
-    return Promise.reject(new Error('Use a length or range, e.g. 8 or 8-16'));
+    return Promise.reject(new Error('请填写长度或范围，例如 8 或 8-16'));
   }
   const parts = str.split('-');
   const from = Number(parts[0]);
   if (!Number.isFinite(from) || from <= 0) {
-    return Promise.reject(new Error('sessionIDLength minimum must be greater than 0'));
+    return Promise.reject(new Error('会话标识的最小长度必须大于 0'));
   }
   if (parts.length === 2 && Number(parts[1]) < from) {
-    return Promise.reject(new Error('sessionIDLength range upper bound must be ≥ lower bound'));
+    return Promise.reject(new Error('会话标识长度范围的上限必须 ≥ 下限'));
   }
   return Promise.resolve();
 }

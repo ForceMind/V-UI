@@ -28,7 +28,7 @@ const RawHostListSchema = z
 
 async function fetchRawHosts(): Promise<RawHost[]> {
   const msg = await HttpUtil.get('/panel/api/hosts/raw', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch hosts');
+  if (!msg?.success) throw new Error(msg?.msg || '获取主机列表失败');
   const validated = parseMsg(msg, RawHostListSchema, 'hosts/raw');
   return Array.isArray(validated.obj) ? validated.obj : [];
 }

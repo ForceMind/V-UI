@@ -93,8 +93,8 @@ export default function SockoptForm({
 
   return (
     <>
-      <Form.Item label="Sockopt">
-        <Switch checked={on} onChange={toggleSockopt} aria-label="Sockopt" />
+      <Form.Item label="套接字选项">
+        <Switch checked={on} onChange={toggleSockopt} aria-label="套接字选项" />
       </Form.Item>
       {on && (
         <>
@@ -215,8 +215,8 @@ export default function SockoptForm({
             <Select
               style={{ width: '50%' }}
               options={[
-                { value: 'off', label: 'Off' },
-                { value: 'redirect', label: 'Redirect' },
+                { value: 'off', label: '关闭' },
+                { value: 'redirect', label: '重定向' },
                 { value: 'tproxy', label: 'TProxy' },
               ]}
             />

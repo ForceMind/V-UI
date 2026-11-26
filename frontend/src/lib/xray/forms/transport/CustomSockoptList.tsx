@@ -12,14 +12,14 @@ import { activateOnKey } from '@/utils/a11y';
 // Ref: https://xtls.github.io/config/transports/sockopt.html#sockoptobject
 
 const SYSTEM_OPTIONS = [
-  { value: 'linux', label: 'linux' },
-  { value: 'windows', label: 'windows' },
-  { value: 'darwin', label: 'darwin' },
+  { value: 'linux', label: 'Linux' },
+  { value: 'windows', label: 'Windows' },
+  { value: 'darwin', label: 'macOS' },
 ];
 
 const TYPE_OPTIONS = [
-  { value: 'int', label: 'int' },
-  { value: 'str', label: 'str' },
+  { value: 'int', label: '整数' },
+  { value: 'str', label: '字符串' },
 ];
 
 interface CustomSockoptListProps {
@@ -58,20 +58,20 @@ export default function CustomSockoptList({
                   onKeyDown={activateOnKey(() => remove(field.name))}
                 />
               </Divider>
-              <Form.Item label="System" name={[field.name, 'system']}>
-                <Select placeholder="all" allowClear options={SYSTEM_OPTIONS} />
+              <Form.Item label="操作系统" name={[field.name, 'system']}>
+                <Select placeholder="全部" allowClear options={SYSTEM_OPTIONS} />
               </Form.Item>
-              <Form.Item label="Level" name={[field.name, 'level']}>
+              <Form.Item label="级别" name={[field.name, 'level']}>
                 <Input placeholder="6 (SOL_TCP)" />
               </Form.Item>
-              <Form.Item label="Opt" name={[field.name, 'opt']}>
-                <Input placeholder="decimal, e.g. 19" />
+              <Form.Item label="选项编号" name={[field.name, 'opt']}>
+                <Input placeholder="十进制，例如 19" />
               </Form.Item>
-              <Form.Item label="Type" name={[field.name, 'type']}>
+              <Form.Item label="类型" name={[field.name, 'type']}>
                 <Select options={TYPE_OPTIONS} />
               </Form.Item>
-              <Form.Item label="Value" name={[field.name, 'value']}>
-                <Input placeholder="value" />
+              <Form.Item label="值" name={[field.name, 'value']}>
+                <Input placeholder="值" />
               </Form.Item>
             </div>
           ))}

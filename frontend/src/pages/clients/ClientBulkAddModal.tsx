@@ -282,11 +282,11 @@ export default function ClientBulkAddModal({
             <FormField name="emailMethod" label={t('pages.clients.method')}>
               <Select
                 options={[
-                  { value: 0, label: 'Random' },
-                  { value: 1, label: 'Random + Prefix' },
-                  { value: 2, label: 'Random + Prefix + Num' },
-                  { value: 3, label: 'Random + Prefix + Num + Postfix' },
-                  { value: 4, label: 'Prefix + Num + Postfix' },
+                  { value: 0, label: '随机' },
+                  { value: 1, label: '随机 + 前缀' },
+                  { value: 2, label: '随机 + 前缀 + 序号' },
+                  { value: 3, label: '随机 + 前缀 + 序号 + 后缀' },
+                  { value: 4, label: '前缀 + 序号 + 后缀' },
                 ]}
               />
             </FormField>

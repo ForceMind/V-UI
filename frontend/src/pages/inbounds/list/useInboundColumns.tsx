@@ -178,7 +178,7 @@ export function useInboundColumns({
           }
           const node = nodesById.get(record.nodeId);
           if (!node) {
-            return <Tag color="orange">node #{record.nodeId}</Tag>;
+            return <Tag color="orange">节点 #{record.nodeId}</Tag>;
           }
           return <Tag color={node.status === 'online' ? 'blue' : 'red'}>{node.name}</Tag>;
         },

@@ -51,12 +51,12 @@ export default function MtprotoFields() {
       <FormField name={['settings', 'preferIp']} label={t('pages.inbounds.form.mtgPreferIp')}>
         <Select
           allowClear
-          placeholder="prefer-ipv6"
+          placeholder="优先 IPv6"
           options={[
-            { value: 'prefer-ipv6', label: 'prefer-ipv6' },
-            { value: 'prefer-ipv4', label: 'prefer-ipv4' },
-            { value: 'only-ipv6', label: 'only-ipv6' },
-            { value: 'only-ipv4', label: 'only-ipv4' },
+            { value: 'prefer-ipv6', label: '优先 IPv6' },
+            { value: 'prefer-ipv4', label: '优先 IPv4' },
+            { value: 'only-ipv6', label: '仅 IPv6' },
+            { value: 'only-ipv4', label: '仅 IPv4' },
           ]}
         />
       </FormField>
