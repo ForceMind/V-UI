@@ -63,25 +63,56 @@ chmod 0700 "$work"
 stage='准备归档'
 service_created=0
 safe_diagnostic() {
-    python3 -I - "$work" "$stage" <<'PY'
-import pathlib,re,sys
+    python3 -I - "$work" "$stage" "${package:-}" <<'PY'
+import json,pathlib,re,sys
 root=pathlib.Path(sys.argv[1]); stage=sys.argv[2]
-path=root/(stage+'.log')
-if not path.exists(): sys.exit(0)
-text=path.read_text(errors='replace')
-allowed=set()
+path=root/(stage+'.log'); text=path.read_text(errors='replace') if path.exists() else ''
+allowed=set(); migration_literals=set()
 for name in ('fixture.py','extract.py'):
     source=root/name
     if source.exists(): allowed.update(re.findall(r"raise (?:RuntimeError|ValueError)\('([^']+)'\)",source.read_text()))
+if len(sys.argv)>3 and sys.argv[3]:
+    source=pathlib.Path(sys.argv[3])/'scripts/zh-migrate.sh'
+    if source.is_file(): migration_literals.update(re.findall(r"(?:reject|fail)\('([^']+)'",source.read_text()))
+reason=None
 for line in reversed(text.splitlines()):
     match=re.fullmatch(r'(?:RuntimeError|ValueError): (.+)',line)
-    if match and match[1] in allowed:
-        print('无凭据诊断：'+match[1]); sys.exit(0)
-categories=re.findall(r'(?m)^(?:[A-Za-z_][A-Za-z0-9_]*\.)*(HTTPError|SSLCertVerificationError|ConnectionRefusedError|TimeoutError|OperationalError|IntegrityError|PermissionError|KeyError|TypeError|ValueError|RuntimeError):',text)
-reason=categories[-1] if categories else '操作返回非零；原始输出未公开'
-for marker,label in [('schema-check.log','候选数据库副本预演未通过'),('迁移预检失败','原安装预检未通过'),('安装包文件校验失败','候选包校验未通过'),('自动恢复未完全成功','自动恢复未完全成功，需要保留原始备份')]:
-    if marker in text: reason=label
+    if match and match[1] in allowed: reason=match[1]; break
+if reason is None:
+    categories=re.findall(r'(?m)^(?:[A-Za-z_][A-Za-z0-9_]*\.)*(HTTPError|SSLCertVerificationError|ConnectionRefusedError|TimeoutError|OperationalError|IntegrityError|PermissionError|KeyError|TypeError|ValueError|RuntimeError):',text)
+    reason=categories[-1] if categories else '操作返回非零；原始输出未公开'
 print('无凭据诊断：'+reason)
+# 只输出迁移器源码内的固定字面原因，动态尾部仅接受测试对象白名单。
+safe_paths={'/','/etc','/etc/x-ui','/etc/x-ui/x-ui.db','/etc/default','/etc/default/x-ui','/etc/systemd','/etc/systemd/system','/etc/systemd/system/x-ui.service','/etc/systemd/system/x-ui.service.d','/etc/systemd/system/x-ui.service.d/90-ci-fixture.conf','/usr','/usr/local','/usr/local/x-ui','/usr/local/x-ui/x-ui','/usr/local/x-ui/bin','/usr/local/x-ui/bin/xray-linux-amd64','/usr/local/x-ui/.env','/usr/local/bin','/usr/local/bin/x-ui','/usr/bin','/usr/bin/x-ui'}
+safe_parameters={'WorkingDirectory','EnvironmentFiles','User','Group','RootDirectory','RootImage','BindPaths','BindReadOnlyPaths','TemporaryFileSystem','ExecStartPre','ExecStartPost','ExecStop','ExecStopPost','EnvironmentDirectories','PAMName','XUI_DB_FOLDER','XUI_LOG_FOLDER','XUI_BIN_FOLDER','XUI_LOG_LEVEL','XUI_CI_FIXTURE','XRAY_VMESS_AEAD_FORCED','webListen','webPort','webBasePath','webCertFile','webKeyFile','subEnable','xrayTemplateConfig','xrayOutboundTestUrl','secret','id','username','password','enable','totalGB','expiryTime','subId','client_traffics','outbound_traffics','inbound_client_ips','custom_geo_resources','OSError','ValueError','KeyError','TypeError','OperationalError','PermissionError','CalledProcessError','TimeoutExpired'}
+for prefix in ('迁移预检失败：','2.9.2 数据保真检查失败：'):
+    matches=[line[len(prefix):] for line in text.splitlines() if line.startswith(prefix)]
+    if not matches: continue
+    message=matches[-1]
+    literals=[literal for literal in migration_literals if message.startswith(literal)]
+    if literals:
+        literal=max(literals,key=len); suffix=message[len(literal):]
+        permitted=suffix if suffix in safe_paths or suffix in safe_parameters or re.fullmatch(r'[0-9]{1,6}/(?:id|user_id|protocol|port|enable|listen|settings|stream_settings|sniffing|total|tag)',suffix) else ''
+        print('迁移分类：'+prefix+literal+permitted)
+    else: print('迁移分类：'+prefix+'受控原因未匹配源码白名单')
+for marker,label in [('schema-check.log','候选数据库副本预演未通过'),('安装包文件校验失败','候选包校验未通过'),('自动恢复未完全成功','自动恢复未完全成功，需要保留原始备份')]:
+    if marker in text: print('迁移分类：'+label)
+# 核心诊断文件只承载固定测试端口、枚举、数字和布尔值；不读配置/DB/state/认证资料。
+source=root/'core-diagnostic.json'
+if source.is_file():
+    raw=json.loads(source.read_text()); clean={}
+    if raw.get('phase') in ('before','first-migrate','after'): clean['phase']=raw['phase']
+    if re.fullmatch(r'(?:unknown|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})',str(raw.get('coreVersion'))): clean['coreVersion']=raw['coreVersion']
+    for key in ('serverConfigTest','clientConfigTest'):
+        if raw.get(key) in ('not-run','pass','fail','missing','timeout'): clean[key]=raw[key]
+    if raw.get('serverApiProtocol') in ('tunnel','dokodemo-door','other'): clean['serverApiProtocol']=raw['serverApiProtocol']
+    for key in ('serverProcesses','serverClientCount','clientExit','socksReply'):
+        value=raw.get(key)
+        if value is None or type(value) is int and -255<=value<=10000: clean[key]=value
+    categories={'none','unsupported_protocol','invalid_tunnel_settings','private_target_blocked','authentication_failed','connection_refused','socket_timeout','upstream_closed','server_config_missing','configuration_timeout','configuration_invalid','client_exited','socks_negotiation','socks_connect_rejected','socks_address_type','http_body_mismatch'}
+    if raw.get('failureCategory') in categories: clean['failureCategory']=raw['failureCategory']
+    listeners=raw.get('localhostListeners',{}); clean['localhostListeners']={key:listeners[key] for key in ('62789','20771','20772','20773') if type(listeners.get(key)) is bool}
+    print('受控核心诊断：'+json.dumps(clean,ensure_ascii=False,sort_keys=True))
 PY
 }
 finish() {
@@ -173,7 +204,7 @@ printf '%s\n' "$official_version" >"$work/official-version"
 
 # Python 只向 root 私密目录写认证资料和诊断；不将原始响应写到 Actions 控制台。
 cat >"$work/fixture.py" <<'PY'
-import http.cookiejar, http.server, json, pathlib, re, socket, sqlite3, ssl, struct, subprocess, sys, threading, time, urllib.parse, urllib.request
+import http.cookiejar, http.server, json, os, pathlib, re, socket, sqlite3, ssl, struct, subprocess, sys, threading, time, urllib.parse, urllib.request
 work = pathlib.Path(sys.argv[1]); action = sys.argv[2]
 authfile = work/'auth.json'; dbfile = pathlib.Path('/etc/x-ui/x-ui.db')
 family = (work/'official-version').read_text().strip()
@@ -235,10 +266,8 @@ if action == 'auth':
     save('auth.json',{'username':username,'password':password,'port':int(s['webPort']),'path':s['webBasePath'],'tls':False})
 elif action == 'seed-static':
     with sqlite3.connect(dbfile) as db:
-        # 专用环回测试模板：保留真实 API/统计服务，只允许本地客户端到本地 HTTP fixture。
-        api_inbound = {'listen':'127.0.0.1','port':62789,'protocol':'dokodemo-door' if legacy else 'tunnel','settings':{'address':'127.0.0.1'} if legacy else {'rewriteAddress':'127.0.0.1'},'tag':'api'}
-        template = {'log':{'loglevel':'warning'},'api':{'tag':'api','services':['HandlerService','LoggerService','StatsService']},'inbounds':[api_inbound],'outbounds':[{'tag':'direct','protocol':'freedom','settings':{'finalRules':[{'action':'allow','ip':['127.0.0.1/32']},{'action':'block'}]}},{'tag':'blocked','protocol':'blackhole','settings':{}}],'routing':{'domainStrategy':'AsIs','rules':[{'type':'field','inboundTag':['api'],'outboundTag':'api'},{'type':'field','ip':['127.0.0.0/8'],'outboundTag':'direct'},{'type':'field','network':'tcp,udp','outboundTag':'blocked'}]},'stats':{},'policy':{'levels':{'0':{'statsUserUplink':True,'statsUserDownlink':True}},'system':{'statsInboundUplink':True,'statsInboundDownlink':True}}}
-        for key,value in [('subEnable','false'),('webListen','127.0.0.1'),('xrayTemplateConfig',json.dumps(template))]:
+        # 服务先采用该版本实际内嵌模板；不猜造 API inbound 或覆盖官方 baseline。
+        for key,value in [('subEnable','false'),('webListen','127.0.0.1')]:
             db.execute('DELETE FROM settings WHERE key=?',(key,)); db.execute('INSERT INTO settings(key,value) VALUES (?,?)',(key,value))
         if family == '3.11.0':
             values = {'id':18732,'name':'ci-preserved-node','remark':'离线保真节点','scheme':'https','address':'192.0.2.1','port':443,'base_path':'/fixture-node/','api_token':'CI-only-fake-node-token','enable':0,'allow_private_address':0,'tls_verify_mode':'verify','inbound_sync_mode':'selected','inbound_tags':'[]','outbound_tag':'','status':'unknown'}
@@ -248,6 +277,26 @@ elif action == 'seed-static':
             db.execute('INSERT INTO nodes ('+','.join(values)+') VALUES ('+','.join('?' for _ in values)+')',list(values.values()))
 elif action == 'tls':
     auth = json.loads(authfile.read_text()); auth['tls'] = True; save('auth.json',auth)
+elif action == 'seed-template-api':
+    request = api_session()
+    route = 'panel/xray/' if legacy else 'panel/api/xray/'
+    envelope = request(route,{})
+    if isinstance(envelope,str): envelope = json.loads(envelope)
+    if not isinstance(envelope,dict): raise RuntimeError('原版模板 API 未返回对象')
+    template = envelope.get('xraySetting')
+    if isinstance(template,str): template = json.loads(template)
+    if not isinstance(template,dict): raise RuntimeError('原版模板 API 缺少实际内嵌模板')
+    save('official-template-baseline.json',template)
+    # 在真实 baseline 上只追加有严格本机目的范围的专用 outbound/rule。
+    # API inbound、策略、DNS、原 direct/blocked outbound 均保留原值。
+    outbounds = template.setdefault('outbounds',[])
+    outbounds.append({'tag':'ci-loopback','protocol':'freedom','settings':{'finalRules':[{'action':'allow','ip':['127.0.0.1/32']},{'action':'block'}]}})
+    routing = template.setdefault('routing',{}); rules = routing.setdefault('rules',[])
+    api_rules = [rule for rule in rules if 'api' in rule.get('inboundTag',[])]
+    other_rules = [rule for rule in rules if rule not in api_rules]
+    routing['rules'] = api_rules+[{'type':'field','ip':['127.0.0.1/32'],'outboundTag':'ci-loopback'}]+other_rules
+    request(route+'update',{'xraySetting':json.dumps(template),'outboundTestUrl':envelope.get('outboundTestUrl','')})
+    save('fixture-template.json',template)
 elif action == 'seed-api':
     request = api_session()
     inbound = {'remark':'ci-preserved-inbound','enable':'true','listen':'127.0.0.1','port':20771,'protocol':'vless','up':0,'down':0,'total':2147483648,'expiryTime':0,'settings':json.dumps({'clients':[client],'decryption':'none'}),'streamSettings':json.dumps({'network':'tcp','security':'none','tcpSettings':{'acceptProxyProtocol':False,'header':{'type':'none'}}}),'sniffing':json.dumps({'enabled':False,'destOverride':[]})}
@@ -301,62 +350,132 @@ elif action == 'db-snapshot':
         save(sys.argv[3],result)
         schema = [list(r) for r in db.execute("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name")]
         save(sys.argv[3]+'.schema',schema)
-        traffic = db.execute('SELECT up,down FROM client_traffics WHERE email=?',(client['email'],)).fetchone()
+        traffic = db.execute('SELECT id,inbound_id,email,up,down FROM client_traffics WHERE email=?',(client['email'],)).fetchone()
         if traffic is None: raise RuntimeError('旧客户端流量记录丢失')
-        save(sys.argv[3]+'.traffic',[int(v or 0) for v in traffic])
+        inbound_traffic = db.execute('SELECT id,up,down FROM inbounds WHERE id=?',(meta()['inboundId'],)).fetchone()
+        save(sys.argv[3]+'.traffic',{'client_traffics':[dict(traffic)],'inbounds':[dict(inbound_traffic)]})
 elif action == 'traffic-check':
     old = json.loads((work/'before-db.json.traffic').read_text()); new = json.loads((work/'after-db.json.traffic').read_text())
-    if any(n < o for o,n in zip(old,new)): raise RuntimeError('原客户端流量计数发生回退')
-elif action == 'traffic-settle':
-    for attempt in range(45):
-        with sqlite3.connect('file:'+str(dbfile)+'?mode=ro',uri=True) as db:
-            row = db.execute('SELECT up,down FROM client_traffics WHERE email=?',(client['email'],)).fetchone()
-        if row and sum(int(v or 0) for v in row)>0: break
-        if attempt == 44: raise RuntimeError('未记录实际环回代理流量，无法证明旧流量计数保真')
-        time.sleep(1)
+    for table in ('client_traffics','inbounds'):
+        current = {row['id']:row for row in new[table]}
+        for previous in old[table]:
+            row = current.get(previous['id'])
+            if row is None: raise RuntimeError('人工历史账本的原记录 ID 丢失')
+            for key in ('email','inbound_id'):
+                if key in previous and row.get(key) != previous[key]: raise RuntimeError('人工历史账本的原记录归属变化')
+            for direction in ('up','down'):
+                if int(previous[direction] or 0)<=0: raise RuntimeError('人工历史账本的基线必须逐项非零')
+                if int(row[direction] or 0)<int(previous[direction]): raise RuntimeError('原历史账本的逐项流量计数发生回退')
+elif action == 'seed-history':
+    # 明确人工预置的历史账本，绝不把这些值称为本轮代理实测流量。
+    with sqlite3.connect(dbfile) as db:
+        update = db.execute('UPDATE client_traffics SET up=?,down=? WHERE email=?',(1048576,2097152,client['email']))
+        if update.rowcount != 1: raise RuntimeError('无法为唯一测试客户端预置历史账本')
+        update = db.execute('UPDATE inbounds SET up=?,down=? WHERE id=?',(3145728,4194304,meta()['inboundId']))
+        if update.rowcount != 1: raise RuntimeError('无法为唯一测试入站预置历史账本')
+    save('history-source.json',{'source':'人工预置历史账本，非本轮代理计数','clientUp':1048576,'clientDown':2097152,'inboundUp':3145728,'inboundDown':4194304})
 elif action == 'proxy':
     body = b'XUI-CI-REAL-VLESS-LOOPBACK\n'
+    core = '/usr/local/x-ui/bin/xray-linux-amd64'
+    diagnostics = {'phase':sys.argv[3],'coreVersion':'unknown','serverConfigTest':'not-run','clientConfigTest':'not-run','failureCategory':'none','serverApiProtocol':'other','serverClientCount':0,'serverProcesses':0,'clientExit':None,'socksReply':None,'localhostListeners':{}}
+    def record_diagnostics():
+        for port in (62789,20771,20772,20773):
+            result = subprocess.run(['ss','-H','-ltn','sport = :'+str(port)],capture_output=True,text=True)
+            diagnostics['localhostListeners'][str(port)] = bool(result.stdout.strip())
+        count = 0
+        for entry in pathlib.Path('/proc').iterdir():
+            if not entry.name.isdecimal(): continue
+            try:
+                if os.path.realpath(str(entry/'exe')) == core: count += 1
+            except OSError: pass
+        diagnostics['serverProcesses'] = count
+        save('core-diagnostic.json',diagnostics)
+    def classify(text, fallback):
+        text = text.lower()
+        for pattern,category in [('unknown.*(?:protocol|proxy)|protocol.*not.support|failed.*dokodemo','unsupported_protocol'),('invalid.*(?:rewriteaddress|address)|missing.*address','invalid_tunnel_settings'),('finalrules|final rules|private.*blocked','private_target_blocked'),('invalid user|invalid request|authentication|invalid uuid','authentication_failed'),('connection refused|actively refused','connection_refused'),('timed out|timeout','socket_timeout'),('unexpected eof|response header.*eof|connection reset|broken pipe','upstream_closed')]:
+            if re.search(pattern,text): return category
+        return fallback
+    version = subprocess.run([core,'version'],capture_output=True,text=True,timeout=10)
+    match = re.search(r'Xray\s+([0-9]+\.[0-9]+\.[0-9]+)',version.stdout)
+    if match: diagnostics['coreVersion'] = match[1]
+    record_diagnostics()
+    server_config = pathlib.Path('/usr/local/x-ui/bin/config.json')
+    for attempt in range(20):
+        if server_config.is_file(): break
+        time.sleep(0.5)
+    if not server_config.is_file():
+        diagnostics.update(serverConfigTest='missing',failureCategory='server_config_missing'); record_diagnostics()
+        raise RuntimeError('真实服务端核心未生成配置文件')
+    parsed = json.loads(server_config.read_text())
+    for inbound in parsed.get('inbounds',[]):
+        if inbound.get('tag') == 'api':
+            protocol = inbound.get('protocol'); diagnostics['serverApiProtocol'] = protocol if protocol in ('tunnel','dokodemo-door') else 'other'
+        if inbound.get('port') == 20771: diagnostics['serverClientCount'] = len(inbound.get('settings',{}).get('clients',[]))
+    environment = dict(os.environ); environment['XRAY_LOCATION_ASSET'] = '/usr/local/x-ui/bin'; environment['XRAY_LOCATION_CONFIG'] = '/usr/local/x-ui/bin'
+    def configuration_test(path,name):
+        try:
+            result = subprocess.run([core,'run','-test','-config',str(path)],cwd='/usr/local/x-ui',env=environment,capture_output=True,text=True,timeout=15)
+        except subprocess.TimeoutExpired:
+            diagnostics[name] = 'timeout'; diagnostics['failureCategory'] = 'configuration_timeout'; record_diagnostics(); return False
+        (work/(name+'.log')).write_text(result.stdout+result.stderr)
+        diagnostics[name] = 'pass' if result.returncode == 0 else 'fail'
+        if result.returncode: diagnostics['failureCategory'] = classify(result.stdout+result.stderr,'configuration_invalid')
+        record_diagnostics(); return result.returncode == 0
+    if not configuration_test(server_config,'serverConfigTest'): raise RuntimeError('实际服务端核心配置检查失败')
+    configuration = {'log':{'loglevel':'warning'},'inbounds':[{'listen':'127.0.0.1','port':20772,'protocol':'socks','settings':{'auth':'noauth','udp':False}}],'outbounds':[{'protocol':'vless','settings':{'vnext':[{'address':'127.0.0.1','port':20771,'users':[{'id':client['id'],'encryption':'none'}]}]},'streamSettings':{'network':'tcp','security':'none'}}]}
+    save('proxy-client.json',configuration)
+    if not configuration_test(work/'proxy-client.json','clientConfigTest'): raise RuntimeError('实际客户端核心配置检查失败')
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             self.send_response(200); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
         def log_message(self,*args): pass
     server = http.server.ThreadingHTTPServer(('127.0.0.1',20773),Handler)
     thread = threading.Thread(target=server.serve_forever,daemon=True); thread.start()
-    configuration = {'log':{'loglevel':'warning'},'inbounds':[{'listen':'127.0.0.1','port':20772,'protocol':'socks','settings':{'auth':'noauth','udp':False}}],'outbounds':[{'protocol':'vless','settings':{'vnext':[{'address':'127.0.0.1','port':20771,'users':[{'id':client['id'],'encryption':'none'}]}]},'streamSettings':{'network':'tcp','security':'none'}}]}
-    save('proxy-client.json',configuration)
     def receive(sock,count):
         data = b''
         while len(data)<count:
             part = sock.recv(count-len(data))
-            if not part: raise RuntimeError('SOCKS 连接提前结束')
+            if not part:
+                diagnostics['failureCategory'] = 'upstream_closed'; raise RuntimeError('SOCKS 连接提前结束')
             data += part
         return data
-    with (work/('proxy-client-'+sys.argv[3]+'.log')).open('wb') as output:
-        process = subprocess.Popen(['/usr/local/x-ui/bin/xray-linux-amd64','run','-config',str(work/'proxy-client.json')],stdout=output,stderr=subprocess.STDOUT)
+    logfile = work/('proxy-client-'+sys.argv[3]+'.log')
+    with logfile.open('wb') as output:
+        process = subprocess.Popen([core,'run','-config',str(work/'proxy-client.json')],cwd='/usr/local/x-ui',env=environment,stdout=output,stderr=subprocess.STDOUT)
         try:
-            for attempt in range(45):
+            for attempt in range(20):
                 try:
-                    if process.poll() is not None: raise RuntimeError('真实 Xray 客户端退出')
+                    diagnostics['clientExit'] = process.poll()
+                    if process.poll() is not None:
+                        diagnostics['failureCategory'] = classify(logfile.read_text(errors='replace'),'client_exited'); raise RuntimeError('真实 Xray 客户端退出')
                     with socket.create_connection(('127.0.0.1',20772),timeout=3) as sock:
                         sock.settimeout(5); sock.sendall(b'\x05\x01\x00')
-                        if receive(sock,2) != b'\x05\x00': raise RuntimeError('SOCKS 协商失败')
+                        if receive(sock,2) != b'\x05\x00':
+                            diagnostics['failureCategory'] = 'socks_negotiation'; raise RuntimeError('SOCKS 协商失败')
                         sock.sendall(b'\x05\x01\x00\x01'+socket.inet_aton('127.0.0.1')+struct.pack('!H',20773))
-                        reply = receive(sock,4)
-                        if reply[1] != 0: raise RuntimeError('真实 VLESS 代理拒绝连接')
+                        reply = receive(sock,4); diagnostics['socksReply'] = reply[1]
+                        if reply[1] != 0:
+                            diagnostics['failureCategory'] = 'socks_connect_rejected'; raise RuntimeError('真实 VLESS 代理拒绝连接')
                         if reply[3] == 1: receive(sock,4)
                         elif reply[3] == 4: receive(sock,16)
                         elif reply[3] == 3: receive(sock,receive(sock,1)[0])
-                        else: raise RuntimeError('SOCKS 地址类型错误')
+                        else:
+                            diagnostics['failureCategory'] = 'socks_address_type'; raise RuntimeError('SOCKS 地址类型错误')
                         receive(sock,2); sock.sendall(b'GET /fixture HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n')
                         response = b''
                         while len(response)<65536:
                             part = sock.recv(4096)
                             if not part: break
                             response += part
-                        if b' 200 ' not in response.split(b'\r\n',1)[0] or response.split(b'\r\n\r\n',1)[-1] != body: raise RuntimeError('代理未返回本地 HTTP fixture 的实际内容')
-                    break
-                except Exception:
-                    if attempt == 44 or process.poll() is not None: raise RuntimeError('真实环回代理验证失败') from None
+                        if b' 200 ' not in response.split(b'\r\n',1)[0] or response.split(b'\r\n\r\n',1)[-1] != body:
+                            diagnostics['failureCategory'] = 'http_body_mismatch'; raise RuntimeError('代理未返回本地 HTTP fixture 的实际内容')
+                    diagnostics['failureCategory'] = 'none'; record_diagnostics(); break
+                except Exception as error:
+                    if isinstance(error,ConnectionRefusedError): diagnostics['failureCategory'] = 'connection_refused'
+                    elif isinstance(error,TimeoutError): diagnostics['failureCategory'] = 'socket_timeout'
+                    diagnostics['failureCategory'] = classify(logfile.read_text(errors='replace'),diagnostics['failureCategory'])
+                    diagnostics['clientExit'] = process.poll(); record_diagnostics()
+                    if attempt == 19 or process.poll() is not None: raise RuntimeError('真实环回代理验证失败，详见受控核心诊断') from None
                     time.sleep(1)
         finally:
             process.terminate()
@@ -409,13 +528,17 @@ printf 'CI custom binary resource\n' >/usr/local/x-ui/bin/ci-custom/nested/resou
 chmod 0640 /usr/local/x-ui/bin/ci-custom/nested/resource.txt
 private '启用TLS探测' python3 "$work/fixture.py" "$work" tls
 systemctl start x-ui.service
+private '读取原版baseline并追加环回路由' python3 "$work/fixture.py" "$work" seed-template-api
 private '正常API创建入站客户端' python3 "$work/fixture.py" "$work" seed-api
 systemctl restart x-ui.service
 private '原版真实环回代理' python3 "$work/fixture.py" "$work" proxy before
-private '等待真实代理流量入库' python3 "$work/fixture.py" "$work" traffic-settle
+systemctl stop x-ui.service
+private '人工预置非零历史账本' python3 "$work/fixture.py" "$work" seed-history
+systemctl start x-ui.service
 private '真实程序基线API' python3 "$work/fixture.py" "$work" probe before-api.json
 private '原数据库保真快照' python3 "$work/fixture.py" "$work" db-snapshot before-db.json
 pass '正常 API 创建客户端、原账号 HTTPS 登录和真实 VLESS 环回代理'
+printf '历史计数验收：client_traffics 与 inbounds 的 up/down 均为明确人工预置的非零历史账本；不将预置值称为本轮代理实测流量。\n'
 if [[ $official_version == 2.9.2 ]]; then printf '不适用：官方 v2.9.2 没有集群节点功能；该版本不声明节点迁移覆盖。\n'; fi
 
 manifest() {
