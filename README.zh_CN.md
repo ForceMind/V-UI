@@ -73,43 +73,15 @@
 
 ## 快速开始
 
-```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
-```
-
-若要安装特定版本，请在命令后附加对应的标签（例如 `v3.7.0`）：
+在使用 systemd 的 Linux x86_64 空白主机上，用 Bash 执行以下命令安装本分支的中文版：
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) v3.7.0
+bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/3x-ui-zh-lite/install-online.sh)
 ```
 
-若要安装滚动更新的 **dev** 版本（来自 `main` 的最新逐次提交预发布版本，而非稳定版本），请传入 `dev-latest`：
+入口从本分支读取 `packages/stable.txt`，下载指定安装包并校验 SHA-256。清单可访问后方可在线安装。安装时可按提示申请域名或 IPv4 证书、安装 PostgreSQL 和 Fail2ban。安装完成后会显示随机账号、密码及面板访问路径。默认监听本机，SSH 转发方式见[中文版安装说明](README.md)。
 
-```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) dev-latest
-```
-
-安装过程中会生成随机的用户名、密码和访问路径。安装完成后，运行 `x-ui` 打开管理菜单，您可以在其中启动/停止服务、查看或重置登录凭据、管理 SSL 证书等。
-
-每个发布资源都会在其旁边附带一个 `.sha256` 校验和。`install.sh` 和更新程序都会据此校验压缩包，不匹配时中止。
-
-完整文档（安装、配置、运维以及完整的 API 参考）请访问 **[docs.sanaei.dev](https://docs.sanaei.dev/zh)**。
-
-### 无人值守安装
-
-安装程序也可以**非交互式**运行，适用于 cloud-init。
-设置 `XUI_NONINTERACTIVE=1`（或在无 TTY 的情况下通过管道传入），它就会全程
-零提示地完成端到端安装，生成随机凭据并写入
-`/etc/x-ui/install-result.env`。请参阅 [`deploy/`](deploy/)：
-
-- [Cloud-init user-data](deploy/cloud-init/) — 在任意云平台上无人值守安装（Hetzner/AWS/DO/Vultr/GCP/Azure/Oracle）
-- [Hetzner Cloud 说明](deploy/marketplace/hetzner/) — 在 Hetzner 上基于 cloud-init 的部署
-
-## 支持的平台
-
-**操作系统：** Ubuntu、Debian、Armbian、Fedora、CentOS、RHEL、AlmaLinux、Rocky Linux、Oracle Linux、Amazon Linux、Virtuozzo、Arch、Manjaro、Parch、openSUSE (Tumbleweed / Leap)、Alpine 和 Windows。
-
-**架构：** `amd64` · `386` · `arm64` (aarch64) · `armv7` · `armv6` · `armv5` · `s390x`。
+使用 `sudo x-ui` 打开运维菜单。无人值守安装可通过 `--ssl 域名`、`--postgres`、`--fail2ban` 和 `--port 端口` 指定选项；组合使用时请将 `--port 端口` 放在最后。
 
 ## 数据库选项
 
