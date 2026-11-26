@@ -77,7 +77,7 @@ for line in reversed(text.splitlines()):
     match=re.fullmatch(r'(?:RuntimeError|ValueError): (.+)',line)
     if match and match[1] in allowed:
         print('无凭据诊断：'+match[1]); sys.exit(0)
-categories=re.findall(r'(?m)^(?:[A-Za-z_]+\.)?(HTTPError|SSLCertVerificationError|ConnectionRefusedError|TimeoutError|OperationalError|IntegrityError|PermissionError|KeyError|TypeError|ValueError|RuntimeError):',text)
+categories=re.findall(r'(?m)^(?:[A-Za-z_][A-Za-z0-9_]*\.)*(HTTPError|SSLCertVerificationError|ConnectionRefusedError|TimeoutError|OperationalError|IntegrityError|PermissionError|KeyError|TypeError|ValueError|RuntimeError):',text)
 reason=categories[-1] if categories else '操作返回非零；原始输出未公开'
 for marker,label in [('schema-check.log','候选数据库副本预演未通过'),('迁移预检失败','原安装预检未通过'),('安装包文件校验失败','候选包校验未通过'),('自动恢复未完全成功','自动恢复未完全成功，需要保留原始备份')]:
     if marker in text: reason=label
@@ -307,6 +307,13 @@ elif action == 'db-snapshot':
 elif action == 'traffic-check':
     old = json.loads((work/'before-db.json.traffic').read_text()); new = json.loads((work/'after-db.json.traffic').read_text())
     if any(n < o for o,n in zip(old,new)): raise RuntimeError('原客户端流量计数发生回退')
+elif action == 'traffic-settle':
+    for attempt in range(45):
+        with sqlite3.connect('file:'+str(dbfile)+'?mode=ro',uri=True) as db:
+            row = db.execute('SELECT up,down FROM client_traffics WHERE email=?',(client['email'],)).fetchone()
+        if row and sum(int(v or 0) for v in row)>0: break
+        if attempt == 44: raise RuntimeError('未记录实际环回代理流量，无法证明旧流量计数保真')
+        time.sleep(1)
 elif action == 'proxy':
     body = b'XUI-CI-REAL-VLESS-LOOPBACK\n'
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -405,6 +412,7 @@ systemctl start x-ui.service
 private '正常API创建入站客户端' python3 "$work/fixture.py" "$work" seed-api
 systemctl restart x-ui.service
 private '原版真实环回代理' python3 "$work/fixture.py" "$work" proxy before
+private '等待真实代理流量入库' python3 "$work/fixture.py" "$work" traffic-settle
 private '真实程序基线API' python3 "$work/fixture.py" "$work" probe before-api.json
 private '原数据库保真快照' python3 "$work/fixture.py" "$work" db-snapshot before-db.json
 pass '正常 API 创建客户端、原账号 HTTPS 登录和真实 VLESS 环回代理'
