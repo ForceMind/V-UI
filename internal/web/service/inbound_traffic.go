@@ -176,28 +176,15 @@ func (s *InboundService) addClientTraffic(tx *gorm.DB, traffics []*xray.ClientTr
 			trafficByEmail[traffics[i].Email] = traffics[i]
 		}
 	}
-	now := time.Now().UnixMilli()
-	// Use atomic per-row UPDATE instead of read-modify-write Save. tx.Save
-	// issues UPDATEs in slice order, which varies between concurrent callers;
-	// on PostgreSQL two transactions locking the same rows in opposite order
-	// deadlock. An atomic "SET up = up + ?" never holds a row lock across a
-	// subsequent lock acquisition, so concurrent writers cannot deadlock.
+	active := make([]*xray.ClientTraffic, 0, len(dbClientTraffics))
 	for _, ct := range dbClientTraffics {
 		t, ok := trafficByEmail[ct.Email]
-		if !ok || (t.Up == 0 && t.Down == 0) {
-			continue
+		if ok && (t.Up != 0 || t.Down != 0) {
+			active = append(active, t)
 		}
-		if err = tx.Exec(
-			fmt.Sprintf(
-				`UPDATE client_traffics SET up = %s, down = %s, last_online = %s WHERE email = ?`,
-				database.ClampedAddExpr("up"),
-				database.ClampedAddExpr("down"),
-				database.GreatestExpr("last_online", "?"),
-			),
-			t.Up, t.Down, now, ct.Email,
-		).Error; err != nil {
-			return fmt.Errorf("update traffic for %s: %w", ct.Email, err)
-		}
+	}
+	if err = updateClientTrafficDeltas(tx, active, time.Now().UnixMilli()); err != nil {
+		return fmt.Errorf("update client traffic deltas: %w", err)
 	}
 
 	// adjustTraffics converts delayed-start rows (negative ExpiryTime → absolute
@@ -214,6 +201,42 @@ func (s *InboundService) addClientTraffic(tx *gorm.DB, traffics []*xray.ClientTr
 		}
 	}
 
+	return nil
+}
+
+func updateClientTrafficDeltas(tx *gorm.DB, active []*xray.ClientTraffic, now int64) error {
+	const maxRows = (sqliteMaxVars - 1) / 3 // email, up, down, plus a shared timestamp
+	for batch := range slices.Chunk(active, maxRows) {
+		var query strings.Builder
+		query.WriteString("WITH deltas(email, up, down) AS (VALUES ")
+		args := make([]any, 0, 3*len(batch)+1)
+		for i, traffic := range batch {
+			if i > 0 {
+				query.WriteByte(',')
+			}
+			query.WriteString("(CAST(? AS TEXT),CAST(? AS BIGINT),CAST(? AS BIGINT))")
+			args = append(args, traffic.Email, traffic.Up, traffic.Down)
+		}
+		query.WriteByte(')')
+		source, join := "deltas", "client_traffics.email = deltas.email"
+		if database.IsPostgres() {
+			// Preserve the previous UPDATE-by-id order, including across batches
+			// in the same accounting transaction. VALUES order alone cannot do this.
+			query.WriteString(`, locked AS (
+				SELECT client_traffics.id, deltas.up, deltas.down
+				FROM client_traffics JOIN deltas ON client_traffics.email = deltas.email
+				ORDER BY client_traffics.id FOR UPDATE OF client_traffics)`)
+			source, join = "locked", "client_traffics.id = locked.id"
+		}
+		fmt.Fprintf(&query, " UPDATE client_traffics SET up = %s, down = %s, last_online = %s FROM %s WHERE %s",
+			database.ClampedAddDeltaExpr("client_traffics.up", source+".up"),
+			database.ClampedAddDeltaExpr("client_traffics.down", source+".down"),
+			database.GreatestExpr("client_traffics.last_online", "?"), source, join)
+		args = append(args, now)
+		if err := tx.Exec(query.String(), args...).Error; err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

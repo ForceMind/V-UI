@@ -9,10 +9,16 @@ import "fmt"
 const TrafficMax = int64(9_000_000_000_000_000_000)
 
 func ClampedAddExpr(col string) string {
+	return ClampedAddDeltaExpr(col, "?")
+}
+
+// ClampedAddDeltaExpr accepts fixed SQL expressions for the column and delta,
+// allowing an UPDATE to read the delta from a batch of bound values.
+func ClampedAddDeltaExpr(col, delta string) string {
 	if IsPostgres() {
-		return fmt.Sprintf("LEAST(%s + ?, %d)", col, TrafficMax)
+		return fmt.Sprintf("LEAST(%s + %s, %d)", col, delta, TrafficMax)
 	}
-	return fmt.Sprintf("MIN(%s + ?, %d)", col, TrafficMax)
+	return fmt.Sprintf("MIN(%s + %s, %d)", col, delta, TrafficMax)
 }
 
 func JSONClientsFromInbound() string {

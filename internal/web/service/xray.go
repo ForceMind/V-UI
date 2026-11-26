@@ -1359,42 +1359,18 @@ func (s *XrayService) GetXrayTraffic() ([]*xray.Traffic, []*xray.ClientTraffic, 
 	return traffic, clientTraffic, nil
 }
 
-// GetOnlineUsers returns connection-based online users (email + source IPs)
-// from the running core's online-stats API. ok=false means the API is not
-// available — xray isn't running or the core predates the online-stats RPCs —
-// and callers must use the legacy traffic-delta / access-log paths. The
-// capability is probed lazily per process: an Unimplemented answer pins this
-// core as unsupported until the next restart, while transient errors leave the
-// capability undecided so a flaky poll can't lock in legacy mode.
+// GetOnlineUsers returns a read-only snapshot of the running core's online users
+// and IPs. The two scheduled callers may share a recent sample of the same core.
 func (s *XrayService) GetOnlineUsers() ([]xray.OnlineUser, bool, error) {
 	process := currentXrayProcess()
 	if process == nil || !process.IsRunning() {
 		return nil, false, nil
 	}
-	if process.OnlineAPISupport() == xray.OnlineAPIUnsupported {
+	users, supported, err := process.QueryOnlineUsers()
+	if currentXrayProcess() != process || !process.IsRunning() {
 		return nil, false, nil
 	}
-	if err := s.xrayAPI.Init(process.GetAPIPort()); err != nil {
-		logger.Debug("Failed to initialize Xray API:", err)
-		return nil, false, err
-	}
-	defer s.xrayAPI.Close()
-
-	users, err := s.xrayAPI.GetOnlineUsers()
-	if err != nil {
-		if xray.IsUnimplementedErr(err) {
-			process.SetOnlineAPISupport(xray.OnlineAPIUnsupported)
-			logger.Info("xray core does not support the online-stats API; falling back to traffic-delta onlines and access-log IP limit")
-			return nil, false, nil
-		}
-		logger.Debug("Failed to fetch Xray online users:", err)
-		return nil, false, err
-	}
-	if process.OnlineAPISupport() == xray.OnlineAPIUnknown {
-		process.SetOnlineAPISupport(xray.OnlineAPISupported)
-		logger.Info("xray core supports the online-stats API; using connection-based onlines and access-log-free IP limit")
-	}
-	return users, true, nil
+	return users, supported, err
 }
 
 // BalancerStatus is the live view of one balancer for the panel UI. Running
