@@ -45,7 +45,7 @@ func TestClientTrafficBatchDeltas(t *testing.T) {
 	failSecond := true
 	const callback = "test:client-traffic-batch"
 	if err := db.Callback().Raw().Before("gorm:raw").Register(callback, func(tx *gorm.DB) {
-		if strings.HasPrefix(tx.Statement.SQL.String(), "WITH deltas(") {
+		if strings.HasPrefix(tx.Statement.SQL.String(), "WITH deltas") {
 			writes++
 			if failSecond && writes == 2 {
 				_ = tx.AddError(stop)
@@ -93,6 +93,46 @@ func TestClientTrafficBatchDeltas(t *testing.T) {
 		}
 		if got.Up != up || got.Down != down || !online {
 			t.Fatalf("batched counters or last online differ at row %d: %+v", i, got)
+		}
+	}
+}
+
+func BenchmarkClientTrafficDeltaWrites(b *testing.B) {
+	b.Setenv("XUI_SCALE_TEST", "1")
+	for _, size := range []int{1, 32, 320} {
+		for _, batch := range []bool{false, true} {
+			b.Run(fmt.Sprintf("rows=%d/batch=%v", size, batch), func(b *testing.B) {
+				setupScaleDB(b)
+				db := database.GetDB()
+				rows := make([]xray.ClientTraffic, size)
+				deltas := make([]clientTrafficDelta, size)
+				for i := range rows {
+					email := fmt.Sprintf("benchmark-write-%04d@example.invalid", i)
+					rows[i] = xray.ClientTraffic{Email: email}
+					deltas[i] = clientTrafficDelta{Email: email, Up: int64(i + 1), Down: 4096}
+				}
+				if err := db.CreateInBatches(&rows, 40).Error; err != nil {
+					b.Fatal(err)
+				}
+				for b.Loop() {
+					err := db.Transaction(func(tx *gorm.DB) error {
+						if batch {
+							return updateClientTrafficDeltas(tx, deltas, 500)
+						}
+						for _, delta := range deltas {
+							query := fmt.Sprintf("UPDATE client_traffics SET up = %s, down = %s, last_online = %s WHERE email = ?",
+								database.ClampedAddExpr("up"), database.ClampedAddExpr("down"), database.GreatestExpr("last_online", "?"))
+							if err := tx.Exec(query, delta.Up, delta.Down, 500, delta.Email).Error; err != nil {
+								return err
+							}
+						}
+						return nil
+					})
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
 		}
 	}
 }

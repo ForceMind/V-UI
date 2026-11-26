@@ -1,0 +1,176 @@
+{
+  "platform": "windows",
+  "core_sha256": "c77a00eb84fb93ae044c2d771a1cabcc033b81e487253fbc35b12df6879c1e15",
+  "sqlite_fixture_sha256": "a3a71b850536c9cd05fa5aa967c885ed2740b597bb5d780d2b6887f84b9ab3d6",
+  "config_sha256": "6a72bfffdb5791012c90cab568f06fb26a9ef039903c78ae199ba769f712ad00",
+  "duration_seconds": 20,
+  "repetitions": 2,
+  "panel_sha256": {
+    "official": "70e97f26b2a25aeb197b9440b189d9ece1da9b7bafce6293fc95265ba9f2ab9a",
+    "candidate": "7392ce7160d4a9e82d022c9d425ccde910e208dc148e86341d201462817013ae"
+  },
+  "workloads": {
+    "single": {
+      "official": {
+        "samples": [
+          {
+            "clients": 1,
+            "seconds": 20.0,
+            "payload_bytes": 27670544384,
+            "mbit_s": 11068.2177536,
+            "panel_cpu_pct": 1.09375,
+            "xray_cpu_pct": 61.25,
+            "panel_cpu_seconds_per_gib": 0.008488485833181358,
+            "xray_cpu_seconds_per_gib": 0.47535520665815606
+          },
+          {
+            "clients": 1,
+            "seconds": 20.0,
+            "payload_bytes": 26472095703,
+            "mbit_s": 10588.8382812,
+            "panel_cpu_pct": 1.5625,
+            "xray_cpu_pct": 62.109375,
+            "panel_cpu_seconds_per_gib": 0.012675396907165676,
+            "xray_cpu_seconds_per_gib": 0.5038470270598356
+          }
+        ],
+        "median": {
+          "clients": 1.0,
+          "seconds": 20.0,
+          "payload_bytes": 27071320043.5,
+          "mbit_s": 10828.5280174,
+          "panel_cpu_pct": 1.328125,
+          "xray_cpu_pct": 61.6796875,
+          "panel_cpu_seconds_per_gib": 0.010581941370173518,
+          "xray_cpu_seconds_per_gib": 0.4896011168589959
+        }
+      },
+      "candidate": {
+        "samples": [
+          {
+            "clients": 1,
+            "seconds": 19.98499999998603,
+            "payload_bytes": 27200913408,
+            "mbit_s": 10888.531762029128,
+            "panel_cpu_pct": 0.8600200150118597,
+            "xray_cpu_pct": 64.11058293724771,
+            "panel_cpu_seconds_per_gib": 0.006784675692020055,
+            "xray_cpu_seconds_per_gib": 0.5057667334051313
+          },
+          {
+            "clients": 1,
+            "seconds": 20.0,
+            "payload_bytes": 27428782080,
+            "mbit_s": 10971.512832,
+            "panel_cpu_pct": 0.859375,
+            "xray_cpu_pct": 62.421875,
+            "panel_cpu_seconds_per_gib": 0.0067283109932382386,
+            "xray_cpu_seconds_per_gib": 0.4887200439633957
+          }
+        ],
+        "median": {
+          "clients": 1.0,
+          "seconds": 19.992499999993015,
+          "payload_bytes": 27314847744.0,
+          "mbit_s": 10930.022297014564,
+          "panel_cpu_pct": 0.8596975075059299,
+          "xray_cpu_pct": 63.26622896862386,
+          "panel_cpu_seconds_per_gib": 0.006756493342629147,
+          "xray_cpu_seconds_per_gib": 0.49724338868426354
+        }
+      }
+    },
+    "concurrent": {
+      "official": {
+        "samples": [
+          {
+            "clients": 320,
+            "seconds": 20.0,
+            "payload_bytes": 2312404992,
+            "mbit_s": 924.9619968,
+            "panel_cpu_pct": 1.328125,
+            "xray_cpu_pct": 31.796875,
+            "panel_cpu_seconds_per_gib": 0.12334027689211977,
+            "xray_cpu_seconds_per_gib": 2.9529113350054557
+          },
+          {
+            "clients": 320,
+            "seconds": 20.0,
+            "payload_bytes": 2289139712,
+            "mbit_s": 915.6558848,
+            "panel_cpu_pct": 1.171875,
+            "xray_cpu_pct": 28.984375,
+            "panel_cpu_seconds_per_gib": 0.10993572768004123,
+            "xray_cpu_seconds_per_gib": 2.7190769979530196
+          }
+        ],
+        "median": {
+          "clients": 320.0,
+          "seconds": 20.0,
+          "payload_bytes": 2300772352.0,
+          "mbit_s": 920.3089408,
+          "panel_cpu_pct": 1.25,
+          "xray_cpu_pct": 30.390625,
+          "panel_cpu_seconds_per_gib": 0.1166380022860805,
+          "xray_cpu_seconds_per_gib": 2.835994166479238
+        }
+      },
+      "candidate": {
+        "samples": [
+          {
+            "clients": 320,
+            "seconds": 19.98499999998603,
+            "payload_bytes": 2306670592,
+            "mbit_s": 923.3607573686714,
+            "panel_cpu_pct": 1.79822366775207,
+            "xray_cpu_pct": 36.82449337005326,
+            "panel_cpu_seconds_per_gib": 0.16728698468619485,
+            "xray_cpu_seconds_per_gib": 3.42574651248686
+          },
+          {
+            "clients": 320,
+            "seconds": 20.015999999945052,
+            "payload_bytes": 2312110080,
+            "mbit_s": 924.1047482039756,
+            "panel_cpu_pct": 1.2490007993639403,
+            "xray_cpu_pct": 30.444394484496048,
+            "panel_cpu_seconds_per_gib": 0.11609977324263039,
+            "xray_cpu_seconds_per_gib": 2.8299319727891157
+          }
+        ],
+        "median": {
+          "clients": 320.0,
+          "seconds": 20.00049999996554,
+          "payload_bytes": 2309390336.0,
+          "mbit_s": 923.7327527863235,
+          "panel_cpu_pct": 1.5236122335580051,
+          "xray_cpu_pct": 33.63444392727465,
+          "panel_cpu_seconds_per_gib": 0.14169337896441261,
+          "xray_cpu_seconds_per_gib": 3.1278392426379877
+        }
+      }
+    }
+  },
+  "quota": {
+    "official": {
+      "quota_bytes": 8388608,
+      "panel_down_bytes": 11599874,
+      "received_before_block_check": 11599872,
+      "overshoot_bytes": 3211264,
+      "blocked_after_seconds": 3.26500000001397,
+      "new_quota_connection_rejected": true,
+      "control_connection_passed": true,
+      "original_stream_ended_at_check": true
+    },
+    "candidate": {
+      "quota_bytes": 8388608,
+      "panel_down_bytes": 12124162,
+      "received_before_block_check": 12189696,
+      "overshoot_bytes": 3801088,
+      "blocked_after_seconds": 3.577999999979511,
+      "new_quota_connection_rejected": true,
+      "control_connection_passed": true,
+      "original_stream_ended_at_check": true
+    }
+  }
+}

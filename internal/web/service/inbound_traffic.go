@@ -176,11 +176,11 @@ func (s *InboundService) addClientTraffic(tx *gorm.DB, traffics []*xray.ClientTr
 			trafficByEmail[traffics[i].Email] = traffics[i]
 		}
 	}
-	active := make([]*xray.ClientTraffic, 0, len(dbClientTraffics))
+	active := make([]clientTrafficDelta, 0, len(dbClientTraffics))
 	for _, ct := range dbClientTraffics {
 		t, ok := trafficByEmail[ct.Email]
 		if ok && (t.Up != 0 || t.Down != 0) {
-			active = append(active, t)
+			active = append(active, clientTrafficDelta{Email: t.Email, Up: t.Up, Down: t.Down})
 		}
 	}
 	if err = updateClientTrafficDeltas(tx, active, time.Now().UnixMilli()); err != nil {
@@ -204,36 +204,50 @@ func (s *InboundService) addClientTraffic(tx *gorm.DB, traffics []*xray.ClientTr
 	return nil
 }
 
-func updateClientTrafficDeltas(tx *gorm.DB, active []*xray.ClientTraffic, now int64) error {
-	const maxRows = (sqliteMaxVars - 1) / 3 // email, up, down, plus a shared timestamp
-	for batch := range slices.Chunk(active, maxRows) {
-		var query strings.Builder
-		query.WriteString("WITH deltas(email, up, down) AS (VALUES ")
-		args := make([]any, 0, 3*len(batch)+1)
-		for i, traffic := range batch {
-			if i > 0 {
-				query.WriteByte(',')
-			}
-			query.WriteString("(CAST(? AS TEXT),CAST(? AS BIGINT),CAST(? AS BIGINT))")
-			args = append(args, traffic.Email, traffic.Up, traffic.Down)
+type clientTrafficDelta struct {
+	Email string `json:"email"`
+	Up    int64  `json:"up"`
+	Down  int64  `json:"down"`
+}
+
+func updateClientTrafficDeltas(tx *gorm.DB, active []clientTrafficDelta, now int64) error {
+	if len(active) == 0 {
+		return nil
+	}
+	if len(active) == 1 {
+		delta := active[0]
+		query := fmt.Sprintf(`UPDATE client_traffics SET up = %s, down = %s, last_online = %s WHERE email = ?`,
+			database.ClampedAddExpr("up"), database.ClampedAddExpr("down"), database.GreatestExpr("last_online", "?"))
+		return tx.Exec(query, delta.Up, delta.Down, now, delta.Email).Error
+	}
+
+	// One bound payload keeps the statement small and its shape fixed at any
+	// batch size. Each dialect decodes the int64 deltas without floating point.
+	query := `WITH deltas(email, up, down) AS MATERIALIZED (
+		SELECT json_extract(value, '$.email'), json_extract(value, '$.up'), json_extract(value, '$.down')
+		FROM json_each(?))`
+	source, join := "deltas", "client_traffics.email = deltas.email"
+	if database.IsPostgres() {
+		// Preserve the previous UPDATE-by-id order, including across batches.
+		query = `WITH deltas AS (
+			SELECT email, up, down FROM jsonb_to_recordset(CAST(? AS JSONB)) AS batch(email TEXT, up BIGINT, down BIGINT)
+		), locked AS (
+			SELECT client_traffics.id, deltas.up, deltas.down
+			FROM client_traffics JOIN deltas ON client_traffics.email = deltas.email
+			ORDER BY client_traffics.id FOR UPDATE OF client_traffics)`
+		source, join = "locked", "client_traffics.id = locked.id"
+	}
+	query += fmt.Sprintf(" UPDATE client_traffics SET up = %s, down = %s, last_online = %s FROM %s WHERE %s",
+		database.ClampedAddDeltaExpr("client_traffics.up", source+".up"),
+		database.ClampedAddDeltaExpr("client_traffics.down", source+".down"),
+		database.GreatestExpr("client_traffics.last_online", "?"), source, join)
+	const batchSize = 299
+	for batch := range slices.Chunk(active, batchSize) {
+		payload, err := json.Marshal(batch)
+		if err != nil {
+			return err
 		}
-		query.WriteByte(')')
-		source, join := "deltas", "client_traffics.email = deltas.email"
-		if database.IsPostgres() {
-			// Preserve the previous UPDATE-by-id order, including across batches
-			// in the same accounting transaction. VALUES order alone cannot do this.
-			query.WriteString(`, locked AS (
-				SELECT client_traffics.id, deltas.up, deltas.down
-				FROM client_traffics JOIN deltas ON client_traffics.email = deltas.email
-				ORDER BY client_traffics.id FOR UPDATE OF client_traffics)`)
-			source, join = "locked", "client_traffics.id = locked.id"
-		}
-		fmt.Fprintf(&query, " UPDATE client_traffics SET up = %s, down = %s, last_online = %s FROM %s WHERE %s",
-			database.ClampedAddDeltaExpr("client_traffics.up", source+".up"),
-			database.ClampedAddDeltaExpr("client_traffics.down", source+".down"),
-			database.GreatestExpr("client_traffics.last_online", "?"), source, join)
-		args = append(args, now)
-		if err := tx.Exec(query.String(), args...).Error; err != nil {
+		if err := tx.Exec(query, string(payload), now).Error; err != nil {
 			return err
 		}
 	}

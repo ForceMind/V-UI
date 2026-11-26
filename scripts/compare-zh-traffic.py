@@ -30,7 +30,7 @@ PANEL_PORT, VLESS_PORT, TARGET_PORT = 28503, 28504, 28505
 INGRESS = "127.0.0.2" if WINDOWS else "198.18.0.10"
 BASE_PATH = "/cpu-fixture/"
 CREDENTIALS = {"username": "bench-user", "password": "bench-only-password-523af8"}
-QUOTA = 16 * 1024**2
+QUOTA = 8 * 1024**2
 BLOCK = b"z" * 32768
 CLOCK_TICKS = None if WINDOWS else os.sysconf("SC_CLK_TCK")
 
@@ -164,9 +164,10 @@ async def serve_target(reader, writer):
             writer.write(b"ok")
             await writer.drain()
             return
-        delay = {b"s": 0.0, b"m": 0.08, b"q": 0.0125}[mode]
+        delay = {b"s": 0.0, b"m": 0.08, b"q": 0.05}[mode]
+        block = BLOCK * 2 if mode == b"q" else BLOCK
         while True:
-            writer.write(BLOCK)
+            writer.write(block)
             await writer.drain()
             if delay:
                 await asyncio.sleep(delay)
@@ -215,7 +216,7 @@ async def ready(proc, executable):
     raise RuntimeError("core did not deliver traffic through the fixture inbound")
 
 
-async def measure(proc, core, users, duration):
+async def measure(proc, core, executable, users, duration):
     sample = [0] * users
     started = [asyncio.Event() for _ in sample]
     mode = b"s" if users == 1 else b"m"
@@ -236,6 +237,10 @@ async def measure(proc, core, users, duration):
     try:
         await asyncio.wait_for(asyncio.gather(*(event.wait() for event in started)), 16)
         await asyncio.sleep(6)
+        online = await asyncio.to_thread(subprocess.check_output, [executable, "api", "statsonline",
+                                           "--server=127.0.0.1:62789", "-email", account(users)], timeout=4)
+        if int(json.loads(online)["stat"]["value"]) < 1:
+            raise RuntimeError("the load generator's client did not appear in the online statistics")
         before = counters()
         begin, initial_byte_count = time.monotonic(), sum(sample)
         await asyncio.sleep(duration)
@@ -279,6 +284,8 @@ async def quota_test(database):
             if not enabled and crossed is not None and not await probe(0):
                 if down < QUOTA or not await probe(1):
                     raise RuntimeError("quota account was not rejected independently of the control account")
+                if not 3 <= crossed - started <= 16:
+                    raise RuntimeError("quota workload was not paced at the requested rate")
                 delay = time.monotonic() - crossed
                 if delay > 10:
                     raise RuntimeError("quota enforcement took longer than two traffic ticks")
@@ -357,7 +364,8 @@ async def compare(args, directory):
             for rep in range(args.repetitions):
                 order = list(binaries if rep % 2 == 0 else reversed(binaries))
                 for label in order:
-                    samples[label].append(await run(label, f"{workload}-{rep}", lambda proc, core: measure(proc, core, users, args.seconds)))
+                    samples[label].append(await run(label, f"{workload}-{rep}",
+                                          lambda proc, core: measure(proc, core, core_binary, users, args.seconds)))
             results["workloads"][workload] = {label: {"samples": runs, "median": {
                 key: statistics.median(run[key] for run in runs) for key in runs[0]}} for label, runs in samples.items()}
         for label in binaries:
