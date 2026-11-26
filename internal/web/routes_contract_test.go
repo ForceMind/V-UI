@@ -107,11 +107,9 @@ func TestRouteRegistryContract(t *testing.T) {
 	registered := registeredContractRoutes(t)
 	documented := documentedContractRoutes(t)
 
-	t.Run("promotion and local panel update routes are absent", func(t *testing.T) {
+	t.Run("promotion routes are absent", func(t *testing.T) {
 		for _, route := range []string{
 			"GET /sponsors", "GET /sponsors/logo/:name",
-			"GET /panel/api/server/getPanelUpdateInfo", "GET /panel/api/server/getUpdateStatus",
-			"POST /panel/api/server/updatePanel", "POST /panel/api/server/setUpdateChannel",
 		} {
 			if registered[route] || documented[route] {
 				t.Errorf("removed route is still present: %s", route)

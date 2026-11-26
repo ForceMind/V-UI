@@ -1,71 +1,62 @@
 # 3X-UI 中文精简版
 
-基于 [3X-UI v3.11.0](https://github.com/MHSanaei/3x-ui/releases/tag/v3.11.0)，面板和日常运维使用简体中文。首版目标是使用 systemd 的 Linux x86_64 空白主机。保留节点、客户端、订阅、流量、路由、日志、证书配置和面板内数据库备份。
+基于 [3X-UI v3.11.0](https://github.com/MHSanaei/3x-ui/releases/tag/v3.11.0)。管理员面板、安装入口和主要运维菜单使用简体中文。安装包面向使用 systemd 的 Linux x86_64 主机。
 
-## 安装与登录
+## 一条命令安装
 
-使用本分支生成的 `3x-ui-v3.11.0-zh.1-linux-amd64.tar.gz` 及同目录的 `.sha256` 。先在 Linux 上执行以下命令。Debian 或 Ubuntu 缺少命令时，可安装 `ca-certificates curl openssl iproute2 util-linux passwd`。
+在线入口读取本分支的 `packages/stable.txt`，从清单指定的提交下载完整的同版本安装包并校验 SHA-256。清单随获准上传的安装包提供。入口使用服务器上的 Bash 和 curl。
 
 ```bash
-sha256sum -c 3x-ui-v3.11.0-zh.1-linux-amd64.tar.gz.sha256
-tar -xzf 3x-ui-v3.11.0-zh.1-linux-amd64.tar.gz
-cd 3x-ui-zh-lite
-sudo bash install.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/3x-ui-zh-lite/install-online.sh)
 ```
 
-安装器默认使用 `2053`，可用 `sudo bash install.sh --port 其他端口` 指定。安装器会生成新账号、随机密码和访问路径，仅在本次运行结束时显示。服务由独立非 root 账号运行，面板绑定 `127.0.0.1`。在自己的电脑上执行以下命令，再用浏览器打开安装器显示的 `http://127.0.0.1:2053/…/`。
+安装时可输入用于自动签发证书的域名或 IPv4，也可选择 PostgreSQL 和 Fail2ban。命令后跟 `--ssl example.org`、`--postgres`、`--fail2ban` 或 `--port 2053` 可以直接选定。HTTP 验证需要服务器的 80 端口可达，域名需正确解析到本机。Cloudflare DNS 证书在安装后的 `x-ui` 菜单操作。
+
+出于访问安全，面板默认监听 `127.0.0.1:2053`，由非 root 账号运行。安装器显示随机账号、密码及路径。未申请证书时可以用 SSH 转发在本机访问。通过运维菜单设置域名、证书和面板监听方式，或使用已有 HTTPS 反代。
 
 ```bash
 ssh -N -L 2053:127.0.0.1:2053 用户名@服务器地址
 ```
 
-开始使用时，登录后打开「入站列表」创建节点，再导出客户端链接。域名和已有证书可在面板中配置。证书和私钥须放在服务账号 `x-ui-zh` 可读的路径，其私钥权限应限于服务所需账号。面板配置备份含节点凭据，请保存在受控位置。
+## 运维功能
 
-安装器遇到已有 3X-UI 程序、服务或数据库会停止。数据库目录是 `/etc/x-ui`，日志目录是 `/var/log/x-ui`。节点端口、外部防火墙和公网订阅配置由管理员按实际节点选择。
+运行 `sudo x-ui` 打开数字菜单。也可直接运行 `sudo x-ui 证书`、`sudo x-ui 测速`、`sudo x-ui BBR`、`sudo x-ui 防火墙`、`sudo x-ui Fail2ban` 或 `sudo x-ui PostgreSQL`。
 
-## 日常运维
-
-| 命令 | 用途 |
+| 功能 | 用途 |
 | --- | --- |
-| `sudo x-ui` | 查看中文命令表 |
-| `sudo x-ui 状态` | 查看面板是否运行 |
-| `sudo x-ui 启动` / `停止` / `重启` | 管理面板及其核心进程 |
-| `sudo x-ui 开机启动` / `关闭开机启动` | 管理开机启动 |
-| `sudo x-ui 设置` | 查看管理端口和访问路径 |
-| `sudo x-ui 日志` | 查看最近 80 行服务日志。核心及系统原始日志保留原文 |
-| `sudo x-ui 重置账号` | 生成新账号和密码，清除旧两步验证设置 |
-| `sudo x-ui 备份 /root/3x-ui-backup.tar.gz` | 临时停止服务、备份 SQLite 数据并恢复原运行状态 |
-| `sudo x-ui 更新 /安装包解压目录/3x-ui-zh-lite` | 校验并安装同版系离线包，留存更新前数据库备份 |
-| `sudo x-ui 卸载` | 交互确认后移除程序和服务，保留数据库及日志 |
+| 自动证书 | 域名和 IPv4 证书签发、续期、现有证书绑定、Cloudflare DNS 验证。自动安装的证书保存在 `/etc/x-ui-managed-certs`，私钥限 root 与面板服务组读取。 |
+| 测速、BBR、防火墙 | 运行 Ookla Speedtest、调整 BBR、管理指定防火墙端口。由管理员在菜单中主动选择。 |
+| Fail2ban | 安装及管理节点 IP 限制，在菜单查看封禁记录。 |
+| PostgreSQL | 安装服务器并创建面板专用数据库，保留 SQLite 默认选项和已有迁移入口。 |
+| 备份 | `sudo x-ui 备份 /root/x-ui-backup.tar.gz` 保存本地数据目录。PostgreSQL 数据通过面板数据库导出，或使用对应的 `pg_dump`。 |
+| 更新 | `sudo x-ui 更新` 通过本分支清单更新。传入解包目录可离线更新，保留数据库和现有设置。 |
+| 节点批量升级 | 主面板向选中的启用且在线节点发起面板软件更新，记录逐台受理或失败结果。节点自行选择发行渠道，官方节点使用官方渠道，中文版节点使用中文包。受理后的实际版本可在节点刷新后核对。 |
 
-## 删减清单
+自动签发失败时可继续用 SSH 登录，再从证书菜单重试。系统命令、ACME、Xray 等原始诊断由对应组件输出，部分上游细节提示仍保留原文。
 
-| 删减项 | 原入口与影响 |
-| --- | --- |
-| 赞助广告 | 移除登录页和概览页广告位、赞助页面、命令面板入口、赞助内容及图片 API。面板不再请求上游赞助素材。 |
-| 捐赠按钮 | 移除侧栏捐赠按钮。原作者和许可证见文末。 |
-| 网页面板升级 | 移除概览页的当前主机更新、稳定版/开发版切换，以及节点列表的批量升级按钮。当前主机更新走中文脚本和经过校验的同版系包。 |
-| 宿主管理附加项 | 缩减原 `x-ui` 脚本。移除测速、BBR 切换、主机防火墙操作、自动签发证书、Fail2ban 自动安装、PostgreSQL 安装和旧版本下载入口。面板证书配置和 SQLite 备份仍可用。 |
-| 安装平台 | 交付目标限定为 systemd Linux x86_64。Windows、OpenRC 和其他架构的安装发布不在本包内。 |
-| 附加地区规则 | 安装包只预置默认 `geoip.dat` 和 `geosite.dat`，省去伊朗及俄罗斯规则副本。需要相关规则时可在面板按需更新。 |
-| 面板语言选择 | 管理员面板固定简体中文，移除登录页和面板设置页的语言切换。订阅页保留给客户端使用的语言选择。 |
+## 本次精简
 
-需要 `CAP_NET_ADMIN` 的宿主操作（如 TUN 与内核网络配置）不属于这套非 root 安装的支持范围。面板中部分上游协议名、原始诊断及 API 参考保留原文。
+- 移除了登录页和概览页的赞助广告、赞助页面、赞助接口，以及侧栏捐赠按钮。
+- 管理员面板使用简体中文，客户端订阅页保留语言切换。
+- 测速、BBR、防火墙、证书、Fail2ban、PostgreSQL、节点批量升级以及地区规则均保留。其他功能的精简需要逐项确认。
 
-## 制作安装包
+## 离线安装或更新
 
-在备有 Go 1.27.3、Node.js 26、npm 11、GCC 和 Linux x86_64 的构建机上从本分支执行：
+传输 `3x-ui-v3.11.0-zh.2-linux-amd64.tar.gz` 及其 `.sha256` 一起到目标服务器。
 
 ```bash
-bash 制作安装包.sh
+sha256sum -c 3x-ui-v3.11.0-zh.2-linux-amd64.tar.gz.sha256
+tar -xzf 3x-ui-v3.11.0-zh.2-linux-amd64.tar.gz
+cd 3x-ui-zh-lite
+sudo bash install.sh
 ```
 
-脚本构建面板前端与 Go 程序，校验上游发行包再取用其中的 Xray 和配套资源，产物写入 `dist/`。可通过 `XUI_UPSTREAM_ARCHIVE=/路径/x-ui-linux-amd64.tar.gz` 复用同一哈希的缓存。构建包标注源码提交及文件校验清单。
+已有本分支安装时运行 `sudo bash update.sh`。全新安装会检查旧面板和保留数据。源码安装包构建入口为 `bash 制作安装包.sh`，使用 Go 1.27.3、Node.js 26、npm 11、GCC 和 Linux x86_64。`XUI_UPSTREAM_ARCHIVE` 可以指定已校验的官方归档缓存。
 
 ## 接手与项目记录
 
-2026-11-25 修改了面板推广、语言、更新入口和 Linux 安装运维流程。上游固定提交 `c621ba9014a6aa21fd7c9ecf45655e44e24ebf13`。完整 Git 历史拉取因连接中断，分支采用与上游逐文件核对的 2,242 个 Linux 源码文件作为独立基线，基线提交 `a0b224e`。
+上游固定提交 `c621ba9014a6aa21fd7c9ecf45655e44e24ebf13`，已逐文件核对的 Linux 源码基线为 `a0b224e`。首版 `53aad64` 曾裁剪上述运维和节点升级入口，本版将其恢复。中文包构建以源码提交和内外两层 SHA-256 校验为准。未在真实服务器执行安装、公开签发、续期、BBR 或防火墙操作。
 
-首版验证覆盖 TypeScript、前端生产构建、7 份定向测试（16 项）、Windows 临时 SQLite 的路由注册检查、Bash 语法、中文帮助、非法端口拒绝、Linux amd64 交叉编译与包校验。真实 Linux systemd 安装和浏览器未验证。后续接手以同一安装包在空白 Linux 主机上完成安装、启动、登录、建立入站和重新启动为首个整机验收。
+恢复后的 Windows 定向 Go 检查覆盖真实路由注册、节点升级并发分发、面板状态和升级请求互斥。前端定向检查包含节点列表、升级入口和弹窗。下一步是取得公开包上传确认，回读远端分支并验证一键入口的清单和字节。目标服务器上的安装启动和续期另行实测。
 
-开放源码及归属沿用 [3X-UI](https://github.com/MHSanaei/3x-ui) 的 [GNU GPL v3](LICENSE)。随包资源的来源和许可见[第三方许可](第三方许可/来源.md)。
+开放源码及归属沿用 [3X-UI](https://github.com/MHSanaei/3x-ui) 的 [GNU GPL v3](LICENSE)。随包资源的来源和许可见[第三方许可](licenses/NOTICE.md)。

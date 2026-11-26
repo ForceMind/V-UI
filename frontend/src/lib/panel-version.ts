@@ -28,6 +28,12 @@ export function formatPanelVersion(version: string | undefined | null): string {
 
 export function isPanelUpdateAvailable(latest: string, current: string): boolean {
   if (!latest || !current) return false;
+  const fork = /^v?3\.11\.0-zh\.(\d+)$/;
+  const latestFork = latest.trim().match(fork);
+  const currentFork = current.trim().match(fork);
+  if (latestFork || currentFork) {
+    return !!latestFork && !!currentFork && Number(latestFork[1]) > Number(currentFork[1]);
+  }
   // A dev+<sha> label and a release tag sit on different channels and carry no
   // order, so a node moved to the other channel is not "behind" the master's latest.
   if (latest.trim().startsWith('dev+') !== current.trim().startsWith('dev+')) return false;

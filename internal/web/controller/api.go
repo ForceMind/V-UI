@@ -90,6 +90,7 @@ var monitorScopeAllow = map[string]struct{}{
 	"/server/xrayObservatory":                     {},
 	"/server/xrayObservatoryHistory/:tag/:bucket": {},
 	"/server/getXrayVersion":                      {},
+	"/server/getPanelUpdateInfo":                  {},
 	"/nodes/history/:id/:metric/:bucket":          {},
 }
 

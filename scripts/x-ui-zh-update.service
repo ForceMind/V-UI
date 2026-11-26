@@ -1,0 +1,8 @@
+[Unit]
+Description=安装已校验的 3X-UI 中文版更新
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/x-ui/zh-update-request.sh
+TimeoutStartSec=20min

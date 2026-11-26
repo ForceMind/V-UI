@@ -23,12 +23,16 @@ describe('node metric availability', () => {
         <NodeList
           nodes={[node]}
           isMobile={isMobile}
+          selectedIds={[]}
+          onSelectionChange={noop}
           onAdd={noop}
           onMtls={noop}
           onEdit={noop}
           onDelete={noop}
           onProbe={noop}
           onToggleEnable={noop}
+          onUpdateNode={noop}
+          onUpdateSelected={noop}
         />,
       );
       if (isMobile) fireEvent.click(screen.getByRole('button', { name: 'More Information' }));
@@ -49,12 +53,16 @@ describe('node metric availability', () => {
     renderWithProviders(
       <NodeList
         nodes={[node]}
+        selectedIds={[]}
+        onSelectionChange={noop}
         onAdd={noop}
         onMtls={noop}
         onEdit={noop}
         onDelete={noop}
         onProbe={noop}
         onToggleEnable={noop}
+        onUpdateNode={noop}
+        onUpdateSelected={noop}
       />,
     );
     expect(screen.getByText('0.0%')).not.toBeNull();

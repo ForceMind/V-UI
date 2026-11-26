@@ -18,8 +18,15 @@ usage() {
   日志              查看最近 80 行服务日志
   设置              查看管理地址和端口
   重置账号          生成新账号和密码，重置两步验证
+  证书              申请、续期、查看或绑定域名/IP 证书
+  Cloudflare证书    申请 DNS 验证证书
+  测速              Ookla 网络测速
+  BBR               开启或关闭 BBR
+  防火墙            管理防火墙端口
+  Fail2ban          安装和管理 Fail2ban 与 IP 限制
+  PostgreSQL        自动安装、迁移和管理 PostgreSQL
   备份 <文件>       保存 SQLite 数据，备份期间短暂停机
-  更新 <安装包目录> 使用已核对校验值的同版系安装包
+  更新 [安装包目录] 在线更新或使用已核对校验值的安装包
   卸载              移除程序和服务，保留数据库及日志
 EOF
 }
@@ -34,10 +41,11 @@ lock_operations() {
 }
 
 panel() {
-    cd "$app"
-    runuser -u x-ui-zh -- env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME="$db" \
-        XUI_DB_FOLDER="$db" XUI_LOG_FOLDER=/var/log/x-ui "$app/x-ui" "$@"
+    source "$app/zh-helpers.sh"
+    xui_cli "$@"
 }
+
+ops() { require_root; exec bash "$app/zh-ops.sh" "$@"; }
 
 show_settings() {
     local settings port path
@@ -76,7 +84,8 @@ uninstall() {
     read -r answer || return 0
     [[ $answer == 卸载 ]] || return 0
     systemctl disable --now "$unit"
-    rm -f -- /etc/systemd/system/x-ui.service /usr/local/bin/x-ui
+    systemctl disable --now x-ui-zh-update.path
+    rm -f -- /etc/systemd/system/x-ui.service /usr/local/bin/x-ui /etc/systemd/system/x-ui-zh-update.{path,service}
     local retired
     retired=$(mktemp -d /usr/local/.x-ui-uninstalled.XXXXXXXX)
     mv -T -- "$app" "$retired/program"
@@ -88,7 +97,8 @@ uninstall() {
 command=${1:-}
 if (( $# )); then shift; fi
 case $command in
-    ''|-h|--help|帮助) usage ;;
+    '') if [[ -t 0 ]]; then ops; else usage; fi ;;
+    -h|--help|帮助) usage ;;
     状态|status)
         if systemctl is-active --quiet "$unit"; then printf '面板正在运行。\n';
         else printf '面板当前未运行。可运行 sudo x-ui 日志 查看原因。\n'; exit 1; fi ;;
@@ -108,10 +118,21 @@ case $command in
         printf '新账号：%s\n新密码：%s\n' "$username" "$password"
         systemctl restart "$unit" ;;
     备份|backup) require_root; lock_operations; backup "$@" ;;
+    证书|cert) ops cert ;;
+    Cloudflare证书|cloudflare-cert) ops cloudflare-cert ;;
+    测速|speedtest) ops speedtest ;;
+    BBR|bbr) ops bbr ;;
+    防火墙|firewall) ops firewall ;;
+    Fail2ban|ip-limit) ops ip-limit ;;
+    PostgreSQL|postgres) ops postgres ;;
+    setup-fail2ban|banlog|restart-xray|update-all-geofiles|geo|migrateDB|pgclient) ops "$command" "$@" ;;
+    cert-permissions) require_root; source "$app/zh-helpers.sh"; cert_permissions ;;
     更新|update)
         require_root
+        if (( $# == 0 )); then exec bash "$app/install-online.sh" --update; fi
         [[ $# == 1 && -f $1/update.sh ]] || die '请传入已解压且校验过的同版系安装包目录。'
         exec bash "$1/update.sh" ;;
+    update-dev) require_root; exec bash "$app/install-online.sh" --update --dev ;;
     卸载|uninstall) require_root; lock_operations; uninstall ;;
     *) usage >&2; die '无法识别此命令。' ;;
 esac

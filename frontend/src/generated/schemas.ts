@@ -4169,6 +4169,34 @@ export const SCHEMAS: Record<string, unknown> = {
     ],
     "type": "object"
   },
+  "PanelUpdateStatus": {
+    "properties": {
+      "exitCode": {
+        "example": 0,
+        "type": "integer"
+      },
+      "finishedAt": {
+        "example": 1735689612,
+        "format": "int64",
+        "type": "integer"
+      },
+      "runId": {
+        "example": "1735689600123456789",
+        "type": "string"
+      },
+      "state": {
+        "example": "success",
+        "type": "string"
+      }
+    },
+    "required": [
+      "exitCode",
+      "finishedAt",
+      "runId",
+      "state"
+    ],
+    "type": "object"
+  },
   "PeerActivity": {
     "description": "PeerActivity is one peer's live embedded-Device-reported state, the\ncounterpart of an Xray access-log entry: a tunnel logs no requests, only\nhandshakes and bytes.",
     "properties": {

@@ -945,6 +945,13 @@ export interface OutboundTraffics {
   up: number;
 }
 
+export interface PanelUpdateStatus {
+  exitCode: number;
+  finishedAt: number;
+  runId: string;
+  state: string;
+}
+
 export interface PeerActivity {
   allowedIPs: string;
   down: number;

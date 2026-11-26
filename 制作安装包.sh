@@ -8,7 +8,7 @@ for cmd in node npm go gcc git curl tar sha256sum; do
     command -v "$cmd" >/dev/null || { printf '缺少构建命令：%s\n' "$cmd" >&2; exit 1; }
 done
 git diff --quiet HEAD -- || { printf '请先提交源代码修改，再制作带提交号的安装包。\n' >&2; exit 1; }
-version=v3.11.0-zh.1
+version="v$(<internal/config/version)"
 upstream_digest=0ddfa4702f595442e2962acd81addc768fdacaa4ff2672c971a0463dae744916
 out=${1:-"$root/dist"}
 mkdir -p -- "$out"
@@ -32,14 +32,15 @@ CGO_ENABLED=1 go build -trimpath -tags 'netgo osusergo' -ldflags '-s -w -linkmod
 
 bundle="$work/3x-ui-zh-lite"
 mkdir -p -- "$bundle"
-tar -xzf "$upstream" -C "$bundle" \
-    x-ui/bin/{xray-linux-amd64,mtg-linux-amd64,geoip.dat,geosite.dat,LICENSE,README.md}
+tar -xzf "$upstream" -C "$bundle" x-ui/bin
 install -m 0755 "$work/x-ui" "$bundle/x-ui/x-ui"
-install -m 0755 install.sh update.sh x-ui.sh "$bundle"
+install -m 0755 install.sh install-online.sh update.sh x-ui.sh "$bundle"
 install -m 0644 x-ui.service LICENSE README.md "$bundle"
-cp -a -- 第三方许可 "$bundle/第三方许可"
-printf '%s\n' "$version" > "$bundle/版本"
-git rev-parse HEAD > "$bundle/源码提交"
+cp -a -- licenses "$bundle/licenses"
+mkdir -p "$bundle/scripts"
+install -m 0644 scripts/{zh-helpers.sh,zh-ops.sh,zh-provision.sh,zh-update-request.sh,x-ui-zh-update.service,x-ui-zh-update.path} "$bundle/scripts"
+printf '%s\n' "$version" > "$bundle/VERSION"
+git rev-parse HEAD > "$bundle/SOURCE_COMMIT"
 ( cd "$bundle"; find . -type f -print0 | sort -z | xargs -0 sha256sum > "$work/SHA256SUMS" )
 mv -- "$work/SHA256SUMS" "$bundle/SHA256SUMS"
 tar -czf "$work/$filename" -C "$work" 3x-ui-zh-lite

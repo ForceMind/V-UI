@@ -1,0 +1,8 @@
+[Unit]
+Description=监听 3X-UI 中文版更新请求
+
+[Path]
+PathExists=/etc/x-ui/update-request
+
+[Install]
+WantedBy=multi-user.target

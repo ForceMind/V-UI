@@ -6,6 +6,7 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   ApartmentOutlined,
   ClusterOutlined,
+  CloudDownloadOutlined,
   DeleteOutlined,
   EditOutlined,
   ExclamationCircleOutlined,
@@ -22,6 +23,7 @@ import {
 
 import NodeHistoryPanel from './NodeHistoryPanel';
 import type { NodeRecord } from '@/api/queries/useNodesQuery';
+import { isPanelUpdateAvailable } from '@/lib/panel-version';
 import { activateOnKey } from '@/utils/a11y';
 import './NodeList.css';
 
@@ -29,12 +31,22 @@ interface NodeListProps {
   nodes: NodeRecord[];
   loading?: boolean;
   isMobile?: boolean;
+  latestVersion?: string;
+  forkLatestVersion?: string;
+  selectedIds: number[];
+  onSelectionChange: (ids: number[]) => void;
   onAdd: () => void;
   onMtls: () => void;
   onEdit: (node: NodeRecord) => void;
   onDelete: (node: NodeRecord) => void;
   onProbe: (node: NodeRecord) => void;
   onToggleEnable: (node: NodeRecord, next: boolean) => void;
+  onUpdateNode: (node: NodeRecord) => void;
+  onUpdateSelected: () => void;
+}
+
+function isUpdateEligible(n: NodeRecord): boolean {
+  return !!n.enable && n.status === 'online';
 }
 
 interface NodeRow extends NodeRecord {
@@ -158,12 +170,18 @@ export default function NodeList({
   nodes,
   loading = false,
   isMobile = false,
+  latestVersion = '',
+  forkLatestVersion = '',
+  selectedIds,
+  onSelectionChange,
   onAdd,
   onMtls,
   onEdit,
   onDelete,
   onProbe,
   onToggleEnable,
+  onUpdateNode,
+  onUpdateSelected,
 }: NodeListProps) {
   const { t } = useTranslation();
   const relativeTime = useRelativeTime();
@@ -254,6 +272,18 @@ export default function NodeList({
                   onClick={() => onProbe(record)}
                 />
               </Tooltip>
+              {isUpdateEligible(record) && (
+                <Tooltip title={t('pages.nodes.updatePanel')}>
+                  <Button
+                    type="text"
+                    size="small"
+                    style={{ fontSize: 16 }}
+                    icon={<CloudDownloadOutlined aria-hidden />}
+                    aria-label={t('pages.nodes.updatePanel')}
+                    onClick={() => onUpdateNode(record)}
+                  />
+                </Tooltip>
+              )}
               <Tooltip title={t('edit')}>
                 <Button
                   type="text"
@@ -398,7 +428,31 @@ export default function NodeList({
         title: t('pages.nodes.panelVersion') || 'Panel version',
         dataIndex: 'panelVersion',
         align: 'center',
-        render: (_value, record) => record.panelVersion || '-',
+        render: (_value, record) => {
+          const availableVersion = record.panelVersion?.includes('-zh.') ? forkLatestVersion : latestVersion;
+          const canUpdate =
+            isUpdateEligible(record) &&
+            isPanelUpdateAvailable(availableVersion, record.panelVersion || '');
+          return (
+            <Space size={4}>
+              <span>{record.panelVersion || '-'}</span>
+              {canUpdate && (
+                <Tooltip title={`${t('pages.nodes.updateAvailable')}: ${availableVersion}`}>
+                  <Tag
+                    color="orange"
+                    style={{ margin: 0, cursor: 'pointer' }}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => onUpdateNode(record)}
+                    onKeyDown={activateOnKey(() => onUpdateNode(record))}
+                  >
+                    {t('pages.nodes.updateAvailable')}
+                  </Tag>
+                </Tooltip>
+              )}
+            </Space>
+          );
+        },
       },
       {
         title: t('pages.nodes.uptime'),
@@ -475,7 +529,19 @@ export default function NodeList({
         render: (_value, record) => relativeTime(record.lastHeartbeat),
       },
     ],
-    [t, showAddress, relativeTime, onToggleEnable, onProbe, onEdit, onDelete, nameByGuid],
+    [
+      t,
+      showAddress,
+      relativeTime,
+      latestVersion,
+      forkLatestVersion,
+      onToggleEnable,
+      onProbe,
+      onEdit,
+      onDelete,
+      onUpdateNode,
+      nameByGuid,
+    ],
   );
 
   // rc-table re-runs every cell renderer whenever the Table re-renders, so keep the
@@ -490,6 +556,18 @@ export default function NodeList({
         scroll={{ x: 'max-content' }}
         size="middle"
         rowKey="key"
+        rowSelection={
+          dataSource.length > 1
+            ? {
+                selectedRowKeys: selectedIds,
+                onChange: (keys) =>
+                  onSelectionChange(keys.filter((k) => typeof k === 'number') as number[]),
+                getCheckboxProps: (record) => ({
+                  disabled: !!record.transitive || !isUpdateEligible(record),
+                }),
+              }
+            : undefined
+        }
         locale={{
           emptyText: (
             <div className="card-empty">
@@ -504,7 +582,7 @@ export default function NodeList({
         }}
       />
     ),
-    [dataSource, columns, loading, t],
+    [dataSource, columns, loading, selectedIds, onSelectionChange, t],
   );
 
   return (
@@ -516,6 +594,11 @@ export default function NodeList({
         <Button icon={<SafetyCertificateOutlined aria-hidden />} onClick={onMtls}>
           {t('pages.nodes.mtls.title')}
         </Button>
+        {selectedIds.length > 0 && (
+          <Button icon={<CloudDownloadOutlined aria-hidden />} onClick={onUpdateSelected}>
+            {t('pages.nodes.updateSelected', { count: selectedIds.length })}
+          </Button>
+        )}
       </div>
 
       {isMobile ? (
@@ -596,6 +679,20 @@ export default function NodeList({
                                 ),
                                 onClick: () => onProbe(record),
                               },
+                              ...(isUpdateEligible(record)
+                                ? [
+                                    {
+                                      key: 'update',
+                                      label: (
+                                        <>
+                                          <CloudDownloadOutlined aria-hidden />{' '}
+                                          {t('pages.nodes.updatePanel')}
+                                        </>
+                                      ),
+                                      onClick: () => onUpdateNode(record),
+                                    },
+                                  ]
+                                : []),
                               {
                                 key: 'edit',
                                 label: (

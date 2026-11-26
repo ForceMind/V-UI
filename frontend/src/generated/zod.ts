@@ -1005,6 +1005,14 @@ export const OutboundTrafficsSchema = z.object({
 });
 export type OutboundTraffics = z.infer<typeof OutboundTrafficsSchema>;
 
+export const PanelUpdateStatusSchema = z.object({
+  exitCode: z.number().int(),
+  finishedAt: z.number().int(),
+  runId: z.string(),
+  state: z.string(),
+});
+export type PanelUpdateStatus = z.infer<typeof PanelUpdateStatusSchema>;
+
 export const PeerActivitySchema = z.object({
   allowedIPs: z.string(),
   down: z.number().int(),
