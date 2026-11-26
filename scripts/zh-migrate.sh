@@ -67,9 +67,24 @@ try:
             env[key] = value
     assignments(shlex.split(show('Environment')))
     envfiles = show('EnvironmentFiles')
-    entries = re.findall(r'(/[-A-Za-z0-9_./]+) \(ignore_errors=(yes|no)\)', envfiles)
-    if envfiles and ' '.join(f'{p} (ignore_errors={optional})' for p, optional in entries) != envfiles:
-        reject('EnvironmentFiles 布局无法安全解析。')
+    # systemctl prints one structured record per file, including duplicates from
+    # unit/drop-ins. Records may be newline- or whitespace-separated. Consume
+    # every byte; never extract valid-looking substrings from malformed output.
+    entry_pattern = re.compile(r'''\s*("/[-A-Za-z0-9_./ ]+"|'/[-A-Za-z0-9_./ ]+'|/[-A-Za-z0-9_./ ]+?)\s+\(\s*ignore_errors\s*=\s*(yes|no)\s*\)(?=\s|$)''')
+    entries = []
+    offset = 0
+    while offset < len(envfiles):
+        if not envfiles[offset:].strip(): break
+        match = entry_pattern.match(envfiles, offset)
+        if match is None: reject('EnvironmentFiles 布局无法安全解析。')
+        token = match.group(1)
+        values = shlex.split(token) if token.startswith(('"', "'")) else [token]
+        if len(values) != 1: reject('EnvironmentFiles 路径无法安全解析。')
+        filename = values[0]
+        if '..' in pathlib.Path(filename).parts or str(pathlib.Path(filename)) != filename:
+            reject('EnvironmentFiles 路径必须是规范绝对路径。')
+        entries.append((filename, match.group(2)))
+        offset = match.end()
     for filename, optional in entries:
         p = pathlib.Path(filename)
         if not p.exists() and optional == 'yes': continue
@@ -407,7 +422,7 @@ PY
 
 migration_upgrade_check() {
     python3 -I - "$1" "$2" <<'PY'
-import hashlib, json, os, pathlib, sqlite3, subprocess, sys
+import hashlib, json, math, os, pathlib, re, sqlite3, subprocess, sys
 stage, executable = pathlib.Path(sys.argv[1]), sys.argv[2]
 state = json.loads((stage/'backup/state.json').read_text())
 original = sqlite3.connect((stage/'backup/database/x-ui.db').as_uri()+'?mode=ro', uri=True)
@@ -418,6 +433,28 @@ def rows(connection, table):
     return [dict(row) for row in connection.execute('SELECT * FROM "'+table+'" ORDER BY '+order)]
 def fail(message):
     sys.exit('2.9.2 数据保真检查失败：'+message)
+def json_semantics(value):
+    if value is None: return ('null',)
+    if type(value) is bool: return ('boolean',value)
+    if type(value) in (int,float):
+        if type(value) is float and not math.isfinite(value): raise ValueError('non-finite JSON number')
+        return ('number',value)
+    if isinstance(value,str): return ('string',value)
+    if isinstance(value,list): return ('array',tuple(json_semantics(item) for item in value))
+    if isinstance(value,dict): return ('object',tuple(sorted((key,json_semantics(item)) for key,item in value.items())))
+    raise ValueError('unsupported JSON value')
+def client_integer(value, field):
+    # Match NormalizeLegacyClientFields + Go int64 exactly for legal values.
+    # Preserve limits/expiry/reset instead of confusing string normalization with loss.
+    if isinstance(value,str):
+        value = value.strip().replace(' ','')
+        if value == '': return 0  # Go treats the empty legacy value as unset.
+        if not re.fullmatch('[+-]?[0-9]+',value): fail('旧客户端字段不是合法整数：'+field)
+        value = int(value,10)
+    elif type(value) is float and math.isfinite(value) and value.is_integer(): value = int(value)
+    elif type(value) is not int: fail('旧客户端字段不是合法整数：'+field)
+    if not -(2**63) <= value < 2**63: fail('旧客户端字段超出 int64 范围：'+field)
+    return value
 try:
     users = rows(original, 'users')
     inbounds = rows(original, 'inbounds')
@@ -461,7 +498,7 @@ try:
         if key == 'xrayTemplateConfig':
             before = json.loads(value) if value.strip() else None
             after = json.loads(current) if isinstance(current, str) and current.strip() else None
-            if before != after:
+            if json_semantics(before) != json_semantics(after):
                 fail('Xray 模板的路由、DNS、outbounds 或其他配置发生语义差异，拒绝覆盖原配置。')
             continue
         if key in ('webBasePath', 'subPath', 'subJsonPath', 'subClashPath') and isinstance(current, str) and value.strip('/') == current.strip('/'): continue
@@ -470,7 +507,8 @@ try:
     if set(new_inbounds) != {row['id'] for row in inbounds}: fail('入站数量或 ID 变化。')
     clients = {row['email']:row for row in rows(upgraded, 'clients')}
     links = {(row['client_id'],row['inbound_id']):row for row in rows(upgraded, 'client_inbounds')}
-    mapping = {'id':'uuid','password':'password','auth':'auth','security':'security','email':'email','subId':'sub_id','enable':'enable','totalGB':'total_gb','expiryTime':'expiry_time','limitIp':'limit_ip','tgId':'tg_id','comment':'comment','reset':'reset'}
+    mapping = {'id':'uuid','password':'password','auth':'auth','security':'security','email':'email','subId':'sub_id','enable':'enable','totalGB':'total_gb','expiryTime':'expiry_time','limitIp':'limit_ip','tgId':'tg_id','comment':'comment','reset':'reset','created_at':'created_at','updated_at':'updated_at'}
+    integer_fields = {'totalGB','expiryTime','limitIp','tgId','reset','created_at','updated_at'}
     for inbound in inbounds:
         new = new_inbounds[inbound['id']]
         for key, value in inbound.items():
@@ -478,19 +516,24 @@ try:
             if key == 'protocol' and value == 'socks' and new[key] == 'mixed': continue
             if key in new and new[key] != value: fail('入站字段被改变：'+str(inbound['id'])+'/'+key)
         for key in ('stream_settings', 'sniffing'):
-            if json.loads(inbound.get(key) or '{}') != json.loads(new.get(key) or '{}'):
+            if json_semantics(json.loads(inbound.get(key) or '{}')) != json_semantics(json.loads(new.get(key) or '{}')):
                 fail('传输或嗅探配置需要改写，不能保证原客户端兼容：'+str(inbound['id'])+'/'+key)
         old_settings = json.loads(inbound['settings'] or '{}')
         new_config = json.loads(new['settings'] or '{}')
         for key, value in old_settings.items():
-            if key != 'clients' and new_config.get(key) != value: fail('入站配置被改变：'+str(inbound['id'])+'/'+key)
+            if key != 'clients' and json_semantics(new_config.get(key)) != json_semantics(value): fail('入站配置被改变：'+str(inbound['id'])+'/'+key)
         for client in old_settings.get('clients', []):
             row = clients.get(client['email'].strip())
             if row is None or (row['id'],inbound['id']) not in links: fail('客户端或入站关联缺失。')
             for key, column in mapping.items():
                 if key not in client: continue
                 value = client[key]
-                if key in ('tgId', 'enable'): value = int(value or 0)
+                if key in integer_fields:
+                    value = client_integer(value,key)
+                    if key in ('created_at','updated_at') and value == 0: continue  # unset timestamps are assigned by GORM
+                elif key == 'enable':
+                    if type(value) is not bool: fail('旧客户端 enable 不是布尔值。')
+                    value = int(value)
                 if row.get(column) != value: fail('客户端属性被改变：'+key)
             if client.get('flow', '') != links[(row['id'],inbound['id'])]['flow_override']: fail('客户端 flow 关联变化。')
     for table in ('client_traffics','outbound_traffics','inbound_client_ips','custom_geo_resources'):

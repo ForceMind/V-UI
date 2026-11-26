@@ -75,6 +75,8 @@ sudo bash install.sh
 
 首次 Ubuntu 验收已通过新装与随机账号登录。3.11.0 的测试在读取环回流量统计时中止，2.9.2 在旧面板的基线代理探测时中止。本次运行结果保留在[首次迁移验收](https://github.com/ForceMind/V-UI/actions/runs/45788870962)。
 
+第二轮中，新装检查通过，原版 3.11.0 的账号和入站基线可用。迁移预检未能识别 systemd 多个环境文件的输出格式；2.9.2 的旧核心拦截了测试所用的私网目的地址。对应修正与完整记录见[第二次验收](https://github.com/ForceMind/V-UI/actions/runs/45790922967)。
+
 `zh.3` 修正证书申请前的端口占用检查、绑定结果回读及 HTTPS 就绪检查。全新安装选用证书时，HTTPS 验证失败会保留证书文件并验证已恢复仅本机的 HTTP。独立签发遇到现有监听时保留现有服务，可从证书菜单用 DNS 验证。本地模拟检查覆盖端口占用与空闲、HTTPS 探测参数、证书私钥不匹配、部分写入及重置回读。
 
 开放源码及归属沿用 [3X-UI](https://github.com/MHSanaei/3x-ui) 的 [GNU GPL v3](LICENSE)。随包资源的来源和许可见[第三方许可](licenses/NOTICE.md)。

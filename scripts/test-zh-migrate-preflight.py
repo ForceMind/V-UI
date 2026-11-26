@@ -130,6 +130,32 @@ class Preflight(unittest.TestCase):
             with self.subTest(path=path):
                 self.run_preflight(props={'WorkingDirectory': APP+'/', 'EnvironmentFiles': path+' (ignore_errors=yes)'})
 
+    def test_systemctl_environment_files_preserves_repeated_and_ordered_records(self):
+        # Ubuntu systemctl serializes repeated unit/drop-in entries as separate lines.
+        repeated = '/etc/default/x-ui (ignore_errors=yes)\n/etc/default/x-ui (ignore_errors=yes)'
+        state, _ = self.run_preflight(props={'Environment':'XRAY_VMESS_AEAD_FORCED=false XUI_CI_FIXTURE=preserve-env', 'EnvironmentFiles':repeated}, files={'/etc/default/x-ui':b'XUI_DB_FOLDER=/etc/x-ui\nXUI_LOG_FOLDER=/var/log/x-ui\n', APP+'/.env':b'XUI_LOG_LEVEL=warning\n'})
+        self.assertEqual(state['environment']['XUI_CI_FIXTURE'],'preserve-env')
+        self.assertEqual(state['environment']['XUI_LOG_LEVEL'],'warning')
+        self.assertEqual(state['config_files'].count('/etc/default/x-ui'),1)
+        for token in ('/etc/second env','"/etc/second env"',"'/etc/second env'"):
+            with self.subTest(path_token=token):
+                state, _ = self.run_preflight(props={'EnvironmentFiles':token+' (ignore_errors=no)'},files={'/etc/second env':b'XUI_LOG_LEVEL=error\n'})
+                self.assertEqual(state['environment']['XUI_LOG_LEVEL'],'error')
+        for separator in ('\n', '  ', '\n\t  '):
+            with self.subTest(separator=repr(separator)):
+                output = separator.join(['/etc/default/x-ui (ignore_errors=yes)', '"/etc/second env"  ( ignore_errors = no )', '/etc/default/x-ui (ignore_errors=no)'])
+                state, _ = self.run_preflight(props={'EnvironmentFiles':output}, files={'/etc/default/x-ui':b'XUI_LOG_LEVEL=warning\n','/etc/second env':b'XUI_LOG_LEVEL=error\n'})
+                self.assertEqual(state['environment']['XUI_LOG_LEVEL'],'warning')  # final repeated file wins
+                state, _ = self.run_preflight(props={'EnvironmentFiles':separator.join(['/etc/default/x-ui (ignore_errors=yes)','"/etc/second env" (ignore_errors=no)'])}, files={'/etc/default/x-ui':b'XUI_LOG_LEVEL=warning\n','/etc/second env':b'XUI_LOG_LEVEL=error\n'})
+                self.assertEqual(state['environment']['XUI_LOG_LEVEL'],'error')
+
+    def test_systemctl_environment_files_consumes_every_record_or_rejects(self):
+        malformed = ['junk /etc/default/x-ui (ignore_errors=yes)', '/etc/default/x-ui (ignore_errors=yes) trailing-junk', '/etc/default/x-ui (ignore_errors=yes)\n/etc/second (ignore_errors=maybe)', '/etc/default/x-ui (ignore_errors=yes)/etc/second (ignore_errors=no)', '/etc/../root/config (ignore_errors=yes)', '/etc//default/x-ui (ignore_errors=yes)', 'EnvironmentFile=-/etc/default/x-ui', '"/etc/unclosed (ignore_errors=yes)']
+        for output in malformed:
+            with self.subTest(output=output), self.assertRaises(SystemExit): self.run_preflight(props={'EnvironmentFiles':output})
+        with self.assertRaises(SystemExit):
+            self.run_preflight(props={'EnvironmentFiles':'"/etc/unsafe env" (ignore_errors=no)'}, files={'/etc/unsafe env':b'XUI_LOG_LEVEL=warning\n'}, modes={'/etc/unsafe env':(stat.S_IFREG|0o666,0,1)})
+
     def test_runtime_reloads_current_environment_and_ignores_snapshot(self):
         state, calls = self.run_preflight(mode='runtime', props={'Environment': 'XUI_NODE_TOKEN_KEY=current NODE_TOKEN_ENCRYPTION=required'}, files={APP + '/.zh-lite-migration': b'sqlite-preserved-v1\n', APP + '/.zh-lite-version': b'v3.11.0-zh.3\n', APP + '/.zh-lite-migration-env.json': b'{"environment":{"XUI_NODE_TOKEN_KEY":"stale"}}'})
         self.assertEqual(state['environment']['XUI_NODE_TOKEN_KEY'], 'current')
@@ -212,18 +238,21 @@ class Preflight(unittest.TestCase):
 
     def test_292_database_contract_rejects_client_account_or_configuration_loss(self):
         upgrade = SOURCE.split("<<'PY'\n")[4].split('\nPY\n', 1)[0]
-        for damage in ('none', 'password', 'client', 'limit', 'link', 'port', 'traffic', 'setting', 'routing', 'dns', 'outbound', 'relative-cert-without-inbounds'):
+        accepted = {'none','numeric-strings','unset-timestamps','json-number-format'}
+        for damage in ('none', 'numeric-strings', 'unset-timestamps', 'json-number-format', 'password', 'client', 'limit', 'link', 'port', 'traffic', 'setting', 'routing', 'dns', 'outbound', 'json-boolean-type', 'created-at', 'updated-at', 'relative-cert-without-inbounds'):
             with self.subTest(damage=damage), tempfile.TemporaryDirectory(prefix='migration-292-') as temporary:
                 stage = pathlib.Path(temporary)
                 (stage/'backup/database').mkdir(parents=True)
                 (stage/'check-database').mkdir()
                 (stage/'backup/state.json').write_text(json.dumps({'environment': {}}))
                 original = stage/'backup/database/x-ui.db'
-                client = {'id':'client-uuid', 'email':'legacy@example.com', 'enable':True, 'subId':'old-sub-id', 'limitIp':2, 'totalGB':500, 'expiryTime':2000000000000, 'tgId':'123', 'flow':'xtls-rprx-vision'}
+                client = {'id':'client-uuid', 'email':'legacy@example.com', 'enable':True, 'subId':'old-sub-id', 'limitIp':2, 'totalGB':500, 'expiryTime':2000000000000, 'tgId':'123', 'flow':'xtls-rprx-vision', 'reset':7, 'created_at':1700000000123, 'updated_at':1700000000456}
+                if damage=='numeric-strings': client.update(limitIp='+2',totalGB=' 5 00 ',expiryTime='2000000000000',tgId='1 2 3',reset=' +7 ',created_at='1700000000123',updated_at='1700000000456')
+                elif damage=='unset-timestamps': client.update(created_at='0',updated_at=0)
                 with contextlib.closing(sqlite3.connect(original)) as db:
                     db.executescript('CREATE TABLE users(id INTEGER,username TEXT,password TEXT); INSERT INTO users VALUES(1,"legacy-admin","$2a$original-hash"); CREATE TABLE history_of_seeders(id INTEGER,seeder_name TEXT); INSERT INTO history_of_seeders VALUES(1,"UserPasswordHash"); CREATE TABLE settings(id INTEGER,key TEXT,value TEXT); INSERT INTO settings VALUES(1,"webBasePath","/legacy-path/"); CREATE TABLE inbounds(id INTEGER,port INTEGER,protocol TEXT,settings TEXT,stream_settings TEXT,sniffing TEXT); CREATE TABLE client_traffics(id INTEGER,email TEXT,up INTEGER,down INTEGER); INSERT INTO client_traffics VALUES(1,"legacy@example.com",17,29);')
                     db.execute('INSERT INTO inbounds VALUES(?,?,?,?,?,?)',(7,12345,'vless',json.dumps({'clients':[client],'decryption':'none'}),'{}','{}'))
-                    template = {'routing':{'rules':[{'domain':['example.org'],'outboundTag':'custom','type':'field'}]},'dns':{'servers':['1.1.1.1']},'outbounds':[{'tag':'custom','protocol':'freedom','settings':{}}]}
+                    template = {'routing':{'rules':[{'domain':['example.org'],'outboundTag':'custom','type':'field'}]},'dns':{'servers':['1.1.1.1'],'disableCache':True,'serveStale':5},'outbounds':[{'tag':'custom','protocol':'freedom','settings':{}}]}
                     db.execute('INSERT INTO settings VALUES(?,?,?)',(2,'xrayTemplateConfig',json.dumps(template)))
                     if damage=='relative-cert-without-inbounds':
                         db.execute('DELETE FROM inbounds')
@@ -235,19 +264,21 @@ class Preflight(unittest.TestCase):
                     self.assertEqual(kwargs['env']['XUI_DB_FOLDER'],str(stage/'check-database'))
                     self.assertEqual(args[1:],['setting','-show','true'])
                     with contextlib.closing(sqlite3.connect(stage/'check-database/x-ui.db')) as migrated:
-                        migrated.executescript('CREATE TABLE clients(id INTEGER,email TEXT,uuid TEXT,enable INTEGER,sub_id TEXT,limit_ip INTEGER,total_gb INTEGER,expiry_time INTEGER,tg_id INTEGER); CREATE TABLE client_inbounds(client_id INTEGER,inbound_id INTEGER,flow_override TEXT); INSERT INTO clients VALUES(1,"legacy@example.com","client-uuid",1,"old-sub-id",2,500,2000000000000,123); INSERT INTO client_inbounds VALUES(1,7,"xtls-rprx-vision");')
-                        mutations={'password':'UPDATE users SET password="changed"', 'client':'DELETE FROM clients', 'limit':'UPDATE clients SET limit_ip=0', 'link':'DELETE FROM client_inbounds', 'port':'UPDATE inbounds SET port=9', 'traffic':'UPDATE client_traffics SET up=0', 'setting':'DELETE FROM settings'}
+                        migrated.executescript('CREATE TABLE clients(id INTEGER,email TEXT,uuid TEXT,enable INTEGER,sub_id TEXT,limit_ip INTEGER,total_gb INTEGER,expiry_time INTEGER,tg_id INTEGER,reset INTEGER,created_at INTEGER,updated_at INTEGER); CREATE TABLE client_inbounds(client_id INTEGER,inbound_id INTEGER,flow_override TEXT); INSERT INTO clients VALUES(1,"legacy@example.com","client-uuid",1,"old-sub-id",2,500,2000000000000,123,7,1700000000123,1700000000456); INSERT INTO client_inbounds VALUES(1,7,"xtls-rprx-vision");')
+                        mutations={'password':'UPDATE users SET password="changed"', 'client':'DELETE FROM clients', 'limit':'UPDATE clients SET limit_ip=0', 'link':'DELETE FROM client_inbounds', 'port':'UPDATE inbounds SET port=9', 'traffic':'UPDATE client_traffics SET up=0', 'setting':'DELETE FROM settings', 'created-at':'UPDATE clients SET created_at=1700000000000', 'updated-at':'UPDATE clients SET updated_at=1700000000000'}
                         if damage in mutations: migrated.execute(mutations[damage])
                         # Reordered/minified JSON remains semantically equal; real configuration loss fails.
                         changed = copy.deepcopy(template)
                         if damage=='routing': changed['routing']['rules']=[]
                         elif damage=='dns': changed['dns']['servers']=['8.8.8.8']
                         elif damage=='outbound': changed['outbounds'][0]['protocol']='blackhole'
+                        elif damage=='json-boolean-type': changed['dns']['disableCache']=1
+                        elif damage=='json-number-format': changed['dns']['serveStale']=5.0
                         migrated.execute('UPDATE settings SET value=? WHERE key="xrayTemplateConfig"',(json.dumps(changed,sort_keys=True,separators=(',',':')),))
                         migrated.commit()
                     return types.SimpleNamespace(returncode=0)
                 with patch.object(sys,'argv',['-',str(stage),'/verified-package/x-ui']), patch('subprocess.run',simulate_official_seeders):
-                    if damage=='none': exec(compile(upgrade,'upgrade-contract','exec'),{})
+                    if damage in accepted: exec(compile(upgrade,'upgrade-contract','exec'),{})
                     else:
                         with self.assertRaises(SystemExit): exec(compile(upgrade,'upgrade-contract','exec'),{})
                 self.assertEqual(original.read_bytes(),before)
