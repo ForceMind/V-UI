@@ -8,13 +8,6 @@ import { ProbeResultSchema, type ProbeResult } from '@/schemas/node';
 
 export type { ProbeResult };
 
-export interface NodeUpdateResult {
-  id: number;
-  name?: string;
-  ok: boolean;
-  error?: string;
-}
-
 export interface RemoteInboundOption {
   tag: string;
   remark?: string;
@@ -69,28 +62,12 @@ export function useNodeMutations() {
     },
   });
 
-  const updatePanelsMut = useMutation({
-    mutationFn: ({ ids, dev }: { ids: number[]; dev: boolean }) =>
-      HttpUtil.post<NodeUpdateResult[]>(
-        '/panel/api/nodes/updatePanel',
-        { ids, dev },
-        {
-          headers: { 'Content-Type': 'application/json' },
-        },
-      ),
-    onSuccess: (msg) => {
-      if (msg?.success) invalidate();
-    },
-  });
-
   return {
     create: (payload: Partial<NodeRecord>) => createMut.mutateAsync(payload),
     update: (id: number, payload: Partial<NodeRecord>) => updateMut.mutateAsync({ id, payload }),
     remove: (id: number) => removeMut.mutateAsync(id),
     setEnable: (id: number, enable: boolean) => setEnableMut.mutateAsync({ id, enable }),
     probe: (id: number) => probeMut.mutateAsync(id),
-    updatePanels: (ids: number[], dev: boolean): Promise<Msg<NodeUpdateResult[]>> =>
-      updatePanelsMut.mutateAsync({ ids, dev }),
     testConnection: async (payload: Partial<NodeRecord>): Promise<Msg<ProbeResult>> => {
       const raw = await HttpUtil.post('/panel/api/nodes/test', payload);
       return parseMsg(raw, ProbeResultSchema, 'nodes/test');

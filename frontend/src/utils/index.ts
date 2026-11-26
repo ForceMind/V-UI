@@ -905,6 +905,7 @@ export class LanguageManager {
   ];
 
   static getLanguage(scope: LanguageScope = 'panel'): string {
+    if (scope === 'panel') return 'zh-CN';
     const cookieName = languageCookieNames[scope];
     let lang = CookieManager.getCookie(cookieName);
     if (lang) return lang;

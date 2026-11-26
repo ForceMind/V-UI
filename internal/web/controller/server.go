@@ -12,7 +12,6 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/netsafe"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/entity"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/global"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service/panel"
@@ -52,8 +51,6 @@ func (a *ServerController) initRouter(g *gin.RouterGroup) {
 	g.GET("/xrayObservatory", a.getXrayObservatory)
 	g.GET("/xrayObservatoryHistory/:tag/:bucket", a.getXrayObservatoryHistoryBucket)
 	g.GET("/getXrayVersion", a.getXrayVersion)
-	g.GET("/getPanelUpdateInfo", a.getPanelUpdateInfo)
-	g.GET("/getUpdateStatus", a.getUpdateStatus)
 	g.GET("/getConfigJson", a.getConfigJson)
 	g.GET("/getDb", a.getDb)
 	g.GET("/getMigration", a.getMigration)
@@ -70,8 +67,6 @@ func (a *ServerController) initRouter(g *gin.RouterGroup) {
 	g.POST("/stopXrayService", a.stopXrayService)
 	g.POST("/restartXrayService", a.restartXrayService)
 	g.POST("/installXray/:version", a.installXray)
-	g.POST("/updatePanel", a.updatePanel)
-	g.POST("/setUpdateChannel", a.setUpdateChannel)
 	g.POST("/updateGeofile", a.updateGeofile)
 	g.POST("/updateGeofile/:fileName", a.updateGeofile)
 	g.POST("/logs/:count", a.getLogs)
@@ -193,65 +188,11 @@ func (a *ServerController) getXrayVersion(c *gin.Context) {
 	jsonObj(c, versions, nil)
 }
 
-// getPanelUpdateInfo retrieves the current and latest panel version.
-func (a *ServerController) getPanelUpdateInfo(c *gin.Context) {
-	info, err := a.panelService.GetUpdateInfo()
-	if err != nil {
-		logger.Debug("panel update check failed:", err)
-		c.JSON(http.StatusOK, entity.Msg{Success: false})
-		return
-	}
-	jsonObj(c, info, nil)
-}
-
 // installXray installs or updates Xray to the specified version.
 func (a *ServerController) installXray(c *gin.Context) {
 	version := c.Param("version")
 	err := a.serverService.UpdateXray(version)
 	jsonMsg(c, I18nWeb(c, "pages.index.xraySwitchVersionPopover"), err)
-}
-
-// updatePanel starts a panel self-update. With no "dev" form value it follows
-// this panel's own channel setting; an explicit "dev" (sent by the master node
-// updater) overrides it for this run. The response's runId identifies this
-// update for a later getUpdateStatus poll.
-func (a *ServerController) updatePanel(c *gin.Context) {
-	devParam := c.PostForm("dev")
-	var runID int64
-	var err error
-	if devParam == "" {
-		runID, err = a.panelService.StartUpdate()
-	} else {
-		dev, perr := strconv.ParseBool(devParam)
-		if perr != nil {
-			jsonMsg(c, "invalid data", perr)
-			return
-		}
-		runID, err = a.panelService.StartUpdateChannel(dev)
-	}
-	var obj any
-	if err == nil {
-		obj = gin.H{"runId": strconv.FormatInt(runID, 10)}
-	}
-	jsonMsgObj(c, I18nWeb(c, "pages.index.panelUpdateStartedPopover"), obj, err)
-}
-
-// getUpdateStatus reports the outcome of the most recently launched panel
-// self-update (see updatePanel). Compare the returned runId against the one
-// updatePanel returned to tell this run's result apart from a stale one.
-func (a *ServerController) getUpdateStatus(c *gin.Context) {
-	jsonObj(c, a.panelService.GetUpdateStatus(), nil)
-}
-
-// setUpdateChannel toggles whether self-update tracks the rolling dev release.
-func (a *ServerController) setUpdateChannel(c *gin.Context) {
-	dev, err := strconv.ParseBool(c.PostForm("dev"))
-	if err != nil {
-		jsonMsg(c, "invalid data", err)
-		return
-	}
-	err = a.settingService.SetDevChannelEnable(dev)
-	jsonMsg(c, I18nWeb(c, "pages.index.updateChannelChanged"), err)
 }
 
 // updateGeofile updates the specified geo file for Xray.

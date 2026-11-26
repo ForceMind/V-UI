@@ -23,7 +23,7 @@ and an entry for a removed route documents an endpoint that 404s. This test
 constructs the real router and diffs it against the registry both ways.
 
 Scope: everything under /panel/api/ plus the session-auth surface the
-registry also documents (/login, /logout, /csrf-token, /sponsors,
+registry also documents (/login, /logout, /csrf-token,
 /getTwoFactorEnable, /ws). SPA page routes are UI, not API, and stay out;
 registry paths that start with "/{" describe the standalone subscription
 server, which this engine does not serve.
@@ -33,7 +33,6 @@ var contractExtraRoutes = map[string]bool{
 	"POST /login":              true,
 	"POST /logout":             true,
 	"GET /csrf-token":          true,
-	"GET /sponsors":            true,
 	"POST /getTwoFactorEnable": true,
 	"GET /ws":                  true,
 }
@@ -107,6 +106,18 @@ func documentedContractRoutes(t *testing.T) map[string]bool {
 func TestRouteRegistryContract(t *testing.T) {
 	registered := registeredContractRoutes(t)
 	documented := documentedContractRoutes(t)
+
+	t.Run("promotion and local panel update routes are absent", func(t *testing.T) {
+		for _, route := range []string{
+			"GET /sponsors", "GET /sponsors/logo/:name",
+			"GET /panel/api/server/getPanelUpdateInfo", "GET /panel/api/server/getUpdateStatus",
+			"POST /panel/api/server/updatePanel", "POST /panel/api/server/setUpdateChannel",
+		} {
+			if registered[route] || documented[route] {
+				t.Errorf("removed route is still present: %s", route)
+			}
+		}
+	})
 
 	t.Run("every API route is documented", func(t *testing.T) {
 		var missing []string

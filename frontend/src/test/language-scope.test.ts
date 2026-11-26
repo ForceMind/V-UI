@@ -41,7 +41,7 @@ describe('subscription language scope', () => {
     expect(dateTimeFormat).toHaveBeenLastCalledWith('fa-IR', expect.any(Object));
   });
 
-  it('maps a Slovak browser to the Slovak panel locale instead of resetting to English', async () => {
+  it('keeps the panel in Simplified Chinese and maps a Slovak subscription browser to Slovak', async () => {
     vi.resetModules();
     const utils = await import('@/utils');
     const cookies = new Map<string, string>();
@@ -54,8 +54,10 @@ describe('subscription language scope', () => {
     const reload = vi.fn();
     vi.stubGlobal('window', { navigator: { language: 'sk' }, location: { reload } });
 
-    expect(utils.LanguageManager.getLanguage()).toBe('sk-SK');
-    expect(cookies.get('lang')).toBe('sk-SK');
+    expect(utils.LanguageManager.getLanguage()).toBe('zh-CN');
+    expect(utils.LanguageManager.getLanguage('subscription')).toBe('sk-SK');
+    expect(cookies.get('lang')).toBeUndefined();
+    expect(cookies.get('subLang')).toBe('sk-SK');
     expect(reload).not.toHaveBeenCalled();
   });
 

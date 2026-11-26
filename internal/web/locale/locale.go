@@ -36,8 +36,8 @@ type SettingService interface {
 
 // InitLocalizer initializes the internationalization system with embedded translation files.
 func InitLocalizer(i18nFS fs.FS, settingService SettingService) error {
-	// set default bundle to English
-	i18nBundle = i18n.NewBundle(language.MustParse("en-US"))
+	// 默认使用简体中文。
+	i18nBundle = i18n.NewBundle(language.SimplifiedChinese)
 	i18nBundle.RegisterUnmarshalFunc("json", json.Unmarshal)
 
 	// parse files
@@ -141,29 +141,20 @@ func initTGBotLocalizer(settingService SettingService) error {
 }
 
 // LocalizerMiddleware returns a Gin middleware that sets up localization for web requests.
-// It determines the user's language from cookies or Accept-Language header,
-// creates a localizer instance, and stores it in the Gin context for use in handlers.
+// It stores a Simplified Chinese localizer in the Gin context.
 // Also provides the I18n function in the context for template rendering.
 func LocalizerMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Ensure bundle is initialized so creating a Localizer won't panic
 		if i18nBundle == nil {
-			i18nBundle = i18n.NewBundle(language.MustParse("en-US"))
+			i18nBundle = i18n.NewBundle(language.SimplifiedChinese)
 			i18nBundle.RegisterUnmarshalFunc("json", json.Unmarshal)
 			// Try lazy-load from disk when running sub server without InitLocalizer
 			if err := loadTranslationsFromDisk(i18nBundle); err != nil {
 				logger.Warning("i18n lazy load failed:", err)
 			}
 		}
-		var lang string
-
-		if cookie, err := c.Request.Cookie("lang"); err == nil {
-			lang = cookie.Value
-		} else {
-			lang = c.GetHeader("Accept-Language")
-		}
-
-		LocalizerWeb = i18n.NewLocalizer(i18nBundle, lang)
+		LocalizerWeb = i18n.NewLocalizer(i18nBundle, "zh-CN")
 
 		c.Set("localizer", LocalizerWeb)
 		c.Set("I18n", I18n)

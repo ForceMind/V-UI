@@ -12,6 +12,7 @@
 
 # Ignore temporary files
 tmp/
+dist/*.sha256
 *.tar.gz
 
 # Ignore build and distribution directories

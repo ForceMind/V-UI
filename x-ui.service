@@ -1,0 +1,36 @@
+[Unit]
+Description=3X-UI 中文精简版
+After=network.target
+
+[Service]
+Type=simple
+User=x-ui-zh
+Group=x-ui-zh
+Environment=HOME=/etc/x-ui
+Environment=XUI_DB_FOLDER=/etc/x-ui
+Environment=XUI_LOG_FOLDER=/var/log/x-ui
+Environment=XRAY_VMESS_AEAD_FORCED=false
+WorkingDirectory=/usr/local/x-ui
+ExecStart=/usr/local/x-ui/x-ui
+ExecReload=/bin/kill -USR1 $MAINPID
+Restart=on-failure
+RestartSec=5s
+KillMode=mixed
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/etc/x-ui /usr/local/x-ui/bin /var/log/x-ui
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

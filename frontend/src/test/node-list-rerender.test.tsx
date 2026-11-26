@@ -9,19 +9,6 @@ import type { NodeRecord } from '@/schemas/node';
 
 import { makeTestQueryClient } from './test-utils';
 
-const updateChecks = vi.hoisted(() => ({ count: 0 }));
-
-vi.mock('@/lib/panel-version', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/panel-version')>();
-  return {
-    ...actual,
-    isPanelUpdateAvailable: (...args: Parameters<typeof actual.isPanelUpdateAvailable>) => {
-      updateChecks.count++;
-      return actual.isPanelUpdateAvailable(...args);
-    },
-  };
-});
-
 // Every heartbeat push re-rendered all rows, unchanged ones too: the columns and
 // table props were rebuilt on each render, so every cell re-ran its renderer.
 describe('NodeList re-render', () => {
@@ -32,6 +19,8 @@ describe('NodeList re-render', () => {
         <ThemeProvider>{children}</ThemeProvider>
       </QueryClientProvider>
     );
+    const unavailableMetrics: string[] = [];
+    const metricsChecks = vi.spyOn(unavailableMetrics, 'includes');
     const nodes: NodeRecord[] = [1, 2, 3].map((id) => ({
       id,
       name: `node-${id}`,
@@ -40,29 +29,25 @@ describe('NodeList re-render', () => {
       enable: true,
       status: 'online',
       panelVersion: '3.0.0',
+      unavailableMetrics,
     }));
     const noop = () => {};
     const props = {
       nodes,
       isMobile: false,
-      latestVersion: '3.0.1',
-      selectedIds: [] as number[],
-      onSelectionChange: noop,
       onAdd: noop,
       onMtls: noop,
       onEdit: noop,
       onDelete: noop,
       onProbe: noop,
       onToggleEnable: noop,
-      onUpdateNode: noop,
-      onUpdateSelected: noop,
     };
     const view = render(<NodeList {...props} />, { wrapper });
-    expect(updateChecks.count).toBeGreaterThan(0);
+    expect(metricsChecks).toHaveBeenCalled();
 
-    updateChecks.count = 0;
+    metricsChecks.mockClear();
     view.rerender(<NodeList {...props} />);
 
-    expect(updateChecks.count).toBe(0);
+    expect(metricsChecks).not.toHaveBeenCalled();
   });
 });

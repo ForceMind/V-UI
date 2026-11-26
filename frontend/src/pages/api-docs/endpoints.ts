@@ -237,13 +237,6 @@ export const sections: readonly Section[] = [
         response: '{\n  "success": true,\n  "obj": "csrf-token-string"\n}',
       },
       {
-        method: 'GET',
-        path: '/sponsors',
-        summary:
-          'Public. Active paid sponsor placements read from the project sponsors.json (cached for 1h); entries outside their from/until window are dropped. Logos are proxied by the panel at /sponsors/logo/{name}. Used by the login page and panel sponsor slots.',
-        responseSchema: 'SponsorList',
-      },
-      {
         method: 'POST',
         path: '/getTwoFactorEnable',
         summary:
@@ -562,18 +555,6 @@ export const sections: readonly Section[] = [
       },
       {
         method: 'GET',
-        path: '/panel/api/server/getPanelUpdateInfo',
-        summary: 'Check whether a newer 3x-ui release is available on GitHub.',
-      },
-      {
-        method: 'GET',
-        path: '/panel/api/server/getUpdateStatus',
-        summary:
-          'Report the outcome of the most recently launched panel self-update (see POST updatePanel). Compare the returned runId against the one updatePanel returned to tell this run apart from a stale result.',
-        responseSchema: 'PanelUpdateStatus',
-      },
-      {
-        method: 'GET',
         path: '/panel/api/server/getConfigJson',
         summary: 'Return the assembled Xray config that\u2019s currently running on this host.',
         response:
@@ -666,37 +647,6 @@ export const sections: readonly Section[] = [
             desc: 'Xray tag (e.g. v25.10.31) or "latest".',
           },
         ],
-      },
-      {
-        method: 'POST',
-        path: '/panel/api/server/updatePanel',
-        summary:
-          'Self-update the panel to the latest version. The server restarts on success. Bearer-token callers need admin or node-admin scope.',
-        params: [
-          {
-            name: 'dev',
-            in: 'body (form)',
-            type: 'boolean',
-            desc: "Override this run's channel. Omit to use the panel's configured channel.",
-            optional: true,
-          },
-        ],
-        response: '{\n  "success": true,\n  "obj": {\n    "runId": "1735689600123456789"\n  }\n}',
-      },
-      {
-        method: 'POST',
-        path: '/panel/api/server/setUpdateChannel',
-        summary:
-          'Toggle the panel update channel between stable and the rolling per-commit dev release. Only effective on dev builds.',
-        params: [
-          {
-            name: 'dev',
-            in: 'body (form)',
-            type: 'boolean',
-            desc: 'true = dev channel, false = stable.',
-          },
-        ],
-        body: 'dev=true',
       },
       {
         method: 'POST',

@@ -1040,12 +1040,6 @@ export const EXAMPLES: Record<string, unknown> = {
     "total": 0,
     "up": 0
   },
-  "PanelUpdateStatus": {
-    "exitCode": 0,
-    "finishedAt": 1735689612,
-    "runId": "1735689600123456789",
-    "state": "success"
-  },
   "PeerActivity": {
     "allowedIPs": "10.8.1.2/32",
     "down": 4194304,
@@ -1152,39 +1146,6 @@ export const EXAMPLES: Record<string, unknown> = {
     "id": 0,
     "key": "",
     "value": ""
-  },
-  "Sponsor": {
-    "enable": true,
-    "from": "2026-10-01T00:00:00Z",
-    "id": "acme-2026-10",
-    "link": "https://acme.example/?utm_source=3x-ui",
-    "logo": "/sponsors/logo/acme.png",
-    "name": "Acme VPS",
-    "slots": [
-      ""
-    ],
-    "text": {},
-    "title": {},
-    "until": "2026-11-01T00:00:00Z"
-  },
-  "SponsorList": {
-    "contact": "https://t.me/example",
-    "sponsors": [
-      {
-        "enable": true,
-        "from": "2026-10-01T00:00:00Z",
-        "id": "acme-2026-10",
-        "link": "https://acme.example/?utm_source=3x-ui",
-        "logo": "/sponsors/logo/acme.png",
-        "name": "Acme VPS",
-        "slots": [
-          ""
-        ],
-        "text": {},
-        "title": {},
-        "until": "2026-11-01T00:00:00Z"
-      }
-    ]
   },
   "SubBalancer": {
     "createdAt": 1710000000000,

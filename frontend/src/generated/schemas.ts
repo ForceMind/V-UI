@@ -4169,35 +4169,6 @@ export const SCHEMAS: Record<string, unknown> = {
     ],
     "type": "object"
   },
-  "PanelUpdateStatus": {
-    "description": "PanelUpdateStatus reports the outcome of the most recently launched panel\nself-update. RunID lets the caller confirm this status belongs to the\nupdate it started rather than a stale result left over from an earlier\nrun; State is one of \"pending\", \"success\", or \"failed\". RunID is a decimal\nstring, not a JSON number: it's a formatted UnixNano timestamp, and\nJavaScript's number type can't represent that precisely (it exceeds\nNumber.MAX_SAFE_INTEGER), which would let two different runs round to the\nsame value on the wire and defeat the whole point of this field.",
-    "properties": {
-      "exitCode": {
-        "example": 0,
-        "type": "integer"
-      },
-      "finishedAt": {
-        "example": 1735689612,
-        "format": "int64",
-        "type": "integer"
-      },
-      "runId": {
-        "example": "1735689600123456789",
-        "type": "string"
-      },
-      "state": {
-        "example": "success",
-        "type": "string"
-      }
-    },
-    "required": [
-      "exitCode",
-      "finishedAt",
-      "runId",
-      "state"
-    ],
-    "type": "object"
-  },
   "PeerActivity": {
     "description": "PeerActivity is one peer's live embedded-Device-reported state, the\ncounterpart of an Xray access-log entry: a tunnel logs no requests, only\nhandshakes and bytes.",
     "properties": {
@@ -4634,90 +4605,6 @@ export const SCHEMAS: Record<string, unknown> = {
       "id",
       "key",
       "value"
-    ],
-    "type": "object"
-  },
-  "Sponsor": {
-    "description": "Sponsor is one paid placement published in the repo's sponsors.json.",
-    "properties": {
-      "enable": {
-        "example": true,
-        "nullable": true,
-        "type": "boolean"
-      },
-      "from": {
-        "example": "2026-10-01T00:00:00Z",
-        "format": "date-time",
-        "nullable": true,
-        "type": "string"
-      },
-      "id": {
-        "example": "acme-2026-10",
-        "type": "string"
-      },
-      "link": {
-        "example": "https://acme.example/?utm_source=3x-ui",
-        "type": "string"
-      },
-      "logo": {
-        "example": "/sponsors/logo/acme.png",
-        "type": "string"
-      },
-      "name": {
-        "example": "Acme VPS",
-        "type": "string"
-      },
-      "slots": {
-        "items": {
-          "type": "string"
-        },
-        "type": "array"
-      },
-      "text": {
-        "additionalProperties": {
-          "type": "string"
-        },
-        "type": "object"
-      },
-      "title": {
-        "additionalProperties": {
-          "type": "string"
-        },
-        "type": "object"
-      },
-      "until": {
-        "example": "2026-11-01T00:00:00Z",
-        "format": "date-time",
-        "type": "string"
-      }
-    },
-    "required": [
-      "id",
-      "link",
-      "name",
-      "slots",
-      "text",
-      "title",
-      "until"
-    ],
-    "type": "object"
-  },
-  "SponsorList": {
-    "description": "SponsorList is the active sponsor set plus the contact link for new sponsors.",
-    "properties": {
-      "contact": {
-        "example": "https://t.me/example",
-        "type": "string"
-      },
-      "sponsors": {
-        "items": {
-          "$ref": "#/components/schemas/Sponsor"
-        },
-        "type": "array"
-      }
-    },
-    "required": [
-      "sponsors"
     ],
     "type": "object"
   },

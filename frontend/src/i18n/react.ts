@@ -1,52 +1,37 @@
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
-
-import { LanguageManager } from '@/utils';
-import type { LanguageScope } from '@/utils';
+import { LanguageManager, type LanguageScope } from '@/utils';
 import { loadAntdLocale } from './AntdRootConfig';
-import enUS from '../../../internal/web/translation/en-US.json';
+import messages from '../../../internal/web/translation/zh-CN.json';
 
-const FALLBACK = 'en-US';
+const language = 'zh-CN';
 
-const lazyModules = import.meta.glob([
+const subscriptionLocales = import.meta.glob([
   '../../../internal/web/translation/*.json',
-  '!../../../internal/web/translation/en-US.json',
+  '!../../../internal/web/translation/zh-CN.json',
 ]);
 
-function moduleKeyFor(code: string): string {
-  return `../../../internal/web/translation/${code}.json`;
-}
-
 export async function readyI18n(scope: LanguageScope = 'panel') {
-  let active = LanguageManager.getLanguage(scope);
-  if (
-    active !== FALLBACK &&
-    !Object.prototype.hasOwnProperty.call(lazyModules, moduleKeyFor(active))
-  ) {
-    active = FALLBACK;
-  }
-
+  const requested = scope === 'subscription' ? LanguageManager.getLanguage(scope) : language;
+  const key = `../../../internal/web/translation/${requested}.json`;
+  const load = Object.hasOwn(subscriptionLocales, key) ? subscriptionLocales[key] : undefined;
+  const active = load ? requested : language;
   await i18next.use(initReactI18next).init({
     lng: active,
-    fallbackLng: FALLBACK,
-    resources: { [FALLBACK]: { translation: enUS } },
+    fallbackLng: language,
+    resources: { [language]: { translation: messages } },
     interpolation: { escapeValue: false, prefix: '{', suffix: '}' },
     returnNull: false,
   });
-  if (active !== FALLBACK) {
-    const loader = lazyModules[moduleKeyFor(active)] as
-      | (() => Promise<{ default: Record<string, unknown> }>)
-      | undefined;
-    if (loader) {
-      const mod = await loader();
-      const messages = (mod.default ?? mod) as Record<string, unknown>;
-      i18next.addResourceBundle(active, 'translation', messages, true, true);
-      await i18next.changeLanguage(active);
-    }
+  if (load) {
+    const { default: subscriptionMessages } = (await load()) as {
+      default: Record<string, unknown>;
+    };
+    i18next.addResourceBundle(active, 'translation', subscriptionMessages, true, true);
+    await i18next.changeLanguage(active);
   }
-  // The html files ship lang="en"; screen readers pick their voice from it (s-ui#1293).
-  document.documentElement.lang = i18next.language;
-  await loadAntdLocale(i18next.language);
+  document.documentElement.lang = active;
+  await loadAntdLocale(active);
   return i18next;
 }
 

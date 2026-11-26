@@ -23,16 +23,12 @@ function renderList(isMobile: boolean) {
     <NodeList
       nodes={[failing]}
       isMobile={isMobile}
-      selectedIds={[]}
-      onSelectionChange={noop}
       onAdd={noop}
       onMtls={noop}
       onEdit={noop}
       onDelete={noop}
       onProbe={noop}
       onToggleEnable={noop}
-      onUpdateNode={noop}
-      onUpdateSelected={noop}
     />,
   );
 }
