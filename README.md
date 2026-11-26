@@ -54,11 +54,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/3x-ui-zh-lite
 
 ## 离线安装或更新
 
-传输同一版本的完整安装包与 `.sha256` 到目标服务器。以 `zh.4` 为例：
+传输同一版本的完整安装包与 `.sha256` 到目标服务器。以 `zh.5` 为例：
 
 ```bash
-sha256sum -c 3x-ui-v3.11.0-zh.4-linux-amd64.tar.gz.sha256
-tar -xzf 3x-ui-v3.11.0-zh.4-linux-amd64.tar.gz
+sha256sum -c 3x-ui-v3.11.0-zh.5-linux-amd64.tar.gz.sha256
+tar -xzf 3x-ui-v3.11.0-zh.5-linux-amd64.tar.gz
 cd 3x-ui-zh-lite
 sudo bash install.sh
 ```
@@ -81,7 +81,7 @@ sudo bash install.sh
 
 最终 `zh.4` 安装包来自源码提交 `637331dd4ca3af4551e7a9de2720b8391bba9edd`。同一个包在五台独立的 Ubuntu 24.04 测试机上通过全新安装、两个原版的迁移与两个原版的故障回退。两版均使用原账号通过 HTTPS 登录、用原客户端完成真实 VLESS 连接，并核对了端口、登录路径、入站与客户端关系、历史流量、证书及自定义文件。测试使用临时证书与本机网络目标。见[最终验收的全部作业](https://github.com/ForceMind/V-UI/actions/runs/45795739574)。
 
-`zh.5` 修正 `zh.4` 启动时新增的 PostgreSQL、Fail2ban 和证书问答。默认命令直接安装，附加工具可通过显式参数或中文运维菜单使用。验收在真实终端条件下执行默认安装，并使用同一候选包复验两个原版迁移和回退。
+`zh.5` 修正 `zh.4` 启动时新增的 PostgreSQL、Fail2ban 和证书问答。默认命令直接安装，附加工具可通过显式参数或中文运维菜单使用。源码提交 `7419cedf740d2d49f958a69af132a10c90c2ac32` 构建的安装包在 Ubuntu 24.04 的伪终端下直接装好并通过真实登录，同时通过了两个原版的迁移与故障回退。[本次验收](https://github.com/ForceMind/V-UI/actions/runs/45803743790)
 
 `zh.3` 修正证书申请前的端口占用检查、绑定结果回读及 HTTPS 就绪检查。全新安装选用证书时，HTTPS 验证失败会保留证书文件并验证已恢复仅本机的 HTTP。独立签发遇到现有监听时保留现有服务，可从证书菜单用 DNS 验证。本地模拟检查覆盖端口占用与空闲、HTTPS 探测参数、证书私钥不匹配、部分写入及重置回读。
 
