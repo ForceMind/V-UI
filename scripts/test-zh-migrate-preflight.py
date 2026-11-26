@@ -1,8 +1,11 @@
 """Read-only unit tests for the embedded Linux preflight; no host service calls."""
 import contextlib
+import ast
 import copy
 import io
+import ipaddress
 import json
+import math
 import pathlib
 import re
 import shutil
@@ -239,7 +242,7 @@ class Preflight(unittest.TestCase):
     def test_292_database_contract_rejects_client_account_or_configuration_loss(self):
         upgrade = SOURCE.split("<<'PY'\n")[4].split('\nPY\n', 1)[0]
         accepted = {'none','numeric-strings','unset-timestamps','json-number-format'}
-        for damage in ('none', 'numeric-strings', 'unset-timestamps', 'json-number-format', 'password', 'client', 'limit', 'link', 'port', 'traffic', 'setting', 'routing', 'dns', 'outbound', 'json-boolean-type', 'created-at', 'updated-at', 'relative-cert-without-inbounds'):
+        for damage in ('none', 'numeric-strings', 'unset-timestamps', 'json-number-format', 'core-reject', 'password', 'client', 'limit', 'link', 'port', 'traffic', 'setting', 'routing', 'dns', 'outbound', 'json-boolean-type', 'created-at', 'updated-at', 'relative-cert-without-inbounds'):
             with self.subTest(damage=damage), tempfile.TemporaryDirectory(prefix='migration-292-') as temporary:
                 stage = pathlib.Path(temporary)
                 (stage/'backup/database').mkdir(parents=True)
@@ -261,6 +264,12 @@ class Preflight(unittest.TestCase):
                 before = original.read_bytes()
                 shutil.copy2(original, stage/'check-database/x-ui.db')
                 def simulate_official_seeders(args, **kwargs):
+                    if args[1:3]==['run','-test']:
+                        self.assertEqual(args[3],'-c')
+                        self.assertEqual(kwargs['env']['XRAY_LOCATION_ASSET'],'/usr/local/x-ui/bin')
+                        validation=json.loads(pathlib.Path(args[4]).read_text())
+                        self.assertEqual(validation['routing'],template['routing'])
+                        return types.SimpleNamespace(returncode=23 if damage=='core-reject' else 0)
                     self.assertEqual(kwargs['env']['XUI_DB_FOLDER'],str(stage/'check-database'))
                     self.assertEqual(args[1:],['setting','-show','true'])
                     with contextlib.closing(sqlite3.connect(stage/'check-database/x-ui.db')) as migrated:
@@ -282,6 +291,43 @@ class Preflight(unittest.TestCase):
                     else:
                         with self.assertRaises(SystemExit): exec(compile(upgrade,'upgrade-contract','exec'),{})
                 self.assertEqual(original.read_bytes(),before)
+
+    def test_official_template_changes_need_ordered_private_egress_proof(self):
+        upgrade=SOURCE.split("<<'PY'\n")[4].split('\nPY\n',1)[0]
+        nodes=[node for node in ast.parse(upgrade).body if isinstance(node,ast.FunctionDef) and node.name in ('json_semantics','template_semantics_preserved')]
+        namespace={'copy':copy,'ipaddress':ipaddress,'math':math}
+        exec(compile(ast.Module(body=nodes,type_ignores=[]),'template-proof','exec'),namespace)
+        preserved=namespace['template_semantics_preserved']
+        # Exact relevant official v2.9.2 defaults, with the systemd fixture's
+        # explicit public test destination inserted before the private deny.
+        before={'api':{'tag':'api','services':['HandlerService','LoggerService','StatsService']},'inbounds':[{'tag':'api','listen':'127.0.0.1','port':62789,'protocol':'tunnel','settings':{'address':'127.0.0.1'}}],
+                'outbounds':[{'tag':'direct','protocol':'freedom','settings':{'domainStrategy':'AsIs','redirect':'','noises':[]}},{'tag':'blocked','protocol':'blackhole','settings':{}},{'tag':'ci-loopback','protocol':'freedom','settings':{'finalRules':[{'action':'allow','ip':['203.0.114.77/32']},{'action':'block'}]}}],
+                'routing':{'domainStrategy':'AsIs','rules':[{'type':'field','inboundTag':['api'],'outboundTag':'api'},{'type':'field','ip':['203.0.114.77/32'],'outboundTag':'ci-loopback'},{'type':'field','ip':['geoip:private'],'outboundTag':'blocked'},{'type':'field','outboundTag':'blocked','protocol':['bittorrent']}]}}
+        after=copy.deepcopy(before)
+        after['outbounds'][0]['settings'].pop('domainStrategy')
+        after['outbounds'][0]['settings']['finalRules']=[{'action':'block','ip':['geoip:private']},{'action':'allow'}]
+        self.assertTrue(preserved(before,after,[{'protocol':'vless'}]))
+        for damage in ('private-allow','domain-exception','missing-deny','filtered-deny','public-api','plaintext','ips-override','dns-change','route-order','custom-final-rules'):
+            old,new=copy.deepcopy(before),copy.deepcopy(after)
+            rows=[{'protocol':'vless'}]
+            if damage=='private-allow':
+                rule={'type':'field','ip':['10.0.0.0/8'],'outboundTag':'direct'}
+                old['routing']['rules'].insert(1,rule);new['routing']['rules'].insert(1,rule)
+            elif damage=='domain-exception':
+                rule={'type':'field','domain':['internal.example.com'],'outboundTag':'direct'}
+                old['routing']['rules'].insert(1,rule);new['routing']['rules'].insert(1,rule)
+            elif damage=='missing-deny':
+                del old['routing']['rules'][2];del new['routing']['rules'][2]
+            elif damage=='filtered-deny':
+                old['routing']['rules'][2]['port']='443';new['routing']['rules'][2]['port']='443'
+            elif damage=='public-api':
+                old['inbounds'][0]['listen']='0.0.0.0';new['inbounds'][0]['listen']='0.0.0.0'
+            elif damage=='plaintext': rows=[{'protocol':'http'}]
+            elif damage=='ips-override': old['outbounds'][0]['settings']['ipsBlocked']=[]
+            elif damage=='dns-change': new['dns']={'servers':['8.8.8.8']}
+            elif damage=='route-order': new['routing']['rules'].reverse()
+            elif damage=='custom-final-rules': old['outbounds'][0]['settings']['finalRules']=[{'action':'allow','ip':['10.0.0.0/8']}]
+            with self.subTest(damage=damage): self.assertFalse(preserved(old,new,rows))
 
     def test_rejects_unsupported_or_ambiguous_layouts(self):
         examples = [

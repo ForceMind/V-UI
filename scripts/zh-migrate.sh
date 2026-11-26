@@ -422,7 +422,7 @@ PY
 
 migration_upgrade_check() {
     python3 -I - "$1" "$2" <<'PY'
-import hashlib, json, math, os, pathlib, re, sqlite3, subprocess, sys
+import copy, hashlib, ipaddress, json, math, os, pathlib, re, sqlite3, subprocess, sys
 stage, executable = pathlib.Path(sys.argv[1]), sys.argv[2]
 state = json.loads((stage/'backup/state.json').read_text())
 original = sqlite3.connect((stage/'backup/database/x-ui.db').as_uri()+'?mode=ro', uri=True)
@@ -455,6 +455,65 @@ def client_integer(value, field):
     elif type(value) is not int: fail('旧客户端字段不是合法整数：'+field)
     if not -(2**63) <= value < 2**63: fail('旧客户端字段超出 int64 范围：'+field)
     return value
+def template_semantics_preserved(before, after, original_inbounds):
+    if not isinstance(before,dict) or not isinstance(after,dict):
+        return json_semantics(before) == json_semantics(after)
+    expected = copy.deepcopy(before)
+    old_outbounds, new_outbounds = before.get('outbounds',[]), after.get('outbounds',[])
+    if not isinstance(old_outbounds,list) or not isinstance(new_outbounds,list) or len(old_outbounds)!=len(new_outbounds): return False
+    hardening = [{'action':'block','ip':['geoip:private']},{'action':'allow'}]
+    def private_egress_already_blocked():
+        # This range list is identical in official Xray 26.4.17 freedom.go and
+        # the locked 26.10.21 geodata/consts.go. Only known protected inbound
+        # protocols qualify; plaintext/custom inbound behavior is not inferred.
+        protected = {'vless','vmess','trojan','shadowsocks','wireguard','hysteria'}
+        if any(row.get('protocol') not in protected for row in original_inbounds): return False
+        private = [ipaddress.ip_network(value) for value in ('0.0.0.0/8','10.0.0.0/8','100.64.0.0/10','127.0.0.0/8','169.254.0.0/16','172.16.0.0/12','192.0.0.0/24','192.0.2.0/24','192.88.99.0/24','192.168.0.0/16','198.18.0.0/15','198.51.100.0/24','203.0.113.0/24','224.0.0.0/3','::/127','fc00::/7','fe80::/10','ff00::/8')]
+        api_config = before.get('api')
+        api_tag = api_config.get('tag') if isinstance(api_config,dict) else None
+        template_inbounds = before.get('inbounds',[])
+        if not isinstance(template_inbounds,list): return False
+        api_inbounds = [row for row in template_inbounds if isinstance(row,dict) and row.get('tag')==api_tag]
+        api_safe = isinstance(api_tag,str) and len(api_inbounds)==1 and api_inbounds[0].get('listen') in ('127.0.0.1','::1') and api_inbounds[0].get('protocol') in ('tunnel','dokodemo-door')
+        blackholes = {row.get('tag') for row in old_outbounds if isinstance(row,dict) and row.get('protocol')=='blackhole' and isinstance(row.get('tag'),str)}
+        routing = before.get('routing',{})
+        if not isinstance(routing,dict) or not isinstance(routing.get('rules'),list): return False
+        api_routed = False
+        for rule in routing['rules']:
+            if not isinstance(rule,dict): return False
+            keys = set(rule)
+            target = rule.get('outboundTag')
+            if keys=={'type','ip','outboundTag'} and rule.get('type')=='field' and rule.get('ip')==['geoip:private'] and isinstance(target,str) and target in blackholes:
+                return all(isinstance(row,dict) and (row.get('protocol') in protected or (api_safe and api_routed and row.get('tag')==api_tag)) for row in template_inbounds)
+            if api_safe and keys=={'type','inboundTag','outboundTag'} and rule.get('type')=='field' and rule.get('inboundTag')==[api_tag] and target==api_tag:
+                api_routed = True
+                continue
+            if isinstance(target,str) and target in blackholes: continue
+            # A preceding exception is safe only when its explicit destination
+            # ranges provably cannot include any private address. Domain/geo
+            # conditions or private allows do not qualify.
+            if keys!={'type','ip','outboundTag'} or rule.get('type')!='field' or not isinstance(rule.get('ip'),list) or not rule['ip']: return False
+            try: networks=[ipaddress.ip_network(value,strict=False) for value in rule['ip']]
+            except (ValueError,TypeError): return False
+            if any(net.version==blocked.version and net.overlaps(blocked) for net in networks for blocked in private): return False
+        return False
+    for index,(old,new) in enumerate(zip(old_outbounds,new_outbounds)):
+        if not isinstance(old,dict) or not isinstance(new,dict): continue
+        if old.get('protocol')!='freedom': continue
+        settings, updated = old.get('settings'), new.get('settings')
+        if not isinstance(settings,dict) or not isinstance(updated,dict): continue
+        expected_settings = expected['outbounds'][index]['settings']
+        # The old and locked new core both map absent/AsIs to AS_IS. Do not
+        # generalize non-default DNS strategies or overwrite custom sockopt.
+        for key in ('domainStrategy','targetStrategy'):
+            if isinstance(settings.get(key),str) and settings[key].lower() in ('','asis') and key not in updated: expected_settings.pop(key,None)
+        if isinstance(old.get('targetStrategy'),str) and old['targetStrategy'].lower() in ('','asis') and 'targetStrategy' not in new: expected['outbounds'][index].pop('targetStrategy',None)
+        if settings.get('finalRules') in (None,[]) and json_semantics(updated.get('finalRules'))==json_semantics(hardening):
+            if 'ipsBlocked' in settings or not private_egress_already_blocked(): return False
+            expected_settings['finalRules']=copy.deepcopy(hardening)
+    # Everything else, including order, DNS, user outbounds, prior routing and
+    # explicit allow/block rules, must still match the original declaration.
+    return json_semantics(expected)==json_semantics(after)
 try:
     users = rows(original, 'users')
     inbounds = rows(original, 'inbounds')
@@ -498,8 +557,23 @@ try:
         if key == 'xrayTemplateConfig':
             before = json.loads(value) if value.strip() else None
             after = json.loads(current) if isinstance(current, str) and current.strip() else None
-            if json_semantics(before) != json_semantics(after):
+            if not template_semantics_preserved(before,after,inbounds):
                 fail('Xray 模板的路由、DNS、outbounds 或其他配置发生语义差异，拒绝覆盖原配置。')
+            if isinstance(after,dict):
+                # Validate the accepted native seeder result with the exact
+                # bundled core. Redirect only diagnostic files into the private
+                # stage; no routing/policy or network option is changed.
+                validation=copy.deepcopy(after)
+                if isinstance(validation.get('log'),dict):
+                    validation['log'].update(access='none',error=str(stage/'core-validation-errors.log'))
+                filename=stage/'template-validated.json'
+                filename.write_text(json.dumps(validation,ensure_ascii=False))
+                core=pathlib.Path(executable).parent/'bin/xray-linux-amd64'
+                core_env=dict(environment)
+                core_env['XRAY_LOCATION_ASSET']='/usr/local/x-ui/bin'
+                with (stage/'template-core-check.log').open('wb') as log:
+                    checked=subprocess.run([str(core),'run','-test','-c',str(filename)],cwd='/usr/local/x-ui/bin',env=core_env,stdout=log,stderr=log,timeout=60)
+                if checked.returncode: fail('保真模板无法由包内新版核心加载，详见 template-core-check.log。')
             continue
         if key in ('webBasePath', 'subPath', 'subJsonPath', 'subClashPath') and isinstance(current, str) and value.strip('/') == current.strip('/'): continue
         if current != value: fail('设置被改变或删除：'+key)
