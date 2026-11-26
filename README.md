@@ -20,7 +20,7 @@ ssh -N -L 2053:127.0.0.1:2053 用户名@服务器地址
 
 ## 从已有的原版 3X-UI 迁移
 
-此入口面向原版 `v3.11.0` 和 `v2.9.2` 的官方脚本安装，适用于 Linux x86_64、systemd、root 服务和 SQLite。需要包含迁移工具的 `v3.11.0-zh.4` 或后续兼容包：
+原版 `v3.11.0` 和 `v2.9.2` 都可以用下面一条命令迁移到 `v3.11.0-zh.4`。适用条件是官方脚本安装、Linux x86_64、systemd、以 root 运行的服务和 SQLite 数据库。在原服务器的 Bash 中执行，保留现有安装和数据目录。
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/3x-ui-zh-lite/install-online.sh) --migrate
@@ -28,7 +28,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/3x-ui-zh-lite
 
 预检读取当前服务、程序版本和实际数据库位置。通过后会短暂停服，备份原程序、管理脚本、服务配置和 SQLite 数据（含仍存在的 WAL），沿用原账号、面板端口、登录路径、证书、节点和自定义核心文件。迁移结束会打印备份目录。启动检查失败时，脚本会尝试恢复备份并报告恢复结果。原本停止的服务会保持停止。
 
-跨主版本迁移会先验证旧数据库在副本上的升级结果。Docker、上文以外的版本、PostgreSQL 以及无法识别的定制服务布局会被拒绝。请保留原数据库和服务文件。已有 PostgreSQL 实例需要独立的备份和迁移流程。中文版新安装时可选择 PostgreSQL。迁移后仍使用 `sudo x-ui` 打开中文管理菜单。
+跨主版本迁移会先在数据库副本上升级并核对数据。遇到无法证明等价的自定义路由会中止并给出原因。Docker、上文以外的版本、已有 PostgreSQL 以及无法识别的定制服务布局会在预检时被拒绝。中文版新安装时可选择 PostgreSQL。迁移后用 `sudo x-ui` 打开中文管理菜单。
 
 ## 运维功能
 
@@ -78,6 +78,8 @@ sudo bash install.sh
 第二轮中，新装检查通过，原版 3.11.0 的账号和入站基线可用。迁移预检未能识别 systemd 多个环境文件的输出格式；2.9.2 的旧核心拦截了测试所用的私网目的地址。对应修正与完整记录见[第二次验收](https://github.com/ForceMind/V-UI/actions/runs/45790922967)。
 
 对齐测试机的 root 命令目录权限后，3.11.0 的真实迁移、重复执行和故障回退通过，既有账号和客户端仍可使用。2.9.2 的原程序也通过了真实 VLESS 连接，但副本升级检测到上游默认 Xray 模板发生变化并中止替换。见[权限预检](https://github.com/ForceMind/V-UI/actions/runs/45792660533)和[第四次验收](https://github.com/ForceMind/V-UI/actions/runs/45793410714)。
+
+最终 `zh.4` 安装包来自源码提交 `637331dd4ca3af4551e7a9de2720b8391bba9edd`。同一个包在五台独立的 Ubuntu 24.04 测试机上通过全新安装、两个原版的迁移与两个原版的故障回退。两版均使用原账号通过 HTTPS 登录、用原客户端完成真实 VLESS 连接，并核对了端口、登录路径、入站与客户端关系、历史流量、证书及自定义文件。测试使用临时证书与本机网络目标。见[最终验收的全部作业](https://github.com/ForceMind/V-UI/actions/runs/45795739574)。
 
 `zh.3` 修正证书申请前的端口占用检查、绑定结果回读及 HTTPS 就绪检查。全新安装选用证书时，HTTPS 验证失败会保留证书文件并验证已恢复仅本机的 HTTP。独立签发遇到现有监听时保留现有服务，可从证书菜单用 DNS 验证。本地模拟检查覆盖端口占用与空闲、HTTPS 探测参数、证书私钥不匹配、部分写入及重置回读。
 
