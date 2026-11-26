@@ -59,39 +59,60 @@ show_settings() {
 backup() (
     [[ $# == 1 ]] || die '用法：sudo x-ui 备份 <文件>'
     [[ ! -e $1 && ! -L $1 ]] || die '备份文件已存在，请另选文件名。'
+    source "$app/zh-helpers.sh"
+    xui_load_paths || die '无法确认原服务的数据位置，已取消备份。'
+    db=$xui_db_folder
+    [[ $xui_db_kind == sqlite ]] || die '当前使用 PostgreSQL，请从面板数据库备份或 PostgreSQL 工具保存备份。'
     [[ $(realpath -m -- "$1") != "$db/"* ]] || die '请将备份保存到数据库目录之外。'
     umask 077
-    local active=0 target temporary
+    local active=0 target temporary snapshot
     target=$(realpath -m -- "$1")
     temporary=$(mktemp -- "$(dirname -- "$target")/.x-ui-backup.XXXXXXXX")
-    trap 'rm -f -- "$temporary"; if (( active )); then systemctl start "$unit" || printf "备份后启动失败，请检查服务日志。\n" >&2; fi' EXIT
+    snapshot=$(mktemp -d -- "$(dirname -- "$target")/.x-ui-snapshot.XXXXXXXX")
+    trap 'if (( active )); then systemctl start "$unit" || printf "备份后启动失败，请检查服务日志。\n" >&2; fi; rm -f -- "$temporary"; rm -rf -- "$snapshot"' EXIT
     if systemctl is-active --quiet "$unit"; then
         active=1
         systemctl stop "$unit"
     fi
-    tar -C /etc -czf "$temporary" x-ui
-    ln -T -- "$temporary" "$target" || die '保存备份失败。'
+    [[ $(systemctl show "$unit" --property=MainPID --value) == 0 ]] || die '停服后仍有进程，未保存不一致的备份。'
+    cp -a -- "$db" "$snapshot/$(basename -- "$db")"
     if (( active )); then
-        systemctl start "$unit" || die '备份已保存，服务启动失败。请查看日志。'
+        systemctl start "$unit" || die '复制数据后服务启动失败，备份尚未保存。请查看日志。'
         active=0
     fi
+    # Compression runs after restoring service, so downtime covers only the copy.
+    tar -C "$snapshot" -czf "$temporary" "$(basename -- "$db")"
+    ln -T -- "$temporary" "$target" || die '保存备份失败。'
     printf '备份已保存：%s\n' "$target"
 )
 
 uninstall() {
-    local answer
+    local answer migrated=0 log_path unit_path
+    source "$app/zh-helpers.sh"
+    xui_load_paths || die '无法确认原服务和数据位置，已取消卸载。'
+    db=$xui_db_folder
+    log_path=$xui_log_folder
+    unit_path=$xui_unit_fragment
+    if xui_migrated; then migrated=1; fi
     printf '输入“卸载”确认。本操作会停止面板和节点服务，保留数据库和日志。\n'
     read -r answer || return 0
     [[ $answer == 卸载 ]] || return 0
     systemctl disable --now "$unit"
-    systemctl disable --now x-ui-zh-update.path
-    rm -f -- /etc/systemd/system/x-ui.service /usr/local/bin/x-ui /etc/systemd/system/x-ui-zh-update.{path,service}
+    if systemctl cat x-ui-zh-update.path >/dev/null 2>&1; then systemctl disable --now x-ui-zh-update.path; fi
+    if (( migrated )) && [[ -f /usr/bin/x-ui ]] && cmp -s -- /usr/bin/x-ui /usr/local/bin/x-ui; then rm -f -- /usr/bin/x-ui; fi
+    rm -f -- "$unit_path" /usr/local/bin/x-ui /etc/systemd/system/x-ui-zh-update.{path,service}
     local retired
     retired=$(mktemp -d /usr/local/.x-ui-uninstalled.XXXXXXXX)
     mv -T -- "$app" "$retired/program"
-    rm -rf -- "$retired"
+    if (( migrated )); then
+        # Original log/certificate paths may be inside app; keep the retired tree.
+        if [[ $log_path == "$app" || $log_path == "$app/"* ]]; then log_path=$retired/program${log_path#"$app"}; fi
+        printf '原程序及自定义资源保留在 %s。\n' "$retired/program"
+    else
+        rm -rf -- "$retired"
+    fi
     systemctl daemon-reload
-    printf '已卸载。数据库位于 %s，日志位于 /var/log/x-ui。\n' "$db"
+    printf '已卸载。数据库位于 %s，日志位于 %s。原环境文件与自定义服务附加配置保留。\n' "$db" "$log_path"
 }
 
 command=${1:-}
@@ -131,6 +152,8 @@ case $command in
         require_root
         if (( $# == 0 )); then exec bash "$app/install-online.sh" --update; fi
         [[ $# == 1 && -f $1/update.sh ]] || die '请传入已解压且校验过的同版系安装包目录。'
+        source "$app/zh-helpers.sh"
+        if xui_migrated; then exec bash "$1/install.sh" --migrate; fi
         exec bash "$1/update.sh" ;;
     update-dev) require_root; exec bash "$app/install-online.sh" --update --dev ;;
     卸载|uninstall) require_root; lock_operations; uninstall ;;

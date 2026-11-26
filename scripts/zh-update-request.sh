@@ -4,6 +4,12 @@ umask 077
 
 request=/etc/x-ui/update-request
 state=/var/lib/x-ui-zh-updates
+result_group=x-ui-zh
+if [[ ${1:-} == --migrated ]]; then
+    state=/var/lib/x-ui-zh-migration-updates
+    request=$state/update-request
+    result_group=root
+fi
 [[ -f $request && ! -L $request ]] || { rm -f -- "$request"; exit 1; }
 read -r run channel extra < <(timeout 2 head -c 32 -- "$request") || { rm -f -- "$request"; exit 1; }
 [[ $run =~ ^[0-9]{16,20}$ && $channel =~ ^(stable|dev)$ && -z ${extra:-} ]] || { rm -f -- "$request"; exit 1; }
@@ -15,7 +21,7 @@ report() {
     local temp
     temp=$(mktemp -- "$state/.result.XXXXXXXX")
     printf '{"state":"%s","runId":"%s","exitCode":%d,"finishedAt":%s}\n' "$status" "$run" "$result" "$(date +%s)" > "$temp"
-    chgrp x-ui-zh "$temp"
+    chgrp "$result_group" "$temp"
     chmod 0640 "$temp"
     mv -fT -- "$temp" "$state/status.json"
     rm -f -- "$request"

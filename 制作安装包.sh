@@ -38,7 +38,7 @@ install -m 0755 install.sh install-online.sh update.sh x-ui.sh "$bundle"
 install -m 0644 x-ui.service LICENSE README.md "$bundle"
 cp -a -- licenses "$bundle/licenses"
 mkdir -p "$bundle/scripts"
-install -m 0644 scripts/{zh-helpers.sh,zh-ops.sh,zh-provision.sh,zh-update-request.sh,x-ui-zh-update.service,x-ui-zh-update.path} "$bundle/scripts"
+install -m 0644 scripts/{zh-helpers.sh,zh-ops.sh,zh-provision.sh,zh-migrate.sh,zh-update-request.sh,x-ui-zh-update.service,x-ui-zh-update.path} "$bundle/scripts"
 printf '%s\n' "$version" > "$bundle/VERSION"
 git rev-parse HEAD > "$bundle/SOURCE_COMMIT"
 ( cd "$bundle"; find . -type f -print0 | sort -z | xargs -0 sha256sum > "$work/SHA256SUMS" )

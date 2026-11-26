@@ -10,27 +10,36 @@ log=/var/log/x-ui
 unit=/etc/systemd/system/x-ui.service
 command_path=/usr/local/bin/x-ui
 mode=install
+mode_selected=
 port=2053
+port_set=0
 postgres=0
 fail2ban=0
 ssl_host=
 update_units=(x-ui-zh-update.service x-ui-zh-update.path)
 
 die() { printf '安装错误：%s\n' "$*" >&2; exit 1; }
+select_mode() {
+    [[ -z $mode_selected || $mode_selected == "$1" ]] || die '更新和接管模式不能同时使用。'
+    mode=$1; mode_selected=$1
+}
 
 while (( $# )); do case $1 in
     -h|--help|帮助)
-        printf '全新安装：sudo bash install.sh [--port 2053] [--postgres] [--fail2ban] [--ssl 域名或IPv4]\n更新：sudo bash update.sh\n'
+        printf '全新安装：sudo bash install.sh [--port 2053] [--postgres] [--fail2ban] [--ssl 域名或IPv4]\n更新：sudo bash update.sh\n接管原版 v2.9.2 / v3.11.0（保留配置）：sudo bash install.sh --migrate\n'
         exit 0 ;;
-    --update) mode=update; shift ;;
+    --update) select_mode update; shift ;;
+    --migrate) select_mode migrate; shift ;;
     --port)
-        [[ $# == 2 && $2 =~ ^[1-9][0-9]{0,4}$ ]] || die '端口须为 1 至 65535 的整数。'
-        port=$2; shift 2 ;;
+        [[ $# -ge 2 && $2 =~ ^[1-9][0-9]{0,4}$ ]] || die '端口须为 1 至 65535 的整数。'
+        port=$2; port_set=1; shift 2 ;;
     --postgres) postgres=1; shift ;;
     --fail2ban) fail2ban=1; shift ;;
     --ssl) [[ $# -ge 2 && -n $2 ]] || die '请提供要申请证书的域名或 IPv4。'; ssl_host=$2; shift 2 ;;
     *) die '无法识别安装参数。运行 bash install.sh --help 查看用法。' ;;
 esac; done
+if [[ $mode == update && ( -e $app/.zh-lite-migration || -L $app/.zh-lite-migration ) ]]; then mode=migrate; fi
+if [[ $mode == migrate && ( $port_set == 1 || $postgres == 1 || $fail2ban == 1 || -n $ssl_host ) ]]; then die '接管保留原配置，不能同时指定端口、数据库、Fail2ban 或证书参数。'; fi
 if [[ $mode == update && ( $postgres == 1 || $fail2ban == 1 || -n $ssl_host ) ]]; then die '更新保留当前证书及数据库。需修改配置时请使用 x-ui 菜单。'; fi
 (( port <= 65535 )) || die '端口须为 1 至 65535 的整数。'
 (( EUID == 0 )) || die '请使用 sudo 运行安装脚本。'
@@ -47,6 +56,12 @@ version=$(<"$package/VERSION")
 
 exec 9>/run/x-ui-zh-lite.lock
 flock -n 9 || die '已有安装、更新或运维操作在执行。'
+
+if [[ $mode == migrate ]]; then
+    source "$package/scripts/zh-migrate.sh"
+    migrate_existing
+    exit 0
+fi
 
 source "$package/scripts/zh-helpers.sh"
 source "$package/scripts/zh-provision.sh"

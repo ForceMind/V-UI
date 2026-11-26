@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -132,10 +133,38 @@ func (s *PanelService) StartUpdate() (int64, error) {
 }
 
 func (s *PanelService) StartUpdateChannel(dev bool) (int64, error) {
+	if runtime.GOOS == "linux" && migratedRootPanel() {
+		// The original service remains intact. Run its updater in a separate
+		// systemd unit so stopping the panel does not interrupt the backup.
+		if err := os.MkdirAll(migratedUpdateDir, 0700); err != nil {
+			return 0, err
+		}
+		runID, err := queueUpdate(migratedUpdateDir, channelName(dev), time.Now().UnixNano())
+		if err != nil {
+			return 0, err
+		}
+		cmd := exec.Command("systemd-run", "--quiet", "--collect", "--unit=x-ui-zh-migration-update",
+			"/usr/local/x-ui/zh-update-request.sh", "--migrated")
+		if err := cmd.Run(); err != nil {
+			_ = os.Remove(filepath.Join(migratedUpdateDir, "update-request"))
+			return 0, fmt.Errorf("系统未能启动独立更新服务：%w", err)
+		}
+		return runID, nil
+	}
 	if runtime.GOOS != "linux" || os.Getenv("XUI_ZH_WEB_UPDATE") != "1" {
-		return 0, fmt.Errorf("此运行环境请使用终端执行 sudo x-ui update")
+		return 0, fmt.Errorf("此运行环境请在终端执行 sudo x-ui 更新")
 	}
 	return queueUpdate(config.GetDBFolderPath(), channelName(dev), time.Now().UnixNano())
+}
+
+const migratedUpdateDir = "/var/lib/x-ui-zh-migration-updates"
+
+func migratedRootPanel() bool {
+	if os.Geteuid() != 0 {
+		return false
+	}
+	marker, err := os.ReadFile("/usr/local/x-ui/.zh-lite-migration")
+	return err == nil && string(marker) == "sqlite-preserved-v1\n"
 }
 
 func queueUpdate(dir, channel string, runID int64) (int64, error) {
@@ -163,7 +192,9 @@ func queueUpdate(dir, channel string, runID int64) (int64, error) {
 
 func (s *PanelService) GetUpdateStatus() *PanelUpdateStatus {
 	path := config.GetUpdateStatusFilePath()
-	if os.Getenv("XUI_ZH_WEB_UPDATE") == "1" {
+	if migratedRootPanel() {
+		path = filepath.Join(migratedUpdateDir, "status.json")
+	} else if os.Getenv("XUI_ZH_WEB_UPDATE") == "1" {
 		path = "/var/lib/x-ui-zh-updates/status.json"
 	}
 	data, err := os.ReadFile(path)

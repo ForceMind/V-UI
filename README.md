@@ -4,7 +4,7 @@
 
 ## 一条命令安装
 
-在线入口读取本分支的 `packages/stable.txt`，从清单指定的提交下载完整的同版本安装包并校验 SHA-256。清单随获准上传的安装包提供。入口使用服务器上的 Bash 和 curl。
+在线入口读取本分支的 `packages/stable.txt`，从清单指定的提交下载完整的同版本安装包并校验 SHA-256。入口使用服务器上的 Bash 和 curl。
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/3x-ui-zh-lite/install-online.sh)
@@ -17,6 +17,18 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/3x-ui-zh-lite
 ```bash
 ssh -N -L 2053:127.0.0.1:2053 用户名@服务器地址
 ```
+
+## 从已有的原版 3X-UI 迁移
+
+此入口面向原版 `v3.11.0` 和 `v2.9.2` 的官方脚本安装，适用于 Linux x86_64、systemd、root 服务和 SQLite。需要包含迁移工具的 `v3.11.0-zh.4` 或后续兼容包：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/3x-ui-zh-lite/install-online.sh) --migrate
+```
+
+预检读取当前服务、程序版本和实际数据库位置。通过后会短暂停服，备份原程序、管理脚本、服务配置和 SQLite 数据（含仍存在的 WAL），沿用原账号、面板端口、登录路径、证书、节点和自定义核心文件。迁移结束会打印备份目录。启动检查失败时，脚本会尝试恢复备份并报告恢复结果。原本停止的服务会保持停止。
+
+跨主版本迁移会先验证旧数据库在副本上的升级结果。Docker、上文以外的版本、PostgreSQL 以及无法识别的定制服务布局会被拒绝。请保留原数据库和服务文件。已有 PostgreSQL 实例需要独立的备份和迁移流程。中文版新安装时可选择 PostgreSQL。迁移后仍使用 `sudo x-ui` 打开中文管理菜单。
 
 ## 运维功能
 
@@ -42,11 +54,11 @@ ssh -N -L 2053:127.0.0.1:2053 用户名@服务器地址
 
 ## 离线安装或更新
 
-传输 `3x-ui-v3.11.0-zh.3-linux-amd64.tar.gz` 及其 `.sha256` 一起到目标服务器。
+传输同一版本的完整安装包与 `.sha256` 到目标服务器。以 `zh.4` 为例：
 
 ```bash
-sha256sum -c 3x-ui-v3.11.0-zh.3-linux-amd64.tar.gz.sha256
-tar -xzf 3x-ui-v3.11.0-zh.3-linux-amd64.tar.gz
+sha256sum -c 3x-ui-v3.11.0-zh.4-linux-amd64.tar.gz.sha256
+tar -xzf 3x-ui-v3.11.0-zh.4-linux-amd64.tar.gz
 cd 3x-ui-zh-lite
 sudo bash install.sh
 ```
@@ -57,7 +69,9 @@ sudo bash install.sh
 
 上游固定提交 `c621ba9014a6aa21fd7c9ecf45655e44e24ebf13`，已逐文件核对的 Linux 源码基线为 `a0b224e`。首版 `53aad64` 曾裁剪上述运维和节点升级入口，本版将其恢复。中文包构建以源码提交和内外两层 SHA-256 校验为准。未在真实服务器执行安装、公开签发、续期、BBR 或防火墙操作。
 
-恢复后的 Windows 定向 Go 检查覆盖真实路由注册、节点升级并发分发、面板状态和升级请求互斥。前端定向检查包含节点列表、升级入口和弹窗。下一步是取得公开包上传确认，回读远端分支并验证一键入口的清单和字节。目标服务器上的安装启动和续期另行实测。
+恢复后的 Windows 定向 Go 检查覆盖路由注册、节点升级并发分发、面板状态和升级请求互斥。前端定向检查包含节点列表、升级入口和弹窗。分支提交 `2d10b48` 已提供 `zh.3` 的完整包和清单，已匿名通过公开入口下载并验证包内外摘要。
+
+本轮工作补充已有原版服务器迁移和中文操作提示。验收项目包括已有数据的预检、备份、替换、出错回退、中文运维说明与可下载的对应版本。旧版 `zh.3` 仅适用于新装或该中文版自身更新。
 
 `zh.3` 修正证书申请前的端口占用检查、绑定结果回读及 HTTPS 就绪检查。全新安装选用证书时，HTTPS 验证失败会保留证书文件并验证已恢复仅本机的 HTTP。独立签发遇到现有监听时保留现有服务，可从证书菜单用 DNS 验证。本地模拟检查覆盖端口占用与空闲、HTTPS 探测参数、证书私钥不匹配、部分写入及重置回读。
 

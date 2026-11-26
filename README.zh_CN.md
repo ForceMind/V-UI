@@ -81,7 +81,9 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/3x-ui-zh-lite
 
 入口从本分支读取 `packages/stable.txt`，下载指定安装包并校验 SHA-256。清单可访问后方可在线安装。安装时可按提示申请域名或 IPv4 证书、安装 PostgreSQL 和 Fail2ban。安装完成后会显示随机账号、密码及面板访问路径。默认监听本机，SSH 转发方式见[中文版安装说明](README.md)。
 
-使用 `sudo x-ui` 打开运维菜单。无人值守安装可通过 `--ssl 域名`、`--postgres`、`--fail2ban` 和 `--port 端口` 指定选项；组合使用时请将 `--port 端口` 放在最后。
+使用 `sudo x-ui` 打开运维菜单。无人值守安装可通过 `--ssl 域名`、`--postgres`、`--fail2ban` 和 `--port 端口` 指定选项。
+
+如果服务器已有原版，请先核对[适用版本、数据库与保留配置的迁移命令](README.md#从已有的原版-3x-ui-迁移)。
 
 ## 数据库选项
 

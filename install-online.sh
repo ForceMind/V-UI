@@ -8,8 +8,9 @@ channel=stable
 mode=install
 verify_only=0
 case ${1:-} in
-    --help|-h) printf '3X-UI 中文版在线安装。参数：--port 端口、--postgres、--fail2ban、--ssl 域名或 IP。\n'; exit 0 ;;
+    --help|-h) printf '3X-UI 中文版\n空白主机安装：可指定 --port 端口、--postgres、--fail2ban、--ssl 域名或 IPv4。\n保留已有配置迁移：--migrate\n仅下载并校验：--verify-only\n'; exit 0 ;;
     --update) mode=update; shift ;;
+    --migrate) mode=migrate; shift ;;
     --verify-only) verify_only=1; shift ;;
 esac
 if [[ $mode == update && ${1:-} == --dev ]]; then channel=dev; shift; fi
@@ -44,5 +45,9 @@ if (( verify_only )); then
     printf '安装包 %s 下载及校验通过。\n' "$version"
     exit 0
 fi
-if [[ $mode == update ]]; then set -- --update "$@"; fi
+if [[ $mode == update && -f /usr/local/x-ui/.zh-lite-migration ]]; then mode=migrate; fi
+case $mode in
+    update) set -- --update "$@" ;;
+    migrate) set -- --migrate "$@" ;;
+esac
 if (( EUID == 0 )); then bash "$path" "$@"; else sudo bash "$path" "$@"; fi

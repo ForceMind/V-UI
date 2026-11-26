@@ -1,8 +1,63 @@
 #!/usr/bin/env bash
 
+xui_migrated() {
+    [[ -e /usr/local/x-ui/.zh-lite-migration || -L /usr/local/x-ui/.zh-lite-migration ]]
+}
+
+xui_runtime() (
+    local app=/usr/local/x-ui mode owner path
+    for path in /usr /usr/local "$app" "$app/zh-migrate.sh" "$app/.zh-lite-migration"; do
+        [[ ! -L $path && -e $path ]] || { printf '接管文件路径不可信：%s\n' "$path" >&2; return 1; }
+        owner=$(stat -c '%u' -- "$path") || return
+        mode=$(stat -c '%a' -- "$path") || return
+        [[ $owner == 0 ]] && (( (8#$mode & 8#022) == 0 )) || { printf '接管文件必须由 root 独占管理：%s\n' "$path" >&2; return 1; }
+    done
+    [[ -f $app/zh-migrate.sh && -f $app/.zh-lite-migration ]] || return 1
+    source "$app/zh-migrate.sh" || return
+    migration_inspect runtime
+)
+
+xui_load_paths() {
+    xui_db_folder=/etc/x-ui
+    xui_log_folder=/var/log/x-ui
+    xui_db_kind=sqlite
+    xui_unit_fragment=/etc/systemd/system/x-ui.service
+    xui_service_account=x-ui-zh
+    xui_bin_folder=/usr/local/x-ui/bin
+    if xui_migrated; then
+        local state parsed
+        local -a paths
+        state=$(xui_runtime) || return
+        parsed=$(python3 -I -c 'import json,os,sys; s=json.load(sys.stdin); log=s["environment"].get("XUI_LOG_FOLDER") or "/var/log/x-ui"; bin=s["environment"].get("XUI_BIN_FOLDER") or "bin"; print(s["database"]); print(os.path.normpath(os.path.join("/usr/local/x-ui", log))); print(s["database_kind"]); print(s["unit"]); print(os.path.normpath(os.path.join("/usr/local/x-ui", bin)))' <<< "$state") || return
+        mapfile -t paths <<< "$parsed"
+        [[ ${#paths[@]} == 5 ]] || return 1
+        xui_db_folder=${paths[0]}
+        xui_log_folder=${paths[1]}
+        xui_db_kind=${paths[2]}
+        xui_unit_fragment=${paths[3]}
+        xui_bin_folder=${paths[4]}
+        xui_service_account=root
+    fi
+}
+
+xui_service_exec() (
+    cd /usr/local/x-ui || return
+    if xui_migrated; then
+        local state
+        state=$(xui_runtime) || return
+        # Re-read current service configuration for every command. Snapshots are backups,
+        # never a credentials source. Do not export these values to the caller shell.
+        python3 -I -c 'import json,os,sys; s=json.load(sys.stdin); e={k:v for k,v in os.environ.items() if not k.startswith("XUI_") and k!="NODE_TOKEN_ENCRYPTION"}; e.update(s.get("service_environment", s["environment"])); os.execve("/usr/local/x-ui/x-ui", ["x-ui", *sys.argv[1:]], e)' "$@" <<< "$state"
+    else
+        runuser -u x-ui-zh -- ./x-ui "$@"
+    fi
+)
+
 xui_cli() (
-    export XUI_DB_FOLDER=/etc/x-ui XUI_LOG_FOLDER=/var/log/x-ui
-    if [[ -r /etc/default/x-ui ]]; then
+    if ! xui_migrated; then
+        export XUI_DB_FOLDER=/etc/x-ui XUI_LOG_FOLDER=/var/log/x-ui
+    fi
+    if ! xui_migrated && [[ -r /etc/default/x-ui ]]; then
         local name value
         while IFS='=' read -r name value; do
             case $name in
@@ -14,7 +69,10 @@ xui_cli() (
     fi
     if [[ ${1:-} == cert && ${2:-} == -webCert ]]; then
         cert_permissions || return
-        if ! runuser -u x-ui-zh -- test -r "$3" || ! runuser -u x-ui-zh -- test -r "$5"; then
+        if xui_migrated; then
+            xui_runtime >/dev/null || return
+            [[ -r $3 && -r $5 ]] || { printf '原 root 服务无法读取证书或私钥。\n' >&2; return 1; }
+        elif ! runuser -u x-ui-zh -- test -r "$3" || ! runuser -u x-ui-zh -- test -r "$5"; then
             printf '证书或私钥无法由 x-ui-zh 服务账号读取，请核对文件及父目录权限。\n' >&2
             return 1
         fi
@@ -27,11 +85,11 @@ xui_cli() (
         fi
     fi
     cd /usr/local/x-ui || return
-    runuser -u x-ui-zh -- ./x-ui "$@" || return
+    xui_service_exec "$@" || return
     if [[ ${1:-} == cert && ( ${2:-} == -webCert || ${2:-} == -reset ) ]]; then
         local settings cert= key=
         if [[ $2 == -webCert ]]; then cert=$3; key=$5; fi
-        settings=$(runuser -u x-ui-zh -- ./x-ui setting -getCert true) || return
+        settings=$(xui_service_exec setting -getCert true) || return
         if ! grep -Fxq -- "cert: $cert" <<< "$settings" || ! grep -Fxq -- "key: $key" <<< "$settings"; then
             printf '无法确认面板已保存所需的证书和私钥路径。\n' >&2
             return 1
@@ -39,8 +97,21 @@ xui_cli() (
     fi
 )
 
+xui_certificate_root() {
+    if xui_migrated; then printf '/root/cert\n'; else printf '/etc/x-ui-managed-certs\n'; fi
+}
+
 cert_permissions() {
-    local certificates=/etc/x-ui-managed-certs
+    local certificates
+    certificates=$(xui_certificate_root) || return
+    if xui_migrated; then
+        xui_runtime >/dev/null || return
+        # The original root service can read its existing certificates. Keep their
+        # ownership and renewal hooks; there may be no x-ui-zh account at all.
+        if [[ ! -e $certificates && ! -L $certificates ]]; then install -d -m 0700 -o root -g root "$certificates"; fi
+        [[ -d $certificates && ! -L $certificates ]] || return 1
+        return 0
+    fi
     install -d -m 0750 -o root -g x-ui-zh "$certificates" || return
     find -P "$certificates" -mindepth 1 -type d -exec chgrp x-ui-zh {} + -exec chmod 2750 {} + || return
     find -P "$certificates" -type f \( -name privkey.pem -o -name fullchain.pem \) \

@@ -1,0 +1,49 @@
+name: 中文版一次性安装与迁移验证
+
+on:
+  push:
+    branches: [3x-ui-zh-lite]
+    paths:
+      - '.github/workflows/zh-migration-check.yml'
+      - 'scripts/test-zh-systemd.sh'
+      - 'packages/*-zh.4-linux-amd64.tar.gz'
+      - 'packages/*-zh.4-linux-amd64.tar.gz.sha256'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: ${{ matrix.mode }} / ${{ matrix.old }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [migrate, rollback]
+        old: ['3.11.0', '2.9.2']
+        include:
+          - mode: fresh
+            old: '3.11.0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: 核对候选包并取得原版测试程序
+        env:
+          OLD_VERSION: ${{ matrix.old }}
+        run: |
+          cd packages
+          sha256sum --check --strict 3x-ui-v3.11.0-zh.4-linux-amd64.tar.gz.sha256
+          curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 --max-time 300 \
+            --output "$RUNNER_TEMP/official.tar.gz" \
+            "https://github.com/MHSanaei/3x-ui/releases/download/v$OLD_VERSION/x-ui-linux-amd64.tar.gz"
+      - name: 在一次性主机上运行真实服务并核对数据
+        env:
+          OLD_VERSION: ${{ matrix.old }}
+          TEST_MODE: ${{ matrix.mode }}
+        run: |
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,RUNNER_OS,ImageOS,RUNNER_TEMP,GITHUB_RUN_ID \
+            env XUI_CI_SYSTEMD_TEST=DISPOSABLE_GITHUB_RUNNER \
+            bash scripts/test-zh-systemd.sh "$TEST_MODE" packages/3x-ui-v3.11.0-zh.4-linux-amd64.tar.gz \
+              "$RUNNER_TEMP/official.tar.gz" "$OLD_VERSION"
