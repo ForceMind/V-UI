@@ -27,7 +27,16 @@ xui_cli() (
         fi
     fi
     cd /usr/local/x-ui || return
-    runuser -u x-ui-zh -- ./x-ui "$@"
+    runuser -u x-ui-zh -- ./x-ui "$@" || return
+    if [[ ${1:-} == cert && ( ${2:-} == -webCert || ${2:-} == -reset ) ]]; then
+        local settings cert= key=
+        if [[ $2 == -webCert ]]; then cert=$3; key=$5; fi
+        settings=$(runuser -u x-ui-zh -- ./x-ui setting -getCert true) || return
+        if ! grep -Fxq -- "cert: $cert" <<< "$settings" || ! grep -Fxq -- "key: $key" <<< "$settings"; then
+            printf '无法确认面板已保存所需的证书和私钥路径。\n' >&2
+            return 1
+        fi
+    fi
 )
 
 cert_permissions() {
@@ -51,4 +60,26 @@ cert_dependencies() {
         printf '请先安装 socat 和 cron 服务。\n' >&2
         return 1
     fi
+}
+
+is_port_in_use() {
+    local port="$1" listeners
+    if command -v ss >/dev/null && listeners=$(ss -H -ltn "sport = :$port" 2>/dev/null); then
+        [[ -n $listeners ]]
+    elif command -v netstat >/dev/null; then
+        netstat -lnt 2>/dev/null | awk -v pattern=":${port}$" '$4 ~ pattern {found=1} END {exit !found}'
+    else
+        command -v lsof >/dev/null && lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+    fi
+}
+
+wait_for_panel() {
+    local url="$1" attempt
+    shift
+    for ((attempt=0; attempt<30; attempt++)); do
+        if curl --noproxy '*' --fail --silent --max-time 1 --output /dev/null "$@" -- "$url"; then return 0; fi
+        systemctl is-active --quiet x-ui.service || return 1
+        sleep 1
+    done
+    return 1
 }

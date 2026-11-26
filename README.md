@@ -42,11 +42,11 @@ ssh -N -L 2053:127.0.0.1:2053 用户名@服务器地址
 
 ## 离线安装或更新
 
-传输 `3x-ui-v3.11.0-zh.2-linux-amd64.tar.gz` 及其 `.sha256` 一起到目标服务器。
+传输 `3x-ui-v3.11.0-zh.3-linux-amd64.tar.gz` 及其 `.sha256` 一起到目标服务器。
 
 ```bash
-sha256sum -c 3x-ui-v3.11.0-zh.2-linux-amd64.tar.gz.sha256
-tar -xzf 3x-ui-v3.11.0-zh.2-linux-amd64.tar.gz
+sha256sum -c 3x-ui-v3.11.0-zh.3-linux-amd64.tar.gz.sha256
+tar -xzf 3x-ui-v3.11.0-zh.3-linux-amd64.tar.gz
 cd 3x-ui-zh-lite
 sudo bash install.sh
 ```
@@ -58,5 +58,7 @@ sudo bash install.sh
 上游固定提交 `c621ba9014a6aa21fd7c9ecf45655e44e24ebf13`，已逐文件核对的 Linux 源码基线为 `a0b224e`。首版 `53aad64` 曾裁剪上述运维和节点升级入口，本版将其恢复。中文包构建以源码提交和内外两层 SHA-256 校验为准。未在真实服务器执行安装、公开签发、续期、BBR 或防火墙操作。
 
 恢复后的 Windows 定向 Go 检查覆盖真实路由注册、节点升级并发分发、面板状态和升级请求互斥。前端定向检查包含节点列表、升级入口和弹窗。下一步是取得公开包上传确认，回读远端分支并验证一键入口的清单和字节。目标服务器上的安装启动和续期另行实测。
+
+`zh.3` 修正证书申请前的端口占用检查、绑定结果回读及 HTTPS 就绪检查。全新安装选用证书时，HTTPS 验证失败会保留证书文件并验证已恢复仅本机的 HTTP。独立签发遇到现有监听时保留现有服务，可从证书菜单用 DNS 验证。本地模拟检查覆盖端口占用与空闲、HTTPS 探测参数、证书私钥不匹配、部分写入及重置回读。
 
 开放源码及归属沿用 [3X-UI](https://github.com/MHSanaei/3x-ui) 的 [GNU GPL v3](LICENSE)。随包资源的来源和许可见[第三方许可](licenses/NOTICE.md)。

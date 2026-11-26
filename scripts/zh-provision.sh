@@ -265,27 +265,10 @@ acme_listen_flag() {
     fi
 }
 
-is_port_in_use() {
-    local port="$1"
-    if command -v ss > /dev/null 2>&1; then
-        ss -ltn 2> /dev/null | awk -v p=":${port}$" '$4 ~ p {exit 0} END {exit 1}'
-        return
-    fi
-    if command -v netstat > /dev/null 2>&1; then
-        netstat -lnt 2> /dev/null | awk -v p=":${port} " '$4 ~ p {exit 0} END {exit 1}'
-        return
-    fi
-    if command -v lsof > /dev/null 2>&1; then
-        lsof -nP -iTCP:${port} -sTCP:LISTEN > /dev/null 2>&1 && return 0
-    fi
-    return 1
-}
-
 install_acme() {
     echo -e "${green}正在安装 acme.sh 证书工具。${plain}"
     cd ~ || return 1
-    curl -s https://get.acme.sh | sh > /dev/null 2>&1
-    if [ $? -ne 0 ]; then
+    if ! (set -o pipefail; curl -fsSL https://get.acme.sh | sh) || [[ ! -x $HOME/.acme.sh/acme.sh ]]; then
         echo -e "${red}acme.sh 安装失败${plain}"
         return 1
     else
@@ -295,11 +278,9 @@ install_acme() {
 }
 
 setup_ssl_certificate() {
-    cert_dependencies || return 1
     local domain="$1"
-    local server_ip="$2"
-    local existing_port="$3"
-    local existing_webBasePath="$4"
+    if is_port_in_use 80; then printf '端口 80 已被占用，未启动独立证书验证。可在运维菜单使用 DNS 验证。\n' >&2; return 1; fi
+    cert_dependencies || return 1
 
     echo -e "${green}正在配置证书。${plain}"
 
@@ -339,12 +320,6 @@ setup_ssl_certificate() {
         echo -e "${yellow}证书安装失败${plain}"
         return 1
     fi
-
-    # Enable auto-renew
-    ~/.acme.sh/acme.sh --upgrade --auto-upgrade > /dev/null 2>&1
-    # Secure permissions: private key readable only by owner
-    chmod 600 $certPath/privkey.pem 2> /dev/null
-    chmod 644 $certPath/fullchain.pem 2> /dev/null
 
     # Set certificate for panel
     local webCertFile="/etc/x-ui-managed-certs/${domain}/fullchain.pem"
@@ -461,37 +436,25 @@ setup_ip_certificate() {
     if [ $? -ne 0 ]; then
         echo -e "${red}Failed to issue IP certificate${plain}"
         echo -e "${yellow}Please ensure port ${WebPort} is reachable (or forwarded from external port 80)${plain}"
-        # Cleanup acme.sh data for both IPv4 and IPv6 if specified
-        rm -rf ${certDir} 2> /dev/null
         return 1
     fi
 
     echo -e "${green}Certificate issued successfully, installing...${plain}"
 
-    # Install certificate
-    # Note: acme.sh may report "Reload error" and exit non-zero if reloadcmd fails,
-    # but the cert files are still installed. We check for files instead of exit code.
-    ~/.acme.sh/acme.sh --installcert --force -d ${ipv4} \
+    if ! ~/.acme.sh/acme.sh --installcert --force -d "$ipv4" \
         --key-file "${certDir}/privkey.pem" \
         --fullchain-file "${certDir}/fullchain.pem" \
-        --reloadcmd "/usr/local/bin/x-ui cert-permissions && ${reloadCmd}" 2>&1 || true
+        --reloadcmd "/usr/local/bin/x-ui cert-permissions && ${reloadCmd}"; then
+        printf '证书材料部署或续期重载配置失败。\n' >&2
+        return 1
+    fi
 
-    # Verify certificate files exist (don't rely on exit code - reloadcmd failure causes non-zero)
     if [[ ! -f "${certDir}/fullchain.pem" || ! -f "${certDir}/privkey.pem" ]]; then
-        echo -e "${red}找不到证书材料 after installation${plain}"
-        # Cleanup acme.sh data for both IPv4 and IPv6 if specified
-        rm -rf ${certDir} 2> /dev/null
+        echo -e "${red}安装后找不到证书材料。${plain}"
         return 1
     fi
 
     echo -e "${green}证书材料已安装${plain}"
-
-    # Enable auto-upgrade for acme.sh (ensures cron job runs)
-    ~/.acme.sh/acme.sh --upgrade --auto-upgrade > /dev/null 2>&1
-
-    # Secure permissions: private key readable only by owner
-    chmod 600 ${certDir}/privkey.pem 2> /dev/null
-    chmod 644 ${certDir}/fullchain.pem 2> /dev/null
 
     # Configure panel to use the certificate
     echo -e "${green}正在绑定面板证书。${plain}"

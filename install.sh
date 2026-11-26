@@ -185,13 +185,8 @@ if [[ $mode == install ]]; then systemctl enable --quiet x-ui.service; fi
 if [[ $mode == install || $was_active == 1 ]]; then
     systemctl start x-ui.service
     if [[ $mode == install ]]; then
-        ready=0
-        for (( attempt=0; attempt<30; attempt++ )); do
-            if curl --fail --silent --max-time 1 --output /dev/null "http://127.0.0.1:$port$web_path"; then ready=1; break; fi
-            systemctl is-active --quiet x-ui.service || break
-            sleep 1
-        done
-        (( ready )) || die '面板本地地址未就绪。'
+        panel_url="http://127.0.0.1:$port$web_path"
+        wait_for_panel "$panel_url" || die '面板本地地址未就绪。'
     else
         systemctl is-active --quiet x-ui.service || die '更新之后服务未运行。'
     fi
@@ -199,20 +194,24 @@ fi
 
 committed=1
 if [[ $mode == install ]]; then
-    printf '已安装并启动 3X-UI %s。\n管理地址：http://127.0.0.1:%s%s\n账号：%s\n密码：%s\n' \
-        "$version" "$port" "$web_path" "$username" "$password"
-    printf '在本机通过 SSH 转发该端口，再打开上面的地址。请妥善保管账号和密码。\n'
+    printf '已安装并启动 3X-UI %s。\n账号：%s\n密码：%s\n' "$version" "$username" "$password"
     if [[ $fail2ban == 1 ]]; then
         "$command_path" setup-fail2ban || printf 'Fail2ban 配置未完成，可在 x-ui 菜单重试。\n' >&2
     fi
     if [[ -n $ssl_host ]]; then
-        if (cert_permissions && if is_ip "$ssl_host"; then setup_ip_certificate "$ssl_host" ''; else setup_ssl_certificate "$ssl_host" "$ssl_host" "$port" "$web_path"; fi); then
-            systemctl restart x-ui.service
-            printf '已配置 %s 的证书。面板仍监听本机，可在运维菜单调整访问方式。\n' "$ssl_host"
+        tls_url="https://$ssl_host:$port$web_path"
+        if (cert_permissions && if is_ip "$ssl_host"; then setup_ip_certificate "$ssl_host" ''; else setup_ssl_certificate "$ssl_host"; fi) \
+            && systemctl restart x-ui.service \
+            && wait_for_panel "$tls_url" --connect-to "$ssl_host:$port:127.0.0.1:$port"; then
+            panel_url=$tls_url
+            printf '%s 的 HTTPS 已通过本地验证。转发或反向代理时请保留证书对应的域名或 IP。\n' "$ssl_host"
         else
-            printf '证书申请未完成，请运行 sudo x-ui 证书 后重试。面板仍可通过 SSH 转发访问。\n' >&2
+            printf '证书申请或 HTTPS 验证未完成，正在恢复本机 HTTP。证书文件保留，可从 sudo x-ui 证书 重试。\n' >&2
+            xui_cli cert -reset && systemctl restart x-ui.service && wait_for_panel "$panel_url" \
+                || die '未能恢复本机 HTTP，请运行 sudo x-ui 日志 查看详情。'
         fi
     fi
+    printf '管理地址：%s\n面板仅在本机监听。请通过 SSH 转发或已有反向代理访问，并妥善保管账号和密码。\n' "$panel_url"
 else
     mv -T -- "$stage/原程序" "$stage/更新前程序"
     printf '已更新到 %s。\n' "$version"

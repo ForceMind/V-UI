@@ -21,23 +21,6 @@ function LOGI() {
     echo -e "${green}[INF] $* ${plain}"
 }
 
-# Port helpers: detect listener and owning process (best effort)
-is_port_in_use() {
-    local port="$1"
-    if command -v ss > /dev/null 2>&1; then
-        ss -ltn 2> /dev/null | awk -v p=":${port}$" '$4 ~ p {exit 0} END {exit 1}'
-        return
-    fi
-    if command -v netstat > /dev/null 2>&1; then
-        netstat -lnt 2> /dev/null | awk -v p=":${port} " '$4 ~ p {exit 0} END {exit 1}'
-        return
-    fi
-    if command -v lsof > /dev/null 2>&1; then
-        lsof -nP -iTCP:${port} -sTCP:LISTEN > /dev/null 2>&1 && return 0
-    fi
-    return 1
-}
-
 # Simple helpers for domain/IP validation
 is_ipv4() {
     [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && return 0 || return 1
@@ -1299,7 +1282,7 @@ ssl_cert_issue_main() {
                 read -rp "Certificate file path (fullchain): " webCertFile
                 read -rp "Private key file path: " webKeyFile
                 if [[ -f "${webCertFile}" && -f "${webKeyFile}" ]]; then
-                    xui_cli cert -webCert "$webCertFile" -webCertKey "$webKeyFile"
+                    xui_cli cert -webCert "$webCertFile" -webCertKey "$webKeyFile" || return 1
                     echo "Panel certificate paths set:"
                     echo "  - Certificate File: $webCertFile"
                     echo "  - Private Key File: $webKeyFile"
@@ -1323,7 +1306,7 @@ ssl_cert_issue_main() {
                     local webKeyFile="/etc/x-ui-managed-certs/${domain}/privkey.pem"
 
                     if [[ -f "${webCertFile}" && -f "${webKeyFile}" ]]; then
-                        xui_cli cert -webCert "$webCertFile" -webCertKey "$webKeyFile"
+                        xui_cli cert -webCert "$webCertFile" -webCertKey "$webKeyFile" || return 1
                         echo "Panel paths set for domain: $domain"
                         echo "  - Certificate File: $webCertFile"
                         echo "  - Private Key File: $webKeyFile"
@@ -1522,28 +1505,21 @@ ssl_cert_issue_for_ip() {
     if [ $? -ne 0 ]; then
         LOGE "证书签发失败，目标为 IP: ${server_ip}"
         LOGE "Make sure port ${WebPort} is open and the server is accessible from the internet"
-        # Cleanup acme.sh data for both IPv4 and IPv6 if specified
-        rm -rf ~/.acme.sh/${server_ip} ~/.acme.sh/${server_ip}_ecc 2> /dev/null
-        [[ -n "$ipv6_addr" ]] && rm -rf ~/.acme.sh/${ipv6_addr} ~/.acme.sh/${ipv6_addr}_ecc 2> /dev/null
         return 1
     else
         LOGI "Certificate issued successfully for IP: ${server_ip}"
     fi
 
-    # Install the certificate
-    # Note: acme.sh may report "Reload error" and exit non-zero if reloadcmd fails,
-    # but the cert files are still installed. We check for files instead of exit code.
-    ~/.acme.sh/acme.sh --installcert --force -d ${server_ip} \
+    if ! ~/.acme.sh/acme.sh --installcert --force -d "$server_ip" \
         --key-file "${certPath}/privkey.pem" \
         --fullchain-file "${certPath}/fullchain.pem" \
-        --reloadcmd "/usr/local/bin/x-ui cert-permissions && ${reloadCmd}" 2>&1 || true
+        --reloadcmd "/usr/local/bin/x-ui cert-permissions && ${reloadCmd}"; then
+        LOGE '证书材料部署或续期重载配置失败。'
+        return 1
+    fi
 
-    # Verify certificate files exist (don't rely on exit code - reloadcmd failure causes non-zero)
     if [[ ! -f "${certPath}/fullchain.pem" || ! -f "${certPath}/privkey.pem" ]]; then
-        LOGE "找不到证书材料 after installation"
-        # Cleanup acme.sh data for both IPv4 and IPv6 if specified
-        rm -rf ~/.acme.sh/${server_ip} ~/.acme.sh/${server_ip}_ecc 2> /dev/null
-        [[ -n "$ipv6_addr" ]] && rm -rf ~/.acme.sh/${ipv6_addr} ~/.acme.sh/${ipv6_addr}_ecc 2> /dev/null
+        LOGE '安装后找不到证书材料。'
         return 1
     fi
 
@@ -1551,8 +1527,6 @@ ssl_cert_issue_for_ip() {
 
     # enable auto-renew
     ~/.acme.sh/acme.sh --upgrade --auto-upgrade > /dev/null 2>&1
-    chmod 600 $certPath/privkey.pem 2> /dev/null
-    chmod 644 $certPath/fullchain.pem 2> /dev/null
 
     # Prompt user to set panel paths after successful certificate installation
     local webCertFile="${certPath}/fullchain.pem"
@@ -1561,7 +1535,7 @@ ssl_cert_issue_for_ip() {
     read -rp "Would you like to set this certificate for the panel? (y/n): " setPanel
     if [[ "$setPanel" == "y" || "$setPanel" == "Y" ]]; then
         if [[ -f "$webCertFile" && -f "$webKeyFile" ]]; then
-            xui_cli cert -webCert "$webCertFile" -webCertKey "$webKeyFile"
+            xui_cli cert -webCert "$webCertFile" -webCertKey "$webKeyFile" || return 1
             LOGI "Panel paths set for IP: $server_ip"
             LOGI "  - Certificate File: $webCertFile"
             LOGI "  - Private Key File: $webKeyFile"
@@ -1702,7 +1676,6 @@ ssl_cert_issue() {
         ~/.acme.sh/acme.sh --issue -d ${domain} $(acme_listen_flag) --standalone --httpport ${WebPort} --force
         if [ $? -ne 0 ]; then
             LOGE "Issuing certificate failed, please check logs."
-            rm -rf ~/.acme.sh/${domain} ~/.acme.sh/${domain}_ecc
             exit 1
         else
             LOGE "Issuing certificate succeeded, installing certificates..."
@@ -1765,14 +1738,10 @@ ssl_cert_issue() {
     if [ $? -ne 0 ]; then
         LOGE "Auto renew failed, certificate details:"
         ls -lah cert/*
-        chmod 600 $certPath/privkey.pem
-        chmod 644 $certPath/fullchain.pem
         exit 1
     else
         LOGI "Auto renew succeeded, certificate details:"
         ls -lah cert/*
-        chmod 600 $certPath/privkey.pem
-        chmod 644 $certPath/fullchain.pem
     fi
 
     # Prompt user to set panel paths after successful certificate installation
@@ -1782,7 +1751,7 @@ ssl_cert_issue() {
         local webKeyFile="/etc/x-ui-managed-certs/${domain}/privkey.pem"
 
         if [[ -f "$webCertFile" && -f "$webKeyFile" ]]; then
-            xui_cli cert -webCert "$webCertFile" -webCertKey "$webKeyFile"
+            xui_cli cert -webCert "$webCertFile" -webCertKey "$webKeyFile" || return 1
             LOGI "Panel paths set for domain: $domain"
             LOGI "  - Certificate File: $webCertFile"
             LOGI "  - Private Key File: $webKeyFile"
@@ -1917,8 +1886,6 @@ ssl_cert_issue_CF() {
         else
             LOGI "The certificate is installed and auto-renewal is turned on. Specific information is as follows:"
             ls -lah ${certPath}/*
-            chmod 600 ${certPath}/privkey.pem
-            chmod 644 ${certPath}/fullchain.pem
         fi
 
         # Prompt user to set panel paths after successful certificate installation
@@ -1928,7 +1895,7 @@ ssl_cert_issue_CF() {
             local webKeyFile="${certPath}/privkey.pem"
 
             if [[ -f "$webCertFile" && -f "$webKeyFile" ]]; then
-                xui_cli cert -webCert "$webCertFile" -webCertKey "$webKeyFile"
+                xui_cli cert -webCert "$webCertFile" -webCertKey "$webKeyFile" || return 1
                 LOGI "Panel paths set for domain: $CF_Domain"
                 LOGI "  - Certificate File: $webCertFile"
                 LOGI "  - Private Key File: $webKeyFile"
