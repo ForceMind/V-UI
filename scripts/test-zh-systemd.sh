@@ -53,6 +53,12 @@ for path in /usr/local/x-ui /etc/x-ui /var/log/x-ui /usr/local/bin/x-ui /usr/bin
 done
 [[ $(systemctl show x-ui.service --property=LoadState --value) == not-found ]] || fail '系统中已有 x-ui 服务。'
 ! id x-ui-zh >/dev/null 2>&1 || fail '已有中文服务账号，请改用新的空白 job。'
+# GitHub grants its runner user write access here for tool installations. Model
+# the root-owned command directory of a server before installing the fixture.
+[[ -d /usr/local/bin && ! -L /usr/local/bin ]] || fail '测试机命令目录布局异常。'
+printf '原 runner 命令目录属主及权限：%s\n' "$(stat -c '%U:%G %a' /usr/local/bin)"
+chown root:root /usr/local/bin
+chmod 0755 /usr/local/bin
 [[ -z $(find /usr/local -maxdepth 1 -type d -name '.x-ui-migrate.*' -print -quit) ]] || fail '存在旧迁移备份，请改用新的空白 job。'
 if ip link show xui-ci-local >/dev/null 2>&1; then fail '专用测试网卡已存在，请改用新的空白 job。'; fi
 for test_port in 20531 20771 20772 20773 62789; do
