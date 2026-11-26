@@ -10,7 +10,7 @@
 bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/3x-ui-zh-lite/install-online.sh)
 ```
 
-安装时可输入用于自动签发证书的域名或 IPv4，也可选择 PostgreSQL 和 Fail2ban。命令后跟 `--ssl example.org`、`--postgres`、`--fail2ban` 或 `--port 2053` 可以直接选定。HTTP 验证需要服务器的 80 端口可达，域名需正确解析到本机。Cloudflare DNS 证书在安装后的 `x-ui` 菜单操作。
+默认一键安装直接完成，使用 SQLite。需要附加功能时，可在命令后加 `--ssl example.org`、`--postgres`、`--fail2ban` 或 `--port 2053`，也可在安装后打开中文运维菜单。证书的 HTTP 验证需要服务器的 80 端口可达，域名需正确解析到本机。Cloudflare DNS 验证可从 `x-ui` 证书菜单发起。
 
 出于访问安全，面板默认监听 `127.0.0.1:2053`，由非 root 账号运行。安装器显示随机账号、密码及路径。未申请证书时可以用 SSH 转发在本机访问。通过运维菜单设置域名、证书和面板监听方式，或使用已有 HTTPS 反代。
 
@@ -20,7 +20,7 @@ ssh -N -L 2053:127.0.0.1:2053 用户名@服务器地址
 
 ## 从已有的原版 3X-UI 迁移
 
-原版 `v3.11.0` 和 `v2.9.2` 都可以用下面一条命令迁移到 `v3.11.0-zh.4`。适用条件是官方脚本安装、Linux x86_64、systemd、以 root 运行的服务和 SQLite 数据库。在原服务器的 Bash 中执行，保留现有安装和数据目录。
+原版 `v3.11.0` 和 `v2.9.2` 都可以用下面一条命令迁移到中文版。适用条件是官方脚本安装、Linux x86_64、systemd、以 root 运行的服务和 SQLite 数据库。在原服务器的 Bash 中执行，保留现有安装和数据目录。
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/3x-ui-zh-lite/install-online.sh) --migrate
@@ -80,6 +80,8 @@ sudo bash install.sh
 对齐测试机的 root 命令目录权限后，3.11.0 的真实迁移、重复执行和故障回退通过，既有账号和客户端仍可使用。2.9.2 的原程序也通过了真实 VLESS 连接，但副本升级检测到上游默认 Xray 模板发生变化并中止替换。见[权限预检](https://github.com/ForceMind/V-UI/actions/runs/45792660533)和[第四次验收](https://github.com/ForceMind/V-UI/actions/runs/45793410714)。
 
 最终 `zh.4` 安装包来自源码提交 `637331dd4ca3af4551e7a9de2720b8391bba9edd`。同一个包在五台独立的 Ubuntu 24.04 测试机上通过全新安装、两个原版的迁移与两个原版的故障回退。两版均使用原账号通过 HTTPS 登录、用原客户端完成真实 VLESS 连接，并核对了端口、登录路径、入站与客户端关系、历史流量、证书及自定义文件。测试使用临时证书与本机网络目标。见[最终验收的全部作业](https://github.com/ForceMind/V-UI/actions/runs/45795739574)。
+
+`zh.5` 修正 `zh.4` 启动时新增的 PostgreSQL、Fail2ban 和证书问答。默认命令直接安装，附加工具可通过显式参数或中文运维菜单使用。验收在真实终端条件下执行默认安装，并使用同一候选包复验两个原版迁移和回退。
 
 `zh.3` 修正证书申请前的端口占用检查、绑定结果回读及 HTTPS 就绪检查。全新安装选用证书时，HTTPS 验证失败会保留证书文件并验证已恢复仅本机的 HTTP。独立签发遇到现有监听时保留现有服务，可从证书菜单用 DNS 验证。本地模拟检查覆盖端口占用与空闲、HTTPS 探测参数、证书私钥不匹配、部分写入及重置回读。
 

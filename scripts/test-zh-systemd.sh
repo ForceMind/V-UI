@@ -28,7 +28,7 @@ case $mode in fresh|migrate|rollback) ;; *) fail '模式必须是 fresh、migrat
 source /etc/os-release
 [[ $ID == ubuntu ]] || fail '实际操作系统不是 Ubuntu。'
 [[ -n ${RUNNER_TEMP:-} && $RUNNER_TEMP == /* && -d $RUNNER_TEMP ]] || fail 'RUNNER_TEMP 必须是已有绝对目录。'
-for program in bash python3 openssl systemctl sha256sum install cp find sort cmp runuser setpriv ss ip realpath cut xargs readlink; do
+for program in bash python3 openssl systemctl sha256sum install cp find sort cmp runuser setpriv ss ip realpath cut xargs readlink script timeout; do
     command -v "$program" >/dev/null || fail 'runner 缺少测试必需的系统工具。'
 done
 for name in $(compgen -e); do
@@ -61,7 +61,7 @@ chown root:root /usr/local/bin
 chmod 0755 /usr/local/bin
 [[ -z $(find /usr/local -maxdepth 1 -type d -name '.x-ui-migrate.*' -print -quit) ]] || fail '存在旧迁移备份，请改用新的空白 job。'
 if ip link show xui-ci-local >/dev/null 2>&1; then fail '专用测试网卡已存在，请改用新的空白 job。'; fi
-for test_port in 20531 20771 20772 20773 62789; do
+for test_port in 2053 20531 20771 20772 20773 62789; do
     [[ -z $(ss -H -ltn "sport = :$test_port") ]] || fail '测试端口已被占用。'
 done
 
@@ -574,7 +574,10 @@ private '签发临时证书' openssl x509 -req -in "$work/leaf.csr" -CA "$work/c
 
 if [[ $mode == fresh ]]; then
     service_created=1
-    private '中文全新安装' env XUI_NONINTERACTIVE=1 bash "$package/install.sh" --port 20531
+    private '中文全新安装' env XUI_CI_INSTALLER="$package/install.sh" timeout 120s \
+        script --quiet --return --command 'test -t 0 && exec bash "$XUI_CI_INSTALLER"' /dev/null
+    [[ -s /etc/x-ui/x-ui.db && ! -e /etc/default/x-ui && ! -e /etc/x-ui-managed-certs ]] || fail '默认新装未使用 SQLite，或触发了附加配置。'
+    pass '交互终端直接完成默认安装，无需回答问题'
     [[ $(systemctl show x-ui.service --property=User --value) == x-ui-zh ]] || fail '新装服务身份不是专用账号。'
     private '读取新装认证' python3 "$work/fixture.py" "$work" auth fresh
     private '验证初次登录' python3 "$work/fixture.py" "$work" probe login-only

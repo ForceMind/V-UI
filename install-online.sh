@@ -47,6 +47,7 @@ if (( verify_only )); then
 fi
 if [[ $mode == update && -f /usr/local/x-ui/.zh-lite-migration ]]; then mode=migrate; fi
 case $mode in
+    install) exec </dev/null ;;
     update) set -- --update "$@" ;;
     migrate) set -- --migrate "$@" ;;
 esac

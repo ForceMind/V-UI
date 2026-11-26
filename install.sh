@@ -65,11 +65,6 @@ fi
 
 source "$package/scripts/zh-helpers.sh"
 source "$package/scripts/zh-provision.sh"
-if [[ $mode == install && -t 0 && ${XUI_NONINTERACTIVE:-0} != 1 ]]; then
-    if [[ $postgres == 0 ]]; then read -rp '要自动安装 PostgreSQL 吗？默认使用 SQLite [y/N]：' choice; [[ ${choice,,} != y ]] || postgres=1; fi
-    if [[ $fail2ban == 0 ]]; then read -rp '要安装并配置 Fail2ban 的节点 IP 限制吗？[y/N]：' choice; [[ ${choice,,} != y ]] || fail2ban=1; fi
-    if [[ -z $ssl_host ]]; then read -rp '请输入要自动签发证书的域名或 IPv4，直接回车可先用 SSH 访问：' ssl_host; fi
-fi
 if [[ -n $ssl_host ]] && ! is_domain "$ssl_host" && ! is_ipv4 "$ssl_host"; then die '证书申请目标必须是有效域名或 IPv4。'; fi
 
 if [[ $mode == install ]]; then
