@@ -245,6 +245,23 @@ is_ipv4() {
     [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && return 0 || return 1
 }
 
+detect_server_ipv4() {
+    local address octet provider
+    local -a octets
+    for provider in https://api4.ipify.org https://ipv4.icanhazip.com https://v4.api.ipinfo.io/ip \
+        https://ipv4.myexternalip.com/raw https://4.ident.me https://check-host.net/ip; do
+        address=$(curl -4 --proto '=https' --fail --silent --connect-timeout 2 --max-time 3 --max-filesize 64 "$provider" 2>/dev/null) || continue
+        is_ipv4 "$address" || continue
+        IFS=. read -r -a octets <<< "$address"
+        for octet in "${octets[@]}"; do
+            (( 10#$octet <= 255 )) || continue 2
+        done
+        printf '%s\n' "$address"
+        return 0
+    done
+    return 1
+}
+
 is_ipv6() {
     [[ "$1" =~ : ]] && return 0 || return 1
 }

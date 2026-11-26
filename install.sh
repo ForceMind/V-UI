@@ -67,6 +67,12 @@ source "$package/scripts/zh-helpers.sh"
 source "$package/scripts/zh-provision.sh"
 if [[ -n $ssl_host ]] && ! is_domain "$ssl_host" && ! is_ipv4 "$ssl_host"; then die '证书申请目标必须是有效域名或 IPv4。'; fi
 
+panel_listens_on() {
+    local settings
+    settings=$(xui_cli setting -getListen true) || return
+    grep -Fxq -- "listenIP: $1" <<< "$settings"
+}
+
 if [[ $mode == install ]]; then
     for path in "$app" "$db" "$command_path" /usr/bin/x-ui "$unit" /etc/default/x-ui /etc/systemd/system/x-ui.service.d; do
         [[ ! -e $path && ! -L $path ]] || die "发现已有面板或保留的数据：$path。请使用空白主机。"
@@ -172,6 +178,8 @@ fi
 mv -T -- "$stage/program" "$app"
 
 if [[ $mode == install ]]; then
+    listen_ip=0.0.0.0
+    if [[ -n $ssl_host ]]; then listen_ip=127.0.0.1; fi
     if [[ $postgres == 1 ]]; then
         dsn=$(install_postgres_local) || die 'PostgreSQL 自动安装失败。'
         [[ $dsn =~ ^postgres://[A-Za-z0-9:@./?=_%-]+$ ]] || die 'PostgreSQL 连接配置无效。'
@@ -179,8 +187,9 @@ if [[ $mode == install ]]; then
         chmod 0600 /etc/default/x-ui
         ensure_pg_client || printf 'PostgreSQL 备份工具未安装，可稍后在运维菜单补装。\n' >&2
     fi
-    xui_cli setting -username "$username" -password "$password" -webBasePath "$web_path" -listenIP 127.0.0.1 -port "$port" \
+    xui_cli setting -username "$username" -password "$password" -webBasePath "$web_path" -listenIP "$listen_ip" -port "$port" \
         >/dev/null || die '初始化数据库和面板设置失败。'
+    panel_listens_on "$listen_ip" || die '未能保存面板监听地址。'
 fi
 
 install -m 0644 "$package/x-ui.service" "$unit"
@@ -212,16 +221,29 @@ if [[ $mode == install ]]; then
         tls_url="https://$ssl_host:$port$web_path"
         if (cert_permissions && if is_ip "$ssl_host"; then setup_ip_certificate "$ssl_host" ''; else setup_ssl_certificate "$ssl_host"; fi) \
             && systemctl restart x-ui.service \
+            && wait_for_panel "$tls_url" --connect-to "$ssl_host:$port:127.0.0.1:$port" \
+            && xui_cli setting -listenIP 0.0.0.0 >/dev/null \
+            && panel_listens_on 0.0.0.0 \
+            && systemctl restart x-ui.service \
             && wait_for_panel "$tls_url" --connect-to "$ssl_host:$port:127.0.0.1:$port"; then
             panel_url=$tls_url
-            printf '%s 的 HTTPS 已通过本地验证。转发或反向代理时请保留证书对应的域名或 IP。\n' "$ssl_host"
+            printf '%s 的 HTTPS 已通过本地验证。\n' "$ssl_host"
         else
             printf '证书申请或 HTTPS 验证未完成，正在恢复本机 HTTP。证书文件保留，可从 sudo x-ui 证书 重试。\n' >&2
-            xui_cli cert -reset && systemctl restart x-ui.service && wait_for_panel "$panel_url" \
+            xui_cli setting -listenIP 127.0.0.1 >/dev/null && panel_listens_on 127.0.0.1 && xui_cli cert -reset \
+                && systemctl restart x-ui.service && wait_for_panel "$panel_url" \
                 || die '未能恢复本机 HTTP，请运行 sudo x-ui 日志 查看详情。'
+            printf '面板仅在本机监听。可通过 SSH 转发访问。\n'
         fi
+        printf '管理地址：%s\n' "$panel_url"
+    else
+        if server_ipv4=$(detect_server_ipv4); then
+            printf '管理地址：http://%s:%s%s\n' "$server_ipv4" "$port" "$web_path"
+        else
+            printf '未能自动识别公网 IPv4。请使用服务器的公网地址。\n管理地址：http://<服务器公网 IP>:%s%s\n' "$port" "$web_path"
+        fi
+        printf '面板监听所有 IPv4 网卡。HTTP 登录为明文，可从 sudo x-ui 证书 配置 HTTPS。\n'
     fi
-    printf '管理地址：%s\n面板仅在本机监听。请通过 SSH 转发或已有反向代理访问，并妥善保管账号和密码。\n' "$panel_url"
 else
     mv -T -- "$stage/原程序" "$stage/更新前程序"
     printf '已更新到 %s。\n' "$version"

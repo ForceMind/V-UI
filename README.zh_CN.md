@@ -79,7 +79,7 @@
 bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/3x-ui-zh-lite/install-online.sh)
 ```
 
-入口从本分支读取 `packages/stable.txt`，下载指定安装包并校验 SHA-256。默认直接安装并使用 SQLite。安装完成后会显示随机账号、密码及面板访问路径。默认监听本机，SSH 转发方式见[中文版安装说明](README.md)。
+入口从本分支读取 `packages/stable.txt`，下载指定安装包并校验 SHA-256。默认直接安装并使用 SQLite。安装完成后会显示随机账号、密码和根据公网 IPv4 生成的管理地址。端口与证书说明见[中文版安装说明](README.md)。
 
 使用 `sudo x-ui` 打开运维菜单。需要在安装时申请证书、安装 PostgreSQL 或安装 Fail2ban，可分别指定 `--ssl 域名`、`--postgres` 或 `--fail2ban`。可用 `--port 端口` 指定面板端口。
 

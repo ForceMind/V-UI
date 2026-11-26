@@ -4,7 +4,7 @@
 # sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,RUNNER_OS,ImageOS,RUNNER_TEMP,GITHUB_RUN_ID \
 #   env XUI_CI_SYSTEMD_TEST=DISPOSABLE_GITHUB_RUNNER \
 #   bash scripts/test-zh-systemd.sh migrate /path/中文完整包.zip /path/官方完整包.tar.gz 2.9.2
-# 模式：fresh、migrate、rollback。两个归档须事先完成来源和摘要核对。
+# 模式：fresh、fresh-tls、fresh-tls-fallback、migrate、rollback。两个归档须事先完成来源和摘要核对。
 # 私密工作目录含一次性凭据、认证快照和原始程序日志，禁止上传该目录或打印日志。
 # 不修改 SSH、不调用防火墙工具、不申请公网证书，也不把测试扩展到现有机器。
 set +x
@@ -14,12 +14,12 @@ umask 077
 
 fail() { printf '测试失败：%s\n' "$1" >&2; exit 1; }
 pass() { printf '通过：%s\n' "$1"; }
-[[ $# == 3 || $# == 4 ]] || fail '用法：test-zh-systemd.sh fresh|migrate|rollback 中文完整包 官方完整包 [3.11.0|2.9.2]'
+[[ $# == 3 || $# == 4 ]] || fail '用法：test-zh-systemd.sh fresh|fresh-tls|fresh-tls-fallback|migrate|rollback 中文完整包 官方完整包 [3.11.0|2.9.2]'
 mode=$1
 official_version=${4:-3.11.0}
 case $official_version in 3.11.0|2.9.2) ;; *) fail '官方版本必须是 3.11.0 或 2.9.2（不带 v）。' ;; esac
-case $mode in fresh|migrate|rollback) ;; *) fail '模式必须是 fresh、migrate 或 rollback。' ;; esac
-[[ $mode != fresh || $official_version == 3.11.0 ]] || fail 'fresh 模式固定使用 v3.11.0 官方包。'
+case $mode in fresh|fresh-tls|fresh-tls-fallback|migrate|rollback) ;; *) fail '无效测试模式。' ;; esac
+[[ $mode != fresh* || $official_version == 3.11.0 ]] || fail '新装模式固定使用 v3.11.0 官方包。'
 [[ ${XUI_CI_SYSTEMD_TEST:-} == DISPOSABLE_GITHUB_RUNNER ]] || fail '缺少一次性 runner 的明确执行确认。'
 [[ $EUID == 0 && ${GITHUB_ACTIONS:-} == true && ${RUNNER_ENVIRONMENT:-} == github-hosted ]] || fail '只允许 root 在 GitHub-hosted Actions 中执行。'
 [[ ${RUNNER_OS:-} == Linux && ${ImageOS:-} == ubuntu* && ${GITHUB_RUN_ID:-} =~ ^[0-9]+$ ]] || fail '只允许 GitHub Ubuntu runner。'
@@ -251,9 +251,9 @@ def inbound_semantics(row):
     result['clients'] = sorted([client_semantics(c) for c in raw.get('clients',[])],key=lambda c:c['email'])
     return result
 
-def api_session():
+def api_session(host='127.0.0.1'):
     auth = json.loads(authfile.read_text())
-    base = ('https' if auth['tls'] else 'http')+'://127.0.0.1:'+str(auth['port'])+auth['path'].rstrip('/')+'/'
+    base = ('https' if auth['tls'] else 'http')+'://'+host+':'+str(auth['port'])+auth['path'].rstrip('/')+'/'
     context = ssl.create_default_context(cafile=str(work/'ca.pem')) if auth['tls'] else ssl.create_default_context()
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),urllib.request.HTTPSHandler(context=context))
     csrf = None
@@ -286,6 +286,8 @@ if action == 'auth':
         text = (work/'中文全新安装.log').read_text()
         u = re.search(r'^账号：([^\r\n]+)$',text,re.M); p = re.search(r'^密码：([^\r\n]+)$',text,re.M)
         if not u or not p: raise RuntimeError('无法读取一次性安装认证信息')
+        if f"管理地址：http://198.51.100.37:{s['webPort']}{s['webBasePath']}" not in text: raise RuntimeError('公开地址未使用已检测的 IPv4 和实际端口路径')
+        if s['webListen'] != '0.0.0.0' or s['webPort'] != '2053': raise RuntimeError('默认监听地址或端口不符')
         username,password = u[1],p[1]
     else: username,password = 'ci-fixture-admin','CI-only-fake-password-7c4b52'
     save('auth.json',{'username':username,'password':password,'port':int(s['webPort']),'path':s['webBasePath'],'tls':False})
@@ -331,7 +333,7 @@ elif action == 'seed-api':
     if not isinstance(added,dict) or not isinstance(added.get('id'),int): raise RuntimeError('原版正常 API 未创建入站')
     save('fixture-meta.json',{'inboundId':added['id']})
 elif action == 'probe':
-    request = api_session()
+    request = api_session(sys.argv[4]) if len(sys.argv) > 4 else api_session()
     if sys.argv[3] == 'login-only': sys.exit(0)
     rows = request('panel/api/inbounds/list')
     rows = [r for r in rows if r.get('id') == meta()['inboundId']] if isinstance(rows,list) else []
@@ -569,19 +571,75 @@ fi
 install -d -m 0750 /etc/x-ui-ci-fixture
 private '生成临时CA' openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=XUI-CI-Temporary-CA -keyout "$work/ca.key" -out "$work/ca.pem"
 private '生成临时证书请求' openssl req -newkey rsa:2048 -nodes -subj /CN=localhost -keyout /etc/x-ui-ci-fixture/privkey.pem -out "$work/leaf.csr"
-printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n' >"$work/leaf.ext"
+printf 'subjectAltName=DNS:localhost,DNS:panel.example.invalid,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n' >"$work/leaf.ext"
 private '签发临时证书' openssl x509 -req -in "$work/leaf.csr" -CA "$work/ca.pem" -CAkey "$work/ca.key" -CAcreateserial -days 1 -extfile "$work/leaf.ext" -out /etc/x-ui-ci-fixture/fullchain.pem
+
+if [[ $mode == fresh-tls* ]]; then
+    [[ ! -e /root/.acme.sh && ! -L /root/.acme.sh ]] || fail '测试机已有 ACME 配置。'
+    install -d -m 0700 /root/.acme.sh
+    cat >/root/.acme.sh/acme.sh <<'SH'
+#!/usr/bin/env bash
+set -eu
+case $1 in
+    --set-default-ca) ;;
+    --issue) [[ $XUI_CI_CERT_MODE == fresh-tls ]] ;;
+    --installcert)
+        shift
+        while (( $# )); do
+            case $1 in
+                --key-file) install -m 0600 /etc/x-ui-ci-fixture/privkey.pem "$2"; shift ;;
+                --fullchain-file) install -m 0644 /etc/x-ui-ci-fixture/fullchain.pem "$2"; shift ;;
+            esac
+            shift
+        done ;;
+    *) exit 1 ;;
+esac
+SH
+    chmod 0700 /root/.acme.sh/acme.sh
+    service_created=1
+    private '显式申请证书的新装' env CURL_CA_BUNDLE="$work/ca.pem" XUI_CI_CERT_MODE="$mode" \
+        timeout 150s bash "$package/install.sh" --ssl panel.example.invalid
+    settings=$(runuser -u x-ui-zh -- env XUI_DB_FOLDER=/etc/x-ui XUI_LOG_FOLDER=/var/log/x-ui /usr/local/x-ui/x-ui setting -show true)
+    panel_path=$(awk -F ': ' '$1 == "webBasePath" {print $2}' <<< "$settings")
+    interface_ip=$(ip -o -4 addr show scope global | awk 'NR == 1 {sub(/\/.*/, "", $4); print $4}')
+    [[ -n $panel_path && -n $interface_ip ]] || fail '缺少测试面板路径或网卡地址。'
+    if [[ $mode == fresh-tls ]]; then
+        grep -Fqx -- "管理地址：https://panel.example.invalid:2053$panel_path" "$work/显式申请证书的新装.log" || fail 'HTTPS 安装未输出证书域名地址。'
+        private '非回环 HTTPS' curl --noproxy '*' --fail --silent --max-time 5 --cacert "$work/ca.pem" \
+            --connect-to "panel.example.invalid:2053:$interface_ip:2053" "https://panel.example.invalid:2053$panel_path"
+        pass '模拟 ACME 成功后，面板在非回环网卡提供已验证的 HTTPS'
+    else
+        grep -Fqx -- "管理地址：http://127.0.0.1:2053$panel_path" "$work/显式申请证书的新装.log" || fail '证书失败后未正确输出本机地址。'
+        private '回退后的本机 HTTP' curl --noproxy '*' --fail --silent --max-time 5 "http://127.0.0.1:2053$panel_path"
+        if curl --noproxy '*' --silent --max-time 3 --output /dev/null "http://$interface_ip:2053$panel_path"; then fail '证书失败时公开了 HTTP 监听。'; fi
+        pass '模拟 ACME 失败后，仅在本机提供 HTTP'
+    fi
+    exit 0
+fi
 
 if [[ $mode == fresh ]]; then
     service_created=1
-    private '中文全新安装' env XUI_CI_INSTALLER="$package/install.sh" timeout 120s \
+    # 固定回显服务的回包，验证超出 IPv4 范围的响应会跳过。面板请求仍走真实 curl。
+    mkdir "$work/tools"
+    cat >"$work/tools/curl" <<'SH'
+#!/usr/bin/env bash
+case ${!#} in
+    https://api4.ipify.org) printf '999.51.100.37\n' ;;
+    https://ipv4.icanhazip.com) printf '198.51.100.37\n' ;;
+    *) exec /usr/bin/curl "$@" ;;
+esac
+SH
+    chmod 0755 "$work/tools/curl"
+    interface_ip=$(ip -o -4 addr show scope global | awk 'NR == 1 {sub(/\/.*/, "", $4); print $4}')
+    [[ -n $interface_ip ]] || fail '测试机缺少非回环 IPv4。'
+    private '中文全新安装' env PATH="$work/tools:$PATH" XUI_CI_INSTALLER="$package/install.sh" timeout 120s \
         script --quiet --return --command 'test -t 0 && exec bash "$XUI_CI_INSTALLER"' /dev/null
     [[ -s /etc/x-ui/x-ui.db && ! -e /etc/default/x-ui && ! -e /etc/x-ui-managed-certs ]] || fail '默认新装未使用 SQLite，或触发了附加配置。'
     pass '交互终端直接完成默认安装，无需回答问题'
     [[ $(systemctl show x-ui.service --property=User --value) == x-ui-zh ]] || fail '新装服务身份不是专用账号。'
     private '读取新装认证' python3 "$work/fixture.py" "$work" auth fresh
-    private '验证初次登录' python3 "$work/fixture.py" "$work" probe login-only
-    pass '全新安装的真实服务、随机账号和原始路径登录'
+    private '通过非回环地址验证初次登录' python3 "$work/fixture.py" "$work" probe login-only "$interface_ip"
+    pass '非回环网卡访问、随机账号登录和公网地址输出'
     systemctl stop x-ui.service
     chgrp x-ui-zh /etc/x-ui-ci-fixture /etc/x-ui-ci-fixture/privkey.pem /etc/x-ui-ci-fixture/fullchain.pem
     chmod 0640 /etc/x-ui-ci-fixture/*.pem
