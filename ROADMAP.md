@@ -1,6 +1,12 @@
 # 开发路线与当前进度
 
-更新：2026-11-24。此文件是当前开发顺序与阶段状态的唯一清单；使用方法见[文档首页](docs/README.md)，准确发布证据见[版本记录](docs/RELEASING.md#当前稳定版)，旧路线和阶段原文见[历史索引](docs/history/README.md)。
+更新：2026-11-27。此文件是当前开发顺序与阶段状态的唯一清单；使用方法见[文档首页](docs/README.md)，准确发布证据见[版本记录](docs/RELEASING.md#当前稳定版)，旧路线和阶段原文见[历史索引](docs/history/README.md)。
+
+## v0.4.28 发布候选
+
+- 基线为已同步并验收的 main / dev [84bc5dc](https://github.com/ForceMind/V-UI/commit/84bc5dc2e5ffe8f3e354490eaa018ad5517b090b)。主线已验证九组 Actions、同轮新装和 12 个公开旧版升级及四目标；同一提交另有隔离 Chromium 和 ARM64 实装证据。 [主线安装](https://github.com/ForceMind/V-UI/actions/runs/45756685058/attempts/1) · [Chromium](https://github.com/ForceMind/V-UI/actions/runs/45678014003) · [ARM64](https://github.com/ForceMind/V-UI/actions/runs/45741002851/attempts/3)
+- 候选包含上述开发增量、版本和验收。公开 v0.4.27 锁定为应用源 `bdf5fbac4475424562c4733b1816093857f62f55`，新增同套件真实保数据升级角色。候选须独立取得准确 Actions、同轮新装及全部旧版升级和四目标制品证据。 [候选说明](docs/RELEASE_NOTES.md)
+- 公开发行和短入口当前对应 v0.4.27。W1 完整环境诊断、真实 Cloudflare 整机签发及外部环境验收仍按各自范围推进。 [正式发布记录](docs/RELEASING.md#当前稳定版)
 
 ## 当前增量：安装、诊断与交付优化
 
@@ -32,7 +38,7 @@
 | W4 证书逐位置状态和重试 | `81268b6` | 23 项合成通过，两固定核心实际 TLS 均验证旧材料保留及原位置重试。 [链路验收](https://github.com/ForceMind/V-UI/actions/runs/45451730511/attempts/1) |
 | W4 维护断线查回 | `61f2506` | 合成与隔离 API 通过，覆盖原任务编号、权限隔离及撤销。 [API 验收](https://github.com/ForceMind/V-UI/actions/runs/45451730668/attempts/1) |
 
-公开 v0.4.27 仍对应既有已验收制品。仍需验证真实 Cloudflare 整机签发、公开 v0.4.27 到下一版本的保数据升级、浏览器和外部环境。W1 完整环境诊断继续单列。
+公开 v0.4.27 对应既有正式制品。主线改版已完成隔离浏览器和 ARM64 实装验收，v0.4.28 另按本页候选标准验证。真实 Cloudflare 整机签发和外部环境待验。W1 完整环境诊断继续单列。
 
 ## 已完成 P3：v0.4.24 与独立核心组件
 

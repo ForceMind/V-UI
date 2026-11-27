@@ -29,10 +29,11 @@ PUBLISHED_BASELINES = {
     '0.4.24': '8b8d7cf82e55609a205455b351f659eb9de91974',
     '0.4.25': '32a03a5b6719400f21a07a75d04d278b76e0df09',
     '0.4.26': '71f0e1689cd356f22e12553f74a9ec4fd8bba388',
+    '0.4.27': 'bdf5fbac4475424562c4733b1816093857f62f55',
 }
-DNS_BASELINES = frozenset({'0.4.23', '0.4.24', '0.4.25', '0.4.26'})
-CORE_AUTHORITY_BASELINES = frozenset({'0.4.24', '0.4.25', '0.4.26'})
-YAML_BASELINES = frozenset({'0.4.25', '0.4.26'})
+DNS_BASELINES = frozenset({'0.4.23', '0.4.24', '0.4.25', '0.4.26', '0.4.27'})
+CORE_AUTHORITY_BASELINES = frozenset({'0.4.24', '0.4.25', '0.4.26', '0.4.27'})
+YAML_BASELINES = frozenset({'0.4.25', '0.4.26', '0.4.27'})
 CONTROL = Path('/usr/local/lib/v-ui')
 FIREWALL = str(CONTROL / 'firewall_support.py')
 MAINTENANCE_FILES = frozenset({
@@ -60,8 +61,8 @@ DNS_BINDING_LAYOUTS = (BINDING_COLUMNS + ('server_name',), BINDING_COLUMNS[:4] +
 
 
 def _target_contract(candidate_version, old_version):
-    if candidate_version not in ('0.4.22', '0.4.23', '0.4.24', '0.4.25', '0.4.26', '0.4.27'):
-        raise AssertionError('Explicit reviewed 0.4.22 through 0.4.27 upgrade target required')
+    if candidate_version not in ('0.4.22', '0.4.23', '0.4.24', '0.4.25', '0.4.26', '0.4.27', '0.4.28'):
+        raise AssertionError('Explicit reviewed 0.4.22 through 0.4.28 upgrade target required')
     if old_version in DNS_BASELINES and candidate_version <= old_version:
         raise AssertionError('The published DNS baseline requires a newer candidate')
     return candidate_version
@@ -118,9 +119,9 @@ def assert_receipt_migration(test, before, after, old_version, candidate_version
         raise AssertionError('Explicit P3 development control profile required')
     if type(core_authority) is not bool or core_authority and not core_control:
         raise AssertionError('Explicit private core authority control profile required')
-    if candidate_version in ('0.4.24', '0.4.25', '0.4.26', '0.4.27') and not (core_control and core_authority):
+    if candidate_version in ('0.4.24', '0.4.25', '0.4.26', '0.4.27', '0.4.28') and not (core_control and core_authority):
         raise AssertionError('Candidate requires the complete core and authority control profile')
-    if candidate_version in ('0.4.25', '0.4.26', '0.4.27') and not yaml_control:
+    if candidate_version in ('0.4.25', '0.4.26', '0.4.27', '0.4.28') and not yaml_control:
         raise AssertionError('Candidate requires the YAML control reader')
     existing_core = old_version in CORE_AUTHORITY_BASELINES
     if existing_core:
@@ -263,7 +264,7 @@ def assert_editor_content_addition(test, before, after):
 
 def assert_node_summary_upgrade(test, before, after, old_version=None):
     """Permit only the declared capability/CAS response additions for 21."""
-    if old_version in ('0.4.21', '0.4.22', '0.4.23', '0.4.24', '0.4.25', '0.4.26'):
+    if old_version in ('0.4.21', '0.4.22', '0.4.23', '0.4.24', '0.4.25', '0.4.26', '0.4.27'):
         test.assertEqual(after,before)
         for row in after:
             test.assertIs(type(row.get('content_revision')),str)
@@ -303,9 +304,9 @@ def assert_upgrade_configuration(test, before, after, old_release, new_release):
     test.assertEqual(after, expected)
 
 
-def managed_xray_fixture_program(data_root='/var/lib/v-ui/data'):
-    """Persist synthetic v0.4.16 bound state; never apply a core or issue a cert."""
-    return 'data_root=' + repr(str(data_root)) + ';' + '''
+def managed_xray_fixture_program(data_root='/var/lib/v-ui/data', *, dns_schema=False):
+    """Persist a synthetic binding without applying a core or issuing a cert."""
+    return f'data_root={str(data_root)!r};dns_schema={dns_schema!r};' + '''
 import hashlib,json,time
 from pathlib import Path
 from app.models import database
@@ -313,7 +314,7 @@ from app.certificates.models import Certificate,CertificateBinding
 root=Path(data_root)
 chain=(root/'certs/provided-fullchain.pem').read_bytes()
 key=(root/'certs/provided-privkey.pem').read_bytes()
-identity='b'*32
+identity=('c' if dns_schema else 'b')*32
 revision=hashlib.sha256(chain).hexdigest()
 material=root/'certificates/revisions'/identity/revision
 material.mkdir(parents=True,mode=0o700)
@@ -332,16 +333,18 @@ with database.SessionLocal() as db:
  db.add(node)
  db.flush()
  node_id=node.id
- db.add(CertificateBinding(target='inbound:'+str(node.id),certificate_id=identity,
-  error='CORE_STOPPED_PENDING_APPLY'))
+ binding=CertificateBinding(target='inbound:'+str(node.id),certificate_id=identity,
+  error='CORE_STOPPED_PENDING_APPLY')
+ if dns_schema: binding.server_name='vpn.example.test'
+ db.add(binding)
  db.commit()
 print(json.dumps({'inbound_id':node_id,'certificate_id':identity}))
 '''
 
 
-def yaml_draft_program(*, create=False, data_root='/var/lib/v-ui/data'):
-    """Run through the installed store and return only identities and source hashes."""
-    return ('create=' + repr(create) + '\ndata_root=' + repr(str(data_root)) + '\n' + r"""
+def yaml_draft_program(*, create=False, data_root='/var/lib/v-ui/data', with_upstream=False):
+    """Return installed plan identities and private content hashes."""
+    return (f'create={create!r}\ndata_root={str(data_root)!r}\nwith_upstream={with_upstream!r}\n' + r"""
 import hashlib,json
 from app.services.mihomo_merge import serialize_mihomo_merge
 from app.services.mihomo_merge_plan import plan_mihomo
@@ -364,8 +367,14 @@ draft=store.load_draft()
 assert draft['execution_mode']=='yaml'
 assert draft['pending'] is None and store.load_active() is None
 record,sources=draft['yaml_plan']
-print(json.dumps({'revision':draft['revision'],'plan':record.record_id,
-                  'sources':{role:digest(raw) for role,raw in sources.items()}}))
+result={'revision':draft['revision'],'plan':record.record_id,
+        'sources':{role:digest(raw) for role,raw in sources.items()}}
+if with_upstream:
+ profile,=draft['upstreams'].values()
+ assert profile['server']=='upstream.example'
+ assert profile['uuid']=='11111111-1111-4111-8111-111111111111'
+ result['upstream_sha256']=digest(json.dumps(draft['upstreams'],sort_keys=True).encode())
+print(json.dumps(result))
 """)
 
 
@@ -492,10 +501,11 @@ with database.SessionLocal() as db:
 print('{}')
 ''')
         self.managed_xray = None
-        if self.old_version in ('0.4.16', '0.4.17', '0.4.19', '0.4.20', '0.4.21'):
+        if self.old_version in ('0.4.16', '0.4.17', '0.4.19', '0.4.20', '0.4.21', '0.4.27'):
             # The stored binding and its local fixture material are observed as
             # data only. No CA, certificate validation or business core is run.
-            self.managed_xray = self._service_python(release, managed_xray_fixture_program())
+            self.managed_xray = self._service_python(
+                release, managed_xray_fixture_program(dns_schema=self.old_version == '0.4.27'))
         status, raw = api('/api/inbounds')
         self.test.assertEqual(status, 200)
         self.nodes = json.loads(raw)
@@ -532,7 +542,8 @@ print('{}')
         self.data = self._snapshot(release)
         self.yaml_state = None
         if self.old_version in YAML_BASELINES:
-            self.yaml_state = self._service_python(release, yaml_draft_program(create=True))
+            self.yaml_state = self._service_python(
+                release, yaml_draft_program(create=True, with_upstream=self.old_version == '0.4.27'))
         for table in ('users','inbounds','subscription_grants','managed_certificates'):
             self.test.assertGreater(self.data[table]['count'], 0)
         self.test.assertGreaterEqual(len(self.data['certificate_material']), 2)
@@ -613,8 +624,9 @@ print(json.dumps(row))
                                  core_control=True, core_authority=True, yaml_control=True)
         self.test.assertEqual(self._snapshot(release,after=True), self.data, 'Private DB rows and certificate bytes must survive')
         if self.yaml_state is not None:
-            self.test.assertEqual(self._service_python(release, yaml_draft_program()), self.yaml_state,
-                                  'Saved YAML plan and all private source bytes must survive')
+            observed = self._service_python(release, yaml_draft_program(with_upstream=self.old_version == '0.4.27'))
+            self.test.assertEqual(observed, self.yaml_state,
+                                  'Saved YAML plan, private sources and imported upstream must survive')
         if self.old_version in DNS_BASELINES:
             self._assert_candidate_origin(release, config)
         after_nodes = json.loads(api('/api/inbounds')[1])
@@ -645,7 +657,9 @@ print(json.dumps(row))
             print('VUI_25_TO_26_UPGRADE_ACCEPTANCE: prior and candidate Root origins, private DB and DNS material, saved YAML plan and three source digests verified')
         if self.old_version == '0.4.26' and self.candidate['version'] == '0.4.27':
             print('VUI_26_TO_27_UPGRADE_ACCEPTANCE: account and node data, live subscription, certificate bindings, private DNS material, saved YAML sources and both Root origins verified')
-        print('Published upgrade: immutable public '+self.old_version+' source/assets -> exact candidate; exact historical root receipt closure; config, users/password hashes, node draft/manual TLS paths, live subscription, provided/managed fixture certificate bytes and managed certificate/binding metadata retained (synthetic un-applied Xray binding on 0.4.16/17/19/20/21; no CA/core qualification); candidate-only bounded downloads OK')
+        if self.old_version == '0.4.27' and self.candidate['version'] == '0.4.28':
+            print('VUI_27_TO_28_UPGRADE_ACCEPTANCE: account, nodes, live subscription, certificate binding, DNS materials, YAML sources, imported upstream and both Root origins verified')
+        print('Published upgrade: immutable public '+self.old_version+' source/assets -> exact candidate; exact historical root receipt closure; config, users/password hashes, node draft/manual TLS paths, live subscription, provided/managed fixture certificate bytes and managed certificate/binding metadata retained (synthetic un-applied Xray binding on 0.4.16/17/19/20/21/27; no CA/core qualification); candidate-only bounded downloads OK')
 
     def clear_yaml_fixture(self, api):
         if self.yaml_state is None:

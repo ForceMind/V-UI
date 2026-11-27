@@ -43,6 +43,8 @@ class ShortInstallContractTests(unittest.TestCase):
             expected.append(('0.4.25','32a03a5b6719400f21a07a75d04d278b76e0df09','.published-v0425',True))
         if tuple(map(int,version.split('.'))) > (0,4,26):
             expected.append(('0.4.26','71f0e1689cd356f22e12553f74a9ec4fd8bba388','.published-v0426',True))
+        if tuple(map(int,version.split('.'))) > (0,4,27):
+            expected.append(('0.4.27','bdf5fbac4475424562c4733b1816093857f62f55','.published-v0427',True))
         return expected
 
     def test_installer_language_identity_does_not_depend_on_consent_test_opt_in(self):
@@ -66,7 +68,7 @@ class ShortInstallContractTests(unittest.TestCase):
         expected=self.expected_upgrade_baselines(version)
         self.assertEqual(rows,[dict(version=v,source=sha,path=path,netlink=netlink)
                                for v,sha,path,netlink in expected])
-        for candidate,count in [('0.4.22',7),('0.4.23',8),('0.4.24',9),('0.4.25',10),('0.4.26',11),('0.4.27',12)]:
+        for candidate,count in [('0.4.22',7),('0.4.23',8),('0.4.24',9),('0.4.25',10),('0.4.26',11),('0.4.27',12),('0.4.28',13)]:
             actual=acceptance_job.matrix_for_version(candidate)['include']
             self.assertEqual(len(actual),count)
             self.assertEqual(actual,[dict(version=v,source=sha,path=path,netlink=netlink)
@@ -118,6 +120,7 @@ class ShortInstallContractTests(unittest.TestCase):
         if tuple(map(int,version.split('.'))) > (0,4,24):expected.append('upgrade-0.4.24')
         if tuple(map(int,version.split('.'))) > (0,4,25):expected.append('upgrade-0.4.25')
         if tuple(map(int,version.split('.'))) > (0,4,26):expected.append('upgrade-0.4.26')
+        if tuple(map(int,version.split('.'))) > (0,4,27):expected.append('upgrade-0.4.27')
         self.assertEqual(selected,expected)
         for role,recipe in recipes:
             commands=recipe['commands']

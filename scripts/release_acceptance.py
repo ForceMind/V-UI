@@ -46,6 +46,7 @@ BASELINES = {
     '0.4.24': '8b8d7cf82e55609a205455b351f659eb9de91974',
     '0.4.25': '32a03a5b6719400f21a07a75d04d278b76e0df09',
     '0.4.26': '71f0e1689cd356f22e12553f74a9ec4fd8bba388',
+    '0.4.27': 'bdf5fbac4475424562c4733b1816093857f62f55',
 }
 ROLES = frozenset({'build', 'fresh'} | {'upgrade-' + version for version in BASELINES})
 PRODUCER_SCOPE = 'producer-inspection'

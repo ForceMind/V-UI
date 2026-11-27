@@ -44,11 +44,12 @@ class Materials:
     def __init__(self, version=VERSION):
         self.version = version
         self.roles = ['build', 'fresh', *('upgrade-' + value for value in BASELINES)]
-        if version in ('0.4.23','0.4.24','0.4.25','0.4.26','0.4.27'): self.roles.append('upgrade-0.4.22')
-        if version in ('0.4.24','0.4.25','0.4.26','0.4.27'): self.roles.append('upgrade-0.4.23')
-        if version in ('0.4.25','0.4.26','0.4.27'): self.roles.append('upgrade-0.4.24')
-        if version in ('0.4.26','0.4.27'): self.roles.append('upgrade-0.4.25')
-        if version == '0.4.27': self.roles.append('upgrade-0.4.26')
+        if version in ('0.4.23','0.4.24','0.4.25','0.4.26','0.4.27','0.4.28'): self.roles.append('upgrade-0.4.22')
+        if version in ('0.4.24','0.4.25','0.4.26','0.4.27','0.4.28'): self.roles.append('upgrade-0.4.23')
+        if version in ('0.4.25','0.4.26','0.4.27','0.4.28'): self.roles.append('upgrade-0.4.24')
+        if version in ('0.4.26','0.4.27','0.4.28'): self.roles.append('upgrade-0.4.25')
+        if version in ('0.4.27','0.4.28'): self.roles.append('upgrade-0.4.26')
+        if version == '0.4.28': self.roles.append('upgrade-0.4.27')
         self.checks = {}; self.jobs = {}; self.artifacts = {}; self.bytes = {}; self.downloads = []
         self.reread = {}; self.pages = {}
         for index, path in enumerate(sorted(policy.WORKFLOWS), 1):
@@ -201,7 +202,7 @@ class ParallelMaterialsTests(unittest.TestCase):
         self.assertEqual(fixture.downloads, [])
 
     def test_current_and_future_matrix_require_every_role_and_return_original_bytes(self):
-        for version, count in [('0.4.22', 9), ('0.4.23', 10), ('0.4.24', 11), ('0.4.25', 12), ('0.4.26', 13), ('0.4.27', 14)]:
+        for version, count in [('0.4.22', 9), ('0.4.23', 10), ('0.4.24', 11), ('0.4.25', 12), ('0.4.26', 13), ('0.4.27', 14), ('0.4.28', 15)]:
             with self.subTest(version=version):
                 fixture = Materials(version); result = fixture.qualify()
                 self.assertEqual(len(fixture.jobs[fixture.checks['oneclick.yml']['id']]), count)
@@ -454,6 +455,17 @@ class LatestPublishedTests(unittest.TestCase):
         values['git/ref/tags/v0.4.26']['object']['sha'] = 'f' * 40
         with self.assertRaises(policy.ParallelPolicyError):
             policy.validate_latest_published('0.4.27', values.__getitem__)
+
+
+    def test_candidate28_requires_exact_public27_source_in_upgrade_matrix(self):
+        source = 'bdf5fbac4475424562c4733b1816093857f62f55'
+        values = {'releases/latest': {'draft': False, 'prerelease': False, 'tag_name': 'v0.4.27'},
+                  'git/ref/tags/v0.4.27': {'object': {'type': 'commit', 'sha': source}}}
+        self.assertEqual(policy.validate_latest_published('0.4.28', values.__getitem__),
+                         {'version': '0.4.27', 'source': source})
+        values['git/ref/tags/v0.4.27']['object']['sha'] = 'f' * 40
+        with self.assertRaises(policy.ParallelPolicyError):
+            policy.validate_latest_published('0.4.28', values.__getitem__)
 
 
 class ScopeRepository:
