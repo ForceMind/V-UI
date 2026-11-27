@@ -1,0 +1,68 @@
+name: 上传已验收的 zh.7 预览安装包
+
+on:
+  push:
+    branches: [3x-ui-zh-lite]
+    paths: ['.github/workflows/zh7-preview-transfer.yml']
+
+permissions: {}
+
+jobs:
+  upload:
+    if: github.repository == 'ForceMind/V-UI' && github.ref == 'refs/heads/3x-ui-zh-lite'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: 核对原验收运行和唯一允许上传的制品
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/ForceMind/V-UI/actions/runs/45979143748 |
+            jq -e '.head_sha=="3fdadeb99ea44f7457bca65b266c9edf6f3b9ce8" and .path==".github/workflows/zh-install-check.yml" and .conclusion=="success"' >/dev/null
+          gh api repos/ForceMind/V-UI/actions/runs/45979143748/artifacts |
+            jq -e 'any(.artifacts[]; .id==15188328005 and .name=="tested-linux-amd64" and .expired==false and .digest=="sha256:6d5f04112896b9aa392017a24b917bbaac29fae6a1922a060e43da44183a2b52")' >/dev/null
+      - uses: actions/download-artifact@v4
+        with:
+          name: tested-linux-amd64
+          path: ${{ runner.temp }}/accepted-zh7
+          github-token: ${{ github.token }}
+          run-id: 45979143748
+      - name: 校验并直接推送预览包和独立入口
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=3x-ui-v3.11.0-zh.7-linux-amd64.tar.gz
+          digest=d7665da30b50f338057e49c1c2488d185ac2beeb024e0bcd18182ee12c2b22b6
+          source_commit=3fdadeb99ea44f7457bca65b266c9edf6f3b9ce8
+          from="$RUNNER_TEMP/accepted-zh7/$file"
+          test "$(stat -c %s "$from")" = 83122418
+          printf '%s  %s\n' "$digest" "$from" | sha256sum --check --strict
+          test "$(tar -xOzf "$from" 3x-ui-zh-lite/SOURCE_COMMIT)" = "$source_commit"
+          test "$(tar -xOzf "$from" 3x-ui-zh-lite/VERSION)" = v3.11.0-zh.7
+
+          ref=refs/heads/3x-ui-zh-lite
+          test "$(git ls-remote --heads origin "$ref" | cut -f1)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test ! -e "packages/$file"
+          install -m 0644 "$from" "packages/$file"
+          printf '%s  %s\n' "$digest" "$file" >"packages/$file.sha256"
+          git add -f -- "packages/$file"
+          git add -- "packages/$file.sha256"
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m '保存通过自动迁移验收的 zh.7 预览包'
+          revision=$(git rev-parse HEAD)
+          sed "s/@REVISION@/$revision/" .github/zh7-preview-online.template >install-preview-online.sh
+          bash -n install-preview-online.sh
+          git add -- install-preview-online.sh
+          git rm -- .github/zh7-preview-online.template
+          git diff --cached --check
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m '提供 zh.7 的独立自动识别预览入口'
+          git diff --exit-code "$GITHUB_SHA" HEAD -- install-online.sh packages/stable.txt
+          git push origin "HEAD:$ref"
+          git rev-parse HEAD
