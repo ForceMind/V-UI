@@ -122,7 +122,7 @@ def vui_api():
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(cookie))
 
     def call(path, data=None):
-        headers = {"Origin": address, "Accept": "application/json"}
+        headers = {"Origin": address, "X-VUI-Request": "1", "Accept": "application/json"}
         if data is not None:
             headers["Content-Type"] = "application/json"
             data = json.dumps(data).encode()
@@ -434,6 +434,14 @@ async def compare(args, directory, reference):
                         saved = config_hashes.setdefault("vui" if name == "vui" else "3x", current)
                         if saved != current:
                             raise RuntimeError("applied configuration changed between trials")
+                        for _ in range(40):
+                            try:
+                                with socket.create_connection((SERVER, INBOUND), timeout=0.25):
+                                    break
+                            except OSError:
+                                await asyncio.sleep(0.25)
+                        else:
+                            raise RuntimeError("the server core did not bind its REALITY listener")
                         if not mode:
                             await smoke(application, context, hostname)
                             proof[name] = True
