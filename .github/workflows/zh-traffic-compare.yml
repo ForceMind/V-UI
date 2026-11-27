@@ -1,0 +1,64 @@
+name: 中文版流量优化同机对比
+
+on:
+  push:
+    branches: [3x-ui-zh-lite]
+    paths:
+      - '.github/workflows/zh-traffic-compare.yml'
+      - 'scripts/compare-zh-traffic.py'
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: 对照前验证候选和锁定原版
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error --retry 3 --max-time 300 \
+            https://github.com/MHSanaei/3x-ui/releases/download/v3.11.0/x-ui-linux-amd64.tar.gz \
+            --output "$RUNNER_TEMP/official.tar.gz"
+          printf '%s  %s\n' 0ddfa4702f595442e2962acd81addc768fdacaa4ff2672c971a0463dae744916 "$RUNNER_TEMP/official.tar.gz" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/official"
+          tar -xzf "$RUNNER_TEMP/official.tar.gz" -C "$RUNNER_TEMP/official"
+          (cd frontend && npm ci --ignore-scripts --no-fund --no-audit && npm run build)
+          CGO_ENABLED=1 go build -trimpath -tags 'netgo osusergo' -ldflags '-s -w -linkmode external -extldflags -static' -o "$RUNNER_TEMP/zh-candidate" .
+          go test ./internal/xray ./internal/web/service ./internal/web/job ./internal/database \
+            -run 'Test(OnlineUsersQuery|ClientTrafficBatchDeltas|CheckClientIp|HasLimitIp|ClampedAddExpr)' -count=1
+      - name: 在无外网网络命名空间顺序比较两版
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          uname -mr
+          lscpu | awk -F: '/^CPU\(s\):|^Model name:/ {print $1 ":" $2}'
+          sudo unshare --net bash -c '
+            set -euo pipefail
+            ip link set lo up
+            ip addr add 198.18.0.10/32 dev lo
+            exec runuser -u "$1" -- python3 -B "$2/scripts/compare-zh-traffic.py" \
+              --official "$3/official/x-ui/x-ui" --candidate "$3/zh-candidate" \
+              --core-dir "$3/official/x-ui/bin" --output "$3/traffic-comparison.json"
+          ' _ "$(id -un)" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+          cat "$RUNNER_TEMP/traffic-comparison.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: traffic-comparison
+          path: ${{ runner.temp }}/traffic-comparison.json
+          retention-days: 7
