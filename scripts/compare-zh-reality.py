@@ -202,14 +202,16 @@ def client_config(public, sni):
     wrong = base64.urlsafe_b64encode(alternate).decode().rstrip("=")
 
     def outbound(tag, key):
-        return {"tag": tag, "type": "vless", "server": SERVER, "server_port": INBOUND, "uuid": UID, "flow": FLOW,
-                "network": "tcp", "tls": {"enabled": True, "server_name": sni, "utls": {"enabled": True,
-                "fingerprint": "chrome"}, "reality": {"enabled": True, "public_key": key, "short_id": SHORT_ID}}}
+        return {"tag": tag, "protocol": "vless", "settings": {"vnext": [{"address": SERVER, "port": INBOUND,
+                "users": [{"id": UID, "flow": FLOW, "encryption": "none"}]}]}, "streamSettings": {
+                "network": "raw", "security": "reality", "realitySettings": {"fingerprint": "chrome",
+                "serverName": sni, "password": key, "shortId": SHORT_ID, "spiderX": "/", "show": False}}}
 
-    return {"log": {"level": "warn"}, "inbounds": [{"type": "socks", "tag": tag, "listen": CLIENT,
-            "listen_port": port} for tag, port in (("good-socks", SOCKS), ("bad-socks", BAD_SOCKS))],
+    return {"log": {"loglevel": "warning", "access": "none"}, "inbounds": [
+            {"protocol": "socks", "tag": tag, "listen": CLIENT, "port": port, "settings": {"auth": "noauth", "udp": False}}
+            for tag, port in (("good-socks", SOCKS), ("bad-socks", BAD_SOCKS))],
             "outbounds": [outbound("good", public), outbound("bad", wrong)],
-            "route": {"rules": [{"inbound": ["bad-socks"], "action": "route", "outbound": "bad"}], "final": "good"}}
+            "routing": {"rules": [{"type": "field", "inboundTag": ["bad-socks"], "outboundTag": "bad"}]}}
 
 
 class Origin:
@@ -286,14 +288,15 @@ async def smoke(origin, context, hostname):
         raise RuntimeError("negative probe reached the HTTPS origin")
 
 
-def diagnose(paths):
+def diagnose(paths, client_offset):
     categories = ("reality verification failed", "invalid connection", "connection refused", "connection reset",
                   "no route to host", "timeout", "unknown user", "flow mismatch", "unsupported", "invalid request",
                   "failed to read", "failed to dial", "certificate", "tls handshake", "short id", "reality",
-                  "closed pipe", "eof")
-    for path in paths:
+                  "closed pipe", "eof", "unknown authority", "hello retry", "unexpected message", "x25519")
+    for index, path in enumerate(paths):
         if path.is_file():
-            contents = path.read_text(errors="replace").casefold()
+            offset = client_offset if index == 0 else 0
+            contents = path.read_bytes()[offset:].decode(errors="replace").casefold()
             print(f"{path.name} categories: " + ", ".join(item for item in categories if item in contents), flush=True)
 
 
@@ -404,12 +407,11 @@ async def compare(args, directory, reference):
             proxy_config = directory / "client.json"
             encoded = json.dumps(config, sort_keys=True).encode()
             proxy_config.write_bytes(encoded)
-            proxy = ns_command("runuser", "-u", pwd.getpwuid(os.getuid()).pw_name, "--", singbox, "run", "-c", proxy_config)
-            address = "127.0.0.1"
+            proxy = ns_command("runuser", "-u", pwd.getpwuid(os.getuid()).pw_name, "--", xray, "run", "-c", proxy_config)
             builds = {"vui": (vui_command, env_vui, singbox), "official": ([args.official], xin, xray),
                       "candidate": ([args.candidate], xin, xray)}
             proof = {"vui": None, "official": None, "candidate": None}
-            report = {"versions": versions, "sha256": {"sing_box": digest(singbox), "xray": digest(xray),
+            report = {"versions": versions, "common_client": "xray", "sha256": {"sing_box": digest(singbox), "xray": digest(xray),
                       "official_panel": digest(args.official), "candidate_panel": digest(args.candidate),
                       "vui_main": digest(payload / "main.py"), "client_config": hashlib.sha256(encoded).hexdigest(),
                       "3x_sqlite_fixture": digest(seed)}, "verified_settings": {"protocol": "vless", "network": "tcp/raw",
@@ -454,10 +456,12 @@ async def compare(args, directory, reference):
                         else:
                             raise RuntimeError("the server core did not bind its REALITY listener")
                         if not mode:
+                            stages = [directory / "client.log", directory / f"{name}-{trial}.log", logs / "xray-error.log"]
+                            client_offset = stages[0].stat().st_size
                             try:
                                 await smoke(application, context, hostname)
                             except Exception:
-                                diagnose((directory / "client.log", directory / f"{name}-{trial}.log", logs / "xray-error.log"))
+                                diagnose(stages, client_offset)
                                 raise
                             proof[name] = True
                             return None
