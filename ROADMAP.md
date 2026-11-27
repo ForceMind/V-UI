@@ -8,6 +8,22 @@
 - 候选包含上述开发增量、版本和验收。公开 v0.4.27 锁定为应用源 `bdf5fbac4475424562c4733b1816093857f62f55`，新增同套件真实保数据升级角色。候选须独立取得准确 Actions、同轮新装及全部旧版升级和四目标制品证据。 [候选说明](docs/RELEASE_NOTES.md)
 - 公开发行和短入口当前对应 v0.4.27。W1 完整环境诊断、真实 Cloudflare 整机签发及外部环境验收仍按各自范围推进。 [正式发布记录](docs/RELEASING.md#当前稳定版)
 
+## v0.4.28 候选验收
+
+准确候选为 [c06351c681a3f38014abc3170e72af6d56fc11b3](https://github.com/ForceMind/V-UI/commit/c06351c681a3f38014abc3170e72af6d56fc11b3)，从已验 main 84bc5dc 建立，release/v0.4.28 与 dev 均已回读。本节单独保存候选的验收证据。
+
+- 九组准确 dev/push Actions 均成功。安装矩阵首轮 15/15，包含构建、真实隔离新装及 13 个公开旧版升级。15 份收据和 14 份运行日志已回下载并核对摘要、来源、轮次及实际结果。 [安装矩阵](https://github.com/ForceMind/V-UI/actions/runs/45990281987/attempts/1)
+- 公开 v0.4.27 固定源为 bdf5fbac4475424562c4733b1816093857f62f55。实际升级验证账户、节点、有效订阅、合成未应用证书绑定和材料、DNS 私有材料、YAML 三份来源、导入上游及新旧 Root 来源。 [旧版升级](https://github.com/ForceMind/V-UI/actions/runs/45990281987/job/140476363098)
+- 四目标包的外层归档摘要、内部校验清单及 manifest 均已验证。x86_64 GNU 来自安装首轮，另外三个目标来自 portable 第三轮。前两轮 x86_64-musl 的固定上游源码查询返回 HTTP 403 rate limit exceeded，失败记录保留。 [便携第三轮](https://github.com/ForceMind/V-UI/actions/runs/45990282133/attempts/3)
+- 独立差异审查未发现阻断。31 项本地合成检查通过，Linux 专用检查采用上述准确 Actions。候选浏览器未验证，真实 Cloudflare、外部环境及 D2 草稿按既有范围待验。
+
+| 目标 | 原始归档 ID | 应用包 SHA-256 |
+| --- | --- | --- |
+| x86_64-gnu | 15192284862 | 8f6164f5075bee81889bd765c45c40293311e6342d2a610b65ce9a4bd3a0024e |
+| aarch64-gnu | 15195601046 | 4b0136d74bc18ecf867380d3e5acff4715cc8ee8a81fedc9a53637b71faccb85 |
+| x86_64-musl | 15194529018 | 5aa5925df9c99831d8c79351a5a20de2b813c0eeeb7314f802140c03de31391f |
+| aarch64-musl | 15195626287 | 469ea1db4582fba3ed76960b31e3878d20a0fdd2b3e377fbc89d06ffff7f9ce0 |
+
 ## 当前增量：安装、诊断与交付优化
 
 公开稳定版为 v0.4.27。P2 DNS 管理、P3 核心独立维护、P4 静态 YAML 应用及 P5 的限定 XHTTP 分享已交付，详细范围见[兼容矩阵](docs/COMPATIBILITY.md)。它们不因新增优化计划重新成为“尚未实现”。
