@@ -1,0 +1,82 @@
+name: 三版 REALITY Vision 同机对比
+
+on:
+  push:
+    branches: [3x-ui-zh-lite]
+    paths:
+      - '.github/workflows/zh-reality-compare.yml'
+      - 'scripts/compare-zh-reality.py'
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: 锁定两款官方发布物并构建中文版候选
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error --retry 3 --max-time 300 \
+            'https://github.com/MHSanaei/3x-ui/releases/download/v3.11.0/x-ui-linux-amd64.tar.gz' -o "$RUNNER_TEMP/official.tar.gz"
+          curl --fail --location --silent --show-error --retry 3 --max-time 300 \
+            'https://github.com/ForceMind/V-UI/releases/download/v0.4.8/vui-linux-x86_64-gnu.zip' -o "$RUNNER_TEMP/vui.zip"
+          printf '%s  %s\n' 0ddfa4702f595442e2962acd81addc768fdacaa4ff2672c971a0463dae744916 "$RUNNER_TEMP/official.tar.gz" | sha256sum --check --strict
+          printf '%s  %s\n' 833fc3ead51a9a103e32be51602072d5c04504a6a36a1ba135a7c344e539cad7 "$RUNNER_TEMP/vui.zip" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/official" "$RUNNER_TEMP/vui-source" "$RUNNER_TEMP/vui"
+          chmod 0700 "$RUNNER_TEMP/vui"
+          tar -xzf "$RUNNER_TEMP/official.tar.gz" -C "$RUNNER_TEMP/official"
+          release_rev=a9f9b5d9c0dd2aada5e8f5f2270b2ce93440d5ff
+          git fetch --no-tags --depth=1 origin "$release_rev"
+          git archive "$release_rev" app deploy scripts/deploy.py tests/reality_helpers.py | tar -x -C "$RUNNER_TEMP/vui-source"
+          python3 -B "$RUNNER_TEMP/vui-source/scripts/deploy.py" --root "$RUNNER_TEMP/vui" stage "$RUNNER_TEMP/vui.zip" \
+            --sha256 833fc3ead51a9a103e32be51602072d5c04504a6a36a1ba135a7c344e539cad7
+          (cd frontend && npm ci --ignore-scripts --no-fund --no-audit && npm run build)
+          CGO_ENABLED=1 go build -trimpath -tags 'netgo osusergo' -ldflags '-s -w -linkmode external -extldflags -static' \
+            -o "$RUNNER_TEMP/zh-candidate" .
+      - name: 验证真实 Vision 握手并交替测量三版
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          uname -mr
+          lscpu | awk -F: '/^CPU\(s\):|^Model name:/ {print $1 ":" $2}'
+          releases=("$RUNNER_TEMP/vui/releases/"*)
+          test "${#releases[@]}" = 1
+          test -x "${releases[0]}/runtime/python/bin/python3"
+          sudo unshare --mount --net --propagation private bash -c '
+            set -euo pipefail
+            ip netns add vui-perf-client
+            trap "ip netns del vui-perf-client" EXIT
+            ip link set lo up
+            ip link add perf-server type veth peer name perf-client
+            ip link set perf-client netns vui-perf-client
+            ip addr add 198.18.0.1/30 dev perf-server
+            ip link set perf-server up
+            ip -n vui-perf-client link set lo up
+            ip -n vui-perf-client addr add 198.18.0.2/30 dev perf-client
+            ip -n vui-perf-client link set perf-client up
+            runuser -u "$1" -- "$4/runtime/python/bin/python3" -B "$2/scripts/compare-zh-reality.py" \
+              --vui "$4" --official "$3/official/x-ui/x-ui" --candidate "$3/zh-candidate" \
+              --reference-helper "$3/vui-source/tests/reality_helpers.py" --output "$3/reality-comparison.json"
+          ' _ "$(id -un)" "$GITHUB_WORKSPACE" "$RUNNER_TEMP" "${releases[0]}"
+          cat "$RUNNER_TEMP/reality-comparison.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reality-comparison
+          path: ${{ runner.temp }}/reality-comparison.json
+          retention-days: 7
