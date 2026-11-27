@@ -93,6 +93,14 @@ sudo bash install.sh
 
 本地 Bash 校验和隔离分流用例已通过，覆盖空白机、已有服务、迁移失败、冲突参数、明确的服务探测失败、已有残留数据和中文版标记。
 
+源码提交 `3fdadeb99ea44f7457bca65b266c9edf6f3b9ce8` 的同一完整包已通过 GitHub Actions 的八项作业。原版 3.11.0 和 2.9.2 均从无参数入口自动迁移，保留账号、节点入站与客户端、历史流量、证书和自定义配置，通过真实 HTTPS 登录及原客户端代理检查。两版均完成自动入口故障注入与回退；空白机直接新装和证书流程也通过。测试使用临时证书和本机代理目标。[验收结果](https://github.com/ForceMind/V-UI/actions/runs/45979143748)
+
+预览安装命令适用于空白机或使用官方脚本安装的原版 3.11.0 / 2.9.2。后者需使用 Linux x86_64、systemd 和 SQLite。迁移会短暂停服并打印备份目录。已有中文版沿用更新入口。预览入口固定下载已验收的 `zh.7`，校验包摘要后执行。
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/3x-ui-zh-lite/install-preview-online.sh)
+```
+
 ### 流量统计优化候选
 
 本轮范围为共享在线用户查询、批量累加本机客户端流量及与原版 `3.11.0` 的同机对比。稳定入口继续使用 `zh.6`。
