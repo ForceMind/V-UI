@@ -151,13 +151,13 @@ def seed_vui(api, reference_host, reference_port):
         raise RuntimeError("V-UI editor did not report the sing-box inbound")
 
 
-def seed_3x(api, private, reference_host, reference_port):
+def seed_3x(api, private, reference_host, reference_port, error_log):
     route = "panel/api/xray/"
     envelope = api(route, {})
     envelope = json.loads(envelope) if isinstance(envelope, str) else envelope
     template = envelope["xraySetting"]
     template = json.loads(template) if isinstance(template, str) else template
-    template["log"] = {"access": "none", "loglevel": "warning"}
+    template["log"] = {"access": "none", "error": str(error_log), "loglevel": "warning"}
     template["outbounds"].append({"tag": "bench-origin", "protocol": "freedom", "settings": {
         "finalRules": [{"action": "allow", "ip": ["127.0.0.1/32"], "port": str(ORIGIN)}, {"action": "block"}]}})
     template["routing"]["rules"].insert(1, {"type": "field", "ip": ["127.0.0.1/32"],
@@ -253,7 +253,7 @@ async def get_https(context, hostname, path, port):
         await writer.drain()
         reply = await asyncio.wait_for(reader.readexactly(4), 8)
         if reply[1] != 0 or reply[3] not in (1, 4):
-            raise ConnectionError("SOCKS connection rejected")
+            raise ConnectionError(f"SOCKS connection rejected (status {reply[1]})")
         await asyncio.wait_for(reader.readexactly(6 if reply[3] == 1 else 18), 8)
         await writer.start_tls(context, server_hostname=hostname, ssl_handshake_timeout=8)
         if writer.get_extra_info("ssl_object").version() != "TLSv1.3":
@@ -284,6 +284,17 @@ async def smoke(origin, context, hostname):
         raise RuntimeError("wrong REALITY public key reached the HTTPS origin")
     if origin.requests != before:
         raise RuntimeError("negative probe reached the HTTPS origin")
+
+
+def diagnose(paths):
+    categories = ("reality verification failed", "invalid connection", "connection refused", "connection reset",
+                  "no route to host", "timeout", "unknown user", "flow mismatch", "unsupported", "invalid request",
+                  "failed to read", "failed to dial", "certificate", "tls handshake", "short id", "reality",
+                  "closed pipe", "eof")
+    for path in paths:
+        if path.is_file():
+            contents = path.read_text(errors="replace").casefold()
+            print(f"{path.name} categories: " + ", ".join(item for item in categories if item in contents), flush=True)
 
 
 async def measure(context, hostname, mode, panel_pid, core_pid):
@@ -385,7 +396,7 @@ async def compare(args, directory, reference):
                 sql.execute("DELETE FROM settings WHERE key = 'subEnable'")
                 sql.execute("INSERT INTO settings(key, value) VALUES ('subEnable', 'false')")
             with process([args.official], directory, xin, "seed-3x.log"):
-                seed_3x(basic["panel_api"](), private, sni, reference_port)
+                seed_3x(basic["panel_api"](), private, sni, reference_port, logs / "xray-error.log")
             with contextlib.closing(sqlite3.connect(db)) as old, contextlib.closing(sqlite3.connect(seed)) as new:
                 old.backup(new)
 
@@ -443,7 +454,11 @@ async def compare(args, directory, reference):
                         else:
                             raise RuntimeError("the server core did not bind its REALITY listener")
                         if not mode:
-                            await smoke(application, context, hostname)
+                            try:
+                                await smoke(application, context, hostname)
+                            except Exception:
+                                diagnose((directory / "client.log", directory / f"{name}-{trial}.log", logs / "xray-error.log"))
+                                raise
                             proof[name] = True
                             return None
                         return await measure(context, hostname, mode, panel.pid, core)

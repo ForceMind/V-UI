@@ -131,6 +131,8 @@ sudo bash install.sh
 
 首次运行已验证发布包和候选构建，V-UI 的真实鉴权拒绝缺少 `X-VUI-Request` 的测试请求。测试客户端已按现有接口补齐该请求头。[首次运行](https://github.com/ForceMind/V-UI/actions/runs/45948889349)
 
+第二次运行通过了 V-UI 正确公钥的 HTTPS 送达和错误公钥的拒绝验证，原版 3X-UI 在 SOCKS 转发阶段返回拒绝。下一轮保留私有错误日志，并在失败时只回读固定的诊断类别。[第二次运行](https://github.com/ForceMind/V-UI/actions/runs/45949739290)
+
 `zh.3` 修正证书申请前的端口占用检查、绑定结果回读及 HTTPS 就绪检查。全新安装选用证书时，HTTPS 验证失败会保留证书文件并验证已恢复仅本机的 HTTP。独立签发遇到现有监听时保留现有服务，可从证书菜单用 DNS 验证。本地模拟检查覆盖端口占用与空闲、HTTPS 探测参数、证书私钥不匹配、部分写入及重置回读。
 
 开放源码及归属沿用 [3X-UI](https://github.com/MHSanaei/3x-ui) 的 [GNU GPL v3](LICENSE)。随包资源的来源和许可见[第三方许可](licenses/NOTICE.md)。
