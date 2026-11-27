@@ -272,7 +272,7 @@ async def get_https(context, hostname, path, port):
             await asyncio.wait_for(writer.wait_closed(), 2)
 
 
-async def smoke(origin, context, hostname):
+async def smoke(origin, context, hostname, rejected_client="wrong REALITY public key"):
     async with get_https(context, hostname, "/probe", SOCKS) as reader:
         if await asyncio.wait_for(reader.readexactly(len(PROBE)), 5) != PROBE:
             raise RuntimeError("positive probe did not deliver the HTTPS fixture")
@@ -283,7 +283,7 @@ async def smoke(origin, context, hostname):
     except (OSError, TimeoutError, asyncio.IncompleteReadError):
         pass
     else:
-        raise RuntimeError("wrong REALITY public key reached the HTTPS origin")
+        raise RuntimeError(f"{rejected_client} reached the HTTPS origin")
     if origin.requests != before:
         raise RuntimeError("negative probe reached the HTTPS origin")
 
