@@ -1,0 +1,282 @@
+{
+  "versions": {
+    "xray": "Xray 26.10.21 (Xray, Penetrates Everything.) 1b1647c (go1.27.3 linux/amd64)",
+    "sing_box": "sing-box version 1.14.2"
+  },
+  "common_client": "xray",
+  "sha256": {
+    "sing_box": "07d2866a6c908281a56053f0e7d454918501592f2f258526f2ebe826dab58793",
+    "xray": "a27e3f95ab6ce270956d0cecd32eda4686a811afc71c64a6a734a3dede14883e",
+    "official_panel": "fb7b3776334fce69299f90168c8c31377b69f89c7787088e6dbf561d07b3d345",
+    "candidate_panel": "d95b02a542e8c4830441ab90bf9b7944cddf9a09dbd891235dcf448d1600b104",
+    "vui_main": "6d3fbd344553c04fbe0a8bfc6571f9f27a90ddaf50b24d60ca45e3cb924055a2",
+    "client_config": "b6583100ceb47775f907102f39b9c58d6cff10611615a7e9e99f7ec0a72dbf6f",
+    "3x_sqlite_fixture": "36b024953b8503b241aecd2e8d481f906c5f07df9d8307165cc17192a5bf24dd"
+  },
+  "verified_settings": {
+    "protocol": "vless",
+    "network": "tcp/raw",
+    "security": "reality",
+    "flow": "xtls-rprx-vision",
+    "application": "HTTPS/TLS1.3"
+  },
+  "concurrent_block_bytes": 65536,
+  "concurrent_block_interval_seconds": 0.05,
+  "without_default_route": true,
+  "origin_unreachable_directly_from_client": true,
+  "positive_and_bad_key_smoke": {
+    "vui": true,
+    "official": true,
+    "candidate": true
+  },
+  "workloads": {
+    "single": {
+      "vui": {
+        "samples": [
+          {
+            "connections": 1,
+            "seconds": 20.000673471000027,
+            "payload_bytes": 21432303616,
+            "mbit_s": 8572.632775421594,
+            "panel_cpu_pct": 0.09999663275838692,
+            "core_cpu_pct": 24.949159873217518,
+            "panel_cpu_seconds": 0.020000000000000018,
+            "core_cpu_seconds": 4.99,
+            "panel_cpu_seconds_per_gib": 0.0010019845213450722,
+            "core_cpu_seconds_per_gib": 0.24999513807559529
+          },
+          {
+            "connections": 1,
+            "seconds": 20.00013173000002,
+            "payload_bytes": 21720662016,
+            "mbit_s": 8688.207581520755,
+            "panel_cpu_pct": 0.09999934135433815,
+            "core_cpu_pct": 24.49983863181283,
+            "panel_cpu_seconds": 0.020000000000000018,
+            "core_cpu_seconds": 4.9,
+            "panel_cpu_seconds_per_gib": 0.0009886824105168205,
+            "core_cpu_seconds_per_gib": 0.2422271905766208
+          }
+        ],
+        "median": {
+          "connections": 1.0,
+          "seconds": 20.000402600500024,
+          "payload_bytes": 21576482816.0,
+          "mbit_s": 8630.420178471175,
+          "panel_cpu_pct": 0.09999798705636254,
+          "core_cpu_pct": 24.724499252515173,
+          "panel_cpu_seconds": 0.020000000000000018,
+          "core_cpu_seconds": 4.945,
+          "panel_cpu_seconds_per_gib": 0.0009953334659309463,
+          "core_cpu_seconds_per_gib": 0.24611116432610802
+        }
+      },
+      "official": {
+        "samples": [
+          {
+            "connections": 1,
+            "seconds": 20.00023991400002,
+            "payload_bytes": 21533474816,
+            "mbit_s": 8613.286603997874,
+            "panel_cpu_pct": 0.29999640133316824,
+            "core_cpu_pct": 6.8999172306628695,
+            "panel_cpu_seconds": 0.06,
+            "core_cpu_seconds": 1.3800000000000001,
+            "panel_cpu_seconds_per_gib": 0.0029918306260599756,
+            "core_cpu_seconds_per_gib": 0.06881210439937945
+          },
+          {
+            "connections": 1,
+            "seconds": 20.000189535000004,
+            "payload_bytes": 20798898176,
+            "mbit_s": 8319.480428763845,
+            "panel_cpu_pct": 0.2999971570019423,
+            "core_cpu_pct": 6.649936980209722,
+            "panel_cpu_seconds": 0.06,
+            "core_cpu_seconds": 1.33,
+            "panel_cpu_seconds_per_gib": 0.00309749626614067,
+            "core_cpu_seconds_per_gib": 0.06866116723278487
+          }
+        ],
+        "median": {
+          "connections": 1.0,
+          "seconds": 20.00021472450001,
+          "payload_bytes": 21166186496.0,
+          "mbit_s": 8466.38351638086,
+          "panel_cpu_pct": 0.2999967791675553,
+          "core_cpu_pct": 6.774927105436296,
+          "panel_cpu_seconds": 0.06,
+          "core_cpu_seconds": 1.355,
+          "panel_cpu_seconds_per_gib": 0.003044663446100323,
+          "core_cpu_seconds_per_gib": 0.06873663581608216
+        }
+      },
+      "candidate": {
+        "samples": [
+          {
+            "connections": 1,
+            "seconds": 20.000259101999973,
+            "payload_bytes": 22152134656,
+            "mbit_s": 8860.739070639278,
+            "panel_cpu_pct": 0.24999676126695855,
+            "core_cpu_pct": 6.599914497447702,
+            "panel_cpu_seconds": 0.05000000000000002,
+            "core_cpu_seconds": 1.3199999999999998,
+            "panel_cpu_seconds_per_gib": 0.0024235628770637977,
+            "core_cpu_seconds_per_gib": 0.06398205995448422
+          },
+          {
+            "connections": 1,
+            "seconds": 20.000159824000036,
+            "payload_bytes": 22038740992,
+            "mbit_s": 8815.425950968125,
+            "panel_cpu_pct": 0.34999720310234983,
+            "core_cpu_pct": 6.699946459387841,
+            "panel_cpu_seconds": 0.06999999999999998,
+            "core_cpu_seconds": 1.3399999999999999,
+            "panel_cpu_seconds_per_gib": 0.0034104456197059326,
+            "core_cpu_seconds_per_gib": 0.06528567329151358
+          }
+        ],
+        "median": {
+          "connections": 1.0,
+          "seconds": 20.000209463000004,
+          "payload_bytes": 22095437824.0,
+          "mbit_s": 8838.082510803702,
+          "panel_cpu_pct": 0.2999969821846542,
+          "core_cpu_pct": 6.6499304784177715,
+          "panel_cpu_seconds": 0.06,
+          "core_cpu_seconds": 1.3299999999999998,
+          "panel_cpu_seconds_per_gib": 0.002917004248384865,
+          "core_cpu_seconds_per_gib": 0.0646338666229989
+        }
+      }
+    },
+    "concurrent": {
+      "vui": {
+        "samples": [
+          {
+            "connections": 64,
+            "seconds": 20.000179150000008,
+            "payload_bytes": 1652555776,
+            "mbit_s": 661.0163893456921,
+            "panel_cpu_pct": 0.09999910425802366,
+            "core_cpu_pct": 5.749948494836355,
+            "panel_cpu_seconds": 0.020000000000000018,
+            "core_cpu_seconds": 1.15,
+            "panel_cpu_seconds_per_gib": 0.012994923857868032,
+            "core_cpu_seconds_per_gib": 0.7472081218274111
+          },
+          {
+            "connections": 64,
+            "seconds": 20.000283066000065,
+            "payload_bytes": 1652555776,
+            "mbit_s": 661.0129548853434,
+            "panel_cpu_pct": 0.09999858469003106,
+            "core_cpu_pct": 5.599920742641736,
+            "panel_cpu_seconds": 0.020000000000000018,
+            "core_cpu_seconds": 1.12,
+            "panel_cpu_seconds_per_gib": 0.012994923857868032,
+            "core_cpu_seconds_per_gib": 0.7277157360406092
+          }
+        ],
+        "median": {
+          "connections": 64.0,
+          "seconds": 20.000231108000037,
+          "payload_bytes": 1652555776.0,
+          "mbit_s": 661.0146721155178,
+          "panel_cpu_pct": 0.09999884447402736,
+          "core_cpu_pct": 5.674934618739045,
+          "panel_cpu_seconds": 0.020000000000000018,
+          "core_cpu_seconds": 1.135,
+          "panel_cpu_seconds_per_gib": 0.012994923857868032,
+          "core_cpu_seconds_per_gib": 0.7374619289340102
+        }
+      },
+      "official": {
+        "samples": [
+          {
+            "connections": 64,
+            "seconds": 20.00076737400002,
+            "payload_bytes": 1651441664,
+            "mbit_s": 660.5513211045253,
+            "panel_cpu_pct": 0.24999040819302487,
+            "core_cpu_pct": 6.2497602048256224,
+            "panel_cpu_seconds": 0.04999999999999999,
+            "core_cpu_seconds": 1.25,
+            "panel_cpu_seconds_per_gib": 0.03250922655660938,
+            "core_cpu_seconds_per_gib": 0.8127306639152347
+          },
+          {
+            "connections": 64,
+            "seconds": 20.000686244000008,
+            "payload_bytes": 1652555776,
+            "mbit_s": 660.9996300484936,
+            "panel_cpu_pct": 0.34998799114205026,
+            "core_cpu_pct": 5.299818151579617,
+            "panel_cpu_seconds": 0.07,
+            "core_cpu_seconds": 1.06,
+            "panel_cpu_seconds_per_gib": 0.04548223350253808,
+            "core_cpu_seconds_per_gib": 0.6887309644670051
+          }
+        ],
+        "median": {
+          "connections": 64.0,
+          "seconds": 20.000726809000014,
+          "payload_bytes": 1651998720.0,
+          "mbit_s": 660.7754755765095,
+          "panel_cpu_pct": 0.29998919966753756,
+          "core_cpu_pct": 5.77478917820262,
+          "panel_cpu_seconds": 0.06,
+          "core_cpu_seconds": 1.155,
+          "panel_cpu_seconds_per_gib": 0.038995730029573725,
+          "core_cpu_seconds_per_gib": 0.75073081419112
+        }
+      },
+      "candidate": {
+        "samples": [
+          {
+            "connections": 64,
+            "seconds": 20.00046764600006,
+            "payload_bytes": 1652555776,
+            "mbit_s": 661.0068545394231,
+            "panel_cpu_pct": 0.24999415456167898,
+            "core_cpu_pct": 5.249877245795259,
+            "panel_cpu_seconds": 0.04999999999999999,
+            "core_cpu_seconds": 1.05,
+            "panel_cpu_seconds_per_gib": 0.032487309644670045,
+            "core_cpu_seconds_per_gib": 0.6822335025380711
+          },
+          {
+            "connections": 64,
+            "seconds": 20.00017349099994,
+            "payload_bytes": 1652555776,
+            "mbit_s": 661.0165763786594,
+            "panel_cpu_pct": 0.29999739765757505,
+            "core_cpu_pct": 5.499952290388876,
+            "panel_cpu_seconds": 0.06,
+            "core_cpu_seconds": 1.1,
+            "panel_cpu_seconds_per_gib": 0.03898477157360406,
+            "core_cpu_seconds_per_gib": 0.7147208121827412
+          }
+        ],
+        "median": {
+          "connections": 64.0,
+          "seconds": 20.0003205685,
+          "payload_bytes": 1652555776.0,
+          "mbit_s": 661.0117154590412,
+          "panel_cpu_pct": 0.274995776109627,
+          "core_cpu_pct": 5.374914768092068,
+          "panel_cpu_seconds": 0.05499999999999999,
+          "core_cpu_seconds": 1.0750000000000002,
+          "panel_cpu_seconds_per_gib": 0.03573604060913706,
+          "core_cpu_seconds_per_gib": 0.6984771573604062
+        }
+      }
+    }
+  },
+  "active_config_sha256": {
+    "vui": "7336017866c393b5fc2d192943c274a7fdc703383a6035caf703b3a0f0258bd4",
+    "3x": "14f005922bf8d9c77baa9dcdba654b1d4068c690c8c13f047ec06f6c52440312"
+  }
+}
