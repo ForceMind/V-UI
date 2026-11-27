@@ -715,7 +715,8 @@ case $mode in
         private '重启后新装API' python3 "$work/fixture.py" "$work" probe after-api.json
         ;;
     migrate)
-        private '接管官方原安装' env XUI_NONINTERACTIVE=1 bash "$package/install.sh" --migrate
+        private '自动识别并接管官方原安装' bash "$package/install.sh"
+        grep -Fq '检测到已有 x-ui 服务' "$work/自动识别并接管官方原安装.log" || fail '默认入口未报告自动识别。'
         [[ $(sha256sum /usr/local/x-ui/x-ui | cut -d' ' -f1) == "$(sha256sum "$package/x-ui/x-ui" | cut -d' ' -f1)" ]] || fail '实际服务未使用待测中文程序。'
         [[ $(systemctl show x-ui.service --property=User --value) == "$original_service_user" && $(systemctl show x-ui.service --property=Group --value) == "$original_service_group" ]] || fail '接管改变了原服务身份。'
         [[ -f /usr/local/x-ui/.zh-lite-migration ]] || fail '缺少接管标记。'
@@ -759,9 +760,10 @@ SH
         chmod 0755 "$fault/x-ui/x-ui"
         private '重建故障包校验' bash -c 'cd -- "$1"; find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum >SHA256SUMS' _ "$fault"
         stage='候选故障回退'
-        if env XUI_NONINTERACTIVE=1 bash "$fault/install.sh" --migrate >"$work/候选故障回退.log" 2>&1; then
+        if bash "$fault/install.sh" >"$work/候选故障回退.log" 2>&1; then
             fail '故障候选安装意外成功，不能声明回退通过。'
         fi
+        grep -Fq '检测到已有 x-ui 服务' "$work/候选故障回退.log" || fail '故障测试未通过默认入口触发迁移。'
         [[ -f /run/x-ui-ci-candidate-failed ]] || fail '候选故障未实际触发，不能声明回退通过。'
         [[ $(sha256sum /usr/local/x-ui/x-ui | cut -d' ' -f1) == "$original_binary_hash" ]] || fail '旧程序未恢复。'
         [[ $(sha256sum /usr/bin/x-ui | cut -d' ' -f1) == "$original_cli_hash" ]] || fail '官方命令未恢复。'

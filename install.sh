@@ -26,7 +26,7 @@ select_mode() {
 
 while (( $# )); do case $1 in
     -h|--help|帮助)
-        printf '全新安装：sudo bash install.sh [--port 2053] [--postgres] [--fail2ban] [--ssl 域名或IPv4]\n更新：sudo bash update.sh\n接管原版 v2.9.2 / v3.11.0（保留配置）：sudo bash install.sh --migrate\n'
+        printf '自动识别并安装：sudo bash install.sh\n空白主机可加：--port 2053、--postgres、--fail2ban 或 --ssl 域名或IPv4。\n原版 v2.9.2 / v3.11.0 保留配置迁移，可显式指定 --migrate。\n更新已有中文版：sudo bash update.sh\n'
         exit 0 ;;
     --update) select_mode update; shift ;;
     --migrate) select_mode migrate; shift ;;
@@ -38,9 +38,6 @@ while (( $# )); do case $1 in
     --ssl) [[ $# -ge 2 && -n $2 ]] || die '请提供要申请证书的域名或 IPv4。'; ssl_host=$2; shift 2 ;;
     *) die '无法识别安装参数。运行 bash install.sh --help 查看用法。' ;;
 esac; done
-if [[ $mode == update && ( -e $app/.zh-lite-migration || -L $app/.zh-lite-migration ) ]]; then mode=migrate; fi
-if [[ $mode == migrate && ( $port_set == 1 || $postgres == 1 || $fail2ban == 1 || -n $ssl_host ) ]]; then die '接管保留原配置，不能同时指定端口、数据库、Fail2ban 或证书参数。'; fi
-if [[ $mode == update && ( $postgres == 1 || $fail2ban == 1 || -n $ssl_host ) ]]; then die '更新保留当前证书及数据库。需修改配置时请使用 x-ui 菜单。'; fi
 (( port <= 65535 )) || die '端口须为 1 至 65535 的整数。'
 (( EUID == 0 )) || die '请使用 sudo 运行安装脚本。'
 [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || die '此包仅支持 Linux x86_64。'
@@ -56,6 +53,27 @@ version=$(<"$package/VERSION")
 
 exec 9>/run/x-ui-zh-lite.lock
 flock -n 9 || die '已有安装、更新或运维操作在执行。'
+
+if [[ $mode == install ]]; then
+    load_state=$(systemctl show x-ui.service --property=LoadState --value) ||
+        [[ $load_state == not-found ]] || die '无法确认现有 x-ui 服务状态，已停止安装。'
+    case $load_state in
+        not-found) ;;
+        loaded)
+            for marker in "$app/.zh-lite-version" "$app/.zh-lite-migration"; do
+                [[ ! -e $marker && ! -L $marker ]] || die '发现已有中文版。请使用 x-ui 更新命令。'
+            done
+            printf '检测到已有 x-ui 服务，正在检查是否可以保留配置迁移。\n'
+            mode=migrate
+            ;;
+        *) die '现有 x-ui 服务状态无法安全处理，已停止安装。' ;;
+    esac
+elif [[ $mode == update && ( -e $app/.zh-lite-migration || -L $app/.zh-lite-migration ) ]]; then
+    mode=migrate
+fi
+
+if [[ $mode == migrate && ( $port_set == 1 || $postgres == 1 || $fail2ban == 1 || -n $ssl_host ) ]]; then die '接管保留原配置，不能同时指定端口、数据库、Fail2ban 或证书参数。'; fi
+if [[ $mode == update && ( $postgres == 1 || $fail2ban == 1 || -n $ssl_host ) ]]; then die '更新保留当前证书及数据库。需修改配置时请使用 x-ui 菜单。'; fi
 
 if [[ $mode == migrate ]]; then
     source "$package/scripts/zh-migrate.sh"
