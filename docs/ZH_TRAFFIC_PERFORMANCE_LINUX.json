@@ -1,0 +1,176 @@
+{
+  "platform": "linux",
+  "core_sha256": "a27e3f95ab6ce270956d0cecd32eda4686a811afc71c64a6a734a3dede14883e",
+  "sqlite_fixture_sha256": "fbf0d84906861a7191b9b06eff639e56e11b91f96520aa4eb6f5d378e352a886",
+  "config_sha256": "ec6fa8972f6df1286f5ae290d10ca576be801705220b0c708ada4b58aa81402f",
+  "duration_seconds": 20,
+  "repetitions": 2,
+  "panel_sha256": {
+    "official": "fb7b3776334fce69299f90168c8c31377b69f89c7787088e6dbf561d07b3d345",
+    "candidate": "6c621bda044d9373597a7664d91cfba704ac9f37b6b8509f9167c14f36a41705"
+  },
+  "workloads": {
+    "single": {
+      "official": {
+        "samples": [
+          {
+            "clients": 1,
+            "seconds": 20.000137633999998,
+            "payload_bytes": 45853337508,
+            "mbit_s": 18341.20878450351,
+            "panel_cpu_pct": 0.34999759142157505,
+            "xray_cpu_pct": 68.99952516596767,
+            "panel_cpu_seconds_per_gib": 0.0016391811755662612,
+            "xray_cpu_seconds_per_gib": 0.32315286032592017
+          },
+          {
+            "clients": 1,
+            "seconds": 20.000080991999994,
+            "payload_bytes": 45080228036,
+            "mbit_s": 18032.018191939136,
+            "panel_cpu_pct": 0.34999858264573974,
+            "xray_cpu_pct": 68.79972138864828,
+            "panel_cpu_seconds_per_gib": 0.0016672925349884532,
+            "xray_cpu_seconds_per_gib": 0.32774207544915884
+          }
+        ],
+        "median": {
+          "clients": 1.0,
+          "seconds": 20.000109312999996,
+          "payload_bytes": 45466782772.0,
+          "mbit_s": 18186.613488221323,
+          "panel_cpu_pct": 0.3499980870336574,
+          "xray_cpu_pct": 68.89962327730797,
+          "panel_cpu_seconds_per_gib": 0.0016532368552773572,
+          "xray_cpu_seconds_per_gib": 0.32544746788753953
+        }
+      },
+      "candidate": {
+        "samples": [
+          {
+            "clients": 1,
+            "seconds": 20.000505524999966,
+            "payload_bytes": 45098610277,
+            "mbit_s": 18038.988152825732,
+            "panel_cpu_pct": 0.24999368109721867,
+            "xray_cpu_pct": 69.44824460880733,
+            "panel_cpu_seconds_per_gib": 0.0011904378177120922,
+            "xray_cpu_seconds_per_gib": 0.3307036257604191
+          },
+          {
+            "clients": 1,
+            "seconds": 20.000271440000006,
+            "payload_bytes": 46952148897,
+            "mbit_s": 18780.604668433432,
+            "panel_cpu_pct": 0.2999959284552591,
+            "xray_cpu_pct": 69.94905065148455,
+            "panel_cpu_seconds_per_gib": 0.0013721312219666356,
+            "xray_cpu_seconds_per_gib": 0.3199352632552204
+          }
+        ],
+        "median": {
+          "clients": 1.0,
+          "seconds": 20.000388482499986,
+          "payload_bytes": 46025379587.0,
+          "mbit_s": 18409.796410629584,
+          "panel_cpu_pct": 0.2749948047762389,
+          "xray_cpu_pct": 69.69864763014594,
+          "panel_cpu_seconds_per_gib": 0.001281284519839364,
+          "xray_cpu_seconds_per_gib": 0.3253194445078198
+        }
+      }
+    },
+    "concurrent": {
+      "official": {
+        "samples": [
+          {
+            "clients": 320,
+            "seconds": 20.000866032999966,
+            "payload_bytes": 2600468480,
+            "mbit_s": 1040.1423521199201,
+            "panel_cpu_pct": 1.1499502052586965,
+            "xray_cpu_pct": 19.949136169487822,
+            "panel_cpu_seconds_per_gib": 0.09496774193548387,
+            "xray_cpu_seconds_per_gib": 1.6474838709677417
+          },
+          {
+            "clients": 320,
+            "seconds": 20.001202964000015,
+            "payload_bytes": 2579496960,
+            "mbit_s": 1031.7367268930027,
+            "panel_cpu_pct": 1.199927826501105,
+            "xray_cpu_pct": 19.098851238475923,
+            "panel_cpu_seconds_per_gib": 0.09990243902439024,
+            "xray_cpu_seconds_per_gib": 1.5901138211382113
+          }
+        ],
+        "median": {
+          "clients": 320.0,
+          "seconds": 20.00103449849999,
+          "payload_bytes": 2589982720.0,
+          "mbit_s": 1035.9395395064614,
+          "panel_cpu_pct": 1.1749390158799007,
+          "xray_cpu_pct": 19.523993703981873,
+          "panel_cpu_seconds_per_gib": 0.09743509047993705,
+          "xray_cpu_seconds_per_gib": 1.6187988460529765
+        }
+      },
+      "candidate": {
+        "samples": [
+          {
+            "clients": 320,
+            "seconds": 20.00026262199998,
+            "payload_bytes": 2600468480,
+            "mbit_s": 1040.1737333746908,
+            "panel_cpu_pct": 0.7499901518043183,
+            "xray_cpu_pct": 20.099736068355732,
+            "panel_cpu_seconds_per_gib": 0.06193548387096773,
+            "xray_cpu_seconds_per_gib": 1.6598709677419352
+          },
+          {
+            "clients": 320,
+            "seconds": 20.000311828000008,
+            "payload_bytes": 2600468480,
+            "mbit_s": 1040.1711742751531,
+            "panel_cpu_pct": 0.7999875270744702,
+            "xray_cpu_pct": 19.899689735977447,
+            "panel_cpu_seconds_per_gib": 0.06606451612903227,
+            "xray_cpu_seconds_per_gib": 1.6433548387096777
+          }
+        ],
+        "median": {
+          "clients": 320.0,
+          "seconds": 20.000287224999994,
+          "payload_bytes": 2600468480.0,
+          "mbit_s": 1040.1724538249218,
+          "panel_cpu_pct": 0.7749888394393942,
+          "xray_cpu_pct": 19.99971290216659,
+          "panel_cpu_seconds_per_gib": 0.064,
+          "xray_cpu_seconds_per_gib": 1.6516129032258065
+        }
+      }
+    }
+  },
+  "quota": {
+    "official": {
+      "quota_bytes": 8388608,
+      "panel_down_bytes": 14745602,
+      "received_before_block_check": 14745600,
+      "overshoot_bytes": 6356992,
+      "blocked_after_seconds": 5.084756475000063,
+      "new_quota_connection_rejected": true,
+      "control_connection_passed": true,
+      "original_stream_ended_at_check": true
+    },
+    "candidate": {
+      "quota_bytes": 8388608,
+      "panel_down_bytes": 8519682,
+      "received_before_block_check": 8519680,
+      "overshoot_bytes": 131072,
+      "blocked_after_seconds": 0.23148443700006283,
+      "new_quota_connection_rejected": true,
+      "control_connection_passed": true,
+      "original_stream_ended_at_check": true
+    }
+  }
+}
