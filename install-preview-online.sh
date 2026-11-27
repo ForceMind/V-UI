@@ -6,7 +6,7 @@ die() { printf '预览安装错误：%s\n' "$*" >&2; exit 1; }
 
 version=v3.11.0-zh.7
 digest=d7665da30b50f338057e49c1c2488d185ac2beeb024e0bcd18182ee12c2b22b6
-revision=d04d2352b43cf78e4d7571a3c2abb7d3e125a4c3
+revision=c6def00b9f50f69691aafc81d9e5d9cae5ad69fa
 repo=https://raw.githubusercontent.com/ForceMind/V-UI
 file="3x-ui-${version}-linux-amd64.tar.gz"
 

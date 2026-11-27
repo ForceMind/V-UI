@@ -101,6 +101,8 @@ sudo bash install.sh
 bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/3x-ui-zh-lite/install-preview-online.sh)
 ```
 
+一次性上传作业将已验收的完整包保存在提交 `c6def00b9f50f69691aafc81d9e5d9cae5ad69fa`，预览入口固定使用该提交和 SHA-256。稳定清单仍为 `zh.6`。[上传记录](https://github.com/ForceMind/V-UI/actions/runs/45982148976)
+
 ### 流量统计优化候选
 
 本轮范围为共享在线用户查询、批量累加本机客户端流量及与原版 `3.11.0` 的同机对比。稳定入口继续使用 `zh.6`。
