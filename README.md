@@ -154,6 +154,19 @@ sudo bash install.sh
 
 旧服务器配置已无法回读。本轮只在一次性 Actions 运行中比较同一 V-UI 0.4.8 发布包的 VLESS WebSocket + TLS、TCP + TLS、TCP/RAW + REALITY + Vision。前两组使用相同证书、TLS 1.3 和空 flow。三组共用客户端版本、HTTPS 正文、单连接与 64 并发节奏。逐组核对核心生效配置和正确连接，并验证错误信任链或错误 REALITY 公钥未送达源站。三组各两轮，记录面板 CPU、核心 CPU、吞吐与每 GiB 核心 CPU 时间。归档原始样本并回读稳定版入口后结束。
 
+受测提交 `fd60e5739637d9fb9574c8f08dd393cab9c00d0a` 在同一台 Ubuntu 24.04、4 逻辑 CPU、AMD EPYC 7763 的测试机上完成。客户端 Xray 26.10.21 和服务器 sing-box 1.14.2 的二进制摘要与上轮相同。三组均通过验证，第二轮颠倒顺序。每轮有效测量 20 秒，CPU 的 100% 等于一个逻辑核，吞吐只计接收端有效正文。REALITY 基线取本轮同机重测数据。[Actions 运行](https://github.com/ForceMind/V-UI/actions/runs/45953590769) · [12 个原始样本](docs/VUI_TRANSPORT_PERFORMANCE_LINUX.json)
+
+| 场景 | VLESS 配置 | 面板 CPU | 核心 CPU | 吞吐 Mbit/s | 核心 CPU 秒/GiB |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 单连接不限速 | WS + TLS | 0.125% | 50.65% | 3,856.26 | 1.129 |
+| 单连接不限速 | TCP + TLS | 0.100% | 47.42% | 3,617.56 | 1.126 |
+| 单连接不限速 | TCP + REALITY + Vision | 0.100% | 25.82% | 4,839.83 | 0.458 |
+| 64 并发控速 | WS + TLS | 0.100% | 19.77% | 661.91 | 2.566 |
+| 64 并发控速 | TCP + TLS | 0.100% | 20.15% | 661.57 | 2.616 |
+| 64 并发控速 | TCP + REALITY + Vision | 0.150% | 12.55% | 662.41 | 1.627 |
+
+64 并发达到了约 662 Mbit/s 的给定负载。相对同机 REALITY + Vision，WS + TLS 与 TCP + TLS 的核心 CPU 分别高 7.22 和 7.60 个百分点，面板均低约 0.05 个百分点。单连接时，两组普通 TLS 的核心 CPU 分别高 24.82 和 21.60 个百分点，每 GiB 消耗约为 REALITY + Vision 的 2.46 倍。本轮经过独立 HTTPS 源站，覆盖长连接下载。旧服务器的核心、部署和负载条件仍无法确认。稳定安装指向 `v3.11.0-zh.6`。
+
 `zh.3` 修正证书申请前的端口占用检查、绑定结果回读及 HTTPS 就绪检查。全新安装选用证书时，HTTPS 验证失败会保留证书文件并验证已恢复仅本机的 HTTP。独立签发遇到现有监听时保留现有服务，可从证书菜单用 DNS 验证。本地模拟检查覆盖端口占用与空闲、HTTPS 探测参数、证书私钥不匹配、部分写入及重置回读。
 
 开放源码及归属沿用 [3X-UI](https://github.com/MHSanaei/3x-ui) 的 [GNU GPL v3](LICENSE)。随包资源的来源和许可见[第三方许可](licenses/NOTICE.md)。
