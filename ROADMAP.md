@@ -2,6 +2,14 @@
 
 更新：2026-11-27。此文件是当前开发顺序与阶段状态的唯一清单；使用方法见[文档首页](docs/README.md)，准确发布证据见[版本记录](docs/RELEASING.md#当前稳定版)，旧路线和阶段原文见[历史索引](docs/history/README.md)。
 
+## v0.4.28 公开发行与短入口验收
+
+v0.4.28 的产品冻结点为 c06351c，正式标签指向 225388eb6a1279abdb59ea5eaae4b5a162d0e6dd。准确发布源的九组主线 Actions、首轮安装升级 15/15、15 份收据、14 份运行日志和四目标原始制品均已复核。便携构建首轮 x86_64-musl 固定上游源码查询遇到 GitHub 403，同 SHA 第二轮全部通过。按 v0.4.28 专属并行非浏览器验收正式晋升，浏览器未验证。 [发布](https://github.com/ForceMind/V-UI/releases/tag/v0.4.28) · [发布运行](https://github.com/ForceMind/V-UI/actions/runs/46153690151/attempts/1) · [发布源安装矩阵](https://github.com/ForceMind/V-UI/actions/runs/46150760875/attempts/1) · [便携第二轮](https://github.com/ForceMind/V-UI/actions/runs/46150760905/attempts/2)
+
+匿名回读确认 Release ID 461608419、标签目标、latest v0.4.28、19 项资产摘要和 14 项非 ZIP 附件字节。旧 v0.4.27 的 19 项资产身份与摘要核对一致。
+
+短入口 7b9cefd7447712ae85543446ad044601628f5adc 已同步 main/dev。公开 main/setup.sh 的实际字节、安装器摘要与整份 SHA256SUMS 摘要已匿名回读。候选首轮发现显式 HTTP-01 参数未转发，修正后保留测试原断言。最终候选前两轮仅遇 GitHub 匿名元数据 403，第三轮完成真实安装。dev 与 main 首轮均默认安装已发布应用 225388e。 [短入口候选](https://github.com/ForceMind/V-UI/actions/runs/46154577450/attempts/3) · [dev](https://github.com/ForceMind/V-UI/actions/runs/46155285547/attempts/1) · [实际 main URL](https://github.com/ForceMind/V-UI/actions/runs/46155779860/attempts/1)
+
 ## v0.4.28 主线验收
 
 main 已正常快进并回读到 [c06351c](https://github.com/ForceMind/V-UI/commit/c06351c681a3f38014abc3170e72af6d56fc11b3)。九组 main/push Actions 全部首轮通过。本节记录准确主线提交的独立运行证据。
