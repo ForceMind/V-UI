@@ -2,6 +2,22 @@
 
 更新：2026-11-27。此文件是当前开发顺序与阶段状态的唯一清单；使用方法见[文档首页](docs/README.md)，准确发布证据见[版本记录](docs/RELEASING.md#当前稳定版)，旧路线和阶段原文见[历史索引](docs/history/README.md)。
 
+## v0.4.28 主线验收
+
+main 已正常快进并回读到 [c06351c](https://github.com/ForceMind/V-UI/commit/c06351c681a3f38014abc3170e72af6d56fc11b3)。九组 main/push Actions 全部首轮通过。本节记录准确主线提交的独立运行证据。
+
+- 安装矩阵首轮 15/15，包含构建、隔离新装和 13 个公开旧版升级。15 份收据与 14 份原始运行日志核对了摘要、准确来源和实际结果。 [主线安装矩阵](https://github.com/ForceMind/V-UI/actions/runs/46096639587/attempts/1)
+- 公开 v0.4.27 固定源为 bdf5fbac4475424562c4733b1816093857f62f55。主线升级保留账户、节点、有效订阅、合成证书绑定记录及材料、私有 DNS 材料、YAML 来源和导入的上游，亦复核了两个 Root 来源。 [公开 v0.4.27 升级](https://github.com/ForceMind/V-UI/actions/runs/46096639587/job/140829593156)
+- 四目标使用主线同源制品，原始归档 SHA-256、内部校验清单和 manifest 已复核。dev 便携构建前两轮上游 403 保留在候选记录。 [主线便携首轮](https://github.com/ForceMind/V-UI/actions/runs/46096639441/attempts/1)
+- v0.4.28 浏览器和真实 Cloudflare 签发未验证。当前公开稳定版为 v0.4.27，D2 #167 仍为开放草稿。
+
+| 目标 | 主线原始归档 ID | 应用包 SHA-256 |
+| --- | --- | --- |
+| aarch64-gnu | 15243781641 | 43c4016033907768814e40119a753571a2f12e84d11b99cbe648b47a1eba60a3 |
+| aarch64-musl | 15243752186 | ee00d5d94a8d90eecb69f25b6afab4435b8a102febaa47c1ff189f3dcb346c4c |
+| x86_64-gnu | 15243468659 | 49095867c31a589d793f53c977085c7692ce4deecab024c54c73f95ac5c0ff7b |
+| x86_64-musl | 15243991072 | d88157561f2c1b02eddb9e0297e894090decb60307794feb2374e009dd07abd6 |
+
 ## v0.4.28 发布候选
 
 - 基线为已同步并验收的 main / dev [84bc5dc](https://github.com/ForceMind/V-UI/commit/84bc5dc2e5ffe8f3e354490eaa018ad5517b090b)。主线已验证九组 Actions、同轮新装和 12 个公开旧版升级及四目标；同一提交另有隔离 Chromium 和 ARM64 实装证据。 [主线安装](https://github.com/ForceMind/V-UI/actions/runs/45756685058/attempts/1) · [Chromium](https://github.com/ForceMind/V-UI/actions/runs/45678014003) · [ARM64](https://github.com/ForceMind/V-UI/actions/runs/45741002851/attempts/3)
