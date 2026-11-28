@@ -1,6 +1,6 @@
 # sing-box VLESS HTTPUpgrade 的 Mihomo YAML 导出
 
-v0.4.28 的此导出仅适用于官方 sing-box 1.14.2 服务端与 Mihomo 1.19.32 原生 YAML 的 HTTP/TCP 转发提供资格。使用节点编辑器选择 sing-box、VLESS、HTTP Upgrade 和 TLS，填写单节点的 SNI、Host、Path 以及现有证书和私钥路径。启用证书校验，使用 Chrome 指纹和空 flow。保存后在订阅入口选择节点和 Mihomo YAML。服务端显式使用 HTTP/1.1，客户端输出 `network: ws` 和 `ws-opts.v2ray-http-upgrade: true`，并设置 `udp: false`。
+v0.4.28 支持在官方 sing-box 1.14.2 服务端和 Mihomo 1.19.32 客户端之间使用此 YAML 导出转发 HTTP/TCP。使用节点编辑器选择 sing-box、VLESS、HTTP Upgrade 和 TLS，填写单节点的 SNI、Host、Path 以及现有证书和私钥路径。启用证书校验，使用 Chrome 指纹和空 flow。保存后在订阅入口选择节点和 Mihomo YAML。服务端显式使用 HTTP/1.1，客户端输出 `network: ws` 和 `ws-opts.v2ray-http-upgrade: true`，并设置 `udp: false`。
 
 节点 URI、raw 订阅、sing-box JSON 和中转上游拒绝该传输。包含该节点的多格式申请整体拒绝。已有授权在下载时重新核对节点，YAML 之外的格式继续服从上述限制。普通节点摘要不返回证书路径、私钥路径或用户凭据。无法在编辑器中保真的现有高级选项会阻止编辑。
 
