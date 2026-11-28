@@ -342,7 +342,7 @@ class SetupShellTests(unittest.TestCase):
     def test_root_flow_preserves_options_stdin_and_clean_environment(self):
         values=['--version','v0.4.28','--domain','panel.example.test',
                 '--cert','/path with spaces/$(touch never); cert.pem','--node-udp-port','18000',
-                '--node-udp-port=18001','--accept-terms','--upgrade']
+                '--node-udp-port=18001','--enable-http01','--accept-terms','--upgrade']
         result=self.run_setup(*values)
         self.assertEqual(result.returncode,0,result.stderr)
         installer=self.logs('installer')[0]

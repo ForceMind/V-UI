@@ -23,7 +23,7 @@ V-UI v0.4.28 交互安装与全局 v-ui 命令（仅支持 Linux）。
 使用 root 或已有 sudo 授权；不新增免密 sudo 规则。
 支持的安装器选项：--domain、--email、--admin、--port、--bind、
 --node-port、--node-udp-port、--open-firewall、--archive-temp-dir、--cert、
---key、--health-ca、--assume-external-ports-open、--accept-terms、--upgrade。
+--key、--health-ca、--enable-http01、--assume-external-ports-open、--accept-terms、--upgrade。
 域名规范化并校验通过后才继续；无效输入会立即提示重新输入。
 域名每行最多 4096 个 UTF-8 字节（含换行）。其他参数值原样转发。
 新安装自动生成用户名和强密码，在控制终端交付；已有账号保持。
@@ -50,7 +50,7 @@ HELP
         installer_args+=("$argument" "$2"); shift 2 ;;
       --email=*|--admin=*|--port=*|--bind=*|--node-port=*|--node-udp-port=*|--open-firewall=*|--archive-temp-dir=*|--cert=*|--key=*|--health-ca=*)
         installer_args+=("$argument"); shift ;;
-      --assume-external-ports-open|--accept-terms|--upgrade)
+      --enable-http01|--assume-external-ports-open|--accept-terms|--upgrade)
         installer_args+=("$argument"); shift ;;
       *)
         printf '选项 %s 不受支持或由安装入口固定管理\n' "$argument" >&2
