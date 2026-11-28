@@ -1,13 +1,15 @@
 # V-UI 0.4.28
 
-**发布候选。** 当前公开稳定版为 [v0.4.27](https://github.com/ForceMind/V-UI/releases/tag/v0.4.27)，公开短安装入口仍安装该版本。
+本版更新面板与终端维护流程，加入 Cloudflare DNS-01 首装选项及限定范围的 HTTPUpgrade 分享。
 
 - 管理员可从总览和节点管理进入创建、分享与订阅流程。分享向导支持复制和下载，订阅仍按授权和客户端格式提供。
 - YAML 草稿提供检查、应用、回退状态和原操作重试。证书按使用位置显示签发、绑定和实际生效状态。部分失败保留旧材料及原位置重试。维护断线后按原任务编号查回结果。
 - 终端维护菜单缩短常用路径并显示恢复入口。首次安装加入 Cloudflare DNS-01 选项。真实 Cloudflare 整机签发仍待验收。
 - HTTPUpgrade 仅支持已验收条件下的 Mihomo YAML 分享。D2 UDP 双跳仍为受阻实验，产品 UDP 中转保持关闭。 [HTTPUpgrade 范围](HTTPUPGRADE_MIHOMO_PROFILE.md) · [D2 草稿](https://github.com/ForceMind/V-UI/pull/167)
 
-候选以已验收主线 [84bc5dc](https://github.com/ForceMind/V-UI/commit/84bc5dc2e5ffe8f3e354490eaa018ad5517b090b) 为基线。升级验收从公开 v0.4.27 安装，复核账户、节点、有效订阅、证书绑定和材料、DNS 私有材料、YAML 草稿及来源、已导入上游和新旧 Root 来源。同轮新装及 13 个旧版升级、九组 Actions 和四个 Linux 目标须绑定候选的准确提交。 [候选状态](../ROADMAP.md#v0428-发布候选)
+本版产品冻结于 [c06351c](https://github.com/ForceMind/V-UI/commit/c06351c681a3f38014abc3170e72af6d56fc11b3)。安装矩阵覆盖隔离新装、从公开 v0.4.27 升级及其他 12 个公开旧版升级。v0.4.27 升级复核账户、节点、有效订阅、旧证书绑定记录及材料、DNS 私有材料、YAML 草稿及来源、已导入上游和新旧 Root 来源。正式应用来源以此 Release 的标签及 RELEASE.json 为准。
+
+本版采用并行非浏览器验收。浏览器未验证。真实 Cloudflare 整机签发待验。
 
 ## 0.4.27 历史说明
 
