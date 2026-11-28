@@ -1,0 +1,42 @@
+name: D2 stock-core UDP experiment
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'experiments/d2/**'
+      - '.github/workflows/d2-stock-udp.yml'
+      - 'docs/D2_STOCK_UDP_ACCEPTANCE.md'
+
+permissions:
+  contents: read
+
+jobs:
+  stock-udp:
+    if: github.repository == 'ForceMind/V-UI' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install locked fixture dependencies
+        run: python -m pip install -r requirements-runtime.txt
+      - name: Execute fixed official-core IPv4 UDP cases
+        env:
+          SOURCE: ${{ github.event.pull_request.head.sha }}
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/tests
+        run: python -u -B experiments/d2/stock_mihomo.py "$RUNNER_TEMP/vui-d2-report" "$SOURCE"
+      - name: Preserve D2 scenario report and sanitized logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: d2-stock-udp-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/vui-d2-report/
+          if-no-files-found: warn
+          retention-days: 30
