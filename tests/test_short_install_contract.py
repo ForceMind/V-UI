@@ -340,11 +340,11 @@ class ShortInstallContractTests(unittest.TestCase):
         self.assertEqual(len(checkouts),2)
         self.assertEqual(checkouts[0]['with']['persist-credentials'],'false')
         self.assertEqual(checkouts[1]['with'],{'persist-credentials':'false',
-                                             'ref':'bdf5fbac4475424562c4733b1816093857f62f55',
+                                             'ref':'225388eb6a1279abdb59ea5eaae4b5a162d0e6dd',
                                              'path':'.published-suite'})
         acceptance=next(step for step in steps if 'VUI_SETUP_INSTALL' in step.get('env',{}))
         self.assertEqual(acceptance['env']['VUI_SETUP_RELEASE_SOURCE'],'${{ github.workspace }}/.published-suite')
-        self.assertEqual(acceptance['env']['VUI_PUBLISHED_INSTALL_VERSION'],'0.4.27')
+        self.assertEqual(acceptance['env']['VUI_PUBLISHED_INSTALL_VERSION'],'0.4.28')
         self.assertEqual(acceptance['env']['VUI_RELEASE_COMMIT'],checkouts[1]['with']['ref'])
 
     def fixture(self, folder, *, release_commit=None, raw=None):

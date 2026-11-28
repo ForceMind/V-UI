@@ -1,10 +1,10 @@
 # 安装与首次运行
 
-当前公开稳定版为 **v0.4.27**。普通新用户使用下方无参数短入口；它固定核验已公开安装器和完整清单，已有安装先进入管理菜单。
+当前公开稳定版为 **v0.4.28**。普通新用户使用下方无参数短入口；它固定核验已公开安装器和完整清单，已有安装先进入管理菜单。
 
-已有实例先备份，升级保留原配置、管理员、节点、订阅与证书。完整包从[官方 v0.4.27 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.27)取得，不混用分支文件、其他版本或不明下载站。
+已有实例先备份，升级保留原配置、管理员、节点、订阅与证书。完整包从[官方 v0.4.28 Release](https://github.com/ForceMind/V-UI/releases/tag/v0.4.28)取得，不混用分支文件、其他版本或不明下载站。
 
-本页描述已公开 v0.4.27。该版自动首装仍使用 HTTP-01；已有证书可按后文提供，Cloudflare DNS-01 由安装后的管理员面板管理。DNS-01 首装及按挑战方式调整 80 端口预检属于[DNS-01 首装开发候选](DNS_FIRST_INSTALL.md)，本页不将计划写成已发布参数或能力。
+交互首装默认使用 HTTP-01，也可选择 Cloudflare DNS-01 或自备证书。按挑战方式检查端口。DNS-01 的输入、权限与失败恢复见[首装说明](DNS_FIRST_INSTALL.md)。
 
 ## 1. 一行安装
 
@@ -14,11 +14,11 @@
 bash <(curl -fsSL https://raw.githubusercontent.com/ForceMind/V-UI/main/setup.sh)
 ```
 
-需要手动固定版本时，先从正式 Release 取得并核验 `install.sh`，再使用下列命令；这里的摘要对应 v0.4.27 的完整 `SHA256SUMS` 文件：
+需要手动固定版本时，先从正式 Release 取得并核验 `install.sh`，再使用下列命令；这里的摘要对应 v0.4.28 的完整 `SHA256SUMS` 文件：
 
 ```bash
-bash install.sh --version v0.4.27 --with-global-cli \
-  --kit-sha256 263119407dd96a23db59bf9756dfb8e6852fa9692e0f337971fbdd2c67f0095f --interactive
+bash install.sh --version v0.4.28 --with-global-cli \
+  --kit-sha256 5cfc8ff44189d88d56d109495cc3e76fe41f242509a11c14f3bfeb8f4a765efb --interactive
 ```
 
 完整安装器的校验参数不用于覆盖短入口的固定信任锚。v0.4.22 的公开套件及历史安装说明见[固定22说明](https://github.com/ForceMind/V-UI/blob/59fc1cce15df8da850dd0a13d58b4efe6879a6be/docs/INSTALLATION.md)。
@@ -62,7 +62,7 @@ bash install.sh --version v0.4.27 --with-global-cli \
 | TCP 8443 | HTTPS 面板，可用 `--port` 修改 |
 | TCP 10443 | 默认节点声明，可用 `--node-port` 修改；实际节点在面板创建 |
 
-新安装在写账号及服务前探测 TCP 80 和面板实际监听；遇到占用会停止，不结束 Nginx、Apache、Caddy、容器或其他进程。默认节点 TCP 端口只作声明，不因占用阻断普通安装。所有预检都不是端口预留或公网可达证明。
+新安装在写账号及服务前探测面板实际监听，HTTP-01 首装另探测 TCP 80。遇到占用会停止，不结束 Nginx、Apache、Caddy、容器或其他进程。默认节点 TCP 端口只作声明，不因占用阻断普通安装。所有预检都不是端口预留或公网可达证明。
 
 普通安装不全面扫描防火墙。安装后需要排错时，用 `v-ui` 菜单 **10** 查看本机规则和监听；菜单 **11** 列出精确协议/端口，明确确认后仅对安全识别的已启用 UFW/firewalld 放行并回读。不会自动启用防火墙、猜 firewalld zone、修改 SSH、云安全组或未知自定义规则。`--open-firewall yes` 保留同等边界；`--assume-external-ports-open` 是兼容参数，不证明公网可达，也不绕过 TLS 检查。
 
@@ -78,12 +78,12 @@ Hysteria2 / TUIC 使用节点 UDP 端口承载 QUIC，TCP 同号规则不能代�
 
 适合需要审核下载步骤或离线转移套件的管理员。先接受官方 Release 作为软件来源，并从受信发布记录或独立核验渠道取得**整个 `SHA256SUMS` 文件的 SHA-256**。摘要证明字节一致，不是签名，不能用未知下载文件的自算值认证来源。
 
-以下是v0.4.27完整19项资产下载与核验模板。逐项校验并复制到root私有目录；目标架构须按实际机器修改。GitHub自动生成的Source code ZIP/TAR不替代`vui-source.zip`。
+以下是v0.4.28完整19项资产下载与核验模板。逐项校验并复制到root私有目录；目标架构须按实际机器修改。GitHub自动生成的Source code ZIP/TAR不替代`vui-source.zip`。
 
 ```sh
 set -euo pipefail
 umask 077
-VERSION=v0.4.27
+VERSION=v0.4.28
 TARGET=x86_64-gnu
 KIT_SHA='<填写已接受的 SHA256SUMS 整文件 SHA-256>'
 case "$TARGET" in x86_64-gnu|aarch64-gnu|x86_64-musl|aarch64-musl) ;; *) exit 1;; esac
@@ -184,4 +184,4 @@ DNS-01在已安装并可登录的面板内由管理员配置，不替代首次�
 
 推荐短入口注册全局 `v-ui`。`sudo v-ui` 的 **12 在线升级**沿用原配置，**13 维护授权**默认只读、30 分钟，最长 180 天；详见[运维指南](OPERATIONS.md)。旧式安装缺少全局入口时，使用短入口升级，或按[受管控制说明](MANAGED_OPERATIONS.md)准备受信组件。
 
-保留离机备份和原版本运行时。v0.4.27 的四目标构建、新装与十二个公开旧版保数据升级已由 Actions 验收。正式应用来源及公开校验见[发布记录](RELEASING.md#当前稳定版)。用户主机与客户端需自行核对；**浏览器未验证**，历史问题与原始失败见[历史索引](history/README.md)。
+保留离机备份和原版本运行时。v0.4.28 的四目标构建、新装与13 个公开旧版保数据升级已由 Actions 验收。正式应用来源及公开校验见[发布记录](RELEASING.md#当前稳定版)。用户主机与客户端需自行核对；**浏览器未验证**，历史问题与原始失败见[历史索引](history/README.md)。

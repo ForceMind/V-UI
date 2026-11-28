@@ -2,6 +2,12 @@
 
 ## 当前稳定版
 
+[v0.4.28](https://github.com/ForceMind/V-UI/releases/tag/v0.4.28) 已公开，正式应用源为 225388eb6a1279abdb59ea5eaae4b5a162d0e6dd，Release ID 为 461608419。准确主线九组 Actions 通过，安装矩阵首轮 15/15，包含隔离新装和 13 个公开旧版保数据升级。19 项附件摘要与 14 项非 ZIP 附件字节均经匿名回读核对。发布按本版并行非浏览器验收执行，浏览器未验证。 [发布运行](https://github.com/ForceMind/V-UI/actions/runs/46153690151) · [主线安装矩阵](https://github.com/ForceMind/V-UI/actions/runs/46150760875/attempts/1)
+
+短入口固定校验公开安装器 SHA-256 **b0c3a1da213240a9dfe4236773da25571804b99e7af51f4688321665ab08efe1** 与完整 SHA256SUMS 文件 SHA-256 **5cfc8ff44189d88d56d109495cc3e76fe41f242509a11c14f3bfeb8f4a765efb**。应用来源为上方发布提交，入口来源单独记录。
+
+## v0.4.27 发行记录（历史）
+
 [v0.4.27](https://github.com/ForceMind/V-UI/releases/tag/v0.4.27) 已公开，正式应用源为 `bdf5fbac4475424562c4733b1816093857f62f55`，Release ID 为 456695014。准确主线九组 Actions 通过，一键安装第 3 轮同轮通过构建、隔离新装和 12 个公开旧版保数据升级。19 项附件摘要已匿名核验，四目标摘要与原始同源制品一致。浏览器未验证。 [发布运行](https://github.com/ForceMind/V-UI/actions/runs/45388101556) · [一键安装验收](https://github.com/ForceMind/V-UI/actions/runs/45371977272/attempts/3)
 
 短入口固定校验公开安装器 SHA-256 `d89454761abc3804ef80c8bee07700ca2c8326054efdf90fce569e270db09775` 与完整 `SHA256SUMS` 文件 SHA-256 `263119407dd96a23db59bf9756dfb8e6852fa9692e0f337971fbdd2c67f0095f`。发布应用的源码与短入口更新的源码分别记录。
@@ -96,10 +102,10 @@ P1提供一次构建、独立角色消费及attempt绑定，已在main `3606cad`
 
 只有这些检查成功后，才通过独立PR更新`setup.sh`的版本、真实`install.sh`字节SHA-256、完整`SHA256SUMS`字节SHA-256，以及`short-install.yml`的冻结公开产品源和直接合同。清单整文件摘要不等于某个ZIP或清单中一行的摘要。
 
-入口候选/dev/main须独立验收；PR和dev使用准确提交URL，main合并后另验实际可变的`main/setup.sh` URL。应用源与入口源分别记录，不因入口或文档推进而重建已公开套件。以下示例使用短入口锁定的 v0.4.27。摘要占位符使用上方已核验的整份 `SHA256SUMS` 文件摘要。
+入口候选/dev/main须独立验收；PR和dev使用准确提交URL，main合并后另验实际可变的`main/setup.sh` URL。应用源与入口源分别记录，不因入口或文档推进而重建已公开套件。以下示例使用短入口锁定的 v0.4.28。摘要占位符使用上方已核验的整份 `SHA256SUMS` 文件摘要。
 
 ```sh
-bash install.sh --version v0.4.27 --with-global-cli \
+bash install.sh --version v0.4.28 --with-global-cli \
   --kit-sha256 '<独立核验的SHA256SUMS整文件SHA-256>' --interactive
 ```
 

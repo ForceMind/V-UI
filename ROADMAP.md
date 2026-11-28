@@ -2,15 +2,15 @@
 
 更新：2026-11-27。此文件是当前开发顺序与阶段状态的唯一清单；使用方法见[文档首页](docs/README.md)，准确发布证据见[版本记录](docs/RELEASING.md#当前稳定版)，旧路线和阶段原文见[历史索引](docs/history/README.md)。
 
-## v0.4.28 发布候选
+## 已发布 v0.4.28
 
-- 基线为已同步并验收的 main / dev [84bc5dc](https://github.com/ForceMind/V-UI/commit/84bc5dc2e5ffe8f3e354490eaa018ad5517b090b)。主线已验证九组 Actions、同轮新装和 12 个公开旧版升级及四目标；同一提交另有隔离 Chromium 和 ARM64 实装证据。 [主线安装](https://github.com/ForceMind/V-UI/actions/runs/45756685058/attempts/1) · [Chromium](https://github.com/ForceMind/V-UI/actions/runs/45678014003) · [ARM64](https://github.com/ForceMind/V-UI/actions/runs/45741002851/attempts/3)
-- 候选包含上述开发增量、版本和验收。公开 v0.4.27 锁定为应用源 `bdf5fbac4475424562c4733b1816093857f62f55`，新增同套件真实保数据升级角色。候选须独立取得准确 Actions、同轮新装及全部旧版升级和四目标制品证据。 [候选说明](docs/RELEASE_NOTES.md)
-- 公开发行和短入口当前对应 v0.4.27。W1 完整环境诊断、真实 Cloudflare 整机签发及外部环境验收仍按各自范围推进。 [正式发布记录](docs/RELEASING.md#当前稳定版)
+[v0.4.28](https://github.com/ForceMind/V-UI/releases/tag/v0.4.28) 从准确主线 225388eb6a1279abdb59ea5eaae4b5a162d0e6dd 发布，产品冻结点为 c06351c。九组 Actions、同轮 15 项安装矩阵、公开 v0.4.27 保数据升级和四目标同源制品均已通过。匿名回读确认标签、19 项附件摘要和应用 latest。浏览器未验证。 [主线安装矩阵](https://github.com/ForceMind/V-UI/actions/runs/46150760875/attempts/1) · [发布运行](https://github.com/ForceMind/V-UI/actions/runs/46153690151)
+
+W1 完整环境诊断、真实 Cloudflare 整机签发及其他外部环境验收继续按各自范围推进。 [正式发布记录](docs/RELEASING.md#当前稳定版)
 
 ## 当前增量：安装、诊断与交付优化
 
-公开稳定版为 v0.4.27。P2 DNS 管理、P3 核心独立维护、P4 静态 YAML 应用及 P5 的限定 XHTTP 分享已交付，详细范围见[兼容矩阵](docs/COMPATIBILITY.md)。它们不因新增优化计划重新成为“尚未实现”。
+公开稳定版为 v0.4.28。P2 DNS 管理、P3 核心独立维护、P4 静态 YAML 应用及 P5 的限定 XHTTP 分享已交付，详细范围见[兼容矩阵](docs/COMPATIBILITY.md)。它们不因新增优化计划重新成为“尚未实现”。
 
 [优化与融合实施方案](docs/V2RAY_AGENT_INTEGRATION_PLAN.md)把 v2ray-agent 的流程与失败场景映射到现有模块，增量工作包编号如下。此表登记本轮范围。实现、审查、准确 CI 和发行记录见下方交接表。
 
@@ -38,7 +38,7 @@
 | W4 证书逐位置状态和重试 | `81268b6` | 23 项合成通过，两固定核心实际 TLS 均验证旧材料保留及原位置重试。 [链路验收](https://github.com/ForceMind/V-UI/actions/runs/45451730511/attempts/1) |
 | W4 维护断线查回 | `61f2506` | 合成与隔离 API 通过，覆盖原任务编号、权限隔离及撤销。 [API 验收](https://github.com/ForceMind/V-UI/actions/runs/45451730668/attempts/1) |
 
-公开 v0.4.27 对应既有正式制品。主线改版已完成隔离浏览器和 ARM64 实装验收，v0.4.28 另按本页候选标准验证。真实 Cloudflare 整机签发和外部环境待验。W1 完整环境诊断继续单列。
+主线改版在 84bc5dc 完成隔离浏览器和 ARM64 实装验收。v0.4.28 的发行验收见本页发布记录，浏览器未验证。真实 Cloudflare 整机签发和外部环境待验。W1 完整环境诊断继续单列。
 
 ## 已完成 P3：v0.4.24 与独立核心组件
 

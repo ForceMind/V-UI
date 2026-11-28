@@ -1,31 +1,29 @@
 # 当前开发交接
 
-更新：2026-11-27。已公开 v0.4.27；应先按[路线图](../ROADMAP.md)确认开发批次，按[发布记录](RELEASING.md#当前稳定版)核对现行应用来源。计划、准确源码、CI、正式发布和生产部署分别记账。
+更新：2026-11-27。已公开 v0.4.28。应先按[路线图](../ROADMAP.md)确认开发批次，按[发布记录](RELEASING.md#当前稳定版)核对现行应用来源。计划、准确源码、CI、正式发布和生产部署分别记账。
 
 ## 本次接手基线
 
 | 身份 | 核验结果 |
 | --- | --- |
-| 正式应用 | [v0.4.27](https://github.com/ForceMind/V-UI/releases/tag/v0.4.27)，应用源 `bdf5fbac4475424562c4733b1816093857f62f55`，19 项公开资产 |
-| 主线接手点 | `84bc5dc2e5ffe8f3e354490eaa018ad5517b090b`，已在 main / dev 完成准确九组、同轮安装矩阵和四目标验收。 [主线安装记录](https://github.com/ForceMind/V-UI/actions/runs/45756685058/attempts/1) |
-| v0.4.28 候选 | 从主线接手点建立候选，旧版保数据升级固定公开 v0.4.27 源。准确候选验收见[路线图](../ROADMAP.md#v0428-发布候选)。 |
-| 开发验收源码 | `2c70c3d9de6dbf265e8e383f6d0c93445a4788da`，HTTPUpgrade 与 W0–W4 已组合；九组 Actions 和四目标包已验。 [准确安装矩阵](https://github.com/ForceMind/V-UI/actions/runs/45451730835/attempts/1) |
-| 应用验收 | 九组准确主线 Actions，四目标、新装、12 个旧版升级及 14 份同源收据，见[主线安装验收](https://github.com/ForceMind/V-UI/actions/runs/45371977272/attempts/3) |
-| 后续入口 | 固定 v0.4.27 安装器和完整清单，见[真实短入口验收](https://github.com/ForceMind/V-UI/actions/runs/45390054777/attempts/1) |
+| 正式应用 | [v0.4.28](https://github.com/ForceMind/V-UI/releases/tag/v0.4.28)，应用源 225388eb6a1279abdb59ea5eaae4b5a162d0e6dd，19 项附件匿名核验 |
+| 产品冻结点 | c06351c681a3f38014abc3170e72af6d56fc11b3，发行源仅追加本版策略及说明 |
+| 应用验收 | 九组主线 Actions、四目标、隔离新装和 13 个公开旧版升级。 [安装矩阵](https://github.com/ForceMind/V-UI/actions/runs/46150760875/attempts/1) |
+| 短入口 | 固定 v0.4.28 安装器和完整清单。 [发布记录](RELEASING.md#当前稳定版) |
 | 独立实验 | [D2 #167](https://github.com/ForceMind/V-UI/pull/167)仍为草稿；固定核心实验 13 项通过、22 项失败、5 项未执行，产品 UDP 中转继续关闭 |
 
 这些 SHA 是接手时的观察值。实施、审查或合并前重新核对远端分支、开放 PR、未提交内容及准确检查，不把本页值当作永久 HEAD。
 
 ## 当前已交付与增量范围
 
-- P2 管理员 Cloudflare DNS-01、通配符、绑定、清理与私有备份兼容已随 v0.4.23 交付。自动首装仍 HTTP-01，DNS 首装是新增工作。
+- P2 管理员 Cloudflare DNS-01、通配符、绑定、清理与私有备份兼容已随 v0.4.23 交付。v0.4.28 交互首装支持 Cloudflare DNS-01。
 - P3 独立核心更新、回退、持久任务、远程用途授权及双域恢复已随 v0.4.24 交付。组件仍按当前应用来源和平台核对资格。
 - P4 静态 YAML 已集成并随 v0.4.25 发布，保持普通单上游模式和原入口策略；动态 provider、任意规则和自动出口切换不由此取得资格。
-- v0.4.26 已公开限定 Xray VLESS/XHTTP/TLS/stream-one/h2 向 Mihomo 的 YAML 与 URI 分享。sing-box JSON、其他 mode、应用 UDP 和中转上游不在该范围，HTTPUpgrade 的 [Mihomo YAML 开发提交](HTTPUPGRADE_MIHOMO_PROFILE.md)已在 dev 通过独立和组合验收。 [独立安装验收](https://github.com/ForceMind/V-UI/actions/runs/45433610436/attempts/1)。公开 v0.4.27 保留原范围。
+- v0.4.26 已公开限定 Xray VLESS/XHTTP/TLS/stream-one/h2 向 Mihomo 的 YAML 与 URI 分享。sing-box JSON、其他 mode、应用 UDP 和中转上游不在该范围，v0.4.28 公开限定的 [HTTPUpgrade Mihomo YAML 分享](HTTPUPGRADE_MIHOMO_PROFILE.md)。
 
 节点、ToClash、订阅、升级、备份与维护授权继续复用现有模块，精确范围见[兼容矩阵](COMPATIBILITY.md)。
 
-W0–W4 的[源码交接点与逐项验证](../ROADMAP.md#w0w4-正式面板与安装增量)集中记录在路线图。准确开发源码 `2c70c3d9de6dbf265e8e383f6d0c93445a4788da`的安装首轮 14 项通过，四目标同源制品已回读。W1 完整环境诊断和 W2 整机 DNS 签发仍需各自证据。v0.4.28 候选独立验收公开 v0.4.27 的保数据升级。
+W0–W4 的[源码交接点与逐项验证](../ROADMAP.md#w0w4-正式面板与安装增量)集中记录在路线图。准确开发源码 `2c70c3d9de6dbf265e8e383f6d0c93445a4788da`的安装首轮 14 项通过，四目标同源制品已回读。W1 完整环境诊断和 W2 整机 DNS 签发仍需各自证据。v0.4.28 已验收从公开 v0.4.27 的保数据升级。
 
 接手 P6 先读 [Tailscale 私有管理设计](TAILSCALE_PRIVATE_MANAGEMENT_DESIGN.md)与共存矩阵。P7 先读[独立部署契约](DEPLOYMENT_TARGETS_CONTRACT.md)。两项均须按指定隔离环境取证。
 
@@ -36,7 +34,7 @@ W0–W4 的[源码交接点与逐项验证](../ROADMAP.md#w0w4-正式面板与�
 - 固定官方核心及已验协议、鉴权、精确 Origin、修订、幂等和失败保护保持。未知写入读取原任务；DNS 本地回退不代表远端副作用消失。
 - 服务用户非 root，不擅改 SSH、未知防火墙、云安全组或无关服务；真实凭据、节点导出、数据库、证书和备份只私存。
 - 构建、四目标制品、真实核心与系统安装/升级在 GitHub Actions 空白临时主机执行；文档使用已有离线检查，代码按受影响行为回归并独审。
-- v0.4.28 候选的浏览器未验证。主线基线的隔离 Chromium 和 ARM64 实装作为基线证据记录。真实 Cloudflare、手机移动网络、真实 512 MiB 整机/24 小时及 Tailscale 接入各自待验。
+- v0.4.28 浏览器未验证。主线基线的隔离 Chromium 和 ARM64 实装作为基线证据记录。真实 Cloudflare、手机移动网络、真实 512 MiB 整机/24 小时及 Tailscale 接入各自待验。
 
 遵守 [AGENTS](../AGENTS.md) 与[贡献指南](../CONTRIBUTING.md)。先完成可审阅差异、独审和必要准确 CI，外部操作按对应明确授权执行。正式发布只晋升同源已验制品，旧资产不覆盖；生产与真实账号/网络操作不由旧发布许可推定。
 
